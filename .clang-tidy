@@ -1,0 +1,94 @@
+---
+# GioDB clang-tidy configuration
+# Checks appropriate for a C++20 database engine project.
+
+Checks: >
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  cppcoreguidelines-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -readability-magic-numbers,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-pro-type-vararg,
+  -readability-redundant-access-specifiers,
+  -modernize-use-nodiscard,
+  -bugprone-easily-swappable-parameters,
+  -readability-function-cognitive-complexity,
+  -cppcoreguidelines-macro-usage,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -performance-enum-size,
+  -bugprone-empty-catch,
+  -cppcoreguidelines-pro-type-member-init,
+  -bugprone-exception-escape,
+
+# Rationale for disabled checks:
+#   modernize-use-trailing-return-type: Conflicts with project style (traditional return types).
+#   readability-identifier-length: Short names like i, j, n are idiomatic in algorithms.
+#   cppcoreguidelines-avoid-magic-numbers / readability-magic-numbers: Too noisy for test code
+#     and well-understood constants (port numbers, buffer sizes).
+#   cppcoreguidelines-pro-bounds-array-to-pointer-decay: Conflicts with logging macros and
+#     assert-style patterns.
+#   cppcoreguidelines-owning-memory: We use RAII and smart pointers but not gsl::owner<>.
+#   cppcoreguidelines-pro-type-vararg: Conflicts with spdlog/fmt variadic macros.
+#   readability-redundant-access-specifiers: We use repeated access specifiers for grouping.
+#   modernize-use-nodiscard: Too noisy; we add [[nodiscard]] selectively where it matters.
+#   bugprone-easily-swappable-parameters: Too many false positives in constructors/factories.
+#   readability-function-cognitive-complexity: Not useful during early development.
+#   cppcoreguidelines-macro-usage: GIODB_LOG_* macros wrap spdlog and require variadic macros.
+#   cppcoreguidelines-pro-bounds-pointer-arithmetic: argv[i] in main() is standard and safe.
+#   performance-enum-size: We prefer int-sized enums for ABI stability and debuggability.
+#   bugprone-empty-catch: False positives when catch blocks return error values.
+#   cppcoreguidelines-pro-type-member-init: False positives on constructors with init lists.
+#   bugprone-exception-escape: False positive on main() due to std::string allocation.
+
+# Treat critical bug-prone and analyzer checks as errors.
+WarningsAsErrors: >
+  bugprone-use-after-move,
+  bugprone-dangling-handle,
+  bugprone-undefined-memory-manipulation,
+  clang-analyzer-core.*,
+  clang-analyzer-deadcode.*,
+  clang-analyzer-cplusplus.*,
+
+HeaderFilterRegex: 'include/giodb/.*\.h$'
+
+CheckOptions:
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase
+  - key: readability-identifier-naming.EnumCase
+    value: CamelCase
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.PublicMemberCase
+    value: lower_case
+  - key: readability-identifier-naming.PrivateMemberCase
+    value: lower_case
+  - key: readability-identifier-naming.PrivateMemberSuffix
+    value: '_'
+  - key: readability-identifier-naming.ProtectedMemberCase
+    value: lower_case
+  - key: readability-identifier-naming.ProtectedMemberSuffix
+    value: '_'
+  - key: readability-identifier-naming.NamespaceCase
+    value: lower_case
+  - key: readability-identifier-naming.EnumConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.ConstexprVariableCase
+    value: lower_case
+  - key: readability-identifier-naming.ParameterCase
+    value: lower_case
+  - key: modernize-use-override.AllowOverrideAndFinal
+    value: false
+  - key: performance-unnecessary-value-param.AllowedTypes
+    value: 'std::shared_ptr;std::unique_ptr'
