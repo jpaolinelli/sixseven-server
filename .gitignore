@@ -1,0 +1,43 @@
+# Build artifacts
+build/
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.lib
+*.dll
+*.exe
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+
+# vcpkg
+vcpkg_installed/
+
+# IDE folders
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Cache
+.cache/
+
+# Data directory (runtime)
+data/
+
+# Coredumps
+core
+core.*
