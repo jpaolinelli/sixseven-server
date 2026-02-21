@@ -73,12 +73,29 @@ DiskManager::~DiskManager() {
     }
 }
 
-Result<FileId> DiskManager::create_file(const std::filesystem::path& path) {
-    int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+Result<FileId> DiskManager::create_file(const std::filesystem::path& path, bool direct_io) {
+    int flags = O_RDWR | O_CREAT | O_TRUNC;
+#if !defined(__APPLE__) && defined(O_DIRECT)
+    if (direct_io) {
+        flags |= O_DIRECT;
+    }
+#endif
+    int fd = ::open(path.c_str(), flags, 0644);
     if (fd < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to create file: " + path.string() + ": " + std::strerror(errno));
     }
+
+#ifdef __APPLE__
+    // macOS: bypass OS page cache via F_NOCACHE.
+    if (direct_io) {
+        if (::fcntl(fd, F_NOCACHE, 1) < 0) {
+            ::close(fd);
+            return make_error(StatusCode::IO_ERROR,
+                              "F_NOCACHE failed: " + std::string(std::strerror(errno)));
+        }
+    }
+#endif
 
     FileId file_id = next_file_id_++;
     if (file_id >= files_.size()) {
@@ -89,6 +106,7 @@ Result<FileId> DiskManager::create_file(const std::filesystem::path& path) {
     file.fd = fd;
     file.path = path;
     file.page_count = 1; // Header page only.
+    file.direct_io = direct_io;
 
     // Pre-allocate 1MB of space.
     auto extend_result = ensure_file_size(file, file_growth_pages);
@@ -109,12 +127,29 @@ Result<FileId> DiskManager::create_file(const std::filesystem::path& path) {
     return ok(file_id);
 }
 
-Result<FileId> DiskManager::open_file(const std::filesystem::path& path) {
-    int fd = ::open(path.c_str(), O_RDWR);
+Result<FileId> DiskManager::open_file(const std::filesystem::path& path, bool direct_io) {
+    int flags = O_RDWR;
+#if !defined(__APPLE__) && defined(O_DIRECT)
+    if (direct_io) {
+        flags |= O_DIRECT;
+    }
+#endif
+    int fd = ::open(path.c_str(), flags);
     if (fd < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to open file: " + path.string() + ": " + std::strerror(errno));
     }
+
+#ifdef __APPLE__
+    // macOS: bypass OS page cache via F_NOCACHE.
+    if (direct_io) {
+        if (::fcntl(fd, F_NOCACHE, 1) < 0) {
+            ::close(fd);
+            return make_error(StatusCode::IO_ERROR,
+                              "F_NOCACHE failed: " + std::string(std::strerror(errno)));
+        }
+    }
+#endif
 
     FileId file_id = next_file_id_++;
     if (file_id >= files_.size()) {
@@ -124,6 +159,7 @@ Result<FileId> DiskManager::open_file(const std::filesystem::path& path) {
     OpenFile& file = files_[file_id];
     file.fd = fd;
     file.path = path;
+    file.direct_io = direct_io;
 
     // Read and validate the file header.
     auto header_result = read_file_header(file);
@@ -266,6 +302,58 @@ Result<uint32_t> DiskManager::file_page_count(FileId file_id) const {
         return tl::unexpected(file_result.error());
     }
     return ok((*file_result)->page_count);
+}
+
+// -- Crash safety -------------------------------------------------------------
+
+Result<void> DiskManager::sync_file(FileId file_id) {
+    auto file_result = get_open_file(file_id);
+    if (!file_result) {
+        return tl::unexpected(file_result.error());
+    }
+    OpenFile* file = *file_result;
+
+#ifdef __APPLE__
+    // F_FULLFSYNC ensures data reaches persistent storage on macOS.
+    // Unlike fsync, this flushes the drive's write cache to the platters.
+    if (::fcntl(file->fd, F_FULLFSYNC) < 0) {
+        return make_error(StatusCode::IO_ERROR,
+                          "F_FULLFSYNC failed: " + std::string(std::strerror(errno)));
+    }
+#else
+    if (::fsync(file->fd) < 0) {
+        return make_error(StatusCode::IO_ERROR,
+                          "fsync failed: " + std::string(std::strerror(errno)));
+    }
+#endif
+
+    return ok();
+}
+
+Result<void> DiskManager::sync_data(FileId file_id) {
+    auto file_result = get_open_file(file_id);
+    if (!file_result) {
+        return tl::unexpected(file_result.error());
+    }
+    OpenFile* file = *file_result;
+
+#ifdef __APPLE__
+    // macOS fsync is similar to Linux fdatasync: it flushes to the drive's
+    // buffer but does not guarantee data reaches the platters.
+    if (::fsync(file->fd) < 0) {
+        return make_error(StatusCode::IO_ERROR,
+                          "fsync failed: " + std::string(std::strerror(errno)));
+    }
+#else
+    // fdatasync skips metadata updates (e.g., access time), which is cheaper
+    // than fsync for data file writes.
+    if (::fdatasync(file->fd) < 0) {
+        return make_error(StatusCode::IO_ERROR,
+                          "fdatasync failed: " + std::string(std::strerror(errno)));
+    }
+#endif
+
+    return ok();
 }
 
 // -- Private helpers ----------------------------------------------------------

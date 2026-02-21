@@ -535,3 +535,178 @@ TEST_F(DiskManagerTest, CorruptedFileHeaderDetected) {
     ASSERT_FALSE(open_result.has_value());
     EXPECT_EQ(open_result.error().code, StatusCode::IO_ERROR);
 }
+
+// -- DiskManager: sync_file and sync_data -------------------------------------
+
+TEST_F(DiskManagerTest, SyncFileSucceeds) {
+    auto create_result = dm_.create_file(test_file());
+    ASSERT_TRUE(create_result.has_value());
+    FileId fid = *create_result;
+
+    // Write a page then sync.
+    auto pid_result = dm_.allocate_page(fid);
+    ASSERT_TRUE(pid_result.has_value());
+
+    Page page(*pid_result, PageType::DATA);
+    auto tuple = std::vector<uint8_t>(100, 0xDD);
+    ASSERT_TRUE(page.insert_tuple(tuple).has_value());
+    ASSERT_TRUE(dm_.write_page(fid, *pid_result, page).has_value());
+
+    // sync_file (full sync) should succeed.
+    auto sync_result = dm_.sync_file(fid);
+    ASSERT_TRUE(sync_result.has_value());
+}
+
+TEST_F(DiskManagerTest, SyncDataSucceeds) {
+    auto create_result = dm_.create_file(test_file());
+    ASSERT_TRUE(create_result.has_value());
+    FileId fid = *create_result;
+
+    // Write a page then sync data.
+    auto pid_result = dm_.allocate_page(fid);
+    ASSERT_TRUE(pid_result.has_value());
+
+    Page page(*pid_result, PageType::DATA);
+    auto tuple = std::vector<uint8_t>(100, 0xEE);
+    ASSERT_TRUE(page.insert_tuple(tuple).has_value());
+    ASSERT_TRUE(dm_.write_page(fid, *pid_result, page).has_value());
+
+    // sync_data (data-only sync) should succeed.
+    auto sync_result = dm_.sync_data(fid);
+    ASSERT_TRUE(sync_result.has_value());
+}
+
+TEST_F(DiskManagerTest, SyncInvalidFileIdFails) {
+    auto result1 = dm_.sync_file(999);
+    ASSERT_FALSE(result1.has_value());
+    EXPECT_EQ(result1.error().code, StatusCode::INVALID_ARGUMENT);
+
+    auto result2 = dm_.sync_data(999);
+    ASSERT_FALSE(result2.has_value());
+    EXPECT_EQ(result2.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST_F(DiskManagerTest, SyncClosedFileFails) {
+    auto create_result = dm_.create_file(test_file());
+    ASSERT_TRUE(create_result.has_value());
+    FileId fid = *create_result;
+    ASSERT_TRUE(dm_.close_file(fid).has_value());
+
+    auto result1 = dm_.sync_file(fid);
+    ASSERT_FALSE(result1.has_value());
+    EXPECT_EQ(result1.error().code, StatusCode::INVALID_ARGUMENT);
+
+    auto result2 = dm_.sync_data(fid);
+    ASSERT_FALSE(result2.has_value());
+    EXPECT_EQ(result2.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST_F(DiskManagerTest, DataPersistsAfterSync) {
+    auto create_result = dm_.create_file(test_file());
+    ASSERT_TRUE(create_result.has_value());
+    FileId fid = *create_result;
+
+    auto pid_result = dm_.allocate_page(fid);
+    ASSERT_TRUE(pid_result.has_value());
+    PageId pid = *pid_result;
+
+    Page page(pid, PageType::DATA);
+    auto tuple = std::vector<uint8_t>(200, 0x77);
+    ASSERT_TRUE(page.insert_tuple(tuple).has_value());
+    ASSERT_TRUE(dm_.write_page(fid, pid, page).has_value());
+
+    // Sync then close.
+    ASSERT_TRUE(dm_.sync_file(fid).has_value());
+    ASSERT_TRUE(dm_.close_file(fid).has_value());
+
+    // Reopen and verify data persisted.
+    auto open_result = dm_.open_file(test_file());
+    ASSERT_TRUE(open_result.has_value());
+    FileId fid2 = *open_result;
+
+    Page read_page(0, PageType::DATA);
+    auto read_result = dm_.read_page(fid2, pid, read_page);
+    ASSERT_TRUE(read_result.has_value());
+
+    auto get_result = read_page.get_tuple(0);
+    ASSERT_TRUE(get_result.has_value());
+    EXPECT_EQ(get_result->size(), 200u);
+    EXPECT_EQ((*get_result)[0], 0x77);
+}
+
+// -- DiskManager: Direct I/O --------------------------------------------------
+
+TEST_F(DiskManagerTest, DirectIOCreateAndWrite) {
+    auto create_result = dm_.create_file(test_file(), /*direct_io=*/true);
+    ASSERT_TRUE(create_result.has_value());
+    FileId fid = *create_result;
+
+    auto pid_result = dm_.allocate_page(fid);
+    ASSERT_TRUE(pid_result.has_value());
+    PageId pid = *pid_result;
+
+    Page page(pid, PageType::DATA);
+    auto tuple = std::vector<uint8_t>(150, 0x55);
+    ASSERT_TRUE(page.insert_tuple(tuple).has_value());
+
+    auto write_result = dm_.write_page(fid, pid, page);
+    ASSERT_TRUE(write_result.has_value());
+
+    // Read back and verify.
+    Page read_page(0, PageType::DATA);
+    auto read_result = dm_.read_page(fid, pid, read_page);
+    ASSERT_TRUE(read_result.has_value());
+
+    auto get_result = read_page.get_tuple(0);
+    ASSERT_TRUE(get_result.has_value());
+    EXPECT_EQ(get_result->size(), 150u);
+    EXPECT_EQ((*get_result)[0], 0x55);
+}
+
+TEST_F(DiskManagerTest, DirectIOOpenExisting) {
+    // Create a file without direct I/O.
+    auto create_result = dm_.create_file(test_file());
+    ASSERT_TRUE(create_result.has_value());
+    FileId fid1 = *create_result;
+
+    auto pid_result = dm_.allocate_page(fid1);
+    ASSERT_TRUE(pid_result.has_value());
+    PageId pid = *pid_result;
+
+    Page page(pid, PageType::DATA);
+    auto tuple = std::vector<uint8_t>(80, 0x33);
+    ASSERT_TRUE(page.insert_tuple(tuple).has_value());
+    ASSERT_TRUE(dm_.write_page(fid1, pid, page).has_value());
+    ASSERT_TRUE(dm_.close_file(fid1).has_value());
+
+    // Reopen with direct I/O.
+    auto open_result = dm_.open_file(test_file(), /*direct_io=*/true);
+    ASSERT_TRUE(open_result.has_value());
+    FileId fid2 = *open_result;
+
+    Page read_page(0, PageType::DATA);
+    auto read_result = dm_.read_page(fid2, pid, read_page);
+    ASSERT_TRUE(read_result.has_value());
+
+    auto get_result = read_page.get_tuple(0);
+    ASSERT_TRUE(get_result.has_value());
+    EXPECT_EQ((*get_result)[0], 0x33);
+}
+
+TEST_F(DiskManagerTest, DirectIOWithSync) {
+    auto create_result = dm_.create_file(test_file(), /*direct_io=*/true);
+    ASSERT_TRUE(create_result.has_value());
+    FileId fid = *create_result;
+
+    auto pid_result = dm_.allocate_page(fid);
+    ASSERT_TRUE(pid_result.has_value());
+
+    Page page(*pid_result, PageType::DATA);
+    auto tuple = std::vector<uint8_t>(100, 0x99);
+    ASSERT_TRUE(page.insert_tuple(tuple).has_value());
+    ASSERT_TRUE(dm_.write_page(fid, *pid_result, page).has_value());
+
+    // Both sync methods should work with direct I/O.
+    ASSERT_TRUE(dm_.sync_file(fid).has_value());
+    ASSERT_TRUE(dm_.sync_data(fid).has_value());
+}
