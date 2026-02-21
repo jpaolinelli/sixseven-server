@@ -1,2 +1,8 @@
 # giodb::table sources
-# Stub — source files will be added as development progresses
+
+add_library(giodb_table STATIC
+    tuple.cpp
+)
+
+target_include_directories(giodb_table PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(giodb_table PUBLIC giodb_common)
