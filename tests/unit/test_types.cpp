@@ -35,32 +35,32 @@ TEST(TypeId, TypeNameReturnsCorrectStrings) {
 
 TEST(TypeId, FixedSizeReturnsCorrectSizes) {
     // 1-byte types
-    EXPECT_EQ(fixed_size(TypeId::INT8), 1u);
-    EXPECT_EQ(fixed_size(TypeId::UINT8), 1u);
-    EXPECT_EQ(fixed_size(TypeId::BOOL), 1u);
+    EXPECT_EQ(fixed_size(TypeId::INT8), 1U);
+    EXPECT_EQ(fixed_size(TypeId::UINT8), 1U);
+    EXPECT_EQ(fixed_size(TypeId::BOOL), 1U);
 
     // 2-byte types
-    EXPECT_EQ(fixed_size(TypeId::INT16), 2u);
-    EXPECT_EQ(fixed_size(TypeId::UINT16), 2u);
+    EXPECT_EQ(fixed_size(TypeId::INT16), 2U);
+    EXPECT_EQ(fixed_size(TypeId::UINT16), 2U);
 
     // 4-byte types
-    EXPECT_EQ(fixed_size(TypeId::INT32), 4u);
-    EXPECT_EQ(fixed_size(TypeId::UINT32), 4u);
-    EXPECT_EQ(fixed_size(TypeId::FLOAT32), 4u);
-    EXPECT_EQ(fixed_size(TypeId::DATE), 4u);
+    EXPECT_EQ(fixed_size(TypeId::INT32), 4U);
+    EXPECT_EQ(fixed_size(TypeId::UINT32), 4U);
+    EXPECT_EQ(fixed_size(TypeId::FLOAT32), 4U);
+    EXPECT_EQ(fixed_size(TypeId::DATE), 4U);
 
     // 8-byte types
-    EXPECT_EQ(fixed_size(TypeId::INT64), 8u);
-    EXPECT_EQ(fixed_size(TypeId::UINT64), 8u);
-    EXPECT_EQ(fixed_size(TypeId::FLOAT64), 8u);
-    EXPECT_EQ(fixed_size(TypeId::TIME), 8u);
-    EXPECT_EQ(fixed_size(TypeId::TIMESTAMP), 8u);
+    EXPECT_EQ(fixed_size(TypeId::INT64), 8U);
+    EXPECT_EQ(fixed_size(TypeId::UINT64), 8U);
+    EXPECT_EQ(fixed_size(TypeId::FLOAT64), 8U);
+    EXPECT_EQ(fixed_size(TypeId::TIME), 8U);
+    EXPECT_EQ(fixed_size(TypeId::TIMESTAMP), 8U);
 
     // 16-byte types
-    EXPECT_EQ(fixed_size(TypeId::DECIMAL), 16u);
-    EXPECT_EQ(fixed_size(TypeId::INTERVAL), 16u);
-    EXPECT_EQ(fixed_size(TypeId::POINT), 16u);
-    EXPECT_EQ(fixed_size(TypeId::UUID), 16u);
+    EXPECT_EQ(fixed_size(TypeId::DECIMAL), 16U);
+    EXPECT_EQ(fixed_size(TypeId::INTERVAL), 16U);
+    EXPECT_EQ(fixed_size(TypeId::POINT), 16U);
+    EXPECT_EQ(fixed_size(TypeId::UUID), 16U);
 }
 
 TEST(TypeId, FixedSizeReturnsNulloptForVariableLength) {
@@ -73,35 +73,35 @@ TEST(TypeId, FixedSizeReturnsNulloptForVariableLength) {
 // -- alignment ----------------------------------------------------------------
 
 TEST(TypeId, AlignmentValues) {
-    EXPECT_EQ(alignment(TypeId::INT8), 1u);
-    EXPECT_EQ(alignment(TypeId::BOOL), 1u);
-    EXPECT_EQ(alignment(TypeId::UINT8), 1u);
+    EXPECT_EQ(alignment(TypeId::INT8), 1U);
+    EXPECT_EQ(alignment(TypeId::BOOL), 1U);
+    EXPECT_EQ(alignment(TypeId::UINT8), 1U);
 
-    EXPECT_EQ(alignment(TypeId::INT16), 2u);
-    EXPECT_EQ(alignment(TypeId::UINT16), 2u);
+    EXPECT_EQ(alignment(TypeId::INT16), 2U);
+    EXPECT_EQ(alignment(TypeId::UINT16), 2U);
 
-    EXPECT_EQ(alignment(TypeId::INT32), 4u);
-    EXPECT_EQ(alignment(TypeId::UINT32), 4u);
-    EXPECT_EQ(alignment(TypeId::FLOAT32), 4u);
-    EXPECT_EQ(alignment(TypeId::DATE), 4u);
+    EXPECT_EQ(alignment(TypeId::INT32), 4U);
+    EXPECT_EQ(alignment(TypeId::UINT32), 4U);
+    EXPECT_EQ(alignment(TypeId::FLOAT32), 4U);
+    EXPECT_EQ(alignment(TypeId::DATE), 4U);
 
-    EXPECT_EQ(alignment(TypeId::INT64), 8u);
-    EXPECT_EQ(alignment(TypeId::UINT64), 8u);
-    EXPECT_EQ(alignment(TypeId::FLOAT64), 8u);
-    EXPECT_EQ(alignment(TypeId::TIME), 8u);
-    EXPECT_EQ(alignment(TypeId::TIMESTAMP), 8u);
-    EXPECT_EQ(alignment(TypeId::DECIMAL), 8u);
-    EXPECT_EQ(alignment(TypeId::INTERVAL), 8u);
-    EXPECT_EQ(alignment(TypeId::POINT), 8u);
+    EXPECT_EQ(alignment(TypeId::INT64), 8U);
+    EXPECT_EQ(alignment(TypeId::UINT64), 8U);
+    EXPECT_EQ(alignment(TypeId::FLOAT64), 8U);
+    EXPECT_EQ(alignment(TypeId::TIME), 8U);
+    EXPECT_EQ(alignment(TypeId::TIMESTAMP), 8U);
+    EXPECT_EQ(alignment(TypeId::DECIMAL), 8U);
+    EXPECT_EQ(alignment(TypeId::INTERVAL), 8U);
+    EXPECT_EQ(alignment(TypeId::POINT), 8U);
 
     // UUID is a byte array — 1-byte aligned
-    EXPECT_EQ(alignment(TypeId::UUID), 1u);
+    EXPECT_EQ(alignment(TypeId::UUID), 1U);
 
     // Variable-length types are pointer-aligned
-    EXPECT_EQ(alignment(TypeId::STRING), 8u);
-    EXPECT_EQ(alignment(TypeId::BLOB), 8u);
-    EXPECT_EQ(alignment(TypeId::JSON), 8u);
-    EXPECT_EQ(alignment(TypeId::EMBEDDING), 8u);
+    EXPECT_EQ(alignment(TypeId::STRING), 8U);
+    EXPECT_EQ(alignment(TypeId::BLOB), 8U);
+    EXPECT_EQ(alignment(TypeId::JSON), 8U);
+    EXPECT_EQ(alignment(TypeId::EMBEDDING), 8U);
 }
 
 // -- is_numeric ---------------------------------------------------------------

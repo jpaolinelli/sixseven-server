@@ -147,7 +147,7 @@ public:
         // Variant index maps directly to our type order.
         // Index 0 = monostate (NULL) — maps to INT8 as a dummy value.
         // IMPORTANT: Always check is_null() before using this result.
-        static constexpr TypeId index_to_type[] = {
+        static constexpr std::array<TypeId, 23> index_to_type = {{
             TypeId::INT8,      // 0: monostate (NULL — MUST check is_null() first!)
             TypeId::INT8,      // 1: int8_t
             TypeId::INT16,     // 2: int16_t
@@ -171,8 +171,8 @@ public:
             TypeId::JSON,      // 20: JsonString
             TypeId::UUID,      // 21: Uuid
             TypeId::EMBEDDING, // 22: Embedding
-        };
-        return index_to_type[data_.index()];
+        }};
+        return index_to_type.at(data_.index());
     }
 
     // -- Typed accessors (throw std::bad_variant_access on type mismatch) -----

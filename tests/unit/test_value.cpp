@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <limits>
 
 using namespace giodb;
@@ -77,9 +78,9 @@ TEST(Value, Uint64) {
 // -- Floating-point types -----------------------------------------------------
 
 TEST(Value, Float32) {
-    Value v(3.14f);
+    Value v(3.14F);
     EXPECT_EQ(v.type_id(), TypeId::FLOAT32);
-    EXPECT_FLOAT_EQ(v.as_float32(), 3.14f);
+    EXPECT_FLOAT_EQ(v.as_float32(), 3.14F);
 }
 
 TEST(Value, Float64) {
@@ -95,7 +96,7 @@ TEST(Value, Decimal128) {
     Value v(d);
     EXPECT_EQ(v.type_id(), TypeId::DECIMAL);
     EXPECT_EQ(v.as_decimal().hi, 1);
-    EXPECT_EQ(v.as_decimal().lo, 500u);
+    EXPECT_EQ(v.as_decimal().lo, 500U);
 }
 
 // -- Bool ---------------------------------------------------------------------
@@ -133,7 +134,7 @@ TEST(Value, Blob) {
     Blob b = {0x01, 0x02, 0xFF};
     Value v(b);
     EXPECT_EQ(v.type_id(), TypeId::BLOB);
-    EXPECT_EQ(v.as_blob().size(), 3u);
+    EXPECT_EQ(v.as_blob().size(), 3U);
     EXPECT_EQ(v.as_blob()[2], 0xFF);
 }
 
@@ -228,11 +229,11 @@ TEST(Value, Uuid) {
 // -- Embedding ----------------------------------------------------------------
 
 TEST(Value, Embedding) {
-    Embedding e = {0.1f, 0.2f, 0.3f, 0.4f};
+    Embedding e = {0.1F, 0.2F, 0.3F, 0.4F};
     Value v(e);
     EXPECT_EQ(v.type_id(), TypeId::EMBEDDING);
-    EXPECT_EQ(v.as_embedding().size(), 4u);
-    EXPECT_FLOAT_EQ(v.as_embedding()[0], 0.1f);
+    EXPECT_EQ(v.as_embedding().size(), 4U);
+    EXPECT_FLOAT_EQ(v.as_embedding()[0], 0.1F);
 }
 
 TEST(Value, EmptyEmbedding) {
@@ -339,7 +340,7 @@ TEST(Value, TryAsAllTypes) {
     EXPECT_TRUE(Value(uint16_t{1}).try_as_uint16().has_value());
     EXPECT_TRUE(Value(uint32_t{1}).try_as_uint32().has_value());
     EXPECT_TRUE(Value(uint64_t{1}).try_as_uint64().has_value());
-    EXPECT_TRUE(Value(1.0f).try_as_float32().has_value());
+    EXPECT_TRUE(Value(1.0F).try_as_float32().has_value());
     EXPECT_TRUE(Value(1.0).try_as_float64().has_value());
     EXPECT_TRUE(Value(Decimal128{}).try_as_decimal().has_value());
     EXPECT_TRUE(Value(true).try_as_bool().has_value());

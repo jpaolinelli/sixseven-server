@@ -7,7 +7,7 @@ namespace giodb {
 
 // -- OverflowManager ----------------------------------------------------------
 
-OverflowManager::OverflowManager(PageAllocator& allocator) : allocator_(allocator) {}
+OverflowManager::OverflowManager(PageAllocator& allocator) : allocator_(&allocator) {}
 
 Result<OverflowPointer> OverflowManager::store_overflow(std::span<const uint8_t> data) {
     if (data.empty()) {
@@ -24,11 +24,11 @@ Result<OverflowPointer> OverflowManager::store_overflow(std::span<const uint8_t>
 
     while (remaining > 0) {
         // Allocate a new overflow page.
-        auto page_id_result = allocator_.allocate_page(PageType::OVERFLOW_PAGE);
+        auto page_id_result = allocator_->allocate_page(PageType::OVERFLOW_PAGE);
         if (!page_id_result) {
             // Clean up already-allocated pages on failure.
             for (auto id : allocated_ids) {
-                (void)allocator_.free_page(id);
+                (void)allocator_->free_page(id);
             }
             return tl::unexpected(page_id_result.error());
         }
@@ -41,10 +41,10 @@ Result<OverflowPointer> OverflowManager::store_overflow(std::span<const uint8_t>
 
         // Link the previous page to this one.
         if (prev_page_id != 0) {
-            auto prev_page_result = allocator_.get_page(prev_page_id);
+            auto prev_page_result = allocator_->get_page(prev_page_id);
             if (!prev_page_result) {
                 for (auto id : allocated_ids) {
-                    (void)allocator_.free_page(id);
+                    (void)allocator_->free_page(id);
                 }
                 return tl::unexpected(prev_page_result.error());
             }
@@ -54,10 +54,10 @@ Result<OverflowPointer> OverflowManager::store_overflow(std::span<const uint8_t>
         }
 
         // Get the new page.
-        auto page_result = allocator_.get_page(page_id);
+        auto page_result = allocator_->get_page(page_id);
         if (!page_result) {
             for (auto id : allocated_ids) {
-                (void)allocator_.free_page(id);
+                (void)allocator_->free_page(id);
             }
             return tl::unexpected(page_result.error());
         }
@@ -91,7 +91,7 @@ Result<std::vector<uint8_t>> OverflowManager::read_overflow(const OverflowPointe
     size_t remaining = pointer.total_length;
 
     while (current_page_id != overflow_no_next_page && remaining > 0) {
-        auto page_result = allocator_.get_page(current_page_id);
+        auto page_result = allocator_->get_page(current_page_id);
         if (!page_result) {
             return tl::unexpected(page_result.error());
         }
@@ -128,7 +128,7 @@ Result<void> OverflowManager::free_overflow(const OverflowPointer& pointer) {
     uint32_t current_page_id = pointer.first_page_id;
 
     while (current_page_id != overflow_no_next_page) {
-        auto page_result = allocator_.get_page(current_page_id);
+        auto page_result = allocator_->get_page(current_page_id);
         if (!page_result) {
             return tl::unexpected(page_result.error());
         }
@@ -139,7 +139,7 @@ Result<void> OverflowManager::free_overflow(const OverflowPointer& pointer) {
         std::memcpy(&next_page_id, &page->raw()[overflow_next_page_offset], sizeof(uint32_t));
 
         // Free the current page.
-        auto free_result = allocator_.free_page(current_page_id);
+        auto free_result = allocator_->free_page(current_page_id);
         if (!free_result) {
             return tl::unexpected(free_result.error());
         }

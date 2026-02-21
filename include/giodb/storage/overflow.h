@@ -46,7 +46,12 @@ static constexpr uint32_t overflow_no_next_page = 0;
 /// free_page(), or until the allocator itself is destroyed.
 class PageAllocator {
 public:
+    PageAllocator() = default;
     virtual ~PageAllocator() = default;
+    PageAllocator(const PageAllocator&) = delete;
+    PageAllocator& operator=(const PageAllocator&) = delete;
+    PageAllocator(PageAllocator&&) = delete;
+    PageAllocator& operator=(PageAllocator&&) = delete;
 
     /// Allocate a new page with the given type. Returns the page ID.
     virtual Result<uint32_t> allocate_page(PageType type) = 0;
@@ -91,7 +96,7 @@ public:
     static bool needs_overflow(size_t data_size) { return data_size > overflow_threshold; }
 
 private:
-    PageAllocator& allocator_;
+    PageAllocator* allocator_;
 };
 
 /// Simple in-memory page allocator for testing purposes.
