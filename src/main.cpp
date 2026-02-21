@@ -1,6 +1,7 @@
 #include "giodb/common/config.h"
 #include "giodb/common/logging.h"
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char* argv[]) {
     // Load config from file if provided, otherwise use defaults
     std::string config_path = (argc > 1) ? argv[1] : "giodb.json";

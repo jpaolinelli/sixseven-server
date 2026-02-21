@@ -52,7 +52,7 @@ jobs:
 
       - name: Run clang-tidy
         run: |
-          find src -name '*.cpp' | \
+          find src tests -name '*.cpp' | \
             xargs clang-tidy-17 -p build/debug --warnings-as-errors='bugprone-use-after-move,bugprone-dangling-handle,clang-analyzer-core.*'
 
   build:
@@ -111,6 +111,6 @@ jobs:
         with:
           name: giodb-${{ matrix.os }}-${{ matrix.cc }}
           path: |
-            build/debug/giodb-server
-            build/debug/giodb-cli
+            build/debug/src/giodb-server
+            build/debug/src/giodb-cli
           retention-days: 7

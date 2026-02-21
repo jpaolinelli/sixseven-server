@@ -45,7 +45,7 @@ if [[ -n "$UNFORMATTED" ]]; then
     done
     echo ""
     echo "Run the following to fix:"
-    echo "  clang-format -i$UNFORMATTED"
+    echo "  clang-format -i $UNFORMATTED"
     echo ""
     echo "Or format all files:"
     echo "  find src include tests -name '*.cpp' -o -name '*.h' | xargs clang-format -i"

@@ -26,7 +26,6 @@ Checks: >
   -performance-enum-size,
   -bugprone-empty-catch,
   -cppcoreguidelines-pro-type-member-init,
-  -bugprone-exception-escape,
 
 # Rationale for disabled checks:
 #   modernize-use-trailing-return-type: Conflicts with project style (traditional return types).
@@ -46,7 +45,6 @@ Checks: >
 #   performance-enum-size: We prefer int-sized enums for ABI stability and debuggability.
 #   bugprone-empty-catch: False positives when catch blocks return error values.
 #   cppcoreguidelines-pro-type-member-init: False positives on constructors with init lists.
-#   bugprone-exception-escape: False positive on main() due to std::string allocation.
 
 # Treat critical bug-prone and analyzer checks as errors.
 WarningsAsErrors: >
