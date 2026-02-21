@@ -16,7 +16,7 @@ add_subdirectory(server)
 
 # Aggregate library — links all module libraries
 add_library(giodb INTERFACE)
-target_link_libraries(giodb INTERFACE giodb_common)
+target_link_libraries(giodb INTERFACE giodb_common giodb_storage)
 
 # Server executable
 add_executable(giodb-server main.cpp)

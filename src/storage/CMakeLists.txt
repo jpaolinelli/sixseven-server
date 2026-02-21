@@ -1,2 +1,9 @@
 # giodb::storage sources
-# Stub — source files will be added as development progresses
+
+add_library(giodb_storage STATIC
+    serialization.cpp
+)
+
+target_include_directories(giodb_storage PUBLIC ${PROJECT_SOURCE_DIR}/include)
+
+target_link_libraries(giodb_storage PUBLIC giodb_common)
