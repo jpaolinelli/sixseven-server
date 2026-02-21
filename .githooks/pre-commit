@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+#
+# Pre-commit hook for GioDB
+# Checks clang-format on staged C++ source files.
+#
+# Install: git config core.hooksPath .githooks
+
+set -euo pipefail
+
+# Find clang-format (try versioned name first for CI, then unversioned)
+CLANG_FORMAT=""
+for candidate in clang-format-17 clang-format; do
+    if command -v "$candidate" &>/dev/null; then
+        CLANG_FORMAT="$candidate"
+        break
+    fi
+done
+
+if [[ -z "$CLANG_FORMAT" ]]; then
+    echo "WARNING: clang-format not found, skipping format check."
+    echo "Install clang-format to enable pre-commit formatting checks."
+    exit 0
+fi
+
+# Get staged C++ files (only added/modified, not deleted)
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM -- '*.cpp' '*.h' '*.hpp')
+
+if [[ -z "$STAGED_FILES" ]]; then
+    exit 0
+fi
+
+# Check formatting
+UNFORMATTED=""
+for file in $STAGED_FILES; do
+    if ! "$CLANG_FORMAT" --dry-run --Werror "$file" 2>/dev/null; then
+        UNFORMATTED="$UNFORMATTED $file"
+    fi
+done
+
+if [[ -n "$UNFORMATTED" ]]; then
+    echo ""
+    echo "ERROR: The following files have formatting issues:"
+    for file in $UNFORMATTED; do
+        echo "  - $file"
+    done
+    echo ""
+    echo "Run the following to fix:"
+    echo "  clang-format -i$UNFORMATTED"
+    echo ""
+    echo "Or format all files:"
+    echo "  find src include tests -name '*.cpp' -o -name '*.h' | xargs clang-format -i"
+    echo ""
+    exit 1
+fi
+
+echo "Format check passed."
