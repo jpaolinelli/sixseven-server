@@ -2,9 +2,15 @@
 
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <atomic>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <set>
+#include <thread>
 #include <vector>
 
 using namespace giodb;
@@ -695,4 +701,357 @@ TEST_F(BufferPoolTest, PoolPageCountAccurate) {
     ASSERT_TRUE(bpm.unpin_page((*p1)->page_id(), false).has_value());
     ASSERT_TRUE(bpm.delete_page((*p1)->page_id()).has_value());
     EXPECT_EQ(bpm.pool_page_count(), 1u);
+}
+
+// =============================================================================
+// Background Flusher Tests
+// =============================================================================
+
+TEST_F(BufferPoolTest, FlusherCleansUnpinnedDirtyPages) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+
+    auto result = bpm.new_page();
+    ASSERT_TRUE(result.has_value());
+    PageId pid = (*result)->page_id();
+    auto tuple = std::vector<uint8_t>(50, 0xBB);
+    ASSERT_TRUE((*result)->insert_tuple(tuple).has_value());
+    ASSERT_TRUE(bpm.unpin_page(pid, /*is_dirty=*/true).has_value());
+
+    // Start the flusher with a short interval.
+    ASSERT_TRUE(bpm.start_flusher(std::chrono::milliseconds(50)).has_value());
+
+    // Wait for the flusher to run at least once.
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    bpm.stop_flusher();
+
+    // Verify the page was written to disk by the flusher.
+    Page read_page(0, PageType::DATA);
+    auto read_result = dm_.read_page(file_id_, pid, read_page);
+    ASSERT_TRUE(read_result.has_value());
+
+    auto get_result = read_page.get_tuple(0);
+    ASSERT_TRUE(get_result.has_value());
+    EXPECT_EQ((*get_result)[0], 0xBB);
+}
+
+TEST_F(BufferPoolTest, FlusherSkipsPinnedDirtyPages) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+
+    // Create a pinned dirty page.
+    auto result = bpm.new_page();
+    ASSERT_TRUE(result.has_value());
+    PageId pid = (*result)->page_id();
+    auto tuple = std::vector<uint8_t>(50, 0xCC);
+    ASSERT_TRUE((*result)->insert_tuple(tuple).has_value());
+    // Unpin to set dirty flag, then re-fetch to re-pin.
+    ASSERT_TRUE(bpm.unpin_page(pid, /*is_dirty=*/true).has_value());
+    auto fetch = bpm.fetch_page(pid);
+    ASSERT_TRUE(fetch.has_value());
+    // Now pin_count=1, is_dirty=true (sticky).
+
+    // Create an unpinned dirty page for comparison.
+    auto result2 = bpm.new_page();
+    ASSERT_TRUE(result2.has_value());
+    PageId pid2 = (*result2)->page_id();
+    auto tuple2 = std::vector<uint8_t>(50, 0xDD);
+    ASSERT_TRUE((*result2)->insert_tuple(tuple2).has_value());
+    ASSERT_TRUE(bpm.unpin_page(pid2, /*is_dirty=*/true).has_value());
+
+    // Start flusher.
+    ASSERT_TRUE(bpm.start_flusher(std::chrono::milliseconds(50)).has_value());
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    // The unpinned dirty page (pid2) should be flushed by normal flusher cycle.
+    Page read_page2(0, PageType::DATA);
+    auto read_result2 = dm_.read_page(file_id_, pid2, read_page2);
+    ASSERT_TRUE(read_result2.has_value());
+    auto get_result2 = read_page2.get_tuple(0);
+    ASSERT_TRUE(get_result2.has_value());
+    EXPECT_EQ((*get_result2)[0], 0xDD);
+
+    // The pinned dirty page (pid) should NOT be flushed yet during normal cycles.
+    Page read_page1(0, PageType::DATA);
+    auto read_result1 = dm_.read_page(file_id_, pid, read_page1);
+    EXPECT_FALSE(read_result1.has_value()); // Checksum error = page was never written.
+
+    // Stop the flusher (final flush includes pinned pages).
+    bpm.stop_flusher();
+
+    // Now the pinned dirty page should be on disk after the shutdown flush.
+    Page read_page3(0, PageType::DATA);
+    auto read_result3 = dm_.read_page(file_id_, pid, read_page3);
+    ASSERT_TRUE(read_result3.has_value());
+    auto get_result3 = read_page3.get_tuple(0);
+    ASSERT_TRUE(get_result3.has_value());
+    EXPECT_EQ((*get_result3)[0], 0xCC);
+
+    // Clean up: unpin the page.
+    ASSERT_TRUE(bpm.unpin_page(pid, false).has_value());
+}
+
+TEST_F(BufferPoolTest, DestructorFlushesWithActiveFlusher) {
+    PageId pid = 0;
+    {
+        BufferPoolManager bpm(dm_, file_id_, 4);
+        ASSERT_TRUE(bpm.start_flusher(std::chrono::milliseconds(1000)).has_value());
+
+        auto result = bpm.new_page();
+        ASSERT_TRUE(result.has_value());
+        pid = (*result)->page_id();
+        auto tuple = std::vector<uint8_t>(50, 0xDD);
+        ASSERT_TRUE((*result)->insert_tuple(tuple).has_value());
+        ASSERT_TRUE(bpm.unpin_page(pid, /*is_dirty=*/true).has_value());
+
+        // Destructor should stop flusher and flush all dirty pages.
+    }
+
+    // Verify page was written to disk by the destructor.
+    Page read_page(0, PageType::DATA);
+    auto read_result = dm_.read_page(file_id_, pid, read_page);
+    ASSERT_TRUE(read_result.has_value());
+    auto get_result = read_page.get_tuple(0);
+    ASSERT_TRUE(get_result.has_value());
+    EXPECT_EQ((*get_result)[0], 0xDD);
+}
+
+TEST_F(BufferPoolTest, StartFlusherTwiceFails) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+
+    ASSERT_TRUE(bpm.start_flusher(std::chrono::milliseconds(100)).has_value());
+
+    auto second = bpm.start_flusher(std::chrono::milliseconds(100));
+    ASSERT_FALSE(second.has_value());
+    EXPECT_EQ(second.error().code, StatusCode::ALREADY_EXISTS);
+
+    bpm.stop_flusher();
+}
+
+TEST_F(BufferPoolTest, StopFlusherWithoutStartIsNoOp) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+
+    // Should not crash or hang.
+    bpm.stop_flusher();
+    bpm.stop_flusher();
+}
+
+// =============================================================================
+// Thread Safety Tests
+// =============================================================================
+
+TEST_F(BufferPoolTest, ConcurrentFetchUnpin) {
+    BufferPoolManager bpm(dm_, file_id_, 10);
+
+    // Pre-create pages.
+    std::vector<PageId> pids;
+    for (int i = 0; i < 5; ++i) {
+        auto result = bpm.new_page();
+        ASSERT_TRUE(result.has_value());
+        pids.push_back((*result)->page_id());
+        ASSERT_TRUE(bpm.unpin_page(pids.back(), false).has_value());
+    }
+
+    // Spawn threads that concurrently fetch and unpin pages.
+    std::atomic<int> errors{0};
+    std::vector<std::thread> threads;
+    for (int t = 0; t < 4; ++t) {
+        threads.emplace_back([&bpm, &pids, &errors, t]() {
+            for (int i = 0; i < 100; ++i) {
+                size_t idx = static_cast<size_t>(t + i) % pids.size();
+                PageId pid = pids[idx];
+                auto fetch_result = bpm.fetch_page(pid);
+                if (!fetch_result.has_value()) {
+                    ++errors;
+                    continue;
+                }
+                auto unpin_result = bpm.unpin_page(pid, false);
+                if (!unpin_result.has_value()) {
+                    ++errors;
+                }
+            }
+        });
+    }
+
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    EXPECT_EQ(errors.load(), 0);
+}
+
+TEST_F(BufferPoolTest, ConcurrentFetchUnpinWithFlusher) {
+    BufferPoolManager bpm(dm_, file_id_, 10);
+
+    // Pre-create dirty pages.
+    std::vector<PageId> pids;
+    for (int i = 0; i < 5; ++i) {
+        auto result = bpm.new_page();
+        ASSERT_TRUE(result.has_value());
+        Page* page = *result;
+        pids.push_back(page->page_id());
+        auto tuple = std::vector<uint8_t>(30, static_cast<uint8_t>(i + 1));
+        ASSERT_TRUE(page->insert_tuple(tuple).has_value());
+        ASSERT_TRUE(bpm.unpin_page(pids.back(), /*is_dirty=*/true).has_value());
+    }
+
+    // Start flusher with short interval.
+    ASSERT_TRUE(bpm.start_flusher(std::chrono::milliseconds(20)).has_value());
+
+    // Spawn threads that concurrently fetch and unpin while flusher is running.
+    std::atomic<int> errors{0};
+    std::vector<std::thread> threads;
+    for (int t = 0; t < 4; ++t) {
+        threads.emplace_back([&bpm, &pids, &errors, t]() {
+            for (int i = 0; i < 100; ++i) {
+                size_t idx = static_cast<size_t>(t + i) % pids.size();
+                PageId pid = pids[idx];
+                auto fetch_result = bpm.fetch_page(pid);
+                if (!fetch_result.has_value()) {
+                    ++errors;
+                    continue;
+                }
+                auto unpin_result = bpm.unpin_page(pid, (i % 2 == 0));
+                if (!unpin_result.has_value()) {
+                    ++errors;
+                }
+            }
+        });
+    }
+
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    bpm.stop_flusher();
+
+    EXPECT_EQ(errors.load(), 0);
+}
+
+// =============================================================================
+// Double-Write Buffer Tests
+// =============================================================================
+
+TEST_F(BufferPoolTest, DoubleWriteBufferWritesThroughDWB) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+
+    auto dwb_path = temp_dir_ / "test.dwb";
+    ASSERT_TRUE(bpm.enable_double_write(dwb_path).has_value());
+
+    auto result = bpm.new_page();
+    ASSERT_TRUE(result.has_value());
+    PageId pid = (*result)->page_id();
+    auto tuple = std::vector<uint8_t>(80, 0xFF);
+    ASSERT_TRUE((*result)->insert_tuple(tuple).has_value());
+    ASSERT_TRUE(bpm.unpin_page(pid, /*is_dirty=*/true).has_value());
+
+    // Flush the page (goes through DWB first, then data file).
+    ASSERT_TRUE(bpm.flush_page(pid).has_value());
+
+    // Verify the data file has the page.
+    Page disk_page(0, PageType::DATA);
+    auto read_result = dm_.read_page(file_id_, pid, disk_page);
+    ASSERT_TRUE(read_result.has_value());
+    auto get_result = disk_page.get_tuple(0);
+    ASSERT_TRUE(get_result.has_value());
+    EXPECT_EQ((*get_result)[0], 0xFF);
+
+    // Verify the DWB file contains a valid page with correct checksum.
+    int dwb_fd = ::open(dwb_path.c_str(), O_RDONLY);
+    ASSERT_GE(dwb_fd, 0);
+
+    std::array<uint8_t, page_size> dwb_data{};
+    ssize_t bytes_read = ::pread(dwb_fd, dwb_data.data(), page_size, 0);
+    EXPECT_EQ(static_cast<size_t>(bytes_read), page_size);
+    ::close(dwb_fd);
+
+    // Construct a Page from the DWB data and verify checksum and content.
+    Page dwb_page(dwb_data);
+    uint32_t stored_cksum = dwb_page.checksum();
+    uint32_t computed_cksum = compute_page_checksum(dwb_page);
+    EXPECT_EQ(stored_cksum, computed_cksum);
+
+    auto dwb_tuple = dwb_page.get_tuple(0);
+    ASSERT_TRUE(dwb_tuple.has_value());
+    EXPECT_EQ(dwb_tuple->size(), 80u);
+    EXPECT_EQ((*dwb_tuple)[0], 0xFF);
+}
+
+TEST_F(BufferPoolTest, EnableDoubleWriteTwiceFails) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+
+    ASSERT_TRUE(bpm.enable_double_write(temp_dir_ / "test.dwb").has_value());
+
+    auto second = bpm.enable_double_write(temp_dir_ / "test2.dwb");
+    ASSERT_FALSE(second.has_value());
+    EXPECT_EQ(second.error().code, StatusCode::ALREADY_EXISTS);
+}
+
+TEST_F(BufferPoolTest, DoubleWriteBufferWithEviction) {
+    // Pool of size 2 with DWB enabled.
+    BufferPoolManager bpm(dm_, file_id_, 2);
+    ASSERT_TRUE(bpm.enable_double_write(temp_dir_ / "test.dwb").has_value());
+
+    // Fill pool with dirty pages.
+    auto p1 = bpm.new_page();
+    ASSERT_TRUE(p1.has_value());
+    PageId pid1 = (*p1)->page_id();
+    auto tuple1 = std::vector<uint8_t>(60, 0x11);
+    ASSERT_TRUE((*p1)->insert_tuple(tuple1).has_value());
+    ASSERT_TRUE(bpm.unpin_page(pid1, /*is_dirty=*/true).has_value());
+
+    auto p2 = bpm.new_page();
+    ASSERT_TRUE(p2.has_value());
+    ASSERT_TRUE(bpm.unpin_page((*p2)->page_id(), false).has_value());
+
+    // Adding a 3rd page forces eviction of page 1 through DWB.
+    auto p3 = bpm.new_page();
+    ASSERT_TRUE(p3.has_value());
+    ASSERT_TRUE(bpm.unpin_page((*p3)->page_id(), false).has_value());
+
+    // Verify evicted page 1 was flushed to disk (via DWB).
+    Page read_page(0, PageType::DATA);
+    auto read_result = dm_.read_page(file_id_, pid1, read_page);
+    ASSERT_TRUE(read_result.has_value());
+    auto get_result = read_page.get_tuple(0);
+    ASSERT_TRUE(get_result.has_value());
+    EXPECT_EQ((*get_result)[0], 0x11);
+}
+
+TEST_F(BufferPoolTest, FlusherWithDoubleWriteBuffer) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+
+    auto dwb_path = temp_dir_ / "test.dwb";
+    ASSERT_TRUE(bpm.enable_double_write(dwb_path).has_value());
+
+    auto result = bpm.new_page();
+    ASSERT_TRUE(result.has_value());
+    PageId pid = (*result)->page_id();
+    auto tuple = std::vector<uint8_t>(40, 0xAA);
+    ASSERT_TRUE((*result)->insert_tuple(tuple).has_value());
+    ASSERT_TRUE(bpm.unpin_page(pid, /*is_dirty=*/true).has_value());
+
+    // Start flusher — it should use DWB when writing dirty pages.
+    ASSERT_TRUE(bpm.start_flusher(std::chrono::milliseconds(50)).has_value());
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    bpm.stop_flusher();
+
+    // Verify the page on disk.
+    Page read_page(0, PageType::DATA);
+    auto read_result = dm_.read_page(file_id_, pid, read_page);
+    ASSERT_TRUE(read_result.has_value());
+    auto get_result = read_page.get_tuple(0);
+    ASSERT_TRUE(get_result.has_value());
+    EXPECT_EQ((*get_result)[0], 0xAA);
+
+    // Verify the DWB file has valid content.
+    int dwb_fd = ::open(dwb_path.c_str(), O_RDONLY);
+    ASSERT_GE(dwb_fd, 0);
+
+    std::array<uint8_t, page_size> dwb_data{};
+    ssize_t bytes_read = ::pread(dwb_fd, dwb_data.data(), page_size, 0);
+    EXPECT_EQ(static_cast<size_t>(bytes_read), page_size);
+    ::close(dwb_fd);
+
+    Page dwb_page(dwb_data);
+    EXPECT_EQ(dwb_page.checksum(), compute_page_checksum(dwb_page));
 }

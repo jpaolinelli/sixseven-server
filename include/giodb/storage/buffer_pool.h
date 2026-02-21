@@ -4,7 +4,12 @@
 #include "giodb/storage/disk_manager.h"
 #include "giodb/storage/page.h"
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <mutex>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -132,6 +137,24 @@ public:
     /// Return the current number of pages in the buffer pool.
     [[nodiscard]] uint32_t pool_page_count() const;
 
+    // -- Thread safety & background flusher ----------------------------------
+
+    /// Enable the double-write buffer for torn page protection.
+    /// Pages are written to the DWB file first, fsynced, then written to the
+    /// data file. If a crash occurs during the data file write, recovery can
+    /// restore the page from the DWB.
+    [[nodiscard]] Result<void> enable_double_write(const std::filesystem::path& dwb_path);
+
+    /// Start the background flusher thread. The flusher periodically scans for
+    /// dirty unpinned pages and writes them to disk.
+    /// @param interval Time between flush cycles (default: 1 second).
+    [[nodiscard]] Result<void>
+    start_flusher(std::chrono::milliseconds interval = std::chrono::seconds(1));
+
+    /// Stop the background flusher thread. Performs a final flush of all dirty
+    /// pages (including pinned), then joins the thread.
+    void stop_flusher();
+
 private:
     struct Frame {
         Page page{0, PageType::DATA};
@@ -142,7 +165,20 @@ private:
 
     /// Find an available frame: takes from free list, or evicts a victim.
     /// On eviction, flushes the dirty page and removes it from the page table.
+    /// Must be called while holding latch_.
     [[nodiscard]] Result<FrameId> find_victim_frame();
+
+    /// Write a page through the double-write buffer (if enabled) then to disk.
+    /// Must be called while holding latch_.
+    [[nodiscard]] Result<void> write_page_impl(PageId page_id, Page& page);
+
+    /// Flush dirty pages. If include_pinned is true, flushes all dirty pages;
+    /// otherwise only flushes dirty pages with pin_count == 0.
+    /// Must be called while holding latch_.
+    void flush_dirty_pages_locked(bool include_pinned = false);
+
+    /// Background flusher thread entry point.
+    void flusher_loop(std::chrono::milliseconds interval);
 
     DiskManager& disk_manager_;
     FileId file_id_;
@@ -151,6 +187,15 @@ private:
     std::unordered_map<PageId, FrameId> page_table_;
     std::vector<FrameId> free_list_;
     LRUKReplacer replacer_;
+
+    // -- Thread safety --------------------------------------------------------
+
+    mutable std::mutex latch_;                 ///< Protects all buffer pool state.
+    std::thread flusher_thread_;               ///< Background flusher thread.
+    std::mutex flusher_mutex_;                 ///< Protects flusher condition variable.
+    std::condition_variable flusher_cv_;       ///< Wakes/stops the flusher.
+    std::atomic<bool> flusher_running_{false}; ///< Flusher shutdown flag.
+    int dwb_fd_ = -1;                          ///< Double-write buffer fd (-1 = disabled).
 };
 
 } // namespace giodb

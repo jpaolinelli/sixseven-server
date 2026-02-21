@@ -1,6 +1,11 @@
 #include "giodb/storage/buffer_pool.h"
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <algorithm>
+#include <cerrno>
+#include <cstring>
 #include <limits>
 
 namespace giodb {
@@ -113,17 +118,26 @@ BufferPoolManager::BufferPoolManager(DiskManager& disk_manager, FileId file_id, 
 }
 
 BufferPoolManager::~BufferPoolManager() {
+    stop_flusher();
+
     // Best-effort flush all dirty pages on destruction.
     // Ignoring errors since we can't propagate from a destructor.
     for (auto& [page_id, frame_id] : page_table_) {
         Frame& frame = frames_[frame_id];
         if (frame.is_dirty) {
-            (void)disk_manager_.write_page(file_id_, frame.page_id, frame.page);
+            (void)write_page_impl(frame.page_id, frame.page);
         }
+    }
+
+    if (dwb_fd_ >= 0) {
+        ::close(dwb_fd_);
+        dwb_fd_ = -1;
     }
 }
 
 Result<Page*> BufferPoolManager::fetch_page(PageId page_id) {
+    std::lock_guard<std::mutex> lock(latch_);
+
     // Check if the page is already in the buffer pool.
     auto it = page_table_.find(page_id);
     if (it != page_table_.end()) {
@@ -135,7 +149,7 @@ Result<Page*> BufferPoolManager::fetch_page(PageId page_id) {
         return ok(&frame.page);
     }
 
-    // Page not in pool — need to bring it from disk.
+    // Page not in pool -- need to bring it from disk.
     auto frame_result = find_victim_frame();
     if (!frame_result) {
         return tl::unexpected(frame_result.error());
@@ -165,6 +179,8 @@ Result<Page*> BufferPoolManager::fetch_page(PageId page_id) {
 }
 
 Result<Page*> BufferPoolManager::new_page() {
+    std::lock_guard<std::mutex> lock(latch_);
+
     // Allocate a new page on disk.
     auto alloc_result = disk_manager_.allocate_page(file_id_);
     if (!alloc_result) {
@@ -195,6 +211,8 @@ Result<Page*> BufferPoolManager::new_page() {
 }
 
 Result<void> BufferPoolManager::unpin_page(PageId page_id, bool is_dirty) {
+    std::lock_guard<std::mutex> lock(latch_);
+
     auto it = page_table_.find(page_id);
     if (it == page_table_.end()) {
         return make_error(StatusCode::NOT_FOUND,
@@ -223,6 +241,8 @@ Result<void> BufferPoolManager::unpin_page(PageId page_id, bool is_dirty) {
 }
 
 Result<void> BufferPoolManager::flush_page(PageId page_id) {
+    std::lock_guard<std::mutex> lock(latch_);
+
     auto it = page_table_.find(page_id);
     if (it == page_table_.end()) {
         return make_error(StatusCode::NOT_FOUND,
@@ -236,7 +256,7 @@ Result<void> BufferPoolManager::flush_page(PageId page_id) {
         return ok(); // Nothing to flush.
     }
 
-    auto write_result = disk_manager_.write_page(file_id_, frame.page_id, frame.page);
+    auto write_result = write_page_impl(frame.page_id, frame.page);
     if (!write_result) {
         return tl::unexpected(write_result.error());
     }
@@ -246,10 +266,12 @@ Result<void> BufferPoolManager::flush_page(PageId page_id) {
 }
 
 Result<void> BufferPoolManager::flush_all() {
+    std::lock_guard<std::mutex> lock(latch_);
+
     for (auto& [page_id, frame_id] : page_table_) {
         Frame& frame = frames_[frame_id];
         if (frame.is_dirty) {
-            auto write_result = disk_manager_.write_page(file_id_, frame.page_id, frame.page);
+            auto write_result = write_page_impl(frame.page_id, frame.page);
             if (!write_result) {
                 return tl::unexpected(write_result.error());
             }
@@ -260,6 +282,8 @@ Result<void> BufferPoolManager::flush_all() {
 }
 
 Result<void> BufferPoolManager::delete_page(PageId page_id) {
+    std::lock_guard<std::mutex> lock(latch_);
+
     auto it = page_table_.find(page_id);
     if (it == page_table_.end()) {
         return make_error(StatusCode::NOT_FOUND,
@@ -288,7 +312,60 @@ Result<void> BufferPoolManager::delete_page(PageId page_id) {
 }
 
 uint32_t BufferPoolManager::pool_page_count() const {
+    std::lock_guard<std::mutex> lock(latch_);
     return static_cast<uint32_t>(page_table_.size());
+}
+
+// -- Thread safety & background flusher ---------------------------------------
+
+Result<void> BufferPoolManager::enable_double_write(const std::filesystem::path& dwb_path) {
+    std::lock_guard<std::mutex> lock(latch_);
+
+    if (dwb_fd_ >= 0) {
+        return make_error(StatusCode::ALREADY_EXISTS, "double-write buffer already enabled");
+    }
+
+    int fd = ::open(dwb_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        return make_error(StatusCode::IO_ERROR,
+                          "failed to create DWB file: " + std::string(std::strerror(errno)));
+    }
+
+    // Pre-allocate one page of space.
+    if (::ftruncate(fd, static_cast<off_t>(page_size)) < 0) {
+        ::close(fd);
+        return make_error(StatusCode::IO_ERROR,
+                          "failed to extend DWB file: " + std::string(std::strerror(errno)));
+    }
+
+    dwb_fd_ = fd;
+    return ok();
+}
+
+Result<void> BufferPoolManager::start_flusher(std::chrono::milliseconds interval) {
+    std::lock_guard<std::mutex> lock(latch_);
+
+    if (flusher_running_.load()) {
+        return make_error(StatusCode::ALREADY_EXISTS, "background flusher already running");
+    }
+
+    flusher_running_.store(true);
+    flusher_thread_ = std::thread(&BufferPoolManager::flusher_loop, this, interval);
+    return ok();
+}
+
+void BufferPoolManager::stop_flusher() {
+    // Must NOT hold latch_ here — the flusher thread acquires it during flush.
+    if (!flusher_running_.exchange(false)) {
+        return; // Already stopped or never started.
+    }
+    {
+        std::lock_guard<std::mutex> lock(flusher_mutex_);
+        flusher_cv_.notify_one();
+    }
+    if (flusher_thread_.joinable()) {
+        flusher_thread_.join();
+    }
 }
 
 // -- Private helpers ----------------------------------------------------------
@@ -301,7 +378,7 @@ Result<FrameId> BufferPoolManager::find_victim_frame() {
         return ok(frame_id);
     }
 
-    // No free frames — evict using LRU-K.
+    // No free frames -- evict using LRU-K.
     auto evict_result = replacer_.evict();
     if (!evict_result) {
         return make_error(StatusCode::INTERNAL_ERROR, "buffer pool is full: all frames are pinned");
@@ -312,7 +389,7 @@ Result<FrameId> BufferPoolManager::find_victim_frame() {
 
     // Flush dirty page before eviction.
     if (victim.is_dirty) {
-        auto write_result = disk_manager_.write_page(file_id_, victim.page_id, victim.page);
+        auto write_result = write_page_impl(victim.page_id, victim.page);
         if (!write_result) {
             return tl::unexpected(write_result.error());
         }
@@ -324,6 +401,69 @@ Result<FrameId> BufferPoolManager::find_victim_frame() {
     victim.pin_count = 0;
 
     return ok(victim_id);
+}
+
+Result<void> BufferPoolManager::write_page_impl(PageId page_id, Page& page) {
+    if (dwb_fd_ >= 0) {
+        // Compute and store checksum so the DWB copy has a valid checksum.
+        page.set_checksum(compute_page_checksum(page));
+
+        ssize_t written = ::pwrite(dwb_fd_, page.raw().data(), page_size, 0);
+        if (written < 0 || static_cast<size_t>(written) != page_size) {
+            return make_error(StatusCode::IO_ERROR,
+                              "DWB write failed: " + std::string(std::strerror(errno)));
+        }
+
+        // Ensure DWB is persisted before writing to the data file.
+#ifdef __APPLE__
+        if (::fcntl(dwb_fd_, F_FULLFSYNC) < 0) {
+            return make_error(StatusCode::IO_ERROR,
+                              "DWB fsync failed: " + std::string(std::strerror(errno)));
+        }
+#else
+        if (::fsync(dwb_fd_) < 0) {
+            return make_error(StatusCode::IO_ERROR,
+                              "DWB fsync failed: " + std::string(std::strerror(errno)));
+        }
+#endif
+    }
+
+    // Write to the actual data file via DiskManager.
+    return disk_manager_.write_page(file_id_, page_id, page);
+}
+
+void BufferPoolManager::flush_dirty_pages_locked(bool include_pinned) {
+    for (auto& [page_id, frame_id] : page_table_) {
+        Frame& frame = frames_[frame_id];
+        if (frame.is_dirty && (include_pinned || frame.pin_count == 0)) {
+            auto result = write_page_impl(frame.page_id, frame.page);
+            if (result) {
+                frame.is_dirty = false;
+            }
+            // Silently skip failures -- background flushing is best-effort.
+        }
+    }
+}
+
+void BufferPoolManager::flusher_loop(std::chrono::milliseconds interval) {
+    while (true) {
+        {
+            std::unique_lock<std::mutex> lock(flusher_mutex_);
+            flusher_cv_.wait_for(lock, interval, [this] { return !flusher_running_.load(); });
+        }
+
+        bool stopping = !flusher_running_.load();
+        {
+            std::lock_guard<std::mutex> lock(latch_);
+            // On shutdown, flush all dirty pages (including pinned).
+            // During normal operation, only flush dirty unpinned pages.
+            flush_dirty_pages_locked(/*include_pinned=*/stopping);
+        }
+
+        if (stopping) {
+            break;
+        }
+    }
 }
 
 } // namespace giodb
