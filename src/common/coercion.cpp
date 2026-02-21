@@ -1,0 +1,360 @@
+#include "giodb/common/coercion.h"
+
+#include <cmath>
+#include <compare>
+#include <cstdint>
+
+namespace giodb {
+
+namespace {
+
+// -- Numeric rank for coercion promotion --------------------------------------
+
+// Higher rank = wider type. Used to determine the common type for coercion.
+// Returns -1 for non-numeric types.
+int numeric_rank(TypeId id) {
+    switch (id) {
+    case TypeId::INT8:
+        return 1;
+    case TypeId::UINT8:
+        return 2;
+    case TypeId::INT16:
+        return 3;
+    case TypeId::UINT16:
+        return 4;
+    case TypeId::INT32:
+        return 5;
+    case TypeId::UINT32:
+        return 6;
+    case TypeId::INT64:
+        return 7;
+    case TypeId::UINT64:
+        return 8;
+    case TypeId::FLOAT32:
+        return 9;
+    case TypeId::FLOAT64:
+        return 10;
+    case TypeId::DECIMAL:
+        return 11;
+    default:
+        return -1;
+    }
+}
+
+// Convert any numeric Value to int64_t for comparison/coercion.
+int64_t to_int64(const Value& v) {
+    switch (v.type_id()) {
+    case TypeId::INT8:
+        return v.as_int8();
+    case TypeId::INT16:
+        return v.as_int16();
+    case TypeId::INT32:
+        return v.as_int32();
+    case TypeId::INT64:
+        return v.as_int64();
+    case TypeId::UINT8:
+        return v.as_uint8();
+    case TypeId::UINT16:
+        return v.as_uint16();
+    case TypeId::UINT32:
+        return v.as_uint32();
+    case TypeId::UINT64:
+        return static_cast<int64_t>(v.as_uint64());
+    default:
+        return 0;
+    }
+}
+
+// Convert any numeric Value to double for comparison/coercion.
+double to_double(const Value& v) {
+    switch (v.type_id()) {
+    case TypeId::INT8:
+        return v.as_int8();
+    case TypeId::INT16:
+        return v.as_int16();
+    case TypeId::INT32:
+        return v.as_int32();
+    case TypeId::INT64:
+        return static_cast<double>(v.as_int64());
+    case TypeId::UINT8:
+        return v.as_uint8();
+    case TypeId::UINT16:
+        return v.as_uint16();
+    case TypeId::UINT32:
+        return v.as_uint32();
+    case TypeId::UINT64:
+        return static_cast<double>(v.as_uint64());
+    case TypeId::FLOAT32:
+        return v.as_float32();
+    case TypeId::FLOAT64:
+        return v.as_float64();
+    default:
+        return 0.0;
+    }
+}
+
+// Create a Value of the target integer type from an int64_t.
+Value int64_to_value(int64_t v, TypeId target) {
+    switch (target) {
+    case TypeId::INT8:
+        return Value(static_cast<int8_t>(v));
+    case TypeId::INT16:
+        return Value(static_cast<int16_t>(v));
+    case TypeId::INT32:
+        return Value(static_cast<int32_t>(v));
+    case TypeId::INT64:
+        return Value(v);
+    case TypeId::UINT8:
+        return Value(static_cast<uint8_t>(v));
+    case TypeId::UINT16:
+        return Value(static_cast<uint16_t>(v));
+    case TypeId::UINT32:
+        return Value(static_cast<uint32_t>(v));
+    case TypeId::UINT64:
+        return Value(static_cast<uint64_t>(v));
+    default:
+        return Value(v);
+    }
+}
+
+// Compare two doubles, treating NaN as greater than everything.
+std::strong_ordering compare_doubles(double a, double b) {
+    if (std::isnan(a) && std::isnan(b)) {
+        return std::strong_ordering::equal;
+    }
+    if (std::isnan(a)) {
+        return std::strong_ordering::greater;
+    }
+    if (std::isnan(b)) {
+        return std::strong_ordering::less;
+    }
+    if (a < b) {
+        return std::strong_ordering::less;
+    }
+    if (a > b) {
+        return std::strong_ordering::greater;
+    }
+    return std::strong_ordering::equal;
+}
+
+// Compare two same-type non-null values.
+Result<std::strong_ordering> compare_same_type(const Value& lhs, const Value& rhs) {
+    switch (lhs.type_id()) {
+    case TypeId::INT8:
+        return ok(lhs.as_int8() <=> rhs.as_int8());
+    case TypeId::INT16:
+        return ok(lhs.as_int16() <=> rhs.as_int16());
+    case TypeId::INT32:
+        return ok(lhs.as_int32() <=> rhs.as_int32());
+    case TypeId::INT64:
+        return ok(lhs.as_int64() <=> rhs.as_int64());
+    case TypeId::UINT8:
+        return ok(lhs.as_uint8() <=> rhs.as_uint8());
+    case TypeId::UINT16:
+        return ok(lhs.as_uint16() <=> rhs.as_uint16());
+    case TypeId::UINT32:
+        return ok(lhs.as_uint32() <=> rhs.as_uint32());
+    case TypeId::UINT64:
+        return ok(lhs.as_uint64() <=> rhs.as_uint64());
+    case TypeId::FLOAT32:
+        return ok(compare_doubles(lhs.as_float32(), rhs.as_float32()));
+    case TypeId::FLOAT64:
+        return ok(compare_doubles(lhs.as_float64(), rhs.as_float64()));
+    case TypeId::DECIMAL: {
+        auto la = lhs.as_decimal();
+        auto ra = rhs.as_decimal();
+        if (la.hi != ra.hi) {
+            return ok(la.hi <=> ra.hi);
+        }
+        return ok(la.lo <=> ra.lo);
+    }
+    case TypeId::BOOL:
+        return ok(static_cast<int>(lhs.as_bool()) <=> static_cast<int>(rhs.as_bool()));
+    case TypeId::STRING:
+        return ok(lhs.as_string() <=> rhs.as_string());
+    case TypeId::DATE:
+        return ok(lhs.as_date().days_since_epoch <=> rhs.as_date().days_since_epoch);
+    case TypeId::TIME:
+        return ok(lhs.as_time().microseconds <=> rhs.as_time().microseconds);
+    case TypeId::TIMESTAMP:
+        return ok(lhs.as_timestamp().microseconds <=> rhs.as_timestamp().microseconds);
+    case TypeId::INTERVAL: {
+        auto li = lhs.as_interval();
+        auto ri = rhs.as_interval();
+        if (li.months != ri.months) {
+            return ok(li.months <=> ri.months);
+        }
+        return ok(li.microseconds <=> ri.microseconds);
+    }
+    case TypeId::POINT: {
+        auto lp = lhs.as_point();
+        auto rp = rhs.as_point();
+        auto x_cmp = compare_doubles(lp.x, rp.x);
+        if (x_cmp != std::strong_ordering::equal) {
+            return ok(x_cmp);
+        }
+        return ok(compare_doubles(lp.y, rp.y));
+    }
+    case TypeId::JSON:
+        return ok(lhs.as_json().data <=> rhs.as_json().data);
+    case TypeId::UUID: {
+        auto& lu = lhs.as_uuid();
+        auto& ru = rhs.as_uuid();
+        for (size_t i = 0; i < 16; ++i) {
+            if (lu[i] != ru[i]) {
+                return ok(lu[i] <=> ru[i]);
+            }
+        }
+        return ok(std::strong_ordering::equal);
+    }
+    case TypeId::BLOB:
+    case TypeId::EMBEDDING:
+        return make_error(StatusCode::TYPE_ERROR,
+                          "cannot compare values of type " + std::string(type_name(lhs.type_id())));
+    }
+    return make_error(StatusCode::INTERNAL_ERROR, "unknown type in comparison");
+}
+
+} // namespace
+
+// -- can_coerce ---------------------------------------------------------------
+
+bool can_coerce(TypeId from, TypeId to) {
+    if (from == to) {
+        return true;
+    }
+
+    int from_rank = numeric_rank(from);
+    int to_rank = numeric_rank(to);
+
+    // Both are numeric: allow widening promotion.
+    if (from_rank > 0 && to_rank > 0) {
+        return to_rank >= from_rank;
+    }
+
+    return false;
+}
+
+// -- coerce -------------------------------------------------------------------
+
+Result<Value> coerce(const Value& value, TypeId target) {
+    if (value.is_null()) {
+        return ok(Value::make_null());
+    }
+
+    TypeId from = value.type_id();
+    if (from == target) {
+        return ok(value);
+    }
+
+    if (!can_coerce(from, target)) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "cannot coerce " + std::string(type_name(from)) + " to " +
+                              std::string(type_name(target)));
+    }
+
+    // Numeric coercions
+    if (target == TypeId::FLOAT32) {
+        return ok(Value(static_cast<float>(to_double(value))));
+    }
+    if (target == TypeId::FLOAT64) {
+        return ok(Value(to_double(value)));
+    }
+    if (target == TypeId::DECIMAL) {
+        // For now, store integer value in lo, 0 in hi.
+        if (is_integer(from)) {
+            int64_t v = to_int64(value);
+            if (v >= 0) {
+                return ok(Value(Decimal128{0, static_cast<uint64_t>(v)}));
+            }
+            return ok(Value(Decimal128{-1, static_cast<uint64_t>(v)}));
+        }
+        // Float to decimal: truncate to integer representation.
+        double d = to_double(value);
+        if (d >= 0) {
+            return ok(Value(Decimal128{0, static_cast<uint64_t>(d)}));
+        }
+        return ok(Value(Decimal128{-1, static_cast<uint64_t>(static_cast<int64_t>(d))}));
+    }
+
+    // Integer-to-integer widening
+    if (is_integer(from) && is_integer(target)) {
+        int64_t v = to_int64(value);
+        return ok(int64_to_value(v, target));
+    }
+
+    // Integer to float (already handled above, but in case)
+    if (is_integer(from) && is_floating(target)) {
+        if (target == TypeId::FLOAT32) {
+            return ok(Value(static_cast<float>(to_int64(value))));
+        }
+        return ok(Value(static_cast<double>(to_int64(value))));
+    }
+
+    // FLOAT32 to FLOAT64
+    if (from == TypeId::FLOAT32 && target == TypeId::FLOAT64) {
+        return ok(Value(static_cast<double>(value.as_float32())));
+    }
+
+    return make_error(StatusCode::TYPE_ERROR,
+                      "cannot coerce " + std::string(type_name(from)) + " to " +
+                          std::string(type_name(target)));
+}
+
+// -- compare ------------------------------------------------------------------
+
+Result<std::strong_ordering> compare(const Value& lhs, const Value& rhs) {
+    // NULL handling: NULL sorts before all non-NULL values.
+    if (lhs.is_null() && rhs.is_null()) {
+        return ok(std::strong_ordering::equal);
+    }
+    if (lhs.is_null()) {
+        return ok(std::strong_ordering::less);
+    }
+    if (rhs.is_null()) {
+        return ok(std::strong_ordering::greater);
+    }
+
+    TypeId lt = lhs.type_id();
+    TypeId rt = rhs.type_id();
+
+    // Same type: direct comparison.
+    if (lt == rt) {
+        return compare_same_type(lhs, rhs);
+    }
+
+    // Cross-type numeric comparison: promote to common type.
+    int lr = numeric_rank(lt);
+    int rr = numeric_rank(rt);
+    if (lr > 0 && rr > 0) {
+        // Promote to the wider type.
+        TypeId common = (lr >= rr) ? lt : rt;
+
+        // For mixed integer/float, compare as doubles.
+        if (is_floating(lt) || is_floating(rt)) {
+            return ok(compare_doubles(to_double(lhs), to_double(rhs)));
+        }
+
+        // For DECIMAL, compare as doubles for now.
+        if (common == TypeId::DECIMAL) {
+            return ok(compare_doubles(to_double(lhs), to_double(rhs)));
+        }
+
+        // Integer-to-integer: compare via coerced values.
+        auto lc = coerce(lhs, common);
+        auto rc = coerce(rhs, common);
+        if (!lc) {
+            return tl::unexpected(lc.error());
+        }
+        if (!rc) {
+            return tl::unexpected(rc.error());
+        }
+        return compare_same_type(*lc, *rc);
+    }
+
+    return make_error(StatusCode::TYPE_ERROR,
+                      "cannot compare " + std::string(type_name(lt)) + " with " +
+                          std::string(type_name(rt)));
+}
+
+} // namespace giodb

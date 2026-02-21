@@ -7,6 +7,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 add_library(giodb_common STATIC
     logging.cpp
     config.cpp
+    coercion.cpp
 )
 
 target_include_directories(giodb_common PUBLIC ${PROJECT_SOURCE_DIR}/include)
