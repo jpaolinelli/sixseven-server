@@ -1,18 +1,6 @@
 # GioDB source library and executables
 
-# Core library (INTERFACE for now, will become STATIC once sources are added)
-add_library(giodb INTERFACE)
-target_include_directories(giodb INTERFACE ${PROJECT_SOURCE_DIR}/include)
-
-# Server executable
-add_executable(giodb-server main.cpp)
-target_link_libraries(giodb-server PRIVATE giodb)
-
-# CLI executable
-add_executable(giodb-cli cli/main.cpp)
-target_link_libraries(giodb-cli PRIVATE giodb)
-
-# Module subdirectories
+# Module subdirectories (must come before aggregate library)
 add_subdirectory(common)
 add_subdirectory(storage)
 add_subdirectory(catalog)
@@ -25,3 +13,15 @@ add_subdirectory(planner)
 add_subdirectory(executor)
 add_subdirectory(txn)
 add_subdirectory(server)
+
+# Aggregate library — links all module libraries
+add_library(giodb INTERFACE)
+target_link_libraries(giodb INTERFACE giodb_common)
+
+# Server executable
+add_executable(giodb-server main.cpp)
+target_link_libraries(giodb-server PRIVATE giodb)
+
+# CLI executable
+add_executable(giodb-cli cli/main.cpp)
+target_link_libraries(giodb-cli PRIVATE giodb)

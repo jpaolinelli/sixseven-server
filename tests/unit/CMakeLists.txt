@@ -2,6 +2,7 @@
 
 add_executable(giodb_unit_tests
     test_sanity.cpp
+    test_logging.cpp
 )
 
 target_link_libraries(giodb_unit_tests
