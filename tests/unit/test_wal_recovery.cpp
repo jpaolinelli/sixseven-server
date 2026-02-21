@@ -10,27 +10,12 @@
 #include <string>
 #include <vector>
 
+#include "test_wal_helpers.h"
+
 namespace giodb {
 namespace {
 
-// -- Helpers ------------------------------------------------------------------
-
-/// Temporary WAL directory with automatic cleanup.
-class TempWalDir {
-public:
-    TempWalDir() {
-        path_ = std::filesystem::temp_directory_path() /
-                ("wal_recovery_test_" + std::to_string(counter_++));
-        std::filesystem::create_directories(path_);
-    }
-    ~TempWalDir() { std::filesystem::remove_all(path_); }
-
-    const std::filesystem::path& path() const { return path_; }
-
-private:
-    std::filesystem::path path_;
-    static inline std::atomic<int> counter_{0};
-};
+using test::TempWalDir;
 
 /// Simple recovery handler that records redo/undo calls for verification.
 class TestRecoveryHandler : public RecoveryHandler {
@@ -846,6 +831,113 @@ TEST(WalRecovery, StatsMaxLsn) {
     ASSERT_TRUE(stats.has_value()) << stats.error().message;
 
     EXPECT_EQ(stats->max_lsn, 3u); // BEGIN=1, INSERT=2, COMMIT=3
+}
+
+TEST(WalRecovery, StatsContainTxnIdSets) {
+    TempWalDir dir;
+
+    {
+        WalWriter writer(dir.path(), test_opts());
+        ASSERT_TRUE(writer.open().has_value());
+        write_committed_txn(writer, 10, 1, "data10");
+        write_aborted_txn(writer, 20, 2, "data20");
+        ASSERT_TRUE(writer.flush().has_value());
+        ASSERT_TRUE(writer.close().has_value());
+    }
+
+    TestRecoveryHandler handler;
+    WalRecovery recovery(dir.path(), handler);
+    auto stats = recovery.recover();
+    ASSERT_TRUE(stats.has_value()) << stats.error().message;
+
+    EXPECT_EQ(stats->committed_txn_ids.size(), 1u);
+    EXPECT_TRUE(stats->committed_txn_ids.count(10));
+    EXPECT_EQ(stats->aborted_txn_ids.size(), 1u);
+    EXPECT_TRUE(stats->aborted_txn_ids.count(20));
+}
+
+TEST(WalRecovery, RecoverInterleavedTransactions) {
+    // Two transactions whose records are interleaved in the WAL:
+    //   Txn 1: BEGIN, INSERT(a), INSERT(b), COMMIT     (committed)
+    //   Txn 2: BEGIN, INSERT(x), INSERT(y)              (in-progress / aborted)
+    // Interleaved order:
+    //   Txn1-BEGIN, Txn2-BEGIN, Txn1-INSERT(a), Txn2-INSERT(x),
+    //   Txn1-INSERT(b), Txn2-INSERT(y), Txn1-COMMIT
+    TempWalDir dir;
+
+    {
+        WalWriter writer(dir.path(), test_opts());
+        ASSERT_TRUE(writer.open().has_value());
+
+        WalRecord t1_begin;
+        t1_begin.type = WalRecordType::BEGIN;
+        t1_begin.txn_id = 1;
+        ASSERT_TRUE(writer.append(t1_begin).has_value());
+
+        WalRecord t2_begin;
+        t2_begin.type = WalRecordType::BEGIN;
+        t2_begin.txn_id = 2;
+        ASSERT_TRUE(writer.append(t2_begin).has_value());
+
+        WalRecord t1_ins_a;
+        t1_ins_a.type = WalRecordType::INSERT;
+        t1_ins_a.txn_id = 1;
+        t1_ins_a.table_id = 10;
+        t1_ins_a.data = {0xA0};
+        ASSERT_TRUE(writer.append(t1_ins_a).has_value());
+
+        WalRecord t2_ins_x;
+        t2_ins_x.type = WalRecordType::INSERT;
+        t2_ins_x.txn_id = 2;
+        t2_ins_x.table_id = 20;
+        t2_ins_x.data = {0xB0};
+        ASSERT_TRUE(writer.append(t2_ins_x).has_value());
+
+        WalRecord t1_ins_b;
+        t1_ins_b.type = WalRecordType::INSERT;
+        t1_ins_b.txn_id = 1;
+        t1_ins_b.table_id = 10;
+        t1_ins_b.data = {0xA1};
+        ASSERT_TRUE(writer.append(t1_ins_b).has_value());
+
+        WalRecord t2_ins_y;
+        t2_ins_y.type = WalRecordType::INSERT;
+        t2_ins_y.txn_id = 2;
+        t2_ins_y.table_id = 20;
+        t2_ins_y.data = {0xB1};
+        ASSERT_TRUE(writer.append(t2_ins_y).has_value());
+
+        WalRecord t1_commit;
+        t1_commit.type = WalRecordType::COMMIT;
+        t1_commit.txn_id = 1;
+        ASSERT_TRUE(writer.append(t1_commit).has_value());
+
+        // Txn 2 has no COMMIT — simulates crash.
+        ASSERT_TRUE(writer.flush().has_value());
+        ASSERT_TRUE(writer.close().has_value());
+    }
+
+    TestRecoveryHandler handler;
+    WalRecovery recovery(dir.path(), handler);
+    auto stats = recovery.recover();
+    ASSERT_TRUE(stats.has_value()) << stats.error().message;
+
+    EXPECT_EQ(stats->committed_txns, 1u); // Txn 1
+    EXPECT_EQ(stats->aborted_txns, 1u);   // Txn 2
+
+    // Redo: both INSERTs of txn 1, in forward order.
+    ASSERT_EQ(handler.redo_entries.size(), 2u);
+    EXPECT_EQ(handler.redo_entries[0].txn_id, 1u);
+    EXPECT_EQ(handler.redo_entries[0].data[0], 0xA0);
+    EXPECT_EQ(handler.redo_entries[1].txn_id, 1u);
+    EXPECT_EQ(handler.redo_entries[1].data[0], 0xA1);
+
+    // Undo: both INSERTs of txn 2, in reverse LSN order.
+    ASSERT_EQ(handler.undo_entries.size(), 2u);
+    EXPECT_EQ(handler.undo_entries[0].txn_id, 2u);
+    EXPECT_EQ(handler.undo_entries[0].data[0], 0xB1); // Later INSERT first.
+    EXPECT_EQ(handler.undo_entries[1].txn_id, 2u);
+    EXPECT_EQ(handler.undo_entries[1].data[0], 0xB0);
 }
 
 } // namespace

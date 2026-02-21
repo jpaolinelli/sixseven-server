@@ -11,27 +11,12 @@
 #include <thread>
 #include <vector>
 
+#include "test_wal_helpers.h"
+
 namespace giodb {
 namespace {
 
-// -- Helpers ------------------------------------------------------------------
-
-/// Create a temporary WAL directory for testing. Automatically removed on
-/// destruction.
-class TempWalDir {
-public:
-    TempWalDir() {
-        path_ = std::filesystem::temp_directory_path() / ("wal_test_" + std::to_string(counter_++));
-        std::filesystem::create_directories(path_);
-    }
-    ~TempWalDir() { std::filesystem::remove_all(path_); }
-
-    const std::filesystem::path& path() const { return path_; }
-
-private:
-    std::filesystem::path path_;
-    static inline std::atomic<int> counter_{0};
-};
+using test::TempWalDir;
 
 /// Create a simple WAL record for testing.
 WalRecord make_test_record(WalRecordType type,

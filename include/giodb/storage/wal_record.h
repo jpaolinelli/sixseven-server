@@ -16,10 +16,10 @@ using lsn_t = uint64_t;
 using txn_id_t = uint64_t;
 
 /// Invalid/unset LSN sentinel.
-static constexpr lsn_t invalid_lsn = 0;
+inline constexpr lsn_t invalid_lsn = 0;
 
 /// Invalid/unset transaction ID sentinel.
-static constexpr txn_id_t invalid_txn_id = 0;
+inline constexpr txn_id_t invalid_txn_id = 0;
 
 // -- WAL Record Type ---------------------------------------------------------
 
@@ -68,7 +68,7 @@ inline const char* wal_record_type_name(WalRecordType type) {
 
 /// A single WAL record representing an atomic change to the database.
 ///
-/// Binary format (all fields little-endian):
+/// Binary format (all fields in native byte order):
 /// ```
 ///   [record_length: uint32]   — total bytes following this field (excl. itself)
 ///   [lsn:           uint64]   — log sequence number
@@ -88,7 +88,7 @@ inline const char* wal_record_type_name(WalRecordType type) {
 struct WalRecord {
     lsn_t lsn = invalid_lsn;          ///< Log sequence number.
     txn_id_t txn_id = invalid_txn_id; ///< Transaction that produced this record.
-    lsn_t prev_lsn = invalid_lsn;     ///< Previous LSN for this txn (undo chain).
+    lsn_t prev_lsn = invalid_lsn;     ///< Reserved for future undo-chain support.
     WalRecordType type = WalRecordType::BEGIN;
     uint32_t table_id = 0;     ///< Target table (0 for txn-level records).
     uint32_t page_id = 0;      ///< Target page (0 for txn-level records).
@@ -99,10 +99,10 @@ struct WalRecord {
 /// Size of the fixed-length header fields (after record_length, before data).
 /// lsn(8) + txn_id(8) + prev_lsn(8) + type(1) + table_id(4) + page_id(4) +
 /// slot_id(2) + data_length(4) = 39 bytes.
-static constexpr size_t wal_record_header_size = 39;
+inline constexpr size_t wal_record_header_size = 39;
 
 /// Overhead per record: record_length(4) + header(39) + crc(4) = 47 bytes.
-static constexpr size_t wal_record_overhead = 47;
+inline constexpr size_t wal_record_overhead = 47;
 
 // -- Serialization -----------------------------------------------------------
 

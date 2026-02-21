@@ -20,11 +20,17 @@ namespace giodb {
 ///
 /// Implementors should apply or reverse the operation described by the
 /// WalRecord to the database state (e.g., via the buffer pool).
+///
+/// @par Idempotency contract
+/// redo() **must** be idempotent: applying the same record twice must produce
+/// the same result as applying it once. Recovery may replay records for pages
+/// that were already flushed to disk before the crash.
 class RecoveryHandler {
 public:
     virtual ~RecoveryHandler() = default;
 
     /// Apply the operation described by the WAL record (forward replay).
+    /// Must be idempotent — see class-level documentation.
     [[nodiscard]] virtual Result<void> redo(const WalRecord& record) = 0;
 
     /// Reverse the operation described by the WAL record (backward rollback).
@@ -42,6 +48,11 @@ struct RecoveryStats {
     size_t aborted_txns = 0;    ///< Transactions that aborted or were in-progress.
     lsn_t checkpoint_lsn = 0;   ///< LSN of the last checkpoint found (0 if none).
     lsn_t max_lsn = 0;          ///< Highest LSN seen during recovery.
+
+    /// Txn IDs that were committed (useful for debugging/diagnostics).
+    std::set<txn_id_t> committed_txn_ids;
+    /// Txn IDs that were aborted or in-progress at crash (diagnostics).
+    std::set<txn_id_t> aborted_txn_ids;
 };
 
 // -- WAL Recovery -------------------------------------------------------------

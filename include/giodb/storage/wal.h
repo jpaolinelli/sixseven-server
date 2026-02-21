@@ -14,7 +14,7 @@
 namespace giodb {
 
 /// Default WAL segment size: 16MB.
-static constexpr size_t wal_default_segment_size = 16 * 1024 * 1024;
+inline constexpr size_t wal_default_segment_size = 16 * 1024 * 1024;
 
 /// Configuration options for the WAL writer.
 struct WalWriterOptions {
@@ -85,11 +85,21 @@ public:
     /// encodes the list of active transaction IDs so recovery knows which
     /// transactions were in-flight at the time of the checkpoint.
     /// Returns the LSN assigned to the checkpoint record.
+    ///
+    /// @note The caller is responsible for providing an accurate snapshot of
+    /// active transactions. Because append() acquires latch_ and the caller
+    /// must gather active txn IDs outside the latch, there is an inherent
+    /// TOCTOU window. Callers should quiesce new transaction starts or use
+    /// external synchronization to obtain a consistent snapshot.
     [[nodiscard]] Result<lsn_t> write_checkpoint(const std::vector<txn_id_t>& active_txns);
 
     /// Remove WAL segment files with IDs strictly less than min_segment_id.
     /// Used after a checkpoint to reclaim disk space from segments that are
     /// no longer needed for recovery.
+    ///
+    /// @note Thread-safe. Acquires latch_ internally. Must not be called
+    /// while latch_ is already held by the same thread (e.g., from inside
+    /// append or flush callbacks) — the mutex is not recursive.
     [[nodiscard]] Result<void> truncate_before(uint64_t min_segment_id);
 
 private:
@@ -145,6 +155,10 @@ private:
 /// The reader opens segment files in order (wal_000001, wal_000002, ...) and
 /// returns records one at a time via next(). When the current segment is
 /// exhausted, it automatically advances to the next segment.
+///
+/// @note Memory: the reader loads one segment at a time into an internal
+/// buffer. Peak memory usage is proportional to the largest segment file
+/// (up to segment_size bytes, default 16 MB).
 ///
 /// Usage:
 /// ```

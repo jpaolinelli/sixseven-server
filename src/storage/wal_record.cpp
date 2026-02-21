@@ -11,17 +11,18 @@ namespace giodb {
 namespace {
 
 /// Write a value to a byte buffer at the given offset using memcpy (safe,
-/// unaligned-friendly). Advances offset by sizeof(T).
+/// unaligned-friendly, native byte order). Advances offset by sizeof(T).
 template <typename T>
-void write_le(std::vector<uint8_t>& buf, size_t& offset, T value) {
+void write_native(std::vector<uint8_t>& buf, size_t& offset, T value) {
     std::memcpy(buf.data() + offset, &value, sizeof(T));
     offset += sizeof(T);
 }
 
-/// Read a value from a byte span at the given offset using memcpy.
-/// Advances offset by sizeof(T).
+/// Read a value from a byte span at the given offset using memcpy (native
+/// byte order). Advances offset by sizeof(T). Caller must ensure
+/// offset + sizeof(T) <= buf.size().
 template <typename T>
-T read_le(std::span<const uint8_t> buf, size_t& offset) {
+T read_native(std::span<const uint8_t> buf, size_t& offset) {
     T value{};
     std::memcpy(&value, buf.data() + offset, sizeof(T));
     offset += sizeof(T);
@@ -39,21 +40,21 @@ std::vector<uint8_t> serialize_wal_record(const WalRecord& record) {
 
     // record_length: total bytes after this field (header + data + crc).
     auto record_length = static_cast<uint32_t>(total_size - sizeof(uint32_t));
-    write_le(buf, offset, record_length);
+    write_native(buf, offset, record_length);
 
     // Fixed header fields.
     size_t crc_start = offset; // CRC covers from here to end of data.
-    write_le(buf, offset, record.lsn);
-    write_le(buf, offset, record.txn_id);
-    write_le(buf, offset, record.prev_lsn);
-    write_le(buf, offset, static_cast<uint8_t>(record.type));
-    write_le(buf, offset, record.table_id);
-    write_le(buf, offset, record.page_id);
-    write_le(buf, offset, record.slot_id);
+    write_native(buf, offset, record.lsn);
+    write_native(buf, offset, record.txn_id);
+    write_native(buf, offset, record.prev_lsn);
+    write_native(buf, offset, static_cast<uint8_t>(record.type));
+    write_native(buf, offset, record.table_id);
+    write_native(buf, offset, record.page_id);
+    write_native(buf, offset, record.slot_id);
 
     // Data length + data.
     auto data_length = static_cast<uint32_t>(record.data.size());
-    write_le(buf, offset, data_length);
+    write_native(buf, offset, data_length);
     if (!record.data.empty()) {
         std::memcpy(buf.data() + offset, record.data.data(), record.data.size());
         offset += record.data.size();
@@ -62,7 +63,7 @@ std::vector<uint8_t> serialize_wal_record(const WalRecord& record) {
     // CRC32C over header + data (everything between record_length and crc).
     size_t crc_length = offset - crc_start;
     uint32_t crc = crc32c(buf.data() + crc_start, crc_length);
-    write_le(buf, offset, crc);
+    write_native(buf, offset, crc);
 
     return buf;
 }
@@ -80,7 +81,7 @@ Result<WalRecord> deserialize_wal_record(std::span<const uint8_t> buf) {
     size_t offset = 0;
 
     // Read record_length.
-    auto record_length = read_le<uint32_t>(buf, offset);
+    auto record_length = read_native<uint32_t>(buf, offset);
 
     // Validate total size: record_length + sizeof(record_length) must fit in buf.
     size_t expected_total = static_cast<size_t>(record_length) + sizeof(uint32_t);
@@ -109,16 +110,28 @@ Result<WalRecord> deserialize_wal_record(std::span<const uint8_t> buf) {
 
     // Deserialize fixed header fields.
     WalRecord record;
-    record.lsn = read_le<uint64_t>(buf, offset);
-    record.txn_id = read_le<uint64_t>(buf, offset);
-    record.prev_lsn = read_le<uint64_t>(buf, offset);
-    record.type = static_cast<WalRecordType>(read_le<uint8_t>(buf, offset));
-    record.table_id = read_le<uint32_t>(buf, offset);
-    record.page_id = read_le<uint32_t>(buf, offset);
-    record.slot_id = read_le<uint16_t>(buf, offset);
+    record.lsn = read_native<uint64_t>(buf, offset);
+    record.txn_id = read_native<uint64_t>(buf, offset);
+    record.prev_lsn = read_native<uint64_t>(buf, offset);
+    auto raw_type = read_native<uint8_t>(buf, offset);
+    if (raw_type > static_cast<uint8_t>(WalRecordType::DROP_TABLE)) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "WAL record has invalid type: " + std::to_string(raw_type));
+    }
+    record.type = static_cast<WalRecordType>(raw_type);
+    record.table_id = read_native<uint32_t>(buf, offset);
+    record.page_id = read_native<uint32_t>(buf, offset);
+    record.slot_id = read_native<uint16_t>(buf, offset);
 
     // Data.
-    auto data_length = read_le<uint32_t>(buf, offset);
+    auto data_length = read_native<uint32_t>(buf, offset);
+    if (offset + data_length > buf.size()) {
+        return make_error(
+            StatusCode::INVALID_ARGUMENT,
+            "WAL record data extends beyond buffer: offset=" + std::to_string(offset) +
+                " data_length=" + std::to_string(data_length) +
+                " buf_size=" + std::to_string(buf.size()));
+    }
     if (data_length > 0) {
         record.data.resize(data_length);
         std::memcpy(record.data.data(), buf.data() + offset, data_length);
