@@ -5,6 +5,7 @@ add_executable(giodb_unit_tests
     test_logging.cpp
     test_result.cpp
     test_config.cpp
+    test_types.cpp
 )
 
 target_link_libraries(giodb_unit_tests
