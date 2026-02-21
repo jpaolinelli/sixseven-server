@@ -14,6 +14,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
 
+# Testing
+enable_testing()
+
 # Subdirectories
 add_subdirectory(src)
 add_subdirectory(tests)
