@@ -571,7 +571,7 @@ TEST_F(DiskManagerTest, CorruptedPageDetected) {
         auto corrupt_offset =
             static_cast<std::streamoff>(pid) * static_cast<std::streamoff>(page_size) + 100;
         fs.seekp(corrupt_offset);
-        char bad_byte = 0xFF;
+        char bad_byte = '\xFF';
         fs.write(&bad_byte, 1);
     }
 
@@ -703,7 +703,7 @@ TEST_F(DiskManagerTest, CorruptedFileHeaderDetected) {
     {
         std::fstream fs(test_file(), std::ios::in | std::ios::out | std::ios::binary);
         fs.seekp(static_cast<std::streamoff>(fh_page_count_offset));
-        char bad_byte = 0xFF;
+        char bad_byte = '\xFF';
         fs.write(&bad_byte, 1);
     }
 

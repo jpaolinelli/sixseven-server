@@ -553,7 +553,7 @@ Result<void> DiskManager::read_file_header(OpenFile& file) {
 }
 
 Result<void> DiskManager::ensure_file_size(OpenFile& file, uint32_t needed_pages) {
-    struct stat st{};
+    struct stat st = {};
     if (::fstat(file.fd, &st) < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "fstat failed: " + std::string(std::strerror(errno)));
