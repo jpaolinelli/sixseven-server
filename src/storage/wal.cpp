@@ -2,6 +2,7 @@
 
 #include "giodb/common/logging.h"
 #include "giodb/storage/wal_record.h"
+#include "giodb/storage/wal_recovery.h" // serialize_checkpoint_data()
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -416,19 +417,7 @@ Result<lsn_t> WalWriter::write_checkpoint(const std::vector<txn_id_t>& active_tx
     WalRecord record;
     record.type = WalRecordType::CHECKPOINT;
     record.txn_id = 0;
-
-    // Encode active transaction IDs into the data payload.
-    // Format: [count: uint32][txn_id: uint64]...
-    auto count = static_cast<uint32_t>(active_txns.size());
-    size_t data_size = sizeof(uint32_t) + active_txns.size() * sizeof(uint64_t);
-    record.data.resize(data_size);
-    size_t offset = 0;
-    std::memcpy(record.data.data() + offset, &count, sizeof(uint32_t));
-    offset += sizeof(uint32_t);
-    for (auto txn_id : active_txns) {
-        std::memcpy(record.data.data() + offset, &txn_id, sizeof(uint64_t));
-        offset += sizeof(uint64_t);
-    }
+    record.data = serialize_checkpoint_data(active_txns);
 
     return append(record);
 }

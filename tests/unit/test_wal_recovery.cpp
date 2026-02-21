@@ -4,9 +4,7 @@
 
 #include <gtest/gtest.h>
 
-#include <atomic>
 #include <filesystem>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -16,6 +14,9 @@ namespace giodb {
 namespace {
 
 using test::TempWalDir;
+using test::test_wal_opts;
+using test::write_aborted_txn;
+using test::write_committed_txn;
 
 /// Simple recovery handler that records redo/undo calls for verification.
 class TestRecoveryHandler : public RecoveryHandler {
@@ -41,59 +42,6 @@ public:
     std::vector<Entry> undo_entries;
 };
 
-/// Create writer options with group commit disabled for deterministic tests.
-WalWriterOptions test_opts() {
-    WalWriterOptions opts;
-    opts.enable_group_commit = false;
-    return opts;
-}
-
-/// Write a simple transaction to the WAL: BEGIN, INSERT, COMMIT.
-void write_committed_txn(WalWriter& writer,
-                         txn_id_t txn_id,
-                         uint32_t table_id,
-                         const std::string& data) {
-    WalRecord begin;
-    begin.type = WalRecordType::BEGIN;
-    begin.txn_id = txn_id;
-    ASSERT_TRUE(writer.append(begin).has_value());
-
-    WalRecord insert;
-    insert.type = WalRecordType::INSERT;
-    insert.txn_id = txn_id;
-    insert.table_id = table_id;
-    insert.data.assign(data.begin(), data.end());
-    ASSERT_TRUE(writer.append(insert).has_value());
-
-    WalRecord commit;
-    commit.type = WalRecordType::COMMIT;
-    commit.txn_id = txn_id;
-    ASSERT_TRUE(writer.append(commit).has_value());
-}
-
-/// Write an aborted transaction to the WAL: BEGIN, INSERT, ABORT.
-void write_aborted_txn(WalWriter& writer,
-                       txn_id_t txn_id,
-                       uint32_t table_id,
-                       const std::string& data) {
-    WalRecord begin;
-    begin.type = WalRecordType::BEGIN;
-    begin.txn_id = txn_id;
-    ASSERT_TRUE(writer.append(begin).has_value());
-
-    WalRecord insert;
-    insert.type = WalRecordType::INSERT;
-    insert.txn_id = txn_id;
-    insert.table_id = table_id;
-    insert.data.assign(data.begin(), data.end());
-    ASSERT_TRUE(writer.append(insert).has_value());
-
-    WalRecord abort;
-    abort.type = WalRecordType::ABORT;
-    abort.txn_id = txn_id;
-    ASSERT_TRUE(writer.append(abort).has_value());
-}
-
 // -- WalReader tests ----------------------------------------------------------
 
 TEST(WalReader, ReadAllRecords) {
@@ -101,7 +49,7 @@ TEST(WalReader, ReadAllRecords) {
 
     // Write some records.
     {
-        WalWriter writer(dir.path(), test_opts());
+        WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
         write_committed_txn(writer, 1, 10, "data1");
         ASSERT_TRUE(writer.flush().has_value());
@@ -134,7 +82,7 @@ TEST(WalReader, ReadAllRecords) {
 
 TEST(WalReader, ReadAcrossMultipleSegments) {
     TempWalDir dir;
-    WalWriterOptions opts = test_opts();
+    WalWriterOptions opts = test_wal_opts();
     opts.segment_size = 128; // Tiny segment to force rotation.
 
     int total_records = 0;
@@ -189,7 +137,7 @@ TEST(WalReader, ReadEmptyWalDir) {
 
 TEST(WalReader, ReadFromSpecificSegment) {
     TempWalDir dir;
-    WalWriterOptions opts = test_opts();
+    WalWriterOptions opts = test_wal_opts();
     opts.segment_size = 128; // Tiny.
 
     {
@@ -273,7 +221,7 @@ TEST(CheckpointData, DeserializeTruncated) {
 
 TEST(WalWriter, WriteCheckpointRecord) {
     TempWalDir dir;
-    WalWriter writer(dir.path(), test_opts());
+    WalWriter writer(dir.path(), test_wal_opts());
     ASSERT_TRUE(writer.open().has_value());
 
     // Write some records.
@@ -314,7 +262,7 @@ TEST(WalWriter, WriteCheckpointRecord) {
 
 TEST(WalWriter, TruncateBeforeRemovesOldSegments) {
     TempWalDir dir;
-    WalWriterOptions opts = test_opts();
+    WalWriterOptions opts = test_wal_opts();
     opts.segment_size = 128; // Tiny.
     WalWriter writer(dir.path(), opts);
     ASSERT_TRUE(writer.open().has_value());
@@ -350,7 +298,7 @@ TEST(WalRecovery, RecoverCommittedTransaction) {
     TempWalDir dir;
 
     {
-        WalWriter writer(dir.path(), test_opts());
+        WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
         write_committed_txn(writer, 1, 10, "committed-data");
         ASSERT_TRUE(writer.flush().has_value());
@@ -380,7 +328,7 @@ TEST(WalRecovery, RecoverAbortedTransaction) {
     TempWalDir dir;
 
     {
-        WalWriter writer(dir.path(), test_opts());
+        WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
         write_aborted_txn(writer, 1, 10, "aborted-data");
         ASSERT_TRUE(writer.flush().has_value());
@@ -408,7 +356,7 @@ TEST(WalRecovery, RecoverInProgressTransaction) {
     TempWalDir dir;
 
     {
-        WalWriter writer(dir.path(), test_opts());
+        WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
 
         WalRecord begin;
@@ -448,7 +396,7 @@ TEST(WalRecovery, RecoverMixedTransactions) {
     TempWalDir dir;
 
     {
-        WalWriter writer(dir.path(), test_opts());
+        WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
 
         // Txn 1: committed.
@@ -500,7 +448,7 @@ TEST(WalRecovery, RecoverMultipleCommittedTransactions) {
     TempWalDir dir;
 
     {
-        WalWriter writer(dir.path(), test_opts());
+        WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
         write_committed_txn(writer, 1, 10, "data1");
         write_committed_txn(writer, 2, 20, "data2");
@@ -530,7 +478,7 @@ TEST(WalRecovery, RecoverWithCheckpoint) {
     TempWalDir dir;
 
     {
-        WalWriter writer(dir.path(), test_opts());
+        WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
 
         // Txn 1: committed before checkpoint.
@@ -566,7 +514,7 @@ TEST(WalRecovery, RecoverWithCheckpointAndActiveTransaction) {
     TempWalDir dir;
 
     {
-        WalWriter writer(dir.path(), test_opts());
+        WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
 
         // Txn 1 starts before checkpoint.
@@ -624,7 +572,7 @@ TEST(WalRecovery, RecoverEmptyWal) {
 
     // Create WAL directory but write no records.
     {
-        WalWriter writer(dir.path(), test_opts());
+        WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
         ASSERT_TRUE(writer.close().has_value());
     }
@@ -645,7 +593,7 @@ TEST(WalRecovery, RecoverMultipleDataRecordTypes) {
     TempWalDir dir;
 
     {
-        WalWriter writer(dir.path(), test_opts());
+        WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
 
         // Committed txn with INSERT, UPDATE, DELETE.
@@ -698,7 +646,7 @@ TEST(WalRecovery, UndoIsInReverseOrder) {
     TempWalDir dir;
 
     {
-        WalWriter writer(dir.path(), test_opts());
+        WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
 
         // Aborted txn with multiple data records.
@@ -746,7 +694,7 @@ TEST(WalRecovery, UndoIsInReverseOrder) {
 
 TEST(WalRecovery, RecoverAcrossMultipleSegments) {
     TempWalDir dir;
-    WalWriterOptions opts = test_opts();
+    WalWriterOptions opts = test_wal_opts();
     opts.segment_size = 128; // Tiny to force rotations.
 
     {
@@ -772,7 +720,7 @@ TEST(WalRecovery, RecoverDataPreservedInCallbacks) {
     TempWalDir dir;
 
     {
-        WalWriter writer(dir.path(), test_opts());
+        WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
 
         WalRecord begin;
@@ -818,7 +766,7 @@ TEST(WalRecovery, StatsMaxLsn) {
     TempWalDir dir;
 
     {
-        WalWriter writer(dir.path(), test_opts());
+        WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
         write_committed_txn(writer, 1, 10, "data");
         ASSERT_TRUE(writer.flush().has_value());
@@ -837,7 +785,7 @@ TEST(WalRecovery, StatsContainTxnIdSets) {
     TempWalDir dir;
 
     {
-        WalWriter writer(dir.path(), test_opts());
+        WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
         write_committed_txn(writer, 10, 1, "data10");
         write_aborted_txn(writer, 20, 2, "data20");
@@ -866,7 +814,7 @@ TEST(WalRecovery, RecoverInterleavedTransactions) {
     TempWalDir dir;
 
     {
-        WalWriter writer(dir.path(), test_opts());
+        WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
 
         WalRecord t1_begin;

@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cstring>
 #include <set>
-#include <unordered_map>
 
 namespace giodb {
 
@@ -83,27 +82,33 @@ bool WalRecovery::is_data_record(WalRecordType type) {
 Result<RecoveryStats> WalRecovery::recover() {
     RecoveryStats stats;
 
-    // ---- Phase 1: Analysis --------------------------------------------------
-    // Stream through the WAL to:
-    //   - Find the last CHECKPOINT record and its active txn set
-    //   - Determine the checkpoint LSN so we know where to start redo/undo
-    //   - Determine transaction outcomes (committed / aborted / in-progress)
-    //
-    // We perform two passes: the first pass (analysis) streams through the
-    // WAL to find the checkpoint and gather txn state. The second pass
-    // (redo + undo) only buffers records from the checkpoint onward.
+    // ---- Single-pass analysis + collection ----------------------------------
+    // Stream through the WAL once.  When a CHECKPOINT record is encountered
+    // we discard previously buffered records and restart collection from the
+    // new checkpoint. This means:
+    //   - We never read the WAL more than once (halves I/O).
+    //   - We only buffer data records from the *last* checkpoint onward,
+    //     keeping memory proportional to the post-checkpoint window.
+    //   - Transaction state is rebuilt from the last checkpoint.
 
-    WalReader analysis_reader(wal_dir_);
-    auto open_result = analysis_reader.open();
+    WalReader reader(wal_dir_);
+    auto open_result = reader.open();
     if (!open_result) {
         return tl::unexpected(open_result.error());
     }
 
     lsn_t last_checkpoint_lsn = 0;
-    std::vector<txn_id_t> checkpoint_active_txns;
+
+    // Buffered data records from the last checkpoint onward (only data types).
+    std::vector<WalRecord> post_checkpoint_records;
+
+    // Transaction state (rebuilt from the last checkpoint).
+    std::set<txn_id_t> committed_txns;
+    std::set<txn_id_t> aborted_txns;
+    std::set<txn_id_t> active_txns;
 
     while (true) {
-        auto record = analysis_reader.next();
+        auto record = reader.next();
         if (!record) {
             if (record.error().code == StatusCode::NOT_FOUND) {
                 break; // End of WAL.
@@ -116,78 +121,33 @@ Result<RecoveryStats> WalRecovery::recover() {
             stats.max_lsn = record->lsn;
         }
 
+        // --- Handle CHECKPOINT: reset collection state -----------------------
         if (record->type == WalRecordType::CHECKPOINT) {
             last_checkpoint_lsn = record->lsn;
-            // Decode the active transaction IDs from the checkpoint payload.
+
+            // Discard everything buffered before this checkpoint.
+            post_checkpoint_records.clear();
+            committed_txns.clear();
+            aborted_txns.clear();
+            active_txns.clear();
+
+            // Seed active_txns with the transactions that were in-flight at
+            // the time of the checkpoint (decoded from its data payload).
             if (!record->data.empty()) {
                 auto active = deserialize_checkpoint_data(record->data);
                 if (active) {
-                    checkpoint_active_txns = std::move(*active);
+                    for (auto txn_id : *active) {
+                        active_txns.insert(txn_id);
+                    }
                 } else {
                     GIODB_LOG_WARN("WAL recovery: failed to decode checkpoint data: {}",
                                    active.error().message);
-                    checkpoint_active_txns.clear();
                 }
-            } else {
-                checkpoint_active_txns.clear();
             }
-        }
-    }
-
-    auto close_result = analysis_reader.close();
-    if (!close_result) {
-        return tl::unexpected(close_result.error());
-    }
-
-    stats.checkpoint_lsn = last_checkpoint_lsn;
-
-    GIODB_LOG_INFO("WAL recovery analysis: {} records scanned, checkpoint_lsn={}, max_lsn={}",
-                   stats.records_scanned,
-                   last_checkpoint_lsn,
-                   stats.max_lsn);
-
-    // ---- Phase 1b: Collect post-checkpoint records and txn state ------------
-    // Re-read the WAL from the checkpoint onward, collecting only the records
-    // needed for redo and undo. This avoids holding the entire WAL in memory.
-
-    WalReader replay_reader(wal_dir_);
-    auto replay_open = replay_reader.open();
-    if (!replay_open) {
-        return tl::unexpected(replay_open.error());
-    }
-
-    std::vector<WalRecord> post_checkpoint_records;
-    std::set<txn_id_t> committed_txns;
-    std::set<txn_id_t> aborted_txns;
-    std::set<txn_id_t> active_txns;
-
-    // Seed active_txns with the transactions that were in-flight at the
-    // time of the checkpoint (decoded from the checkpoint's data payload).
-    for (auto txn_id : checkpoint_active_txns) {
-        active_txns.insert(txn_id);
-    }
-
-    bool past_checkpoint = (last_checkpoint_lsn == 0);
-
-    while (true) {
-        auto record = replay_reader.next();
-        if (!record) {
-            if (record.error().code == StatusCode::NOT_FOUND) {
-                break;
-            }
-            return tl::unexpected(record.error());
+            continue; // Don't buffer the checkpoint record itself.
         }
 
-        // Skip records before the checkpoint.
-        if (!past_checkpoint) {
-            if (record->lsn >= last_checkpoint_lsn) {
-                past_checkpoint = true;
-            } else {
-                continue;
-            }
-        }
-
-        // Track transaction state.
+        // --- Track transaction state -----------------------------------------
         if (record->txn_id != 0) {
             switch (record->type) {
             case WalRecordType::BEGIN:
@@ -213,16 +173,18 @@ Result<RecoveryStats> WalRecovery::recover() {
             }
         }
 
-        // Keep data records and skip the checkpoint record itself.
-        if (record->type != WalRecordType::CHECKPOINT) {
+        // --- Buffer only data records (BEGIN/COMMIT/ABORT are not needed) ----
+        if (is_data_record(record->type)) {
             post_checkpoint_records.push_back(std::move(*record));
         }
     }
 
-    auto replay_close = replay_reader.close();
-    if (!replay_close) {
-        return tl::unexpected(replay_close.error());
+    auto close_result = reader.close();
+    if (!close_result) {
+        return tl::unexpected(close_result.error());
     }
+
+    stats.checkpoint_lsn = last_checkpoint_lsn;
 
     // In-progress transactions at crash time are treated as aborted.
     for (auto txn_id : active_txns) {
@@ -234,17 +196,18 @@ Result<RecoveryStats> WalRecovery::recover() {
     stats.committed_txn_ids = committed_txns;
     stats.aborted_txn_ids = aborted_txns;
 
-    GIODB_LOG_INFO("WAL recovery: {} committed, {} aborted/in-progress transactions",
+    GIODB_LOG_INFO("WAL recovery analysis: {} records scanned, checkpoint_lsn={}, max_lsn={}, "
+                   "{} committed, {} aborted/in-progress",
+                   stats.records_scanned,
+                   last_checkpoint_lsn,
+                   stats.max_lsn,
                    stats.committed_txns,
                    stats.aborted_txns);
 
     // ---- Phase 2: Redo ------------------------------------------------------
-    // Replay data-modifying records of committed transactions in forward order.
+    // Replay data records of committed transactions in forward order.
 
     for (const auto& rec : post_checkpoint_records) {
-        if (!is_data_record(rec.type)) {
-            continue;
-        }
         if (committed_txns.find(rec.txn_id) == committed_txns.end()) {
             continue; // Not a committed transaction.
         }
@@ -259,13 +222,10 @@ Result<RecoveryStats> WalRecovery::recover() {
     GIODB_LOG_INFO("WAL recovery redo: {} records replayed", stats.records_redone);
 
     // ---- Phase 3: Undo ------------------------------------------------------
-    // Reverse data-modifying records of aborted/in-progress transactions
-    // in reverse (LSN) order.
+    // Reverse data records of aborted/in-progress transactions in reverse
+    // (LSN) order.
 
     for (auto it = post_checkpoint_records.rbegin(); it != post_checkpoint_records.rend(); ++it) {
-        if (!is_data_record(it->type)) {
-            continue;
-        }
         if (aborted_txns.find(it->txn_id) == aborted_txns.end()) {
             continue; // Not an aborted transaction.
         }
