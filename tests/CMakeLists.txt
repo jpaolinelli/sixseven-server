@@ -1,2 +1,4 @@
 # GioDB test targets
-# Stub — test targets will be added in subsequent tickets
+
+add_subdirectory(unit)
+add_subdirectory(integration)
