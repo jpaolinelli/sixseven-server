@@ -1,0 +1,13 @@
+{
+  "name": "giodb",
+  "version-string": "0.1.0",
+  "description": "A hybrid relational, graph, and vector database",
+  "builtin-baseline": "05442024c3fda64320bd25d2251cc9807b84fb6f",
+  "dependencies": [
+    "spdlog",
+    "nlohmann-json",
+    "gtest",
+    "benchmark",
+    "tl-expected"
+  ]
+}
