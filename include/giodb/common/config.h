@@ -1,10 +1,10 @@
 #pragma once
 
+#include "giodb/common/result.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
-
-#include "giodb/common/result.h"
 
 namespace giodb {
 
@@ -25,4 +25,4 @@ struct Config {
     static Result<Config> load_from_file(const std::string& path);
 };
 
-}  // namespace giodb
+} // namespace giodb

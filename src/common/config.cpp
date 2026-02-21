@@ -1,9 +1,9 @@
 #include "giodb/common/config.h"
 
+#include <nlohmann/json.hpp>
+
 #include <filesystem>
 #include <fstream>
-
-#include <nlohmann/json.hpp>
 
 namespace giodb {
 
@@ -18,8 +18,7 @@ Result<Config> Config::load_from_file(const std::string& path) {
 
     std::ifstream file(path);
     if (!file.is_open()) {
-        return make_error(StatusCode::IO_ERROR,
-                          "failed to open config file: " + path);
+        return make_error(StatusCode::IO_ERROR, "failed to open config file: " + path);
     }
 
     nlohmann::json j;
@@ -59,4 +58,4 @@ Result<Config> Config::load_from_file(const std::string& path) {
     return ok(std::move(config));
 }
 
-}  // namespace giodb
+} // namespace giodb

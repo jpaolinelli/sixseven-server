@@ -9,4 +9,4 @@ void init_logging(const std::string& level) {
     spdlog::set_level(spdlog::level::from_str(level));
 }
 
-}  // namespace giodb
+} // namespace giodb

@@ -1,6 +1,6 @@
-#include <gtest/gtest.h>
-
 #include "giodb/common/result.h"
+
+#include <gtest/gtest.h>
 
 using namespace giodb;
 
@@ -59,9 +59,7 @@ TEST(Result, AndThenChainsSuccess) {
 }
 
 TEST(Result, AndThenPropagatesError) {
-    auto parse_int = [](const std::string& /*s*/) -> Result<int> {
-        return ok(0);
-    };
+    auto parse_int = [](const std::string& /*s*/) -> Result<int> { return ok(0); };
 
     Result<std::string> r = make_error(StatusCode::NOT_FOUND, "missing");
     auto chained = r.and_then(parse_int);

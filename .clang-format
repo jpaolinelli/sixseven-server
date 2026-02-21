@@ -1,0 +1,39 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+IndentWidth: 4
+ColumnLimit: 100
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Inline
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  # Project headers
+  - Regex: '^"giodb/'
+    Priority: 1
+  # Third-party headers
+  - Regex: '^<(nlohmann|spdlog|tl|gtest|gmock|benchmark)/'
+    Priority: 2
+  - Regex: '^<.+\.h(pp)?>'
+    Priority: 3
+  # System/standard headers
+  - Regex: '^<.*>'
+    Priority: 4
+PointerAlignment: Left
+
+AccessModifierOffset: -4
+AlignAfterOpenBracket: Align
+AllowShortBlocksOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakTemplateDeclarations: Yes
+BinPackArguments: false
+BinPackParameters: false
+BreakConstructorInitializers: BeforeColon
+NamespaceIndentation: None
+SpaceAfterCStyleCast: false
+SpaceAfterTemplateKeyword: true
+SpaceBeforeParens: ControlStatements
+Standard: c++20
+UseTab: Never

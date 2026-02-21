@@ -1,13 +1,14 @@
+#include "giodb/common/config.h"
+
+#include <gtest/gtest.h>
+
+#include <unistd.h>
+
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <unistd.h>
-
-#include <gtest/gtest.h>
-
-#include "giodb/common/config.h"
 
 using namespace giodb;
 
@@ -43,9 +44,7 @@ protected:
         std::rename(buf.data(), tmp_path_.c_str());
     }
 
-    void TearDown() override {
-        std::remove(tmp_path_.c_str());
-    }
+    void TearDown() override { std::remove(tmp_path_.c_str()); }
 
     void write_file(const std::string& content) {
         std::ofstream f(tmp_path_);

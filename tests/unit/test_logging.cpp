@@ -1,6 +1,6 @@
-#include <gtest/gtest.h>
-
 #include "giodb/common/logging.h"
+
+#include <gtest/gtest.h>
 
 TEST(Logging, InitDoesNotCrash) {
     EXPECT_NO_THROW(giodb::init_logging("info"));

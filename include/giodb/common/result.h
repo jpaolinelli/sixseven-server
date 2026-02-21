@@ -1,12 +1,12 @@
 #pragma once
 
-#include <string>
-#include <source_location>
-#include <utility>
+#include "giodb/common/status.h"
 
 #include <tl/expected.hpp>
 
-#include "giodb/common/status.h"
+#include <source_location>
+#include <string>
+#include <utility>
 
 namespace giodb {
 
@@ -16,7 +16,8 @@ struct Error {
     std::string message;
     std::source_location location;
 
-    Error(StatusCode code, std::string message,
+    Error(StatusCode code,
+          std::string message,
           std::source_location location = std::source_location::current())
         : code(code), message(std::move(message)), location(location) {}
 };
@@ -32,10 +33,11 @@ Result<T> ok(T value) {
 }
 
 /// Convenience: create a failed Result with the given status code and message.
-inline tl::unexpected<Error> make_error(
-    StatusCode code, std::string message,
-    std::source_location location = std::source_location::current()) {
+inline tl::unexpected<Error>
+make_error(StatusCode code,
+           std::string message,
+           std::source_location location = std::source_location::current()) {
     return tl::unexpected<Error>(Error(code, std::move(message), location));
 }
 
-}  // namespace giodb
+} // namespace giodb
