@@ -7,6 +7,7 @@ add_library(giodb_storage STATIC
     disk_manager.cpp
     buffer_pool.cpp
     wal_record.cpp
+    wal.cpp
 )
 
 target_include_directories(giodb_storage PUBLIC ${PROJECT_SOURCE_DIR}/include)

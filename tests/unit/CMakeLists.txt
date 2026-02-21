@@ -15,6 +15,7 @@ add_executable(giodb_unit_tests
     test_disk_manager.cpp
     test_buffer_pool.cpp
     test_wal_record.cpp
+    test_wal.cpp
 )
 
 target_link_libraries(giodb_unit_tests
