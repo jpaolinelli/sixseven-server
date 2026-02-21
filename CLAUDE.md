@@ -21,6 +21,10 @@ Engine  Engine      Engine (HNSW)
 Storage Engine (Buffer Pool, WAL, B+ Trees)
 ```
 
+# Vision Document / Original Plan
+
+./docs/giodb-production-plan.md
+
 ## Build Commands
 
 ```bash
