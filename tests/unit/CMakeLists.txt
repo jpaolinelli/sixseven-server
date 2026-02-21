@@ -9,6 +9,7 @@ add_executable(giodb_unit_tests
     test_value.cpp
     test_coercion.cpp
     test_serialization.cpp
+    test_page.cpp
 )
 
 target_link_libraries(giodb_unit_tests

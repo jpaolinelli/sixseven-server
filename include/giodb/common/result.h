@@ -32,6 +32,11 @@ Result<T> ok(T value) {
     return Result<T>(std::move(value));
 }
 
+/// Convenience: create a successful Result<void>.
+inline Result<void> ok() {
+    return {};
+}
+
 /// Convenience: create a failed Result with the given status code and message.
 inline tl::unexpected<Error>
 make_error(StatusCode code,
