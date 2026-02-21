@@ -11,6 +11,7 @@ add_executable(giodb_unit_tests
     test_serialization.cpp
     test_page.cpp
     test_tuple.cpp
+    test_overflow.cpp
 )
 
 target_link_libraries(giodb_unit_tests
