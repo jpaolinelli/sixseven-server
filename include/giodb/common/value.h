@@ -1,5 +1,6 @@
 #pragma once
 
+#include "giodb/common/result.h"
 #include "giodb/common/types.h"
 
 #include <array>
@@ -138,12 +139,16 @@ public:
     /// Return true if this value is NULL.
     [[nodiscard]] bool is_null() const { return std::holds_alternative<std::monostate>(data_); }
 
-    /// Return the TypeId of the held value. Returns INT8 for NULL (use is_null() to check).
+    /// Return the TypeId of the held value.
+    /// WARNING: For NULL values, this returns TypeId::INT8 as a placeholder — callers MUST
+    /// check is_null() before relying on type_id(). This is a known design trade-off to avoid
+    /// adding a 23rd TypeId::NULL_TYPE that would complicate switch exhaustiveness everywhere.
     [[nodiscard]] TypeId type_id() const {
         // Variant index maps directly to our type order.
-        // Index 0 = monostate (NULL), which we handle specially.
+        // Index 0 = monostate (NULL) — maps to INT8 as a dummy value.
+        // IMPORTANT: Always check is_null() before using this result.
         static constexpr TypeId index_to_type[] = {
-            TypeId::INT8,      // 0: monostate (NULL placeholder — use is_null())
+            TypeId::INT8,      // 0: monostate (NULL — MUST check is_null() first!)
             TypeId::INT8,      // 1: int8_t
             TypeId::INT16,     // 2: int16_t
             TypeId::INT32,     // 3: int32_t
@@ -220,11 +225,83 @@ public:
     [[nodiscard]] Uuid& as_uuid() { return std::get<Uuid>(data_); }
     [[nodiscard]] Embedding& as_embedding() { return std::get<Embedding>(data_); }
 
+    // -- Result-based accessors (return Error instead of throwing) -----------
+    // Use these in hot paths or when callers prefer Result<T> error handling
+    // over catching std::bad_variant_access.
+
+    [[nodiscard]] Result<const int8_t*> try_as_int8() const {
+        return try_get<int8_t>(TypeId::INT8);
+    }
+    [[nodiscard]] Result<const int16_t*> try_as_int16() const {
+        return try_get<int16_t>(TypeId::INT16);
+    }
+    [[nodiscard]] Result<const int32_t*> try_as_int32() const {
+        return try_get<int32_t>(TypeId::INT32);
+    }
+    [[nodiscard]] Result<const int64_t*> try_as_int64() const {
+        return try_get<int64_t>(TypeId::INT64);
+    }
+    [[nodiscard]] Result<const uint8_t*> try_as_uint8() const {
+        return try_get<uint8_t>(TypeId::UINT8);
+    }
+    [[nodiscard]] Result<const uint16_t*> try_as_uint16() const {
+        return try_get<uint16_t>(TypeId::UINT16);
+    }
+    [[nodiscard]] Result<const uint32_t*> try_as_uint32() const {
+        return try_get<uint32_t>(TypeId::UINT32);
+    }
+    [[nodiscard]] Result<const uint64_t*> try_as_uint64() const {
+        return try_get<uint64_t>(TypeId::UINT64);
+    }
+    [[nodiscard]] Result<const float*> try_as_float32() const {
+        return try_get<float>(TypeId::FLOAT32);
+    }
+    [[nodiscard]] Result<const double*> try_as_float64() const {
+        return try_get<double>(TypeId::FLOAT64);
+    }
+    [[nodiscard]] Result<const Decimal128*> try_as_decimal() const {
+        return try_get<Decimal128>(TypeId::DECIMAL);
+    }
+    [[nodiscard]] Result<const bool*> try_as_bool() const { return try_get<bool>(TypeId::BOOL); }
+    [[nodiscard]] Result<const std::string*> try_as_string() const {
+        return try_get<std::string>(TypeId::STRING);
+    }
+    [[nodiscard]] Result<const Blob*> try_as_blob() const { return try_get<Blob>(TypeId::BLOB); }
+    [[nodiscard]] Result<const Date*> try_as_date() const { return try_get<Date>(TypeId::DATE); }
+    [[nodiscard]] Result<const Time*> try_as_time() const { return try_get<Time>(TypeId::TIME); }
+    [[nodiscard]] Result<const Timestamp*> try_as_timestamp() const {
+        return try_get<Timestamp>(TypeId::TIMESTAMP);
+    }
+    [[nodiscard]] Result<const Interval*> try_as_interval() const {
+        return try_get<Interval>(TypeId::INTERVAL);
+    }
+    [[nodiscard]] Result<const Point*> try_as_point() const {
+        return try_get<Point>(TypeId::POINT);
+    }
+    [[nodiscard]] Result<const JsonString*> try_as_json() const {
+        return try_get<JsonString>(TypeId::JSON);
+    }
+    [[nodiscard]] Result<const Uuid*> try_as_uuid() const { return try_get<Uuid>(TypeId::UUID); }
+    [[nodiscard]] Result<const Embedding*> try_as_embedding() const {
+        return try_get<Embedding>(TypeId::EMBEDDING);
+    }
+
     /// Access the underlying variant data.
     [[nodiscard]] const ValueData& data() const { return data_; }
     [[nodiscard]] ValueData& data() { return data_; }
 
 private:
+    template <typename T>
+    [[nodiscard]] Result<const T*> try_get(TypeId expected) const {
+        auto* ptr = std::get_if<T>(&data_);
+        if (ptr == nullptr) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              "expected " + std::string(type_name(expected)) + ", got " +
+                                  (is_null() ? "NULL" : std::string(type_name(type_id()))));
+        }
+        return ok(ptr);
+    }
+
     ValueData data_;
 };
 

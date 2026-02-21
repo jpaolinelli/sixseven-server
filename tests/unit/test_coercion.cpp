@@ -243,6 +243,42 @@ TEST(Compare, IncompatibleTypesReturnError) {
     EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
 }
 
+TEST(Compare, CrossTypeSignedUnsigned) {
+    // Must fix: compare(int64_t{-1}, uint64_t{1}) should return less, not greater.
+    auto r = compare(Value(int64_t{-1}), Value(uint64_t{1}));
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(*r, std::strong_ordering::less);
+
+    // Negative signed vs any unsigned is always less.
+    r = compare(Value(int32_t{-100}), Value(uint32_t{0}));
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(*r, std::strong_ordering::less);
+
+    // Unsigned vs negative signed is always greater.
+    r = compare(Value(uint64_t{1}), Value(int64_t{-1}));
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(*r, std::strong_ordering::greater);
+
+    // Both non-negative: normal comparison.
+    r = compare(Value(int64_t{100}), Value(uint64_t{200}));
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(*r, std::strong_ordering::less);
+
+    r = compare(Value(int32_t{100}), Value(uint32_t{100}));
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(*r, std::strong_ordering::equal);
+
+    // Large uint64_t vs small int64_t — correct unsigned comparison.
+    r = compare(Value(uint64_t{18446744073709551615ULL}), Value(int64_t{0}));
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(*r, std::strong_ordering::greater);
+
+    // INT8 negative vs UINT8.
+    r = compare(Value(int8_t{-1}), Value(uint8_t{0}));
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(*r, std::strong_ordering::less);
+}
+
 TEST(Compare, FloatNaN) {
     auto nan = std::numeric_limits<double>::quiet_NaN();
     auto r = compare(Value(nan), Value(1.0));

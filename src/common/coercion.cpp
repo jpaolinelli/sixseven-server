@@ -179,6 +179,10 @@ Result<std::strong_ordering> compare_same_type(const Value& lhs, const Value& rh
     case TypeId::TIMESTAMP:
         return ok(lhs.as_timestamp().microseconds <=> rhs.as_timestamp().microseconds);
     case TypeId::INTERVAL: {
+        // Lexicographic comparison by (months, microseconds). Note: this does NOT
+        // attempt calendar-aware normalization — Interval{1, 0} (1 month) is not
+        // equivalent to Interval{0, 2678400000000} (31 days in microseconds).
+        // This matches PostgreSQL's interval comparison semantics.
         auto li = lhs.as_interval();
         auto ri = rhs.as_interval();
         if (li.months != ri.months) {
@@ -283,14 +287,6 @@ Result<Value> coerce(const Value& value, TypeId target) {
         return ok(int64_to_value(v, target));
     }
 
-    // Integer to float (already handled above, but in case)
-    if (is_integer(from) && is_floating(target)) {
-        if (target == TypeId::FLOAT32) {
-            return ok(Value(static_cast<float>(to_int64(value))));
-        }
-        return ok(Value(static_cast<double>(to_int64(value))));
-    }
-
     // FLOAT32 to FLOAT64
     if (from == TypeId::FLOAT32 && target == TypeId::FLOAT64) {
         return ok(Value(static_cast<double>(value.as_float32())));
@@ -340,7 +336,29 @@ Result<std::strong_ordering> compare(const Value& lhs, const Value& rhs) {
             return ok(compare_doubles(to_double(lhs), to_double(rhs)));
         }
 
-        // Integer-to-integer: compare via coerced values.
+        // Mixed signed/unsigned integer comparison: if one side is signed
+        // and negative, it is always less than any unsigned value. This avoids
+        // incorrect results from unsigned wraparound during coercion.
+        bool l_signed = (lt == TypeId::INT8 || lt == TypeId::INT16 || lt == TypeId::INT32 ||
+                         lt == TypeId::INT64);
+        bool r_signed = (rt == TypeId::INT8 || rt == TypeId::INT16 || rt == TypeId::INT32 ||
+                         rt == TypeId::INT64);
+        if (l_signed != r_signed) {
+            if (l_signed && to_int64(lhs) < 0) {
+                return ok(std::strong_ordering::less);
+            }
+            if (r_signed && to_int64(rhs) < 0) {
+                return ok(std::strong_ordering::greater);
+            }
+            // Both non-negative: safe to compare as uint64_t.
+            uint64_t l_val =
+                (lt == TypeId::UINT64) ? lhs.as_uint64() : static_cast<uint64_t>(to_int64(lhs));
+            uint64_t r_val =
+                (rt == TypeId::UINT64) ? rhs.as_uint64() : static_cast<uint64_t>(to_int64(rhs));
+            return ok(l_val <=> r_val);
+        }
+
+        // Same signedness: compare via coerced values.
         auto lc = coerce(lhs, common);
         auto rc = coerce(rhs, common);
         if (!lc) {

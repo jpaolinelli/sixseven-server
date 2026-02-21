@@ -305,3 +305,52 @@ TEST(Value, MoveSemantics) {
     Value v2 = std::move(v1);
     EXPECT_EQ(v2.as_string(), "test");
 }
+
+// -- try_as Result-based accessors --------------------------------------------
+
+TEST(Value, TryAsSuccess) {
+    Value v(int32_t{42});
+    auto result = v.try_as_int32();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(**result, 42);
+}
+
+TEST(Value, TryAsTypeMismatch) {
+    Value v(int32_t{42});
+    auto result = v.try_as_string();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(Value, TryAsNull) {
+    Value v;
+    auto result = v.try_as_int32();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(Value, TryAsAllTypes) {
+    // Verify try_as works for all 22 types.
+    EXPECT_TRUE(Value(int8_t{1}).try_as_int8().has_value());
+    EXPECT_TRUE(Value(int16_t{1}).try_as_int16().has_value());
+    EXPECT_TRUE(Value(int32_t{1}).try_as_int32().has_value());
+    EXPECT_TRUE(Value(int64_t{1}).try_as_int64().has_value());
+    EXPECT_TRUE(Value(uint8_t{1}).try_as_uint8().has_value());
+    EXPECT_TRUE(Value(uint16_t{1}).try_as_uint16().has_value());
+    EXPECT_TRUE(Value(uint32_t{1}).try_as_uint32().has_value());
+    EXPECT_TRUE(Value(uint64_t{1}).try_as_uint64().has_value());
+    EXPECT_TRUE(Value(1.0f).try_as_float32().has_value());
+    EXPECT_TRUE(Value(1.0).try_as_float64().has_value());
+    EXPECT_TRUE(Value(Decimal128{}).try_as_decimal().has_value());
+    EXPECT_TRUE(Value(true).try_as_bool().has_value());
+    EXPECT_TRUE(Value(std::string{"x"}).try_as_string().has_value());
+    EXPECT_TRUE(Value(Blob{1}).try_as_blob().has_value());
+    EXPECT_TRUE(Value(Date{}).try_as_date().has_value());
+    EXPECT_TRUE(Value(Time{}).try_as_time().has_value());
+    EXPECT_TRUE(Value(Timestamp{}).try_as_timestamp().has_value());
+    EXPECT_TRUE(Value(Interval{}).try_as_interval().has_value());
+    EXPECT_TRUE(Value(Point{}).try_as_point().has_value());
+    EXPECT_TRUE(Value(JsonString{""}).try_as_json().has_value());
+    EXPECT_TRUE(Value(Uuid{}).try_as_uuid().has_value());
+    EXPECT_TRUE(Value(Embedding{}).try_as_embedding().has_value());
+}

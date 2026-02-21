@@ -6,6 +6,18 @@ namespace giodb {
 
 namespace {
 
+// -- Portable big-endian detection --------------------------------------------
+// GCC/Clang provide __BYTE_ORDER__, MSVC is always little-endian (x86/ARM).
+
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__)
+#define GIODB_BIG_ENDIAN (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#elif defined(_MSC_VER)
+#define GIODB_BIG_ENDIAN 0
+#else
+#define GIODB_BIG_ENDIAN 0
+#endif
+
 // -- Little-endian helpers ----------------------------------------------------
 
 // Write a trivially copyable value in little-endian byte order.
@@ -14,7 +26,7 @@ void write_le(std::vector<uint8_t>& buf, T value) {
     static_assert(std::is_trivially_copyable_v<T>);
     uint8_t bytes[sizeof(T)];
     std::memcpy(bytes, &value, sizeof(T));
-#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#if GIODB_BIG_ENDIAN
     for (size_t i = 0; i < sizeof(T) / 2; ++i) {
         std::swap(bytes[i], bytes[sizeof(T) - 1 - i]);
     }
@@ -28,7 +40,7 @@ T read_le(const uint8_t* src) {
     static_assert(std::is_trivially_copyable_v<T>);
     uint8_t bytes[sizeof(T)];
     std::memcpy(bytes, src, sizeof(T));
-#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#if GIODB_BIG_ENDIAN
     for (size_t i = 0; i < sizeof(T) / 2; ++i) {
         std::swap(bytes[i], bytes[sizeof(T) - 1 - i]);
     }
@@ -95,8 +107,8 @@ std::vector<uint8_t> serialize(const Value& value) {
         return buf;
     }
 
-    buf.push_back(0x01);
     buf.reserve(1 + payload_size(value));
+    buf.push_back(0x01);
 
     switch (value.type_id()) {
     case TypeId::INT8:
