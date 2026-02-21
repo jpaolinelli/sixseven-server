@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux GCC 13
+            os: ubuntu-latest
+            cc: gcc-13
+            cxx: g++-13
+            install: sudo apt-get update && sudo apt-get install -y gcc-13 g++-13 ninja-build
+
+          - name: Linux Clang 17
+            os: ubuntu-latest
+            cc: clang-17
+            cxx: clang++-17
+            install: sudo apt-get update && sudo apt-get install -y clang-17 ninja-build
+
+          - name: macOS Apple Clang
+            os: macos-latest
+            cc: clang
+            cxx: clang++
+            install: brew install ninja
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: ${{ matrix.install }}
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 1940ee77e81573713c0d364c42f5990172198be1
+
+      - name: Configure
+        run: cmake --preset default
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+
+      - name: Build
+        run: cmake --build build/debug
+
+      - name: Test
+        run: ctest --test-dir build/debug --output-on-failure
+
+      - name: Upload binaries
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: giodb-${{ matrix.os }}-${{ matrix.cc }}
+          path: |
+            build/debug/giodb-server
+            build/debug/giodb-cli
+          retention-days: 7
