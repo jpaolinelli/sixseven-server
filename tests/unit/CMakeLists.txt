@@ -13,6 +13,7 @@ add_executable(giodb_unit_tests
     test_tuple.cpp
     test_overflow.cpp
     test_disk_manager.cpp
+    test_buffer_pool.cpp
 )
 
 target_link_libraries(giodb_unit_tests

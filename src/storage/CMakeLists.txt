@@ -5,6 +5,7 @@ add_library(giodb_storage STATIC
     page.cpp
     overflow.cpp
     disk_manager.cpp
+    buffer_pool.cpp
 )
 
 target_include_directories(giodb_storage PUBLIC ${PROJECT_SOURCE_DIR}/include)
