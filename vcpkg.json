@@ -4,10 +4,25 @@
   "description": "A hybrid relational, graph, and vector database",
   "builtin-baseline": "1940ee77e81573713c0d364c42f5990172198be1",
   "dependencies": [
-    "spdlog",
-    "nlohmann-json",
-    "gtest",
-    "benchmark",
-    "tl-expected"
+    {
+      "name": "spdlog",
+      "version>=": "1.17.0"
+    },
+    {
+      "name": "nlohmann-json",
+      "version>=": "3.12.0"
+    },
+    {
+      "name": "gtest",
+      "version>=": "1.17.0"
+    },
+    {
+      "name": "benchmark",
+      "version>=": "1.9.5"
+    },
+    {
+      "name": "tl-expected",
+      "version>=": "1.3.1"
+    }
   ]
 }

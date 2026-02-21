@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <unistd.h>
 
 #include <gtest/gtest.h>
 
@@ -32,7 +33,14 @@ protected:
 
     void SetUp() override {
         auto tmp_dir = std::filesystem::temp_directory_path();
-        tmp_path_ = (tmp_dir / "giodb_test_XXXXXX.json").string();
+        auto tmpl = (tmp_dir / "giodb_test_XXXXXX").string();
+        std::vector<char> buf(tmpl.begin(), tmpl.end());
+        buf.push_back('\0');
+        int fd = mkstemp(buf.data());
+        ASSERT_NE(fd, -1) << "mkstemp failed";
+        close(fd);
+        tmp_path_ = std::string(buf.data()) + ".json";
+        std::rename(buf.data(), tmp_path_.c_str());
     }
 
     void TearDown() override {
@@ -86,6 +94,14 @@ TEST_F(ConfigFileTest, MalformedJsonReturnsError) {
     auto result = Config::load_from_file(tmp_path_);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
+}
+
+TEST_F(ConfigFileTest, PortOutOfRangeReturnsError) {
+    write_file(R"({"port": 70000})");
+
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
 TEST_F(ConfigFileTest, EmptyJsonObjectUsesDefaults) {

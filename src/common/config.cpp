@@ -36,7 +36,12 @@ Result<Config> Config::load_from_file(const std::string& path) {
         config.data_dir = j["data_dir"].get<std::string>();
     }
     if (j.contains("port") && j["port"].is_number_unsigned()) {
-        config.port = j["port"].get<uint16_t>();
+        auto port_value = j["port"].get<uint64_t>();
+        if (port_value > 65535) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "port must be in range 0-65535, got: " + std::to_string(port_value));
+        }
+        config.port = static_cast<uint16_t>(port_value);
     }
     if (j.contains("log_level") && j["log_level"].is_string()) {
         config.log_level = j["log_level"].get<std::string>();
