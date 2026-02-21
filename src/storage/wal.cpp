@@ -392,6 +392,66 @@ uint64_t WalWriter::find_latest_segment() const {
     return latest;
 }
 
+// -- Checkpoint ---------------------------------------------------------------
+
+Result<lsn_t> WalWriter::write_checkpoint(const std::vector<txn_id_t>& active_txns) {
+    WalRecord record;
+    record.type = WalRecordType::CHECKPOINT;
+    record.txn_id = 0;
+
+    // Encode active transaction IDs into the data payload.
+    // Format: [count: uint32][txn_id: uint64]...
+    auto count = static_cast<uint32_t>(active_txns.size());
+    size_t data_size = sizeof(uint32_t) + active_txns.size() * sizeof(uint64_t);
+    record.data.resize(data_size);
+    size_t offset = 0;
+    std::memcpy(record.data.data() + offset, &count, sizeof(uint32_t));
+    offset += sizeof(uint32_t);
+    for (auto txn_id : active_txns) {
+        std::memcpy(record.data.data() + offset, &txn_id, sizeof(uint64_t));
+        offset += sizeof(uint64_t);
+    }
+
+    return append(record);
+}
+
+Result<void> WalWriter::truncate_before(uint64_t min_segment_id) {
+    std::lock_guard<std::mutex> lock(latch_);
+
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(wal_dir_, ec)) {
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+        auto filename = entry.path().filename().string();
+
+        if (filename.size() != 10 || filename.substr(0, 4) != "wal_") {
+            continue;
+        }
+
+        auto num_str = filename.substr(4);
+        bool all_digits = std::all_of(
+            num_str.begin(), num_str.end(), [](char c) { return c >= '0' && c <= '9'; });
+        if (!all_digits) {
+            continue;
+        }
+
+        uint64_t seg_id = std::stoull(num_str);
+        if (seg_id < min_segment_id) {
+            std::error_code remove_ec;
+            std::filesystem::remove(entry.path(), remove_ec);
+            if (remove_ec) {
+                return make_error(StatusCode::IO_ERROR,
+                                  "failed to remove WAL segment: " + entry.path().string() + ": " +
+                                      remove_ec.message());
+            }
+            GIODB_LOG_INFO("WAL truncated segment {}", seg_id);
+        }
+    }
+
+    return ok();
+}
+
 // -- Group commit -------------------------------------------------------------
 
 void WalWriter::start_group_commit() {
@@ -450,6 +510,186 @@ void WalWriter::flush_loop() {
             flushed_lsn_.store(latest, std::memory_order_release);
         }
     }
+}
+
+// -- WalReader ----------------------------------------------------------------
+
+WalReader::WalReader(std::filesystem::path wal_dir) : wal_dir_(std::move(wal_dir)) {}
+
+WalReader::~WalReader() {
+    if (is_open_) {
+        (void)close();
+    }
+}
+
+Result<void> WalReader::open(uint64_t start_segment) {
+    if (is_open_) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "WAL reader already open");
+    }
+
+    segments_ = find_segments();
+    if (segments_.empty()) {
+        // No segments — reader is open but next() will immediately return NOT_FOUND.
+        is_open_ = true;
+        return ok();
+    }
+
+    // If start_segment is specified, skip segments before it.
+    if (start_segment > 0) {
+        seg_index_ = 0;
+        while (seg_index_ < segments_.size() && segments_[seg_index_] < start_segment) {
+            ++seg_index_;
+        }
+    } else {
+        seg_index_ = 0;
+    }
+
+    // Load the first segment.
+    if (seg_index_ < segments_.size()) {
+        auto result = load_segment(segments_[seg_index_]);
+        if (!result) {
+            return result;
+        }
+    }
+
+    is_open_ = true;
+    return ok();
+}
+
+Result<WalRecord> WalReader::next() {
+    if (!is_open_) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "WAL reader not open");
+    }
+
+    while (true) {
+        // Check if we have data remaining in the current buffer.
+        if (!buf_.empty() && read_offset_ + sizeof(uint32_t) <= buf_.size()) {
+            // Read the record_length prefix.
+            uint32_t record_length = 0;
+            std::memcpy(&record_length, buf_.data() + read_offset_, sizeof(uint32_t));
+
+            // Zero record_length means end of valid data in this segment.
+            if (record_length == 0) {
+                // Fall through to advance to next segment.
+            } else {
+                size_t total_size = static_cast<size_t>(record_length) + sizeof(uint32_t);
+                if (read_offset_ + total_size <= buf_.size()) {
+                    auto span = std::span<const uint8_t>(buf_.data() + read_offset_, total_size);
+                    auto result = deserialize_wal_record(span);
+                    if (result) {
+                        read_offset_ += total_size;
+                        return result;
+                    }
+                    // Invalid record — treat as end of segment.
+                }
+                // Incomplete record — treat as end of segment.
+            }
+        }
+
+        // Advance to the next segment.
+        ++seg_index_;
+        if (seg_index_ >= segments_.size()) {
+            return make_error(StatusCode::NOT_FOUND, "no more WAL records");
+        }
+
+        auto result = load_segment(segments_[seg_index_]);
+        if (!result) {
+            return tl::unexpected(result.error());
+        }
+    }
+}
+
+Result<void> WalReader::close() {
+    buf_.clear();
+    segments_.clear();
+    seg_index_ = 0;
+    read_offset_ = 0;
+    is_open_ = false;
+    return ok();
+}
+
+uint64_t WalReader::current_segment_id() const {
+    if (seg_index_ < segments_.size()) {
+        return segments_[seg_index_];
+    }
+    return 0;
+}
+
+std::vector<uint64_t> WalReader::find_segments() const {
+    std::vector<uint64_t> result;
+
+    std::error_code ec;
+    if (!std::filesystem::exists(wal_dir_, ec)) {
+        return result;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(wal_dir_, ec)) {
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+        auto filename = entry.path().filename().string();
+
+        if (filename.size() != 10 || filename.substr(0, 4) != "wal_") {
+            continue;
+        }
+
+        auto num_str = filename.substr(4);
+        bool all_digits = std::all_of(
+            num_str.begin(), num_str.end(), [](char c) { return c >= '0' && c <= '9'; });
+        if (!all_digits) {
+            continue;
+        }
+
+        result.push_back(std::stoull(num_str));
+    }
+
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+Result<void> WalReader::load_segment(uint64_t seg_id) {
+    auto path = segment_path(seg_id);
+
+    // Get file size.
+    std::error_code ec;
+    auto file_size = std::filesystem::file_size(path, ec);
+    if (ec) {
+        return make_error(StatusCode::IO_ERROR,
+                          "failed to get WAL segment size: " + path.string() + ": " + ec.message());
+    }
+
+    if (file_size == 0) {
+        buf_.clear();
+        read_offset_ = 0;
+        return ok();
+    }
+
+    // Read the entire segment into memory.
+    int fd = ::open(path.c_str(), O_RDONLY);
+    if (fd < 0) {
+        return make_error(StatusCode::IO_ERROR,
+                          "failed to open WAL segment for reading: " + path.string() + ": " +
+                              std::strerror(errno));
+    }
+
+    buf_.resize(file_size);
+    ssize_t bytes_read = ::pread(fd, buf_.data(), file_size, 0);
+    ::close(fd);
+
+    if (bytes_read < 0 || static_cast<size_t>(bytes_read) != file_size) {
+        return make_error(StatusCode::IO_ERROR,
+                          "failed to read WAL segment: " + path.string() + ": " +
+                              std::strerror(errno));
+    }
+
+    read_offset_ = 0;
+    return ok();
+}
+
+std::filesystem::path WalReader::segment_path(uint64_t seg_id) const {
+    std::ostringstream oss;
+    oss << "wal_" << std::setw(6) << std::setfill('0') << seg_id;
+    return wal_dir_ / oss.str();
 }
 
 } // namespace giodb

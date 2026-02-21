@@ -81,6 +81,17 @@ public:
     /// commit thread, and closes the segment file.
     [[nodiscard]] Result<void> close();
 
+    /// Write a CHECKPOINT record to the WAL. The checkpoint data payload
+    /// encodes the list of active transaction IDs so recovery knows which
+    /// transactions were in-flight at the time of the checkpoint.
+    /// Returns the LSN assigned to the checkpoint record.
+    [[nodiscard]] Result<lsn_t> write_checkpoint(const std::vector<txn_id_t>& active_txns);
+
+    /// Remove WAL segment files with IDs strictly less than min_segment_id.
+    /// Used after a checkpoint to reclaim disk space from segments that are
+    /// no longer needed for recovery.
+    [[nodiscard]] Result<void> truncate_before(uint64_t min_segment_id);
+
 private:
     /// Open or create a segment file for writing.
     [[nodiscard]] Result<void> open_segment(uint64_t seg_id);
@@ -125,6 +136,74 @@ private:
     std::mutex flush_mutex_;
     std::condition_variable flush_cv_;
     std::atomic<bool> flush_running_{false};
+};
+
+// -- WAL Reader ---------------------------------------------------------------
+
+/// Reads WAL records sequentially across all segments in a WAL directory.
+///
+/// The reader opens segment files in order (wal_000001, wal_000002, ...) and
+/// returns records one at a time via next(). When the current segment is
+/// exhausted, it automatically advances to the next segment.
+///
+/// Usage:
+/// ```
+///   WalReader reader(wal_dir);
+///   reader.open();
+///   while (auto result = reader.next()) {
+///       process(result.value());
+///   }
+///   reader.close();
+/// ```
+class WalReader {
+public:
+    explicit WalReader(std::filesystem::path wal_dir);
+    ~WalReader();
+
+    // Non-copyable, non-movable.
+    WalReader(const WalReader&) = delete;
+    WalReader& operator=(const WalReader&) = delete;
+    WalReader(WalReader&&) = delete;
+    WalReader& operator=(WalReader&&) = delete;
+
+    /// Open the WAL directory for reading, starting from the given segment.
+    /// Segment IDs start at 1. If start_segment is 0, starts from the lowest
+    /// available segment.
+    [[nodiscard]] Result<void> open(uint64_t start_segment = 0);
+
+    /// Read the next WAL record. Returns NOT_FOUND when all records have
+    /// been read across all segments. Automatically advances to the next
+    /// segment file when the current one is exhausted.
+    [[nodiscard]] Result<WalRecord> next();
+
+    /// Close the reader and release resources.
+    [[nodiscard]] Result<void> close();
+
+    /// Return the segment ID currently being read.
+    [[nodiscard]] uint64_t current_segment_id() const;
+
+private:
+    /// Find all segment IDs in the directory, sorted ascending.
+    [[nodiscard]] std::vector<uint64_t> find_segments() const;
+
+    /// Load the next segment file into the read buffer.
+    [[nodiscard]] Result<void> load_segment(uint64_t seg_id);
+
+    /// Generate a segment file path: wal_dir / "wal_NNNNNN".
+    [[nodiscard]] std::filesystem::path segment_path(uint64_t seg_id) const;
+
+    std::filesystem::path wal_dir_;
+    bool is_open_ = false;
+
+    /// All segment IDs in order.
+    std::vector<uint64_t> segments_;
+    /// Index into segments_ for the current segment being read.
+    size_t seg_index_ = 0;
+
+    /// Current segment's data loaded into memory.
+    std::vector<uint8_t> buf_;
+    /// Read offset within buf_.
+    size_t read_offset_ = 0;
 };
 
 } // namespace giodb

@@ -16,6 +16,7 @@ add_executable(giodb_unit_tests
     test_buffer_pool.cpp
     test_wal_record.cpp
     test_wal.cpp
+    test_wal_recovery.cpp
 )
 
 target_link_libraries(giodb_unit_tests
