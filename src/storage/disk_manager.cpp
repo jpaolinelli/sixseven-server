@@ -1,6 +1,7 @@
 #include "giodb/storage/disk_manager.h"
 
 #include <fcntl.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -8,13 +9,74 @@
 #include <cerrno>
 #include <cstring>
 
+// Hardware CRC32C support on ARM (Apple Silicon, ARMv8 with CRC extensions).
+#if defined(__ARM_FEATURE_CRC32)
+#include <arm_acle.h>
+#endif
+
 namespace giodb {
 
 // -- CRC32C implementation ----------------------------------------------------
 // Uses the Castagnoli polynomial (bit-reversed: 0x82F63B78), standard for
 // storage systems (iSCSI, ext4, Btrfs).
+//
+// When building on ARM with CRC extensions (e.g., Apple Silicon), the hardware
+// __crc32c* intrinsics are used for significantly higher throughput.
 
 namespace {
+
+#if defined(__ARM_FEATURE_CRC32)
+
+// -- Hardware CRC32C (ARM intrinsics) -----------------------------------------
+
+/// Process a contiguous byte range using hardware CRC32C, accumulating into crc.
+uint32_t crc32c_hw_accumulate(uint32_t crc, const uint8_t* data, size_t length) {
+    // Process 8 bytes at a time.
+    while (length >= 8) {
+        uint64_t val = 0;
+        std::memcpy(&val, data, sizeof(uint64_t));
+        crc = __crc32cd(crc, val);
+        data += 8;
+        length -= 8;
+    }
+    // Process 4 bytes.
+    if (length >= 4) {
+        uint32_t val = 0;
+        std::memcpy(&val, data, sizeof(uint32_t));
+        crc = __crc32cw(crc, val);
+        data += 4;
+        length -= 4;
+    }
+    // Process remaining bytes one at a time.
+    while (length > 0) {
+        crc = __crc32cb(crc, *data);
+        ++data;
+        --length;
+    }
+    return crc;
+}
+
+/// Compute CRC32C over a buffer, treating bytes [skip_off, skip_off+skip_len) as zero.
+uint32_t crc32c_skip_region(const uint8_t* data, size_t length, size_t skip_off, size_t skip_len) {
+    uint32_t crc = 0xFFFFFFFF;
+    // Segment before the skip region.
+    crc = crc32c_hw_accumulate(crc, data, skip_off);
+    // Skip region: feed zeros.
+    std::array<uint8_t, 8> zeros{};
+    size_t remaining = skip_len;
+    while (remaining > 0) {
+        size_t chunk = std::min(remaining, zeros.size());
+        crc = crc32c_hw_accumulate(crc, zeros.data(), chunk);
+        remaining -= chunk;
+    }
+    // Segment after the skip region.
+    crc = crc32c_hw_accumulate(crc, data + skip_off + skip_len, length - skip_off - skip_len);
+    return crc ^ 0xFFFFFFFF;
+}
+
+#else
+
+// -- Software CRC32C (lookup table) -------------------------------------------
 
 constexpr uint32_t crc32c_poly = 0x82F63B78;
 
@@ -46,20 +108,27 @@ uint32_t crc32c_skip_region(const uint8_t* data, size_t length, size_t skip_off,
     return crc ^ 0xFFFFFFFF;
 }
 
+#endif // __ARM_FEATURE_CRC32
+
 } // namespace
 
 uint32_t crc32c(const uint8_t* data, size_t length) {
+#if defined(__ARM_FEATURE_CRC32)
+    uint32_t crc = 0xFFFFFFFF;
+    crc = crc32c_hw_accumulate(crc, data, length);
+    return crc ^ 0xFFFFFFFF;
+#else
     uint32_t crc = 0xFFFFFFFF;
     for (size_t i = 0; i < length; ++i) {
         crc = crc32c_table[(crc ^ data[i]) & 0xFF] ^ (crc >> 8);
     }
     return crc ^ 0xFFFFFFFF;
+#endif
 }
 
 uint32_t compute_page_checksum(const Page& page) {
-    // The checksum field is at offset 20, size 4 bytes (off_checksum in page.h).
-    static constexpr size_t cksum_offset = 20;
-    return crc32c_skip_region(page.raw().data(), page_size, cksum_offset, sizeof(uint32_t));
+    return crc32c_skip_region(
+        page.raw().data(), page_size, Page::checksum_offset, sizeof(uint32_t));
 }
 
 // -- DiskManager --------------------------------------------------------------
@@ -73,8 +142,27 @@ DiskManager::~DiskManager() {
     }
 }
 
-Result<FileId> DiskManager::create_file(const std::filesystem::path& path, bool direct_io) {
-    int flags = O_RDWR | O_CREAT | O_TRUNC;
+FileId DiskManager::acquire_file_id() {
+    if (!free_ids_.empty()) {
+        FileId id = free_ids_.back();
+        free_ids_.pop_back();
+        return id;
+    }
+    FileId id = next_file_id_++;
+    if (id >= files_.size()) {
+        files_.resize(id + 1);
+    }
+    return id;
+}
+
+Result<FileId>
+DiskManager::create_file(const std::filesystem::path& path, bool direct_io, bool overwrite) {
+    int flags = O_RDWR | O_CREAT;
+    if (overwrite) {
+        flags |= O_TRUNC;
+    } else {
+        flags |= O_EXCL; // Fail if the file already exists.
+    }
 #if !defined(__APPLE__) && defined(O_DIRECT)
     if (direct_io) {
         flags |= O_DIRECT;
@@ -82,8 +170,18 @@ Result<FileId> DiskManager::create_file(const std::filesystem::path& path, bool 
 #endif
     int fd = ::open(path.c_str(), flags, 0644);
     if (fd < 0) {
+        if (errno == EEXIST) {
+            return make_error(StatusCode::ALREADY_EXISTS, "file already exists: " + path.string());
+        }
         return make_error(StatusCode::IO_ERROR,
                           "failed to create file: " + path.string() + ": " + std::strerror(errno));
+    }
+
+    // Acquire an exclusive advisory lock to prevent concurrent access.
+    if (::flock(fd, LOCK_EX | LOCK_NB) < 0) {
+        ::close(fd);
+        return make_error(StatusCode::IO_ERROR,
+                          "failed to lock file (already in use?): " + path.string());
     }
 
 #ifdef __APPLE__
@@ -97,10 +195,7 @@ Result<FileId> DiskManager::create_file(const std::filesystem::path& path, bool 
     }
 #endif
 
-    FileId file_id = next_file_id_++;
-    if (file_id >= files_.size()) {
-        files_.resize(file_id + 1);
-    }
+    FileId file_id = acquire_file_id();
 
     OpenFile& file = files_[file_id];
     file.fd = fd;
@@ -112,7 +207,9 @@ Result<FileId> DiskManager::create_file(const std::filesystem::path& path, bool 
     auto extend_result = ensure_file_size(file, file_growth_pages);
     if (!extend_result) {
         ::close(fd);
+        ::unlink(path.c_str());
         file.fd = -1;
+        free_ids_.push_back(file_id);
         return tl::unexpected(extend_result.error());
     }
 
@@ -120,7 +217,9 @@ Result<FileId> DiskManager::create_file(const std::filesystem::path& path, bool 
     auto header_result = write_file_header(file);
     if (!header_result) {
         ::close(fd);
+        ::unlink(path.c_str());
         file.fd = -1;
+        free_ids_.push_back(file_id);
         return tl::unexpected(header_result.error());
     }
 
@@ -140,6 +239,13 @@ Result<FileId> DiskManager::open_file(const std::filesystem::path& path, bool di
                           "failed to open file: " + path.string() + ": " + std::strerror(errno));
     }
 
+    // Acquire an exclusive advisory lock to prevent concurrent access.
+    if (::flock(fd, LOCK_EX | LOCK_NB) < 0) {
+        ::close(fd);
+        return make_error(StatusCode::IO_ERROR,
+                          "failed to lock file (already in use?): " + path.string());
+    }
+
 #ifdef __APPLE__
     // macOS: bypass OS page cache via F_NOCACHE.
     if (direct_io) {
@@ -151,10 +257,7 @@ Result<FileId> DiskManager::open_file(const std::filesystem::path& path, bool di
     }
 #endif
 
-    FileId file_id = next_file_id_++;
-    if (file_id >= files_.size()) {
-        files_.resize(file_id + 1);
-    }
+    FileId file_id = acquire_file_id();
 
     OpenFile& file = files_[file_id];
     file.fd = fd;
@@ -166,6 +269,7 @@ Result<FileId> DiskManager::open_file(const std::filesystem::path& path, bool di
     if (!header_result) {
         ::close(fd);
         file.fd = -1;
+        free_ids_.push_back(file_id);
         return tl::unexpected(header_result.error());
     }
 
@@ -179,6 +283,7 @@ Result<void> DiskManager::close_file(FileId file_id) {
     }
     OpenFile* file = *file_result;
 
+    // flock is automatically released on close.
     if (::close(file->fd) < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to close file: " + file->path.string() + ": " +
@@ -186,6 +291,7 @@ Result<void> DiskManager::close_file(FileId file_id) {
     }
 
     file->fd = -1;
+    free_ids_.push_back(file_id);
     return ok();
 }
 
@@ -270,30 +376,38 @@ Result<void> DiskManager::write_page(FileId file_id, PageId page_id, Page& page)
 }
 
 Result<PageId> DiskManager::allocate_page(FileId file_id) {
+    return allocate_pages(file_id, 1);
+}
+
+Result<PageId> DiskManager::allocate_pages(FileId file_id, uint32_t count) {
+    if (count == 0) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "page count must be greater than 0");
+    }
+
     auto file_result = get_open_file(file_id);
     if (!file_result) {
         return tl::unexpected(file_result.error());
     }
     OpenFile* file = *file_result;
 
-    PageId new_page_id = file->page_count;
-    file->page_count += 1;
+    PageId first_page_id = file->page_count;
+    file->page_count += count;
 
     // Extend file if needed.
     auto extend_result = ensure_file_size(*file, file->page_count);
     if (!extend_result) {
-        file->page_count -= 1; // Roll back.
+        file->page_count -= count; // Roll back.
         return tl::unexpected(extend_result.error());
     }
 
-    // Persist the updated page count in the file header.
+    // Persist the updated page count in the file header (once for all pages).
     auto header_result = write_file_header(*file);
     if (!header_result) {
-        file->page_count -= 1;
+        file->page_count -= count;
         return tl::unexpected(header_result.error());
     }
 
-    return ok(new_page_id);
+    return ok(first_page_id);
 }
 
 Result<uint32_t> DiskManager::file_page_count(FileId file_id) const {

@@ -59,6 +59,10 @@ static constexpr size_t min_tuple_size = 1;
 /// - data_offset_ tracks where the next tuple would be written (lowest occupied tuple byte).
 class Page {
 public:
+    /// Byte offset of the checksum field within the page header.
+    /// Exposed for external checksum computation (e.g., DiskManager CRC32C).
+    static constexpr size_t checksum_offset = 20;
+
     /// Construct a new page with the given page_id and type.
     /// Initializes the header and empty slot directory.
     Page(uint32_t page_id, PageType page_type);
@@ -140,8 +144,8 @@ private:
     static constexpr size_t off_slot_count = 6;  // uint16_t (2 bytes)
     static constexpr size_t off_data_offset = 8; // uint16_t (2 bytes) — lowest tuple byte
     // 2 bytes padding at offset 10
-    static constexpr size_t off_lsn = 12;      // uint64_t (8 bytes)
-    static constexpr size_t off_checksum = 20; // uint32_t (4 bytes)
+    static constexpr size_t off_lsn = 12;                   // uint64_t (8 bytes)
+    static constexpr size_t off_checksum = checksum_offset; // uint32_t (4 bytes)
     // Total header: 24 bytes
 
     // -- Slot directory helpers -----------------------------------------------

@@ -54,6 +54,14 @@ static constexpr size_t fh_checksum_offset = 12;  // uint32_t
 /// Files grow in 1MB chunks (128 pages). Pages must be written with
 /// write_page() before they can be read; reading an uninitialized page
 /// returns a checksum verification error.
+///
+/// Thread safety: This class is NOT thread-safe. External synchronization
+/// (e.g., a mutex) is required if a DiskManager instance is shared across
+/// threads. In practice, the buffer pool layer provides this synchronization.
+///
+/// File locking: Each open file is protected by an exclusive advisory lock
+/// (flock). This prevents multiple processes from opening the same database
+/// file concurrently, which would lead to data corruption.
 class DiskManager {
 public:
     DiskManager() = default;
@@ -66,17 +74,19 @@ public:
     DiskManager& operator=(DiskManager&&) = delete;
 
     /// Create a new database file with a valid header. Pre-allocates 1MB.
+    /// Fails with ALREADY_EXISTS if the file already exists and overwrite
+    /// is false. If overwrite is true, the existing file is truncated.
     /// If direct_io is true, bypasses the OS page cache (F_NOCACHE on macOS,
     /// O_DIRECT on Linux).
-    [[nodiscard]] Result<FileId> create_file(const std::filesystem::path& path,
-                                             bool direct_io = false);
+    [[nodiscard]] Result<FileId>
+    create_file(const std::filesystem::path& path, bool direct_io = false, bool overwrite = false);
 
     /// Open an existing database file, validating magic and version.
     /// If direct_io is true, bypasses the OS page cache.
     [[nodiscard]] Result<FileId> open_file(const std::filesystem::path& path,
                                            bool direct_io = false);
 
-    /// Close a file handle.
+    /// Close a file handle. The FileId may be reused by future open/create calls.
     [[nodiscard]] Result<void> close_file(FileId file_id);
 
     /// Read page from disk with CRC32C verification.
@@ -89,6 +99,12 @@ public:
 
     /// Allocate a new page, extending the file if needed. Returns page ID >= 1.
     [[nodiscard]] Result<PageId> allocate_page(FileId file_id);
+
+    /// Allocate multiple pages in a single operation. More efficient than
+    /// calling allocate_page() in a loop because the file header is written
+    /// only once. Returns the first page ID of the allocated range.
+    /// Allocated pages are [first_id, first_id + count).
+    [[nodiscard]] Result<PageId> allocate_pages(FileId file_id, uint32_t count);
 
     /// Return total allocated page count (including header page 0).
     [[nodiscard]] Result<uint32_t> file_page_count(FileId file_id) const;
@@ -113,6 +129,9 @@ private:
         bool direct_io = false;  ///< Whether OS page cache is bypassed.
     };
 
+    /// Acquire the next available FileId, reusing closed slots when possible.
+    FileId acquire_file_id();
+
     [[nodiscard]] Result<OpenFile*> get_open_file(FileId file_id);
     [[nodiscard]] Result<const OpenFile*> get_open_file(FileId file_id) const;
     [[nodiscard]] Result<void> write_file_header(OpenFile& file);
@@ -120,6 +139,7 @@ private:
     [[nodiscard]] Result<void> ensure_file_size(OpenFile& file, uint32_t needed_pages);
 
     std::vector<OpenFile> files_;
+    std::vector<FileId> free_ids_; ///< Reusable FileId slots from closed files.
     FileId next_file_id_ = 0;
 };
 

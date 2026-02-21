@@ -105,6 +105,11 @@ TEST(PageChecksum, ChecksumFieldIgnored) {
     EXPECT_EQ(cksum_a, cksum_b);
 }
 
+TEST(PageChecksum, UsesPublicChecksumOffset) {
+    // Verify that Page::checksum_offset matches the expected value (20 bytes).
+    EXPECT_EQ(Page::checksum_offset, 20u);
+}
+
 // -- DiskManager: create and open files ---------------------------------------
 
 TEST_F(DiskManagerTest, CreateFile) {
@@ -124,6 +129,39 @@ TEST_F(DiskManagerTest, CreateFile) {
     auto pc = dm_.file_page_count(fid);
     ASSERT_TRUE(pc.has_value());
     EXPECT_EQ(*pc, 1u);
+}
+
+TEST_F(DiskManagerTest, CreateExistingFileFailsWithoutOverwrite) {
+    // First create succeeds.
+    auto result1 = dm_.create_file(test_file());
+    ASSERT_TRUE(result1.has_value());
+    ASSERT_TRUE(dm_.close_file(*result1).has_value());
+
+    // Second create without overwrite should fail with ALREADY_EXISTS.
+    auto result2 = dm_.create_file(test_file());
+    ASSERT_FALSE(result2.has_value());
+    EXPECT_EQ(result2.error().code, StatusCode::ALREADY_EXISTS);
+}
+
+TEST_F(DiskManagerTest, CreateExistingFileSucceedsWithOverwrite) {
+    // First create.
+    auto result1 = dm_.create_file(test_file());
+    ASSERT_TRUE(result1.has_value());
+    FileId fid1 = *result1;
+
+    // Allocate some pages.
+    ASSERT_TRUE(dm_.allocate_page(fid1).has_value());
+    ASSERT_TRUE(dm_.allocate_page(fid1).has_value());
+    ASSERT_TRUE(dm_.close_file(fid1).has_value());
+
+    // Overwrite should succeed and reset page count.
+    auto result2 = dm_.create_file(test_file(), /*direct_io=*/false, /*overwrite=*/true);
+    ASSERT_TRUE(result2.has_value());
+    FileId fid2 = *result2;
+
+    auto pc = dm_.file_page_count(fid2);
+    ASSERT_TRUE(pc.has_value());
+    EXPECT_EQ(*pc, 1u); // Reset to just header.
 }
 
 TEST_F(DiskManagerTest, OpenExistingFile) {
@@ -170,6 +208,73 @@ TEST_F(DiskManagerTest, OpenFileWithBadMagicFails) {
     EXPECT_EQ(result.error().code, StatusCode::IO_ERROR);
 }
 
+TEST_F(DiskManagerTest, OpenFileWithVersionMismatchFails) {
+    // Write a valid file header but with wrong version number.
+    std::array<uint8_t, page_size> header{};
+    std::memcpy(&header[fh_magic_offset], &file_magic, sizeof(uint32_t));
+    uint32_t bad_version = 99;
+    std::memcpy(&header[fh_version_offset], &bad_version, sizeof(uint32_t));
+    uint32_t pc = 1;
+    std::memcpy(&header[fh_page_count_offset], &pc, sizeof(uint32_t));
+
+    // Compute a valid checksum for this (bad-version) header so we reach
+    // the version check rather than failing on checksum.
+    uint32_t cksum = crc32c(header.data(), page_size);
+    // Re-compute with skip region like the real code does.
+    // We need to zero the checksum field, compute, then write.
+    std::memset(&header[fh_checksum_offset], 0, sizeof(uint32_t));
+    // Use crc32c on the whole buffer with the checksum field zeroed.
+    cksum = crc32c(header.data(), page_size);
+    std::memcpy(&header[fh_checksum_offset], &cksum, sizeof(uint32_t));
+
+    {
+        std::ofstream ofs(test_file(), std::ios::binary);
+        ofs.write(reinterpret_cast<const char*>(header.data()), page_size);
+    }
+
+    auto result = dm_.open_file(test_file());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::IO_ERROR);
+}
+
+TEST_F(DiskManagerTest, OpenShortFileFails) {
+    // Write a file that is shorter than one page (incomplete header).
+    {
+        std::ofstream ofs(test_file(), std::ios::binary);
+        std::array<uint8_t, 64> short_data{};
+        ofs.write(reinterpret_cast<const char*>(short_data.data()), short_data.size());
+    }
+
+    auto result = dm_.open_file(test_file());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::IO_ERROR);
+}
+
+// -- DiskManager: file locking ------------------------------------------------
+
+TEST_F(DiskManagerTest, FileLockingPreventsDoubleOpen) {
+    auto create_result = dm_.create_file(test_file());
+    ASSERT_TRUE(create_result.has_value());
+    // File is still open and locked.
+
+    // A second DiskManager trying to open the same file should fail.
+    DiskManager dm2;
+    auto open_result = dm2.open_file(test_file());
+    ASSERT_FALSE(open_result.has_value());
+    EXPECT_EQ(open_result.error().code, StatusCode::IO_ERROR);
+}
+
+TEST_F(DiskManagerTest, FileLockReleasedAfterClose) {
+    auto create_result = dm_.create_file(test_file());
+    ASSERT_TRUE(create_result.has_value());
+    ASSERT_TRUE(dm_.close_file(*create_result).has_value());
+
+    // After closing, another DiskManager should be able to open it.
+    DiskManager dm2;
+    auto open_result = dm2.open_file(test_file());
+    ASSERT_TRUE(open_result.has_value());
+}
+
 // -- DiskManager: close -------------------------------------------------------
 
 TEST_F(DiskManagerTest, CloseFile) {
@@ -190,6 +295,23 @@ TEST_F(DiskManagerTest, CloseInvalidFileIdFails) {
     auto result = dm_.close_file(999);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+// -- DiskManager: FileId reuse ------------------------------------------------
+
+TEST_F(DiskManagerTest, FileIdReusedAfterClose) {
+    auto result1 = dm_.create_file(test_file("file1.gdb"));
+    ASSERT_TRUE(result1.has_value());
+    FileId fid1 = *result1;
+
+    ASSERT_TRUE(dm_.close_file(fid1).has_value());
+
+    // The next create should reuse fid1's slot.
+    auto result2 = dm_.create_file(test_file("file2.gdb"));
+    ASSERT_TRUE(result2.has_value());
+    FileId fid2 = *result2;
+
+    EXPECT_EQ(fid1, fid2);
 }
 
 // -- DiskManager: allocate_page -----------------------------------------------
@@ -236,6 +358,61 @@ TEST_F(DiskManagerTest, AllocatePageExtendsFile) {
     EXPECT_GE(file_sz, 201u * page_size);
     // Should be aligned to 1MB chunks.
     EXPECT_EQ(file_sz % (static_cast<uintmax_t>(file_growth_pages) * page_size), 0u);
+}
+
+// -- DiskManager: bulk allocate_pages -----------------------------------------
+
+TEST_F(DiskManagerTest, BulkAllocatePagesReturnsFirstId) {
+    auto create_result = dm_.create_file(test_file());
+    ASSERT_TRUE(create_result.has_value());
+    FileId fid = *create_result;
+
+    // Bulk-allocate 10 pages.
+    auto result = dm_.allocate_pages(fid, 10);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, 1u); // First user page.
+
+    auto pc = dm_.file_page_count(fid);
+    ASSERT_TRUE(pc.has_value());
+    EXPECT_EQ(*pc, 11u); // header + 10 pages.
+
+    // All 10 pages should be writable.
+    for (PageId pid = 1; pid <= 10; ++pid) {
+        Page page(pid, PageType::DATA);
+        auto tuple = std::vector<uint8_t>(50, static_cast<uint8_t>(pid));
+        ASSERT_TRUE(page.insert_tuple(tuple).has_value());
+        auto write_result = dm_.write_page(fid, pid, page);
+        ASSERT_TRUE(write_result.has_value()) << "Failed to write page " << pid;
+    }
+}
+
+TEST_F(DiskManagerTest, BulkAllocatePagesZeroCountFails) {
+    auto create_result = dm_.create_file(test_file());
+    ASSERT_TRUE(create_result.has_value());
+    FileId fid = *create_result;
+
+    auto result = dm_.allocate_pages(fid, 0);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST_F(DiskManagerTest, BulkAllocatePagesCombinedWithSingle) {
+    auto create_result = dm_.create_file(test_file());
+    ASSERT_TRUE(create_result.has_value());
+    FileId fid = *create_result;
+
+    // Allocate one page, then bulk-allocate 5 more.
+    auto p1 = dm_.allocate_page(fid);
+    ASSERT_TRUE(p1.has_value());
+    EXPECT_EQ(*p1, 1u);
+
+    auto p2 = dm_.allocate_pages(fid, 5);
+    ASSERT_TRUE(p2.has_value());
+    EXPECT_EQ(*p2, 2u); // Continues from where single allocation left off.
+
+    auto pc = dm_.file_page_count(fid);
+    ASSERT_TRUE(pc.has_value());
+    EXPECT_EQ(*pc, 7u); // header + 1 + 5.
 }
 
 // -- DiskManager: write and read pages ----------------------------------------
