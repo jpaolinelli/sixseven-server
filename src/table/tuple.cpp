@@ -157,7 +157,7 @@ size_t write_fixed_value(uint8_t* dest, const Value& value) {
         return 16;
     }
     case TypeId::UUID: {
-        auto& u = value.as_uuid();
+        const auto& u = value.as_uuid();
         std::memcpy(dest, u.data(), 16);
         return 16;
     }
@@ -238,25 +238,25 @@ Value read_fixed_value(const uint8_t* src, TypeId type) {
         return Value(Timestamp{v});
     }
     case TypeId::DECIMAL: {
-        Decimal128 d;
+        Decimal128 d{};
         std::memcpy(&d.hi, src, 8);
         std::memcpy(&d.lo, src + 8, 8);
         return Value(d);
     }
     case TypeId::INTERVAL: {
-        Interval iv;
+        Interval iv{};
         std::memcpy(&iv.months, src, 8);
         std::memcpy(&iv.microseconds, src + 8, 8);
         return Value(iv);
     }
     case TypeId::POINT: {
-        Point p;
+        Point p{};
         std::memcpy(&p.x, src, 8);
         std::memcpy(&p.y, src + 8, 8);
         return Value(p);
     }
     case TypeId::UUID: {
-        Uuid u;
+        Uuid u{};
         std::memcpy(u.data(), src, 16);
         return Value(u);
     }
@@ -270,19 +270,19 @@ Value read_fixed_value(const uint8_t* src, TypeId type) {
 std::span<const uint8_t> var_value_bytes(const Value& value) {
     switch (value.type_id()) {
     case TypeId::STRING: {
-        auto& s = value.as_string();
+        const auto& s = value.as_string();
         return {reinterpret_cast<const uint8_t*>(s.data()), s.size()};
     }
     case TypeId::BLOB: {
-        auto& b = value.as_blob();
+        const auto& b = value.as_blob();
         return {b.data(), b.size()};
     }
     case TypeId::JSON: {
-        auto& j = value.as_json().data;
+        const auto& j = value.as_json().data;
         return {reinterpret_cast<const uint8_t*>(j.data()), j.size()};
     }
     case TypeId::EMBEDDING: {
-        auto& e = value.as_embedding();
+        const auto& e = value.as_embedding();
         return {reinterpret_cast<const uint8_t*>(e.data()), e.size() * sizeof(float)};
     }
     default:
@@ -329,7 +329,7 @@ Result<std::vector<uint8_t>> serialize(const std::vector<Value>& values, const S
     // Compute sizes for each region.
     size_t bitmap_size = schema.null_bitmap_size();
     size_t fixed_size_total = schema.fixed_region_size();
-    size_t var_offset_table_size = schema.variable_column_count() * VAR_ENTRY_SIZE;
+    size_t var_offset_table_size = schema.variable_column_count() * var_entry_size;
 
     // Compute total variable data size.
     size_t var_data_size = 0;
@@ -344,6 +344,17 @@ Result<std::vector<uint8_t>> serialize(const std::vector<Value>& values, const S
     }
 
     size_t total = bitmap_size + fixed_size_total + var_offset_table_size + var_data_size;
+
+    // Guard against uint16_t offset overflow. Variable-length offsets and lengths
+    // are stored as uint16_t, so the total tuple size cannot exceed 65,535 bytes.
+    // Callers must route large values through OverflowManager before serializing.
+    if (total > max_tuple_size) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "tuple size (" + std::to_string(total) + " bytes) exceeds maximum (" +
+                              std::to_string(max_tuple_size) +
+                              " bytes); route large values through OverflowManager");
+    }
+
     std::vector<uint8_t> buf(total, 0);
 
     // 1. Write null bitmap.
@@ -376,7 +387,7 @@ Result<std::vector<uint8_t>> serialize(const std::vector<Value>& values, const S
             continue;
         }
 
-        size_t entry_pos = var_table_base + (*vi) * VAR_ENTRY_SIZE;
+        size_t entry_pos = var_table_base + (*vi) * var_entry_size;
 
         if (values[i].is_null()) {
             // Null variable-length field: offset=0, length=0.
@@ -386,8 +397,9 @@ Result<std::vector<uint8_t>> serialize(const std::vector<Value>& values, const S
         }
 
         auto bytes = var_value_bytes(values[i]);
-        uint16_t offset = static_cast<uint16_t>(var_write_pos);
-        uint16_t length = static_cast<uint16_t>(bytes.size());
+        // Safe to cast: total tuple size was validated above to fit in uint16_t.
+        auto offset = static_cast<uint16_t>(var_write_pos);
+        auto length = static_cast<uint16_t>(bytes.size());
 
         write_u16(&buf[entry_pos], offset);
         write_u16(&buf[entry_pos + 2], length);
@@ -437,9 +449,9 @@ Result<std::vector<Value>> deserialize(std::span<const uint8_t> data, const Sche
             // Variable-length field.
             auto vi = schema.var_field_index(i);
             size_t var_table_base = bitmap_size + schema.fixed_region_size();
-            size_t entry_pos = var_table_base + (*vi) * VAR_ENTRY_SIZE;
+            size_t entry_pos = var_table_base + (*vi) * var_entry_size;
 
-            if (entry_pos + VAR_ENTRY_SIZE > data.size()) {
+            if (entry_pos + var_entry_size > data.size()) {
                 return make_error(StatusCode::INVALID_ARGUMENT,
                                   "tuple data too short for var-length offset entry at column " +
                                       std::to_string(i));
@@ -502,9 +514,9 @@ Result<Value> get_field(std::span<const uint8_t> data, const Schema& schema, siz
     // Variable-length field.
     auto vi = schema.var_field_index(col_index);
     size_t var_table_base = bitmap_size + schema.fixed_region_size();
-    size_t entry_pos = var_table_base + (*vi) * VAR_ENTRY_SIZE;
+    size_t entry_pos = var_table_base + (*vi) * var_entry_size;
 
-    if (entry_pos + VAR_ENTRY_SIZE > data.size()) {
+    if (entry_pos + var_entry_size > data.size()) {
         return make_error(StatusCode::INVALID_ARGUMENT,
                           "tuple data too short for var-length offset entry at column " +
                               std::to_string(col_index));
@@ -530,7 +542,7 @@ size_t compute_tuple_size(const std::vector<Value>& values, const Schema& schema
     size_t n = schema.column_count();
     size_t bitmap_size = schema.null_bitmap_size();
     size_t fixed_total = schema.fixed_region_size();
-    size_t var_table = schema.variable_column_count() * VAR_ENTRY_SIZE;
+    size_t var_table = schema.variable_column_count() * var_entry_size;
 
     size_t var_data = 0;
     for (size_t i = 0; i < n && i < values.size(); ++i) {

@@ -4,14 +4,14 @@
 #include "giodb/storage/page.h"
 
 #include <cstdint>
-#include <functional>
+#include <memory>
 #include <span>
 #include <vector>
 
 namespace giodb {
 
 /// Threshold in bytes above which values should be stored in overflow pages.
-static constexpr size_t OVERFLOW_THRESHOLD = 2048;
+static constexpr size_t overflow_threshold = 2048;
 
 /// Pointer stored in the main tuple to reference overflow data.
 /// Total size: 8 bytes (fits in a fixed-size field slot).
@@ -24,22 +24,26 @@ struct OverflowPointer {
 
 /// Offset within an overflow page where the next_page_id field is stored.
 /// Immediately after the standard page header.
-static constexpr size_t OVERFLOW_NEXT_PAGE_OFFSET = PAGE_HEADER_SIZE;
+static constexpr size_t overflow_next_page_offset = page_header_size;
 
 /// Size of the next_page_id field in an overflow page.
-static constexpr size_t OVERFLOW_NEXT_PAGE_SIZE = sizeof(uint32_t);
+static constexpr size_t overflow_next_page_size = sizeof(uint32_t);
 
 /// Offset within an overflow page where chunk data begins.
-static constexpr size_t OVERFLOW_DATA_OFFSET = OVERFLOW_NEXT_PAGE_OFFSET + OVERFLOW_NEXT_PAGE_SIZE;
+static constexpr size_t overflow_data_offset = overflow_next_page_offset + overflow_next_page_size;
 
 /// Maximum chunk data that fits in a single overflow page.
-static constexpr size_t OVERFLOW_CHUNK_CAPACITY = PAGE_SIZE - OVERFLOW_DATA_OFFSET;
+static constexpr size_t overflow_chunk_capacity = page_size - overflow_data_offset;
 
 /// Sentinel value indicating no next page (end of overflow chain).
-static constexpr uint32_t OVERFLOW_NO_NEXT_PAGE = 0;
+static constexpr uint32_t overflow_no_next_page = 0;
 
 /// Abstract interface for allocating and freeing pages.
 /// Implementations may manage an in-memory pool, a disk-backed buffer pool, etc.
+///
+/// get_page() returns a raw pointer to a Page whose lifetime is managed by the
+/// allocator. The returned pointer remains valid until the page is freed via
+/// free_page(), or until the allocator itself is destroyed.
 class PageAllocator {
 public:
     virtual ~PageAllocator() = default;
@@ -72,6 +76,8 @@ public:
 
     /// Store data across one or more overflow pages. Returns an OverflowPointer
     /// that can be stored in the main tuple to reference this data.
+    /// If allocation fails partway through, all previously allocated pages in
+    /// the chain are freed before the error is returned.
     [[nodiscard]] Result<OverflowPointer> store_overflow(std::span<const uint8_t> data);
 
     /// Read overflow data by following the page chain starting at the given pointer.
@@ -82,14 +88,14 @@ public:
     [[nodiscard]] Result<void> free_overflow(const OverflowPointer& pointer);
 
     /// Return true if the given data size exceeds the overflow threshold.
-    static bool needs_overflow(size_t data_size) { return data_size > OVERFLOW_THRESHOLD; }
+    static bool needs_overflow(size_t data_size) { return data_size > overflow_threshold; }
 
 private:
     PageAllocator& allocator_;
 };
 
 /// Simple in-memory page allocator for testing purposes.
-/// Pages are stored in a vector and never written to disk.
+/// Pages are stored via unique_ptr for pointer stability across allocations.
 class InMemoryPageAllocator : public PageAllocator {
 public:
     InMemoryPageAllocator() = default;
@@ -106,7 +112,7 @@ public:
     [[nodiscard]] size_t total_pages() const { return pages_.size(); }
 
 private:
-    std::vector<Page> pages_;
+    std::vector<std::unique_ptr<Page>> pages_;
     std::vector<bool> active_; ///< Track which pages are active (not freed).
     uint32_t next_id_ = 1;     ///< Next page ID to assign (1-based, 0 is reserved).
 };

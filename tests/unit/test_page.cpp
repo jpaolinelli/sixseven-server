@@ -290,9 +290,9 @@ TEST(Page, UpdateInvalidSlotFails) {
 
 TEST(Page, FreeSpaceNewPage) {
     Page page(0, PageType::DATA);
-    // Total usable = PAGE_SIZE - PAGE_HEADER_SIZE = 8168
-    // free_space() reserves SLOT_ENTRY_SIZE for a new entry.
-    EXPECT_EQ(page.free_space(), PAGE_SIZE - PAGE_HEADER_SIZE - SLOT_ENTRY_SIZE);
+    // Total usable = page_size - page_header_size = 8168
+    // free_space() reserves slot_entry_size for a new entry.
+    EXPECT_EQ(page.free_space(), page_size - page_header_size - slot_entry_size);
 }
 
 TEST(Page, FreeSpaceDecreases) {
@@ -305,7 +305,7 @@ TEST(Page, FreeSpaceDecreases) {
     // After insert: lost 100 bytes (tuple) + 4 bytes (slot entry).
     // free_space() also reserves 4 for next slot entry.
     size_t after = page.free_space();
-    EXPECT_EQ(after, initial - 100 - SLOT_ENTRY_SIZE);
+    EXPECT_EQ(after, initial - 100 - slot_entry_size);
 }
 
 // -- Compaction ---------------------------------------------------------------
@@ -350,7 +350,7 @@ TEST(Page, CompactionRecoversFreeSpace) {
 TEST(Page, CompactionEmptyPage) {
     Page page(0, PageType::DATA);
     page.compact(); // Should not crash.
-    EXPECT_EQ(page.free_space(), PAGE_SIZE - PAGE_HEADER_SIZE - SLOT_ENTRY_SIZE);
+    EXPECT_EQ(page.free_space(), page_size - page_header_size - slot_entry_size);
 }
 
 TEST(Page, CompactionAllDeleted) {

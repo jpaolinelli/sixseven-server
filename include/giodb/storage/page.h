@@ -10,7 +10,7 @@
 namespace giodb {
 
 /// Default page size: 8KB.
-static constexpr size_t PAGE_SIZE = 8192;
+static constexpr size_t page_size = 8192;
 
 /// Page type identifier stored in the page header.
 enum class PageType : uint8_t {
@@ -35,13 +35,13 @@ struct SlotEntry {
 /// Page header layout (stored at the beginning of every page).
 /// Total size: 24 bytes (4 + 1 + 1 padding + 2 + 2 + 2 padding + 8 + 4).
 /// We pack it tightly to a known fixed size using explicit byte layout.
-static constexpr size_t PAGE_HEADER_SIZE = 24;
+static constexpr size_t page_header_size = 24;
 
 /// Slot entry size in bytes.
-static constexpr size_t SLOT_ENTRY_SIZE = sizeof(uint16_t) * 2; // offset + length = 4 bytes
+static constexpr size_t slot_entry_size = sizeof(uint16_t) * 2; // offset + length = 4 bytes
 
 /// Minimum tuple size (to avoid degenerate cases).
-static constexpr size_t MIN_TUPLE_SIZE = 1;
+static constexpr size_t min_tuple_size = 1;
 
 /// An 8KB slotted page that stores variable-length tuples.
 ///
@@ -64,7 +64,7 @@ public:
     Page(uint32_t page_id, PageType page_type);
 
     /// Construct from raw bytes (e.g., read from disk). Header is parsed from data.
-    explicit Page(const std::array<uint8_t, PAGE_SIZE>& raw);
+    explicit Page(const std::array<uint8_t, page_size>& raw);
 
     // -- Header accessors -----------------------------------------------------
 
@@ -76,8 +76,8 @@ public:
 
     void set_page_id(uint32_t id);
     void set_page_type(PageType type);
-    void set_lsn(uint64_t lsn);
-    void set_checksum(uint32_t checksum);
+    void set_lsn(uint64_t new_lsn);
+    void set_checksum(uint32_t new_checksum);
 
     // -- Tuple operations -----------------------------------------------------
 
@@ -91,25 +91,39 @@ public:
 
     /// Delete a tuple by marking its slot as deleted (offset = 0).
     /// The space is not immediately reclaimed — call compact() for that.
+    /// Stale tuple data is zeroed for defense-in-depth.
     [[nodiscard]] Result<void> delete_tuple(SlotId slot_id);
 
     /// Update a tuple. If the new data fits in the existing slot, update in-place.
     /// Otherwise, delete the old tuple and insert the new one in the same slot.
+    ///
+    /// Note: this method does NOT attempt automatic compaction. If the update
+    /// fails due to insufficient contiguous free space, the caller should call
+    /// compact() and retry. This keeps compaction under the caller's control
+    /// since it is an expensive operation.
     [[nodiscard]] Result<void> update_tuple(SlotId slot_id, std::span<const uint8_t> data);
 
-    /// Return the number of bytes available for new tuples (accounting for a new slot entry).
+    /// Return the number of bytes available for new tuples, accounting for a
+    /// new slot entry. This is conservative: if deleted slots are available for
+    /// reuse, the actual insertable tuple size may be up to slot_entry_size
+    /// bytes larger, since insert_tuple() reuses deleted slots before allocating
+    /// new directory entries.
     [[nodiscard]] size_t free_space() const;
 
     /// Defragment the page by moving all tuples to the end of the page,
     /// eliminating gaps left by deleted or updated tuples.
+    /// Freed regions are zeroed for defense-in-depth.
     void compact();
 
     /// Access the raw page data (e.g., for writing to disk).
-    [[nodiscard]] const std::array<uint8_t, PAGE_SIZE>& raw() const { return data_; }
-    [[nodiscard]] std::array<uint8_t, PAGE_SIZE>& raw() { return data_; }
+    [[nodiscard]] const std::array<uint8_t, page_size>& raw() const { return data_; }
+    [[nodiscard]] std::array<uint8_t, page_size>& raw() { return data_; }
 
 private:
-    // -- Header read/write helpers (little-endian) ----------------------------
+    // -- Header read/write helpers (native endianness) ------------------------
+    // Note: uses native endianness via memcpy. All platforms GioDB currently
+    // targets are little-endian (x86-64, ARM LE). If big-endian support is
+    // needed, add explicit byte-swap logic as done in serialization.cpp.
 
     void write_u16(size_t offset, uint16_t value);
     void write_u32(size_t offset, uint32_t value);
@@ -120,14 +134,14 @@ private:
 
     // -- Header field offsets -------------------------------------------------
 
-    static constexpr size_t OFF_PAGE_ID = 0;   // uint32_t (4 bytes)
-    static constexpr size_t OFF_PAGE_TYPE = 4; // uint8_t  (1 byte)
+    static constexpr size_t off_page_id = 0;   // uint32_t (4 bytes)
+    static constexpr size_t off_page_type = 4; // uint8_t  (1 byte)
     // 1 byte padding at offset 5
-    static constexpr size_t OFF_SLOT_COUNT = 6;  // uint16_t (2 bytes)
-    static constexpr size_t OFF_DATA_OFFSET = 8; // uint16_t (2 bytes) — lowest tuple byte
+    static constexpr size_t off_slot_count = 6;  // uint16_t (2 bytes)
+    static constexpr size_t off_data_offset = 8; // uint16_t (2 bytes) — lowest tuple byte
     // 2 bytes padding at offset 10
-    static constexpr size_t OFF_LSN = 12;      // uint64_t (8 bytes)
-    static constexpr size_t OFF_CHECKSUM = 20; // uint32_t (4 bytes)
+    static constexpr size_t off_lsn = 12;      // uint64_t (8 bytes)
+    static constexpr size_t off_checksum = 20; // uint32_t (4 bytes)
     // Total header: 24 bytes
 
     // -- Slot directory helpers -----------------------------------------------
@@ -151,7 +165,7 @@ private:
     [[nodiscard]] uint16_t data_offset() const;
     void set_data_offset(uint16_t offset);
 
-    std::array<uint8_t, PAGE_SIZE> data_{};
+    std::array<uint8_t, page_size> data_{};
 };
 
 } // namespace giodb

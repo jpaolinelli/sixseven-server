@@ -1,8 +1,6 @@
 #include "giodb/storage/page.h"
 
-#include <algorithm>
 #include <cstring>
-#include <vector>
 
 namespace giodb {
 
@@ -10,52 +8,52 @@ namespace giodb {
 
 Page::Page(uint32_t page_id, PageType page_type) {
     data_.fill(0);
-    write_u32(OFF_PAGE_ID, page_id);
-    data_[OFF_PAGE_TYPE] = static_cast<uint8_t>(page_type);
+    write_u32(off_page_id, page_id);
+    data_[off_page_type] = static_cast<uint8_t>(page_type);
     set_slot_count(0);
-    set_data_offset(static_cast<uint16_t>(PAGE_SIZE));
-    write_u64(OFF_LSN, 0);
-    write_u32(OFF_CHECKSUM, 0);
+    set_data_offset(static_cast<uint16_t>(page_size));
+    write_u64(off_lsn, 0);
+    write_u32(off_checksum, 0);
 }
 
-Page::Page(const std::array<uint8_t, PAGE_SIZE>& raw) : data_(raw) {}
+Page::Page(const std::array<uint8_t, page_size>& raw) : data_(raw) {}
 
 // -- Header accessors ---------------------------------------------------------
 
 uint32_t Page::page_id() const {
-    return read_u32(OFF_PAGE_ID);
+    return read_u32(off_page_id);
 }
 
 PageType Page::page_type() const {
-    return static_cast<PageType>(data_[OFF_PAGE_TYPE]);
+    return static_cast<PageType>(data_[off_page_type]);
 }
 
 uint16_t Page::slot_count() const {
-    return read_u16(OFF_SLOT_COUNT);
+    return read_u16(off_slot_count);
 }
 
 uint64_t Page::lsn() const {
-    return read_u64(OFF_LSN);
+    return read_u64(off_lsn);
 }
 
 uint32_t Page::checksum() const {
-    return read_u32(OFF_CHECKSUM);
+    return read_u32(off_checksum);
 }
 
 void Page::set_page_id(uint32_t id) {
-    write_u32(OFF_PAGE_ID, id);
+    write_u32(off_page_id, id);
 }
 
 void Page::set_page_type(PageType type) {
-    data_[OFF_PAGE_TYPE] = static_cast<uint8_t>(type);
+    data_[off_page_type] = static_cast<uint8_t>(type);
 }
 
-void Page::set_lsn(uint64_t lsn_val) {
-    write_u64(OFF_LSN, lsn_val);
+void Page::set_lsn(uint64_t new_lsn) {
+    write_u64(off_lsn, new_lsn);
 }
 
-void Page::set_checksum(uint32_t cksum) {
-    write_u32(OFF_CHECKSUM, cksum);
+void Page::set_checksum(uint32_t new_checksum) {
+    write_u32(off_checksum, new_checksum);
 }
 
 // -- Tuple operations ---------------------------------------------------------
@@ -65,8 +63,8 @@ Result<SlotId> Page::insert_tuple(std::span<const uint8_t> data) {
         return make_error(StatusCode::INVALID_ARGUMENT, "cannot insert empty tuple");
     }
 
-    uint16_t tuple_len = static_cast<uint16_t>(data.size());
-    size_t needed = tuple_len + SLOT_ENTRY_SIZE;
+    auto tuple_len = static_cast<uint16_t>(data.size());
+    size_t needed = tuple_len + slot_entry_size;
 
     // Check if we can reuse a deleted slot.
     SlotId reuse_slot = slot_count();
@@ -89,7 +87,7 @@ Result<SlotId> Page::insert_tuple(std::span<const uint8_t> data) {
     }
 
     // Allocate tuple space at the bottom of the page.
-    uint16_t new_data_offset = static_cast<uint16_t>(data_offset() - tuple_len);
+    auto new_data_offset = static_cast<uint16_t>(data_offset() - tuple_len);
     std::memcpy(&data_[new_data_offset], data.data(), tuple_len);
 
     // Write the slot entry.
@@ -130,6 +128,9 @@ Result<void> Page::delete_tuple(SlotId slot_id) {
         return make_error(StatusCode::NOT_FOUND, "slot is already deleted");
     }
 
+    // Zero stale tuple data for defense-in-depth.
+    std::memset(&data_[entry.offset], 0, entry.length);
+
     // Mark as deleted by zeroing the slot entry.
     write_slot(slot_id, {0, 0});
     return ok();
@@ -149,19 +150,23 @@ Result<void> Page::update_tuple(SlotId slot_id, std::span<const uint8_t> data) {
         return make_error(StatusCode::NOT_FOUND, "slot is deleted");
     }
 
-    uint16_t new_len = static_cast<uint16_t>(data.size());
+    auto new_len = static_cast<uint16_t>(data.size());
 
     if (new_len <= entry.length) {
         // Fits in-place: overwrite the existing tuple.
         std::memcpy(&data_[entry.offset], data.data(), new_len);
+        // Zero any leftover bytes from the old (longer) tuple.
+        if (new_len < entry.length) {
+            std::memset(&data_[entry.offset + new_len], 0, entry.length - new_len);
+        }
         // Update slot with new (shorter) length. Keep same offset.
-        // The gap between entry.offset and entry.offset + (entry.length - new_len)
-        // becomes dead space until compaction.
         write_slot(slot_id, {entry.offset, new_len});
         return ok();
     }
 
     // Doesn't fit in-place: delete the old tuple and allocate new space.
+    // Zero old tuple data.
+    std::memset(&data_[entry.offset], 0, entry.length);
     // Mark old slot as deleted.
     write_slot(slot_id, {0, 0});
 
@@ -175,7 +180,7 @@ Result<void> Page::update_tuple(SlotId slot_id, std::span<const uint8_t> data) {
     }
 
     // Allocate new space at the bottom.
-    uint16_t new_offset = static_cast<uint16_t>(data_offset() - new_len);
+    auto new_offset = static_cast<uint16_t>(data_offset() - new_len);
     std::memcpy(&data_[new_offset], data.data(), new_len);
     write_slot(slot_id, {new_offset, new_len});
     set_data_offset(new_offset);
@@ -191,43 +196,38 @@ size_t Page::free_space() const {
     }
     size_t raw = d_off - dir_end;
     // Reserve space for one new slot entry.
-    if (raw < SLOT_ENTRY_SIZE) {
+    if (raw < slot_entry_size) {
         return 0;
     }
-    return raw - SLOT_ENTRY_SIZE;
+    return raw - slot_entry_size;
 }
 
 void Page::compact() {
     uint16_t sc = slot_count();
     if (sc == 0) {
-        set_data_offset(static_cast<uint16_t>(PAGE_SIZE));
+        set_data_offset(static_cast<uint16_t>(page_size));
         return;
     }
 
-    // Collect all live tuples with their data.
-    struct LiveTuple {
-        SlotId slot_id;
-        std::vector<uint8_t> data;
-    };
-    std::vector<LiveTuple> live;
-    live.reserve(sc);
+    // Collect all live tuples into a stack-allocated temporary buffer.
+    // This avoids per-tuple heap allocations on a hot path.
+    std::array<uint8_t, page_size> tmp{};
+    auto write_pos = static_cast<uint16_t>(page_size);
 
     for (SlotId i = 0; i < sc; ++i) {
         SlotEntry entry = read_slot(i);
         if (entry.offset != 0) {
-            live.push_back(
-                {i,
-                 std::vector<uint8_t>(&data_[entry.offset], &data_[entry.offset + entry.length])});
+            write_pos -= entry.length;
+            std::memcpy(&tmp[write_pos], &data_[entry.offset], entry.length);
+            write_slot(i, {write_pos, entry.length});
         }
     }
 
-    // Rewrite tuples from the end of the page, tightly packed.
-    uint16_t write_pos = static_cast<uint16_t>(PAGE_SIZE);
-    for (auto& tuple : live) {
-        uint16_t len = static_cast<uint16_t>(tuple.data.size());
-        write_pos -= len;
-        std::memcpy(&data_[write_pos], tuple.data.data(), len);
-        write_slot(tuple.slot_id, {write_pos, len});
+    // Copy repacked tuples back and zero the freed region.
+    std::memcpy(&data_[write_pos], &tmp[write_pos], page_size - write_pos);
+    size_t dir_end = slot_directory_end();
+    if (write_pos > dir_end) {
+        std::memset(&data_[dir_end], 0, write_pos - dir_end);
     }
 
     set_data_offset(write_pos);
@@ -268,7 +268,7 @@ uint64_t Page::read_u64(size_t offset) const {
 // -- Slot directory helpers ---------------------------------------------------
 
 size_t Page::slot_offset(SlotId slot_id) const {
-    return PAGE_HEADER_SIZE + static_cast<size_t>(slot_id) * SLOT_ENTRY_SIZE;
+    return page_header_size + static_cast<size_t>(slot_id) * slot_entry_size;
 }
 
 SlotEntry Page::read_slot(SlotId slot_id) const {
@@ -283,19 +283,19 @@ void Page::write_slot(SlotId slot_id, SlotEntry entry) {
 }
 
 size_t Page::slot_directory_end() const {
-    return PAGE_HEADER_SIZE + static_cast<size_t>(slot_count()) * SLOT_ENTRY_SIZE;
+    return page_header_size + static_cast<size_t>(slot_count()) * slot_entry_size;
 }
 
 void Page::set_slot_count(uint16_t count) {
-    write_u16(OFF_SLOT_COUNT, count);
+    write_u16(off_slot_count, count);
 }
 
 uint16_t Page::data_offset() const {
-    return read_u16(OFF_DATA_OFFSET);
+    return read_u16(off_data_offset);
 }
 
 void Page::set_data_offset(uint16_t offset) {
-    write_u16(OFF_DATA_OFFSET, offset);
+    write_u16(off_data_offset, offset);
 }
 
 } // namespace giodb

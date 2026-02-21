@@ -38,17 +38,17 @@ TEST(OverflowPointer, Equality) {
 
 TEST(Overflow, Constants) {
     // Overflow data starts after header (24) + next_page_id (4) = 28 bytes.
-    EXPECT_EQ(OVERFLOW_DATA_OFFSET, PAGE_HEADER_SIZE + sizeof(uint32_t));
-    EXPECT_EQ(OVERFLOW_CHUNK_CAPACITY, PAGE_SIZE - OVERFLOW_DATA_OFFSET);
-    // Chunk capacity should be PAGE_SIZE - 28 = 8164 bytes.
-    EXPECT_EQ(OVERFLOW_CHUNK_CAPACITY, 8164u);
+    EXPECT_EQ(overflow_data_offset, page_header_size + sizeof(uint32_t));
+    EXPECT_EQ(overflow_chunk_capacity, page_size - overflow_data_offset);
+    // Chunk capacity should be page_size - 28 = 8164 bytes.
+    EXPECT_EQ(overflow_chunk_capacity, 8164u);
 }
 
 TEST(Overflow, NeedsOverflow) {
     EXPECT_FALSE(OverflowManager::needs_overflow(0));
     EXPECT_FALSE(OverflowManager::needs_overflow(1024));
-    EXPECT_FALSE(OverflowManager::needs_overflow(OVERFLOW_THRESHOLD));
-    EXPECT_TRUE(OverflowManager::needs_overflow(OVERFLOW_THRESHOLD + 1));
+    EXPECT_FALSE(OverflowManager::needs_overflow(overflow_threshold));
+    EXPECT_TRUE(OverflowManager::needs_overflow(overflow_threshold + 1));
     EXPECT_TRUE(OverflowManager::needs_overflow(100000));
 }
 
@@ -139,13 +139,13 @@ TEST(OverflowManager, ExactlyOneChunk) {
     InMemoryPageAllocator alloc;
     OverflowManager mgr(alloc);
 
-    auto data = make_data(OVERFLOW_CHUNK_CAPACITY); // Exactly fills one page.
+    auto data = make_data(overflow_chunk_capacity); // Exactly fills one page.
 
     auto ptr_result = mgr.store_overflow(data);
     ASSERT_TRUE(ptr_result.has_value());
     OverflowPointer ptr = *ptr_result;
 
-    EXPECT_EQ(ptr.total_length, static_cast<uint32_t>(OVERFLOW_CHUNK_CAPACITY));
+    EXPECT_EQ(ptr.total_length, static_cast<uint32_t>(overflow_chunk_capacity));
     EXPECT_EQ(alloc.allocated_count(), 1u);
 
     auto read_result = mgr.read_overflow(ptr);
@@ -158,13 +158,13 @@ TEST(OverflowManager, TwoPages) {
     OverflowManager mgr(alloc);
 
     // One byte more than fits in a single overflow page.
-    auto data = make_data(OVERFLOW_CHUNK_CAPACITY + 1);
+    auto data = make_data(overflow_chunk_capacity + 1);
 
     auto ptr_result = mgr.store_overflow(data);
     ASSERT_TRUE(ptr_result.has_value());
     OverflowPointer ptr = *ptr_result;
 
-    EXPECT_EQ(ptr.total_length, static_cast<uint32_t>(OVERFLOW_CHUNK_CAPACITY + 1));
+    EXPECT_EQ(ptr.total_length, static_cast<uint32_t>(overflow_chunk_capacity + 1));
     EXPECT_EQ(alloc.allocated_count(), 2u);
 
     auto read_result = mgr.read_overflow(ptr);
@@ -203,7 +203,7 @@ TEST(OverflowManager, LargeValue32KB) {
     EXPECT_EQ(ptr.total_length, 32768u);
 
     // 32768 / 8164 = 4.01..., so need 5 pages.
-    size_t expected_pages = (32768 + OVERFLOW_CHUNK_CAPACITY - 1) / OVERFLOW_CHUNK_CAPACITY;
+    size_t expected_pages = (32768 + overflow_chunk_capacity - 1) / overflow_chunk_capacity;
     EXPECT_EQ(expected_pages, 5u);
     EXPECT_EQ(alloc.allocated_count(), expected_pages);
 
@@ -225,7 +225,7 @@ TEST(OverflowManager, VeryLargeValue1MB) {
 
     EXPECT_EQ(ptr.total_length, static_cast<uint32_t>(size));
 
-    size_t expected_pages = (size + OVERFLOW_CHUNK_CAPACITY - 1) / OVERFLOW_CHUNK_CAPACITY;
+    size_t expected_pages = (size + overflow_chunk_capacity - 1) / overflow_chunk_capacity;
     EXPECT_EQ(alloc.allocated_count(), expected_pages);
 
     auto read_result = mgr.read_overflow(ptr);
@@ -366,7 +366,7 @@ TEST(OverflowManager, PagesHaveOverflowType) {
     InMemoryPageAllocator alloc;
     OverflowManager mgr(alloc);
 
-    auto data = make_data(OVERFLOW_CHUNK_CAPACITY + 100); // 2 pages.
+    auto data = make_data(overflow_chunk_capacity + 100); // 2 pages.
     auto ptr_result = mgr.store_overflow(data);
     ASSERT_TRUE(ptr_result.has_value());
     OverflowPointer ptr = *ptr_result;
