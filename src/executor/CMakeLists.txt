@@ -6,6 +6,9 @@ add_library(giodb_executor STATIC
     project.cpp
     sort.cpp
     limit.cpp
+    insert.cpp
+    update.cpp
+    delete.cpp
 )
 
 target_include_directories(giodb_executor PUBLIC ${PROJECT_SOURCE_DIR}/include)

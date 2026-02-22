@@ -1,0 +1,203 @@
+#include "giodb/executor/insert.h"
+
+#include "giodb/common/coercion.h"
+#include "giodb/common/types.h"
+#include "giodb/executor/expr_evaluator.h"
+
+namespace giodb {
+
+namespace {
+
+/// Fit a Value to the storage type, allowing both widening and narrowing
+/// numeric conversions.  The standard coerce() only allows widening; DML
+/// operators need to narrow expression results (e.g. INT64 arithmetic back
+/// to INT32 storage).
+Result<Value> fit_to_storage(const Value& val, TypeId target) {
+    if (val.is_null() || val.type_id() == target) {
+        return ok(val);
+    }
+    // Try standard widening coercion first.
+    if (can_coerce(val.type_id(), target)) {
+        return coerce(val, target);
+    }
+    // Allow numeric narrowing (e.g. INT64 → INT32).
+    if (is_numeric(val.type_id()) && is_integer(target)) {
+        // Convert to int64 then to the target integer type.
+        int64_t v = 0;
+        switch (val.type_id()) {
+        case TypeId::INT8:  v = val.as_int8(); break;
+        case TypeId::INT16: v = val.as_int16(); break;
+        case TypeId::INT32: v = val.as_int32(); break;
+        case TypeId::INT64: v = val.as_int64(); break;
+        case TypeId::UINT8:  v = val.as_uint8(); break;
+        case TypeId::UINT16: v = val.as_uint16(); break;
+        case TypeId::UINT32: v = val.as_uint32(); break;
+        case TypeId::UINT64: v = static_cast<int64_t>(val.as_uint64()); break;
+        case TypeId::FLOAT32: v = static_cast<int64_t>(val.as_float32()); break;
+        case TypeId::FLOAT64: v = static_cast<int64_t>(val.as_float64()); break;
+        default:
+            return make_error(StatusCode::TYPE_ERROR,
+                              "cannot fit " + std::string(type_name(val.type_id())) +
+                                  " to " + std::string(type_name(target)));
+        }
+        switch (target) {
+        case TypeId::INT8:  return ok(Value(static_cast<int8_t>(v)));
+        case TypeId::INT16: return ok(Value(static_cast<int16_t>(v)));
+        case TypeId::INT32: return ok(Value(static_cast<int32_t>(v)));
+        case TypeId::INT64: return ok(Value(v));
+        case TypeId::UINT8:  return ok(Value(static_cast<uint8_t>(v)));
+        case TypeId::UINT16: return ok(Value(static_cast<uint16_t>(v)));
+        case TypeId::UINT32: return ok(Value(static_cast<uint32_t>(v)));
+        case TypeId::UINT64: return ok(Value(static_cast<uint64_t>(v)));
+        default: break;
+        }
+    }
+    if (is_numeric(val.type_id()) && is_floating(target)) {
+        double d = 0.0;
+        switch (val.type_id()) {
+        case TypeId::INT8:  d = val.as_int8(); break;
+        case TypeId::INT16: d = val.as_int16(); break;
+        case TypeId::INT32: d = val.as_int32(); break;
+        case TypeId::INT64: d = static_cast<double>(val.as_int64()); break;
+        case TypeId::UINT8:  d = val.as_uint8(); break;
+        case TypeId::UINT16: d = val.as_uint16(); break;
+        case TypeId::UINT32: d = val.as_uint32(); break;
+        case TypeId::UINT64: d = static_cast<double>(val.as_uint64()); break;
+        case TypeId::FLOAT32: d = val.as_float32(); break;
+        case TypeId::FLOAT64: d = val.as_float64(); break;
+        default: break;
+        }
+        if (target == TypeId::FLOAT32) return ok(Value(static_cast<float>(d)));
+        if (target == TypeId::FLOAT64) return ok(Value(d));
+    }
+    return make_error(StatusCode::TYPE_ERROR,
+                      "cannot fit " + std::string(type_name(val.type_id())) +
+                          " to " + std::string(type_name(target)));
+}
+
+} // namespace
+
+InsertOperator::InsertOperator(TableHeap& heap, const Schema& storage_schema,
+                               std::vector<std::vector<const Expr*>> value_rows,
+                               const BoundStatement& bound)
+    : heap_(heap),
+      storage_schema_(storage_schema),
+      value_rows_(std::move(value_rows)),
+      bound_(bound),
+      schema_(OutputSchema({OutputColumn{"", "count", TypeId::INT64, false, 0}})) {}
+
+InsertOperator::InsertOperator(TableHeap& heap, const Schema& storage_schema,
+                               std::unique_ptr<Iterator> child)
+    : heap_(heap),
+      storage_schema_(storage_schema),
+      child_(std::move(child)),
+      schema_(OutputSchema({OutputColumn{"", "count", TypeId::INT64, false, 0}})) {}
+
+Result<void> InsertOperator::open() {
+    executed_ = false;
+    if (child_) {
+        return child_->open();
+    }
+    return ok();
+}
+
+Result<std::optional<Tuple>> InsertOperator::next() {
+    if (executed_) {
+        return ok(std::optional<Tuple>(std::nullopt));
+    }
+    executed_ = true;
+
+    int64_t count = 0;
+
+    if (child_) {
+        // INSERT ... SELECT — pull rows from child iterator.
+        while (true) {
+            auto row = child_->next();
+            if (!row) {
+                return make_error(row.error().code, row.error().message);
+            }
+            if (!row->has_value()) {
+                break;
+            }
+
+            auto values = row->value().values;
+            // Coerce to storage types when needed.
+            for (size_t i = 0; i < values.size() && i < storage_schema_.column_count(); ++i) {
+                auto target = storage_schema_.column(i).type;
+                if (values[i].type_id() != target && !values[i].is_null()) {
+                    auto fitted = fit_to_storage(values[i], target);
+                    if (!fitted) {
+                        return make_error(fitted.error().code, fitted.error().message);
+                    }
+                    values[i] = std::move(*fitted);
+                }
+            }
+            auto bytes = TupleSerializer::serialize(values, storage_schema_);
+            if (!bytes) {
+                return make_error(bytes.error().code, bytes.error().message);
+            }
+            auto rid = heap_.insert_tuple(*bytes);
+            if (!rid) {
+                return make_error(rid.error().code, rid.error().message);
+            }
+            ++count;
+        }
+    } else {
+        // INSERT ... VALUES — evaluate expression rows.
+        Tuple dummy{{}, std::nullopt};
+        OutputSchema empty_schema;
+
+        for (const auto& row_exprs : value_rows_) {
+            std::vector<Value> values;
+            values.reserve(row_exprs.size());
+
+            for (size_t i = 0; i < row_exprs.size(); ++i) {
+                auto val = evaluate_expr(*row_exprs[i], dummy, empty_schema, bound_);
+                if (!val) {
+                    return make_error(val.error().code, val.error().message);
+                }
+                // Coerce to storage schema type so TupleSerializer sees the
+                // expected variant alternative.
+                if (i < storage_schema_.column_count()) {
+                    auto target = storage_schema_.column(i).type;
+                    if (val->type_id() != target && !val->is_null()) {
+                        auto fitted = fit_to_storage(*val, target);
+                        if (!fitted) {
+                            return make_error(fitted.error().code,
+                                              fitted.error().message);
+                        }
+                        values.push_back(std::move(*fitted));
+                        continue;
+                    }
+                }
+                values.push_back(std::move(*val));
+            }
+
+            auto bytes = TupleSerializer::serialize(values, storage_schema_);
+            if (!bytes) {
+                return make_error(bytes.error().code, bytes.error().message);
+            }
+            auto rid = heap_.insert_tuple(*bytes);
+            if (!rid) {
+                return make_error(rid.error().code, rid.error().message);
+            }
+            ++count;
+        }
+    }
+
+    Tuple result;
+    result.values.push_back(Value(count));
+    return ok(std::optional<Tuple>(std::move(result)));
+}
+
+void InsertOperator::close() {
+    if (child_) {
+        child_->close();
+    }
+}
+
+const OutputSchema& InsertOperator::output_schema() const {
+    return schema_;
+}
+
+} // namespace giodb
