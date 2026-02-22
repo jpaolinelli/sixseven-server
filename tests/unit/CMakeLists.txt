@@ -20,6 +20,8 @@ add_executable(giodb_unit_tests
     test_btree_node.cpp
     test_btree.cpp
     test_btree_concurrency.cpp
+    test_table_heap.cpp
+    test_catalog.cpp
 )
 
 target_link_libraries(giodb_unit_tests
