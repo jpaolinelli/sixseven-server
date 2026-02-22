@@ -137,7 +137,9 @@ const std::unordered_map<std::string, TokenType>& keyword_map() {
 }
 
 /// Convert a character to uppercase (ASCII only).
-char to_upper(char c) { return static_cast<char>(std::toupper(static_cast<unsigned char>(c))); }
+char to_upper(char c) {
+    return static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+}
 
 /// Check if a character can start an identifier (letter or underscore).
 bool is_ident_start(char c) {
@@ -171,8 +173,7 @@ Result<std::vector<Token>> Lexer::tokenize() {
         }
 
         if (at_end()) {
-            tokens.push_back(
-                Token{TokenType::END_OF_FILE, {}, line_, column_});
+            tokens.push_back(Token{TokenType::END_OF_FILE, {}, line_, column_});
             break;
         }
 
@@ -200,12 +201,14 @@ char Lexer::advance() {
 }
 
 char Lexer::peek() const {
-    if (at_end()) return '\0';
+    if (at_end())
+        return '\0';
     return source_[current_];
 }
 
 char Lexer::peek_next() const {
-    if (current_ + 1 >= source_.size()) return '\0';
+    if (current_ + 1 >= source_.size())
+        return '\0';
     return source_[current_ + 1];
 }
 
@@ -256,11 +259,10 @@ Result<void> Lexer::skip_whitespace_and_comments() {
                 }
             }
             if (depth > 0) {
-                return make_error(
-                    StatusCode::PARSE_ERROR,
-                    "unterminated block comment starting at line " +
-                        std::to_string(comment_line) + ", column " +
-                        std::to_string(comment_col));
+                return make_error(StatusCode::PARSE_ERROR,
+                                  "unterminated block comment starting at line " +
+                                      std::to_string(comment_line) + ", column " +
+                                      std::to_string(comment_col));
             }
             continue;
         }
@@ -282,13 +284,20 @@ Result<Token> Lexer::scan_token() {
 
     // Single-character tokens.
     switch (c) {
-    case '+': return make_token(TokenType::PLUS);
-    case '-': return make_token(TokenType::MINUS);
-    case '*': return make_token(TokenType::STAR);
-    case '/': return make_token(TokenType::SLASH);
-    case '%': return make_token(TokenType::PERCENT);
-    case ',': return make_token(TokenType::COMMA);
-    case ';': return make_token(TokenType::SEMICOLON);
+    case '+':
+        return make_token(TokenType::PLUS);
+    case '-':
+        return make_token(TokenType::MINUS);
+    case '*':
+        return make_token(TokenType::STAR);
+    case '/':
+        return make_token(TokenType::SLASH);
+    case '%':
+        return make_token(TokenType::PERCENT);
+    case ',':
+        return make_token(TokenType::COMMA);
+    case ';':
+        return make_token(TokenType::SEMICOLON);
     case '.':
         // Check for float literal starting with dot: .123
         if (!at_end() && std::isdigit(static_cast<unsigned char>(peek()))) {
@@ -298,12 +307,18 @@ Result<Token> Lexer::scan_token() {
             return make_token(TokenType::FLOAT_LITERAL);
         }
         return make_token(TokenType::DOT);
-    case '(': return make_token(TokenType::LPAREN);
-    case ')': return make_token(TokenType::RPAREN);
-    case '[': return make_token(TokenType::LBRACKET);
-    case ']': return make_token(TokenType::RBRACKET);
-    case '=': return make_token(TokenType::EQUAL);
-    default: break;
+    case '(':
+        return make_token(TokenType::LPAREN);
+    case ')':
+        return make_token(TokenType::RPAREN);
+    case '[':
+        return make_token(TokenType::LBRACKET);
+    case ']':
+        return make_token(TokenType::RBRACKET);
+    case '=':
+        return make_token(TokenType::EQUAL);
+    default:
+        break;
     }
 
     // Two-character operators.
@@ -361,9 +376,9 @@ Result<Token> Lexer::scan_token() {
     }
 
     return make_error(StatusCode::PARSE_ERROR,
-                      "unexpected character '" + std::string(1, c) +
-                          "' at line " + std::to_string(token_start_line_) +
-                          ", column " + std::to_string(token_start_column_));
+                      "unexpected character '" + std::string(1, c) + "' at line " +
+                          std::to_string(token_start_line_) + ", column " +
+                          std::to_string(token_start_column_));
 }
 
 Token Lexer::scan_number() {
@@ -373,8 +388,8 @@ Token Lexer::scan_number() {
     }
 
     // Check for fractional part.
-    if (!at_end() && peek() == '.' && (current_ + 1 >= source_.size() ||
-                                        !is_ident_start(peek_next()))) {
+    if (!at_end() && peek() == '.' &&
+        (current_ + 1 >= source_.size() || !is_ident_start(peek_next()))) {
         advance(); // consume .
         while (!at_end() && std::isdigit(static_cast<unsigned char>(peek()))) {
             advance();
@@ -413,11 +428,10 @@ Result<Token> Lexer::scan_string() {
     // Opening quote already consumed.
     while (true) {
         if (at_end()) {
-            return make_error(
-                StatusCode::PARSE_ERROR,
-                "unterminated string literal starting at line " +
-                    std::to_string(token_start_line_) + ", column " +
-                    std::to_string(token_start_column_));
+            return make_error(StatusCode::PARSE_ERROR,
+                              "unterminated string literal starting at line " +
+                                  std::to_string(token_start_line_) + ", column " +
+                                  std::to_string(token_start_column_));
         }
         char c = advance();
         if (c == '\'') {
@@ -460,8 +474,7 @@ bool Lexer::has_valid_exponent() const {
         return false;
     }
     size_t lookahead = current_ + 1;
-    if (lookahead < source_.size() &&
-        (source_[lookahead] == '+' || source_[lookahead] == '-')) {
+    if (lookahead < source_.size() && (source_[lookahead] == '+' || source_[lookahead] == '-')) {
         lookahead++;
     }
     return lookahead < source_.size() &&
@@ -469,8 +482,8 @@ bool Lexer::has_valid_exponent() const {
 }
 
 Token Lexer::make_token(TokenType type) const {
-    return Token{type, source_.substr(start_, current_ - start_),
-                 token_start_line_, token_start_column_};
+    return Token{
+        type, source_.substr(start_, current_ - start_), token_start_line_, token_start_column_};
 }
 
 } // namespace giodb

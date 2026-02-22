@@ -11,7 +11,8 @@ static std::vector<StmtPtr> parse_ok(std::string_view sql) {
     Lexer lexer(sql);
     auto tokens = lexer.tokenize();
     EXPECT_TRUE(tokens.has_value()) << tokens.error().message;
-    if (!tokens) return {};
+    if (!tokens)
+        return {};
 
     Parser parser(std::move(*tokens));
     auto stmts = parser.parse_all();
@@ -22,14 +23,16 @@ static std::vector<StmtPtr> parse_ok(std::string_view sql) {
 static StmtPtr parse_one(std::string_view sql) {
     auto stmts = parse_ok(sql);
     EXPECT_EQ(stmts.size(), 1u);
-    if (stmts.size() != 1) return nullptr;
+    if (stmts.size() != 1)
+        return nullptr;
     return std::move(stmts[0]);
 }
 
 static void expect_parse_error(std::string_view sql) {
     Lexer lexer(sql);
     auto tokens = lexer.tokenize();
-    if (!tokens) return; // lexer error is also acceptable
+    if (!tokens)
+        return; // lexer error is also acceptable
     Parser parser(std::move(*tokens));
     auto stmts = parser.parse_all();
     EXPECT_FALSE(stmts.has_value()) << "expected parse error for: " << sql;
@@ -52,8 +55,7 @@ TEST(Parser, CreateTableBasic) {
 }
 
 TEST(Parser, CreateTableIfNotExists) {
-    auto stmt = parse_one(
-        "CREATE TABLE IF NOT EXISTS users (id INT)");
+    auto stmt = parse_one("CREATE TABLE IF NOT EXISTS users (id INT)");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     EXPECT_TRUE(ct->if_not_exists);
@@ -103,8 +105,7 @@ TEST(Parser, CreateTablePrimaryKeyColumn) {
 }
 
 TEST(Parser, CreateTablePrimaryKeyConstraint) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (id INT, name TEXT, PRIMARY KEY(id))");
+    auto stmt = parse_one("CREATE TABLE t (id INT, name TEXT, PRIMARY KEY(id))");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     ASSERT_EQ(ct->constraints.size(), 1u);
@@ -114,8 +115,7 @@ TEST(Parser, CreateTablePrimaryKeyConstraint) {
 }
 
 TEST(Parser, CreateTableCompositePK) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (a INT, b INT, PRIMARY KEY(a, b))");
+    auto stmt = parse_one("CREATE TABLE t (a INT, b INT, PRIMARY KEY(a, b))");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     ASSERT_EQ(ct->constraints.size(), 1u);
@@ -125,8 +125,7 @@ TEST(Parser, CreateTableCompositePK) {
 }
 
 TEST(Parser, CreateTableCheck) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (age INT CHECK(age > 0))");
+    auto stmt = parse_one("CREATE TABLE t (age INT CHECK(age > 0))");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     auto* chk = dynamic_cast<BinaryExpr*>(ct->columns[0].check_expr.get());
@@ -135,8 +134,7 @@ TEST(Parser, CreateTableCheck) {
 }
 
 TEST(Parser, CreateTableCheckConstraint) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (age INT, CHECK(age > 0))");
+    auto stmt = parse_one("CREATE TABLE t (age INT, CHECK(age > 0))");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     ASSERT_EQ(ct->constraints.size(), 1u);
@@ -145,11 +143,10 @@ TEST(Parser, CreateTableCheckConstraint) {
 }
 
 TEST(Parser, CreateTableForeignKey) {
-    auto stmt = parse_one(
-        "CREATE TABLE orders ("
-        "  id INT PRIMARY KEY,"
-        "  user_id INT REFERENCES users(id) ON DELETE CASCADE"
-        ")");
+    auto stmt = parse_one("CREATE TABLE orders ("
+                          "  id INT PRIMARY KEY,"
+                          "  user_id INT REFERENCES users(id) ON DELETE CASCADE"
+                          ")");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     EXPECT_EQ(ct->columns[1].fk_table, "users");
@@ -158,11 +155,10 @@ TEST(Parser, CreateTableForeignKey) {
 }
 
 TEST(Parser, CreateTableForeignKeyConstraint) {
-    auto stmt = parse_one(
-        "CREATE TABLE orders ("
-        "  id INT, user_id INT,"
-        "  FOREIGN KEY(user_id) REFERENCES users(id)"
-        ")");
+    auto stmt = parse_one("CREATE TABLE orders ("
+                          "  id INT, user_id INT,"
+                          "  FOREIGN KEY(user_id) REFERENCES users(id)"
+                          ")");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     ASSERT_EQ(ct->constraints.size(), 1u);
@@ -171,8 +167,7 @@ TEST(Parser, CreateTableForeignKeyConstraint) {
 }
 
 TEST(Parser, CreateTableUniqueConstraint) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (a INT, b INT, UNIQUE(a, b))");
+    auto stmt = parse_one("CREATE TABLE t (a INT, b INT, UNIQUE(a, b))");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     ASSERT_EQ(ct->constraints.size(), 1u);
@@ -181,8 +176,7 @@ TEST(Parser, CreateTableUniqueConstraint) {
 }
 
 TEST(Parser, CreateTableNamedConstraint) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (id INT, CONSTRAINT pk_t PRIMARY KEY(id))");
+    auto stmt = parse_one("CREATE TABLE t (id INT, CONSTRAINT pk_t PRIMARY KEY(id))");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     ASSERT_EQ(ct->constraints.size(), 1u);
@@ -191,14 +185,13 @@ TEST(Parser, CreateTableNamedConstraint) {
 }
 
 TEST(Parser, CreateTableAllTypes) {
-    auto stmt = parse_one(
-        "CREATE TABLE types ("
-        "  a TINYINT, b SMALLINT, c INT, d BIGINT,"
-        "  e FLOAT, f DOUBLE, g DECIMAL(10, 2),"
-        "  h BOOLEAN, i CHAR(10), j VARCHAR(255), k TEXT,"
-        "  l BLOB, m DATE, n TIME, o TIMESTAMP, p INTERVAL,"
-        "  q POINT, r JSON, s UUID"
-        ")");
+    auto stmt = parse_one("CREATE TABLE types ("
+                          "  a TINYINT, b SMALLINT, c INT, d BIGINT,"
+                          "  e FLOAT, f DOUBLE, g DECIMAL(10, 2),"
+                          "  h BOOLEAN, i CHAR(10), j VARCHAR(255), k TEXT,"
+                          "  l BLOB, m DATE, n TIME, o TIMESTAMP, p INTERVAL,"
+                          "  q POINT, r JSON, s UUID"
+                          ")");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     ASSERT_EQ(ct->columns.size(), 19u);
@@ -211,11 +204,10 @@ TEST(Parser, CreateTableAllTypes) {
 }
 
 TEST(Parser, CreateTableEmbedding) {
-    auto stmt = parse_one(
-        "CREATE TABLE products ("
-        "  id INT, description TEXT,"
-        "  vec EMBEDDING(384, description, 'openai')"
-        ")");
+    auto stmt = parse_one("CREATE TABLE products ("
+                          "  id INT, description TEXT,"
+                          "  vec EMBEDDING(384, description, 'openai')"
+                          ")");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     ASSERT_EQ(ct->columns.size(), 3u);
@@ -226,11 +218,10 @@ TEST(Parser, CreateTableEmbedding) {
 }
 
 TEST(Parser, CreateTableMultipleConstraints) {
-    auto stmt = parse_one(
-        "CREATE TABLE t ("
-        "  id INT NOT NULL UNIQUE DEFAULT 0,"
-        "  name VARCHAR(100) NOT NULL"
-        ")");
+    auto stmt = parse_one("CREATE TABLE t ("
+                          "  id INT NOT NULL UNIQUE DEFAULT 0,"
+                          "  name VARCHAR(100) NOT NULL"
+                          ")");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     EXPECT_FALSE(ct->columns[0].nullable);
@@ -301,8 +292,7 @@ TEST(Parser, AlterTableDropColumn) {
 }
 
 TEST(Parser, AlterTableRenameColumn) {
-    auto stmt = parse_one(
-        "ALTER TABLE users RENAME COLUMN old_name TO new_name");
+    auto stmt = parse_one("ALTER TABLE users RENAME COLUMN old_name TO new_name");
     auto* at = dynamic_cast<AlterTableStmt*>(stmt.get());
     ASSERT_NE(at, nullptr);
     EXPECT_EQ(at->action, AlterAction::RENAME_COLUMN);
@@ -313,8 +303,7 @@ TEST(Parser, AlterTableRenameColumn) {
 // -- CREATE INDEX tests -------------------------------------------------------
 
 TEST(Parser, CreateIndex) {
-    auto stmt = parse_one(
-        "CREATE INDEX idx_users_name ON users(name)");
+    auto stmt = parse_one("CREATE INDEX idx_users_name ON users(name)");
     auto* ci = dynamic_cast<CreateIndexStmt*>(stmt.get());
     ASSERT_NE(ci, nullptr);
     EXPECT_EQ(ci->name, "idx_users_name");
@@ -325,16 +314,14 @@ TEST(Parser, CreateIndex) {
 }
 
 TEST(Parser, CreateUniqueIndex) {
-    auto stmt = parse_one(
-        "CREATE UNIQUE INDEX idx_email ON users(email)");
+    auto stmt = parse_one("CREATE UNIQUE INDEX idx_email ON users(email)");
     auto* ci = dynamic_cast<CreateIndexStmt*>(stmt.get());
     ASSERT_NE(ci, nullptr);
     EXPECT_TRUE(ci->is_unique);
 }
 
 TEST(Parser, CreateIndexMultiColumn) {
-    auto stmt = parse_one(
-        "CREATE INDEX idx_multi ON users(last_name, first_name)");
+    auto stmt = parse_one("CREATE INDEX idx_multi ON users(last_name, first_name)");
     auto* ci = dynamic_cast<CreateIndexStmt*>(stmt.get());
     ASSERT_NE(ci, nullptr);
     ASSERT_EQ(ci->columns.size(), 2u);
@@ -343,16 +330,14 @@ TEST(Parser, CreateIndexMultiColumn) {
 }
 
 TEST(Parser, CreateIndexUsing) {
-    auto stmt = parse_one(
-        "CREATE INDEX idx_hash ON users(id) USING hash");
+    auto stmt = parse_one("CREATE INDEX idx_hash ON users(id) USING hash");
     auto* ci = dynamic_cast<CreateIndexStmt*>(stmt.get());
     ASSERT_NE(ci, nullptr);
     EXPECT_EQ(ci->method, "hash");
 }
 
 TEST(Parser, CreateIndexIfNotExists) {
-    auto stmt = parse_one(
-        "CREATE INDEX IF NOT EXISTS idx ON t(c)");
+    auto stmt = parse_one("CREATE INDEX IF NOT EXISTS idx ON t(c)");
     auto* ci = dynamic_cast<CreateIndexStmt*>(stmt.get());
     ASSERT_NE(ci, nullptr);
     EXPECT_TRUE(ci->if_not_exists);
@@ -378,8 +363,7 @@ TEST(Parser, DropIndexIfExists) {
 // -- CREATE EDGE TYPE tests ---------------------------------------------------
 
 TEST(Parser, CreateEdgeType) {
-    auto stmt = parse_one(
-        "CREATE EDGE TYPE follows FROM users TO users");
+    auto stmt = parse_one("CREATE EDGE TYPE follows FROM users TO users");
     auto* ce = dynamic_cast<CreateEdgeTypeStmt*>(stmt.get());
     ASSERT_NE(ce, nullptr);
     EXPECT_EQ(ce->name, "follows");
@@ -389,9 +373,8 @@ TEST(Parser, CreateEdgeType) {
 }
 
 TEST(Parser, CreateEdgeTypeWithProperties) {
-    auto stmt = parse_one(
-        "CREATE EDGE TYPE knows (since TIMESTAMP, weight FLOAT) "
-        "FROM users TO users");
+    auto stmt = parse_one("CREATE EDGE TYPE knows (since TIMESTAMP, weight FLOAT) "
+                          "FROM users TO users");
     auto* ce = dynamic_cast<CreateEdgeTypeStmt*>(stmt.get());
     ASSERT_NE(ce, nullptr);
     ASSERT_EQ(ce->properties.size(), 2u);
@@ -402,8 +385,7 @@ TEST(Parser, CreateEdgeTypeWithProperties) {
 }
 
 TEST(Parser, CreateEdgeTypeDifferentTables) {
-    auto stmt = parse_one(
-        "CREATE EDGE TYPE authored FROM users TO articles");
+    auto stmt = parse_one("CREATE EDGE TYPE authored FROM users TO articles");
     auto* ce = dynamic_cast<CreateEdgeTypeStmt*>(stmt.get());
     ASSERT_NE(ce, nullptr);
     EXPECT_EQ(ce->from_table, "users");
@@ -430,10 +412,9 @@ TEST(Parser, DropEdgeTypeIfExists) {
 // -- Multi-statement tests ----------------------------------------------------
 
 TEST(Parser, MultipleStatements) {
-    auto stmts = parse_ok(
-        "CREATE TABLE users (id INT); "
-        "CREATE TABLE orders (id INT); "
-        "DROP TABLE old_table;");
+    auto stmts = parse_ok("CREATE TABLE users (id INT); "
+                          "CREATE TABLE orders (id INT); "
+                          "DROP TABLE old_table;");
     ASSERT_EQ(stmts.size(), 3u);
     EXPECT_NE(dynamic_cast<CreateTableStmt*>(stmts[0].get()), nullptr);
     EXPECT_NE(dynamic_cast<CreateTableStmt*>(stmts[1].get()), nullptr);
@@ -501,34 +482,28 @@ TEST(Parser, ExprCheckComparison) {
 }
 
 TEST(Parser, ExprCheckAndOr) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (x INT, y INT, CHECK(x > 0 AND y > 0))");
+    auto stmt = parse_one("CREATE TABLE t (x INT, y INT, CHECK(x > 0 AND y > 0))");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
-    auto* and_expr = dynamic_cast<BinaryExpr*>(
-        ct->constraints[0].check_expr.get());
+    auto* and_expr = dynamic_cast<BinaryExpr*>(ct->constraints[0].check_expr.get());
     ASSERT_NE(and_expr, nullptr);
     EXPECT_EQ(and_expr->op, BinaryOp::AND);
 }
 
 TEST(Parser, ExprIsNull) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (x INT, CHECK(x IS NOT NULL))");
+    auto stmt = parse_one("CREATE TABLE t (x INT, CHECK(x IS NOT NULL))");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
-    auto* is_null = dynamic_cast<IsNullExpr*>(
-        ct->constraints[0].check_expr.get());
+    auto* is_null = dynamic_cast<IsNullExpr*>(ct->constraints[0].check_expr.get());
     ASSERT_NE(is_null, nullptr);
     EXPECT_TRUE(is_null->negated);
 }
 
 TEST(Parser, ExprFunctionCall) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP())");
+    auto stmt = parse_one("CREATE TABLE t (ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP())");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
-    auto* fn = dynamic_cast<FunctionCallExpr*>(
-        ct->columns[0].default_expr.get());
+    auto* fn = dynamic_cast<FunctionCallExpr*>(ct->columns[0].default_expr.get());
     ASSERT_NE(fn, nullptr);
     EXPECT_EQ(fn->name, "CURRENT_TIMESTAMP");
     EXPECT_TRUE(fn->args.empty());
@@ -606,8 +581,7 @@ TEST(Parser, KeywordAsTableName) {
 // -- Case insensitivity -------------------------------------------------------
 
 TEST(Parser, CaseInsensitiveKeywords) {
-    auto stmt = parse_one(
-        "create table Users (Id int not null, Name varchar(50))");
+    auto stmt = parse_one("create table Users (Id int not null, Name varchar(50))");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     EXPECT_EQ(ct->name, "Users");
@@ -621,8 +595,7 @@ TEST(Parser, CaseInsensitiveKeywords) {
 // -- INSERT tests -------------------------------------------------------------
 
 TEST(Parser, InsertBasic) {
-    auto stmt = parse_one(
-        "INSERT INTO users (name, age) VALUES ('Alice', 30)");
+    auto stmt = parse_one("INSERT INTO users (name, age) VALUES ('Alice', 30)");
     auto* ins = dynamic_cast<InsertStmt*>(stmt.get());
     ASSERT_NE(ins, nullptr);
     EXPECT_EQ(ins->table_name, "users");
@@ -647,8 +620,7 @@ TEST(Parser, InsertNoColumns) {
 }
 
 TEST(Parser, InsertMultipleRows) {
-    auto stmt = parse_one(
-        "INSERT INTO users (name) VALUES ('Alice'), ('Bob'), ('Charlie')");
+    auto stmt = parse_one("INSERT INTO users (name) VALUES ('Alice'), ('Bob'), ('Charlie')");
     auto* ins = dynamic_cast<InsertStmt*>(stmt.get());
     ASSERT_NE(ins, nullptr);
     ASSERT_EQ(ins->values.size(), 3u);
@@ -661,8 +633,7 @@ TEST(Parser, InsertMultipleRows) {
 }
 
 TEST(Parser, InsertSelect) {
-    auto stmt = parse_one(
-        "INSERT INTO archive (name) SELECT name FROM users WHERE active = FALSE");
+    auto stmt = parse_one("INSERT INTO archive (name) SELECT name FROM users WHERE active = FALSE");
     auto* ins = dynamic_cast<InsertStmt*>(stmt.get());
     ASSERT_NE(ins, nullptr);
     EXPECT_EQ(ins->table_name, "archive");
@@ -675,8 +646,7 @@ TEST(Parser, InsertSelect) {
 }
 
 TEST(Parser, InsertReturning) {
-    auto stmt = parse_one(
-        "INSERT INTO users (name) VALUES ('test') RETURNING id, name");
+    auto stmt = parse_one("INSERT INTO users (name) VALUES ('test') RETURNING id, name");
     auto* ins = dynamic_cast<InsertStmt*>(stmt.get());
     ASSERT_NE(ins, nullptr);
     ASSERT_EQ(ins->returning.size(), 2u);
@@ -701,8 +671,7 @@ TEST(Parser, UpdateBasic) {
 }
 
 TEST(Parser, UpdateMultipleSet) {
-    auto stmt = parse_one(
-        "UPDATE products SET price = 9.99, stock = stock + 1");
+    auto stmt = parse_one("UPDATE products SET price = 9.99, stock = stock + 1");
     auto* upd = dynamic_cast<UpdateStmt*>(stmt.get());
     ASSERT_NE(upd, nullptr);
     ASSERT_EQ(upd->assignments.size(), 2u);
@@ -711,8 +680,7 @@ TEST(Parser, UpdateMultipleSet) {
 }
 
 TEST(Parser, UpdateReturning) {
-    auto stmt = parse_one(
-        "UPDATE users SET active = FALSE WHERE id = 1 RETURNING *");
+    auto stmt = parse_one("UPDATE users SET active = FALSE WHERE id = 1 RETURNING *");
     auto* upd = dynamic_cast<UpdateStmt*>(stmt.get());
     ASSERT_NE(upd, nullptr);
     ASSERT_EQ(upd->returning.size(), 1u);
@@ -762,8 +730,8 @@ TEST(Parser, LinkBasic) {
 }
 
 TEST(Parser, LinkWithProperties) {
-    auto stmt = parse_one(
-        "LINK users(1) TO users(2) VIA follows (since = '2024-01-01', weight = 0.5)");
+    auto stmt =
+        parse_one("LINK users(1) TO users(2) VIA follows (since = '2024-01-01', weight = 0.5)");
     auto* lnk = dynamic_cast<LinkStmt*>(stmt.get());
     ASSERT_NE(lnk, nullptr);
     ASSERT_EQ(lnk->properties.size(), 2u);
@@ -784,8 +752,7 @@ TEST(Parser, UnlinkBasic) {
 }
 
 TEST(Parser, UnlinkWithWhere) {
-    auto stmt = parse_one(
-        "UNLINK users(1) FROM users(2) VIA follows WHERE weight < 0.5");
+    auto stmt = parse_one("UNLINK users(1) FROM users(2) VIA follows WHERE weight < 0.5");
     auto* ulnk = dynamic_cast<UnlinkStmt*>(stmt.get());
     ASSERT_NE(ulnk, nullptr);
     EXPECT_NE(ulnk->where_expr, nullptr);
@@ -839,8 +806,7 @@ TEST(Parser, SelectWhere) {
 }
 
 TEST(Parser, SelectOrderBy) {
-    auto stmt = parse_one(
-        "SELECT name FROM users ORDER BY name ASC, age DESC");
+    auto stmt = parse_one("SELECT name FROM users ORDER BY name ASC, age DESC");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->order_by.size(), 2u);
@@ -874,8 +840,7 @@ TEST(Parser, SelectAlias) {
 // -- IN expression ------------------------------------------------------------
 
 TEST(Parser, ExprInValues) {
-    auto stmt = parse_one(
-        "SELECT id FROM users WHERE status IN ('active', 'pending')");
+    auto stmt = parse_one("SELECT id FROM users WHERE status IN ('active', 'pending')");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* in_expr = dynamic_cast<InExpr*>(sel->where_expr.get());
@@ -888,8 +853,7 @@ TEST(Parser, ExprInValues) {
 }
 
 TEST(Parser, ExprNotIn) {
-    auto stmt = parse_one(
-        "SELECT id FROM users WHERE id NOT IN (1, 2, 3)");
+    auto stmt = parse_one("SELECT id FROM users WHERE id NOT IN (1, 2, 3)");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* in_expr = dynamic_cast<InExpr*>(sel->where_expr.get());
@@ -899,8 +863,7 @@ TEST(Parser, ExprNotIn) {
 }
 
 TEST(Parser, ExprInSubquery) {
-    auto stmt = parse_one(
-        "SELECT * FROM orders WHERE user_id IN (SELECT id FROM users)");
+    auto stmt = parse_one("SELECT * FROM orders WHERE user_id IN (SELECT id FROM users)");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* in_expr = dynamic_cast<InExpr*>(sel->where_expr.get());
@@ -913,8 +876,7 @@ TEST(Parser, ExprInSubquery) {
 // -- BETWEEN expression -------------------------------------------------------
 
 TEST(Parser, ExprBetween) {
-    auto stmt = parse_one(
-        "SELECT * FROM products WHERE price BETWEEN 10 AND 100");
+    auto stmt = parse_one("SELECT * FROM products WHERE price BETWEEN 10 AND 100");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* bet = dynamic_cast<BetweenExpr*>(sel->where_expr.get());
@@ -929,8 +891,7 @@ TEST(Parser, ExprBetween) {
 }
 
 TEST(Parser, ExprNotBetween) {
-    auto stmt = parse_one(
-        "SELECT * FROM t WHERE x NOT BETWEEN 0 AND 9");
+    auto stmt = parse_one("SELECT * FROM t WHERE x NOT BETWEEN 0 AND 9");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* bet = dynamic_cast<BetweenExpr*>(sel->where_expr.get());
@@ -940,8 +901,7 @@ TEST(Parser, ExprNotBetween) {
 
 TEST(Parser, ExprBetweenAndOther) {
     // x BETWEEN 1 AND 10 AND y = 5 — first AND is BETWEEN, second is boolean.
-    auto stmt = parse_one(
-        "SELECT * FROM t WHERE x BETWEEN 1 AND 10 AND y = 5");
+    auto stmt = parse_one("SELECT * FROM t WHERE x BETWEEN 1 AND 10 AND y = 5");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* and_expr = dynamic_cast<BinaryExpr*>(sel->where_expr.get());
@@ -954,8 +914,7 @@ TEST(Parser, ExprBetweenAndOther) {
 // -- LIKE expression ----------------------------------------------------------
 
 TEST(Parser, ExprLike) {
-    auto stmt = parse_one(
-        "SELECT * FROM users WHERE name LIKE 'A%'");
+    auto stmt = parse_one("SELECT * FROM users WHERE name LIKE 'A%'");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* like = dynamic_cast<LikeExpr*>(sel->where_expr.get());
@@ -967,8 +926,7 @@ TEST(Parser, ExprLike) {
 }
 
 TEST(Parser, ExprNotLike) {
-    auto stmt = parse_one(
-        "SELECT * FROM users WHERE name NOT LIKE '%test%'");
+    auto stmt = parse_one("SELECT * FROM users WHERE name NOT LIKE '%test%'");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* like = dynamic_cast<LikeExpr*>(sel->where_expr.get());
@@ -979,9 +937,8 @@ TEST(Parser, ExprNotLike) {
 // -- CASE expression ----------------------------------------------------------
 
 TEST(Parser, ExprCaseSearched) {
-    auto stmt = parse_one(
-        "SELECT CASE WHEN age < 18 THEN 'minor' "
-        "WHEN age < 65 THEN 'adult' ELSE 'senior' END FROM users");
+    auto stmt = parse_one("SELECT CASE WHEN age < 18 THEN 'minor' "
+                          "WHEN age < 65 THEN 'adult' ELSE 'senior' END FROM users");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* case_expr = dynamic_cast<CaseExpr*>(sel->items[0].expr.get());
@@ -992,9 +949,8 @@ TEST(Parser, ExprCaseSearched) {
 }
 
 TEST(Parser, ExprCaseSimple) {
-    auto stmt = parse_one(
-        "SELECT CASE status WHEN 'A' THEN 'Active' "
-        "WHEN 'I' THEN 'Inactive' END FROM users");
+    auto stmt = parse_one("SELECT CASE status WHEN 'A' THEN 'Active' "
+                          "WHEN 'I' THEN 'Inactive' END FROM users");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* case_expr = dynamic_cast<CaseExpr*>(sel->items[0].expr.get());
@@ -1043,8 +999,7 @@ TEST(Parser, ExprExists) {
 // -- Subquery expression ------------------------------------------------------
 
 TEST(Parser, ExprSubquery) {
-    auto stmt = parse_one(
-        "SELECT (SELECT COUNT(*) FROM orders) FROM users");
+    auto stmt = parse_one("SELECT (SELECT COUNT(*) FROM orders) FROM users");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* sub = dynamic_cast<SubqueryExpr*>(sel->items[0].expr.get());
@@ -1054,8 +1009,7 @@ TEST(Parser, ExprSubquery) {
 // -- Array literal ------------------------------------------------------------
 
 TEST(Parser, ExprArray) {
-    auto stmt = parse_one(
-        "SELECT * FROM products WHERE vec = [1.0, 2.0, 3.0]");
+    auto stmt = parse_one("SELECT * FROM products WHERE vec = [1.0, 2.0, 3.0]");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* eq = dynamic_cast<BinaryExpr*>(sel->where_expr.get());
@@ -1094,8 +1048,7 @@ TEST(Parser, ExprCountDistinct) {
 // -- Qualified column ref -----------------------------------------------------
 
 TEST(Parser, ExprQualifiedColumn) {
-    auto stmt = parse_one(
-        "SELECT users.name FROM users WHERE users.id = 1");
+    auto stmt = parse_one("SELECT users.name FROM users WHERE users.id = 1");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* col = dynamic_cast<ColumnRefExpr*>(sel->items[0].expr.get());
@@ -1107,8 +1060,7 @@ TEST(Parser, ExprQualifiedColumn) {
 // -- Complex expressions combining operators ----------------------------------
 
 TEST(Parser, ExprComplex) {
-    auto stmt = parse_one(
-        "SELECT * FROM t WHERE a > 1 AND b IN (1, 2) OR c LIKE '%x%'");
+    auto stmt = parse_one("SELECT * FROM t WHERE a > 1 AND b IN (1, 2) OR c LIKE '%x%'");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     // OR has lowest precedence: (a > 1 AND b IN (1, 2)) OR (c LIKE '%x%')
@@ -1122,9 +1074,8 @@ TEST(Parser, ExprComplex) {
 // -- JOIN tests ---------------------------------------------------------------
 
 TEST(Parser, SelectInnerJoin) {
-    auto stmt = parse_one(
-        "SELECT u.name, o.total FROM users u "
-        "INNER JOIN orders o ON u.id = o.user_id");
+    auto stmt = parse_one("SELECT u.name, o.total FROM users u "
+                          "INNER JOIN orders o ON u.id = o.user_id");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->from.size(), 1u);
@@ -1138,8 +1089,7 @@ TEST(Parser, SelectInnerJoin) {
 }
 
 TEST(Parser, SelectLeftJoin) {
-    auto stmt = parse_one(
-        "SELECT * FROM users LEFT JOIN orders ON users.id = orders.user_id");
+    auto stmt = parse_one("SELECT * FROM users LEFT JOIN orders ON users.id = orders.user_id");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->joins.size(), 1u);
@@ -1147,8 +1097,8 @@ TEST(Parser, SelectLeftJoin) {
 }
 
 TEST(Parser, SelectLeftOuterJoin) {
-    auto stmt = parse_one(
-        "SELECT * FROM users LEFT OUTER JOIN orders ON users.id = orders.user_id");
+    auto stmt =
+        parse_one("SELECT * FROM users LEFT OUTER JOIN orders ON users.id = orders.user_id");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->joins.size(), 1u);
@@ -1156,8 +1106,7 @@ TEST(Parser, SelectLeftOuterJoin) {
 }
 
 TEST(Parser, SelectRightJoin) {
-    auto stmt = parse_one(
-        "SELECT * FROM users RIGHT JOIN orders ON users.id = orders.user_id");
+    auto stmt = parse_one("SELECT * FROM users RIGHT JOIN orders ON users.id = orders.user_id");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->joins.size(), 1u);
@@ -1165,8 +1114,7 @@ TEST(Parser, SelectRightJoin) {
 }
 
 TEST(Parser, SelectFullOuterJoin) {
-    auto stmt = parse_one(
-        "SELECT * FROM a FULL OUTER JOIN b ON a.id = b.id");
+    auto stmt = parse_one("SELECT * FROM a FULL OUTER JOIN b ON a.id = b.id");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->joins.size(), 1u);
@@ -1183,8 +1131,7 @@ TEST(Parser, SelectCrossJoin) {
 }
 
 TEST(Parser, SelectBareJoin) {
-    auto stmt = parse_one(
-        "SELECT * FROM a JOIN b ON a.id = b.a_id");
+    auto stmt = parse_one("SELECT * FROM a JOIN b ON a.id = b.a_id");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->joins.size(), 1u);
@@ -1192,10 +1139,9 @@ TEST(Parser, SelectBareJoin) {
 }
 
 TEST(Parser, SelectMultiJoin) {
-    auto stmt = parse_one(
-        "SELECT * FROM a "
-        "JOIN b ON a.id = b.a_id "
-        "LEFT JOIN c ON b.id = c.b_id");
+    auto stmt = parse_one("SELECT * FROM a "
+                          "JOIN b ON a.id = b.a_id "
+                          "LEFT JOIN c ON b.id = c.b_id");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->joins.size(), 2u);
@@ -1206,8 +1152,7 @@ TEST(Parser, SelectMultiJoin) {
 // -- GROUP BY / HAVING tests --------------------------------------------------
 
 TEST(Parser, SelectGroupBy) {
-    auto stmt = parse_one(
-        "SELECT department, COUNT(*) FROM employees GROUP BY department");
+    auto stmt = parse_one("SELECT department, COUNT(*) FROM employees GROUP BY department");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->group_by.size(), 1u);
@@ -1217,16 +1162,14 @@ TEST(Parser, SelectGroupBy) {
 }
 
 TEST(Parser, SelectGroupByMultiple) {
-    auto stmt = parse_one(
-        "SELECT dept, role, COUNT(*) FROM emp GROUP BY dept, role");
+    auto stmt = parse_one("SELECT dept, role, COUNT(*) FROM emp GROUP BY dept, role");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->group_by.size(), 2u);
 }
 
 TEST(Parser, SelectGroupByHaving) {
-    auto stmt = parse_one(
-        "SELECT dept, COUNT(*) FROM emp GROUP BY dept HAVING COUNT(*) > 5");
+    auto stmt = parse_one("SELECT dept, COUNT(*) FROM emp GROUP BY dept HAVING COUNT(*) > 5");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->group_by.size(), 1u);
@@ -1239,8 +1182,7 @@ TEST(Parser, SelectGroupByHaving) {
 // -- Set operations -----------------------------------------------------------
 
 TEST(Parser, SelectUnion) {
-    auto stmt = parse_one(
-        "SELECT id FROM a UNION SELECT id FROM b");
+    auto stmt = parse_one("SELECT id FROM a UNION SELECT id FROM b");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->set_op, SelectStmt::SetOp::UNION);
@@ -1250,24 +1192,21 @@ TEST(Parser, SelectUnion) {
 }
 
 TEST(Parser, SelectUnionAll) {
-    auto stmt = parse_one(
-        "SELECT id FROM a UNION ALL SELECT id FROM b");
+    auto stmt = parse_one("SELECT id FROM a UNION ALL SELECT id FROM b");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->set_op, SelectStmt::SetOp::UNION_ALL);
 }
 
 TEST(Parser, SelectIntersect) {
-    auto stmt = parse_one(
-        "SELECT id FROM a INTERSECT SELECT id FROM b");
+    auto stmt = parse_one("SELECT id FROM a INTERSECT SELECT id FROM b");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->set_op, SelectStmt::SetOp::INTERSECT);
 }
 
 TEST(Parser, SelectExcept) {
-    auto stmt = parse_one(
-        "SELECT id FROM a EXCEPT SELECT id FROM b");
+    auto stmt = parse_one("SELECT id FROM a EXCEPT SELECT id FROM b");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->set_op, SelectStmt::SetOp::EXCEPT);
@@ -1276,9 +1215,8 @@ TEST(Parser, SelectExcept) {
 // -- CTE (WITH) tests ---------------------------------------------------------
 
 TEST(Parser, SelectWithCTE) {
-    auto stmt = parse_one(
-        "WITH active AS (SELECT * FROM users WHERE active = TRUE) "
-        "SELECT * FROM active");
+    auto stmt = parse_one("WITH active AS (SELECT * FROM users WHERE active = TRUE) "
+                          "SELECT * FROM active");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->ctes.size(), 1u);
@@ -1289,9 +1227,8 @@ TEST(Parser, SelectWithCTE) {
 }
 
 TEST(Parser, SelectWithMultipleCTEs) {
-    auto stmt = parse_one(
-        "WITH a AS (SELECT 1), b AS (SELECT 2) "
-        "SELECT * FROM a, b");
+    auto stmt = parse_one("WITH a AS (SELECT 1), b AS (SELECT 2) "
+                          "SELECT * FROM a, b");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->ctes.size(), 2u);
@@ -1302,8 +1239,7 @@ TEST(Parser, SelectWithMultipleCTEs) {
 // -- Subquery in FROM ---------------------------------------------------------
 
 TEST(Parser, SelectSubqueryInFrom) {
-    auto stmt = parse_one(
-        "SELECT s.id FROM (SELECT id FROM users WHERE active = TRUE) AS s");
+    auto stmt = parse_one("SELECT s.id FROM (SELECT id FROM users WHERE active = TRUE) AS s");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->from.size(), 1u);
@@ -1314,8 +1250,7 @@ TEST(Parser, SelectSubqueryInFrom) {
 }
 
 TEST(Parser, SelectSubqueryImplicitAlias) {
-    auto stmt = parse_one(
-        "SELECT s.id FROM (SELECT id FROM users) s");
+    auto stmt = parse_one("SELECT s.id FROM (SELECT id FROM users) s");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->from[0].alias, "s");
@@ -1342,15 +1277,14 @@ TEST(Parser, SelectImplicitColumnAlias) {
 // -- Complex SELECT combining multiple clauses --------------------------------
 
 TEST(Parser, SelectAllClauses) {
-    auto stmt = parse_one(
-        "SELECT DISTINCT dept, COUNT(*) AS cnt "
-        "FROM employees e "
-        "JOIN departments d ON e.dept_id = d.id "
-        "WHERE e.active = TRUE "
-        "GROUP BY dept "
-        "HAVING COUNT(*) > 3 "
-        "ORDER BY cnt DESC "
-        "LIMIT 10 OFFSET 5");
+    auto stmt = parse_one("SELECT DISTINCT dept, COUNT(*) AS cnt "
+                          "FROM employees e "
+                          "JOIN departments d ON e.dept_id = d.id "
+                          "WHERE e.active = TRUE "
+                          "GROUP BY dept "
+                          "HAVING COUNT(*) > 3 "
+                          "ORDER BY cnt DESC "
+                          "LIMIT 10 OFFSET 5");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_TRUE(sel->distinct);
@@ -1415,9 +1349,8 @@ TEST(Parser, TraverseMaxDepth) {
 }
 
 TEST(Parser, TraverseAllOptions) {
-    auto stmt = parse_one(
-        "TRAVERSE knows FROM users(42) DIRECTION BOTH MAX_DEPTH 5 "
-        "WHERE weight > 0.5 FETCH");
+    auto stmt = parse_one("TRAVERSE knows FROM users(42) DIRECTION BOTH MAX_DEPTH 5 "
+                          "WHERE weight > 0.5 FETCH");
     auto* tr = dynamic_cast<TraverseStmt*>(stmt.get());
     ASSERT_NE(tr, nullptr);
     EXPECT_EQ(tr->edge_type, "knows");
@@ -1430,8 +1363,7 @@ TEST(Parser, TraverseAllOptions) {
 // -- SHORTEST PATH tests ------------------------------------------------------
 
 TEST(Parser, ShortestPathBasic) {
-    auto stmt = parse_one(
-        "SHORTEST PATH FROM users(1) TO users(42) VIA follows");
+    auto stmt = parse_one("SHORTEST PATH FROM users(1) TO users(42) VIA follows");
     auto* sp = dynamic_cast<ShortestPathStmt*>(stmt.get());
     ASSERT_NE(sp, nullptr);
     EXPECT_EQ(sp->from_table, "users");
@@ -1442,9 +1374,8 @@ TEST(Parser, ShortestPathBasic) {
 }
 
 TEST(Parser, ShortestPathWithOptions) {
-    auto stmt = parse_one(
-        "SHORTEST PATH FROM users(1) TO users(99) VIA knows "
-        "DIRECTION BOTH MAX_DEPTH 10");
+    auto stmt = parse_one("SHORTEST PATH FROM users(1) TO users(99) VIA knows "
+                          "DIRECTION BOTH MAX_DEPTH 10");
     auto* sp = dynamic_cast<ShortestPathStmt*>(stmt.get());
     ASSERT_NE(sp, nullptr);
     EXPECT_EQ(sp->direction, TraverseDirection::BOTH);
@@ -1454,8 +1385,7 @@ TEST(Parser, ShortestPathWithOptions) {
 // -- MATCH tests --------------------------------------------------------------
 
 TEST(Parser, MatchBasic) {
-    auto stmt = parse_one(
-        "MATCH (a:users)-[e:follows]->(b:users) RETURN a.name, b.name");
+    auto stmt = parse_one("MATCH (a:users)-[e:follows]->(b:users) RETURN a.name, b.name");
     auto* m = dynamic_cast<MatchStmt*>(stmt.get());
     ASSERT_NE(m, nullptr);
     ASSERT_EQ(m->pattern.size(), 2u);
@@ -1472,9 +1402,8 @@ TEST(Parser, MatchBasic) {
 }
 
 TEST(Parser, MatchWithWhere) {
-    auto stmt = parse_one(
-        "MATCH (a:users)-[e:follows]->(b:users) "
-        "WHERE a.age > 18 RETURN b.name");
+    auto stmt = parse_one("MATCH (a:users)-[e:follows]->(b:users) "
+                          "WHERE a.age > 18 RETURN b.name");
     auto* m = dynamic_cast<MatchStmt*>(stmt.get());
     ASSERT_NE(m, nullptr);
     EXPECT_NE(m->where_expr, nullptr);
@@ -1482,8 +1411,7 @@ TEST(Parser, MatchWithWhere) {
 }
 
 TEST(Parser, MatchIncoming) {
-    auto stmt = parse_one(
-        "MATCH (a:users)<-[e:follows]-(b:users) RETURN a.name");
+    auto stmt = parse_one("MATCH (a:users)<-[e:follows]-(b:users) RETURN a.name");
     auto* m = dynamic_cast<MatchStmt*>(stmt.get());
     ASSERT_NE(m, nullptr);
     ASSERT_TRUE(m->pattern[0].outgoing_edge.has_value());
@@ -1491,8 +1419,7 @@ TEST(Parser, MatchIncoming) {
 }
 
 TEST(Parser, MatchUndirected) {
-    auto stmt = parse_one(
-        "MATCH (a:users)-[e:knows]-(b:users) RETURN a.name");
+    auto stmt = parse_one("MATCH (a:users)-[e:knows]-(b:users) RETURN a.name");
     auto* m = dynamic_cast<MatchStmt*>(stmt.get());
     ASSERT_NE(m, nullptr);
     ASSERT_TRUE(m->pattern[0].outgoing_edge.has_value());
@@ -1500,9 +1427,8 @@ TEST(Parser, MatchUndirected) {
 }
 
 TEST(Parser, MatchMultiHop) {
-    auto stmt = parse_one(
-        "MATCH (a:users)-[e1:follows]->(b:users)-[e2:follows]->(c:users) "
-        "RETURN a.name, c.name");
+    auto stmt = parse_one("MATCH (a:users)-[e1:follows]->(b:users)-[e2:follows]->(c:users) "
+                          "RETURN a.name, c.name");
     auto* m = dynamic_cast<MatchStmt*>(stmt.get());
     ASSERT_NE(m, nullptr);
     ASSERT_EQ(m->pattern.size(), 3u);
@@ -1514,8 +1440,7 @@ TEST(Parser, MatchMultiHop) {
 // -- NEAREST tests ------------------------------------------------------------
 
 TEST(Parser, NearestBasic) {
-    auto stmt = parse_one(
-        "NEAREST 5 FROM products.embedding TO [1.0, 2.0, 3.0]");
+    auto stmt = parse_one("NEAREST 5 FROM products.embedding TO [1.0, 2.0, 3.0]");
     auto* n = dynamic_cast<NearestStmt*>(stmt.get());
     ASSERT_NE(n, nullptr);
     auto* k = dynamic_cast<LiteralExpr*>(n->k.get());
@@ -1527,16 +1452,14 @@ TEST(Parser, NearestBasic) {
 }
 
 TEST(Parser, NearestWithWhere) {
-    auto stmt = parse_one(
-        "NEAREST 10 FROM products.vec TO [1.0, 0.0] WHERE active = TRUE");
+    auto stmt = parse_one("NEAREST 10 FROM products.vec TO [1.0, 0.0] WHERE active = TRUE");
     auto* n = dynamic_cast<NearestStmt*>(stmt.get());
     ASSERT_NE(n, nullptr);
     EXPECT_NE(n->where_expr, nullptr);
 }
 
 TEST(Parser, NearestWithMetric) {
-    auto stmt = parse_one(
-        "NEAREST 5 FROM items.embedding TO [1.0, 2.0] USING L2");
+    auto stmt = parse_one("NEAREST 5 FROM items.embedding TO [1.0, 2.0] USING L2");
     auto* n = dynamic_cast<NearestStmt*>(stmt.get());
     ASSERT_NE(n, nullptr);
     EXPECT_EQ(n->metric, NearestMetric::L2);

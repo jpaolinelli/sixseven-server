@@ -107,11 +107,12 @@ bool is_type_keyword(TokenType type) {
 /// Check if token is an identifier matching the given uppercase name
 /// (case-insensitive).
 bool match_ident_ci(const Token& tok, std::string_view upper_name) {
-    if (tok.type != TokenType::IDENTIFIER) return false;
-    if (tok.lexeme.size() != upper_name.size()) return false;
+    if (tok.type != TokenType::IDENTIFIER)
+        return false;
+    if (tok.lexeme.size() != upper_name.size())
+        return false;
     for (size_t i = 0; i < tok.lexeme.size(); ++i) {
-        if (static_cast<char>(std::toupper(
-                static_cast<unsigned char>(tok.lexeme[i]))) !=
+        if (static_cast<char>(std::toupper(static_cast<unsigned char>(tok.lexeme[i]))) !=
             upper_name[i]) {
             return false;
         }
@@ -174,8 +175,7 @@ std::string unquote_string(std::string_view lexeme) {
     std::string result;
     result.reserve(lexeme.size());
     for (size_t i = 0; i < lexeme.size(); ++i) {
-        if (lexeme[i] == '\'' && i + 1 < lexeme.size() &&
-            lexeme[i + 1] == '\'') {
+        if (lexeme[i] == '\'' && i + 1 < lexeme.size() && lexeme[i + 1] == '\'') {
             result += '\'';
             ++i;
         } else {
@@ -198,7 +198,8 @@ Result<StmtPtr> Parser::parse() {
         return error("unexpected end of input");
     }
     auto stmt = parse_statement();
-    if (!stmt) return stmt;
+    if (!stmt)
+        return stmt;
 
     // Consume optional trailing semicolon.
     match(TokenType::SEMICOLON);
@@ -211,7 +212,8 @@ Result<std::vector<StmtPtr>> Parser::parse_all() {
 
     while (!at_end()) {
         // Skip stray semicolons.
-        if (match(TokenType::SEMICOLON)) continue;
+        if (match(TokenType::SEMICOLON))
+            continue;
 
         auto stmt = parse_statement();
         if (stmt) {
@@ -273,11 +275,10 @@ Result<Token> Parser::expect(TokenType type, const std::string& message) {
         return ok(advance());
     }
     const auto& tok = peek();
-    return make_error(
-        StatusCode::PARSE_ERROR,
-        message + " at line " + std::to_string(tok.line) + ", column " +
-            std::to_string(tok.column) + " (got " +
-            std::string(token_type_name(tok.type)) + ")");
+    return make_error(StatusCode::PARSE_ERROR,
+                      message + " at line " + std::to_string(tok.line) + ", column " +
+                          std::to_string(tok.column) + " (got " +
+                          std::string(token_type_name(tok.type)) + ")");
 }
 
 bool Parser::at_end() const {
@@ -289,59 +290,83 @@ Result<std::string> Parser::parse_name(const std::string& context) {
         return ok(std::string(advance().lexeme));
     }
     const auto& tok = peek();
-    return make_error(
-        StatusCode::PARSE_ERROR,
-        "expected " + context + " at line " + std::to_string(tok.line) +
-            ", column " + std::to_string(tok.column) + " (got " +
-            std::string(token_type_name(tok.type)) + ")");
+    return make_error(StatusCode::PARSE_ERROR,
+                      "expected " + context + " at line " + std::to_string(tok.line) + ", column " +
+                          std::to_string(tok.column) + " (got " +
+                          std::string(token_type_name(tok.type)) + ")");
 }
 
 // -- Error recovery -----------------------------------------------------------
 
 void Parser::synchronize() {
     while (!at_end()) {
-        if (match(TokenType::SEMICOLON)) return;
+        if (match(TokenType::SEMICOLON))
+            return;
         advance();
     }
 }
 
 Result<StmtPtr> Parser::error(const std::string& message) {
     const auto& tok = peek();
-    return make_error(
-        StatusCode::PARSE_ERROR,
-        message + " at line " + std::to_string(tok.line) + ", column " +
-            std::to_string(tok.column));
+    return make_error(StatusCode::PARSE_ERROR,
+                      message + " at line " + std::to_string(tok.line) + ", column " +
+                          std::to_string(tok.column));
 }
 
 // -- Statement dispatch -------------------------------------------------------
 
 Result<StmtPtr> Parser::parse_statement() {
     switch (peek().type) {
-    case TokenType::CREATE: return parse_create();
-    case TokenType::DROP: return parse_drop();
-    case TokenType::ALTER: return parse_alter();
-    case TokenType::INSERT: return parse_insert();
-    case TokenType::UPDATE: return parse_update();
-    case TokenType::DELETE: return parse_delete();
-    case TokenType::SELECT: return parse_select();
-    case TokenType::WITH: return parse_with();
-    case TokenType::LINK: return parse_link();
-    case TokenType::UNLINK: return parse_unlink();
-    case TokenType::TRAVERSE: return parse_traverse();
-    case TokenType::NEAREST: return parse_nearest();
-    case TokenType::MATCH: return parse_match();
-    case TokenType::SHORTEST: return parse_shortest_path();
-    case TokenType::BEGIN: return parse_begin();
-    case TokenType::COMMIT: return parse_commit();
-    case TokenType::ROLLBACK: return parse_rollback();
-    case TokenType::SAVEPOINT: return parse_savepoint();
-    case TokenType::SET: return parse_set_stmt();
-    case TokenType::SHOW: return parse_show();
-    case TokenType::EXPLAIN: return parse_explain();
-    case TokenType::DESCRIBE: return parse_describe();
-    case TokenType::REEMBED: return parse_reembed();
-    case TokenType::VACUUM: return parse_vacuum();
-    case TokenType::ANALYZE: return parse_analyze_stmt();
+    case TokenType::CREATE:
+        return parse_create();
+    case TokenType::DROP:
+        return parse_drop();
+    case TokenType::ALTER:
+        return parse_alter();
+    case TokenType::INSERT:
+        return parse_insert();
+    case TokenType::UPDATE:
+        return parse_update();
+    case TokenType::DELETE:
+        return parse_delete();
+    case TokenType::SELECT:
+        return parse_select();
+    case TokenType::WITH:
+        return parse_with();
+    case TokenType::LINK:
+        return parse_link();
+    case TokenType::UNLINK:
+        return parse_unlink();
+    case TokenType::TRAVERSE:
+        return parse_traverse();
+    case TokenType::NEAREST:
+        return parse_nearest();
+    case TokenType::MATCH:
+        return parse_match();
+    case TokenType::SHORTEST:
+        return parse_shortest_path();
+    case TokenType::BEGIN:
+        return parse_begin();
+    case TokenType::COMMIT:
+        return parse_commit();
+    case TokenType::ROLLBACK:
+        return parse_rollback();
+    case TokenType::SAVEPOINT:
+        return parse_savepoint();
+    case TokenType::SET:
+        return parse_set_stmt();
+    case TokenType::SHOW:
+        return parse_show();
+    case TokenType::EXPLAIN:
+        return parse_explain();
+    case TokenType::DESCRIBE:
+        return parse_describe();
+    case TokenType::REEMBED:
+        return parse_reembed();
+    case TokenType::VACUUM:
+        return parse_vacuum();
+    case TokenType::ANALYZE:
+        return parse_analyze_stmt();
     default:
         return error("expected statement");
     }
@@ -350,17 +375,21 @@ Result<StmtPtr> Parser::parse_statement() {
 Result<StmtPtr> Parser::parse_create() {
     advance(); // consume CREATE
 
-    if (match(TokenType::TABLE)) return parse_create_table();
-    if (match(TokenType::INDEX)) return parse_create_index(false);
+    if (match(TokenType::TABLE))
+        return parse_create_table();
+    if (match(TokenType::INDEX))
+        return parse_create_index(false);
     if (check(TokenType::UNIQUE)) {
         advance(); // consume UNIQUE
         auto idx = expect(TokenType::INDEX, "expected INDEX after UNIQUE");
-        if (!idx) return tl::unexpected(idx.error());
+        if (!idx)
+            return tl::unexpected(idx.error());
         return parse_create_index(true);
     }
     if (match(TokenType::EDGE)) {
         auto type = expect(TokenType::TYPE, "expected TYPE after EDGE");
-        if (!type) return tl::unexpected(type.error());
+        if (!type)
+            return tl::unexpected(type.error());
         return parse_create_edge_type();
     }
 
@@ -370,11 +399,14 @@ Result<StmtPtr> Parser::parse_create() {
 Result<StmtPtr> Parser::parse_drop() {
     advance(); // consume DROP
 
-    if (match(TokenType::TABLE)) return parse_drop_table();
-    if (match(TokenType::INDEX)) return parse_drop_index();
+    if (match(TokenType::TABLE))
+        return parse_drop_table();
+    if (match(TokenType::INDEX))
+        return parse_drop_index();
     if (match(TokenType::EDGE)) {
         auto type = expect(TokenType::TYPE, "expected TYPE after EDGE");
-        if (!type) return tl::unexpected(type.error());
+        if (!type)
+            return tl::unexpected(type.error());
         return parse_drop_edge_type();
     }
 
@@ -385,7 +417,8 @@ Result<StmtPtr> Parser::parse_alter() {
     advance(); // consume ALTER
 
     auto tbl = expect(TokenType::TABLE, "expected TABLE after ALTER");
-    if (!tbl) return tl::unexpected(tbl.error());
+    if (!tbl)
+        return tl::unexpected(tbl.error());
     return parse_alter_table();
 }
 
@@ -397,39 +430,45 @@ Result<StmtPtr> Parser::parse_create_table() {
     // IF NOT EXISTS
     if (match(TokenType::IF)) {
         auto not_tok = expect(TokenType::NOT, "expected NOT after IF");
-        if (!not_tok) return tl::unexpected(not_tok.error());
+        if (!not_tok)
+            return tl::unexpected(not_tok.error());
         auto exists_tok = expect(TokenType::EXISTS, "expected EXISTS after NOT");
-        if (!exists_tok) return tl::unexpected(exists_tok.error());
+        if (!exists_tok)
+            return tl::unexpected(exists_tok.error());
         stmt->if_not_exists = true;
     }
 
     // Table name.
     auto name = parse_name("table name");
-    if (!name) return tl::unexpected(name.error());
+    if (!name)
+        return tl::unexpected(name.error());
     stmt->name = std::move(*name);
 
     // ( column_defs, ... [, table_constraints, ...] )
     auto lp = expect(TokenType::LPAREN, "expected '(' after table name");
-    if (!lp) return tl::unexpected(lp.error());
+    if (!lp)
+        return tl::unexpected(lp.error());
 
     bool first = true;
     while (!check(TokenType::RPAREN) && !at_end()) {
         if (!first) {
             auto comma = expect(TokenType::COMMA, "expected ',' between definitions");
-            if (!comma) return tl::unexpected(comma.error());
+            if (!comma)
+                return tl::unexpected(comma.error());
         }
         first = false;
 
         // Peek ahead to decide: table constraint or column def.
-        if (check(TokenType::PRIMARY) || check(TokenType::UNIQUE) ||
-            check(TokenType::CHECK) || check(TokenType::FOREIGN) ||
-            check(TokenType::CONSTRAINT)) {
+        if (check(TokenType::PRIMARY) || check(TokenType::UNIQUE) || check(TokenType::CHECK) ||
+            check(TokenType::FOREIGN) || check(TokenType::CONSTRAINT)) {
             auto tc = parse_table_constraint();
-            if (!tc) return tl::unexpected(tc.error());
+            if (!tc)
+                return tl::unexpected(tc.error());
             stmt->constraints.push_back(std::move(*tc));
         } else {
             auto col = parse_column_def();
-            if (!col) return tl::unexpected(col.error());
+            if (!col)
+                return tl::unexpected(col.error());
 
             // If column has inline PRIMARY KEY, convert to table constraint.
             // (We detect this via a sentinel — see parse_column_def.)
@@ -438,7 +477,8 @@ Result<StmtPtr> Parser::parse_create_table() {
     }
 
     auto rp = expect(TokenType::RPAREN, "expected ')' after column definitions");
-    if (!rp) return tl::unexpected(rp.error());
+    if (!rp)
+        return tl::unexpected(rp.error());
 
     return ok(StmtPtr(std::move(stmt)));
 }
@@ -450,19 +490,22 @@ Result<AstColumnDef> Parser::parse_column_def() {
 
     // Column name.
     auto name = parse_name("column name");
-    if (!name) return tl::unexpected(name.error());
+    if (!name)
+        return tl::unexpected(name.error());
     col.name = std::move(*name);
 
     // Column type.
     auto type = parse_type_spec();
-    if (!type) return tl::unexpected(type.error());
+    if (!type)
+        return tl::unexpected(type.error());
     col.type = std::move(*type);
 
     // Column constraints (in any order).
     while (!check(TokenType::COMMA) && !check(TokenType::RPAREN) && !at_end()) {
         if (match(TokenType::NOT)) {
             auto null_tok = expect(TokenType::NULL_KW, "expected NULL after NOT");
-            if (!null_tok) return tl::unexpected(null_tok.error());
+            if (!null_tok)
+                return tl::unexpected(null_tok.error());
             col.nullable = false;
         } else if (match(TokenType::NULL_KW)) {
             col.nullable = true;
@@ -470,44 +513,52 @@ Result<AstColumnDef> Parser::parse_column_def() {
             col.is_unique = true;
         } else if (match(TokenType::PRIMARY)) {
             auto key_tok = expect(TokenType::KEY, "expected KEY after PRIMARY");
-            if (!key_tok) return tl::unexpected(key_tok.error());
+            if (!key_tok)
+                return tl::unexpected(key_tok.error());
             col.nullable = false; // PRIMARY KEY implies NOT NULL.
             col.is_unique = true;
         } else if (match(TokenType::DEFAULT)) {
             auto expr = parse_expression();
-            if (!expr) return tl::unexpected(expr.error());
+            if (!expr)
+                return tl::unexpected(expr.error());
             col.default_expr = std::move(*expr);
         } else if (match(TokenType::CHECK)) {
             auto lp = expect(TokenType::LPAREN, "expected '(' after CHECK");
-            if (!lp) return tl::unexpected(lp.error());
+            if (!lp)
+                return tl::unexpected(lp.error());
             auto expr = parse_expression();
-            if (!expr) return tl::unexpected(expr.error());
+            if (!expr)
+                return tl::unexpected(expr.error());
             auto rp = expect(TokenType::RPAREN, "expected ')' after CHECK expression");
-            if (!rp) return tl::unexpected(rp.error());
+            if (!rp)
+                return tl::unexpected(rp.error());
             col.check_expr = std::move(*expr);
         } else if (match(TokenType::REFERENCES)) {
             auto tbl_name = parse_name("referenced table name");
-            if (!tbl_name) return tl::unexpected(tbl_name.error());
+            if (!tbl_name)
+                return tl::unexpected(tbl_name.error());
             col.fk_table = std::move(*tbl_name);
             auto lp = expect(TokenType::LPAREN, "expected '(' after table name");
-            if (!lp) return tl::unexpected(lp.error());
+            if (!lp)
+                return tl::unexpected(lp.error());
             auto col_name = parse_name("referenced column name");
-            if (!col_name) return tl::unexpected(col_name.error());
+            if (!col_name)
+                return tl::unexpected(col_name.error());
             col.fk_column = std::move(*col_name);
             auto rp = expect(TokenType::RPAREN, "expected ')'");
-            if (!rp) return tl::unexpected(rp.error());
+            if (!rp)
+                return tl::unexpected(rp.error());
             // ON DELETE action.
             if (match(TokenType::ON)) {
-                auto del = expect(TokenType::DELETE,
-                                  "expected DELETE after ON");
-                if (!del) return tl::unexpected(del.error());
+                auto del = expect(TokenType::DELETE, "expected DELETE after ON");
+                if (!del)
+                    return tl::unexpected(del.error());
                 if (match(TokenType::CASCADE)) {
                     col.fk_on_delete = ReferentialAction::CASCADE;
                 } else if (match(TokenType::RESTRICT)) {
                     col.fk_on_delete = ReferentialAction::RESTRICT;
                 } else {
-                    return tl::unexpected(
-                        error("expected CASCADE or RESTRICT").error());
+                    return tl::unexpected(error("expected CASCADE or RESTRICT").error());
                 }
             }
         } else {
@@ -526,61 +577,68 @@ Result<TypeSpec> Parser::parse_type_spec() {
     if (!is_type_keyword(peek().type)) {
         const auto& tok = peek();
         return make_error(StatusCode::PARSE_ERROR,
-                          "expected type name at line " +
-                              std::to_string(tok.line) + ", column " +
+                          "expected type name at line " + std::to_string(tok.line) + ", column " +
                               std::to_string(tok.column));
     }
 
     ts.name = std::string(advance().lexeme);
     // Normalize to uppercase.
-    std::transform(ts.name.begin(), ts.name.end(), ts.name.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    std::transform(ts.name.begin(), ts.name.end(), ts.name.begin(), [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+    });
 
     // EMBEDDING(dim, source, 'provider')
     if (ts.name == "EMBEDDING" && match(TokenType::LPAREN)) {
         // Dimension.
         auto dim = expect(TokenType::INTEGER_LITERAL, "expected dimension");
-        if (!dim) return tl::unexpected(dim.error());
+        if (!dim)
+            return tl::unexpected(dim.error());
         ts.param1 = std::stoi(std::string(dim->lexeme));
 
         auto c1 = expect(TokenType::COMMA, "expected ',' after dimension");
-        if (!c1) return tl::unexpected(c1.error());
+        if (!c1)
+            return tl::unexpected(c1.error());
 
         // Source column name.
         auto src = parse_name("source column");
-        if (!src) return tl::unexpected(src.error());
+        if (!src)
+            return tl::unexpected(src.error());
         ts.source = std::move(*src);
 
         auto c2 = expect(TokenType::COMMA, "expected ',' after source");
-        if (!c2) return tl::unexpected(c2.error());
+        if (!c2)
+            return tl::unexpected(c2.error());
 
         // Provider (string literal).
         auto prov = expect(TokenType::STRING_LITERAL, "expected provider string");
-        if (!prov) return tl::unexpected(prov.error());
+        if (!prov)
+            return tl::unexpected(prov.error());
         ts.provider = unquote_string(prov->lexeme);
 
         auto rp = expect(TokenType::RPAREN, "expected ')'");
-        if (!rp) return tl::unexpected(rp.error());
+        if (!rp)
+            return tl::unexpected(rp.error());
         return ok(std::move(ts));
     }
 
     // Types with optional parameters: VARCHAR(n), CHAR(n), DECIMAL(p,s),
     // NUMERIC(p,s).
     if (match(TokenType::LPAREN)) {
-        auto p1 = expect(TokenType::INTEGER_LITERAL,
-                         "expected parameter value");
-        if (!p1) return tl::unexpected(p1.error());
+        auto p1 = expect(TokenType::INTEGER_LITERAL, "expected parameter value");
+        if (!p1)
+            return tl::unexpected(p1.error());
         ts.param1 = std::stoi(std::string(p1->lexeme));
 
         if (match(TokenType::COMMA)) {
-            auto p2 = expect(TokenType::INTEGER_LITERAL,
-                             "expected second parameter");
-            if (!p2) return tl::unexpected(p2.error());
+            auto p2 = expect(TokenType::INTEGER_LITERAL, "expected second parameter");
+            if (!p2)
+                return tl::unexpected(p2.error());
             ts.param2 = std::stoi(std::string(p2->lexeme));
         }
 
         auto rp = expect(TokenType::RPAREN, "expected ')'");
-        if (!rp) return tl::unexpected(rp.error());
+        if (!rp)
+            return tl::unexpected(rp.error());
     }
 
     return ok(std::move(ts));
@@ -594,91 +652,111 @@ Result<TableConstraint> Parser::parse_table_constraint() {
     // Optional CONSTRAINT name.
     if (match(TokenType::CONSTRAINT)) {
         auto name = parse_name("constraint name");
-        if (!name) return tl::unexpected(name.error());
+        if (!name)
+            return tl::unexpected(name.error());
         tc.name = std::move(*name);
     }
 
     if (match(TokenType::PRIMARY)) {
         auto key = expect(TokenType::KEY, "expected KEY after PRIMARY");
-        if (!key) return tl::unexpected(key.error());
+        if (!key)
+            return tl::unexpected(key.error());
         tc.kind = TableConstraint::Kind::PRIMARY_KEY;
 
         auto lp = expect(TokenType::LPAREN, "expected '(' after PRIMARY KEY");
-        if (!lp) return tl::unexpected(lp.error());
+        if (!lp)
+            return tl::unexpected(lp.error());
 
         do {
             auto col = parse_name("column name");
-            if (!col) return tl::unexpected(col.error());
+            if (!col)
+                return tl::unexpected(col.error());
             tc.columns.push_back(std::move(*col));
         } while (match(TokenType::COMMA));
 
         auto rp = expect(TokenType::RPAREN, "expected ')'");
-        if (!rp) return tl::unexpected(rp.error());
+        if (!rp)
+            return tl::unexpected(rp.error());
     } else if (match(TokenType::UNIQUE)) {
         tc.kind = TableConstraint::Kind::UNIQUE;
 
         auto lp = expect(TokenType::LPAREN, "expected '(' after UNIQUE");
-        if (!lp) return tl::unexpected(lp.error());
+        if (!lp)
+            return tl::unexpected(lp.error());
 
         do {
             auto col = parse_name("column name");
-            if (!col) return tl::unexpected(col.error());
+            if (!col)
+                return tl::unexpected(col.error());
             tc.columns.push_back(std::move(*col));
         } while (match(TokenType::COMMA));
 
         auto rp = expect(TokenType::RPAREN, "expected ')'");
-        if (!rp) return tl::unexpected(rp.error());
+        if (!rp)
+            return tl::unexpected(rp.error());
     } else if (match(TokenType::CHECK)) {
         tc.kind = TableConstraint::Kind::CHECK;
 
         auto lp = expect(TokenType::LPAREN, "expected '(' after CHECK");
-        if (!lp) return tl::unexpected(lp.error());
+        if (!lp)
+            return tl::unexpected(lp.error());
         auto expr = parse_expression();
-        if (!expr) return tl::unexpected(expr.error());
+        if (!expr)
+            return tl::unexpected(expr.error());
         tc.check_expr = std::move(*expr);
         auto rp = expect(TokenType::RPAREN, "expected ')'");
-        if (!rp) return tl::unexpected(rp.error());
+        if (!rp)
+            return tl::unexpected(rp.error());
     } else if (match(TokenType::FOREIGN)) {
         auto key = expect(TokenType::KEY, "expected KEY after FOREIGN");
-        if (!key) return tl::unexpected(key.error());
+        if (!key)
+            return tl::unexpected(key.error());
         tc.kind = TableConstraint::Kind::FOREIGN_KEY;
 
         auto lp = expect(TokenType::LPAREN, "expected '('");
-        if (!lp) return tl::unexpected(lp.error());
+        if (!lp)
+            return tl::unexpected(lp.error());
         do {
             auto col = parse_name("column name");
-            if (!col) return tl::unexpected(col.error());
+            if (!col)
+                return tl::unexpected(col.error());
             tc.columns.push_back(std::move(*col));
         } while (match(TokenType::COMMA));
         auto rp = expect(TokenType::RPAREN, "expected ')'");
-        if (!rp) return tl::unexpected(rp.error());
+        if (!rp)
+            return tl::unexpected(rp.error());
 
         auto ref = expect(TokenType::REFERENCES, "expected REFERENCES");
-        if (!ref) return tl::unexpected(ref.error());
+        if (!ref)
+            return tl::unexpected(ref.error());
         auto tbl = parse_name("referenced table");
-        if (!tbl) return tl::unexpected(tbl.error());
+        if (!tbl)
+            return tl::unexpected(tbl.error());
         tc.fk_table = std::move(*tbl);
 
         auto lp2 = expect(TokenType::LPAREN, "expected '('");
-        if (!lp2) return tl::unexpected(lp2.error());
+        if (!lp2)
+            return tl::unexpected(lp2.error());
         do {
             auto col = parse_name("column name");
-            if (!col) return tl::unexpected(col.error());
+            if (!col)
+                return tl::unexpected(col.error());
             tc.fk_columns.push_back(std::move(*col));
         } while (match(TokenType::COMMA));
         auto rp2 = expect(TokenType::RPAREN, "expected ')'");
-        if (!rp2) return tl::unexpected(rp2.error());
+        if (!rp2)
+            return tl::unexpected(rp2.error());
 
         if (match(TokenType::ON)) {
             auto del = expect(TokenType::DELETE, "expected DELETE");
-            if (!del) return tl::unexpected(del.error());
+            if (!del)
+                return tl::unexpected(del.error());
             if (match(TokenType::CASCADE)) {
                 tc.on_delete = ReferentialAction::CASCADE;
             } else if (match(TokenType::RESTRICT)) {
                 tc.on_delete = ReferentialAction::RESTRICT;
             } else {
-                return tl::unexpected(
-                    error("expected CASCADE or RESTRICT").error());
+                return tl::unexpected(error("expected CASCADE or RESTRICT").error());
             }
         }
     } else {
@@ -695,12 +773,14 @@ Result<StmtPtr> Parser::parse_drop_table() {
 
     if (match(TokenType::IF)) {
         auto exists = expect(TokenType::EXISTS, "expected EXISTS after IF");
-        if (!exists) return tl::unexpected(exists.error());
+        if (!exists)
+            return tl::unexpected(exists.error());
         stmt->if_exists = true;
     }
 
     auto name = parse_name("table name");
-    if (!name) return tl::unexpected(name.error());
+    if (!name)
+        return tl::unexpected(name.error());
     stmt->name = std::move(*name);
 
     if (match(TokenType::CASCADE)) {
@@ -718,16 +798,18 @@ Result<StmtPtr> Parser::parse_alter_table() {
     auto stmt = std::make_unique<AlterTableStmt>();
 
     auto name = parse_name("table name");
-    if (!name) return tl::unexpected(name.error());
+    if (!name)
+        return tl::unexpected(name.error());
     stmt->table_name = std::move(*name);
 
     // ADD COLUMN
     if (match_ident_ci(peek(), "ADD")) {
-        advance(); // consume ADD
+        advance();                // consume ADD
         match(TokenType::COLUMN); // optional COLUMN keyword
         stmt->action = AlterAction::ADD_COLUMN;
         auto col = parse_column_def();
-        if (!col) return tl::unexpected(col.error());
+        if (!col)
+            return tl::unexpected(col.error());
         stmt->column = std::move(*col);
         return ok(StmtPtr(std::move(stmt)));
     }
@@ -736,30 +818,32 @@ Result<StmtPtr> Parser::parse_alter_table() {
         match(TokenType::COLUMN); // optional COLUMN keyword
         stmt->action = AlterAction::DROP_COLUMN;
         auto col_name = parse_name("column name");
-        if (!col_name) return tl::unexpected(col_name.error());
+        if (!col_name)
+            return tl::unexpected(col_name.error());
         stmt->column_name = std::move(*col_name);
         return ok(StmtPtr(std::move(stmt)));
     }
 
     // RENAME COLUMN old TO new
     if (match_ident_ci(peek(), "RENAME")) {
-        advance(); // consume RENAME
+        advance();                // consume RENAME
         match(TokenType::COLUMN); // optional COLUMN keyword
         stmt->action = AlterAction::RENAME_COLUMN;
         auto old_name = parse_name("old column name");
-        if (!old_name) return tl::unexpected(old_name.error());
+        if (!old_name)
+            return tl::unexpected(old_name.error());
         stmt->column_name = std::move(*old_name);
 
         // Expect TO.
         if (match_ident_ci(peek(), "TO")) {
             advance();
         } else {
-            return tl::unexpected(
-                error("expected TO after old column name").error());
+            return tl::unexpected(error("expected TO after old column name").error());
         }
 
         auto new_name = parse_name("new column name");
-        if (!new_name) return tl::unexpected(new_name.error());
+        if (!new_name)
+            return tl::unexpected(new_name.error());
         stmt->new_column_name = std::move(*new_name);
         return ok(StmtPtr(std::move(stmt)));
     }
@@ -776,42 +860,51 @@ Result<StmtPtr> Parser::parse_create_index(bool is_unique) {
     // IF NOT EXISTS
     if (match(TokenType::IF)) {
         auto not_tok = expect(TokenType::NOT, "expected NOT after IF");
-        if (!not_tok) return tl::unexpected(not_tok.error());
+        if (!not_tok)
+            return tl::unexpected(not_tok.error());
         auto exists_tok = expect(TokenType::EXISTS, "expected EXISTS after NOT");
-        if (!exists_tok) return tl::unexpected(exists_tok.error());
+        if (!exists_tok)
+            return tl::unexpected(exists_tok.error());
         stmt->if_not_exists = true;
     }
 
     // Index name.
     auto name = parse_name("index name");
-    if (!name) return tl::unexpected(name.error());
+    if (!name)
+        return tl::unexpected(name.error());
     stmt->name = std::move(*name);
 
     // ON table(cols...)
     auto on = expect(TokenType::ON, "expected ON after index name");
-    if (!on) return tl::unexpected(on.error());
+    if (!on)
+        return tl::unexpected(on.error());
 
     auto table = parse_name("table name");
-    if (!table) return tl::unexpected(table.error());
+    if (!table)
+        return tl::unexpected(table.error());
     stmt->table_name = std::move(*table);
 
     auto lp = expect(TokenType::LPAREN, "expected '(' after table name");
-    if (!lp) return tl::unexpected(lp.error());
+    if (!lp)
+        return tl::unexpected(lp.error());
 
     do {
         auto col = parse_name("column name");
-        if (!col) return tl::unexpected(col.error());
+        if (!col)
+            return tl::unexpected(col.error());
         stmt->columns.push_back(std::move(*col));
     } while (match(TokenType::COMMA));
 
     auto rp = expect(TokenType::RPAREN, "expected ')'");
-    if (!rp) return tl::unexpected(rp.error());
+    if (!rp)
+        return tl::unexpected(rp.error());
 
     // Optional USING method.
     if (match_ident_ci(peek(), "USING")) {
         advance(); // consume USING
         auto method = parse_name("index method");
-        if (!method) return tl::unexpected(method.error());
+        if (!method)
+            return tl::unexpected(method.error());
         stmt->method = std::move(*method);
     }
 
@@ -825,12 +918,14 @@ Result<StmtPtr> Parser::parse_drop_index() {
 
     if (match(TokenType::IF)) {
         auto exists = expect(TokenType::EXISTS, "expected EXISTS after IF");
-        if (!exists) return tl::unexpected(exists.error());
+        if (!exists)
+            return tl::unexpected(exists.error());
         stmt->if_exists = true;
     }
 
     auto name = parse_name("index name");
-    if (!name) return tl::unexpected(name.error());
+    if (!name)
+        return tl::unexpected(name.error());
     stmt->name = std::move(*name);
 
     return ok(StmtPtr(std::move(stmt)));
@@ -842,7 +937,8 @@ Result<StmtPtr> Parser::parse_create_edge_type() {
     auto stmt = std::make_unique<CreateEdgeTypeStmt>();
 
     auto name = parse_name("edge type name");
-    if (!name) return tl::unexpected(name.error());
+    if (!name)
+        return tl::unexpected(name.error());
     stmt->name = std::move(*name);
 
     // Optional property list: (prop type, ...)
@@ -851,30 +947,36 @@ Result<StmtPtr> Parser::parse_create_edge_type() {
         while (!check(TokenType::RPAREN) && !at_end()) {
             if (!first_prop) {
                 auto comma = expect(TokenType::COMMA, "expected ','");
-                if (!comma) return tl::unexpected(comma.error());
+                if (!comma)
+                    return tl::unexpected(comma.error());
             }
             first_prop = false;
 
             EdgeProperty prop;
             auto prop_name = parse_name("property name");
-            if (!prop_name) return tl::unexpected(prop_name.error());
+            if (!prop_name)
+                return tl::unexpected(prop_name.error());
             prop.name = std::move(*prop_name);
 
             auto type = parse_type_spec();
-            if (!type) return tl::unexpected(type.error());
+            if (!type)
+                return tl::unexpected(type.error());
             prop.type = std::move(*type);
 
             stmt->properties.push_back(std::move(prop));
         }
         auto rp = expect(TokenType::RPAREN, "expected ')'");
-        if (!rp) return tl::unexpected(rp.error());
+        if (!rp)
+            return tl::unexpected(rp.error());
     }
 
     // FROM table TO table.
     auto from = expect(TokenType::FROM, "expected FROM");
-    if (!from) return tl::unexpected(from.error());
+    if (!from)
+        return tl::unexpected(from.error());
     auto from_tbl = parse_name("source table name");
-    if (!from_tbl) return tl::unexpected(from_tbl.error());
+    if (!from_tbl)
+        return tl::unexpected(from_tbl.error());
     stmt->from_table = std::move(*from_tbl);
 
     // TO uses the identifier "TO", but we don't have a TO keyword.
@@ -885,7 +987,8 @@ Result<StmtPtr> Parser::parse_create_edge_type() {
     }
 
     auto to_tbl = parse_name("target table name");
-    if (!to_tbl) return tl::unexpected(to_tbl.error());
+    if (!to_tbl)
+        return tl::unexpected(to_tbl.error());
     stmt->to_table = std::move(*to_tbl);
 
     return ok(StmtPtr(std::move(stmt)));
@@ -898,12 +1001,14 @@ Result<StmtPtr> Parser::parse_drop_edge_type() {
 
     if (match(TokenType::IF)) {
         auto exists = expect(TokenType::EXISTS, "expected EXISTS after IF");
-        if (!exists) return tl::unexpected(exists.error());
+        if (!exists)
+            return tl::unexpected(exists.error());
         stmt->if_exists = true;
     }
 
     auto name = parse_name("edge type name");
-    if (!name) return tl::unexpected(name.error());
+    if (!name)
+        return tl::unexpected(name.error());
     stmt->name = std::move(*name);
 
     return ok(StmtPtr(std::move(stmt)));
@@ -914,47 +1019,55 @@ Result<StmtPtr> Parser::parse_drop_edge_type() {
 Result<StmtPtr> Parser::parse_insert() {
     advance(); // consume INSERT
     auto into = expect(TokenType::INTO, "expected INTO after INSERT");
-    if (!into) return tl::unexpected(into.error());
+    if (!into)
+        return tl::unexpected(into.error());
 
     auto stmt = std::make_unique<InsertStmt>();
 
     auto name = parse_name("table name");
-    if (!name) return tl::unexpected(name.error());
+    if (!name)
+        return tl::unexpected(name.error());
     stmt->table_name = std::move(*name);
 
     // Optional column list.
     if (match(TokenType::LPAREN)) {
         do {
             auto col = parse_name("column name");
-            if (!col) return tl::unexpected(col.error());
+            if (!col)
+                return tl::unexpected(col.error());
             stmt->columns.push_back(std::move(*col));
         } while (match(TokenType::COMMA));
 
         auto rp = expect(TokenType::RPAREN, "expected ')'");
-        if (!rp) return tl::unexpected(rp.error());
+        if (!rp)
+            return tl::unexpected(rp.error());
     }
 
     // VALUES or SELECT.
     if (match(TokenType::VALUES)) {
         do {
             auto lp = expect(TokenType::LPAREN, "expected '(' for value row");
-            if (!lp) return tl::unexpected(lp.error());
+            if (!lp)
+                return tl::unexpected(lp.error());
 
             std::vector<ExprPtr> row;
             do {
                 auto val = parse_expression();
-                if (!val) return tl::unexpected(val.error());
+                if (!val)
+                    return tl::unexpected(val.error());
                 row.push_back(std::move(*val));
             } while (match(TokenType::COMMA));
 
             auto rp = expect(TokenType::RPAREN, "expected ')'");
-            if (!rp) return tl::unexpected(rp.error());
+            if (!rp)
+                return tl::unexpected(rp.error());
 
             stmt->values.push_back(std::move(row));
         } while (match(TokenType::COMMA));
     } else if (check(TokenType::SELECT)) {
         auto sel = parse_select();
-        if (!sel) return tl::unexpected(sel.error());
+        if (!sel)
+            return tl::unexpected(sel.error());
         stmt->select = std::move(*sel);
     } else {
         return error("expected VALUES or SELECT after INSERT INTO");
@@ -962,7 +1075,8 @@ Result<StmtPtr> Parser::parse_insert() {
 
     // Optional RETURNING.
     auto ret = parse_returning();
-    if (!ret) return tl::unexpected(ret.error());
+    if (!ret)
+        return tl::unexpected(ret.error());
     stmt->returning = std::move(*ret);
 
     return ok(StmtPtr(std::move(stmt)));
@@ -975,24 +1089,29 @@ Result<StmtPtr> Parser::parse_update() {
     auto stmt = std::make_unique<UpdateStmt>();
 
     auto name = parse_name("table name");
-    if (!name) return tl::unexpected(name.error());
+    if (!name)
+        return tl::unexpected(name.error());
     stmt->table_name = std::move(*name);
 
     auto set = expect(TokenType::SET, "expected SET after table name");
-    if (!set) return tl::unexpected(set.error());
+    if (!set)
+        return tl::unexpected(set.error());
 
     // Assignments: col = expr, ...
     do {
         Assignment a;
         auto col = parse_name("column name");
-        if (!col) return tl::unexpected(col.error());
+        if (!col)
+            return tl::unexpected(col.error());
         a.column = std::move(*col);
 
         auto eq = expect(TokenType::EQUAL, "expected '=' in SET clause");
-        if (!eq) return tl::unexpected(eq.error());
+        if (!eq)
+            return tl::unexpected(eq.error());
 
         auto val = parse_expression();
-        if (!val) return tl::unexpected(val.error());
+        if (!val)
+            return tl::unexpected(val.error());
         a.value = std::move(*val);
 
         stmt->assignments.push_back(std::move(a));
@@ -1001,13 +1120,15 @@ Result<StmtPtr> Parser::parse_update() {
     // Optional WHERE.
     if (match(TokenType::WHERE)) {
         auto expr = parse_expression();
-        if (!expr) return tl::unexpected(expr.error());
+        if (!expr)
+            return tl::unexpected(expr.error());
         stmt->where_expr = std::move(*expr);
     }
 
     // Optional RETURNING.
     auto ret = parse_returning();
-    if (!ret) return tl::unexpected(ret.error());
+    if (!ret)
+        return tl::unexpected(ret.error());
     stmt->returning = std::move(*ret);
 
     return ok(StmtPtr(std::move(stmt)));
@@ -1018,24 +1139,28 @@ Result<StmtPtr> Parser::parse_update() {
 Result<StmtPtr> Parser::parse_delete() {
     advance(); // consume DELETE
     auto from = expect(TokenType::FROM, "expected FROM after DELETE");
-    if (!from) return tl::unexpected(from.error());
+    if (!from)
+        return tl::unexpected(from.error());
 
     auto stmt = std::make_unique<DeleteStmt>();
 
     auto name = parse_name("table name");
-    if (!name) return tl::unexpected(name.error());
+    if (!name)
+        return tl::unexpected(name.error());
     stmt->table_name = std::move(*name);
 
     // Optional WHERE.
     if (match(TokenType::WHERE)) {
         auto expr = parse_expression();
-        if (!expr) return tl::unexpected(expr.error());
+        if (!expr)
+            return tl::unexpected(expr.error());
         stmt->where_expr = std::move(*expr);
     }
 
     // Optional RETURNING.
     auto ret = parse_returning();
-    if (!ret) return tl::unexpected(ret.error());
+    if (!ret)
+        return tl::unexpected(ret.error());
     stmt->returning = std::move(*ret);
 
     return ok(StmtPtr(std::move(stmt)));
@@ -1049,16 +1174,20 @@ Result<StmtPtr> Parser::parse_link() {
 
     // source_table(source_key)
     auto src_tbl = parse_name("source table");
-    if (!src_tbl) return tl::unexpected(src_tbl.error());
+    if (!src_tbl)
+        return tl::unexpected(src_tbl.error());
     stmt->source_table = std::move(*src_tbl);
 
     auto lp1 = expect(TokenType::LPAREN, "expected '('");
-    if (!lp1) return tl::unexpected(lp1.error());
+    if (!lp1)
+        return tl::unexpected(lp1.error());
     auto src_key = parse_expression();
-    if (!src_key) return tl::unexpected(src_key.error());
+    if (!src_key)
+        return tl::unexpected(src_key.error());
     stmt->source_key = std::move(*src_key);
     auto rp1 = expect(TokenType::RPAREN, "expected ')'");
-    if (!rp1) return tl::unexpected(rp1.error());
+    if (!rp1)
+        return tl::unexpected(rp1.error());
 
     // TO
     if (!match_ident_ci(peek(), "TO")) {
@@ -1068,22 +1197,28 @@ Result<StmtPtr> Parser::parse_link() {
 
     // target_table(target_key)
     auto tgt_tbl = parse_name("target table");
-    if (!tgt_tbl) return tl::unexpected(tgt_tbl.error());
+    if (!tgt_tbl)
+        return tl::unexpected(tgt_tbl.error());
     stmt->target_table = std::move(*tgt_tbl);
 
     auto lp2 = expect(TokenType::LPAREN, "expected '('");
-    if (!lp2) return tl::unexpected(lp2.error());
+    if (!lp2)
+        return tl::unexpected(lp2.error());
     auto tgt_key = parse_expression();
-    if (!tgt_key) return tl::unexpected(tgt_key.error());
+    if (!tgt_key)
+        return tl::unexpected(tgt_key.error());
     stmt->target_key = std::move(*tgt_key);
     auto rp2 = expect(TokenType::RPAREN, "expected ')'");
-    if (!rp2) return tl::unexpected(rp2.error());
+    if (!rp2)
+        return tl::unexpected(rp2.error());
 
     // VIA edge_type
     auto via = expect(TokenType::VIA, "expected VIA");
-    if (!via) return tl::unexpected(via.error());
+    if (!via)
+        return tl::unexpected(via.error());
     auto edge = parse_name("edge type name");
-    if (!edge) return tl::unexpected(edge.error());
+    if (!edge)
+        return tl::unexpected(edge.error());
     stmt->edge_type = std::move(*edge);
 
     // Optional properties: (prop = val, ...)
@@ -1091,21 +1226,25 @@ Result<StmtPtr> Parser::parse_link() {
         do {
             Assignment a;
             auto pname = parse_name("property name");
-            if (!pname) return tl::unexpected(pname.error());
+            if (!pname)
+                return tl::unexpected(pname.error());
             a.column = std::move(*pname);
 
             auto eq = expect(TokenType::EQUAL, "expected '='");
-            if (!eq) return tl::unexpected(eq.error());
+            if (!eq)
+                return tl::unexpected(eq.error());
 
             auto val = parse_expression();
-            if (!val) return tl::unexpected(val.error());
+            if (!val)
+                return tl::unexpected(val.error());
             a.value = std::move(*val);
 
             stmt->properties.push_back(std::move(a));
         } while (match(TokenType::COMMA));
 
         auto rp = expect(TokenType::RPAREN, "expected ')'");
-        if (!rp) return tl::unexpected(rp.error());
+        if (!rp)
+            return tl::unexpected(rp.error());
     }
 
     return ok(StmtPtr(std::move(stmt)));
@@ -1119,45 +1258,57 @@ Result<StmtPtr> Parser::parse_unlink() {
 
     // source_table(source_key)
     auto src_tbl = parse_name("source table");
-    if (!src_tbl) return tl::unexpected(src_tbl.error());
+    if (!src_tbl)
+        return tl::unexpected(src_tbl.error());
     stmt->source_table = std::move(*src_tbl);
 
     auto lp1 = expect(TokenType::LPAREN, "expected '('");
-    if (!lp1) return tl::unexpected(lp1.error());
+    if (!lp1)
+        return tl::unexpected(lp1.error());
     auto src_key = parse_expression();
-    if (!src_key) return tl::unexpected(src_key.error());
+    if (!src_key)
+        return tl::unexpected(src_key.error());
     stmt->source_key = std::move(*src_key);
     auto rp1 = expect(TokenType::RPAREN, "expected ')'");
-    if (!rp1) return tl::unexpected(rp1.error());
+    if (!rp1)
+        return tl::unexpected(rp1.error());
 
     // FROM
     auto from = expect(TokenType::FROM, "expected FROM");
-    if (!from) return tl::unexpected(from.error());
+    if (!from)
+        return tl::unexpected(from.error());
 
     // target_table(target_key)
     auto tgt_tbl = parse_name("target table");
-    if (!tgt_tbl) return tl::unexpected(tgt_tbl.error());
+    if (!tgt_tbl)
+        return tl::unexpected(tgt_tbl.error());
     stmt->target_table = std::move(*tgt_tbl);
 
     auto lp2 = expect(TokenType::LPAREN, "expected '('");
-    if (!lp2) return tl::unexpected(lp2.error());
+    if (!lp2)
+        return tl::unexpected(lp2.error());
     auto tgt_key = parse_expression();
-    if (!tgt_key) return tl::unexpected(tgt_key.error());
+    if (!tgt_key)
+        return tl::unexpected(tgt_key.error());
     stmt->target_key = std::move(*tgt_key);
     auto rp2 = expect(TokenType::RPAREN, "expected ')'");
-    if (!rp2) return tl::unexpected(rp2.error());
+    if (!rp2)
+        return tl::unexpected(rp2.error());
 
     // VIA edge_type
     auto via = expect(TokenType::VIA, "expected VIA");
-    if (!via) return tl::unexpected(via.error());
+    if (!via)
+        return tl::unexpected(via.error());
     auto edge = parse_name("edge type name");
-    if (!edge) return tl::unexpected(edge.error());
+    if (!edge)
+        return tl::unexpected(edge.error());
     stmt->edge_type = std::move(*edge);
 
     // Optional WHERE.
     if (match(TokenType::WHERE)) {
         auto expr = parse_expression();
-        if (!expr) return tl::unexpected(expr.error());
+        if (!expr)
+            return tl::unexpected(expr.error());
         stmt->where_expr = std::move(*expr);
     }
 
@@ -1168,11 +1319,13 @@ Result<StmtPtr> Parser::parse_unlink() {
 
 Result<std::vector<SelectItem>> Parser::parse_returning() {
     std::vector<SelectItem> items;
-    if (!match(TokenType::RETURNING)) return ok(std::move(items));
+    if (!match(TokenType::RETURNING))
+        return ok(std::move(items));
 
     do {
         auto item = parse_select_item();
-        if (!item) return tl::unexpected(item.error());
+        if (!item)
+            return tl::unexpected(item.error());
         items.push_back(std::move(*item));
     } while (match(TokenType::COMMA));
 
@@ -1188,28 +1341,34 @@ Result<StmtPtr> Parser::parse_with() {
     do {
         SelectStmt::CTE cte;
         auto name = parse_name("CTE name");
-        if (!name) return tl::unexpected(name.error());
+        if (!name)
+            return tl::unexpected(name.error());
         cte.name = std::move(*name);
 
         auto as_tok = expect(TokenType::AS, "expected AS after CTE name");
-        if (!as_tok) return tl::unexpected(as_tok.error());
+        if (!as_tok)
+            return tl::unexpected(as_tok.error());
 
         auto lp = expect(TokenType::LPAREN, "expected '(' before CTE query");
-        if (!lp) return tl::unexpected(lp.error());
+        if (!lp)
+            return tl::unexpected(lp.error());
 
         auto q = parse_select();
-        if (!q) return tl::unexpected(q.error());
+        if (!q)
+            return tl::unexpected(q.error());
         cte.query = std::move(*q);
 
         auto rp = expect(TokenType::RPAREN, "expected ')' after CTE query");
-        if (!rp) return tl::unexpected(rp.error());
+        if (!rp)
+            return tl::unexpected(rp.error());
 
         ctes.push_back(std::move(cte));
     } while (match(TokenType::COMMA));
 
     // Parse the main SELECT.
     auto sel = parse_select();
-    if (!sel) return sel;
+    if (!sel)
+        return sel;
     auto* stmt = dynamic_cast<SelectStmt*>(sel->get());
     stmt->ctes = std::move(ctes);
     return sel;
@@ -1229,7 +1388,8 @@ Result<StmtPtr> Parser::parse_select() {
     // Select items.
     do {
         auto item = parse_select_item();
-        if (!item) return tl::unexpected(item.error());
+        if (!item)
+            return tl::unexpected(item.error());
         stmt->items.push_back(std::move(*item));
     } while (match(TokenType::COMMA));
 
@@ -1237,55 +1397,63 @@ Result<StmtPtr> Parser::parse_select() {
     if (match(TokenType::FROM)) {
         do {
             auto ref = parse_table_ref();
-            if (!ref) return tl::unexpected(ref.error());
+            if (!ref)
+                return tl::unexpected(ref.error());
             stmt->from.push_back(std::move(*ref));
         } while (match(TokenType::COMMA));
     }
 
     // JOINs.
-    while (check(TokenType::INNER) || check(TokenType::LEFT) ||
-           check(TokenType::RIGHT) || check(TokenType::FULL) ||
-           check(TokenType::CROSS) || check(TokenType::JOIN)) {
+    while (check(TokenType::INNER) || check(TokenType::LEFT) || check(TokenType::RIGHT) ||
+           check(TokenType::FULL) || check(TokenType::CROSS) || check(TokenType::JOIN)) {
         JoinClause join;
 
         if (match(TokenType::INNER)) {
             join.type = JoinType::INNER;
             auto j = expect(TokenType::JOIN, "expected JOIN after INNER");
-            if (!j) return tl::unexpected(j.error());
+            if (!j)
+                return tl::unexpected(j.error());
         } else if (match(TokenType::LEFT)) {
             join.type = JoinType::LEFT;
             match(TokenType::OUTER); // optional OUTER
             auto j = expect(TokenType::JOIN, "expected JOIN");
-            if (!j) return tl::unexpected(j.error());
+            if (!j)
+                return tl::unexpected(j.error());
         } else if (match(TokenType::RIGHT)) {
             join.type = JoinType::RIGHT;
             match(TokenType::OUTER);
             auto j = expect(TokenType::JOIN, "expected JOIN");
-            if (!j) return tl::unexpected(j.error());
+            if (!j)
+                return tl::unexpected(j.error());
         } else if (match(TokenType::FULL)) {
             join.type = JoinType::FULL;
             match(TokenType::OUTER);
             auto j = expect(TokenType::JOIN, "expected JOIN");
-            if (!j) return tl::unexpected(j.error());
+            if (!j)
+                return tl::unexpected(j.error());
         } else if (match(TokenType::CROSS)) {
             join.type = JoinType::CROSS;
             auto j = expect(TokenType::JOIN, "expected JOIN after CROSS");
-            if (!j) return tl::unexpected(j.error());
+            if (!j)
+                return tl::unexpected(j.error());
         } else {
-            advance(); // consume JOIN
+            advance();                   // consume JOIN
             join.type = JoinType::INNER; // bare JOIN defaults to INNER
         }
 
         auto ref = parse_table_ref();
-        if (!ref) return tl::unexpected(ref.error());
+        if (!ref)
+            return tl::unexpected(ref.error());
         join.table = std::move(*ref);
 
         // ON condition (not for CROSS JOIN).
         if (join.type != JoinType::CROSS) {
             auto on = expect(TokenType::ON, "expected ON after JOIN table");
-            if (!on) return tl::unexpected(on.error());
+            if (!on)
+                return tl::unexpected(on.error());
             auto expr = parse_expression();
-            if (!expr) return tl::unexpected(expr.error());
+            if (!expr)
+                return tl::unexpected(expr.error());
             join.on_expr = std::move(*expr);
         }
 
@@ -1295,25 +1463,29 @@ Result<StmtPtr> Parser::parse_select() {
     // WHERE
     if (match(TokenType::WHERE)) {
         auto expr = parse_expression();
-        if (!expr) return tl::unexpected(expr.error());
+        if (!expr)
+            return tl::unexpected(expr.error());
         stmt->where_expr = std::move(*expr);
     }
 
     // GROUP BY
     if (match(TokenType::GROUP)) {
         auto by = expect(TokenType::BY, "expected BY after GROUP");
-        if (!by) return tl::unexpected(by.error());
+        if (!by)
+            return tl::unexpected(by.error());
 
         do {
             auto expr = parse_expression();
-            if (!expr) return tl::unexpected(expr.error());
+            if (!expr)
+                return tl::unexpected(expr.error());
             stmt->group_by.push_back(std::move(*expr));
         } while (match(TokenType::COMMA));
 
         // HAVING
         if (match(TokenType::HAVING)) {
             auto expr = parse_expression();
-            if (!expr) return tl::unexpected(expr.error());
+            if (!expr)
+                return tl::unexpected(expr.error());
             stmt->having_expr = std::move(*expr);
         }
     }
@@ -1321,12 +1493,14 @@ Result<StmtPtr> Parser::parse_select() {
     // ORDER BY
     if (match(TokenType::ORDER)) {
         auto by = expect(TokenType::BY, "expected BY after ORDER");
-        if (!by) return tl::unexpected(by.error());
+        if (!by)
+            return tl::unexpected(by.error());
 
         do {
             OrderByItem item;
             auto expr = parse_expression();
-            if (!expr) return tl::unexpected(expr.error());
+            if (!expr)
+                return tl::unexpected(expr.error());
             item.expr = std::move(*expr);
 
             if (match(TokenType::DESC)) {
@@ -1342,14 +1516,16 @@ Result<StmtPtr> Parser::parse_select() {
     // LIMIT
     if (match(TokenType::LIMIT)) {
         auto expr = parse_expression();
-        if (!expr) return tl::unexpected(expr.error());
+        if (!expr)
+            return tl::unexpected(expr.error());
         stmt->limit = std::move(*expr);
     }
 
     // OFFSET
     if (match(TokenType::OFFSET)) {
         auto expr = parse_expression();
-        if (!expr) return tl::unexpected(expr.error());
+        if (!expr)
+            return tl::unexpected(expr.error());
         stmt->offset = std::move(*expr);
     }
 
@@ -1361,17 +1537,20 @@ Result<StmtPtr> Parser::parse_select() {
             stmt->set_op = SelectStmt::SetOp::UNION;
         }
         auto rhs = parse_select();
-        if (!rhs) return tl::unexpected(rhs.error());
+        if (!rhs)
+            return tl::unexpected(rhs.error());
         stmt->set_rhs = std::move(*rhs);
     } else if (match(TokenType::INTERSECT)) {
         stmt->set_op = SelectStmt::SetOp::INTERSECT;
         auto rhs = parse_select();
-        if (!rhs) return tl::unexpected(rhs.error());
+        if (!rhs)
+            return tl::unexpected(rhs.error());
         stmt->set_rhs = std::move(*rhs);
     } else if (match(TokenType::EXCEPT)) {
         stmt->set_op = SelectStmt::SetOp::EXCEPT;
         auto rhs = parse_select();
-        if (!rhs) return tl::unexpected(rhs.error());
+        if (!rhs)
+            return tl::unexpected(rhs.error());
         stmt->set_rhs = std::move(*rhs);
     }
 
@@ -1390,8 +1569,7 @@ Result<SelectItem> Parser::parse_select_item() {
     }
 
     // table.* — lookahead: name DOT STAR
-    if (is_name_token(peek().type) &&
-        current_ + 2 < tokens_.size() &&
+    if (is_name_token(peek().type) && current_ + 2 < tokens_.size() &&
         tokens_[current_ + 1].type == TokenType::DOT &&
         tokens_[current_ + 2].type == TokenType::STAR) {
         item.is_star = true;
@@ -1403,12 +1581,14 @@ Result<SelectItem> Parser::parse_select_item() {
 
     // Expression [AS alias] or expression implicit_alias.
     auto expr = parse_expression();
-    if (!expr) return tl::unexpected(expr.error());
+    if (!expr)
+        return tl::unexpected(expr.error());
     item.expr = std::move(*expr);
 
     if (match(TokenType::AS)) {
         auto alias = parse_name("alias");
-        if (!alias) return tl::unexpected(alias.error());
+        if (!alias)
+            return tl::unexpected(alias.error());
         item.alias = std::move(*alias);
     } else if (is_name_token(peek().type) && !is_clause_keyword(peek().type)) {
         // Implicit alias (without AS).
@@ -1426,19 +1606,21 @@ Result<TableRef> Parser::parse_table_ref() {
     // Subquery: (SELECT ...) [AS] alias
     if (match(TokenType::LPAREN)) {
         auto subquery = parse_select();
-        if (!subquery) return tl::unexpected(subquery.error());
+        if (!subquery)
+            return tl::unexpected(subquery.error());
         ref.subquery = std::move(*subquery);
 
         auto rp = expect(TokenType::RPAREN, "expected ')' after subquery");
-        if (!rp) return tl::unexpected(rp.error());
+        if (!rp)
+            return tl::unexpected(rp.error());
 
         // Alias (required for subqueries in practice, optional in grammar).
         if (match(TokenType::AS)) {
             auto alias = parse_name("subquery alias");
-            if (!alias) return tl::unexpected(alias.error());
+            if (!alias)
+                return tl::unexpected(alias.error());
             ref.alias = std::move(*alias);
-        } else if (is_name_token(peek().type) &&
-                   !is_clause_keyword(peek().type)) {
+        } else if (is_name_token(peek().type) && !is_clause_keyword(peek().type)) {
             ref.alias = std::string(advance().lexeme);
         }
 
@@ -1447,16 +1629,17 @@ Result<TableRef> Parser::parse_table_ref() {
 
     // Regular table name.
     auto name = parse_name("table name");
-    if (!name) return tl::unexpected(name.error());
+    if (!name)
+        return tl::unexpected(name.error());
     ref.name = std::move(*name);
 
     // Optional alias (explicit AS or implicit).
     if (match(TokenType::AS)) {
         auto alias = parse_name("table alias");
-        if (!alias) return tl::unexpected(alias.error());
+        if (!alias)
+            return tl::unexpected(alias.error());
         ref.alias = std::move(*alias);
-    } else if (is_name_token(peek().type) &&
-               !is_clause_keyword(peek().type)) {
+    } else if (is_name_token(peek().type) && !is_clause_keyword(peek().type)) {
         ref.alias = std::string(advance().lexeme);
     }
 
@@ -1470,23 +1653,29 @@ Result<StmtPtr> Parser::parse_traverse() {
     auto stmt = std::make_unique<TraverseStmt>();
 
     auto edge = parse_name("edge type");
-    if (!edge) return tl::unexpected(edge.error());
+    if (!edge)
+        return tl::unexpected(edge.error());
     stmt->edge_type = std::move(*edge);
 
     auto from = expect(TokenType::FROM, "expected FROM after edge type");
-    if (!from) return tl::unexpected(from.error());
+    if (!from)
+        return tl::unexpected(from.error());
 
     auto tbl = parse_name("table name");
-    if (!tbl) return tl::unexpected(tbl.error());
+    if (!tbl)
+        return tl::unexpected(tbl.error());
     stmt->from_table = std::move(*tbl);
 
     auto lp = expect(TokenType::LPAREN, "expected '(' after table name");
-    if (!lp) return tl::unexpected(lp.error());
+    if (!lp)
+        return tl::unexpected(lp.error());
     auto key = parse_expression();
-    if (!key) return tl::unexpected(key.error());
+    if (!key)
+        return tl::unexpected(key.error());
     stmt->from_key = std::move(*key);
     auto rp = expect(TokenType::RPAREN, "expected ')'");
-    if (!rp) return tl::unexpected(rp.error());
+    if (!rp)
+        return tl::unexpected(rp.error());
 
     // Optional DIRECTION IN|OUT|BOTH.
     if (match(TokenType::DIRECTION)) {
@@ -1505,16 +1694,17 @@ Result<StmtPtr> Parser::parse_traverse() {
 
     // Optional MAX_DEPTH n.
     if (match(TokenType::MAX_DEPTH)) {
-        auto depth = expect(TokenType::INTEGER_LITERAL,
-                            "expected integer after MAX_DEPTH");
-        if (!depth) return tl::unexpected(depth.error());
+        auto depth = expect(TokenType::INTEGER_LITERAL, "expected integer after MAX_DEPTH");
+        if (!depth)
+            return tl::unexpected(depth.error());
         stmt->max_depth = std::stoi(std::string(depth->lexeme));
     }
 
     // Optional WHERE.
     if (match(TokenType::WHERE)) {
         auto expr = parse_expression();
-        if (!expr) return tl::unexpected(expr.error());
+        if (!expr)
+            return tl::unexpected(expr.error());
         stmt->where_expr = std::move(*expr);
     }
 
@@ -1534,22 +1724,27 @@ Result<StmtPtr> Parser::parse_nearest() {
 
     // k (number of neighbors).
     auto k = parse_expression();
-    if (!k) return tl::unexpected(k.error());
+    if (!k)
+        return tl::unexpected(k.error());
     stmt->k = std::move(*k);
 
     // FROM table.column.
     auto from = expect(TokenType::FROM, "expected FROM");
-    if (!from) return tl::unexpected(from.error());
+    if (!from)
+        return tl::unexpected(from.error());
 
     auto tbl = parse_name("table name");
-    if (!tbl) return tl::unexpected(tbl.error());
+    if (!tbl)
+        return tl::unexpected(tbl.error());
     stmt->table_name = std::move(*tbl);
 
     auto dot = expect(TokenType::DOT, "expected '.' after table name");
-    if (!dot) return tl::unexpected(dot.error());
+    if (!dot)
+        return tl::unexpected(dot.error());
 
     auto col = parse_name("column name");
-    if (!col) return tl::unexpected(col.error());
+    if (!col)
+        return tl::unexpected(col.error());
     stmt->column_name = std::move(*col);
 
     // TO target.
@@ -1559,13 +1754,15 @@ Result<StmtPtr> Parser::parse_nearest() {
     advance();
 
     auto target = parse_expression();
-    if (!target) return tl::unexpected(target.error());
+    if (!target)
+        return tl::unexpected(target.error());
     stmt->target = std::move(*target);
 
     // Optional WHERE.
     if (match(TokenType::WHERE)) {
         auto expr = parse_expression();
-        if (!expr) return tl::unexpected(expr.error());
+        if (!expr)
+            return tl::unexpected(expr.error());
         stmt->where_expr = std::move(*expr);
     }
 
@@ -1599,7 +1796,8 @@ Result<StmtPtr> Parser::parse_match() {
     while (true) {
         // Parse node pattern: ([variable][:label])
         auto lp = expect(TokenType::LPAREN, "expected '(' for node pattern");
-        if (!lp) return tl::unexpected(lp.error());
+        if (!lp)
+            return tl::unexpected(lp.error());
 
         NodePattern node;
 
@@ -1607,17 +1805,20 @@ Result<StmtPtr> Parser::parse_match() {
             // (:label) — no variable.
             advance(); // consume :
             auto label = parse_name("node label");
-            if (!label) return tl::unexpected(label.error());
+            if (!label)
+                return tl::unexpected(label.error());
             node.label = std::move(*label);
         } else if (!check(TokenType::RPAREN) && is_name_token(peek().type)) {
             auto name = parse_name("node variable or label");
-            if (!name) return tl::unexpected(name.error());
+            if (!name)
+                return tl::unexpected(name.error());
 
             if (match(TokenType::COLON)) {
                 // variable:label
                 node.variable = std::move(*name);
                 auto label = parse_name("node label");
-                if (!label) return tl::unexpected(label.error());
+                if (!label)
+                    return tl::unexpected(label.error());
                 node.label = std::move(*label);
             } else {
                 // Just variable, no label.
@@ -1627,7 +1828,8 @@ Result<StmtPtr> Parser::parse_match() {
         // else: empty () node pattern.
 
         auto rp = expect(TokenType::RPAREN, "expected ')' for node pattern");
-        if (!rp) return tl::unexpected(rp.error());
+        if (!rp)
+            return tl::unexpected(rp.error());
 
         PathElement elem;
         elem.node = std::move(node);
@@ -1640,7 +1842,8 @@ Result<StmtPtr> Parser::parse_match() {
             if (match(TokenType::LESS)) {
                 incoming_prefix = true;
                 auto dash = expect(TokenType::MINUS, "expected '-' after '<'");
-                if (!dash) return tl::unexpected(dash.error());
+                if (!dash)
+                    return tl::unexpected(dash.error());
             } else {
                 advance(); // consume -
             }
@@ -1651,17 +1854,19 @@ Result<StmtPtr> Parser::parse_match() {
                     // [:edge_type]
                     advance(); // consume :
                     auto etype = parse_name("edge type");
-                    if (!etype) return tl::unexpected(etype.error());
+                    if (!etype)
+                        return tl::unexpected(etype.error());
                     edge.edge_type = std::move(*etype);
-                } else if (!check(TokenType::RBRACKET) &&
-                           is_name_token(peek().type)) {
+                } else if (!check(TokenType::RBRACKET) && is_name_token(peek().type)) {
                     auto name = parse_name("edge variable or type");
-                    if (!name) return tl::unexpected(name.error());
+                    if (!name)
+                        return tl::unexpected(name.error());
 
                     if (match(TokenType::COLON)) {
                         edge.variable = std::move(*name);
                         auto etype = parse_name("edge type");
-                        if (!etype) return tl::unexpected(etype.error());
+                        if (!etype)
+                            return tl::unexpected(etype.error());
                         edge.edge_type = std::move(*etype);
                     } else {
                         edge.edge_type = std::move(*name);
@@ -1669,12 +1874,14 @@ Result<StmtPtr> Parser::parse_match() {
                 }
 
                 auto rb = expect(TokenType::RBRACKET, "expected ']'");
-                if (!rb) return tl::unexpected(rb.error());
+                if (!rb)
+                    return tl::unexpected(rb.error());
             }
 
             // Suffix: -> or -
             auto dash = expect(TokenType::MINUS, "expected '-' in edge pattern");
-            if (!dash) return tl::unexpected(dash.error());
+            if (!dash)
+                return tl::unexpected(dash.error());
 
             bool outgoing_suffix = match(TokenType::GREATER);
 
@@ -1699,17 +1906,20 @@ Result<StmtPtr> Parser::parse_match() {
     // Optional WHERE.
     if (match(TokenType::WHERE)) {
         auto expr = parse_expression();
-        if (!expr) return tl::unexpected(expr.error());
+        if (!expr)
+            return tl::unexpected(expr.error());
         stmt->where_expr = std::move(*expr);
     }
 
     // RETURN select_items.
     auto ret = expect(TokenType::RETURN, "expected RETURN");
-    if (!ret) return tl::unexpected(ret.error());
+    if (!ret)
+        return tl::unexpected(ret.error());
 
     do {
         auto item = parse_select_item();
-        if (!item) return tl::unexpected(item.error());
+        if (!item)
+            return tl::unexpected(item.error());
         stmt->return_items.push_back(std::move(*item));
     } while (match(TokenType::COMMA));
 
@@ -1721,25 +1931,31 @@ Result<StmtPtr> Parser::parse_match() {
 Result<StmtPtr> Parser::parse_shortest_path() {
     advance(); // consume SHORTEST
     auto path = expect(TokenType::PATH, "expected PATH after SHORTEST");
-    if (!path) return tl::unexpected(path.error());
+    if (!path)
+        return tl::unexpected(path.error());
 
     auto stmt = std::make_unique<ShortestPathStmt>();
 
     // FROM table(pk).
     auto from = expect(TokenType::FROM, "expected FROM");
-    if (!from) return tl::unexpected(from.error());
+    if (!from)
+        return tl::unexpected(from.error());
 
     auto from_tbl = parse_name("source table");
-    if (!from_tbl) return tl::unexpected(from_tbl.error());
+    if (!from_tbl)
+        return tl::unexpected(from_tbl.error());
     stmt->from_table = std::move(*from_tbl);
 
     auto lp1 = expect(TokenType::LPAREN, "expected '('");
-    if (!lp1) return tl::unexpected(lp1.error());
+    if (!lp1)
+        return tl::unexpected(lp1.error());
     auto from_key = parse_expression();
-    if (!from_key) return tl::unexpected(from_key.error());
+    if (!from_key)
+        return tl::unexpected(from_key.error());
     stmt->from_key = std::move(*from_key);
     auto rp1 = expect(TokenType::RPAREN, "expected ')'");
-    if (!rp1) return tl::unexpected(rp1.error());
+    if (!rp1)
+        return tl::unexpected(rp1.error());
 
     // TO table(pk).
     if (!match_ident_ci(peek(), "TO")) {
@@ -1748,22 +1964,28 @@ Result<StmtPtr> Parser::parse_shortest_path() {
     advance();
 
     auto to_tbl = parse_name("target table");
-    if (!to_tbl) return tl::unexpected(to_tbl.error());
+    if (!to_tbl)
+        return tl::unexpected(to_tbl.error());
     stmt->to_table = std::move(*to_tbl);
 
     auto lp2 = expect(TokenType::LPAREN, "expected '('");
-    if (!lp2) return tl::unexpected(lp2.error());
+    if (!lp2)
+        return tl::unexpected(lp2.error());
     auto to_key = parse_expression();
-    if (!to_key) return tl::unexpected(to_key.error());
+    if (!to_key)
+        return tl::unexpected(to_key.error());
     stmt->to_key = std::move(*to_key);
     auto rp2 = expect(TokenType::RPAREN, "expected ')'");
-    if (!rp2) return tl::unexpected(rp2.error());
+    if (!rp2)
+        return tl::unexpected(rp2.error());
 
     // VIA edge_type.
     auto via = expect(TokenType::VIA, "expected VIA");
-    if (!via) return tl::unexpected(via.error());
+    if (!via)
+        return tl::unexpected(via.error());
     auto edge = parse_name("edge type");
-    if (!edge) return tl::unexpected(edge.error());
+    if (!edge)
+        return tl::unexpected(edge.error());
     stmt->edge_type = std::move(*edge);
 
     // Optional DIRECTION.
@@ -1783,9 +2005,9 @@ Result<StmtPtr> Parser::parse_shortest_path() {
 
     // Optional MAX_DEPTH.
     if (match(TokenType::MAX_DEPTH)) {
-        auto depth = expect(TokenType::INTEGER_LITERAL,
-                            "expected integer after MAX_DEPTH");
-        if (!depth) return tl::unexpected(depth.error());
+        auto depth = expect(TokenType::INTEGER_LITERAL, "expected integer after MAX_DEPTH");
+        if (!depth)
+            return tl::unexpected(depth.error());
         stmt->max_depth = std::stoi(std::string(depth->lexeme));
     }
 
@@ -1795,7 +2017,7 @@ Result<StmtPtr> Parser::parse_shortest_path() {
 // -- TCL: BEGIN / COMMIT / ROLLBACK / SAVEPOINT -------------------------------
 
 Result<StmtPtr> Parser::parse_begin() {
-    advance(); // consume BEGIN
+    advance();                     // consume BEGIN
     match(TokenType::TRANSACTION); // optional TRANSACTION
     return ok(StmtPtr(std::make_unique<BeginStmt>()));
 }
@@ -1813,7 +2035,8 @@ Result<StmtPtr> Parser::parse_rollback() {
     if (match_ident_ci(peek(), "TO")) {
         advance();
         auto name = parse_name("savepoint name");
-        if (!name) return tl::unexpected(name.error());
+        if (!name)
+            return tl::unexpected(name.error());
         stmt->savepoint = std::move(*name);
     }
 
@@ -1825,7 +2048,8 @@ Result<StmtPtr> Parser::parse_savepoint() {
     auto stmt = std::make_unique<SavepointStmt>();
 
     auto name = parse_name("savepoint name");
-    if (!name) return tl::unexpected(name.error());
+    if (!name)
+        return tl::unexpected(name.error());
     stmt->name = std::move(*name);
 
     return ok(StmtPtr(std::move(stmt)));
@@ -1838,14 +2062,17 @@ Result<StmtPtr> Parser::parse_set_stmt() {
     auto stmt = std::make_unique<SetStmt>();
 
     auto param = parse_name("parameter name");
-    if (!param) return tl::unexpected(param.error());
+    if (!param)
+        return tl::unexpected(param.error());
     stmt->parameter = std::move(*param);
 
     auto eq = expect(TokenType::EQUAL, "expected '=' after parameter");
-    if (!eq) return tl::unexpected(eq.error());
+    if (!eq)
+        return tl::unexpected(eq.error());
 
     auto val = parse_expression();
-    if (!val) return tl::unexpected(val.error());
+    if (!val)
+        return tl::unexpected(val.error());
     stmt->value = std::move(*val);
 
     return ok(StmtPtr(std::move(stmt)));
@@ -1869,9 +2096,11 @@ Result<StmtPtr> Parser::parse_show() {
         advance(); // consume COLUMN or COLUMNS
         stmt->target = ShowTarget::COLUMNS;
         auto from = expect(TokenType::FROM, "expected FROM after COLUMNS");
-        if (!from) return tl::unexpected(from.error());
+        if (!from)
+            return tl::unexpected(from.error());
         auto name = parse_name("table name");
-        if (!name) return tl::unexpected(name.error());
+        if (!name)
+            return tl::unexpected(name.error());
         stmt->name = std::move(*name);
         return ok(StmtPtr(std::move(stmt)));
     }
@@ -1900,7 +2129,8 @@ Result<StmtPtr> Parser::parse_show() {
     // SHOW parameter_name
     stmt->target = ShowTarget::PARAMETER;
     auto name = parse_name("parameter name");
-    if (!name) return tl::unexpected(name.error());
+    if (!name)
+        return tl::unexpected(name.error());
     stmt->name = std::move(*name);
     return ok(StmtPtr(std::move(stmt)));
 }
@@ -1918,7 +2148,8 @@ Result<StmtPtr> Parser::parse_explain() {
 
     // Parse the inner statement.
     auto inner = parse_statement();
-    if (!inner) return tl::unexpected(inner.error());
+    if (!inner)
+        return tl::unexpected(inner.error());
     stmt->statement = std::move(*inner);
 
     return ok(StmtPtr(std::move(stmt)));
@@ -1931,7 +2162,8 @@ Result<StmtPtr> Parser::parse_describe() {
     auto stmt = std::make_unique<DescribeStmt>();
 
     auto name = parse_name("table name");
-    if (!name) return tl::unexpected(name.error());
+    if (!name)
+        return tl::unexpected(name.error());
     stmt->table_name = std::move(*name);
 
     return ok(StmtPtr(std::move(stmt)));
@@ -1940,12 +2172,13 @@ Result<StmtPtr> Parser::parse_describe() {
 // -- Admin: REEMBED -----------------------------------------------------------
 
 Result<StmtPtr> Parser::parse_reembed() {
-    advance(); // consume REEMBED
+    advance();               // consume REEMBED
     match(TokenType::TABLE); // optional TABLE keyword
     auto stmt = std::make_unique<ReembedStmt>();
 
     auto name = parse_name("table name");
-    if (!name) return tl::unexpected(name.error());
+    if (!name)
+        return tl::unexpected(name.error());
     stmt->table_name = std::move(*name);
 
     return ok(StmtPtr(std::move(stmt)));
@@ -1958,10 +2191,10 @@ Result<StmtPtr> Parser::parse_vacuum() {
     auto stmt = std::make_unique<VacuumStmt>();
 
     // Optional table name.
-    if (!at_end() && !check(TokenType::SEMICOLON) &&
-        is_name_token(peek().type)) {
+    if (!at_end() && !check(TokenType::SEMICOLON) && is_name_token(peek().type)) {
         auto name = parse_name("table name");
-        if (!name) return tl::unexpected(name.error());
+        if (!name)
+            return tl::unexpected(name.error());
         stmt->table_name = std::move(*name);
     }
 
@@ -1975,10 +2208,10 @@ Result<StmtPtr> Parser::parse_analyze_stmt() {
     auto stmt = std::make_unique<AnalyzeStmt>();
 
     // Optional table name.
-    if (!at_end() && !check(TokenType::SEMICOLON) &&
-        is_name_token(peek().type)) {
+    if (!at_end() && !check(TokenType::SEMICOLON) && is_name_token(peek().type)) {
         auto name = parse_name("table name");
-        if (!name) return tl::unexpected(name.error());
+        if (!name)
+            return tl::unexpected(name.error());
         stmt->table_name = std::move(*name);
     }
 
@@ -1993,13 +2226,15 @@ Result<ExprPtr> Parser::parse_expression() {
 
 Result<ExprPtr> Parser::parse_or() {
     auto left = parse_and();
-    if (!left) return left;
+    if (!left)
+        return left;
 
     while (match(TokenType::OR)) {
         uint32_t line = previous().line;
         uint32_t col = previous().column;
         auto right = parse_and();
-        if (!right) return right;
+        if (!right)
+            return right;
 
         auto bin = std::make_unique<BinaryExpr>();
         bin->op = BinaryOp::OR;
@@ -2015,13 +2250,15 @@ Result<ExprPtr> Parser::parse_or() {
 
 Result<ExprPtr> Parser::parse_and() {
     auto left = parse_not();
-    if (!left) return left;
+    if (!left)
+        return left;
 
     while (match(TokenType::AND)) {
         uint32_t line = previous().line;
         uint32_t col = previous().column;
         auto right = parse_not();
-        if (!right) return right;
+        if (!right)
+            return right;
 
         auto bin = std::make_unique<BinaryExpr>();
         bin->op = BinaryOp::AND;
@@ -2040,7 +2277,8 @@ Result<ExprPtr> Parser::parse_not() {
         uint32_t line = previous().line;
         uint32_t col = previous().column;
         auto operand = parse_not();
-        if (!operand) return operand;
+        if (!operand)
+            return operand;
 
         auto unary = std::make_unique<UnaryExpr>();
         unary->op = UnaryOp::NOT;
@@ -2055,7 +2293,8 @@ Result<ExprPtr> Parser::parse_not() {
 
 Result<ExprPtr> Parser::parse_comparison() {
     auto left = parse_addition();
-    if (!left) return left;
+    if (!left)
+        return left;
 
     // IS [NOT] NULL
     if (match(TokenType::IS)) {
@@ -2063,7 +2302,8 @@ Result<ExprPtr> Parser::parse_comparison() {
         uint32_t col = previous().column;
         bool negated = match(TokenType::NOT);
         auto null_tok = expect(TokenType::NULL_KW, "expected NULL after IS");
-        if (!null_tok) return tl::unexpected(null_tok.error());
+        if (!null_tok)
+            return tl::unexpected(null_tok.error());
 
         auto is_null = std::make_unique<IsNullExpr>();
         is_null->expr = std::move(*left);
@@ -2090,7 +2330,8 @@ Result<ExprPtr> Parser::parse_comparison() {
         uint32_t col = previous().column;
 
         auto lp = expect(TokenType::LPAREN, "expected '(' after IN");
-        if (!lp) return tl::unexpected(lp.error());
+        if (!lp)
+            return tl::unexpected(lp.error());
 
         auto in_expr = std::make_unique<InExpr>();
         in_expr->expr = std::move(*left);
@@ -2100,18 +2341,21 @@ Result<ExprPtr> Parser::parse_comparison() {
 
         if (check(TokenType::SELECT)) {
             auto subquery = parse_select();
-            if (!subquery) return tl::unexpected(subquery.error());
+            if (!subquery)
+                return tl::unexpected(subquery.error());
             in_expr->subquery = std::move(*subquery);
         } else {
             do {
                 auto val = parse_expression();
-                if (!val) return tl::unexpected(val.error());
+                if (!val)
+                    return tl::unexpected(val.error());
                 in_expr->values.push_back(std::move(*val));
             } while (match(TokenType::COMMA));
         }
 
         auto rp = expect(TokenType::RPAREN, "expected ')'");
-        if (!rp) return tl::unexpected(rp.error());
+        if (!rp)
+            return tl::unexpected(rp.error());
         return ok(ExprPtr(std::move(in_expr)));
     }
 
@@ -2121,13 +2365,16 @@ Result<ExprPtr> Parser::parse_comparison() {
         uint32_t col = previous().column;
 
         auto low = parse_addition();
-        if (!low) return tl::unexpected(low.error());
+        if (!low)
+            return tl::unexpected(low.error());
 
         auto and_tok = expect(TokenType::AND, "expected AND in BETWEEN");
-        if (!and_tok) return tl::unexpected(and_tok.error());
+        if (!and_tok)
+            return tl::unexpected(and_tok.error());
 
         auto high = parse_addition();
-        if (!high) return tl::unexpected(high.error());
+        if (!high)
+            return tl::unexpected(high.error());
 
         auto between = std::make_unique<BetweenExpr>();
         between->expr = std::move(*left);
@@ -2145,7 +2392,8 @@ Result<ExprPtr> Parser::parse_comparison() {
         uint32_t col = previous().column;
 
         auto pattern = parse_addition();
-        if (!pattern) return tl::unexpected(pattern.error());
+        if (!pattern)
+            return tl::unexpected(pattern.error());
 
         auto like = std::make_unique<LikeExpr>();
         like->expr = std::move(*left);
@@ -2159,18 +2407,32 @@ Result<ExprPtr> Parser::parse_comparison() {
     // Comparison operators.
     BinaryOp op;
     bool has_op = false;
-    if (match(TokenType::EQUAL)) { op = BinaryOp::EQUAL; has_op = true; }
-    else if (match(TokenType::NOT_EQUAL)) { op = BinaryOp::NOT_EQUAL; has_op = true; }
-    else if (match(TokenType::LESS)) { op = BinaryOp::LESS; has_op = true; }
-    else if (match(TokenType::GREATER)) { op = BinaryOp::GREATER; has_op = true; }
-    else if (match(TokenType::LESS_EQUAL)) { op = BinaryOp::LESS_EQUAL; has_op = true; }
-    else if (match(TokenType::GREATER_EQUAL)) { op = BinaryOp::GREATER_EQUAL; has_op = true; }
+    if (match(TokenType::EQUAL)) {
+        op = BinaryOp::EQUAL;
+        has_op = true;
+    } else if (match(TokenType::NOT_EQUAL)) {
+        op = BinaryOp::NOT_EQUAL;
+        has_op = true;
+    } else if (match(TokenType::LESS)) {
+        op = BinaryOp::LESS;
+        has_op = true;
+    } else if (match(TokenType::GREATER)) {
+        op = BinaryOp::GREATER;
+        has_op = true;
+    } else if (match(TokenType::LESS_EQUAL)) {
+        op = BinaryOp::LESS_EQUAL;
+        has_op = true;
+    } else if (match(TokenType::GREATER_EQUAL)) {
+        op = BinaryOp::GREATER_EQUAL;
+        has_op = true;
+    }
 
     if (has_op) {
         uint32_t line = previous().line;
         uint32_t col = previous().column;
         auto right = parse_addition();
-        if (!right) return right;
+        if (!right)
+            return right;
 
         auto bin = std::make_unique<BinaryExpr>();
         bin->op = op;
@@ -2186,21 +2448,30 @@ Result<ExprPtr> Parser::parse_comparison() {
 
 Result<ExprPtr> Parser::parse_addition() {
     auto left = parse_multiplication();
-    if (!left) return left;
+    if (!left)
+        return left;
 
-    while (check(TokenType::PLUS) || check(TokenType::MINUS) ||
-           check(TokenType::PIPE_PIPE)) {
+    while (check(TokenType::PLUS) || check(TokenType::MINUS) || check(TokenType::PIPE_PIPE)) {
         Token op_tok = advance();
         BinaryOp op;
         switch (op_tok.type) {
-        case TokenType::PLUS: op = BinaryOp::ADD; break;
-        case TokenType::MINUS: op = BinaryOp::SUBTRACT; break;
-        case TokenType::PIPE_PIPE: op = BinaryOp::CONCAT; break;
-        default: op = BinaryOp::ADD; break; // unreachable
+        case TokenType::PLUS:
+            op = BinaryOp::ADD;
+            break;
+        case TokenType::MINUS:
+            op = BinaryOp::SUBTRACT;
+            break;
+        case TokenType::PIPE_PIPE:
+            op = BinaryOp::CONCAT;
+            break;
+        default:
+            op = BinaryOp::ADD;
+            break; // unreachable
         }
 
         auto right = parse_multiplication();
-        if (!right) return right;
+        if (!right)
+            return right;
 
         auto bin = std::make_unique<BinaryExpr>();
         bin->op = op;
@@ -2216,21 +2487,30 @@ Result<ExprPtr> Parser::parse_addition() {
 
 Result<ExprPtr> Parser::parse_multiplication() {
     auto left = parse_unary();
-    if (!left) return left;
+    if (!left)
+        return left;
 
-    while (check(TokenType::STAR) || check(TokenType::SLASH) ||
-           check(TokenType::PERCENT)) {
+    while (check(TokenType::STAR) || check(TokenType::SLASH) || check(TokenType::PERCENT)) {
         Token op_tok = advance();
         BinaryOp op;
         switch (op_tok.type) {
-        case TokenType::STAR: op = BinaryOp::MULTIPLY; break;
-        case TokenType::SLASH: op = BinaryOp::DIVIDE; break;
-        case TokenType::PERCENT: op = BinaryOp::MODULO; break;
-        default: op = BinaryOp::MULTIPLY; break; // unreachable
+        case TokenType::STAR:
+            op = BinaryOp::MULTIPLY;
+            break;
+        case TokenType::SLASH:
+            op = BinaryOp::DIVIDE;
+            break;
+        case TokenType::PERCENT:
+            op = BinaryOp::MODULO;
+            break;
+        default:
+            op = BinaryOp::MULTIPLY;
+            break; // unreachable
         }
 
         auto right = parse_unary();
-        if (!right) return right;
+        if (!right)
+            return right;
 
         auto bin = std::make_unique<BinaryExpr>();
         bin->op = op;
@@ -2249,7 +2529,8 @@ Result<ExprPtr> Parser::parse_unary() {
         uint32_t line = previous().line;
         uint32_t col = previous().column;
         auto operand = parse_unary();
-        if (!operand) return operand;
+        if (!operand)
+            return operand;
 
         auto unary = std::make_unique<UnaryExpr>();
         unary->op = UnaryOp::NEGATE;
@@ -2264,7 +2545,8 @@ Result<ExprPtr> Parser::parse_unary() {
 
 Result<ExprPtr> Parser::parse_postfix() {
     auto expr = parse_primary();
-    if (!expr) return expr;
+    if (!expr)
+        return expr;
 
     // :: type cast (PostgreSQL-style).
     while (match(TokenType::COLON_COLON)) {
@@ -2272,7 +2554,8 @@ Result<ExprPtr> Parser::parse_postfix() {
         uint32_t col = previous().column;
 
         auto ts = parse_type_spec();
-        if (!ts) return tl::unexpected(ts.error());
+        if (!ts)
+            return tl::unexpected(ts.error());
 
         auto cast = std::make_unique<CastExpr>();
         cast->expr = std::move(*expr);
@@ -2351,13 +2634,16 @@ Result<ExprPtr> Parser::parse_primary() {
         uint32_t col = previous().column;
 
         auto lp = expect(TokenType::LPAREN, "expected '(' after EXISTS");
-        if (!lp) return tl::unexpected(lp.error());
+        if (!lp)
+            return tl::unexpected(lp.error());
 
         auto subquery = parse_select();
-        if (!subquery) return tl::unexpected(subquery.error());
+        if (!subquery)
+            return tl::unexpected(subquery.error());
 
         auto rp = expect(TokenType::RPAREN, "expected ')'");
-        if (!rp) return tl::unexpected(rp.error());
+        if (!rp)
+            return tl::unexpected(rp.error());
 
         auto exists = std::make_unique<ExistsExpr>();
         exists->subquery = std::move(*subquery);
@@ -2378,7 +2664,8 @@ Result<ExprPtr> Parser::parse_primary() {
         // Simple CASE: CASE operand WHEN ...
         if (!check(TokenType::WHEN)) {
             auto operand = parse_expression();
-            if (!operand) return tl::unexpected(operand.error());
+            if (!operand)
+                return tl::unexpected(operand.error());
             case_expr->operand = std::move(*operand);
         }
 
@@ -2386,14 +2673,17 @@ Result<ExprPtr> Parser::parse_primary() {
         while (match(TokenType::WHEN)) {
             CaseWhen cw;
             auto cond = parse_expression();
-            if (!cond) return tl::unexpected(cond.error());
+            if (!cond)
+                return tl::unexpected(cond.error());
             cw.condition = std::move(*cond);
 
             auto then_tok = expect(TokenType::THEN, "expected THEN");
-            if (!then_tok) return tl::unexpected(then_tok.error());
+            if (!then_tok)
+                return tl::unexpected(then_tok.error());
 
             auto result = parse_expression();
-            if (!result) return tl::unexpected(result.error());
+            if (!result)
+                return tl::unexpected(result.error());
             cw.result = std::move(*result);
 
             case_expr->whens.push_back(std::move(cw));
@@ -2402,12 +2692,14 @@ Result<ExprPtr> Parser::parse_primary() {
         // Optional ELSE.
         if (match(TokenType::ELSE)) {
             auto else_expr = parse_expression();
-            if (!else_expr) return tl::unexpected(else_expr.error());
+            if (!else_expr)
+                return tl::unexpected(else_expr.error());
             case_expr->else_expr = std::move(*else_expr);
         }
 
         auto end = expect(TokenType::END, "expected END");
-        if (!end) return tl::unexpected(end.error());
+        if (!end)
+            return tl::unexpected(end.error());
         return ok(ExprPtr(std::move(case_expr)));
     }
 
@@ -2416,10 +2708,12 @@ Result<ExprPtr> Parser::parse_primary() {
         // Subquery: (SELECT ...)
         if (check(TokenType::SELECT)) {
             auto subquery = parse_select();
-            if (!subquery) return tl::unexpected(subquery.error());
+            if (!subquery)
+                return tl::unexpected(subquery.error());
 
             auto rp = expect(TokenType::RPAREN, "expected ')'");
-            if (!rp) return tl::unexpected(rp.error());
+            if (!rp)
+                return tl::unexpected(rp.error());
 
             auto sub = std::make_unique<SubqueryExpr>();
             sub->subquery = std::move(*subquery);
@@ -2427,9 +2721,11 @@ Result<ExprPtr> Parser::parse_primary() {
         }
 
         auto expr = parse_expression();
-        if (!expr) return expr;
+        if (!expr)
+            return expr;
         auto rp = expect(TokenType::RPAREN, "expected ')'");
-        if (!rp) return tl::unexpected(rp.error());
+        if (!rp)
+            return tl::unexpected(rp.error());
         return expr;
     }
 
@@ -2445,13 +2741,15 @@ Result<ExprPtr> Parser::parse_primary() {
         if (!check(TokenType::RBRACKET)) {
             do {
                 auto elem = parse_expression();
-                if (!elem) return tl::unexpected(elem.error());
+                if (!elem)
+                    return tl::unexpected(elem.error());
                 arr->elements.push_back(std::move(*elem));
             } while (match(TokenType::COMMA));
         }
 
         auto rb = expect(TokenType::RBRACKET, "expected ']'");
-        if (!rb) return tl::unexpected(rb.error());
+        if (!rb)
+            return tl::unexpected(rb.error());
         return ok(ExprPtr(std::move(arr)));
     }
 
@@ -2465,24 +2763,27 @@ Result<ExprPtr> Parser::parse_primary() {
         std::string name_upper;
         name_upper.reserve(name.size());
         for (char c : name) {
-            name_upper += static_cast<char>(
-                std::toupper(static_cast<unsigned char>(c)));
+            name_upper += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
         }
 
         // CAST(expr AS type)
         if (name_upper == "CAST" && check(TokenType::LPAREN)) {
             advance(); // consume (
             auto expr = parse_expression();
-            if (!expr) return tl::unexpected(expr.error());
+            if (!expr)
+                return tl::unexpected(expr.error());
 
             auto as_tok = expect(TokenType::AS, "expected AS in CAST");
-            if (!as_tok) return tl::unexpected(as_tok.error());
+            if (!as_tok)
+                return tl::unexpected(as_tok.error());
 
             auto ts = parse_type_spec();
-            if (!ts) return tl::unexpected(ts.error());
+            if (!ts)
+                return tl::unexpected(ts.error());
 
             auto rp = expect(TokenType::RPAREN, "expected ')' after CAST");
-            if (!rp) return tl::unexpected(rp.error());
+            if (!rp)
+                return tl::unexpected(rp.error());
 
             auto cast = std::make_unique<CastExpr>();
             cast->expr = std::move(*expr);
@@ -2514,20 +2815,23 @@ Result<ExprPtr> Parser::parse_primary() {
             } else if (!check(TokenType::RPAREN)) {
                 do {
                     auto arg = parse_expression();
-                    if (!arg) return arg;
+                    if (!arg)
+                        return arg;
                     fn->args.push_back(std::move(*arg));
                 } while (match(TokenType::COMMA));
             }
 
             auto rp = expect(TokenType::RPAREN, "expected ')'");
-            if (!rp) return tl::unexpected(rp.error());
+            if (!rp)
+                return tl::unexpected(rp.error());
             return ok(ExprPtr(std::move(fn)));
         }
 
         // Qualified column: table.column
         if (match(TokenType::DOT)) {
             auto col_name = parse_name("column name");
-            if (!col_name) return tl::unexpected(col_name.error());
+            if (!col_name)
+                return tl::unexpected(col_name.error());
 
             auto ref = std::make_unique<ColumnRefExpr>();
             ref->table = std::move(name);
@@ -2546,8 +2850,7 @@ Result<ExprPtr> Parser::parse_primary() {
     }
 
     return make_error(StatusCode::PARSE_ERROR,
-                      "expected expression at line " +
-                          std::to_string(tok.line) + ", column " +
+                      "expected expression at line " + std::to_string(tok.line) + ", column " +
                           std::to_string(tok.column) + " (got " +
                           std::string(token_type_name(tok.type)) + ")");
 }

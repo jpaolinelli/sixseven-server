@@ -143,26 +143,16 @@ TEST(Lexer, TypeKeywords) {
         TokenType expected;
     };
     KW keywords[] = {
-        {"BIGINT", TokenType::BIGINT},
-        {"BLOB", TokenType::BLOB_KW},
-        {"BOOLEAN", TokenType::BOOLEAN},
-        {"CHAR", TokenType::CHAR},
-        {"DATE", TokenType::DATE},
-        {"DECIMAL", TokenType::DECIMAL},
-        {"DOUBLE", TokenType::DOUBLE},
-        {"FLOAT", TokenType::FLOAT},
-        {"INT", TokenType::INT},
-        {"INTEGER", TokenType::INTEGER},
-        {"INTERVAL", TokenType::INTERVAL},
-        {"JSON", TokenType::JSON_KW},
-        {"NUMERIC", TokenType::NUMERIC},
-        {"POINT", TokenType::POINT_KW},
-        {"SMALLINT", TokenType::SMALLINT},
-        {"TEXT", TokenType::TEXT},
-        {"TIME", TokenType::TIME},
-        {"TIMESTAMP", TokenType::TIMESTAMP},
-        {"TINYINT", TokenType::TINYINT},
-        {"UUID", TokenType::UUID_KW},
+        {"BIGINT", TokenType::BIGINT},     {"BLOB", TokenType::BLOB_KW},
+        {"BOOLEAN", TokenType::BOOLEAN},   {"CHAR", TokenType::CHAR},
+        {"DATE", TokenType::DATE},         {"DECIMAL", TokenType::DECIMAL},
+        {"DOUBLE", TokenType::DOUBLE},     {"FLOAT", TokenType::FLOAT},
+        {"INT", TokenType::INT},           {"INTEGER", TokenType::INTEGER},
+        {"INTERVAL", TokenType::INTERVAL}, {"JSON", TokenType::JSON_KW},
+        {"NUMERIC", TokenType::NUMERIC},   {"POINT", TokenType::POINT_KW},
+        {"SMALLINT", TokenType::SMALLINT}, {"TEXT", TokenType::TEXT},
+        {"TIME", TokenType::TIME},         {"TIMESTAMP", TokenType::TIMESTAMP},
+        {"TINYINT", TokenType::TINYINT},   {"UUID", TokenType::UUID_KW},
         {"VARCHAR", TokenType::VARCHAR},
     };
 
@@ -561,11 +551,10 @@ TEST(Lexer, InsertStatement) {
 }
 
 TEST(Lexer, CreateTableStatement) {
-    auto tokens = tokenize_ok(
-        "CREATE TABLE users (\n"
-        "  id INT PRIMARY KEY,\n"
-        "  name VARCHAR NOT NULL\n"
-        ");");
+    auto tokens = tokenize_ok("CREATE TABLE users (\n"
+                              "  id INT PRIMARY KEY,\n"
+                              "  name VARCHAR NOT NULL\n"
+                              ");");
     ASSERT_GE(tokens.size(), 14u);
     EXPECT_EQ(tokens[0].type, TokenType::CREATE);
     EXPECT_EQ(tokens[1].type, TokenType::TABLE);

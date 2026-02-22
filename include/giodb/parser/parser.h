@@ -40,8 +40,7 @@ private:
     Token advance();
     [[nodiscard]] bool check(TokenType type) const;
     bool match(TokenType type);
-    [[nodiscard]] Result<Token> expect(TokenType type,
-                                       const std::string& message);
+    [[nodiscard]] Result<Token> expect(TokenType type, const std::string& message);
     [[nodiscard]] bool at_end() const;
 
     /// Accept IDENTIFIER or any keyword that can serve as a name.
