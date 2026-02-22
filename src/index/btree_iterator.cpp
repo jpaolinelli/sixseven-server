@@ -6,12 +6,14 @@
 namespace giodb {
 
 BTreeIterator::BTreeIterator(const BTreeIndex& index, PageId start_leaf_id,
-                             uint16_t start_pos, std::optional<KeyType> end_key)
+                             uint16_t start_pos, std::optional<KeyType> end_key,
+                             std::shared_lock<std::shared_mutex> tree_lock)
     : index_(&index),
       current_leaf_id_(start_leaf_id),
       current_pos_(start_pos),
       end_key_(std::move(end_key)),
-      exhausted_(false) {}
+      exhausted_(false),
+      tree_lock_(std::move(tree_lock)) {}
 
 BTreeIterator::BTreeIterator() : exhausted_(true) {}
 

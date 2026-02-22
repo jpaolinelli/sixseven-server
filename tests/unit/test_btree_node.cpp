@@ -1,31 +1,11 @@
-#include "giodb/index/btree_key.h"
-#include "giodb/index/btree_node.h"
-#include "giodb/index/rid.h"
+#include "test_btree_helpers.h"
 
 #include <gtest/gtest.h>
 
 #include <vector>
 
 using namespace giodb;
-
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-/// Create a single-column INT64 key.
-static KeyType make_key(int64_t v) {
-    return {Value(v)};
-}
-
-/// Create a composite (INT64, STRING) key.
-static KeyType make_composite_key(int64_t v, const std::string& s) {
-    return {Value(v), Value(s)};
-}
-
-/// Create an RID with page_id = value, slot_id = 0.
-static RID make_rid(uint32_t page_id, uint16_t slot_id = 0) {
-    return {page_id, slot_id};
-}
+using namespace giodb::test;
 
 // =============================================================================
 // KeyType Comparison Tests
@@ -267,27 +247,27 @@ TEST(BTreeInternalNode, SearchRouting) {
     node.keys().push_back(make_key(40));
     node.children().push_back(300); // Right of 40.
 
-    // Search for key < 20 → child 100.
+    // Search for key < 20 -> child 100.
     auto r1 = node.search(make_key(10));
     ASSERT_TRUE(r1.has_value());
     EXPECT_EQ(*r1, 100u);
 
-    // Search for key == 20 → child 200 (keys_[0] <= key, so go right).
+    // Search for key == 20 -> child 200 (keys_[0] <= key, so go right).
     auto r2 = node.search(make_key(20));
     ASSERT_TRUE(r2.has_value());
     EXPECT_EQ(*r2, 200u);
 
-    // Search for 20 < key < 40 → child 200.
+    // Search for 20 < key < 40 -> child 200.
     auto r3 = node.search(make_key(30));
     ASSERT_TRUE(r3.has_value());
     EXPECT_EQ(*r3, 200u);
 
-    // Search for key == 40 → child 300.
+    // Search for key == 40 -> child 300.
     auto r4 = node.search(make_key(40));
     ASSERT_TRUE(r4.has_value());
     EXPECT_EQ(*r4, 300u);
 
-    // Search for key > 40 → child 300.
+    // Search for key > 40 -> child 300.
     auto r5 = node.search(make_key(50));
     ASSERT_TRUE(r5.has_value());
     EXPECT_EQ(*r5, 300u);

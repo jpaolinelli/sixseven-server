@@ -1,12 +1,17 @@
 #include "giodb/index/btree_index.h"
 
 #include "giodb/index/btree_iterator.h"
+#include "giodb/storage/wal.h"
+#include "giodb/storage/wal_record.h"
+
+#include <cstring>
+#include <shared_mutex>
 
 namespace giodb {
 
 // -- Default max keys ---------------------------------------------------------
 
-static constexpr uint16_t default_max_keys = 128;
+inline constexpr uint16_t default_max_keys = 128;
 
 uint16_t BTreeIndex::effective_internal_max_keys() const {
     return config_.internal_max_keys > 0 ? config_.internal_max_keys : default_max_keys;
@@ -65,22 +70,91 @@ bool BTreeIndex::is_leaf_node(PageId page_id) const {
     return leaf_nodes_.count(page_id) > 0;
 }
 
+std::shared_mutex& BTreeIndex::tree_latch() const {
+    return tree_latch_;
+}
+
 // -- Accessors ----------------------------------------------------------------
 
 PageId BTreeIndex::root_page_id() const {
+    std::shared_lock lock(tree_latch_);
     return root_page_id_;
 }
 
 uint64_t BTreeIndex::size() const {
+    std::shared_lock lock(tree_latch_);
     return size_;
 }
 
 bool BTreeIndex::empty() const {
+    std::shared_lock lock(tree_latch_);
     return size_ == 0;
 }
 
 const BTreeConfig& BTreeIndex::config() const {
-    return config_;
+    return config_; // Immutable after construction — no lock needed.
+}
+
+// -- Shared helpers (reduce code duplication) ----------------------------------
+
+Result<uint16_t> BTreeIndex::find_child_index(
+    const BTreeInternalNode* parent, PageId child_id) const {
+    const auto& children = parent->children();
+    for (uint16_t i = 0; i < static_cast<uint16_t>(children.size()); ++i) {
+        if (children[i] == child_id) {
+            return ok(i);
+        }
+    }
+    return make_error(StatusCode::INTERNAL_ERROR,
+                      "child " + std::to_string(child_id) +
+                          " not found in parent " + std::to_string(parent->page_id()));
+}
+
+Result<void> BTreeIndex::set_node_parent(PageId child_id, PageId parent_id) {
+    if (child_id == invalid_page_id) {
+        return ok(); // Silently ignore sentinel.
+    }
+    auto* leaf = get_leaf_node(child_id);
+    if (leaf != nullptr) {
+        leaf->set_parent_page_id(parent_id);
+        return ok();
+    }
+    auto* internal = get_internal_node(child_id);
+    if (internal != nullptr) {
+        internal->set_parent_page_id(parent_id);
+        return ok();
+    }
+    return make_error(StatusCode::INTERNAL_ERROR,
+                      "node not found: " + std::to_string(child_id));
+}
+
+Result<void> BTreeIndex::handle_post_merge(BTreeInternalNode* parent) {
+    if (parent->page_id() == root_page_id_ && parent->key_count() == 0) {
+        // Root has no keys left; its only child becomes new root.
+        PageId only_child = parent->child_at(0);
+        internal_nodes_.erase(root_page_id_);
+        root_page_id_ = only_child;
+        return set_node_parent(root_page_id_, invalid_page_id);
+    }
+
+    if (parent->page_id() != root_page_id_ && parent->is_underfull(false)) {
+        return fix_underfull_internal(parent);
+    }
+
+    return ok();
+}
+
+void BTreeIndex::log_split(PageId original_page_id, PageId new_page_id) {
+    if (wal_ == nullptr) {
+        return;
+    }
+    WalRecord record;
+    record.type = WalRecordType::PAGE_SPLIT;
+    record.page_id = original_page_id;
+    record.data.resize(sizeof(PageId));
+    std::memcpy(record.data.data(), &new_page_id, sizeof(PageId));
+    // Best-effort: split already completed in-memory.
+    (void)wal_->append(record);
 }
 
 // -- Traversal ----------------------------------------------------------------
@@ -108,9 +182,9 @@ Result<PageId> BTreeIndex::find_leaf(const KeyType& key) const {
     return ok(current);
 }
 
-PageId BTreeIndex::find_leftmost_leaf() const {
+Result<PageId> BTreeIndex::find_leftmost_leaf() const {
     if (root_page_id_ == invalid_page_id) {
-        return invalid_page_id;
+        return make_error(StatusCode::NOT_FOUND, "tree is empty");
     }
 
     PageId current = root_page_id_;
@@ -118,17 +192,20 @@ PageId BTreeIndex::find_leftmost_leaf() const {
     while (!is_leaf_node(current)) {
         const auto* node = get_internal_node(current);
         if (node == nullptr) {
-            return invalid_page_id;
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "internal node not found: " + std::to_string(current));
         }
         current = node->child_at(0);
     }
 
-    return current;
+    return ok(current);
 }
 
 // -- Insert (GDB-93) ---------------------------------------------------------
 
 Result<void> BTreeIndex::insert(const KeyType& key, const RID& rid) {
+    std::unique_lock lock(tree_latch_);
+
     // If tree is empty, create root leaf.
     if (root_page_id_ == invalid_page_id) {
         auto* leaf = create_leaf_node();
@@ -164,8 +241,9 @@ Result<void> BTreeIndex::insert(const KeyType& key, const RID& rid) {
         return ok();
     }
 
-    // Leaf is full — need to split.
-    // First, insert into the leaf (temporarily over capacity) then split.
+    // Leaf is full — insert-then-split: the leaf temporarily holds max_keys + 1
+    // entries. BTreeLeafNode::insert() intentionally does NOT enforce capacity
+    // limits; the caller (here) splits the node immediately after the insert.
     auto insert_result = leaf->insert(key, rid, config_.is_unique);
     if (!insert_result.has_value()) {
         return tl::unexpected(insert_result.error());
@@ -217,6 +295,8 @@ Result<std::pair<KeyType, PageId>> BTreeIndex::split_leaf(BTreeLeafNode* leaf) {
     // Separator = first key of new leaf (copy up).
     KeyType separator = new_leaf->key_at(0);
 
+    log_split(leaf->page_id(), new_leaf->page_id());
+
     return ok(std::make_pair(std::move(separator), new_leaf->page_id()));
 }
 
@@ -237,14 +317,9 @@ Result<std::pair<KeyType, PageId>> BTreeIndex::split_internal(BTreeInternalNode*
 
     // Update parent pointers for children moved to new node.
     for (PageId child_id : new_node->children()) {
-        auto* child_leaf = get_leaf_node(child_id);
-        if (child_leaf != nullptr) {
-            child_leaf->set_parent_page_id(new_node->page_id());
-        } else {
-            auto* child_internal = get_internal_node(child_id);
-            if (child_internal != nullptr) {
-                child_internal->set_parent_page_id(new_node->page_id());
-            }
+        auto result = set_node_parent(child_id, new_node->page_id());
+        if (!result.has_value()) {
+            return tl::unexpected(result.error());
         }
     }
 
@@ -255,12 +330,13 @@ Result<std::pair<KeyType, PageId>> BTreeIndex::split_internal(BTreeInternalNode*
     // Set parent for new node.
     new_node->set_parent_page_id(node->parent_page_id());
 
+    log_split(node->page_id(), new_node->page_id());
+
     return ok(std::make_pair(std::move(push_up_key), new_node->page_id()));
 }
 
 Result<void> BTreeIndex::insert_into_parent(PageId left_page_id, const KeyType& key,
                                              PageId right_page_id) {
-    // Check if left is the root.
     // Get parent page ID from the left node.
     PageId parent_id = invalid_page_id;
     auto* left_leaf = get_leaf_node(left_page_id);
@@ -284,49 +360,34 @@ Result<void> BTreeIndex::insert_into_parent(PageId left_page_id, const KeyType& 
                           "parent node not found: " + std::to_string(parent_id));
     }
 
-    // Find position to insert separator in parent.
-    // The separator should be inserted after the child pointer that points to left_page_id.
-    uint16_t pos = 0;
-    for (uint16_t i = 0; i < static_cast<uint16_t>(parent->children().size()); ++i) {
-        if (parent->child_at(i) == left_page_id) {
-            pos = i;
-            break;
-        }
+    // Find position to insert separator (verified child-index search).
+    auto pos_result = find_child_index(parent, left_page_id);
+    if (!pos_result.has_value()) {
+        return tl::unexpected(pos_result.error());
     }
+    uint16_t pos = *pos_result;
 
     if (!parent->is_full()) {
         auto result = parent->insert_at(pos, key, right_page_id);
         if (!result.has_value()) {
             return tl::unexpected(result.error());
         }
-
-        // Update right child's parent pointer.
-        auto* right_leaf = get_leaf_node(right_page_id);
-        if (right_leaf != nullptr) {
-            right_leaf->set_parent_page_id(parent_id);
-        } else {
-            auto* right_internal = get_internal_node(right_page_id);
-            if (right_internal != nullptr) {
-                right_internal->set_parent_page_id(parent_id);
-            }
+        auto set_result = set_node_parent(right_page_id, parent_id);
+        if (!set_result.has_value()) {
+            return tl::unexpected(set_result.error());
         }
-
         return ok();
     }
 
-    // Parent is full — insert directly into vectors (bypassing capacity check) then split.
+    // Parent is full — insert directly into vectors (bypassing capacity check)
+    // then split. This is the "insert-then-split" pattern: the internal node
+    // temporarily holds max_keys + 1 entries, mirroring the leaf approach.
     parent->keys().insert(parent->keys().begin() + pos, key);
     parent->children().insert(parent->children().begin() + pos + 1, right_page_id);
 
-    // Update right child's parent pointer before split.
-    auto* right_leaf = get_leaf_node(right_page_id);
-    if (right_leaf != nullptr) {
-        right_leaf->set_parent_page_id(parent_id);
-    } else {
-        auto* right_internal = get_internal_node(right_page_id);
-        if (right_internal != nullptr) {
-            right_internal->set_parent_page_id(parent_id);
-        }
+    auto set_result = set_node_parent(right_page_id, parent_id);
+    if (!set_result.has_value()) {
+        return tl::unexpected(set_result.error());
     }
 
     auto split_result = split_internal(parent);
@@ -345,25 +406,13 @@ Result<void> BTreeIndex::create_new_root(PageId left_page_id, const KeyType& key
     new_root->children().push_back(left_page_id);
     new_root->children().push_back(right_page_id);
 
-    // Update parent pointers of children.
-    auto* left_leaf = get_leaf_node(left_page_id);
-    if (left_leaf != nullptr) {
-        left_leaf->set_parent_page_id(new_root->page_id());
-    } else {
-        auto* left_internal = get_internal_node(left_page_id);
-        if (left_internal != nullptr) {
-            left_internal->set_parent_page_id(new_root->page_id());
-        }
+    auto left_result = set_node_parent(left_page_id, new_root->page_id());
+    if (!left_result.has_value()) {
+        return tl::unexpected(left_result.error());
     }
-
-    auto* right_leaf = get_leaf_node(right_page_id);
-    if (right_leaf != nullptr) {
-        right_leaf->set_parent_page_id(new_root->page_id());
-    } else {
-        auto* right_internal = get_internal_node(right_page_id);
-        if (right_internal != nullptr) {
-            right_internal->set_parent_page_id(new_root->page_id());
-        }
+    auto right_result = set_node_parent(right_page_id, new_root->page_id());
+    if (!right_result.has_value()) {
+        return tl::unexpected(right_result.error());
     }
 
     root_page_id_ = new_root->page_id();
@@ -373,6 +422,8 @@ Result<void> BTreeIndex::create_new_root(PageId left_page_id, const KeyType& key
 // -- Search (GDB-94) ---------------------------------------------------------
 
 Result<std::optional<RID>> BTreeIndex::search(const KeyType& key) const {
+    std::shared_lock lock(tree_latch_);
+
     if (root_page_id_ == invalid_page_id) {
         return ok(std::optional<RID>(std::nullopt));
     }
@@ -393,8 +444,11 @@ Result<std::optional<RID>> BTreeIndex::search(const KeyType& key) const {
 
 Result<BTreeIterator> BTreeIndex::range_scan(const std::optional<KeyType>& begin_key,
                                               const std::optional<KeyType>& end_key) const {
+    // Acquire a shared lock that will be transferred to the iterator.
+    std::shared_lock lock(tree_latch_);
+
     if (root_page_id_ == invalid_page_id) {
-        return ok(BTreeIterator()); // Empty iterator.
+        return ok(BTreeIterator()); // Empty iterator (lock released).
     }
 
     PageId start_leaf_id = invalid_page_id;
@@ -426,19 +480,23 @@ Result<BTreeIterator> BTreeIndex::range_scan(const std::optional<KeyType>& begin
             }
         }
     } else {
-        start_leaf_id = find_leftmost_leaf();
-        start_pos = 0;
-        if (start_leaf_id == invalid_page_id) {
-            return ok(BTreeIterator());
+        auto leftmost = find_leftmost_leaf();
+        if (!leftmost.has_value()) {
+            return tl::unexpected(leftmost.error());
         }
+        start_leaf_id = *leftmost;
+        start_pos = 0;
     }
 
-    return ok(BTreeIterator(*this, start_leaf_id, start_pos, end_key));
+    // Move the shared lock into the iterator so it stays alive for the scan.
+    return ok(BTreeIterator(*this, start_leaf_id, start_pos, end_key, std::move(lock)));
 }
 
 // -- Delete (GDB-95) ---------------------------------------------------------
 
 Result<bool> BTreeIndex::remove(const KeyType& key) {
+    std::unique_lock lock(tree_latch_);
+
     if (root_page_id_ == invalid_page_id) {
         return ok(false);
     }
@@ -488,51 +546,40 @@ Result<void> BTreeIndex::fix_underfull_leaf(BTreeLeafNode* leaf) {
         return make_error(StatusCode::INTERNAL_ERROR, "parent not found for underfull leaf");
     }
 
-    // Find index of this leaf in parent's children.
-    uint16_t child_index = 0;
-    for (uint16_t i = 0; i < static_cast<uint16_t>(parent->children().size()); ++i) {
-        if (parent->child_at(i) == leaf->page_id()) {
-            child_index = i;
-            break;
-        }
+    auto ci_result = find_child_index(parent, leaf->page_id());
+    if (!ci_result.has_value()) {
+        return tl::unexpected(ci_result.error());
     }
+    uint16_t child_index = *ci_result;
+
+    uint16_t min_keys = (leaf->max_keys() + 1) / 2;
 
     // Try redistribute from left sibling.
     if (child_index > 0) {
         auto* left_sibling = get_leaf_node(parent->child_at(child_index - 1));
-        if (left_sibling != nullptr) {
-            uint16_t min_keys = (leaf->max_keys() + 1) / 2;
-            if (left_sibling->key_count() > min_keys) {
-                // Steal last key from left sibling.
-                uint16_t steal_idx = left_sibling->key_count() - 1;
-                leaf->keys().insert(leaf->keys().begin(), left_sibling->key_at(steal_idx));
-                leaf->rids().insert(leaf->rids().begin(), left_sibling->rid_at(steal_idx));
-                left_sibling->keys().pop_back();
-                left_sibling->rids().pop_back();
+        if (left_sibling != nullptr && left_sibling->key_count() > min_keys) {
+            uint16_t steal_idx = left_sibling->key_count() - 1;
+            leaf->keys().insert(leaf->keys().begin(), left_sibling->key_at(steal_idx));
+            leaf->rids().insert(leaf->rids().begin(), left_sibling->rid_at(steal_idx));
+            left_sibling->keys().pop_back();
+            left_sibling->rids().pop_back();
 
-                // Update parent separator: parent key at (child_index - 1) = new first key of leaf.
-                parent->keys()[child_index - 1] = leaf->key_at(0);
-                return ok();
-            }
+            parent->keys()[child_index - 1] = leaf->key_at(0);
+            return ok();
         }
     }
 
     // Try redistribute from right sibling.
     if (child_index + 1 < static_cast<uint16_t>(parent->children().size())) {
         auto* right_sibling = get_leaf_node(parent->child_at(child_index + 1));
-        if (right_sibling != nullptr) {
-            uint16_t min_keys = (leaf->max_keys() + 1) / 2;
-            if (right_sibling->key_count() > min_keys) {
-                // Steal first key from right sibling.
-                leaf->keys().push_back(right_sibling->key_at(0));
-                leaf->rids().push_back(right_sibling->rid_at(0));
-                right_sibling->keys().erase(right_sibling->keys().begin());
-                right_sibling->rids().erase(right_sibling->rids().begin());
+        if (right_sibling != nullptr && right_sibling->key_count() > min_keys) {
+            leaf->keys().push_back(right_sibling->key_at(0));
+            leaf->rids().push_back(right_sibling->rid_at(0));
+            right_sibling->keys().erase(right_sibling->keys().begin());
+            right_sibling->rids().erase(right_sibling->rids().begin());
 
-                // Update parent separator.
-                parent->keys()[child_index] = right_sibling->key_at(0);
-                return ok();
-            }
+            parent->keys()[child_index] = right_sibling->key_at(0);
+            return ok();
         }
     }
 
@@ -540,13 +587,11 @@ Result<void> BTreeIndex::fix_underfull_leaf(BTreeLeafNode* leaf) {
     if (child_index > 0) {
         auto* left_sibling = get_leaf_node(parent->child_at(child_index - 1));
         if (left_sibling != nullptr) {
-            // Merge leaf into left_sibling.
-            left_sibling->keys().insert(left_sibling->keys().end(), leaf->keys().begin(),
-                                        leaf->keys().end());
-            left_sibling->rids().insert(left_sibling->rids().end(), leaf->rids().begin(),
-                                        leaf->rids().end());
+            left_sibling->keys().insert(left_sibling->keys().end(),
+                                        leaf->keys().begin(), leaf->keys().end());
+            left_sibling->rids().insert(left_sibling->rids().end(),
+                                        leaf->rids().begin(), leaf->rids().end());
 
-            // Update sibling pointers.
             left_sibling->set_next_leaf_id(leaf->next_leaf_id());
             if (leaf->next_leaf_id() != invalid_page_id) {
                 auto* next_leaf = get_leaf_node(leaf->next_leaf_id());
@@ -555,36 +600,11 @@ Result<void> BTreeIndex::fix_underfull_leaf(BTreeLeafNode* leaf) {
                 }
             }
 
-            // Remove separator and child pointer from parent.
             PageId leaf_id = leaf->page_id();
             parent->remove_at(child_index - 1);
             leaf_nodes_.erase(leaf_id);
 
-            // Check if parent needs fixing.
-            if (parent->page_id() == root_page_id_ && parent->key_count() == 0) {
-                // Root has no keys left, its only child becomes new root.
-                PageId only_child = parent->child_at(0);
-                internal_nodes_.erase(root_page_id_);
-                root_page_id_ = only_child;
-
-                // Clear parent pointer of new root.
-                auto* new_root_leaf = get_leaf_node(root_page_id_);
-                if (new_root_leaf != nullptr) {
-                    new_root_leaf->set_parent_page_id(invalid_page_id);
-                } else {
-                    auto* new_root_internal = get_internal_node(root_page_id_);
-                    if (new_root_internal != nullptr) {
-                        new_root_internal->set_parent_page_id(invalid_page_id);
-                    }
-                }
-                return ok();
-            }
-
-            if (parent->page_id() != root_page_id_ && parent->is_underfull(false)) {
-                return fix_underfull_internal(parent);
-            }
-
-            return ok();
+            return handle_post_merge(parent);
         }
     }
 
@@ -592,13 +612,11 @@ Result<void> BTreeIndex::fix_underfull_leaf(BTreeLeafNode* leaf) {
     if (child_index + 1 < static_cast<uint16_t>(parent->children().size())) {
         auto* right_sibling = get_leaf_node(parent->child_at(child_index + 1));
         if (right_sibling != nullptr) {
-            // Merge right_sibling into leaf.
-            leaf->keys().insert(leaf->keys().end(), right_sibling->keys().begin(),
-                                right_sibling->keys().end());
-            leaf->rids().insert(leaf->rids().end(), right_sibling->rids().begin(),
-                                right_sibling->rids().end());
+            leaf->keys().insert(leaf->keys().end(),
+                                right_sibling->keys().begin(), right_sibling->keys().end());
+            leaf->rids().insert(leaf->rids().end(),
+                                right_sibling->rids().begin(), right_sibling->rids().end());
 
-            // Update sibling pointers.
             leaf->set_next_leaf_id(right_sibling->next_leaf_id());
             if (right_sibling->next_leaf_id() != invalid_page_id) {
                 auto* next_leaf = get_leaf_node(right_sibling->next_leaf_id());
@@ -611,28 +629,7 @@ Result<void> BTreeIndex::fix_underfull_leaf(BTreeLeafNode* leaf) {
             parent->remove_at(child_index);
             leaf_nodes_.erase(right_id);
 
-            if (parent->page_id() == root_page_id_ && parent->key_count() == 0) {
-                PageId only_child = parent->child_at(0);
-                internal_nodes_.erase(root_page_id_);
-                root_page_id_ = only_child;
-
-                auto* new_root_leaf = get_leaf_node(root_page_id_);
-                if (new_root_leaf != nullptr) {
-                    new_root_leaf->set_parent_page_id(invalid_page_id);
-                } else {
-                    auto* new_root_internal = get_internal_node(root_page_id_);
-                    if (new_root_internal != nullptr) {
-                        new_root_internal->set_parent_page_id(invalid_page_id);
-                    }
-                }
-                return ok();
-            }
-
-            if (parent->page_id() != root_page_id_ && parent->is_underfull(false)) {
-                return fix_underfull_internal(parent);
-            }
-
-            return ok();
+            return handle_post_merge(parent);
         }
     }
 
@@ -646,78 +643,59 @@ Result<void> BTreeIndex::fix_underfull_internal(BTreeInternalNode* node) {
         return make_error(StatusCode::INTERNAL_ERROR, "parent not found for underfull internal node");
     }
 
-    // Find index of this node in parent's children.
-    uint16_t child_index = 0;
-    for (uint16_t i = 0; i < static_cast<uint16_t>(parent->children().size()); ++i) {
-        if (parent->child_at(i) == node->page_id()) {
-            child_index = i;
-            break;
-        }
+    auto ci_result = find_child_index(parent, node->page_id());
+    if (!ci_result.has_value()) {
+        return tl::unexpected(ci_result.error());
     }
+    uint16_t child_index = *ci_result;
+
+    uint16_t min_keys = (node->max_keys() + 1) / 2;
 
     // Try redistribute from left sibling.
     if (child_index > 0) {
         auto* left_sibling = get_internal_node(parent->child_at(child_index - 1));
-        if (left_sibling != nullptr) {
-            uint16_t min_keys = (node->max_keys() + 1) / 2;
-            if (left_sibling->key_count() > min_keys) {
-                // Pull separator down from parent, push last key of sibling up.
-                KeyType parent_key = parent->key_at(child_index - 1);
-                KeyType sibling_last_key = left_sibling->keys().back();
-                PageId moved_child = left_sibling->children().back();
+        if (left_sibling != nullptr && left_sibling->key_count() > min_keys) {
+            KeyType parent_key = parent->key_at(child_index - 1);
+            KeyType sibling_last_key = left_sibling->keys().back();
+            PageId moved_child = left_sibling->children().back();
 
-                node->keys().insert(node->keys().begin(), parent_key);
-                node->children().insert(node->children().begin(), moved_child);
+            node->keys().insert(node->keys().begin(), parent_key);
+            node->children().insert(node->children().begin(), moved_child);
 
-                // Update parent pointer of moved child.
-                auto* moved_leaf = get_leaf_node(moved_child);
-                if (moved_leaf != nullptr) {
-                    moved_leaf->set_parent_page_id(node->page_id());
-                } else {
-                    auto* moved_internal = get_internal_node(moved_child);
-                    if (moved_internal != nullptr) {
-                        moved_internal->set_parent_page_id(node->page_id());
-                    }
-                }
-
-                parent->keys()[child_index - 1] = sibling_last_key;
-                left_sibling->keys().pop_back();
-                left_sibling->children().pop_back();
-
-                return ok();
+            auto result = set_node_parent(moved_child, node->page_id());
+            if (!result.has_value()) {
+                return tl::unexpected(result.error());
             }
+
+            parent->keys()[child_index - 1] = sibling_last_key;
+            left_sibling->keys().pop_back();
+            left_sibling->children().pop_back();
+
+            return ok();
         }
     }
 
     // Try redistribute from right sibling.
     if (child_index + 1 < static_cast<uint16_t>(parent->children().size())) {
         auto* right_sibling = get_internal_node(parent->child_at(child_index + 1));
-        if (right_sibling != nullptr) {
-            uint16_t min_keys = (node->max_keys() + 1) / 2;
-            if (right_sibling->key_count() > min_keys) {
-                KeyType parent_key = parent->key_at(child_index);
-                KeyType sibling_first_key = right_sibling->keys().front();
-                PageId moved_child = right_sibling->children().front();
+        if (right_sibling != nullptr && right_sibling->key_count() > min_keys) {
+            KeyType parent_key = parent->key_at(child_index);
+            KeyType sibling_first_key = right_sibling->keys().front();
+            PageId moved_child = right_sibling->children().front();
 
-                node->keys().push_back(parent_key);
-                node->children().push_back(moved_child);
+            node->keys().push_back(parent_key);
+            node->children().push_back(moved_child);
 
-                auto* moved_leaf = get_leaf_node(moved_child);
-                if (moved_leaf != nullptr) {
-                    moved_leaf->set_parent_page_id(node->page_id());
-                } else {
-                    auto* moved_internal = get_internal_node(moved_child);
-                    if (moved_internal != nullptr) {
-                        moved_internal->set_parent_page_id(node->page_id());
-                    }
-                }
-
-                parent->keys()[child_index] = sibling_first_key;
-                right_sibling->keys().erase(right_sibling->keys().begin());
-                right_sibling->children().erase(right_sibling->children().begin());
-
-                return ok();
+            auto result = set_node_parent(moved_child, node->page_id());
+            if (!result.has_value()) {
+                return tl::unexpected(result.error());
             }
+
+            parent->keys()[child_index] = sibling_first_key;
+            right_sibling->keys().erase(right_sibling->keys().begin());
+            right_sibling->children().erase(right_sibling->children().begin());
+
+            return ok();
         }
     }
 
@@ -725,26 +703,18 @@ Result<void> BTreeIndex::fix_underfull_internal(BTreeInternalNode* node) {
     if (child_index > 0) {
         auto* left_sibling = get_internal_node(parent->child_at(child_index - 1));
         if (left_sibling != nullptr) {
-            // Pull separator down from parent.
             KeyType parent_key = parent->key_at(child_index - 1);
             left_sibling->keys().push_back(parent_key);
 
-            // Move all keys and children from node to left sibling.
-            left_sibling->keys().insert(left_sibling->keys().end(), node->keys().begin(),
-                                        node->keys().end());
+            left_sibling->keys().insert(left_sibling->keys().end(),
+                                        node->keys().begin(), node->keys().end());
             left_sibling->children().insert(left_sibling->children().end(),
                                             node->children().begin(), node->children().end());
 
-            // Update parent pointers for moved children.
             for (PageId child_id : node->children()) {
-                auto* child_leaf = get_leaf_node(child_id);
-                if (child_leaf != nullptr) {
-                    child_leaf->set_parent_page_id(left_sibling->page_id());
-                } else {
-                    auto* child_internal = get_internal_node(child_id);
-                    if (child_internal != nullptr) {
-                        child_internal->set_parent_page_id(left_sibling->page_id());
-                    }
+                auto result = set_node_parent(child_id, left_sibling->page_id());
+                if (!result.has_value()) {
+                    return tl::unexpected(result.error());
                 }
             }
 
@@ -752,28 +722,7 @@ Result<void> BTreeIndex::fix_underfull_internal(BTreeInternalNode* node) {
             parent->remove_at(child_index - 1);
             internal_nodes_.erase(node_id);
 
-            if (parent->page_id() == root_page_id_ && parent->key_count() == 0) {
-                PageId only_child = parent->child_at(0);
-                internal_nodes_.erase(root_page_id_);
-                root_page_id_ = only_child;
-
-                auto* new_root_leaf = get_leaf_node(root_page_id_);
-                if (new_root_leaf != nullptr) {
-                    new_root_leaf->set_parent_page_id(invalid_page_id);
-                } else {
-                    auto* new_root_internal = get_internal_node(root_page_id_);
-                    if (new_root_internal != nullptr) {
-                        new_root_internal->set_parent_page_id(invalid_page_id);
-                    }
-                }
-                return ok();
-            }
-
-            if (parent->page_id() != root_page_id_ && parent->is_underfull(false)) {
-                return fix_underfull_internal(parent);
-            }
-
-            return ok();
+            return handle_post_merge(parent);
         }
     }
 
@@ -784,20 +733,15 @@ Result<void> BTreeIndex::fix_underfull_internal(BTreeInternalNode* node) {
             KeyType parent_key = parent->key_at(child_index);
             node->keys().push_back(parent_key);
 
-            node->keys().insert(node->keys().end(), right_sibling->keys().begin(),
-                                right_sibling->keys().end());
-            node->children().insert(node->children().end(), right_sibling->children().begin(),
-                                    right_sibling->children().end());
+            node->keys().insert(node->keys().end(),
+                                right_sibling->keys().begin(), right_sibling->keys().end());
+            node->children().insert(node->children().end(),
+                                    right_sibling->children().begin(), right_sibling->children().end());
 
             for (PageId child_id : right_sibling->children()) {
-                auto* child_leaf = get_leaf_node(child_id);
-                if (child_leaf != nullptr) {
-                    child_leaf->set_parent_page_id(node->page_id());
-                } else {
-                    auto* child_internal = get_internal_node(child_id);
-                    if (child_internal != nullptr) {
-                        child_internal->set_parent_page_id(node->page_id());
-                    }
+                auto result = set_node_parent(child_id, node->page_id());
+                if (!result.has_value()) {
+                    return tl::unexpected(result.error());
                 }
             }
 
@@ -805,28 +749,7 @@ Result<void> BTreeIndex::fix_underfull_internal(BTreeInternalNode* node) {
             parent->remove_at(child_index);
             internal_nodes_.erase(right_id);
 
-            if (parent->page_id() == root_page_id_ && parent->key_count() == 0) {
-                PageId only_child = parent->child_at(0);
-                internal_nodes_.erase(root_page_id_);
-                root_page_id_ = only_child;
-
-                auto* new_root_leaf = get_leaf_node(root_page_id_);
-                if (new_root_leaf != nullptr) {
-                    new_root_leaf->set_parent_page_id(invalid_page_id);
-                } else {
-                    auto* new_root_internal = get_internal_node(root_page_id_);
-                    if (new_root_internal != nullptr) {
-                        new_root_internal->set_parent_page_id(invalid_page_id);
-                    }
-                }
-                return ok();
-            }
-
-            if (parent->page_id() != root_page_id_ && parent->is_underfull(false)) {
-                return fix_underfull_internal(parent);
-            }
-
-            return ok();
+            return handle_post_merge(parent);
         }
     }
 
@@ -836,6 +759,8 @@ Result<void> BTreeIndex::fix_underfull_internal(BTreeInternalNode* node) {
 // -- Bulk Load (GDB-97) ------------------------------------------------------
 
 Result<void> BTreeIndex::bulk_load(std::vector<std::pair<KeyType, RID>>& sorted_entries) {
+    std::unique_lock lock(tree_latch_);
+
     if (root_page_id_ != invalid_page_id) {
         return make_error(StatusCode::INVALID_ARGUMENT, "bulk load requires an empty tree");
     }
@@ -844,18 +769,20 @@ Result<void> BTreeIndex::bulk_load(std::vector<std::pair<KeyType, RID>>& sorted_
         return ok();
     }
 
-    // Check for duplicates in unique index.
-    if (config_.is_unique) {
-        for (size_t i = 1; i < sorted_entries.size(); ++i) {
-            auto cmp = compare_keys(sorted_entries[i - 1].first, sorted_entries[i].first);
-            if (!cmp.has_value()) {
-                return tl::unexpected(cmp.error());
-            }
-            if (*cmp == std::strong_ordering::equal) {
-                return make_error(StatusCode::CONSTRAINT_VIOLATION,
-                                  "duplicate key in sorted input at position " +
-                                      std::to_string(i));
-            }
+    // Validate sort order (and uniqueness if configured) in a single pass.
+    for (size_t i = 1; i < sorted_entries.size(); ++i) {
+        auto cmp = compare_keys(sorted_entries[i - 1].first, sorted_entries[i].first);
+        if (!cmp.has_value()) {
+            return tl::unexpected(cmp.error());
+        }
+        if (*cmp == std::strong_ordering::greater) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "bulk load input not sorted at position " + std::to_string(i));
+        }
+        if (config_.is_unique && *cmp == std::strong_ordering::equal) {
+            return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                              "duplicate key in sorted input at position " +
+                                  std::to_string(i));
         }
     }
 
@@ -909,7 +836,6 @@ Result<void> BTreeIndex::bulk_load(std::vector<std::pair<KeyType, RID>>& sorted_
     // Build internal levels bottom-up.
     std::vector<PageId> current_children = leaf_ids;
     std::vector<KeyType> current_separators = std::move(separators);
-    bool children_are_leaves = true;
 
     while (current_children.size() > 1) {
         uint16_t internal_max = effective_internal_max_keys();
@@ -940,16 +866,9 @@ Result<void> BTreeIndex::bulk_load(std::vector<std::pair<KeyType, RID>>& sorted_
 
             // Set parent pointers for children.
             for (PageId cid : internal->children()) {
-                if (children_are_leaves) {
-                    auto* child_leaf = get_leaf_node(cid);
-                    if (child_leaf != nullptr) {
-                        child_leaf->set_parent_page_id(internal->page_id());
-                    }
-                } else {
-                    auto* child_internal = get_internal_node(cid);
-                    if (child_internal != nullptr) {
-                        child_internal->set_parent_page_id(internal->page_id());
-                    }
+                auto result = set_node_parent(cid, internal->page_id());
+                if (!result.has_value()) {
+                    return tl::unexpected(result.error());
                 }
             }
 
@@ -962,7 +881,6 @@ Result<void> BTreeIndex::bulk_load(std::vector<std::pair<KeyType, RID>>& sorted_
 
         current_children = std::move(next_children);
         current_separators = std::move(next_separators);
-        children_are_leaves = false;
     }
 
     root_page_id_ = current_children[0];

@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <shared_mutex>
+#include <stdexcept>
 #include <vector>
 
 namespace giodb {
@@ -33,8 +34,17 @@ public:
     void set_parent_page_id(PageId id);
     [[nodiscard]] uint16_t key_count() const;
     [[nodiscard]] uint16_t max_keys() const;
+
+    /// Return the key at the given index.
+    /// @pre index < key_count() — caller must verify bounds.
+    /// Throws std::out_of_range in debug/release if out of bounds.
     [[nodiscard]] const KeyType& key_at(uint16_t index) const;
+
+    /// Return the child page_id at the given index.
+    /// @pre index < children().size() — caller must verify bounds.
+    /// Throws std::out_of_range in debug/release if out of bounds.
     [[nodiscard]] PageId child_at(uint16_t index) const;
+
     void set_child_at(uint16_t index, PageId child_id);
 
     /// Find the child page_id to follow for the given search key.
@@ -43,6 +53,7 @@ public:
 
     /// Insert a new (key, right_child) pair at the given position.
     /// The key separates children_[pos] and the new right_child.
+    /// Returns INTERNAL_ERROR if the node is already at max capacity.
     [[nodiscard]] Result<void> insert_at(uint16_t pos, const KeyType& key, PageId right_child);
 
     /// Remove key at index. Also removes children_[index + 1].
@@ -53,6 +64,11 @@ public:
 
     /// True if the node is underfull (below minimum occupancy).
     /// Root nodes are never underfull. Non-root minimum = ceil(max_keys / 2).
+    ///
+    /// @note The minimum occupancy formula (max_keys + 1) / 2 is more aggressive
+    /// than the textbook ceil(order/2) - 1 (where order = max_keys + 1).
+    /// This triggers merging/redistribution earlier, keeping nodes fuller on
+    /// average at the cost of slightly more structural modifications.
     [[nodiscard]] bool is_underfull(bool is_root) const;
 
     /// Direct access to keys/children for split operations.
@@ -93,7 +109,15 @@ public:
     void set_prev_leaf_id(PageId id);
     [[nodiscard]] uint16_t key_count() const;
     [[nodiscard]] uint16_t max_keys() const;
+
+    /// Return the key at the given index.
+    /// @pre index < key_count() — caller must verify bounds.
+    /// Throws std::out_of_range in debug/release if out of bounds.
     [[nodiscard]] const KeyType& key_at(uint16_t index) const;
+
+    /// Return the RID at the given index.
+    /// @pre index < key_count() — caller must verify bounds.
+    /// Throws std::out_of_range in debug/release if out of bounds.
     [[nodiscard]] const RID& rid_at(uint16_t index) const;
 
     /// Point lookup: find the RID for an exact key match.
@@ -106,6 +130,12 @@ public:
 
     /// Insert a (key, rid) pair in sorted order.
     /// If is_unique is true, returns CONSTRAINT_VIOLATION if key already exists.
+    ///
+    /// @note This method does NOT enforce capacity limits; it always inserts into
+    /// the underlying vectors. The caller (BTreeIndex) is responsible for checking
+    /// is_full() and splitting the node after the insert when over capacity.
+    /// This design allows the "insert-then-split" algorithm where the node
+    /// temporarily holds max_keys + 1 entries before being split.
     [[nodiscard]] Result<void> insert(const KeyType& key, const RID& rid, bool is_unique = false);
 
     /// Delete the entry with the given key. Returns true if found and deleted.
@@ -116,6 +146,8 @@ public:
 
     /// True if the node is underfull (below minimum occupancy).
     /// Root nodes are never underfull. Non-root minimum = ceil(max_keys / 2).
+    ///
+    /// @note See BTreeInternalNode::is_underfull for details on the threshold.
     [[nodiscard]] bool is_underfull(bool is_root) const;
 
     /// Direct access to keys/rids for split operations.

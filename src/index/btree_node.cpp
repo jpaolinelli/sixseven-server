@@ -32,15 +32,15 @@ uint16_t BTreeInternalNode::max_keys() const {
 }
 
 const KeyType& BTreeInternalNode::key_at(uint16_t index) const {
-    return keys_[index];
+    return keys_.at(index);
 }
 
 PageId BTreeInternalNode::child_at(uint16_t index) const {
-    return children_[index];
+    return children_.at(index);
 }
 
 void BTreeInternalNode::set_child_at(uint16_t index, PageId child_id) {
-    children_[index] = child_id;
+    children_.at(index) = child_id;
 }
 
 Result<PageId> BTreeInternalNode::search(const KeyType& key) const {
@@ -164,11 +164,11 @@ uint16_t BTreeLeafNode::max_keys() const {
 }
 
 const KeyType& BTreeLeafNode::key_at(uint16_t index) const {
-    return keys_[index];
+    return keys_.at(index);
 }
 
 const RID& BTreeLeafNode::rid_at(uint16_t index) const {
-    return rids_[index];
+    return rids_.at(index);
 }
 
 Result<std::optional<RID>> BTreeLeafNode::search(const KeyType& key) const {

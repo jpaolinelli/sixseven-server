@@ -1,8 +1,4 @@
-#include "giodb/index/btree_index.h"
-#include "giodb/index/btree_iterator.h"
-#include "giodb/index/btree_key.h"
-#include "giodb/index/btree_node.h"
-#include "giodb/index/rid.h"
+#include "test_btree_helpers.h"
 
 #include <gtest/gtest.h>
 
@@ -12,55 +8,7 @@
 #include <vector>
 
 using namespace giodb;
-
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-/// Create a BTreeIndex with small capacity for testing (forces splits early).
-static BTreeIndex make_test_index(uint16_t leaf_max = 4, uint16_t internal_max = 4,
-                                  bool is_unique = false) {
-    BTreeConfig config;
-    config.key_types = {TypeId::INT64};
-    config.leaf_max_keys = leaf_max;
-    config.internal_max_keys = internal_max;
-    config.is_unique = is_unique;
-    return BTreeIndex(std::move(config));
-}
-
-static KeyType make_key(int64_t v) {
-    return {Value(v)};
-}
-
-static KeyType make_composite_key(int64_t v, const std::string& s) {
-    return {Value(v), Value(s)};
-}
-
-static RID make_rid(uint32_t page_id, uint16_t slot_id = 0) {
-    return {page_id, slot_id};
-}
-
-/// Collect all (key, rid) pairs from a range scan into a vector.
-static Result<std::vector<std::pair<KeyType, RID>>> collect_scan(
-    BTreeIterator& it) {
-    std::vector<std::pair<KeyType, RID>> results;
-    while (!it.is_end()) {
-        auto entry = it.next();
-        if (!entry.has_value()) {
-            return tl::unexpected(entry.error());
-        }
-        if (!entry->has_value()) {
-            break;
-        }
-        results.push_back(std::move(**entry));
-    }
-    return ok(std::move(results));
-}
-
-/// Helper to extract INT64 from a single-column key.
-static int64_t key_val(const KeyType& k) {
-    return std::get<int64_t>(k[0].data());
-}
+using namespace giodb::test;
 
 // =============================================================================
 // GDB-93: Insert with Page Splits
@@ -86,7 +34,7 @@ TEST(BTreeInsert, MultipleKeys) {
 TEST(BTreeInsert, LeafSplit) {
     auto tree = make_test_index(4, 4); // max 4 keys per leaf.
 
-    // Insert 5 keys → forces a leaf split.
+    // Insert 5 keys -> forces a leaf split.
     for (int i = 1; i <= 5; ++i) {
         auto ins = tree.insert(make_key(i * 10), make_rid(static_cast<uint32_t>(i)));
         ASSERT_TRUE(ins.has_value()) << "Failed to insert key " << i * 10;
@@ -105,7 +53,7 @@ TEST(BTreeInsert, LeafSplit) {
 TEST(BTreeInsert, MultipleSplits) {
     auto tree = make_test_index(4, 4);
 
-    // Insert 20 keys → multiple leaf splits and possibly internal splits.
+    // Insert 20 keys -> multiple leaf splits and possibly internal splits.
     for (int i = 1; i <= 20; ++i) {
         auto ins = tree.insert(make_key(i * 10), make_rid(static_cast<uint32_t>(i)));
         ASSERT_TRUE(ins.has_value()) << "Failed to insert key " << i * 10;
@@ -121,7 +69,7 @@ TEST(BTreeInsert, MultipleSplits) {
 }
 
 TEST(BTreeInsert, CascadingSplits) {
-    auto tree = make_test_index(3, 3); // Very small capacity → cascading splits.
+    auto tree = make_test_index(3, 3); // Very small capacity -> cascading splits.
 
     for (int i = 1; i <= 50; ++i) {
         auto ins = tree.insert(make_key(i), make_rid(static_cast<uint32_t>(i)));
@@ -724,6 +672,19 @@ TEST(BTreeBulkLoad, NonEmptyTreeFails) {
     (void)tree.insert(make_key(1), make_rid(1));
 
     std::vector<std::pair<KeyType, RID>> entries = {{make_key(2), make_rid(2)}};
+    auto result = tree.bulk_load(entries);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST(BTreeBulkLoad, UnsortedInputFails) {
+    auto tree = make_test_index(4, 4);
+    std::vector<std::pair<KeyType, RID>> entries = {
+        {make_key(10), make_rid(1)},
+        {make_key(30), make_rid(3)},
+        {make_key(20), make_rid(2)}, // Not sorted!
+    };
+
     auto result = tree.bulk_load(entries);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);

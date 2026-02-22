@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <shared_mutex>
 #include <utility>
 
 namespace giodb {
@@ -14,16 +15,23 @@ namespace giodb {
 class BTreeIndex;
 
 /// Iterator for B+ tree range scans. Follows sibling pointers across leaves.
+///
+/// @note Lifetime: the iterator holds a shared lock on the owning BTreeIndex's
+/// tree_latch_, preventing concurrent writes during the scan. The iterator
+/// MUST NOT outlive the BTreeIndex that created it. Destroying the iterator
+/// releases the shared lock, allowing writes to proceed.
 class BTreeIterator {
 public:
     /// Construct an iterator starting at the given leaf/position.
     /// end_key is the exclusive upper bound (nullopt = no upper bound).
+    /// tree_lock is a shared lock on the tree's latch (moved in).
     BTreeIterator(const BTreeIndex& index,
                   PageId start_leaf_id,
                   uint16_t start_pos,
-                  std::optional<KeyType> end_key);
+                  std::optional<KeyType> end_key,
+                  std::shared_lock<std::shared_mutex> tree_lock);
 
-    /// Default constructor creates an exhausted (end) iterator.
+    /// Default constructor creates an exhausted (end) iterator with no lock.
     BTreeIterator();
 
     /// Advance to the next entry. Returns (key, rid) or nullopt if exhausted.
@@ -38,6 +46,10 @@ private:
     uint16_t current_pos_ = 0;
     std::optional<KeyType> end_key_;
     bool exhausted_ = true;
+
+    /// Shared lock on the tree, held for the lifetime of the scan.
+    /// Default-constructed (no mutex owned) for exhausted iterators.
+    std::shared_lock<std::shared_mutex> tree_lock_;
 };
 
 } // namespace giodb
