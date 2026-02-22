@@ -702,3 +702,117 @@ TEST(Lexer, EOFToken) {
     ASSERT_GE(tokens.size(), 2u);
     EXPECT_EQ(tokens.back().type, TokenType::END_OF_FILE);
 }
+
+// -- Malformed scientific notation (issue #1) ---------------------------------
+
+TEST(Lexer, MalformedExponentNoDigits) {
+    // "1.5e" should parse as FLOAT(1.5) IDENTIFIER(e), not FLOAT(1.5e).
+    auto tokens = tokenize_ok("1.5e");
+    ASSERT_GE(tokens.size(), 3u);
+    EXPECT_EQ(tokens[0].type, TokenType::FLOAT_LITERAL);
+    EXPECT_EQ(tokens[0].lexeme, "1.5");
+    EXPECT_EQ(tokens[1].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[1].lexeme, "e");
+}
+
+TEST(Lexer, MalformedExponentPlusNoDigits) {
+    // "1.5e+" should parse as FLOAT(1.5) IDENTIFIER(e) PLUS.
+    auto tokens = tokenize_ok("1.5e+");
+    ASSERT_GE(tokens.size(), 4u);
+    EXPECT_EQ(tokens[0].type, TokenType::FLOAT_LITERAL);
+    EXPECT_EQ(tokens[0].lexeme, "1.5");
+    EXPECT_EQ(tokens[1].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[1].lexeme, "e");
+    EXPECT_EQ(tokens[2].type, TokenType::PLUS);
+}
+
+TEST(Lexer, MalformedIntExponentNoDigits) {
+    // "1e" should parse as INTEGER(1) IDENTIFIER(e).
+    auto tokens = tokenize_ok("1e");
+    ASSERT_GE(tokens.size(), 3u);
+    EXPECT_EQ(tokens[0].type, TokenType::INTEGER_LITERAL);
+    EXPECT_EQ(tokens[0].lexeme, "1");
+    EXPECT_EQ(tokens[1].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[1].lexeme, "e");
+}
+
+TEST(Lexer, ValidExponentStillWorks) {
+    auto tokens = tokenize_ok("1.5e10");
+    ASSERT_GE(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::FLOAT_LITERAL);
+    EXPECT_EQ(tokens[0].lexeme, "1.5e10");
+}
+
+TEST(Lexer, ValidExponentWithSign) {
+    auto tokens = tokenize_ok("2E-3");
+    ASSERT_GE(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::FLOAT_LITERAL);
+    EXPECT_EQ(tokens[0].lexeme, "2E-3");
+}
+
+// -- Lone operators that should error -----------------------------------------
+
+TEST(Lexer, LonePipeErrors) {
+    Lexer lexer("SELECT | FROM");
+    auto result = lexer.tokenize();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
+}
+
+TEST(Lexer, LoneColonErrors) {
+    Lexer lexer("x : y");
+    auto result = lexer.tokenize();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
+}
+
+TEST(Lexer, LoneBangErrors) {
+    Lexer lexer("SELECT ! FROM");
+    auto result = lexer.tokenize();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
+}
+
+// -- Multiple statements ------------------------------------------------------
+
+TEST(Lexer, MultipleStatements) {
+    auto tokens = tokenize_ok("SELECT 1; SELECT 2;");
+    ASSERT_GE(tokens.size(), 7u);
+    EXPECT_EQ(tokens[0].type, TokenType::SELECT);
+    EXPECT_EQ(tokens[1].type, TokenType::INTEGER_LITERAL);
+    EXPECT_EQ(tokens[1].lexeme, "1");
+    EXPECT_EQ(tokens[2].type, TokenType::SEMICOLON);
+    EXPECT_EQ(tokens[3].type, TokenType::SELECT);
+    EXPECT_EQ(tokens[4].type, TokenType::INTEGER_LITERAL);
+    EXPECT_EQ(tokens[4].lexeme, "2");
+    EXPECT_EQ(tokens[5].type, TokenType::SEMICOLON);
+}
+
+// -- Lexer reuse (issue #7) ---------------------------------------------------
+
+TEST(Lexer, TokenizeTwiceProducesSameResult) {
+    Lexer lexer("SELECT 1");
+    auto first = lexer.tokenize();
+    ASSERT_TRUE(first.has_value());
+
+    auto second = lexer.tokenize();
+    ASSERT_TRUE(second.has_value());
+
+    ASSERT_EQ(first->size(), second->size());
+    for (size_t i = 0; i < first->size(); ++i) {
+        EXPECT_EQ((*first)[i].type, (*second)[i].type);
+        EXPECT_EQ((*first)[i].lexeme, (*second)[i].lexeme);
+        EXPECT_EQ((*first)[i].line, (*second)[i].line);
+        EXPECT_EQ((*first)[i].column, (*second)[i].column);
+    }
+}
+
+// -- Tab handling in position tracking ----------------------------------------
+
+TEST(Lexer, TabInPositionTracking) {
+    auto tokens = tokenize_ok("\tSELECT");
+    ASSERT_GE(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].line, 1u);
+    // Tab advances column by 1 (single character).
+    EXPECT_EQ(tokens[0].column, 2u);
+}

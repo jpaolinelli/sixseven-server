@@ -68,6 +68,9 @@ private:
     /// Scan an identifier or keyword.
     [[nodiscard]] Token scan_identifier();
 
+    /// Check if current position has a valid exponent (e/E followed by digits).
+    [[nodiscard]] bool has_valid_exponent() const;
+
     /// Create a token with the current lexeme range.
     [[nodiscard]] Token make_token(TokenType type) const;
 

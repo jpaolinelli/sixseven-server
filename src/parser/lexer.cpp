@@ -149,6 +149,12 @@ bool is_ident_char(char c) {
 Lexer::Lexer(std::string_view source) : source_(source) {}
 
 Result<std::vector<Token>> Lexer::tokenize() {
+    // Reset state so tokenize() can be called multiple times.
+    start_ = 0;
+    current_ = 0;
+    line_ = 1;
+    column_ = 1;
+
     std::vector<Token> tokens;
 
     while (true) {
@@ -289,17 +295,11 @@ Result<Token> Lexer::scan_token() {
     case ')': return make_token(TokenType::RPAREN);
     case '[': return make_token(TokenType::LBRACKET);
     case ']': return make_token(TokenType::RBRACKET);
+    case '=': return make_token(TokenType::EQUAL);
     default: break;
     }
 
     // Two-character operators.
-    if (c == '=' && !at_end()) {
-        return make_token(TokenType::EQUAL);
-    }
-    if (c == '=' && at_end()) {
-        return make_token(TokenType::EQUAL);
-    }
-
     if (c == '!' && !at_end() && peek() == '=') {
         advance(); // consume =
         return make_token(TokenType::NOT_EQUAL);
@@ -370,8 +370,9 @@ Token Lexer::scan_number() {
             advance();
         }
         // Check for scientific notation: 1.5e10, 1.5E-3
-        if (!at_end() && (peek() == 'e' || peek() == 'E')) {
-            advance();
+        // Only consume e/E if followed by digits (or +/- then digits).
+        if (has_valid_exponent()) {
+            advance(); // consume e/E
             if (!at_end() && (peek() == '+' || peek() == '-')) {
                 advance();
             }
@@ -383,8 +384,9 @@ Token Lexer::scan_number() {
     }
 
     // Check for scientific notation on integer: 1e10
-    if (!at_end() && (peek() == 'e' || peek() == 'E')) {
-        advance();
+    // Only consume e/E if followed by digits (or +/- then digits).
+    if (has_valid_exponent()) {
+        advance(); // consume e/E
         if (!at_end() && (peek() == '+' || peek() == '-')) {
             advance();
         }
@@ -441,6 +443,19 @@ Token Lexer::scan_identifier() {
     }
 
     return make_token(TokenType::IDENTIFIER);
+}
+
+bool Lexer::has_valid_exponent() const {
+    if (at_end() || (peek() != 'e' && peek() != 'E')) {
+        return false;
+    }
+    size_t lookahead = current_ + 1;
+    if (lookahead < source_.size() &&
+        (source_[lookahead] == '+' || source_[lookahead] == '-')) {
+        lookahead++;
+    }
+    return lookahead < source_.size() &&
+           std::isdigit(static_cast<unsigned char>(source_[lookahead]));
 }
 
 Token Lexer::make_token(TokenType type) const {
