@@ -439,7 +439,7 @@ Result<std::vector<Value>> deserialize(std::span<const uint8_t> data, const Sche
             // Fixed-size field.
             size_t offset = fixed_base + *fo;
             auto fs = fixed_size(schema.column(i).type);
-            if (offset + *fs > data.size()) {
+            if (!fs || offset + *fs > data.size()) {
                 return make_error(StatusCode::INVALID_ARGUMENT,
                                   "tuple data too short for fixed field at column " +
                                       std::to_string(i));
@@ -448,6 +448,11 @@ Result<std::vector<Value>> deserialize(std::span<const uint8_t> data, const Sche
         } else {
             // Variable-length field.
             auto vi = schema.var_field_index(i);
+            if (!vi) {
+                return make_error(StatusCode::INVALID_ARGUMENT,
+                                  "column " + std::to_string(i) +
+                                      " is neither fixed nor variable-length");
+            }
             size_t var_table_base = bitmap_size + schema.fixed_region_size();
             size_t entry_pos = var_table_base + (*vi) * var_entry_size;
 
@@ -503,7 +508,7 @@ Result<Value> get_field(std::span<const uint8_t> data, const Schema& schema, siz
         // Fixed-size field.
         size_t offset = bitmap_size + *fo;
         auto fs = fixed_size(schema.column(col_index).type);
-        if (offset + *fs > data.size()) {
+        if (!fs || offset + *fs > data.size()) {
             return make_error(StatusCode::INVALID_ARGUMENT,
                               "tuple data too short for fixed field at column " +
                                   std::to_string(col_index));
@@ -513,6 +518,11 @@ Result<Value> get_field(std::span<const uint8_t> data, const Schema& schema, siz
 
     // Variable-length field.
     auto vi = schema.var_field_index(col_index);
+    if (!vi) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "column " + std::to_string(col_index) +
+                              " is neither fixed nor variable-length");
+    }
     size_t var_table_base = bitmap_size + schema.fixed_region_size();
     size_t entry_pos = var_table_base + (*vi) * var_entry_size;
 

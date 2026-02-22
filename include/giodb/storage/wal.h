@@ -14,7 +14,7 @@
 namespace giodb {
 
 /// Default WAL segment size: 16MB.
-inline constexpr size_t wal_default_segment_size = 16 * 1024 * 1024;
+inline constexpr size_t wal_default_segment_size = size_t{16} * 1024 * 1024;
 
 /// Configuration options for the WAL writer.
 struct WalWriterOptions {
