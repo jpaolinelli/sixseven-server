@@ -97,6 +97,21 @@ bool is_type_keyword(TokenType type) {
     }
 }
 
+/// Check if token is an identifier matching the given uppercase name
+/// (case-insensitive).
+bool match_ident_ci(const Token& tok, std::string_view upper_name) {
+    if (tok.type != TokenType::IDENTIFIER) return false;
+    if (tok.lexeme.size() != upper_name.size()) return false;
+    for (size_t i = 0; i < tok.lexeme.size(); ++i) {
+        if (static_cast<char>(std::toupper(
+                static_cast<unsigned char>(tok.lexeme[i]))) !=
+            upper_name[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /// Strip single quotes from a string literal lexeme and unescape '' -> '.
 std::string unquote_string(std::string_view lexeme) {
     // Remove surrounding quotes.
@@ -252,8 +267,14 @@ Result<StmtPtr> Parser::parse_statement() {
     case TokenType::CREATE: return parse_create();
     case TokenType::DROP: return parse_drop();
     case TokenType::ALTER: return parse_alter();
+    case TokenType::INSERT: return parse_insert();
+    case TokenType::UPDATE: return parse_update();
+    case TokenType::DELETE: return parse_delete();
+    case TokenType::SELECT: return parse_select();
+    case TokenType::LINK: return parse_link();
+    case TokenType::UNLINK: return parse_unlink();
     default:
-        return error("expected statement (CREATE, DROP, ALTER, ...)");
+        return error("expected statement");
     }
 }
 
@@ -632,8 +653,7 @@ Result<StmtPtr> Parser::parse_alter_table() {
     stmt->table_name = std::move(*name);
 
     // ADD COLUMN
-    if (peek().type == TokenType::IDENTIFIER &&
-        peek().lexeme == "ADD") {
+    if (match_ident_ci(peek(), "ADD")) {
         advance(); // consume ADD
         match(TokenType::COLUMN); // optional COLUMN keyword
         stmt->action = AlterAction::ADD_COLUMN;
@@ -653,8 +673,7 @@ Result<StmtPtr> Parser::parse_alter_table() {
     }
 
     // RENAME COLUMN old TO new
-    if (peek().type == TokenType::IDENTIFIER &&
-        peek().lexeme == "RENAME") {
+    if (match_ident_ci(peek(), "RENAME")) {
         advance(); // consume RENAME
         match(TokenType::COLUMN); // optional COLUMN keyword
         stmt->action = AlterAction::RENAME_COLUMN;
@@ -663,7 +682,7 @@ Result<StmtPtr> Parser::parse_alter_table() {
         stmt->column_name = std::move(*old_name);
 
         // Expect TO.
-        if (peek().type == TokenType::IDENTIFIER && peek().lexeme == "TO") {
+        if (match_ident_ci(peek(), "TO")) {
             advance();
         } else {
             return tl::unexpected(
@@ -720,7 +739,7 @@ Result<StmtPtr> Parser::parse_create_index(bool is_unique) {
     if (!rp) return tl::unexpected(rp.error());
 
     // Optional USING method.
-    if (peek().type == TokenType::IDENTIFIER && peek().lexeme == "USING") {
+    if (match_ident_ci(peek(), "USING")) {
         advance(); // consume USING
         auto method = parse_name("index method");
         if (!method) return tl::unexpected(method.error());
@@ -790,8 +809,7 @@ Result<StmtPtr> Parser::parse_create_edge_type() {
     stmt->from_table = std::move(*from_tbl);
 
     // TO uses the identifier "TO", but we don't have a TO keyword.
-    // Check for identifier "TO".
-    if (peek().type == TokenType::IDENTIFIER && peek().lexeme == "TO") {
+    if (match_ident_ci(peek(), "TO")) {
         advance();
     } else {
         return tl::unexpected(error("expected TO").error());
@@ -820,6 +838,395 @@ Result<StmtPtr> Parser::parse_drop_edge_type() {
     stmt->name = std::move(*name);
 
     return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- DML: INSERT --------------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_insert() {
+    advance(); // consume INSERT
+    auto into = expect(TokenType::INTO, "expected INTO after INSERT");
+    if (!into) return tl::unexpected(into.error());
+
+    auto stmt = std::make_unique<InsertStmt>();
+
+    auto name = parse_name("table name");
+    if (!name) return tl::unexpected(name.error());
+    stmt->table_name = std::move(*name);
+
+    // Optional column list.
+    if (match(TokenType::LPAREN)) {
+        do {
+            auto col = parse_name("column name");
+            if (!col) return tl::unexpected(col.error());
+            stmt->columns.push_back(std::move(*col));
+        } while (match(TokenType::COMMA));
+
+        auto rp = expect(TokenType::RPAREN, "expected ')'");
+        if (!rp) return tl::unexpected(rp.error());
+    }
+
+    // VALUES or SELECT.
+    if (match(TokenType::VALUES)) {
+        do {
+            auto lp = expect(TokenType::LPAREN, "expected '(' for value row");
+            if (!lp) return tl::unexpected(lp.error());
+
+            std::vector<ExprPtr> row;
+            do {
+                auto val = parse_expression();
+                if (!val) return tl::unexpected(val.error());
+                row.push_back(std::move(*val));
+            } while (match(TokenType::COMMA));
+
+            auto rp = expect(TokenType::RPAREN, "expected ')'");
+            if (!rp) return tl::unexpected(rp.error());
+
+            stmt->values.push_back(std::move(row));
+        } while (match(TokenType::COMMA));
+    } else if (check(TokenType::SELECT)) {
+        auto sel = parse_select();
+        if (!sel) return tl::unexpected(sel.error());
+        stmt->select = std::move(*sel);
+    } else {
+        return error("expected VALUES or SELECT after INSERT INTO");
+    }
+
+    // Optional RETURNING.
+    auto ret = parse_returning();
+    if (!ret) return tl::unexpected(ret.error());
+    stmt->returning = std::move(*ret);
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- DML: UPDATE --------------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_update() {
+    advance(); // consume UPDATE
+    auto stmt = std::make_unique<UpdateStmt>();
+
+    auto name = parse_name("table name");
+    if (!name) return tl::unexpected(name.error());
+    stmt->table_name = std::move(*name);
+
+    auto set = expect(TokenType::SET, "expected SET after table name");
+    if (!set) return tl::unexpected(set.error());
+
+    // Assignments: col = expr, ...
+    do {
+        Assignment a;
+        auto col = parse_name("column name");
+        if (!col) return tl::unexpected(col.error());
+        a.column = std::move(*col);
+
+        auto eq = expect(TokenType::EQUAL, "expected '=' in SET clause");
+        if (!eq) return tl::unexpected(eq.error());
+
+        auto val = parse_expression();
+        if (!val) return tl::unexpected(val.error());
+        a.value = std::move(*val);
+
+        stmt->assignments.push_back(std::move(a));
+    } while (match(TokenType::COMMA));
+
+    // Optional WHERE.
+    if (match(TokenType::WHERE)) {
+        auto expr = parse_expression();
+        if (!expr) return tl::unexpected(expr.error());
+        stmt->where_expr = std::move(*expr);
+    }
+
+    // Optional RETURNING.
+    auto ret = parse_returning();
+    if (!ret) return tl::unexpected(ret.error());
+    stmt->returning = std::move(*ret);
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- DML: DELETE --------------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_delete() {
+    advance(); // consume DELETE
+    auto from = expect(TokenType::FROM, "expected FROM after DELETE");
+    if (!from) return tl::unexpected(from.error());
+
+    auto stmt = std::make_unique<DeleteStmt>();
+
+    auto name = parse_name("table name");
+    if (!name) return tl::unexpected(name.error());
+    stmt->table_name = std::move(*name);
+
+    // Optional WHERE.
+    if (match(TokenType::WHERE)) {
+        auto expr = parse_expression();
+        if (!expr) return tl::unexpected(expr.error());
+        stmt->where_expr = std::move(*expr);
+    }
+
+    // Optional RETURNING.
+    auto ret = parse_returning();
+    if (!ret) return tl::unexpected(ret.error());
+    stmt->returning = std::move(*ret);
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- DML: LINK ----------------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_link() {
+    advance(); // consume LINK
+    auto stmt = std::make_unique<LinkStmt>();
+
+    // source_table(source_key)
+    auto src_tbl = parse_name("source table");
+    if (!src_tbl) return tl::unexpected(src_tbl.error());
+    stmt->source_table = std::move(*src_tbl);
+
+    auto lp1 = expect(TokenType::LPAREN, "expected '('");
+    if (!lp1) return tl::unexpected(lp1.error());
+    auto src_key = parse_expression();
+    if (!src_key) return tl::unexpected(src_key.error());
+    stmt->source_key = std::move(*src_key);
+    auto rp1 = expect(TokenType::RPAREN, "expected ')'");
+    if (!rp1) return tl::unexpected(rp1.error());
+
+    // TO
+    if (!match_ident_ci(peek(), "TO")) {
+        return error("expected TO after source key");
+    }
+    advance();
+
+    // target_table(target_key)
+    auto tgt_tbl = parse_name("target table");
+    if (!tgt_tbl) return tl::unexpected(tgt_tbl.error());
+    stmt->target_table = std::move(*tgt_tbl);
+
+    auto lp2 = expect(TokenType::LPAREN, "expected '('");
+    if (!lp2) return tl::unexpected(lp2.error());
+    auto tgt_key = parse_expression();
+    if (!tgt_key) return tl::unexpected(tgt_key.error());
+    stmt->target_key = std::move(*tgt_key);
+    auto rp2 = expect(TokenType::RPAREN, "expected ')'");
+    if (!rp2) return tl::unexpected(rp2.error());
+
+    // VIA edge_type
+    auto via = expect(TokenType::VIA, "expected VIA");
+    if (!via) return tl::unexpected(via.error());
+    auto edge = parse_name("edge type name");
+    if (!edge) return tl::unexpected(edge.error());
+    stmt->edge_type = std::move(*edge);
+
+    // Optional properties: (prop = val, ...)
+    if (match(TokenType::LPAREN)) {
+        do {
+            Assignment a;
+            auto pname = parse_name("property name");
+            if (!pname) return tl::unexpected(pname.error());
+            a.column = std::move(*pname);
+
+            auto eq = expect(TokenType::EQUAL, "expected '='");
+            if (!eq) return tl::unexpected(eq.error());
+
+            auto val = parse_expression();
+            if (!val) return tl::unexpected(val.error());
+            a.value = std::move(*val);
+
+            stmt->properties.push_back(std::move(a));
+        } while (match(TokenType::COMMA));
+
+        auto rp = expect(TokenType::RPAREN, "expected ')'");
+        if (!rp) return tl::unexpected(rp.error());
+    }
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- DML: UNLINK --------------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_unlink() {
+    advance(); // consume UNLINK
+    auto stmt = std::make_unique<UnlinkStmt>();
+
+    // source_table(source_key)
+    auto src_tbl = parse_name("source table");
+    if (!src_tbl) return tl::unexpected(src_tbl.error());
+    stmt->source_table = std::move(*src_tbl);
+
+    auto lp1 = expect(TokenType::LPAREN, "expected '('");
+    if (!lp1) return tl::unexpected(lp1.error());
+    auto src_key = parse_expression();
+    if (!src_key) return tl::unexpected(src_key.error());
+    stmt->source_key = std::move(*src_key);
+    auto rp1 = expect(TokenType::RPAREN, "expected ')'");
+    if (!rp1) return tl::unexpected(rp1.error());
+
+    // FROM
+    auto from = expect(TokenType::FROM, "expected FROM");
+    if (!from) return tl::unexpected(from.error());
+
+    // target_table(target_key)
+    auto tgt_tbl = parse_name("target table");
+    if (!tgt_tbl) return tl::unexpected(tgt_tbl.error());
+    stmt->target_table = std::move(*tgt_tbl);
+
+    auto lp2 = expect(TokenType::LPAREN, "expected '('");
+    if (!lp2) return tl::unexpected(lp2.error());
+    auto tgt_key = parse_expression();
+    if (!tgt_key) return tl::unexpected(tgt_key.error());
+    stmt->target_key = std::move(*tgt_key);
+    auto rp2 = expect(TokenType::RPAREN, "expected ')'");
+    if (!rp2) return tl::unexpected(rp2.error());
+
+    // VIA edge_type
+    auto via = expect(TokenType::VIA, "expected VIA");
+    if (!via) return tl::unexpected(via.error());
+    auto edge = parse_name("edge type name");
+    if (!edge) return tl::unexpected(edge.error());
+    stmt->edge_type = std::move(*edge);
+
+    // Optional WHERE.
+    if (match(TokenType::WHERE)) {
+        auto expr = parse_expression();
+        if (!expr) return tl::unexpected(expr.error());
+        stmt->where_expr = std::move(*expr);
+    }
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- DML helpers: RETURNING ---------------------------------------------------
+
+Result<std::vector<SelectItem>> Parser::parse_returning() {
+    std::vector<SelectItem> items;
+    if (!match(TokenType::RETURNING)) return ok(std::move(items));
+
+    do {
+        auto item = parse_select_item();
+        if (!item) return tl::unexpected(item.error());
+        items.push_back(std::move(*item));
+    } while (match(TokenType::COMMA));
+
+    return ok(std::move(items));
+}
+
+// -- Query: SELECT (core for subqueries) --------------------------------------
+
+Result<StmtPtr> Parser::parse_select() {
+    advance(); // consume SELECT
+    auto stmt = std::make_unique<SelectStmt>();
+
+    // DISTINCT
+    if (match(TokenType::DISTINCT)) {
+        stmt->distinct = true;
+    }
+
+    // Select items.
+    do {
+        auto item = parse_select_item();
+        if (!item) return tl::unexpected(item.error());
+        stmt->items.push_back(std::move(*item));
+    } while (match(TokenType::COMMA));
+
+    // FROM
+    if (match(TokenType::FROM)) {
+        do {
+            TableRef ref;
+            auto name = parse_name("table name");
+            if (!name) return tl::unexpected(name.error());
+            ref.name = std::move(*name);
+
+            // Optional alias.
+            if (match(TokenType::AS)) {
+                auto alias = parse_name("table alias");
+                if (!alias) return tl::unexpected(alias.error());
+                ref.alias = std::move(*alias);
+            }
+
+            stmt->from.push_back(std::move(ref));
+        } while (match(TokenType::COMMA));
+    }
+
+    // WHERE
+    if (match(TokenType::WHERE)) {
+        auto expr = parse_expression();
+        if (!expr) return tl::unexpected(expr.error());
+        stmt->where_expr = std::move(*expr);
+    }
+
+    // ORDER BY
+    if (match(TokenType::ORDER)) {
+        auto by = expect(TokenType::BY, "expected BY after ORDER");
+        if (!by) return tl::unexpected(by.error());
+
+        do {
+            OrderByItem item;
+            auto expr = parse_expression();
+            if (!expr) return tl::unexpected(expr.error());
+            item.expr = std::move(*expr);
+
+            if (match(TokenType::DESC)) {
+                item.direction = SortDirection::DESC;
+            } else {
+                match(TokenType::ASC);
+            }
+
+            stmt->order_by.push_back(std::move(item));
+        } while (match(TokenType::COMMA));
+    }
+
+    // LIMIT
+    if (match(TokenType::LIMIT)) {
+        auto expr = parse_expression();
+        if (!expr) return tl::unexpected(expr.error());
+        stmt->limit = std::move(*expr);
+    }
+
+    // OFFSET
+    if (match(TokenType::OFFSET)) {
+        auto expr = parse_expression();
+        if (!expr) return tl::unexpected(expr.error());
+        stmt->offset = std::move(*expr);
+    }
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- Query: SELECT item -------------------------------------------------------
+
+Result<SelectItem> Parser::parse_select_item() {
+    SelectItem item;
+
+    // *
+    if (match(TokenType::STAR)) {
+        item.is_star = true;
+        return ok(std::move(item));
+    }
+
+    // table.* — lookahead: name DOT STAR
+    if (is_name_token(peek().type) &&
+        current_ + 2 < tokens_.size() &&
+        tokens_[current_ + 1].type == TokenType::DOT &&
+        tokens_[current_ + 2].type == TokenType::STAR) {
+        item.is_star = true;
+        item.table_star = std::string(advance().lexeme);
+        advance(); // consume DOT
+        advance(); // consume STAR
+        return ok(std::move(item));
+    }
+
+    // Expression [AS alias].
+    auto expr = parse_expression();
+    if (!expr) return tl::unexpected(expr.error());
+    item.expr = std::move(*expr);
+
+    if (match(TokenType::AS)) {
+        auto alias = parse_name("alias");
+        if (!alias) return tl::unexpected(alias.error());
+        item.alias = std::move(*alias);
+    }
+
+    return ok(std::move(item));
 }
 
 // -- Expression parsing -------------------------------------------------------
@@ -908,6 +1315,89 @@ Result<ExprPtr> Parser::parse_comparison() {
         is_null->line = line;
         is_null->col = col;
         return ok(ExprPtr(std::move(is_null)));
+    }
+
+    // [NOT] IN / BETWEEN / LIKE — check for NOT modifier.
+    bool negated = false;
+    if (check(TokenType::NOT) && current_ + 1 < tokens_.size()) {
+        auto next_type = tokens_[current_ + 1].type;
+        if (next_type == TokenType::IN || next_type == TokenType::BETWEEN ||
+            next_type == TokenType::LIKE) {
+            advance(); // consume NOT
+            negated = true;
+        }
+    }
+
+    // IN (values...) or IN (SELECT ...)
+    if (match(TokenType::IN)) {
+        uint32_t line = previous().line;
+        uint32_t col = previous().column;
+
+        auto lp = expect(TokenType::LPAREN, "expected '(' after IN");
+        if (!lp) return tl::unexpected(lp.error());
+
+        auto in_expr = std::make_unique<InExpr>();
+        in_expr->expr = std::move(*left);
+        in_expr->negated = negated;
+        in_expr->line = line;
+        in_expr->col = col;
+
+        if (check(TokenType::SELECT)) {
+            auto subquery = parse_select();
+            if (!subquery) return tl::unexpected(subquery.error());
+            in_expr->subquery = std::move(*subquery);
+        } else {
+            do {
+                auto val = parse_expression();
+                if (!val) return tl::unexpected(val.error());
+                in_expr->values.push_back(std::move(*val));
+            } while (match(TokenType::COMMA));
+        }
+
+        auto rp = expect(TokenType::RPAREN, "expected ')'");
+        if (!rp) return tl::unexpected(rp.error());
+        return ok(ExprPtr(std::move(in_expr)));
+    }
+
+    // BETWEEN low AND high
+    if (match(TokenType::BETWEEN)) {
+        uint32_t line = previous().line;
+        uint32_t col = previous().column;
+
+        auto low = parse_addition();
+        if (!low) return tl::unexpected(low.error());
+
+        auto and_tok = expect(TokenType::AND, "expected AND in BETWEEN");
+        if (!and_tok) return tl::unexpected(and_tok.error());
+
+        auto high = parse_addition();
+        if (!high) return tl::unexpected(high.error());
+
+        auto between = std::make_unique<BetweenExpr>();
+        between->expr = std::move(*left);
+        between->low = std::move(*low);
+        between->high = std::move(*high);
+        between->negated = negated;
+        between->line = line;
+        between->col = col;
+        return ok(ExprPtr(std::move(between)));
+    }
+
+    // LIKE pattern
+    if (match(TokenType::LIKE)) {
+        uint32_t line = previous().line;
+        uint32_t col = previous().column;
+
+        auto pattern = parse_addition();
+        if (!pattern) return tl::unexpected(pattern.error());
+
+        auto like = std::make_unique<LikeExpr>();
+        like->expr = std::move(*left);
+        like->pattern = std::move(*pattern);
+        like->negated = negated;
+        like->line = line;
+        like->col = col;
+        return ok(ExprPtr(std::move(like)));
     }
 
     // Comparison operators.
@@ -1013,7 +1503,30 @@ Result<ExprPtr> Parser::parse_unary() {
         return ok(ExprPtr(std::move(unary)));
     }
 
-    return parse_primary();
+    return parse_postfix();
+}
+
+Result<ExprPtr> Parser::parse_postfix() {
+    auto expr = parse_primary();
+    if (!expr) return expr;
+
+    // :: type cast (PostgreSQL-style).
+    while (match(TokenType::COLON_COLON)) {
+        uint32_t line = previous().line;
+        uint32_t col = previous().column;
+
+        auto ts = parse_type_spec();
+        if (!ts) return tl::unexpected(ts.error());
+
+        auto cast = std::make_unique<CastExpr>();
+        cast->expr = std::move(*expr);
+        cast->target_type = std::move(*ts);
+        cast->line = line;
+        cast->col = col;
+        expr = ok(ExprPtr(std::move(cast)));
+    }
+
+    return expr;
 }
 
 Result<ExprPtr> Parser::parse_primary() {
@@ -1076,8 +1589,87 @@ Result<ExprPtr> Parser::parse_primary() {
         return ok(ExprPtr(std::move(lit)));
     }
 
-    // Parenthesized expression.
+    // EXISTS (SELECT ...).
+    if (match(TokenType::EXISTS)) {
+        uint32_t line = previous().line;
+        uint32_t col = previous().column;
+
+        auto lp = expect(TokenType::LPAREN, "expected '(' after EXISTS");
+        if (!lp) return tl::unexpected(lp.error());
+
+        auto subquery = parse_select();
+        if (!subquery) return tl::unexpected(subquery.error());
+
+        auto rp = expect(TokenType::RPAREN, "expected ')'");
+        if (!rp) return tl::unexpected(rp.error());
+
+        auto exists = std::make_unique<ExistsExpr>();
+        exists->subquery = std::move(*subquery);
+        exists->line = line;
+        exists->col = col;
+        return ok(ExprPtr(std::move(exists)));
+    }
+
+    // CASE expression.
+    if (match(TokenType::CASE)) {
+        uint32_t line = previous().line;
+        uint32_t col = previous().column;
+
+        auto case_expr = std::make_unique<CaseExpr>();
+        case_expr->line = line;
+        case_expr->col = col;
+
+        // Simple CASE: CASE operand WHEN ...
+        if (!check(TokenType::WHEN)) {
+            auto operand = parse_expression();
+            if (!operand) return tl::unexpected(operand.error());
+            case_expr->operand = std::move(*operand);
+        }
+
+        // WHEN clauses.
+        while (match(TokenType::WHEN)) {
+            CaseWhen cw;
+            auto cond = parse_expression();
+            if (!cond) return tl::unexpected(cond.error());
+            cw.condition = std::move(*cond);
+
+            auto then_tok = expect(TokenType::THEN, "expected THEN");
+            if (!then_tok) return tl::unexpected(then_tok.error());
+
+            auto result = parse_expression();
+            if (!result) return tl::unexpected(result.error());
+            cw.result = std::move(*result);
+
+            case_expr->whens.push_back(std::move(cw));
+        }
+
+        // Optional ELSE.
+        if (match(TokenType::ELSE)) {
+            auto else_expr = parse_expression();
+            if (!else_expr) return tl::unexpected(else_expr.error());
+            case_expr->else_expr = std::move(*else_expr);
+        }
+
+        auto end = expect(TokenType::END, "expected END");
+        if (!end) return tl::unexpected(end.error());
+        return ok(ExprPtr(std::move(case_expr)));
+    }
+
+    // Parenthesized expression or subquery.
     if (match(TokenType::LPAREN)) {
+        // Subquery: (SELECT ...)
+        if (check(TokenType::SELECT)) {
+            auto subquery = parse_select();
+            if (!subquery) return tl::unexpected(subquery.error());
+
+            auto rp = expect(TokenType::RPAREN, "expected ')'");
+            if (!rp) return tl::unexpected(rp.error());
+
+            auto sub = std::make_unique<SubqueryExpr>();
+            sub->subquery = std::move(*subquery);
+            return ok(ExprPtr(std::move(sub)));
+        }
+
         auto expr = parse_expression();
         if (!expr) return expr;
         auto rp = expect(TokenType::RPAREN, "expected ')'");
@@ -1085,11 +1677,64 @@ Result<ExprPtr> Parser::parse_primary() {
         return expr;
     }
 
-    // Identifier, column reference, or function call.
+    // Array literal: [elem, ...]
+    if (match(TokenType::LBRACKET)) {
+        uint32_t line = previous().line;
+        uint32_t col = previous().column;
+
+        auto arr = std::make_unique<ArrayExpr>();
+        arr->line = line;
+        arr->col = col;
+
+        if (!check(TokenType::RBRACKET)) {
+            do {
+                auto elem = parse_expression();
+                if (!elem) return tl::unexpected(elem.error());
+                arr->elements.push_back(std::move(*elem));
+            } while (match(TokenType::COMMA));
+        }
+
+        auto rb = expect(TokenType::RBRACKET, "expected ']'");
+        if (!rb) return tl::unexpected(rb.error());
+        return ok(ExprPtr(std::move(arr)));
+    }
+
+    // Identifier, column reference, function call, or CAST.
     if (is_name_token(tok.type)) {
         std::string name(advance().lexeme);
         uint32_t line = previous().line;
         uint32_t col = previous().column;
+
+        // Normalize to uppercase for keyword-like checks.
+        std::string name_upper;
+        name_upper.reserve(name.size());
+        for (char c : name) {
+            name_upper += static_cast<char>(
+                std::toupper(static_cast<unsigned char>(c)));
+        }
+
+        // CAST(expr AS type)
+        if (name_upper == "CAST" && check(TokenType::LPAREN)) {
+            advance(); // consume (
+            auto expr = parse_expression();
+            if (!expr) return tl::unexpected(expr.error());
+
+            auto as_tok = expect(TokenType::AS, "expected AS in CAST");
+            if (!as_tok) return tl::unexpected(as_tok.error());
+
+            auto ts = parse_type_spec();
+            if (!ts) return tl::unexpected(ts.error());
+
+            auto rp = expect(TokenType::RPAREN, "expected ')' after CAST");
+            if (!rp) return tl::unexpected(rp.error());
+
+            auto cast = std::make_unique<CastExpr>();
+            cast->expr = std::move(*expr);
+            cast->target_type = std::move(*ts);
+            cast->line = line;
+            cast->col = col;
+            return ok(ExprPtr(std::move(cast)));
+        }
 
         // Function call: name(...)
         if (match(TokenType::LPAREN)) {
@@ -1098,7 +1743,19 @@ Result<ExprPtr> Parser::parse_primary() {
             fn->line = line;
             fn->col = col;
 
-            if (!check(TokenType::RPAREN)) {
+            // DISTINCT for aggregates: COUNT(DISTINCT col).
+            if (match(TokenType::DISTINCT)) {
+                fn->distinct = true;
+            }
+
+            // STAR for COUNT(*).
+            if (check(TokenType::STAR) && !fn->distinct) {
+                advance(); // consume *
+                // Represent * as a ColumnRefExpr with column="*".
+                auto star = std::make_unique<ColumnRefExpr>();
+                star->column = "*";
+                fn->args.push_back(std::move(star));
+            } else if (!check(TokenType::RPAREN)) {
                 do {
                     auto arg = parse_expression();
                     if (!arg) return arg;

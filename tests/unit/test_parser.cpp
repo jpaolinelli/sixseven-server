@@ -613,3 +613,520 @@ TEST(Parser, CaseInsensitiveKeywords) {
     EXPECT_EQ(ct->name, "Users");
     EXPECT_EQ(ct->columns[0].name, "Id");
 }
+
+// =============================================================================
+// DML tests (GDB-104)
+// =============================================================================
+
+// -- INSERT tests -------------------------------------------------------------
+
+TEST(Parser, InsertBasic) {
+    auto stmt = parse_one(
+        "INSERT INTO users (name, age) VALUES ('Alice', 30)");
+    auto* ins = dynamic_cast<InsertStmt*>(stmt.get());
+    ASSERT_NE(ins, nullptr);
+    EXPECT_EQ(ins->table_name, "users");
+    ASSERT_EQ(ins->columns.size(), 2u);
+    EXPECT_EQ(ins->columns[0], "name");
+    EXPECT_EQ(ins->columns[1], "age");
+    ASSERT_EQ(ins->values.size(), 1u);
+    ASSERT_EQ(ins->values[0].size(), 2u);
+    auto* name_lit = dynamic_cast<LiteralExpr*>(ins->values[0][0].get());
+    ASSERT_NE(name_lit, nullptr);
+    EXPECT_EQ(name_lit->kind, LiteralKind::STRING);
+    EXPECT_EQ(name_lit->value, "Alice");
+}
+
+TEST(Parser, InsertNoColumns) {
+    auto stmt = parse_one("INSERT INTO users VALUES (1, 'Bob', 25)");
+    auto* ins = dynamic_cast<InsertStmt*>(stmt.get());
+    ASSERT_NE(ins, nullptr);
+    EXPECT_TRUE(ins->columns.empty());
+    ASSERT_EQ(ins->values.size(), 1u);
+    ASSERT_EQ(ins->values[0].size(), 3u);
+}
+
+TEST(Parser, InsertMultipleRows) {
+    auto stmt = parse_one(
+        "INSERT INTO users (name) VALUES ('Alice'), ('Bob'), ('Charlie')");
+    auto* ins = dynamic_cast<InsertStmt*>(stmt.get());
+    ASSERT_NE(ins, nullptr);
+    ASSERT_EQ(ins->values.size(), 3u);
+    auto* v1 = dynamic_cast<LiteralExpr*>(ins->values[0][0].get());
+    ASSERT_NE(v1, nullptr);
+    EXPECT_EQ(v1->value, "Alice");
+    auto* v3 = dynamic_cast<LiteralExpr*>(ins->values[2][0].get());
+    ASSERT_NE(v3, nullptr);
+    EXPECT_EQ(v3->value, "Charlie");
+}
+
+TEST(Parser, InsertSelect) {
+    auto stmt = parse_one(
+        "INSERT INTO archive (name) SELECT name FROM users WHERE active = FALSE");
+    auto* ins = dynamic_cast<InsertStmt*>(stmt.get());
+    ASSERT_NE(ins, nullptr);
+    EXPECT_EQ(ins->table_name, "archive");
+    ASSERT_EQ(ins->columns.size(), 1u);
+    EXPECT_TRUE(ins->values.empty());
+    auto* sel = dynamic_cast<SelectStmt*>(ins->select.get());
+    ASSERT_NE(sel, nullptr);
+    EXPECT_EQ(sel->from.size(), 1u);
+    EXPECT_EQ(sel->from[0].name, "users");
+}
+
+TEST(Parser, InsertReturning) {
+    auto stmt = parse_one(
+        "INSERT INTO users (name) VALUES ('test') RETURNING id, name");
+    auto* ins = dynamic_cast<InsertStmt*>(stmt.get());
+    ASSERT_NE(ins, nullptr);
+    ASSERT_EQ(ins->returning.size(), 2u);
+    auto* r0 = dynamic_cast<ColumnRefExpr*>(ins->returning[0].expr.get());
+    ASSERT_NE(r0, nullptr);
+    EXPECT_EQ(r0->column, "id");
+}
+
+// -- UPDATE tests -------------------------------------------------------------
+
+TEST(Parser, UpdateBasic) {
+    auto stmt = parse_one("UPDATE users SET name = 'Bob' WHERE id = 1");
+    auto* upd = dynamic_cast<UpdateStmt*>(stmt.get());
+    ASSERT_NE(upd, nullptr);
+    EXPECT_EQ(upd->table_name, "users");
+    ASSERT_EQ(upd->assignments.size(), 1u);
+    EXPECT_EQ(upd->assignments[0].column, "name");
+    auto* val = dynamic_cast<LiteralExpr*>(upd->assignments[0].value.get());
+    ASSERT_NE(val, nullptr);
+    EXPECT_EQ(val->value, "Bob");
+    EXPECT_NE(upd->where_expr, nullptr);
+}
+
+TEST(Parser, UpdateMultipleSet) {
+    auto stmt = parse_one(
+        "UPDATE products SET price = 9.99, stock = stock + 1");
+    auto* upd = dynamic_cast<UpdateStmt*>(stmt.get());
+    ASSERT_NE(upd, nullptr);
+    ASSERT_EQ(upd->assignments.size(), 2u);
+    EXPECT_EQ(upd->assignments[0].column, "price");
+    EXPECT_EQ(upd->assignments[1].column, "stock");
+}
+
+TEST(Parser, UpdateReturning) {
+    auto stmt = parse_one(
+        "UPDATE users SET active = FALSE WHERE id = 1 RETURNING *");
+    auto* upd = dynamic_cast<UpdateStmt*>(stmt.get());
+    ASSERT_NE(upd, nullptr);
+    ASSERT_EQ(upd->returning.size(), 1u);
+    EXPECT_TRUE(upd->returning[0].is_star);
+}
+
+// -- DELETE tests -------------------------------------------------------------
+
+TEST(Parser, DeleteBasic) {
+    auto stmt = parse_one("DELETE FROM users WHERE id = 42");
+    auto* del = dynamic_cast<DeleteStmt*>(stmt.get());
+    ASSERT_NE(del, nullptr);
+    EXPECT_EQ(del->table_name, "users");
+    EXPECT_NE(del->where_expr, nullptr);
+}
+
+TEST(Parser, DeleteNoWhere) {
+    auto stmt = parse_one("DELETE FROM temp_table");
+    auto* del = dynamic_cast<DeleteStmt*>(stmt.get());
+    ASSERT_NE(del, nullptr);
+    EXPECT_EQ(del->table_name, "temp_table");
+    EXPECT_EQ(del->where_expr, nullptr);
+}
+
+TEST(Parser, DeleteReturning) {
+    auto stmt = parse_one("DELETE FROM users WHERE id = 1 RETURNING id");
+    auto* del = dynamic_cast<DeleteStmt*>(stmt.get());
+    ASSERT_NE(del, nullptr);
+    ASSERT_EQ(del->returning.size(), 1u);
+}
+
+// -- LINK tests ---------------------------------------------------------------
+
+TEST(Parser, LinkBasic) {
+    auto stmt = parse_one("LINK users(1) TO posts(42) VIA authored");
+    auto* lnk = dynamic_cast<LinkStmt*>(stmt.get());
+    ASSERT_NE(lnk, nullptr);
+    EXPECT_EQ(lnk->source_table, "users");
+    EXPECT_EQ(lnk->target_table, "posts");
+    EXPECT_EQ(lnk->edge_type, "authored");
+    auto* src = dynamic_cast<LiteralExpr*>(lnk->source_key.get());
+    ASSERT_NE(src, nullptr);
+    EXPECT_EQ(src->value, "1");
+    auto* tgt = dynamic_cast<LiteralExpr*>(lnk->target_key.get());
+    ASSERT_NE(tgt, nullptr);
+    EXPECT_EQ(tgt->value, "42");
+}
+
+TEST(Parser, LinkWithProperties) {
+    auto stmt = parse_one(
+        "LINK users(1) TO users(2) VIA follows (since = '2024-01-01', weight = 0.5)");
+    auto* lnk = dynamic_cast<LinkStmt*>(stmt.get());
+    ASSERT_NE(lnk, nullptr);
+    ASSERT_EQ(lnk->properties.size(), 2u);
+    EXPECT_EQ(lnk->properties[0].column, "since");
+    EXPECT_EQ(lnk->properties[1].column, "weight");
+}
+
+// -- UNLINK tests -------------------------------------------------------------
+
+TEST(Parser, UnlinkBasic) {
+    auto stmt = parse_one("UNLINK users(1) FROM posts(42) VIA authored");
+    auto* ulnk = dynamic_cast<UnlinkStmt*>(stmt.get());
+    ASSERT_NE(ulnk, nullptr);
+    EXPECT_EQ(ulnk->source_table, "users");
+    EXPECT_EQ(ulnk->target_table, "posts");
+    EXPECT_EQ(ulnk->edge_type, "authored");
+    EXPECT_EQ(ulnk->where_expr, nullptr);
+}
+
+TEST(Parser, UnlinkWithWhere) {
+    auto stmt = parse_one(
+        "UNLINK users(1) FROM users(2) VIA follows WHERE weight < 0.5");
+    auto* ulnk = dynamic_cast<UnlinkStmt*>(stmt.get());
+    ASSERT_NE(ulnk, nullptr);
+    EXPECT_NE(ulnk->where_expr, nullptr);
+}
+
+// -- SELECT tests (basic, for subqueries) -------------------------------------
+
+TEST(Parser, SelectBasic) {
+    auto stmt = parse_one("SELECT id, name FROM users");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    EXPECT_FALSE(sel->distinct);
+    ASSERT_EQ(sel->items.size(), 2u);
+    auto* c0 = dynamic_cast<ColumnRefExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(c0, nullptr);
+    EXPECT_EQ(c0->column, "id");
+    ASSERT_EQ(sel->from.size(), 1u);
+    EXPECT_EQ(sel->from[0].name, "users");
+}
+
+TEST(Parser, SelectStar) {
+    auto stmt = parse_one("SELECT * FROM users");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->items.size(), 1u);
+    EXPECT_TRUE(sel->items[0].is_star);
+}
+
+TEST(Parser, SelectTableStar) {
+    auto stmt = parse_one("SELECT u.* FROM users AS u");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->items.size(), 1u);
+    EXPECT_TRUE(sel->items[0].is_star);
+    EXPECT_EQ(sel->items[0].table_star, "u");
+    EXPECT_EQ(sel->from[0].alias, "u");
+}
+
+TEST(Parser, SelectDistinct) {
+    auto stmt = parse_one("SELECT DISTINCT name FROM users");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    EXPECT_TRUE(sel->distinct);
+}
+
+TEST(Parser, SelectWhere) {
+    auto stmt = parse_one("SELECT id FROM users WHERE age > 18");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    EXPECT_NE(sel->where_expr, nullptr);
+}
+
+TEST(Parser, SelectOrderBy) {
+    auto stmt = parse_one(
+        "SELECT name FROM users ORDER BY name ASC, age DESC");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->order_by.size(), 2u);
+    EXPECT_EQ(sel->order_by[0].direction, SortDirection::ASC);
+    EXPECT_EQ(sel->order_by[1].direction, SortDirection::DESC);
+}
+
+TEST(Parser, SelectLimitOffset) {
+    auto stmt = parse_one("SELECT * FROM users LIMIT 10 OFFSET 20");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* lim = dynamic_cast<LiteralExpr*>(sel->limit.get());
+    ASSERT_NE(lim, nullptr);
+    EXPECT_EQ(lim->value, "10");
+    auto* off = dynamic_cast<LiteralExpr*>(sel->offset.get());
+    ASSERT_NE(off, nullptr);
+    EXPECT_EQ(off->value, "20");
+}
+
+TEST(Parser, SelectAlias) {
+    auto stmt = parse_one("SELECT name AS n FROM users");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    EXPECT_EQ(sel->items[0].alias, "n");
+}
+
+// =============================================================================
+// Enhanced expression tests (GDB-104)
+// =============================================================================
+
+// -- IN expression ------------------------------------------------------------
+
+TEST(Parser, ExprInValues) {
+    auto stmt = parse_one(
+        "SELECT id FROM users WHERE status IN ('active', 'pending')");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* in_expr = dynamic_cast<InExpr*>(sel->where_expr.get());
+    ASSERT_NE(in_expr, nullptr);
+    EXPECT_FALSE(in_expr->negated);
+    ASSERT_EQ(in_expr->values.size(), 2u);
+    auto* v0 = dynamic_cast<LiteralExpr*>(in_expr->values[0].get());
+    ASSERT_NE(v0, nullptr);
+    EXPECT_EQ(v0->value, "active");
+}
+
+TEST(Parser, ExprNotIn) {
+    auto stmt = parse_one(
+        "SELECT id FROM users WHERE id NOT IN (1, 2, 3)");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* in_expr = dynamic_cast<InExpr*>(sel->where_expr.get());
+    ASSERT_NE(in_expr, nullptr);
+    EXPECT_TRUE(in_expr->negated);
+    ASSERT_EQ(in_expr->values.size(), 3u);
+}
+
+TEST(Parser, ExprInSubquery) {
+    auto stmt = parse_one(
+        "SELECT * FROM orders WHERE user_id IN (SELECT id FROM users)");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* in_expr = dynamic_cast<InExpr*>(sel->where_expr.get());
+    ASSERT_NE(in_expr, nullptr);
+    EXPECT_TRUE(in_expr->values.empty());
+    auto* sub = dynamic_cast<SelectStmt*>(in_expr->subquery.get());
+    ASSERT_NE(sub, nullptr);
+}
+
+// -- BETWEEN expression -------------------------------------------------------
+
+TEST(Parser, ExprBetween) {
+    auto stmt = parse_one(
+        "SELECT * FROM products WHERE price BETWEEN 10 AND 100");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* bet = dynamic_cast<BetweenExpr*>(sel->where_expr.get());
+    ASSERT_NE(bet, nullptr);
+    EXPECT_FALSE(bet->negated);
+    auto* low = dynamic_cast<LiteralExpr*>(bet->low.get());
+    ASSERT_NE(low, nullptr);
+    EXPECT_EQ(low->value, "10");
+    auto* high = dynamic_cast<LiteralExpr*>(bet->high.get());
+    ASSERT_NE(high, nullptr);
+    EXPECT_EQ(high->value, "100");
+}
+
+TEST(Parser, ExprNotBetween) {
+    auto stmt = parse_one(
+        "SELECT * FROM t WHERE x NOT BETWEEN 0 AND 9");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* bet = dynamic_cast<BetweenExpr*>(sel->where_expr.get());
+    ASSERT_NE(bet, nullptr);
+    EXPECT_TRUE(bet->negated);
+}
+
+TEST(Parser, ExprBetweenAndOther) {
+    // x BETWEEN 1 AND 10 AND y = 5 — first AND is BETWEEN, second is boolean.
+    auto stmt = parse_one(
+        "SELECT * FROM t WHERE x BETWEEN 1 AND 10 AND y = 5");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* and_expr = dynamic_cast<BinaryExpr*>(sel->where_expr.get());
+    ASSERT_NE(and_expr, nullptr);
+    EXPECT_EQ(and_expr->op, BinaryOp::AND);
+    auto* bet = dynamic_cast<BetweenExpr*>(and_expr->lhs.get());
+    ASSERT_NE(bet, nullptr);
+}
+
+// -- LIKE expression ----------------------------------------------------------
+
+TEST(Parser, ExprLike) {
+    auto stmt = parse_one(
+        "SELECT * FROM users WHERE name LIKE 'A%'");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* like = dynamic_cast<LikeExpr*>(sel->where_expr.get());
+    ASSERT_NE(like, nullptr);
+    EXPECT_FALSE(like->negated);
+    auto* pat = dynamic_cast<LiteralExpr*>(like->pattern.get());
+    ASSERT_NE(pat, nullptr);
+    EXPECT_EQ(pat->value, "A%");
+}
+
+TEST(Parser, ExprNotLike) {
+    auto stmt = parse_one(
+        "SELECT * FROM users WHERE name NOT LIKE '%test%'");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* like = dynamic_cast<LikeExpr*>(sel->where_expr.get());
+    ASSERT_NE(like, nullptr);
+    EXPECT_TRUE(like->negated);
+}
+
+// -- CASE expression ----------------------------------------------------------
+
+TEST(Parser, ExprCaseSearched) {
+    auto stmt = parse_one(
+        "SELECT CASE WHEN age < 18 THEN 'minor' "
+        "WHEN age < 65 THEN 'adult' ELSE 'senior' END FROM users");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* case_expr = dynamic_cast<CaseExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(case_expr, nullptr);
+    EXPECT_EQ(case_expr->operand, nullptr);
+    ASSERT_EQ(case_expr->whens.size(), 2u);
+    EXPECT_NE(case_expr->else_expr, nullptr);
+}
+
+TEST(Parser, ExprCaseSimple) {
+    auto stmt = parse_one(
+        "SELECT CASE status WHEN 'A' THEN 'Active' "
+        "WHEN 'I' THEN 'Inactive' END FROM users");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* case_expr = dynamic_cast<CaseExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(case_expr, nullptr);
+    EXPECT_NE(case_expr->operand, nullptr);
+    ASSERT_EQ(case_expr->whens.size(), 2u);
+    EXPECT_EQ(case_expr->else_expr, nullptr);
+}
+
+// -- CAST expression ----------------------------------------------------------
+
+TEST(Parser, ExprCast) {
+    auto stmt = parse_one("SELECT CAST(age AS TEXT) FROM users");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* cast = dynamic_cast<CastExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(cast, nullptr);
+    EXPECT_EQ(cast->target_type.name, "TEXT");
+    auto* col = dynamic_cast<ColumnRefExpr*>(cast->expr.get());
+    ASSERT_NE(col, nullptr);
+    EXPECT_EQ(col->column, "age");
+}
+
+TEST(Parser, ExprColonColonCast) {
+    auto stmt = parse_one("SELECT age::TEXT FROM users");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* cast = dynamic_cast<CastExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(cast, nullptr);
+    EXPECT_EQ(cast->target_type.name, "TEXT");
+}
+
+// -- EXISTS expression --------------------------------------------------------
+
+TEST(Parser, ExprExists) {
+    auto stmt = parse_one(
+        "SELECT * FROM users WHERE EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* exists = dynamic_cast<ExistsExpr*>(sel->where_expr.get());
+    ASSERT_NE(exists, nullptr);
+    auto* sub = dynamic_cast<SelectStmt*>(exists->subquery.get());
+    ASSERT_NE(sub, nullptr);
+}
+
+// -- Subquery expression ------------------------------------------------------
+
+TEST(Parser, ExprSubquery) {
+    auto stmt = parse_one(
+        "SELECT (SELECT COUNT(*) FROM orders) FROM users");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* sub = dynamic_cast<SubqueryExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(sub, nullptr);
+}
+
+// -- Array literal ------------------------------------------------------------
+
+TEST(Parser, ExprArray) {
+    auto stmt = parse_one(
+        "SELECT * FROM products WHERE vec = [1.0, 2.0, 3.0]");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* eq = dynamic_cast<BinaryExpr*>(sel->where_expr.get());
+    ASSERT_NE(eq, nullptr);
+    auto* arr = dynamic_cast<ArrayExpr*>(eq->rhs.get());
+    ASSERT_NE(arr, nullptr);
+    ASSERT_EQ(arr->elements.size(), 3u);
+}
+
+// -- Aggregate functions with DISTINCT and STAR -------------------------------
+
+TEST(Parser, ExprCountStar) {
+    auto stmt = parse_one("SELECT COUNT(*) FROM users");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* fn = dynamic_cast<FunctionCallExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(fn, nullptr);
+    EXPECT_EQ(fn->name, "COUNT");
+    ASSERT_EQ(fn->args.size(), 1u);
+    auto* star = dynamic_cast<ColumnRefExpr*>(fn->args[0].get());
+    ASSERT_NE(star, nullptr);
+    EXPECT_EQ(star->column, "*");
+}
+
+TEST(Parser, ExprCountDistinct) {
+    auto stmt = parse_one("SELECT COUNT(DISTINCT name) FROM users");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* fn = dynamic_cast<FunctionCallExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(fn, nullptr);
+    EXPECT_EQ(fn->name, "COUNT");
+    EXPECT_TRUE(fn->distinct);
+    ASSERT_EQ(fn->args.size(), 1u);
+}
+
+// -- Qualified column ref -----------------------------------------------------
+
+TEST(Parser, ExprQualifiedColumn) {
+    auto stmt = parse_one(
+        "SELECT users.name FROM users WHERE users.id = 1");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* col = dynamic_cast<ColumnRefExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(col, nullptr);
+    EXPECT_EQ(col->table, "users");
+    EXPECT_EQ(col->column, "name");
+}
+
+// -- Complex expressions combining operators ----------------------------------
+
+TEST(Parser, ExprComplex) {
+    auto stmt = parse_one(
+        "SELECT * FROM t WHERE a > 1 AND b IN (1, 2) OR c LIKE '%x%'");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    // OR has lowest precedence: (a > 1 AND b IN (1, 2)) OR (c LIKE '%x%')
+    auto* or_expr = dynamic_cast<BinaryExpr*>(sel->where_expr.get());
+    ASSERT_NE(or_expr, nullptr);
+    EXPECT_EQ(or_expr->op, BinaryOp::OR);
+}
+
+// -- DML error handling -------------------------------------------------------
+
+TEST(Parser, ErrorInsertMissingInto) {
+    expect_parse_error("INSERT users (name) VALUES ('test')");
+}
+
+TEST(Parser, ErrorUpdateMissingSet) {
+    expect_parse_error("UPDATE users name = 'test'");
+}
+
+TEST(Parser, ErrorDeleteMissingFrom) {
+    expect_parse_error("DELETE users WHERE id = 1");
+}

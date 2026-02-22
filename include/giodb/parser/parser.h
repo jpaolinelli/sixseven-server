@@ -75,6 +75,23 @@ private:
     [[nodiscard]] Result<TypeSpec> parse_type_spec();
     [[nodiscard]] Result<TableConstraint> parse_table_constraint();
 
+    // -- DML ----------------------------------------------------------------
+
+    [[nodiscard]] Result<StmtPtr> parse_insert();
+    [[nodiscard]] Result<StmtPtr> parse_update();
+    [[nodiscard]] Result<StmtPtr> parse_delete();
+    [[nodiscard]] Result<StmtPtr> parse_link();
+    [[nodiscard]] Result<StmtPtr> parse_unlink();
+
+    // -- DML helpers --------------------------------------------------------
+
+    [[nodiscard]] Result<std::vector<SelectItem>> parse_returning();
+
+    // -- Query --------------------------------------------------------------
+
+    [[nodiscard]] Result<StmtPtr> parse_select();
+    [[nodiscard]] Result<SelectItem> parse_select_item();
+
     // -- Expression parsing -------------------------------------------------
 
     [[nodiscard]] Result<ExprPtr> parse_expression();
@@ -85,6 +102,7 @@ private:
     [[nodiscard]] Result<ExprPtr> parse_addition();
     [[nodiscard]] Result<ExprPtr> parse_multiplication();
     [[nodiscard]] Result<ExprPtr> parse_unary();
+    [[nodiscard]] Result<ExprPtr> parse_postfix();
     [[nodiscard]] Result<ExprPtr> parse_primary();
 
     std::vector<Token> tokens_;
