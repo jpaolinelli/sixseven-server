@@ -26,6 +26,8 @@ add_executable(giodb_unit_tests
     test_ast.cpp
     test_parser.cpp
     test_binder.cpp
+    test_expr_evaluator.cpp
+    test_seq_scan.cpp
 )
 
 target_link_libraries(giodb_unit_tests
