@@ -7,45 +7,14 @@
 
 #include <gtest/gtest.h>
 
-#include <cstddef>
+#include <cstdint>
 #include <memory>
-#include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
+#include "test_helpers.h"
+
 using namespace giodb;
-
-// ---------------------------------------------------------------------------
-// VectorIterator — in-memory test helper (same as NLJ tests)
-// ---------------------------------------------------------------------------
-
-class VectorIterator : public Iterator {
-public:
-    VectorIterator(OutputSchema schema, std::vector<Tuple> tuples)
-        : schema_(std::move(schema)), tuples_(std::move(tuples)) {}
-
-    Result<void> open() override {
-        cursor_ = 0;
-        return ok();
-    }
-
-    Result<std::optional<Tuple>> next() override {
-        if (cursor_ >= tuples_.size()) {
-            return ok(std::optional<Tuple>(std::nullopt));
-        }
-        size_t idx = cursor_++;
-        return ok(std::optional<Tuple>(Tuple{tuples_[idx].values, tuples_[idx].rid}));
-    }
-
-    void close() override { cursor_ = 0; }
-    const OutputSchema& output_schema() const override { return schema_; }
-
-private:
-    OutputSchema schema_;
-    std::vector<Tuple> tuples_;
-    size_t cursor_ = 0;
-};
 
 // ---------------------------------------------------------------------------
 // Test fixture
@@ -382,6 +351,77 @@ TEST_F(HashJoinTest, GraceHashJoinLargeDataset) {
     auto rows = collect_all(join);
     // All 100 should match (same keys on both sides).
     ASSERT_EQ(rows.size(), 100u);
+}
+
+// ===========================================================================
+// Output schema test
+// ===========================================================================
+
+// ===========================================================================
+// NULL join key tests
+// ===========================================================================
+
+TEST_F(HashJoinTest, InnerJoinNullKeyNeverMatches) {
+    auto probe_data = std::vector<Tuple>{
+        make_probe(1, "alice"),
+        Tuple{{Value::make_null(), Value(std::string("nulluser"))}, {}},
+    };
+    auto build_data = std::vector<Tuple>{
+        make_build(1, "eng"),
+        Tuple{{Value::make_null(), Value(std::string("nulldept"))}, {}},
+    };
+
+    auto probe_key = col_ref("probe", "id");
+    auto build_key = col_ref("build", "id");
+    BoundStatement bound;
+
+    HashJoinOperator join(std::make_unique<VectorIterator>(probe_schema(), std::move(probe_data)),
+                          std::make_unique<VectorIterator>(build_schema(), std::move(build_data)),
+                          JoinType::INNER,
+                          probe_key.get(),
+                          build_key.get(),
+                          bound,
+                          combined_schema());
+
+    auto rows = collect_all(join);
+    // Only alice(1) matches eng(1). NULL keys don't match.
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].values[0].as_int32(), 1);
+}
+
+TEST_F(HashJoinTest, LeftJoinNullKeyProducesNullBuild) {
+    auto probe_data = std::vector<Tuple>{
+        make_probe(1, "alice"),
+        Tuple{{Value::make_null(), Value(std::string("nulluser"))}, {}},
+    };
+    auto build_data = std::vector<Tuple>{
+        make_build(1, "eng"),
+    };
+
+    auto probe_key = col_ref("probe", "id");
+    auto build_key = col_ref("build", "id");
+    BoundStatement bound;
+
+    HashJoinOperator join(std::make_unique<VectorIterator>(probe_schema(), std::move(probe_data)),
+                          std::make_unique<VectorIterator>(build_schema(), std::move(build_data)),
+                          JoinType::LEFT,
+                          probe_key.get(),
+                          build_key.get(),
+                          bound,
+                          combined_schema());
+
+    auto rows = collect_all(join);
+    ASSERT_EQ(rows.size(), 2u);
+    // Find the null-key row and verify it got NULL build side.
+    bool found_null_probe = false;
+    for (auto& r : rows) {
+        if (r.values[0].is_null()) {
+            EXPECT_TRUE(r.values[2].is_null());
+            EXPECT_TRUE(r.values[3].is_null());
+            found_null_probe = true;
+        }
+    }
+    EXPECT_TRUE(found_null_probe);
 }
 
 // ===========================================================================

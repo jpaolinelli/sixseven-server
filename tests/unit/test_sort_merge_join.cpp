@@ -7,45 +7,14 @@
 
 #include <gtest/gtest.h>
 
-#include <cstddef>
+#include <cstdint>
 #include <memory>
-#include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
+#include "test_helpers.h"
+
 using namespace giodb;
-
-// ---------------------------------------------------------------------------
-// VectorIterator — in-memory test helper
-// ---------------------------------------------------------------------------
-
-class VectorIterator : public Iterator {
-public:
-    VectorIterator(OutputSchema schema, std::vector<Tuple> tuples)
-        : schema_(std::move(schema)), tuples_(std::move(tuples)) {}
-
-    Result<void> open() override {
-        cursor_ = 0;
-        return ok();
-    }
-
-    Result<std::optional<Tuple>> next() override {
-        if (cursor_ >= tuples_.size()) {
-            return ok(std::optional<Tuple>(std::nullopt));
-        }
-        size_t idx = cursor_++;
-        return ok(std::optional<Tuple>(Tuple{tuples_[idx].values, tuples_[idx].rid}));
-    }
-
-    void close() override { cursor_ = 0; }
-    const OutputSchema& output_schema() const override { return schema_; }
-
-private:
-    OutputSchema schema_;
-    std::vector<Tuple> tuples_;
-    size_t cursor_ = 0;
-};
 
 // ---------------------------------------------------------------------------
 // Test fixture
@@ -360,6 +329,81 @@ TEST_F(SortMergeJoinTest, FullJoinBothEmpty) {
 
     auto rows = collect_all(join);
     EXPECT_EQ(rows.size(), 0u);
+}
+
+// ===========================================================================
+// Output schema test
+// ===========================================================================
+
+// ===========================================================================
+// NULL join key tests
+// ===========================================================================
+
+TEST_F(SortMergeJoinTest, InnerJoinNullKeyNeverMatches) {
+    auto left_data = std::vector<Tuple>{
+        make_left(1, "alice"),
+        Tuple{{Value::make_null(), Value(std::string("nulluser"))}, {}},
+    };
+    auto right_data = std::vector<Tuple>{
+        make_right(1, "eng"),
+        Tuple{{Value::make_null(), Value(std::string("nulldept"))}, {}},
+    };
+
+    auto left_key = col_ref("left", "id");
+    auto right_key = col_ref("right", "id");
+    BoundStatement bound;
+
+    SortMergeJoinOperator join(
+        std::make_unique<VectorIterator>(left_schema(), std::move(left_data)),
+        std::make_unique<VectorIterator>(right_schema(), std::move(right_data)),
+        JoinType::INNER,
+        left_key.get(),
+        right_key.get(),
+        bound,
+        combined_schema());
+
+    auto rows = collect_all(join);
+    // Only alice(1) matches eng(1). NULL keys don't match.
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].values[0].as_int32(), 1);
+}
+
+TEST_F(SortMergeJoinTest, LeftJoinNullKeyProducesNullRight) {
+    auto left_data = std::vector<Tuple>{
+        make_left(1, "alice"),
+        Tuple{{Value::make_null(), Value(std::string("nulluser"))}, {}},
+    };
+    auto right_data = std::vector<Tuple>{
+        make_right(1, "eng"),
+    };
+
+    auto left_key = col_ref("left", "id");
+    auto right_key = col_ref("right", "id");
+    BoundStatement bound;
+
+    SortMergeJoinOperator join(
+        std::make_unique<VectorIterator>(left_schema(), std::move(left_data)),
+        std::make_unique<VectorIterator>(right_schema(), std::move(right_data)),
+        JoinType::LEFT,
+        left_key.get(),
+        right_key.get(),
+        bound,
+        combined_schema());
+
+    auto rows = collect_all(join);
+    // alice matches eng; nulluser has no match → NULL right side.
+    ASSERT_EQ(rows.size(), 2u);
+    // Sort order: NULL sorts before 1, so nulluser comes first.
+    // Check that the null-key row has NULL right side.
+    bool found_null_left_key = false;
+    for (auto& r : rows) {
+        if (r.values[0].is_null()) {
+            EXPECT_TRUE(r.values[2].is_null());
+            EXPECT_TRUE(r.values[3].is_null());
+            found_null_left_key = true;
+        }
+    }
+    EXPECT_TRUE(found_null_left_key);
 }
 
 // ===========================================================================

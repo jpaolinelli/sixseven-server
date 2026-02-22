@@ -7,49 +7,14 @@
 
 #include <gtest/gtest.h>
 
-#include <cstddef>
+#include <cstdint>
 #include <memory>
-#include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
+#include "test_helpers.h"
+
 using namespace giodb;
-
-// ---------------------------------------------------------------------------
-// VectorIterator — in-memory test helper
-// ---------------------------------------------------------------------------
-
-/// A simple iterator that returns pre-loaded tuples. Supports close/open
-/// for re-scanning (needed when used as the left child in nested joins).
-class VectorIterator : public Iterator {
-public:
-    VectorIterator(OutputSchema schema, std::vector<Tuple> tuples)
-        : schema_(std::move(schema)), tuples_(std::move(tuples)) {}
-
-    Result<void> open() override {
-        cursor_ = 0;
-        return ok();
-    }
-
-    Result<std::optional<Tuple>> next() override {
-        if (cursor_ >= tuples_.size()) {
-            return ok(std::optional<Tuple>(std::nullopt));
-        }
-        // Return a copy so re-scanning works.
-        size_t idx = cursor_++;
-        return ok(std::optional<Tuple>(Tuple{tuples_[idx].values, tuples_[idx].rid}));
-    }
-
-    void close() override { cursor_ = 0; }
-
-    const OutputSchema& output_schema() const override { return schema_; }
-
-private:
-    OutputSchema schema_;
-    std::vector<Tuple> tuples_;
-    size_t cursor_ = 0;
-};
 
 // ---------------------------------------------------------------------------
 // Test fixture
@@ -648,4 +613,79 @@ TEST_F(NestedLoopJoinTest, InnerJoinNonEquiPredicate) {
     // left.id=2 < right.id=4 → 1 match
     // left.id=3 < right.id=4 → 1 match
     ASSERT_EQ(rows.size(), 4u);
+}
+
+// ===========================================================================
+// NULL join key tests
+// ===========================================================================
+
+TEST_F(NestedLoopJoinTest, InnerJoinNullKeyNeverMatches) {
+    // NULL keys should never match anything, including other NULLs.
+    auto left_data = std::vector<Tuple>{
+        make_left(1, "alice"),
+        Tuple{{Value::make_null(), Value(std::string("nulluser"))}, {}},
+    };
+    auto right_data = std::vector<Tuple>{
+        make_right(1, "eng"),
+        Tuple{{Value::make_null(), Value(std::string("nulldept"))}, {}},
+    };
+
+    auto pred = equi_predicate();
+    BoundStatement bound;
+
+    NestedLoopJoinOperator join(
+        std::make_unique<VectorIterator>(left_schema(), std::move(left_data)),
+        std::make_unique<VectorIterator>(right_schema(), std::move(right_data)),
+        JoinType::INNER,
+        pred.get(),
+        bound,
+        combined_schema());
+
+    auto rows = collect_all(join);
+    // Only alice(1) matches eng(1). NULL keys don't match.
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].values[0].as_int32(), 1);
+}
+
+TEST_F(NestedLoopJoinTest, LeftJoinNullKeyProducesNullRight) {
+    auto left_data = std::vector<Tuple>{
+        make_left(1, "alice"),
+        Tuple{{Value::make_null(), Value(std::string("nulluser"))}, {}},
+    };
+    auto right_data = std::vector<Tuple>{
+        make_right(1, "eng"),
+    };
+
+    auto pred = equi_predicate();
+    BoundStatement bound;
+
+    NestedLoopJoinOperator join(
+        std::make_unique<VectorIterator>(left_schema(), std::move(left_data)),
+        std::make_unique<VectorIterator>(right_schema(), std::move(right_data)),
+        JoinType::LEFT,
+        pred.get(),
+        bound,
+        combined_schema());
+
+    auto rows = collect_all(join);
+    // alice matches eng; nulluser has no match → NULL right side.
+    ASSERT_EQ(rows.size(), 2u);
+    // Find each row by checking for null key.
+    bool found_alice = false;
+    bool found_null_user = false;
+    for (auto& r : rows) {
+        if (!r.values[0].is_null() && r.values[0].as_int32() == 1) {
+            EXPECT_EQ(r.values[1].as_string(), "alice");
+            EXPECT_EQ(r.values[3].as_string(), "eng");
+            found_alice = true;
+        }
+        if (r.values[0].is_null()) {
+            EXPECT_EQ(r.values[1].as_string(), "nulluser");
+            EXPECT_TRUE(r.values[2].is_null());
+            EXPECT_TRUE(r.values[3].is_null());
+            found_null_user = true;
+        }
+    }
+    EXPECT_TRUE(found_alice);
+    EXPECT_TRUE(found_null_user);
 }
