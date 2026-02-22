@@ -1465,6 +1465,38 @@ TEST(Parser, NearestWithMetric) {
     EXPECT_EQ(n->metric, NearestMetric::L2);
 }
 
+TEST(Parser, NearestWithinTraverse) {
+    auto stmt =
+        parse_one("NEAREST 5 FROM articles.content_vec TO 'machine learning' "
+                  "WITHIN TRAVERSE cites FROM articles('abc-123') DIRECTION OUT MAX_DEPTH 3");
+    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    ASSERT_NE(n, nullptr);
+    auto* k = dynamic_cast<LiteralExpr*>(n->k.get());
+    ASSERT_NE(k, nullptr);
+    EXPECT_EQ(k->value, "5");
+    EXPECT_EQ(n->table_name, "articles");
+    EXPECT_EQ(n->column_name, "content_vec");
+    ASSERT_NE(n->within_traverse, nullptr);
+    auto* t = dynamic_cast<TraverseStmt*>(n->within_traverse.get());
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(t->edge_type, "cites");
+    EXPECT_EQ(t->from_table, "articles");
+    EXPECT_EQ(t->direction, TraverseDirection::OUT);
+    ASSERT_TRUE(t->max_depth.has_value());
+    EXPECT_EQ(*t->max_depth, 3);
+}
+
+TEST(Parser, NearestWithinTraverseAndWhereUsing) {
+    auto stmt = parse_one("NEAREST 10 FROM posts.body_vec TO 'data analysis' "
+                          "WITHIN TRAVERSE authored FROM users('u1') DIRECTION OUT MAX_DEPTH 1 "
+                          "WHERE score > 0.5 USING L2");
+    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    ASSERT_NE(n, nullptr);
+    EXPECT_NE(n->within_traverse, nullptr);
+    EXPECT_NE(n->where_expr, nullptr);
+    EXPECT_EQ(n->metric, NearestMetric::L2);
+}
+
 // =============================================================================
 // TCL statement tests (GDB-106)
 // =============================================================================
@@ -1606,4 +1638,215 @@ TEST(Parser, AnalyzeTable) {
     auto* a = dynamic_cast<AnalyzeStmt*>(stmt.get());
     ASSERT_NE(a, nullptr);
     EXPECT_EQ(a->table_name, "users");
+}
+
+// =============================================================================
+// AstVisitor tests (GDB-102)
+// =============================================================================
+
+namespace {
+
+/// Test visitor that records which visit() method was called.
+class TypeRecordingVisitor : public AstVisitor {
+public:
+    std::string visited_type;
+
+    // -- Expressions --
+    void visit(const LiteralExpr&) override { visited_type = "LiteralExpr"; }
+    void visit(const ColumnRefExpr&) override { visited_type = "ColumnRefExpr"; }
+    void visit(const BinaryExpr&) override { visited_type = "BinaryExpr"; }
+    void visit(const UnaryExpr&) override { visited_type = "UnaryExpr"; }
+    void visit(const FunctionCallExpr&) override { visited_type = "FunctionCallExpr"; }
+    void visit(const CastExpr&) override { visited_type = "CastExpr"; }
+    void visit(const CaseExpr&) override { visited_type = "CaseExpr"; }
+    void visit(const InExpr&) override { visited_type = "InExpr"; }
+    void visit(const BetweenExpr&) override { visited_type = "BetweenExpr"; }
+    void visit(const IsNullExpr&) override { visited_type = "IsNullExpr"; }
+    void visit(const LikeExpr&) override { visited_type = "LikeExpr"; }
+    void visit(const ExistsExpr&) override { visited_type = "ExistsExpr"; }
+    void visit(const SubqueryExpr&) override { visited_type = "SubqueryExpr"; }
+    void visit(const ArrayExpr&) override { visited_type = "ArrayExpr"; }
+
+    // -- DDL --
+    void visit(const CreateTableStmt&) override { visited_type = "CreateTableStmt"; }
+    void visit(const DropTableStmt&) override { visited_type = "DropTableStmt"; }
+    void visit(const AlterTableStmt&) override { visited_type = "AlterTableStmt"; }
+    void visit(const CreateIndexStmt&) override { visited_type = "CreateIndexStmt"; }
+    void visit(const DropIndexStmt&) override { visited_type = "DropIndexStmt"; }
+    void visit(const CreateEdgeTypeStmt&) override { visited_type = "CreateEdgeTypeStmt"; }
+    void visit(const DropEdgeTypeStmt&) override { visited_type = "DropEdgeTypeStmt"; }
+
+    // -- DML --
+    void visit(const InsertStmt&) override { visited_type = "InsertStmt"; }
+    void visit(const UpdateStmt&) override { visited_type = "UpdateStmt"; }
+    void visit(const DeleteStmt&) override { visited_type = "DeleteStmt"; }
+    void visit(const LinkStmt&) override { visited_type = "LinkStmt"; }
+    void visit(const UnlinkStmt&) override { visited_type = "UnlinkStmt"; }
+
+    // -- Query --
+    void visit(const SelectStmt&) override { visited_type = "SelectStmt"; }
+    void visit(const TraverseStmt&) override { visited_type = "TraverseStmt"; }
+    void visit(const NearestStmt&) override { visited_type = "NearestStmt"; }
+    void visit(const MatchStmt&) override { visited_type = "MatchStmt"; }
+    void visit(const ShortestPathStmt&) override { visited_type = "ShortestPathStmt"; }
+
+    // -- TCL --
+    void visit(const BeginStmt&) override { visited_type = "BeginStmt"; }
+    void visit(const CommitStmt&) override { visited_type = "CommitStmt"; }
+    void visit(const RollbackStmt&) override { visited_type = "RollbackStmt"; }
+    void visit(const SavepointStmt&) override { visited_type = "SavepointStmt"; }
+
+    // -- Admin --
+    void visit(const SetStmt&) override { visited_type = "SetStmt"; }
+    void visit(const ShowStmt&) override { visited_type = "ShowStmt"; }
+    void visit(const ExplainStmt&) override { visited_type = "ExplainStmt"; }
+    void visit(const DescribeStmt&) override { visited_type = "DescribeStmt"; }
+    void visit(const ReembedStmt&) override { visited_type = "ReembedStmt"; }
+    void visit(const VacuumStmt&) override { visited_type = "VacuumStmt"; }
+    void visit(const AnalyzeStmt&) override { visited_type = "AnalyzeStmt"; }
+};
+
+/// Helper: parse SQL, accept visitor on the resulting statement.
+std::string visit_stmt(std::string_view sql) {
+    auto stmt = parse_one(sql);
+    if (!stmt)
+        return "";
+    TypeRecordingVisitor v;
+    stmt->accept(v);
+    return v.visited_type;
+}
+
+} // namespace
+
+TEST(AstVisitor, DispatchesDDL) {
+    EXPECT_EQ(visit_stmt("CREATE TABLE t (id INT)"), "CreateTableStmt");
+    EXPECT_EQ(visit_stmt("DROP TABLE t"), "DropTableStmt");
+    EXPECT_EQ(visit_stmt("ALTER TABLE t ADD COLUMN c INT"), "AlterTableStmt");
+    EXPECT_EQ(visit_stmt("CREATE INDEX idx ON t(c)"), "CreateIndexStmt");
+    EXPECT_EQ(visit_stmt("DROP INDEX idx"), "DropIndexStmt");
+    EXPECT_EQ(visit_stmt("CREATE EDGE TYPE follows FROM users TO users"), "CreateEdgeTypeStmt");
+    EXPECT_EQ(visit_stmt("DROP EDGE TYPE follows"), "DropEdgeTypeStmt");
+}
+
+TEST(AstVisitor, DispatchesDML) {
+    EXPECT_EQ(visit_stmt("INSERT INTO t (c) VALUES (1)"), "InsertStmt");
+    EXPECT_EQ(visit_stmt("UPDATE t SET c = 1"), "UpdateStmt");
+    EXPECT_EQ(visit_stmt("DELETE FROM t WHERE id = 1"), "DeleteStmt");
+    EXPECT_EQ(visit_stmt("LINK users(1) TO posts(2) VIA authored"), "LinkStmt");
+    EXPECT_EQ(visit_stmt("UNLINK users(1) FROM posts(2) VIA authored"), "UnlinkStmt");
+}
+
+TEST(AstVisitor, DispatchesQuery) {
+    EXPECT_EQ(visit_stmt("SELECT 1"), "SelectStmt");
+    EXPECT_EQ(visit_stmt("TRAVERSE follows FROM users(1)"), "TraverseStmt");
+    EXPECT_EQ(visit_stmt("NEAREST 5 FROM t.col TO [1.0]"), "NearestStmt");
+    EXPECT_EQ(visit_stmt("MATCH (a:users)-[e:follows]->(b:users) RETURN a.name"), "MatchStmt");
+    EXPECT_EQ(visit_stmt("SHORTEST PATH FROM users(1) TO users(2) VIA follows"),
+              "ShortestPathStmt");
+}
+
+TEST(AstVisitor, DispatchesTCL) {
+    EXPECT_EQ(visit_stmt("BEGIN"), "BeginStmt");
+    EXPECT_EQ(visit_stmt("COMMIT"), "CommitStmt");
+    EXPECT_EQ(visit_stmt("ROLLBACK"), "RollbackStmt");
+    EXPECT_EQ(visit_stmt("SAVEPOINT sp1"), "SavepointStmt");
+}
+
+TEST(AstVisitor, DispatchesAdmin) {
+    EXPECT_EQ(visit_stmt("SET param = 42"), "SetStmt");
+    EXPECT_EQ(visit_stmt("SHOW TABLES"), "ShowStmt");
+    EXPECT_EQ(visit_stmt("EXPLAIN SELECT 1"), "ExplainStmt");
+    EXPECT_EQ(visit_stmt("DESCRIBE users"), "DescribeStmt");
+    EXPECT_EQ(visit_stmt("REEMBED TABLE users"), "ReembedStmt");
+    EXPECT_EQ(visit_stmt("VACUUM"), "VacuumStmt");
+    EXPECT_EQ(visit_stmt("ANALYZE"), "AnalyzeStmt");
+}
+
+TEST(AstVisitor, DispatchesExpressions) {
+    // Parse expressions via SELECT, then visit the select item's expression.
+    TypeRecordingVisitor v;
+
+    // LiteralExpr
+    auto s1 = parse_one("SELECT 42");
+    auto* sel1 = dynamic_cast<SelectStmt*>(s1.get());
+    ASSERT_NE(sel1, nullptr);
+    ASSERT_FALSE(sel1->items.empty());
+    sel1->items[0].expr->accept(v);
+    EXPECT_EQ(v.visited_type, "LiteralExpr");
+
+    // ColumnRefExpr
+    auto s2 = parse_one("SELECT name FROM t");
+    auto* sel2 = dynamic_cast<SelectStmt*>(s2.get());
+    ASSERT_NE(sel2, nullptr);
+    sel2->items[0].expr->accept(v);
+    EXPECT_EQ(v.visited_type, "ColumnRefExpr");
+
+    // BinaryExpr
+    auto s3 = parse_one("SELECT 1 + 2");
+    auto* sel3 = dynamic_cast<SelectStmt*>(s3.get());
+    ASSERT_NE(sel3, nullptr);
+    sel3->items[0].expr->accept(v);
+    EXPECT_EQ(v.visited_type, "BinaryExpr");
+
+    // UnaryExpr
+    auto s4 = parse_one("SELECT -1");
+    auto* sel4 = dynamic_cast<SelectStmt*>(s4.get());
+    ASSERT_NE(sel4, nullptr);
+    sel4->items[0].expr->accept(v);
+    EXPECT_EQ(v.visited_type, "UnaryExpr");
+
+    // FunctionCallExpr
+    auto s5 = parse_one("SELECT COUNT(*)");
+    auto* sel5 = dynamic_cast<SelectStmt*>(s5.get());
+    ASSERT_NE(sel5, nullptr);
+    sel5->items[0].expr->accept(v);
+    EXPECT_EQ(v.visited_type, "FunctionCallExpr");
+
+    // ArrayExpr
+    auto s6 = parse_one("SELECT [1, 2, 3]");
+    auto* sel6 = dynamic_cast<SelectStmt*>(s6.get());
+    ASSERT_NE(sel6, nullptr);
+    sel6->items[0].expr->accept(v);
+    EXPECT_EQ(v.visited_type, "ArrayExpr");
+}
+
+TEST(AstVisitor, DispatchesCastExpr) {
+    TypeRecordingVisitor v;
+    auto s = parse_one("SELECT x::INT FROM t");
+    auto* sel = dynamic_cast<SelectStmt*>(s.get());
+    ASSERT_NE(sel, nullptr);
+    sel->items[0].expr->accept(v);
+    EXPECT_EQ(v.visited_type, "CastExpr");
+}
+
+TEST(AstVisitor, DispatchesPredicateExprs) {
+    TypeRecordingVisitor v;
+
+    // IsNullExpr
+    auto s1 = parse_one("SELECT x FROM t WHERE x IS NULL");
+    auto* sel1 = dynamic_cast<SelectStmt*>(s1.get());
+    ASSERT_NE(sel1, nullptr);
+    sel1->where_expr->accept(v);
+    EXPECT_EQ(v.visited_type, "IsNullExpr");
+
+    // LikeExpr
+    auto s2 = parse_one("SELECT x FROM t WHERE x LIKE 'a%'");
+    auto* sel2 = dynamic_cast<SelectStmt*>(s2.get());
+    ASSERT_NE(sel2, nullptr);
+    sel2->where_expr->accept(v);
+    EXPECT_EQ(v.visited_type, "LikeExpr");
+
+    // BetweenExpr
+    auto s3 = parse_one("SELECT x FROM t WHERE x BETWEEN 1 AND 10");
+    auto* sel3 = dynamic_cast<SelectStmt*>(s3.get());
+    ASSERT_NE(sel3, nullptr);
+    sel3->where_expr->accept(v);
+    EXPECT_EQ(v.visited_type, "BetweenExpr");
+
+    // InExpr
+    auto s4 = parse_one("SELECT x FROM t WHERE x IN (1, 2, 3)");
+    auto* sel4 = dynamic_cast<SelectStmt*>(s4.get());
+    ASSERT_NE(sel4, nullptr);
+    sel4->where_expr->accept(v);
+    EXPECT_EQ(v.visited_type, "InExpr");
 }

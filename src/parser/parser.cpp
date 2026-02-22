@@ -1758,6 +1758,65 @@ Result<StmtPtr> Parser::parse_nearest() {
         return tl::unexpected(target.error());
     stmt->target = std::move(*target);
 
+    // Optional WITHIN TRAVERSE scope.
+    // Only parses the core traverse clause (edge, FROM, DIRECTION, MAX_DEPTH)
+    // without WHERE/FETCH, since those belong to the outer NEAREST.
+    if (match_ident_ci(peek(), "WITHIN")) {
+        advance(); // consume WITHIN
+        if (!match(TokenType::TRAVERSE)) {
+            return error("expected TRAVERSE after WITHIN");
+        }
+        auto trav = std::make_unique<TraverseStmt>();
+
+        auto edge = parse_name("edge type");
+        if (!edge)
+            return tl::unexpected(edge.error());
+        trav->edge_type = std::move(*edge);
+
+        auto from_tok = expect(TokenType::FROM, "expected FROM after edge type");
+        if (!from_tok)
+            return tl::unexpected(from_tok.error());
+
+        auto tbl_name = parse_name("table name");
+        if (!tbl_name)
+            return tl::unexpected(tbl_name.error());
+        trav->from_table = std::move(*tbl_name);
+
+        auto lp = expect(TokenType::LPAREN, "expected '(' after table name");
+        if (!lp)
+            return tl::unexpected(lp.error());
+        auto key_expr = parse_expression();
+        if (!key_expr)
+            return tl::unexpected(key_expr.error());
+        trav->from_key = std::move(*key_expr);
+        auto rp = expect(TokenType::RPAREN, "expected ')'");
+        if (!rp)
+            return tl::unexpected(rp.error());
+
+        if (match(TokenType::DIRECTION)) {
+            if (match(TokenType::IN)) {
+                trav->direction = TraverseDirection::IN;
+            } else if (match_ident_ci(peek(), "OUT")) {
+                advance();
+                trav->direction = TraverseDirection::OUT;
+            } else if (match_ident_ci(peek(), "BOTH")) {
+                advance();
+                trav->direction = TraverseDirection::BOTH;
+            } else {
+                return error("expected IN, OUT, or BOTH after DIRECTION");
+            }
+        }
+
+        if (match(TokenType::MAX_DEPTH)) {
+            auto depth = expect(TokenType::INTEGER_LITERAL, "expected integer after MAX_DEPTH");
+            if (!depth)
+                return tl::unexpected(depth.error());
+            trav->max_depth = std::stoi(std::string(depth->lexeme));
+        }
+
+        stmt->within_traverse = std::move(trav);
+    }
+
     // Optional WHERE.
     if (match(TokenType::WHERE)) {
         auto expr = parse_expression();

@@ -14,6 +14,7 @@ namespace giodb {
 
 struct Expr;
 struct Stmt;
+class AstVisitor;
 
 /// Owning pointer to an expression AST node.
 using ExprPtr = std::unique_ptr<Expr>;
@@ -117,10 +118,10 @@ enum class ReferentialAction : uint8_t {
 /// EMBEDDING(384, source_col, 'openai')).
 struct TypeSpec {
     std::string name;
-    std::optional<int32_t> param1;  ///< Length, precision, or dimension.
-    std::optional<int32_t> param2;  ///< Scale (for DECIMAL).
-    std::string source;             ///< Source column (for EMBEDDING).
-    std::string provider;           ///< Provider name (for EMBEDDING).
+    std::optional<int32_t> param1; ///< Length, precision, or dimension.
+    std::optional<int32_t> param2; ///< Scale (for DECIMAL).
+    std::string source;            ///< Source column (for EMBEDDING).
+    std::string provider;          ///< Provider name (for EMBEDDING).
 };
 
 /// Column definition in CREATE TABLE (distinct from tuple-level ColumnDef).
@@ -185,7 +186,7 @@ struct SelectItem {
     ExprPtr expr;
     std::string alias;
     bool is_star = false;
-    std::string table_star;  ///< Non-empty for table.* (e.g., "users").
+    std::string table_star; ///< Non-empty for table.* (e.g., "users").
 };
 
 /// Edge property definition in CREATE EDGE TYPE.
@@ -226,9 +227,12 @@ struct CaseWhen {
 /// Base class for all expression AST nodes.
 struct Expr {
     uint32_t line = 0;
-    uint32_t col = 0;   ///< Source column (named 'col' to avoid clash with ColumnRefExpr::column).
+    uint32_t col = 0; ///< Source column (named 'col' to avoid clash with ColumnRefExpr::column).
 
     virtual ~Expr() = default;
+
+    /// Accept an AST visitor (double-dispatch).
+    virtual void accept(AstVisitor& visitor) const = 0;
 
 protected:
     Expr() = default;
@@ -242,12 +246,14 @@ protected:
 struct LiteralExpr : Expr {
     LiteralKind kind;
     std::string value;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// Column reference: [table.]column.
 struct ColumnRefExpr : Expr {
     std::string table;
     std::string column;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// Binary operation: lhs op rhs.
@@ -255,12 +261,14 @@ struct BinaryExpr : Expr {
     BinaryOp op;
     ExprPtr lhs;
     ExprPtr rhs;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// Unary operation: op operand.
 struct UnaryExpr : Expr {
     UnaryOp op;
     ExprPtr operand;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// Function call: name(args...) or name(DISTINCT args...).
@@ -268,12 +276,14 @@ struct FunctionCallExpr : Expr {
     std::string name;
     std::vector<ExprPtr> args;
     bool distinct = false;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// Type cast: expr::type or CAST(expr AS type).
 struct CastExpr : Expr {
     ExprPtr expr;
     TypeSpec target_type;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// CASE expression:
@@ -282,6 +292,7 @@ struct CaseExpr : Expr {
     ExprPtr operand;
     std::vector<CaseWhen> whens;
     ExprPtr else_expr;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// IN expression: expr [NOT] IN (values...) or expr [NOT] IN (SELECT ...).
@@ -290,6 +301,7 @@ struct InExpr : Expr {
     std::vector<ExprPtr> values;
     StmtPtr subquery;
     bool negated = false;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// BETWEEN expression: expr [NOT] BETWEEN low AND high.
@@ -298,12 +310,14 @@ struct BetweenExpr : Expr {
     ExprPtr low;
     ExprPtr high;
     bool negated = false;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// IS [NOT] NULL expression.
 struct IsNullExpr : Expr {
     ExprPtr expr;
     bool negated = false;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// LIKE expression: expr [NOT] LIKE pattern.
@@ -311,21 +325,25 @@ struct LikeExpr : Expr {
     ExprPtr expr;
     ExprPtr pattern;
     bool negated = false;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// EXISTS (SELECT ...).
 struct ExistsExpr : Expr {
     StmtPtr subquery;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// Scalar subquery: (SELECT ...) used as a value.
 struct SubqueryExpr : Expr {
     StmtPtr subquery;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// Array literal: [1.0, 2.0, 3.0] for vector constants.
 struct ArrayExpr : Expr {
     std::vector<ExprPtr> elements;
+    void accept(AstVisitor& visitor) const override;
 };
 
 // ---------------------------------------------------------------------------
@@ -335,6 +353,9 @@ struct ArrayExpr : Expr {
 /// Base class for all statement AST nodes.
 struct Stmt {
     virtual ~Stmt() = default;
+
+    /// Accept an AST visitor (double-dispatch).
+    virtual void accept(AstVisitor& visitor) const = 0;
 
 protected:
     Stmt() = default;
@@ -350,6 +371,7 @@ struct CreateTableStmt : Stmt {
     std::vector<AstColumnDef> columns;
     std::vector<TableConstraint> constraints;
     bool if_not_exists = false;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// DROP TABLE name [IF EXISTS] [CASCADE|RESTRICT].
@@ -357,6 +379,7 @@ struct DropTableStmt : Stmt {
     std::string name;
     bool if_exists = false;
     bool cascade = false;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// ALTER TABLE name ADD/DROP/RENAME COLUMN ...
@@ -366,6 +389,7 @@ struct AlterTableStmt : Stmt {
     AstColumnDef column;
     std::string column_name;
     std::string new_column_name;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// CREATE [UNIQUE] INDEX name ON table(cols...) [IF NOT EXISTS] [USING method].
@@ -376,12 +400,14 @@ struct CreateIndexStmt : Stmt {
     bool is_unique = false;
     std::string method;
     bool if_not_exists = false;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// DROP INDEX name [IF EXISTS].
 struct DropIndexStmt : Stmt {
     std::string name;
     bool if_exists = false;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// CREATE EDGE TYPE name (props...) FROM table TO table.
@@ -390,12 +416,14 @@ struct CreateEdgeTypeStmt : Stmt {
     std::vector<EdgeProperty> properties;
     std::string from_table;
     std::string to_table;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// DROP EDGE TYPE name [IF EXISTS].
 struct DropEdgeTypeStmt : Stmt {
     std::string name;
     bool if_exists = false;
+    void accept(AstVisitor& visitor) const override;
 };
 
 // ---------------------------------------------------------------------------
@@ -410,6 +438,7 @@ struct InsertStmt : Stmt {
     std::vector<std::vector<ExprPtr>> values;
     StmtPtr select;
     std::vector<SelectItem> returning;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// UPDATE table SET col=val, ... WHERE expr [RETURNING cols].
@@ -418,6 +447,7 @@ struct UpdateStmt : Stmt {
     std::vector<Assignment> assignments;
     ExprPtr where_expr;
     std::vector<SelectItem> returning;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// DELETE FROM table WHERE expr [RETURNING cols].
@@ -425,6 +455,7 @@ struct DeleteStmt : Stmt {
     std::string table_name;
     ExprPtr where_expr;
     std::vector<SelectItem> returning;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// LINK table(pk) TO table(pk) VIA edge_type (prop=val, ...).
@@ -435,6 +466,7 @@ struct LinkStmt : Stmt {
     ExprPtr target_key;
     std::string edge_type;
     std::vector<Assignment> properties;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// UNLINK table(pk) FROM table(pk) VIA edge_type [WHERE expr].
@@ -445,6 +477,7 @@ struct UnlinkStmt : Stmt {
     ExprPtr target_key;
     std::string edge_type;
     ExprPtr where_expr;
+    void accept(AstVisitor& visitor) const override;
 };
 
 // ---------------------------------------------------------------------------
@@ -483,6 +516,7 @@ struct SelectStmt : Stmt {
     SetOp set_op = SetOp::NONE;
     StmtPtr set_rhs;
     std::vector<CTE> ctes;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// TRAVERSE edge_type FROM table(pk) [DIRECTION ...] [MAX_DEPTH n]
@@ -495,9 +529,11 @@ struct TraverseStmt : Stmt {
     std::optional<int32_t> max_depth;
     ExprPtr where_expr;
     bool fetch = false;
+    void accept(AstVisitor& visitor) const override;
 };
 
-/// NEAREST k FROM table.col TO target [WHERE expr] [USING metric].
+/// NEAREST k FROM table.col TO target [WITHIN TRAVERSE ...]
+///   [WHERE expr] [USING metric].
 struct NearestStmt : Stmt {
     ExprPtr k;
     std::string table_name;
@@ -506,6 +542,7 @@ struct NearestStmt : Stmt {
     ExprPtr where_expr;
     NearestMetric metric = NearestMetric::COSINE;
     StmtPtr within_traverse;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// MATCH pattern WHERE expr RETURN items.
@@ -513,6 +550,7 @@ struct MatchStmt : Stmt {
     std::vector<PathElement> pattern;
     ExprPtr where_expr;
     std::vector<SelectItem> return_items;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// SHORTEST PATH FROM table(pk) TO table(pk) VIA edge_type
@@ -525,6 +563,7 @@ struct ShortestPathStmt : Stmt {
     std::string edge_type;
     TraverseDirection direction = TraverseDirection::OUT;
     std::optional<int32_t> max_depth;
+    void accept(AstVisitor& visitor) const override;
 };
 
 // ---------------------------------------------------------------------------
@@ -532,19 +571,25 @@ struct ShortestPathStmt : Stmt {
 // ---------------------------------------------------------------------------
 
 /// BEGIN [TRANSACTION].
-struct BeginStmt : Stmt {};
+struct BeginStmt : Stmt {
+    void accept(AstVisitor& visitor) const override;
+};
 
 /// COMMIT.
-struct CommitStmt : Stmt {};
+struct CommitStmt : Stmt {
+    void accept(AstVisitor& visitor) const override;
+};
 
 /// ROLLBACK [TO savepoint].
 struct RollbackStmt : Stmt {
     std::string savepoint;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// SAVEPOINT name.
 struct SavepointStmt : Stmt {
     std::string name;
+    void accept(AstVisitor& visitor) const override;
 };
 
 // ---------------------------------------------------------------------------
@@ -555,38 +600,264 @@ struct SavepointStmt : Stmt {
 struct SetStmt : Stmt {
     std::string parameter;
     ExprPtr value;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// SHOW (TABLES | COLUMNS FROM table | EDGE TYPES | INDEXES | parameter).
 struct ShowStmt : Stmt {
     ShowTarget target;
     std::string name;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// EXPLAIN [ANALYZE] statement.
 struct ExplainStmt : Stmt {
     StmtPtr statement;
     bool analyze = false;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// DESCRIBE table.
 struct DescribeStmt : Stmt {
     std::string table_name;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// REEMBED TABLE table.
 struct ReembedStmt : Stmt {
     std::string table_name;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// VACUUM [table].
 struct VacuumStmt : Stmt {
     std::string table_name;
+    void accept(AstVisitor& visitor) const override;
 };
 
 /// ANALYZE [table].
 struct AnalyzeStmt : Stmt {
     std::string table_name;
+    void accept(AstVisitor& visitor) const override;
 };
+
+// ---------------------------------------------------------------------------
+// AST visitor interface
+// ---------------------------------------------------------------------------
+
+/// Visitor interface for double-dispatch over AST nodes.
+///
+/// Implement this interface to traverse the AST without dynamic_cast.
+/// Each concrete node type calls the corresponding visit() method.
+///
+/// Usage:
+/// ```
+///   class MyVisitor : public AstVisitor {
+///       void visit(const CreateTableStmt& s) override { ... }
+///       // ... override all visit methods ...
+///   };
+///   MyVisitor v;
+///   stmt->accept(v);
+/// ```
+class AstVisitor {
+public:
+    virtual ~AstVisitor() = default;
+
+    // -- Expressions ----------------------------------------------------------
+
+    virtual void visit(const LiteralExpr& node) = 0;
+    virtual void visit(const ColumnRefExpr& node) = 0;
+    virtual void visit(const BinaryExpr& node) = 0;
+    virtual void visit(const UnaryExpr& node) = 0;
+    virtual void visit(const FunctionCallExpr& node) = 0;
+    virtual void visit(const CastExpr& node) = 0;
+    virtual void visit(const CaseExpr& node) = 0;
+    virtual void visit(const InExpr& node) = 0;
+    virtual void visit(const BetweenExpr& node) = 0;
+    virtual void visit(const IsNullExpr& node) = 0;
+    virtual void visit(const LikeExpr& node) = 0;
+    virtual void visit(const ExistsExpr& node) = 0;
+    virtual void visit(const SubqueryExpr& node) = 0;
+    virtual void visit(const ArrayExpr& node) = 0;
+
+    // -- DDL statements -------------------------------------------------------
+
+    virtual void visit(const CreateTableStmt& node) = 0;
+    virtual void visit(const DropTableStmt& node) = 0;
+    virtual void visit(const AlterTableStmt& node) = 0;
+    virtual void visit(const CreateIndexStmt& node) = 0;
+    virtual void visit(const DropIndexStmt& node) = 0;
+    virtual void visit(const CreateEdgeTypeStmt& node) = 0;
+    virtual void visit(const DropEdgeTypeStmt& node) = 0;
+
+    // -- DML statements -------------------------------------------------------
+
+    virtual void visit(const InsertStmt& node) = 0;
+    virtual void visit(const UpdateStmt& node) = 0;
+    virtual void visit(const DeleteStmt& node) = 0;
+    virtual void visit(const LinkStmt& node) = 0;
+    virtual void visit(const UnlinkStmt& node) = 0;
+
+    // -- Query statements -----------------------------------------------------
+
+    virtual void visit(const SelectStmt& node) = 0;
+    virtual void visit(const TraverseStmt& node) = 0;
+    virtual void visit(const NearestStmt& node) = 0;
+    virtual void visit(const MatchStmt& node) = 0;
+    virtual void visit(const ShortestPathStmt& node) = 0;
+
+    // -- TCL statements -------------------------------------------------------
+
+    virtual void visit(const BeginStmt& node) = 0;
+    virtual void visit(const CommitStmt& node) = 0;
+    virtual void visit(const RollbackStmt& node) = 0;
+    virtual void visit(const SavepointStmt& node) = 0;
+
+    // -- Admin statements -----------------------------------------------------
+
+    virtual void visit(const SetStmt& node) = 0;
+    virtual void visit(const ShowStmt& node) = 0;
+    virtual void visit(const ExplainStmt& node) = 0;
+    virtual void visit(const DescribeStmt& node) = 0;
+    virtual void visit(const ReembedStmt& node) = 0;
+    virtual void visit(const VacuumStmt& node) = 0;
+    virtual void visit(const AnalyzeStmt& node) = 0;
+};
+
+// ---------------------------------------------------------------------------
+// accept() implementations (defined after AstVisitor is complete)
+// ---------------------------------------------------------------------------
+
+// -- Expressions --------------------------------------------------------------
+
+inline void LiteralExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void ColumnRefExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void BinaryExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void UnaryExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void FunctionCallExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void CastExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void CaseExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void InExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void BetweenExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void IsNullExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void LikeExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void ExistsExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void SubqueryExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void ArrayExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+
+// -- Statements ---------------------------------------------------------------
+
+inline void CreateTableStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void DropTableStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void AlterTableStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void CreateIndexStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void DropIndexStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void CreateEdgeTypeStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void DropEdgeTypeStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void InsertStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void UpdateStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void DeleteStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void LinkStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void UnlinkStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void SelectStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void TraverseStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void NearestStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void MatchStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void ShortestPathStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void BeginStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void CommitStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void RollbackStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void SavepointStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void SetStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void ShowStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void ExplainStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void DescribeStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void ReembedStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void VacuumStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void AnalyzeStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
 
 } // namespace giodb
