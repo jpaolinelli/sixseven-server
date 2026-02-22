@@ -17,6 +17,9 @@ add_executable(giodb_unit_tests
     test_wal_record.cpp
     test_wal.cpp
     test_wal_recovery.cpp
+    test_btree_node.cpp
+    test_btree.cpp
+    test_btree_concurrency.cpp
 )
 
 target_link_libraries(giodb_unit_tests
