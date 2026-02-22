@@ -1,0 +1,83 @@
+---
+name: quality-checks
+description: Use when you need to run code quality tools — clang-format, clang-tidy, building, running tests, or AddressSanitizer. Provides the exact commands and interpretation of results for the GioDB project.
+user-invocable: false
+---
+
+# Quality Checks
+
+## Build
+
+```bash
+export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset default && cmake --build build/debug
+```
+
+Must complete with zero errors and zero warnings (`-Werror` is enabled).
+
+## Tests
+
+```bash
+export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset default && cmake --build build/debug --target giodb_unit_tests && ctest --test-dir build/debug --output-on-failure
+```
+
+All tests must pass. If any fail, read the failure output and fix before proceeding.
+
+## clang-format
+
+### Check for violations (dry run)
+
+```bash
+clang-format --dry-run -Werror <files>
+```
+
+### Auto-fix formatting
+
+```bash
+clang-format -i <files>
+```
+
+### Finding changed files to format
+
+```bash
+# Modified + staged files (filter to .h/.cpp under include/, src/, tests/)
+git diff --name-only HEAD -- 'include/*.h' 'src/*.cpp' 'src/*.h' 'tests/*.cpp' 'tests/*.h'
+git diff --name-only --cached -- 'include/*.h' 'src/*.cpp' 'src/*.h' 'tests/*.cpp' 'tests/*.h'
+
+# Untracked new files
+git ls-files --others --exclude-standard -- 'include/' 'src/' 'tests/' | grep -E '\.(h|cpp)$'
+```
+
+## clang-tidy
+
+Run on `.cpp` implementation files (headers are checked transitively):
+
+```bash
+/opt/homebrew/opt/llvm/bin/clang-tidy <cpp-files> -p build/debug
+```
+
+**Prerequisite**: The project must be built first — clang-tidy needs `build/debug/compile_commands.json`.
+
+If `build/debug/compile_commands.json` does not exist, build the project first.
+
+## AddressSanitizer
+
+For deeper memory safety checks:
+
+```bash
+export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset asan
+cmake --build build/asan --target giodb_unit_tests
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=0 ./build/asan/tests/unit/giodb_unit_tests
+```
+
+Detects: buffer overflows, use-after-free, memory leaks, stack overflows.
+
+## Pre-Commit Checklist
+
+Before every commit, run these in order:
+
+1. `clang-format -i` on all changed `.h` and `.cpp` files
+2. `clang-tidy` on all changed `.cpp` files (fix any warnings)
+3. Build the project (zero warnings)
+4. Run all tests (all pass)
+
+Never commit if any of these steps fail.

@@ -329,3 +329,128 @@ TEST_F(QueryEngineTest, FullCRUDPipeline) {
 TEST_F(QueryEngineTest, ErrorOnNonExistentTable) {
     exec_error("SELECT * FROM does_not_exist", StatusCode::NOT_FOUND);
 }
+
+// =============================================================================
+// JOIN integration tests (end-to-end SQL through parse → bind → plan → execute)
+// =============================================================================
+
+TEST_F(QueryEngineTest, InnerJoin) {
+    exec_ok("CREATE TABLE employees (id INT, name VARCHAR, dept_id INT)");
+    exec_ok("CREATE TABLE departments (id INT, dept_name VARCHAR)");
+
+    exec_ok("INSERT INTO employees VALUES (1, 'alice', 10)");
+    exec_ok("INSERT INTO employees VALUES (2, 'bob', 20)");
+    exec_ok("INSERT INTO employees VALUES (3, 'charlie', 30)");
+
+    exec_ok("INSERT INTO departments VALUES (10, 'engineering')");
+    exec_ok("INSERT INTO departments VALUES (20, 'sales')");
+    exec_ok("INSERT INTO departments VALUES (40, 'hr')");
+
+    auto qr = exec_ok("SELECT employees.name, departments.dept_name "
+                      "FROM employees JOIN departments ON employees.dept_id = departments.id");
+
+    // alice(dept_id=10) matches engineering, bob(dept_id=20) matches sales.
+    // charlie(dept_id=30) has no match, hr(id=40) has no match.
+    ASSERT_EQ(qr.rows.size(), 2u);
+    ASSERT_EQ(qr.column_names.size(), 2u);
+    EXPECT_EQ(qr.column_names[0], "name");
+    EXPECT_EQ(qr.column_names[1], "dept_name");
+
+    // Verify content (order depends on scan order).
+    bool found_alice = false;
+    bool found_bob = false;
+    for (auto& row : qr.rows) {
+        if (row[0].as_string() == "alice") {
+            EXPECT_EQ(row[1].as_string(), "engineering");
+            found_alice = true;
+        }
+        if (row[0].as_string() == "bob") {
+            EXPECT_EQ(row[1].as_string(), "sales");
+            found_bob = true;
+        }
+    }
+    EXPECT_TRUE(found_alice);
+    EXPECT_TRUE(found_bob);
+}
+
+TEST_F(QueryEngineTest, LeftJoin) {
+    exec_ok("CREATE TABLE employees (id INT, name VARCHAR, dept_id INT)");
+    exec_ok("CREATE TABLE departments (id INT, dept_name VARCHAR)");
+
+    exec_ok("INSERT INTO employees VALUES (1, 'alice', 10)");
+    exec_ok("INSERT INTO employees VALUES (2, 'bob', 20)");
+    exec_ok("INSERT INTO employees VALUES (3, 'charlie', 99)");
+
+    exec_ok("INSERT INTO departments VALUES (10, 'engineering')");
+    exec_ok("INSERT INTO departments VALUES (20, 'sales')");
+
+    auto qr = exec_ok("SELECT employees.name, departments.dept_name "
+                      "FROM employees LEFT JOIN departments ON employees.dept_id = departments.id");
+
+    // All 3 employees should appear. charlie has no matching dept → NULL.
+    ASSERT_EQ(qr.rows.size(), 3u);
+
+    bool found_charlie_null = false;
+    for (auto& row : qr.rows) {
+        if (row[0].as_string() == "charlie") {
+            EXPECT_TRUE(row[1].is_null());
+            found_charlie_null = true;
+        }
+    }
+    EXPECT_TRUE(found_charlie_null);
+}
+
+TEST_F(QueryEngineTest, CrossJoin) {
+    exec_ok("CREATE TABLE colors (name VARCHAR)");
+    exec_ok("CREATE TABLE sizes (name VARCHAR)");
+
+    exec_ok("INSERT INTO colors VALUES ('red')");
+    exec_ok("INSERT INTO colors VALUES ('blue')");
+
+    exec_ok("INSERT INTO sizes VALUES ('S')");
+    exec_ok("INSERT INTO sizes VALUES ('M')");
+    exec_ok("INSERT INTO sizes VALUES ('L')");
+
+    auto qr = exec_ok("SELECT colors.name, sizes.name "
+                      "FROM colors CROSS JOIN sizes");
+
+    // 2 colors x 3 sizes = 6 combinations.
+    ASSERT_EQ(qr.rows.size(), 6u);
+    ASSERT_EQ(qr.column_names.size(), 2u);
+}
+
+TEST_F(QueryEngineTest, JoinWithWhereFilter) {
+    exec_ok("CREATE TABLE employees (id INT, name VARCHAR, dept_id INT)");
+    exec_ok("CREATE TABLE departments (id INT, dept_name VARCHAR)");
+
+    exec_ok("INSERT INTO employees VALUES (1, 'alice', 10)");
+    exec_ok("INSERT INTO employees VALUES (2, 'bob', 20)");
+
+    exec_ok("INSERT INTO departments VALUES (10, 'engineering')");
+    exec_ok("INSERT INTO departments VALUES (20, 'sales')");
+
+    auto qr = exec_ok("SELECT employees.name, departments.dept_name "
+                      "FROM employees JOIN departments ON employees.dept_id = departments.id "
+                      "WHERE departments.dept_name = 'engineering'");
+
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "alice");
+    EXPECT_EQ(qr.rows[0][1].as_string(), "engineering");
+}
+
+TEST_F(QueryEngineTest, JoinWithSelectStar) {
+    exec_ok("CREATE TABLE t1 (a INT, b VARCHAR)");
+    exec_ok("CREATE TABLE t2 (c INT, d VARCHAR)");
+
+    exec_ok("INSERT INTO t1 VALUES (1, 'x')");
+    exec_ok("INSERT INTO t2 VALUES (1, 'y')");
+
+    auto qr = exec_ok("SELECT * FROM t1 JOIN t2 ON t1.a = t2.c");
+
+    ASSERT_EQ(qr.rows.size(), 1u);
+    ASSERT_EQ(qr.column_names.size(), 4u);
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 1);
+    EXPECT_EQ(qr.rows[0][1].as_string(), "x");
+    EXPECT_EQ(qr.rows[0][2].as_int32(), 1);
+    EXPECT_EQ(qr.rows[0][3].as_string(), "y");
+}

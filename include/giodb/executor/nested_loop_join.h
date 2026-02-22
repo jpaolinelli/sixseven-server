@@ -1,0 +1,80 @@
+#pragma once
+
+#include "giodb/executor/iterator.h"
+#include "giodb/executor/tuple.h"
+#include "giodb/parser/ast.h"
+#include "giodb/planner/binder.h"
+
+#include <cstddef>
+#include <memory>
+#include <optional>
+#include <vector>
+
+namespace giodb {
+
+/// Nested Loop Join operator: for each tuple from the left (outer) child,
+/// scan all tuples from the right (inner) child and evaluate the join predicate.
+///
+/// Supports all join types: INNER, LEFT, RIGHT, FULL, CROSS, SEMI, ANTI.
+/// The right child is materialised in memory on open().
+class NestedLoopJoinOperator : public Iterator {
+public:
+    /// @param left     Left (outer) child iterator.
+    /// @param right    Right (inner) child iterator.
+    /// @param type     Join type (INNER, LEFT, RIGHT, FULL, CROSS, SEMI, ANTI).
+    /// @param on_expr  Join predicate (nullptr for CROSS JOIN).
+    /// @param bound    BoundStatement with expr_types map.
+    /// @param schema   Combined output schema (left columns + right columns).
+    NestedLoopJoinOperator(std::unique_ptr<Iterator> left,
+                           std::unique_ptr<Iterator> right,
+                           JoinType type,
+                           const Expr* on_expr,
+                           const BoundStatement& bound,
+                           OutputSchema schema);
+
+    Result<void> open() override;
+    Result<std::optional<Tuple>> next() override;
+    void close() override;
+    const OutputSchema& output_schema() const override;
+
+private:
+    /// Combine a left and right tuple into a single output tuple.
+    Tuple combine(const Tuple& left, const Tuple& right) const;
+
+    /// Create a tuple with NULLs for the right side.
+    Tuple left_with_null_right(const Tuple& left) const;
+
+    /// Create a tuple with NULLs for the left side.
+    Tuple null_left_with_right(const Tuple& right) const;
+
+    /// Evaluate the join predicate against a combined tuple.
+    Result<bool> matches(const Tuple& combined) const;
+
+    std::unique_ptr<Iterator> left_;
+    std::unique_ptr<Iterator> right_;
+    JoinType type_;
+    const Expr* on_expr_;
+    const BoundStatement& bound_;
+    OutputSchema schema_;
+
+    size_t left_col_count_ = 0;
+    size_t right_col_count_ = 0;
+
+    // Materialised right-side tuples.
+    std::vector<Tuple> right_tuples_;
+
+    // Iteration state.
+    std::optional<Tuple> current_left_;
+    size_t right_cursor_ = 0;
+    bool left_exhausted_ = false;
+    bool left_matched_ = false;
+
+    // For RIGHT/FULL: track which right tuples matched.
+    std::vector<bool> right_matched_;
+
+    // For RIGHT/FULL: emit unmatched right tuples after left is exhausted.
+    bool emitting_unmatched_right_ = false;
+    size_t unmatched_right_cursor_ = 0;
+};
+
+} // namespace giodb
