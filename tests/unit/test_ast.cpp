@@ -287,9 +287,9 @@ TEST(Ast, ArrayExpr) {
 TEST(Ast, ExprLineColumn) {
     auto e = make_int("42");
     e->line = 5;
-    e->column = 10;
+    e->col = 10;
     EXPECT_EQ(e->line, 5u);
-    EXPECT_EQ(e->column, 10u);
+    EXPECT_EQ(e->col, 10u);
 }
 
 // -- Supporting type tests ---------------------------------------------------

@@ -2,6 +2,7 @@
 
 add_library(giodb_parser STATIC
     lexer.cpp
+    parser.cpp
 )
 
 target_include_directories(giodb_parser PUBLIC ${PROJECT_SOURCE_DIR}/include)

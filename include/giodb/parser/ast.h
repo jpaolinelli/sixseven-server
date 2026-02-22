@@ -226,7 +226,7 @@ struct CaseWhen {
 /// Base class for all expression AST nodes.
 struct Expr {
     uint32_t line = 0;
-    uint32_t column = 0;
+    uint32_t col = 0;   ///< Source column (named 'col' to avoid clash with ColumnRefExpr::column).
 
     virtual ~Expr() = default;
 
