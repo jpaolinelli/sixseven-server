@@ -25,6 +25,7 @@ add_executable(giodb_unit_tests
     test_lexer.cpp
     test_ast.cpp
     test_parser.cpp
+    test_binder.cpp
 )
 
 target_link_libraries(giodb_unit_tests
