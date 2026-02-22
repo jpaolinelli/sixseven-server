@@ -23,6 +23,7 @@ add_executable(giodb_unit_tests
     test_table_heap.cpp
     test_catalog.cpp
     test_lexer.cpp
+    test_ast.cpp
 )
 
 target_link_libraries(giodb_unit_tests
