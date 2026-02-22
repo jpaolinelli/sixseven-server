@@ -1,8 +1,7 @@
-#include "giodb/executor/query_engine.h"
-
 #include "giodb/catalog/catalog.h"
 #include "giodb/common/types.h"
 #include "giodb/common/value.h"
+#include "giodb/executor/query_engine.h"
 #include "giodb/executor/storage_manager.h"
 #include "giodb/storage/disk_manager.h"
 
@@ -23,8 +22,7 @@ using namespace giodb;
 class QueryEngineTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ =
-            std::filesystem::temp_directory_path() / "giodb_test_qe";
+        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_qe";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_ / "tables");
 
@@ -53,9 +51,7 @@ protected:
     }
 
     /// Helper: create the standard test table.
-    void create_test_table() {
-        exec_ok("CREATE TABLE users (id INT, name VARCHAR, age INT)");
-    }
+    void create_test_table() { exec_ok("CREATE TABLE users (id INT, name VARCHAR, age INT)"); }
 
     /// Helper: insert standard test data (3 rows).
     void insert_test_data() {
@@ -83,8 +79,7 @@ TEST_F(QueryEngineTest, CreateTable) {
 TEST_F(QueryEngineTest, CreateTableIfNotExists) {
     exec_ok("CREATE TABLE users (id INT, name VARCHAR)");
     // Second CREATE with IF NOT EXISTS should succeed silently.
-    auto qr =
-        exec_ok("CREATE TABLE IF NOT EXISTS users (id INT, name VARCHAR)");
+    auto qr = exec_ok("CREATE TABLE IF NOT EXISTS users (id INT, name VARCHAR)");
     EXPECT_EQ(qr.message, "CREATE TABLE");
 }
 

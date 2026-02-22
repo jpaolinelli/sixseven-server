@@ -3,8 +3,7 @@
 namespace giodb {
 
 DeleteOperator::DeleteOperator(TableHeap& heap, std::unique_ptr<Iterator> child)
-    : heap_(heap),
-      child_(std::move(child)),
+    : heap_(heap), child_(std::move(child)),
       schema_(OutputSchema({OutputColumn{"", "count", TypeId::INT64, false, 0}})) {}
 
 Result<void> DeleteOperator::open() {
@@ -31,8 +30,7 @@ Result<std::optional<Tuple>> DeleteOperator::next() {
 
         auto& tuple = row->value();
         if (!tuple.rid.has_value()) {
-            return make_error(StatusCode::INTERNAL_ERROR,
-                              "DELETE: tuple has no RID");
+            return make_error(StatusCode::INTERNAL_ERROR, "DELETE: tuple has no RID");
         }
 
         auto del = heap_.delete_tuple(*tuple.rid);

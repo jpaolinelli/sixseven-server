@@ -1,8 +1,7 @@
-#include "giodb/executor/filter.h"
-#include "giodb/executor/seq_scan.h"
-
 #include "giodb/common/types.h"
 #include "giodb/common/value.h"
+#include "giodb/executor/filter.h"
+#include "giodb/executor/seq_scan.h"
 #include "giodb/executor/tuple.h"
 #include "giodb/parser/ast.h"
 #include "giodb/planner/binder.h"

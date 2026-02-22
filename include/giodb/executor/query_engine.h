@@ -54,16 +54,13 @@ public:
 
 private:
     /// Execute a DDL CREATE TABLE statement.
-    [[nodiscard]] Result<QueryResult>
-    execute_create_table(const CreateTableStmt& stmt);
+    [[nodiscard]] Result<QueryResult> execute_create_table(const CreateTableStmt& stmt);
 
     /// Execute a DDL DROP TABLE statement.
-    [[nodiscard]] Result<QueryResult>
-    execute_drop_table(const DropTableStmt& stmt);
+    [[nodiscard]] Result<QueryResult> execute_drop_table(const DropTableStmt& stmt);
 
     /// Execute a DML/query via the Planner + Iterator pipeline.
-    [[nodiscard]] Result<QueryResult>
-    execute_plan(const BoundStatement& bound);
+    [[nodiscard]] Result<QueryResult> execute_plan(const BoundStatement& bound);
 
     Catalog& catalog_;
     StorageManager& storage_;

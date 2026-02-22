@@ -1,10 +1,9 @@
+#include "giodb/common/types.h"
+#include "giodb/common/value.h"
 #include "giodb/executor/limit.h"
 #include "giodb/executor/project.h"
 #include "giodb/executor/seq_scan.h"
 #include "giodb/executor/sort.h"
-
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
 #include "giodb/executor/tuple.h"
 #include "giodb/parser/ast.h"
 #include "giodb/planner/binder.h"
@@ -247,7 +246,7 @@ TEST_F(ProjectSortLimitTest, SortAscending) {
     auto results = drain(sort);
 
     ASSERT_EQ(results.size(), 3u);
-    EXPECT_EQ(results[0].values[1].as_string(), "bob");    // age 25
+    EXPECT_EQ(results[0].values[1].as_string(), "bob");     // age 25
     EXPECT_EQ(results[1].values[1].as_string(), "alice");   // age 30
     EXPECT_EQ(results[2].values[1].as_string(), "charlie"); // age 35
 }
@@ -444,8 +443,8 @@ TEST_F(ProjectSortLimitTest, ProjectThenSortThenLimit) {
     OutputColumn oc2{"", "age", TypeId::INT32, true, 0};
     OutputSchema proj_schema({oc1, oc2});
 
-    auto project =
-        std::make_unique<ProjectOperator>(std::move(scan), std::move(projs), std::move(proj_schema), bound);
+    auto project = std::make_unique<ProjectOperator>(
+        std::move(scan), std::move(projs), std::move(proj_schema), bound);
 
     // Sort by age DESC
     auto sort_age = col_ref("age");
@@ -457,7 +456,7 @@ TEST_F(ProjectSortLimitTest, ProjectThenSortThenLimit) {
     auto results = drain(limit);
 
     ASSERT_EQ(results.size(), 2u);
-    EXPECT_EQ(results[0].values.size(), 2u); // projected to 2 columns
+    EXPECT_EQ(results[0].values.size(), 2u);                // projected to 2 columns
     EXPECT_EQ(results[0].values[0].as_string(), "charlie"); // age 35 (highest)
     EXPECT_EQ(results[1].values[0].as_string(), "alice");   // age 30
 }

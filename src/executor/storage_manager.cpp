@@ -6,8 +6,7 @@
 
 namespace giodb {
 
-StorageManager::StorageManager(DiskManager& dm, std::filesystem::path data_dir,
-                               uint32_t pool_size)
+StorageManager::StorageManager(DiskManager& dm, std::filesystem::path data_dir, uint32_t pool_size)
     : dm_(dm), data_dir_(std::move(data_dir)), pool_size_(pool_size) {}
 
 std::filesystem::path StorageManager::table_path(table_id_t id) const {
@@ -24,13 +23,12 @@ Schema StorageManager::build_storage_schema(const TableSchema& ts) {
 }
 
 Result<void> StorageManager::create_table_storage(table_id_t table_id,
-                                                   const TableSchema& table_schema) {
+                                                  const TableSchema& table_schema) {
     std::lock_guard lock(mu_);
 
     if (tables_.count(table_id) != 0) {
         return make_error(StatusCode::ALREADY_EXISTS,
-                          "storage already exists for table_id " +
-                              std::to_string(table_id));
+                          "storage already exists for table_id " + std::to_string(table_id));
     }
 
     auto path = table_path(table_id);
@@ -44,8 +42,7 @@ Result<void> StorageManager::create_table_storage(table_id_t table_id,
     auto storage = std::make_unique<TableStorage>();
     storage->file_id = *fid;
     storage->bpm = std::make_unique<BufferPoolManager>(dm_, *fid, pool_size_);
-    storage->heap =
-        std::make_unique<TableHeap>(*storage->bpm, dm_, *fid);
+    storage->heap = std::make_unique<TableHeap>(*storage->bpm, dm_, *fid);
     storage->storage_schema = build_storage_schema(table_schema);
 
     tables_[table_id] = std::move(storage);

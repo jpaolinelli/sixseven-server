@@ -27,7 +27,8 @@ public:
     /// @param child  The child operator to pull tuples from.
     /// @param keys   ORDER BY specification (expression + ASC/DESC).
     /// @param bound  BoundStatement with expr_types map for evaluation.
-    SortOperator(std::unique_ptr<Iterator> child, std::vector<SortKey> keys,
+    SortOperator(std::unique_ptr<Iterator> child,
+                 std::vector<SortKey> keys,
                  const BoundStatement& bound);
 
     Result<void> open() override;

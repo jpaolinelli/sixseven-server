@@ -25,7 +25,8 @@ public:
     /// @param storage_schema Byte-level schema for TupleSerializer.
     /// @param value_rows     Each inner vector is one row of expression pointers.
     /// @param bound          BoundStatement for expression evaluation.
-    InsertOperator(TableHeap& heap, const Schema& storage_schema,
+    InsertOperator(TableHeap& heap,
+                   const Schema& storage_schema,
                    std::vector<std::vector<const Expr*>> value_rows,
                    const BoundStatement& bound);
 
@@ -33,8 +34,7 @@ public:
     /// @param heap           Target table heap.
     /// @param storage_schema Byte-level schema for TupleSerializer.
     /// @param child          Child iterator producing rows to insert.
-    InsertOperator(TableHeap& heap, const Schema& storage_schema,
-                   std::unique_ptr<Iterator> child);
+    InsertOperator(TableHeap& heap, const Schema& storage_schema, std::unique_ptr<Iterator> child);
 
     Result<void> open() override;
     Result<std::optional<Tuple>> next() override;

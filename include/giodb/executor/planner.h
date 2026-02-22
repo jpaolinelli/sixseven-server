@@ -35,22 +35,22 @@ public:
     ///                     (e.g. ColumnRefExprs for SELECT *). The caller
     ///                     must keep this vector alive as long as the
     ///                     returned iterator is in use.
-    [[nodiscard]] Result<std::unique_ptr<Iterator>>
-    plan(const BoundStatement& bound, std::vector<ExprPtr>& owned_exprs);
+    [[nodiscard]] Result<std::unique_ptr<Iterator>> plan(const BoundStatement& bound,
+                                                         std::vector<ExprPtr>& owned_exprs);
 
 private:
-    [[nodiscard]] Result<std::unique_ptr<Iterator>>
-    plan_select(const SelectStmt& stmt, const BoundStatement& bound,
-                std::vector<ExprPtr>& owned_exprs);
+    [[nodiscard]] Result<std::unique_ptr<Iterator>> plan_select(const SelectStmt& stmt,
+                                                                const BoundStatement& bound,
+                                                                std::vector<ExprPtr>& owned_exprs);
 
-    [[nodiscard]] Result<std::unique_ptr<Iterator>>
-    plan_insert(const InsertStmt& stmt, const BoundStatement& bound);
+    [[nodiscard]] Result<std::unique_ptr<Iterator>> plan_insert(const InsertStmt& stmt,
+                                                                const BoundStatement& bound);
 
-    [[nodiscard]] Result<std::unique_ptr<Iterator>>
-    plan_update(const UpdateStmt& stmt, const BoundStatement& bound);
+    [[nodiscard]] Result<std::unique_ptr<Iterator>> plan_update(const UpdateStmt& stmt,
+                                                                const BoundStatement& bound);
 
-    [[nodiscard]] Result<std::unique_ptr<Iterator>>
-    plan_delete(const DeleteStmt& stmt, const BoundStatement& bound);
+    [[nodiscard]] Result<std::unique_ptr<Iterator>> plan_delete(const DeleteStmt& stmt,
+                                                                const BoundStatement& bound);
 
     /// Build an OutputSchema from BoundStatement::output_columns.
     [[nodiscard]] static OutputSchema
@@ -59,8 +59,7 @@ private:
     /// Build an OutputSchema from a TableSchema (all columns of the table).
     /// Uses @p table_alias as the table name if non-empty.
     [[nodiscard]] static OutputSchema
-    build_table_output_schema(const TableSchema& ts,
-                              const std::string& table_alias = "");
+    build_table_output_schema(const TableSchema& ts, const std::string& table_alias = "");
 
     const Catalog& catalog_;
     StorageManager& storage_;

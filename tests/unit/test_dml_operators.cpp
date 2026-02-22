@@ -1,11 +1,10 @@
+#include "giodb/common/types.h"
+#include "giodb/common/value.h"
 #include "giodb/executor/delete.h"
 #include "giodb/executor/insert.h"
 #include "giodb/executor/seq_scan.h"
-#include "giodb/executor/update.h"
-
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
 #include "giodb/executor/tuple.h"
+#include "giodb/executor/update.h"
 #include "giodb/parser/ast.h"
 #include "giodb/planner/binder.h"
 #include "giodb/storage/buffer_pool.h"
@@ -319,8 +318,8 @@ TEST_F(DmlOperatorsTest, UpdateWithPredicate) {
     auto name_lit = make_lit_string("updated");
     std::vector<UpdateAssignment> assigns = {{1, name_lit.get()}}; // column 1 = name
 
-    auto scan = std::make_unique<SeqScanOperator>(heap, storage_schema_, output_schema_,
-                                                   pred.get(), &bound);
+    auto scan = std::make_unique<SeqScanOperator>(
+        heap, storage_schema_, output_schema_, pred.get(), &bound);
     UpdateOperator update(heap, storage_schema_, std::move(scan), std::move(assigns), bound);
 
     auto open = update.open();
@@ -411,8 +410,8 @@ TEST_F(DmlOperatorsTest, DeleteWithPredicate) {
     // DELETE FROM t WHERE age < 30
     auto pred = make_binary(BinaryOp::LESS, make_col_ref("age"), make_lit_int("30"));
 
-    auto scan = std::make_unique<SeqScanOperator>(heap, storage_schema_, output_schema_,
-                                                   pred.get(), &bound);
+    auto scan = std::make_unique<SeqScanOperator>(
+        heap, storage_schema_, output_schema_, pred.get(), &bound);
     DeleteOperator del(heap, std::move(scan));
 
     auto open = del.open();
@@ -507,8 +506,8 @@ TEST_F(DmlOperatorsTest, InsertThenUpdateThenDelete) {
     auto new_age = make_lit_int("50");
     std::vector<UpdateAssignment> assigns = {{2, new_age.get()}};
 
-    auto scan_up = std::make_unique<SeqScanOperator>(heap, storage_schema_, output_schema_,
-                                                      pred_name.get(), &bound);
+    auto scan_up = std::make_unique<SeqScanOperator>(
+        heap, storage_schema_, output_schema_, pred_name.get(), &bound);
     UpdateOperator update(heap, storage_schema_, std::move(scan_up), std::move(assigns), bound);
     auto u_open = update.open();
     ASSERT_TRUE(u_open.has_value()) << u_open.error().message;
@@ -519,8 +518,8 @@ TEST_F(DmlOperatorsTest, InsertThenUpdateThenDelete) {
 
     // Step 3: DELETE WHERE age > 40
     auto pred_del = make_binary(BinaryOp::GREATER, make_col_ref("age"), make_lit_int("40"));
-    auto scan_del = std::make_unique<SeqScanOperator>(heap, storage_schema_, output_schema_,
-                                                       pred_del.get(), &bound);
+    auto scan_del = std::make_unique<SeqScanOperator>(
+        heap, storage_schema_, output_schema_, pred_del.get(), &bound);
     DeleteOperator del(heap, std::move(scan_del));
     auto d_open = del.open();
     ASSERT_TRUE(d_open.has_value()) << d_open.error().message;

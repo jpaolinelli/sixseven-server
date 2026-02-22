@@ -22,67 +22,117 @@ Result<Value> fit_to_storage(const Value& val, TypeId target) {
     if (is_numeric(val.type_id()) && is_integer(target)) {
         int64_t v = 0;
         switch (val.type_id()) {
-        case TypeId::INT8:  v = val.as_int8(); break;
-        case TypeId::INT16: v = val.as_int16(); break;
-        case TypeId::INT32: v = val.as_int32(); break;
-        case TypeId::INT64: v = val.as_int64(); break;
-        case TypeId::UINT8:  v = val.as_uint8(); break;
-        case TypeId::UINT16: v = val.as_uint16(); break;
-        case TypeId::UINT32: v = val.as_uint32(); break;
-        case TypeId::UINT64: v = static_cast<int64_t>(val.as_uint64()); break;
-        case TypeId::FLOAT32: v = static_cast<int64_t>(val.as_float32()); break;
-        case TypeId::FLOAT64: v = static_cast<int64_t>(val.as_float64()); break;
+        case TypeId::INT8:
+            v = val.as_int8();
+            break;
+        case TypeId::INT16:
+            v = val.as_int16();
+            break;
+        case TypeId::INT32:
+            v = val.as_int32();
+            break;
+        case TypeId::INT64:
+            v = val.as_int64();
+            break;
+        case TypeId::UINT8:
+            v = val.as_uint8();
+            break;
+        case TypeId::UINT16:
+            v = val.as_uint16();
+            break;
+        case TypeId::UINT32:
+            v = val.as_uint32();
+            break;
+        case TypeId::UINT64:
+            v = static_cast<int64_t>(val.as_uint64());
+            break;
+        case TypeId::FLOAT32:
+            v = static_cast<int64_t>(val.as_float32());
+            break;
+        case TypeId::FLOAT64:
+            v = static_cast<int64_t>(val.as_float64());
+            break;
         default:
             return make_error(StatusCode::TYPE_ERROR,
-                              "cannot fit " + std::string(type_name(val.type_id())) +
-                                  " to " + std::string(type_name(target)));
+                              "cannot fit " + std::string(type_name(val.type_id())) + " to " +
+                                  std::string(type_name(target)));
         }
         switch (target) {
-        case TypeId::INT8:  return ok(Value(static_cast<int8_t>(v)));
-        case TypeId::INT16: return ok(Value(static_cast<int16_t>(v)));
-        case TypeId::INT32: return ok(Value(static_cast<int32_t>(v)));
-        case TypeId::INT64: return ok(Value(v));
-        case TypeId::UINT8:  return ok(Value(static_cast<uint8_t>(v)));
-        case TypeId::UINT16: return ok(Value(static_cast<uint16_t>(v)));
-        case TypeId::UINT32: return ok(Value(static_cast<uint32_t>(v)));
-        case TypeId::UINT64: return ok(Value(static_cast<uint64_t>(v)));
-        default: break;
+        case TypeId::INT8:
+            return ok(Value(static_cast<int8_t>(v)));
+        case TypeId::INT16:
+            return ok(Value(static_cast<int16_t>(v)));
+        case TypeId::INT32:
+            return ok(Value(static_cast<int32_t>(v)));
+        case TypeId::INT64:
+            return ok(Value(v));
+        case TypeId::UINT8:
+            return ok(Value(static_cast<uint8_t>(v)));
+        case TypeId::UINT16:
+            return ok(Value(static_cast<uint16_t>(v)));
+        case TypeId::UINT32:
+            return ok(Value(static_cast<uint32_t>(v)));
+        case TypeId::UINT64:
+            return ok(Value(static_cast<uint64_t>(v)));
+        default:
+            break;
         }
     }
     if (is_numeric(val.type_id()) && is_floating(target)) {
         double d = 0.0;
         switch (val.type_id()) {
-        case TypeId::INT8:  d = val.as_int8(); break;
-        case TypeId::INT16: d = val.as_int16(); break;
-        case TypeId::INT32: d = val.as_int32(); break;
-        case TypeId::INT64: d = static_cast<double>(val.as_int64()); break;
-        case TypeId::UINT8:  d = val.as_uint8(); break;
-        case TypeId::UINT16: d = val.as_uint16(); break;
-        case TypeId::UINT32: d = val.as_uint32(); break;
-        case TypeId::UINT64: d = static_cast<double>(val.as_uint64()); break;
-        case TypeId::FLOAT32: d = val.as_float32(); break;
-        case TypeId::FLOAT64: d = val.as_float64(); break;
-        default: break;
+        case TypeId::INT8:
+            d = val.as_int8();
+            break;
+        case TypeId::INT16:
+            d = val.as_int16();
+            break;
+        case TypeId::INT32:
+            d = val.as_int32();
+            break;
+        case TypeId::INT64:
+            d = static_cast<double>(val.as_int64());
+            break;
+        case TypeId::UINT8:
+            d = val.as_uint8();
+            break;
+        case TypeId::UINT16:
+            d = val.as_uint16();
+            break;
+        case TypeId::UINT32:
+            d = val.as_uint32();
+            break;
+        case TypeId::UINT64:
+            d = static_cast<double>(val.as_uint64());
+            break;
+        case TypeId::FLOAT32:
+            d = val.as_float32();
+            break;
+        case TypeId::FLOAT64:
+            d = val.as_float64();
+            break;
+        default:
+            break;
         }
-        if (target == TypeId::FLOAT32) return ok(Value(static_cast<float>(d)));
-        if (target == TypeId::FLOAT64) return ok(Value(d));
+        if (target == TypeId::FLOAT32)
+            return ok(Value(static_cast<float>(d)));
+        if (target == TypeId::FLOAT64)
+            return ok(Value(d));
     }
     return make_error(StatusCode::TYPE_ERROR,
-                      "cannot fit " + std::string(type_name(val.type_id())) +
-                          " to " + std::string(type_name(target)));
+                      "cannot fit " + std::string(type_name(val.type_id())) + " to " +
+                          std::string(type_name(target)));
 }
 
 } // namespace
 
-UpdateOperator::UpdateOperator(TableHeap& heap, const Schema& storage_schema,
+UpdateOperator::UpdateOperator(TableHeap& heap,
+                               const Schema& storage_schema,
                                std::unique_ptr<Iterator> child,
                                std::vector<UpdateAssignment> assignments,
                                const BoundStatement& bound)
-    : heap_(heap),
-      storage_schema_(storage_schema),
-      child_(std::move(child)),
-      assignments_(std::move(assignments)),
-      bound_(bound),
+    : heap_(heap), storage_schema_(storage_schema), child_(std::move(child)),
+      assignments_(std::move(assignments)), bound_(bound),
       schema_(OutputSchema({OutputColumn{"", "count", TypeId::INT64, false, 0}})) {}
 
 Result<void> UpdateOperator::open() {
@@ -109,8 +159,7 @@ Result<std::optional<Tuple>> UpdateOperator::next() {
 
         auto& tuple = row->value();
         if (!tuple.rid.has_value()) {
-            return make_error(StatusCode::INTERNAL_ERROR,
-                              "UPDATE: tuple has no RID");
+            return make_error(StatusCode::INTERNAL_ERROR, "UPDATE: tuple has no RID");
         }
 
         // Copy current values and apply assignments.
@@ -122,8 +171,7 @@ Result<std::optional<Tuple>> UpdateOperator::next() {
                 return make_error(val.error().code, val.error().message);
             }
             if (assign.column_index >= new_values.size()) {
-                return make_error(StatusCode::INTERNAL_ERROR,
-                                  "UPDATE: column index out of range");
+                return make_error(StatusCode::INTERNAL_ERROR, "UPDATE: column index out of range");
             }
             // Coerce the expression result to the storage column type so that
             // TupleSerializer::serialize() sees the expected variant alternative.

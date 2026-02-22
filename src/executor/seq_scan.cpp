@@ -5,14 +5,13 @@
 
 namespace giodb {
 
-SeqScanOperator::SeqScanOperator(TableHeap& heap, const Schema& storage_schema,
-                                 OutputSchema output_schema, const Expr* predicate,
+SeqScanOperator::SeqScanOperator(TableHeap& heap,
+                                 const Schema& storage_schema,
+                                 OutputSchema output_schema,
+                                 const Expr* predicate,
                                  const BoundStatement* bound)
-    : heap_(heap),
-      storage_schema_(storage_schema),
-      schema_(std::move(output_schema)),
-      predicate_(predicate),
-      bound_(bound) {}
+    : heap_(heap), storage_schema_(storage_schema), schema_(std::move(output_schema)),
+      predicate_(predicate), bound_(bound) {}
 
 Result<void> SeqScanOperator::open() {
     auto it = heap_.begin();

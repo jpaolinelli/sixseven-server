@@ -16,7 +16,8 @@ public:
     /// @param child     The child operator to pull tuples from.
     /// @param predicate The filter expression (must evaluate to BOOL).
     /// @param bound     BoundStatement with expr_types map for evaluation.
-    FilterOperator(std::unique_ptr<Iterator> child, const Expr& predicate,
+    FilterOperator(std::unique_ptr<Iterator> child,
+                   const Expr& predicate,
                    const BoundStatement& bound);
 
     Result<void> open() override;

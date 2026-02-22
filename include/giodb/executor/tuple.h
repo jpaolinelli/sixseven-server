@@ -70,7 +70,7 @@ public:
 
     /// Find a column index by qualified name (table.column).
     [[nodiscard]] std::optional<size_t> find_column(const std::string& table,
-                                                     const std::string& col) const {
+                                                    const std::string& col) const {
         for (size_t i = 0; i < columns_.size(); ++i) {
             if (columns_[i].table_name == table && columns_[i].name == col) {
                 return i;

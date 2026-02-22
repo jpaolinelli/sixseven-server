@@ -34,13 +34,12 @@ public:
     /// @param dm         Shared DiskManager for all file I/O.
     /// @param data_dir   Directory where table files are stored.
     /// @param pool_size  Buffer pool size (frames) per table. Default 256.
-    StorageManager(DiskManager& dm, std::filesystem::path data_dir,
-                   uint32_t pool_size = 256);
+    StorageManager(DiskManager& dm, std::filesystem::path data_dir, uint32_t pool_size = 256);
 
     /// Create physical storage for a new table.
     /// Creates the backing file and initializes the BufferPoolManager + TableHeap.
     [[nodiscard]] Result<void> create_table_storage(table_id_t table_id,
-                                                     const TableSchema& table_schema);
+                                                    const TableSchema& table_schema);
 
     /// Get the storage for an existing table.
     [[nodiscard]] Result<TableStorage*> get_table_storage(table_id_t table_id);

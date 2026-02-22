@@ -12,7 +12,8 @@ namespace giodb {
 ///
 /// The `bound` statement provides type information via the `expr_types` side map
 /// (populated by the Binder). Column references are resolved against `schema`.
-[[nodiscard]] Result<Value> evaluate_expr(const Expr& expr, const Tuple& tuple,
+[[nodiscard]] Result<Value> evaluate_expr(const Expr& expr,
+                                          const Tuple& tuple,
                                           const OutputSchema& schema,
                                           const BoundStatement& bound);
 
@@ -20,7 +21,8 @@ namespace giodb {
 ///
 /// Used for WHERE, HAVING, JOIN ON, and CASE WHEN conditions.
 /// NULL is treated as false (SQL three-valued logic: WHERE filters out NULLs).
-[[nodiscard]] Result<bool> evaluate_predicate(const Expr& expr, const Tuple& tuple,
+[[nodiscard]] Result<bool> evaluate_predicate(const Expr& expr,
+                                              const Tuple& tuple,
                                               const OutputSchema& schema,
                                               const BoundStatement& bound);
 

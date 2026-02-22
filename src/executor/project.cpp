@@ -6,11 +6,10 @@ namespace giodb {
 
 ProjectOperator::ProjectOperator(std::unique_ptr<Iterator> child,
                                  std::vector<ProjectionExpr> projections,
-                                 OutputSchema output_schema, const BoundStatement& bound)
-    : child_(std::move(child)),
-      projections_(std::move(projections)),
-      schema_(std::move(output_schema)),
-      bound_(bound) {}
+                                 OutputSchema output_schema,
+                                 const BoundStatement& bound)
+    : child_(std::move(child)), projections_(std::move(projections)),
+      schema_(std::move(output_schema)), bound_(bound) {}
 
 Result<void> ProjectOperator::open() {
     return child_->open();

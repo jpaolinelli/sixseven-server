@@ -20,8 +20,8 @@ Planner::Planner(const Catalog& catalog, StorageManager& storage)
 // Public API
 // ---------------------------------------------------------------------------
 
-Result<std::unique_ptr<Iterator>>
-Planner::plan(const BoundStatement& bound, std::vector<ExprPtr>& owned_exprs) {
+Result<std::unique_ptr<Iterator>> Planner::plan(const BoundStatement& bound,
+                                                std::vector<ExprPtr>& owned_exprs) {
     if (auto* sel = dynamic_cast<const SelectStmt*>(bound.stmt)) {
         return plan_select(*sel, bound, owned_exprs);
     }
@@ -34,28 +34,24 @@ Planner::plan(const BoundStatement& bound, std::vector<ExprPtr>& owned_exprs) {
     if (auto* del = dynamic_cast<const DeleteStmt*>(bound.stmt)) {
         return plan_delete(*del, bound);
     }
-    return make_error(StatusCode::NOT_IMPLEMENTED,
-                      "planner does not support this statement type");
+    return make_error(StatusCode::NOT_IMPLEMENTED, "planner does not support this statement type");
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-OutputSchema
-Planner::build_output_schema(const std::vector<ResolvedColumn>& columns) {
+OutputSchema Planner::build_output_schema(const std::vector<ResolvedColumn>& columns) {
     std::vector<OutputColumn> out;
     out.reserve(columns.size());
     for (const auto& rc : columns) {
-        out.push_back(
-            {rc.table_name, rc.column_name, rc.type_id, rc.nullable, rc.table_id});
+        out.push_back({rc.table_name, rc.column_name, rc.type_id, rc.nullable, rc.table_id});
     }
     return OutputSchema(std::move(out));
 }
 
-OutputSchema
-Planner::build_table_output_schema(const TableSchema& ts,
-                                   const std::string& table_alias) {
+OutputSchema Planner::build_table_output_schema(const TableSchema& ts,
+                                                const std::string& table_alias) {
     std::vector<OutputColumn> out;
     out.reserve(ts.columns.size());
     const auto& tname = table_alias.empty() ? ts.name : table_alias;
@@ -69,20 +65,18 @@ Planner::build_table_output_schema(const TableSchema& ts,
 // SELECT
 // ---------------------------------------------------------------------------
 
-Result<std::unique_ptr<Iterator>>
-Planner::plan_select(const SelectStmt& stmt, const BoundStatement& bound,
-                     std::vector<ExprPtr>& owned_exprs) {
+Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
+                                                       const BoundStatement& bound,
+                                                       std::vector<ExprPtr>& owned_exprs) {
     // -- 1. Resolve the source table -----------------------------------------
     if (stmt.from.empty()) {
-        return make_error(StatusCode::NOT_IMPLEMENTED,
-                          "SELECT without FROM is not yet supported");
+        return make_error(StatusCode::NOT_IMPLEMENTED, "SELECT without FROM is not yet supported");
     }
 
     const auto& table_ref = stmt.from[0];
     auto table_schema = catalog_.get_table(table_ref.name);
     if (!table_schema) {
-        return make_error(table_schema.error().code,
-                          table_schema.error().message);
+        return make_error(table_schema.error().code, table_schema.error().message);
     }
 
     auto ts = storage_.get_table_storage(table_schema->table_id);
@@ -92,17 +86,14 @@ Planner::plan_select(const SelectStmt& stmt, const BoundStatement& bound,
     auto* storage = *ts;
 
     // Use alias if provided.
-    const auto& alias =
-        table_ref.alias.empty() ? table_ref.name : table_ref.alias;
+    const auto& alias = table_ref.alias.empty() ? table_ref.name : table_ref.alias;
     auto table_output = build_table_output_schema(*table_schema, alias);
 
     // -- 2. SeqScan with optional WHERE predicate ----------------------------
-    const Expr* predicate =
-        stmt.where_expr ? stmt.where_expr.get() : nullptr;
+    const Expr* predicate = stmt.where_expr ? stmt.where_expr.get() : nullptr;
 
     auto scan = std::make_unique<SeqScanOperator>(
-        *storage->heap, storage->storage_schema, table_output, predicate,
-        &bound);
+        *storage->heap, storage->storage_schema, table_output, predicate, &bound);
 
     std::unique_ptr<Iterator> child = std::move(scan);
 
@@ -126,8 +117,7 @@ Planner::plan_select(const SelectStmt& stmt, const BoundStatement& bound,
             std::string col_alias = item.alias;
             if (col_alias.empty()) {
                 // Try to derive a name from a column reference.
-                if (auto* cr = dynamic_cast<const ColumnRefExpr*>(
-                        item.expr.get())) {
+                if (auto* cr = dynamic_cast<const ColumnRefExpr*>(item.expr.get())) {
                     col_alias = cr->column;
                 } else {
                     col_alias = "?column?";
@@ -138,9 +128,8 @@ Planner::plan_select(const SelectStmt& stmt, const BoundStatement& bound,
     }
 
     auto output_schema = build_output_schema(bound.output_columns);
-    child = std::make_unique<ProjectOperator>(std::move(child),
-                                              std::move(projections),
-                                              std::move(output_schema), bound);
+    child = std::make_unique<ProjectOperator>(
+        std::move(child), std::move(projections), std::move(output_schema), bound);
 
     // -- 4. ORDER BY ---------------------------------------------------------
     if (!stmt.order_by.empty()) {
@@ -149,8 +138,7 @@ Planner::plan_select(const SelectStmt& stmt, const BoundStatement& bound,
         for (const auto& ob : stmt.order_by) {
             keys.push_back({ob.expr.get(), ob.direction});
         }
-        child = std::make_unique<SortOperator>(std::move(child),
-                                               std::move(keys), bound);
+        child = std::make_unique<SortOperator>(std::move(child), std::move(keys), bound);
     }
 
     // -- 5. LIMIT / OFFSET ---------------------------------------------------
@@ -165,14 +153,12 @@ Planner::plan_select(const SelectStmt& stmt, const BoundStatement& bound,
 
         int64_t offset_val = 0;
         if (stmt.offset) {
-            if (auto* olit =
-                    dynamic_cast<const LiteralExpr*>(stmt.offset.get())) {
+            if (auto* olit = dynamic_cast<const LiteralExpr*>(stmt.offset.get())) {
                 offset_val = std::stoll(olit->value);
             }
         }
 
-        child = std::make_unique<LimitOperator>(std::move(child), limit_val,
-                                                offset_val);
+        child = std::make_unique<LimitOperator>(std::move(child), limit_val, offset_val);
     }
 
     return ok(std::move(child));
@@ -182,12 +168,11 @@ Planner::plan_select(const SelectStmt& stmt, const BoundStatement& bound,
 // INSERT
 // ---------------------------------------------------------------------------
 
-Result<std::unique_ptr<Iterator>>
-Planner::plan_insert(const InsertStmt& stmt, const BoundStatement& bound) {
+Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
+                                                       const BoundStatement& bound) {
     auto table_schema = catalog_.get_table(stmt.table_name);
     if (!table_schema) {
-        return make_error(table_schema.error().code,
-                          table_schema.error().message);
+        return make_error(table_schema.error().code, table_schema.error().message);
     }
 
     auto ts = storage_.get_table_storage(table_schema->table_id);
@@ -227,9 +212,8 @@ Planner::plan_insert(const InsertStmt& stmt, const BoundStatement& bound) {
                     }
                 }
                 if (!found) {
-                    return make_error(
-                        StatusCode::NOT_FOUND,
-                        "column not found: " + stmt.columns[i]);
+                    return make_error(StatusCode::NOT_FOUND,
+                                      "column not found: " + stmt.columns[i]);
                 }
             }
             // Columns not mentioned get nullptr — InsertOperator evaluates
@@ -237,10 +221,8 @@ Planner::plan_insert(const InsertStmt& stmt, const BoundStatement& bound) {
             // For now we require all columns to be provided.
             for (size_t j = 0; j < ncols; ++j) {
                 if (reordered[j] == nullptr) {
-                    return make_error(
-                        StatusCode::INVALID_ARGUMENT,
-                        "missing value for column: " +
-                            table_schema->columns[j].name);
+                    return make_error(StatusCode::INVALID_ARGUMENT,
+                                      "missing value for column: " + table_schema->columns[j].name);
                 }
             }
             value_rows.push_back(std::move(reordered));
@@ -256,12 +238,11 @@ Planner::plan_insert(const InsertStmt& stmt, const BoundStatement& bound) {
 // UPDATE
 // ---------------------------------------------------------------------------
 
-Result<std::unique_ptr<Iterator>>
-Planner::plan_update(const UpdateStmt& stmt, const BoundStatement& bound) {
+Result<std::unique_ptr<Iterator>> Planner::plan_update(const UpdateStmt& stmt,
+                                                       const BoundStatement& bound) {
     auto table_schema = catalog_.get_table(stmt.table_name);
     if (!table_schema) {
-        return make_error(table_schema.error().code,
-                          table_schema.error().message);
+        return make_error(table_schema.error().code, table_schema.error().message);
     }
 
     auto ts = storage_.get_table_storage(table_schema->table_id);
@@ -273,11 +254,9 @@ Planner::plan_update(const UpdateStmt& stmt, const BoundStatement& bound) {
     auto table_output = build_table_output_schema(*table_schema);
 
     // SeqScan with optional WHERE predicate.
-    const Expr* predicate =
-        stmt.where_expr ? stmt.where_expr.get() : nullptr;
+    const Expr* predicate = stmt.where_expr ? stmt.where_expr.get() : nullptr;
     auto scan = std::make_unique<SeqScanOperator>(
-        *storage->heap, storage->storage_schema, table_output, predicate,
-        &bound);
+        *storage->heap, storage->storage_schema, table_output, predicate, &bound);
 
     // Build assignment vector.
     std::vector<UpdateAssignment> assignments;
@@ -287,21 +266,18 @@ Planner::plan_update(const UpdateStmt& stmt, const BoundStatement& bound) {
         bool found = false;
         for (size_t i = 0; i < table_schema->columns.size(); ++i) {
             if (table_schema->columns[i].name == assign.column) {
-                assignments.push_back(
-                    {i, assign.value.get()});
+                assignments.push_back({i, assign.value.get()});
                 found = true;
                 break;
             }
         }
         if (!found) {
-            return make_error(StatusCode::NOT_FOUND,
-                              "column not found: " + assign.column);
+            return make_error(StatusCode::NOT_FOUND, "column not found: " + assign.column);
         }
     }
 
     auto iter = std::make_unique<UpdateOperator>(
-        *storage->heap, storage->storage_schema, std::move(scan),
-        std::move(assignments), bound);
+        *storage->heap, storage->storage_schema, std::move(scan), std::move(assignments), bound);
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
 }
 
@@ -309,12 +285,11 @@ Planner::plan_update(const UpdateStmt& stmt, const BoundStatement& bound) {
 // DELETE
 // ---------------------------------------------------------------------------
 
-Result<std::unique_ptr<Iterator>>
-Planner::plan_delete(const DeleteStmt& stmt, const BoundStatement& bound) {
+Result<std::unique_ptr<Iterator>> Planner::plan_delete(const DeleteStmt& stmt,
+                                                       const BoundStatement& bound) {
     auto table_schema = catalog_.get_table(stmt.table_name);
     if (!table_schema) {
-        return make_error(table_schema.error().code,
-                          table_schema.error().message);
+        return make_error(table_schema.error().code, table_schema.error().message);
     }
 
     auto ts = storage_.get_table_storage(table_schema->table_id);
@@ -325,14 +300,11 @@ Planner::plan_delete(const DeleteStmt& stmt, const BoundStatement& bound) {
 
     auto table_output = build_table_output_schema(*table_schema);
 
-    const Expr* predicate =
-        stmt.where_expr ? stmt.where_expr.get() : nullptr;
+    const Expr* predicate = stmt.where_expr ? stmt.where_expr.get() : nullptr;
     auto scan = std::make_unique<SeqScanOperator>(
-        *storage->heap, storage->storage_schema, table_output, predicate,
-        &bound);
+        *storage->heap, storage->storage_schema, table_output, predicate, &bound);
 
-    auto iter =
-        std::make_unique<DeleteOperator>(*storage->heap, std::move(scan));
+    auto iter = std::make_unique<DeleteOperator>(*storage->heap, std::move(scan));
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
 }
 

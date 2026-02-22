@@ -25,72 +25,121 @@ Result<Value> fit_to_storage(const Value& val, TypeId target) {
         // Convert to int64 then to the target integer type.
         int64_t v = 0;
         switch (val.type_id()) {
-        case TypeId::INT8:  v = val.as_int8(); break;
-        case TypeId::INT16: v = val.as_int16(); break;
-        case TypeId::INT32: v = val.as_int32(); break;
-        case TypeId::INT64: v = val.as_int64(); break;
-        case TypeId::UINT8:  v = val.as_uint8(); break;
-        case TypeId::UINT16: v = val.as_uint16(); break;
-        case TypeId::UINT32: v = val.as_uint32(); break;
-        case TypeId::UINT64: v = static_cast<int64_t>(val.as_uint64()); break;
-        case TypeId::FLOAT32: v = static_cast<int64_t>(val.as_float32()); break;
-        case TypeId::FLOAT64: v = static_cast<int64_t>(val.as_float64()); break;
+        case TypeId::INT8:
+            v = val.as_int8();
+            break;
+        case TypeId::INT16:
+            v = val.as_int16();
+            break;
+        case TypeId::INT32:
+            v = val.as_int32();
+            break;
+        case TypeId::INT64:
+            v = val.as_int64();
+            break;
+        case TypeId::UINT8:
+            v = val.as_uint8();
+            break;
+        case TypeId::UINT16:
+            v = val.as_uint16();
+            break;
+        case TypeId::UINT32:
+            v = val.as_uint32();
+            break;
+        case TypeId::UINT64:
+            v = static_cast<int64_t>(val.as_uint64());
+            break;
+        case TypeId::FLOAT32:
+            v = static_cast<int64_t>(val.as_float32());
+            break;
+        case TypeId::FLOAT64:
+            v = static_cast<int64_t>(val.as_float64());
+            break;
         default:
             return make_error(StatusCode::TYPE_ERROR,
-                              "cannot fit " + std::string(type_name(val.type_id())) +
-                                  " to " + std::string(type_name(target)));
+                              "cannot fit " + std::string(type_name(val.type_id())) + " to " +
+                                  std::string(type_name(target)));
         }
         switch (target) {
-        case TypeId::INT8:  return ok(Value(static_cast<int8_t>(v)));
-        case TypeId::INT16: return ok(Value(static_cast<int16_t>(v)));
-        case TypeId::INT32: return ok(Value(static_cast<int32_t>(v)));
-        case TypeId::INT64: return ok(Value(v));
-        case TypeId::UINT8:  return ok(Value(static_cast<uint8_t>(v)));
-        case TypeId::UINT16: return ok(Value(static_cast<uint16_t>(v)));
-        case TypeId::UINT32: return ok(Value(static_cast<uint32_t>(v)));
-        case TypeId::UINT64: return ok(Value(static_cast<uint64_t>(v)));
-        default: break;
+        case TypeId::INT8:
+            return ok(Value(static_cast<int8_t>(v)));
+        case TypeId::INT16:
+            return ok(Value(static_cast<int16_t>(v)));
+        case TypeId::INT32:
+            return ok(Value(static_cast<int32_t>(v)));
+        case TypeId::INT64:
+            return ok(Value(v));
+        case TypeId::UINT8:
+            return ok(Value(static_cast<uint8_t>(v)));
+        case TypeId::UINT16:
+            return ok(Value(static_cast<uint16_t>(v)));
+        case TypeId::UINT32:
+            return ok(Value(static_cast<uint32_t>(v)));
+        case TypeId::UINT64:
+            return ok(Value(static_cast<uint64_t>(v)));
+        default:
+            break;
         }
     }
     if (is_numeric(val.type_id()) && is_floating(target)) {
         double d = 0.0;
         switch (val.type_id()) {
-        case TypeId::INT8:  d = val.as_int8(); break;
-        case TypeId::INT16: d = val.as_int16(); break;
-        case TypeId::INT32: d = val.as_int32(); break;
-        case TypeId::INT64: d = static_cast<double>(val.as_int64()); break;
-        case TypeId::UINT8:  d = val.as_uint8(); break;
-        case TypeId::UINT16: d = val.as_uint16(); break;
-        case TypeId::UINT32: d = val.as_uint32(); break;
-        case TypeId::UINT64: d = static_cast<double>(val.as_uint64()); break;
-        case TypeId::FLOAT32: d = val.as_float32(); break;
-        case TypeId::FLOAT64: d = val.as_float64(); break;
-        default: break;
+        case TypeId::INT8:
+            d = val.as_int8();
+            break;
+        case TypeId::INT16:
+            d = val.as_int16();
+            break;
+        case TypeId::INT32:
+            d = val.as_int32();
+            break;
+        case TypeId::INT64:
+            d = static_cast<double>(val.as_int64());
+            break;
+        case TypeId::UINT8:
+            d = val.as_uint8();
+            break;
+        case TypeId::UINT16:
+            d = val.as_uint16();
+            break;
+        case TypeId::UINT32:
+            d = val.as_uint32();
+            break;
+        case TypeId::UINT64:
+            d = static_cast<double>(val.as_uint64());
+            break;
+        case TypeId::FLOAT32:
+            d = val.as_float32();
+            break;
+        case TypeId::FLOAT64:
+            d = val.as_float64();
+            break;
+        default:
+            break;
         }
-        if (target == TypeId::FLOAT32) return ok(Value(static_cast<float>(d)));
-        if (target == TypeId::FLOAT64) return ok(Value(d));
+        if (target == TypeId::FLOAT32)
+            return ok(Value(static_cast<float>(d)));
+        if (target == TypeId::FLOAT64)
+            return ok(Value(d));
     }
     return make_error(StatusCode::TYPE_ERROR,
-                      "cannot fit " + std::string(type_name(val.type_id())) +
-                          " to " + std::string(type_name(target)));
+                      "cannot fit " + std::string(type_name(val.type_id())) + " to " +
+                          std::string(type_name(target)));
 }
 
 } // namespace
 
-InsertOperator::InsertOperator(TableHeap& heap, const Schema& storage_schema,
+InsertOperator::InsertOperator(TableHeap& heap,
+                               const Schema& storage_schema,
                                std::vector<std::vector<const Expr*>> value_rows,
                                const BoundStatement& bound)
-    : heap_(heap),
-      storage_schema_(storage_schema),
-      value_rows_(std::move(value_rows)),
-      bound_(bound),
-      schema_(OutputSchema({OutputColumn{"", "count", TypeId::INT64, false, 0}})) {}
+    : heap_(heap), storage_schema_(storage_schema), value_rows_(std::move(value_rows)),
+      bound_(bound), schema_(OutputSchema({OutputColumn{"", "count", TypeId::INT64, false, 0}})) {}
 
-InsertOperator::InsertOperator(TableHeap& heap, const Schema& storage_schema,
+InsertOperator::InsertOperator(TableHeap& heap,
+                               const Schema& storage_schema,
                                std::unique_ptr<Iterator> child)
-    : heap_(heap),
-      storage_schema_(storage_schema),
-      child_(std::move(child)),
+    : heap_(heap), storage_schema_(storage_schema), child_(std::move(child)),
       schema_(OutputSchema({OutputColumn{"", "count", TypeId::INT64, false, 0}})) {}
 
 Result<void> InsertOperator::open() {
@@ -163,8 +212,7 @@ Result<std::optional<Tuple>> InsertOperator::next() {
                     if (val->type_id() != target && !val->is_null()) {
                         auto fitted = fit_to_storage(*val, target);
                         if (!fitted) {
-                            return make_error(fitted.error().code,
-                                              fitted.error().message);
+                            return make_error(fitted.error().code, fitted.error().message);
                         }
                         values.push_back(std::move(*fitted));
                         continue;

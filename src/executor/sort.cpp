@@ -7,7 +7,8 @@
 
 namespace giodb {
 
-SortOperator::SortOperator(std::unique_ptr<Iterator> child, std::vector<SortKey> keys,
+SortOperator::SortOperator(std::unique_ptr<Iterator> child,
+                           std::vector<SortKey> keys,
                            const BoundStatement& bound)
     : child_(std::move(child)), keys_(std::move(keys)), bound_(bound) {}
 
@@ -40,7 +41,8 @@ Result<void> SortOperator::open() {
     const auto& bound = bound_;
 
     // Use a stable sort to preserve insertion order for equal elements.
-    std::stable_sort(sorted_.begin(), sorted_.end(),
+    std::stable_sort(sorted_.begin(),
+                     sorted_.end(),
                      [&schema, &keys, &bound](const Tuple& a, const Tuple& b) -> bool {
                          for (const auto& key : keys) {
                              auto va = evaluate_expr(*key.expr, a, schema, bound);

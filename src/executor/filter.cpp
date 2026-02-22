@@ -4,7 +4,8 @@
 
 namespace giodb {
 
-FilterOperator::FilterOperator(std::unique_ptr<Iterator> child, const Expr& predicate,
+FilterOperator::FilterOperator(std::unique_ptr<Iterator> child,
+                               const Expr& predicate,
                                const BoundStatement& bound)
     : child_(std::move(child)), predicate_(predicate), bound_(bound) {}
 
@@ -22,8 +23,7 @@ Result<std::optional<Tuple>> FilterOperator::next() {
             return row; // Child exhausted.
         }
 
-        auto pass =
-            evaluate_predicate(predicate_, row->value(), child_->output_schema(), bound_);
+        auto pass = evaluate_predicate(predicate_, row->value(), child_->output_schema(), bound_);
         if (!pass) {
             return make_error(pass.error().code, pass.error().message);
         }

@@ -28,7 +28,8 @@ public:
     /// @param output_schema The output schema (computed from projections).
     /// @param bound        BoundStatement with expr_types map for evaluation.
     ProjectOperator(std::unique_ptr<Iterator> child,
-                    std::vector<ProjectionExpr> projections, OutputSchema output_schema,
+                    std::vector<ProjectionExpr> projections,
+                    OutputSchema output_schema,
                     const BoundStatement& bound);
 
     Result<void> open() override;

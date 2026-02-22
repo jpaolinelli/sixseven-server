@@ -32,7 +32,8 @@ public:
     /// @param child          Child iterator yielding tuples to update (with WHERE applied).
     /// @param assignments    SET column = expr assignments.
     /// @param bound          BoundStatement for expression evaluation.
-    UpdateOperator(TableHeap& heap, const Schema& storage_schema,
+    UpdateOperator(TableHeap& heap,
+                   const Schema& storage_schema,
                    std::unique_ptr<Iterator> child,
                    std::vector<UpdateAssignment> assignments,
                    const BoundStatement& bound);

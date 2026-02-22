@@ -19,8 +19,10 @@ public:
     /// @param output_schema  Logical output schema (column names/types).
     /// @param predicate      Optional WHERE-clause expression (nullptr = no filter).
     /// @param bound          BoundStatement with expr_types map for predicate eval.
-    SeqScanOperator(TableHeap& heap, const Schema& storage_schema,
-                    OutputSchema output_schema, const Expr* predicate = nullptr,
+    SeqScanOperator(TableHeap& heap,
+                    const Schema& storage_schema,
+                    OutputSchema output_schema,
+                    const Expr* predicate = nullptr,
                     const BoundStatement* bound = nullptr);
 
     Result<void> open() override;

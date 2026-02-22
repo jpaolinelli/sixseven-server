@@ -18,8 +18,8 @@ namespace {
 // Forward declaration of the internal evaluator
 // ---------------------------------------------------------------------------
 
-Result<Value> eval(const Expr& expr, const Tuple& tuple, const OutputSchema& schema,
-                   const BoundStatement& bound);
+Result<Value>
+eval(const Expr& expr, const Tuple& tuple, const OutputSchema& schema, const BoundStatement& bound);
 
 // ---------------------------------------------------------------------------
 // Literal evaluation
@@ -41,8 +41,7 @@ Result<Value> eval_literal(const LiteralExpr& expr) {
             double v = std::stod(expr.value);
             return ok(Value(v));
         } catch (...) {
-            return make_error(StatusCode::TYPE_ERROR,
-                              "cannot parse float literal: " + expr.value);
+            return make_error(StatusCode::TYPE_ERROR, "cannot parse float literal: " + expr.value);
         }
     }
     case LiteralKind::STRING:
@@ -61,8 +60,8 @@ Result<Value> eval_literal(const LiteralExpr& expr) {
 // Column reference evaluation
 // ---------------------------------------------------------------------------
 
-Result<Value> eval_column_ref(const ColumnRefExpr& expr, const Tuple& tuple,
-                              const OutputSchema& schema) {
+Result<Value>
+eval_column_ref(const ColumnRefExpr& expr, const Tuple& tuple, const OutputSchema& schema) {
     std::optional<size_t> idx;
     if (!expr.table.empty()) {
         idx = schema.find_column(expr.table, expr.column);
@@ -115,8 +114,7 @@ Result<double> to_double(const Value& v) {
         return ok(v.as_float64());
     default:
         return make_error(StatusCode::TYPE_ERROR,
-                          "cannot convert " + std::string(type_name(v.type_id())) +
-                              " to numeric");
+                          "cannot convert " + std::string(type_name(v.type_id())) + " to numeric");
     }
 }
 
@@ -144,8 +142,7 @@ Result<int64_t> to_int64(const Value& v) {
         return ok(static_cast<int64_t>(v.as_uint64()));
     default:
         return make_error(StatusCode::TYPE_ERROR,
-                          "cannot convert " + std::string(type_name(v.type_id())) +
-                              " to integer");
+                          "cannot convert " + std::string(type_name(v.type_id())) + " to integer");
     }
 }
 
@@ -261,8 +258,10 @@ Result<Value> eval_comparison(BinaryOp op, const Value& lhs, const Value& rhs) {
 // Binary expression
 // ---------------------------------------------------------------------------
 
-Result<Value> eval_binary(const BinaryExpr& expr, const Tuple& tuple,
-                          const OutputSchema& schema, const BoundStatement& bound) {
+Result<Value> eval_binary(const BinaryExpr& expr,
+                          const Tuple& tuple,
+                          const OutputSchema& schema,
+                          const BoundStatement& bound) {
     // Short-circuit for AND/OR.
     if (expr.op == BinaryOp::AND) {
         auto lhs = eval(*expr.lhs, tuple, schema, bound);
@@ -378,8 +377,10 @@ Result<Value> eval_binary(const BinaryExpr& expr, const Tuple& tuple,
 // Unary expression
 // ---------------------------------------------------------------------------
 
-Result<Value> eval_unary(const UnaryExpr& expr, const Tuple& tuple,
-                         const OutputSchema& schema, const BoundStatement& bound) {
+Result<Value> eval_unary(const UnaryExpr& expr,
+                         const Tuple& tuple,
+                         const OutputSchema& schema,
+                         const BoundStatement& bound) {
     auto val = eval(*expr.operand, tuple, schema, bound);
     if (!val) {
         return val;
@@ -421,8 +422,10 @@ Result<Value> eval_unary(const UnaryExpr& expr, const Tuple& tuple,
 // CAST expression
 // ---------------------------------------------------------------------------
 
-Result<Value> eval_cast(const CastExpr& expr, const Tuple& tuple,
-                        const OutputSchema& schema, const BoundStatement& bound) {
+Result<Value> eval_cast(const CastExpr& expr,
+                        const Tuple& tuple,
+                        const OutputSchema& schema,
+                        const BoundStatement& bound) {
     auto val = eval(*expr.expr, tuple, schema, bound);
     if (!val) {
         return val;
@@ -442,8 +445,10 @@ Result<Value> eval_cast(const CastExpr& expr, const Tuple& tuple,
 // IS NULL
 // ---------------------------------------------------------------------------
 
-Result<Value> eval_is_null(const IsNullExpr& expr, const Tuple& tuple,
-                           const OutputSchema& schema, const BoundStatement& bound) {
+Result<Value> eval_is_null(const IsNullExpr& expr,
+                           const Tuple& tuple,
+                           const OutputSchema& schema,
+                           const BoundStatement& bound) {
     auto val = eval(*expr.expr, tuple, schema, bound);
     if (!val) {
         return val;
@@ -459,8 +464,10 @@ Result<Value> eval_is_null(const IsNullExpr& expr, const Tuple& tuple,
 // BETWEEN
 // ---------------------------------------------------------------------------
 
-Result<Value> eval_between(const BetweenExpr& expr, const Tuple& tuple,
-                           const OutputSchema& schema, const BoundStatement& bound) {
+Result<Value> eval_between(const BetweenExpr& expr,
+                           const Tuple& tuple,
+                           const OutputSchema& schema,
+                           const BoundStatement& bound) {
     auto val = eval(*expr.expr, tuple, schema, bound);
     if (!val) {
         return val;
@@ -487,8 +494,8 @@ Result<Value> eval_between(const BetweenExpr& expr, const Tuple& tuple,
         return make_error(cmp_high.error().code, cmp_high.error().message);
     }
 
-    bool in_range = (*cmp_low != std::strong_ordering::less) &&
-                    (*cmp_high != std::strong_ordering::greater);
+    bool in_range =
+        (*cmp_low != std::strong_ordering::less) && (*cmp_high != std::strong_ordering::greater);
     if (expr.negated) {
         in_range = !in_range;
     }
@@ -499,7 +506,9 @@ Result<Value> eval_between(const BetweenExpr& expr, const Tuple& tuple,
 // IN
 // ---------------------------------------------------------------------------
 
-Result<Value> eval_in(const InExpr& expr, const Tuple& tuple, const OutputSchema& schema,
+Result<Value> eval_in(const InExpr& expr,
+                      const Tuple& tuple,
+                      const OutputSchema& schema,
                       const BoundStatement& bound) {
     auto val = eval(*expr.expr, tuple, schema, bound);
     if (!val) {
@@ -586,7 +595,9 @@ bool match_like(const std::string& text, const std::string& pattern, size_t ti, 
 
 } // namespace
 
-Result<Value> eval_like(const LikeExpr& expr, const Tuple& tuple, const OutputSchema& schema,
+Result<Value> eval_like(const LikeExpr& expr,
+                        const Tuple& tuple,
+                        const OutputSchema& schema,
                         const BoundStatement& bound) {
     auto val = eval(*expr.expr, tuple, schema, bound);
     if (!val) {
@@ -616,7 +627,9 @@ Result<Value> eval_like(const LikeExpr& expr, const Tuple& tuple, const OutputSc
 // CASE expression
 // ---------------------------------------------------------------------------
 
-Result<Value> eval_case(const CaseExpr& expr, const Tuple& tuple, const OutputSchema& schema,
+Result<Value> eval_case(const CaseExpr& expr,
+                        const Tuple& tuple,
+                        const OutputSchema& schema,
                         const BoundStatement& bound) {
     if (expr.operand) {
         // Simple CASE: CASE operand WHEN val THEN result ...
@@ -660,8 +673,10 @@ Result<Value> eval_case(const CaseExpr& expr, const Tuple& tuple, const OutputSc
 // Function call (stub — full function evaluation is a later ticket)
 // ---------------------------------------------------------------------------
 
-Result<Value> eval_function(const FunctionCallExpr& /*expr*/, const Tuple& /*tuple*/,
-                            const OutputSchema& /*schema*/, const BoundStatement& /*bound*/) {
+Result<Value> eval_function(const FunctionCallExpr& /*expr*/,
+                            const Tuple& /*tuple*/,
+                            const OutputSchema& /*schema*/,
+                            const BoundStatement& /*bound*/) {
     return make_error(StatusCode::NOT_IMPLEMENTED, "function evaluation not yet implemented");
 }
 
@@ -669,7 +684,9 @@ Result<Value> eval_function(const FunctionCallExpr& /*expr*/, const Tuple& /*tup
 // Array expression
 // ---------------------------------------------------------------------------
 
-Result<Value> eval_array(const ArrayExpr& expr, const Tuple& tuple, const OutputSchema& schema,
+Result<Value> eval_array(const ArrayExpr& expr,
+                         const Tuple& tuple,
+                         const OutputSchema& schema,
                          const BoundStatement& bound) {
     Embedding result;
     result.reserve(expr.elements.size());
@@ -694,7 +711,9 @@ Result<Value> eval_array(const ArrayExpr& expr, const Tuple& tuple, const Output
 // Main expression evaluator
 // ---------------------------------------------------------------------------
 
-Result<Value> eval(const Expr& expr, const Tuple& tuple, const OutputSchema& schema,
+Result<Value> eval(const Expr& expr,
+                   const Tuple& tuple,
+                   const OutputSchema& schema,
                    const BoundStatement& bound) {
     // Dispatch via dynamic_cast (matches binder pattern).
     if (auto* lit = dynamic_cast<const LiteralExpr*>(&expr)) {
@@ -736,8 +755,7 @@ Result<Value> eval(const Expr& expr, const Tuple& tuple, const OutputSchema& sch
     // Subquery and Exists are not supported in the executor yet.
     if (dynamic_cast<const SubqueryExpr*>(&expr) != nullptr ||
         dynamic_cast<const ExistsExpr*>(&expr) != nullptr) {
-        return make_error(StatusCode::NOT_IMPLEMENTED,
-                          "subquery evaluation not yet implemented");
+        return make_error(StatusCode::NOT_IMPLEMENTED, "subquery evaluation not yet implemented");
     }
 
     return make_error(StatusCode::INTERNAL_ERROR, "unknown expression type in evaluator");
@@ -749,12 +767,16 @@ Result<Value> eval(const Expr& expr, const Tuple& tuple, const OutputSchema& sch
 // Public API
 // ---------------------------------------------------------------------------
 
-Result<Value> evaluate_expr(const Expr& expr, const Tuple& tuple, const OutputSchema& schema,
+Result<Value> evaluate_expr(const Expr& expr,
+                            const Tuple& tuple,
+                            const OutputSchema& schema,
                             const BoundStatement& bound) {
     return eval(expr, tuple, schema, bound);
 }
 
-Result<bool> evaluate_predicate(const Expr& expr, const Tuple& tuple, const OutputSchema& schema,
+Result<bool> evaluate_predicate(const Expr& expr,
+                                const Tuple& tuple,
+                                const OutputSchema& schema,
                                 const BoundStatement& bound) {
     auto val = eval(expr, tuple, schema, bound);
     if (!val) {
