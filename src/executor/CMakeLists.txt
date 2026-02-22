@@ -9,6 +9,9 @@ add_library(giodb_executor STATIC
     insert.cpp
     update.cpp
     delete.cpp
+    nested_loop_join.cpp
+    hash_join.cpp
+    sort_merge_join.cpp
     storage_manager.cpp
     planner.cpp
     query_engine.cpp

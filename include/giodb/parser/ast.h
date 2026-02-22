@@ -57,6 +57,8 @@ enum class JoinType : uint8_t {
     RIGHT,
     FULL,
     CROSS,
+    SEMI,
+    ANTI,
 };
 
 /// Sort direction for ORDER BY.
