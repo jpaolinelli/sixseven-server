@@ -1119,6 +1119,257 @@ TEST(Parser, ExprComplex) {
 
 // -- DML error handling -------------------------------------------------------
 
+// -- JOIN tests ---------------------------------------------------------------
+
+TEST(Parser, SelectInnerJoin) {
+    auto stmt = parse_one(
+        "SELECT u.name, o.total FROM users u "
+        "INNER JOIN orders o ON u.id = o.user_id");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->from.size(), 1u);
+    EXPECT_EQ(sel->from[0].name, "users");
+    EXPECT_EQ(sel->from[0].alias, "u");
+    ASSERT_EQ(sel->joins.size(), 1u);
+    EXPECT_EQ(sel->joins[0].type, JoinType::INNER);
+    EXPECT_EQ(sel->joins[0].table.name, "orders");
+    EXPECT_EQ(sel->joins[0].table.alias, "o");
+    EXPECT_NE(sel->joins[0].on_expr, nullptr);
+}
+
+TEST(Parser, SelectLeftJoin) {
+    auto stmt = parse_one(
+        "SELECT * FROM users LEFT JOIN orders ON users.id = orders.user_id");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->joins.size(), 1u);
+    EXPECT_EQ(sel->joins[0].type, JoinType::LEFT);
+}
+
+TEST(Parser, SelectLeftOuterJoin) {
+    auto stmt = parse_one(
+        "SELECT * FROM users LEFT OUTER JOIN orders ON users.id = orders.user_id");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->joins.size(), 1u);
+    EXPECT_EQ(sel->joins[0].type, JoinType::LEFT);
+}
+
+TEST(Parser, SelectRightJoin) {
+    auto stmt = parse_one(
+        "SELECT * FROM users RIGHT JOIN orders ON users.id = orders.user_id");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->joins.size(), 1u);
+    EXPECT_EQ(sel->joins[0].type, JoinType::RIGHT);
+}
+
+TEST(Parser, SelectFullOuterJoin) {
+    auto stmt = parse_one(
+        "SELECT * FROM a FULL OUTER JOIN b ON a.id = b.id");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->joins.size(), 1u);
+    EXPECT_EQ(sel->joins[0].type, JoinType::FULL);
+}
+
+TEST(Parser, SelectCrossJoin) {
+    auto stmt = parse_one("SELECT * FROM a CROSS JOIN b");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->joins.size(), 1u);
+    EXPECT_EQ(sel->joins[0].type, JoinType::CROSS);
+    EXPECT_EQ(sel->joins[0].on_expr, nullptr);
+}
+
+TEST(Parser, SelectBareJoin) {
+    auto stmt = parse_one(
+        "SELECT * FROM a JOIN b ON a.id = b.a_id");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->joins.size(), 1u);
+    EXPECT_EQ(sel->joins[0].type, JoinType::INNER);
+}
+
+TEST(Parser, SelectMultiJoin) {
+    auto stmt = parse_one(
+        "SELECT * FROM a "
+        "JOIN b ON a.id = b.a_id "
+        "LEFT JOIN c ON b.id = c.b_id");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->joins.size(), 2u);
+    EXPECT_EQ(sel->joins[0].type, JoinType::INNER);
+    EXPECT_EQ(sel->joins[1].type, JoinType::LEFT);
+}
+
+// -- GROUP BY / HAVING tests --------------------------------------------------
+
+TEST(Parser, SelectGroupBy) {
+    auto stmt = parse_one(
+        "SELECT department, COUNT(*) FROM employees GROUP BY department");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->group_by.size(), 1u);
+    auto* col = dynamic_cast<ColumnRefExpr*>(sel->group_by[0].get());
+    ASSERT_NE(col, nullptr);
+    EXPECT_EQ(col->column, "department");
+}
+
+TEST(Parser, SelectGroupByMultiple) {
+    auto stmt = parse_one(
+        "SELECT dept, role, COUNT(*) FROM emp GROUP BY dept, role");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->group_by.size(), 2u);
+}
+
+TEST(Parser, SelectGroupByHaving) {
+    auto stmt = parse_one(
+        "SELECT dept, COUNT(*) FROM emp GROUP BY dept HAVING COUNT(*) > 5");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->group_by.size(), 1u);
+    EXPECT_NE(sel->having_expr, nullptr);
+    auto* bin = dynamic_cast<BinaryExpr*>(sel->having_expr.get());
+    ASSERT_NE(bin, nullptr);
+    EXPECT_EQ(bin->op, BinaryOp::GREATER);
+}
+
+// -- Set operations -----------------------------------------------------------
+
+TEST(Parser, SelectUnion) {
+    auto stmt = parse_one(
+        "SELECT id FROM a UNION SELECT id FROM b");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    EXPECT_EQ(sel->set_op, SelectStmt::SetOp::UNION);
+    auto* rhs = dynamic_cast<SelectStmt*>(sel->set_rhs.get());
+    ASSERT_NE(rhs, nullptr);
+    EXPECT_EQ(rhs->from[0].name, "b");
+}
+
+TEST(Parser, SelectUnionAll) {
+    auto stmt = parse_one(
+        "SELECT id FROM a UNION ALL SELECT id FROM b");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    EXPECT_EQ(sel->set_op, SelectStmt::SetOp::UNION_ALL);
+}
+
+TEST(Parser, SelectIntersect) {
+    auto stmt = parse_one(
+        "SELECT id FROM a INTERSECT SELECT id FROM b");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    EXPECT_EQ(sel->set_op, SelectStmt::SetOp::INTERSECT);
+}
+
+TEST(Parser, SelectExcept) {
+    auto stmt = parse_one(
+        "SELECT id FROM a EXCEPT SELECT id FROM b");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    EXPECT_EQ(sel->set_op, SelectStmt::SetOp::EXCEPT);
+}
+
+// -- CTE (WITH) tests ---------------------------------------------------------
+
+TEST(Parser, SelectWithCTE) {
+    auto stmt = parse_one(
+        "WITH active AS (SELECT * FROM users WHERE active = TRUE) "
+        "SELECT * FROM active");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->ctes.size(), 1u);
+    EXPECT_EQ(sel->ctes[0].name, "active");
+    auto* cte_query = dynamic_cast<SelectStmt*>(sel->ctes[0].query.get());
+    ASSERT_NE(cte_query, nullptr);
+    EXPECT_EQ(sel->from[0].name, "active");
+}
+
+TEST(Parser, SelectWithMultipleCTEs) {
+    auto stmt = parse_one(
+        "WITH a AS (SELECT 1), b AS (SELECT 2) "
+        "SELECT * FROM a, b");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->ctes.size(), 2u);
+    EXPECT_EQ(sel->ctes[0].name, "a");
+    EXPECT_EQ(sel->ctes[1].name, "b");
+}
+
+// -- Subquery in FROM ---------------------------------------------------------
+
+TEST(Parser, SelectSubqueryInFrom) {
+    auto stmt = parse_one(
+        "SELECT s.id FROM (SELECT id FROM users WHERE active = TRUE) AS s");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->from.size(), 1u);
+    EXPECT_EQ(sel->from[0].alias, "s");
+    auto* sub = dynamic_cast<SelectStmt*>(sel->from[0].subquery.get());
+    ASSERT_NE(sub, nullptr);
+    EXPECT_EQ(sub->from[0].name, "users");
+}
+
+TEST(Parser, SelectSubqueryImplicitAlias) {
+    auto stmt = parse_one(
+        "SELECT s.id FROM (SELECT id FROM users) s");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    EXPECT_EQ(sel->from[0].alias, "s");
+    EXPECT_NE(sel->from[0].subquery, nullptr);
+}
+
+// -- Implicit alias tests -----------------------------------------------------
+
+TEST(Parser, SelectImplicitTableAlias) {
+    auto stmt = parse_one("SELECT u.name FROM users u WHERE u.id = 1");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    EXPECT_EQ(sel->from[0].name, "users");
+    EXPECT_EQ(sel->from[0].alias, "u");
+}
+
+TEST(Parser, SelectImplicitColumnAlias) {
+    auto stmt = parse_one("SELECT name n FROM users");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    EXPECT_EQ(sel->items[0].alias, "n");
+}
+
+// -- Complex SELECT combining multiple clauses --------------------------------
+
+TEST(Parser, SelectAllClauses) {
+    auto stmt = parse_one(
+        "SELECT DISTINCT dept, COUNT(*) AS cnt "
+        "FROM employees e "
+        "JOIN departments d ON e.dept_id = d.id "
+        "WHERE e.active = TRUE "
+        "GROUP BY dept "
+        "HAVING COUNT(*) > 3 "
+        "ORDER BY cnt DESC "
+        "LIMIT 10 OFFSET 5");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    EXPECT_TRUE(sel->distinct);
+    ASSERT_EQ(sel->items.size(), 2u);
+    EXPECT_EQ(sel->items[1].alias, "cnt");
+    ASSERT_EQ(sel->from.size(), 1u);
+    EXPECT_EQ(sel->from[0].alias, "e");
+    ASSERT_EQ(sel->joins.size(), 1u);
+    EXPECT_NE(sel->where_expr, nullptr);
+    ASSERT_EQ(sel->group_by.size(), 1u);
+    EXPECT_NE(sel->having_expr, nullptr);
+    ASSERT_EQ(sel->order_by.size(), 1u);
+    EXPECT_EQ(sel->order_by[0].direction, SortDirection::DESC);
+    EXPECT_NE(sel->limit, nullptr);
+    EXPECT_NE(sel->offset, nullptr);
+}
+
+// -- DML error handling -------------------------------------------------------
+
 TEST(Parser, ErrorInsertMissingInto) {
     expect_parse_error("INSERT users (name) VALUES ('test')");
 }

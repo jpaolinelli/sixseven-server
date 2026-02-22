@@ -90,7 +90,9 @@ private:
     // -- Query --------------------------------------------------------------
 
     [[nodiscard]] Result<StmtPtr> parse_select();
+    [[nodiscard]] Result<StmtPtr> parse_with();
     [[nodiscard]] Result<SelectItem> parse_select_item();
+    [[nodiscard]] Result<TableRef> parse_table_ref();
 
     // -- Expression parsing -------------------------------------------------
 

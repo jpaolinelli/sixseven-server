@@ -112,6 +112,52 @@ bool match_ident_ci(const Token& tok, std::string_view upper_name) {
     return true;
 }
 
+/// Check if a token type is a clause-starting keyword (not usable as alias).
+bool is_clause_keyword(TokenType type) {
+    switch (type) {
+    case TokenType::FROM:
+    case TokenType::WHERE:
+    case TokenType::JOIN:
+    case TokenType::INNER:
+    case TokenType::LEFT:
+    case TokenType::RIGHT:
+    case TokenType::FULL:
+    case TokenType::CROSS:
+    case TokenType::ON:
+    case TokenType::GROUP:
+    case TokenType::HAVING:
+    case TokenType::ORDER:
+    case TokenType::LIMIT:
+    case TokenType::OFFSET:
+    case TokenType::UNION:
+    case TokenType::INTERSECT:
+    case TokenType::EXCEPT:
+    case TokenType::RETURNING:
+    case TokenType::SET:
+    case TokenType::VALUES:
+    case TokenType::INTO:
+    case TokenType::SELECT:
+    case TokenType::INSERT:
+    case TokenType::UPDATE:
+    case TokenType::DELETE:
+    case TokenType::CREATE:
+    case TokenType::DROP:
+    case TokenType::ALTER:
+    case TokenType::WITH:
+    case TokenType::AND:
+    case TokenType::OR:
+    case TokenType::NOT:
+    case TokenType::AS:
+    case TokenType::BEGIN:
+    case TokenType::COMMIT:
+    case TokenType::ROLLBACK:
+    case TokenType::END_OF_FILE:
+        return true;
+    default:
+        return false;
+    }
+}
+
 /// Strip single quotes from a string literal lexeme and unescape '' -> '.
 std::string unquote_string(std::string_view lexeme) {
     // Remove surrounding quotes.
@@ -271,6 +317,7 @@ Result<StmtPtr> Parser::parse_statement() {
     case TokenType::UPDATE: return parse_update();
     case TokenType::DELETE: return parse_delete();
     case TokenType::SELECT: return parse_select();
+    case TokenType::WITH: return parse_with();
     case TokenType::LINK: return parse_link();
     case TokenType::UNLINK: return parse_unlink();
     default:
@@ -1110,7 +1157,43 @@ Result<std::vector<SelectItem>> Parser::parse_returning() {
     return ok(std::move(items));
 }
 
-// -- Query: SELECT (core for subqueries) --------------------------------------
+// -- Query: WITH (CTEs) -------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_with() {
+    advance(); // consume WITH
+    std::vector<SelectStmt::CTE> ctes;
+
+    do {
+        SelectStmt::CTE cte;
+        auto name = parse_name("CTE name");
+        if (!name) return tl::unexpected(name.error());
+        cte.name = std::move(*name);
+
+        auto as_tok = expect(TokenType::AS, "expected AS after CTE name");
+        if (!as_tok) return tl::unexpected(as_tok.error());
+
+        auto lp = expect(TokenType::LPAREN, "expected '(' before CTE query");
+        if (!lp) return tl::unexpected(lp.error());
+
+        auto q = parse_select();
+        if (!q) return tl::unexpected(q.error());
+        cte.query = std::move(*q);
+
+        auto rp = expect(TokenType::RPAREN, "expected ')' after CTE query");
+        if (!rp) return tl::unexpected(rp.error());
+
+        ctes.push_back(std::move(cte));
+    } while (match(TokenType::COMMA));
+
+    // Parse the main SELECT.
+    auto sel = parse_select();
+    if (!sel) return sel;
+    auto* stmt = dynamic_cast<SelectStmt*>(sel->get());
+    stmt->ctes = std::move(ctes);
+    return sel;
+}
+
+// -- Query: SELECT ------------------------------------------------------------
 
 Result<StmtPtr> Parser::parse_select() {
     advance(); // consume SELECT
@@ -1131,20 +1214,60 @@ Result<StmtPtr> Parser::parse_select() {
     // FROM
     if (match(TokenType::FROM)) {
         do {
-            TableRef ref;
-            auto name = parse_name("table name");
-            if (!name) return tl::unexpected(name.error());
-            ref.name = std::move(*name);
-
-            // Optional alias.
-            if (match(TokenType::AS)) {
-                auto alias = parse_name("table alias");
-                if (!alias) return tl::unexpected(alias.error());
-                ref.alias = std::move(*alias);
-            }
-
-            stmt->from.push_back(std::move(ref));
+            auto ref = parse_table_ref();
+            if (!ref) return tl::unexpected(ref.error());
+            stmt->from.push_back(std::move(*ref));
         } while (match(TokenType::COMMA));
+    }
+
+    // JOINs.
+    while (check(TokenType::INNER) || check(TokenType::LEFT) ||
+           check(TokenType::RIGHT) || check(TokenType::FULL) ||
+           check(TokenType::CROSS) || check(TokenType::JOIN)) {
+        JoinClause join;
+
+        if (match(TokenType::INNER)) {
+            join.type = JoinType::INNER;
+            auto j = expect(TokenType::JOIN, "expected JOIN after INNER");
+            if (!j) return tl::unexpected(j.error());
+        } else if (match(TokenType::LEFT)) {
+            join.type = JoinType::LEFT;
+            match(TokenType::OUTER); // optional OUTER
+            auto j = expect(TokenType::JOIN, "expected JOIN");
+            if (!j) return tl::unexpected(j.error());
+        } else if (match(TokenType::RIGHT)) {
+            join.type = JoinType::RIGHT;
+            match(TokenType::OUTER);
+            auto j = expect(TokenType::JOIN, "expected JOIN");
+            if (!j) return tl::unexpected(j.error());
+        } else if (match(TokenType::FULL)) {
+            join.type = JoinType::FULL;
+            match(TokenType::OUTER);
+            auto j = expect(TokenType::JOIN, "expected JOIN");
+            if (!j) return tl::unexpected(j.error());
+        } else if (match(TokenType::CROSS)) {
+            join.type = JoinType::CROSS;
+            auto j = expect(TokenType::JOIN, "expected JOIN after CROSS");
+            if (!j) return tl::unexpected(j.error());
+        } else {
+            advance(); // consume JOIN
+            join.type = JoinType::INNER; // bare JOIN defaults to INNER
+        }
+
+        auto ref = parse_table_ref();
+        if (!ref) return tl::unexpected(ref.error());
+        join.table = std::move(*ref);
+
+        // ON condition (not for CROSS JOIN).
+        if (join.type != JoinType::CROSS) {
+            auto on = expect(TokenType::ON, "expected ON after JOIN table");
+            if (!on) return tl::unexpected(on.error());
+            auto expr = parse_expression();
+            if (!expr) return tl::unexpected(expr.error());
+            join.on_expr = std::move(*expr);
+        }
+
+        stmt->joins.push_back(std::move(join));
     }
 
     // WHERE
@@ -1152,6 +1275,25 @@ Result<StmtPtr> Parser::parse_select() {
         auto expr = parse_expression();
         if (!expr) return tl::unexpected(expr.error());
         stmt->where_expr = std::move(*expr);
+    }
+
+    // GROUP BY
+    if (match(TokenType::GROUP)) {
+        auto by = expect(TokenType::BY, "expected BY after GROUP");
+        if (!by) return tl::unexpected(by.error());
+
+        do {
+            auto expr = parse_expression();
+            if (!expr) return tl::unexpected(expr.error());
+            stmt->group_by.push_back(std::move(*expr));
+        } while (match(TokenType::COMMA));
+
+        // HAVING
+        if (match(TokenType::HAVING)) {
+            auto expr = parse_expression();
+            if (!expr) return tl::unexpected(expr.error());
+            stmt->having_expr = std::move(*expr);
+        }
     }
 
     // ORDER BY
@@ -1189,6 +1331,28 @@ Result<StmtPtr> Parser::parse_select() {
         stmt->offset = std::move(*expr);
     }
 
+    // Set operations: UNION [ALL] / INTERSECT / EXCEPT.
+    if (match(TokenType::UNION)) {
+        if (match(TokenType::ALL)) {
+            stmt->set_op = SelectStmt::SetOp::UNION_ALL;
+        } else {
+            stmt->set_op = SelectStmt::SetOp::UNION;
+        }
+        auto rhs = parse_select();
+        if (!rhs) return tl::unexpected(rhs.error());
+        stmt->set_rhs = std::move(*rhs);
+    } else if (match(TokenType::INTERSECT)) {
+        stmt->set_op = SelectStmt::SetOp::INTERSECT;
+        auto rhs = parse_select();
+        if (!rhs) return tl::unexpected(rhs.error());
+        stmt->set_rhs = std::move(*rhs);
+    } else if (match(TokenType::EXCEPT)) {
+        stmt->set_op = SelectStmt::SetOp::EXCEPT;
+        auto rhs = parse_select();
+        if (!rhs) return tl::unexpected(rhs.error());
+        stmt->set_rhs = std::move(*rhs);
+    }
+
     return ok(StmtPtr(std::move(stmt)));
 }
 
@@ -1215,7 +1379,7 @@ Result<SelectItem> Parser::parse_select_item() {
         return ok(std::move(item));
     }
 
-    // Expression [AS alias].
+    // Expression [AS alias] or expression implicit_alias.
     auto expr = parse_expression();
     if (!expr) return tl::unexpected(expr.error());
     item.expr = std::move(*expr);
@@ -1224,9 +1388,57 @@ Result<SelectItem> Parser::parse_select_item() {
         auto alias = parse_name("alias");
         if (!alias) return tl::unexpected(alias.error());
         item.alias = std::move(*alias);
+    } else if (is_name_token(peek().type) && !is_clause_keyword(peek().type)) {
+        // Implicit alias (without AS).
+        item.alias = std::string(advance().lexeme);
     }
 
     return ok(std::move(item));
+}
+
+// -- Query: table reference ---------------------------------------------------
+
+Result<TableRef> Parser::parse_table_ref() {
+    TableRef ref;
+
+    // Subquery: (SELECT ...) [AS] alias
+    if (match(TokenType::LPAREN)) {
+        auto subquery = parse_select();
+        if (!subquery) return tl::unexpected(subquery.error());
+        ref.subquery = std::move(*subquery);
+
+        auto rp = expect(TokenType::RPAREN, "expected ')' after subquery");
+        if (!rp) return tl::unexpected(rp.error());
+
+        // Alias (required for subqueries in practice, optional in grammar).
+        if (match(TokenType::AS)) {
+            auto alias = parse_name("subquery alias");
+            if (!alias) return tl::unexpected(alias.error());
+            ref.alias = std::move(*alias);
+        } else if (is_name_token(peek().type) &&
+                   !is_clause_keyword(peek().type)) {
+            ref.alias = std::string(advance().lexeme);
+        }
+
+        return ok(std::move(ref));
+    }
+
+    // Regular table name.
+    auto name = parse_name("table name");
+    if (!name) return tl::unexpected(name.error());
+    ref.name = std::move(*name);
+
+    // Optional alias (explicit AS or implicit).
+    if (match(TokenType::AS)) {
+        auto alias = parse_name("table alias");
+        if (!alias) return tl::unexpected(alias.error());
+        ref.alias = std::move(*alias);
+    } else if (is_name_token(peek().type) &&
+               !is_clause_keyword(peek().type)) {
+        ref.alias = std::string(advance().lexeme);
+    }
+
+    return ok(std::move(ref));
 }
 
 // -- Expression parsing -------------------------------------------------------
