@@ -4,6 +4,7 @@
 #include "giodb/executor/filter.h"
 #include "giodb/executor/insert.h"
 #include "giodb/executor/limit.h"
+#include "giodb/executor/nested_loop_join.h"
 #include "giodb/executor/project.h"
 #include "giodb/executor/seq_scan.h"
 #include "giodb/executor/sort.h"
@@ -89,13 +90,71 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
     const auto& alias = table_ref.alias.empty() ? table_ref.name : table_ref.alias;
     auto table_output = build_table_output_schema(*table_schema, alias);
 
-    // -- 2. SeqScan with optional WHERE predicate ----------------------------
-    const Expr* predicate = stmt.where_expr ? stmt.where_expr.get() : nullptr;
+    const bool has_joins = !stmt.joins.empty();
+
+    // -- 2. SeqScan -----------------------------------------------------------
+    // When joins are present, don't push WHERE into the scan (it may reference
+    // columns from join tables). Instead apply WHERE after joins as a filter.
+    const Expr* scan_predicate = (!has_joins && stmt.where_expr) ? stmt.where_expr.get() : nullptr;
 
     auto scan = std::make_unique<SeqScanOperator>(
-        *storage->heap, storage->storage_schema, table_output, predicate, &bound);
+        *storage->heap, storage->storage_schema, table_output, scan_predicate, &bound);
 
     std::unique_ptr<Iterator> child = std::move(scan);
+
+    // -- 2b. JOIN operators ---------------------------------------------------
+    if (has_joins) {
+        for (const auto& join_clause : stmt.joins) {
+            const auto& jtref = join_clause.table;
+            auto join_schema = catalog_.get_table(jtref.name);
+            if (!join_schema) {
+                return make_error(join_schema.error().code, join_schema.error().message);
+            }
+
+            auto jts = storage_.get_table_storage(join_schema->table_id);
+            if (!jts) {
+                return make_error(jts.error().code, jts.error().message);
+            }
+            auto* join_storage = *jts;
+
+            const auto& join_alias = jtref.alias.empty() ? jtref.name : jtref.alias;
+            auto join_table_output = build_table_output_schema(*join_schema, join_alias);
+
+            auto join_scan = std::make_unique<SeqScanOperator>(*join_storage->heap,
+                                                               join_storage->storage_schema,
+                                                               join_table_output,
+                                                               nullptr,
+                                                               &bound);
+
+            // Build combined output schema: left columns + right columns.
+            const auto& left_schema = child->output_schema();
+            const auto& right_schema_ref = join_scan->output_schema();
+
+            std::vector<OutputColumn> combined_cols;
+            combined_cols.reserve(left_schema.column_count() + right_schema_ref.column_count());
+            for (size_t i = 0; i < left_schema.column_count(); ++i) {
+                combined_cols.push_back(left_schema.column(i));
+            }
+            for (size_t i = 0; i < right_schema_ref.column_count(); ++i) {
+                combined_cols.push_back(right_schema_ref.column(i));
+            }
+            auto combined = OutputSchema(std::move(combined_cols));
+
+            const Expr* on_expr = join_clause.on_expr ? join_clause.on_expr.get() : nullptr;
+
+            child = std::make_unique<NestedLoopJoinOperator>(std::move(child),
+                                                             std::move(join_scan),
+                                                             join_clause.type,
+                                                             on_expr,
+                                                             bound,
+                                                             std::move(combined));
+        }
+
+        // Apply WHERE as a filter after all joins.
+        if (stmt.where_expr) {
+            child = std::make_unique<FilterOperator>(std::move(child), *stmt.where_expr, bound);
+        }
+    }
 
     // -- 3. Projection -------------------------------------------------------
     std::vector<ProjectionExpr> projections;
@@ -103,13 +162,16 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
 
     for (const auto& item : stmt.items) {
         if (item.is_star || !item.table_star.empty()) {
-            // Expand * or table.* : create a ColumnRefExpr for each column.
-            const auto& cols_to_expand = table_schema->columns;
-            for (const auto& col : cols_to_expand) {
+            // Expand * or table.* using bound output columns (which the binder
+            // already resolved for all tables including joins).
+            for (const auto& rc : bound.output_columns) {
+                if (!item.table_star.empty() && rc.table_name != item.table_star) {
+                    continue;
+                }
                 auto cr = std::make_unique<ColumnRefExpr>();
-                cr->table = alias;
-                cr->column = col.name;
-                projections.push_back({cr.get(), col.name});
+                cr->table = rc.table_name;
+                cr->column = rc.column_name;
+                projections.push_back({cr.get(), rc.column_name});
                 owned_exprs.push_back(std::move(cr));
             }
         } else {
