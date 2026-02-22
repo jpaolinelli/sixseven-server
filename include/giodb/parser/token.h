@@ -15,6 +15,7 @@ enum class TokenType : uint8_t {
 
     ALL,
     ALTER,
+    ANALYZE,
     AND,
     AS,
     ASC,
@@ -39,6 +40,7 @@ enum class TokenType : uint8_t {
     DEFAULT,
     DELETE,
     DESC,
+    DESCRIBE,
     DISTINCT,
     DOUBLE,
     DROP,
@@ -46,6 +48,7 @@ enum class TokenType : uint8_t {
     END,
     EXCEPT,
     EXISTS,
+    EXPLAIN,
     FALSE_KW,
     FLOAT,
     FOREIGN,
@@ -85,8 +88,10 @@ enum class TokenType : uint8_t {
     RETURNING,
     RIGHT,
     ROLLBACK,
+    SAVEPOINT,
     SELECT,
     SET,
+    SHOW,
     SMALLINT,
     TABLE,
     TEXT,
@@ -100,6 +105,7 @@ enum class TokenType : uint8_t {
     UNIQUE,
     UPDATE,
     UUID_KW,
+    VACUUM,
     VALUES,
     VARCHAR,
     WHEN,
@@ -126,6 +132,7 @@ enum class TokenType : uint8_t {
     PATH,
     RECURSIVE,
     REEMBED,
+    RETURN,
     SHORTEST,
     TRAVERSE,
     TYPE,
@@ -152,6 +159,7 @@ enum class TokenType : uint8_t {
 
     COMMA,     // ,
     SEMICOLON, // ;
+    COLON,     // :
     DOT,       // .
     LPAREN,    // (
     RPAREN,    // )
@@ -175,6 +183,7 @@ constexpr std::string_view token_type_name(TokenType type) {
     switch (type) {
     case TokenType::ALL:            return "ALL";
     case TokenType::ALTER:          return "ALTER";
+    case TokenType::ANALYZE:        return "ANALYZE";
     case TokenType::AND:            return "AND";
     case TokenType::AS:             return "AS";
     case TokenType::ASC:            return "ASC";
@@ -199,6 +208,7 @@ constexpr std::string_view token_type_name(TokenType type) {
     case TokenType::DEFAULT:        return "DEFAULT";
     case TokenType::DELETE:         return "DELETE";
     case TokenType::DESC:           return "DESC";
+    case TokenType::DESCRIBE:       return "DESCRIBE";
     case TokenType::DISTINCT:       return "DISTINCT";
     case TokenType::DOUBLE:         return "DOUBLE";
     case TokenType::DROP:           return "DROP";
@@ -206,6 +216,7 @@ constexpr std::string_view token_type_name(TokenType type) {
     case TokenType::END:            return "END";
     case TokenType::EXCEPT:         return "EXCEPT";
     case TokenType::EXISTS:         return "EXISTS";
+    case TokenType::EXPLAIN:        return "EXPLAIN";
     case TokenType::FALSE_KW:       return "FALSE";
     case TokenType::FLOAT:          return "FLOAT";
     case TokenType::FOREIGN:        return "FOREIGN";
@@ -245,8 +256,10 @@ constexpr std::string_view token_type_name(TokenType type) {
     case TokenType::RETURNING:      return "RETURNING";
     case TokenType::RIGHT:          return "RIGHT";
     case TokenType::ROLLBACK:       return "ROLLBACK";
+    case TokenType::SAVEPOINT:      return "SAVEPOINT";
     case TokenType::SELECT:         return "SELECT";
     case TokenType::SET:            return "SET";
+    case TokenType::SHOW:           return "SHOW";
     case TokenType::SMALLINT:       return "SMALLINT";
     case TokenType::TABLE:          return "TABLE";
     case TokenType::TEXT:           return "TEXT";
@@ -260,6 +273,7 @@ constexpr std::string_view token_type_name(TokenType type) {
     case TokenType::UNIQUE:         return "UNIQUE";
     case TokenType::UPDATE:         return "UPDATE";
     case TokenType::UUID_KW:        return "UUID";
+    case TokenType::VACUUM:         return "VACUUM";
     case TokenType::VALUES:         return "VALUES";
     case TokenType::VARCHAR:        return "VARCHAR";
     case TokenType::WHEN:           return "WHEN";
@@ -280,6 +294,7 @@ constexpr std::string_view token_type_name(TokenType type) {
     case TokenType::PATH:           return "PATH";
     case TokenType::RECURSIVE:      return "RECURSIVE";
     case TokenType::REEMBED:        return "REEMBED";
+    case TokenType::RETURN:         return "RETURN";
     case TokenType::SHORTEST:       return "SHORTEST";
     case TokenType::TRAVERSE:       return "TRAVERSE";
     case TokenType::TYPE:           return "TYPE";
@@ -300,6 +315,7 @@ constexpr std::string_view token_type_name(TokenType type) {
     case TokenType::COLON_COLON:    return "COLON_COLON";
     case TokenType::COMMA:          return "COMMA";
     case TokenType::SEMICOLON:      return "SEMICOLON";
+    case TokenType::COLON:          return "COLON";
     case TokenType::DOT:            return "DOT";
     case TokenType::LPAREN:         return "LPAREN";
     case TokenType::RPAREN:         return "RPAREN";

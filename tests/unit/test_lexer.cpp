@@ -759,11 +759,16 @@ TEST(Lexer, LonePipeErrors) {
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
-TEST(Lexer, LoneColonErrors) {
+TEST(Lexer, LoneColonIsToken) {
     Lexer lexer("x : y");
     auto result = lexer.tokenize();
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
+    ASSERT_TRUE(result.has_value());
+    auto& tokens = *result;
+    ASSERT_EQ(tokens.size(), 4u); // x : y EOF
+    EXPECT_EQ(tokens[0].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[1].type, TokenType::COLON);
+    EXPECT_EQ(tokens[2].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[3].type, TokenType::END_OF_FILE);
 }
 
 TEST(Lexer, LoneBangErrors) {

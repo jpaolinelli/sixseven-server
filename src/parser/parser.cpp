@@ -58,7 +58,14 @@ bool is_name_token(TokenType type) {
     case TokenType::LINK:
     case TokenType::UNLINK:
     case TokenType::REEMBED:
+    case TokenType::RETURN:
     case TokenType::VIA:
+    case TokenType::ANALYZE:
+    case TokenType::DESCRIBE:
+    case TokenType::EXPLAIN:
+    case TokenType::SAVEPOINT:
+    case TokenType::SHOW:
+    case TokenType::VACUUM:
     case TokenType::MAX_DEPTH:
         return true;
     default:
@@ -320,6 +327,21 @@ Result<StmtPtr> Parser::parse_statement() {
     case TokenType::WITH: return parse_with();
     case TokenType::LINK: return parse_link();
     case TokenType::UNLINK: return parse_unlink();
+    case TokenType::TRAVERSE: return parse_traverse();
+    case TokenType::NEAREST: return parse_nearest();
+    case TokenType::MATCH: return parse_match();
+    case TokenType::SHORTEST: return parse_shortest_path();
+    case TokenType::BEGIN: return parse_begin();
+    case TokenType::COMMIT: return parse_commit();
+    case TokenType::ROLLBACK: return parse_rollback();
+    case TokenType::SAVEPOINT: return parse_savepoint();
+    case TokenType::SET: return parse_set_stmt();
+    case TokenType::SHOW: return parse_show();
+    case TokenType::EXPLAIN: return parse_explain();
+    case TokenType::DESCRIBE: return parse_describe();
+    case TokenType::REEMBED: return parse_reembed();
+    case TokenType::VACUUM: return parse_vacuum();
+    case TokenType::ANALYZE: return parse_analyze_stmt();
     default:
         return error("expected statement");
     }
@@ -1439,6 +1461,528 @@ Result<TableRef> Parser::parse_table_ref() {
     }
 
     return ok(std::move(ref));
+}
+
+// -- Graph: TRAVERSE ----------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_traverse() {
+    advance(); // consume TRAVERSE
+    auto stmt = std::make_unique<TraverseStmt>();
+
+    auto edge = parse_name("edge type");
+    if (!edge) return tl::unexpected(edge.error());
+    stmt->edge_type = std::move(*edge);
+
+    auto from = expect(TokenType::FROM, "expected FROM after edge type");
+    if (!from) return tl::unexpected(from.error());
+
+    auto tbl = parse_name("table name");
+    if (!tbl) return tl::unexpected(tbl.error());
+    stmt->from_table = std::move(*tbl);
+
+    auto lp = expect(TokenType::LPAREN, "expected '(' after table name");
+    if (!lp) return tl::unexpected(lp.error());
+    auto key = parse_expression();
+    if (!key) return tl::unexpected(key.error());
+    stmt->from_key = std::move(*key);
+    auto rp = expect(TokenType::RPAREN, "expected ')'");
+    if (!rp) return tl::unexpected(rp.error());
+
+    // Optional DIRECTION IN|OUT|BOTH.
+    if (match(TokenType::DIRECTION)) {
+        if (match(TokenType::IN)) {
+            stmt->direction = TraverseDirection::IN;
+        } else if (match_ident_ci(peek(), "OUT")) {
+            advance();
+            stmt->direction = TraverseDirection::OUT;
+        } else if (match_ident_ci(peek(), "BOTH")) {
+            advance();
+            stmt->direction = TraverseDirection::BOTH;
+        } else {
+            return error("expected IN, OUT, or BOTH after DIRECTION");
+        }
+    }
+
+    // Optional MAX_DEPTH n.
+    if (match(TokenType::MAX_DEPTH)) {
+        auto depth = expect(TokenType::INTEGER_LITERAL,
+                            "expected integer after MAX_DEPTH");
+        if (!depth) return tl::unexpected(depth.error());
+        stmt->max_depth = std::stoi(std::string(depth->lexeme));
+    }
+
+    // Optional WHERE.
+    if (match(TokenType::WHERE)) {
+        auto expr = parse_expression();
+        if (!expr) return tl::unexpected(expr.error());
+        stmt->where_expr = std::move(*expr);
+    }
+
+    // Optional FETCH.
+    if (match(TokenType::FETCH)) {
+        stmt->fetch = true;
+    }
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- Graph: NEAREST -----------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_nearest() {
+    advance(); // consume NEAREST
+    auto stmt = std::make_unique<NearestStmt>();
+
+    // k (number of neighbors).
+    auto k = parse_expression();
+    if (!k) return tl::unexpected(k.error());
+    stmt->k = std::move(*k);
+
+    // FROM table.column.
+    auto from = expect(TokenType::FROM, "expected FROM");
+    if (!from) return tl::unexpected(from.error());
+
+    auto tbl = parse_name("table name");
+    if (!tbl) return tl::unexpected(tbl.error());
+    stmt->table_name = std::move(*tbl);
+
+    auto dot = expect(TokenType::DOT, "expected '.' after table name");
+    if (!dot) return tl::unexpected(dot.error());
+
+    auto col = parse_name("column name");
+    if (!col) return tl::unexpected(col.error());
+    stmt->column_name = std::move(*col);
+
+    // TO target.
+    if (!match_ident_ci(peek(), "TO")) {
+        return error("expected TO after column name");
+    }
+    advance();
+
+    auto target = parse_expression();
+    if (!target) return tl::unexpected(target.error());
+    stmt->target = std::move(*target);
+
+    // Optional WHERE.
+    if (match(TokenType::WHERE)) {
+        auto expr = parse_expression();
+        if (!expr) return tl::unexpected(expr.error());
+        stmt->where_expr = std::move(*expr);
+    }
+
+    // Optional USING metric.
+    if (match_ident_ci(peek(), "USING")) {
+        advance();
+        if (match_ident_ci(peek(), "COSINE")) {
+            advance();
+            stmt->metric = NearestMetric::COSINE;
+        } else if (match_ident_ci(peek(), "L2")) {
+            advance();
+            stmt->metric = NearestMetric::L2;
+        } else if (match_ident_ci(peek(), "DOT")) {
+            advance();
+            stmt->metric = NearestMetric::DOT;
+        } else {
+            return error("expected COSINE, L2, or DOT after USING");
+        }
+    }
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- Graph: MATCH -------------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_match() {
+    advance(); // consume MATCH
+    auto stmt = std::make_unique<MatchStmt>();
+
+    // Parse pattern: (node)[-[edge]->(node)...]
+    while (true) {
+        // Parse node pattern: ([variable][:label])
+        auto lp = expect(TokenType::LPAREN, "expected '(' for node pattern");
+        if (!lp) return tl::unexpected(lp.error());
+
+        NodePattern node;
+
+        if (check(TokenType::COLON)) {
+            // (:label) — no variable.
+            advance(); // consume :
+            auto label = parse_name("node label");
+            if (!label) return tl::unexpected(label.error());
+            node.label = std::move(*label);
+        } else if (!check(TokenType::RPAREN) && is_name_token(peek().type)) {
+            auto name = parse_name("node variable or label");
+            if (!name) return tl::unexpected(name.error());
+
+            if (match(TokenType::COLON)) {
+                // variable:label
+                node.variable = std::move(*name);
+                auto label = parse_name("node label");
+                if (!label) return tl::unexpected(label.error());
+                node.label = std::move(*label);
+            } else {
+                // Just variable, no label.
+                node.variable = std::move(*name);
+            }
+        }
+        // else: empty () node pattern.
+
+        auto rp = expect(TokenType::RPAREN, "expected ')' for node pattern");
+        if (!rp) return tl::unexpected(rp.error());
+
+        PathElement elem;
+        elem.node = std::move(node);
+
+        // Check for edge pattern.
+        if (check(TokenType::MINUS) || check(TokenType::LESS)) {
+            EdgePatternDef edge;
+            bool incoming_prefix = false;
+
+            if (match(TokenType::LESS)) {
+                incoming_prefix = true;
+                auto dash = expect(TokenType::MINUS, "expected '-' after '<'");
+                if (!dash) return tl::unexpected(dash.error());
+            } else {
+                advance(); // consume -
+            }
+
+            // Optional [variable:edge_type].
+            if (match(TokenType::LBRACKET)) {
+                if (check(TokenType::COLON)) {
+                    // [:edge_type]
+                    advance(); // consume :
+                    auto etype = parse_name("edge type");
+                    if (!etype) return tl::unexpected(etype.error());
+                    edge.edge_type = std::move(*etype);
+                } else if (!check(TokenType::RBRACKET) &&
+                           is_name_token(peek().type)) {
+                    auto name = parse_name("edge variable or type");
+                    if (!name) return tl::unexpected(name.error());
+
+                    if (match(TokenType::COLON)) {
+                        edge.variable = std::move(*name);
+                        auto etype = parse_name("edge type");
+                        if (!etype) return tl::unexpected(etype.error());
+                        edge.edge_type = std::move(*etype);
+                    } else {
+                        edge.edge_type = std::move(*name);
+                    }
+                }
+
+                auto rb = expect(TokenType::RBRACKET, "expected ']'");
+                if (!rb) return tl::unexpected(rb.error());
+            }
+
+            // Suffix: -> or -
+            auto dash = expect(TokenType::MINUS, "expected '-' in edge pattern");
+            if (!dash) return tl::unexpected(dash.error());
+
+            bool outgoing_suffix = match(TokenType::GREATER);
+
+            // Determine direction.
+            if (incoming_prefix && !outgoing_suffix) {
+                edge.direction = TraverseDirection::IN;
+            } else if (!incoming_prefix && outgoing_suffix) {
+                edge.direction = TraverseDirection::OUT;
+            } else {
+                edge.direction = TraverseDirection::BOTH;
+            }
+
+            elem.outgoing_edge = std::move(edge);
+            stmt->pattern.push_back(std::move(elem));
+            // Continue to parse next node.
+        } else {
+            stmt->pattern.push_back(std::move(elem));
+            break;
+        }
+    }
+
+    // Optional WHERE.
+    if (match(TokenType::WHERE)) {
+        auto expr = parse_expression();
+        if (!expr) return tl::unexpected(expr.error());
+        stmt->where_expr = std::move(*expr);
+    }
+
+    // RETURN select_items.
+    auto ret = expect(TokenType::RETURN, "expected RETURN");
+    if (!ret) return tl::unexpected(ret.error());
+
+    do {
+        auto item = parse_select_item();
+        if (!item) return tl::unexpected(item.error());
+        stmt->return_items.push_back(std::move(*item));
+    } while (match(TokenType::COMMA));
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- Graph: SHORTEST PATH -----------------------------------------------------
+
+Result<StmtPtr> Parser::parse_shortest_path() {
+    advance(); // consume SHORTEST
+    auto path = expect(TokenType::PATH, "expected PATH after SHORTEST");
+    if (!path) return tl::unexpected(path.error());
+
+    auto stmt = std::make_unique<ShortestPathStmt>();
+
+    // FROM table(pk).
+    auto from = expect(TokenType::FROM, "expected FROM");
+    if (!from) return tl::unexpected(from.error());
+
+    auto from_tbl = parse_name("source table");
+    if (!from_tbl) return tl::unexpected(from_tbl.error());
+    stmt->from_table = std::move(*from_tbl);
+
+    auto lp1 = expect(TokenType::LPAREN, "expected '('");
+    if (!lp1) return tl::unexpected(lp1.error());
+    auto from_key = parse_expression();
+    if (!from_key) return tl::unexpected(from_key.error());
+    stmt->from_key = std::move(*from_key);
+    auto rp1 = expect(TokenType::RPAREN, "expected ')'");
+    if (!rp1) return tl::unexpected(rp1.error());
+
+    // TO table(pk).
+    if (!match_ident_ci(peek(), "TO")) {
+        return error("expected TO");
+    }
+    advance();
+
+    auto to_tbl = parse_name("target table");
+    if (!to_tbl) return tl::unexpected(to_tbl.error());
+    stmt->to_table = std::move(*to_tbl);
+
+    auto lp2 = expect(TokenType::LPAREN, "expected '('");
+    if (!lp2) return tl::unexpected(lp2.error());
+    auto to_key = parse_expression();
+    if (!to_key) return tl::unexpected(to_key.error());
+    stmt->to_key = std::move(*to_key);
+    auto rp2 = expect(TokenType::RPAREN, "expected ')'");
+    if (!rp2) return tl::unexpected(rp2.error());
+
+    // VIA edge_type.
+    auto via = expect(TokenType::VIA, "expected VIA");
+    if (!via) return tl::unexpected(via.error());
+    auto edge = parse_name("edge type");
+    if (!edge) return tl::unexpected(edge.error());
+    stmt->edge_type = std::move(*edge);
+
+    // Optional DIRECTION.
+    if (match(TokenType::DIRECTION)) {
+        if (match(TokenType::IN)) {
+            stmt->direction = TraverseDirection::IN;
+        } else if (match_ident_ci(peek(), "OUT")) {
+            advance();
+            stmt->direction = TraverseDirection::OUT;
+        } else if (match_ident_ci(peek(), "BOTH")) {
+            advance();
+            stmt->direction = TraverseDirection::BOTH;
+        } else {
+            return error("expected IN, OUT, or BOTH after DIRECTION");
+        }
+    }
+
+    // Optional MAX_DEPTH.
+    if (match(TokenType::MAX_DEPTH)) {
+        auto depth = expect(TokenType::INTEGER_LITERAL,
+                            "expected integer after MAX_DEPTH");
+        if (!depth) return tl::unexpected(depth.error());
+        stmt->max_depth = std::stoi(std::string(depth->lexeme));
+    }
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- TCL: BEGIN / COMMIT / ROLLBACK / SAVEPOINT -------------------------------
+
+Result<StmtPtr> Parser::parse_begin() {
+    advance(); // consume BEGIN
+    match(TokenType::TRANSACTION); // optional TRANSACTION
+    return ok(StmtPtr(std::make_unique<BeginStmt>()));
+}
+
+Result<StmtPtr> Parser::parse_commit() {
+    advance(); // consume COMMIT
+    return ok(StmtPtr(std::make_unique<CommitStmt>()));
+}
+
+Result<StmtPtr> Parser::parse_rollback() {
+    advance(); // consume ROLLBACK
+    auto stmt = std::make_unique<RollbackStmt>();
+
+    // Optional TO savepoint_name.
+    if (match_ident_ci(peek(), "TO")) {
+        advance();
+        auto name = parse_name("savepoint name");
+        if (!name) return tl::unexpected(name.error());
+        stmt->savepoint = std::move(*name);
+    }
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+Result<StmtPtr> Parser::parse_savepoint() {
+    advance(); // consume SAVEPOINT
+    auto stmt = std::make_unique<SavepointStmt>();
+
+    auto name = parse_name("savepoint name");
+    if (!name) return tl::unexpected(name.error());
+    stmt->name = std::move(*name);
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- Admin: SET ---------------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_set_stmt() {
+    advance(); // consume SET
+    auto stmt = std::make_unique<SetStmt>();
+
+    auto param = parse_name("parameter name");
+    if (!param) return tl::unexpected(param.error());
+    stmt->parameter = std::move(*param);
+
+    auto eq = expect(TokenType::EQUAL, "expected '=' after parameter");
+    if (!eq) return tl::unexpected(eq.error());
+
+    auto val = parse_expression();
+    if (!val) return tl::unexpected(val.error());
+    stmt->value = std::move(*val);
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- Admin: SHOW --------------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_show() {
+    advance(); // consume SHOW
+    auto stmt = std::make_unique<ShowStmt>();
+
+    // SHOW TABLES
+    if (match_ident_ci(peek(), "TABLES")) {
+        advance();
+        stmt->target = ShowTarget::TABLES;
+        return ok(StmtPtr(std::move(stmt)));
+    }
+
+    // SHOW COLUMNS FROM table / SHOW COLUMN FROM table
+    if (check(TokenType::COLUMN) || match_ident_ci(peek(), "COLUMNS")) {
+        advance(); // consume COLUMN or COLUMNS
+        stmt->target = ShowTarget::COLUMNS;
+        auto from = expect(TokenType::FROM, "expected FROM after COLUMNS");
+        if (!from) return tl::unexpected(from.error());
+        auto name = parse_name("table name");
+        if (!name) return tl::unexpected(name.error());
+        stmt->name = std::move(*name);
+        return ok(StmtPtr(std::move(stmt)));
+    }
+
+    // SHOW EDGE TYPE(S)
+    if (check(TokenType::EDGE)) {
+        advance(); // consume EDGE
+        if (check(TokenType::TYPE)) {
+            advance();
+        } else if (match_ident_ci(peek(), "TYPES")) {
+            advance();
+        } else {
+            return error("expected TYPE(S) after EDGE");
+        }
+        stmt->target = ShowTarget::EDGE_TYPES;
+        return ok(StmtPtr(std::move(stmt)));
+    }
+
+    // SHOW INDEXES / SHOW INDEX
+    if (check(TokenType::INDEX) || match_ident_ci(peek(), "INDEXES")) {
+        advance();
+        stmt->target = ShowTarget::INDEXES;
+        return ok(StmtPtr(std::move(stmt)));
+    }
+
+    // SHOW parameter_name
+    stmt->target = ShowTarget::PARAMETER;
+    auto name = parse_name("parameter name");
+    if (!name) return tl::unexpected(name.error());
+    stmt->name = std::move(*name);
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- Admin: EXPLAIN -----------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_explain() {
+    advance(); // consume EXPLAIN
+    auto stmt = std::make_unique<ExplainStmt>();
+
+    // Optional ANALYZE.
+    if (match(TokenType::ANALYZE)) {
+        stmt->analyze = true;
+    }
+
+    // Parse the inner statement.
+    auto inner = parse_statement();
+    if (!inner) return tl::unexpected(inner.error());
+    stmt->statement = std::move(*inner);
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- Admin: DESCRIBE ----------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_describe() {
+    advance(); // consume DESCRIBE
+    auto stmt = std::make_unique<DescribeStmt>();
+
+    auto name = parse_name("table name");
+    if (!name) return tl::unexpected(name.error());
+    stmt->table_name = std::move(*name);
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- Admin: REEMBED -----------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_reembed() {
+    advance(); // consume REEMBED
+    match(TokenType::TABLE); // optional TABLE keyword
+    auto stmt = std::make_unique<ReembedStmt>();
+
+    auto name = parse_name("table name");
+    if (!name) return tl::unexpected(name.error());
+    stmt->table_name = std::move(*name);
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- Admin: VACUUM ------------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_vacuum() {
+    advance(); // consume VACUUM
+    auto stmt = std::make_unique<VacuumStmt>();
+
+    // Optional table name.
+    if (!at_end() && !check(TokenType::SEMICOLON) &&
+        is_name_token(peek().type)) {
+        auto name = parse_name("table name");
+        if (!name) return tl::unexpected(name.error());
+        stmt->table_name = std::move(*name);
+    }
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- Admin: ANALYZE -----------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_analyze_stmt() {
+    advance(); // consume ANALYZE
+    auto stmt = std::make_unique<AnalyzeStmt>();
+
+    // Optional table name.
+    if (!at_end() && !check(TokenType::SEMICOLON) &&
+        is_name_token(peek().type)) {
+        auto name = parse_name("table name");
+        if (!name) return tl::unexpected(name.error());
+        stmt->table_name = std::move(*name);
+    }
+
+    return ok(StmtPtr(std::move(stmt)));
 }
 
 // -- Expression parsing -------------------------------------------------------

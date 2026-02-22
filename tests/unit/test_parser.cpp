@@ -1381,3 +1381,306 @@ TEST(Parser, ErrorUpdateMissingSet) {
 TEST(Parser, ErrorDeleteMissingFrom) {
     expect_parse_error("DELETE users WHERE id = 1");
 }
+
+// =============================================================================
+// Graph statement tests (GDB-106)
+// =============================================================================
+
+// -- TRAVERSE tests -----------------------------------------------------------
+
+TEST(Parser, TraverseBasic) {
+    auto stmt = parse_one("TRAVERSE follows FROM users(1)");
+    auto* tr = dynamic_cast<TraverseStmt*>(stmt.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->edge_type, "follows");
+    EXPECT_EQ(tr->from_table, "users");
+    EXPECT_EQ(tr->direction, TraverseDirection::OUT);
+    EXPECT_FALSE(tr->max_depth.has_value());
+    EXPECT_EQ(tr->where_expr, nullptr);
+    EXPECT_FALSE(tr->fetch);
+}
+
+TEST(Parser, TraverseDirection) {
+    auto stmt = parse_one("TRAVERSE follows FROM users(1) DIRECTION IN");
+    auto* tr = dynamic_cast<TraverseStmt*>(stmt.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->direction, TraverseDirection::IN);
+}
+
+TEST(Parser, TraverseMaxDepth) {
+    auto stmt = parse_one("TRAVERSE follows FROM users(1) MAX_DEPTH 3");
+    auto* tr = dynamic_cast<TraverseStmt*>(stmt.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->max_depth.value(), 3);
+}
+
+TEST(Parser, TraverseAllOptions) {
+    auto stmt = parse_one(
+        "TRAVERSE knows FROM users(42) DIRECTION BOTH MAX_DEPTH 5 "
+        "WHERE weight > 0.5 FETCH");
+    auto* tr = dynamic_cast<TraverseStmt*>(stmt.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->edge_type, "knows");
+    EXPECT_EQ(tr->direction, TraverseDirection::BOTH);
+    EXPECT_EQ(tr->max_depth.value(), 5);
+    EXPECT_NE(tr->where_expr, nullptr);
+    EXPECT_TRUE(tr->fetch);
+}
+
+// -- SHORTEST PATH tests ------------------------------------------------------
+
+TEST(Parser, ShortestPathBasic) {
+    auto stmt = parse_one(
+        "SHORTEST PATH FROM users(1) TO users(42) VIA follows");
+    auto* sp = dynamic_cast<ShortestPathStmt*>(stmt.get());
+    ASSERT_NE(sp, nullptr);
+    EXPECT_EQ(sp->from_table, "users");
+    EXPECT_EQ(sp->to_table, "users");
+    EXPECT_EQ(sp->edge_type, "follows");
+    EXPECT_EQ(sp->direction, TraverseDirection::OUT);
+    EXPECT_FALSE(sp->max_depth.has_value());
+}
+
+TEST(Parser, ShortestPathWithOptions) {
+    auto stmt = parse_one(
+        "SHORTEST PATH FROM users(1) TO users(99) VIA knows "
+        "DIRECTION BOTH MAX_DEPTH 10");
+    auto* sp = dynamic_cast<ShortestPathStmt*>(stmt.get());
+    ASSERT_NE(sp, nullptr);
+    EXPECT_EQ(sp->direction, TraverseDirection::BOTH);
+    EXPECT_EQ(sp->max_depth.value(), 10);
+}
+
+// -- MATCH tests --------------------------------------------------------------
+
+TEST(Parser, MatchBasic) {
+    auto stmt = parse_one(
+        "MATCH (a:users)-[e:follows]->(b:users) RETURN a.name, b.name");
+    auto* m = dynamic_cast<MatchStmt*>(stmt.get());
+    ASSERT_NE(m, nullptr);
+    ASSERT_EQ(m->pattern.size(), 2u);
+    EXPECT_EQ(m->pattern[0].node.variable, "a");
+    EXPECT_EQ(m->pattern[0].node.label, "users");
+    ASSERT_TRUE(m->pattern[0].outgoing_edge.has_value());
+    EXPECT_EQ(m->pattern[0].outgoing_edge->variable, "e");
+    EXPECT_EQ(m->pattern[0].outgoing_edge->edge_type, "follows");
+    EXPECT_EQ(m->pattern[0].outgoing_edge->direction, TraverseDirection::OUT);
+    EXPECT_EQ(m->pattern[1].node.variable, "b");
+    EXPECT_EQ(m->pattern[1].node.label, "users");
+    EXPECT_FALSE(m->pattern[1].outgoing_edge.has_value());
+    ASSERT_EQ(m->return_items.size(), 2u);
+}
+
+TEST(Parser, MatchWithWhere) {
+    auto stmt = parse_one(
+        "MATCH (a:users)-[e:follows]->(b:users) "
+        "WHERE a.age > 18 RETURN b.name");
+    auto* m = dynamic_cast<MatchStmt*>(stmt.get());
+    ASSERT_NE(m, nullptr);
+    EXPECT_NE(m->where_expr, nullptr);
+    ASSERT_EQ(m->return_items.size(), 1u);
+}
+
+TEST(Parser, MatchIncoming) {
+    auto stmt = parse_one(
+        "MATCH (a:users)<-[e:follows]-(b:users) RETURN a.name");
+    auto* m = dynamic_cast<MatchStmt*>(stmt.get());
+    ASSERT_NE(m, nullptr);
+    ASSERT_TRUE(m->pattern[0].outgoing_edge.has_value());
+    EXPECT_EQ(m->pattern[0].outgoing_edge->direction, TraverseDirection::IN);
+}
+
+TEST(Parser, MatchUndirected) {
+    auto stmt = parse_one(
+        "MATCH (a:users)-[e:knows]-(b:users) RETURN a.name");
+    auto* m = dynamic_cast<MatchStmt*>(stmt.get());
+    ASSERT_NE(m, nullptr);
+    ASSERT_TRUE(m->pattern[0].outgoing_edge.has_value());
+    EXPECT_EQ(m->pattern[0].outgoing_edge->direction, TraverseDirection::BOTH);
+}
+
+TEST(Parser, MatchMultiHop) {
+    auto stmt = parse_one(
+        "MATCH (a:users)-[e1:follows]->(b:users)-[e2:follows]->(c:users) "
+        "RETURN a.name, c.name");
+    auto* m = dynamic_cast<MatchStmt*>(stmt.get());
+    ASSERT_NE(m, nullptr);
+    ASSERT_EQ(m->pattern.size(), 3u);
+    ASSERT_TRUE(m->pattern[0].outgoing_edge.has_value());
+    ASSERT_TRUE(m->pattern[1].outgoing_edge.has_value());
+    EXPECT_FALSE(m->pattern[2].outgoing_edge.has_value());
+}
+
+// -- NEAREST tests ------------------------------------------------------------
+
+TEST(Parser, NearestBasic) {
+    auto stmt = parse_one(
+        "NEAREST 5 FROM products.embedding TO [1.0, 2.0, 3.0]");
+    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    ASSERT_NE(n, nullptr);
+    auto* k = dynamic_cast<LiteralExpr*>(n->k.get());
+    ASSERT_NE(k, nullptr);
+    EXPECT_EQ(k->value, "5");
+    EXPECT_EQ(n->table_name, "products");
+    EXPECT_EQ(n->column_name, "embedding");
+    EXPECT_EQ(n->metric, NearestMetric::COSINE);
+}
+
+TEST(Parser, NearestWithWhere) {
+    auto stmt = parse_one(
+        "NEAREST 10 FROM products.vec TO [1.0, 0.0] WHERE active = TRUE");
+    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    ASSERT_NE(n, nullptr);
+    EXPECT_NE(n->where_expr, nullptr);
+}
+
+TEST(Parser, NearestWithMetric) {
+    auto stmt = parse_one(
+        "NEAREST 5 FROM items.embedding TO [1.0, 2.0] USING L2");
+    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    ASSERT_NE(n, nullptr);
+    EXPECT_EQ(n->metric, NearestMetric::L2);
+}
+
+// =============================================================================
+// TCL statement tests (GDB-106)
+// =============================================================================
+
+TEST(Parser, Begin) {
+    auto stmt = parse_one("BEGIN");
+    EXPECT_NE(dynamic_cast<BeginStmt*>(stmt.get()), nullptr);
+}
+
+TEST(Parser, BeginTransaction) {
+    auto stmt = parse_one("BEGIN TRANSACTION");
+    EXPECT_NE(dynamic_cast<BeginStmt*>(stmt.get()), nullptr);
+}
+
+TEST(Parser, Commit) {
+    auto stmt = parse_one("COMMIT");
+    EXPECT_NE(dynamic_cast<CommitStmt*>(stmt.get()), nullptr);
+}
+
+TEST(Parser, Rollback) {
+    auto stmt = parse_one("ROLLBACK");
+    auto* rb = dynamic_cast<RollbackStmt*>(stmt.get());
+    ASSERT_NE(rb, nullptr);
+    EXPECT_TRUE(rb->savepoint.empty());
+}
+
+TEST(Parser, RollbackToSavepoint) {
+    auto stmt = parse_one("ROLLBACK TO sp1");
+    auto* rb = dynamic_cast<RollbackStmt*>(stmt.get());
+    ASSERT_NE(rb, nullptr);
+    EXPECT_EQ(rb->savepoint, "sp1");
+}
+
+TEST(Parser, Savepoint) {
+    auto stmt = parse_one("SAVEPOINT sp1");
+    auto* sp = dynamic_cast<SavepointStmt*>(stmt.get());
+    ASSERT_NE(sp, nullptr);
+    EXPECT_EQ(sp->name, "sp1");
+}
+
+// =============================================================================
+// Admin statement tests (GDB-106)
+// =============================================================================
+
+TEST(Parser, SetParameter) {
+    auto stmt = parse_one("SET work_mem = 1024");
+    auto* s = dynamic_cast<SetStmt*>(stmt.get());
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(s->parameter, "work_mem");
+    auto* val = dynamic_cast<LiteralExpr*>(s->value.get());
+    ASSERT_NE(val, nullptr);
+    EXPECT_EQ(val->value, "1024");
+}
+
+TEST(Parser, ShowTables) {
+    auto stmt = parse_one("SHOW TABLES");
+    auto* s = dynamic_cast<ShowStmt*>(stmt.get());
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(s->target, ShowTarget::TABLES);
+}
+
+TEST(Parser, ShowColumns) {
+    auto stmt = parse_one("SHOW COLUMNS FROM users");
+    auto* s = dynamic_cast<ShowStmt*>(stmt.get());
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(s->target, ShowTarget::COLUMNS);
+    EXPECT_EQ(s->name, "users");
+}
+
+TEST(Parser, ShowEdgeTypes) {
+    auto stmt = parse_one("SHOW EDGE TYPES");
+    auto* s = dynamic_cast<ShowStmt*>(stmt.get());
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(s->target, ShowTarget::EDGE_TYPES);
+}
+
+TEST(Parser, ShowIndexes) {
+    auto stmt = parse_one("SHOW INDEXES");
+    auto* s = dynamic_cast<ShowStmt*>(stmt.get());
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(s->target, ShowTarget::INDEXES);
+}
+
+TEST(Parser, Explain) {
+    auto stmt = parse_one("EXPLAIN SELECT * FROM users");
+    auto* e = dynamic_cast<ExplainStmt*>(stmt.get());
+    ASSERT_NE(e, nullptr);
+    EXPECT_FALSE(e->analyze);
+    auto* inner = dynamic_cast<SelectStmt*>(e->statement.get());
+    ASSERT_NE(inner, nullptr);
+}
+
+TEST(Parser, ExplainAnalyze) {
+    auto stmt = parse_one("EXPLAIN ANALYZE SELECT * FROM users");
+    auto* e = dynamic_cast<ExplainStmt*>(stmt.get());
+    ASSERT_NE(e, nullptr);
+    EXPECT_TRUE(e->analyze);
+    auto* inner = dynamic_cast<SelectStmt*>(e->statement.get());
+    ASSERT_NE(inner, nullptr);
+}
+
+TEST(Parser, Describe) {
+    auto stmt = parse_one("DESCRIBE users");
+    auto* d = dynamic_cast<DescribeStmt*>(stmt.get());
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->table_name, "users");
+}
+
+TEST(Parser, Reembed) {
+    auto stmt = parse_one("REEMBED TABLE products");
+    auto* r = dynamic_cast<ReembedStmt*>(stmt.get());
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(r->table_name, "products");
+}
+
+TEST(Parser, Vacuum) {
+    auto stmt = parse_one("VACUUM");
+    auto* v = dynamic_cast<VacuumStmt*>(stmt.get());
+    ASSERT_NE(v, nullptr);
+    EXPECT_TRUE(v->table_name.empty());
+}
+
+TEST(Parser, VacuumTable) {
+    auto stmt = parse_one("VACUUM users");
+    auto* v = dynamic_cast<VacuumStmt*>(stmt.get());
+    ASSERT_NE(v, nullptr);
+    EXPECT_EQ(v->table_name, "users");
+}
+
+TEST(Parser, Analyze) {
+    auto stmt = parse_one("ANALYZE");
+    auto* a = dynamic_cast<AnalyzeStmt*>(stmt.get());
+    ASSERT_NE(a, nullptr);
+    EXPECT_TRUE(a->table_name.empty());
+}
+
+TEST(Parser, AnalyzeTable) {
+    auto stmt = parse_one("ANALYZE users");
+    auto* a = dynamic_cast<AnalyzeStmt*>(stmt.get());
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(a->table_name, "users");
+}

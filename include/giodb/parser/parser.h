@@ -94,6 +94,30 @@ private:
     [[nodiscard]] Result<SelectItem> parse_select_item();
     [[nodiscard]] Result<TableRef> parse_table_ref();
 
+    // -- Graph / Vector -----------------------------------------------------
+
+    [[nodiscard]] Result<StmtPtr> parse_traverse();
+    [[nodiscard]] Result<StmtPtr> parse_nearest();
+    [[nodiscard]] Result<StmtPtr> parse_match();
+    [[nodiscard]] Result<StmtPtr> parse_shortest_path();
+
+    // -- TCL ----------------------------------------------------------------
+
+    [[nodiscard]] Result<StmtPtr> parse_begin();
+    [[nodiscard]] Result<StmtPtr> parse_commit();
+    [[nodiscard]] Result<StmtPtr> parse_rollback();
+    [[nodiscard]] Result<StmtPtr> parse_savepoint();
+
+    // -- Admin --------------------------------------------------------------
+
+    [[nodiscard]] Result<StmtPtr> parse_set_stmt();
+    [[nodiscard]] Result<StmtPtr> parse_show();
+    [[nodiscard]] Result<StmtPtr> parse_explain();
+    [[nodiscard]] Result<StmtPtr> parse_describe();
+    [[nodiscard]] Result<StmtPtr> parse_reembed();
+    [[nodiscard]] Result<StmtPtr> parse_vacuum();
+    [[nodiscard]] Result<StmtPtr> parse_analyze_stmt();
+
     // -- Expression parsing -------------------------------------------------
 
     [[nodiscard]] Result<ExprPtr> parse_expression();

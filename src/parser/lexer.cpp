@@ -15,6 +15,7 @@ const std::unordered_map<std::string, TokenType>& keyword_map() {
         // SQL keywords
         {"ALL", TokenType::ALL},
         {"ALTER", TokenType::ALTER},
+        {"ANALYZE", TokenType::ANALYZE},
         {"AND", TokenType::AND},
         {"AS", TokenType::AS},
         {"ASC", TokenType::ASC},
@@ -40,6 +41,7 @@ const std::unordered_map<std::string, TokenType>& keyword_map() {
         {"DEFAULT", TokenType::DEFAULT},
         {"DELETE", TokenType::DELETE},
         {"DESC", TokenType::DESC},
+        {"DESCRIBE", TokenType::DESCRIBE},
         {"DIRECTION", TokenType::DIRECTION},
         {"DISTINCT", TokenType::DISTINCT},
         {"DOUBLE", TokenType::DOUBLE},
@@ -50,6 +52,7 @@ const std::unordered_map<std::string, TokenType>& keyword_map() {
         {"END", TokenType::END},
         {"EXCEPT", TokenType::EXCEPT},
         {"EXISTS", TokenType::EXISTS},
+        {"EXPLAIN", TokenType::EXPLAIN},
         {"FALSE", TokenType::FALSE_KW},
         {"FETCH", TokenType::FETCH},
         {"FLOAT", TokenType::FLOAT},
@@ -95,13 +98,16 @@ const std::unordered_map<std::string, TokenType>& keyword_map() {
         {"RECURSIVE", TokenType::RECURSIVE},
         {"REEMBED", TokenType::REEMBED},
         {"REFERENCES", TokenType::REFERENCES},
+        {"RETURN", TokenType::RETURN},
         {"RESTRICT", TokenType::RESTRICT},
         {"RETURNING", TokenType::RETURNING},
         {"RIGHT", TokenType::RIGHT},
         {"ROLLBACK", TokenType::ROLLBACK},
+        {"SAVEPOINT", TokenType::SAVEPOINT},
         {"SELECT", TokenType::SELECT},
         {"SET", TokenType::SET},
         {"SHORTEST", TokenType::SHORTEST},
+        {"SHOW", TokenType::SHOW},
         {"SMALLINT", TokenType::SMALLINT},
         {"SUM", TokenType::SUM},
         {"TABLE", TokenType::TABLE},
@@ -119,6 +125,7 @@ const std::unordered_map<std::string, TokenType>& keyword_map() {
         {"UNLINK", TokenType::UNLINK},
         {"UPDATE", TokenType::UPDATE},
         {"UUID", TokenType::UUID_KW},
+        {"VACUUM", TokenType::VACUUM},
         {"VALUES", TokenType::VALUES},
         {"VARCHAR", TokenType::VARCHAR},
         {"VIA", TokenType::VIA},
@@ -330,9 +337,12 @@ Result<Token> Lexer::scan_token() {
         return make_token(TokenType::PIPE_PIPE);
     }
 
-    if (c == ':' && !at_end() && peek() == ':') {
-        advance();
-        return make_token(TokenType::COLON_COLON);
+    if (c == ':') {
+        if (!at_end() && peek() == ':') {
+            advance();
+            return make_token(TokenType::COLON_COLON);
+        }
+        return make_token(TokenType::COLON);
     }
 
     // String literal.
