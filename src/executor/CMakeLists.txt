@@ -3,6 +3,9 @@ add_library(giodb_executor STATIC
     expr_evaluator.cpp
     seq_scan.cpp
     filter.cpp
+    project.cpp
+    sort.cpp
+    limit.cpp
 )
 
 target_include_directories(giodb_executor PUBLIC ${PROJECT_SOURCE_DIR}/include)
