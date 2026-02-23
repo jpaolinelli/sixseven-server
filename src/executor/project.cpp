@@ -7,9 +7,10 @@ namespace giodb {
 ProjectOperator::ProjectOperator(std::unique_ptr<Iterator> child,
                                  std::vector<ProjectionExpr> projections,
                                  OutputSchema output_schema,
-                                 const BoundStatement& bound)
+                                 const BoundStatement& bound,
+                                 const SubqueryContext* subquery_ctx)
     : child_(std::move(child)), projections_(std::move(projections)),
-      schema_(std::move(output_schema)), bound_(bound) {}
+      schema_(std::move(output_schema)), bound_(bound), subquery_ctx_(subquery_ctx) {}
 
 Result<void> ProjectOperator::open() {
     return child_->open();
@@ -30,7 +31,7 @@ Result<std::optional<Tuple>> ProjectOperator::next() {
     projected.reserve(projections_.size());
 
     for (const auto& proj : projections_) {
-        auto val = evaluate_expr(*proj.expr, input, child_->output_schema(), bound_);
+        auto val = evaluate_expr(*proj.expr, input, child_->output_schema(), bound_, subquery_ctx_);
         if (!val) {
             return make_error(val.error().code, val.error().message);
         }

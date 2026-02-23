@@ -11,6 +11,9 @@
 
 namespace giodb {
 
+// Forward declaration.
+struct SubqueryContext;
+
 /// A single projection expression: an Expr* to evaluate plus the output column alias.
 struct ProjectionExpr {
     const Expr* expr = nullptr;
@@ -30,7 +33,8 @@ public:
     ProjectOperator(std::unique_ptr<Iterator> child,
                     std::vector<ProjectionExpr> projections,
                     OutputSchema output_schema,
-                    const BoundStatement& bound);
+                    const BoundStatement& bound,
+                    const SubqueryContext* subquery_ctx = nullptr);
 
     Result<void> open() override;
     Result<std::optional<Tuple>> next() override;
@@ -42,6 +46,7 @@ private:
     std::vector<ProjectionExpr> projections_;
     OutputSchema schema_;
     const BoundStatement& bound_;
+    const SubqueryContext* subquery_ctx_ = nullptr;
 };
 
 } // namespace giodb

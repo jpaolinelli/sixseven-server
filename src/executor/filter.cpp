@@ -6,8 +6,9 @@ namespace giodb {
 
 FilterOperator::FilterOperator(std::unique_ptr<Iterator> child,
                                const Expr& predicate,
-                               const BoundStatement& bound)
-    : child_(std::move(child)), predicate_(predicate), bound_(bound) {}
+                               const BoundStatement& bound,
+                               const SubqueryContext* subquery_ctx)
+    : child_(std::move(child)), predicate_(predicate), bound_(bound), subquery_ctx_(subquery_ctx) {}
 
 Result<void> FilterOperator::open() {
     return child_->open();
@@ -23,7 +24,8 @@ Result<std::optional<Tuple>> FilterOperator::next() {
             return row; // Child exhausted.
         }
 
-        auto pass = evaluate_predicate(predicate_, row->value(), child_->output_schema(), bound_);
+        auto pass = evaluate_predicate(
+            predicate_, row->value(), child_->output_schema(), bound_, subquery_ctx_);
         if (!pass) {
             return make_error(pass.error().code, pass.error().message);
         }

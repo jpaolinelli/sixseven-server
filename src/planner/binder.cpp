@@ -255,9 +255,9 @@ Result<ExprType> Binder::bind_expr(const Expr& expr, Scope& scope, BoundStatemen
     } else if (auto* e = dynamic_cast<const LikeExpr*>(&expr)) {
         result = bind_like(*e, scope, bound);
     } else if (auto* e = dynamic_cast<const ExistsExpr*>(&expr)) {
-        result = bind_exists(*e, bound);
+        result = bind_exists(*e, scope, bound);
     } else if (auto* e = dynamic_cast<const SubqueryExpr*>(&expr)) {
-        result = bind_subquery(*e, bound);
+        result = bind_subquery(*e, scope, bound);
     } else if (auto* e = dynamic_cast<const ArrayExpr*>(&expr)) {
         result = bind_array(*e, scope, bound);
     }
@@ -541,10 +541,17 @@ Result<ExprType> Binder::bind_in(const InExpr& expr, Scope& scope, BoundStatemen
     bool any_agg = lhs->is_aggregate;
 
     if (expr.subquery) {
-        // IN (SELECT ...) — bind the subquery.
-        auto sub = bind(*expr.subquery);
-        if (!sub) {
-            return tl::unexpected(sub.error());
+        // IN (SELECT ...) — bind the subquery with parent scope for correlation.
+        if (auto* sub_sel = dynamic_cast<const SelectStmt*>(expr.subquery.get())) {
+            auto sub = bind_select(*sub_sel, &scope);
+            if (!sub) {
+                return tl::unexpected(sub.error());
+            }
+        } else {
+            auto sub = bind(*expr.subquery);
+            if (!sub) {
+                return tl::unexpected(sub.error());
+            }
         }
     } else {
         for (auto& val : expr.values) {
@@ -615,11 +622,19 @@ Result<ExprType> Binder::bind_like(const LikeExpr& expr, Scope& scope, BoundStat
     return ok(et);
 }
 
-Result<ExprType> Binder::bind_exists(const ExistsExpr& expr, BoundStatement& /*bound*/) {
+Result<ExprType>
+Binder::bind_exists(const ExistsExpr& expr, Scope& scope, BoundStatement& /*bound*/) {
     if (expr.subquery) {
-        auto sub = bind(*expr.subquery);
-        if (!sub) {
-            return tl::unexpected(sub.error());
+        if (auto* sub_sel = dynamic_cast<const SelectStmt*>(expr.subquery.get())) {
+            auto sub = bind_select(*sub_sel, &scope);
+            if (!sub) {
+                return tl::unexpected(sub.error());
+            }
+        } else {
+            auto sub = bind(*expr.subquery);
+            if (!sub) {
+                return tl::unexpected(sub.error());
+            }
         }
     }
 
@@ -629,12 +644,18 @@ Result<ExprType> Binder::bind_exists(const ExistsExpr& expr, BoundStatement& /*b
     return ok(et);
 }
 
-Result<ExprType> Binder::bind_subquery(const SubqueryExpr& expr, BoundStatement& /*bound*/) {
+Result<ExprType>
+Binder::bind_subquery(const SubqueryExpr& expr, Scope& scope, BoundStatement& /*bound*/) {
     if (!expr.subquery) {
         return make_error(StatusCode::INTERNAL_ERROR, "subquery expression has no query");
     }
 
-    auto sub = bind(*expr.subquery);
+    Result<BoundStatement> sub = make_error(StatusCode::INTERNAL_ERROR, "unexpected");
+    if (auto* sub_sel = dynamic_cast<const SelectStmt*>(expr.subquery.get())) {
+        sub = bind_select(*sub_sel, &scope);
+    } else {
+        sub = bind(*expr.subquery);
+    }
     if (!sub) {
         return tl::unexpected(sub.error());
     }
@@ -677,8 +698,8 @@ Result<Scope>
 Binder::build_from_scope(const SelectStmt& stmt, Scope* parent, BoundStatement& bound) {
     Scope scope(parent);
 
-    // CTE references — bind each CTE and store bound results.
-    std::unordered_map<std::string, BoundStatement> cte_results;
+    // CTE references — bind each CTE and store in binder-level map
+    // so that nested subquery bindings can also access them.
     for (auto& cte : stmt.ctes) {
         if (!cte.query) {
             continue;
@@ -687,7 +708,7 @@ Binder::build_from_scope(const SelectStmt& stmt, Scope* parent, BoundStatement& 
         if (!sub) {
             return tl::unexpected(sub.error());
         }
-        cte_results.emplace(to_upper(cte.name), std::move(*sub));
+        cte_results_.emplace(to_upper(cte.name), std::move(*sub));
     }
 
     // FROM tables — check CTEs first, then catalog.
@@ -708,8 +729,8 @@ Binder::build_from_scope(const SelectStmt& stmt, Scope* parent, BoundStatement& 
             scope.add_table(std::move(st));
         } else {
             // Check if this is a CTE reference.
-            auto cte_it = cte_results.find(to_upper(tref.name));
-            if (cte_it != cte_results.end()) {
+            auto cte_it = cte_results_.find(to_upper(tref.name));
+            if (cte_it != cte_results_.end()) {
                 ScopeTable st;
                 st.table_id = 0;
                 std::string alias = tref.alias.empty() ? tref.name : tref.alias;
@@ -749,13 +770,27 @@ Binder::build_from_scope(const SelectStmt& stmt, Scope* parent, BoundStatement& 
             }
             scope.add_table(std::move(st));
         } else {
-            auto schema = catalog_.get_table(jtref.name);
-            if (!schema) {
-                return tl::unexpected(schema.error());
+            // Check if this is a CTE reference.
+            auto cte_it = cte_results_.find(to_upper(jtref.name));
+            if (cte_it != cte_results_.end()) {
+                ScopeTable st;
+                st.table_id = 0;
+                std::string alias = jtref.alias.empty() ? jtref.name : jtref.alias;
+                st.alias = alias;
+                st.columns = cte_it->second.output_columns;
+                for (auto& col : st.columns) {
+                    col.table_name = alias;
+                }
+                scope.add_table(std::move(st));
+            } else {
+                auto schema = catalog_.get_table(jtref.name);
+                if (!schema) {
+                    return tl::unexpected(schema.error());
+                }
+                std::string alias = jtref.alias.empty() ? jtref.name : jtref.alias;
+                scope.add_table(make_scope_table(*schema, alias));
+                bound.referenced_tables.push_back(schema->table_id);
             }
-            std::string alias = jtref.alias.empty() ? jtref.name : jtref.alias;
-            scope.add_table(make_scope_table(*schema, alias));
-            bound.referenced_tables.push_back(schema->table_id);
         }
     }
 
@@ -883,11 +918,15 @@ Binder::bind_returning(const std::vector<SelectItem>& items, Scope& scope, Bound
 }
 
 Result<BoundStatement> Binder::bind_select(const SelectStmt& stmt) {
+    return bind_select(stmt, nullptr);
+}
+
+Result<BoundStatement> Binder::bind_select(const SelectStmt& stmt, Scope* parent_scope) {
     BoundStatement bound;
     bound.stmt = &stmt;
 
     // 1. Build FROM scope (includes CTEs).
-    auto scope_result = build_from_scope(stmt, nullptr, bound);
+    auto scope_result = build_from_scope(stmt, parent_scope, bound);
     if (!scope_result) {
         return tl::unexpected(scope_result.error());
     }

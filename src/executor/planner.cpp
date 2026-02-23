@@ -9,6 +9,7 @@
 #include "giodb/executor/project.h"
 #include "giodb/executor/seq_scan.h"
 #include "giodb/executor/sort.h"
+#include "giodb/executor/subquery_source.h"
 #include "giodb/executor/update.h"
 #include "giodb/planner/type_resolver.h"
 
@@ -200,7 +201,7 @@ ExprPtr rewrite_expr(const Expr& expr,
 } // anonymous namespace
 
 Planner::Planner(const Catalog& catalog, StorageManager& storage)
-    : catalog_(catalog), storage_(storage) {}
+    : catalog_(catalog), storage_(storage), subquery_ctx_{catalog_, storage_} {}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -248,18 +249,70 @@ OutputSchema Planner::build_table_output_schema(const TableSchema& ts,
 }
 
 // ---------------------------------------------------------------------------
-// SELECT
+// Plan FROM source: table, CTE, or derived table
 // ---------------------------------------------------------------------------
 
-Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
-                                                       const BoundStatement& bound,
-                                                       std::vector<ExprPtr>& owned_exprs) {
-    // -- 1. Resolve the source table -----------------------------------------
-    if (stmt.from.empty()) {
-        return make_error(StatusCode::NOT_IMPLEMENTED, "SELECT without FROM is not yet supported");
+Result<Planner::PlannedSource>
+Planner::plan_from_source(const TableRef& table_ref,
+                          const std::string& alias,
+                          const std::unordered_map<std::string, const SelectStmt*>& cte_map,
+                          const BoundStatement& bound,
+                          std::vector<ExprPtr>& owned_exprs) {
+    // Case 1: Derived table (FROM (SELECT ...) AS sub).
+    if (table_ref.subquery) {
+        auto* sub_sel = dynamic_cast<const SelectStmt*>(table_ref.subquery.get());
+        if (!sub_sel) {
+            return make_error(StatusCode::INTERNAL_ERROR, "FROM subquery is not a SELECT");
+        }
+
+        Binder binder(catalog_);
+        auto sub_bound = binder.bind(*sub_sel);
+        if (!sub_bound) {
+            return make_error(sub_bound.error().code, sub_bound.error().message);
+        }
+
+        auto sub_iter = plan_select(*sub_sel, *sub_bound, owned_exprs);
+        if (!sub_iter) {
+            return make_error(sub_iter.error().code, sub_iter.error().message);
+        }
+
+        // Build output schema with the alias applied.
+        std::vector<OutputColumn> cols;
+        for (const auto& rc : sub_bound->output_columns) {
+            cols.push_back({alias, rc.column_name, rc.type_id, rc.nullable, 0});
+        }
+        auto schema = OutputSchema(std::move(cols));
+        auto source_op = std::make_unique<SubquerySourceOperator>(std::move(*sub_iter), schema);
+        return ok(PlannedSource{std::move(source_op), std::move(schema)});
     }
 
-    const auto& table_ref = stmt.from[0];
+    // Case 2: CTE reference (WITH name AS (...) SELECT ... FROM name).
+    auto cte_it = cte_map.find(to_upper(table_ref.name));
+    if (cte_it != cte_map.end()) {
+        const auto* cte_sel = cte_it->second;
+
+        Binder binder(catalog_);
+        auto sub_bound = binder.bind(*cte_sel);
+        if (!sub_bound) {
+            return make_error(sub_bound.error().code, sub_bound.error().message);
+        }
+
+        auto sub_iter = plan_select(*cte_sel, *sub_bound, owned_exprs);
+        if (!sub_iter) {
+            return make_error(sub_iter.error().code, sub_iter.error().message);
+        }
+
+        // Build output schema with the alias applied.
+        std::vector<OutputColumn> cols;
+        for (const auto& rc : sub_bound->output_columns) {
+            cols.push_back({alias, rc.column_name, rc.type_id, rc.nullable, 0});
+        }
+        auto schema = OutputSchema(std::move(cols));
+        auto source_op = std::make_unique<SubquerySourceOperator>(std::move(*sub_iter), schema);
+        return ok(PlannedSource{std::move(source_op), std::move(schema)});
+    }
+
+    // Case 3: Physical table.
     auto table_schema = catalog_.get_table(table_ref.name);
     if (!table_schema) {
         return make_error(table_schema.error().code, table_schema.error().message);
@@ -271,49 +324,348 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
     }
     auto* storage = *ts;
 
-    // Use alias if provided.
-    const auto& alias = table_ref.alias.empty() ? table_ref.name : table_ref.alias;
     auto table_output = build_table_output_schema(*table_schema, alias);
+    auto scan = std::make_unique<SeqScanOperator>(
+        *storage->heap, storage->storage_schema, table_output, nullptr, &bound);
+
+    return ok(PlannedSource{std::move(scan), std::move(table_output)});
+}
+
+// ---------------------------------------------------------------------------
+// Subquery predicate rewriting
+// ---------------------------------------------------------------------------
+
+Result<const Expr*> Planner::rewrite_subquery_predicates(
+    const Expr& where_expr,
+    std::unique_ptr<Iterator>& child,
+    const BoundStatement& bound,
+    const std::unordered_map<std::string, const SelectStmt*>& cte_map,
+    std::vector<ExprPtr>& owned_exprs) {
+    // --- EXISTS (subquery) → SEMI join ---
+    if (auto* exists = dynamic_cast<const ExistsExpr*>(&where_expr)) {
+        auto* sub_sel = dynamic_cast<const SelectStmt*>(exists->subquery.get());
+        if (sub_sel && !sub_sel->from.empty()) {
+            // Plan the inner query's FROM source as the right side.
+            const auto& inner_ref = sub_sel->from[0];
+            const auto& inner_alias = inner_ref.alias.empty() ? inner_ref.name : inner_ref.alias;
+
+            auto right_source =
+                plan_from_source(inner_ref, inner_alias, cte_map, bound, owned_exprs);
+            if (!right_source) {
+                return make_error(right_source.error().code, right_source.error().message);
+            }
+
+            // Build combined schema: left + right.
+            const auto& left_schema = child->output_schema();
+            const auto& right_schema = right_source->schema;
+
+            std::vector<OutputColumn> combined_cols;
+            combined_cols.reserve(left_schema.column_count() + right_schema.column_count());
+            for (size_t i = 0; i < left_schema.column_count(); ++i) {
+                combined_cols.push_back(left_schema.column(i));
+            }
+            for (size_t i = 0; i < right_schema.column_count(); ++i) {
+                combined_cols.push_back(right_schema.column(i));
+            }
+            auto combined = OutputSchema(std::move(combined_cols));
+
+            // Use the inner query's WHERE as the join ON condition.
+            const Expr* on_expr = sub_sel->where_expr ? sub_sel->where_expr.get() : nullptr;
+
+            child = std::make_unique<NestedLoopJoinOperator>(std::move(child),
+                                                             std::move(right_source->iter),
+                                                             JoinType::SEMI,
+                                                             on_expr,
+                                                             bound,
+                                                             std::move(combined));
+            return ok(static_cast<const Expr*>(nullptr)); // Consumed the predicate.
+        }
+    }
+
+    // --- NOT EXISTS (subquery) → ANTI join ---
+    // NOT EXISTS is represented as UnaryExpr(NOT, ExistsExpr).
+    if (auto* unary = dynamic_cast<const UnaryExpr*>(&where_expr)) {
+        if (unary->op == UnaryOp::NOT) {
+            if (auto* exists = dynamic_cast<const ExistsExpr*>(unary->operand.get())) {
+                auto* sub_sel = dynamic_cast<const SelectStmt*>(exists->subquery.get());
+                if (sub_sel && !sub_sel->from.empty()) {
+                    const auto& inner_ref = sub_sel->from[0];
+                    const auto& inner_alias =
+                        inner_ref.alias.empty() ? inner_ref.name : inner_ref.alias;
+
+                    auto right_source =
+                        plan_from_source(inner_ref, inner_alias, cte_map, bound, owned_exprs);
+                    if (!right_source) {
+                        return make_error(right_source.error().code, right_source.error().message);
+                    }
+
+                    const auto& left_schema = child->output_schema();
+                    const auto& right_schema = right_source->schema;
+
+                    std::vector<OutputColumn> combined_cols;
+                    combined_cols.reserve(left_schema.column_count() + right_schema.column_count());
+                    for (size_t i = 0; i < left_schema.column_count(); ++i) {
+                        combined_cols.push_back(left_schema.column(i));
+                    }
+                    for (size_t i = 0; i < right_schema.column_count(); ++i) {
+                        combined_cols.push_back(right_schema.column(i));
+                    }
+                    auto combined = OutputSchema(std::move(combined_cols));
+
+                    const Expr* on_expr = sub_sel->where_expr ? sub_sel->where_expr.get() : nullptr;
+
+                    child = std::make_unique<NestedLoopJoinOperator>(std::move(child),
+                                                                     std::move(right_source->iter),
+                                                                     JoinType::ANTI,
+                                                                     on_expr,
+                                                                     bound,
+                                                                     std::move(combined));
+                    return ok(static_cast<const Expr*>(nullptr));
+                }
+            }
+        }
+    }
+
+    // --- IN (subquery) → SEMI join ---
+    if (auto* in_expr = dynamic_cast<const InExpr*>(&where_expr)) {
+        if (in_expr->subquery) {
+            auto* sub_sel = dynamic_cast<const SelectStmt*>(in_expr->subquery.get());
+            if (sub_sel && !sub_sel->from.empty()) {
+                // Plan the entire subquery (not just the FROM table), so that
+                // any filters, aggregations, etc. inside the subquery are
+                // correctly applied.
+                Binder binder(catalog_);
+                auto sub_bound = binder.bind(*sub_sel);
+                if (!sub_bound) {
+                    return make_error(sub_bound.error().code, sub_bound.error().message);
+                }
+
+                auto sub_iter = plan_select(*sub_sel, *sub_bound, owned_exprs);
+                if (!sub_iter) {
+                    return make_error(sub_iter.error().code, sub_iter.error().message);
+                }
+
+                // Build output schema for the materialised subquery.
+                // Use a synthetic alias to avoid name collisions.
+                std::string sub_alias = "__in_sub__";
+                std::vector<OutputColumn> sub_cols;
+                for (const auto& rc : sub_bound->output_columns) {
+                    sub_cols.push_back({sub_alias, rc.column_name, rc.type_id, rc.nullable, 0});
+                }
+                auto sub_schema = OutputSchema(std::move(sub_cols));
+                auto sub_source =
+                    std::make_unique<SubquerySourceOperator>(std::move(*sub_iter), sub_schema);
+
+                // Build combined schema.
+                const auto& left_schema = child->output_schema();
+
+                std::vector<OutputColumn> combined_cols;
+                combined_cols.reserve(left_schema.column_count() + sub_schema.column_count());
+                for (size_t i = 0; i < left_schema.column_count(); ++i) {
+                    combined_cols.push_back(left_schema.column(i));
+                }
+                for (size_t i = 0; i < sub_schema.column_count(); ++i) {
+                    combined_cols.push_back(sub_schema.column(i));
+                }
+                auto combined = OutputSchema(std::move(combined_cols));
+
+                // Synthesise the join ON condition: outer_expr = subquery_result_col.
+                // Build: ColumnRef(sub_alias, first_output_col) for the right side.
+                auto rhs_col = std::make_unique<ColumnRefExpr>();
+                rhs_col->table = sub_alias;
+                rhs_col->column = sub_bound->output_columns[0].column_name;
+
+                auto eq = std::make_unique<BinaryExpr>();
+                eq->op = BinaryOp::EQUAL;
+                // Clone the left-hand side of the IN expression.
+                if (auto* lhs_col = dynamic_cast<const ColumnRefExpr*>(in_expr->expr.get())) {
+                    auto lhs = std::make_unique<ColumnRefExpr>();
+                    lhs->table = lhs_col->table;
+                    lhs->column = lhs_col->column;
+                    eq->lhs = std::move(lhs);
+                } else {
+                    // For non-column expressions, we still create the equality.
+                    // Use the original expression pointer — it outlives the plan.
+                    // We need to wrap it in an owned clone.
+                    auto lhs = std::make_unique<ColumnRefExpr>();
+                    lhs->column = "__in_lhs__";
+                    eq->lhs = std::move(lhs);
+                    // Fallback: can't rewrite non-column IN expressions easily.
+                    // Return the expression as-is for the filter fallback.
+                    return ok(static_cast<const Expr*>(&where_expr));
+                }
+                eq->rhs = std::move(rhs_col);
+
+                const Expr* on_ptr = eq.get();
+                owned_exprs.push_back(std::move(eq));
+
+                JoinType jtype = in_expr->negated ? JoinType::ANTI : JoinType::SEMI;
+
+                child = std::make_unique<NestedLoopJoinOperator>(std::move(child),
+                                                                 std::move(sub_source),
+                                                                 jtype,
+                                                                 on_ptr,
+                                                                 bound,
+                                                                 std::move(combined));
+                return ok(static_cast<const Expr*>(nullptr));
+            }
+        }
+    }
+
+    // --- AND: split and try to rewrite each side ---
+    if (auto* bin = dynamic_cast<const BinaryExpr*>(&where_expr)) {
+        if (bin->op == BinaryOp::AND) {
+            auto left_result =
+                rewrite_subquery_predicates(*bin->lhs, child, bound, cte_map, owned_exprs);
+            if (!left_result) {
+                return left_result;
+            }
+            auto right_result =
+                rewrite_subquery_predicates(*bin->rhs, child, bound, cte_map, owned_exprs);
+            if (!right_result) {
+                return right_result;
+            }
+
+            const Expr* left_remaining = *left_result;
+            const Expr* right_remaining = *right_result;
+
+            if (!left_remaining && !right_remaining) {
+                return ok(static_cast<const Expr*>(nullptr));
+            }
+            if (!left_remaining) {
+                return ok(right_remaining);
+            }
+            if (!right_remaining) {
+                return ok(left_remaining);
+            }
+
+            // Both sides have remaining conditions — recombine with AND.
+            // We need to return the original expression since both sub-parts
+            // are still the original AST nodes connected by the AND.
+            return ok(static_cast<const Expr*>(&where_expr));
+        }
+    }
+
+    // No subquery found — return the expression as-is for filter.
+    return ok(static_cast<const Expr*>(&where_expr));
+}
+
+// ---------------------------------------------------------------------------
+// SELECT
+// ---------------------------------------------------------------------------
+
+Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
+                                                       const BoundStatement& bound,
+                                                       std::vector<ExprPtr>& owned_exprs) {
+    // -- 0. Build CTE map -------------------------------------------------------
+    std::unordered_map<std::string, const SelectStmt*> cte_map;
+    for (const auto& cte : stmt.ctes) {
+        if (cte.query) {
+            auto* cte_sel = dynamic_cast<const SelectStmt*>(cte.query.get());
+            if (cte_sel) {
+                cte_map[to_upper(cte.name)] = cte_sel;
+            }
+        }
+    }
+
+    // -- 1. Resolve the source table/CTE/subquery --------------------------------
+    if (stmt.from.empty()) {
+        return make_error(StatusCode::NOT_IMPLEMENTED, "SELECT without FROM is not yet supported");
+    }
+
+    const auto& table_ref = stmt.from[0];
+    const auto& alias = table_ref.alias.empty() ? table_ref.name : table_ref.alias;
+
+    auto source = plan_from_source(table_ref, alias, cte_map, bound, owned_exprs);
+    if (!source) {
+        return make_error(source.error().code, source.error().message);
+    }
 
     const bool has_joins = !stmt.joins.empty();
 
-    // -- 2. SeqScan -----------------------------------------------------------
-    // When joins are present, don't push WHERE into the scan (it may reference
-    // columns from join tables). Instead apply WHERE after joins as a filter.
-    const Expr* scan_predicate = (!has_joins && stmt.where_expr) ? stmt.where_expr.get() : nullptr;
+    // -- 2. Optionally push WHERE into scan (only for physical tables with no joins).
+    // For subquery/CTE sources or when joins are present, don't push WHERE.
+    bool pushed_where = false;
+    if (!has_joins && stmt.where_expr && !table_ref.subquery &&
+        cte_map.find(to_upper(table_ref.name)) == cte_map.end()) {
+        // Check if WHERE contains subquery predicates.
+        bool has_subquery_predicate = false;
+        {
+            const auto* w = stmt.where_expr.get();
+            if (dynamic_cast<const ExistsExpr*>(w) || dynamic_cast<const SubqueryExpr*>(w)) {
+                has_subquery_predicate = true;
+            }
+            if (auto* un = dynamic_cast<const UnaryExpr*>(w)) {
+                if (un->op == UnaryOp::NOT && dynamic_cast<const ExistsExpr*>(un->operand.get())) {
+                    has_subquery_predicate = true;
+                }
+            }
+            if (auto* in = dynamic_cast<const InExpr*>(w)) {
+                if (in->subquery) {
+                    has_subquery_predicate = true;
+                }
+            }
+            // Check in AND branches.
+            if (auto* bin = dynamic_cast<const BinaryExpr*>(w)) {
+                if (bin->op == BinaryOp::AND) {
+                    // If either side has subquery, don't push.
+                    auto check_sub = [](const Expr* e) {
+                        if (dynamic_cast<const ExistsExpr*>(e))
+                            return true;
+                        if (auto* u = dynamic_cast<const UnaryExpr*>(e)) {
+                            if (u->op == UnaryOp::NOT &&
+                                dynamic_cast<const ExistsExpr*>(u->operand.get()))
+                                return true;
+                        }
+                        if (auto* ie = dynamic_cast<const InExpr*>(e)) {
+                            if (ie->subquery)
+                                return true;
+                        }
+                        return false;
+                    };
+                    if (check_sub(bin->lhs.get()) || check_sub(bin->rhs.get())) {
+                        has_subquery_predicate = true;
+                    }
+                }
+            }
+        }
 
-    auto scan = std::make_unique<SeqScanOperator>(
-        *storage->heap, storage->storage_schema, table_output, scan_predicate, &bound);
+        if (!has_subquery_predicate) {
+            // Re-create the scan with the predicate pushed down.
+            auto table_schema = catalog_.get_table(table_ref.name);
+            if (table_schema) {
+                auto ts = storage_.get_table_storage(table_schema->table_id);
+                if (ts) {
+                    auto* storage = *ts;
+                    auto table_output = build_table_output_schema(*table_schema, alias);
+                    source->iter = std::make_unique<SeqScanOperator>(*storage->heap,
+                                                                     storage->storage_schema,
+                                                                     table_output,
+                                                                     stmt.where_expr.get(),
+                                                                     &bound);
+                    source->schema = std::move(table_output);
+                    pushed_where = true;
+                }
+            }
+        }
+    }
 
-    std::unique_ptr<Iterator> child = std::move(scan);
+    std::unique_ptr<Iterator> child = std::move(source->iter);
 
     // -- 2b. JOIN operators ---------------------------------------------------
     if (has_joins) {
         for (const auto& join_clause : stmt.joins) {
             const auto& jtref = join_clause.table;
-            auto join_schema = catalog_.get_table(jtref.name);
-            if (!join_schema) {
-                return make_error(join_schema.error().code, join_schema.error().message);
-            }
-
-            auto jts = storage_.get_table_storage(join_schema->table_id);
-            if (!jts) {
-                return make_error(jts.error().code, jts.error().message);
-            }
-            auto* join_storage = *jts;
-
             const auto& join_alias = jtref.alias.empty() ? jtref.name : jtref.alias;
-            auto join_table_output = build_table_output_schema(*join_schema, join_alias);
 
-            auto join_scan = std::make_unique<SeqScanOperator>(*join_storage->heap,
-                                                               join_storage->storage_schema,
-                                                               join_table_output,
-                                                               nullptr,
-                                                               &bound);
+            auto join_source = plan_from_source(jtref, join_alias, cte_map, bound, owned_exprs);
+            if (!join_source) {
+                return make_error(join_source.error().code, join_source.error().message);
+            }
 
             // Build combined output schema: left columns + right columns.
             const auto& left_schema = child->output_schema();
-            const auto& right_schema_ref = join_scan->output_schema();
+            const auto& right_schema_ref = join_source->schema;
 
             std::vector<OutputColumn> combined_cols;
             combined_cols.reserve(left_schema.column_count() + right_schema_ref.column_count());
@@ -328,17 +680,29 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
             const Expr* on_expr = join_clause.on_expr ? join_clause.on_expr.get() : nullptr;
 
             child = std::make_unique<NestedLoopJoinOperator>(std::move(child),
-                                                             std::move(join_scan),
+                                                             std::move(join_source->iter),
                                                              join_clause.type,
                                                              on_expr,
                                                              bound,
                                                              std::move(combined));
         }
+    }
 
-        // Apply WHERE as a filter after all joins.
-        if (stmt.where_expr) {
-            child = std::make_unique<FilterOperator>(std::move(child), *stmt.where_expr, bound);
+    // -- 2c. Subquery predicate rewriting (EXISTS/NOT EXISTS/IN) ----------------
+    const Expr* remaining_where = nullptr;
+    if (stmt.where_expr && !pushed_where) {
+        auto rewrite_result =
+            rewrite_subquery_predicates(*stmt.where_expr, child, bound, cte_map, owned_exprs);
+        if (!rewrite_result) {
+            return make_error(rewrite_result.error().code, rewrite_result.error().message);
         }
+        remaining_where = *rewrite_result;
+    }
+
+    // -- 2d. Apply remaining WHERE as a filter ---------------------------------
+    if (remaining_where) {
+        child = std::make_unique<FilterOperator>(
+            std::move(child), *remaining_where, bound, &subquery_ctx_);
     }
 
     // -- 3. Detect GROUP BY / aggregation ------------------------------------
@@ -466,7 +830,8 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
             auto having_rewritten = rewrite_expr(*stmt.having_expr, agg_map);
             auto* having_ptr = having_rewritten.get();
             owned_exprs.push_back(std::move(having_rewritten));
-            child = std::make_unique<FilterOperator>(std::move(child), *having_ptr, bound);
+            child = std::make_unique<FilterOperator>(
+                std::move(child), *having_ptr, bound, &subquery_ctx_);
         }
 
         // -- 3f. Build rewritten projections ----------------------------------
@@ -504,8 +869,11 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
         }
 
         auto output_schema = build_output_schema(bound.output_columns);
-        child = std::make_unique<ProjectOperator>(
-            std::move(child), std::move(projections), std::move(output_schema), bound);
+        child = std::make_unique<ProjectOperator>(std::move(child),
+                                                  std::move(projections),
+                                                  std::move(output_schema),
+                                                  bound,
+                                                  &subquery_ctx_);
     } else {
         // -- 3 (no aggregation). Projection ----------------------------------
         std::vector<ProjectionExpr> projections;
@@ -541,8 +909,11 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
         }
 
         auto output_schema = build_output_schema(bound.output_columns);
-        child = std::make_unique<ProjectOperator>(
-            std::move(child), std::move(projections), std::move(output_schema), bound);
+        child = std::make_unique<ProjectOperator>(std::move(child),
+                                                  std::move(projections),
+                                                  std::move(output_schema),
+                                                  bound,
+                                                  &subquery_ctx_);
     }
 
     // -- 4. ORDER BY ---------------------------------------------------------
