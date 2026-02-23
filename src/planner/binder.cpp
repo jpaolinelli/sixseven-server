@@ -742,7 +742,7 @@ Binder::build_from_scope(const SelectStmt& stmt, Scope* parent, BoundStatement& 
                 scope.add_table(std::move(st));
             } else {
                 // Regular table reference.
-                auto schema = catalog_.get_table(tref.name);
+                auto schema = catalog_.get_table(default_database_id, tref.name);
                 if (!schema) {
                     return tl::unexpected(schema.error());
                 }
@@ -783,7 +783,7 @@ Binder::build_from_scope(const SelectStmt& stmt, Scope* parent, BoundStatement& 
                 }
                 scope.add_table(std::move(st));
             } else {
-                auto schema = catalog_.get_table(jtref.name);
+                auto schema = catalog_.get_table(default_database_id, jtref.name);
                 if (!schema) {
                     return tl::unexpected(schema.error());
                 }
@@ -1038,7 +1038,7 @@ Result<BoundStatement> Binder::bind_insert(const InsertStmt& stmt) {
     BoundStatement bound;
     bound.stmt = &stmt;
 
-    auto schema = catalog_.get_table(stmt.table_name);
+    auto schema = catalog_.get_table(default_database_id, stmt.table_name);
     if (!schema) {
         return tl::unexpected(schema.error());
     }
@@ -1129,7 +1129,7 @@ Result<BoundStatement> Binder::bind_update(const UpdateStmt& stmt) {
     BoundStatement bound;
     bound.stmt = &stmt;
 
-    auto schema = catalog_.get_table(stmt.table_name);
+    auto schema = catalog_.get_table(default_database_id, stmt.table_name);
     if (!schema) {
         return tl::unexpected(schema.error());
     }
@@ -1193,7 +1193,7 @@ Result<BoundStatement> Binder::bind_delete(const DeleteStmt& stmt) {
     BoundStatement bound;
     bound.stmt = &stmt;
 
-    auto schema = catalog_.get_table(stmt.table_name);
+    auto schema = catalog_.get_table(default_database_id, stmt.table_name);
     if (!schema) {
         return tl::unexpected(schema.error());
     }
@@ -1232,7 +1232,7 @@ Result<BoundStatement> Binder::bind_create_table(const CreateTableStmt& stmt) {
 
     // Check for duplicate table name (unless IF NOT EXISTS).
     if (!stmt.if_not_exists) {
-        auto existing = catalog_.get_table(stmt.name);
+        auto existing = catalog_.get_table(default_database_id, stmt.name);
         if (existing) {
             return make_error(StatusCode::ALREADY_EXISTS, "table " + stmt.name + " already exists");
         }
@@ -1274,7 +1274,7 @@ Result<BoundStatement> Binder::bind_create_table(const CreateTableStmt& stmt) {
         // FK constraints: verify referenced table exists.
         if (constraint.kind == TableConstraint::Kind::FOREIGN_KEY) {
             if (!constraint.fk_table.empty()) {
-                auto fk_schema = catalog_.get_table(constraint.fk_table);
+                auto fk_schema = catalog_.get_table(default_database_id, constraint.fk_table);
                 if (!fk_schema) {
                     return make_error(StatusCode::NOT_FOUND,
                                       "foreign key references unknown table: " +
@@ -1287,7 +1287,7 @@ Result<BoundStatement> Binder::bind_create_table(const CreateTableStmt& stmt) {
     // Validate column-level FK constraints.
     for (auto& col : stmt.columns) {
         if (!col.fk_table.empty()) {
-            auto fk_schema = catalog_.get_table(col.fk_table);
+            auto fk_schema = catalog_.get_table(default_database_id, col.fk_table);
             if (!fk_schema) {
                 return make_error(StatusCode::NOT_FOUND,
                                   "foreign key references unknown table: " + col.fk_table);
@@ -1303,7 +1303,7 @@ Result<BoundStatement> Binder::bind_drop_table(const DropTableStmt& stmt) {
     bound.stmt = &stmt;
 
     if (!stmt.if_exists) {
-        auto schema = catalog_.get_table(stmt.name);
+        auto schema = catalog_.get_table(default_database_id, stmt.name);
         if (!schema) {
             return tl::unexpected(schema.error());
         }
@@ -1317,7 +1317,7 @@ Result<BoundStatement> Binder::bind_alter_table(const AlterTableStmt& stmt) {
     BoundStatement bound;
     bound.stmt = &stmt;
 
-    auto schema = catalog_.get_table(stmt.table_name);
+    auto schema = catalog_.get_table(default_database_id, stmt.table_name);
     if (!schema) {
         return tl::unexpected(schema.error());
     }
@@ -1378,7 +1378,7 @@ Result<BoundStatement> Binder::bind_create_index(const CreateIndexStmt& stmt) {
     BoundStatement bound;
     bound.stmt = &stmt;
 
-    auto schema = catalog_.get_table(stmt.table_name);
+    auto schema = catalog_.get_table(default_database_id, stmt.table_name);
     if (!schema) {
         return tl::unexpected(schema.error());
     }
@@ -1435,13 +1435,13 @@ Result<BoundStatement> Binder::bind_create_edge_type(const CreateEdgeTypeStmt& s
     bound.stmt = &stmt;
 
     // Verify FROM and TO tables exist.
-    auto from_schema = catalog_.get_table(stmt.from_table);
+    auto from_schema = catalog_.get_table(default_database_id, stmt.from_table);
     if (!from_schema) {
         return make_error(StatusCode::NOT_FOUND, "FROM table not found: " + stmt.from_table);
     }
     bound.referenced_tables.push_back(from_schema->table_id);
 
-    auto to_schema = catalog_.get_table(stmt.to_table);
+    auto to_schema = catalog_.get_table(default_database_id, stmt.to_table);
     if (!to_schema) {
         return make_error(StatusCode::NOT_FOUND, "TO table not found: " + stmt.to_table);
     }
@@ -1494,7 +1494,7 @@ Result<BoundStatement> Binder::bind_link(const LinkStmt& stmt) {
     bound.referenced_edge_types.push_back(edge->edge_id);
 
     // Verify source table matches edge definition.
-    auto src = catalog_.get_table(stmt.source_table);
+    auto src = catalog_.get_table(default_database_id, stmt.source_table);
     if (!src) {
         return tl::unexpected(src.error());
     }
@@ -1506,7 +1506,7 @@ Result<BoundStatement> Binder::bind_link(const LinkStmt& stmt) {
     }
 
     // Verify target table matches edge definition.
-    auto tgt = catalog_.get_table(stmt.target_table);
+    auto tgt = catalog_.get_table(default_database_id, stmt.target_table);
     if (!tgt) {
         return tl::unexpected(tgt.error());
     }
@@ -1545,7 +1545,7 @@ Result<BoundStatement> Binder::bind_unlink(const UnlinkStmt& stmt) {
     }
     bound.referenced_edge_types.push_back(edge->edge_id);
 
-    auto src = catalog_.get_table(stmt.source_table);
+    auto src = catalog_.get_table(default_database_id, stmt.source_table);
     if (!src) {
         return tl::unexpected(src.error());
     }
@@ -1556,7 +1556,7 @@ Result<BoundStatement> Binder::bind_unlink(const UnlinkStmt& stmt) {
                               " does not match edge type source");
     }
 
-    auto tgt = catalog_.get_table(stmt.target_table);
+    auto tgt = catalog_.get_table(default_database_id, stmt.target_table);
     if (!tgt) {
         return tl::unexpected(tgt.error());
     }
@@ -1600,7 +1600,7 @@ Result<BoundStatement> Binder::bind_traverse(const TraverseStmt& stmt) {
     }
     bound.referenced_edge_types.push_back(edge->edge_id);
 
-    auto from = catalog_.get_table(stmt.from_table);
+    auto from = catalog_.get_table(default_database_id, stmt.from_table);
     if (!from) {
         return tl::unexpected(from.error());
     }
@@ -1631,7 +1631,7 @@ Result<BoundStatement> Binder::bind_nearest(const NearestStmt& stmt) {
     bound.stmt = &stmt;
 
     // Resolve table.
-    auto schema = catalog_.get_table(stmt.table_name);
+    auto schema = catalog_.get_table(default_database_id, stmt.table_name);
     if (!schema) {
         return tl::unexpected(schema.error());
     }
@@ -1707,7 +1707,7 @@ Result<BoundStatement> Binder::bind_match(const MatchStmt& stmt) {
     // Resolve pattern: each node label → table, each edge → edge type.
     for (auto& elem : stmt.pattern) {
         if (!elem.node.label.empty()) {
-            auto schema = catalog_.get_table(elem.node.label);
+            auto schema = catalog_.get_table(default_database_id, elem.node.label);
             if (!schema) {
                 return tl::unexpected(schema.error());
             }
@@ -1756,13 +1756,13 @@ Result<BoundStatement> Binder::bind_shortest_path(const ShortestPathStmt& stmt) 
     }
     bound.referenced_edge_types.push_back(edge->edge_id);
 
-    auto from = catalog_.get_table(stmt.from_table);
+    auto from = catalog_.get_table(default_database_id, stmt.from_table);
     if (!from) {
         return tl::unexpected(from.error());
     }
     bound.referenced_tables.push_back(from->table_id);
 
-    auto to = catalog_.get_table(stmt.to_table);
+    auto to = catalog_.get_table(default_database_id, stmt.to_table);
     if (!to) {
         return tl::unexpected(to.error());
     }
@@ -1811,7 +1811,7 @@ Result<BoundStatement> Binder::bind_describe(const DescribeStmt& stmt) {
     BoundStatement bound;
     bound.stmt = &stmt;
 
-    auto schema = catalog_.get_table(stmt.table_name);
+    auto schema = catalog_.get_table(default_database_id, stmt.table_name);
     if (!schema) {
         return tl::unexpected(schema.error());
     }
@@ -1826,7 +1826,7 @@ Result<BoundStatement> Binder::bind_show(const ShowStmt& stmt) {
 
     // SHOW COLUMNS FROM table — verify table exists.
     if (stmt.target == ShowTarget::COLUMNS && !stmt.name.empty()) {
-        auto schema = catalog_.get_table(stmt.name);
+        auto schema = catalog_.get_table(default_database_id, stmt.name);
         if (!schema) {
             return tl::unexpected(schema.error());
         }
@@ -1843,7 +1843,7 @@ Result<BoundStatement> Binder::bind_passthrough(const Stmt& stmt) {
     // Validate REEMBED, VACUUM, ANALYZE table references.
     if (auto* s = dynamic_cast<const ReembedStmt*>(&stmt)) {
         if (!s->table_name.empty()) {
-            auto schema = catalog_.get_table(s->table_name);
+            auto schema = catalog_.get_table(default_database_id, s->table_name);
             if (!schema) {
                 return tl::unexpected(schema.error());
             }
@@ -1851,7 +1851,7 @@ Result<BoundStatement> Binder::bind_passthrough(const Stmt& stmt) {
         }
     } else if (auto* s = dynamic_cast<const VacuumStmt*>(&stmt)) {
         if (!s->table_name.empty()) {
-            auto schema = catalog_.get_table(s->table_name);
+            auto schema = catalog_.get_table(default_database_id, s->table_name);
             if (!schema) {
                 return tl::unexpected(schema.error());
             }
@@ -1859,7 +1859,7 @@ Result<BoundStatement> Binder::bind_passthrough(const Stmt& stmt) {
         }
     } else if (auto* s = dynamic_cast<const AnalyzeStmt*>(&stmt)) {
         if (!s->table_name.empty()) {
-            auto schema = catalog_.get_table(s->table_name);
+            auto schema = catalog_.get_table(default_database_id, s->table_name);
             if (!schema) {
                 return tl::unexpected(schema.error());
             }

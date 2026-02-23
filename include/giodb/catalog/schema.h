@@ -8,6 +8,9 @@
 
 namespace giodb {
 
+/// Unique identifier for databases within the catalog.
+using database_id_t = int32_t;
+
 /// Unique identifier for tables within the catalog.
 using table_id_t = int32_t;
 
@@ -16,6 +19,15 @@ using index_id_t = int32_t;
 
 /// Unique identifier for edge types within the catalog.
 using edge_id_t = int32_t;
+
+/// Default database ID for the built-in 'giodb' database.
+inline constexpr database_id_t default_database_id = 1;
+
+/// Metadata for a database in the system catalog.
+struct Database {
+    database_id_t database_id = 0;
+    std::string name;
+};
 
 /// Describes a column in a catalog table schema.
 /// Richer than the tuple-level ColumnDef (which only has name + type).
@@ -62,5 +74,18 @@ struct EmbeddingColumnDef {
     std::string source_expr;
     std::string provider;
 };
+
+/// Returns the system table schema for sys_databases(database_id INT32, name STRING).
+inline TableSchema sys_databases_schema() {
+    TableSchema schema;
+    schema.table_id = 0; // System tables use reserved IDs.
+    schema.name = "sys_databases";
+    schema.columns = {
+        {0, "database_id", TypeId::INT32, false, ""},
+        {1, "name", TypeId::STRING, false, ""},
+    };
+    schema.pk_columns = "database_id";
+    return schema;
+}
 
 } // namespace giodb

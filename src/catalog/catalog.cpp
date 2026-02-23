@@ -4,12 +4,115 @@
 
 namespace giodb {
 
-// -- Table operations ---------------------------------------------------------
+// -- Constructor --------------------------------------------------------------
 
-Result<table_id_t> Catalog::create_table(TableSchema schema) {
+Catalog::Catalog() {
+    // Create the default 'giodb' database.
+    databases_by_id_[default_database_id] = Database{default_database_id, "giodb"};
+    database_name_to_id_["giodb"] = default_database_id;
+}
+
+// -- Database operations ------------------------------------------------------
+
+Result<database_id_t> Catalog::create_database(const std::string& name) {
     std::lock_guard lock(mu_);
 
-    if (table_name_to_id_.contains(schema.name)) {
+    if (database_name_to_id_.contains(name)) {
+        return make_error(StatusCode::ALREADY_EXISTS, "database '" + name + "' already exists");
+    }
+
+    database_id_t id = next_database_id_++;
+    databases_by_id_[id] = Database{id, name};
+    database_name_to_id_[name] = id;
+
+    return ok(id);
+}
+
+Result<void> Catalog::drop_database(database_id_t database_id, bool cascade) {
+    std::lock_guard lock(mu_);
+
+    if (database_id == default_database_id) {
+        return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                          "cannot drop the default 'giodb' database");
+    }
+
+    auto db_it = databases_by_id_.find(database_id);
+    if (db_it == databases_by_id_.end()) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "database with id " + std::to_string(database_id) + " not found");
+    }
+
+    // Check if database contains tables.
+    auto& name_map = table_name_to_id_[database_id];
+    if (!name_map.empty()) {
+        if (!cascade) {
+            return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                              "database '" + db_it->second.name +
+                                  "' contains tables; use cascade to drop");
+        }
+
+        // Cascade: drop all tables in this database.
+        std::vector<std::string> table_names;
+        table_names.reserve(name_map.size());
+        for (auto& [tname, _] : name_map) {
+            table_names.push_back(tname);
+        }
+        for (auto& tname : table_names) {
+            auto result = drop_table_locked(database_id, tname);
+            if (!result.has_value()) {
+                return result;
+            }
+        }
+    }
+
+    // Remove the database.
+    database_name_to_id_.erase(db_it->second.name);
+    databases_by_id_.erase(db_it);
+    table_name_to_id_.erase(database_id);
+
+    return ok();
+}
+
+Result<Database> Catalog::get_database(const std::string& name) const {
+    std::lock_guard lock(mu_);
+
+    auto name_it = database_name_to_id_.find(name);
+    if (name_it == database_name_to_id_.end()) {
+        return make_error(StatusCode::NOT_FOUND, "database '" + name + "' not found");
+    }
+
+    return ok(databases_by_id_.at(name_it->second));
+}
+
+std::vector<Database> Catalog::list_databases() const {
+    std::lock_guard lock(mu_);
+
+    std::vector<Database> result;
+    result.reserve(databases_by_id_.size());
+    for (auto& [id, db] : databases_by_id_) {
+        result.push_back(db);
+    }
+
+    std::sort(result.begin(), result.end(), [](const Database& a, const Database& b) {
+        return a.database_id < b.database_id;
+    });
+
+    return result;
+}
+
+// -- Table operations ---------------------------------------------------------
+
+Result<table_id_t> Catalog::create_table(database_id_t database_id, TableSchema schema) {
+    std::lock_guard lock(mu_);
+
+    // Validate the database exists.
+    if (!databases_by_id_.contains(database_id)) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "database with id " + std::to_string(database_id) + " not found");
+    }
+
+    auto& name_map = table_name_to_id_[database_id];
+    if (name_map.contains(schema.name)) {
         return make_error(StatusCode::ALREADY_EXISTS, "table '" + schema.name + "' already exists");
     }
 
@@ -21,17 +124,27 @@ Result<table_id_t> Catalog::create_table(TableSchema schema) {
         schema.columns[static_cast<size_t>(i)].ordinal = i;
     }
 
-    table_name_to_id_[schema.name] = id;
+    name_map[schema.name] = id;
+    table_to_database_[id] = database_id;
     tables_by_id_[id] = std::move(schema);
 
     return ok(id);
 }
 
-Result<void> Catalog::drop_table(const std::string& name) {
+Result<void> Catalog::drop_table(database_id_t database_id, const std::string& name) {
     std::lock_guard lock(mu_);
+    return drop_table_locked(database_id, name);
+}
 
-    auto name_it = table_name_to_id_.find(name);
-    if (name_it == table_name_to_id_.end()) {
+Result<void> Catalog::drop_table_locked(database_id_t database_id, const std::string& name) {
+    auto db_map_it = table_name_to_id_.find(database_id);
+    if (db_map_it == table_name_to_id_.end()) {
+        return make_error(StatusCode::NOT_FOUND, "table '" + name + "' not found");
+    }
+
+    auto& name_map = db_map_it->second;
+    auto name_it = name_map.find(name);
+    if (name_it == name_map.end()) {
         return make_error(StatusCode::NOT_FOUND, "table '" + name + "' not found");
     }
 
@@ -72,16 +185,23 @@ Result<void> Catalog::drop_table(const std::string& name) {
                   [tid](const EmbeddingColumnDef& e) { return e.table_id == tid; });
 
     tables_by_id_.erase(tid);
-    table_name_to_id_.erase(name_it);
+    table_to_database_.erase(tid);
+    name_map.erase(name_it);
 
     return ok();
 }
 
-Result<TableSchema> Catalog::get_table(const std::string& name) const {
+Result<TableSchema> Catalog::get_table(database_id_t database_id, const std::string& name) const {
     std::lock_guard lock(mu_);
 
-    auto name_it = table_name_to_id_.find(name);
-    if (name_it == table_name_to_id_.end()) {
+    auto db_map_it = table_name_to_id_.find(database_id);
+    if (db_map_it == table_name_to_id_.end()) {
+        return make_error(StatusCode::NOT_FOUND, "table '" + name + "' not found");
+    }
+
+    auto& name_map = db_map_it->second;
+    auto name_it = name_map.find(name);
+    if (name_it == name_map.end()) {
         return make_error(StatusCode::NOT_FOUND, "table '" + name + "' not found");
     }
 
@@ -100,13 +220,20 @@ Result<TableSchema> Catalog::get_table_by_id(table_id_t id) const {
     return ok(it->second);
 }
 
-std::vector<TableSchema> Catalog::list_tables() const {
+std::vector<TableSchema> Catalog::list_tables(database_id_t database_id) const {
     std::lock_guard lock(mu_);
 
     std::vector<TableSchema> result;
-    result.reserve(tables_by_id_.size());
-    for (auto& [id, schema] : tables_by_id_) {
-        result.push_back(schema);
+
+    auto db_map_it = table_name_to_id_.find(database_id);
+    if (db_map_it == table_name_to_id_.end()) {
+        return result;
+    }
+
+    auto& name_map = db_map_it->second;
+    result.reserve(name_map.size());
+    for (auto& [tname, tid] : name_map) {
+        result.push_back(tables_by_id_.at(tid));
     }
 
     // Sort by table_id for deterministic output.

@@ -90,7 +90,7 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
     }
 
     // Register in catalog.
-    auto table_id = catalog_.create_table(std::move(ts));
+    auto table_id = catalog_.create_table(default_database_id, std::move(ts));
     if (!table_id) {
         if (stmt.if_not_exists && table_id.error().code == StatusCode::ALREADY_EXISTS) {
             QueryResult qr;
@@ -101,7 +101,7 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
     }
 
     // Retrieve the created schema (now has assigned table_id).
-    auto schema = catalog_.get_table(stmt.name);
+    auto schema = catalog_.get_table(default_database_id, stmt.name);
     if (!schema) {
         return make_error(schema.error().code, schema.error().message);
     }
@@ -122,7 +122,7 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
 // ---------------------------------------------------------------------------
 
 Result<QueryResult> QueryEngine::execute_drop_table(const DropTableStmt& stmt) {
-    auto schema = catalog_.get_table(stmt.name);
+    auto schema = catalog_.get_table(default_database_id, stmt.name);
     if (!schema) {
         if (stmt.if_exists && schema.error().code == StatusCode::NOT_FOUND) {
             QueryResult qr;
@@ -141,7 +141,7 @@ Result<QueryResult> QueryEngine::execute_drop_table(const DropTableStmt& stmt) {
     }
 
     // Remove from catalog.
-    auto drop_catalog = catalog_.drop_table(stmt.name);
+    auto drop_catalog = catalog_.drop_table(default_database_id, stmt.name);
     if (!drop_catalog) {
         return make_error(drop_catalog.error().code, drop_catalog.error().message);
     }

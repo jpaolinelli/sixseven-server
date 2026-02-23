@@ -13,45 +13,71 @@ namespace giodb {
 
 /// System catalog that stores and manages schema metadata.
 ///
-/// Maintains in-memory maps for fast table/index lookups, keyed by name.
-/// All DDL operations (create/drop) invalidate the relevant cache entries.
+/// Supports multiple databases. Tables are scoped per database so that
+/// the same table name may exist in different databases.
+///
+/// A default database named "giodb" (id = default_database_id) is created
+/// on construction.
 ///
 /// Thread safety: All public methods are protected by a mutex.
 ///
 /// Usage:
 /// ```
 ///   Catalog catalog;
+///   auto db_id = default_database_id;
 ///   TableSchema schema;
 ///   schema.name = "users";
 ///   schema.columns = { ... };
-///   auto id = catalog.create_table(schema).value();
-///   auto retrieved = catalog.get_table("users").value();
-///   catalog.drop_table("users");
+///   auto id = catalog.create_table(db_id, schema).value();
+///   auto retrieved = catalog.get_table(db_id, "users").value();
+///   catalog.drop_table(db_id, "users");
 /// ```
 class Catalog {
 public:
-    Catalog() = default;
+    Catalog();
+
+    // -- Database operations --------------------------------------------------
+
+    /// Create a new database. Assigns a sequential database_id.
+    /// Fails with ALREADY_EXISTS if a database with the same name exists.
+    [[nodiscard]] Result<database_id_t> create_database(const std::string& name);
+
+    /// Drop a database by id.
+    /// If cascade is false, fails with CONSTRAINT_VIOLATION if the database
+    /// contains tables. If cascade is true, drops all tables first.
+    /// Cannot drop the default 'giodb' database.
+    [[nodiscard]] Result<void> drop_database(database_id_t database_id, bool cascade);
+
+    /// Retrieve a database by name.
+    /// Fails with NOT_FOUND if the database does not exist.
+    [[nodiscard]] Result<Database> get_database(const std::string& name) const;
+
+    /// List all databases, sorted by database_id.
+    [[nodiscard]] std::vector<Database> list_databases() const;
 
     // -- Table operations -----------------------------------------------------
 
-    /// Create a new table. Assigns a sequential table_id.
-    /// Fails with ALREADY_EXISTS if a table with the same name exists.
-    [[nodiscard]] Result<table_id_t> create_table(TableSchema schema);
+    /// Create a new table in the given database. Assigns a sequential table_id.
+    /// Fails with ALREADY_EXISTS if a table with the same name exists in
+    /// that database.
+    [[nodiscard]] Result<table_id_t> create_table(database_id_t database_id, TableSchema schema);
 
-    /// Drop a table by name. Also removes all associated indexes.
+    /// Drop a table by name within a database. Also removes all associated
+    /// indexes, edge types, and embedding columns.
     /// Fails with NOT_FOUND if the table does not exist.
-    [[nodiscard]] Result<void> drop_table(const std::string& name);
+    [[nodiscard]] Result<void> drop_table(database_id_t database_id, const std::string& name);
 
-    /// Retrieve a table schema by name.
+    /// Retrieve a table schema by name within a database.
     /// Fails with NOT_FOUND if the table does not exist.
-    [[nodiscard]] Result<TableSchema> get_table(const std::string& name) const;
+    [[nodiscard]] Result<TableSchema> get_table(database_id_t database_id,
+                                                const std::string& name) const;
 
-    /// Retrieve a table schema by table_id.
+    /// Retrieve a table schema by table_id (global lookup, not scoped by db).
     /// Fails with NOT_FOUND if the table does not exist.
     [[nodiscard]] Result<TableSchema> get_table_by_id(table_id_t id) const;
 
-    /// List all table schemas.
-    [[nodiscard]] std::vector<TableSchema> list_tables() const;
+    /// List all table schemas in the given database.
+    [[nodiscard]] std::vector<TableSchema> list_tables(database_id_t database_id) const;
 
     // -- Index operations -----------------------------------------------------
 
@@ -107,18 +133,33 @@ public:
     [[nodiscard]] std::vector<EmbeddingColumnDef> list_all_embedding_columns() const;
 
 private:
+    /// Drop a table by name (caller must hold mu_). Used internally by
+    /// drop_table() and drop_database() with cascade.
+    Result<void> drop_table_locked(database_id_t database_id, const std::string& name);
+
     mutable std::mutex mu_;
 
     /// Next auto-increment IDs.
+    database_id_t next_database_id_ = default_database_id + 1;
     table_id_t next_table_id_ = 1;
     index_id_t next_index_id_ = 1;
     edge_id_t next_edge_id_ = 1;
 
+    /// Primary storage: database_id -> Database.
+    std::unordered_map<database_id_t, Database> databases_by_id_;
+
+    /// Name lookup: database name -> database_id.
+    std::unordered_map<std::string, database_id_t> database_name_to_id_;
+
     /// Primary storage: table_id -> TableSchema.
     std::unordered_map<table_id_t, TableSchema> tables_by_id_;
 
-    /// Name lookup: table name -> table_id.
-    std::unordered_map<std::string, table_id_t> table_name_to_id_;
+    /// Name lookup scoped per database: database_id -> (table name -> table_id).
+    std::unordered_map<database_id_t, std::unordered_map<std::string, table_id_t>>
+        table_name_to_id_;
+
+    /// Reverse lookup: table_id -> database_id (for get_table_by_id).
+    std::unordered_map<table_id_t, database_id_t> table_to_database_;
 
     /// Primary storage: index_id -> IndexDef.
     std::unordered_map<index_id_t, IndexDef> indexes_by_id_;
