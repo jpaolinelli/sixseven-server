@@ -140,9 +140,6 @@ private:
     /// Generate a random layer for a new node using exponential distribution.
     [[nodiscard]] uint8_t random_layer();
 
-    /// Compute L2 (Euclidean) squared distance between two vectors.
-    [[nodiscard]] static float distance_l2(std::span<const float> a, std::span<const float> b);
-
     /// Read a node's vector data.
     [[nodiscard]] Result<std::vector<float>> read_node_vector(const HnswNode& node) const;
 
