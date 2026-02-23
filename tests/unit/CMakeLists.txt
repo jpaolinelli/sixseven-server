@@ -35,6 +35,7 @@ add_executable(giodb_unit_tests
     test_sort_merge_join.cpp
     test_hash_aggregate.cpp
     test_window_function.cpp
+    test_storage_manager.cpp
     test_query_engine.cpp
     test_subquery.cpp
 )

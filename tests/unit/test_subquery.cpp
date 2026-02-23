@@ -26,7 +26,7 @@ protected:
     void SetUp() override {
         data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_subquery";
         std::filesystem::remove_all(data_dir_);
-        std::filesystem::create_directories(data_dir_ / "tables");
+        std::filesystem::create_directories(data_dir_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
