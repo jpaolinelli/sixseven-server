@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace giodb {
@@ -22,7 +23,10 @@ struct DropDatabaseStmt;
 struct DropEdgeTypeStmt;
 struct DropTableStmt;
 struct LinkStmt;
+struct ReembedStmt;
 struct UnlinkStmt;
+class HnswIndex;
+class ProviderRegistry;
 
 /// Result of executing a SQL statement.
 struct QueryResult {
@@ -67,6 +71,12 @@ public:
     /// Get the current database ID.
     [[nodiscard]] database_id_t current_database_id() const;
 
+    /// Set the provider registry for embedding operations (REEMBED, NEAREST).
+    void set_provider_registry(ProviderRegistry* registry);
+
+    /// Set the HNSW index map for vector operations (REEMBED, NEAREST).
+    void set_hnsw_indexes(std::unordered_map<std::string, HnswIndex*>* indexes);
+
 private:
     /// Execute a DDL CREATE DATABASE statement.
     [[nodiscard]] Result<QueryResult> execute_create_database(const CreateDatabaseStmt& stmt);
@@ -94,12 +104,17 @@ private:
     [[nodiscard]] Result<QueryResult> execute_unlink(const UnlinkStmt& stmt,
                                                      const BoundStatement& bound);
 
+    /// Execute a REEMBED TABLE statement (bulk embedding regeneration).
+    [[nodiscard]] Result<QueryResult> execute_reembed(const ReembedStmt& stmt);
+
     /// Execute a DML/query via the Planner + Iterator pipeline.
     [[nodiscard]] Result<QueryResult> execute_plan(const BoundStatement& bound);
 
     Catalog& catalog_;
     StorageManager& storage_;
     GraphEngine* graph_engine_;
+    ProviderRegistry* provider_registry_ = nullptr;
+    std::unordered_map<std::string, HnswIndex*>* hnsw_indexes_ = nullptr;
     database_id_t current_database_id_ = default_database_id;
 };
 

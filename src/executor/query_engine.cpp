@@ -1,5 +1,6 @@
 #include "giodb/executor/query_engine.h"
 
+#include "giodb/common/logging.h"
 #include "giodb/executor/expr_evaluator.h"
 #include "giodb/executor/planner.h"
 #include "giodb/parser/ast.h"
@@ -7,7 +8,12 @@
 #include "giodb/parser/parser.h"
 #include "giodb/planner/binder.h"
 #include "giodb/planner/type_resolver.h"
+#include "giodb/table/tuple.h"
+#include "giodb/vector/embedding_column.h"
+#include "giodb/vector/hnsw_index.h"
+#include "giodb/vector/provider_registry.h"
 
+#include <chrono>
 #include <string>
 
 namespace giodb {
@@ -21,6 +27,14 @@ void QueryEngine::set_current_database(database_id_t database_id) {
 
 database_id_t QueryEngine::current_database_id() const {
     return current_database_id_;
+}
+
+void QueryEngine::set_provider_registry(ProviderRegistry* registry) {
+    provider_registry_ = registry;
+}
+
+void QueryEngine::set_hnsw_indexes(std::unordered_map<std::string, HnswIndex*>* indexes) {
+    hnsw_indexes_ = indexes;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +90,11 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
     }
     if (auto* unlink = dynamic_cast<const UnlinkStmt*>(bound->stmt)) {
         return execute_unlink(*unlink, *bound);
+    }
+
+    // 5b. Dispatch admin commands after binding.
+    if (auto* reembed = dynamic_cast<const ReembedStmt*>(bound->stmt)) {
+        return execute_reembed(*reembed);
     }
 
     // 6. Plan + Execute.
@@ -406,6 +425,217 @@ Result<QueryResult> QueryEngine::execute_unlink(const UnlinkStmt& stmt,
     QueryResult qr;
     qr.affected_rows = 1;
     qr.message = "UNLINK";
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// REEMBED TABLE
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
+    // 1. Resolve the table.
+    auto table_schema = catalog_.get_table(current_database_id_, stmt.table_name);
+    if (!table_schema) {
+        return make_error(table_schema.error().code, table_schema.error().message);
+    }
+
+    // 2. Get embedding column definitions.
+    auto emb_cols = catalog_.list_embedding_columns(table_schema->table_id);
+    if (emb_cols.empty()) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "table '" + stmt.table_name + "' has no EMBEDDING columns");
+    }
+
+    // 3. Validate provider registry is available.
+    if (provider_registry_ == nullptr) {
+        return make_error(StatusCode::INTERNAL_ERROR, "REEMBED requires a ProviderRegistry");
+    }
+
+    // 4. Resolve providers and locate column indexes for each embedding column.
+    struct EmbeddingTarget {
+        EmbeddingColumnDef def;
+        std::shared_ptr<EmbeddingProvider> provider;
+        size_t column_index;
+    };
+    std::vector<EmbeddingTarget> targets;
+
+    for (const auto& ec : emb_cols) {
+        auto provider = provider_registry_->resolve(ec.provider);
+        if (!provider) {
+            return make_error(provider.error().code,
+                              "failed to resolve provider '" + ec.provider +
+                                  "': " + provider.error().message);
+        }
+
+        size_t col_idx = 0;
+        for (size_t i = 0; i < table_schema->columns.size(); ++i) {
+            if (table_schema->columns[i].ordinal == ec.column_id) {
+                col_idx = i;
+                break;
+            }
+        }
+
+        targets.push_back({ec, std::move(*provider), col_idx});
+    }
+
+    // 5. Get table storage.
+    auto ts = storage_.get_table_storage(table_schema->table_id);
+    if (!ts) {
+        return make_error(ts.error().code, ts.error().message);
+    }
+    auto* table_storage = *ts;
+
+    // 6. Sequential scan with batch embedding.
+    auto scan_it = table_storage->heap->begin();
+    if (!scan_it) {
+        return make_error(scan_it.error().code, scan_it.error().message);
+    }
+
+    static constexpr size_t batch_size = 32;
+
+    struct RowInfo {
+        RID rid;
+        std::vector<Value> values;
+    };
+
+    std::vector<RowInfo> batch;
+    batch.reserve(batch_size);
+    int64_t total_processed = 0;
+    int64_t total_skipped = 0;
+    auto start_time = std::chrono::steady_clock::now();
+
+    // Lambda to process a batch of rows.
+    auto process_batch = [&]() -> Result<void> {
+        if (batch.empty()) {
+            return ok();
+        }
+
+        for (auto& target : targets) {
+            // Extract source texts from each row.
+            std::vector<std::string> source_texts;
+            source_texts.reserve(batch.size());
+
+            for (const auto& row : batch) {
+                std::string text;
+                for (size_t i = 0; i < table_schema->columns.size(); ++i) {
+                    if (table_schema->columns[i].name == target.def.source_expr) {
+                        if (!row.values[i].is_null() && row.values[i].type_id() == TypeId::STRING) {
+                            text = row.values[i].as_string();
+                        }
+                        break;
+                    }
+                }
+                source_texts.push_back(std::move(text));
+            }
+
+            // Batch embed via the provider.
+            auto embeddings = target.provider->embed_batch(source_texts);
+            if (!embeddings) {
+                GIODB_LOG_WARN("REEMBED: batch embed failed for provider '{}': {}",
+                               target.def.provider,
+                               embeddings.error().message);
+                total_skipped += static_cast<int64_t>(batch.size());
+                continue;
+            }
+
+            // Update each row's embedding and persist.
+            for (size_t i = 0; i < batch.size(); ++i) {
+                auto& row = batch[i];
+
+                row.values[target.column_index] = Value(Embedding((*embeddings)[i]));
+
+                auto serialized =
+                    TupleSerializer::serialize(row.values, table_storage->storage_schema);
+                if (!serialized) {
+                    ++total_skipped;
+                    continue;
+                }
+
+                auto update_result = table_storage->heap->update_tuple(row.rid, *serialized);
+                if (!update_result) {
+                    ++total_skipped;
+                    continue;
+                }
+            }
+        }
+
+        return ok();
+    };
+
+    while (true) {
+        auto row = scan_it->next();
+        if (!row) {
+            break;
+        }
+
+        auto& [rid, data] = *row;
+        auto values = TupleSerializer::deserialize(data, table_storage->storage_schema);
+        if (!values) {
+            ++total_skipped;
+            continue;
+        }
+
+        batch.push_back({rid, std::move(*values)});
+
+        if (batch.size() >= batch_size) {
+            auto result = process_batch();
+            if (!result) {
+                return make_error(result.error().code, result.error().message);
+            }
+            total_processed += static_cast<int64_t>(batch.size());
+            batch.clear();
+
+            if (total_processed % 1000 == 0) {
+                GIODB_LOG_INFO("REEMBED: processed {} rows", total_processed);
+            }
+        }
+    }
+
+    // Process remaining rows.
+    if (!batch.empty()) {
+        auto result = process_batch();
+        if (!result) {
+            return make_error(result.error().code, result.error().message);
+        }
+        total_processed += static_cast<int64_t>(batch.size());
+        batch.clear();
+    }
+
+    // 7. Invalidate HNSW indexes so subsequent NEAREST queries use brute-force
+    //    with the updated tuple embeddings.
+    if (hnsw_indexes_ != nullptr) {
+        for (const auto& target : targets) {
+            auto index_name = EmbeddingColumnManager::make_index_name(
+                stmt.table_name, table_schema->columns[target.column_index].name);
+            auto idx_it = hnsw_indexes_->find(index_name);
+            if (idx_it != hnsw_indexes_->end()) {
+                auto* hnsw = idx_it->second;
+                uint32_t count = hnsw->node_count();
+                for (uint32_t n = 0; n < count; ++n) {
+                    auto rm = hnsw->remove(n);
+                    (void)rm; // Best-effort removal.
+                }
+                auto compact_result = hnsw->compact();
+                (void)compact_result;
+                GIODB_LOG_INFO("REEMBED: cleared HNSW index '{}'", index_name);
+            }
+        }
+    }
+
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start_time);
+
+    GIODB_LOG_INFO("REEMBED: completed {} rows in {}ms ({} skipped)",
+                   total_processed,
+                   elapsed.count(),
+                   total_skipped);
+
+    QueryResult qr;
+    qr.affected_rows = total_processed;
+    qr.message = "REEMBED " + std::to_string(total_processed) + " rows";
+    if (total_skipped > 0) {
+        qr.message += " (" + std::to_string(total_skipped) + " skipped)";
+    }
     return ok(std::move(qr));
 }
 
