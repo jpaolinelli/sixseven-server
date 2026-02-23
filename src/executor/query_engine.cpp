@@ -1,8 +1,10 @@
 #include "giodb/executor/query_engine.h"
 
+#include "giodb/catalog/schema.h"
 #include "giodb/common/logging.h"
 #include "giodb/executor/expr_evaluator.h"
 #include "giodb/executor/planner.h"
+#include "giodb/executor/settings_cache.h"
 #include "giodb/parser/ast.h"
 #include "giodb/parser/lexer.h"
 #include "giodb/parser/parser.h"
@@ -36,6 +38,10 @@ void QueryEngine::set_provider_registry(ProviderRegistry* registry) {
 
 void QueryEngine::set_hnsw_indexes(std::unordered_map<std::string, HnswIndex*>* indexes) {
     hnsw_indexes_ = indexes;
+}
+
+void QueryEngine::set_settings_cache(SettingsCache* cache) {
+    settings_cache_ = cache;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +82,12 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
     }
     if (auto* drop_edge = dynamic_cast<const DropEdgeTypeStmt*>(stmt_ptr->get())) {
         return execute_drop_edge_type(*drop_edge);
+    }
+    if (auto* set = dynamic_cast<const SetStmt*>(stmt_ptr->get())) {
+        return execute_set(*set);
+    }
+    if (auto* show = dynamic_cast<const ShowStmt*>(stmt_ptr->get())) {
+        return execute_show(*show);
     }
 
     // 4. Bind.
@@ -725,6 +737,171 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
     }
 
     return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// SET parameter = value
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_set(const SetStmt& stmt) {
+    if (!settings_cache_) {
+        return make_error(
+            StatusCode::INTERNAL_ERROR,
+            "settings cache not initialized (system database may not be bootstrapped)");
+    }
+
+    // Extract the value from the expression (must be a literal).
+    std::string value_str;
+    if (auto* lit = dynamic_cast<const LiteralExpr*>(stmt.value.get())) {
+        value_str = lit->value;
+    } else {
+        return make_error(StatusCode::INVALID_ARGUMENT, "SET value must be a literal");
+    }
+
+    // Validate and update the in-memory cache (checks existence + mutability).
+    auto update_result = settings_cache_->update(stmt.parameter, value_str);
+    if (!update_result) {
+        return make_error(update_result.error().code, update_result.error().message);
+    }
+
+    // Persist to sys_settings table.
+    auto prev_db = current_database_id_;
+    set_current_database(system_database_id);
+
+    // Escape single quotes in the value.
+    std::string escaped_value;
+    escaped_value.reserve(value_str.size());
+    for (char c : value_str) {
+        if (c == '\'') {
+            escaped_value += "''";
+        } else {
+            escaped_value += c;
+        }
+    }
+
+    auto persist = execute("UPDATE sys_settings SET value = '" + escaped_value + "' WHERE key = '" +
+                           stmt.parameter + "'");
+    set_current_database(prev_db);
+
+    if (!persist) {
+        return make_error(persist.error().code,
+                          "SET succeeded in cache but failed to persist: " +
+                              persist.error().message);
+    }
+
+    // Apply runtime side-effect.
+    SettingsCache::apply_runtime_change(stmt.parameter, value_str);
+
+    QueryResult qr;
+    qr.message = "SET";
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// SHOW
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_show(const ShowStmt& stmt) {
+    switch (stmt.target) {
+
+    case ShowTarget::PARAMETER: {
+        if (!settings_cache_) {
+            return make_error(
+                StatusCode::INTERNAL_ERROR,
+                "settings cache not initialized (system database may not be bootstrapped)");
+        }
+        auto entry = settings_cache_->get(stmt.name);
+        if (!entry) {
+            return make_error(StatusCode::NOT_FOUND, "unrecognized parameter '" + stmt.name + "'");
+        }
+
+        QueryResult qr;
+        qr.column_names = {"key", "value"};
+        qr.column_types = {TypeId::STRING, TypeId::STRING};
+        qr.rows.push_back({Value(entry->key), Value(entry->value)});
+        return ok(std::move(qr));
+    }
+
+    case ShowTarget::ALL: {
+        if (!settings_cache_) {
+            return make_error(
+                StatusCode::INTERNAL_ERROR,
+                "settings cache not initialized (system database may not be bootstrapped)");
+        }
+        auto entries = settings_cache_->get_all();
+
+        QueryResult qr;
+        qr.column_names = {"key", "value", "category", "is_runtime_mutable"};
+        qr.column_types = {TypeId::STRING, TypeId::STRING, TypeId::STRING, TypeId::BOOL};
+        for (const auto& e : entries) {
+            qr.rows.push_back(
+                {Value(e.key), Value(e.value), Value(e.category), Value(e.is_runtime_mutable)});
+        }
+        return ok(std::move(qr));
+    }
+
+    case ShowTarget::TABLES: {
+        auto tables = catalog_.list_tables(current_database_id_);
+
+        QueryResult qr;
+        qr.column_names = {"table_name"};
+        qr.column_types = {TypeId::STRING};
+        for (const auto& ts : tables) {
+            qr.rows.push_back({Value(ts.name)});
+        }
+        return ok(std::move(qr));
+    }
+
+    case ShowTarget::COLUMNS: {
+        auto schema = catalog_.get_table(current_database_id_, stmt.name);
+        if (!schema) {
+            return make_error(schema.error().code, schema.error().message);
+        }
+
+        QueryResult qr;
+        qr.column_names = {"column_name", "type", "nullable"};
+        qr.column_types = {TypeId::STRING, TypeId::STRING, TypeId::BOOL};
+        for (const auto& col : schema->columns) {
+            qr.rows.push_back(
+                {Value(col.name), Value(std::string(type_name(col.type_id))), Value(col.nullable)});
+        }
+        return ok(std::move(qr));
+    }
+
+    case ShowTarget::INDEXES: {
+        auto indexes = catalog_.list_all_indexes();
+
+        QueryResult qr;
+        qr.column_names = {"index_name", "table_id", "columns", "type", "unique"};
+        qr.column_types = {
+            TypeId::STRING, TypeId::INT64, TypeId::STRING, TypeId::STRING, TypeId::BOOL};
+        for (const auto& idx : indexes) {
+            qr.rows.push_back({Value(idx.name),
+                               Value(static_cast<int64_t>(idx.table_id)),
+                               Value(idx.columns),
+                               Value(idx.index_type),
+                               Value(idx.is_unique)});
+        }
+        return ok(std::move(qr));
+    }
+
+    case ShowTarget::EDGE_TYPES: {
+        auto edge_types = catalog_.list_edge_types();
+
+        QueryResult qr;
+        qr.column_names = {"edge_type", "source_table_id", "target_table_id"};
+        qr.column_types = {TypeId::STRING, TypeId::INT64, TypeId::INT64};
+        for (const auto& et : edge_types) {
+            qr.rows.push_back({Value(et.name),
+                               Value(static_cast<int64_t>(et.source_table_id)),
+                               Value(static_cast<int64_t>(et.target_table_id))});
+        }
+        return ok(std::move(qr));
+    }
+
+    } // switch
+
+    return make_error(StatusCode::NOT_IMPLEMENTED, "unsupported SHOW target");
 }
 
 } // namespace giodb

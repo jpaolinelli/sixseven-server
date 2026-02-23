@@ -52,6 +52,7 @@ add_executable(giodb_unit_tests
     test_nearest_scan.cpp
     test_reembed.cpp
     test_system_bootstrap.cpp
+    test_set_show.cpp
 )
 
 target_link_libraries(giodb_unit_tests
