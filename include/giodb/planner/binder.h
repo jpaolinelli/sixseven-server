@@ -102,13 +102,17 @@ struct BoundStatement {
 /// ```
 class Binder {
 public:
-    explicit Binder(const Catalog& catalog) : catalog_(catalog) {}
+    /// @param catalog      System catalog for schema lookups.
+    /// @param database_id  The current database context for name resolution.
+    explicit Binder(const Catalog& catalog, database_id_t database_id = default_database_id)
+        : catalog_(catalog), database_id_(database_id) {}
 
     /// Bind a parsed statement. Validates names, types, and semantics.
     [[nodiscard]] Result<BoundStatement> bind(const Stmt& stmt);
 
 private:
     const Catalog& catalog_;
+    database_id_t database_id_;
 
     /// CTE results accumulated during binding. Inner subqueries can reference
     /// CTEs defined by their parent queries.
@@ -178,6 +182,10 @@ private:
 
     /// Build a ScopeTable from a catalog TableSchema.
     ScopeTable make_scope_table(const TableSchema& schema, const std::string& alias) const;
+
+    /// Resolve a table in the current database, wrapping NOT_FOUND errors with
+    /// the database name for clearer diagnostics.
+    Result<TableSchema> resolve_table(const std::string& table_name) const;
 
     /// Check whether an expression references an aggregate (by consulting expr_types map).
     bool contains_aggregate(const Expr& expr, const BoundStatement& bound) const;

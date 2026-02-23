@@ -37,6 +37,7 @@ add_executable(giodb_unit_tests
     test_window_function.cpp
     test_storage_manager.cpp
     test_query_engine.cpp
+    test_database_context.cpp
     test_subquery.cpp
 )
 
