@@ -5,6 +5,7 @@
 #include "giodb/executor/hash_aggregate.h"
 #include "giodb/executor/insert.h"
 #include "giodb/executor/limit.h"
+#include "giodb/executor/nearest_scan.h"
 #include "giodb/executor/nested_loop_join.h"
 #include "giodb/executor/pattern_match.h"
 #include "giodb/executor/project.h"
@@ -15,6 +16,7 @@
 #include "giodb/executor/traversal.h"
 #include "giodb/executor/update.h"
 #include "giodb/planner/type_resolver.h"
+#include "giodb/vector/embedding_column.h"
 
 #include <algorithm>
 #include <cassert>
@@ -206,8 +208,11 @@ ExprPtr rewrite_expr(const Expr& expr,
 Planner::Planner(const Catalog& catalog,
                  StorageManager& storage,
                  database_id_t database_id,
-                 GraphEngine* graph_engine)
+                 GraphEngine* graph_engine,
+                 ProviderRegistry* provider_registry,
+                 std::unordered_map<std::string, HnswIndex*>* hnsw_indexes)
     : catalog_(catalog), storage_(storage), database_id_(database_id), graph_engine_(graph_engine),
+      provider_registry_(provider_registry), hnsw_indexes_(hnsw_indexes),
       subquery_ctx_{catalog_, storage_} {}
 
 // ---------------------------------------------------------------------------
@@ -236,6 +241,9 @@ Result<std::unique_ptr<Iterator>> Planner::plan(const BoundStatement& bound,
     }
     if (auto* match = dynamic_cast<const MatchStmt*>(bound.stmt)) {
         return plan_match(*match, bound);
+    }
+    if (auto* nearest = dynamic_cast<const NearestStmt*>(bound.stmt)) {
+        return plan_nearest(*nearest, bound);
     }
     return make_error(StatusCode::NOT_IMPLEMENTED, "planner does not support this statement type");
 }
@@ -1268,6 +1276,249 @@ Result<std::unique_ptr<Iterator>> Planner::plan_match(const MatchStmt& stmt,
                                                        std::move(schema),
                                                        stmt.where_expr.get(),
                                                        bound);
+
+    return ok(std::unique_ptr<Iterator>(std::move(iter)));
+}
+
+// ---------------------------------------------------------------------------
+// NEAREST
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Map AST NearestMetric to vector::DistanceMetric.
+DistanceMetric to_distance_metric(NearestMetric m) {
+    switch (m) {
+    case NearestMetric::L2:
+        return DistanceMetric::L2;
+    case NearestMetric::DOT:
+        return DistanceMetric::DOT_PRODUCT;
+    case NearestMetric::COSINE:
+    default:
+        return DistanceMetric::COSINE;
+    }
+}
+
+} // anonymous namespace
+
+Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
+                                                        const BoundStatement& bound) {
+    // Resolve the table.
+    auto table_schema = catalog_.get_table(database_id_, stmt.table_name);
+    if (!table_schema) {
+        return make_error(table_schema.error().code, table_schema.error().message);
+    }
+
+    // Get table storage.
+    auto ts = storage_.get_table_storage(table_schema->table_id);
+    if (!ts) {
+        return make_error(ts.error().code, ts.error().message);
+    }
+    auto* storage = *ts;
+
+    // Find the EMBEDDING column index.
+    int32_t emb_col_idx = -1;
+    for (size_t i = 0; i < table_schema->columns.size(); ++i) {
+        if (to_upper(table_schema->columns[i].name) == to_upper(stmt.column_name)) {
+            emb_col_idx = static_cast<int32_t>(i);
+            break;
+        }
+    }
+    if (emb_col_idx < 0) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "column " + stmt.column_name + " not found in table " + stmt.table_name);
+    }
+
+    // Evaluate k.
+    Tuple empty_tuple;
+    OutputSchema empty_schema;
+    auto k_val = evaluate_expr(*stmt.k, empty_tuple, empty_schema, bound);
+    if (!k_val) {
+        return make_error(k_val.error().code, k_val.error().message);
+    }
+    auto k = static_cast<uint32_t>(k_val->as_int64());
+
+    // Evaluate the target expression to get the query vector.
+    auto target_val = evaluate_expr(*stmt.target, empty_tuple, empty_schema, bound);
+    if (!target_val) {
+        return make_error(target_val.error().code, target_val.error().message);
+    }
+
+    std::vector<float> query_vector;
+
+    if (!target_val->is_null() && target_val->type_id() == TypeId::EMBEDDING) {
+        // Target is a literal vector.
+        query_vector = target_val->as_embedding();
+    } else if (!target_val->is_null() && target_val->type_id() == TypeId::STRING) {
+        // Target is a text string — auto-embed via the column's provider.
+        if (provider_registry_ == nullptr) {
+            return make_error(StatusCode::NOT_IMPLEMENTED,
+                              "text auto-embedding requires a ProviderRegistry");
+        }
+
+        // Look up the embedding column metadata.
+        auto emb_cols = catalog_.list_embedding_columns(table_schema->table_id);
+        std::string provider_name;
+        for (const auto& ec : emb_cols) {
+            if (ec.column_id == emb_col_idx) {
+                provider_name = ec.provider;
+                break;
+            }
+        }
+        if (provider_name.empty()) {
+            return make_error(StatusCode::NOT_FOUND,
+                              "no embedding provider configured for column " + stmt.column_name);
+        }
+
+        auto provider = provider_registry_->resolve(provider_name);
+        if (!provider) {
+            return make_error(provider.error().code, provider.error().message);
+        }
+
+        auto embedding = (*provider)->embed(target_val->as_string());
+        if (!embedding) {
+            return make_error(embedding.error().code, embedding.error().message);
+        }
+        query_vector = std::move(*embedding);
+    } else {
+        return make_error(StatusCode::TYPE_ERROR, "NEAREST target must be a vector or text string");
+    }
+
+    // Build NearestScanConfig.
+    NearestScanConfig config;
+    config.k = k;
+    config.query_vector = std::move(query_vector);
+    config.metric = to_distance_metric(stmt.metric);
+    config.embedding_column_index = emb_col_idx;
+
+    // Handle WITHIN TRAVERSE (graph-scoped search).
+    if (stmt.within_traverse) {
+        if (!graph_engine_) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "graph engine not available for WITHIN TRAVERSE");
+        }
+
+        auto* trav_stmt = dynamic_cast<const TraverseStmt*>(stmt.within_traverse.get());
+        if (!trav_stmt) {
+            return make_error(StatusCode::INTERNAL_ERROR, "expected TraverseStmt in WITHIN clause");
+        }
+
+        // Evaluate the start key.
+        auto start_key = evaluate_expr(*trav_stmt->from_key, empty_tuple, empty_schema, bound);
+        if (!start_key) {
+            return make_error(start_key.error().code, start_key.error().message);
+        }
+
+        // Save start PK before moving the value into the config.
+        int64_t start_pk = start_key->as_int64();
+
+        TraversalConfig trav_config;
+        trav_config.edge_type = trav_stmt->edge_type;
+        trav_config.start_key = std::move(*start_key);
+        trav_config.direction = trav_stmt->direction;
+        trav_config.max_depth = trav_stmt->max_depth.value_or(100);
+
+        // Build a minimal output schema for traversal.
+        TypeId pk_type = TypeId::INT64;
+        if (!table_schema->pk_columns.empty()) {
+            for (const auto& col : table_schema->columns) {
+                if (col.name == table_schema->pk_columns) {
+                    pk_type = col.type_id;
+                    break;
+                }
+            }
+        }
+        std::vector<OutputColumn> trav_cols;
+        trav_cols.push_back({"", "node", pk_type, false, 0});
+        trav_cols.push_back({"", "depth", TypeId::INT64, false, 0});
+        auto trav_schema = OutputSchema(std::move(trav_cols));
+
+        // Execute BFS to get the reachable node set.
+        BoundStatement trav_bound;
+        TraversalOperator trav_op(
+            *graph_engine_, std::move(trav_config), std::move(trav_schema), nullptr, trav_bound);
+        auto open_res = trav_op.open();
+        if (!open_res) {
+            return make_error(open_res.error().code, open_res.error().message);
+        }
+
+        // Collect reachable node PKs.
+        std::unordered_set<int64_t> reachable_pks;
+        while (true) {
+            auto row = trav_op.next();
+            if (!row) {
+                return make_error(row.error().code, row.error().message);
+            }
+            if (!row->has_value()) {
+                break;
+            }
+            reachable_pks.insert(row->value().values[0].as_int64());
+        }
+        trav_op.close();
+
+        // Also include the start node itself.
+        reachable_pks.insert(start_pk);
+
+        // Scan the table to build PK → node_ordinal mapping, then convert
+        // reachable PKs to node ordinals for the HNSW filter.
+        auto scan_it = storage->heap->begin();
+        if (!scan_it) {
+            return make_error(scan_it.error().code, scan_it.error().message);
+        }
+
+        // Find the PK column index.
+        int32_t pk_col_idx = -1;
+        for (size_t i = 0; i < table_schema->columns.size(); ++i) {
+            if (table_schema->columns[i].name == table_schema->pk_columns) {
+                pk_col_idx = static_cast<int32_t>(i);
+                break;
+            }
+        }
+
+        uint32_t ordinal = 0;
+        while (true) {
+            auto row = scan_it->next();
+            if (!row) {
+                break;
+            }
+            auto& [rid, data] = *row;
+            auto values = TupleSerializer::deserialize(data, storage->storage_schema);
+            if (!values) {
+                return make_error(values.error().code, values.error().message);
+            }
+            if (pk_col_idx >= 0 &&
+                reachable_pks.count((*values)[static_cast<size_t>(pk_col_idx)].as_int64()) > 0) {
+                config.allowed_node_ids.insert(ordinal);
+            }
+            ++ordinal;
+        }
+    }
+
+    // Look up the companion HNSW index.
+    HnswIndex* hnsw_index = nullptr;
+    if (hnsw_indexes_ != nullptr) {
+        auto index_name =
+            EmbeddingColumnManager::make_index_name(stmt.table_name, stmt.column_name);
+        auto it = hnsw_indexes_->find(index_name);
+        if (it != hnsw_indexes_->end()) {
+            hnsw_index = it->second;
+        }
+    }
+
+    // Build output schema: all table columns + _distance.
+    auto table_output = build_table_output_schema(*table_schema);
+    std::vector<OutputColumn> out_cols = table_output.columns();
+    out_cols.push_back(
+        {stmt.table_name, "_distance", TypeId::FLOAT64, false, table_schema->table_id});
+    auto schema = OutputSchema(std::move(out_cols));
+
+    auto iter = std::make_unique<NearestScanOperator>(*storage->heap,
+                                                      storage->storage_schema,
+                                                      std::move(config),
+                                                      std::move(schema),
+                                                      stmt.where_expr.get(),
+                                                      bound,
+                                                      hnsw_index);
 
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
 }

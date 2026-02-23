@@ -18,6 +18,7 @@ add_library(giodb_executor STATIC
     traversal.cpp
     shortest_path.cpp
     pattern_match.cpp
+    nearest_scan.cpp
     storage_manager.cpp
     planner.cpp
     query_engine.cpp
@@ -32,4 +33,5 @@ target_link_libraries(giodb_executor
         giodb_parser
         giodb_planner
         giodb_graph
+        giodb_vector
 )

@@ -49,6 +49,7 @@ add_executable(giodb_unit_tests
     test_embedding_column.cpp
     test_embedding_worker.cpp
     test_embedding_providers.cpp
+    test_nearest_scan.cpp
 )
 
 target_link_libraries(giodb_unit_tests

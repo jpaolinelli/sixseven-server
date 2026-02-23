@@ -9,6 +9,8 @@
 #include "giodb/graph/graph_engine.h"
 #include "giodb/parser/ast.h"
 #include "giodb/planner/binder.h"
+#include "giodb/vector/hnsw_index.h"
+#include "giodb/vector/provider_registry.h"
 
 #include <memory>
 #include <string>
@@ -28,14 +30,18 @@ namespace giodb {
 /// produce iterator trees.
 class Planner {
 public:
-    /// @param catalog       System catalog for schema lookups.
-    /// @param storage       StorageManager for TableHeap access.
-    /// @param database_id   Current database context for table resolution.
-    /// @param graph_engine  Optional GraphEngine for graph query planning.
+    /// @param catalog          System catalog for schema lookups.
+    /// @param storage          StorageManager for TableHeap access.
+    /// @param database_id      Current database context for table resolution.
+    /// @param graph_engine     Optional GraphEngine for graph query planning.
+    /// @param provider_registry Optional ProviderRegistry for text auto-embedding.
+    /// @param hnsw_indexes     Optional map of index name → loaded HnswIndex.
     Planner(const Catalog& catalog,
             StorageManager& storage,
             database_id_t database_id = default_database_id,
-            GraphEngine* graph_engine = nullptr);
+            GraphEngine* graph_engine = nullptr,
+            ProviderRegistry* provider_registry = nullptr,
+            std::unordered_map<std::string, HnswIndex*>* hnsw_indexes = nullptr);
 
     /// Build an iterator tree for a DML/query statement.
     ///
@@ -111,10 +117,17 @@ private:
     [[nodiscard]] Result<std::unique_ptr<Iterator>> plan_match(const MatchStmt& stmt,
                                                                const BoundStatement& bound);
 
+    // -- Vector query planning ------------------------------------------------
+
+    [[nodiscard]] Result<std::unique_ptr<Iterator>> plan_nearest(const NearestStmt& stmt,
+                                                                 const BoundStatement& bound);
+
     const Catalog& catalog_;
     StorageManager& storage_;
     database_id_t database_id_;
     GraphEngine* graph_engine_;
+    ProviderRegistry* provider_registry_;
+    std::unordered_map<std::string, HnswIndex*>* hnsw_indexes_;
     SubqueryContext subquery_ctx_;
 };
 
