@@ -41,6 +41,9 @@ add_executable(giodb_unit_tests
     test_subquery.cpp
     test_edge_table.cpp
     test_graph_engine.cpp
+    test_traversal.cpp
+    test_shortest_path.cpp
+    test_pattern_match.cpp
 )
 
 target_link_libraries(giodb_unit_tests

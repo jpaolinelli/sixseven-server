@@ -1,5 +1,6 @@
 #include "giodb/executor/query_engine.h"
 
+#include "giodb/executor/expr_evaluator.h"
 #include "giodb/executor/planner.h"
 #include "giodb/parser/ast.h"
 #include "giodb/parser/lexer.h"
@@ -11,8 +12,8 @@
 
 namespace giodb {
 
-QueryEngine::QueryEngine(Catalog& catalog, StorageManager& storage)
-    : catalog_(catalog), storage_(storage) {}
+QueryEngine::QueryEngine(Catalog& catalog, StorageManager& storage, GraphEngine* graph_engine)
+    : catalog_(catalog), storage_(storage), graph_engine_(graph_engine) {}
 
 void QueryEngine::set_current_database(database_id_t database_id) {
     current_database_id_ = database_id;
@@ -55,6 +56,12 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
     if (auto* drop = dynamic_cast<const DropTableStmt*>(stmt_ptr->get())) {
         return execute_drop_table(*drop);
     }
+    if (auto* create_edge = dynamic_cast<const CreateEdgeTypeStmt*>(stmt_ptr->get())) {
+        return execute_create_edge_type(*create_edge);
+    }
+    if (auto* drop_edge = dynamic_cast<const DropEdgeTypeStmt*>(stmt_ptr->get())) {
+        return execute_drop_edge_type(*drop_edge);
+    }
 
     // 4. Bind.
     Binder binder(catalog_, current_database_id_);
@@ -63,7 +70,15 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
         return make_error(bound.error().code, bound.error().message);
     }
 
-    // 5. Plan + Execute.
+    // 5. Dispatch graph DML after binding.
+    if (auto* link = dynamic_cast<const LinkStmt*>(bound->stmt)) {
+        return execute_link(*link, *bound);
+    }
+    if (auto* unlink = dynamic_cast<const UnlinkStmt*>(bound->stmt)) {
+        return execute_unlink(*unlink, *bound);
+    }
+
+    // 6. Plan + Execute.
     return execute_plan(*bound);
 }
 
@@ -236,12 +251,171 @@ Result<QueryResult> QueryEngine::execute_drop_table(const DropTableStmt& stmt) {
 }
 
 // ---------------------------------------------------------------------------
+// DDL: CREATE EDGE TYPE
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_create_edge_type(const CreateEdgeTypeStmt& stmt) {
+    if (!graph_engine_) {
+        return make_error(StatusCode::INTERNAL_ERROR,
+                          "graph engine not available for CREATE EDGE TYPE");
+    }
+
+    // Resolve source and target tables.
+    auto from_schema = catalog_.get_table(current_database_id_, stmt.from_table);
+    if (!from_schema) {
+        return make_error(from_schema.error().code, from_schema.error().message);
+    }
+    auto to_schema = catalog_.get_table(current_database_id_, stmt.to_table);
+    if (!to_schema) {
+        return make_error(to_schema.error().code, to_schema.error().message);
+    }
+
+    // Find PK types.
+    TypeId from_pk_type = TypeId::INT64;
+    TypeId to_pk_type = TypeId::INT64;
+    for (const auto& col : from_schema->columns) {
+        if (col.name == from_schema->pk_columns) {
+            from_pk_type = col.type_id;
+            break;
+        }
+    }
+    for (const auto& col : to_schema->columns) {
+        if (col.name == to_schema->pk_columns) {
+            to_pk_type = col.type_id;
+            break;
+        }
+    }
+
+    // Convert property columns.
+    std::vector<ColumnDef> prop_cols;
+    for (const auto& prop : stmt.properties) {
+        auto type_result = resolve_type_spec(prop.type);
+        if (!type_result) {
+            return make_error(type_result.error().code, type_result.error().message);
+        }
+        prop_cols.push_back({prop.name, *type_result});
+    }
+
+    auto result = graph_engine_->create_edge_type(
+        stmt.name, from_schema->table_id, to_schema->table_id, from_pk_type, to_pk_type, prop_cols);
+    if (!result) {
+        return make_error(result.error().code, result.error().message);
+    }
+
+    QueryResult qr;
+    qr.message = "CREATE EDGE TYPE";
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// DDL: DROP EDGE TYPE
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_drop_edge_type(const DropEdgeTypeStmt& stmt) {
+    if (!graph_engine_) {
+        return make_error(StatusCode::INTERNAL_ERROR,
+                          "graph engine not available for DROP EDGE TYPE");
+    }
+
+    auto result = graph_engine_->drop_edge_type(stmt.name);
+    if (!result) {
+        if (stmt.if_exists && result.error().code == StatusCode::NOT_FOUND) {
+            QueryResult qr;
+            qr.message = "DROP EDGE TYPE";
+            return ok(std::move(qr));
+        }
+        return make_error(result.error().code, result.error().message);
+    }
+
+    QueryResult qr;
+    qr.message = "DROP EDGE TYPE";
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// LINK
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_link(const LinkStmt& stmt, const BoundStatement& bound) {
+    if (!graph_engine_) {
+        return make_error(StatusCode::INTERNAL_ERROR, "graph engine not available for LINK");
+    }
+
+    Tuple empty_tuple;
+    OutputSchema empty_schema;
+
+    auto src_key = evaluate_expr(*stmt.source_key, empty_tuple, empty_schema, bound);
+    if (!src_key) {
+        return make_error(src_key.error().code, src_key.error().message);
+    }
+
+    auto tgt_key = evaluate_expr(*stmt.target_key, empty_tuple, empty_schema, bound);
+    if (!tgt_key) {
+        return make_error(tgt_key.error().code, tgt_key.error().message);
+    }
+
+    // Evaluate property values.
+    std::vector<Value> props;
+    for (const auto& assign : stmt.properties) {
+        auto val = evaluate_expr(*assign.value, empty_tuple, empty_schema, bound);
+        if (!val) {
+            return make_error(val.error().code, val.error().message);
+        }
+        props.push_back(std::move(*val));
+    }
+
+    auto result = graph_engine_->link(stmt.edge_type, *src_key, *tgt_key, props);
+    if (!result) {
+        return make_error(result.error().code, result.error().message);
+    }
+
+    QueryResult qr;
+    qr.affected_rows = 1;
+    qr.message = "LINK";
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// UNLINK
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_unlink(const UnlinkStmt& stmt,
+                                                const BoundStatement& bound) {
+    if (!graph_engine_) {
+        return make_error(StatusCode::INTERNAL_ERROR, "graph engine not available for UNLINK");
+    }
+
+    Tuple empty_tuple;
+    OutputSchema empty_schema;
+
+    auto src_key = evaluate_expr(*stmt.source_key, empty_tuple, empty_schema, bound);
+    if (!src_key) {
+        return make_error(src_key.error().code, src_key.error().message);
+    }
+
+    auto tgt_key = evaluate_expr(*stmt.target_key, empty_tuple, empty_schema, bound);
+    if (!tgt_key) {
+        return make_error(tgt_key.error().code, tgt_key.error().message);
+    }
+
+    auto result = graph_engine_->unlink(stmt.edge_type, *src_key, *tgt_key);
+    if (!result) {
+        return make_error(result.error().code, result.error().message);
+    }
+
+    QueryResult qr;
+    qr.affected_rows = 1;
+    qr.message = "UNLINK";
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
 // DML / Query execution via Planner
 // ---------------------------------------------------------------------------
 
 Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
     // Build iterator tree.
-    Planner planner(catalog_, storage_, current_database_id_);
+    Planner planner(catalog_, storage_, current_database_id_, graph_engine_);
     std::vector<ExprPtr> owned_exprs;
     auto iter = planner.plan(bound, owned_exprs);
     if (!iter) {
