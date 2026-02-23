@@ -1,5 +1,6 @@
 # giodb::vector sources
 add_library(giodb_vector STATIC
+    distance.cpp
     hnsw_page.cpp
     hnsw_index.cpp
 )

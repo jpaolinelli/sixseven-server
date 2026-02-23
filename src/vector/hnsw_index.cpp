@@ -1,6 +1,7 @@
 #include "giodb/vector/hnsw_index.h"
 
 #include "giodb/common/logging.h"
+#include "giodb/vector/distance.h"
 
 #include <algorithm>
 #include <cmath>
@@ -811,15 +812,6 @@ uint8_t HnswIndex::random_layer() {
     return level;
 }
 
-float HnswIndex::distance_l2(std::span<const float> a, std::span<const float> b) {
-    float sum = 0.0F;
-    for (size_t i = 0; i < a.size() && i < b.size(); ++i) {
-        float diff = a[i] - b[i];
-        sum += diff * diff;
-    }
-    return sum;
-}
-
 Result<std::vector<float>> HnswIndex::read_node_vector(const HnswNode& node) const {
     return read_vector(node.vector_page_id, node.vector_slot_id);
 }
@@ -841,7 +833,7 @@ Result<uint32_t> HnswIndex::greedy_search_layer(std::span<const float> query,
     }
 
     uint32_t current_id = entry_id;
-    float current_dist = distance_l2(query, entry_vec_result.value());
+    float current_dist = compute_distance(DistanceMetric::L2, query, entry_vec_result.value());
 
     bool changed = true;
     while (changed) {
@@ -876,7 +868,7 @@ Result<uint32_t> HnswIndex::greedy_search_layer(std::span<const float> query,
             if (!nvec.has_value()) {
                 continue;
             }
-            float dist = distance_l2(query, nvec.value());
+            float dist = compute_distance(DistanceMetric::L2, query, nvec.value());
             if (dist < current_dist) {
                 current_id = neighbor.node_id;
                 current_dist = dist;
@@ -917,7 +909,7 @@ HnswIndex::search_layer(std::span<const float> query,
         return ok(std::vector<Candidate>{});
     }
 
-    float entry_dist = distance_l2(query, entry_vec.value());
+    float entry_dist = compute_distance(DistanceMetric::L2, query, entry_vec.value());
     candidates.push({entry_id, entry_dist});
     result.push({entry_id, entry_dist});
     visited.insert(entry_id);
@@ -967,7 +959,7 @@ HnswIndex::search_layer(std::span<const float> query,
                 continue;
             }
 
-            float dist = distance_l2(query, nvec.value());
+            float dist = compute_distance(DistanceMetric::L2, query, nvec.value());
 
             if (result.size() < ef || dist < result.top().distance) {
                 candidates.push({neighbor.node_id, dist});
