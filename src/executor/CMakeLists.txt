@@ -12,6 +12,7 @@ add_library(giodb_executor STATIC
     nested_loop_join.cpp
     hash_join.cpp
     sort_merge_join.cpp
+    hash_aggregate.cpp
     storage_manager.cpp
     planner.cpp
     query_engine.cpp

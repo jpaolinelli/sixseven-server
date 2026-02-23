@@ -33,6 +33,7 @@ add_executable(giodb_unit_tests
     test_nested_loop_join.cpp
     test_hash_join.cpp
     test_sort_merge_join.cpp
+    test_hash_aggregate.cpp
     test_query_engine.cpp
 )
 

@@ -85,6 +85,7 @@ const std::unordered_set<std::string>& aggregate_names() {
         "AVG",
         "MIN",
         "MAX",
+        "STRING_AGG",
     };
     return names;
 }
@@ -163,6 +164,9 @@ Result<TypeId> aggregate_return_type(const std::string& name, TypeId input_type)
                                   std::string(type_name(input_type)));
         }
         return ok(input_type);
+    }
+    if (upper == "STRING_AGG") {
+        return ok(TypeId::STRING);
     }
 
     return make_error(StatusCode::TYPE_ERROR, "unknown aggregate function: " + name);
