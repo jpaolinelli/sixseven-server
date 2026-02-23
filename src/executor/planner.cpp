@@ -2,6 +2,7 @@
 
 #include "giodb/executor/delete.h"
 #include "giodb/executor/filter.h"
+#include "giodb/executor/hash_aggregate.h"
 #include "giodb/executor/insert.h"
 #include "giodb/executor/limit.h"
 #include "giodb/executor/nested_loop_join.h"
@@ -9,10 +10,190 @@
 #include "giodb/executor/seq_scan.h"
 #include "giodb/executor/sort.h"
 #include "giodb/executor/update.h"
+#include "giodb/planner/type_resolver.h"
 
+#include <algorithm>
+#include <cctype>
 #include <string>
+#include <unordered_map>
 
 namespace giodb {
+
+namespace {
+
+std::string to_upper(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+    });
+    return s;
+}
+
+/// Recursively collect all aggregate FunctionCallExpr nodes in an expression tree.
+void collect_aggregate_exprs(const Expr& expr,
+                             const BoundStatement& bound,
+                             std::vector<const FunctionCallExpr*>& out) {
+    if (auto* fn = dynamic_cast<const FunctionCallExpr*>(&expr)) {
+        auto it = bound.expr_types.find(&expr);
+        if (it != bound.expr_types.end() && it->second.is_aggregate) {
+            out.push_back(fn);
+            return; // Don't recurse into aggregate arguments.
+        }
+    }
+
+    // Recurse into sub-expressions.
+    if (auto* bin = dynamic_cast<const BinaryExpr*>(&expr)) {
+        if (bin->lhs) {
+            collect_aggregate_exprs(*bin->lhs, bound, out);
+        }
+        if (bin->rhs) {
+            collect_aggregate_exprs(*bin->rhs, bound, out);
+        }
+    } else if (auto* un = dynamic_cast<const UnaryExpr*>(&expr)) {
+        if (un->operand) {
+            collect_aggregate_exprs(*un->operand, bound, out);
+        }
+    } else if (auto* fn = dynamic_cast<const FunctionCallExpr*>(&expr)) {
+        for (auto& arg : fn->args) {
+            if (arg) {
+                collect_aggregate_exprs(*arg, bound, out);
+            }
+        }
+    } else if (auto* cast = dynamic_cast<const CastExpr*>(&expr)) {
+        if (cast->expr) {
+            collect_aggregate_exprs(*cast->expr, bound, out);
+        }
+    }
+}
+
+/// Check if an expression tree contains any aggregate function call.
+bool contains_any_aggregate(const Expr& expr, const BoundStatement& bound) {
+    std::vector<const FunctionCallExpr*> aggs;
+    collect_aggregate_exprs(expr, bound, aggs);
+    return !aggs.empty();
+}
+
+/// Convert a FunctionCallExpr to an AggFunc enum + separator.
+AggFunc resolve_agg_func(const FunctionCallExpr& fn) {
+    std::string upper = to_upper(fn.name);
+
+    if (upper == "COUNT") {
+        if (fn.distinct) {
+            return AggFunc::COUNT_DISTINCT;
+        }
+        // COUNT(*): parser represents * as ColumnRefExpr{column="*"}.
+        if (!fn.args.empty()) {
+            if (auto* cref = dynamic_cast<const ColumnRefExpr*>(fn.args[0].get())) {
+                if (cref->column == "*") {
+                    return AggFunc::COUNT_STAR;
+                }
+            }
+        }
+        if (fn.args.empty()) {
+            return AggFunc::COUNT_STAR;
+        }
+        return AggFunc::COUNT;
+    }
+    if (upper == "SUM") {
+        return AggFunc::SUM;
+    }
+    if (upper == "AVG") {
+        return AggFunc::AVG;
+    }
+    if (upper == "MIN") {
+        return AggFunc::MIN;
+    }
+    if (upper == "MAX") {
+        return AggFunc::MAX;
+    }
+    if (upper == "STRING_AGG") {
+        return AggFunc::STRING_AGG;
+    }
+    return AggFunc::COUNT_STAR; // fallback (should never happen after binder validation)
+}
+
+/// Deep-clone an expression tree, replacing aggregate FunctionCallExpr nodes
+/// with ColumnRefExpr nodes that reference the aggregate output columns.
+ExprPtr rewrite_expr(const Expr& expr,
+                     const std::unordered_map<const Expr*, std::string>& agg_map) {
+    // If this expression is a mapped aggregate, replace it.
+    auto it = agg_map.find(&expr);
+    if (it != agg_map.end()) {
+        auto cr = std::make_unique<ColumnRefExpr>();
+        cr->table = "";
+        cr->column = it->second;
+        return cr;
+    }
+
+    // Recursively clone and rewrite sub-expressions.
+    if (auto* lit = dynamic_cast<const LiteralExpr*>(&expr)) {
+        auto n = std::make_unique<LiteralExpr>();
+        n->kind = lit->kind;
+        n->value = lit->value;
+        n->line = lit->line;
+        n->col = lit->col;
+        return n;
+    }
+    if (auto* col = dynamic_cast<const ColumnRefExpr*>(&expr)) {
+        auto n = std::make_unique<ColumnRefExpr>();
+        n->table = col->table;
+        n->column = col->column;
+        n->line = col->line;
+        n->col = col->col;
+        return n;
+    }
+    if (auto* bin = dynamic_cast<const BinaryExpr*>(&expr)) {
+        auto n = std::make_unique<BinaryExpr>();
+        n->op = bin->op;
+        n->lhs = bin->lhs ? rewrite_expr(*bin->lhs, agg_map) : nullptr;
+        n->rhs = bin->rhs ? rewrite_expr(*bin->rhs, agg_map) : nullptr;
+        n->line = bin->line;
+        n->col = bin->col;
+        return n;
+    }
+    if (auto* un = dynamic_cast<const UnaryExpr*>(&expr)) {
+        auto n = std::make_unique<UnaryExpr>();
+        n->op = un->op;
+        n->operand = un->operand ? rewrite_expr(*un->operand, agg_map) : nullptr;
+        n->line = un->line;
+        n->col = un->col;
+        return n;
+    }
+    if (auto* cast = dynamic_cast<const CastExpr*>(&expr)) {
+        auto n = std::make_unique<CastExpr>();
+        n->target_type = cast->target_type;
+        n->expr = cast->expr ? rewrite_expr(*cast->expr, agg_map) : nullptr;
+        n->line = cast->line;
+        n->col = cast->col;
+        return n;
+    }
+    if (auto* fn = dynamic_cast<const FunctionCallExpr*>(&expr)) {
+        // Non-aggregate function call — clone it and rewrite args.
+        auto n = std::make_unique<FunctionCallExpr>();
+        n->name = fn->name;
+        n->distinct = fn->distinct;
+        n->line = fn->line;
+        n->col = fn->col;
+        for (auto& arg : fn->args) {
+            n->args.push_back(arg ? rewrite_expr(*arg, agg_map) : nullptr);
+        }
+        return n;
+    }
+    if (auto* isnull = dynamic_cast<const IsNullExpr*>(&expr)) {
+        auto n = std::make_unique<IsNullExpr>();
+        n->negated = isnull->negated;
+        n->expr = isnull->expr ? rewrite_expr(*isnull->expr, agg_map) : nullptr;
+        n->line = isnull->line;
+        n->col = isnull->col;
+        return n;
+    }
+
+    // Fallback: return a column ref that will fail (should not happen for valid queries).
+    auto cr = std::make_unique<ColumnRefExpr>();
+    cr->column = "__unsupported_expr__";
+    return cr;
+}
+
+} // anonymous namespace
 
 Planner::Planner(const Catalog& catalog, StorageManager& storage)
     : catalog_(catalog), storage_(storage) {}
@@ -156,42 +337,209 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
         }
     }
 
-    // -- 3. Projection -------------------------------------------------------
-    std::vector<ProjectionExpr> projections;
-    projections.reserve(stmt.items.size());
+    // -- 3. Detect GROUP BY / aggregation ------------------------------------
+    bool has_group_by = !stmt.group_by.empty();
+    bool has_aggregates = false;
+    for (auto& item : stmt.items) {
+        if (item.expr && contains_any_aggregate(*item.expr, bound)) {
+            has_aggregates = true;
+            break;
+        }
+    }
 
-    for (const auto& item : stmt.items) {
-        if (item.is_star || !item.table_star.empty()) {
-            // Expand * or table.* using bound output columns (which the binder
-            // already resolved for all tables including joins).
-            for (const auto& rc : bound.output_columns) {
-                if (!item.table_star.empty() && rc.table_name != item.table_star) {
-                    continue;
-                }
-                auto cr = std::make_unique<ColumnRefExpr>();
-                cr->table = rc.table_name;
-                cr->column = rc.column_name;
-                projections.push_back({cr.get(), rc.column_name});
-                owned_exprs.push_back(std::move(cr));
+    if (has_group_by || has_aggregates) {
+        // -- 3a. Collect all aggregate function calls from SELECT + HAVING ----
+        std::vector<const FunctionCallExpr*> all_agg_exprs;
+        for (auto& item : stmt.items) {
+            if (item.expr) {
+                collect_aggregate_exprs(*item.expr, bound, all_agg_exprs);
             }
-        } else {
-            // Named expression.
+        }
+        if (stmt.having_expr) {
+            collect_aggregate_exprs(*stmt.having_expr, bound, all_agg_exprs);
+        }
+
+        // Deduplicate aggregate expressions (same pointer may appear in SELECT and HAVING).
+        std::vector<const FunctionCallExpr*> unique_aggs;
+        for (auto* agg : all_agg_exprs) {
+            bool found = false;
+            for (auto* u : unique_aggs) {
+                if (u == agg) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                unique_aggs.push_back(agg);
+            }
+        }
+
+        // -- 3b. Build AggregateDescriptors and agg_map ----------------------
+        std::vector<AggregateDescriptor> agg_descs;
+        std::unordered_map<const Expr*, std::string> agg_map; // FunctionCallExpr* → output col name
+
+        for (size_t i = 0; i < unique_aggs.size(); ++i) {
+            auto* fn = unique_aggs[i];
+            AggregateDescriptor desc;
+            desc.func = resolve_agg_func(*fn);
+
+            // Set the argument expression.
+            if (desc.func == AggFunc::COUNT_STAR) {
+                desc.arg = nullptr;
+            } else if (!fn->args.empty()) {
+                desc.arg = fn->args[0].get();
+            }
+
+            // STRING_AGG separator (second argument).
+            if (desc.func == AggFunc::STRING_AGG && fn->args.size() >= 2) {
+                if (auto* sep_lit = dynamic_cast<const LiteralExpr*>(fn->args[1].get())) {
+                    desc.separator = sep_lit->value;
+                } else {
+                    desc.separator = ","; // default
+                }
+            }
+
+            std::string col_name = "__agg_" + std::to_string(i);
+            agg_map[fn] = col_name;
+            agg_descs.push_back(std::move(desc));
+        }
+
+        // -- 3c. Build aggregate output schema --------------------------------
+        const auto& child_schema = child->output_schema();
+        std::vector<OutputColumn> agg_out_cols;
+
+        // GROUP BY columns first (preserve original names from child schema).
+        std::vector<const Expr*> group_by_ptrs;
+        for (auto& gb : stmt.group_by) {
+            if (gb) {
+                group_by_ptrs.push_back(gb.get());
+
+                // Find the column info from the child schema.
+                if (auto* cref = dynamic_cast<const ColumnRefExpr*>(gb.get())) {
+                    std::optional<size_t> idx;
+                    if (!cref->table.empty()) {
+                        idx = child_schema.find_column(cref->table, cref->column);
+                    } else {
+                        idx = child_schema.find_column(cref->column);
+                    }
+                    if (idx) {
+                        agg_out_cols.push_back(child_schema.column(*idx));
+                    } else {
+                        // Fallback for expressions.
+                        agg_out_cols.push_back({"", cref->column, TypeId::STRING, true, 0});
+                    }
+                } else {
+                    // Non-column GROUP BY expression.
+                    agg_out_cols.push_back({"", "?group?", TypeId::STRING, true, 0});
+                }
+            }
+        }
+
+        // Aggregate result columns.
+        for (size_t i = 0; i < unique_aggs.size(); ++i) {
+            std::string col_name = "__agg_" + std::to_string(i);
+            auto it = bound.expr_types.find(unique_aggs[i]);
+            TypeId type = TypeId::INT64;
+            bool nullable = true;
+            if (it != bound.expr_types.end()) {
+                type = it->second.type_id;
+                nullable = it->second.nullable;
+            }
+            agg_out_cols.push_back({"", col_name, type, nullable, 0});
+        }
+
+        auto agg_schema = OutputSchema(std::move(agg_out_cols));
+
+        // -- 3d. Create HashAggregateOperator ---------------------------------
+        child = std::make_unique<HashAggregateOperator>(std::move(child),
+                                                        std::move(group_by_ptrs),
+                                                        std::move(agg_descs),
+                                                        bound,
+                                                        std::move(agg_schema));
+
+        // -- 3e. Apply HAVING filter ------------------------------------------
+        if (stmt.having_expr) {
+            auto having_rewritten = rewrite_expr(*stmt.having_expr, agg_map);
+            auto* having_ptr = having_rewritten.get();
+            owned_exprs.push_back(std::move(having_rewritten));
+            child = std::make_unique<FilterOperator>(std::move(child), *having_ptr, bound);
+        }
+
+        // -- 3f. Build rewritten projections ----------------------------------
+        std::vector<ProjectionExpr> projections;
+        for (const auto& item : stmt.items) {
+            if (item.is_star || !item.table_star.empty()) {
+                // SELECT * with GROUP BY — handled by binder validation (error).
+                continue;
+            }
+            if (!item.expr) {
+                continue;
+            }
+
             std::string col_alias = item.alias;
             if (col_alias.empty()) {
-                // Try to derive a name from a column reference.
                 if (auto* cr = dynamic_cast<const ColumnRefExpr*>(item.expr.get())) {
                     col_alias = cr->column;
+                } else if (auto* fn = dynamic_cast<const FunctionCallExpr*>(item.expr.get())) {
+                    col_alias = fn->name;
                 } else {
                     col_alias = "?column?";
                 }
             }
-            projections.push_back({item.expr.get(), col_alias});
-        }
-    }
 
-    auto output_schema = build_output_schema(bound.output_columns);
-    child = std::make_unique<ProjectOperator>(
-        std::move(child), std::move(projections), std::move(output_schema), bound);
+            // Check if this SELECT item needs aggregate rewriting.
+            if (contains_any_aggregate(*item.expr, bound)) {
+                auto rewritten = rewrite_expr(*item.expr, agg_map);
+                auto* ptr = rewritten.get();
+                owned_exprs.push_back(std::move(rewritten));
+                projections.push_back({ptr, col_alias});
+            } else {
+                // Pure column reference or literal — use as-is.
+                projections.push_back({item.expr.get(), col_alias});
+            }
+        }
+
+        auto output_schema = build_output_schema(bound.output_columns);
+        child = std::make_unique<ProjectOperator>(
+            std::move(child), std::move(projections), std::move(output_schema), bound);
+    } else {
+        // -- 3 (no aggregation). Projection ----------------------------------
+        std::vector<ProjectionExpr> projections;
+        projections.reserve(stmt.items.size());
+
+        for (const auto& item : stmt.items) {
+            if (item.is_star || !item.table_star.empty()) {
+                // Expand * or table.* using bound output columns (which the binder
+                // already resolved for all tables including joins).
+                for (const auto& rc : bound.output_columns) {
+                    if (!item.table_star.empty() && rc.table_name != item.table_star) {
+                        continue;
+                    }
+                    auto cr = std::make_unique<ColumnRefExpr>();
+                    cr->table = rc.table_name;
+                    cr->column = rc.column_name;
+                    projections.push_back({cr.get(), rc.column_name});
+                    owned_exprs.push_back(std::move(cr));
+                }
+            } else {
+                // Named expression.
+                std::string col_alias = item.alias;
+                if (col_alias.empty()) {
+                    // Try to derive a name from a column reference.
+                    if (auto* cr = dynamic_cast<const ColumnRefExpr*>(item.expr.get())) {
+                        col_alias = cr->column;
+                    } else {
+                        col_alias = "?column?";
+                    }
+                }
+                projections.push_back({item.expr.get(), col_alias});
+            }
+        }
+
+        auto output_schema = build_output_schema(bound.output_columns);
+        child = std::make_unique<ProjectOperator>(
+            std::move(child), std::move(projections), std::move(output_schema), bound);
+    }
 
     // -- 4. ORDER BY ---------------------------------------------------------
     if (!stmt.order_by.empty()) {
