@@ -15,6 +15,9 @@ add_library(giodb_executor STATIC
     hash_aggregate.cpp
     window_function.cpp
     subquery_source.cpp
+    traversal.cpp
+    shortest_path.cpp
+    pattern_match.cpp
     storage_manager.cpp
     planner.cpp
     query_engine.cpp
@@ -28,4 +31,5 @@ target_link_libraries(giodb_executor
         giodb_table
         giodb_parser
         giodb_planner
+        giodb_graph
 )

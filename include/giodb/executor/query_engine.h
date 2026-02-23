@@ -5,6 +5,7 @@
 #include "giodb/common/types.h"
 #include "giodb/common/value.h"
 #include "giodb/executor/storage_manager.h"
+#include "giodb/graph/graph_engine.h"
 
 #include <cstdint>
 #include <string>
@@ -15,9 +16,13 @@ namespace giodb {
 // Forward declarations.
 struct BoundStatement;
 struct CreateDatabaseStmt;
+struct CreateEdgeTypeStmt;
 struct CreateTableStmt;
 struct DropDatabaseStmt;
+struct DropEdgeTypeStmt;
 struct DropTableStmt;
+struct LinkStmt;
+struct UnlinkStmt;
 
 /// Result of executing a SQL statement.
 struct QueryResult {
@@ -47,9 +52,10 @@ struct QueryResult {
 /// which bypass the planner and directly modify the Catalog + StorageManager.
 class QueryEngine {
 public:
-    /// @param catalog  System catalog (schema metadata).
-    /// @param storage  StorageManager (physical table storage).
-    QueryEngine(Catalog& catalog, StorageManager& storage);
+    /// @param catalog       System catalog (schema metadata).
+    /// @param storage       StorageManager (physical table storage).
+    /// @param graph_engine  Optional GraphEngine for graph operations.
+    QueryEngine(Catalog& catalog, StorageManager& storage, GraphEngine* graph_engine = nullptr);
 
     /// Execute a SQL statement string and return the result.
     /// Uses the current database context for name resolution.
@@ -74,11 +80,26 @@ private:
     /// Execute a DDL DROP TABLE statement.
     [[nodiscard]] Result<QueryResult> execute_drop_table(const DropTableStmt& stmt);
 
+    /// Execute a DDL CREATE EDGE TYPE statement.
+    [[nodiscard]] Result<QueryResult> execute_create_edge_type(const CreateEdgeTypeStmt& stmt);
+
+    /// Execute a DDL DROP EDGE TYPE statement.
+    [[nodiscard]] Result<QueryResult> execute_drop_edge_type(const DropEdgeTypeStmt& stmt);
+
+    /// Execute a LINK statement (create edge).
+    [[nodiscard]] Result<QueryResult> execute_link(const LinkStmt& stmt,
+                                                   const BoundStatement& bound);
+
+    /// Execute an UNLINK statement (delete edge).
+    [[nodiscard]] Result<QueryResult> execute_unlink(const UnlinkStmt& stmt,
+                                                     const BoundStatement& bound);
+
     /// Execute a DML/query via the Planner + Iterator pipeline.
     [[nodiscard]] Result<QueryResult> execute_plan(const BoundStatement& bound);
 
     Catalog& catalog_;
     StorageManager& storage_;
+    GraphEngine* graph_engine_;
     database_id_t current_database_id_ = default_database_id;
 };
 

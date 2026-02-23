@@ -6,6 +6,7 @@
 #include "giodb/executor/iterator.h"
 #include "giodb/executor/storage_manager.h"
 #include "giodb/executor/tuple.h"
+#include "giodb/graph/graph_engine.h"
 #include "giodb/parser/ast.h"
 #include "giodb/planner/binder.h"
 
@@ -27,12 +28,14 @@ namespace giodb {
 /// produce iterator trees.
 class Planner {
 public:
-    /// @param catalog      System catalog for schema lookups.
-    /// @param storage      StorageManager for TableHeap access.
-    /// @param database_id  Current database context for table resolution.
+    /// @param catalog       System catalog for schema lookups.
+    /// @param storage       StorageManager for TableHeap access.
+    /// @param database_id   Current database context for table resolution.
+    /// @param graph_engine  Optional GraphEngine for graph query planning.
     Planner(const Catalog& catalog,
             StorageManager& storage,
-            database_id_t database_id = default_database_id);
+            database_id_t database_id = default_database_id,
+            GraphEngine* graph_engine = nullptr);
 
     /// Build an iterator tree for a DML/query statement.
     ///
@@ -97,9 +100,21 @@ private:
                                 const std::unordered_map<std::string, const SelectStmt*>& cte_map,
                                 std::vector<ExprPtr>& owned_exprs);
 
+    // -- Graph query planning -------------------------------------------------
+
+    [[nodiscard]] Result<std::unique_ptr<Iterator>> plan_traverse(const TraverseStmt& stmt,
+                                                                  const BoundStatement& bound);
+
+    [[nodiscard]] Result<std::unique_ptr<Iterator>> plan_shortest_path(const ShortestPathStmt& stmt,
+                                                                       const BoundStatement& bound);
+
+    [[nodiscard]] Result<std::unique_ptr<Iterator>> plan_match(const MatchStmt& stmt,
+                                                               const BoundStatement& bound);
+
     const Catalog& catalog_;
     StorageManager& storage_;
     database_id_t database_id_;
+    GraphEngine* graph_engine_;
     SubqueryContext subquery_ctx_;
 };
 

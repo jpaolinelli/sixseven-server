@@ -6,10 +6,13 @@
 #include "giodb/executor/insert.h"
 #include "giodb/executor/limit.h"
 #include "giodb/executor/nested_loop_join.h"
+#include "giodb/executor/pattern_match.h"
 #include "giodb/executor/project.h"
 #include "giodb/executor/seq_scan.h"
+#include "giodb/executor/shortest_path.h"
 #include "giodb/executor/sort.h"
 #include "giodb/executor/subquery_source.h"
+#include "giodb/executor/traversal.h"
 #include "giodb/executor/update.h"
 #include "giodb/planner/type_resolver.h"
 
@@ -200,8 +203,11 @@ ExprPtr rewrite_expr(const Expr& expr,
 
 } // anonymous namespace
 
-Planner::Planner(const Catalog& catalog, StorageManager& storage, database_id_t database_id)
-    : catalog_(catalog), storage_(storage), database_id_(database_id),
+Planner::Planner(const Catalog& catalog,
+                 StorageManager& storage,
+                 database_id_t database_id,
+                 GraphEngine* graph_engine)
+    : catalog_(catalog), storage_(storage), database_id_(database_id), graph_engine_(graph_engine),
       subquery_ctx_{catalog_, storage_} {}
 
 // ---------------------------------------------------------------------------
@@ -221,6 +227,15 @@ Result<std::unique_ptr<Iterator>> Planner::plan(const BoundStatement& bound,
     }
     if (auto* del = dynamic_cast<const DeleteStmt*>(bound.stmt)) {
         return plan_delete(*del, bound);
+    }
+    if (auto* trav = dynamic_cast<const TraverseStmt*>(bound.stmt)) {
+        return plan_traverse(*trav, bound);
+    }
+    if (auto* sp = dynamic_cast<const ShortestPathStmt*>(bound.stmt)) {
+        return plan_shortest_path(*sp, bound);
+    }
+    if (auto* match = dynamic_cast<const MatchStmt*>(bound.stmt)) {
+        return plan_match(*match, bound);
     }
     return make_error(StatusCode::NOT_IMPLEMENTED, "planner does not support this statement type");
 }
@@ -1091,6 +1106,169 @@ Result<std::unique_ptr<Iterator>> Planner::plan_delete(const DeleteStmt& stmt,
         *storage->heap, storage->storage_schema, table_output, predicate, &bound);
 
     auto iter = std::make_unique<DeleteOperator>(*storage->heap, std::move(scan));
+    return ok(std::unique_ptr<Iterator>(std::move(iter)));
+}
+
+// ---------------------------------------------------------------------------
+// TRAVERSE
+// ---------------------------------------------------------------------------
+
+Result<std::unique_ptr<Iterator>> Planner::plan_traverse(const TraverseStmt& stmt,
+                                                         const BoundStatement& bound) {
+    if (!graph_engine_) {
+        return make_error(StatusCode::INTERNAL_ERROR, "graph engine not available for TRAVERSE");
+    }
+
+    // Evaluate the start key.
+    Tuple empty_tuple;
+    OutputSchema empty_schema;
+    auto key_val = evaluate_expr(*stmt.from_key, empty_tuple, empty_schema, bound);
+    if (!key_val) {
+        return make_error(key_val.error().code, key_val.error().message);
+    }
+
+    TraversalConfig config;
+    config.edge_type = stmt.edge_type;
+    config.start_key = std::move(*key_val);
+    config.direction = stmt.direction;
+    config.max_depth = stmt.max_depth.value_or(100);
+    config.fetch = stmt.fetch;
+    config.collect_edges = true;
+
+    // Build output schema.
+    // Determine PK type from the edge type definition.
+    auto edge_def = catalog_.get_edge_type(stmt.edge_type);
+    if (!edge_def) {
+        return make_error(edge_def.error().code, edge_def.error().message);
+    }
+
+    // Look up the target table schema for PK type info.
+    TypeId pk_type = TypeId::INT64;
+    if (!bound.referenced_tables.empty()) {
+        auto ts = catalog_.get_table_by_id(bound.referenced_tables[0]);
+        if (ts) {
+            // Find PK column type.
+            if (!ts->pk_columns.empty()) {
+                for (const auto& col : ts->columns) {
+                    if (col.name == ts->pk_columns) {
+                        pk_type = col.type_id;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    std::vector<OutputColumn> out_cols;
+    out_cols.push_back({"", "node", pk_type, false, 0});
+    out_cols.push_back({"", "depth", TypeId::INT64, false, 0});
+    if (stmt.fetch) {
+        out_cols.push_back({"", "source", pk_type, true, 0});
+    }
+    auto schema = OutputSchema(std::move(out_cols));
+
+    auto iter = std::make_unique<TraversalOperator>(
+        *graph_engine_, std::move(config), std::move(schema), stmt.where_expr.get(), bound);
+
+    return ok(std::unique_ptr<Iterator>(std::move(iter)));
+}
+
+// ---------------------------------------------------------------------------
+// SHORTEST PATH
+// ---------------------------------------------------------------------------
+
+Result<std::unique_ptr<Iterator>> Planner::plan_shortest_path(const ShortestPathStmt& stmt,
+                                                              const BoundStatement& bound) {
+    if (!graph_engine_) {
+        return make_error(StatusCode::INTERNAL_ERROR,
+                          "graph engine not available for SHORTEST PATH");
+    }
+
+    // Evaluate start and end keys.
+    Tuple empty_tuple;
+    OutputSchema empty_schema;
+    auto from_val = evaluate_expr(*stmt.from_key, empty_tuple, empty_schema, bound);
+    if (!from_val) {
+        return make_error(from_val.error().code, from_val.error().message);
+    }
+    auto to_val = evaluate_expr(*stmt.to_key, empty_tuple, empty_schema, bound);
+    if (!to_val) {
+        return make_error(to_val.error().code, to_val.error().message);
+    }
+
+    ShortestPathConfig sp_config;
+    sp_config.edge_type = stmt.edge_type;
+    sp_config.from_key = std::move(*from_val);
+    sp_config.to_key = std::move(*to_val);
+    sp_config.direction = stmt.direction;
+    sp_config.max_depth = stmt.max_depth.value_or(100);
+
+    // Determine PK type.
+    TypeId pk_type = TypeId::INT64;
+    if (!bound.referenced_tables.empty()) {
+        auto ts = catalog_.get_table_by_id(bound.referenced_tables[0]);
+        if (ts) {
+            if (!ts->pk_columns.empty()) {
+                for (const auto& col : ts->columns) {
+                    if (col.name == ts->pk_columns) {
+                        pk_type = col.type_id;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    std::vector<OutputColumn> out_cols;
+    out_cols.push_back({"", "node", pk_type, false, 0});
+    out_cols.push_back({"", "hop", TypeId::INT64, false, 0});
+    auto schema = OutputSchema(std::move(out_cols));
+
+    auto iter = std::make_unique<ShortestPathOperator>(
+        *graph_engine_, std::move(sp_config), std::move(schema));
+
+    return ok(std::unique_ptr<Iterator>(std::move(iter)));
+}
+
+// ---------------------------------------------------------------------------
+// MATCH
+// ---------------------------------------------------------------------------
+
+Result<std::unique_ptr<Iterator>> Planner::plan_match(const MatchStmt& stmt,
+                                                      const BoundStatement& bound) {
+    if (!graph_engine_) {
+        return make_error(StatusCode::INTERNAL_ERROR, "graph engine not available for MATCH");
+    }
+
+    // Build pattern config from AST pattern elements.
+    MatchConfig match_config;
+    for (const auto& elem : stmt.pattern) {
+        MatchNodeDef node_def;
+        node_def.variable = elem.node.variable;
+        node_def.label = elem.node.label;
+        match_config.nodes.push_back(std::move(node_def));
+
+        if (elem.outgoing_edge) {
+            MatchEdgeDef edge_def;
+            edge_def.variable = elem.outgoing_edge->variable;
+            edge_def.edge_type = elem.outgoing_edge->edge_type;
+            edge_def.direction = elem.outgoing_edge->direction;
+            match_config.edges.push_back(std::move(edge_def));
+        }
+    }
+
+    // Build output schema from bound output columns.
+    auto schema = build_output_schema(bound.output_columns);
+
+    auto iter = std::make_unique<PatternMatchOperator>(*graph_engine_,
+                                                       catalog_,
+                                                       storage_,
+                                                       database_id_,
+                                                       std::move(match_config),
+                                                       std::move(schema),
+                                                       stmt.where_expr.get(),
+                                                       bound);
+
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
 }
 
