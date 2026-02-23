@@ -27,9 +27,12 @@ namespace giodb {
 /// produce iterator trees.
 class Planner {
 public:
-    /// @param catalog  System catalog for schema lookups.
-    /// @param storage  StorageManager for TableHeap access.
-    Planner(const Catalog& catalog, StorageManager& storage);
+    /// @param catalog      System catalog for schema lookups.
+    /// @param storage      StorageManager for TableHeap access.
+    /// @param database_id  Current database context for table resolution.
+    Planner(const Catalog& catalog,
+            StorageManager& storage,
+            database_id_t database_id = default_database_id);
 
     /// Build an iterator tree for a DML/query statement.
     ///
@@ -96,6 +99,7 @@ private:
 
     const Catalog& catalog_;
     StorageManager& storage_;
+    database_id_t database_id_;
     SubqueryContext subquery_ctx_;
 };
 

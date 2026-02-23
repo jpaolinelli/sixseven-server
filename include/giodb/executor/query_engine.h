@@ -52,7 +52,14 @@ public:
     QueryEngine(Catalog& catalog, StorageManager& storage);
 
     /// Execute a SQL statement string and return the result.
+    /// Uses the current database context for name resolution.
     [[nodiscard]] Result<QueryResult> execute(const std::string& sql);
+
+    /// Set the current database context by ID.
+    void set_current_database(database_id_t database_id);
+
+    /// Get the current database ID.
+    [[nodiscard]] database_id_t current_database_id() const;
 
 private:
     /// Execute a DDL CREATE DATABASE statement.
@@ -72,6 +79,7 @@ private:
 
     Catalog& catalog_;
     StorageManager& storage_;
+    database_id_t current_database_id_ = default_database_id;
 };
 
 } // namespace giodb

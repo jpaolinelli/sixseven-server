@@ -200,8 +200,9 @@ ExprPtr rewrite_expr(const Expr& expr,
 
 } // anonymous namespace
 
-Planner::Planner(const Catalog& catalog, StorageManager& storage)
-    : catalog_(catalog), storage_(storage), subquery_ctx_{catalog_, storage_} {}
+Planner::Planner(const Catalog& catalog, StorageManager& storage, database_id_t database_id)
+    : catalog_(catalog), storage_(storage), database_id_(database_id),
+      subquery_ctx_{catalog_, storage_} {}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -265,7 +266,7 @@ Planner::plan_from_source(const TableRef& table_ref,
             return make_error(StatusCode::INTERNAL_ERROR, "FROM subquery is not a SELECT");
         }
 
-        Binder binder(catalog_);
+        Binder binder(catalog_, database_id_);
         auto sub_bound = binder.bind(*sub_sel);
         if (!sub_bound) {
             return make_error(sub_bound.error().code, sub_bound.error().message);
@@ -291,7 +292,7 @@ Planner::plan_from_source(const TableRef& table_ref,
     if (cte_it != cte_map.end()) {
         const auto* cte_sel = cte_it->second;
 
-        Binder binder(catalog_);
+        Binder binder(catalog_, database_id_);
         auto sub_bound = binder.bind(*cte_sel);
         if (!sub_bound) {
             return make_error(sub_bound.error().code, sub_bound.error().message);
@@ -313,7 +314,7 @@ Planner::plan_from_source(const TableRef& table_ref,
     }
 
     // Case 3: Physical table.
-    auto table_schema = catalog_.get_table(default_database_id, table_ref.name);
+    auto table_schema = catalog_.get_table(database_id_, table_ref.name);
     if (!table_schema) {
         return make_error(table_schema.error().code, table_schema.error().message);
     }
@@ -434,7 +435,7 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
                 // Plan the entire subquery (not just the FROM table), so that
                 // any filters, aggregations, etc. inside the subquery are
                 // correctly applied.
-                Binder binder(catalog_);
+                Binder binder(catalog_, database_id_);
                 auto sub_bound = binder.bind(*sub_sel);
                 if (!sub_bound) {
                     return make_error(sub_bound.error().code, sub_bound.error().message);
@@ -632,7 +633,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
 
         if (!has_subquery_predicate) {
             // Re-create the scan with the predicate pushed down.
-            auto table_schema = catalog_.get_table(default_database_id, table_ref.name);
+            auto table_schema = catalog_.get_table(database_id_, table_ref.name);
             if (table_schema) {
                 auto ts = storage_.get_table_storage(table_schema->table_id);
                 if (ts) {
@@ -955,7 +956,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
 
 Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
                                                        const BoundStatement& bound) {
-    auto table_schema = catalog_.get_table(default_database_id, stmt.table_name);
+    auto table_schema = catalog_.get_table(database_id_, stmt.table_name);
     if (!table_schema) {
         return make_error(table_schema.error().code, table_schema.error().message);
     }
@@ -1025,7 +1026,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
 
 Result<std::unique_ptr<Iterator>> Planner::plan_update(const UpdateStmt& stmt,
                                                        const BoundStatement& bound) {
-    auto table_schema = catalog_.get_table(default_database_id, stmt.table_name);
+    auto table_schema = catalog_.get_table(database_id_, stmt.table_name);
     if (!table_schema) {
         return make_error(table_schema.error().code, table_schema.error().message);
     }
@@ -1072,7 +1073,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_update(const UpdateStmt& stmt,
 
 Result<std::unique_ptr<Iterator>> Planner::plan_delete(const DeleteStmt& stmt,
                                                        const BoundStatement& bound) {
-    auto table_schema = catalog_.get_table(default_database_id, stmt.table_name);
+    auto table_schema = catalog_.get_table(database_id_, stmt.table_name);
     if (!table_schema) {
         return make_error(table_schema.error().code, table_schema.error().message);
     }

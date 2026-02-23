@@ -14,6 +14,14 @@ namespace giodb {
 QueryEngine::QueryEngine(Catalog& catalog, StorageManager& storage)
     : catalog_(catalog), storage_(storage) {}
 
+void QueryEngine::set_current_database(database_id_t database_id) {
+    current_database_id_ = database_id;
+}
+
+database_id_t QueryEngine::current_database_id() const {
+    return current_database_id_;
+}
+
 // ---------------------------------------------------------------------------
 // Full pipeline
 // ---------------------------------------------------------------------------
@@ -49,7 +57,7 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
     }
 
     // 4. Bind.
-    Binder binder(catalog_);
+    Binder binder(catalog_, current_database_id_);
     auto bound = binder.bind(**stmt_ptr);
     if (!bound) {
         return make_error(bound.error().code, bound.error().message);
@@ -166,7 +174,7 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
     }
 
     // Register in catalog.
-    auto table_id = catalog_.create_table(default_database_id, std::move(ts));
+    auto table_id = catalog_.create_table(current_database_id_, std::move(ts));
     if (!table_id) {
         if (stmt.if_not_exists && table_id.error().code == StatusCode::ALREADY_EXISTS) {
             QueryResult qr;
@@ -177,13 +185,13 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
     }
 
     // Retrieve the created schema (now has assigned table_id).
-    auto schema = catalog_.get_table(default_database_id, stmt.name);
+    auto schema = catalog_.get_table(current_database_id_, stmt.name);
     if (!schema) {
         return make_error(schema.error().code, schema.error().message);
     }
 
     // Create physical storage.
-    auto storage_result = storage_.create_table_storage(default_database_id, *table_id, *schema);
+    auto storage_result = storage_.create_table_storage(current_database_id_, *table_id, *schema);
     if (!storage_result) {
         return make_error(storage_result.error().code, storage_result.error().message);
     }
@@ -198,7 +206,7 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
 // ---------------------------------------------------------------------------
 
 Result<QueryResult> QueryEngine::execute_drop_table(const DropTableStmt& stmt) {
-    auto schema = catalog_.get_table(default_database_id, stmt.name);
+    auto schema = catalog_.get_table(current_database_id_, stmt.name);
     if (!schema) {
         if (stmt.if_exists && schema.error().code == StatusCode::NOT_FOUND) {
             QueryResult qr;
@@ -211,13 +219,13 @@ Result<QueryResult> QueryEngine::execute_drop_table(const DropTableStmt& stmt) {
     auto table_id = schema->table_id;
 
     // Drop storage first (flush + close + delete file).
-    auto drop_storage = storage_.drop_table_storage(default_database_id, table_id);
+    auto drop_storage = storage_.drop_table_storage(current_database_id_, table_id);
     if (!drop_storage) {
         return make_error(drop_storage.error().code, drop_storage.error().message);
     }
 
     // Remove from catalog.
-    auto drop_catalog = catalog_.drop_table(default_database_id, stmt.name);
+    auto drop_catalog = catalog_.drop_table(current_database_id_, stmt.name);
     if (!drop_catalog) {
         return make_error(drop_catalog.error().code, drop_catalog.error().message);
     }
@@ -233,7 +241,7 @@ Result<QueryResult> QueryEngine::execute_drop_table(const DropTableStmt& stmt) {
 
 Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
     // Build iterator tree.
-    Planner planner(catalog_, storage_);
+    Planner planner(catalog_, storage_, current_database_id_);
     std::vector<ExprPtr> owned_exprs;
     auto iter = planner.plan(bound, owned_exprs);
     if (!iter) {
