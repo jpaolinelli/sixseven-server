@@ -74,6 +74,12 @@ Result<QueryResult> QueryEngine::execute_create_database(const CreateDatabaseStm
         return make_error(db_id.error().code, db_id.error().message);
     }
 
+    // Create the database directory structure.
+    auto storage_result = storage_.create_database_storage(*db_id);
+    if (!storage_result) {
+        return make_error(storage_result.error().code, storage_result.error().message);
+    }
+
     QueryResult qr;
     qr.message = "CREATE DATABASE";
     return ok(std::move(qr));
@@ -100,7 +106,7 @@ Result<QueryResult> QueryEngine::execute_drop_database(const DropDatabaseStmt& s
     if (stmt.cascade) {
         auto tables = catalog_.list_tables(db_id);
         for (const auto& table : tables) {
-            auto drop_storage = storage_.drop_table_storage(table.table_id);
+            auto drop_storage = storage_.drop_table_storage(db_id, table.table_id);
             if (!drop_storage) {
                 return make_error(drop_storage.error().code, drop_storage.error().message);
             }
@@ -110,6 +116,12 @@ Result<QueryResult> QueryEngine::execute_drop_database(const DropDatabaseStmt& s
     auto result = catalog_.drop_database(db_id, stmt.cascade);
     if (!result) {
         return make_error(result.error().code, result.error().message);
+    }
+
+    // Remove the database directory.
+    auto drop_dir = storage_.drop_database_storage(db_id);
+    if (!drop_dir) {
+        return make_error(drop_dir.error().code, drop_dir.error().message);
     }
 
     QueryResult qr;
@@ -171,7 +183,7 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
     }
 
     // Create physical storage.
-    auto storage_result = storage_.create_table_storage(*table_id, *schema);
+    auto storage_result = storage_.create_table_storage(default_database_id, *table_id, *schema);
     if (!storage_result) {
         return make_error(storage_result.error().code, storage_result.error().message);
     }
@@ -199,7 +211,7 @@ Result<QueryResult> QueryEngine::execute_drop_table(const DropTableStmt& stmt) {
     auto table_id = schema->table_id;
 
     // Drop storage first (flush + close + delete file).
-    auto drop_storage = storage_.drop_table_storage(table_id);
+    auto drop_storage = storage_.drop_table_storage(default_database_id, table_id);
     if (!drop_storage) {
         return make_error(drop_storage.error().code, drop_storage.error().message);
     }

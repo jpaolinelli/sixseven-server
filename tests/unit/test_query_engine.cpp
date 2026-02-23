@@ -24,7 +24,7 @@ protected:
     void SetUp() override {
         data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_qe";
         std::filesystem::remove_all(data_dir_);
-        std::filesystem::create_directories(data_dir_ / "tables");
+        std::filesystem::create_directories(data_dir_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
@@ -183,7 +183,7 @@ TEST_F(QueryEngineTest, DropDatabaseCascade) {
     ASSERT_TRUE(tid.has_value());
     auto schema = catalog_.get_table(db->database_id, "t1");
     ASSERT_TRUE(schema.has_value());
-    auto storage_result = storage_->create_table_storage(*tid, *schema);
+    auto storage_result = storage_->create_table_storage(db->database_id, *tid, *schema);
     ASSERT_TRUE(storage_result.has_value());
 
     auto qr = exec_ok("DROP DATABASE mydb CASCADE");
