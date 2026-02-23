@@ -75,8 +75,8 @@ private:
     [[nodiscard]] Token make_token(TokenType type) const;
 
     std::string_view source_;
-    size_t start_ = 0;    ///< Start of current lexeme.
-    size_t current_ = 0;  ///< Current scan position.
+    size_t start_ = 0;   ///< Start of current lexeme.
+    size_t current_ = 0; ///< Current scan position.
     uint32_t line_ = 1;
     uint32_t column_ = 1;
     uint32_t token_start_line_ = 1;

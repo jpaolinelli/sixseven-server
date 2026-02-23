@@ -72,8 +72,7 @@ Result<PageId> BTreeInternalNode::search(const KeyType& key) const {
     return ok(children_[lo]);
 }
 
-Result<void> BTreeInternalNode::insert_at(uint16_t pos, const KeyType& key,
-                                           PageId right_child) {
+Result<void> BTreeInternalNode::insert_at(uint16_t pos, const KeyType& key, PageId right_child) {
     if (key_count() >= max_keys_) {
         return make_error(StatusCode::INTERNAL_ERROR, "internal node is full");
     }

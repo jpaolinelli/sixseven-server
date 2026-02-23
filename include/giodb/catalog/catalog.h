@@ -101,8 +101,7 @@ public:
     [[nodiscard]] Result<void> register_embedding_column(EmbeddingColumnDef def);
 
     /// List all embedding column definitions for a given table.
-    [[nodiscard]] std::vector<EmbeddingColumnDef>
-    list_embedding_columns(table_id_t table_id) const;
+    [[nodiscard]] std::vector<EmbeddingColumnDef> list_embedding_columns(table_id_t table_id) const;
 
     /// List all embedding column definitions.
     [[nodiscard]] std::vector<EmbeddingColumnDef> list_all_embedding_columns() const;

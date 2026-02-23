@@ -10,8 +10,7 @@ Result<table_id_t> Catalog::create_table(TableSchema schema) {
     std::lock_guard lock(mu_);
 
     if (table_name_to_id_.contains(schema.name)) {
-        return make_error(StatusCode::ALREADY_EXISTS,
-                          "table '" + schema.name + "' already exists");
+        return make_error(StatusCode::ALREADY_EXISTS, "table '" + schema.name + "' already exists");
     }
 
     table_id_t id = next_table_id_++;
@@ -33,8 +32,7 @@ Result<void> Catalog::drop_table(const std::string& name) {
 
     auto name_it = table_name_to_id_.find(name);
     if (name_it == table_name_to_id_.end()) {
-        return make_error(StatusCode::NOT_FOUND,
-                          "table '" + name + "' not found");
+        return make_error(StatusCode::NOT_FOUND, "table '" + name + "' not found");
     }
 
     table_id_t tid = name_it->second;
@@ -84,8 +82,7 @@ Result<TableSchema> Catalog::get_table(const std::string& name) const {
 
     auto name_it = table_name_to_id_.find(name);
     if (name_it == table_name_to_id_.end()) {
-        return make_error(StatusCode::NOT_FOUND,
-                          "table '" + name + "' not found");
+        return make_error(StatusCode::NOT_FOUND, "table '" + name + "' not found");
     }
 
     return ok(tables_by_id_.at(name_it->second));
@@ -113,10 +110,9 @@ std::vector<TableSchema> Catalog::list_tables() const {
     }
 
     // Sort by table_id for deterministic output.
-    std::sort(result.begin(), result.end(),
-              [](const TableSchema& a, const TableSchema& b) {
-                  return a.table_id < b.table_id;
-              });
+    std::sort(result.begin(), result.end(), [](const TableSchema& a, const TableSchema& b) {
+        return a.table_id < b.table_id;
+    });
 
     return result;
 }
@@ -127,15 +123,13 @@ Result<index_id_t> Catalog::create_index(IndexDef def) {
     std::lock_guard lock(mu_);
 
     if (index_name_to_id_.contains(def.name)) {
-        return make_error(StatusCode::ALREADY_EXISTS,
-                          "index '" + def.name + "' already exists");
+        return make_error(StatusCode::ALREADY_EXISTS, "index '" + def.name + "' already exists");
     }
 
     // Validate that the referenced table exists.
     if (!tables_by_id_.contains(def.table_id)) {
         return make_error(StatusCode::NOT_FOUND,
-                          "table with id " + std::to_string(def.table_id) +
-                              " not found");
+                          "table with id " + std::to_string(def.table_id) + " not found");
     }
 
     index_id_t id = next_index_id_++;
@@ -152,8 +146,7 @@ Result<void> Catalog::drop_index(const std::string& name) {
 
     auto name_it = index_name_to_id_.find(name);
     if (name_it == index_name_to_id_.end()) {
-        return make_error(StatusCode::NOT_FOUND,
-                          "index '" + name + "' not found");
+        return make_error(StatusCode::NOT_FOUND, "index '" + name + "' not found");
     }
 
     indexes_by_id_.erase(name_it->second);
@@ -167,8 +160,7 @@ Result<IndexDef> Catalog::get_index(const std::string& name) const {
 
     auto name_it = index_name_to_id_.find(name);
     if (name_it == index_name_to_id_.end()) {
-        return make_error(StatusCode::NOT_FOUND,
-                          "index '" + name + "' not found");
+        return make_error(StatusCode::NOT_FOUND, "index '" + name + "' not found");
     }
 
     return ok(indexes_by_id_.at(name_it->second));
@@ -184,10 +176,9 @@ std::vector<IndexDef> Catalog::list_indexes(table_id_t table_id) const {
         }
     }
 
-    std::sort(result.begin(), result.end(),
-              [](const IndexDef& a, const IndexDef& b) {
-                  return a.index_id < b.index_id;
-              });
+    std::sort(result.begin(), result.end(), [](const IndexDef& a, const IndexDef& b) {
+        return a.index_id < b.index_id;
+    });
 
     return result;
 }
@@ -201,10 +192,9 @@ std::vector<IndexDef> Catalog::list_all_indexes() const {
         result.push_back(def);
     }
 
-    std::sort(result.begin(), result.end(),
-              [](const IndexDef& a, const IndexDef& b) {
-                  return a.index_id < b.index_id;
-              });
+    std::sort(result.begin(), result.end(), [](const IndexDef& a, const IndexDef& b) {
+        return a.index_id < b.index_id;
+    });
 
     return result;
 }
@@ -222,15 +212,15 @@ Result<edge_id_t> Catalog::create_edge_type(EdgeTypeDef def) {
     // Validate source table exists.
     if (!tables_by_id_.contains(def.source_table_id)) {
         return make_error(StatusCode::NOT_FOUND,
-                          "source table with id " +
-                              std::to_string(def.source_table_id) + " not found");
+                          "source table with id " + std::to_string(def.source_table_id) +
+                              " not found");
     }
 
     // Validate target table exists.
     if (!tables_by_id_.contains(def.target_table_id)) {
         return make_error(StatusCode::NOT_FOUND,
-                          "target table with id " +
-                              std::to_string(def.target_table_id) + " not found");
+                          "target table with id " + std::to_string(def.target_table_id) +
+                              " not found");
     }
 
     edge_id_t id = next_edge_id_++;
@@ -247,8 +237,7 @@ Result<void> Catalog::drop_edge_type(const std::string& name) {
 
     auto name_it = edge_name_to_id_.find(name);
     if (name_it == edge_name_to_id_.end()) {
-        return make_error(StatusCode::NOT_FOUND,
-                          "edge type '" + name + "' not found");
+        return make_error(StatusCode::NOT_FOUND, "edge type '" + name + "' not found");
     }
 
     edge_types_by_id_.erase(name_it->second);
@@ -262,8 +251,7 @@ Result<EdgeTypeDef> Catalog::get_edge_type(const std::string& name) const {
 
     auto name_it = edge_name_to_id_.find(name);
     if (name_it == edge_name_to_id_.end()) {
-        return make_error(StatusCode::NOT_FOUND,
-                          "edge type '" + name + "' not found");
+        return make_error(StatusCode::NOT_FOUND, "edge type '" + name + "' not found");
     }
 
     return ok(edge_types_by_id_.at(name_it->second));
@@ -278,10 +266,9 @@ std::vector<EdgeTypeDef> Catalog::list_edge_types() const {
         result.push_back(def);
     }
 
-    std::sort(result.begin(), result.end(),
-              [](const EdgeTypeDef& a, const EdgeTypeDef& b) {
-                  return a.edge_id < b.edge_id;
-              });
+    std::sort(result.begin(), result.end(), [](const EdgeTypeDef& a, const EdgeTypeDef& b) {
+        return a.edge_id < b.edge_id;
+    });
 
     return result;
 }
@@ -294,19 +281,16 @@ Result<void> Catalog::register_embedding_column(EmbeddingColumnDef def) {
     // Validate that the referenced table exists.
     if (!tables_by_id_.contains(def.table_id)) {
         return make_error(StatusCode::NOT_FOUND,
-                          "table with id " + std::to_string(def.table_id) +
-                              " not found");
+                          "table with id " + std::to_string(def.table_id) + " not found");
     }
 
     // Check for duplicate (table_id, column_id) pair.
     for (auto& existing : embedding_columns_) {
-        if (existing.table_id == def.table_id &&
-            existing.column_id == def.column_id) {
-            return make_error(
-                StatusCode::ALREADY_EXISTS,
-                "embedding column already registered for table " +
-                    std::to_string(def.table_id) + ", column " +
-                    std::to_string(def.column_id));
+        if (existing.table_id == def.table_id && existing.column_id == def.column_id) {
+            return make_error(StatusCode::ALREADY_EXISTS,
+                              "embedding column already registered for table " +
+                                  std::to_string(def.table_id) + ", column " +
+                                  std::to_string(def.column_id));
         }
     }
 
@@ -314,8 +298,7 @@ Result<void> Catalog::register_embedding_column(EmbeddingColumnDef def) {
     return ok();
 }
 
-std::vector<EmbeddingColumnDef>
-Catalog::list_embedding_columns(table_id_t table_id) const {
+std::vector<EmbeddingColumnDef> Catalog::list_embedding_columns(table_id_t table_id) const {
     std::lock_guard lock(mu_);
 
     std::vector<EmbeddingColumnDef> result;

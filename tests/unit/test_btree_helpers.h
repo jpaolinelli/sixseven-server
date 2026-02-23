@@ -15,8 +15,8 @@
 namespace giodb::test {
 
 /// Create a BTreeIndex with small capacity for testing (forces splits early).
-inline BTreeIndex make_test_index(uint16_t leaf_max = 4, uint16_t internal_max = 4,
-                                  bool is_unique = false) {
+inline BTreeIndex
+make_test_index(uint16_t leaf_max = 4, uint16_t internal_max = 4, bool is_unique = false) {
     BTreeConfig config;
     config.key_types = {TypeId::INT64};
     config.leaf_max_keys = leaf_max;

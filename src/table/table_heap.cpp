@@ -89,7 +89,8 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data) {
         auto unpin = bpm_.unpin_page(new_pid, false);
         if (!unpin) {
             GIODB_LOG_WARN("unpin failed after insert_tuple error on page {}: {}",
-                           new_pid, unpin.error().message);
+                           new_pid,
+                           unpin.error().message);
         }
         return tl::unexpected(slot.error());
     }
@@ -117,7 +118,8 @@ Result<std::vector<uint8_t>> TableHeap::get_tuple(RID rid) {
         auto unpin = bpm_.unpin_page(rid.page_id, false);
         if (!unpin) {
             GIODB_LOG_WARN("unpin failed after get_tuple error on page {}: {}",
-                           rid.page_id, unpin.error().message);
+                           rid.page_id,
+                           unpin.error().message);
         }
         return tl::unexpected(tuple_span.error());
     }
@@ -155,7 +157,8 @@ Result<void> TableHeap::update_tuple(RID rid, std::span<const uint8_t> data) {
             auto unpin = bpm_.unpin_page(rid.page_id, false);
             if (!unpin) {
                 GIODB_LOG_WARN("unpin failed after update_tuple error on page {}: {}",
-                               rid.page_id, unpin.error().message);
+                               rid.page_id,
+                               unpin.error().message);
             }
             return tl::unexpected(result.error());
         }
@@ -181,7 +184,8 @@ Result<void> TableHeap::delete_tuple(RID rid) {
         auto unpin = bpm_.unpin_page(rid.page_id, false);
         if (!unpin) {
             GIODB_LOG_WARN("unpin failed after delete_tuple error on page {}: {}",
-                           rid.page_id, unpin.error().message);
+                           rid.page_id,
+                           unpin.error().message);
         }
         return tl::unexpected(result.error());
     }
@@ -213,8 +217,7 @@ Result<uint32_t> TableHeap::page_count() const {
 
 // -- TableIterator ------------------------------------------------------------
 
-TableIterator::TableIterator(BufferPoolManager& bpm, PageId start_page,
-                             uint32_t total_pages)
+TableIterator::TableIterator(BufferPoolManager& bpm, PageId start_page, uint32_t total_pages)
     : bpm_(bpm), current_page_(start_page), total_pages_(total_pages) {}
 
 std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
@@ -242,7 +245,8 @@ std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
                 auto unpin = bpm_.unpin_page(current_page_, false);
                 if (!unpin) {
                     GIODB_LOG_WARN("unpin failed during scan on page {}: {}",
-                                   current_page_, unpin.error().message);
+                                   current_page_,
+                                   unpin.error().message);
                 }
                 return std::make_pair(rid, std::move(data));
             }
@@ -253,8 +257,8 @@ std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
         // No more slots on this page — move to next.
         auto unpin = bpm_.unpin_page(current_page_, false);
         if (!unpin) {
-            GIODB_LOG_WARN("unpin failed during scan on page {}: {}",
-                           current_page_, unpin.error().message);
+            GIODB_LOG_WARN(
+                "unpin failed during scan on page {}: {}", current_page_, unpin.error().message);
         }
         current_page_++;
         current_slot_ = 0;

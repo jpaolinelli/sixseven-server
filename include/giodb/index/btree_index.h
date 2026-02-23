@@ -58,9 +58,8 @@ public:
     ///
     /// The returned iterator holds a shared lock on the tree, preventing
     /// concurrent writes until the iterator is destroyed.
-    [[nodiscard]] Result<BTreeIterator> range_scan(
-        const std::optional<KeyType>& begin_key,
-        const std::optional<KeyType>& end_key) const;
+    [[nodiscard]] Result<BTreeIterator> range_scan(const std::optional<KeyType>& begin_key,
+                                                   const std::optional<KeyType>& end_key) const;
 
     /// Delete the entry with the given key.
     /// Returns true if the key was found and deleted.
@@ -68,8 +67,7 @@ public:
 
     /// Bulk load from pre-sorted entries. Tree must be empty.
     /// Validates sort order and uniqueness (if configured).
-    [[nodiscard]] Result<void> bulk_load(
-        std::vector<std::pair<KeyType, RID>>& sorted_entries);
+    [[nodiscard]] Result<void> bulk_load(std::vector<std::pair<KeyType, RID>>& sorted_entries);
 
     /// Return the root page ID (invalid_page_id if tree is empty).
     [[nodiscard]] PageId root_page_id() const;
@@ -110,10 +108,10 @@ private:
     // -- Structural modification ---
     [[nodiscard]] Result<std::pair<KeyType, PageId>> split_leaf(BTreeLeafNode* leaf);
     [[nodiscard]] Result<std::pair<KeyType, PageId>> split_internal(BTreeInternalNode* node);
-    [[nodiscard]] Result<void> insert_into_parent(
-        PageId left_page_id, const KeyType& key, PageId right_page_id);
-    [[nodiscard]] Result<void> create_new_root(
-        PageId left_page_id, const KeyType& key, PageId right_page_id);
+    [[nodiscard]] Result<void>
+    insert_into_parent(PageId left_page_id, const KeyType& key, PageId right_page_id);
+    [[nodiscard]] Result<void>
+    create_new_root(PageId left_page_id, const KeyType& key, PageId right_page_id);
 
     // -- Delete helpers ---
     [[nodiscard]] Result<void> fix_underfull_leaf(BTreeLeafNode* leaf);
@@ -123,8 +121,8 @@ private:
 
     /// Find the index of child_id in parent's children vector.
     /// Returns INTERNAL_ERROR if child_id is not found (indicates tree corruption).
-    [[nodiscard]] Result<uint16_t> find_child_index(
-        const BTreeInternalNode* parent, PageId child_id) const;
+    [[nodiscard]] Result<uint16_t> find_child_index(const BTreeInternalNode* parent,
+                                                    PageId child_id) const;
 
     /// Set the parent_page_id of the node at child_id (whether leaf or internal).
     /// Silently ignored only if child_id is invalid_page_id.

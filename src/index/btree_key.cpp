@@ -7,8 +7,8 @@ namespace giodb {
 Result<std::strong_ordering> compare_keys(const KeyType& lhs, const KeyType& rhs) {
     if (lhs.size() != rhs.size()) {
         return make_error(StatusCode::INVALID_ARGUMENT,
-                          "key column count mismatch: " + std::to_string(lhs.size()) +
-                              " vs " + std::to_string(rhs.size()));
+                          "key column count mismatch: " + std::to_string(lhs.size()) + " vs " +
+                              std::to_string(rhs.size()));
     }
 
     for (size_t i = 0; i < lhs.size(); ++i) {
