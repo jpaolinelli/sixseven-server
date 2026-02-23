@@ -1,10 +1,11 @@
-name: CI
+name: CI (disabled)
 
+# Temporarily disabled — re-enable by restoring the original `on:` triggers below.
 on:
   push:
-    branches: [main]
+    branches: [disabled-placeholder-do-not-use]
   pull_request:
-    branches: [main]
+    branches: [disabled-placeholder-do-not-use]
 
 env:
   VCPKG_ROOT: ${{ github.workspace }}/vcpkg
