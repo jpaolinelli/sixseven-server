@@ -23,6 +23,11 @@ struct Config {
     /// Returns defaults if the file does not exist.
     /// Returns an error if the file exists but contains malformed JSON.
     static Result<Config> load_from_file(const std::string& path);
+
+    /// Apply a single setting from sys_settings.
+    /// Maps dotted setting keys (e.g., "server.port") to Config fields.
+    /// Unknown keys are silently ignored.
+    void apply_setting(const std::string& key, const std::string& value);
 };
 
 } // namespace giodb
