@@ -33,7 +33,7 @@ protected:
                 {4, "active", TypeId::BOOL, false, ""},
             };
             s.pk_columns = "id";
-            auto r = catalog.create_table(std::move(s));
+            auto r = catalog.create_table(default_database_id, std::move(s));
             ASSERT_TRUE(r.has_value());
         }
 
@@ -50,7 +50,7 @@ protected:
                 {4, "created_at", TypeId::TIMESTAMP, true, ""},
             };
             s.pk_columns = "id";
-            auto r = catalog.create_table(std::move(s));
+            auto r = catalog.create_table(default_database_id, std::move(s));
             ASSERT_TRUE(r.has_value());
         }
 
@@ -67,7 +67,7 @@ protected:
                 {4, "desc_vector", TypeId::EMBEDDING, true, ""},
             };
             s.pk_columns = "id";
-            auto r = catalog.create_table(std::move(s));
+            auto r = catalog.create_table(default_database_id, std::move(s));
             ASSERT_TRUE(r.has_value());
         }
 
@@ -309,7 +309,7 @@ TEST(TypeResolver, UnknownFunctionError) {
 // ===========================================================================
 
 TEST_F(BinderTest, ScopeSingleTableResolve) {
-    auto schema = catalog.get_table("users");
+    auto schema = catalog.get_table(default_database_id, "users");
     ASSERT_TRUE(schema.has_value());
 
     Scope scope;
@@ -339,7 +339,7 @@ TEST_F(BinderTest, ScopeSingleTableResolve) {
 }
 
 TEST_F(BinderTest, ScopeQualifiedResolve) {
-    auto schema = catalog.get_table("users");
+    auto schema = catalog.get_table(default_database_id, "users");
     ASSERT_TRUE(schema.has_value());
 
     Scope scope;

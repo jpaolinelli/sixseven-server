@@ -313,7 +313,7 @@ Planner::plan_from_source(const TableRef& table_ref,
     }
 
     // Case 3: Physical table.
-    auto table_schema = catalog_.get_table(table_ref.name);
+    auto table_schema = catalog_.get_table(default_database_id, table_ref.name);
     if (!table_schema) {
         return make_error(table_schema.error().code, table_schema.error().message);
     }
@@ -632,7 +632,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
 
         if (!has_subquery_predicate) {
             // Re-create the scan with the predicate pushed down.
-            auto table_schema = catalog_.get_table(table_ref.name);
+            auto table_schema = catalog_.get_table(default_database_id, table_ref.name);
             if (table_schema) {
                 auto ts = storage_.get_table_storage(table_schema->table_id);
                 if (ts) {
@@ -955,7 +955,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
 
 Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
                                                        const BoundStatement& bound) {
-    auto table_schema = catalog_.get_table(stmt.table_name);
+    auto table_schema = catalog_.get_table(default_database_id, stmt.table_name);
     if (!table_schema) {
         return make_error(table_schema.error().code, table_schema.error().message);
     }
@@ -1025,7 +1025,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
 
 Result<std::unique_ptr<Iterator>> Planner::plan_update(const UpdateStmt& stmt,
                                                        const BoundStatement& bound) {
-    auto table_schema = catalog_.get_table(stmt.table_name);
+    auto table_schema = catalog_.get_table(default_database_id, stmt.table_name);
     if (!table_schema) {
         return make_error(table_schema.error().code, table_schema.error().message);
     }
@@ -1072,7 +1072,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_update(const UpdateStmt& stmt,
 
 Result<std::unique_ptr<Iterator>> Planner::plan_delete(const DeleteStmt& stmt,
                                                        const BoundStatement& bound) {
-    auto table_schema = catalog_.get_table(stmt.table_name);
+    auto table_schema = catalog_.get_table(default_database_id, stmt.table_name);
     if (!table_schema) {
         return make_error(table_schema.error().code, table_schema.error().message);
     }
