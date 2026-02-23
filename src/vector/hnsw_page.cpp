@@ -82,8 +82,7 @@ std::vector<uint8_t> serialize_hnsw_node(const HnswNode& node) {
 
 Result<HnswNode> deserialize_hnsw_node(std::span<const uint8_t> data) {
     if (data.size() < hnsw_node_header_size) {
-        return make_error(StatusCode::INVALID_ARGUMENT,
-                          "HNSW node data too short for header");
+        return make_error(StatusCode::INVALID_ARGUMENT, "HNSW node data too short for header");
     }
 
     HnswNode node;
@@ -132,7 +131,9 @@ Result<HnswNode> deserialize_hnsw_node(std::span<const uint8_t> data) {
 // -- HnswMeta serialization --------------------------------------------------
 
 std::vector<uint8_t> serialize_hnsw_meta(const HnswMeta& meta) {
-    std::vector<uint8_t> buf(hnsw_meta_size, 0);
+    const size_t total =
+        hnsw_meta_size + 4 + meta.node_page_ids.size() * 4 + 4 + meta.vector_page_ids.size() * 4;
+    std::vector<uint8_t> buf(total, 0);
     size_t off = 0;
 
     write_u32(buf, off, meta.entry_point_id);
@@ -152,14 +153,28 @@ std::vector<uint8_t> serialize_hnsw_meta(const HnswMeta& meta) {
     write_u32(buf, off, meta.tombstone_count);
     off += 4;
     write_u32(buf, off, meta.next_node_id);
+    off += 4;
+
+    // Page lists for persistence across restarts.
+    write_u32(buf, off, static_cast<uint32_t>(meta.node_page_ids.size()));
+    off += 4;
+    for (auto pid : meta.node_page_ids) {
+        write_u32(buf, off, pid);
+        off += 4;
+    }
+    write_u32(buf, off, static_cast<uint32_t>(meta.vector_page_ids.size()));
+    off += 4;
+    for (auto pid : meta.vector_page_ids) {
+        write_u32(buf, off, pid);
+        off += 4;
+    }
 
     return buf;
 }
 
 Result<HnswMeta> deserialize_hnsw_meta(std::span<const uint8_t> data) {
     if (data.size() < hnsw_meta_size) {
-        return make_error(StatusCode::INVALID_ARGUMENT,
-                          "HNSW meta data too short");
+        return make_error(StatusCode::INVALID_ARGUMENT, "HNSW meta data too short");
     }
 
     HnswMeta meta;
@@ -182,6 +197,35 @@ Result<HnswMeta> deserialize_hnsw_meta(std::span<const uint8_t> data) {
     meta.tombstone_count = read_u32(data.data(), off);
     off += 4;
     meta.next_node_id = read_u32(data.data(), off);
+    off += 4;
+
+    // Read page lists if present (variable-length tail).
+    if (off + 4 <= data.size()) {
+        uint32_t count = read_u32(data.data(), off);
+        off += 4;
+        if (off + static_cast<size_t>(count) * 4 > data.size()) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "HNSW meta truncated at node page list");
+        }
+        meta.node_page_ids.resize(count);
+        for (uint32_t i = 0; i < count; ++i) {
+            meta.node_page_ids[i] = read_u32(data.data(), off);
+            off += 4;
+        }
+    }
+    if (off + 4 <= data.size()) {
+        uint32_t count = read_u32(data.data(), off);
+        off += 4;
+        if (off + static_cast<size_t>(count) * 4 > data.size()) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "HNSW meta truncated at vector page list");
+        }
+        meta.vector_page_ids.resize(count);
+        for (uint32_t i = 0; i < count; ++i) {
+            meta.vector_page_ids[i] = read_u32(data.data(), off);
+            off += 4;
+        }
+    }
 
     return ok(meta);
 }
@@ -195,12 +239,11 @@ std::vector<uint8_t> serialize_hnsw_vector(std::span<const float> vec) {
     return buf;
 }
 
-Result<std::vector<float>>
-deserialize_hnsw_vector(std::span<const uint8_t> data, uint32_t dimension) {
+Result<std::vector<float>> deserialize_hnsw_vector(std::span<const uint8_t> data,
+                                                   uint32_t dimension) {
     const size_t expected = static_cast<size_t>(dimension) * sizeof(float);
     if (data.size() < expected) {
-        return make_error(StatusCode::INVALID_ARGUMENT,
-                          "HNSW vector data too short for dimension");
+        return make_error(StatusCode::INVALID_ARGUMENT, "HNSW vector data too short for dimension");
     }
 
     std::vector<float> vec(dimension);

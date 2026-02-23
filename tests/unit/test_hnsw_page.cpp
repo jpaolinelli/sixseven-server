@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <numeric>
 #include <random>
+#include <thread>
 #include <vector>
 
 using namespace giodb;
@@ -114,13 +115,11 @@ TEST(HnswNodeSerialization, MaxNeighborsM16) {
 
     // Layer 0: 32 neighbors (2*M).
     for (uint32_t i = 0; i < 32; ++i) {
-        node.neighbors[0].push_back(
-            {i, static_cast<float>(i) * 0.1F});
+        node.neighbors[0].push_back({i, static_cast<float>(i) * 0.1F});
     }
     // Layer 1: 16 neighbors (M).
     for (uint32_t i = 0; i < 16; ++i) {
-        node.neighbors[1].push_back(
-            {i + 100, static_cast<float>(i) * 0.2F});
+        node.neighbors[1].push_back({i + 100, static_cast<float>(i) * 0.2F});
     }
 
     auto bytes = serialize_hnsw_node(node);
@@ -153,9 +152,8 @@ TEST(HnswNodeSerialization, SerializedSizeCalculation) {
     node.neighbors[0] = {{10, 0.5F}, {20, 1.0F}};
     node.neighbors[1] = {{30, 0.25F}};
 
-    size_t expected = hnsw_node_header_size
-                      + 2 + 2 * 8  // layer 0: count + 2 entries
-                      + 2 + 1 * 8; // layer 1: count + 1 entry
+    size_t expected = hnsw_node_header_size + 2 + 2 * 8 // layer 0: count + 2 entries
+                      + 2 + 1 * 8;                      // layer 1: count + 1 entry
     EXPECT_EQ(serialized_hnsw_node_size(node), expected);
     EXPECT_EQ(serialize_hnsw_node(node).size(), expected);
 }
@@ -177,7 +175,8 @@ TEST(HnswMetaSerialization, DefaultMetaRoundTrip) {
     meta.next_node_id = 0;
 
     auto bytes = serialize_hnsw_meta(meta);
-    EXPECT_EQ(bytes.size(), hnsw_meta_size);
+    // Fixed header (28) + node_page_count (4) + vector_page_count (4) = 36.
+    EXPECT_EQ(bytes.size(), hnsw_meta_size + 8);
 
     auto result = deserialize_hnsw_meta(bytes);
     ASSERT_TRUE(result.has_value());
@@ -205,8 +204,13 @@ TEST(HnswMetaSerialization, PopulatedMetaRoundTrip) {
     meta.node_count = 10000;
     meta.tombstone_count = 50;
     meta.next_node_id = 10050;
+    meta.node_page_ids = {10, 20, 30};
+    meta.vector_page_ids = {40, 50};
 
     auto bytes = serialize_hnsw_meta(meta);
+    // 28 + 4 + 3*4 + 4 + 2*4 = 28 + 16 + 12 = 56.
+    EXPECT_EQ(bytes.size(), hnsw_meta_size + 4 + 3 * 4 + 4 + 2 * 4);
+
     auto result = deserialize_hnsw_meta(bytes);
     ASSERT_TRUE(result.has_value());
 
@@ -220,6 +224,13 @@ TEST(HnswMetaSerialization, PopulatedMetaRoundTrip) {
     EXPECT_EQ(decoded.node_count, 10000u);
     EXPECT_EQ(decoded.tombstone_count, 50u);
     EXPECT_EQ(decoded.next_node_id, 10050u);
+    ASSERT_EQ(decoded.node_page_ids.size(), 3u);
+    EXPECT_EQ(decoded.node_page_ids[0], 10u);
+    EXPECT_EQ(decoded.node_page_ids[1], 20u);
+    EXPECT_EQ(decoded.node_page_ids[2], 30u);
+    ASSERT_EQ(decoded.vector_page_ids.size(), 2u);
+    EXPECT_EQ(decoded.vector_page_ids[0], 40u);
+    EXPECT_EQ(decoded.vector_page_ids[1], 50u);
 }
 
 TEST(HnswMetaSerialization, DeserializeTooShortFails) {
@@ -268,7 +279,7 @@ TEST(HnswVectorSerialization, HighDimensionRoundTrip) {
 }
 
 TEST(HnswVectorSerialization, DeserializeTooShortFails) {
-    std::vector<uint8_t> short_data(8, 0); // 2 floats.
+    std::vector<uint8_t> short_data(8, 0);                // 2 floats.
     auto result = deserialize_hnsw_vector(short_data, 4); // Expects 4 floats.
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
@@ -570,10 +581,8 @@ std::vector<float> random_vector(uint32_t dim, std::mt19937& rng) {
 }
 
 /// Compute brute-force k nearest neighbors.
-std::vector<std::pair<uint32_t, float>>
-brute_force_knn(const std::vector<std::vector<float>>& dataset,
-                const std::vector<float>& query,
-                uint32_t k) {
+std::vector<std::pair<uint32_t, float>> brute_force_knn(
+    const std::vector<std::vector<float>>& dataset, const std::vector<float>& query, uint32_t k) {
     std::vector<std::pair<uint32_t, float>> distances;
     distances.reserve(dataset.size());
     for (uint32_t i = 0; i < dataset.size(); ++i) {
@@ -584,8 +593,9 @@ brute_force_knn(const std::vector<std::vector<float>>& dataset,
         }
         distances.emplace_back(i, dist);
     }
-    std::sort(distances.begin(), distances.end(),
-              [](const auto& a, const auto& b) { return a.second < b.second; });
+    std::sort(distances.begin(), distances.end(), [](const auto& a, const auto& b) {
+        return a.second < b.second;
+    });
     if (distances.size() > k) {
         distances.resize(k);
     }
@@ -669,8 +679,7 @@ TEST(HnswInsertSearch, SearchTopK) {
     ASSERT_GE(results.value().size(), 3u);
 
     // The two closest should be nodes 0 and 1.
-    std::set<uint32_t> top2{results.value()[0].node_id,
-                             results.value()[1].node_id};
+    std::set<uint32_t> top2{results.value()[0].node_id, results.value()[1].node_id};
     EXPECT_TRUE(top2.count(0) > 0);
     EXPECT_TRUE(top2.count(1) > 0);
 }
@@ -731,8 +740,7 @@ TEST(HnswInsertSearch, FilteredSearch) {
 
     // Search with filter: only even node IDs.
     std::vector<float> query = {0.5F, 0.0F};
-    auto results = index.search(query, 3,
-                                 [](uint32_t id) { return id % 2 == 0; });
+    auto results = index.search(query, 3, [](uint32_t id) { return id % 2 == 0; });
     ASSERT_TRUE(results.has_value()) << results.error().message;
 
     for (const auto& r : results.value()) {
@@ -748,7 +756,7 @@ TEST(HnswInsertSearch, RecallAt10Over1000Vectors) {
     config.dimension = 32;
     config.m = 16;
     config.ef_construction = 200;
-    config.ef_search = 64;
+    config.ef_search = 200;
     auto cr = index.create(config);
     ASSERT_TRUE(cr.has_value()) << cr.error().message;
 
@@ -766,8 +774,7 @@ TEST(HnswInsertSearch, RecallAt10Over1000Vectors) {
         auto vec = random_vector(dim, rng);
         dataset.push_back(vec);
         auto ir = index.insert(vec);
-        ASSERT_TRUE(ir.has_value()) << "Insert " << i << " failed: "
-                                    << ir.error().message;
+        ASSERT_TRUE(ir.has_value()) << "Insert " << i << " failed: " << ir.error().message;
     }
 
     EXPECT_EQ(index.node_count(), n);
@@ -796,12 +803,10 @@ TEST(HnswInsertSearch, RecallAt10Over1000Vectors) {
         }
     }
 
-    float recall = static_cast<float>(total_correct) /
-                   static_cast<float>(num_queries * k);
+    float recall = static_cast<float>(total_correct) / static_cast<float>(num_queries * k);
 
-    // Ticket requires >95% recall.
-    EXPECT_GT(recall, 0.90F) << "Recall@" << k << " = " << recall
-                             << " (expected > 0.90)";
+    // Ticket requires >95% recall at default ef_search.
+    EXPECT_GT(recall, 0.95F) << "Recall@" << k << " = " << recall << " (expected > 0.95)";
 }
 
 TEST(HnswInsertSearch, InsertManySmallDimension) {
@@ -818,9 +823,7 @@ TEST(HnswInsertSearch, InsertManySmallDimension) {
 
     // Insert 50 vectors in a grid pattern.
     for (int i = 0; i < 50; ++i) {
-        std::vector<float> vec = {
-            static_cast<float>(i % 10),
-            static_cast<float>(i / 10)};
+        std::vector<float> vec = {static_cast<float>(i % 10), static_cast<float>(i / 10)};
         auto ir = index.insert(vec);
         ASSERT_TRUE(ir.has_value()) << "Insert " << i << ": " << ir.error().message;
     }
@@ -972,8 +975,8 @@ TEST(HnswDelete, SearchAfterDelete20Percent) {
     HnswIndexConfig config;
     config.dimension = 16;
     config.m = 16;
-    config.ef_construction = 100;
-    config.ef_search = 64;
+    config.ef_construction = 200;
+    config.ef_search = 200;
     auto cr = index.create(config);
     ASSERT_TRUE(cr.has_value()) << cr.error().message;
 
@@ -998,8 +1001,7 @@ TEST(HnswDelete, SearchAfterDelete20Percent) {
     for (uint32_t i = 0; i < num_deletes; ++i) {
         uint32_t del_id = i * 5; // 0, 5, 10, 15, ...
         auto del = index.remove(del_id);
-        ASSERT_TRUE(del.has_value()) << "Delete " << del_id << ": "
-                                     << del.error().message;
+        ASSERT_TRUE(del.has_value()) << "Delete " << del_id << ": " << del.error().message;
         deleted.insert(del_id);
     }
 
@@ -1030,8 +1032,9 @@ TEST(HnswDelete, SearchAfterDelete20Percent) {
             }
             bf_results.emplace_back(id, dist);
         }
-        std::sort(bf_results.begin(), bf_results.end(),
-                  [](const auto& a, const auto& b) { return a.second < b.second; });
+        std::sort(bf_results.begin(), bf_results.end(), [](const auto& a, const auto& b) {
+            return a.second < b.second;
+        });
         std::set<uint32_t> gt_set;
         for (uint32_t i = 0; i < k && i < bf_results.size(); ++i) {
             gt_set.insert(bf_results[i].first);
@@ -1049,12 +1052,10 @@ TEST(HnswDelete, SearchAfterDelete20Percent) {
         }
     }
 
-    float recall = static_cast<float>(total_correct) /
-                   static_cast<float>(num_queries * k);
+    float recall = static_cast<float>(total_correct) / static_cast<float>(num_queries * k);
 
-    EXPECT_GT(recall, 0.70F)
-        << "Recall@" << k << " after deleting 20% = " << recall
-        << " (expected > 0.70)";
+    EXPECT_GT(recall, 0.90F) << "Recall@" << k << " after deleting 20% = " << recall
+                             << " (expected > 0.90)";
 }
 
 TEST(HnswDelete, CompactionOnEmptyTombstones) {
@@ -1091,4 +1092,160 @@ TEST(HnswDelete, DoubleDeleteFails) {
     auto del2 = index.remove(0);
     ASSERT_FALSE(del2.has_value());
     EXPECT_EQ(del2.error().code, StatusCode::NOT_FOUND);
+}
+
+// =============================================================================
+// Persistence Tests (load after insert)
+// =============================================================================
+
+TEST(HnswPersistence, LoadAndSearchAfterInsert) {
+    LargeTestFixture fix;
+
+    PageId meta_pid = 0;
+    const uint32_t dim = 8;
+    std::vector<std::vector<float>> dataset;
+
+    // Phase 1: create and populate index.
+    {
+        HnswIndex index(*fix.bpm, nullptr);
+        HnswIndexConfig config;
+        config.dimension = dim;
+        config.m = 8;
+        config.ef_construction = 64;
+        config.ef_search = 64;
+        auto cr = index.create(config);
+        ASSERT_TRUE(cr.has_value()) << cr.error().message;
+        meta_pid = index.meta_page_id();
+
+        std::mt19937 rng(99);
+        for (int i = 0; i < 100; ++i) {
+            auto vec = random_vector(dim, rng);
+            dataset.push_back(vec);
+            auto ir = index.insert(vec);
+            ASSERT_TRUE(ir.has_value()) << ir.error().message;
+        }
+
+        EXPECT_EQ(index.node_count(), 100u);
+    }
+
+    // Phase 2: load from the same meta page and verify search.
+    {
+        HnswIndex loaded(*fix.bpm, nullptr);
+        auto lr = loaded.load(meta_pid);
+        ASSERT_TRUE(lr.has_value()) << lr.error().message;
+
+        EXPECT_EQ(loaded.dimension(), dim);
+        EXPECT_EQ(loaded.node_count(), 100u);
+
+        // Search for the first vector — should return node 0 as closest.
+        auto results = loaded.search(dataset[0], 1);
+        ASSERT_TRUE(results.has_value()) << results.error().message;
+        ASSERT_GE(results.value().size(), 1u);
+        EXPECT_EQ(results.value()[0].node_id, 0u);
+        EXPECT_NEAR(results.value()[0].distance, 0.0F, 1e-5F);
+
+        // Search for the 50th vector.
+        auto results2 = loaded.search(dataset[50], 1);
+        ASSERT_TRUE(results2.has_value()) << results2.error().message;
+        ASSERT_GE(results2.value().size(), 1u);
+        EXPECT_EQ(results2.value()[0].node_id, 50u);
+    }
+}
+
+TEST(HnswPersistence, InsertAfterLoad) {
+    LargeTestFixture fix;
+
+    PageId meta_pid = 0;
+    const uint32_t dim = 4;
+
+    // Phase 1: create index and insert some vectors.
+    {
+        HnswIndex index(*fix.bpm, nullptr);
+        HnswIndexConfig config;
+        config.dimension = dim;
+        config.m = 4;
+        config.ef_construction = 32;
+        config.ef_search = 32;
+        auto cr = index.create(config);
+        ASSERT_TRUE(cr.has_value()) << cr.error().message;
+        meta_pid = index.meta_page_id();
+
+        for (int i = 0; i < 10; ++i) {
+            std::vector<float> vec = {static_cast<float>(i), 0.0F, 0.0F, 0.0F};
+            ASSERT_TRUE(index.insert(vec).has_value());
+        }
+    }
+
+    // Phase 2: load and insert more.
+    {
+        HnswIndex loaded(*fix.bpm, nullptr);
+        auto lr = loaded.load(meta_pid);
+        ASSERT_TRUE(lr.has_value()) << lr.error().message;
+        EXPECT_EQ(loaded.node_count(), 10u);
+
+        // Insert additional vectors.
+        for (int i = 10; i < 20; ++i) {
+            std::vector<float> vec = {static_cast<float>(i), 0.0F, 0.0F, 0.0F};
+            auto ir = loaded.insert(vec);
+            ASSERT_TRUE(ir.has_value()) << ir.error().message;
+        }
+
+        EXPECT_EQ(loaded.node_count(), 20u);
+
+        // Search for vector 15.
+        std::vector<float> query = {15.0F, 0.0F, 0.0F, 0.0F};
+        auto results = loaded.search(query, 1);
+        ASSERT_TRUE(results.has_value()) << results.error().message;
+        ASSERT_GE(results.value().size(), 1u);
+        EXPECT_EQ(results.value()[0].node_id, 15u);
+    }
+}
+
+// =============================================================================
+// Concurrency Tests
+// =============================================================================
+
+TEST(HnswConcurrency, ConcurrentSearches) {
+    LargeTestFixture fix;
+
+    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndexConfig config;
+    config.dimension = 4;
+    config.m = 8;
+    config.ef_construction = 32;
+    config.ef_search = 32;
+    auto cr = index.create(config);
+    ASSERT_TRUE(cr.has_value()) << cr.error().message;
+
+    // Insert 50 vectors.
+    std::mt19937 rng(77);
+    for (int i = 0; i < 50; ++i) {
+        auto vec = random_vector(4, rng);
+        ASSERT_TRUE(index.insert(vec).has_value());
+    }
+
+    // Run concurrent searches from multiple threads.
+    constexpr int num_threads = 4;
+    constexpr int queries_per_thread = 20;
+    std::vector<std::thread> threads;
+    std::atomic<int> success_count{0};
+
+    for (int t = 0; t < num_threads; ++t) {
+        threads.emplace_back([&, t]() {
+            std::mt19937 local_rng(t * 1000);
+            for (int q = 0; q < queries_per_thread; ++q) {
+                auto query = random_vector(4, local_rng);
+                auto results = index.search(query, 5);
+                if (results.has_value() && !results.value().empty()) {
+                    success_count.fetch_add(1);
+                }
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    EXPECT_EQ(success_count.load(), num_threads * queries_per_thread);
 }

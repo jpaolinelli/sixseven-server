@@ -79,6 +79,9 @@ struct HnswMeta {
     uint32_t node_count = 0;
     uint32_t tombstone_count = 0;
     uint32_t next_node_id = 0;
+    /// Page IDs for node and vector data pages (persisted for restart).
+    std::vector<uint32_t> node_page_ids;
+    std::vector<uint32_t> vector_page_ids;
 };
 
 static constexpr size_t hnsw_meta_size = 28;
@@ -101,11 +104,10 @@ static constexpr size_t hnsw_meta_size = 28;
 [[nodiscard]] Result<HnswMeta> deserialize_hnsw_meta(std::span<const uint8_t> data);
 
 /// Serialize a vector (float array) for storage in an HNSW_VECTOR_DATA page tuple.
-[[nodiscard]] std::vector<uint8_t>
-serialize_hnsw_vector(std::span<const float> vec);
+[[nodiscard]] std::vector<uint8_t> serialize_hnsw_vector(std::span<const float> vec);
 
 /// Deserialize a vector from bytes read from an HNSW_VECTOR_DATA page tuple.
-[[nodiscard]] Result<std::vector<float>>
-deserialize_hnsw_vector(std::span<const uint8_t> data, uint32_t dimension);
+[[nodiscard]] Result<std::vector<float>> deserialize_hnsw_vector(std::span<const uint8_t> data,
+                                                                 uint32_t dimension);
 
 } // namespace giodb

@@ -9,6 +9,7 @@
 #include <functional>
 #include <mutex>
 #include <random>
+#include <shared_mutex>
 #include <span>
 #include <unordered_map>
 #include <vector>
@@ -79,15 +80,13 @@ public:
 
     /// Search for the k nearest neighbors to the query vector.
     /// Returns results sorted by ascending distance.
-    [[nodiscard]] Result<std::vector<HnswSearchResult>>
-    search(std::span<const float> query, uint32_t k) const;
+    [[nodiscard]] Result<std::vector<HnswSearchResult>> search(std::span<const float> query,
+                                                               uint32_t k) const;
 
     /// Search with a filter predicate. Only nodes where predicate returns
     /// true are included in results.
     [[nodiscard]] Result<std::vector<HnswSearchResult>>
-    search(std::span<const float> query,
-           uint32_t k,
-           const HnswFilterPredicate& predicate) const;
+    search(std::span<const float> query, uint32_t k, const HnswFilterPredicate& predicate) const;
 
     /// Mark a node as deleted (lazy tombstone).
     [[nodiscard]] Result<void> remove(uint32_t node_id);
@@ -113,44 +112,36 @@ public:
 
     /// Allocate a new node page slot. Returns the (page_id, slot_id) where
     /// the serialized node data was stored.
-    [[nodiscard]] Result<HnswNodeLocation>
-    allocate_node(const HnswNode& node);
+    [[nodiscard]] Result<HnswNodeLocation> allocate_node(const HnswNode& node);
 
     /// Read a node from its storage location.
-    [[nodiscard]] Result<HnswNode>
-    read_node(const HnswNodeLocation& loc) const;
+    [[nodiscard]] Result<HnswNode> read_node(const HnswNodeLocation& loc) const;
 
     /// Update a node at its storage location.
-    [[nodiscard]] Result<void>
-    update_node(const HnswNodeLocation& loc, const HnswNode& node);
+    [[nodiscard]] Result<void> update_node(const HnswNodeLocation& loc, const HnswNode& node);
 
     /// Allocate storage for a vector and return its (page_id, slot_id).
-    [[nodiscard]] Result<HnswNodeLocation>
-    allocate_vector(std::span<const float> vec);
+    [[nodiscard]] Result<HnswNodeLocation> allocate_vector(std::span<const float> vec);
 
     /// Read a vector from its storage location.
-    [[nodiscard]] Result<std::vector<float>>
-    read_vector(PageId page_id, SlotId slot_id) const;
+    [[nodiscard]] Result<std::vector<float>> read_vector(PageId page_id, SlotId slot_id) const;
 
     /// Persist the current metadata to the metadata page.
     [[nodiscard]] Result<void> flush_meta();
 
     /// Look up a node's storage location by its ID.
-    [[nodiscard]] Result<HnswNodeLocation>
-    node_location(uint32_t node_id) const;
+    [[nodiscard]] Result<HnswNodeLocation> node_location(uint32_t node_id) const;
 
 private:
     /// Find or allocate a page of the given type that has at least min_free
     /// bytes of free space.
-    [[nodiscard]] Result<PageId>
-    find_page_with_space(PageType type, size_t min_free);
+    [[nodiscard]] Result<PageId> find_page_with_space(PageType type, size_t min_free);
 
     /// Generate a random layer for a new node using exponential distribution.
     [[nodiscard]] uint8_t random_layer();
 
     /// Compute L2 (Euclidean) squared distance between two vectors.
-    [[nodiscard]] static float distance_l2(std::span<const float> a,
-                                            std::span<const float> b);
+    [[nodiscard]] static float distance_l2(std::span<const float> a, std::span<const float> b);
 
     /// Read a node's vector data.
     [[nodiscard]] Result<std::vector<float>> read_node_vector(const HnswNode& node) const;
@@ -158,18 +149,14 @@ private:
     /// Greedy search: find the single closest node at the given layer,
     /// starting from entry_id.
     [[nodiscard]] Result<uint32_t>
-    greedy_search_layer(std::span<const float> query,
-                        uint32_t entry_id,
-                        uint8_t layer) const;
+    greedy_search_layer(std::span<const float> query, uint32_t entry_id, uint8_t layer) const;
 
     /// Beam search at a specific layer. Returns up to ef candidates sorted
     /// by distance (ascending).
     struct Candidate {
         uint32_t node_id;
         float distance;
-        bool operator>(const Candidate& other) const {
-            return distance > other.distance;
-        }
+        bool operator>(const Candidate& other) const { return distance > other.distance; }
     };
 
     [[nodiscard]] Result<std::vector<Candidate>>
@@ -180,14 +167,12 @@ private:
                  const HnswFilterPredicate& predicate) const;
 
     /// Select the best M neighbors from a candidate list for a given layer.
-    [[nodiscard]] std::vector<HnswNeighbor>
-    select_neighbors(const std::vector<Candidate>& candidates,
-                     uint16_t max_neighbors) const;
+    [[nodiscard]] static std::vector<HnswNeighbor>
+    select_neighbors(const std::vector<Candidate>& candidates, uint16_t max_neighbors);
 
     /// Log a WAL record for an HNSW page modification.
     [[nodiscard]] Result<void>
-    log_wal(WalRecordType type, PageId page_id, SlotId slot_id,
-            std::span<const uint8_t> data);
+    log_wal(WalRecordType type, PageId page_id, SlotId slot_id, std::span<const uint8_t> data);
 
     BufferPoolManager& buffer_pool_;
     WalWriter* wal_;
@@ -202,7 +187,7 @@ private:
     std::vector<PageId> node_pages_;
     std::vector<PageId> vector_pages_;
 
-    mutable std::mutex latch_;
+    mutable std::shared_mutex latch_;
     mutable std::mt19937 rng_{std::random_device{}()};
 };
 
