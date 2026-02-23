@@ -23,6 +23,12 @@ using edge_id_t = int32_t;
 /// Default database ID for the built-in 'giodb' database.
 inline constexpr database_id_t default_database_id = 1;
 
+/// System database ID for the built-in 'giodb_system' database.
+inline constexpr database_id_t system_database_id = 2;
+
+/// System database name.
+inline constexpr const char* system_database_name = "giodb_system";
+
 /// Metadata for a database in the system catalog.
 struct Database {
     database_id_t database_id = 0;
@@ -98,6 +104,22 @@ inline TableSchema sys_databases_schema() {
         {1, "name", TypeId::STRING, false, ""},
     };
     schema.pk_columns = "database_id";
+    return schema;
+}
+
+/// Returns the system table schema for sys_settings.
+inline TableSchema sys_settings_schema() {
+    TableSchema schema;
+    schema.table_id = 0; // System tables use reserved IDs.
+    schema.name = "sys_settings";
+    schema.columns = {
+        {0, "key", TypeId::STRING, false, ""},
+        {1, "value", TypeId::STRING, true, ""},
+        {2, "category", TypeId::STRING, true, ""},
+        {3, "description", TypeId::STRING, true, ""},
+        {4, "is_runtime_mutable", TypeId::BOOL, true, ""},
+    };
+    schema.pk_columns = "key";
     return schema;
 }
 

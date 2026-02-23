@@ -45,7 +45,7 @@ public:
     /// Drop a database by id.
     /// If cascade is false, fails with CONSTRAINT_VIOLATION if the database
     /// contains tables. If cascade is true, drops all tables first.
-    /// Cannot drop the default 'giodb' database.
+    /// Cannot drop the default 'giodb' database or the 'giodb_system' database.
     [[nodiscard]] Result<void> drop_database(database_id_t database_id, bool cascade);
 
     /// Retrieve a database by name.
@@ -157,8 +157,8 @@ private:
 
     mutable std::mutex mu_;
 
-    /// Next auto-increment IDs.
-    database_id_t next_database_id_ = default_database_id + 1;
+    /// Next auto-increment IDs. Starts after system_database_id (2).
+    database_id_t next_database_id_ = system_database_id + 1;
     table_id_t next_table_id_ = 1;
     index_id_t next_index_id_ = 1;
     edge_id_t next_edge_id_ = 1;

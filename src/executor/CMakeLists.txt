@@ -20,6 +20,7 @@ add_library(giodb_executor STATIC
     pattern_match.cpp
     nearest_scan.cpp
     storage_manager.cpp
+    system_bootstrap.cpp
     planner.cpp
     query_engine.cpp
 )

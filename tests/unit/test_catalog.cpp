@@ -841,9 +841,11 @@ TEST(Catalog, ListDatabasesIncludesDefault) {
     Catalog catalog;
 
     auto dbs = catalog.list_databases();
-    ASSERT_EQ(dbs.size(), 1u);
+    ASSERT_EQ(dbs.size(), 2u);
     EXPECT_EQ(dbs[0].database_id, default_database_id);
     EXPECT_EQ(dbs[0].name, "giodb");
+    EXPECT_EQ(dbs[1].database_id, system_database_id);
+    EXPECT_EQ(dbs[1].name, system_database_name);
 }
 
 // -- Create database ----------------------------------------------------------
@@ -916,10 +918,12 @@ TEST(Catalog, ListDatabasesSortedById) {
     ASSERT_TRUE(catalog.create_database("alpha").has_value());
 
     auto dbs = catalog.list_databases();
-    ASSERT_EQ(dbs.size(), 3u); // giodb + zeta + alpha
+    ASSERT_EQ(dbs.size(), 4u); // giodb + giodb_system + zeta + alpha
     EXPECT_EQ(dbs[0].name, "giodb");
+    EXPECT_EQ(dbs[1].name, system_database_name);
     EXPECT_LT(dbs[0].database_id, dbs[1].database_id);
     EXPECT_LT(dbs[1].database_id, dbs[2].database_id);
+    EXPECT_LT(dbs[2].database_id, dbs[3].database_id);
 }
 
 // -- Drop database ------------------------------------------------------------
@@ -1028,8 +1032,9 @@ TEST(Catalog, DropDatabaseRemovesFromList) {
     ASSERT_TRUE(catalog.drop_database(*id, false).has_value());
 
     auto dbs = catalog.list_databases();
-    ASSERT_EQ(dbs.size(), 1u); // Only giodb remains.
+    ASSERT_EQ(dbs.size(), 2u); // giodb + giodb_system remain.
     EXPECT_EQ(dbs[0].name, "giodb");
+    EXPECT_EQ(dbs[1].name, system_database_name);
 }
 
 // -- Table scoping per database -----------------------------------------------

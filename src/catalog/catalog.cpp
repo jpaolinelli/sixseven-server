@@ -10,6 +10,10 @@ Catalog::Catalog() {
     // Create the default 'giodb' database.
     databases_by_id_[default_database_id] = Database{default_database_id, "giodb"};
     database_name_to_id_["giodb"] = default_database_id;
+
+    // Create the system 'giodb_system' database.
+    databases_by_id_[system_database_id] = Database{system_database_id, system_database_name};
+    database_name_to_id_[system_database_name] = system_database_id;
 }
 
 // -- Database operations ------------------------------------------------------
@@ -34,6 +38,10 @@ Result<void> Catalog::drop_database(database_id_t database_id, bool cascade) {
     if (database_id == default_database_id) {
         return make_error(StatusCode::CONSTRAINT_VIOLATION,
                           "cannot drop the default 'giodb' database");
+    }
+
+    if (database_id == system_database_id) {
+        return make_error(StatusCode::CONSTRAINT_VIOLATION, "cannot drop the system database");
     }
 
     auto db_it = databases_by_id_.find(database_id);
@@ -137,6 +145,12 @@ Result<void> Catalog::drop_table(database_id_t database_id, const std::string& n
 }
 
 Result<void> Catalog::drop_table_locked(database_id_t database_id, const std::string& name) {
+    // Protect system tables in the giodb_system database.
+    if (database_id == system_database_id) {
+        return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                          "cannot drop system table '" + name + "'");
+    }
+
     auto db_map_it = table_name_to_id_.find(database_id);
     if (db_map_it == table_name_to_id_.end()) {
         return make_error(StatusCode::NOT_FOUND, "table '" + name + "' not found");

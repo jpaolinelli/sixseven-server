@@ -58,4 +58,25 @@ Result<Config> Config::load_from_file(const std::string& path) {
     return ok(std::move(config));
 }
 
+// NOLINTNEXTLINE(bugprone-branch-clone)
+void Config::apply_setting(const std::string& key, const std::string& value) {
+    if (key == "server.port") {
+        auto v = std::stoul(value);
+        if (v <= 65535) {
+            port = static_cast<uint16_t>(v);
+        }
+    } else if (key == "server.max_connections") {
+        max_connections = std::stoull(value);
+    } else if (key == "storage.data_dir") {
+        data_dir = value;
+    } else if (key == "storage.buffer_pool_size_mb") {
+        buffer_pool_size_mb = std::stoull(value);
+    } else if (key == "storage.wal_segment_size_mb") {
+        wal_segment_size_mb = std::stoull(value);
+    } else if (key == "logging.level") {
+        log_level = value;
+    }
+    // Unknown keys are silently ignored.
+}
+
 } // namespace giodb
