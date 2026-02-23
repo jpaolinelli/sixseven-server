@@ -20,6 +20,8 @@ enum class PageType : uint8_t {
     OVERFLOW_PAGE,
     FREE_LIST,
     HNSW_NODE,
+    HNSW_META,
+    HNSW_VECTOR_DATA,
 };
 
 /// Slot identifier within a page (0-based index into the slot directory).

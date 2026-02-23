@@ -44,6 +44,7 @@ add_executable(giodb_unit_tests
     test_traversal.cpp
     test_shortest_path.cpp
     test_pattern_match.cpp
+    test_hnsw_page.cpp
 )
 
 target_link_libraries(giodb_unit_tests
