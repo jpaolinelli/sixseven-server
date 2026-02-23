@@ -13,6 +13,7 @@ add_library(giodb_executor STATIC
     hash_join.cpp
     sort_merge_join.cpp
     hash_aggregate.cpp
+    window_function.cpp
     storage_manager.cpp
     planner.cpp
     query_engine.cpp
