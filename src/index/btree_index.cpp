@@ -97,8 +97,8 @@ const BTreeConfig& BTreeIndex::config() const {
 
 // -- Shared helpers (reduce code duplication) ----------------------------------
 
-Result<uint16_t> BTreeIndex::find_child_index(
-    const BTreeInternalNode* parent, PageId child_id) const {
+Result<uint16_t> BTreeIndex::find_child_index(const BTreeInternalNode* parent,
+                                              PageId child_id) const {
     const auto& children = parent->children();
     for (uint16_t i = 0; i < static_cast<uint16_t>(children.size()); ++i) {
         if (children[i] == child_id) {
@@ -106,8 +106,8 @@ Result<uint16_t> BTreeIndex::find_child_index(
         }
     }
     return make_error(StatusCode::INTERNAL_ERROR,
-                      "child " + std::to_string(child_id) +
-                          " not found in parent " + std::to_string(parent->page_id()));
+                      "child " + std::to_string(child_id) + " not found in parent " +
+                          std::to_string(parent->page_id()));
 }
 
 Result<void> BTreeIndex::set_node_parent(PageId child_id, PageId parent_id) {
@@ -124,8 +124,7 @@ Result<void> BTreeIndex::set_node_parent(PageId child_id, PageId parent_id) {
         internal->set_parent_page_id(parent_id);
         return ok();
     }
-    return make_error(StatusCode::INTERNAL_ERROR,
-                      "node not found: " + std::to_string(child_id));
+    return make_error(StatusCode::INTERNAL_ERROR, "node not found: " + std::to_string(child_id));
 }
 
 Result<void> BTreeIndex::handle_post_merge(BTreeInternalNode* parent) {
@@ -335,8 +334,8 @@ Result<std::pair<KeyType, PageId>> BTreeIndex::split_internal(BTreeInternalNode*
     return ok(std::make_pair(std::move(push_up_key), new_node->page_id()));
 }
 
-Result<void> BTreeIndex::insert_into_parent(PageId left_page_id, const KeyType& key,
-                                             PageId right_page_id) {
+Result<void>
+BTreeIndex::insert_into_parent(PageId left_page_id, const KeyType& key, PageId right_page_id) {
     // Get parent page ID from the left node.
     PageId parent_id = invalid_page_id;
     auto* left_leaf = get_leaf_node(left_page_id);
@@ -399,8 +398,8 @@ Result<void> BTreeIndex::insert_into_parent(PageId left_page_id, const KeyType& 
     return insert_into_parent(parent_id, push_up_key, new_node_id);
 }
 
-Result<void> BTreeIndex::create_new_root(PageId left_page_id, const KeyType& key,
-                                          PageId right_page_id) {
+Result<void>
+BTreeIndex::create_new_root(PageId left_page_id, const KeyType& key, PageId right_page_id) {
     auto* new_root = create_internal_node();
     new_root->keys().push_back(key);
     new_root->children().push_back(left_page_id);
@@ -443,7 +442,7 @@ Result<std::optional<RID>> BTreeIndex::search(const KeyType& key) const {
 }
 
 Result<BTreeIterator> BTreeIndex::range_scan(const std::optional<KeyType>& begin_key,
-                                              const std::optional<KeyType>& end_key) const {
+                                             const std::optional<KeyType>& end_key) const {
     // Acquire a shared lock that will be transferred to the iterator.
     std::shared_lock lock(tree_latch_);
 
@@ -587,10 +586,10 @@ Result<void> BTreeIndex::fix_underfull_leaf(BTreeLeafNode* leaf) {
     if (child_index > 0) {
         auto* left_sibling = get_leaf_node(parent->child_at(child_index - 1));
         if (left_sibling != nullptr) {
-            left_sibling->keys().insert(left_sibling->keys().end(),
-                                        leaf->keys().begin(), leaf->keys().end());
-            left_sibling->rids().insert(left_sibling->rids().end(),
-                                        leaf->rids().begin(), leaf->rids().end());
+            left_sibling->keys().insert(
+                left_sibling->keys().end(), leaf->keys().begin(), leaf->keys().end());
+            left_sibling->rids().insert(
+                left_sibling->rids().end(), leaf->rids().begin(), leaf->rids().end());
 
             left_sibling->set_next_leaf_id(leaf->next_leaf_id());
             if (leaf->next_leaf_id() != invalid_page_id) {
@@ -612,10 +611,10 @@ Result<void> BTreeIndex::fix_underfull_leaf(BTreeLeafNode* leaf) {
     if (child_index + 1 < static_cast<uint16_t>(parent->children().size())) {
         auto* right_sibling = get_leaf_node(parent->child_at(child_index + 1));
         if (right_sibling != nullptr) {
-            leaf->keys().insert(leaf->keys().end(),
-                                right_sibling->keys().begin(), right_sibling->keys().end());
-            leaf->rids().insert(leaf->rids().end(),
-                                right_sibling->rids().begin(), right_sibling->rids().end());
+            leaf->keys().insert(
+                leaf->keys().end(), right_sibling->keys().begin(), right_sibling->keys().end());
+            leaf->rids().insert(
+                leaf->rids().end(), right_sibling->rids().begin(), right_sibling->rids().end());
 
             leaf->set_next_leaf_id(right_sibling->next_leaf_id());
             if (right_sibling->next_leaf_id() != invalid_page_id) {
@@ -640,7 +639,8 @@ Result<void> BTreeIndex::fix_underfull_internal(BTreeInternalNode* node) {
     PageId parent_id = node->parent_page_id();
     auto* parent = get_internal_node(parent_id);
     if (parent == nullptr) {
-        return make_error(StatusCode::INTERNAL_ERROR, "parent not found for underfull internal node");
+        return make_error(StatusCode::INTERNAL_ERROR,
+                          "parent not found for underfull internal node");
     }
 
     auto ci_result = find_child_index(parent, node->page_id());
@@ -706,10 +706,10 @@ Result<void> BTreeIndex::fix_underfull_internal(BTreeInternalNode* node) {
             KeyType parent_key = parent->key_at(child_index - 1);
             left_sibling->keys().push_back(parent_key);
 
-            left_sibling->keys().insert(left_sibling->keys().end(),
-                                        node->keys().begin(), node->keys().end());
-            left_sibling->children().insert(left_sibling->children().end(),
-                                            node->children().begin(), node->children().end());
+            left_sibling->keys().insert(
+                left_sibling->keys().end(), node->keys().begin(), node->keys().end());
+            left_sibling->children().insert(
+                left_sibling->children().end(), node->children().begin(), node->children().end());
 
             for (PageId child_id : node->children()) {
                 auto result = set_node_parent(child_id, left_sibling->page_id());
@@ -733,10 +733,11 @@ Result<void> BTreeIndex::fix_underfull_internal(BTreeInternalNode* node) {
             KeyType parent_key = parent->key_at(child_index);
             node->keys().push_back(parent_key);
 
-            node->keys().insert(node->keys().end(),
-                                right_sibling->keys().begin(), right_sibling->keys().end());
+            node->keys().insert(
+                node->keys().end(), right_sibling->keys().begin(), right_sibling->keys().end());
             node->children().insert(node->children().end(),
-                                    right_sibling->children().begin(), right_sibling->children().end());
+                                    right_sibling->children().begin(),
+                                    right_sibling->children().end());
 
             for (PageId child_id : right_sibling->children()) {
                 auto result = set_node_parent(child_id, node->page_id());
@@ -781,8 +782,7 @@ Result<void> BTreeIndex::bulk_load(std::vector<std::pair<KeyType, RID>>& sorted_
         }
         if (config_.is_unique && *cmp == std::strong_ordering::equal) {
             return make_error(StatusCode::CONSTRAINT_VIOLATION,
-                              "duplicate key in sorted input at position " +
-                                  std::to_string(i));
+                              "duplicate key in sorted input at position " + std::to_string(i));
         }
     }
 
@@ -802,9 +802,8 @@ Result<void> BTreeIndex::bulk_load(std::vector<std::pair<KeyType, RID>>& sorted_
         auto* leaf = create_leaf_node();
         leaf_ids.push_back(leaf->page_id());
 
-        uint16_t count =
-            static_cast<uint16_t>(std::min(static_cast<size_t>(fill_target),
-                                           sorted_entries.size() - idx));
+        uint16_t count = static_cast<uint16_t>(
+            std::min(static_cast<size_t>(fill_target), sorted_entries.size() - idx));
         // If this is the last leaf and remaining entries fit, take them all.
         if (sorted_entries.size() - idx <= static_cast<size_t>(leaf_max)) {
             count = static_cast<uint16_t>(sorted_entries.size() - idx);

@@ -1,11 +1,11 @@
-#include "test_btree_helpers.h"
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <numeric>
 #include <random>
 #include <vector>
+
+#include "test_btree_helpers.h"
 
 using namespace giodb;
 using namespace giodb::test;
@@ -712,7 +712,7 @@ TEST(BTreeUnique, RejectDuplicateOnBulkLoad) {
     std::vector<std::pair<KeyType, RID>> entries = {
         {make_key(10), make_rid(1)},
         {make_key(20), make_rid(2)},
-        {make_key(20), make_rid(3)},  // Duplicate!
+        {make_key(20), make_rid(3)}, // Duplicate!
         {make_key(30), make_rid(4)},
     };
 

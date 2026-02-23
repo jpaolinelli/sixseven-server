@@ -1,10 +1,10 @@
-#include "test_btree_helpers.h"
-
 #include <gtest/gtest.h>
 
 #include <atomic>
 #include <thread>
 #include <vector>
+
+#include "test_btree_helpers.h"
 
 using namespace giodb;
 using namespace giodb::test;

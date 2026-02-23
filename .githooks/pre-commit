@@ -7,9 +7,12 @@
 
 set -euo pipefail
 
+# Required major version (must match CI)
+REQUIRED_VERSION=20
+
 # Find clang-format (try versioned name first for CI, then unversioned)
 CLANG_FORMAT=""
-for candidate in clang-format-17 clang-format; do
+for candidate in clang-format-$REQUIRED_VERSION clang-format; do
     if command -v "$candidate" &>/dev/null; then
         CLANG_FORMAT="$candidate"
         break
@@ -18,8 +21,17 @@ done
 
 if [[ -z "$CLANG_FORMAT" ]]; then
     echo "WARNING: clang-format not found, skipping format check."
-    echo "Install clang-format to enable pre-commit formatting checks."
+    echo "Install clang-format-$REQUIRED_VERSION to enable pre-commit formatting checks."
     exit 0
+fi
+
+# Print version and warn on mismatch
+CF_VERSION=$("$CLANG_FORMAT" --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+CF_MAJOR=${CF_VERSION%%.*}
+echo "Format check using $CLANG_FORMAT $CF_VERSION"
+if [[ "$CF_MAJOR" != "$REQUIRED_VERSION" ]]; then
+    echo "WARNING: clang-format major version $CF_MAJOR does not match CI version $REQUIRED_VERSION."
+    echo "Install clang-format-$REQUIRED_VERSION for consistent formatting."
 fi
 
 # Get staged C++ files (only added/modified, not deleted)
@@ -45,10 +57,10 @@ if [[ -n "$UNFORMATTED" ]]; then
     done
     echo ""
     echo "Run the following to fix:"
-    echo "  clang-format -i $UNFORMATTED"
+    echo "  $CLANG_FORMAT -i $UNFORMATTED"
     echo ""
     echo "Or format all files:"
-    echo "  find src include tests -name '*.cpp' -o -name '*.h' | xargs clang-format -i"
+    echo "  find src include tests -name '*.cpp' -o -name '*.h' | xargs $CLANG_FORMAT -i"
     echo ""
     exit 1
 fi

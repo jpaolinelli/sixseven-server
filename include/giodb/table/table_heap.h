@@ -89,8 +89,7 @@ private:
 /// ```
 class TableIterator {
 public:
-    TableIterator(BufferPoolManager& bpm, PageId start_page,
-                  uint32_t total_pages);
+    TableIterator(BufferPoolManager& bpm, PageId start_page, uint32_t total_pages);
 
     /// Advance to the next live tuple.
     /// @return A pair of (RID, tuple data copy), or nullopt if scan is exhausted.

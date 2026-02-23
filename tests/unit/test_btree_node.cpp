@@ -1,8 +1,8 @@
-#include "test_btree_helpers.h"
-
 #include <gtest/gtest.h>
 
 #include <vector>
+
+#include "test_btree_helpers.h"
 
 using namespace giodb;
 using namespace giodb::test;
@@ -229,8 +229,8 @@ TEST(BTreeLeafNode, IsUnderfull) {
     (void)leaf.insert(make_key(10), make_rid(1));
     (void)leaf.insert(make_key(20), make_rid(2));
 
-    EXPECT_TRUE(leaf.is_underfull(false));  // 2 < 5
-    EXPECT_FALSE(leaf.is_underfull(true));  // Root is never underfull.
+    EXPECT_TRUE(leaf.is_underfull(false)); // 2 < 5
+    EXPECT_FALSE(leaf.is_underfull(true)); // Root is never underfull.
 }
 
 // =============================================================================
@@ -328,8 +328,8 @@ TEST(BTreeInternalNode, IsUnderfull) {
     node.children().push_back(100);
     (void)node.insert_at(0, make_key(10), 200);
 
-    EXPECT_TRUE(node.is_underfull(false));  // 1 < 5
-    EXPECT_FALSE(node.is_underfull(true));  // Root is never underfull.
+    EXPECT_TRUE(node.is_underfull(false)); // 1 < 5
+    EXPECT_FALSE(node.is_underfull(true)); // Root is never underfull.
 }
 
 TEST(BTreeInternalNode, SearchEmptyFails) {

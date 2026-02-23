@@ -20,8 +20,7 @@ static ExprPtr make_string(const std::string& v) {
     return e;
 }
 
-static ExprPtr make_col(const std::string& col,
-                        const std::string& table = "") {
+static ExprPtr make_col(const std::string& col, const std::string& table = "") {
     auto e = std::make_unique<ColumnRefExpr>();
     e->table = table;
     e->column = col;
@@ -918,7 +917,7 @@ TEST(Ast, AnalyzeStmt) {
 TEST(Ast, ExprMoveSemantics) {
     auto e = make_int("42");
     ExprPtr moved = std::move(e);
-    EXPECT_EQ(e, nullptr);  // NOLINT: testing moved-from state
+    EXPECT_EQ(e, nullptr); // NOLINT: testing moved-from state
     EXPECT_NE(moved, nullptr);
     auto* lit = dynamic_cast<LiteralExpr*>(moved.get());
     ASSERT_NE(lit, nullptr);
@@ -929,7 +928,7 @@ TEST(Ast, StmtMoveSemantics) {
     auto stmt = std::make_unique<CreateTableStmt>();
     stmt->name = "test";
     StmtPtr moved = std::move(stmt);
-    EXPECT_EQ(stmt, nullptr);  // NOLINT: testing moved-from state
+    EXPECT_EQ(stmt, nullptr); // NOLINT: testing moved-from state
     auto* ct = dynamic_cast<CreateTableStmt*>(moved.get());
     ASSERT_NE(ct, nullptr);
     EXPECT_EQ(ct->name, "test");

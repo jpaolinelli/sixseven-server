@@ -1,7 +1,6 @@
-#include "giodb/table/table_heap.h"
-
 #include "giodb/storage/buffer_pool.h"
 #include "giodb/storage/disk_manager.h"
+#include "giodb/table/table_heap.h"
 
 #include <gtest/gtest.h>
 
@@ -68,7 +67,8 @@ TEST_F(TableHeapTest, InsertMultipleTuples) {
     for (int i = 0; i < 50; ++i) {
         auto tuple = make_tuple(100, static_cast<uint8_t>(i));
         auto rid_result = heap.insert_tuple(tuple);
-        ASSERT_TRUE(rid_result.has_value()) << "Insert " << i << " failed: " << rid_result.error().message;
+        ASSERT_TRUE(rid_result.has_value())
+            << "Insert " << i << " failed: " << rid_result.error().message;
         rids.push_back(*rid_result);
     }
 
@@ -100,7 +100,8 @@ TEST_F(TableHeapTest, InsertAcrossMultiplePages) {
     for (int i = 0; i < 30; ++i) {
         auto tuple = make_tuple(2000, static_cast<uint8_t>(i));
         auto rid_result = heap.insert_tuple(tuple);
-        ASSERT_TRUE(rid_result.has_value()) << "Insert " << i << " failed: " << rid_result.error().message;
+        ASSERT_TRUE(rid_result.has_value())
+            << "Insert " << i << " failed: " << rid_result.error().message;
         rids.push_back(*rid_result);
     }
 
