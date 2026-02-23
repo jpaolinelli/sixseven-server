@@ -53,6 +53,7 @@ add_executable(giodb_unit_tests
     test_reembed.cpp
     test_system_bootstrap.cpp
     test_set_show.cpp
+    test_provider_cache.cpp
 )
 
 target_link_libraries(giodb_unit_tests

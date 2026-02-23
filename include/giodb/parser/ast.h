@@ -94,6 +94,7 @@ enum class ShowTarget : uint8_t {
     COLUMNS,
     EDGE_TYPES,
     INDEXES,
+    PROVIDERS,
     PARAMETER,
     ALL,
 };

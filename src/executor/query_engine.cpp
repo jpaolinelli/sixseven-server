@@ -4,6 +4,7 @@
 #include "giodb/common/logging.h"
 #include "giodb/executor/expr_evaluator.h"
 #include "giodb/executor/planner.h"
+#include "giodb/executor/provider_cache.h"
 #include "giodb/executor/settings_cache.h"
 #include "giodb/parser/ast.h"
 #include "giodb/parser/lexer.h"
@@ -42,6 +43,10 @@ void QueryEngine::set_hnsw_indexes(std::unordered_map<std::string, HnswIndex*>* 
 
 void QueryEngine::set_settings_cache(SettingsCache* cache) {
     settings_cache_ = cache;
+}
+
+void QueryEngine::set_provider_cache(ProviderCache* cache) {
+    provider_cache_ = cache;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,6 +209,20 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
         ccd.type_id = *type_result;
         ccd.nullable = col.nullable;
         ts.columns.push_back(std::move(ccd));
+    }
+
+    // Validate EMBEDDING column provider references against the provider cache.
+    if (provider_cache_) {
+        for (const auto& col : stmt.columns) {
+            if (!col.type.provider.empty()) {
+                auto valid = provider_cache_->validate_provider_exists(col.type.provider);
+                if (!valid) {
+                    return make_error(StatusCode::NOT_FOUND,
+                                      "column '" + col.name + "' references unknown provider '" +
+                                          col.type.provider + "'");
+                }
+            }
+        }
     }
 
     // Extract primary key from table-level constraints.
@@ -690,6 +709,87 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
 // ---------------------------------------------------------------------------
 
 Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
+    // Pre-execution: enforce provider constraints for DML on sys_providers.
+    std::vector<ProviderConfig> protected_providers;
+    bool is_provider_delete = false;
+
+    if (provider_cache_) {
+        // Default uniqueness: auto-unset previous defaults before INSERT/UPDATE
+        // that sets is_default = TRUE.
+        if (auto* ins = dynamic_cast<const InsertStmt*>(bound.stmt)) {
+            if (ins->table_name == "sys_providers") {
+                // Find the is_default column index in the INSERT.
+                int def_idx = -1;
+                if (ins->columns.empty()) {
+                    def_idx = 6; // is_default is the 7th column in schema order.
+                } else {
+                    for (size_t i = 0; i < ins->columns.size(); ++i) {
+                        if (ins->columns[i] == "is_default") {
+                            def_idx = static_cast<int>(i);
+                            break;
+                        }
+                    }
+                }
+                if (def_idx >= 0) {
+                    bool sets_default = false;
+                    for (const auto& row : ins->values) {
+                        if (def_idx < static_cast<int>(row.size())) {
+                            if (auto* lit = dynamic_cast<const LiteralExpr*>(row[def_idx].get())) {
+                                if (lit->kind == LiteralKind::BOOLEAN && lit->value == "true") {
+                                    sets_default = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (sets_default) {
+                        auto prev_db = current_database_id_;
+                        set_current_database(system_database_id);
+                        auto unset = execute("UPDATE sys_providers SET is_default = FALSE "
+                                             "WHERE is_default = TRUE");
+                        set_current_database(prev_db);
+                        if (!unset) {
+                            GIODB_LOG_WARN("failed to unset existing default provider: {}",
+                                           unset.error().message);
+                        }
+                    }
+                }
+            }
+        } else if (auto* upd = dynamic_cast<const UpdateStmt*>(bound.stmt)) {
+            if (upd->table_name == "sys_providers") {
+                for (const auto& assign : upd->assignments) {
+                    if (assign.column == "is_default") {
+                        if (auto* lit = dynamic_cast<const LiteralExpr*>(assign.value.get())) {
+                            if (lit->kind == LiteralKind::BOOLEAN && lit->value == "true") {
+                                auto prev_db = current_database_id_;
+                                set_current_database(system_database_id);
+                                auto unset = execute("UPDATE sys_providers SET is_default = FALSE "
+                                                     "WHERE is_default = TRUE");
+                                set_current_database(prev_db);
+                                if (!unset) {
+                                    GIODB_LOG_WARN("failed to unset existing default provider: {}",
+                                                   unset.error().message);
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        } else if (auto* del = dynamic_cast<const DeleteStmt*>(bound.stmt)) {
+            // Referential integrity: snapshot in-use providers before DELETE.
+            if (del->table_name == "sys_providers") {
+                is_provider_delete = true;
+                auto all = provider_cache_->get_all();
+                for (const auto& p : all) {
+                    if (provider_cache_->is_provider_in_use(p.name, catalog_)) {
+                        protected_providers.push_back(p);
+                    }
+                }
+            }
+        }
+    }
+
     // Build iterator tree.
     Planner planner(catalog_, storage_, current_database_id_, graph_engine_);
     std::vector<ExprPtr> owned_exprs;
@@ -736,7 +836,66 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
         qr.column_types.clear();
     }
 
+    // Invalidate provider cache if DML targeted sys_providers.
+    maybe_invalidate_provider_cache(bound);
+
+    // Post-execution: verify no in-use providers were deleted.
+    if (is_provider_delete && !protected_providers.empty()) {
+        for (const auto& pp : protected_providers) {
+            if (!provider_cache_->get(pp.name).has_value()) {
+                // Compensate: re-insert the deleted in-use provider.
+                auto prev_db = current_database_id_;
+                set_current_database(system_database_id);
+                std::string api_key_val = pp.api_key.empty() ? "NULL" : "'" + pp.api_key + "'";
+                std::string sql =
+                    "INSERT INTO sys_providers VALUES (" + std::to_string(pp.provider_id) + ", '" +
+                    pp.name + "', '" + pp.type + "', '" + pp.endpoint + "', '" + pp.model + "', " +
+                    api_key_val + ", " + (pp.is_default ? "TRUE" : "FALSE") + ", NULL)";
+                auto re_insert = execute(sql);
+                set_current_database(prev_db);
+
+                if (!re_insert) {
+                    GIODB_LOG_ERROR("failed to restore in-use provider '{}': {}",
+                                    pp.name,
+                                    re_insert.error().message);
+                }
+                // Reload cache to reflect the restored provider.
+                auto reload = provider_cache_->load(*this);
+                if (!reload) {
+                    GIODB_LOG_WARN("failed to reload provider cache: {}", reload.error().message);
+                }
+
+                return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                                  "cannot delete provider '" + pp.name +
+                                      "': referenced by EMBEDDING columns");
+            }
+        }
+    }
+
     return ok(std::move(qr));
+}
+
+void QueryEngine::maybe_invalidate_provider_cache(const BoundStatement& bound) {
+    if (!provider_cache_) {
+        return;
+    }
+
+    // Detect if the DML targeted the sys_providers table.
+    std::string target_table;
+    if (auto* ins = dynamic_cast<const InsertStmt*>(bound.stmt)) {
+        target_table = ins->table_name;
+    } else if (auto* upd = dynamic_cast<const UpdateStmt*>(bound.stmt)) {
+        target_table = upd->table_name;
+    } else if (auto* del = dynamic_cast<const DeleteStmt*>(bound.stmt)) {
+        target_table = del->table_name;
+    }
+
+    if (target_table == "sys_providers") {
+        auto reload = provider_cache_->load(*this);
+        if (!reload) {
+            GIODB_LOG_WARN("failed to reload provider cache after DML: {}", reload.error().message);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -895,6 +1054,28 @@ Result<QueryResult> QueryEngine::execute_show(const ShowStmt& stmt) {
             qr.rows.push_back({Value(et.name),
                                Value(static_cast<int64_t>(et.source_table_id)),
                                Value(static_cast<int64_t>(et.target_table_id))});
+        }
+        return ok(std::move(qr));
+    }
+
+    case ShowTarget::PROVIDERS: {
+        if (!provider_cache_) {
+            return make_error(
+                StatusCode::INTERNAL_ERROR,
+                "provider cache not initialized (system database may not be bootstrapped)");
+        }
+        auto providers = provider_cache_->get_all();
+
+        QueryResult qr;
+        qr.column_names = {"name", "type", "endpoint", "model", "is_default"};
+        qr.column_types = {
+            TypeId::STRING, TypeId::STRING, TypeId::STRING, TypeId::STRING, TypeId::BOOL};
+        for (const auto& p : providers) {
+            qr.rows.push_back({Value(p.name),
+                               Value(p.type),
+                               Value(p.endpoint),
+                               Value(p.model),
+                               Value(p.is_default)});
         }
         return ok(std::move(qr));
     }

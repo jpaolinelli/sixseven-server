@@ -44,6 +44,27 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
 
     GIODB_LOG_INFO("system bootstrap: sys_settings table created");
 
+    // 3b. Create sys_providers table.
+    auto create_providers = engine.execute("CREATE TABLE sys_providers ("
+                                           "provider_id INT, "
+                                           "name VARCHAR, "
+                                           "type VARCHAR, "
+                                           "endpoint VARCHAR, "
+                                           "model VARCHAR, "
+                                           "api_key_encrypted VARCHAR, "
+                                           "is_default BOOLEAN, "
+                                           "created_at TIMESTAMP, "
+                                           "PRIMARY KEY (provider_id)"
+                                           ")");
+    if (!create_providers) {
+        engine.set_current_database(prev_db);
+        return make_error(create_providers.error().code,
+                          "failed to create sys_providers table: " +
+                              create_providers.error().message);
+    }
+
+    GIODB_LOG_INFO("system bootstrap: sys_providers table created");
+
     // 4. Seed default settings on first run.
     if (!is_bootstrapped(data_dir)) {
         auto seed_result = seed_default_settings(engine, config);
