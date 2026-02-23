@@ -14,7 +14,9 @@ namespace giodb {
 
 // Forward declarations.
 struct BoundStatement;
+struct CreateDatabaseStmt;
 struct CreateTableStmt;
+struct DropDatabaseStmt;
 struct DropTableStmt;
 
 /// Result of executing a SQL statement.
@@ -41,8 +43,8 @@ struct QueryResult {
 /// Ties together the full SQL pipeline:
 ///   SQL string → Lexer → Parser → Binder → Planner → Executor → QueryResult
 ///
-/// Also handles DDL statements (CREATE/DROP TABLE) which bypass the
-/// planner and directly modify the Catalog + StorageManager.
+/// Also handles DDL statements (CREATE/DROP TABLE, CREATE/DROP DATABASE)
+/// which bypass the planner and directly modify the Catalog + StorageManager.
 class QueryEngine {
 public:
     /// @param catalog  System catalog (schema metadata).
@@ -53,6 +55,12 @@ public:
     [[nodiscard]] Result<QueryResult> execute(const std::string& sql);
 
 private:
+    /// Execute a DDL CREATE DATABASE statement.
+    [[nodiscard]] Result<QueryResult> execute_create_database(const CreateDatabaseStmt& stmt);
+
+    /// Execute a DDL DROP DATABASE statement.
+    [[nodiscard]] Result<QueryResult> execute_drop_database(const DropDatabaseStmt& stmt);
+
     /// Execute a DDL CREATE TABLE statement.
     [[nodiscard]] Result<QueryResult> execute_create_table(const CreateTableStmt& stmt);
 

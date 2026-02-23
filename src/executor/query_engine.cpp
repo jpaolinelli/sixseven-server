@@ -35,6 +35,12 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
 
     // 3. Dispatch DDL before binding (CREATE TABLE creates the table
     //    that the binder would try to look up).
+    if (auto* create_db = dynamic_cast<const CreateDatabaseStmt*>(stmt_ptr->get())) {
+        return execute_create_database(*create_db);
+    }
+    if (auto* drop_db = dynamic_cast<const DropDatabaseStmt*>(stmt_ptr->get())) {
+        return execute_drop_database(*drop_db);
+    }
     if (auto* create = dynamic_cast<const CreateTableStmt*>(stmt_ptr->get())) {
         return execute_create_table(*create);
     }
@@ -51,6 +57,64 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
 
     // 5. Plan + Execute.
     return execute_plan(*bound);
+}
+
+// ---------------------------------------------------------------------------
+// DDL: CREATE DATABASE
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_create_database(const CreateDatabaseStmt& stmt) {
+    auto db_id = catalog_.create_database(stmt.database_name);
+    if (!db_id) {
+        if (stmt.if_not_exists && db_id.error().code == StatusCode::ALREADY_EXISTS) {
+            QueryResult qr;
+            qr.message = "CREATE DATABASE";
+            return ok(std::move(qr));
+        }
+        return make_error(db_id.error().code, db_id.error().message);
+    }
+
+    QueryResult qr;
+    qr.message = "CREATE DATABASE";
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// DDL: DROP DATABASE
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_drop_database(const DropDatabaseStmt& stmt) {
+    auto db = catalog_.get_database(stmt.database_name);
+    if (!db) {
+        if (stmt.if_exists && db.error().code == StatusCode::NOT_FOUND) {
+            QueryResult qr;
+            qr.message = "DROP DATABASE";
+            return ok(std::move(qr));
+        }
+        return make_error(db.error().code, db.error().message);
+    }
+
+    auto db_id = db->database_id;
+
+    // If cascade, drop storage for every table in this database first.
+    if (stmt.cascade) {
+        auto tables = catalog_.list_tables(db_id);
+        for (const auto& table : tables) {
+            auto drop_storage = storage_.drop_table_storage(table.table_id);
+            if (!drop_storage) {
+                return make_error(drop_storage.error().code, drop_storage.error().message);
+            }
+        }
+    }
+
+    auto result = catalog_.drop_database(db_id, stmt.cascade);
+    if (!result) {
+        return make_error(result.error().code, result.error().message);
+    }
+
+    QueryResult qr;
+    qr.message = "DROP DATABASE";
+    return ok(std::move(qr));
 }
 
 // ---------------------------------------------------------------------------
