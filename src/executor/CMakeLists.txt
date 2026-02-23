@@ -14,6 +14,7 @@ add_library(giodb_executor STATIC
     sort_merge_join.cpp
     hash_aggregate.cpp
     window_function.cpp
+    subquery_source.cpp
     storage_manager.cpp
     planner.cpp
     query_engine.cpp

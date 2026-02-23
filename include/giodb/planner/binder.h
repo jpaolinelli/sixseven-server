@@ -110,9 +110,14 @@ public:
 private:
     const Catalog& catalog_;
 
+    /// CTE results accumulated during binding. Inner subqueries can reference
+    /// CTEs defined by their parent queries.
+    std::unordered_map<std::string, BoundStatement> cte_results_;
+
     // -- Statement handlers ---------------------------------------------------
 
     Result<BoundStatement> bind_select(const SelectStmt& stmt);
+    Result<BoundStatement> bind_select(const SelectStmt& stmt, Scope* parent_scope);
     Result<BoundStatement> bind_insert(const InsertStmt& stmt);
     Result<BoundStatement> bind_update(const UpdateStmt& stmt);
     Result<BoundStatement> bind_delete(const DeleteStmt& stmt);
@@ -149,8 +154,8 @@ private:
     Result<ExprType> bind_between(const BetweenExpr& expr, Scope& scope, BoundStatement& bound);
     Result<ExprType> bind_is_null(const IsNullExpr& expr, Scope& scope, BoundStatement& bound);
     Result<ExprType> bind_like(const LikeExpr& expr, Scope& scope, BoundStatement& bound);
-    Result<ExprType> bind_exists(const ExistsExpr& expr, BoundStatement& bound);
-    Result<ExprType> bind_subquery(const SubqueryExpr& expr, BoundStatement& bound);
+    Result<ExprType> bind_exists(const ExistsExpr& expr, Scope& scope, BoundStatement& bound);
+    Result<ExprType> bind_subquery(const SubqueryExpr& expr, Scope& scope, BoundStatement& bound);
     Result<ExprType> bind_array(const ArrayExpr& expr, Scope& scope, BoundStatement& bound);
 
     // -- Helpers --------------------------------------------------------------

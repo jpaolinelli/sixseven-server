@@ -36,6 +36,7 @@ add_executable(giodb_unit_tests
     test_hash_aggregate.cpp
     test_window_function.cpp
     test_query_engine.cpp
+    test_subquery.cpp
 )
 
 target_link_libraries(giodb_unit_tests

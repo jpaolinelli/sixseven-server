@@ -9,6 +9,9 @@
 
 namespace giodb {
 
+// Forward declaration.
+struct SubqueryContext;
+
 /// Filter operator: wraps a child iterator and passes through only
 /// those tuples for which the predicate evaluates to true.
 class FilterOperator : public Iterator {
@@ -18,7 +21,8 @@ public:
     /// @param bound     BoundStatement with expr_types map for evaluation.
     FilterOperator(std::unique_ptr<Iterator> child,
                    const Expr& predicate,
-                   const BoundStatement& bound);
+                   const BoundStatement& bound,
+                   const SubqueryContext* subquery_ctx = nullptr);
 
     Result<void> open() override;
     Result<std::optional<Tuple>> next() override;
@@ -29,6 +33,7 @@ private:
     std::unique_ptr<Iterator> child_;
     const Expr& predicate_;
     const BoundStatement& bound_;
+    const SubqueryContext* subquery_ctx_ = nullptr;
 };
 
 } // namespace giodb

@@ -1,7 +1,12 @@
 #include "giodb/executor/expr_evaluator.h"
 
+#include "giodb/catalog/catalog.h"
 #include "giodb/common/coercion.h"
 #include "giodb/common/types.h"
+#include "giodb/executor/planner.h"
+#include "giodb/executor/storage_manager.h"
+#include "giodb/parser/lexer.h"
+#include "giodb/parser/parser.h"
 #include "giodb/planner/type_resolver.h"
 
 #include <algorithm>
@@ -18,8 +23,11 @@ namespace {
 // Forward declaration of the internal evaluator
 // ---------------------------------------------------------------------------
 
-Result<Value>
-eval(const Expr& expr, const Tuple& tuple, const OutputSchema& schema, const BoundStatement& bound);
+Result<Value> eval(const Expr& expr,
+                   const Tuple& tuple,
+                   const OutputSchema& schema,
+                   const BoundStatement& bound,
+                   const SubqueryContext* subquery_ctx);
 
 // ---------------------------------------------------------------------------
 // Literal evaluation
@@ -261,10 +269,11 @@ Result<Value> eval_comparison(BinaryOp op, const Value& lhs, const Value& rhs) {
 Result<Value> eval_binary(const BinaryExpr& expr,
                           const Tuple& tuple,
                           const OutputSchema& schema,
-                          const BoundStatement& bound) {
+                          const BoundStatement& bound,
+                          const SubqueryContext* subquery_ctx) {
     // Short-circuit for AND/OR.
     if (expr.op == BinaryOp::AND) {
-        auto lhs = eval(*expr.lhs, tuple, schema, bound);
+        auto lhs = eval(*expr.lhs, tuple, schema, bound, subquery_ctx);
         if (!lhs) {
             return lhs;
         }
@@ -272,7 +281,7 @@ Result<Value> eval_binary(const BinaryExpr& expr,
         if (!lhs->is_null() && lhs->type_id() == TypeId::BOOL && !lhs->as_bool()) {
             return ok(Value(false));
         }
-        auto rhs = eval(*expr.rhs, tuple, schema, bound);
+        auto rhs = eval(*expr.rhs, tuple, schema, bound, subquery_ctx);
         if (!rhs) {
             return rhs;
         }
@@ -293,7 +302,7 @@ Result<Value> eval_binary(const BinaryExpr& expr,
     }
 
     if (expr.op == BinaryOp::OR) {
-        auto lhs = eval(*expr.lhs, tuple, schema, bound);
+        auto lhs = eval(*expr.lhs, tuple, schema, bound, subquery_ctx);
         if (!lhs) {
             return lhs;
         }
@@ -301,7 +310,7 @@ Result<Value> eval_binary(const BinaryExpr& expr,
         if (!lhs->is_null() && lhs->type_id() == TypeId::BOOL && lhs->as_bool()) {
             return ok(Value(true));
         }
-        auto rhs = eval(*expr.rhs, tuple, schema, bound);
+        auto rhs = eval(*expr.rhs, tuple, schema, bound, subquery_ctx);
         if (!rhs) {
             return rhs;
         }
@@ -322,11 +331,11 @@ Result<Value> eval_binary(const BinaryExpr& expr,
     }
 
     // Evaluate both sides.
-    auto lhs = eval(*expr.lhs, tuple, schema, bound);
+    auto lhs = eval(*expr.lhs, tuple, schema, bound, subquery_ctx);
     if (!lhs) {
         return lhs;
     }
-    auto rhs = eval(*expr.rhs, tuple, schema, bound);
+    auto rhs = eval(*expr.rhs, tuple, schema, bound, subquery_ctx);
     if (!rhs) {
         return rhs;
     }
@@ -380,8 +389,9 @@ Result<Value> eval_binary(const BinaryExpr& expr,
 Result<Value> eval_unary(const UnaryExpr& expr,
                          const Tuple& tuple,
                          const OutputSchema& schema,
-                         const BoundStatement& bound) {
-    auto val = eval(*expr.operand, tuple, schema, bound);
+                         const BoundStatement& bound,
+                         const SubqueryContext* subquery_ctx) {
+    auto val = eval(*expr.operand, tuple, schema, bound, subquery_ctx);
     if (!val) {
         return val;
     }
@@ -425,8 +435,9 @@ Result<Value> eval_unary(const UnaryExpr& expr,
 Result<Value> eval_cast(const CastExpr& expr,
                         const Tuple& tuple,
                         const OutputSchema& schema,
-                        const BoundStatement& bound) {
-    auto val = eval(*expr.expr, tuple, schema, bound);
+                        const BoundStatement& bound,
+                        const SubqueryContext* subquery_ctx) {
+    auto val = eval(*expr.expr, tuple, schema, bound, subquery_ctx);
     if (!val) {
         return val;
     }
@@ -448,8 +459,9 @@ Result<Value> eval_cast(const CastExpr& expr,
 Result<Value> eval_is_null(const IsNullExpr& expr,
                            const Tuple& tuple,
                            const OutputSchema& schema,
-                           const BoundStatement& bound) {
-    auto val = eval(*expr.expr, tuple, schema, bound);
+                           const BoundStatement& bound,
+                           const SubqueryContext* subquery_ctx) {
+    auto val = eval(*expr.expr, tuple, schema, bound, subquery_ctx);
     if (!val) {
         return val;
     }
@@ -467,16 +479,17 @@ Result<Value> eval_is_null(const IsNullExpr& expr,
 Result<Value> eval_between(const BetweenExpr& expr,
                            const Tuple& tuple,
                            const OutputSchema& schema,
-                           const BoundStatement& bound) {
-    auto val = eval(*expr.expr, tuple, schema, bound);
+                           const BoundStatement& bound,
+                           const SubqueryContext* subquery_ctx) {
+    auto val = eval(*expr.expr, tuple, schema, bound, subquery_ctx);
     if (!val) {
         return val;
     }
-    auto low = eval(*expr.low, tuple, schema, bound);
+    auto low = eval(*expr.low, tuple, schema, bound, subquery_ctx);
     if (!low) {
         return low;
     }
-    auto high = eval(*expr.high, tuple, schema, bound);
+    auto high = eval(*expr.high, tuple, schema, bound, subquery_ctx);
     if (!high) {
         return high;
     }
@@ -509,8 +522,9 @@ Result<Value> eval_between(const BetweenExpr& expr,
 Result<Value> eval_in(const InExpr& expr,
                       const Tuple& tuple,
                       const OutputSchema& schema,
-                      const BoundStatement& bound) {
-    auto val = eval(*expr.expr, tuple, schema, bound);
+                      const BoundStatement& bound,
+                      const SubqueryContext* subquery_ctx) {
+    auto val = eval(*expr.expr, tuple, schema, bound, subquery_ctx);
     if (!val) {
         return val;
     }
@@ -519,11 +533,73 @@ Result<Value> eval_in(const InExpr& expr,
         return ok(Value::make_null());
     }
 
+    // IN (subquery) — execute the subquery and check membership.
+    if (expr.subquery && subquery_ctx) {
+        auto* sel = dynamic_cast<const SelectStmt*>(expr.subquery.get());
+        if (!sel) {
+            return make_error(StatusCode::INTERNAL_ERROR, "IN subquery is not a SELECT");
+        }
+
+        Binder binder(subquery_ctx->catalog);
+        auto sub_bound = binder.bind(*sel);
+        if (!sub_bound) {
+            return make_error(sub_bound.error().code, sub_bound.error().message);
+        }
+
+        Planner planner(subquery_ctx->catalog, subquery_ctx->storage);
+        std::vector<ExprPtr> owned;
+        auto iter = planner.plan(*sub_bound, owned);
+        if (!iter) {
+            return make_error(iter.error().code, iter.error().message);
+        }
+
+        auto open_res = (*iter)->open();
+        if (!open_res) {
+            return make_error(open_res.error().code, open_res.error().message);
+        }
+
+        bool found = false;
+        bool has_null = false;
+        while (true) {
+            auto row = (*iter)->next();
+            if (!row) {
+                (*iter)->close();
+                return make_error(row.error().code, row.error().message);
+            }
+            if (!row->has_value()) {
+                break;
+            }
+            const auto& sub_val = row->value().values[0];
+            if (sub_val.is_null()) {
+                has_null = true;
+                continue;
+            }
+            auto cmp = compare(*val, sub_val);
+            if (cmp && *cmp == std::strong_ordering::equal) {
+                found = true;
+                break;
+            }
+        }
+        (*iter)->close();
+
+        if (found) {
+            return ok(Value(!expr.negated));
+        }
+        if (has_null) {
+            return ok(Value::make_null());
+        }
+        return ok(Value(expr.negated));
+    }
+
+    if (expr.subquery) {
+        return make_error(StatusCode::NOT_IMPLEMENTED, "IN subquery evaluation not yet supported");
+    }
+
     // IN-list (not subquery).
     bool found = false;
     bool has_null = false;
     for (const auto& elem : expr.values) {
-        auto ev = eval(*elem, tuple, schema, bound);
+        auto ev = eval(*elem, tuple, schema, bound, subquery_ctx);
         if (!ev) {
             return ev;
         }
@@ -598,12 +674,13 @@ bool match_like(const std::string& text, const std::string& pattern, size_t ti, 
 Result<Value> eval_like(const LikeExpr& expr,
                         const Tuple& tuple,
                         const OutputSchema& schema,
-                        const BoundStatement& bound) {
-    auto val = eval(*expr.expr, tuple, schema, bound);
+                        const BoundStatement& bound,
+                        const SubqueryContext* subquery_ctx) {
+    auto val = eval(*expr.expr, tuple, schema, bound, subquery_ctx);
     if (!val) {
         return val;
     }
-    auto pat = eval(*expr.pattern, tuple, schema, bound);
+    auto pat = eval(*expr.pattern, tuple, schema, bound, subquery_ctx);
     if (!pat) {
         return pat;
     }
@@ -630,41 +707,42 @@ Result<Value> eval_like(const LikeExpr& expr,
 Result<Value> eval_case(const CaseExpr& expr,
                         const Tuple& tuple,
                         const OutputSchema& schema,
-                        const BoundStatement& bound) {
+                        const BoundStatement& bound,
+                        const SubqueryContext* subquery_ctx) {
     if (expr.operand) {
         // Simple CASE: CASE operand WHEN val THEN result ...
-        auto operand = eval(*expr.operand, tuple, schema, bound);
+        auto operand = eval(*expr.operand, tuple, schema, bound, subquery_ctx);
         if (!operand) {
             return operand;
         }
         for (const auto& when : expr.whens) {
-            auto cond_val = eval(*when.condition, tuple, schema, bound);
+            auto cond_val = eval(*when.condition, tuple, schema, bound, subquery_ctx);
             if (!cond_val) {
                 return cond_val;
             }
             if (!operand->is_null() && !cond_val->is_null()) {
                 auto cmp = compare(*operand, *cond_val);
                 if (cmp && *cmp == std::strong_ordering::equal) {
-                    return eval(*when.result, tuple, schema, bound);
+                    return eval(*when.result, tuple, schema, bound, subquery_ctx);
                 }
             }
         }
     } else {
         // Searched CASE: CASE WHEN condition THEN result ...
         for (const auto& when : expr.whens) {
-            auto cond = eval(*when.condition, tuple, schema, bound);
+            auto cond = eval(*when.condition, tuple, schema, bound, subquery_ctx);
             if (!cond) {
                 return cond;
             }
             if (!cond->is_null() && cond->type_id() == TypeId::BOOL && cond->as_bool()) {
-                return eval(*when.result, tuple, schema, bound);
+                return eval(*when.result, tuple, schema, bound, subquery_ctx);
             }
         }
     }
 
     // No match — return ELSE or NULL.
     if (expr.else_expr) {
-        return eval(*expr.else_expr, tuple, schema, bound);
+        return eval(*expr.else_expr, tuple, schema, bound, subquery_ctx);
     }
     return ok(Value::make_null());
 }
@@ -676,7 +754,8 @@ Result<Value> eval_case(const CaseExpr& expr,
 Result<Value> eval_function(const FunctionCallExpr& /*expr*/,
                             const Tuple& /*tuple*/,
                             const OutputSchema& /*schema*/,
-                            const BoundStatement& /*bound*/) {
+                            const BoundStatement& /*bound*/,
+                            const SubqueryContext* /*subquery_ctx*/) {
     return make_error(StatusCode::NOT_IMPLEMENTED, "function evaluation not yet implemented");
 }
 
@@ -687,11 +766,12 @@ Result<Value> eval_function(const FunctionCallExpr& /*expr*/,
 Result<Value> eval_array(const ArrayExpr& expr,
                          const Tuple& tuple,
                          const OutputSchema& schema,
-                         const BoundStatement& bound) {
+                         const BoundStatement& bound,
+                         const SubqueryContext* subquery_ctx) {
     Embedding result;
     result.reserve(expr.elements.size());
     for (const auto& elem : expr.elements) {
-        auto val = eval(*elem, tuple, schema, bound);
+        auto val = eval(*elem, tuple, schema, bound, subquery_ctx);
         if (!val) {
             return val;
         }
@@ -708,13 +788,117 @@ Result<Value> eval_array(const ArrayExpr& expr,
 }
 
 // ---------------------------------------------------------------------------
+// EXISTS expression
+// ---------------------------------------------------------------------------
+
+Result<Value> eval_exists(const ExistsExpr& expr, const SubqueryContext* subquery_ctx) {
+    if (!subquery_ctx) {
+        return make_error(StatusCode::NOT_IMPLEMENTED,
+                          "EXISTS subquery evaluation requires SubqueryContext");
+    }
+
+    auto* sel = dynamic_cast<const SelectStmt*>(expr.subquery.get());
+    if (!sel) {
+        return make_error(StatusCode::INTERNAL_ERROR, "EXISTS subquery is not a SELECT");
+    }
+
+    Binder binder(subquery_ctx->catalog);
+    auto sub_bound = binder.bind(*sel);
+    if (!sub_bound) {
+        return make_error(sub_bound.error().code, sub_bound.error().message);
+    }
+
+    Planner planner(subquery_ctx->catalog, subquery_ctx->storage);
+    std::vector<ExprPtr> owned;
+    auto iter = planner.plan(*sub_bound, owned);
+    if (!iter) {
+        return make_error(iter.error().code, iter.error().message);
+    }
+
+    auto open_res = (*iter)->open();
+    if (!open_res) {
+        return make_error(open_res.error().code, open_res.error().message);
+    }
+
+    auto row = (*iter)->next();
+    (*iter)->close();
+
+    if (!row) {
+        return make_error(row.error().code, row.error().message);
+    }
+    return ok(Value(row->has_value()));
+}
+
+// ---------------------------------------------------------------------------
+// Scalar subquery expression
+// ---------------------------------------------------------------------------
+
+Result<Value> eval_scalar_subquery(const SubqueryExpr& expr, const SubqueryContext* subquery_ctx) {
+    if (!subquery_ctx) {
+        return make_error(StatusCode::NOT_IMPLEMENTED,
+                          "scalar subquery evaluation requires SubqueryContext");
+    }
+
+    auto* sel = dynamic_cast<const SelectStmt*>(expr.subquery.get());
+    if (!sel) {
+        return make_error(StatusCode::INTERNAL_ERROR, "scalar subquery is not a SELECT");
+    }
+
+    Binder binder(subquery_ctx->catalog);
+    auto sub_bound = binder.bind(*sel);
+    if (!sub_bound) {
+        return make_error(sub_bound.error().code, sub_bound.error().message);
+    }
+
+    Planner planner(subquery_ctx->catalog, subquery_ctx->storage);
+    std::vector<ExprPtr> owned;
+    auto iter = planner.plan(*sub_bound, owned);
+    if (!iter) {
+        return make_error(iter.error().code, iter.error().message);
+    }
+
+    auto open_res = (*iter)->open();
+    if (!open_res) {
+        return make_error(open_res.error().code, open_res.error().message);
+    }
+
+    // Get first row.
+    auto first_row = (*iter)->next();
+    if (!first_row) {
+        (*iter)->close();
+        return make_error(first_row.error().code, first_row.error().message);
+    }
+    if (!first_row->has_value()) {
+        (*iter)->close();
+        return ok(Value::make_null()); // No rows → NULL.
+    }
+
+    Value result = first_row->value().values[0];
+
+    // Check for more than one row.
+    auto second_row = (*iter)->next();
+    (*iter)->close();
+
+    if (!second_row) {
+        return make_error(second_row.error().code, second_row.error().message);
+    }
+    if (second_row->has_value()) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "scalar subquery must return at most one row");
+    }
+
+    return ok(std::move(result));
+}
+
+// ---------------------------------------------------------------------------
 // Main expression evaluator
 // ---------------------------------------------------------------------------
 
 Result<Value> eval(const Expr& expr,
                    const Tuple& tuple,
                    const OutputSchema& schema,
-                   const BoundStatement& bound) {
+                   const BoundStatement& bound,
+                   const SubqueryContext* subquery_ctx) {
     // Dispatch via dynamic_cast (matches binder pattern).
     if (auto* lit = dynamic_cast<const LiteralExpr*>(&expr)) {
         return eval_literal(*lit);
@@ -723,39 +907,40 @@ Result<Value> eval(const Expr& expr,
         return eval_column_ref(*col, tuple, schema);
     }
     if (auto* bin = dynamic_cast<const BinaryExpr*>(&expr)) {
-        return eval_binary(*bin, tuple, schema, bound);
+        return eval_binary(*bin, tuple, schema, bound, subquery_ctx);
     }
     if (auto* un = dynamic_cast<const UnaryExpr*>(&expr)) {
-        return eval_unary(*un, tuple, schema, bound);
+        return eval_unary(*un, tuple, schema, bound, subquery_ctx);
     }
     if (auto* cast = dynamic_cast<const CastExpr*>(&expr)) {
-        return eval_cast(*cast, tuple, schema, bound);
+        return eval_cast(*cast, tuple, schema, bound, subquery_ctx);
     }
     if (auto* is_null = dynamic_cast<const IsNullExpr*>(&expr)) {
-        return eval_is_null(*is_null, tuple, schema, bound);
+        return eval_is_null(*is_null, tuple, schema, bound, subquery_ctx);
     }
     if (auto* between = dynamic_cast<const BetweenExpr*>(&expr)) {
-        return eval_between(*between, tuple, schema, bound);
+        return eval_between(*between, tuple, schema, bound, subquery_ctx);
     }
     if (auto* in = dynamic_cast<const InExpr*>(&expr)) {
-        return eval_in(*in, tuple, schema, bound);
+        return eval_in(*in, tuple, schema, bound, subquery_ctx);
     }
     if (auto* like = dynamic_cast<const LikeExpr*>(&expr)) {
-        return eval_like(*like, tuple, schema, bound);
+        return eval_like(*like, tuple, schema, bound, subquery_ctx);
     }
     if (auto* case_e = dynamic_cast<const CaseExpr*>(&expr)) {
-        return eval_case(*case_e, tuple, schema, bound);
+        return eval_case(*case_e, tuple, schema, bound, subquery_ctx);
     }
     if (auto* fn = dynamic_cast<const FunctionCallExpr*>(&expr)) {
-        return eval_function(*fn, tuple, schema, bound);
+        return eval_function(*fn, tuple, schema, bound, subquery_ctx);
     }
     if (auto* arr = dynamic_cast<const ArrayExpr*>(&expr)) {
-        return eval_array(*arr, tuple, schema, bound);
+        return eval_array(*arr, tuple, schema, bound, subquery_ctx);
     }
-    // Subquery and Exists are not supported in the executor yet.
-    if (dynamic_cast<const SubqueryExpr*>(&expr) != nullptr ||
-        dynamic_cast<const ExistsExpr*>(&expr) != nullptr) {
-        return make_error(StatusCode::NOT_IMPLEMENTED, "subquery evaluation not yet implemented");
+    if (auto* exists = dynamic_cast<const ExistsExpr*>(&expr)) {
+        return eval_exists(*exists, subquery_ctx);
+    }
+    if (auto* sub = dynamic_cast<const SubqueryExpr*>(&expr)) {
+        return eval_scalar_subquery(*sub, subquery_ctx);
     }
 
     return make_error(StatusCode::INTERNAL_ERROR, "unknown expression type in evaluator");
@@ -770,15 +955,17 @@ Result<Value> eval(const Expr& expr,
 Result<Value> evaluate_expr(const Expr& expr,
                             const Tuple& tuple,
                             const OutputSchema& schema,
-                            const BoundStatement& bound) {
-    return eval(expr, tuple, schema, bound);
+                            const BoundStatement& bound,
+                            const SubqueryContext* subquery_ctx) {
+    return eval(expr, tuple, schema, bound, subquery_ctx);
 }
 
 Result<bool> evaluate_predicate(const Expr& expr,
                                 const Tuple& tuple,
                                 const OutputSchema& schema,
-                                const BoundStatement& bound) {
-    auto val = eval(expr, tuple, schema, bound);
+                                const BoundStatement& bound,
+                                const SubqueryContext* subquery_ctx) {
+    auto val = eval(expr, tuple, schema, bound, subquery_ctx);
     if (!val) {
         return make_error(val.error().code, val.error().message);
     }

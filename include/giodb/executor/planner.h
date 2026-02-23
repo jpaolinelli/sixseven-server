@@ -2,6 +2,7 @@
 
 #include "giodb/catalog/catalog.h"
 #include "giodb/common/result.h"
+#include "giodb/executor/expr_evaluator.h"
 #include "giodb/executor/iterator.h"
 #include "giodb/executor/storage_manager.h"
 #include "giodb/executor/tuple.h"
@@ -9,6 +10,8 @@
 #include "giodb/planner/binder.h"
 
 #include <memory>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace giodb {
@@ -19,7 +22,7 @@ namespace giodb {
 /// intermediate logical plan layer.  When an optimizer is added in the
 /// future, it would be inserted between the Binder and the Planner.
 ///
-/// Supports: SELECT, INSERT, UPDATE, DELETE.
+/// Supports: SELECT (with subqueries, CTEs), INSERT, UPDATE, DELETE.
 /// DDL statements are handled by QueryEngine directly since they don't
 /// produce iterator trees.
 class Planner {
@@ -61,8 +64,39 @@ private:
     [[nodiscard]] static OutputSchema
     build_table_output_schema(const TableSchema& ts, const std::string& table_alias = "");
 
+    /// Plan a FROM source: physical table, CTE reference, or derived table.
+    ///
+    /// @param table_ref    The FROM clause table reference.
+    /// @param alias        The resolved alias for this source.
+    /// @param cte_map      Map of CTE name → CTE query for the current SELECT.
+    /// @param bound        Parent BoundStatement (for expression types).
+    /// @param owned_exprs  Owned expression storage.
+    /// @return An iterator + output schema for the source.
+    struct PlannedSource {
+        std::unique_ptr<Iterator> iter;
+        OutputSchema schema;
+    };
+
+    [[nodiscard]] Result<PlannedSource>
+    plan_from_source(const TableRef& table_ref,
+                     const std::string& alias,
+                     const std::unordered_map<std::string, const SelectStmt*>& cte_map,
+                     const BoundStatement& bound,
+                     std::vector<ExprPtr>& owned_exprs);
+
+    /// Extract EXISTS/NOT EXISTS/IN-subquery conditions from a WHERE clause
+    /// and rewrite them as SEMI/ANTI joins. Returns the remaining WHERE
+    /// predicate (may be nullptr if all conditions were rewritten).
+    [[nodiscard]] Result<const Expr*>
+    rewrite_subquery_predicates(const Expr& where_expr,
+                                std::unique_ptr<Iterator>& child,
+                                const BoundStatement& bound,
+                                const std::unordered_map<std::string, const SelectStmt*>& cte_map,
+                                std::vector<ExprPtr>& owned_exprs);
+
     const Catalog& catalog_;
     StorageManager& storage_;
+    SubqueryContext subquery_ctx_;
 };
 
 } // namespace giodb
