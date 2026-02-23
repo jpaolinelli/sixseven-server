@@ -67,6 +67,7 @@ bool is_name_token(TokenType type) {
     case TokenType::SHOW:
     case TokenType::VACUUM:
     case TokenType::MAX_DEPTH:
+    case TokenType::DATABASE:
         return true;
     default:
         return false;
@@ -377,6 +378,8 @@ Result<StmtPtr> Parser::parse_create() {
 
     if (match(TokenType::TABLE))
         return parse_create_table();
+    if (match(TokenType::DATABASE))
+        return parse_create_database();
     if (match(TokenType::INDEX))
         return parse_create_index(false);
     if (check(TokenType::UNIQUE)) {
@@ -393,7 +396,7 @@ Result<StmtPtr> Parser::parse_create() {
         return parse_create_edge_type();
     }
 
-    return error("expected TABLE, INDEX, UNIQUE INDEX, or EDGE TYPE after CREATE");
+    return error("expected TABLE, DATABASE, INDEX, UNIQUE INDEX, or EDGE TYPE after CREATE");
 }
 
 Result<StmtPtr> Parser::parse_drop() {
@@ -401,6 +404,8 @@ Result<StmtPtr> Parser::parse_drop() {
 
     if (match(TokenType::TABLE))
         return parse_drop_table();
+    if (match(TokenType::DATABASE))
+        return parse_drop_database();
     if (match(TokenType::INDEX))
         return parse_drop_index();
     if (match(TokenType::EDGE)) {
@@ -410,7 +415,7 @@ Result<StmtPtr> Parser::parse_drop() {
         return parse_drop_edge_type();
     }
 
-    return error("expected TABLE, INDEX, or EDGE TYPE after DROP");
+    return error("expected TABLE, DATABASE, INDEX, or EDGE TYPE after DROP");
 }
 
 Result<StmtPtr> Parser::parse_alter() {
@@ -782,6 +787,55 @@ Result<StmtPtr> Parser::parse_drop_table() {
     if (!name)
         return tl::unexpected(name.error());
     stmt->name = std::move(*name);
+
+    if (match(TokenType::CASCADE)) {
+        stmt->cascade = true;
+    } else {
+        match(TokenType::RESTRICT);
+    }
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- DDL: CREATE DATABASE -----------------------------------------------------
+
+Result<StmtPtr> Parser::parse_create_database() {
+    auto stmt = std::make_unique<CreateDatabaseStmt>();
+
+    if (match(TokenType::IF)) {
+        auto not_kw = expect(TokenType::NOT, "expected NOT after IF");
+        if (!not_kw)
+            return tl::unexpected(not_kw.error());
+        auto exists = expect(TokenType::EXISTS, "expected EXISTS after IF NOT");
+        if (!exists)
+            return tl::unexpected(exists.error());
+        stmt->if_not_exists = true;
+    }
+
+    auto name = parse_name("database name");
+    if (!name)
+        return tl::unexpected(name.error());
+    stmt->database_name = std::move(*name);
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- DDL: DROP DATABASE -------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_drop_database() {
+    auto stmt = std::make_unique<DropDatabaseStmt>();
+
+    if (match(TokenType::IF)) {
+        auto exists = expect(TokenType::EXISTS, "expected EXISTS after IF");
+        if (!exists)
+            return tl::unexpected(exists.error());
+        stmt->if_exists = true;
+    }
+
+    auto name = parse_name("database name");
+    if (!name)
+        return tl::unexpected(name.error());
+    stmt->database_name = std::move(*name);
 
     if (match(TokenType::CASCADE)) {
         stmt->cascade = true;

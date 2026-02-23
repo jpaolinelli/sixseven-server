@@ -66,6 +66,8 @@ private:
     [[nodiscard]] Result<StmtPtr> parse_drop_table();
     [[nodiscard]] Result<StmtPtr> parse_drop_index();
     [[nodiscard]] Result<StmtPtr> parse_drop_edge_type();
+    [[nodiscard]] Result<StmtPtr> parse_create_database();
+    [[nodiscard]] Result<StmtPtr> parse_drop_database();
     [[nodiscard]] Result<StmtPtr> parse_alter_table();
 
     // -- DDL helpers --------------------------------------------------------

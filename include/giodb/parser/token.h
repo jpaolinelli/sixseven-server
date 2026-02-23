@@ -35,6 +35,7 @@ enum class TokenType : uint8_t {
     COUNT,
     CREATE,
     CROSS,
+    DATABASE,
     DATE,
     DECIMAL,
     DEFAULT,
@@ -225,6 +226,8 @@ constexpr std::string_view token_type_name(TokenType type) {
         return "CREATE";
     case TokenType::CROSS:
         return "CROSS";
+    case TokenType::DATABASE:
+        return "DATABASE";
     case TokenType::DATE:
         return "DATE";
     case TokenType::DECIMAL:

@@ -36,6 +36,7 @@ const std::unordered_map<std::string, TokenType>& keyword_map() {
         {"COUNT", TokenType::COUNT},
         {"CREATE", TokenType::CREATE},
         {"CROSS", TokenType::CROSS},
+        {"DATABASE", TokenType::DATABASE},
         {"DATE", TokenType::DATE},
         {"DECIMAL", TokenType::DECIMAL},
         {"DEFAULT", TokenType::DEFAULT},

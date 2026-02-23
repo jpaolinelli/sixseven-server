@@ -409,6 +409,89 @@ TEST(Parser, DropEdgeTypeIfExists) {
     EXPECT_TRUE(de->if_exists);
 }
 
+// -- CREATE DATABASE tests ----------------------------------------------------
+
+TEST(Parser, CreateDatabaseBasic) {
+    auto stmt = parse_one("CREATE DATABASE mydb");
+    auto* cd = dynamic_cast<CreateDatabaseStmt*>(stmt.get());
+    ASSERT_NE(cd, nullptr);
+    EXPECT_EQ(cd->database_name, "mydb");
+    EXPECT_FALSE(cd->if_not_exists);
+}
+
+TEST(Parser, CreateDatabaseIfNotExists) {
+    auto stmt = parse_one("CREATE DATABASE IF NOT EXISTS mydb");
+    auto* cd = dynamic_cast<CreateDatabaseStmt*>(stmt.get());
+    ASSERT_NE(cd, nullptr);
+    EXPECT_EQ(cd->database_name, "mydb");
+    EXPECT_TRUE(cd->if_not_exists);
+}
+
+TEST(Parser, CreateDatabaseCaseInsensitive) {
+    auto stmt = parse_one("create database MyDB");
+    auto* cd = dynamic_cast<CreateDatabaseStmt*>(stmt.get());
+    ASSERT_NE(cd, nullptr);
+    EXPECT_EQ(cd->database_name, "MyDB");
+}
+
+TEST(Parser, CreateDatabaseMissingName) {
+    expect_parse_error("CREATE DATABASE");
+}
+
+TEST(Parser, CreateDatabaseIfNotExistsMissingName) {
+    expect_parse_error("CREATE DATABASE IF NOT EXISTS");
+}
+
+// -- DROP DATABASE tests ------------------------------------------------------
+
+TEST(Parser, DropDatabaseBasic) {
+    auto stmt = parse_one("DROP DATABASE mydb");
+    auto* dd = dynamic_cast<DropDatabaseStmt*>(stmt.get());
+    ASSERT_NE(dd, nullptr);
+    EXPECT_EQ(dd->database_name, "mydb");
+    EXPECT_FALSE(dd->if_exists);
+    EXPECT_FALSE(dd->cascade);
+}
+
+TEST(Parser, DropDatabaseIfExists) {
+    auto stmt = parse_one("DROP DATABASE IF EXISTS mydb");
+    auto* dd = dynamic_cast<DropDatabaseStmt*>(stmt.get());
+    ASSERT_NE(dd, nullptr);
+    EXPECT_EQ(dd->database_name, "mydb");
+    EXPECT_TRUE(dd->if_exists);
+    EXPECT_FALSE(dd->cascade);
+}
+
+TEST(Parser, DropDatabaseCascade) {
+    auto stmt = parse_one("DROP DATABASE mydb CASCADE");
+    auto* dd = dynamic_cast<DropDatabaseStmt*>(stmt.get());
+    ASSERT_NE(dd, nullptr);
+    EXPECT_EQ(dd->database_name, "mydb");
+    EXPECT_FALSE(dd->if_exists);
+    EXPECT_TRUE(dd->cascade);
+}
+
+TEST(Parser, DropDatabaseIfExistsCascade) {
+    auto stmt = parse_one("DROP DATABASE IF EXISTS mydb CASCADE");
+    auto* dd = dynamic_cast<DropDatabaseStmt*>(stmt.get());
+    ASSERT_NE(dd, nullptr);
+    EXPECT_EQ(dd->database_name, "mydb");
+    EXPECT_TRUE(dd->if_exists);
+    EXPECT_TRUE(dd->cascade);
+}
+
+TEST(Parser, DropDatabaseRestrict) {
+    auto stmt = parse_one("DROP DATABASE mydb RESTRICT");
+    auto* dd = dynamic_cast<DropDatabaseStmt*>(stmt.get());
+    ASSERT_NE(dd, nullptr);
+    EXPECT_EQ(dd->database_name, "mydb");
+    EXPECT_FALSE(dd->cascade);
+}
+
+TEST(Parser, DropDatabaseMissingName) {
+    expect_parse_error("DROP DATABASE");
+}
+
 // -- Multi-statement tests ----------------------------------------------------
 
 TEST(Parser, MultipleStatements) {
@@ -1675,6 +1758,8 @@ public:
     void visit(const DropIndexStmt&) override { visited_type = "DropIndexStmt"; }
     void visit(const CreateEdgeTypeStmt&) override { visited_type = "CreateEdgeTypeStmt"; }
     void visit(const DropEdgeTypeStmt&) override { visited_type = "DropEdgeTypeStmt"; }
+    void visit(const CreateDatabaseStmt&) override { visited_type = "CreateDatabaseStmt"; }
+    void visit(const DropDatabaseStmt&) override { visited_type = "DropDatabaseStmt"; }
 
     // -- DML --
     void visit(const InsertStmt&) override { visited_type = "InsertStmt"; }
@@ -1726,6 +1811,8 @@ TEST(AstVisitor, DispatchesDDL) {
     EXPECT_EQ(visit_stmt("DROP INDEX idx"), "DropIndexStmt");
     EXPECT_EQ(visit_stmt("CREATE EDGE TYPE follows FROM users TO users"), "CreateEdgeTypeStmt");
     EXPECT_EQ(visit_stmt("DROP EDGE TYPE follows"), "DropEdgeTypeStmt");
+    EXPECT_EQ(visit_stmt("CREATE DATABASE mydb"), "CreateDatabaseStmt");
+    EXPECT_EQ(visit_stmt("DROP DATABASE mydb"), "DropDatabaseStmt");
 }
 
 TEST(AstVisitor, DispatchesDML) {

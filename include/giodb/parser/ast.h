@@ -428,6 +428,21 @@ struct DropEdgeTypeStmt : Stmt {
     void accept(AstVisitor& visitor) const override;
 };
 
+/// CREATE DATABASE [IF NOT EXISTS] name.
+struct CreateDatabaseStmt : Stmt {
+    std::string database_name;
+    bool if_not_exists = false;
+    void accept(AstVisitor& visitor) const override;
+};
+
+/// DROP DATABASE [IF EXISTS] name [CASCADE|RESTRICT].
+struct DropDatabaseStmt : Stmt {
+    std::string database_name;
+    bool if_exists = false;
+    bool cascade = false;
+    void accept(AstVisitor& visitor) const override;
+};
+
 // ---------------------------------------------------------------------------
 // DML statements
 // ---------------------------------------------------------------------------
@@ -691,6 +706,8 @@ public:
     virtual void visit(const DropIndexStmt& node) = 0;
     virtual void visit(const CreateEdgeTypeStmt& node) = 0;
     virtual void visit(const DropEdgeTypeStmt& node) = 0;
+    virtual void visit(const CreateDatabaseStmt& node) = 0;
+    virtual void visit(const DropDatabaseStmt& node) = 0;
 
     // -- DML statements -------------------------------------------------------
 
@@ -796,6 +813,12 @@ inline void CreateEdgeTypeStmt::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void DropEdgeTypeStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void CreateDatabaseStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void DropDatabaseStmt::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void InsertStmt::accept(AstVisitor& v) const {
