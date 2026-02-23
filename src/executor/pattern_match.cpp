@@ -4,53 +4,9 @@
 #include "giodb/executor/expr_evaluator.h"
 #include "giodb/table/tuple.h"
 
-#include <functional>
 #include <unordered_map>
-#include <unordered_set>
 
 namespace giodb {
-
-namespace {
-
-struct ValueHash {
-    size_t operator()(const Value& v) const {
-        if (v.is_null()) {
-            return 0;
-        }
-        const auto& data = v.data();
-        return std::visit(
-            [](const auto& val) -> size_t {
-                using T = std::decay_t<decltype(val)>;
-                if constexpr (std::is_same_v<T, std::monostate>) {
-                    return 0;
-                } else if constexpr (std::is_same_v<T, std::string>) {
-                    return std::hash<std::string>{}(val);
-                } else if constexpr (std::is_same_v<T, bool>) {
-                    return std::hash<bool>{}(val);
-                } else if constexpr (std::is_arithmetic_v<T>) {
-                    return std::hash<T>{}(val);
-                } else {
-                    return 0;
-                }
-            },
-            data);
-    }
-};
-
-struct ValueEqual {
-    bool operator()(const Value& a, const Value& b) const {
-        if (a.is_null() || b.is_null()) {
-            return a.is_null() && b.is_null();
-        }
-        auto cmp = compare(a, b);
-        if (!cmp) {
-            return false;
-        }
-        return *cmp == std::strong_ordering::equal;
-    }
-};
-
-} // anonymous namespace
 
 PatternMatchOperator::PatternMatchOperator(GraphEngine& graph_engine,
                                            const Catalog& catalog,
@@ -182,13 +138,16 @@ Result<void> PatternMatchOperator::execute_single_hop() {
         Value src_pk = (*deserialized)[static_cast<size_t>(pk_col_idx)];
 
         // Get edges from this source node in the appropriate direction.
-        std::vector<EdgeRow> edges;
+        // Each entry is (edge, neighbor_pk) — neighbor_pk is already resolved
+        // based on which index the edge came from.
+        std::vector<std::pair<EdgeRow, Value>> edges_with_neighbor;
         if (edge_def.direction == TraverseDirection::OUT ||
             edge_def.direction == TraverseDirection::BOTH) {
             auto fwd = graph_engine_.get_edges_from(edge_def.edge_type, src_pk);
             if (fwd) {
                 for (auto& e : *fwd) {
-                    edges.push_back(std::move(e));
+                    Value nbr = e.target_pk;
+                    edges_with_neighbor.emplace_back(std::move(e), std::move(nbr));
                 }
             }
         }
@@ -197,12 +156,13 @@ Result<void> PatternMatchOperator::execute_single_hop() {
             auto rev = graph_engine_.get_edges_to(edge_def.edge_type, src_pk);
             if (rev) {
                 for (auto& e : *rev) {
-                    edges.push_back(std::move(e));
+                    Value nbr = e.source_pk;
+                    edges_with_neighbor.emplace_back(std::move(e), std::move(nbr));
                 }
             }
         }
 
-        for (auto& edge : edges) {
+        for (auto& [edge, tgt_pk] : edges_with_neighbor) {
             // Build output tuple with columns from both nodes.
             // The output schema was built by the binder based on RETURN items.
             // We need to populate values matching the schema columns.
@@ -231,8 +191,6 @@ Result<void> PatternMatchOperator::execute_single_hop() {
                     }
                 } else if (out_col.table_name == tgt_node.variable && !tgt_node.label.empty()) {
                     // Column from target node — need to fetch target row.
-                    Value tgt_pk = (edge_def.direction == TraverseDirection::IN) ? edge.source_pk
-                                                                                 : edge.target_pk;
                     auto tgt_data = fetch_node_data(tgt_node.label, tgt_pk);
                     if (tgt_data) {
                         auto tgt_schema = catalog_.get_table(database_id_, tgt_node.label);
@@ -352,13 +310,13 @@ Result<void> PatternMatchOperator::execute_multi_hop() {
 
             const Value& src_pk = it->second;
 
-            std::vector<EdgeRow> edges;
+            std::vector<Value> neighbor_pks;
             if (edge_def.direction == TraverseDirection::OUT ||
                 edge_def.direction == TraverseDirection::BOTH) {
                 auto fwd = graph_engine_.get_edges_from(edge_def.edge_type, src_pk);
                 if (fwd) {
                     for (auto& e : *fwd) {
-                        edges.push_back(std::move(e));
+                        neighbor_pks.push_back(std::move(e.target_pk));
                     }
                 }
             }
@@ -367,15 +325,12 @@ Result<void> PatternMatchOperator::execute_multi_hop() {
                 auto rev = graph_engine_.get_edges_to(edge_def.edge_type, src_pk);
                 if (rev) {
                     for (auto& e : *rev) {
-                        edges.push_back(std::move(e));
+                        neighbor_pks.push_back(std::move(e.source_pk));
                     }
                 }
             }
 
-            for (auto& edge : edges) {
-                Value tgt_pk =
-                    (edge_def.direction == TraverseDirection::IN) ? edge.source_pk : edge.target_pk;
-
+            for (auto& tgt_pk : neighbor_pks) {
                 Binding new_b = binding;
                 new_b[tgt_var] = std::move(tgt_pk);
                 new_bindings.push_back(std::move(new_b));

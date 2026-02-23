@@ -292,5 +292,54 @@ TEST_F(TraversalTest, NonexistentStartNode) {
     EXPECT_TRUE(nodes.empty());
 }
 
+TEST_F(TraversalTest, WhereFilterExcludesNodes) {
+    // Build a WHERE predicate: node > 3
+    // This should exclude nodes 2 and 3 from the BFS results.
+    auto col_ref = std::make_unique<ColumnRefExpr>();
+    col_ref->column = "node";
+
+    auto literal = std::make_unique<LiteralExpr>();
+    literal->kind = LiteralKind::INTEGER;
+    literal->value = "3";
+
+    auto predicate = std::make_unique<BinaryExpr>();
+    predicate->op = BinaryOp::GREATER;
+    predicate->lhs = std::move(col_ref);
+    predicate->rhs = std::move(literal);
+
+    TraversalConfig config;
+    config.edge_type = "follows";
+    config.start_key = Value(static_cast<int64_t>(1));
+    config.direction = TraverseDirection::OUT;
+    config.max_depth = 100;
+
+    std::vector<OutputColumn> cols;
+    cols.push_back({"", "node", TypeId::INT64, false, 0});
+    cols.push_back({"", "depth", TypeId::INT64, false, 0});
+    OutputSchema schema(std::move(cols));
+
+    BoundStatement bound;
+    TraversalOperator op(*graph_, std::move(config), std::move(schema), predicate.get(), bound);
+    auto open_result = op.open();
+    ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
+
+    std::vector<int64_t> nodes;
+    while (true) {
+        auto row = op.next();
+        ASSERT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value()) {
+            break;
+        }
+        nodes.push_back(row->value().values[0].as_int64());
+    }
+    op.close();
+
+    // BFS from 1 visits 2, 3, 4, 5 — but WHERE node > 3 keeps only 4 and 5.
+    ASSERT_EQ(nodes.size(), 2);
+    std::sort(nodes.begin(), nodes.end());
+    EXPECT_EQ(nodes[0], 4);
+    EXPECT_EQ(nodes[1], 5);
+}
+
 } // namespace
 } // namespace giodb

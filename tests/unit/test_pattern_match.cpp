@@ -333,5 +333,62 @@ TEST_F(PatternMatchTest, NoEdgesInPattern) {
     op.close();
 }
 
+TEST_F(PatternMatchTest, BothDirectionSingleHop) {
+    // MATCH (p:people)-[r:knows BOTH]->(q:people) RETURN p.name, q.name
+    // With BOTH direction, Alice knows Bob (forward) AND Bob knows Alice (reverse).
+    MatchConfig config;
+    config.nodes.push_back({"p", "people"});
+    config.nodes.push_back({"q", "people"});
+    config.edges.push_back({"r", "knows", TraverseDirection::BOTH});
+
+    std::vector<OutputColumn> out_cols;
+    out_cols.push_back({"p", "name", TypeId::STRING, false, people_id_});
+    out_cols.push_back({"q", "name", TypeId::STRING, false, people_id_});
+    OutputSchema schema(std::move(out_cols));
+
+    BoundStatement bound;
+    PatternMatchOperator op(*graph_,
+                            *catalog_,
+                            *storage_,
+                            default_database_id,
+                            std::move(config),
+                            std::move(schema),
+                            nullptr,
+                            bound);
+
+    auto open_result = op.open();
+    ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
+
+    std::vector<std::pair<std::string, std::string>> results;
+    while (true) {
+        auto row = op.next();
+        ASSERT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value()) {
+            break;
+        }
+        auto& vals = row->value().values;
+        ASSERT_EQ(vals.size(), 2);
+        results.emplace_back(vals[0].as_string(), vals[1].as_string());
+    }
+    op.close();
+
+    // Edges: Alice→Bob, Bob→Charlie (both forward and reverse).
+    // Alice: forward→Bob, reverse from nobody (nobody knows Alice via 'knows')
+    // Bob: forward→Charlie, reverse←Alice
+    // Charlie: forward→nobody, reverse←Bob
+    // So BOTH gives: (Alice,Bob), (Bob,Alice), (Bob,Charlie), (Charlie,Bob)
+    ASSERT_EQ(results.size(), 4);
+
+    std::sort(results.begin(), results.end());
+    EXPECT_EQ(results[0].first, "Alice");
+    EXPECT_EQ(results[0].second, "Bob");
+    EXPECT_EQ(results[1].first, "Bob");
+    EXPECT_EQ(results[1].second, "Alice");
+    EXPECT_EQ(results[2].first, "Bob");
+    EXPECT_EQ(results[2].second, "Charlie");
+    EXPECT_EQ(results[3].first, "Charlie");
+    EXPECT_EQ(results[3].second, "Bob");
+}
+
 } // namespace
 } // namespace giodb

@@ -1,57 +1,12 @@
 #include "giodb/executor/traversal.h"
 
-#include "giodb/common/coercion.h"
+#include "giodb/common/value_hash.h"
 #include "giodb/executor/expr_evaluator.h"
 
 #include <deque>
-#include <functional>
 #include <unordered_set>
 
 namespace giodb {
-
-namespace {
-
-/// Hash functor for Value used in the visited set.
-struct ValueHash {
-    size_t operator()(const Value& v) const {
-        if (v.is_null()) {
-            return 0;
-        }
-        const auto& data = v.data();
-        return std::visit(
-            [](const auto& val) -> size_t {
-                using T = std::decay_t<decltype(val)>;
-                if constexpr (std::is_same_v<T, std::monostate>) {
-                    return 0;
-                } else if constexpr (std::is_same_v<T, std::string>) {
-                    return std::hash<std::string>{}(val);
-                } else if constexpr (std::is_same_v<T, bool>) {
-                    return std::hash<bool>{}(val);
-                } else if constexpr (std::is_arithmetic_v<T>) {
-                    return std::hash<T>{}(val);
-                } else {
-                    return 0;
-                }
-            },
-            data);
-    }
-};
-
-/// Equality functor for Value used in the visited set.
-struct ValueEqual {
-    bool operator()(const Value& a, const Value& b) const {
-        if (a.is_null() || b.is_null()) {
-            return a.is_null() && b.is_null();
-        }
-        auto cmp = compare(a, b);
-        if (!cmp) {
-            return false;
-        }
-        return *cmp == std::strong_ordering::equal;
-    }
-};
-
-} // anonymous namespace
 
 TraversalOperator::TraversalOperator(GraphEngine& graph_engine,
                                      TraversalConfig config,
