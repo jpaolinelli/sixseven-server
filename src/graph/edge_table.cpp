@@ -53,8 +53,13 @@ Result<uint64_t> EdgeTable::insert_edge(const Value& source_pk,
         }
     }
 
-    // Assign row ID.
+    // Assign row ID with overflow guard.
     uint64_t row_id = next_row_id_++;
+    if (row_id > kMaxEncodableRowId) {
+        --next_row_id_;
+        return make_error(StatusCode::INTERNAL_ERROR,
+                          "edge row ID overflow: exceeded 48-bit RID encoding capacity");
+    }
     Value row_id_val(static_cast<int64_t>(row_id));
 
     // Insert into forward adjacency index: (source_pk, row_id).
@@ -68,6 +73,8 @@ Result<uint64_t> EdgeTable::insert_edge(const Value& source_pk,
     KeyType rev_key = {target_pk, row_id_val};
     auto rev_result = reverse_index_->insert(rev_key, encode_rid(row_id));
     if (!rev_result.has_value()) {
+        // Rollback forward index insert.
+        (void)forward_index_->remove(fwd_key);
         return tl::unexpected(rev_result.error());
     }
 
@@ -76,6 +83,9 @@ Result<uint64_t> EdgeTable::insert_edge(const Value& source_pk,
         KeyType unique_key = {source_pk, target_pk};
         auto uniq_result = unique_index_->insert(unique_key, encode_rid(row_id));
         if (!uniq_result.has_value()) {
+            // Rollback forward and reverse index inserts.
+            (void)forward_index_->remove(fwd_key);
+            (void)reverse_index_->remove(rev_key);
             return tl::unexpected(uniq_result.error());
         }
     }
@@ -283,6 +293,9 @@ Result<std::vector<uint64_t>> EdgeTable::lookup_adjacency(const BTreeIndex& inde
 }
 
 RID EdgeTable::encode_rid(uint64_t edge_row_id) {
+    // RID packs into 48 bits: 32-bit PageId + 16-bit SlotId.
+    static_assert(sizeof(PageId) == 4 && sizeof(SlotId) == 2,
+                  "RID packing assumes 32-bit PageId and 16-bit SlotId (48 bits total)");
     return RID{static_cast<PageId>(edge_row_id & 0xFFFFFFFF),
                static_cast<SlotId>((edge_row_id >> 32) & 0xFFFF)};
 }

@@ -146,8 +146,9 @@ Result<uint64_t> GraphEngine::unlink_where(const std::string& edge_type,
         return tl::unexpected(edges.error());
     }
 
-    // Filter to edges targeting the specific target_pk and matching the predicate.
-    uint64_t deleted_count = 0;
+    // Collect matching edge row IDs first, then delete in a second pass.
+    // This avoids partial deletion: we validate all candidates before mutating.
+    std::vector<uint64_t> to_delete;
     for (const auto& edge : *edges) {
         KeyType lhs = {edge.target_pk};
         KeyType rhs = {target_pk};
@@ -158,16 +159,19 @@ Result<uint64_t> GraphEngine::unlink_where(const std::string& edge_type,
         if (!predicate(edge)) {
             continue;
         }
+        to_delete.push_back(edge.edge_row_id);
+    }
 
-        auto del = table.delete_edge(edge.edge_row_id);
+    // Delete all matching edges.
+    for (uint64_t row_id : to_delete) {
+        auto del = table.delete_edge(row_id);
         if (!del.has_value()) {
             return tl::unexpected(del.error());
         }
-        ++deleted_count;
     }
 
-    GIODB_LOG_DEBUG("UNLINK WHERE via '{}': removed {} edges", edge_type, deleted_count);
-    return ok(deleted_count);
+    GIODB_LOG_DEBUG("UNLINK WHERE via '{}': removed {} edges", edge_type, to_delete.size());
+    return ok(static_cast<uint64_t>(to_delete.size()));
 }
 
 Result<std::vector<EdgeRow>> GraphEngine::get_edges_from(const std::string& edge_type,

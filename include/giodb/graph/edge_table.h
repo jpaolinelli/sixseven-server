@@ -99,10 +99,15 @@ private:
                                                                  const Value& key) const;
 
     /// Encode an edge_row_id as a RID for B+ tree storage.
+    /// Requires edge_row_id <= kMaxEncodableRowId (48-bit limit).
     static RID encode_rid(uint64_t edge_row_id);
 
     /// Decode an edge_row_id from a RID.
     static uint64_t decode_rid(const RID& rid);
+
+    /// Maximum row ID that can be losslessly encoded into a RID.
+    /// RID uses 32-bit PageId + 16-bit SlotId = 48 bits total.
+    static constexpr uint64_t kMaxEncodableRowId = (1ULL << 48) - 1;
 
     EdgeTableConfig config_;
     uint64_t next_row_id_ = 1;
