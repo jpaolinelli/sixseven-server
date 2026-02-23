@@ -21,6 +21,7 @@ add_library(giodb_executor STATIC
     nearest_scan.cpp
     storage_manager.cpp
     system_bootstrap.cpp
+    settings_cache.cpp
     planner.cpp
     query_engine.cpp
 )

@@ -24,9 +24,12 @@ struct DropEdgeTypeStmt;
 struct DropTableStmt;
 struct LinkStmt;
 struct ReembedStmt;
+struct SetStmt;
+struct ShowStmt;
 struct UnlinkStmt;
 class HnswIndex;
 class ProviderRegistry;
+class SettingsCache;
 
 /// Result of executing a SQL statement.
 struct QueryResult {
@@ -77,7 +80,16 @@ public:
     /// Set the HNSW index map for vector operations (REEMBED, NEAREST).
     void set_hnsw_indexes(std::unordered_map<std::string, HnswIndex*>* indexes);
 
+    /// Set the settings cache for SET/SHOW commands.
+    void set_settings_cache(SettingsCache* cache);
+
 private:
+    /// Execute a SET parameter = value statement.
+    [[nodiscard]] Result<QueryResult> execute_set(const SetStmt& stmt);
+
+    /// Execute a SHOW statement (SHOW parameter, SHOW ALL, SHOW TABLES, etc.).
+    [[nodiscard]] Result<QueryResult> execute_show(const ShowStmt& stmt);
+
     /// Execute a DDL CREATE DATABASE statement.
     [[nodiscard]] Result<QueryResult> execute_create_database(const CreateDatabaseStmt& stmt);
 
@@ -115,6 +127,7 @@ private:
     GraphEngine* graph_engine_;
     ProviderRegistry* provider_registry_ = nullptr;
     std::unordered_map<std::string, HnswIndex*>* hnsw_indexes_ = nullptr;
+    SettingsCache* settings_cache_ = nullptr;
     database_id_t current_database_id_ = default_database_id;
 };
 

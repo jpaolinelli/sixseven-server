@@ -2174,10 +2174,18 @@ Result<StmtPtr> Parser::parse_set_stmt() {
     advance(); // consume SET
     auto stmt = std::make_unique<SetStmt>();
 
+    // Parse dotted parameter name (e.g., logging.level).
     auto param = parse_name("parameter name");
     if (!param)
         return tl::unexpected(param.error());
     stmt->parameter = std::move(*param);
+    while (check(TokenType::DOT)) {
+        advance(); // consume DOT
+        auto part = parse_name("parameter name component");
+        if (!part)
+            return tl::unexpected(part.error());
+        stmt->parameter += "." + *part;
+    }
 
     auto eq = expect(TokenType::EQUAL, "expected '=' after parameter");
     if (!eq)
@@ -2239,12 +2247,26 @@ Result<StmtPtr> Parser::parse_show() {
         return ok(StmtPtr(std::move(stmt)));
     }
 
-    // SHOW parameter_name
+    // SHOW ALL / SHOW SETTINGS
+    if (check(TokenType::ALL) || match_ident_ci(peek(), "SETTINGS")) {
+        advance();
+        stmt->target = ShowTarget::ALL;
+        return ok(StmtPtr(std::move(stmt)));
+    }
+
+    // SHOW parameter_name (supports dotted names like logging.level)
     stmt->target = ShowTarget::PARAMETER;
     auto name = parse_name("parameter name");
     if (!name)
         return tl::unexpected(name.error());
     stmt->name = std::move(*name);
+    while (check(TokenType::DOT)) {
+        advance(); // consume DOT
+        auto part = parse_name("parameter name component");
+        if (!part)
+            return tl::unexpected(part.error());
+        stmt->name += "." + *part;
+    }
     return ok(StmtPtr(std::move(stmt)));
 }
 

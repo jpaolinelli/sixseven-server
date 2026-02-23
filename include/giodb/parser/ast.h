@@ -95,6 +95,7 @@ enum class ShowTarget : uint8_t {
     EDGE_TYPES,
     INDEXES,
     PARAMETER,
+    ALL,
 };
 
 /// Literal value kinds.
