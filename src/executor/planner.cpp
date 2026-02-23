@@ -1409,6 +1409,9 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
             return make_error(start_key.error().code, start_key.error().message);
         }
 
+        // Save start PK before moving the value into the config.
+        int64_t start_pk = start_key->as_int64();
+
         TraversalConfig trav_config;
         trav_config.edge_type = trav_stmt->edge_type;
         trav_config.start_key = std::move(*start_key);
@@ -1454,7 +1457,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
         trav_op.close();
 
         // Also include the start node itself.
-        reachable_pks.insert(start_key->as_int64());
+        reachable_pks.insert(start_pk);
 
         // Scan the table to build PK → node_ordinal mapping, then convert
         // reachable PKs to node ordinals for the HNSW filter.

@@ -83,6 +83,15 @@ private:
     /// HNSW index search: use the index for approximate nearest neighbors.
     Result<void> execute_hnsw_search();
 
+    /// Build the WHERE filter output schema (table columns without _distance).
+    /// Called once during open() when where_expr_ is set.
+    OutputSchema build_where_filter_schema() const;
+
+    /// Apply WHERE post-filter to a candidate and, if it passes, build the
+    /// result tuple (table columns + _distance) and append it to results_.
+    /// Returns the number of results emitted (0 or 1).
+    Result<size_t> filter_and_emit(Tuple& candidate_tuple, float distance);
+
     TableHeap& heap_;
     const Schema& storage_schema_;
     NearestScanConfig config_;
@@ -90,6 +99,10 @@ private:
     const Expr* where_expr_;
     const BoundStatement& bound_;
     HnswIndex* hnsw_index_;
+
+    /// Output schema for WHERE predicate evaluation (excludes _distance).
+    /// Built once in open() to avoid per-row allocation.
+    OutputSchema where_filter_schema_;
 
     std::vector<Tuple> results_;
     size_t cursor_ = 0;

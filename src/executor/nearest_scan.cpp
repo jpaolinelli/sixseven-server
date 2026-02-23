@@ -22,6 +22,11 @@ Result<void> NearestScanOperator::open() {
     results_.clear();
     cursor_ = 0;
 
+    // Build the WHERE filter schema once (if needed).
+    if (where_expr_ != nullptr) {
+        where_filter_schema_ = build_where_filter_schema();
+    }
+
     if (hnsw_index_ != nullptr && hnsw_index_->node_count() > 0) {
         return execute_hnsw_search();
     }
@@ -114,33 +119,11 @@ Result<void> NearestScanOperator::execute_brute_force() {
             break;
         }
 
-        // Apply WHERE post-filter.
-        if (where_expr_ != nullptr) {
-            // Build a temporary output schema without _distance for predicate eval.
-            // The WHERE predicate references table columns, not _distance.
-            OutputSchema table_schema;
-            std::vector<OutputColumn> table_cols;
-            for (size_t i = 0; i + 1 < schema_.column_count(); ++i) {
-                table_cols.push_back(schema_.column(i));
-            }
-            table_schema = OutputSchema(std::move(table_cols));
-
-            auto pass = evaluate_predicate(*where_expr_, cand.tuple, table_schema, bound_);
-            if (!pass) {
-                return make_error(pass.error().code, pass.error().message);
-            }
-            if (!*pass) {
-                continue;
-            }
+        auto emitted = filter_and_emit(cand.tuple, cand.distance);
+        if (!emitted) {
+            return make_error(emitted.error().code, emitted.error().message);
         }
-
-        // Build result tuple: all table columns + _distance.
-        Tuple result;
-        result.values = std::move(cand.tuple.values);
-        result.values.push_back(Value(static_cast<double>(cand.distance)));
-        result.rid = cand.tuple.rid;
-        results_.push_back(std::move(result));
-        ++count;
+        count += *emitted;
     }
 
     return ok();
@@ -233,32 +216,49 @@ Result<void> NearestScanOperator::execute_hnsw_search() {
             break;
         }
 
-        if (where_expr_ != nullptr) {
-            OutputSchema table_schema;
-            std::vector<OutputColumn> table_cols;
-            for (size_t i = 0; i + 1 < schema_.column_count(); ++i) {
-                table_cols.push_back(schema_.column(i));
-            }
-            table_schema = OutputSchema(std::move(table_cols));
-
-            auto pass = evaluate_predicate(*where_expr_, m.tuple, table_schema, bound_);
-            if (!pass) {
-                return make_error(pass.error().code, pass.error().message);
-            }
-            if (!*pass) {
-                continue;
-            }
+        auto emitted = filter_and_emit(m.tuple, m.distance);
+        if (!emitted) {
+            return make_error(emitted.error().code, emitted.error().message);
         }
-
-        Tuple result;
-        result.values = std::move(m.tuple.values);
-        result.values.push_back(Value(static_cast<double>(m.distance)));
-        result.rid = m.tuple.rid;
-        results_.push_back(std::move(result));
-        ++count;
+        count += *emitted;
     }
 
     return ok();
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+OutputSchema NearestScanOperator::build_where_filter_schema() const {
+    // The output schema has table columns + _distance at the end.
+    // The WHERE predicate references table columns only, so strip _distance.
+    std::vector<OutputColumn> table_cols;
+    for (size_t i = 0; i + 1 < schema_.column_count(); ++i) {
+        table_cols.push_back(schema_.column(i));
+    }
+    return OutputSchema(std::move(table_cols));
+}
+
+Result<size_t> NearestScanOperator::filter_and_emit(Tuple& candidate_tuple, float distance) {
+    // Apply WHERE post-filter if present.
+    if (where_expr_ != nullptr) {
+        auto pass = evaluate_predicate(*where_expr_, candidate_tuple, where_filter_schema_, bound_);
+        if (!pass) {
+            return make_error(pass.error().code, pass.error().message);
+        }
+        if (!*pass) {
+            return ok(size_t{0});
+        }
+    }
+
+    // Build result tuple: all table columns + _distance.
+    Tuple result;
+    result.values = std::move(candidate_tuple.values);
+    result.values.push_back(Value(static_cast<double>(distance)));
+    result.rid = candidate_tuple.rid;
+    results_.push_back(std::move(result));
+    return ok(size_t{1});
 }
 
 } // namespace giodb
