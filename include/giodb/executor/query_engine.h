@@ -28,6 +28,7 @@ struct SetStmt;
 struct ShowStmt;
 struct UnlinkStmt;
 class HnswIndex;
+class ProviderCache;
 class ProviderRegistry;
 class SettingsCache;
 
@@ -83,6 +84,9 @@ public:
     /// Set the settings cache for SET/SHOW commands.
     void set_settings_cache(SettingsCache* cache);
 
+    /// Set the provider cache for SHOW PROVIDERS and provider management.
+    void set_provider_cache(ProviderCache* cache);
+
 private:
     /// Execute a SET parameter = value statement.
     [[nodiscard]] Result<QueryResult> execute_set(const SetStmt& stmt);
@@ -120,7 +124,11 @@ private:
     [[nodiscard]] Result<QueryResult> execute_reembed(const ReembedStmt& stmt);
 
     /// Execute a DML/query via the Planner + Iterator pipeline.
+    /// After successful DML on sys_providers, automatically reloads the provider cache.
     [[nodiscard]] Result<QueryResult> execute_plan(const BoundStatement& bound);
+
+    /// Invalidate the provider cache after DML on sys_providers.
+    void maybe_invalidate_provider_cache(const BoundStatement& bound);
 
     Catalog& catalog_;
     StorageManager& storage_;
@@ -128,6 +136,7 @@ private:
     ProviderRegistry* provider_registry_ = nullptr;
     std::unordered_map<std::string, HnswIndex*>* hnsw_indexes_ = nullptr;
     SettingsCache* settings_cache_ = nullptr;
+    ProviderCache* provider_cache_ = nullptr;
     database_id_t current_database_id_ = default_database_id;
 };
 

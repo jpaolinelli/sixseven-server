@@ -94,6 +94,21 @@ struct EmbeddingProviderConfig {
     int32_t dimension = 0; ///< Expected embedding dimension
 };
 
+/// Persistent provider configuration stored in the sys_providers table.
+///
+/// This is the persistent backend for the EMBEDDING type's provider system.
+/// Providers are registered via SQL (INSERT INTO giodb_system.sys_providers)
+/// and cached in memory for fast lookups.
+struct ProviderConfig {
+    int32_t provider_id = 0;
+    std::string name;        ///< Unique provider name, e.g., "openai-prod"
+    std::string type;        ///< Provider type: "openai", "ollama", "onnx"
+    std::string endpoint;    ///< API endpoint URL
+    std::string model;       ///< Model identifier
+    std::string api_key;     ///< Decrypted API key (in-memory only)
+    bool is_default = false; ///< At most one provider can be default
+};
+
 /// Returns the system table schema for sys_databases(database_id INT32, name STRING).
 inline TableSchema sys_databases_schema() {
     TableSchema schema;
@@ -120,6 +135,25 @@ inline TableSchema sys_settings_schema() {
         {4, "is_runtime_mutable", TypeId::BOOL, true, ""},
     };
     schema.pk_columns = "key";
+    return schema;
+}
+
+/// Returns the system table schema for sys_providers.
+inline TableSchema sys_providers_schema() {
+    TableSchema schema;
+    schema.table_id = 0; // System tables use reserved IDs.
+    schema.name = "sys_providers";
+    schema.columns = {
+        {0, "provider_id", TypeId::INT32, false, ""},
+        {1, "name", TypeId::STRING, false, ""},
+        {2, "type", TypeId::STRING, false, ""},
+        {3, "endpoint", TypeId::STRING, false, ""},
+        {4, "model", TypeId::STRING, false, ""},
+        {5, "api_key_encrypted", TypeId::STRING, true, ""},
+        {6, "is_default", TypeId::BOOL, true, ""},
+        {7, "created_at", TypeId::TIMESTAMP, true, ""},
+    };
+    schema.pk_columns = "provider_id";
     return schema;
 }
 

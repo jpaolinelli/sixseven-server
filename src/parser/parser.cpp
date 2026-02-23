@@ -2247,6 +2247,13 @@ Result<StmtPtr> Parser::parse_show() {
         return ok(StmtPtr(std::move(stmt)));
     }
 
+    // SHOW PROVIDERS / SHOW PROVIDER
+    if (match_ident_ci(peek(), "PROVIDERS") || match_ident_ci(peek(), "PROVIDER")) {
+        advance();
+        stmt->target = ShowTarget::PROVIDERS;
+        return ok(StmtPtr(std::move(stmt)));
+    }
+
     // SHOW ALL / SHOW SETTINGS
     if (check(TokenType::ALL) || match_ident_ci(peek(), "SETTINGS")) {
         advance();
