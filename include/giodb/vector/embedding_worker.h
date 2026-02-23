@@ -20,7 +20,7 @@ namespace giodb {
 
 /// Abstract interface for embedding generation providers.
 ///
-/// Implementations call external APIs (OpenAI, Cohere, local models, etc.)
+/// Implementations call external APIs (OpenAI, Ollama, local models, etc.)
 /// to convert text into embedding vectors.
 class EmbeddingProvider {
 public:
@@ -34,8 +34,15 @@ public:
     [[nodiscard]] virtual Result<std::vector<std::vector<float>>>
     embed_batch(const std::vector<std::string>& texts) = 0;
 
-    /// Return the provider name (e.g., "openai", "cohere").
+    /// Return the provider name (e.g., "openai", "ollama", "builtin").
     [[nodiscard]] virtual std::string name() const = 0;
+
+    /// Return the embedding dimension this provider produces.
+    [[nodiscard]] virtual size_t dimension() const = 0;
+
+    /// Validate connectivity and model availability.
+    /// Returns ok() on success, or an error describing the failure.
+    [[nodiscard]] virtual Result<void> health_check() = 0;
 };
 
 /// Callback invoked when an embedding is successfully generated.

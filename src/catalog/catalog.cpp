@@ -443,4 +443,60 @@ std::vector<EmbeddingColumnDef> Catalog::list_all_embedding_columns() const {
     return embedding_columns_;
 }
 
+// -- Embedding provider operations --------------------------------------------
+
+Result<void> Catalog::register_embedding_provider(EmbeddingProviderConfig config) {
+    std::lock_guard lock(mu_);
+
+    if (embedding_providers_.contains(config.name)) {
+        return make_error(StatusCode::ALREADY_EXISTS,
+                          "embedding provider '" + config.name + "' already exists");
+    }
+
+    auto name = config.name;
+    embedding_providers_.emplace(std::move(name), std::move(config));
+    return ok();
+}
+
+Result<EmbeddingProviderConfig> Catalog::get_embedding_provider(const std::string& name) const {
+    std::lock_guard lock(mu_);
+
+    auto it = embedding_providers_.find(name);
+    if (it == embedding_providers_.end()) {
+        return make_error(StatusCode::NOT_FOUND, "embedding provider '" + name + "' not found");
+    }
+
+    return ok(it->second);
+}
+
+std::vector<EmbeddingProviderConfig> Catalog::list_embedding_providers() const {
+    std::lock_guard lock(mu_);
+
+    std::vector<EmbeddingProviderConfig> result;
+    result.reserve(embedding_providers_.size());
+    for (auto& [name, config] : embedding_providers_) {
+        result.push_back(config);
+    }
+
+    std::sort(result.begin(),
+              result.end(),
+              [](const EmbeddingProviderConfig& a, const EmbeddingProviderConfig& b) {
+                  return a.name < b.name;
+              });
+
+    return result;
+}
+
+Result<void> Catalog::remove_embedding_provider(const std::string& name) {
+    std::lock_guard lock(mu_);
+
+    auto it = embedding_providers_.find(name);
+    if (it == embedding_providers_.end()) {
+        return make_error(StatusCode::NOT_FOUND, "embedding provider '" + name + "' not found");
+    }
+
+    embedding_providers_.erase(it);
+    return ok();
+}
+
 } // namespace giodb
