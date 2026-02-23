@@ -454,3 +454,96 @@ TEST_F(QueryEngineTest, JoinWithSelectStar) {
     EXPECT_EQ(qr.rows[0][2].as_int32(), 1);
     EXPECT_EQ(qr.rows[0][3].as_string(), "y");
 }
+
+// =============================================================================
+// GROUP BY / Aggregation integration tests (end-to-end SQL pipeline)
+// =============================================================================
+
+TEST_F(QueryEngineTest, GroupByCountStar) {
+    exec_ok("CREATE TABLE employees (id INT, dept VARCHAR, salary INT)");
+    exec_ok("INSERT INTO employees VALUES (1, 'eng', 100)");
+    exec_ok("INSERT INTO employees VALUES (2, 'eng', 120)");
+    exec_ok("INSERT INTO employees VALUES (3, 'sales', 80)");
+    exec_ok("INSERT INTO employees VALUES (4, 'eng', 110)");
+    exec_ok("INSERT INTO employees VALUES (5, 'sales', 90)");
+
+    auto qr = exec_ok("SELECT dept, COUNT(*) FROM employees GROUP BY dept");
+
+    ASSERT_EQ(qr.rows.size(), 2u);
+    ASSERT_EQ(qr.column_names.size(), 2u);
+
+    // Results are unordered — find each group.
+    std::unordered_map<std::string, int64_t> counts;
+    for (auto& row : qr.rows) {
+        counts[row[0].as_string()] = row[1].as_int64();
+    }
+    EXPECT_EQ(counts["eng"], 3);
+    EXPECT_EQ(counts["sales"], 2);
+}
+
+TEST_F(QueryEngineTest, GroupByWithHaving) {
+    // This is the exact AC integration test:
+    // SELECT dept, COUNT(*) FROM employees GROUP BY dept HAVING COUNT(*) > 1
+    exec_ok("CREATE TABLE employees (id INT, dept VARCHAR, salary INT)");
+    exec_ok("INSERT INTO employees VALUES (1, 'eng', 100)");
+    exec_ok("INSERT INTO employees VALUES (2, 'eng', 120)");
+    exec_ok("INSERT INTO employees VALUES (3, 'sales', 80)");
+    exec_ok("INSERT INTO employees VALUES (4, 'hr', 70)");
+
+    auto qr = exec_ok("SELECT dept, COUNT(*) FROM employees GROUP BY dept HAVING COUNT(*) > 1");
+
+    // eng has 2, sales and hr have 1 each — only eng passes HAVING.
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "eng");
+    EXPECT_EQ(qr.rows[0][1].as_int64(), 2);
+}
+
+TEST_F(QueryEngineTest, GroupBySumAvg) {
+    exec_ok("CREATE TABLE employees (id INT, dept VARCHAR, salary INT)");
+    exec_ok("INSERT INTO employees VALUES (1, 'eng', 100)");
+    exec_ok("INSERT INTO employees VALUES (2, 'eng', 200)");
+    exec_ok("INSERT INTO employees VALUES (3, 'sales', 150)");
+
+    auto qr = exec_ok("SELECT dept, SUM(salary), AVG(salary) FROM employees GROUP BY dept");
+
+    ASSERT_EQ(qr.rows.size(), 2u);
+
+    for (auto& row : qr.rows) {
+        if (row[0].as_string() == "eng") {
+            EXPECT_EQ(row[1].as_int64(), 300);            // SUM
+            EXPECT_DOUBLE_EQ(row[2].as_float64(), 150.0); // AVG
+        } else {
+            EXPECT_EQ(row[0].as_string(), "sales");
+            EXPECT_EQ(row[1].as_int64(), 150);            // SUM
+            EXPECT_DOUBLE_EQ(row[2].as_float64(), 150.0); // AVG
+        }
+    }
+}
+
+TEST_F(QueryEngineTest, GroupByMinMax) {
+    exec_ok("CREATE TABLE employees (id INT, dept VARCHAR, salary INT)");
+    exec_ok("INSERT INTO employees VALUES (1, 'eng', 100)");
+    exec_ok("INSERT INTO employees VALUES (2, 'eng', 200)");
+    exec_ok("INSERT INTO employees VALUES (3, 'eng', 150)");
+
+    auto qr = exec_ok("SELECT dept, MIN(salary), MAX(salary) FROM employees GROUP BY dept");
+
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "eng");
+    EXPECT_EQ(qr.rows[0][1].as_int32(), 100); // MIN
+    EXPECT_EQ(qr.rows[0][2].as_int32(), 200); // MAX
+}
+
+TEST_F(QueryEngineTest, GlobalAggregationNoGroupBy) {
+    exec_ok("CREATE TABLE nums (val INT)");
+    exec_ok("INSERT INTO nums VALUES (10)");
+    exec_ok("INSERT INTO nums VALUES (20)");
+    exec_ok("INSERT INTO nums VALUES (30)");
+
+    auto qr = exec_ok("SELECT COUNT(*), SUM(val), AVG(val) FROM nums");
+
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_int64(), 3);             // COUNT(*)
+    EXPECT_EQ(qr.rows[0][1].as_int64(), 60);            // SUM
+    EXPECT_DOUBLE_EQ(qr.rows[0][2].as_float64(), 20.0); // AVG
+}

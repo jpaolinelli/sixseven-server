@@ -13,6 +13,7 @@
 #include "giodb/planner/type_resolver.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cctype>
 #include <string>
 #include <unordered_map>
@@ -108,7 +109,10 @@ AggFunc resolve_agg_func(const FunctionCallExpr& fn) {
     if (upper == "STRING_AGG") {
         return AggFunc::STRING_AGG;
     }
-    return AggFunc::COUNT_STAR; // fallback (should never happen after binder validation)
+    // Should never reach here after binder validation. Use COUNT_STAR as a
+    // defensive default and assert in debug builds so we notice immediately.
+    assert(false && "resolve_agg_func: unknown aggregate function");
+    return AggFunc::COUNT_STAR;
 }
 
 /// Deep-clone an expression tree, replacing aggregate FunctionCallExpr nodes
