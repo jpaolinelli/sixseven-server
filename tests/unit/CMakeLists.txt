@@ -39,6 +39,8 @@ add_executable(giodb_unit_tests
     test_query_engine.cpp
     test_database_context.cpp
     test_subquery.cpp
+    test_edge_table.cpp
+    test_graph_engine.cpp
 )
 
 target_link_libraries(giodb_unit_tests
