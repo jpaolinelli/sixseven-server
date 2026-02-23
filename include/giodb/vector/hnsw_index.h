@@ -94,6 +94,10 @@ public:
     /// Run compaction: free tombstoned nodes and rebuild neighbor connections.
     [[nodiscard]] Result<void> compact();
 
+    /// Clear all nodes and vectors, resetting node IDs to start from 0.
+    /// Used by REEMBED to rebuild the index from scratch.
+    [[nodiscard]] Result<void> reset();
+
     // -- Accessors -------------------------------------------------------------
 
     /// Return the metadata page ID (root of the index on disk).

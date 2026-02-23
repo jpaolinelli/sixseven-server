@@ -14,6 +14,7 @@
 #include "giodb/vector/provider_registry.h"
 
 #include <chrono>
+#include <span>
 #include <string>
 
 namespace giodb {
@@ -601,24 +602,57 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
         batch.clear();
     }
 
-    // 7. Invalidate HNSW indexes so subsequent NEAREST queries use brute-force
-    //    with the updated tuple embeddings.
+    // 7. Rebuild HNSW indexes with the new embeddings.
     if (hnsw_indexes_ != nullptr) {
         for (const auto& target : targets) {
             auto index_name = EmbeddingColumnManager::make_index_name(
                 stmt.table_name, table_schema->columns[target.column_index].name);
             auto idx_it = hnsw_indexes_->find(index_name);
-            if (idx_it != hnsw_indexes_->end()) {
-                auto* hnsw = idx_it->second;
-                uint32_t count = hnsw->node_count();
-                for (uint32_t n = 0; n < count; ++n) {
-                    auto rm = hnsw->remove(n);
-                    (void)rm; // Best-effort removal.
-                }
-                auto compact_result = hnsw->compact();
-                (void)compact_result;
-                GIODB_LOG_INFO("REEMBED: cleared HNSW index '{}'", index_name);
+            if (idx_it == hnsw_indexes_->end()) {
+                continue;
             }
+            auto* hnsw = idx_it->second;
+
+            // Reset the index so new inserts start from node_id 0.
+            auto reset_result = hnsw->reset();
+            if (!reset_result) {
+                GIODB_LOG_WARN("REEMBED: failed to reset HNSW index '{}': {}",
+                               index_name,
+                               reset_result.error().message);
+                continue;
+            }
+
+            // Re-scan the table and insert all embeddings in row order.
+            auto rebuild_it = table_storage->heap->begin();
+            if (!rebuild_it) {
+                GIODB_LOG_WARN("REEMBED: failed to scan table for HNSW rebuild: {}",
+                               rebuild_it.error().message);
+                continue;
+            }
+
+            uint32_t inserted = 0;
+            while (true) {
+                auto row = rebuild_it->next();
+                if (!row) {
+                    break;
+                }
+                auto& [rid, data] = *row;
+                auto vals = TupleSerializer::deserialize(data, table_storage->storage_schema);
+                if (!vals) {
+                    continue;
+                }
+                const auto& emb_val = (*vals)[target.column_index];
+                if (!emb_val.is_null() && emb_val.type_id() == TypeId::EMBEDDING) {
+                    const auto& vec = emb_val.as_embedding();
+                    auto ins = hnsw->insert(std::span<const float>(vec));
+                    if (ins) {
+                        ++inserted;
+                    }
+                }
+            }
+
+            GIODB_LOG_INFO(
+                "REEMBED: rebuilt HNSW index '{}' with {} vectors", index_name, inserted);
         }
     }
 

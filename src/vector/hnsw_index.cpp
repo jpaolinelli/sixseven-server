@@ -590,6 +590,46 @@ Result<void> HnswIndex::compact() {
     return ok();
 }
 
+// -- Reset -------------------------------------------------------------------
+
+Result<void> HnswIndex::reset() {
+    std::unique_lock<std::shared_mutex> lock(latch_);
+
+    // Free all node and vector page tuples.
+    for (const auto& [nid, nloc] : node_map_) {
+        auto node_result = read_node(nloc);
+        if (node_result.has_value()) {
+            // Free vector storage.
+            auto vfetch = buffer_pool_.fetch_page(node_result->vector_page_id);
+            if (vfetch.has_value()) {
+                (void)vfetch.value()->delete_tuple(node_result->vector_slot_id);
+                (void)buffer_pool_.unpin_page(node_result->vector_page_id, true);
+            }
+        }
+        // Free node storage.
+        auto nfetch = buffer_pool_.fetch_page(nloc.page_id);
+        if (nfetch.has_value()) {
+            (void)nfetch.value()->delete_tuple(nloc.slot_id);
+            (void)buffer_pool_.unpin_page(nloc.page_id, true);
+        }
+    }
+
+    // Reset in-memory state so new inserts start from node_id 0.
+    node_map_.clear();
+    meta_.next_node_id = 0;
+    meta_.node_count = 0;
+    meta_.tombstone_count = 0;
+    meta_.entry_point_id = hnsw_invalid_node_id;
+    meta_.max_layer = 0;
+
+    auto flush_result = flush_meta();
+    if (!flush_result.has_value()) {
+        return make_error(flush_result.error().code, flush_result.error().message);
+    }
+
+    return ok();
+}
+
 // -- Page-level operations ---------------------------------------------------
 
 Result<HnswNodeLocation> HnswIndex::allocate_node(const HnswNode& node) {

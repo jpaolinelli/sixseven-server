@@ -3,9 +3,12 @@
 #include "giodb/common/value.h"
 #include "giodb/executor/query_engine.h"
 #include "giodb/executor/storage_manager.h"
+#include "giodb/storage/buffer_pool.h"
 #include "giodb/storage/disk_manager.h"
 #include "giodb/table/tuple.h"
 #include "giodb/vector/builtin_provider.h"
+#include "giodb/vector/embedding_column.h"
+#include "giodb/vector/hnsw_index.h"
 #include "giodb/vector/provider_registry.h"
 
 #include <gtest/gtest.h>
@@ -13,7 +16,9 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace giodb;
@@ -304,4 +309,92 @@ TEST_F(ReembedTest, ReembedWithOptionalTableKeyword) {
     // REEMBED products (without TABLE keyword).
     auto qr2 = exec_ok("REEMBED products");
     EXPECT_EQ(qr2.affected_rows, 1);
+}
+
+// =============================================================================
+// HNSW index rebuild tests
+// =============================================================================
+
+TEST_F(ReembedTest, HnswIndexIsRebuiltAfterReembed) {
+    create_embedding_table();
+    insert_row(1, "laptop computer");
+    insert_row(2, "wireless mouse");
+    insert_row(3, "mechanical keyboard");
+
+    // Set up an HNSW index backed by a real buffer pool.
+    auto hnsw_path = std::filesystem::temp_directory_path() / "giodb_test_reembed_hnsw.db";
+    std::filesystem::remove(hnsw_path);
+
+    auto hfid = dm_.create_file(hnsw_path, false, true);
+    ASSERT_TRUE(hfid.has_value()) << hfid.error().message;
+
+    auto hnsw_bpm = std::make_unique<BufferPoolManager>(dm_, *hfid, 256);
+    auto hnsw = std::make_unique<HnswIndex>(*hnsw_bpm, nullptr);
+
+    auto create_result = hnsw->create({.dimension = 4});
+    ASSERT_TRUE(create_result.has_value()) << create_result.error().message;
+
+    // Insert dummy vectors (all zeros) to simulate initial state.
+    for (int i = 0; i < 3; ++i) {
+        std::vector<float> dummy(4, 0.0F);
+        auto ins = hnsw->insert(std::span<const float>(dummy));
+        ASSERT_TRUE(ins.has_value()) << ins.error().message;
+        EXPECT_EQ(*ins, static_cast<uint32_t>(i));
+    }
+    EXPECT_EQ(hnsw->node_count(), 3u);
+
+    // Wire the HNSW index into the engine.
+    auto index_name = EmbeddingColumnManager::make_index_name("products", "emb");
+    std::unordered_map<std::string, HnswIndex*> hnsw_map;
+    hnsw_map[index_name] = hnsw.get();
+    engine_->set_hnsw_indexes(&hnsw_map);
+
+    // Run REEMBED.
+    auto qr = exec_ok("REEMBED TABLE products");
+    EXPECT_EQ(qr.affected_rows, 3);
+
+    // HNSW index should have 3 nodes with IDs 0, 1, 2 (rebuilt from scratch).
+    EXPECT_EQ(hnsw->node_count(), 3u);
+
+    // Verify node IDs are 0, 1, 2 by checking locations exist.
+    for (uint32_t n = 0; n < 3; ++n) {
+        auto loc = hnsw->node_location(n);
+        EXPECT_TRUE(loc.has_value()) << "node " << n << " should exist after rebuild";
+    }
+
+    // Verify the vectors in the index are non-zero (regenerated, not the old dummies).
+    for (uint32_t n = 0; n < 3; ++n) {
+        auto loc = hnsw->node_location(n);
+        ASSERT_TRUE(loc.has_value());
+        auto node = hnsw->read_node(*loc);
+        ASSERT_TRUE(node.has_value());
+        auto vec = hnsw->read_vector(node->vector_page_id, node->vector_slot_id);
+        ASSERT_TRUE(vec.has_value());
+        EXPECT_EQ(vec->size(), 4u);
+
+        bool all_zero = true;
+        for (float v : *vec) {
+            if (v != 0.0F) {
+                all_zero = false;
+                break;
+            }
+        }
+        EXPECT_FALSE(all_zero) << "node " << n << " vector should be non-zero after REEMBED";
+    }
+
+    // Verify search works: query with the first row's embedding should return node 0.
+    auto embeddings = read_all_embeddings();
+    ASSERT_EQ(embeddings.size(), 3u);
+    auto results = hnsw->search(std::span<const float>(embeddings[0]), 1);
+    ASSERT_TRUE(results.has_value()) << results.error().message;
+    ASSERT_EQ(results->size(), 1u);
+    EXPECT_EQ((*results)[0].node_id, 0u);
+    EXPECT_FLOAT_EQ((*results)[0].distance, 0.0F);
+
+    // Cleanup.
+    engine_->set_hnsw_indexes(nullptr);
+    hnsw.reset();
+    hnsw_bpm.reset();
+    (void)dm_.close_file(*hfid);
+    std::filesystem::remove(hnsw_path);
 }
