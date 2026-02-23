@@ -75,6 +75,19 @@ struct EmbeddingColumnDef {
     std::string provider;
 };
 
+/// Configuration for an embedding provider stored in the system catalog.
+///
+/// Providers are identified by name (e.g., "ollama/all-minilm") and
+/// configured with a type, endpoint, model, and optional API key.
+struct EmbeddingProviderConfig {
+    std::string name;      ///< Unique provider name, e.g., "ollama/all-minilm"
+    std::string type;      ///< Provider type: "ollama", "openai", "builtin"
+    std::string base_url;  ///< API base URL, e.g., "http://localhost:11434"
+    std::string model;     ///< Model identifier, e.g., "all-minilm"
+    std::string api_key;   ///< API key (OpenAI only)
+    int32_t dimension = 0; ///< Expected embedding dimension
+};
+
 /// Returns the system table schema for sys_databases(database_id INT32, name STRING).
 inline TableSchema sys_databases_schema() {
     TableSchema schema;

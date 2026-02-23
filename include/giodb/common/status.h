@@ -17,6 +17,8 @@ enum class StatusCode {
     CONSTRAINT_VIOLATION,
     TXN_CONFLICT,
     TXN_ABORTED,
+    NETWORK_ERROR,
+    AUTH_ERROR,
 };
 
 /// Return a human-readable name for a StatusCode.
@@ -46,6 +48,10 @@ inline const char* status_code_name(StatusCode code) {
         return "TXN_CONFLICT";
     case StatusCode::TXN_ABORTED:
         return "TXN_ABORTED";
+    case StatusCode::NETWORK_ERROR:
+        return "NETWORK_ERROR";
+    case StatusCode::AUTH_ERROR:
+        return "AUTH_ERROR";
     }
     return "UNKNOWN";
 }

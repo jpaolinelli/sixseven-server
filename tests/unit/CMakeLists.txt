@@ -48,6 +48,7 @@ add_executable(giodb_unit_tests
     test_distance.cpp
     test_embedding_column.cpp
     test_embedding_worker.cpp
+    test_embedding_providers.cpp
 )
 
 target_link_libraries(giodb_unit_tests

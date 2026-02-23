@@ -132,6 +132,24 @@ public:
     /// List all embedding column definitions.
     [[nodiscard]] std::vector<EmbeddingColumnDef> list_all_embedding_columns() const;
 
+    // -- Embedding provider operations ----------------------------------------
+
+    /// Register an embedding provider configuration.
+    /// Fails with ALREADY_EXISTS if a provider with the same name exists.
+    [[nodiscard]] Result<void> register_embedding_provider(EmbeddingProviderConfig config);
+
+    /// Retrieve an embedding provider by name.
+    /// Fails with NOT_FOUND if the provider does not exist.
+    [[nodiscard]] Result<EmbeddingProviderConfig>
+    get_embedding_provider(const std::string& name) const;
+
+    /// List all registered embedding providers.
+    [[nodiscard]] std::vector<EmbeddingProviderConfig> list_embedding_providers() const;
+
+    /// Remove an embedding provider by name.
+    /// Fails with NOT_FOUND if the provider does not exist.
+    [[nodiscard]] Result<void> remove_embedding_provider(const std::string& name);
+
 private:
     /// Drop a table by name (caller must hold mu_). Used internally by
     /// drop_table() and drop_database() with cascade.
@@ -177,6 +195,9 @@ private:
     /// We use a vector and linear scan since the number of embedding
     /// columns is expected to be small.
     std::vector<EmbeddingColumnDef> embedding_columns_;
+
+    /// Embedding provider configurations keyed by name.
+    std::unordered_map<std::string, EmbeddingProviderConfig> embedding_providers_;
 };
 
 } // namespace giodb

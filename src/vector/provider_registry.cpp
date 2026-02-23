@@ -1,0 +1,132 @@
+#include "giodb/vector/provider_registry.h"
+
+#include "giodb/common/logging.h"
+#include "giodb/vector/builtin_provider.h"
+#include "giodb/vector/ollama_provider.h"
+#include "giodb/vector/openai_provider.h"
+
+namespace giodb {
+
+ProviderRegistry::ProviderRegistry(Catalog& catalog) : catalog_(catalog) {
+    // Default HTTP client factory.
+    http_client_factory_ = []() { return make_http_client(); };
+}
+
+Result<std::shared_ptr<EmbeddingProvider>> ProviderRegistry::resolve(const std::string& name) {
+    {
+        std::lock_guard lock(mu_);
+        auto it = cache_.find(name);
+        if (it != cache_.end()) {
+            return ok(it->second);
+        }
+    }
+
+    // Look up config in the catalog.
+    auto config_result = catalog_.get_embedding_provider(name);
+    EmbeddingProviderConfig config;
+
+    if (config_result.has_value()) {
+        config = std::move(*config_result);
+    } else {
+        // Fall back to parsing "type/model" from the name.
+        auto parsed = parse_provider_name(name);
+        if (!parsed.has_value()) {
+            return tl::unexpected(parsed.error());
+        }
+
+        config.name = name;
+        config.type = parsed->first;
+        config.model = parsed->second;
+
+        // Apply defaults based on type.
+        if (config.type == "ollama") {
+            config.base_url = "http://localhost:11434";
+        } else if (config.type == "openai") {
+            config.base_url = "https://api.openai.com";
+        }
+    }
+
+    auto provider = create_provider(config);
+    if (!provider.has_value()) {
+        return tl::unexpected(provider.error());
+    }
+
+    std::lock_guard lock(mu_);
+    cache_[name] = *provider;
+    return provider;
+}
+
+void ProviderRegistry::set_http_client_factory(
+    std::function<std::unique_ptr<HttpClient>()> factory) {
+    http_client_factory_ = std::move(factory);
+}
+
+void ProviderRegistry::clear_cache() {
+    std::lock_guard lock(mu_);
+    cache_.clear();
+}
+
+Result<std::pair<std::string, std::string>>
+ProviderRegistry::parse_provider_name(const std::string& name) {
+    auto slash_pos = name.find('/');
+    if (slash_pos == std::string::npos || slash_pos == 0 || slash_pos == name.size() - 1) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "invalid provider name '" + name +
+                              "': expected format 'type/model' "
+                              "(e.g., 'ollama/all-minilm', 'openai/text-embedding-3-small', "
+                              "'builtin/384')");
+    }
+
+    return ok(std::make_pair(name.substr(0, slash_pos), name.substr(slash_pos + 1)));
+}
+
+Result<std::shared_ptr<EmbeddingProvider>>
+ProviderRegistry::create_provider(const EmbeddingProviderConfig& config) {
+    if (config.type == "ollama") {
+        if (config.base_url.empty()) {
+            return make_error(StatusCode::INVALID_ARGUMENT, "Ollama provider requires a base_url");
+        }
+        auto client = http_client_factory_();
+        auto provider = std::make_shared<OllamaProvider>(
+            config.base_url,
+            config.model,
+            config.dimension > 0 ? static_cast<size_t>(config.dimension) : 384,
+            std::move(client));
+        GIODB_LOG_INFO("created Ollama provider: model={}, url={}", config.model, config.base_url);
+        return ok(std::shared_ptr<EmbeddingProvider>(std::move(provider)));
+    }
+
+    if (config.type == "openai") {
+        if (config.api_key.empty()) {
+            return make_error(StatusCode::AUTH_ERROR, "OpenAI provider requires an api_key");
+        }
+        auto client = http_client_factory_();
+        auto provider = std::make_shared<OpenAIProvider>(
+            config.api_key,
+            config.model,
+            config.dimension > 0 ? static_cast<size_t>(config.dimension) : 1536,
+            std::move(client),
+            config.base_url.empty() ? "https://api.openai.com" : config.base_url);
+        GIODB_LOG_INFO("created OpenAI provider: model={}", config.model);
+        return ok(std::shared_ptr<EmbeddingProvider>(std::move(provider)));
+    }
+
+    if (config.type == "builtin") {
+        size_t dim = config.dimension > 0 ? static_cast<size_t>(config.dimension) : 384;
+        // If model field looks like a number, use it as dimension.
+        if (!config.model.empty()) {
+            try {
+                dim = std::stoul(config.model);
+            } catch (...) {
+                // Not a number — use default.
+            }
+        }
+        auto provider = std::make_shared<BuiltinProvider>(dim);
+        GIODB_LOG_INFO("created builtin provider: dimension={}", dim);
+        return ok(std::shared_ptr<EmbeddingProvider>(std::move(provider)));
+    }
+
+    return make_error(StatusCode::INVALID_ARGUMENT, "unknown provider type: '" + config.type + "'");
+}
+
+} // namespace giodb

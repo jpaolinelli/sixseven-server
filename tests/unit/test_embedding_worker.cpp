@@ -41,6 +41,8 @@ public:
     }
 
     std::string name() const override { return "test"; }
+    size_t dimension() const override { return static_cast<size_t>(dimension_); }
+    Result<void> health_check() override { return ok(); }
 
     int call_count() const { return call_count_.load(); }
     int batch_call_count() const { return batch_call_count_.load(); }
