@@ -107,6 +107,92 @@ TEST_F(QueryEngineTest, DropTableNotFound) {
 }
 
 // =============================================================================
+// Database DDL tests
+// =============================================================================
+
+TEST_F(QueryEngineTest, CreateDatabase) {
+    auto qr = exec_ok("CREATE DATABASE mydb");
+    EXPECT_EQ(qr.message, "CREATE DATABASE");
+}
+
+TEST_F(QueryEngineTest, CreateDatabaseIfNotExists) {
+    exec_ok("CREATE DATABASE mydb");
+    // Second CREATE with IF NOT EXISTS should succeed silently.
+    auto qr = exec_ok("CREATE DATABASE IF NOT EXISTS mydb");
+    EXPECT_EQ(qr.message, "CREATE DATABASE");
+}
+
+TEST_F(QueryEngineTest, CreateDatabaseDuplicateError) {
+    exec_ok("CREATE DATABASE mydb");
+    exec_error("CREATE DATABASE mydb", StatusCode::ALREADY_EXISTS);
+}
+
+TEST_F(QueryEngineTest, DropDatabase) {
+    exec_ok("CREATE DATABASE mydb");
+    auto qr = exec_ok("DROP DATABASE mydb");
+    EXPECT_EQ(qr.message, "DROP DATABASE");
+    // Database should no longer exist — creating it again should work.
+    exec_ok("CREATE DATABASE mydb");
+}
+
+TEST_F(QueryEngineTest, DropDatabaseIfExists) {
+    // DROP on non-existent database with IF EXISTS should succeed.
+    auto qr = exec_ok("DROP DATABASE IF EXISTS nonexistent");
+    EXPECT_EQ(qr.message, "DROP DATABASE");
+}
+
+TEST_F(QueryEngineTest, DropDatabaseNotFound) {
+    exec_error("DROP DATABASE nonexistent", StatusCode::NOT_FOUND);
+}
+
+TEST_F(QueryEngineTest, DropDefaultDatabaseFails) {
+    exec_error("DROP DATABASE giodb", StatusCode::CONSTRAINT_VIOLATION);
+}
+
+TEST_F(QueryEngineTest, DropDatabaseNotEmptyWithoutCascade) {
+    exec_ok("CREATE DATABASE mydb");
+    // Add a table to the database via catalog directly so it's non-empty.
+    TableSchema ts;
+    ts.name = "t1";
+    CatalogColumnDef col;
+    col.ordinal = 0;
+    col.name = "id";
+    col.type_id = TypeId::INT32;
+    ts.columns.push_back(col);
+    auto db = catalog_.get_database("mydb");
+    ASSERT_TRUE(db.has_value());
+    auto tid = catalog_.create_table(db->database_id, std::move(ts));
+    ASSERT_TRUE(tid.has_value());
+
+    exec_error("DROP DATABASE mydb", StatusCode::CONSTRAINT_VIOLATION);
+}
+
+TEST_F(QueryEngineTest, DropDatabaseCascade) {
+    exec_ok("CREATE DATABASE mydb");
+    // Add a table to the database via catalog + storage so CASCADE can clean up.
+    TableSchema ts;
+    ts.name = "t1";
+    CatalogColumnDef col;
+    col.ordinal = 0;
+    col.name = "id";
+    col.type_id = TypeId::INT32;
+    ts.columns.push_back(col);
+    auto db = catalog_.get_database("mydb");
+    ASSERT_TRUE(db.has_value());
+    auto tid = catalog_.create_table(db->database_id, ts);
+    ASSERT_TRUE(tid.has_value());
+    auto schema = catalog_.get_table(db->database_id, "t1");
+    ASSERT_TRUE(schema.has_value());
+    auto storage_result = storage_->create_table_storage(*tid, *schema);
+    ASSERT_TRUE(storage_result.has_value());
+
+    auto qr = exec_ok("DROP DATABASE mydb CASCADE");
+    EXPECT_EQ(qr.message, "DROP DATABASE");
+    // Database should be gone — creating it again should work.
+    exec_ok("CREATE DATABASE mydb");
+}
+
+// =============================================================================
 // INSERT tests
 // =============================================================================
 
