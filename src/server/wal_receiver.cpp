@@ -322,11 +322,12 @@ Result<void> WalReceiver::write_local_wal(const std::vector<WalRecord>& records)
         return ok();
     }
 
-    for (auto record : records) {
-        auto result = local_writer_->append(record);
+    for (const auto& record : records) {
+        auto mutable_record = record;
+        auto result = local_writer_->append(mutable_record);
         if (!result) {
-            GIODB_LOG_WARN("WAL receiver: failed to write local WAL record: {}",
-                           result.error().message);
+            return make_error(result.error().code,
+                              "failed to write local WAL record: " + result.error().message);
         }
     }
 
