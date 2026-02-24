@@ -65,6 +65,8 @@ add_executable(giodb_unit_tests
     test_standby_mode.cpp
     test_promotion.cpp
     test_replication_monitoring.cpp
+    test_mvcc.cpp
+    test_vacuum.cpp
 )
 
 target_link_libraries(giodb_unit_tests
