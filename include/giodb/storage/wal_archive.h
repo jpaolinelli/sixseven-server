@@ -93,7 +93,14 @@ public:
     /// Get the full path to an archived segment by segment number.
     [[nodiscard]] Result<std::filesystem::path> get_archived_segment(uint64_t segment_number) const;
 
+    /// Set a callback that returns the minimum LSN that must be retained
+    /// for replication slots. cleanup_before() will never remove segments
+    /// needed by any active slot.
+    void set_retention_lsn_provider(std::function<lsn_t()> provider);
+
     /// Remove archived segments older than the given LSN.
+    /// If a retention LSN provider is set, the effective cleanup LSN is
+    /// clamped to not exceed the provider's minimum.
     [[nodiscard]] Result<void> cleanup_before(lsn_t lsn);
 
     /// Remove archived segments, keeping only the last N.
@@ -124,6 +131,9 @@ private:
     std::filesystem::path wal_dir_;
     std::filesystem::path archive_dir_;
     WalArchiveOptions options_;
+
+    /// Optional callback returning the minimum LSN needed by replication slots.
+    std::function<lsn_t()> retention_lsn_provider_;
 
     /// Protects the pending queue.
     mutable std::mutex queue_mutex_;

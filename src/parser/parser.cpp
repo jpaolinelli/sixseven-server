@@ -2254,6 +2254,17 @@ Result<StmtPtr> Parser::parse_show() {
         return ok(StmtPtr(std::move(stmt)));
     }
 
+    // SHOW REPLICATION SLOTS
+    if (match_ident_ci(peek(), "REPLICATION")) {
+        advance(); // consume REPLICATION
+        if (!match_ident_ci(peek(), "SLOTS")) {
+            return error("expected SLOTS after REPLICATION");
+        }
+        advance(); // consume SLOTS
+        stmt->target = ShowTarget::REPLICATION_SLOTS;
+        return ok(StmtPtr(std::move(stmt)));
+    }
+
     // SHOW ALL / SHOW SETTINGS
     if (check(TokenType::ALL) || match_ident_ci(peek(), "SETTINGS")) {
         advance();

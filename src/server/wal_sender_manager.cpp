@@ -10,16 +10,18 @@ WalSenderManager::WalSenderManager(std::filesystem::path wal_dir,
                                    WalArchiveManager* archive_mgr,
                                    WalWriter& writer,
                                    uint32_t max_wal_senders,
-                                   WalSenderOptions sender_options)
+                                   WalSenderOptions sender_options,
+                                   ReplicationSlotManager* slot_mgr)
     : wal_dir_(std::move(wal_dir)), archive_mgr_(archive_mgr), writer_(writer),
-      max_wal_senders_(max_wal_senders), sender_options_(sender_options) {}
+      max_wal_senders_(max_wal_senders), sender_options_(sender_options), slot_mgr_(slot_mgr) {}
 
 WalSenderManager::~WalSenderManager() {
     stop_all();
 }
 
 Result<void> WalSenderManager::accept_connection(std::unique_ptr<ReplicationConnection> connection,
-                                                 lsn_t start_lsn) {
+                                                 lsn_t start_lsn,
+                                                 const std::string& slot_name) {
     std::lock_guard lock(senders_mutex_);
 
     // Clean up stopped senders before checking the limit.
@@ -34,8 +36,13 @@ Result<void> WalSenderManager::accept_connection(std::unique_ptr<ReplicationConn
     }
 
     auto peer = connection->peer_description();
-    auto sender = std::make_unique<WalSender>(
-        std::move(connection), wal_dir_, archive_mgr_, writer_, sender_options_);
+    auto sender = std::make_unique<WalSender>(std::move(connection),
+                                              wal_dir_,
+                                              archive_mgr_,
+                                              writer_,
+                                              sender_options_,
+                                              slot_mgr_,
+                                              slot_name);
 
     auto result = sender->start_streaming(start_lsn);
     if (!result) {

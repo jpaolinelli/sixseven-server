@@ -10,9 +10,12 @@ WalSender::WalSender(std::unique_ptr<ReplicationConnection> connection,
                      std::filesystem::path wal_dir,
                      WalArchiveManager* archive_mgr,
                      WalWriter& writer,
-                     WalSenderOptions options)
+                     WalSenderOptions options,
+                     ReplicationSlotManager* slot_mgr,
+                     std::string slot_name)
     : connection_(std::move(connection)), wal_dir_(std::move(wal_dir)), archive_mgr_(archive_mgr),
-      writer_(writer), options_(options), last_status_time_(std::chrono::steady_clock::now()) {}
+      writer_(writer), options_(options), slot_mgr_(slot_mgr), slot_name_(std::move(slot_name)),
+      last_status_time_(std::chrono::steady_clock::now()) {}
 
 WalSender::~WalSender() {
     stop();
@@ -41,11 +44,18 @@ void WalSender::notify_new_wal(lsn_t flush_lsn) {
 }
 
 void WalSender::handle_standby_status(const StandbyStatusMessage& status) {
-    std::lock_guard lock(status_mutex_);
-    replica_received_lsn_ = status.received_lsn;
-    replica_applied_lsn_ = status.applied_lsn;
-    replica_flushed_lsn_ = status.flushed_lsn;
-    last_status_time_ = std::chrono::steady_clock::now();
+    {
+        std::lock_guard lock(status_mutex_);
+        replica_received_lsn_ = status.received_lsn;
+        replica_applied_lsn_ = status.applied_lsn;
+        replica_flushed_lsn_ = status.flushed_lsn;
+        last_status_time_ = std::chrono::steady_clock::now();
+    }
+
+    // Forward confirmed progress to the replication slot manager.
+    if (slot_mgr_ != nullptr && !slot_name_.empty() && status.flushed_lsn != invalid_lsn) {
+        slot_mgr_->update_confirmed_lsn(slot_name_, status.flushed_lsn);
+    }
 }
 
 void WalSender::handle_hot_standby_feedback(const HotStandbyFeedbackMessage& feedback) {
@@ -106,12 +116,25 @@ void WalSender::streaming_loop() {
     // Compute start LSN from sent_lsn (which was set to start_lsn - 1).
     lsn_t start_lsn = sent_lsn_.load() + 1;
 
+    // Activate the replication slot if configured.
+    if (slot_mgr_ != nullptr && !slot_name_.empty()) {
+        auto activate_result = slot_mgr_->activate_slot(slot_name_, start_lsn);
+        if (!activate_result) {
+            GIODB_LOG_WARN("WalSender failed to activate slot '{}': {}",
+                           slot_name_,
+                           activate_result.error().message);
+        }
+    }
+
     auto catchup_result = run_catchup(start_lsn);
     if (!catchup_result) {
         GIODB_LOG_ERROR("WalSender catch-up failed for {}: {}",
                         connection_->peer_description(),
                         catchup_result.error().message);
         state_.store(State::STOPPED);
+        if (slot_mgr_ != nullptr && !slot_name_.empty()) {
+            (void)slot_mgr_->deactivate_slot(slot_name_);
+        }
         connection_->close();
         return;
     }
@@ -127,6 +150,9 @@ void WalSender::streaming_loop() {
                         connection_->peer_description(),
                         cc_result.error().message);
         state_.store(State::STOPPED);
+        if (slot_mgr_ != nullptr && !slot_name_.empty()) {
+            (void)slot_mgr_->deactivate_slot(slot_name_);
+        }
         connection_->close();
         return;
     }
@@ -139,6 +165,11 @@ void WalSender::streaming_loop() {
         GIODB_LOG_WARN("WalSender streaming ended for {}: {}",
                        connection_->peer_description(),
                        stream_result.error().message);
+    }
+
+    // Deactivate the replication slot on disconnect.
+    if (slot_mgr_ != nullptr && !slot_name_.empty()) {
+        (void)slot_mgr_->deactivate_slot(slot_name_);
     }
 
     state_.store(State::STOPPED);

@@ -30,6 +30,7 @@ struct UnlinkStmt;
 class HnswIndex;
 class ProviderCache;
 class ProviderRegistry;
+class ReplicationSlotManager;
 class SettingsCache;
 
 /// Result of executing a SQL statement.
@@ -86,6 +87,9 @@ public:
 
     /// Set the provider cache for SHOW PROVIDERS and provider management.
     void set_provider_cache(ProviderCache* cache);
+
+    /// Set the replication slot manager for SHOW REPLICATION SLOTS.
+    void set_slot_manager(ReplicationSlotManager* slot_mgr);
 
     /// Enable or disable standby (read-only) mode.
     /// When enabled, all write operations are rejected.
@@ -152,6 +156,7 @@ private:
     std::unordered_map<std::string, HnswIndex*>* hnsw_indexes_ = nullptr;
     SettingsCache* settings_cache_ = nullptr;
     ProviderCache* provider_cache_ = nullptr;
+    ReplicationSlotManager* slot_mgr_ = nullptr;
     database_id_t current_database_id_ = default_database_id;
     int skip_masking_depth_ = 0;
     bool standby_mode_ = false;

@@ -11,6 +11,7 @@
 #include "giodb/parser/parser.h"
 #include "giodb/planner/binder.h"
 #include "giodb/planner/type_resolver.h"
+#include "giodb/server/replication_slot.h"
 #include "giodb/table/tuple.h"
 #include "giodb/vector/embedding_column.h"
 #include "giodb/vector/hnsw_index.h"
@@ -47,6 +48,10 @@ void QueryEngine::set_settings_cache(SettingsCache* cache) {
 
 void QueryEngine::set_provider_cache(ProviderCache* cache) {
     provider_cache_ = cache;
+}
+
+void QueryEngine::set_slot_manager(ReplicationSlotManager* slot_mgr) {
+    slot_mgr_ = slot_mgr;
 }
 
 void QueryEngine::set_standby_mode(bool enabled) {
@@ -1150,6 +1155,32 @@ Result<QueryResult> QueryEngine::execute_show(const ShowStmt& stmt) {
                                Value(p.endpoint),
                                Value(p.model),
                                Value(p.is_default)});
+        }
+        return ok(std::move(qr));
+    }
+
+    case ShowTarget::REPLICATION_SLOTS: {
+        if (!slot_mgr_) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "replication slot manager not initialized");
+        }
+        auto slots = slot_mgr_->list_slots();
+
+        QueryResult qr;
+        qr.column_names = {
+            "slot_name", "slot_type", "active", "restart_lsn", "confirmed_flush_lsn"};
+        qr.column_types = {
+            TypeId::STRING, TypeId::STRING, TypeId::BOOL, TypeId::INT64, TypeId::INT64};
+        for (const auto& s : slots) {
+            qr.rows.push_back({Value(s.slot_name),
+                               Value(s.slot_type),
+                               Value(s.active),
+                               s.restart_lsn != invalid_lsn
+                                   ? Value(static_cast<int64_t>(s.restart_lsn))
+                                   : Value(),
+                               s.confirmed_flush_lsn != invalid_lsn
+                                   ? Value(static_cast<int64_t>(s.confirmed_flush_lsn))
+                                   : Value()});
         }
         return ok(std::move(qr));
     }

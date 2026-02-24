@@ -95,6 +95,7 @@ enum class ShowTarget : uint8_t {
     EDGE_TYPES,
     INDEXES,
     PROVIDERS,
+    REPLICATION_SLOTS,
     PARAMETER,
     ALL,
 };

@@ -623,5 +623,79 @@ TEST(WalArchiveManager, StopDrainsQueue) {
     ASSERT_TRUE(writer.close().has_value());
 }
 
+// -- Retention LSN provider integration (GDB-196) ----------------------------
+
+TEST(WalArchiveManager, CleanupRespectsRetentionProvider) {
+    TempWalDir wal_dir;
+    TempArchiveDir archive_dir;
+
+    WalWriterOptions opts;
+    opts.segment_size = 256;
+    opts.enable_group_commit = false;
+    WalWriter writer(wal_dir.path(), opts);
+    ASSERT_TRUE(writer.open().has_value());
+
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path());
+
+    // Archive a few segments.
+    std::vector<CompletedSegment> segments;
+    for (int i = 0; i < 3; ++i) {
+        auto seg = write_and_rotate(writer);
+        segments.push_back(seg);
+        ASSERT_TRUE(mgr.archive_segment(seg.segment_id, seg.last_lsn).has_value());
+    }
+
+    auto list = mgr.list_archived_segments();
+    ASSERT_TRUE(list.has_value());
+    ASSERT_EQ(list->size(), 3u);
+
+    // Set a retention provider that returns the 2nd segment's last LSN.
+    // This should prevent cleanup of segments 1 and 2, even if the caller
+    // requests cleanup of everything.
+    lsn_t retention_lsn = segments[1].last_lsn;
+    mgr.set_retention_lsn_provider([retention_lsn]() { return retention_lsn; });
+
+    // Request cleanup of everything (high LSN), but the provider clamps it.
+    ASSERT_TRUE(mgr.cleanup_before(999999).has_value());
+
+    // Segment 0 should be removed (last_lsn < retention_lsn),
+    // but segments 1 and 2 should be retained.
+    auto remaining = mgr.list_archived_segments();
+    ASSERT_TRUE(remaining.has_value());
+    EXPECT_GE(remaining->size(), 2u);
+
+    ASSERT_TRUE(writer.close().has_value());
+}
+
+TEST(WalArchiveManager, CleanupWithoutProviderRemovesAll) {
+    TempWalDir wal_dir;
+    TempArchiveDir archive_dir;
+
+    WalWriterOptions opts;
+    opts.segment_size = 256;
+    opts.enable_group_commit = false;
+    WalWriter writer(wal_dir.path(), opts);
+    ASSERT_TRUE(writer.open().has_value());
+
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path());
+
+    // Archive segments.
+    std::vector<CompletedSegment> segments;
+    for (int i = 0; i < 3; ++i) {
+        auto seg = write_and_rotate(writer);
+        segments.push_back(seg);
+        ASSERT_TRUE(mgr.archive_segment(seg.segment_id, seg.last_lsn).has_value());
+    }
+
+    // No retention provider — cleanup should remove all below the LSN.
+    ASSERT_TRUE(mgr.cleanup_before(999999).has_value());
+
+    auto remaining = mgr.list_archived_segments();
+    ASSERT_TRUE(remaining.has_value());
+    EXPECT_EQ(remaining->size(), 0u);
+
+    ASSERT_TRUE(writer.close().has_value());
+}
+
 } // namespace
 } // namespace giodb

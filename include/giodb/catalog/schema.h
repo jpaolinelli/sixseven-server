@@ -158,4 +158,21 @@ inline TableSchema sys_providers_schema() {
     return schema;
 }
 
+/// Returns the system table schema for sys_replication_slots.
+inline TableSchema sys_replication_slots_schema() {
+    TableSchema schema;
+    schema.table_id = 0; // System tables use reserved IDs.
+    schema.name = "sys_replication_slots";
+    schema.columns = {
+        {0, "slot_name", TypeId::STRING, false, ""},
+        {1, "slot_type", TypeId::STRING, false, ""},
+        {2, "active", TypeId::BOOL, false, ""},
+        {3, "restart_lsn", TypeId::INT64, true, ""},
+        {4, "confirmed_flush_lsn", TypeId::INT64, true, ""},
+        {5, "created_at", TypeId::TIMESTAMP, true, ""},
+    };
+    schema.pk_columns = "slot_name";
+    return schema;
+}
+
 } // namespace giodb

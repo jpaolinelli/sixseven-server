@@ -27,16 +27,20 @@ public:
                      WalArchiveManager* archive_mgr,
                      WalWriter& writer,
                      uint32_t max_wal_senders = 10,
-                     WalSenderOptions sender_options = {});
+                     WalSenderOptions sender_options = {},
+                     ReplicationSlotManager* slot_mgr = nullptr);
     ~WalSenderManager();
 
     WalSenderManager(const WalSenderManager&) = delete;
     WalSenderManager& operator=(const WalSenderManager&) = delete;
 
     /// Accept a new replication connection and start streaming from start_lsn.
-    /// Returns REPLICATION_ERROR if max_wal_senders would be exceeded.
+    /// If slot_name is non-empty, the slot is activated on connect and
+    /// deactivated on disconnect. Returns REPLICATION_ERROR if
+    /// max_wal_senders would be exceeded.
     [[nodiscard]] Result<void> accept_connection(std::unique_ptr<ReplicationConnection> connection,
-                                                 lsn_t start_lsn);
+                                                 lsn_t start_lsn,
+                                                 const std::string& slot_name = {});
 
     /// Broadcast a WAL flush notification to all active senders.
     void notify_new_wal(lsn_t flush_lsn);
@@ -71,6 +75,7 @@ private:
     WalWriter& writer_;
     uint32_t max_wal_senders_;
     WalSenderOptions sender_options_;
+    ReplicationSlotManager* slot_mgr_;
 
     mutable std::mutex senders_mutex_;
     std::vector<std::unique_ptr<WalSender>> senders_;
