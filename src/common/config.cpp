@@ -66,6 +66,34 @@ Result<Config> Config::load_from_file(const std::string& path) {
         config.master_key_path = config.data_dir + "/master.key";
     }
 
+    // Server mode: "primary" (default) or "standby".
+    if (j.contains("server") && j["server"].is_object()) {
+        const auto& server = j["server"];
+        if (server.contains("mode") && server["mode"].is_string()) {
+            config.standby_mode = (server["mode"].get<std::string>() == "standby");
+        }
+    }
+
+    // Replication settings (standby-specific).
+    if (j.contains("replication") && j["replication"].is_object()) {
+        const auto& repl = j["replication"];
+        if (repl.contains("primary_host") && repl["primary_host"].is_string()) {
+            config.replication_primary_host = repl["primary_host"].get<std::string>();
+        }
+        if (repl.contains("primary_port") && repl["primary_port"].is_number_unsigned()) {
+            auto port_value = repl["primary_port"].get<uint64_t>();
+            if (port_value <= 65535) {
+                config.replication_primary_port = static_cast<uint16_t>(port_value);
+            }
+        }
+        if (repl.contains("retry_interval_ms") && repl["retry_interval_ms"].is_number()) {
+            config.replication_retry_interval_ms = repl["retry_interval_ms"].get<int32_t>();
+        }
+        if (repl.contains("max_retry_interval_ms") && repl["max_retry_interval_ms"].is_number()) {
+            config.replication_max_retry_interval_ms = repl["max_retry_interval_ms"].get<int32_t>();
+        }
+    }
+
     return ok(std::move(config));
 }
 
@@ -96,6 +124,19 @@ void Config::apply_setting(const std::string& key, const std::string& value) {
         replication_keepalive_interval_ms = std::stoi(value);
     } else if (key == "replication.sender_timeout_ms") {
         replication_sender_timeout_ms = std::stoi(value);
+    } else if (key == "server.mode") {
+        standby_mode = (value == "standby");
+    } else if (key == "replication.primary_host") {
+        replication_primary_host = value;
+    } else if (key == "replication.primary_port") {
+        auto v = std::stoul(value);
+        if (v <= 65535) {
+            replication_primary_port = static_cast<uint16_t>(v);
+        }
+    } else if (key == "replication.retry_interval_ms") {
+        replication_retry_interval_ms = std::stoi(value);
+    } else if (key == "replication.max_retry_interval_ms") {
+        replication_max_retry_interval_ms = std::stoi(value);
     }
     // Unknown keys are silently ignored.
 }

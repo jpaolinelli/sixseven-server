@@ -20,6 +20,7 @@ enum class StatusCode {
     NETWORK_ERROR,
     AUTH_ERROR,
     REPLICATION_ERROR,
+    READ_ONLY,
 };
 
 /// Return a human-readable name for a StatusCode.
@@ -55,6 +56,8 @@ inline const char* status_code_name(StatusCode code) {
         return "AUTH_ERROR";
     case StatusCode::REPLICATION_ERROR:
         return "REPLICATION_ERROR";
+    case StatusCode::READ_ONLY:
+        return "READ_ONLY";
     }
     return "UNKNOWN";
 }

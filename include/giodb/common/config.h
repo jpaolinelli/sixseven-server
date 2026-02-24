@@ -22,6 +22,13 @@ struct Config {
     int32_t replication_keepalive_interval_ms = 10000;
     int32_t replication_sender_timeout_ms = 60000;
 
+    // Standby mode settings.
+    bool standby_mode = false;                    ///< True when server runs as read-only standby.
+    std::string replication_primary_host;         ///< Hostname/IP of the primary.
+    uint16_t replication_primary_port = 5432;     ///< Port of the primary.
+    int32_t replication_retry_interval_ms = 5000; ///< Initial retry interval for reconnection.
+    int32_t replication_max_retry_interval_ms = 60000; ///< Maximum retry interval (backoff cap).
+
     /// Create a Config with all default values.
     static Config load_defaults();
 

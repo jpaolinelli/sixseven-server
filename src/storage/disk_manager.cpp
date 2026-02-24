@@ -276,6 +276,39 @@ Result<FileId> DiskManager::open_file(const std::filesystem::path& path, bool di
     return ok(file_id);
 }
 
+Result<FileId> DiskManager::open_file_readonly(const std::filesystem::path& path) {
+    int fd = ::open(path.c_str(), O_RDONLY);
+    if (fd < 0) {
+        return make_error(StatusCode::IO_ERROR,
+                          "failed to open file: " + path.string() + ": " + std::strerror(errno));
+    }
+
+    // Acquire a shared advisory lock (allows concurrent readers).
+    if (::flock(fd, LOCK_SH | LOCK_NB) < 0) {
+        ::close(fd);
+        return make_error(StatusCode::IO_ERROR,
+                          "failed to acquire shared lock on file: " + path.string());
+    }
+
+    FileId file_id = acquire_file_id();
+
+    OpenFile& file = files_[file_id];
+    file.fd = fd;
+    file.path = path;
+    file.read_only = true;
+
+    // Read and validate the file header.
+    auto header_result = read_file_header(file);
+    if (!header_result) {
+        ::close(fd);
+        file.fd = -1;
+        free_ids_.push_back(file_id);
+        return tl::unexpected(header_result.error());
+    }
+
+    return ok(file_id);
+}
+
 Result<void> DiskManager::close_file(FileId file_id) {
     auto file_result = get_open_file(file_id);
     if (!file_result) {
@@ -345,6 +378,11 @@ Result<void> DiskManager::write_page(FileId file_id, PageId page_id, Page& page)
     }
     OpenFile* file = *file_result;
 
+    if (file->read_only) {
+        return make_error(StatusCode::READ_ONLY,
+                          "cannot write to read-only file: " + file->path.string());
+    }
+
     if (page_id == 0) {
         return make_error(StatusCode::INVALID_ARGUMENT,
                           "page 0 is the file header and cannot be written as a data page");
@@ -389,6 +427,11 @@ Result<PageId> DiskManager::allocate_pages(FileId file_id, uint32_t count) {
         return tl::unexpected(file_result.error());
     }
     OpenFile* file = *file_result;
+
+    if (file->read_only) {
+        return make_error(StatusCode::READ_ONLY,
+                          "cannot allocate pages in read-only file: " + file->path.string());
+    }
 
     PageId first_page_id = file->page_count;
     file->page_count += count;
