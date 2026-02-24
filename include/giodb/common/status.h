@@ -21,6 +21,8 @@ enum class StatusCode {
     AUTH_ERROR,
     REPLICATION_ERROR,
     READ_ONLY,
+    LOCK_TIMEOUT,
+    DEADLOCK,
 };
 
 /// Return a human-readable name for a StatusCode.
@@ -58,6 +60,10 @@ inline const char* status_code_name(StatusCode code) {
         return "REPLICATION_ERROR";
     case StatusCode::READ_ONLY:
         return "READ_ONLY";
+    case StatusCode::LOCK_TIMEOUT:
+        return "LOCK_TIMEOUT";
+    case StatusCode::DEADLOCK:
+        return "DEADLOCK";
     }
     return "UNKNOWN";
 }

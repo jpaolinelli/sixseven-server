@@ -67,6 +67,7 @@ add_executable(giodb_unit_tests
     test_replication_monitoring.cpp
     test_mvcc.cpp
     test_vacuum.cpp
+    test_lock_manager.cpp
 )
 
 target_link_libraries(giodb_unit_tests
