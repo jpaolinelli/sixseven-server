@@ -92,6 +92,27 @@ Result<Config> Config::load_from_file(const std::string& path) {
         if (repl.contains("max_retry_interval_ms") && repl["max_retry_interval_ms"].is_number()) {
             config.replication_max_retry_interval_ms = repl["max_retry_interval_ms"].get<int32_t>();
         }
+        if (repl.contains("synchronous_mode") && repl["synchronous_mode"].is_string()) {
+            config.replication_synchronous_mode = repl["synchronous_mode"].get<std::string>();
+        }
+        if (repl.contains("synchronous_standby_names") &&
+            repl["synchronous_standby_names"].is_string()) {
+            config.replication_synchronous_standby_names =
+                repl["synchronous_standby_names"].get<std::string>();
+        }
+        if (repl.contains("synchronous_commit_count") &&
+            repl["synchronous_commit_count"].is_number()) {
+            config.replication_synchronous_commit_count =
+                repl["synchronous_commit_count"].get<int32_t>();
+        }
+        if (repl.contains("synchronous_timeout_ms") && repl["synchronous_timeout_ms"].is_number()) {
+            config.replication_synchronous_timeout_ms =
+                repl["synchronous_timeout_ms"].get<int32_t>();
+        }
+        if (repl.contains("synchronous_fallback") && repl["synchronous_fallback"].is_string()) {
+            config.replication_synchronous_fallback =
+                repl["synchronous_fallback"].get<std::string>();
+        }
     }
 
     return ok(std::move(config));
@@ -137,6 +158,16 @@ void Config::apply_setting(const std::string& key, const std::string& value) {
         replication_retry_interval_ms = std::stoi(value);
     } else if (key == "replication.max_retry_interval_ms") {
         replication_max_retry_interval_ms = std::stoi(value);
+    } else if (key == "replication.synchronous_mode") {
+        replication_synchronous_mode = value;
+    } else if (key == "replication.synchronous_standby_names") {
+        replication_synchronous_standby_names = value;
+    } else if (key == "replication.synchronous_commit_count") {
+        replication_synchronous_commit_count = std::stoi(value);
+    } else if (key == "replication.synchronous_timeout_ms") {
+        replication_synchronous_timeout_ms = std::stoi(value);
+    } else if (key == "replication.synchronous_fallback") {
+        replication_synchronous_fallback = value;
     }
     // Unknown keys are silently ignored.
 }

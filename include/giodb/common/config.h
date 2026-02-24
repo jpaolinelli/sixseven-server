@@ -29,6 +29,14 @@ struct Config {
     int32_t replication_retry_interval_ms = 5000; ///< Initial retry interval for reconnection.
     int32_t replication_max_retry_interval_ms = 60000; ///< Maximum retry interval (backoff cap).
 
+    // Synchronous replication settings.
+    std::string replication_synchronous_mode =
+        "off"; ///< off/remote_write/remote_flush/remote_apply.
+    std::string replication_synchronous_standby_names;  ///< Comma-separated slot names for sync.
+    int32_t replication_synchronous_commit_count = 1;   ///< How many standbys must ack.
+    int32_t replication_synchronous_timeout_ms = 30000; ///< Timeout before fallback.
+    std::string replication_synchronous_fallback = "error"; ///< error/warn/block.
+
     /// Create a Config with all default values.
     static Config load_defaults();
 

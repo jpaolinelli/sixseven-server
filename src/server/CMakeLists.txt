@@ -3,6 +3,7 @@
 add_library(giodb_server STATIC
     replication_message.cpp
     replication_slot.cpp
+    sync_replication.cpp
     wal_receiver.cpp
     wal_sender.cpp
     wal_sender_manager.cpp

@@ -12,10 +12,11 @@ WalSender::WalSender(std::unique_ptr<ReplicationConnection> connection,
                      WalWriter& writer,
                      WalSenderOptions options,
                      ReplicationSlotManager* slot_mgr,
-                     std::string slot_name)
+                     std::string slot_name,
+                     SyncReplicationManager* sync_mgr)
     : connection_(std::move(connection)), wal_dir_(std::move(wal_dir)), archive_mgr_(archive_mgr),
       writer_(writer), options_(options), slot_mgr_(slot_mgr), slot_name_(std::move(slot_name)),
-      last_status_time_(std::chrono::steady_clock::now()) {}
+      sync_mgr_(sync_mgr), last_status_time_(std::chrono::steady_clock::now()) {}
 
 WalSender::~WalSender() {
     stop();
@@ -55,6 +56,12 @@ void WalSender::handle_standby_status(const StandbyStatusMessage& status) {
     // Forward confirmed progress to the replication slot manager.
     if (slot_mgr_ != nullptr && !slot_name_.empty() && status.flushed_lsn != invalid_lsn) {
         slot_mgr_->update_confirmed_lsn(slot_name_, status.flushed_lsn);
+    }
+
+    // Forward progress to the synchronous replication manager.
+    if (sync_mgr_ != nullptr && !slot_name_.empty()) {
+        sync_mgr_->report_replica_progress(
+            slot_name_, status.received_lsn, status.flushed_lsn, status.applied_lsn);
     }
 }
 
@@ -170,6 +177,11 @@ void WalSender::streaming_loop() {
     // Deactivate the replication slot on disconnect.
     if (slot_mgr_ != nullptr && !slot_name_.empty()) {
         (void)slot_mgr_->deactivate_slot(slot_name_);
+    }
+
+    // Remove replica from synchronous replication tracking.
+    if (sync_mgr_ != nullptr && !slot_name_.empty()) {
+        sync_mgr_->remove_replica(slot_name_);
     }
 
     state_.store(State::STOPPED);
