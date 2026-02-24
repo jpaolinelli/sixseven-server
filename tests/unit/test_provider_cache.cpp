@@ -1,5 +1,6 @@
 #include "giodb/catalog/catalog.h"
 #include "giodb/common/config.h"
+#include "giodb/common/secrets_manager.h"
 #include "giodb/common/types.h"
 #include "giodb/common/value.h"
 #include "giodb/executor/provider_cache.h"
@@ -709,4 +710,289 @@ TEST_F(ProviderCacheTest, CannotDropSysProviders) {
 TEST_F(ProviderCacheTest, CannotDropSysProvidersViaSql) {
     use_database(system_database_name);
     exec_error("DROP TABLE sys_providers", StatusCode::CONSTRAINT_VIOLATION);
+}
+
+// =============================================================================
+// GDB-191: Encrypted secrets storage for API keys
+// =============================================================================
+
+class EncryptedProviderCacheTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_encrypted_provider_cache";
+        std::filesystem::remove_all(data_dir_);
+        std::filesystem::create_directories(data_dir_);
+
+        dm_ = std::make_unique<DiskManager>();
+        catalog_ = std::make_unique<Catalog>();
+        storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
+        engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
+        config_ = Config::load_defaults();
+        cache_ = std::make_unique<ProviderCache>();
+
+        // Create a SecretsManager with a test master key.
+        auto key_path = (data_dir_ / "master.key").string();
+        auto mgr = SecretsManager::create(key_path);
+        ASSERT_TRUE(mgr.has_value()) << mgr.error().message;
+        secrets_manager_ = std::make_unique<SecretsManager>(std::move(*mgr));
+
+        // Wire up encryption.
+        cache_->set_secrets_manager(secrets_manager_.get());
+
+        // Bootstrap system database + sys_settings + sys_providers.
+        auto boot = SystemBootstrap::bootstrap(*engine_, *catalog_, *storage_, config_, data_dir_);
+        ASSERT_TRUE(boot.has_value()) << boot.error().message;
+
+        // Load provider cache.
+        auto load = cache_->load(*engine_);
+        ASSERT_TRUE(load.has_value()) << load.error().message;
+
+        // Wire up the cache.
+        engine_->set_provider_cache(cache_.get());
+
+        // Switch to default database for user operations.
+        use_database("giodb");
+    }
+
+    void TearDown() override {
+        engine_.reset();
+        cache_.reset();
+        secrets_manager_.reset();
+        storage_.reset();
+        catalog_.reset();
+        dm_.reset();
+        std::filesystem::remove_all(data_dir_);
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << result.error().message;
+        return std::move(*result);
+    }
+
+    void use_database(const std::string& name) {
+        auto db = catalog_->get_database(name);
+        ASSERT_TRUE(db.has_value()) << "database '" << name << "' not found";
+        engine_->set_current_database(db->database_id);
+    }
+
+    int32_t insert_provider(const std::string& name,
+                            const std::string& type,
+                            const std::string& endpoint,
+                            const std::string& model,
+                            const std::string& api_key = "",
+                            bool is_default = false) {
+        int32_t id = next_id_++;
+
+        use_database(system_database_name);
+
+        std::string sql = "INSERT INTO sys_providers VALUES (" + std::to_string(id) + ", '" + name +
+                          "', '" + type + "', '" + endpoint + "', '" + model + "', " +
+                          (api_key.empty() ? "NULL" : "'" + api_key + "'") + ", " +
+                          (is_default ? "TRUE" : "FALSE") + ", NULL)";
+        exec_ok(sql);
+
+        use_database("giodb");
+        return id;
+    }
+
+    /// Read the raw api_key_encrypted value from the database (bypassing masking).
+    std::string read_raw_api_key(int32_t provider_id) {
+        use_database(system_database_name);
+        engine_->push_skip_masking();
+        auto qr = exec_ok("SELECT api_key_encrypted FROM sys_providers "
+                          "WHERE provider_id = " +
+                          std::to_string(provider_id));
+        engine_->pop_skip_masking();
+        use_database("giodb");
+
+        if (qr.rows.empty() || qr.rows[0][0].is_null()) {
+            return "";
+        }
+        return qr.rows[0][0].as_string();
+    }
+
+    std::unique_ptr<DiskManager> dm_;
+    std::unique_ptr<Catalog> catalog_;
+    std::filesystem::path data_dir_;
+    std::unique_ptr<StorageManager> storage_;
+    std::unique_ptr<QueryEngine> engine_;
+    std::unique_ptr<ProviderCache> cache_;
+    std::unique_ptr<SecretsManager> secrets_manager_;
+    Config config_;
+    int32_t next_id_ = 1;
+};
+
+// --- AC: API keys encrypted before storage in sys_providers ---
+
+TEST_F(EncryptedProviderCacheTest, ApiKeyEncryptedOnDisk) {
+    auto id = insert_provider("openai-prod",
+                              "openai",
+                              "https://api.openai.com/v1",
+                              "text-embedding-3-small",
+                              "sk-test123");
+
+    // The raw value on disk should be encrypted (not the plaintext key).
+    std::string raw = read_raw_api_key(id);
+    EXPECT_NE(raw, "sk-test123");
+    EXPECT_TRUE(SecretsManager::looks_encrypted(raw)) << "raw value should look encrypted: " << raw;
+}
+
+// --- AC: API keys decrypted correctly when loaded into memory ---
+
+TEST_F(EncryptedProviderCacheTest, ApiKeyDecryptedInMemory) {
+    insert_provider("openai-prod",
+                    "openai",
+                    "https://api.openai.com/v1",
+                    "text-embedding-3-small",
+                    "sk-test123");
+
+    auto provider = cache_->get("openai-prod");
+    ASSERT_TRUE(provider.has_value());
+    EXPECT_EQ(provider->api_key, "sk-test123");
+}
+
+// --- AC: SELECT * FROM sys_providers masks the api_key_encrypted column ---
+
+TEST_F(EncryptedProviderCacheTest, SelectMasksApiKey) {
+    insert_provider("openai-prod",
+                    "openai",
+                    "https://api.openai.com/v1",
+                    "text-embedding-3-small",
+                    "sk-test123",
+                    true);
+
+    use_database(system_database_name);
+    auto qr = exec_ok("SELECT name, api_key_encrypted FROM sys_providers");
+    use_database("giodb");
+
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "openai-prod");
+    EXPECT_EQ(qr.rows[0][1].as_string(), "********");
+}
+
+TEST_F(EncryptedProviderCacheTest, SelectStarMasksApiKey) {
+    insert_provider("openai-prod",
+                    "openai",
+                    "https://api.openai.com/v1",
+                    "text-embedding-3-small",
+                    "sk-test123",
+                    true);
+
+    use_database(system_database_name);
+    auto qr = exec_ok("SELECT * FROM sys_providers");
+    use_database("giodb");
+
+    ASSERT_EQ(qr.rows.size(), 1u);
+
+    // Find the api_key_encrypted column.
+    int key_col = -1;
+    for (size_t i = 0; i < qr.column_names.size(); ++i) {
+        if (qr.column_names[i] == "api_key_encrypted") {
+            key_col = static_cast<int>(i);
+            break;
+        }
+    }
+    ASSERT_GE(key_col, 0) << "api_key_encrypted column not found";
+    EXPECT_EQ(qr.rows[0][static_cast<size_t>(key_col)].as_string(), "********");
+}
+
+TEST_F(EncryptedProviderCacheTest, NullApiKeyNotMasked) {
+    insert_provider("ollama-local", "ollama", "http://localhost:11434", "nomic-embed-text");
+
+    use_database(system_database_name);
+    auto qr = exec_ok("SELECT api_key_encrypted FROM sys_providers");
+    use_database("giodb");
+
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_TRUE(qr.rows[0][0].is_null());
+}
+
+// --- AC: Decrypted keys zeroed from memory on cleanup ---
+// (Verified by SecureString tests in test_secrets_manager.cpp)
+
+// --- Encryption round-trip with cache reload ---
+
+TEST_F(EncryptedProviderCacheTest, CacheReloadDecryptsCorrectly) {
+    insert_provider("openai-prod",
+                    "openai",
+                    "https://api.openai.com/v1",
+                    "text-embedding-3-small",
+                    "sk-test123");
+
+    // Create a fresh cache with the same SecretsManager and reload.
+    auto fresh_cache = std::make_unique<ProviderCache>();
+    fresh_cache->set_secrets_manager(secrets_manager_.get());
+    auto load = fresh_cache->load(*engine_);
+    ASSERT_TRUE(load.has_value()) << load.error().message;
+
+    auto provider = fresh_cache->get("openai-prod");
+    ASSERT_TRUE(provider.has_value());
+    EXPECT_EQ(provider->api_key, "sk-test123");
+}
+
+TEST_F(EncryptedProviderCacheTest, UpdateApiKeyReEncrypts) {
+    auto id = insert_provider("openai-prod",
+                              "openai",
+                              "https://api.openai.com/v1",
+                              "text-embedding-3-small",
+                              "sk-old-key");
+
+    // Update the api_key.
+    use_database(system_database_name);
+    exec_ok("UPDATE sys_providers SET api_key_encrypted = 'sk-new-key' "
+            "WHERE name = 'openai-prod'");
+    use_database("giodb");
+
+    // The cache should have the new decrypted key.
+    auto provider = cache_->get("openai-prod");
+    ASSERT_TRUE(provider.has_value());
+    EXPECT_EQ(provider->api_key, "sk-new-key");
+
+    // The raw value on disk should be encrypted.
+    std::string raw = read_raw_api_key(id);
+    EXPECT_NE(raw, "sk-new-key");
+    EXPECT_TRUE(SecretsManager::looks_encrypted(raw));
+}
+
+TEST_F(EncryptedProviderCacheTest, MultipleProvidersWithKeys) {
+    insert_provider("openai-prod",
+                    "openai",
+                    "https://api.openai.com/v1",
+                    "text-embedding-3-small",
+                    "sk-openai-123");
+    insert_provider(
+        "anthropic-prod", "openai", "https://api.anthropic.com/v1", "claude-3-opus", "sk-ant-456");
+    insert_provider("ollama-local", "ollama", "http://localhost:11434", "nomic-embed-text");
+
+    EXPECT_EQ(cache_->size(), 3u);
+
+    auto p1 = cache_->get("openai-prod");
+    ASSERT_TRUE(p1.has_value());
+    EXPECT_EQ(p1->api_key, "sk-openai-123");
+
+    auto p2 = cache_->get("anthropic-prod");
+    ASSERT_TRUE(p2.has_value());
+    EXPECT_EQ(p2->api_key, "sk-ant-456");
+
+    auto p3 = cache_->get("ollama-local");
+    ASSERT_TRUE(p3.has_value());
+    EXPECT_EQ(p3->api_key, "");
+}
+
+TEST_F(EncryptedProviderCacheTest, ShowProvidersDoesNotExposeKeys) {
+    insert_provider("openai-prod",
+                    "openai",
+                    "https://api.openai.com/v1",
+                    "text-embedding-3-small",
+                    "sk-secret");
+
+    auto qr = exec_ok("SHOW PROVIDERS");
+    ASSERT_EQ(qr.rows.size(), 1u);
+
+    // SHOW PROVIDERS should not include api_key column at all.
+    for (const auto& col : qr.column_names) {
+        EXPECT_NE(col, "api_key_encrypted");
+        EXPECT_NE(col, "api_key");
+    }
 }

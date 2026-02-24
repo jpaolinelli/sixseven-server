@@ -49,6 +49,16 @@ void QueryEngine::set_provider_cache(ProviderCache* cache) {
     provider_cache_ = cache;
 }
 
+void QueryEngine::push_skip_masking() {
+    ++skip_masking_depth_;
+}
+
+void QueryEngine::pop_skip_masking() {
+    if (skip_masking_depth_ > 0) {
+        --skip_masking_depth_;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Full pipeline
 // ---------------------------------------------------------------------------
@@ -836,6 +846,22 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
         qr.column_types.clear();
     }
 
+    // Mask api_key_encrypted in SELECT results from sys_providers.
+    // Skip masking when internal queries need raw encrypted values
+    // (e.g., ProviderCache::load uses push_skip_masking/pop_skip_masking).
+    if (skip_masking_depth_ == 0) {
+        for (size_t col = 0; col < qr.column_names.size(); ++col) {
+            if (qr.column_names[col] == "api_key_encrypted") {
+                for (auto& row : qr.rows) {
+                    if (col < row.size() && !row[col].is_null()) {
+                        row[col] = Value(std::string("********"));
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     // Invalidate provider cache if DML targeted sys_providers.
     maybe_invalidate_provider_cache(bound);
 
@@ -846,7 +872,8 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                 // Compensate: re-insert the deleted in-use provider.
                 auto prev_db = current_database_id_;
                 set_current_database(system_database_id);
-                std::string api_key_val = pp.api_key.empty() ? "NULL" : "'" + pp.api_key + "'";
+                std::string api_key_val =
+                    pp.api_key.empty() ? "NULL" : "'" + pp.api_key.str() + "'";
                 std::string sql =
                     "INSERT INTO sys_providers VALUES (" + std::to_string(pp.provider_id) + ", '" +
                     pp.name + "', '" + pp.type + "', '" + pp.endpoint + "', '" + pp.model + "', " +
@@ -876,7 +903,7 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
 }
 
 void QueryEngine::maybe_invalidate_provider_cache(const BoundStatement& bound) {
-    if (!provider_cache_) {
+    if (!provider_cache_ || provider_cache_->is_loading()) {
         return;
     }
 

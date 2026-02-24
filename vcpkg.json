@@ -27,6 +27,10 @@
     {
       "name": "cpp-httplib",
       "version>=": "0.18.3"
+    },
+    {
+      "name": "openssl",
+      "version>=": "3.4.1"
     }
   ]
 }

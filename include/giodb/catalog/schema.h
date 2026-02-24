@@ -1,5 +1,6 @@
 #pragma once
 
+#include "giodb/common/secure_string.h"
 #include "giodb/common/types.h"
 
 #include <cstdint>
@@ -105,7 +106,7 @@ struct ProviderConfig {
     std::string type;        ///< Provider type: "openai", "ollama", "onnx"
     std::string endpoint;    ///< API endpoint URL
     std::string model;       ///< Model identifier
-    std::string api_key;     ///< Decrypted API key (in-memory only)
+    SecureString api_key;    ///< Decrypted API key (in-memory only, zeroed on deallocation)
     bool is_default = false; ///< At most one provider can be default
 };
 
