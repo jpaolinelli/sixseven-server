@@ -92,6 +92,9 @@ Result<Config> Config::load_from_file(const std::string& path) {
         if (repl.contains("max_retry_interval_ms") && repl["max_retry_interval_ms"].is_number()) {
             config.replication_max_retry_interval_ms = repl["max_retry_interval_ms"].get<int32_t>();
         }
+        if (repl.contains("promote_max_lag_bytes") && repl["promote_max_lag_bytes"].is_number()) {
+            config.replication_promote_max_lag_bytes = repl["promote_max_lag_bytes"].get<int64_t>();
+        }
         if (repl.contains("synchronous_mode") && repl["synchronous_mode"].is_string()) {
             config.replication_synchronous_mode = repl["synchronous_mode"].get<std::string>();
         }
@@ -168,6 +171,8 @@ void Config::apply_setting(const std::string& key, const std::string& value) {
         replication_synchronous_timeout_ms = std::stoi(value);
     } else if (key == "replication.synchronous_fallback") {
         replication_synchronous_fallback = value;
+    } else if (key == "replication.promote_max_lag_bytes") {
+        replication_promote_max_lag_bytes = std::stoll(value);
     }
     // Unknown keys are silently ignored.
 }

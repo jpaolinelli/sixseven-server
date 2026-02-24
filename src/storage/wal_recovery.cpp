@@ -74,6 +74,7 @@ bool WalRecovery::is_data_record(WalRecordType type) {
     case WalRecordType::COMMIT:
     case WalRecordType::ABORT:
     case WalRecordType::CHECKPOINT:
+    case WalRecordType::PROMOTE:
         return false;
     }
     return false; // Unreachable — silences compiler warning.

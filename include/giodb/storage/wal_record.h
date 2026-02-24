@@ -35,6 +35,7 @@ enum class WalRecordType : uint8_t {
     CHECKPOINT = 7,
     CREATE_TABLE = 8,
     DROP_TABLE = 9,
+    PROMOTE = 10,
 };
 
 /// Return a human-readable name for a WalRecordType.
@@ -60,6 +61,8 @@ inline const char* wal_record_type_name(WalRecordType type) {
         return "CREATE_TABLE";
     case WalRecordType::DROP_TABLE:
         return "DROP_TABLE";
+    case WalRecordType::PROMOTE:
+        return "PROMOTE";
     }
     return "UNKNOWN";
 }

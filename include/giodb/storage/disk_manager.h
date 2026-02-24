@@ -92,6 +92,12 @@ public:
     /// fail on read-only files. Used by standby servers for user table access.
     [[nodiscard]] Result<FileId> open_file_readonly(const std::filesystem::path& path);
 
+    /// Re-open a read-only file in read/write mode.
+    /// Closes the read-only fd (releasing the shared lock), re-opens with O_RDWR,
+    /// and acquires an exclusive advisory lock. Used during standby promotion to
+    /// switch data files from read-only to writable without changing the FileId.
+    [[nodiscard]] Result<void> reopen_file_readwrite(FileId file_id);
+
     /// Close a file handle. The FileId may be reused by future open/create calls.
     [[nodiscard]] Result<void> close_file(FileId file_id);
 

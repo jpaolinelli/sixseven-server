@@ -114,7 +114,7 @@ Result<WalRecord> deserialize_wal_record(std::span<const uint8_t> buf) {
     record.txn_id = read_native<uint64_t>(buf, offset);
     record.prev_lsn = read_native<uint64_t>(buf, offset);
     auto raw_type = read_native<uint8_t>(buf, offset);
-    if (raw_type > static_cast<uint8_t>(WalRecordType::DROP_TABLE)) {
+    if (raw_type > static_cast<uint8_t>(WalRecordType::PROMOTE)) {
         return make_error(StatusCode::INVALID_ARGUMENT,
                           "WAL record has invalid type: " + std::to_string(raw_type));
     }
