@@ -4,6 +4,7 @@
 #include "giodb/server/replication_connection.h"
 #include "giodb/server/replication_message.h"
 #include "giodb/server/replication_slot.h"
+#include "giodb/server/sync_replication.h"
 #include "giodb/storage/wal.h"
 #include "giodb/storage/wal_archive.h"
 #include "giodb/storage/wal_record.h"
@@ -64,13 +65,15 @@ public:
     /// @param options       Configuration.
     /// @param slot_mgr     Replication slot manager (may be nullptr).
     /// @param slot_name    Replication slot name (empty if no slot).
+    /// @param sync_mgr     Synchronous replication manager (may be nullptr).
     WalSender(std::unique_ptr<ReplicationConnection> connection,
               std::filesystem::path wal_dir,
               WalArchiveManager* archive_mgr,
               WalWriter& writer,
               WalSenderOptions options = {},
               ReplicationSlotManager* slot_mgr = nullptr,
-              std::string slot_name = {});
+              std::string slot_name = {},
+              SyncReplicationManager* sync_mgr = nullptr);
     ~WalSender();
 
     WalSender(const WalSender&) = delete;
@@ -133,6 +136,7 @@ private:
     WalSenderOptions options_;
     ReplicationSlotManager* slot_mgr_;
     std::string slot_name_;
+    SyncReplicationManager* sync_mgr_;
 
     std::thread stream_thread_;
     std::atomic<State> state_{State::CREATED};

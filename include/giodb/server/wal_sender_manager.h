@@ -2,6 +2,7 @@
 
 #include "giodb/common/result.h"
 #include "giodb/server/replication_connection.h"
+#include "giodb/server/sync_replication.h"
 #include "giodb/server/wal_sender.h"
 #include "giodb/storage/wal.h"
 #include "giodb/storage/wal_archive.h"
@@ -28,7 +29,8 @@ public:
                      WalWriter& writer,
                      uint32_t max_wal_senders = 10,
                      WalSenderOptions sender_options = {},
-                     ReplicationSlotManager* slot_mgr = nullptr);
+                     ReplicationSlotManager* slot_mgr = nullptr,
+                     SyncReplicationManager* sync_mgr = nullptr);
     ~WalSenderManager();
 
     WalSenderManager(const WalSenderManager&) = delete;
@@ -76,6 +78,7 @@ private:
     uint32_t max_wal_senders_;
     WalSenderOptions sender_options_;
     ReplicationSlotManager* slot_mgr_;
+    SyncReplicationManager* sync_mgr_;
 
     mutable std::mutex senders_mutex_;
     std::vector<std::unique_ptr<WalSender>> senders_;

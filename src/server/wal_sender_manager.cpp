@@ -11,9 +11,11 @@ WalSenderManager::WalSenderManager(std::filesystem::path wal_dir,
                                    WalWriter& writer,
                                    uint32_t max_wal_senders,
                                    WalSenderOptions sender_options,
-                                   ReplicationSlotManager* slot_mgr)
+                                   ReplicationSlotManager* slot_mgr,
+                                   SyncReplicationManager* sync_mgr)
     : wal_dir_(std::move(wal_dir)), archive_mgr_(archive_mgr), writer_(writer),
-      max_wal_senders_(max_wal_senders), sender_options_(sender_options), slot_mgr_(slot_mgr) {}
+      max_wal_senders_(max_wal_senders), sender_options_(sender_options), slot_mgr_(slot_mgr),
+      sync_mgr_(sync_mgr) {}
 
 WalSenderManager::~WalSenderManager() {
     stop_all();
@@ -42,7 +44,8 @@ Result<void> WalSenderManager::accept_connection(std::unique_ptr<ReplicationConn
                                               writer_,
                                               sender_options_,
                                               slot_mgr_,
-                                              slot_name);
+                                              slot_name,
+                                              sync_mgr_);
 
     auto result = sender->start_streaming(start_lsn);
     if (!result) {
