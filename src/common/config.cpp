@@ -86,6 +86,10 @@ void Config::apply_setting(const std::string& key, const std::string& value) {
         wal_segment_size_mb = std::stoull(value);
     } else if (key == "logging.level") {
         log_level = value;
+    } else if (key == "replication.archive_enabled") {
+        archive_enabled = (value == "TRUE" || value == "true" || value == "1");
+    } else if (key == "replication.archive_cleanup_policy") {
+        archive_cleanup_policy = value;
     }
     // Unknown keys are silently ignored.
 }

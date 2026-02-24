@@ -16,6 +16,8 @@ struct Config {
     size_t wal_segment_size_mb = 16;
     size_t max_connections = 100;
     std::string master_key_path; // defaults to <data_dir>/master.key
+    bool archive_enabled = false;
+    std::string archive_cleanup_policy = "keep_all";
 
     /// Create a Config with all default values.
     static Config load_defaults();

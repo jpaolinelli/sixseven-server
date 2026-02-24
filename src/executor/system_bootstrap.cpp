@@ -147,6 +147,16 @@ Result<void> SystemBootstrap::seed_default_settings(QueryEngine& engine, const C
          "logging",
          "Log level (trace/debug/info/warn/error)",
          true},
+        {"replication.archive_enabled",
+         config.archive_enabled ? "true" : "false",
+         "replication",
+         "Enable WAL segment archiving",
+         false},
+        {"replication.archive_cleanup_policy",
+         config.archive_cleanup_policy,
+         "replication",
+         "Archive cleanup policy (keep_all/keep_last_n/keep_since_lsn)",
+         false},
     };
 
     for (const auto& s : defaults) {

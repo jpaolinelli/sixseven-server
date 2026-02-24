@@ -312,16 +312,30 @@ Result<void> WalWriter::rotate_segment() {
         flushed_lsn_.store(next_lsn_ > 0 ? next_lsn_ - 1 : 0, std::memory_order_release);
     }
 
+    // Remember the completed segment ID and last LSN before closing.
+    uint64_t completed_segment = segment_id_;
+    lsn_t completed_lsn = next_lsn_ > 0 ? next_lsn_ - 1 : 0;
+
     auto result = close_segment();
     if (!result) {
         return result;
     }
 
-    uint64_t next_seg = segment_id_ + 1;
+    uint64_t next_seg = completed_segment + 1;
 
     GIODB_LOG_INFO("WAL rotating to segment {}", next_seg);
 
+    // Notify the archive callback (e.g., to enqueue async archival).
+    if (on_segment_rotated_) {
+        on_segment_rotated_(completed_segment, completed_lsn);
+    }
+
     return open_segment(next_seg);
+}
+
+void WalWriter::set_on_segment_rotated(OnSegmentRotated callback) {
+    std::lock_guard<std::mutex> lock(latch_);
+    on_segment_rotated_ = std::move(callback);
 }
 
 Result<void> WalWriter::scan_segment() {
