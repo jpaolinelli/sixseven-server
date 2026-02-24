@@ -188,7 +188,23 @@ WalArchiveManager::get_archived_segment(uint64_t segment_number) const {
     return ok(path);
 }
 
+void WalArchiveManager::set_retention_lsn_provider(std::function<lsn_t()> provider) {
+    retention_lsn_provider_ = std::move(provider);
+}
+
 Result<void> WalArchiveManager::cleanup_before(lsn_t lsn) {
+    // Clamp the cleanup LSN to respect replication slot retention.
+    if (retention_lsn_provider_) {
+        lsn_t min_slot_lsn = retention_lsn_provider_();
+        if (min_slot_lsn != invalid_lsn && min_slot_lsn < lsn) {
+            GIODB_LOG_INFO("WAL archive cleanup: clamping cleanup LSN from {} to {} "
+                           "(replication slot retention)",
+                           lsn,
+                           min_slot_lsn);
+            lsn = min_slot_lsn;
+        }
+    }
+
     auto segments = list_segments_in_dir(archive_dir_);
     if (segments.empty()) {
         return ok();

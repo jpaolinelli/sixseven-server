@@ -37,4 +37,5 @@ target_link_libraries(giodb_executor
         giodb_planner
         giodb_graph
         giodb_vector
+        giodb_server
 )

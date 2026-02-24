@@ -6,6 +6,7 @@
 #include "giodb/executor/settings_cache.h"
 #include "giodb/executor/storage_manager.h"
 #include "giodb/executor/system_bootstrap.h"
+#include "giodb/server/replication_slot.h"
 #include "giodb/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
@@ -327,4 +328,51 @@ TEST_F(SetShowTest, SetWithStringLiteralQuotedValue) {
     auto entry = cache_->get("logging.level");
     ASSERT_TRUE(entry.has_value());
     EXPECT_EQ(entry->value, "trace");
+}
+
+// =============================================================================
+// SHOW REPLICATION SLOTS (GDB-196)
+// =============================================================================
+
+TEST_F(SetShowTest, ShowReplicationSlotsEmpty) {
+    // Wire up a slot manager with no slots.
+    auto tmp = std::filesystem::temp_directory_path() / "giodb_test_show_slots";
+    std::filesystem::create_directories(tmp);
+    giodb::ReplicationSlotManager slot_mgr(tmp);
+    engine_->set_slot_manager(&slot_mgr);
+
+    auto qr = exec_ok("SHOW REPLICATION SLOTS");
+    EXPECT_EQ(qr.column_names.size(), 5u);
+    EXPECT_EQ(qr.column_names[0], "slot_name");
+    EXPECT_EQ(qr.column_names[1], "slot_type");
+    EXPECT_EQ(qr.column_names[2], "active");
+    EXPECT_EQ(qr.column_names[3], "restart_lsn");
+    EXPECT_EQ(qr.column_names[4], "confirmed_flush_lsn");
+    EXPECT_TRUE(qr.rows.empty());
+
+    std::filesystem::remove_all(tmp);
+}
+
+TEST_F(SetShowTest, ShowReplicationSlotsWithData) {
+    auto tmp = std::filesystem::temp_directory_path() / "giodb_test_show_slots2";
+    std::filesystem::create_directories(tmp);
+    giodb::ReplicationSlotManager slot_mgr(tmp);
+    engine_->set_slot_manager(&slot_mgr);
+
+    ASSERT_TRUE(slot_mgr.create_slot("replica_1").has_value());
+    ASSERT_TRUE(slot_mgr.activate_slot("replica_1", 100).has_value());
+
+    auto qr = exec_ok("SHOW REPLICATION SLOTS");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "replica_1");
+    EXPECT_EQ(qr.rows[0][1].as_string(), "physical");
+    EXPECT_EQ(qr.rows[0][2].as_bool(), true);
+    EXPECT_EQ(qr.rows[0][3].as_int64(), 100);
+
+    std::filesystem::remove_all(tmp);
+}
+
+TEST_F(SetShowTest, ShowReplicationSlotsNoManager) {
+    // Without a slot manager set, should return an error.
+    exec_error("SHOW REPLICATION SLOTS", StatusCode::INTERNAL_ERROR);
 }

@@ -3,7 +3,6 @@
 #include "giodb/common/result.h"
 #include "giodb/storage/wal_record.h"
 
-#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <mutex>
