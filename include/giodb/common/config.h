@@ -29,6 +29,9 @@ struct Config {
     int32_t replication_retry_interval_ms = 5000; ///< Initial retry interval for reconnection.
     int32_t replication_max_retry_interval_ms = 60000; ///< Maximum retry interval (backoff cap).
 
+    // Promotion settings.
+    int64_t replication_promote_max_lag_bytes = 0; ///< Max replay lag for promotion (0 = any lag).
+
     // Synchronous replication settings.
     std::string replication_synchronous_mode =
         "off"; ///< off/remote_write/remote_flush/remote_apply.

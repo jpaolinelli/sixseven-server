@@ -309,6 +309,42 @@ Result<FileId> DiskManager::open_file_readonly(const std::filesystem::path& path
     return ok(file_id);
 }
 
+Result<void> DiskManager::reopen_file_readwrite(FileId file_id) {
+    auto file_result = get_open_file(file_id);
+    if (!file_result) {
+        return tl::unexpected(file_result.error());
+    }
+    OpenFile* file = *file_result;
+
+    if (!file->read_only) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "file is already writable");
+    }
+
+    auto path = file->path;
+
+    // Close the read-only fd (releases shared lock).
+    ::close(file->fd);
+    file->fd = -1;
+
+    // Re-open in read/write mode.
+    int fd = ::open(path.c_str(), O_RDWR);
+    if (fd < 0) {
+        return make_error(StatusCode::IO_ERROR,
+                          "failed to reopen file: " + path.string() + ": " + std::strerror(errno));
+    }
+
+    // Acquire exclusive advisory lock.
+    if (::flock(fd, LOCK_EX | LOCK_NB) < 0) {
+        ::close(fd);
+        return make_error(StatusCode::IO_ERROR,
+                          "failed to acquire exclusive lock on file: " + path.string());
+    }
+
+    file->fd = fd;
+    file->read_only = false;
+    return ok();
+}
+
 Result<void> DiskManager::close_file(FileId file_id) {
     auto file_result = get_open_file(file_id);
     if (!file_result) {

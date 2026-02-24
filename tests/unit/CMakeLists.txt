@@ -63,6 +63,7 @@ add_executable(giodb_unit_tests
     test_wal_sender_manager.cpp
     test_wal_receiver.cpp
     test_standby_mode.cpp
+    test_promotion.cpp
 )
 
 target_link_libraries(giodb_unit_tests
