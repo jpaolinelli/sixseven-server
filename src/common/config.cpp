@@ -8,7 +8,10 @@
 namespace giodb {
 
 Config Config::load_defaults() {
-    return Config{};
+    Config config;
+    // Default master_key_path derived from data_dir.
+    config.master_key_path = config.data_dir + "/master.key";
+    return config;
 }
 
 Result<Config> Config::load_from_file(const std::string& path) {
@@ -53,6 +56,14 @@ Result<Config> Config::load_from_file(const std::string& path) {
     }
     if (j.contains("max_connections") && j["max_connections"].is_number_unsigned()) {
         config.max_connections = j["max_connections"].get<size_t>();
+    }
+    if (j.contains("master_key_path") && j["master_key_path"].is_string()) {
+        config.master_key_path = j["master_key_path"].get<std::string>();
+    }
+
+    // Default master_key_path to <data_dir>/master.key if not explicitly set.
+    if (config.master_key_path.empty()) {
+        config.master_key_path = config.data_dir + "/master.key";
     }
 
     return ok(std::move(config));

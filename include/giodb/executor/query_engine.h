@@ -87,6 +87,14 @@ public:
     /// Set the provider cache for SHOW PROVIDERS and provider management.
     void set_provider_cache(ProviderCache* cache);
 
+    /// Increment the skip-masking counter. While > 0, api_key_encrypted
+    /// values in SELECT results are not masked. Used by ProviderCache::load()
+    /// which needs raw encrypted values.
+    void push_skip_masking();
+
+    /// Decrement the skip-masking counter.
+    void pop_skip_masking();
+
 private:
     /// Execute a SET parameter = value statement.
     [[nodiscard]] Result<QueryResult> execute_set(const SetStmt& stmt);
@@ -138,6 +146,7 @@ private:
     SettingsCache* settings_cache_ = nullptr;
     ProviderCache* provider_cache_ = nullptr;
     database_id_t current_database_id_ = default_database_id;
+    int skip_masking_depth_ = 0;
 };
 
 } // namespace giodb
