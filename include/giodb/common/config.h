@@ -18,6 +18,9 @@ struct Config {
     std::string master_key_path; // defaults to <data_dir>/master.key
     bool archive_enabled = false;
     std::string archive_cleanup_policy = "keep_all";
+    int32_t replication_max_wal_senders = 10;
+    int32_t replication_keepalive_interval_ms = 10000;
+    int32_t replication_sender_timeout_ms = 60000;
 
     /// Create a Config with all default values.
     static Config load_defaults();
