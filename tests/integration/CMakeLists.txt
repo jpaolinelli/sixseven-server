@@ -2,6 +2,7 @@
 
 add_executable(giodb_integration_tests
     test_multi_database.cpp
+    test_system_database.cpp
 )
 
 target_link_libraries(giodb_integration_tests
