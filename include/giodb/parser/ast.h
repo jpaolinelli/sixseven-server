@@ -96,6 +96,8 @@ enum class ShowTarget : uint8_t {
     INDEXES,
     PROVIDERS,
     REPLICATION_SLOTS,
+    REPLICATION_STATUS,
+    STANDBY_STATUS,
     PARAMETER,
     ALL,
 };

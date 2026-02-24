@@ -197,6 +197,16 @@ Result<void> SystemBootstrap::seed_default_settings(QueryEngine& engine, const C
          "replication",
          "Fallback on sync timeout (error/warn/block)",
          true},
+        {"replication.lag_warning_threshold_ms",
+         std::to_string(config.replication_lag_warning_threshold_ms),
+         "replication",
+         "Replication lag threshold in ms before warning is logged",
+         true},
+        {"replication.disconnect_warning_threshold_ms",
+         std::to_string(config.replication_disconnect_warning_threshold_ms),
+         "replication",
+         "Replica disconnect threshold in ms before error is logged",
+         true},
     };
 
     for (const auto& s : defaults) {

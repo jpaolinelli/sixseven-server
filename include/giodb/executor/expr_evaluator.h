@@ -11,6 +11,8 @@ namespace giodb {
 // Forward declarations.
 class Catalog;
 class StorageManager;
+class WalReceiver;
+class WalWriter;
 
 /// Context for evaluating subquery expressions at runtime.
 ///
@@ -21,6 +23,22 @@ struct SubqueryContext {
     const Catalog& catalog;
     StorageManager& storage;
 };
+
+/// Context for evaluating system functions (pg_current_wal_lsn, etc.).
+///
+/// Set by QueryEngine before executing a query so that the expression
+/// evaluator can resolve replication-related system functions.
+struct SystemFunctionContext {
+    bool standby_mode = false;
+    WalWriter* wal_writer = nullptr;
+    WalReceiver* wal_receiver = nullptr;
+};
+
+/// Set the thread-local system function context for expression evaluation.
+void set_system_function_context(const SystemFunctionContext* ctx);
+
+/// Get the current thread-local system function context.
+const SystemFunctionContext* get_system_function_context();
 
 /// Evaluate an expression against a tuple, returning a Value.
 ///

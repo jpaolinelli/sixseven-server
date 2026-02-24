@@ -3,6 +3,7 @@
 #include "giodb/common/logging.h"
 
 #include <algorithm>
+#include <unordered_set>
 
 namespace giodb {
 
@@ -102,15 +103,30 @@ uint32_t WalSenderManager::max_wal_senders() const {
 
 std::vector<WalSenderManager::SenderStatus> WalSenderManager::get_sender_statuses() const {
     std::lock_guard lock(senders_mutex_);
+
+    // Determine which replicas are in synchronous mode.
+    std::unordered_set<std::string> sync_names;
+    if (sync_mgr_) {
+        auto cfg = sync_mgr_->current_config();
+        sync_names = cfg.standby_names;
+    }
+
     std::vector<SenderStatus> statuses;
     statuses.reserve(senders_.size());
     for (const auto& sender : senders_) {
+        std::string sync_state = "async";
+        if (!sender->slot_name().empty() && sync_names.count(sender->slot_name())) {
+            sync_state = "sync";
+        }
         statuses.push_back({
+            sender->slot_name(),
             sender->peer_description(),
             sender->state(),
+            sender->sent_lsn(),
             sender->replica_received_lsn(),
             sender->replica_applied_lsn(),
             sender->replica_flushed_lsn(),
+            std::move(sync_state),
         });
     }
     return statuses;

@@ -12,6 +12,9 @@
 #include "giodb/planner/binder.h"
 #include "giodb/planner/type_resolver.h"
 #include "giodb/server/replication_slot.h"
+#include "giodb/server/wal_receiver.h"
+#include "giodb/server/wal_sender_manager.h"
+#include "giodb/storage/wal.h"
 #include "giodb/table/tuple.h"
 #include "giodb/vector/embedding_column.h"
 #include "giodb/vector/hnsw_index.h"
@@ -54,6 +57,18 @@ void QueryEngine::set_slot_manager(ReplicationSlotManager* slot_mgr) {
     slot_mgr_ = slot_mgr;
 }
 
+void QueryEngine::set_wal_sender_manager(WalSenderManager* sender_mgr) {
+    sender_mgr_ = sender_mgr;
+}
+
+void QueryEngine::set_wal_receiver(WalReceiver* receiver) {
+    wal_receiver_ = receiver;
+}
+
+void QueryEngine::set_wal_writer(WalWriter* writer) {
+    wal_writer_ = writer;
+}
+
 void QueryEngine::set_standby_mode(bool enabled) {
     standby_mode_ = enabled;
 }
@@ -77,6 +92,23 @@ void QueryEngine::pop_skip_masking() {
 // ---------------------------------------------------------------------------
 
 Result<QueryResult> QueryEngine::execute(const std::string& sql) {
+    // Set system function context for replication functions.
+    SystemFunctionContext sys_fn_ctx;
+    sys_fn_ctx.standby_mode = standby_mode_;
+    sys_fn_ctx.wal_writer = wal_writer_;
+    sys_fn_ctx.wal_receiver = wal_receiver_;
+    set_system_function_context(&sys_fn_ctx);
+
+    // Ensure context is cleared on exit.
+    struct ContextGuard {
+        ContextGuard() = default;
+        ~ContextGuard() { set_system_function_context(nullptr); }
+        ContextGuard(const ContextGuard&) = delete;
+        ContextGuard& operator=(const ContextGuard&) = delete;
+        ContextGuard(ContextGuard&&) = delete;
+        ContextGuard& operator=(ContextGuard&&) = delete;
+    } ctx_guard;
+
     // 1. Lex.
     Lexer lexer(sql);
     auto tokens = lexer.tokenize();
@@ -155,6 +187,69 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
     }
     if (auto* show = dynamic_cast<const ShowStmt*>(stmt_ptr->get())) {
         return execute_show(*show);
+    }
+
+    // 4b. Handle SELECT <system_function()> without FROM clause.
+    if (auto* select = dynamic_cast<const SelectStmt*>(stmt_ptr->get())) {
+        if (select->from.empty() && !select->items.empty()) {
+            // Check if all items are system function calls.
+            bool all_system_fns = true;
+            for (const auto& item : select->items) {
+                auto* fn = dynamic_cast<const FunctionCallExpr*>(item.expr.get());
+                if (!fn) {
+                    all_system_fns = false;
+                    break;
+                }
+                std::string upper;
+                for (char c : fn->name) {
+                    upper += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                }
+                if (upper != "PG_CURRENT_WAL_LSN" && upper != "PG_IS_IN_RECOVERY" &&
+                    upper != "PG_LAST_WAL_REPLAY_LSN") {
+                    all_system_fns = false;
+                    break;
+                }
+            }
+            if (all_system_fns) {
+                QueryResult qr;
+                std::vector<Value> row;
+                for (const auto& item : select->items) {
+                    auto* fn = dynamic_cast<const FunctionCallExpr*>(item.expr.get());
+                    std::string upper;
+                    for (char c : fn->name) {
+                        upper += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                    }
+                    std::string col_name = item.alias.empty() ? fn->name + "()" : item.alias;
+                    qr.column_names.push_back(col_name);
+
+                    if (upper == "PG_CURRENT_WAL_LSN") {
+                        qr.column_types.push_back(TypeId::INT64);
+                        if (wal_writer_) {
+                            row.emplace_back(static_cast<int64_t>(wal_writer_->current_lsn()));
+                        } else {
+                            row.emplace_back(Value::make_null());
+                        }
+                    } else if (upper == "PG_IS_IN_RECOVERY") {
+                        qr.column_types.push_back(TypeId::BOOL);
+                        row.emplace_back(standby_mode_);
+                    } else if (upper == "PG_LAST_WAL_REPLAY_LSN") {
+                        qr.column_types.push_back(TypeId::INT64);
+                        if (wal_receiver_) {
+                            auto state = wal_receiver_->get_state();
+                            if (state.applied_lsn != invalid_lsn) {
+                                row.emplace_back(static_cast<int64_t>(state.applied_lsn));
+                            } else {
+                                row.emplace_back(Value::make_null());
+                            }
+                        } else {
+                            row.emplace_back(Value::make_null());
+                        }
+                    }
+                }
+                qr.rows.push_back(std::move(row));
+                return ok(std::move(qr));
+            }
+        }
     }
 
     // 5. Bind.
@@ -1182,6 +1277,111 @@ Result<QueryResult> QueryEngine::execute_show(const ShowStmt& stmt) {
                                    ? Value(static_cast<int64_t>(s.confirmed_flush_lsn))
                                    : Value()});
         }
+        return ok(std::move(qr));
+    }
+
+    case ShowTarget::REPLICATION_STATUS: {
+        if (sender_mgr_ == nullptr) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "WAL sender manager not initialized (not running as primary)");
+        }
+        auto statuses = sender_mgr_->get_sender_statuses();
+
+        QueryResult qr;
+        qr.column_names = {"slot_name",
+                           "client_addr",
+                           "state",
+                           "sent_lsn",
+                           "write_lsn",
+                           "flush_lsn",
+                           "replay_lsn",
+                           "write_lag_ms",
+                           "flush_lag_ms",
+                           "replay_lag_ms",
+                           "sync_state"};
+        qr.column_types = {TypeId::STRING,
+                           TypeId::STRING,
+                           TypeId::STRING,
+                           TypeId::INT64,
+                           TypeId::INT64,
+                           TypeId::INT64,
+                           TypeId::INT64,
+                           TypeId::INT64,
+                           TypeId::INT64,
+                           TypeId::INT64,
+                           TypeId::STRING};
+
+        // Get current WAL position for lag calculation.
+        lsn_t current_lsn = wal_writer_ ? wal_writer_->current_lsn() : 0;
+
+        for (const auto& s : statuses) {
+            // State string.
+            std::string state_str;
+            switch (s.state) {
+            case WalSender::State::CREATED:
+                state_str = "startup";
+                break;
+            case WalSender::State::CATCHING_UP:
+                state_str = "catchup";
+                break;
+            case WalSender::State::STREAMING:
+                state_str = "streaming";
+                break;
+            case WalSender::State::STOPPED:
+                state_str = "stopped";
+                break;
+            }
+
+            // Lag is the difference between primary's current LSN and replica's
+            // reported positions (in bytes, used as a proxy for milliseconds
+            // since we don't track timestamps per-LSN).
+            auto lag = [current_lsn](lsn_t replica_lsn) -> int64_t {
+                if (replica_lsn == invalid_lsn || current_lsn == 0) {
+                    return -1;
+                }
+                return static_cast<int64_t>(current_lsn) - static_cast<int64_t>(replica_lsn);
+            };
+
+            qr.rows.push_back(
+                {Value(s.slot_name),
+                 Value(s.peer),
+                 Value(state_str),
+                 s.sent_lsn != invalid_lsn ? Value(static_cast<int64_t>(s.sent_lsn)) : Value(),
+                 s.received_lsn != invalid_lsn ? Value(static_cast<int64_t>(s.received_lsn))
+                                               : Value(),
+                 s.flushed_lsn != invalid_lsn ? Value(static_cast<int64_t>(s.flushed_lsn))
+                                              : Value(),
+                 s.applied_lsn != invalid_lsn ? Value(static_cast<int64_t>(s.applied_lsn))
+                                              : Value(),
+                 Value(lag(s.received_lsn)),
+                 Value(lag(s.flushed_lsn)),
+                 Value(lag(s.applied_lsn)),
+                 Value(s.sync_state)});
+        }
+        return ok(std::move(qr));
+    }
+
+    case ShowTarget::STANDBY_STATUS: {
+        if (wal_receiver_ == nullptr) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "WAL receiver not initialized (not running as standby)");
+        }
+        auto state = wal_receiver_->get_state();
+
+        QueryResult qr;
+        qr.column_names = {
+            "received_lsn", "applied_lsn", "flushed_lsn", "replication_lag_ms", "is_streaming"};
+        qr.column_types = {
+            TypeId::INT64, TypeId::INT64, TypeId::INT64, TypeId::INT64, TypeId::BOOL};
+        qr.rows.push_back(
+            {state.received_lsn != invalid_lsn ? Value(static_cast<int64_t>(state.received_lsn))
+                                               : Value(),
+             state.applied_lsn != invalid_lsn ? Value(static_cast<int64_t>(state.applied_lsn))
+                                              : Value(),
+             state.flushed_lsn != invalid_lsn ? Value(static_cast<int64_t>(state.flushed_lsn))
+                                              : Value(),
+             Value(static_cast<int64_t>(state.replication_lag.count())),
+             Value(state.is_streaming)});
         return ok(std::move(qr));
     }
 

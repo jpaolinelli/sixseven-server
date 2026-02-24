@@ -8,6 +8,8 @@
 #include "giodb/parser/lexer.h"
 #include "giodb/parser/parser.h"
 #include "giodb/planner/type_resolver.h"
+#include "giodb/server/wal_receiver.h"
+#include "giodb/storage/wal.h"
 
 #include <algorithm>
 #include <cctype>
@@ -16,6 +18,17 @@
 #include <string>
 
 namespace giodb {
+
+// Thread-local system function context for replication functions.
+static thread_local const SystemFunctionContext* tl_sys_fn_ctx = nullptr;
+
+void set_system_function_context(const SystemFunctionContext* ctx) {
+    tl_sys_fn_ctx = ctx;
+}
+
+const SystemFunctionContext* get_system_function_context() {
+    return tl_sys_fn_ctx;
+}
 
 namespace {
 
@@ -751,12 +764,49 @@ Result<Value> eval_case(const CaseExpr& expr,
 // Function call (stub — full function evaluation is a later ticket)
 // ---------------------------------------------------------------------------
 
-Result<Value> eval_function(const FunctionCallExpr& /*expr*/,
+Result<Value> eval_function(const FunctionCallExpr& expr,
                             const Tuple& /*tuple*/,
                             const OutputSchema& /*schema*/,
                             const BoundStatement& /*bound*/,
                             const SubqueryContext* /*subquery_ctx*/) {
-    return make_error(StatusCode::NOT_IMPLEMENTED, "function evaluation not yet implemented");
+    // Uppercase the function name for case-insensitive matching.
+    std::string upper;
+    upper.reserve(expr.name.size());
+    for (char c : expr.name) {
+        upper += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    }
+
+    // Replication system functions.
+    if (upper == "PG_CURRENT_WAL_LSN") {
+        auto* ctx = tl_sys_fn_ctx;
+        if (!ctx || !ctx->wal_writer) {
+            return ok(Value::make_null());
+        }
+        return ok(Value(static_cast<int64_t>(ctx->wal_writer->current_lsn())));
+    }
+
+    if (upper == "PG_IS_IN_RECOVERY") {
+        auto* ctx = tl_sys_fn_ctx;
+        if (!ctx) {
+            return ok(Value(false));
+        }
+        return ok(Value(ctx->standby_mode));
+    }
+
+    if (upper == "PG_LAST_WAL_REPLAY_LSN") {
+        auto* ctx = tl_sys_fn_ctx;
+        if (!ctx || !ctx->wal_receiver) {
+            return ok(Value::make_null());
+        }
+        auto state = ctx->wal_receiver->get_state();
+        if (state.applied_lsn == invalid_lsn) {
+            return ok(Value::make_null());
+        }
+        return ok(Value(static_cast<int64_t>(state.applied_lsn)));
+    }
+
+    return make_error(StatusCode::NOT_IMPLEMENTED,
+                      "function '" + expr.name + "' is not yet implemented");
 }
 
 // ---------------------------------------------------------------------------

@@ -118,6 +118,9 @@ public:
     /// Return the last LSN that was sent to the replica.
     [[nodiscard]] lsn_t sent_lsn() const;
 
+    /// Return the replication slot name (empty if no slot).
+    [[nodiscard]] const std::string& slot_name() const;
+
 private:
     void streaming_loop();
     [[nodiscard]] Result<void> run_catchup(lsn_t start_lsn);

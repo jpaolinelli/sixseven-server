@@ -2,6 +2,7 @@
 
 add_library(giodb_server STATIC
     promotion_manager.cpp
+    replication_health_monitor.cpp
     replication_message.cpp
     replication_slot.cpp
     sync_replication.cpp

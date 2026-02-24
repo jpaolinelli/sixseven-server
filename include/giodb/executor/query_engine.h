@@ -32,6 +32,9 @@ class ProviderCache;
 class ProviderRegistry;
 class ReplicationSlotManager;
 class SettingsCache;
+class WalReceiver;
+class WalSenderManager;
+class WalWriter;
 
 /// Result of executing a SQL statement.
 struct QueryResult {
@@ -90,6 +93,15 @@ public:
 
     /// Set the replication slot manager for SHOW REPLICATION SLOTS.
     void set_slot_manager(ReplicationSlotManager* slot_mgr);
+
+    /// Set the WAL sender manager for SHOW REPLICATION STATUS (primary).
+    void set_wal_sender_manager(WalSenderManager* sender_mgr);
+
+    /// Set the WAL receiver for SHOW STANDBY STATUS (replica).
+    void set_wal_receiver(WalReceiver* receiver);
+
+    /// Set the WAL writer for pg_current_wal_lsn().
+    void set_wal_writer(WalWriter* writer);
 
     /// Enable or disable standby (read-only) mode.
     /// When enabled, all write operations are rejected.
@@ -157,6 +169,9 @@ private:
     SettingsCache* settings_cache_ = nullptr;
     ProviderCache* provider_cache_ = nullptr;
     ReplicationSlotManager* slot_mgr_ = nullptr;
+    WalSenderManager* sender_mgr_ = nullptr;
+    WalReceiver* wal_receiver_ = nullptr;
+    WalWriter* wal_writer_ = nullptr;
     database_id_t current_database_id_ = default_database_id;
     int skip_masking_depth_ = 0;
     bool standby_mode_ = false;
