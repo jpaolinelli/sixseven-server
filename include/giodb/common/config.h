@@ -40,6 +40,10 @@ struct Config {
     int32_t replication_synchronous_timeout_ms = 30000; ///< Timeout before fallback.
     std::string replication_synchronous_fallback = "error"; ///< error/warn/block.
 
+    // Health monitoring thresholds.
+    int64_t replication_lag_warning_threshold_ms = 10000;        ///< Lag threshold for warnings.
+    int64_t replication_disconnect_warning_threshold_ms = 60000; ///< Disconnect threshold.
+
     /// Create a Config with all default values.
     static Config load_defaults();
 

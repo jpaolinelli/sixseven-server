@@ -260,6 +260,17 @@ Result<TypeId> function_return_type(const std::string& name, const std::vector<T
         return ok(TypeId::TIMESTAMP);
     }
 
+    // Replication system functions
+    if (upper == "PG_CURRENT_WAL_LSN") {
+        return ok(TypeId::INT64);
+    }
+    if (upper == "PG_IS_IN_RECOVERY") {
+        return ok(TypeId::BOOL);
+    }
+    if (upper == "PG_LAST_WAL_REPLAY_LSN") {
+        return ok(TypeId::INT64);
+    }
+
     return make_error(StatusCode::TYPE_ERROR, "unknown function: " + name);
 }
 

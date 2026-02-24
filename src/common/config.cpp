@@ -116,6 +116,16 @@ Result<Config> Config::load_from_file(const std::string& path) {
             config.replication_synchronous_fallback =
                 repl["synchronous_fallback"].get<std::string>();
         }
+        if (repl.contains("lag_warning_threshold_ms") &&
+            repl["lag_warning_threshold_ms"].is_number()) {
+            config.replication_lag_warning_threshold_ms =
+                repl["lag_warning_threshold_ms"].get<int64_t>();
+        }
+        if (repl.contains("disconnect_warning_threshold_ms") &&
+            repl["disconnect_warning_threshold_ms"].is_number()) {
+            config.replication_disconnect_warning_threshold_ms =
+                repl["disconnect_warning_threshold_ms"].get<int64_t>();
+        }
     }
 
     return ok(std::move(config));
@@ -173,6 +183,10 @@ void Config::apply_setting(const std::string& key, const std::string& value) {
         replication_synchronous_fallback = value;
     } else if (key == "replication.promote_max_lag_bytes") {
         replication_promote_max_lag_bytes = std::stoll(value);
+    } else if (key == "replication.lag_warning_threshold_ms") {
+        replication_lag_warning_threshold_ms = std::stoll(value);
+    } else if (key == "replication.disconnect_warning_threshold_ms") {
+        replication_disconnect_warning_threshold_ms = std::stoll(value);
     }
     // Unknown keys are silently ignored.
 }

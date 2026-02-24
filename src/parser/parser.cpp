@@ -2254,14 +2254,30 @@ Result<StmtPtr> Parser::parse_show() {
         return ok(StmtPtr(std::move(stmt)));
     }
 
-    // SHOW REPLICATION SLOTS
+    // SHOW REPLICATION SLOTS / SHOW REPLICATION STATUS
     if (match_ident_ci(peek(), "REPLICATION")) {
         advance(); // consume REPLICATION
-        if (!match_ident_ci(peek(), "SLOTS")) {
-            return error("expected SLOTS after REPLICATION");
+        if (match_ident_ci(peek(), "SLOTS")) {
+            advance(); // consume SLOTS
+            stmt->target = ShowTarget::REPLICATION_SLOTS;
+            return ok(StmtPtr(std::move(stmt)));
         }
-        advance(); // consume SLOTS
-        stmt->target = ShowTarget::REPLICATION_SLOTS;
+        if (match_ident_ci(peek(), "STATUS")) {
+            advance(); // consume STATUS
+            stmt->target = ShowTarget::REPLICATION_STATUS;
+            return ok(StmtPtr(std::move(stmt)));
+        }
+        return error("expected SLOTS or STATUS after REPLICATION");
+    }
+
+    // SHOW STANDBY STATUS
+    if (match_ident_ci(peek(), "STANDBY")) {
+        advance(); // consume STANDBY
+        if (!match_ident_ci(peek(), "STATUS")) {
+            return error("expected STATUS after STANDBY");
+        }
+        advance(); // consume STATUS
+        stmt->target = ShowTarget::STANDBY_STATUS;
         return ok(StmtPtr(std::move(stmt)));
     }
 

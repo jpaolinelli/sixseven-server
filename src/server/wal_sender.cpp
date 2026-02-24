@@ -111,6 +111,10 @@ lsn_t WalSender::sent_lsn() const {
     return sent_lsn_.load();
 }
 
+const std::string& WalSender::slot_name() const {
+    return slot_name_;
+}
+
 uint64_t WalSender::now_us() {
     auto now = std::chrono::system_clock::now();
     auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch());

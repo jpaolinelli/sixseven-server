@@ -61,11 +61,14 @@ public:
 
     /// Status of a single sender for monitoring.
     struct SenderStatus {
+        std::string slot_name;
         std::string peer;
         WalSender::State state;
+        lsn_t sent_lsn;
         lsn_t received_lsn;
         lsn_t applied_lsn;
         lsn_t flushed_lsn;
+        std::string sync_state; ///< "async" or "sync"
     };
 
     /// Get status of all active senders.
