@@ -831,3 +831,278 @@ TEST(Helpers, TransactionStatusNames) {
     EXPECT_STREQ(transaction_status_name(TransactionStatus::COMMITTED), "COMMITTED");
     EXPECT_STREQ(transaction_status_name(TransactionStatus::ABORTED), "ABORTED");
 }
+
+// =============================================================================
+// SAVEPOINT / ROLLBACK TO / RELEASE SAVEPOINT tests
+// =============================================================================
+
+TEST(Savepoint, CreateAndRollbackRestoresWriteSet) {
+    TransactionManager mgr;
+    auto* t1 = mgr.begin().value();
+
+    RID rid_a = {1, 0};
+    RID rid_b = {1, 1};
+    RID rid_c = {2, 0};
+
+    // Write rid_a, then create a savepoint.
+    mgr.record_write(t1->txn_id, rid_a);
+    ASSERT_TRUE(mgr.savepoint(t1->txn_id, "sp1").has_value());
+
+    // Write more after the savepoint.
+    mgr.record_write(t1->txn_id, rid_b);
+    mgr.record_write(t1->txn_id, rid_c);
+    EXPECT_EQ(t1->write_set.size(), 3u);
+
+    // Rollback to sp1 — should restore write set to {rid_a}.
+    ASSERT_TRUE(mgr.rollback_to_savepoint(t1->txn_id, "sp1").has_value());
+    EXPECT_EQ(t1->write_set.size(), 1u);
+    EXPECT_TRUE(t1->write_set.count(rid_a) > 0);
+    EXPECT_FALSE(t1->write_set.count(rid_b) > 0);
+    EXPECT_FALSE(t1->write_set.count(rid_c) > 0);
+}
+
+TEST(Savepoint, RollbackAlsoRestoresReadSet) {
+    TransactionManager mgr;
+    auto* t1 = mgr.begin().value();
+
+    RID rid_x = {1, 0};
+    RID rid_y = {2, 0};
+
+    mgr.record_read(t1->txn_id, rid_x);
+    ASSERT_TRUE(mgr.savepoint(t1->txn_id, "sp1").has_value());
+
+    mgr.record_read(t1->txn_id, rid_y);
+    EXPECT_EQ(t1->read_set.size(), 2u);
+
+    ASSERT_TRUE(mgr.rollback_to_savepoint(t1->txn_id, "sp1").has_value());
+    EXPECT_EQ(t1->read_set.size(), 1u);
+    EXPECT_TRUE(t1->read_set.count(rid_x) > 0);
+    EXPECT_FALSE(t1->read_set.count(rid_y) > 0);
+}
+
+TEST(Savepoint, NestedSavepoints) {
+    TransactionManager mgr;
+    auto* t1 = mgr.begin().value();
+
+    mgr.record_write(t1->txn_id, {1, 0});
+    ASSERT_TRUE(mgr.savepoint(t1->txn_id, "sp1").has_value());
+
+    mgr.record_write(t1->txn_id, {2, 0});
+    ASSERT_TRUE(mgr.savepoint(t1->txn_id, "sp2").has_value());
+
+    mgr.record_write(t1->txn_id, {3, 0});
+    EXPECT_EQ(t1->write_set.size(), 3u);
+
+    // Rollback to sp2 — only undoes writes after sp2.
+    ASSERT_TRUE(mgr.rollback_to_savepoint(t1->txn_id, "sp2").has_value());
+    EXPECT_EQ(t1->write_set.size(), 2u);
+    EXPECT_TRUE(t1->write_set.count(RID{1, 0}) > 0);
+    EXPECT_TRUE(t1->write_set.count(RID{2, 0}) > 0);
+
+    // Rollback to sp1 — further undoes.
+    ASSERT_TRUE(mgr.rollback_to_savepoint(t1->txn_id, "sp1").has_value());
+    EXPECT_EQ(t1->write_set.size(), 1u);
+    EXPECT_TRUE(t1->write_set.count(RID{1, 0}) > 0);
+}
+
+TEST(Savepoint, RollbackToMiddleDestroysLaterSavepoints) {
+    TransactionManager mgr;
+    auto* t1 = mgr.begin().value();
+
+    ASSERT_TRUE(mgr.savepoint(t1->txn_id, "sp1").has_value());
+    ASSERT_TRUE(mgr.savepoint(t1->txn_id, "sp2").has_value());
+    ASSERT_TRUE(mgr.savepoint(t1->txn_id, "sp3").has_value());
+    EXPECT_EQ(t1->savepoints.size(), 3u);
+
+    // Rollback to sp1 — destroys sp2 and sp3.
+    ASSERT_TRUE(mgr.rollback_to_savepoint(t1->txn_id, "sp1").has_value());
+    EXPECT_EQ(t1->savepoints.size(), 1u);
+    EXPECT_EQ(t1->savepoints[0].name, "sp1");
+
+    // sp2 and sp3 no longer exist.
+    auto result = mgr.rollback_to_savepoint(t1->txn_id, "sp2");
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
+}
+
+TEST(Savepoint, SavepointRetainedAfterRollback) {
+    // Per SQL standard: ROLLBACK TO keeps the target savepoint, allowing reuse.
+    TransactionManager mgr;
+    auto* t1 = mgr.begin().value();
+
+    ASSERT_TRUE(mgr.savepoint(t1->txn_id, "sp1").has_value());
+    mgr.record_write(t1->txn_id, {1, 0});
+    ASSERT_TRUE(mgr.rollback_to_savepoint(t1->txn_id, "sp1").has_value());
+    EXPECT_EQ(t1->write_set.size(), 0u);
+
+    // Write again and rollback a second time — should still work.
+    mgr.record_write(t1->txn_id, {2, 0});
+    ASSERT_TRUE(mgr.rollback_to_savepoint(t1->txn_id, "sp1").has_value());
+    EXPECT_EQ(t1->write_set.size(), 0u);
+}
+
+TEST(Savepoint, ReleaseSavepoint) {
+    TransactionManager mgr;
+    auto* t1 = mgr.begin().value();
+
+    ASSERT_TRUE(mgr.savepoint(t1->txn_id, "sp1").has_value());
+    ASSERT_TRUE(mgr.savepoint(t1->txn_id, "sp2").has_value());
+    EXPECT_EQ(t1->savepoints.size(), 2u);
+
+    // Release sp1 — removes sp1 and sp2 (established after sp1).
+    ASSERT_TRUE(mgr.release_savepoint(t1->txn_id, "sp1").has_value());
+    EXPECT_TRUE(t1->savepoints.empty());
+
+    // Cannot rollback to released savepoint.
+    auto result = mgr.rollback_to_savepoint(t1->txn_id, "sp1");
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
+}
+
+TEST(Savepoint, NonExistentSavepointFails) {
+    TransactionManager mgr;
+    auto* t1 = mgr.begin().value();
+
+    auto result = mgr.rollback_to_savepoint(t1->txn_id, "nosuchsp");
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
+
+    auto rel = mgr.release_savepoint(t1->txn_id, "nosuchsp");
+    EXPECT_FALSE(rel.has_value());
+    EXPECT_EQ(rel.error().code, StatusCode::NOT_FOUND);
+}
+
+TEST(Savepoint, SavepointInNonActiveTransaction) {
+    TransactionManager mgr;
+    auto* t1 = mgr.begin().value();
+    ASSERT_TRUE(mgr.commit(t1->txn_id).has_value());
+
+    auto result = mgr.savepoint(t1->txn_id, "sp1");
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST(Savepoint, DuplicateNameUsesLatest) {
+    TransactionManager mgr;
+    auto* t1 = mgr.begin().value();
+
+    // Create two savepoints with the same name at different points.
+    mgr.record_write(t1->txn_id, {1, 0});
+    ASSERT_TRUE(mgr.savepoint(t1->txn_id, "dup").has_value());
+
+    mgr.record_write(t1->txn_id, {2, 0});
+    ASSERT_TRUE(mgr.savepoint(t1->txn_id, "dup").has_value());
+
+    mgr.record_write(t1->txn_id, {3, 0});
+    EXPECT_EQ(t1->write_set.size(), 3u);
+
+    // Rollback to "dup" — uses the LATEST one (which saved {1,0} and {2,0}).
+    ASSERT_TRUE(mgr.rollback_to_savepoint(t1->txn_id, "dup").has_value());
+    EXPECT_EQ(t1->write_set.size(), 2u);
+    EXPECT_TRUE(t1->write_set.count(RID{1, 0}) > 0);
+    EXPECT_TRUE(t1->write_set.count(RID{2, 0}) > 0);
+}
+
+TEST(Savepoint, CommitAfterSavepointSucceeds) {
+    TransactionManager mgr;
+    auto* t1 = mgr.begin(IsolationLevel::SNAPSHOT_ISOLATION).value();
+
+    mgr.record_write(t1->txn_id, {1, 0});
+    ASSERT_TRUE(mgr.savepoint(t1->txn_id, "sp1").has_value());
+    mgr.record_write(t1->txn_id, {2, 0});
+
+    // Commit should succeed — savepoints don't interfere with commit.
+    ASSERT_TRUE(mgr.commit(t1->txn_id).has_value());
+    EXPECT_EQ(mgr.get_status(t1->txn_id), TransactionStatus::COMMITTED);
+}
+
+// =============================================================================
+// Transaction GC (garbage collection) tests
+// =============================================================================
+
+TEST(TransactionGC, CleansUpCompletedTransactions) {
+    TransactionManager mgr;
+
+    // Create and commit several transactions.
+    auto* t1 = mgr.begin().value();
+    auto* t2 = mgr.begin().value();
+    auto* t3 = mgr.begin().value();
+    auto id1 = t1->txn_id;
+    auto id2 = t2->txn_id;
+    auto id3 = t3->txn_id;
+    ASSERT_TRUE(mgr.commit(id1).has_value());
+    ASSERT_TRUE(mgr.commit(id2).has_value());
+    ASSERT_TRUE(mgr.commit(id3).has_value());
+
+    // All completed — gc should remove them.
+    mgr.gc_completed_transactions();
+
+    // Transactions should no longer be in the map (pointers are now dangling).
+    EXPECT_EQ(mgr.get_transaction(id1), nullptr);
+    EXPECT_EQ(mgr.get_transaction(id2), nullptr);
+    EXPECT_EQ(mgr.get_transaction(id3), nullptr);
+
+    // But status should still be correct (from pruned_committed_).
+    EXPECT_EQ(mgr.get_status(id1), TransactionStatus::COMMITTED);
+    EXPECT_EQ(mgr.get_status(id2), TransactionStatus::COMMITTED);
+    EXPECT_EQ(mgr.get_status(id3), TransactionStatus::COMMITTED);
+}
+
+TEST(TransactionGC, PreservesActiveTransactions) {
+    TransactionManager mgr;
+
+    auto* t1 = mgr.begin().value();
+    auto* t2 = mgr.begin().value();
+    auto id1 = t1->txn_id;
+    auto id2 = t2->txn_id;
+    ASSERT_TRUE(mgr.commit(id1).has_value());
+    // t2 still active.
+
+    mgr.gc_completed_transactions();
+
+    // With t2 active, horizon = min(snapshot.xmin=1, txn_id=2) = 1.
+    // t1 txn_id=1, 1 < 1 is false — not GC'd.
+    // t2 is active — not GC'd.
+    EXPECT_NE(mgr.get_transaction(id1), nullptr);
+    EXPECT_NE(mgr.get_transaction(id2), nullptr);
+
+    // After t2 commits, all can be GC'd.
+    ASSERT_TRUE(mgr.commit(id2).has_value());
+    mgr.gc_completed_transactions();
+    EXPECT_EQ(mgr.get_transaction(id1), nullptr);
+    EXPECT_EQ(mgr.get_transaction(id2), nullptr);
+    EXPECT_EQ(mgr.get_status(id1), TransactionStatus::COMMITTED);
+    EXPECT_EQ(mgr.get_status(id2), TransactionStatus::COMMITTED);
+}
+
+TEST(TransactionGC, AbortedTransactionsGCdCorrectly) {
+    TransactionManager mgr;
+
+    auto* t1 = mgr.begin().value();
+    auto t1_id = t1->txn_id;
+    ASSERT_TRUE(mgr.abort(t1_id).has_value());
+
+    mgr.gc_completed_transactions();
+
+    // Aborted transaction should be removed.
+    EXPECT_EQ(mgr.get_transaction(t1_id), nullptr);
+    // Status defaults to ABORTED for unknown txns — correct behavior.
+    EXPECT_EQ(mgr.get_status(t1_id), TransactionStatus::ABORTED);
+}
+
+TEST(TransactionGC, VisibilityCorrectAfterGC) {
+    TransactionManager mgr;
+
+    // T1 inserts and commits.
+    auto* t1 = mgr.begin().value();
+    MvccTupleHeader header;
+    header.xmin = t1->txn_id;
+    ASSERT_TRUE(mgr.commit(t1->txn_id).has_value());
+
+    // GC t1.
+    mgr.gc_completed_transactions();
+
+    // T2 starts — should still see t1's committed tuple.
+    auto* t2 = mgr.begin().value();
+    EXPECT_TRUE(is_visible(header, t2->snapshot, mgr, t2->txn_id));
+}

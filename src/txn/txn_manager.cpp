@@ -2,6 +2,7 @@
 
 #include "giodb/common/logging.h"
 
+#include <algorithm>
 #include <limits>
 
 namespace giodb {
@@ -105,11 +106,17 @@ TransactionStatus TransactionManager::get_status(txn_id_t txn_id) const {
     std::lock_guard lock(mu_);
 
     auto it = transactions_.find(txn_id);
-    if (it == transactions_.end()) {
-        // Unknown transactions are treated as aborted (conservative).
-        return TransactionStatus::ABORTED;
+    if (it != transactions_.end()) {
+        return it->second->status;
     }
-    return it->second->status;
+
+    // Check if this was a committed transaction that was garbage-collected.
+    if (pruned_committed_.count(txn_id) > 0) {
+        return TransactionStatus::COMMITTED;
+    }
+
+    // Unknown transactions are treated as aborted (conservative).
+    return TransactionStatus::ABORTED;
 }
 
 Transaction* TransactionManager::get_transaction(txn_id_t txn_id) const {
@@ -145,9 +152,101 @@ void TransactionManager::record_read(txn_id_t txn_id, RID rid) {
     }
 }
 
-txn_id_t TransactionManager::xmin_horizon() const {
+Result<void> TransactionManager::savepoint(txn_id_t txn_id, const std::string& name) {
     std::lock_guard lock(mu_);
 
+    auto it = transactions_.find(txn_id);
+    if (it == transactions_.end()) {
+        return make_error(StatusCode::NOT_FOUND, "transaction not found");
+    }
+
+    auto& txn = *it->second;
+    if (txn.status != TransactionStatus::ACTIVE) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "cannot create savepoint in non-active transaction");
+    }
+
+    Savepoint sp;
+    sp.name = name;
+    sp.saved_write_set = txn.write_set;
+    sp.saved_read_set = txn.read_set;
+    txn.savepoints.push_back(std::move(sp));
+
+    GIODB_LOG_DEBUG("SAVEPOINT {} in txn_id={}", name, txn_id);
+    return ok();
+}
+
+Result<void> TransactionManager::rollback_to_savepoint(txn_id_t txn_id, const std::string& name) {
+    std::lock_guard lock(mu_);
+
+    auto it = transactions_.find(txn_id);
+    if (it == transactions_.end()) {
+        return make_error(StatusCode::NOT_FOUND, "transaction not found");
+    }
+
+    auto& txn = *it->second;
+    if (txn.status != TransactionStatus::ACTIVE) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "cannot rollback to savepoint in non-active transaction");
+    }
+
+    // Find the most recent savepoint with the given name (search from back).
+    auto sp_it = std::find_if(txn.savepoints.rbegin(),
+                              txn.savepoints.rend(),
+                              [&name](const Savepoint& sp) { return sp.name == name; });
+    if (sp_it == txn.savepoints.rend()) {
+        return make_error(StatusCode::NOT_FOUND, "savepoint not found: " + name);
+    }
+
+    // Restore write and read sets to the savepoint state.
+    txn.write_set = sp_it->saved_write_set;
+    txn.read_set = sp_it->saved_read_set;
+
+    // Remove all savepoints created after this one (keep the target savepoint).
+    // sp_it.base() points to the element after sp_it in forward order.
+    txn.savepoints.erase(sp_it.base(), txn.savepoints.end());
+
+    GIODB_LOG_DEBUG("ROLLBACK TO SAVEPOINT {} in txn_id={}", name, txn_id);
+    return ok();
+}
+
+Result<void> TransactionManager::release_savepoint(txn_id_t txn_id, const std::string& name) {
+    std::lock_guard lock(mu_);
+
+    auto it = transactions_.find(txn_id);
+    if (it == transactions_.end()) {
+        return make_error(StatusCode::NOT_FOUND, "transaction not found");
+    }
+
+    auto& txn = *it->second;
+    if (txn.status != TransactionStatus::ACTIVE) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "cannot release savepoint in non-active transaction");
+    }
+
+    // Find the most recent savepoint with the given name.
+    auto sp_it = std::find_if(txn.savepoints.rbegin(),
+                              txn.savepoints.rend(),
+                              [&name](const Savepoint& sp) { return sp.name == name; });
+    if (sp_it == txn.savepoints.rend()) {
+        return make_error(StatusCode::NOT_FOUND, "savepoint not found: " + name);
+    }
+
+    // Remove this savepoint and all established after it.
+    // std::prev(sp_it.base()) converts reverse iterator to forward iterator pointing at the
+    // element.
+    txn.savepoints.erase(std::prev(sp_it.base()), txn.savepoints.end());
+
+    GIODB_LOG_DEBUG("RELEASE SAVEPOINT {} in txn_id={}", name, txn_id);
+    return ok();
+}
+
+txn_id_t TransactionManager::xmin_horizon() const {
+    std::lock_guard lock(mu_);
+    return xmin_horizon_locked();
+}
+
+txn_id_t TransactionManager::xmin_horizon_locked() const {
     txn_id_t horizon = std::numeric_limits<txn_id_t>::max();
     for (const auto& [id, txn] : transactions_) {
         if (txn->status == TransactionStatus::ACTIVE) {
@@ -165,6 +264,27 @@ txn_id_t TransactionManager::xmin_horizon() const {
         horizon = next_txn_id_;
     }
     return horizon;
+}
+
+void TransactionManager::gc_completed_transactions() {
+    std::lock_guard lock(mu_);
+    gc_completed_transactions_locked();
+}
+
+void TransactionManager::gc_completed_transactions_locked() {
+    txn_id_t horizon = xmin_horizon_locked();
+
+    for (auto it = transactions_.begin(); it != transactions_.end();) {
+        auto& txn = *it->second;
+        if (txn.status != TransactionStatus::ACTIVE && txn.txn_id < horizon) {
+            if (txn.status == TransactionStatus::COMMITTED) {
+                pruned_committed_.insert(txn.txn_id);
+            }
+            it = transactions_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void TransactionManager::set_default_isolation_level(IsolationLevel level) {

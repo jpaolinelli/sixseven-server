@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace giodb {
@@ -71,6 +72,17 @@ struct Snapshot {
     }
 };
 
+// -- Savepoint ----------------------------------------------------------------
+
+/// A savepoint within a transaction.
+/// Captures the state of write_set and read_set at the time of creation,
+/// allowing partial rollback within a transaction (SAVEPOINT / ROLLBACK TO).
+struct Savepoint {
+    std::string name;              ///< Savepoint name.
+    std::set<RID> saved_write_set; ///< Write set snapshot at savepoint creation.
+    std::set<RID> saved_read_set;  ///< Read set snapshot at savepoint creation.
+};
+
 // -- Transaction --------------------------------------------------------------
 
 /// A transaction in the MVCC system.
@@ -85,6 +97,9 @@ struct Transaction {
 
     /// Read set: RIDs read by this transaction (for SSI rw-dependency tracking).
     std::set<RID> read_set;
+
+    /// Savepoint stack (newest at back). Supports SAVEPOINT / ROLLBACK TO / RELEASE.
+    std::vector<Savepoint> savepoints;
 };
 
 } // namespace giodb

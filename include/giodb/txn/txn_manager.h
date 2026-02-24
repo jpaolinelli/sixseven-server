@@ -7,7 +7,9 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace giodb {
 
@@ -57,6 +59,18 @@ public:
     /// Get the next transaction ID that will be assigned (useful for testing).
     [[nodiscard]] txn_id_t next_txn_id() const;
 
+    /// Create a named savepoint within an active transaction.
+    /// Captures the current write_set and read_set so they can be restored later.
+    [[nodiscard]] Result<void> savepoint(txn_id_t txn_id, const std::string& name);
+
+    /// Roll back to a named savepoint, restoring write_set and read_set.
+    /// Destroys all savepoints established after the target savepoint.
+    /// The target savepoint itself is retained (per SQL standard).
+    [[nodiscard]] Result<void> rollback_to_savepoint(txn_id_t txn_id, const std::string& name);
+
+    /// Release (destroy) a named savepoint and all savepoints established after it.
+    [[nodiscard]] Result<void> release_savepoint(txn_id_t txn_id, const std::string& name);
+
     /// Record that a transaction wrote to a specific RID (for conflict detection).
     void record_write(txn_id_t txn_id, RID rid);
 
@@ -74,6 +88,12 @@ public:
     /// Get the current default isolation level.
     [[nodiscard]] IsolationLevel default_isolation_level() const;
 
+    /// Garbage-collect completed transactions whose txn_id < xmin_horizon.
+    /// Frees memory from committed/aborted transactions that are no longer
+    /// needed for visibility checks by any active transaction.
+    /// Should be called periodically (e.g., by the auto-vacuum worker).
+    void gc_completed_transactions();
+
 private:
     mutable std::mutex mu_;
     txn_id_t next_txn_id_ = 1;
@@ -82,8 +102,18 @@ private:
     /// All transactions (active and recently completed).
     std::unordered_map<txn_id_t, std::unique_ptr<Transaction>> transactions_;
 
+    /// Committed txn_ids that have been garbage-collected from transactions_.
+    /// Needed so get_status() can still return COMMITTED for pruned transactions.
+    std::unordered_set<txn_id_t> pruned_committed_;
+
     /// Take a snapshot while holding the lock.
     [[nodiscard]] Snapshot take_snapshot_locked() const;
+
+    /// Compute xmin_horizon while already holding the lock.
+    [[nodiscard]] txn_id_t xmin_horizon_locked() const;
+
+    /// Garbage-collect completed transactions (caller holds mu_).
+    void gc_completed_transactions_locked();
 
     /// Check for write-write conflicts under Snapshot Isolation / SSI.
     [[nodiscard]] Result<void> check_write_conflicts(const Transaction& txn) const;

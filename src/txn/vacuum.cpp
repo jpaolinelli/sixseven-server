@@ -152,10 +152,10 @@ AutoVacuumConfig AutoVacuumWorker::config() const {
 }
 
 Result<void> AutoVacuumWorker::start() {
-    if (running_.load()) {
+    bool expected = false;
+    if (!running_.compare_exchange_strong(expected, true)) {
         return make_error(StatusCode::ALREADY_EXISTS, "auto-vacuum worker already running");
     }
-    running_.store(true);
     worker_thread_ = std::thread(&AutoVacuumWorker::worker_loop, this);
     GIODB_LOG_INFO("auto-vacuum worker started");
     return ok();
