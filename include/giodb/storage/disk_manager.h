@@ -86,6 +86,12 @@ public:
     [[nodiscard]] Result<FileId> open_file(const std::filesystem::path& path,
                                            bool direct_io = false);
 
+    /// Open an existing database file in read-only mode.
+    /// Uses a shared advisory lock (LOCK_SH) instead of exclusive, allowing
+    /// concurrent readers. Write operations (write_page, allocate_page) will
+    /// fail on read-only files. Used by standby servers for user table access.
+    [[nodiscard]] Result<FileId> open_file_readonly(const std::filesystem::path& path);
+
     /// Close a file handle. The FileId may be reused by future open/create calls.
     [[nodiscard]] Result<void> close_file(FileId file_id);
 
@@ -127,6 +133,7 @@ private:
         std::filesystem::path path;
         uint32_t page_count = 0; ///< Allocated pages including header page 0.
         bool direct_io = false;  ///< Whether OS page cache is bypassed.
+        bool read_only = false;  ///< Whether the file was opened in read-only mode.
     };
 
     /// Acquire the next available FileId, reusing closed slots when possible.

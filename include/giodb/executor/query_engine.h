@@ -87,6 +87,13 @@ public:
     /// Set the provider cache for SHOW PROVIDERS and provider management.
     void set_provider_cache(ProviderCache* cache);
 
+    /// Enable or disable standby (read-only) mode.
+    /// When enabled, all write operations are rejected.
+    void set_standby_mode(bool enabled);
+
+    /// Return true if the engine is in standby (read-only) mode.
+    [[nodiscard]] bool is_standby_mode() const;
+
     /// Increment the skip-masking counter. While > 0, api_key_encrypted
     /// values in SELECT results are not masked. Used by ProviderCache::load()
     /// which needs raw encrypted values.
@@ -147,6 +154,7 @@ private:
     ProviderCache* provider_cache_ = nullptr;
     database_id_t current_database_id_ = default_database_id;
     int skip_masking_depth_ = 0;
+    bool standby_mode_ = false;
 };
 
 } // namespace giodb

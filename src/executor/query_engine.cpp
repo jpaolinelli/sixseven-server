@@ -49,6 +49,14 @@ void QueryEngine::set_provider_cache(ProviderCache* cache) {
     provider_cache_ = cache;
 }
 
+void QueryEngine::set_standby_mode(bool enabled) {
+    standby_mode_ = enabled;
+}
+
+bool QueryEngine::is_standby_mode() const {
+    return standby_mode_;
+}
+
 void QueryEngine::push_skip_masking() {
     ++skip_masking_depth_;
 }
@@ -78,7 +86,46 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
         return make_error(stmt_ptr.error().code, stmt_ptr.error().message);
     }
 
-    // 3. Dispatch DDL before binding (CREATE TABLE creates the table
+    // 3. Reject writes in standby mode.
+    if (standby_mode_) {
+        const auto* raw = stmt_ptr->get();
+        bool is_write = dynamic_cast<const InsertStmt*>(raw) != nullptr ||
+                        dynamic_cast<const UpdateStmt*>(raw) != nullptr ||
+                        dynamic_cast<const DeleteStmt*>(raw) != nullptr ||
+                        dynamic_cast<const CreateTableStmt*>(raw) != nullptr ||
+                        dynamic_cast<const DropTableStmt*>(raw) != nullptr ||
+                        dynamic_cast<const CreateDatabaseStmt*>(raw) != nullptr ||
+                        dynamic_cast<const DropDatabaseStmt*>(raw) != nullptr ||
+                        dynamic_cast<const CreateEdgeTypeStmt*>(raw) != nullptr ||
+                        dynamic_cast<const DropEdgeTypeStmt*>(raw) != nullptr ||
+                        dynamic_cast<const LinkStmt*>(raw) != nullptr ||
+                        dynamic_cast<const UnlinkStmt*>(raw) != nullptr ||
+                        dynamic_cast<const ReembedStmt*>(raw) != nullptr;
+
+        if (is_write) {
+            // Determine whether this is DML or DDL for the error message.
+            bool is_ddl = dynamic_cast<const CreateTableStmt*>(raw) != nullptr ||
+                          dynamic_cast<const DropTableStmt*>(raw) != nullptr ||
+                          dynamic_cast<const CreateDatabaseStmt*>(raw) != nullptr ||
+                          dynamic_cast<const DropDatabaseStmt*>(raw) != nullptr ||
+                          dynamic_cast<const CreateEdgeTypeStmt*>(raw) != nullptr ||
+                          dynamic_cast<const DropEdgeTypeStmt*>(raw) != nullptr;
+
+            if (is_ddl) {
+                return make_error(StatusCode::READ_ONLY,
+                                  "cannot execute DDL on a read-only standby");
+            }
+            return make_error(StatusCode::READ_ONLY, "cannot execute DML on a read-only standby");
+        }
+
+        // Reject SET (global setting modification) in standby mode.
+        if (dynamic_cast<const SetStmt*>(raw) != nullptr) {
+            return make_error(StatusCode::READ_ONLY,
+                              "cannot modify settings on a read-only standby");
+        }
+    }
+
+    // 4. Dispatch DDL before binding (CREATE TABLE creates the table
     //    that the binder would try to look up).
     if (auto* create_db = dynamic_cast<const CreateDatabaseStmt*>(stmt_ptr->get())) {
         return execute_create_database(*create_db);
@@ -105,14 +152,14 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
         return execute_show(*show);
     }
 
-    // 4. Bind.
+    // 5. Bind.
     Binder binder(catalog_, current_database_id_);
     auto bound = binder.bind(**stmt_ptr);
     if (!bound) {
         return make_error(bound.error().code, bound.error().message);
     }
 
-    // 5. Dispatch graph DML after binding.
+    // 6. Dispatch graph DML after binding.
     if (auto* link = dynamic_cast<const LinkStmt*>(bound->stmt)) {
         return execute_link(*link, *bound);
     }
@@ -120,12 +167,12 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
         return execute_unlink(*unlink, *bound);
     }
 
-    // 5b. Dispatch admin commands after binding.
+    // 6b. Dispatch admin commands after binding.
     if (auto* reembed = dynamic_cast<const ReembedStmt*>(bound->stmt)) {
         return execute_reembed(*reembed);
     }
 
-    // 6. Plan + Execute.
+    // 7. Plan + Execute.
     return execute_plan(*bound);
 }
 
