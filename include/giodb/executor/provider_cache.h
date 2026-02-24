@@ -3,6 +3,7 @@
 #include "giodb/catalog/schema.h"
 #include "giodb/common/result.h"
 
+#include <atomic>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -67,7 +68,7 @@ private:
     std::unordered_map<std::string, ProviderConfig> providers_;
     int32_t next_provider_id_ = 1;
     const SecretsManager* secrets_manager_ = nullptr;
-    bool loading_ = false; // Prevents re-entrant loads during encryption UPDATEs.
+    std::atomic<bool> loading_{false}; // Prevents re-entrant loads during encryption UPDATEs.
 };
 
 } // namespace giodb

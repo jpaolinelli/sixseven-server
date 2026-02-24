@@ -2,6 +2,8 @@
 
 #include "giodb/common/result.h"
 
+#include <openssl/crypto.h>
+
 #include <string>
 #include <vector>
 
@@ -55,10 +57,41 @@ public:
     /// the definitive check is whether decrypt() succeeds.
     [[nodiscard]] static bool looks_encrypted(const std::string& value);
 
+    ~SecretsManager() {
+        if (!master_key_.empty()) {
+            OPENSSL_cleanse(master_key_.data(), master_key_.size());
+        }
+    }
+
+    SecretsManager(const SecretsManager&) = delete;
+    SecretsManager& operator=(const SecretsManager&) = delete;
+
+    SecretsManager(SecretsManager&& other) noexcept : master_key_(std::move(other.master_key_)) {
+        // The moved-from vector may retain memory; zero it.
+        if (!other.master_key_.empty()) {
+            OPENSSL_cleanse(other.master_key_.data(), other.master_key_.size());
+        }
+        other.master_key_.clear();
+    }
+
+    SecretsManager& operator=(SecretsManager&& other) noexcept {
+        if (this != &other) {
+            if (!master_key_.empty()) {
+                OPENSSL_cleanse(master_key_.data(), master_key_.size());
+            }
+            master_key_ = std::move(other.master_key_);
+            if (!other.master_key_.empty()) {
+                OPENSSL_cleanse(other.master_key_.data(), other.master_key_.size());
+            }
+            other.master_key_.clear();
+        }
+        return *this;
+    }
+
 private:
     SecretsManager() = default;
 
-    /// The 256-bit master encryption key.
+    /// The 256-bit master encryption key (zeroed on destruction).
     std::vector<uint8_t> master_key_;
 };
 

@@ -872,7 +872,8 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                 // Compensate: re-insert the deleted in-use provider.
                 auto prev_db = current_database_id_;
                 set_current_database(system_database_id);
-                std::string api_key_val = pp.api_key.empty() ? "NULL" : "'" + pp.api_key + "'";
+                std::string api_key_val =
+                    pp.api_key.empty() ? "NULL" : "'" + pp.api_key.str() + "'";
                 std::string sql =
                     "INSERT INTO sys_providers VALUES (" + std::to_string(pp.provider_id) + ", '" +
                     pp.name + "', '" + pp.type + "', '" + pp.endpoint + "', '" + pp.model + "', " +

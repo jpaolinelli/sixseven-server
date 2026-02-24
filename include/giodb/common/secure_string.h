@@ -77,6 +77,7 @@ public:
 
     bool operator==(const SecureString& other) const { return data_ == other.data_; }
     bool operator==(const std::string& other) const { return data_ == other; }
+    bool operator==(const char* other) const { return data_ == other; }
 
     /// Zero the contents and release memory.
     void clear() {
