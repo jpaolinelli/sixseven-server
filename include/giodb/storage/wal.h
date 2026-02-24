@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <thread>
 
@@ -102,6 +103,15 @@ public:
     /// append or flush callbacks) — the mutex is not recursive.
     [[nodiscard]] Result<void> truncate_before(uint64_t min_segment_id);
 
+    /// Callback type invoked after a segment rotation completes.
+    /// Parameters: (completed_segment_id, last_lsn_in_segment).
+    using OnSegmentRotated = std::function<void(uint64_t, lsn_t)>;
+
+    /// Register a callback to be invoked after each segment rotation.
+    /// The callback runs under the WAL writer's mutex — it should be
+    /// lightweight (e.g., enqueue work to a background thread).
+    void set_on_segment_rotated(OnSegmentRotated callback);
+
 private:
     /// Open or create a segment file for writing.
     [[nodiscard]] Result<void> open_segment(uint64_t seg_id);
@@ -146,6 +156,9 @@ private:
     std::mutex flush_mutex_;
     std::condition_variable flush_cv_;
     std::atomic<bool> flush_running_{false};
+
+    // Segment rotation callback.
+    OnSegmentRotated on_segment_rotated_;
 };
 
 // -- WAL Reader ---------------------------------------------------------------
