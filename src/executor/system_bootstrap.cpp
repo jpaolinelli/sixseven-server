@@ -157,6 +157,21 @@ Result<void> SystemBootstrap::seed_default_settings(QueryEngine& engine, const C
          "replication",
          "Archive cleanup policy (keep_all/keep_last_n/keep_since_lsn)",
          false},
+        {"replication.max_wal_senders",
+         std::to_string(config.replication_max_wal_senders),
+         "replication",
+         "Max concurrent replication connections",
+         false},
+        {"replication.keepalive_interval_ms",
+         std::to_string(config.replication_keepalive_interval_ms),
+         "replication",
+         "Keepalive interval in milliseconds",
+         true},
+        {"replication.sender_timeout_ms",
+         std::to_string(config.replication_sender_timeout_ms),
+         "replication",
+         "Sender timeout in milliseconds",
+         true},
     };
 
     for (const auto& s : defaults) {

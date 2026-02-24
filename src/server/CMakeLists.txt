@@ -1,2 +1,11 @@
 # giodb::server sources
-# Stub — source files will be added as development progresses
+
+add_library(giodb_server STATIC
+    replication_message.cpp
+    wal_sender.cpp
+    wal_sender_manager.cpp
+)
+
+target_include_directories(giodb_server PUBLIC ${PROJECT_SOURCE_DIR}/include)
+
+target_link_libraries(giodb_server PUBLIC giodb_storage giodb_common)

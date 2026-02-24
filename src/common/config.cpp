@@ -90,6 +90,12 @@ void Config::apply_setting(const std::string& key, const std::string& value) {
         archive_enabled = (value == "TRUE" || value == "true" || value == "1");
     } else if (key == "replication.archive_cleanup_policy") {
         archive_cleanup_policy = value;
+    } else if (key == "replication.max_wal_senders") {
+        replication_max_wal_senders = std::stoi(value);
+    } else if (key == "replication.keepalive_interval_ms") {
+        replication_keepalive_interval_ms = std::stoi(value);
+    } else if (key == "replication.sender_timeout_ms") {
+        replication_sender_timeout_ms = std::stoi(value);
     }
     // Unknown keys are silently ignored.
 }

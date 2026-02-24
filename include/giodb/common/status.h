@@ -19,6 +19,7 @@ enum class StatusCode {
     TXN_ABORTED,
     NETWORK_ERROR,
     AUTH_ERROR,
+    REPLICATION_ERROR,
 };
 
 /// Return a human-readable name for a StatusCode.
@@ -52,6 +53,8 @@ inline const char* status_code_name(StatusCode code) {
         return "NETWORK_ERROR";
     case StatusCode::AUTH_ERROR:
         return "AUTH_ERROR";
+    case StatusCode::REPLICATION_ERROR:
+        return "REPLICATION_ERROR";
     }
     return "UNKNOWN";
 }

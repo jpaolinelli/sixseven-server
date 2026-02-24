@@ -56,6 +56,9 @@ add_executable(giodb_unit_tests
     test_set_show.cpp
     test_provider_cache.cpp
     test_secrets_manager.cpp
+    test_replication_message.cpp
+    test_wal_sender.cpp
+    test_wal_sender_manager.cpp
 )
 
 target_link_libraries(giodb_unit_tests
