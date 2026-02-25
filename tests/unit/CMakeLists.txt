@@ -75,6 +75,11 @@ add_executable(giodb_unit_tests
     test_cost_model.cpp
     test_rewrite_rules.cpp
     test_explain.cpp
+    test_connection.cpp
+    test_event_loop.cpp
+    test_thread_pool.cpp
+    test_server.cpp
+    test_server_lifecycle.cpp
 )
 
 target_link_libraries(giodb_unit_tests

@@ -1,0 +1,80 @@
+#pragma once
+
+#include "giodb/common/config.h"
+#include "giodb/common/result.h"
+#include "giodb/server/connection.h"
+#include "giodb/server/event_loop.h"
+#include "giodb/server/thread_pool.h"
+
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+
+namespace giodb {
+
+/// Server health snapshot.
+struct HealthInfo {
+    std::string version;
+    std::chrono::seconds uptime{0};
+    size_t active_connections = 0;
+    size_t max_connections = 0;
+};
+
+/// Event-driven TCP server for GioDB.
+///
+/// Runs a single acceptor thread with an epoll/kqueue event loop and dispatches
+/// query work to a thread pool.
+class Server {
+public:
+    static constexpr const char* VERSION = "0.1.0";
+    static constexpr size_t DEFAULT_THREAD_POOL_SIZE = 4;
+
+    explicit Server(Config config);
+    ~Server();
+
+    Server(const Server&) = delete;
+    Server& operator=(const Server&) = delete;
+
+    /// Bind, listen, and run the event loop. Blocks until shutdown is requested.
+    [[nodiscard]] Result<void> start();
+
+    /// Signal-safe: set the stop flag so the event loop exits on next iteration.
+    /// The actual cleanup (drain, close) happens when start() unwinds.
+    /// Safe to call from a signal handler.
+    void request_shutdown();
+
+    /// Convenience for non-signal callers: equivalent to request_shutdown().
+    /// Actual resource cleanup is deferred to when start() returns.
+    void shutdown();
+
+    bool is_running() const { return running_.load(std::memory_order_acquire); }
+    HealthInfo health() const;
+
+    /// Exposed for testing: the port we actually bound to (useful with port 0).
+    uint16_t bound_port() const { return bound_port_; }
+
+private:
+    [[nodiscard]] Result<void> setup_listener();
+    void run_event_loop();
+    void do_shutdown();
+    void accept_connection();
+    void handle_read(int fd);
+    void handle_write(int fd);
+    void close_connection(int fd);
+
+    Config config_;
+    std::unique_ptr<EventLoop> event_loop_;
+    std::unique_ptr<ThreadPool> thread_pool_;
+    std::unordered_map<int, Connection> connections_;
+    mutable std::mutex connections_mutex_;
+    int listen_fd_ = -1;
+    uint16_t bound_port_ = 0;
+    std::atomic<bool> running_{false};
+    std::chrono::steady_clock::time_point start_time_;
+};
+
+} // namespace giodb

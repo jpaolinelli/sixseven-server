@@ -57,6 +57,9 @@ Result<Config> Config::load_from_file(const std::string& path) {
     if (j.contains("max_connections") && j["max_connections"].is_number_unsigned()) {
         config.max_connections = j["max_connections"].get<size_t>();
     }
+    if (j.contains("shutdown_timeout_s") && j["shutdown_timeout_s"].is_number()) {
+        config.shutdown_timeout_s = j["shutdown_timeout_s"].get<int32_t>();
+    }
     if (j.contains("master_key_path") && j["master_key_path"].is_string()) {
         config.master_key_path = j["master_key_path"].get<std::string>();
     }
@@ -187,6 +190,8 @@ void Config::apply_setting(const std::string& key, const std::string& value) {
         replication_lag_warning_threshold_ms = std::stoll(value);
     } else if (key == "replication.disconnect_warning_threshold_ms") {
         replication_disconnect_warning_threshold_ms = std::stoll(value);
+    } else if (key == "server.shutdown_timeout_s") {
+        shutdown_timeout_s = std::stoi(value);
     }
     // Unknown keys are silently ignored.
 }

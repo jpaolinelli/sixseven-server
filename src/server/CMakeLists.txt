@@ -1,6 +1,10 @@
 # giodb::server sources
 
 add_library(giodb_server STATIC
+    connection.cpp
+    event_loop.cpp
+    server.cpp
+    thread_pool.cpp
     promotion_manager.cpp
     replication_health_monitor.cpp
     replication_message.cpp
