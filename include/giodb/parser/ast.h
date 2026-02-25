@@ -448,6 +448,27 @@ struct DropDatabaseStmt : Stmt {
     void accept(AstVisitor& visitor) const override;
 };
 
+/// CREATE USER name WITH PASSWORD 'password'.
+struct CreateUserStmt : Stmt {
+    std::string username;
+    std::string password;
+    void accept(AstVisitor& visitor) const override;
+};
+
+/// DROP USER [IF EXISTS] name.
+struct DropUserStmt : Stmt {
+    std::string username;
+    bool if_exists = false;
+    void accept(AstVisitor& visitor) const override;
+};
+
+/// ALTER USER name WITH PASSWORD 'new_password'.
+struct AlterUserStmt : Stmt {
+    std::string username;
+    std::string password;
+    void accept(AstVisitor& visitor) const override;
+};
+
 // ---------------------------------------------------------------------------
 // DML statements
 // ---------------------------------------------------------------------------
@@ -720,6 +741,9 @@ public:
     virtual void visit(const DropEdgeTypeStmt& node) = 0;
     virtual void visit(const CreateDatabaseStmt& node) = 0;
     virtual void visit(const DropDatabaseStmt& node) = 0;
+    virtual void visit(const CreateUserStmt& node) = 0;
+    virtual void visit(const DropUserStmt& node) = 0;
+    virtual void visit(const AlterUserStmt& node) = 0;
 
     // -- DML statements -------------------------------------------------------
 
@@ -831,6 +855,15 @@ inline void CreateDatabaseStmt::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void DropDatabaseStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void CreateUserStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void DropUserStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void AlterUserStmt::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void InsertStmt::accept(AstVisitor& v) const {

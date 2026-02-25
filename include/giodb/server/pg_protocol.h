@@ -3,10 +3,13 @@
 #include "giodb/common/result.h"
 #include "giodb/common/types.h"
 #include "giodb/common/value.h"
+#include "giodb/server/auth.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -111,6 +114,7 @@ using QueryExecutor = std::function<Result<QueryResult>(const std::string& sql)>
 /// Protocol state machine phases.
 enum class ProtocolState : uint8_t {
     WAIT_FOR_STARTUP,
+    WAIT_FOR_AUTH,
     READY,
     CLOSED,
 };
@@ -142,6 +146,9 @@ public:
     /// Set the callback used to execute SQL queries.
     void set_query_executor(QueryExecutor executor);
 
+    /// Set the authentication method and user manager for this handler.
+    void set_auth(AuthMethod method, UserManager* user_mgr);
+
     /// Process available data in the connection's read buffer.
     /// Handles message framing (partial-read reassembly) internally.
     /// Returns ok() when all complete messages have been processed,
@@ -171,6 +178,9 @@ private:
 
     /// Handle a typed frontend message (Query, Terminate, etc.).
     Result<size_t> handle_frontend_message(Connection& conn);
+
+    /// Handle a frontend message during the WAIT_FOR_AUTH phase.
+    Result<size_t> handle_auth_message(Connection& conn);
 
     // -- Simple query protocol --
 
@@ -207,6 +217,16 @@ private:
     void send_no_data(Connection& conn);
     void send_parameter_description(Connection& conn, const std::vector<uint32_t>& param_oids);
 
+    // -- Auth message senders --
+
+    void send_auth_md5_password(Connection& conn, const std::array<uint8_t, 4>& salt);
+    void send_auth_sasl(Connection& conn);
+    void send_auth_sasl_continue(Connection& conn, const std::string& data);
+    void send_auth_sasl_final(Connection& conn, const std::string& data);
+
+    /// Complete the post-auth handshake (parameter status, backend key, ready).
+    void complete_startup(Connection& conn);
+
     ProtocolState state_ = ProtocolState::WAIT_FOR_STARTUP;
     QueryExecutor query_executor_;
     int32_t backend_pid_;
@@ -224,6 +244,14 @@ private:
 
     /// Named portals. Empty name ("") is the unnamed portal.
     std::unordered_map<std::string, Portal> portals_;
+
+    // -- Authentication state --
+
+    AuthMethod auth_method_ = AuthMethod::TRUST;
+    UserManager* user_mgr_ = nullptr;
+    std::array<uint8_t, 4> md5_salt_{};
+    std::optional<ScramServerState> scram_state_;
+    bool scram_first_done_ = false; ///< True after server-first-message sent.
 };
 
 } // namespace giodb

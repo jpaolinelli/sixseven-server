@@ -12,6 +12,7 @@
 #include "giodb/parser/parser.h"
 #include "giodb/planner/binder.h"
 #include "giodb/planner/type_resolver.h"
+#include "giodb/server/auth.h"
 #include "giodb/server/replication_slot.h"
 #include "giodb/server/wal_receiver.h"
 #include "giodb/server/wal_sender_manager.h"
@@ -88,6 +89,14 @@ void QueryEngine::pop_skip_masking() {
     }
 }
 
+void QueryEngine::set_user_manager(UserManager* user_mgr) {
+    user_mgr_ = user_mgr;
+}
+
+void QueryEngine::set_auth_method(AuthMethod method) {
+    auth_method_ = method;
+}
+
 // ---------------------------------------------------------------------------
 // Full pipeline
 // ---------------------------------------------------------------------------
@@ -138,7 +147,10 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
                         dynamic_cast<const DropEdgeTypeStmt*>(raw) != nullptr ||
                         dynamic_cast<const LinkStmt*>(raw) != nullptr ||
                         dynamic_cast<const UnlinkStmt*>(raw) != nullptr ||
-                        dynamic_cast<const ReembedStmt*>(raw) != nullptr;
+                        dynamic_cast<const ReembedStmt*>(raw) != nullptr ||
+                        dynamic_cast<const CreateUserStmt*>(raw) != nullptr ||
+                        dynamic_cast<const DropUserStmt*>(raw) != nullptr ||
+                        dynamic_cast<const AlterUserStmt*>(raw) != nullptr;
 
         if (is_write) {
             // Determine whether this is DML or DDL for the error message.
@@ -147,7 +159,10 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
                           dynamic_cast<const CreateDatabaseStmt*>(raw) != nullptr ||
                           dynamic_cast<const DropDatabaseStmt*>(raw) != nullptr ||
                           dynamic_cast<const CreateEdgeTypeStmt*>(raw) != nullptr ||
-                          dynamic_cast<const DropEdgeTypeStmt*>(raw) != nullptr;
+                          dynamic_cast<const DropEdgeTypeStmt*>(raw) != nullptr ||
+                          dynamic_cast<const CreateUserStmt*>(raw) != nullptr ||
+                          dynamic_cast<const DropUserStmt*>(raw) != nullptr ||
+                          dynamic_cast<const AlterUserStmt*>(raw) != nullptr;
 
             if (is_ddl) {
                 return make_error(StatusCode::READ_ONLY,
@@ -188,6 +203,15 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
     }
     if (auto* show = dynamic_cast<const ShowStmt*>(stmt_ptr->get())) {
         return execute_show(*show);
+    }
+    if (auto* create_user = dynamic_cast<const CreateUserStmt*>(stmt_ptr->get())) {
+        return execute_create_user(*create_user);
+    }
+    if (auto* drop_user = dynamic_cast<const DropUserStmt*>(stmt_ptr->get())) {
+        return execute_drop_user(*drop_user);
+    }
+    if (auto* alter_user = dynamic_cast<const AlterUserStmt*>(stmt_ptr->get())) {
+        return execute_alter_user(*alter_user);
     }
 
     // 4b. Handle SELECT <system_function()> without FROM clause.
@@ -1442,6 +1466,71 @@ Result<QueryResult> QueryEngine::execute_show(const ShowStmt& stmt) {
     } // switch
 
     return make_error(StatusCode::NOT_IMPLEMENTED, "unsupported SHOW target");
+}
+
+// ---------------------------------------------------------------------------
+// DDL: CREATE USER
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_create_user(const CreateUserStmt& stmt) {
+    if (!user_mgr_) {
+        return make_error(StatusCode::INTERNAL_ERROR,
+                          "user manager not initialized for CREATE USER");
+    }
+
+    auto result = user_mgr_->create_user(stmt.username, stmt.password, auth_method_);
+    if (!result) {
+        return make_error(result.error().code, result.error().message);
+    }
+
+    GIODB_LOG_INFO("created user '{}'", stmt.username);
+
+    QueryResult qr;
+    qr.message = "CREATE USER";
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// DDL: DROP USER
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_drop_user(const DropUserStmt& stmt) {
+    if (!user_mgr_) {
+        return make_error(StatusCode::INTERNAL_ERROR, "user manager not initialized for DROP USER");
+    }
+
+    auto result = user_mgr_->drop_user(stmt.username, stmt.if_exists);
+    if (!result) {
+        return make_error(result.error().code, result.error().message);
+    }
+
+    GIODB_LOG_INFO("dropped user '{}'", stmt.username);
+
+    QueryResult qr;
+    qr.message = "DROP USER";
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// DDL: ALTER USER
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_alter_user(const AlterUserStmt& stmt) {
+    if (!user_mgr_) {
+        return make_error(StatusCode::INTERNAL_ERROR,
+                          "user manager not initialized for ALTER USER");
+    }
+
+    auto result = user_mgr_->alter_user(stmt.username, stmt.password, auth_method_);
+    if (!result) {
+        return make_error(result.error().code, result.error().message);
+    }
+
+    GIODB_LOG_INFO("altered user '{}'", stmt.username);
+
+    QueryResult qr;
+    qr.message = "ALTER USER";
+    return ok(std::move(qr));
 }
 
 } // namespace giodb

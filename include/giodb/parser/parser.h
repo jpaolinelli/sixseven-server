@@ -69,6 +69,9 @@ private:
     [[nodiscard]] Result<StmtPtr> parse_create_database();
     [[nodiscard]] Result<StmtPtr> parse_drop_database();
     [[nodiscard]] Result<StmtPtr> parse_alter_table();
+    [[nodiscard]] Result<StmtPtr> parse_create_user();
+    [[nodiscard]] Result<StmtPtr> parse_drop_user();
+    [[nodiscard]] Result<StmtPtr> parse_alter_user();
 
     // -- DDL helpers --------------------------------------------------------
 

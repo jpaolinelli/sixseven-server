@@ -1,6 +1,7 @@
 # giodb::server sources
 
 add_library(giodb_server STATIC
+    auth.cpp
     connection.cpp
     event_loop.cpp
     pg_protocol.cpp

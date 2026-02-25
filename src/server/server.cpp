@@ -30,10 +30,19 @@ Result<void> set_nonblocking(int fd) {
 
 } // namespace
 
-Server::Server(Config config) : config_(std::move(config)) {}
+Server::Server(Config config) : config_(std::move(config)) {
+    auto method = parse_auth_method(config_.auth_method);
+    if (method) {
+        auth_method_ = *method;
+    }
+}
 
 void Server::set_query_executor(QueryExecutor executor) {
     query_executor_ = std::move(executor);
+}
+
+void Server::set_user_manager(UserManager* user_mgr) {
+    user_mgr_ = user_mgr;
 }
 
 Server::~Server() {
@@ -250,6 +259,7 @@ void Server::accept_connection() {
     if (query_executor_) {
         handler.set_query_executor(query_executor_);
     }
+    handler.set_auth(auth_method_, user_mgr_);
 
     std::lock_guard lock(connections_mutex_);
     connections_.emplace(client_fd, std::move(conn));
