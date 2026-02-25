@@ -17,6 +17,7 @@ export function SchemaBrowser({ onSelect }: SchemaBrowserProps) {
   const [databases, setDatabases] = useState<DatabaseInfo[]>([]);
   const [schemas, setSchemas] = useState<Record<string, DatabaseSchema>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
+  const [schemaErrors, setSchemaErrors] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -37,11 +38,17 @@ export function SchemaBrowser({ onSelect }: SchemaBrowserProps) {
   const loadSchema = async (dbName: string) => {
     if (schemas[dbName] || loading[dbName]) return;
     setLoading((prev) => ({ ...prev, [dbName]: true }));
+    setSchemaErrors((prev) => {
+      const next = { ...prev };
+      delete next[dbName];
+      return next;
+    });
     try {
       const schema = await fetchDatabaseSchema(dbName);
       setSchemas((prev) => ({ ...prev, [dbName]: schema }));
-    } catch {
-      // Schema load failed — will show empty tree.
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to load schema";
+      setSchemaErrors((prev) => ({ ...prev, [dbName]: msg }));
     } finally {
       setLoading((prev) => ({ ...prev, [dbName]: false }));
     }
@@ -50,6 +57,7 @@ export function SchemaBrowser({ onSelect }: SchemaBrowserProps) {
   const handleRefresh = () => {
     setSchemas({});
     setLoading({});
+    setSchemaErrors({});
     loadDatabases();
   };
 
@@ -94,6 +102,7 @@ export function SchemaBrowser({ onSelect }: SchemaBrowserProps) {
             db={db}
             schema={schemas[db.name]}
             isLoading={loading[db.name] ?? false}
+            schemaError={schemaErrors[db.name]}
             filter={filter}
             matchesFilter={matchesFilter}
             onExpand={() => loadSchema(db.name)}
@@ -109,6 +118,7 @@ function DatabaseNode({
   db,
   schema,
   isLoading,
+  schemaError,
   filter,
   matchesFilter,
   onExpand,
@@ -117,6 +127,7 @@ function DatabaseNode({
   db: DatabaseInfo;
   schema?: DatabaseSchema;
   isLoading: boolean;
+  schemaError?: string;
   filter: string;
   matchesFilter: (name: string) => boolean;
   onExpand: () => void;
@@ -142,6 +153,9 @@ function DatabaseNode({
     >
       {isLoading && (
         <div className="px-4 py-1 text-xs text-gray-600">Loading...</div>
+      )}
+      {schemaError && (
+        <div className="px-4 py-1 text-xs text-red-400">{schemaError}</div>
       )}
       {schema && (
         <>

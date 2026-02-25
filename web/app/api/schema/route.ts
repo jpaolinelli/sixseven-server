@@ -8,7 +8,7 @@ import type {
   EdgeTypeInfo,
   EmbeddingInfo,
 } from "@/lib/types";
-import { buildTableInfo } from "@/lib/schema-utils";
+import { buildTableInfo, quoteIdent } from "@/lib/schema-utils";
 
 const SYSTEM_DATABASES = new Set(["giodb_system"]);
 
@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
     const tables = await Promise.all(
       tableNames.map(async (name) => {
         const colResult = await query(
-          `SHOW COLUMNS FROM ${name}`,
+          `SHOW COLUMNS FROM ${quoteIdent(name)}`,
           database
         );
         const columns: ColumnInfo[] = colResult.rows.map((row) => ({

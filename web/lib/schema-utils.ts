@@ -10,6 +10,11 @@ import type {
 
 const API_BASE = "/api";
 
+/** Double-quote a SQL identifier to prevent injection. */
+export function quoteIdent(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`;
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) {
@@ -39,7 +44,7 @@ export async function fetchSampleData(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      sql: `SELECT * FROM ${table} LIMIT 10`,
+      sql: `SELECT * FROM ${quoteIdent(table)} LIMIT 10`,
       database,
     }),
   });

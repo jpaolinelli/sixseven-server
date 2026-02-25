@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchSampleData } from "@/lib/schema-utils";
+import { fetchSampleData, quoteIdent } from "@/lib/schema-utils";
 import type { SelectedItem } from "@/lib/types";
 
 interface SchemaDetailsProps {
@@ -225,7 +225,7 @@ function EmbeddingDetails({
   useEffect(() => {
     let cancelled = false;
     // Fetch % populated: count non-null embedding values vs total rows.
-    const sql = `SELECT COUNT(${embedding.columnName}) AS populated, COUNT(*) AS total FROM ${embedding.tableName}`;
+    const sql = `SELECT COUNT(${quoteIdent(embedding.columnName)}) AS populated, COUNT(*) AS total FROM ${quoteIdent(embedding.tableName)}`;
     fetch("/api/query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -247,7 +247,7 @@ function EmbeddingDetails({
     return () => {
       cancelled = true;
     };
-  }, [database, embedding]);
+  }, [database, embedding.tableName, embedding.columnName]);
 
   return (
     <div className="p-6">
