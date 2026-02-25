@@ -238,20 +238,30 @@ TEST(ConstantFolding, BooleanAndShortCircuit) {
 }
 
 TEST(ConstantFolding, BooleanAndTrueElimination) {
-    // true AND <literal_expr> -> <literal_expr>
-    auto expr = make_binary(BinaryOp::AND, make_bool_lit(true), make_int_lit(42));
+    // true AND col_ref -> col_ref (non-foldable operand)
+    auto expr = make_binary(BinaryOp::AND, make_bool_lit(true), make_column_ref("t", "active"));
     auto result = fold_constants(*expr);
-    // true AND 42: rhs is not a boolean so just returns folded rhs (which is 42)
-    // Actually fold_constants recurses: folded_rhs for literal 42 is nullptr.
-    // So is_literal_true(lhs) && folded_rhs would require folded_rhs to be non-null.
-    // Since 42 doesn't fold, folded_rhs is nullptr. Result: nullptr.
-    // Let's test with true AND (1+2) instead.
-    auto expr2 = make_binary(BinaryOp::AND,
-                             make_bool_lit(true),
-                             make_binary(BinaryOp::ADD, make_int_lit(1), make_int_lit(2)));
+    ASSERT_NE(result, nullptr);
+    auto* col = dynamic_cast<const ColumnRefExpr*>(result.get());
+    ASSERT_NE(col, nullptr);
+    EXPECT_EQ(col->table, "t");
+    EXPECT_EQ(col->column, "active");
+
+    // col_ref AND true -> col_ref
+    auto expr2 = make_binary(BinaryOp::AND, make_column_ref("t", "x"), make_bool_lit(true));
     auto r2 = fold_constants(*expr2);
     ASSERT_NE(r2, nullptr);
-    EXPECT_EQ(as_lit(r2)->value, "3");
+    auto* col2 = dynamic_cast<const ColumnRefExpr*>(r2.get());
+    ASSERT_NE(col2, nullptr);
+    EXPECT_EQ(col2->column, "x");
+
+    // true AND (1+2) -> 3 (foldable operand still works)
+    auto expr3 = make_binary(BinaryOp::AND,
+                             make_bool_lit(true),
+                             make_binary(BinaryOp::ADD, make_int_lit(1), make_int_lit(2)));
+    auto r3 = fold_constants(*expr3);
+    ASSERT_NE(r3, nullptr);
+    EXPECT_EQ(as_lit(r3)->value, "3");
 }
 
 TEST(ConstantFolding, BooleanOrShortCircuit) {
@@ -263,13 +273,29 @@ TEST(ConstantFolding, BooleanOrShortCircuit) {
 }
 
 TEST(ConstantFolding, BooleanOrFalseElimination) {
-    // false OR (2+3) -> 5
-    auto expr = make_binary(BinaryOp::OR,
-                            make_bool_lit(false),
-                            make_binary(BinaryOp::ADD, make_int_lit(2), make_int_lit(3)));
+    // false OR col_ref -> col_ref (non-foldable operand)
+    auto expr = make_binary(BinaryOp::OR, make_bool_lit(false), make_column_ref("t", "active"));
     auto result = fold_constants(*expr);
     ASSERT_NE(result, nullptr);
-    EXPECT_EQ(as_lit(result)->value, "5");
+    auto* col = dynamic_cast<const ColumnRefExpr*>(result.get());
+    ASSERT_NE(col, nullptr);
+    EXPECT_EQ(col->column, "active");
+
+    // col_ref OR false -> col_ref
+    auto expr2 = make_binary(BinaryOp::OR, make_column_ref("t", "x"), make_bool_lit(false));
+    auto r2 = fold_constants(*expr2);
+    ASSERT_NE(r2, nullptr);
+    auto* col2 = dynamic_cast<const ColumnRefExpr*>(r2.get());
+    ASSERT_NE(col2, nullptr);
+    EXPECT_EQ(col2->column, "x");
+
+    // false OR (2+3) -> 5 (foldable operand still works)
+    auto expr3 = make_binary(BinaryOp::OR,
+                             make_bool_lit(false),
+                             make_binary(BinaryOp::ADD, make_int_lit(2), make_int_lit(3)));
+    auto r3 = fold_constants(*expr3);
+    ASSERT_NE(r3, nullptr);
+    EXPECT_EQ(as_lit(r3)->value, "5");
 }
 
 TEST(ConstantFolding, NotTrue) {
@@ -542,6 +568,22 @@ TEST(SubqueryDecorrelation, InToSemiJoin) {
     in_expr->negated = false;
     auto jt = subquery_to_join_type(*in_expr);
     EXPECT_EQ(jt, JoinType::SEMI);
+}
+
+TEST(SubqueryDecorrelation, NotExistsToAntiJoin) {
+    auto exists = std::make_unique<ExistsExpr>();
+    exists->subquery = std::make_unique<SelectStmt>();
+    auto not_exists = make_unary(UnaryOp::NOT, std::move(exists));
+    auto jt = subquery_to_join_type(*not_exists);
+    EXPECT_EQ(jt, JoinType::ANTI);
+}
+
+TEST(SubqueryDecorrelation, NotInToAntiJoin) {
+    auto in_expr = std::make_unique<InExpr>();
+    in_expr->expr = make_column_ref("t", "x");
+    in_expr->negated = true;
+    auto jt = subquery_to_join_type(*in_expr);
+    EXPECT_EQ(jt, JoinType::ANTI);
 }
 
 TEST(SubqueryDecorrelation, OtherExprToInnerJoin) {

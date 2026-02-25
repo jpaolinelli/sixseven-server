@@ -134,6 +134,162 @@ static ExprPtr make_null_literal() {
     return lit;
 }
 
+/// Deep-clone an expression tree. Returns nullptr for types that contain
+/// Stmt pointers (ExistsExpr, SubqueryExpr) since those can't be trivially cloned.
+static ExprPtr clone_expr(const Expr& expr) {
+    if (const auto* lit = dynamic_cast<const LiteralExpr*>(&expr)) {
+        auto c = std::make_unique<LiteralExpr>();
+        c->kind = lit->kind;
+        c->value = lit->value;
+        return c;
+    }
+    if (const auto* col = dynamic_cast<const ColumnRefExpr*>(&expr)) {
+        auto c = std::make_unique<ColumnRefExpr>();
+        c->table = col->table;
+        c->column = col->column;
+        return c;
+    }
+    if (const auto* bin = dynamic_cast<const BinaryExpr*>(&expr)) {
+        auto cl = clone_expr(*bin->lhs);
+        auto cr = clone_expr(*bin->rhs);
+        if (!cl || !cr) {
+            return nullptr;
+        }
+        auto c = std::make_unique<BinaryExpr>();
+        c->op = bin->op;
+        c->lhs = std::move(cl);
+        c->rhs = std::move(cr);
+        return c;
+    }
+    if (const auto* u = dynamic_cast<const UnaryExpr*>(&expr)) {
+        auto co = clone_expr(*u->operand);
+        if (!co) {
+            return nullptr;
+        }
+        auto c = std::make_unique<UnaryExpr>();
+        c->op = u->op;
+        c->operand = std::move(co);
+        return c;
+    }
+    if (const auto* func = dynamic_cast<const FunctionCallExpr*>(&expr)) {
+        auto c = std::make_unique<FunctionCallExpr>();
+        c->name = func->name;
+        c->distinct = func->distinct;
+        for (const auto& arg : func->args) {
+            auto ca = clone_expr(*arg);
+            if (!ca) {
+                return nullptr;
+            }
+            c->args.push_back(std::move(ca));
+        }
+        return c;
+    }
+    if (const auto* cast = dynamic_cast<const CastExpr*>(&expr)) {
+        auto ce = clone_expr(*cast->expr);
+        if (!ce) {
+            return nullptr;
+        }
+        auto c = std::make_unique<CastExpr>();
+        c->expr = std::move(ce);
+        c->target_type = cast->target_type;
+        return c;
+    }
+    if (const auto* between = dynamic_cast<const BetweenExpr*>(&expr)) {
+        auto ce = clone_expr(*between->expr);
+        auto cl = clone_expr(*between->low);
+        auto ch = clone_expr(*between->high);
+        if (!ce || !cl || !ch) {
+            return nullptr;
+        }
+        auto c = std::make_unique<BetweenExpr>();
+        c->expr = std::move(ce);
+        c->low = std::move(cl);
+        c->high = std::move(ch);
+        c->negated = between->negated;
+        return c;
+    }
+    if (const auto* is_null = dynamic_cast<const IsNullExpr*>(&expr)) {
+        auto ce = clone_expr(*is_null->expr);
+        if (!ce) {
+            return nullptr;
+        }
+        auto c = std::make_unique<IsNullExpr>();
+        c->expr = std::move(ce);
+        c->negated = is_null->negated;
+        return c;
+    }
+    if (const auto* like = dynamic_cast<const LikeExpr*>(&expr)) {
+        auto ce = clone_expr(*like->expr);
+        auto cp = clone_expr(*like->pattern);
+        if (!ce || !cp) {
+            return nullptr;
+        }
+        auto c = std::make_unique<LikeExpr>();
+        c->expr = std::move(ce);
+        c->pattern = std::move(cp);
+        c->negated = like->negated;
+        return c;
+    }
+    if (const auto* in_expr = dynamic_cast<const InExpr*>(&expr)) {
+        if (in_expr->subquery) {
+            return nullptr; // Cannot clone subquery.
+        }
+        auto ce = clone_expr(*in_expr->expr);
+        if (!ce) {
+            return nullptr;
+        }
+        auto c = std::make_unique<InExpr>();
+        c->expr = std::move(ce);
+        c->negated = in_expr->negated;
+        for (const auto& val : in_expr->values) {
+            auto cv = clone_expr(*val);
+            if (!cv) {
+                return nullptr;
+            }
+            c->values.push_back(std::move(cv));
+        }
+        return c;
+    }
+    if (const auto* case_expr = dynamic_cast<const CaseExpr*>(&expr)) {
+        auto c = std::make_unique<CaseExpr>();
+        if (case_expr->operand) {
+            c->operand = clone_expr(*case_expr->operand);
+            if (!c->operand) {
+                return nullptr;
+            }
+        }
+        for (const auto& when : case_expr->whens) {
+            CaseWhen cw;
+            cw.condition = clone_expr(*when.condition);
+            cw.result = clone_expr(*when.result);
+            if (!cw.condition || !cw.result) {
+                return nullptr;
+            }
+            c->whens.push_back(std::move(cw));
+        }
+        if (case_expr->else_expr) {
+            c->else_expr = clone_expr(*case_expr->else_expr);
+            if (!c->else_expr) {
+                return nullptr;
+            }
+        }
+        return c;
+    }
+    if (const auto* arr = dynamic_cast<const ArrayExpr*>(&expr)) {
+        auto c = std::make_unique<ArrayExpr>();
+        for (const auto& elem : arr->elements) {
+            auto ce = clone_expr(*elem);
+            if (!ce) {
+                return nullptr;
+            }
+            c->elements.push_back(std::move(ce));
+        }
+        return c;
+    }
+    // ExistsExpr, SubqueryExpr contain StmtPtr — cannot trivially clone.
+    return nullptr;
+}
+
 ExprPtr fold_constants(const Expr& expr) {
     if (const auto* bin = dynamic_cast<const BinaryExpr*>(&expr)) {
         auto folded_lhs = fold_constants(*bin->lhs);
@@ -200,11 +356,17 @@ ExprPtr fold_constants(const Expr& expr) {
             if (is_literal_false(rhs)) {
                 return make_bool_literal(false);
             }
-            if (is_literal_true(lhs) && folded_rhs) {
-                return folded_rhs;
+            if (is_literal_true(lhs)) {
+                if (folded_rhs) {
+                    return folded_rhs;
+                }
+                return clone_expr(*bin->rhs);
             }
-            if (is_literal_true(rhs) && folded_lhs) {
-                return folded_lhs;
+            if (is_literal_true(rhs)) {
+                if (folded_lhs) {
+                    return folded_lhs;
+                }
+                return clone_expr(*bin->lhs);
             }
         }
 
@@ -215,11 +377,17 @@ ExprPtr fold_constants(const Expr& expr) {
             if (is_literal_true(rhs)) {
                 return make_bool_literal(true);
             }
-            if (is_literal_false(lhs) && folded_rhs) {
-                return folded_rhs;
+            if (is_literal_false(lhs)) {
+                if (folded_rhs) {
+                    return folded_rhs;
+                }
+                return clone_expr(*bin->rhs);
             }
-            if (is_literal_false(rhs) && folded_lhs) {
-                return folded_lhs;
+            if (is_literal_false(rhs)) {
+                if (folded_lhs) {
+                    return folded_lhs;
+                }
+                return clone_expr(*bin->lhs);
             }
         }
 
@@ -499,12 +667,22 @@ bool is_correlated_subquery(const Expr& expr, const std::unordered_set<std::stri
 }
 
 JoinType subquery_to_join_type(const Expr& expr) {
+    // NOT EXISTS -> ANTI join, EXISTS -> SEMI join.
+    if (const auto* unary = dynamic_cast<const UnaryExpr*>(&expr)) {
+        if (unary->op == UnaryOp::NOT) {
+            if (dynamic_cast<const ExistsExpr*>(unary->operand.get()) != nullptr) {
+                return JoinType::ANTI;
+            }
+        }
+    }
+
     if (dynamic_cast<const ExistsExpr*>(&expr) != nullptr) {
         return JoinType::SEMI;
     }
 
-    if (dynamic_cast<const InExpr*>(&expr) != nullptr) {
-        return JoinType::SEMI;
+    // NOT IN -> ANTI join, IN -> SEMI join.
+    if (const auto* in_expr = dynamic_cast<const InExpr*>(&expr)) {
+        return in_expr->negated ? JoinType::ANTI : JoinType::SEMI;
     }
 
     return JoinType::INNER;
