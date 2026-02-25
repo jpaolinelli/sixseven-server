@@ -7,6 +7,7 @@
 #include "giodb/executor/storage_manager.h"
 #include "giodb/executor/tuple.h"
 #include "giodb/graph/graph_engine.h"
+#include "giodb/index/btree_index.h"
 #include "giodb/parser/ast.h"
 #include "giodb/planner/binder.h"
 #include "giodb/vector/hnsw_index.h"
@@ -36,12 +37,14 @@ public:
     /// @param graph_engine     Optional GraphEngine for graph query planning.
     /// @param provider_registry Optional ProviderRegistry for text auto-embedding.
     /// @param hnsw_indexes     Optional map of index name → loaded HnswIndex.
+    /// @param btree_indexes    Optional map of index_id → loaded BTreeIndex.
     Planner(const Catalog& catalog,
             StorageManager& storage,
             database_id_t database_id = default_database_id,
             GraphEngine* graph_engine = nullptr,
             ProviderRegistry* provider_registry = nullptr,
-            std::unordered_map<std::string, HnswIndex*>* hnsw_indexes = nullptr);
+            std::unordered_map<std::string, HnswIndex*>* hnsw_indexes = nullptr,
+            std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes = nullptr);
 
     /// Build an iterator tree for a DML/query statement.
     ///
@@ -106,6 +109,16 @@ private:
                                 const std::unordered_map<std::string, const SelectStmt*>& cte_map,
                                 std::vector<ExprPtr>& owned_exprs);
 
+    /// Try to create an IndexScanOperator for a table if a suitable B+ tree
+    /// index exists for the given WHERE predicate. Returns nullptr if no
+    /// suitable index is found (caller should fall back to SeqScan).
+    [[nodiscard]] Result<std::unique_ptr<Iterator>>
+    try_plan_index_scan(const TableSchema& table_schema,
+                        TableStorage* storage,
+                        const OutputSchema& table_output,
+                        const Expr* where_expr,
+                        const BoundStatement& bound);
+
     // -- Graph query planning -------------------------------------------------
 
     [[nodiscard]] Result<std::unique_ptr<Iterator>> plan_traverse(const TraverseStmt& stmt,
@@ -128,6 +141,7 @@ private:
     GraphEngine* graph_engine_;
     ProviderRegistry* provider_registry_;
     std::unordered_map<std::string, HnswIndex*>* hnsw_indexes_;
+    std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes_;
     SubqueryContext subquery_ctx_;
 };
 
