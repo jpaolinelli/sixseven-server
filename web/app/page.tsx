@@ -5,6 +5,8 @@ import { SchemaDetails } from "@/components/SchemaDetails";
 import { QueryEditor } from "@/components/QueryEditor";
 import { GraphExplorer } from "@/components/GraphExplorer";
 import { Dashboard } from "@/components/Dashboard";
+import { ConnectionManager } from "@/components/ConnectionManager";
+import { ConnectionProvider, useConnection } from "@/lib/ConnectionContext";
 import { useState, useEffect, useCallback } from "react";
 import type {
   SelectedItem,
@@ -18,6 +20,16 @@ import type { SchemaCompletionData } from "@/lib/giodb-sql-lang";
 type ActivePanel = "schema" | "query" | "graph" | "dashboard";
 
 export default function Home() {
+  return (
+    <ConnectionProvider>
+      <AppContent />
+    </ConnectionProvider>
+  );
+}
+
+function AppContent() {
+  const { connectionParams, status } = useConnection();
+
   const [selected, setSelected] = useState<SelectedItem | null>(null);
   const [activePanel, setActivePanel] = useState<ActivePanel>("query");
   const [databases, setDatabases] = useState<DatabaseInfo[]>([]);
@@ -30,7 +42,7 @@ export default function Home() {
   // Load databases for the query editor dropdown and autocomplete
   const loadSchemaForCompletion = useCallback(async () => {
     try {
-      const dbs = await fetchDatabases();
+      const dbs = await fetchDatabases(connectionParams);
       setDatabases(dbs);
 
       // Load schema for all non-system databases (for autocomplete)
@@ -40,7 +52,10 @@ export default function Home() {
 
       for (const db of dbs.filter((d) => !d.isSystem)) {
         try {
-          const schema: DatabaseSchema = await fetchDatabaseSchema(db.name);
+          const schema: DatabaseSchema = await fetchDatabaseSchema(
+            db.name,
+            connectionParams
+          );
           for (const table of schema.tables) {
             allTables.push({
               name: table.name,
@@ -66,11 +81,14 @@ export default function Home() {
     } catch {
       // Databases will be empty — editor still works
     }
-  }, []);
+  }, [connectionParams]);
 
+  // Reload schema when connection changes or becomes connected
   useEffect(() => {
-    loadSchemaForCompletion();
-  }, [loadSchemaForCompletion]);
+    if (status === "connected") {
+      loadSchemaForCompletion();
+    }
+  }, [status, loadSchemaForCompletion]);
 
   const databaseNames = databases
     .filter((d) => !d.isSystem)
@@ -83,6 +101,9 @@ export default function Home() {
         <div className="p-3 border-b border-gray-800 flex items-center gap-2">
           <span className="text-sm font-semibold text-gray-100">GioDB</span>
           <span className="text-xs text-gray-500">Admin</span>
+          <div className="ml-auto relative">
+            <ConnectionManager />
+          </div>
         </div>
 
         {/* Panel toggle */}

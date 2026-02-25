@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { quoteIdent } from "@/lib/schema-utils";
+import type { ConnectionParams } from "@/lib/connection-types";
 
 /**
  * POST /api/graph — Execute graph traversal or shortest-path queries.
  *
  * Body variants:
- *  { action: "traverse", database, table, id, direction?, edgeType? }
- *  { action: "shortest_path", database, sourceTable, sourceId, targetTable, targetId }
- *  { action: "node_details", database, table, id }
+ *  { action: "traverse", database, table, id, direction?, edgeType?, connection? }
+ *  { action: "shortest_path", database, sourceTable, sourceId, targetTable, targetId, connection? }
+ *  { action: "node_details", database, table, id, connection? }
  */
 export async function POST(request: NextRequest) {
   try {
@@ -22,13 +23,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const conn = parseConnectionParams(body);
+
     switch (action) {
       case "traverse":
-        return await handleTraverse(body, database);
+        return await handleTraverse(body, database, conn);
       case "shortest_path":
-        return await handleShortestPath(body, database);
+        return await handleShortestPath(body, database, conn);
       case "node_details":
-        return await handleNodeDetails(body, database);
+        return await handleNodeDetails(body, database, conn);
       default:
         return NextResponse.json(
           { error: `Unknown action: ${action}` },
@@ -49,7 +52,8 @@ async function handleTraverse(
     direction?: "out" | "in" | "both";
     edgeType?: string;
   },
-  database: string
+  database: string,
+  conn?: ConnectionParams
 ) {
   const { table, id, direction = "both", edgeType } = body;
 
@@ -66,7 +70,7 @@ async function handleTraverse(
 
   const sql = `TRAVERSE ${dir}${edgeClause} FROM ${quoteIdent(table)} WHERE id = ${quoteLiteral(id)} MAX_DEPTH 1`;
 
-  const result = await query(sql, database);
+  const result = await query(sql, database, conn);
   return NextResponse.json(result);
 }
 
@@ -77,7 +81,8 @@ async function handleShortestPath(
     targetTable: string;
     targetId: string;
   },
-  database: string
+  database: string,
+  conn?: ConnectionParams
 ) {
   const { sourceTable, sourceId, targetTable, targetId } = body;
 
@@ -90,13 +95,14 @@ async function handleShortestPath(
 
   const sql = `SHORTEST PATH FROM ${quoteIdent(sourceTable)} WHERE id = ${quoteLiteral(sourceId)} TO ${quoteIdent(targetTable)} WHERE id = ${quoteLiteral(targetId)}`;
 
-  const result = await query(sql, database);
+  const result = await query(sql, database, conn);
   return NextResponse.json(result);
 }
 
 async function handleNodeDetails(
   body: { table: string; id: string },
-  database: string
+  database: string,
+  conn?: ConnectionParams
 ) {
   const { table, id } = body;
 
@@ -109,7 +115,7 @@ async function handleNodeDetails(
 
   const sql = `SELECT * FROM ${quoteIdent(table)} WHERE id = ${quoteLiteral(id)}`;
 
-  const result = await query(sql, database);
+  const result = await query(sql, database, conn);
   return NextResponse.json(result);
 }
 
@@ -117,4 +123,16 @@ async function handleNodeDetails(
 function quoteLiteral(value: string): string {
   if (/^\d+$/.test(value)) return value;
   return `'${value.replace(/'/g, "''")}'`;
+}
+
+function parseConnectionParams(
+  body: Record<string, unknown>
+): ConnectionParams | undefined {
+  const c = body.connection as Record<string, unknown> | undefined;
+  if (!c || !c.host) return undefined;
+  return {
+    host: String(c.host),
+    port: Number(c.port) || 6767,
+    user: String(c.user || "giodb"),
+  };
 }

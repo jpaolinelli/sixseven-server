@@ -12,6 +12,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { SqlEditor } from "./SqlEditor";
 import { QueryResults } from "./QueryResults";
+import { useConnection } from "@/lib/ConnectionContext";
 import type { SchemaCompletionData } from "@/lib/giodb-sql-lang";
 import {
   loadHistory,
@@ -60,6 +61,7 @@ export function QueryEditor({
   schemaData,
   defaultDatabase = "",
 }: QueryEditorProps) {
+  const { connectionParams } = useConnection();
   const [tabs, setTabs] = useState<QueryTab[]>(() => [
     createTab(defaultDatabase || databases[0] || "", 1),
   ]);
@@ -99,7 +101,11 @@ export function QueryEditor({
         const res = await fetch("/api/query", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sql, database: activeTab.database }),
+          body: JSON.stringify({
+            sql,
+            database: activeTab.database,
+            connection: connectionParams,
+          }),
         });
 
         const durationMs = Math.round(performance.now() - startTime);
@@ -156,7 +162,7 @@ export function QueryEditor({
         );
       }
     },
-    [activeTabId, activeTab.database]
+    [activeTabId, activeTab.database, connectionParams]
   );
 
   // Save to history (Ctrl+S)

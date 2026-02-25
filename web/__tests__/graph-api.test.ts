@@ -80,7 +80,8 @@ describe("POST /api/graph", () => {
       expect(res.status).toBe(200);
       expect(mockedQuery).toHaveBeenCalledWith(
         expect.stringContaining("TRAVERSE BOTH"),
-        "social"
+        "social",
+        undefined
       );
     });
 
@@ -98,7 +99,8 @@ describe("POST /api/graph", () => {
       );
       expect(mockedQuery).toHaveBeenCalledWith(
         expect.stringContaining("TRAVERSE OUT"),
-        "social"
+        "social",
+        undefined
       );
     });
 
@@ -116,7 +118,8 @@ describe("POST /api/graph", () => {
       );
       expect(mockedQuery).toHaveBeenCalledWith(
         expect.stringContaining('EDGE "follows"'),
-        "social"
+        "social",
+        undefined
       );
     });
 
@@ -202,7 +205,8 @@ describe("POST /api/graph", () => {
       expect(res.status).toBe(200);
       expect(mockedQuery).toHaveBeenCalledWith(
         expect.stringContaining("SHORTEST PATH"),
-        "social"
+        "social",
+        undefined
       );
     });
   });
