@@ -29,6 +29,7 @@ add_executable(giodb_unit_tests
     test_binder.cpp
     test_expr_evaluator.cpp
     test_seq_scan.cpp
+    test_index_scan.cpp
     test_project_sort_limit.cpp
     test_dml_operators.cpp
     test_nested_loop_join.cpp

@@ -2,6 +2,8 @@
 add_library(giodb_executor STATIC
     expr_evaluator.cpp
     seq_scan.cpp
+    index_scan.cpp
+    bitmap_scan.cpp
     filter.cpp
     project.cpp
     sort.cpp
@@ -33,6 +35,7 @@ target_link_libraries(giodb_executor
     PUBLIC
         giodb_common
         giodb_table
+        giodb_index
         giodb_parser
         giodb_planner
         giodb_graph

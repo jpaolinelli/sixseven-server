@@ -3,6 +3,7 @@
 #include "giodb/executor/delete.h"
 #include "giodb/executor/filter.h"
 #include "giodb/executor/hash_aggregate.h"
+#include "giodb/executor/index_scan.h"
 #include "giodb/executor/insert.h"
 #include "giodb/executor/limit.h"
 #include "giodb/executor/nearest_scan.h"
@@ -210,10 +211,11 @@ Planner::Planner(const Catalog& catalog,
                  database_id_t database_id,
                  GraphEngine* graph_engine,
                  ProviderRegistry* provider_registry,
-                 std::unordered_map<std::string, HnswIndex*>* hnsw_indexes)
+                 std::unordered_map<std::string, HnswIndex*>* hnsw_indexes,
+                 std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes)
     : catalog_(catalog), storage_(storage), database_id_(database_id), graph_engine_(graph_engine),
       provider_registry_(provider_registry), hnsw_indexes_(hnsw_indexes),
-      subquery_ctx_{catalog_, storage_} {}
+      btree_indexes_(btree_indexes), subquery_ctx_{catalog_, storage_} {}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -662,13 +664,24 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
                 if (ts) {
                     auto* storage = *ts;
                     auto table_output = build_table_output_schema(*table_schema, alias);
-                    source->iter = std::make_unique<SeqScanOperator>(*storage->heap,
-                                                                     storage->storage_schema,
-                                                                     table_output,
-                                                                     stmt.where_expr.get(),
-                                                                     &bound);
-                    source->schema = std::move(table_output);
-                    pushed_where = true;
+
+                    // Try to use an index scan if a suitable B+ tree index exists.
+                    auto idx_scan = try_plan_index_scan(
+                        *table_schema, *ts, table_output, stmt.where_expr.get(), bound);
+                    if (idx_scan && *idx_scan) {
+                        source->iter = std::move(*idx_scan);
+                        source->schema = std::move(table_output);
+                        pushed_where = true;
+                    } else {
+                        // Fall back to sequential scan with predicate pushdown.
+                        source->iter = std::make_unique<SeqScanOperator>(*storage->heap,
+                                                                         storage->storage_schema,
+                                                                         table_output,
+                                                                         stmt.where_expr.get(),
+                                                                         &bound);
+                        source->schema = std::move(table_output);
+                        pushed_where = true;
+                    }
                 }
             }
         }
@@ -1521,6 +1534,234 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
                                                       hnsw_index);
 
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
+}
+
+// ---------------------------------------------------------------------------
+// Index scan planning
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Parse a comma-separated column list (e.g. "a,b,c") into individual names.
+std::vector<std::string> parse_index_columns(const std::string& columns) {
+    std::vector<std::string> result;
+    size_t start = 0;
+    while (start < columns.size()) {
+        size_t end = columns.find(',', start);
+        if (end == std::string::npos) {
+            end = columns.size();
+        }
+        // Trim whitespace.
+        auto s = start;
+        while (s < end && columns[s] == ' ') {
+            ++s;
+        }
+        auto e = end;
+        while (e > s && columns[e - 1] == ' ') {
+            --e;
+        }
+        if (s < e) {
+            result.emplace_back(columns.substr(s, e - s));
+        }
+        start = end + 1;
+    }
+    return result;
+}
+
+/// Check if a binary predicate is a simple comparison between a column and a
+/// literal (e.g., `col = 42` or `col > 10`). Returns the column name, the
+/// literal Value, and the operator.
+struct SimpleComparison {
+    std::string column_name;
+    Value literal_value;
+    BinaryOp op = BinaryOp::EQUAL;
+};
+
+std::optional<SimpleComparison> extract_simple_comparison(const Expr* expr) {
+    auto* bin = dynamic_cast<const BinaryExpr*>(expr);
+    if (bin == nullptr) {
+        return std::nullopt;
+    }
+
+    // Only handle comparison operators.
+    switch (bin->op) {
+    case BinaryOp::EQUAL:
+    case BinaryOp::LESS:
+    case BinaryOp::GREATER:
+    case BinaryOp::LESS_EQUAL:
+    case BinaryOp::GREATER_EQUAL:
+        break;
+    default:
+        return std::nullopt;
+    }
+
+    auto* col = dynamic_cast<const ColumnRefExpr*>(bin->lhs.get());
+    auto* lit = dynamic_cast<const LiteralExpr*>(bin->rhs.get());
+
+    if (col == nullptr || lit == nullptr) {
+        // Try reversed: literal op column.
+        col = dynamic_cast<const ColumnRefExpr*>(bin->rhs.get());
+        lit = dynamic_cast<const LiteralExpr*>(bin->lhs.get());
+        if (col == nullptr || lit == nullptr) {
+            return std::nullopt;
+        }
+        // Flip the operator for reversed operands.
+        SimpleComparison cmp;
+        cmp.column_name = col->column;
+        switch (bin->op) {
+        case BinaryOp::LESS:
+            cmp.op = BinaryOp::GREATER;
+            break;
+        case BinaryOp::GREATER:
+            cmp.op = BinaryOp::LESS;
+            break;
+        case BinaryOp::LESS_EQUAL:
+            cmp.op = BinaryOp::GREATER_EQUAL;
+            break;
+        case BinaryOp::GREATER_EQUAL:
+            cmp.op = BinaryOp::LESS_EQUAL;
+            break;
+        default:
+            cmp.op = bin->op;
+            break;
+        }
+
+        // Parse the literal value.
+        if (lit->kind == LiteralKind::INTEGER) {
+            cmp.literal_value = Value(static_cast<int64_t>(std::stoll(lit->value)));
+        } else if (lit->kind == LiteralKind::FLOAT) {
+            cmp.literal_value = Value(std::stod(lit->value));
+        } else if (lit->kind == LiteralKind::STRING) {
+            cmp.literal_value = Value(lit->value);
+        } else {
+            return std::nullopt;
+        }
+        return cmp;
+    }
+
+    SimpleComparison cmp;
+    cmp.column_name = col->column;
+    cmp.op = bin->op;
+
+    // Parse the literal value.
+    if (lit->kind == LiteralKind::INTEGER) {
+        cmp.literal_value = Value(static_cast<int64_t>(std::stoll(lit->value)));
+    } else if (lit->kind == LiteralKind::FLOAT) {
+        cmp.literal_value = Value(std::stod(lit->value));
+    } else if (lit->kind == LiteralKind::STRING) {
+        cmp.literal_value = Value(lit->value);
+    } else {
+        return std::nullopt;
+    }
+
+    return cmp;
+}
+
+} // anonymous namespace
+
+Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema& table_schema,
+                                                               TableStorage* storage,
+                                                               const OutputSchema& table_output,
+                                                               const Expr* where_expr,
+                                                               const BoundStatement& bound) {
+    // No B+ tree indexes available.
+    if (btree_indexes_ == nullptr || btree_indexes_->empty() || where_expr == nullptr) {
+        return ok(std::unique_ptr<Iterator>(nullptr));
+    }
+
+    // Extract simple comparison from the WHERE clause.
+    auto cmp = extract_simple_comparison(where_expr);
+    if (!cmp) {
+        return ok(std::unique_ptr<Iterator>(nullptr));
+    }
+
+    // Find a matching B+ tree index on this table.
+    auto indexes = catalog_.list_indexes(table_schema.table_id);
+    for (const auto& idx_def : indexes) {
+        if (idx_def.index_type != "btree") {
+            continue;
+        }
+
+        auto it = btree_indexes_->find(idx_def.index_id);
+        if (it == btree_indexes_->end()) {
+            continue;
+        }
+
+        auto idx_columns = parse_index_columns(idx_def.columns);
+        if (idx_columns.empty()) {
+            continue;
+        }
+
+        // Check if the first (prefix) column of the index matches the predicate column.
+        if (idx_columns[0] != cmp->column_name) {
+            continue;
+        }
+
+        // Found a matching index. Build scan bounds.
+        auto* btree = it->second;
+        KeyType key_value = {cmp->literal_value};
+
+        std::optional<KeyType> begin_key;
+        std::optional<KeyType> end_key;
+        const Expr* residual = nullptr; // Residual predicate after pushdown.
+
+        switch (cmp->op) {
+        case BinaryOp::EQUAL:
+            begin_key = key_value;
+            // For equality, end_key should be just past the key.
+            // The B+ tree range_scan is [begin, end), so we need begin=key and
+            // we let the index scan check equality as a post-filter.
+            // Actually, for point lookups we scan [key, nullopt) and filter.
+            end_key = std::nullopt;
+            // Use the WHERE expr as a residual to filter exact matches.
+            residual = where_expr;
+            break;
+        case BinaryOp::GREATER:
+        case BinaryOp::GREATER_EQUAL:
+            begin_key = key_value;
+            end_key = std::nullopt;
+            // For GREATER (strict), we need to skip the exact match.
+            // Use residual predicate to handle this.
+            residual = where_expr;
+            break;
+        case BinaryOp::LESS:
+        case BinaryOp::LESS_EQUAL:
+            begin_key = std::nullopt;
+            end_key = key_value;
+            // Residual handles the exact boundary.
+            residual = where_expr;
+            break;
+        default:
+            continue;
+        }
+
+        // Build the index column position map for potential index-only scans.
+        std::vector<size_t> index_col_indexes;
+        for (const auto& icol : idx_columns) {
+            for (size_t ci = 0; ci < table_schema.columns.size(); ++ci) {
+                if (table_schema.columns[ci].name == icol) {
+                    index_col_indexes.push_back(ci);
+                    break;
+                }
+            }
+        }
+
+        auto scan = std::make_unique<IndexScanOperator>(*btree,
+                                                        *storage->heap,
+                                                        storage->storage_schema,
+                                                        table_output,
+                                                        std::move(begin_key),
+                                                        std::move(end_key),
+                                                        std::move(index_col_indexes),
+                                                        false, // index_only: conservative default
+                                                        residual,
+                                                        &bound);
+
+        return ok(std::unique_ptr<Iterator>(std::move(scan)));
+    }
+
+    // No suitable index found.
+    return ok(std::unique_ptr<Iterator>(nullptr));
 }
 
 } // namespace giodb
