@@ -21,6 +21,7 @@ add_executable(giodb_unit_tests
     test_btree_node.cpp
     test_btree.cpp
     test_btree_concurrency.cpp
+    test_hash_index.cpp
     test_table_heap.cpp
     test_catalog.cpp
     test_lexer.cpp

@@ -3,6 +3,7 @@ add_library(giodb_executor STATIC
     expr_evaluator.cpp
     seq_scan.cpp
     index_scan.cpp
+    hash_index_scan.cpp
     bitmap_scan.cpp
     filter.cpp
     project.cpp
