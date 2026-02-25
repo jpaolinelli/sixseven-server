@@ -403,13 +403,13 @@ std::optional<Result<QueryResult>> Session::try_handle_prepare(const std::string
             make_error(StatusCode::PARSE_ERROR, "syntax error: PREPARE requires a statement"));
     }
 
+    GIODB_LOG_DEBUG("session {}: PREPARE {} (sql='{}')", backend_pid_, stmt_name, stmt_sql);
+
     PreparedStatement stmt;
     stmt.name = stmt_name;
     stmt.sql = std::move(stmt_sql);
     stmt.param_oids = std::move(param_oids);
     add_prepared_statement(stmt_name, std::move(stmt));
-
-    GIODB_LOG_DEBUG("session {}: PREPARE {} (sql='{}')", backend_pid_, stmt_name, stmt_sql);
 
     QueryResult qr;
     qr.message = "PREPARE";

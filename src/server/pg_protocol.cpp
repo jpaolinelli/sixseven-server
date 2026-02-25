@@ -77,6 +77,35 @@ int32_t generate_secret_key() {
     return dist(rng);
 }
 
+/// Case-insensitive string prefix check.
+bool starts_with_ci(std::string_view str, std::string_view prefix) {
+    if (str.size() < prefix.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < prefix.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(str[i])) !=
+            std::tolower(static_cast<unsigned char>(prefix[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Build a PostgreSQL CommandComplete tag from a QueryResult.
+std::string build_command_complete_tag(const QueryResult& qr) {
+    if (!qr.column_names.empty()) {
+        return "SELECT " + std::to_string(qr.rows.size());
+    }
+    if (qr.affected_rows >= 0) {
+        std::string tag = qr.message.empty() ? "UNKNOWN" : qr.message;
+        if (tag.find("INSERT") == 0) {
+            return "INSERT 0 " + std::to_string(qr.affected_rows);
+        }
+        return tag + " " + std::to_string(qr.affected_rows);
+    }
+    return qr.message.empty() ? "OK" : qr.message;
+}
+
 } // namespace
 
 // -- Type OID mapping ---------------------------------------------------------
@@ -995,29 +1024,14 @@ Result<size_t> PgProtocolHandler::handle_frontend_message(Connection& conn) {
 }
 
 void PgProtocolHandler::send_query_result(Connection& conn, const QueryResult& qr) {
-    // Determine if this is a SELECT (has column names) or DML/DDL.
     if (!qr.column_names.empty()) {
         // SELECT: send RowDescription + DataRows + CommandComplete.
         send_row_description(conn, qr);
         for (const auto& row : qr.rows) {
             send_data_row(conn, row, qr.column_types);
         }
-        send_command_complete(conn, "SELECT " + std::to_string(qr.rows.size()));
-    } else if (qr.affected_rows >= 0) {
-        // DML: send CommandComplete with tag and row count.
-        std::string tag = qr.message.empty() ? "UNKNOWN" : qr.message;
-
-        // For INSERT, PG format is "INSERT 0 <count>".
-        if (tag.find("INSERT") == 0) {
-            tag = "INSERT 0 " + std::to_string(qr.affected_rows);
-        } else {
-            tag += " " + std::to_string(qr.affected_rows);
-        }
-        send_command_complete(conn, tag);
-    } else {
-        // DDL/utility: send CommandComplete with the message.
-        send_command_complete(conn, qr.message.empty() ? "OK" : qr.message);
     }
+    send_command_complete(conn, build_command_complete_tag(qr));
 }
 
 void PgProtocolHandler::handle_simple_query(Connection& conn, std::string_view sql) {
@@ -1101,14 +1115,7 @@ void PgProtocolHandler::handle_simple_query(Connection& conn, std::string_view s
 std::optional<Result<void>> PgProtocolHandler::try_handle_execute(Connection& conn,
                                                                   const std::string& sql) {
     // Check for "EXECUTE " prefix (case-insensitive).
-    if (sql.size() < 8) {
-        return std::nullopt;
-    }
-    std::string prefix = sql.substr(0, 8);
-    std::transform(prefix.begin(), prefix.end(), prefix.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    if (prefix != "execute ") {
+    if (!starts_with_ci(sql, "EXECUTE ")) {
         return std::nullopt;
     }
 
@@ -1340,18 +1347,8 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
         for (const auto& row : qr.rows) {
             send_data_row(conn, row, qr.column_types);
         }
-        send_command_complete(conn, "SELECT " + std::to_string(qr.rows.size()));
-    } else if (qr.affected_rows >= 0) {
-        std::string tag = qr.message.empty() ? "UNKNOWN" : qr.message;
-        if (tag.find("INSERT") == 0) {
-            tag = "INSERT 0 " + std::to_string(qr.affected_rows);
-        } else {
-            tag += " " + std::to_string(qr.affected_rows);
-        }
-        send_command_complete(conn, tag);
-    } else {
-        send_command_complete(conn, qr.message.empty() ? "OK" : qr.message);
     }
+    send_command_complete(conn, build_command_complete_tag(qr));
 }
 
 void PgProtocolHandler::handle_sync(Connection& conn) {
