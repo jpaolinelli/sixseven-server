@@ -3,6 +3,7 @@
 #include "giodb/executor/delete.h"
 #include "giodb/executor/filter.h"
 #include "giodb/executor/hash_aggregate.h"
+#include "giodb/executor/hash_index_scan.h"
 #include "giodb/executor/index_scan.h"
 #include "giodb/executor/insert.h"
 #include "giodb/executor/limit.h"
@@ -212,10 +213,12 @@ Planner::Planner(const Catalog& catalog,
                  GraphEngine* graph_engine,
                  ProviderRegistry* provider_registry,
                  std::unordered_map<std::string, HnswIndex*>* hnsw_indexes,
-                 std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes)
+                 std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes,
+                 std::unordered_map<index_id_t, HashIndex*>* hash_indexes)
     : catalog_(catalog), storage_(storage), database_id_(database_id), graph_engine_(graph_engine),
       provider_registry_(provider_registry), hnsw_indexes_(hnsw_indexes),
-      btree_indexes_(btree_indexes), subquery_ctx_{catalog_, storage_} {}
+      btree_indexes_(btree_indexes), hash_indexes_(hash_indexes),
+      subquery_ctx_{catalog_, storage_} {}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -1664,8 +1667,7 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema
                                                                const OutputSchema& table_output,
                                                                const Expr* where_expr,
                                                                const BoundStatement& bound) {
-    // No B+ tree indexes available.
-    if (btree_indexes_ == nullptr || btree_indexes_->empty() || where_expr == nullptr) {
+    if (where_expr == nullptr) {
         return ok(std::unique_ptr<Iterator>(nullptr));
     }
 
@@ -1675,8 +1677,58 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema
         return ok(std::unique_ptr<Iterator>(nullptr));
     }
 
-    // Find a matching B+ tree index on this table.
     auto indexes = catalog_.list_indexes(table_schema.table_id);
+
+    // --- Try hash index first (preferred for equality predicates) ---
+    if (cmp->op == BinaryOp::EQUAL && hash_indexes_ != nullptr && !hash_indexes_->empty()) {
+        for (const auto& idx_def : indexes) {
+            if (idx_def.index_type != "hash") {
+                continue;
+            }
+
+            auto it = hash_indexes_->find(idx_def.index_id);
+            if (it == hash_indexes_->end()) {
+                continue;
+            }
+
+            auto idx_columns = parse_index_columns(idx_def.columns);
+            if (idx_columns.empty() || idx_columns[0] != cmp->column_name) {
+                continue;
+            }
+
+            // Found a matching hash index for an equality predicate.
+            auto* hash_idx = it->second;
+            KeyType lookup_key = {cmp->literal_value};
+
+            std::vector<size_t> index_col_indexes;
+            for (const auto& icol : idx_columns) {
+                for (size_t ci = 0; ci < table_schema.columns.size(); ++ci) {
+                    if (table_schema.columns[ci].name == icol) {
+                        index_col_indexes.push_back(ci);
+                        break;
+                    }
+                }
+            }
+
+            auto scan = std::make_unique<HashIndexScanOperator>(*hash_idx,
+                                                                *storage->heap,
+                                                                storage->storage_schema,
+                                                                table_output,
+                                                                std::move(lookup_key),
+                                                                std::move(index_col_indexes),
+                                                                false, // index_only
+                                                                where_expr,
+                                                                &bound);
+
+            return ok(std::unique_ptr<Iterator>(std::move(scan)));
+        }
+    }
+
+    // --- Fall back to B+ tree index ---
+    if (btree_indexes_ == nullptr || btree_indexes_->empty()) {
+        return ok(std::unique_ptr<Iterator>(nullptr));
+    }
+
     for (const auto& idx_def : indexes) {
         if (idx_def.index_type != "btree") {
             continue;
