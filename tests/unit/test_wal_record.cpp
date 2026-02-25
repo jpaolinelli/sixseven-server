@@ -224,7 +224,7 @@ TEST(WalRecord, LengthPrefixIsCorrect) {
 TEST(WalRecord, AllFieldsPreserved) {
     WalRecord record;
     record.lsn = 123456789;
-    record.txn_id = 987654321;
+    record.txn_id = 987667671;
     record.prev_lsn = 123456788;
     record.type = WalRecordType::UPDATE;
     record.table_id = 42;

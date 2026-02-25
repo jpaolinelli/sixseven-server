@@ -90,10 +90,12 @@ enum class AlterAction : uint8_t {
 
 /// SHOW target for SHOW statements.
 enum class ShowTarget : uint8_t {
+    DATABASES,
     TABLES,
     COLUMNS,
     EDGE_TYPES,
     INDEXES,
+    EMBEDDINGS,
     PROVIDERS,
     REPLICATION_SLOTS,
     REPLICATION_STATUS,

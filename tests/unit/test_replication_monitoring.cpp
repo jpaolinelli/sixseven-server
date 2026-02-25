@@ -209,7 +209,7 @@ TEST_F(ReplicationMonitoringTest, ShowReplicationStatusWithReplica) {
 
     // Create a slot and accept a connection.
     ASSERT_TRUE(slot_mgr_->create_slot("replica_1").has_value());
-    auto conn = std::make_unique<TestReplicationConnection>("192.168.1.10:5432");
+    auto conn = std::make_unique<TestReplicationConnection>("192.168.1.10:6767");
     ASSERT_TRUE(sender_mgr.accept_connection(std::move(conn), 1, "replica_1").has_value());
 
     // Give the sender thread a moment to start.
@@ -218,7 +218,7 @@ TEST_F(ReplicationMonitoringTest, ShowReplicationStatusWithReplica) {
     auto qr = exec_ok("SHOW REPLICATION STATUS");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "replica_1");         // slot_name
-    EXPECT_EQ(qr.rows[0][1].as_string(), "192.168.1.10:5432"); // client_addr
+    EXPECT_EQ(qr.rows[0][1].as_string(), "192.168.1.10:6767"); // client_addr
     // State should be catchup or streaming.
     std::string state = qr.rows[0][2].as_string();
     EXPECT_TRUE(state == "catchup" || state == "streaming" || state == "startup")

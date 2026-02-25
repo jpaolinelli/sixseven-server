@@ -10,7 +10,7 @@ namespace giodb {
 
 struct Config {
     std::string data_dir = "./data";
-    uint16_t port = 5432;
+    uint16_t port = 6767;
     std::string log_level = "info";
     size_t buffer_pool_size_mb = 256;
     size_t wal_segment_size_mb = 16;
@@ -25,7 +25,7 @@ struct Config {
     // Standby mode settings.
     bool standby_mode = false;                    ///< True when server runs as read-only standby.
     std::string replication_primary_host;         ///< Hostname/IP of the primary.
-    uint16_t replication_primary_port = 5432;     ///< Port of the primary.
+    uint16_t replication_primary_port = 6767;     ///< Port of the primary.
     int32_t replication_retry_interval_ms = 5000; ///< Initial retry interval for reconnection.
     int32_t replication_max_retry_interval_ms = 60000; ///< Maximum retry interval (backoff cap).
 

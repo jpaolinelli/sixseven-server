@@ -1,8 +1,15 @@
+#include "giodb/catalog/catalog.h"
 #include "giodb/common/config.h"
 #include "giodb/common/logging.h"
+#include "giodb/executor/query_engine.h"
+#include "giodb/executor/settings_cache.h"
+#include "giodb/executor/storage_manager.h"
+#include "giodb/executor/system_bootstrap.h"
 #include "giodb/server/server.h"
+#include "giodb/storage/disk_manager.h"
 
 #include <csignal>
+#include <filesystem>
 #include <string>
 
 namespace {
@@ -70,10 +77,44 @@ int main(int argc, char* argv[]) {
         GIODB_LOG_INFO("  primary_port: {}", config.replication_primary_port);
     }
 
+    // Initialize query execution infrastructure.
+    std::filesystem::path data_dir(config.data_dir);
+    std::filesystem::create_directories(data_dir);
+
+    giodb::DiskManager disk_manager;
+    giodb::Catalog catalog;
+    giodb::StorageManager storage(disk_manager, data_dir);
+    giodb::QueryEngine engine(catalog, storage);
+
+    // Bootstrap system database (creates sys_settings, sys_providers, seeds defaults).
+    auto boot = giodb::SystemBootstrap::bootstrap(engine, catalog, storage, config, data_dir);
+    if (!boot) {
+        GIODB_LOG_ERROR("bootstrap failed: {}", boot.error().message);
+        return 1;
+    }
+
+    // Load settings cache and wire it to the engine.
+    giodb::SettingsCache settings_cache;
+    auto load = settings_cache.load(engine);
+    if (!load) {
+        GIODB_LOG_ERROR("settings cache load failed: {}", load.error().message);
+        return 1;
+    }
+    engine.set_settings_cache(&settings_cache);
+
+    // Switch engine to default user database.
+    engine.set_current_database(giodb::default_database_id);
+
     install_signal_handlers();
 
     giodb::Server server(std::move(config));
     g_server = &server;
+
+    // Wire query executor: route SQL to the shared QueryEngine.
+    server.set_query_executor(
+        [&engine](const std::string& sql) -> giodb::Result<giodb::QueryResult> {
+            return engine.execute(sql);
+        });
 
     auto result = server.start();
     g_server = nullptr;

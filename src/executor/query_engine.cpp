@@ -1251,6 +1251,18 @@ Result<QueryResult> QueryEngine::execute_show(const ShowStmt& stmt) {
         return ok(std::move(qr));
     }
 
+    case ShowTarget::DATABASES: {
+        auto databases = catalog_.list_databases();
+
+        QueryResult qr;
+        qr.column_names = {"database_name"};
+        qr.column_types = {TypeId::STRING};
+        for (const auto& db : databases) {
+            qr.rows.push_back({Value(db.name)});
+        }
+        return ok(std::move(qr));
+    }
+
     case ShowTarget::TABLES: {
         auto tables = catalog_.list_tables(current_database_id_);
 
@@ -1283,12 +1295,14 @@ Result<QueryResult> QueryEngine::execute_show(const ShowStmt& stmt) {
         auto indexes = catalog_.list_all_indexes();
 
         QueryResult qr;
-        qr.column_names = {"index_name", "table_id", "columns", "type", "unique"};
+        qr.column_names = {"index_name", "table_name", "columns", "type", "unique"};
         qr.column_types = {
-            TypeId::STRING, TypeId::INT64, TypeId::STRING, TypeId::STRING, TypeId::BOOL};
+            TypeId::STRING, TypeId::STRING, TypeId::STRING, TypeId::STRING, TypeId::BOOL};
         for (const auto& idx : indexes) {
+            auto table = catalog_.get_table_by_id(idx.table_id);
+            std::string table_name = table ? table->name : "unknown";
             qr.rows.push_back({Value(idx.name),
-                               Value(static_cast<int64_t>(idx.table_id)),
+                               Value(table_name),
                                Value(idx.columns),
                                Value(idx.index_type),
                                Value(idx.is_unique)});
@@ -1300,12 +1314,52 @@ Result<QueryResult> QueryEngine::execute_show(const ShowStmt& stmt) {
         auto edge_types = catalog_.list_edge_types();
 
         QueryResult qr;
-        qr.column_names = {"edge_type", "source_table_id", "target_table_id"};
-        qr.column_types = {TypeId::STRING, TypeId::INT64, TypeId::INT64};
+        qr.column_names = {"edge_type", "source_table", "target_table"};
+        qr.column_types = {TypeId::STRING, TypeId::STRING, TypeId::STRING};
         for (const auto& et : edge_types) {
+            auto src = catalog_.get_table_by_id(et.source_table_id);
+            auto tgt = catalog_.get_table_by_id(et.target_table_id);
             qr.rows.push_back({Value(et.name),
-                               Value(static_cast<int64_t>(et.source_table_id)),
-                               Value(static_cast<int64_t>(et.target_table_id))});
+                               Value(src ? src->name : std::string("unknown")),
+                               Value(tgt ? tgt->name : std::string("unknown"))});
+        }
+        return ok(std::move(qr));
+    }
+
+    case ShowTarget::EMBEDDINGS: {
+        std::vector<EmbeddingColumnDef> embeddings;
+        if (!stmt.name.empty()) {
+            // SHOW EMBEDDINGS FROM table — filter by table name.
+            auto schema = catalog_.get_table(current_database_id_, stmt.name);
+            if (!schema) {
+                return make_error(schema.error().code, schema.error().message);
+            }
+            embeddings = catalog_.list_embedding_columns(schema->table_id);
+        } else {
+            embeddings = catalog_.list_all_embedding_columns();
+        }
+
+        QueryResult qr;
+        qr.column_names = {"table_name", "column_name", "dimension", "source_expr", "provider"};
+        qr.column_types = {
+            TypeId::STRING, TypeId::STRING, TypeId::INT32, TypeId::STRING, TypeId::STRING};
+        for (const auto& emb : embeddings) {
+            auto table = catalog_.get_table_by_id(emb.table_id);
+            std::string table_name = table ? table->name : "unknown";
+            std::string col_name = "unknown";
+            if (table) {
+                for (const auto& col : table->columns) {
+                    if (col.ordinal == emb.column_id) {
+                        col_name = col.name;
+                        break;
+                    }
+                }
+            }
+            qr.rows.push_back({Value(table_name),
+                               Value(col_name),
+                               Value(emb.dimension),
+                               Value(emb.source_expr),
+                               Value(emb.provider)});
         }
         return ok(std::move(qr));
     }

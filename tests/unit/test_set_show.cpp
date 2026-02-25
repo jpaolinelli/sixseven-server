@@ -260,12 +260,170 @@ TEST_F(SetShowTest, ShowIndexes) {
     auto qr = exec_ok("SHOW INDEXES");
     ASSERT_EQ(qr.column_names.size(), 5u);
     EXPECT_EQ(qr.column_names[0], "index_name");
+    EXPECT_EQ(qr.column_names[1], "table_name");
+}
+
+TEST_F(SetShowTest, ShowIndexesResolvesTableName) {
+    exec_ok("CREATE TABLE idx_test (id INT, name VARCHAR, PRIMARY KEY (id))");
+
+    // Register index via catalog API (CREATE INDEX not yet in query engine).
+    auto table = catalog_->get_table(default_database_id, "idx_test");
+    ASSERT_TRUE(table.has_value());
+    IndexDef idx;
+    idx.table_id = table->table_id;
+    idx.name = "idx_name";
+    idx.index_type = "btree";
+    idx.columns = "name";
+    idx.is_unique = false;
+    ASSERT_TRUE(catalog_->create_index(idx).has_value());
+
+    auto qr = exec_ok("SHOW INDEXES");
+    bool found = false;
+    for (const auto& row : qr.rows) {
+        if (row[0].as_string() == "idx_name") {
+            found = true;
+            EXPECT_EQ(row[1].as_string(), "idx_test");
+            EXPECT_EQ(row[2].as_string(), "name");
+        }
+    }
+    EXPECT_TRUE(found);
 }
 
 TEST_F(SetShowTest, ShowEdgeTypes) {
     auto qr = exec_ok("SHOW EDGE TYPES");
     ASSERT_EQ(qr.column_names.size(), 3u);
     EXPECT_EQ(qr.column_names[0], "edge_type");
+    EXPECT_EQ(qr.column_names[1], "source_table");
+    EXPECT_EQ(qr.column_names[2], "target_table");
+}
+
+TEST_F(SetShowTest, ShowEdgeTypesResolvesTableNames) {
+    exec_ok("CREATE TABLE et_src (id INT, PRIMARY KEY (id))");
+    exec_ok("CREATE TABLE et_tgt (id INT, PRIMARY KEY (id))");
+
+    // Register edge type via catalog API (graph engine not available in test).
+    auto src = catalog_->get_table(default_database_id, "et_src");
+    auto tgt = catalog_->get_table(default_database_id, "et_tgt");
+    ASSERT_TRUE(src.has_value());
+    ASSERT_TRUE(tgt.has_value());
+    EdgeTypeDef et;
+    et.name = "follows";
+    et.source_table_id = src->table_id;
+    et.target_table_id = tgt->table_id;
+    ASSERT_TRUE(catalog_->create_edge_type(et).has_value());
+
+    auto qr = exec_ok("SHOW EDGE TYPES");
+    bool found = false;
+    for (const auto& row : qr.rows) {
+        if (row[0].as_string() == "follows") {
+            found = true;
+            EXPECT_EQ(row[1].as_string(), "et_src");
+            EXPECT_EQ(row[2].as_string(), "et_tgt");
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+// =============================================================================
+// SHOW DATABASES (GDB-53)
+// =============================================================================
+
+TEST_F(SetShowTest, ShowDatabases) {
+    auto qr = exec_ok("SHOW DATABASES");
+    ASSERT_EQ(qr.column_names.size(), 1u);
+    EXPECT_EQ(qr.column_names[0], "database_name");
+
+    // Default databases: giodb and giodb_system.
+    bool found_giodb = false;
+    bool found_system = false;
+    for (const auto& row : qr.rows) {
+        if (row[0].as_string() == "giodb")
+            found_giodb = true;
+        if (row[0].as_string() == "giodb_system")
+            found_system = true;
+    }
+    EXPECT_TRUE(found_giodb);
+    EXPECT_TRUE(found_system);
+}
+
+TEST_F(SetShowTest, ShowDatabasesAfterCreate) {
+    exec_ok("CREATE DATABASE test_show_db");
+
+    auto qr = exec_ok("SHOW DATABASES");
+    bool found = false;
+    for (const auto& row : qr.rows) {
+        if (row[0].as_string() == "test_show_db")
+            found = true;
+    }
+    EXPECT_TRUE(found);
+}
+
+// =============================================================================
+// SHOW EMBEDDINGS (GDB-53)
+// =============================================================================
+
+TEST_F(SetShowTest, ShowEmbeddingsEmpty) {
+    auto qr = exec_ok("SHOW EMBEDDINGS");
+    ASSERT_EQ(qr.column_names.size(), 5u);
+    EXPECT_EQ(qr.column_names[0], "table_name");
+    EXPECT_EQ(qr.column_names[1], "column_name");
+    EXPECT_EQ(qr.column_names[2], "dimension");
+    EXPECT_EQ(qr.column_names[3], "source_expr");
+    EXPECT_EQ(qr.column_names[4], "provider");
+    EXPECT_TRUE(qr.rows.empty());
+}
+
+TEST_F(SetShowTest, ShowEmbeddingsWithData) {
+    exec_ok("CREATE TABLE emb_test (id INT, title VARCHAR, vec INT, PRIMARY KEY (id))");
+
+    // Register embedding metadata via catalog API (EmbeddingColumnManager not
+    // available in this test fixture).
+    auto table = catalog_->get_table(default_database_id, "emb_test");
+    ASSERT_TRUE(table.has_value());
+    EmbeddingColumnDef emb;
+    emb.table_id = table->table_id;
+    emb.column_id = 2; // ordinal of 'vec'
+    emb.dimension = 384;
+    emb.source_expr = "title";
+    emb.provider = "test/model";
+    ASSERT_TRUE(catalog_->register_embedding_column(emb).has_value());
+
+    auto qr = exec_ok("SHOW EMBEDDINGS");
+    ASSERT_GE(qr.rows.size(), 1u);
+    bool found = false;
+    for (const auto& row : qr.rows) {
+        if (row[0].as_string() == "emb_test" && row[1].as_string() == "vec") {
+            found = true;
+            EXPECT_EQ(row[2].as_int32(), 384);
+            EXPECT_EQ(row[3].as_string(), "title");
+            EXPECT_EQ(row[4].as_string(), "test/model");
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(SetShowTest, ShowEmbeddingsFromTable) {
+    exec_ok("CREATE TABLE emb_filter (id INT, title VARCHAR, vec INT, PRIMARY KEY (id))");
+
+    auto table = catalog_->get_table(default_database_id, "emb_filter");
+    ASSERT_TRUE(table.has_value());
+    EmbeddingColumnDef emb;
+    emb.table_id = table->table_id;
+    emb.column_id = 2;
+    emb.dimension = 128;
+    emb.source_expr = "title";
+    emb.provider = "p1";
+    ASSERT_TRUE(catalog_->register_embedding_column(emb).has_value());
+
+    auto qr = exec_ok("SHOW EMBEDDINGS FROM emb_filter");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "emb_filter");
+    EXPECT_EQ(qr.rows[0][1].as_string(), "vec");
+    EXPECT_EQ(qr.rows[0][2].as_int32(), 128);
+}
+
+TEST_F(SetShowTest, ShowEmbeddingsFromNonexistentTable) {
+    exec_error("SHOW EMBEDDINGS FROM nonexistent", StatusCode::NOT_FOUND);
 }
 
 // =============================================================================

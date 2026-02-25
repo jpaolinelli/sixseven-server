@@ -15,7 +15,7 @@ using namespace giodb;
 TEST(Config, DefaultValues) {
     auto config = Config::load_defaults();
     EXPECT_EQ(config.data_dir, "./data");
-    EXPECT_EQ(config.port, 5432);
+    EXPECT_EQ(config.port, 6767);
     EXPECT_EQ(config.log_level, "info");
     EXPECT_EQ(config.buffer_pool_size_mb, 256u);
     EXPECT_EQ(config.wal_segment_size_mb, 16u);
@@ -25,7 +25,7 @@ TEST(Config, DefaultValues) {
 TEST(Config, MissingFileReturnsDefaults) {
     auto result = Config::load_from_file("/nonexistent/path/config.json");
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->port, 5432);
+    EXPECT_EQ(result->port, 6767);
 }
 
 class ConfigFileTest : public ::testing::Test {
@@ -108,6 +108,6 @@ TEST_F(ConfigFileTest, EmptyJsonObjectUsesDefaults) {
 
     auto result = Config::load_from_file(tmp_path_);
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->port, 5432);
+    EXPECT_EQ(result->port, 6767);
     EXPECT_EQ(result->data_dir, "./data");
 }

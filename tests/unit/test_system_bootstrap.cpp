@@ -272,7 +272,7 @@ TEST_F(SystemBootstrapTest, LoadSettingsAppliesOverrides) {
 
     // Load settings from sys_settings.
     Config config = Config::load_defaults();
-    EXPECT_EQ(config.port, 5432);
+    EXPECT_EQ(config.port, 6767);
 
     auto load_result = SystemBootstrap::load_settings(*engine_, *catalog_, config);
     ASSERT_TRUE(load_result.has_value()) << load_result.error().message;
@@ -297,12 +297,12 @@ TEST_F(SystemBootstrapTest, ConfigPriorityChain) {
     // Now load settings into a fresh defaults config.
     use_database("giodb");
     Config fresh = Config::load_defaults();
-    EXPECT_EQ(fresh.port, 5432); // Default.
+    EXPECT_EQ(fresh.port, 6767); // Default.
 
     auto load_result = SystemBootstrap::load_settings(*engine_, *catalog_, fresh);
     ASSERT_TRUE(load_result.has_value()) << load_result.error().message;
 
-    // sys_settings (7777) should override default (5432).
+    // sys_settings (7777) should override default (6767).
     EXPECT_EQ(fresh.port, 7777);
     EXPECT_EQ(fresh.log_level, "debug");
 }

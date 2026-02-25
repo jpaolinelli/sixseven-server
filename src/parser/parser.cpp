@@ -2287,6 +2287,13 @@ Result<StmtPtr> Parser::parse_show() {
     advance(); // consume SHOW
     auto stmt = std::make_unique<ShowStmt>();
 
+    // SHOW DATABASES
+    if (match_ident_ci(peek(), "DATABASES")) {
+        advance();
+        stmt->target = ShowTarget::DATABASES;
+        return ok(StmtPtr(std::move(stmt)));
+    }
+
     // SHOW TABLES
     if (match_ident_ci(peek(), "TABLES")) {
         advance();
@@ -2326,6 +2333,20 @@ Result<StmtPtr> Parser::parse_show() {
     if (check(TokenType::INDEX) || match_ident_ci(peek(), "INDEXES")) {
         advance();
         stmt->target = ShowTarget::INDEXES;
+        return ok(StmtPtr(std::move(stmt)));
+    }
+
+    // SHOW EMBEDDINGS [FROM table]
+    if (match_ident_ci(peek(), "EMBEDDINGS") || match_ident_ci(peek(), "EMBEDDING")) {
+        advance();
+        stmt->target = ShowTarget::EMBEDDINGS;
+        if (check(TokenType::FROM)) {
+            advance(); // consume FROM
+            auto name = parse_name("table name");
+            if (!name)
+                return tl::unexpected(name.error());
+            stmt->name = std::move(*name);
+        }
         return ok(StmtPtr(std::move(stmt)));
     }
 

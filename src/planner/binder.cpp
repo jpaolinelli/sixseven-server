@@ -1839,8 +1839,9 @@ Result<BoundStatement> Binder::bind_show(const ShowStmt& stmt) {
     BoundStatement bound;
     bound.stmt = &stmt;
 
-    // SHOW COLUMNS FROM table — verify table exists.
-    if (stmt.target == ShowTarget::COLUMNS && !stmt.name.empty()) {
+    // SHOW COLUMNS FROM table / SHOW EMBEDDINGS FROM table — verify table exists.
+    if ((stmt.target == ShowTarget::COLUMNS || stmt.target == ShowTarget::EMBEDDINGS) &&
+        !stmt.name.empty()) {
         auto schema = resolve_table(stmt.name);
         if (!schema) {
             return tl::unexpected(schema.error());

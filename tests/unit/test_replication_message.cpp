@@ -132,13 +132,13 @@ TEST(ReplicationMessage, StandbyStatusRoundTrip) {
 TEST(ReplicationMessage, HotStandbyFeedbackRoundTrip) {
     HotStandbyFeedbackMessage msg;
     msg.xmin = 55;
-    msg.timestamp_us = 9876543210ULL;
+    msg.timestamp_us = 9876676710ULL;
 
     auto buf = serialize_hot_standby_feedback(msg);
     auto result = deserialize_hot_standby_feedback(buf);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->xmin, 55u);
-    EXPECT_EQ(result->timestamp_us, 9876543210ULL);
+    EXPECT_EQ(result->timestamp_us, 9876676710ULL);
 }
 
 // -- CRC corruption tests -----------------------------------------------------
