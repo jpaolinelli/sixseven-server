@@ -8,17 +8,29 @@ import type {
   EdgeTypeInfo,
   EmbeddingInfo,
 } from "@/lib/types";
+import type { ConnectionParams } from "@/lib/connection-types";
 import { buildTableInfo, quoteIdent } from "@/lib/schema-utils";
 
 const SYSTEM_DATABASES = new Set(["giodb_system"]);
 
 export async function GET(request: NextRequest) {
   const database = request.nextUrl.searchParams.get("database");
+  const connHost = request.nextUrl.searchParams.get("connHost");
+  const connPort = request.nextUrl.searchParams.get("connPort");
+  const connUser = request.nextUrl.searchParams.get("connUser");
+
+  const conn: ConnectionParams | undefined = connHost
+    ? {
+        host: connHost,
+        port: Number(connPort) || 6767,
+        user: connUser || "giodb",
+      }
+    : undefined;
 
   try {
     if (!database) {
       // Return list of all databases.
-      const result = await query("SHOW DATABASES");
+      const result = await query("SHOW DATABASES", undefined, conn);
       const databases: DatabaseInfo[] = result.rows.map((row) => ({
         name: String(row[0]),
         isSystem: SYSTEM_DATABASES.has(String(row[0])),
@@ -29,10 +41,10 @@ export async function GET(request: NextRequest) {
     // Return full schema for a specific database.
     const [tablesResult, indexesResult, edgeTypesResult, embeddingsResult] =
       await Promise.all([
-        query("SHOW TABLES", database),
-        query("SHOW INDEXES", database),
-        query("SHOW EDGE TYPES", database),
-        query("SHOW EMBEDDINGS", database),
+        query("SHOW TABLES", database, conn),
+        query("SHOW INDEXES", database, conn),
+        query("SHOW EDGE TYPES", database, conn),
+        query("SHOW EMBEDDINGS", database, conn),
       ]);
 
     const indexes: IndexInfo[] = indexesResult.rows.map((row) => ({
@@ -63,7 +75,8 @@ export async function GET(request: NextRequest) {
       tableNames.map(async (name) => {
         const colResult = await query(
           `SHOW COLUMNS FROM ${quoteIdent(name)}`,
-          database
+          database,
+          conn
         );
         const columns: ColumnInfo[] = colResult.rows.map((row) => ({
           name: String(row[0]),

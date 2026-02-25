@@ -5,14 +5,19 @@ import type {
   EmbeddingPipelineStats,
   SlowQuery,
 } from "./dashboard-types";
+import type { ConnectionParams } from "./connection-types";
 
 export async function fetchDashboardData(
-  slowQueryThresholdMs: number
+  slowQueryThresholdMs: number,
+  conn?: ConnectionParams
 ): Promise<DashboardData> {
   const res = await fetch("/api/dashboard", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ slow_query_threshold_ms: slowQueryThresholdMs }),
+    body: JSON.stringify({
+      slow_query_threshold_ms: slowQueryThresholdMs,
+      connection: conn,
+    }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

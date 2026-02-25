@@ -24,6 +24,7 @@ import {
   formatRate,
   formatMs,
 } from "@/lib/dashboard-utils";
+import { useConnection } from "@/lib/ConnectionContext";
 
 const REFRESH_INTERVALS = [
   { label: "1s", value: 1000 },
@@ -36,6 +37,7 @@ const REFRESH_INTERVALS = [
 const MAX_HISTORY_POINTS = 60;
 
 export function Dashboard() {
+  const { connectionParams } = useConnection();
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,7 +49,7 @@ export function Dashboard() {
 
   const loadData = useCallback(async () => {
     try {
-      const result = await fetchDashboardData(slowQueryThreshold);
+      const result = await fetchDashboardData(slowQueryThreshold, connectionParams);
       setData(result);
       setError(null);
       setHitRateHistory((prev) => {
@@ -63,7 +65,7 @@ export function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [slowQueryThreshold]);
+  }, [slowQueryThreshold, connectionParams]);
 
   // Initial load
   useEffect(() => {

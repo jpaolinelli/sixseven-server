@@ -22,6 +22,7 @@ import {
   tableColor,
   parseNodeId,
 } from "@/lib/graph-utils";
+import { useConnection } from "@/lib/ConnectionContext";
 import type { EdgeTypeInfo } from "@/lib/types";
 
 interface GraphExplorerProps {
@@ -37,6 +38,7 @@ export function GraphExplorer({
   edgeTypes,
   defaultDatabase,
 }: GraphExplorerProps) {
+  const { connectionParams } = useConnection();
   const [database, setDatabase] = useState(defaultDatabase);
   const [nodes, setNodes] = useState<Map<string, GraphNode>>(new Map());
   const [edges, setEdges] = useState<Map<string, GraphEdge>>(new Map());
@@ -312,7 +314,9 @@ export function GraphExplorer({
           node.table,
           node.pk,
           direction,
-          node.depth
+          node.depth,
+          undefined,
+          connectionParams
         );
 
         setNodes((prev) => {
@@ -346,7 +350,7 @@ export function GraphExplorer({
         setLoading(false);
       }
     },
-    [database, nodes]
+    [database, nodes, connectionParams]
   );
 
   const removeNode = useCallback((nodeId: string) => {
@@ -375,7 +379,7 @@ export function GraphExplorer({
 
       setLoading(true);
       try {
-        const data = await fetchNodeDetails(database, node.table, node.pk);
+        const data = await fetchNodeDetails(database, node.table, node.pk, connectionParams);
         setDetailNode({ node, data });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load details");
@@ -384,7 +388,7 @@ export function GraphExplorer({
       }
       setContextMenu(null);
     },
-    [database, nodes]
+    [database, nodes, connectionParams]
   );
 
   const handleFindPath = useCallback(async () => {
@@ -403,7 +407,8 @@ export function GraphExplorer({
         src.table,
         src.pk,
         tgt.table,
-        tgt.pk
+        tgt.pk,
+        connectionParams
       );
 
       // Parse path result — expect rows with table/id pairs

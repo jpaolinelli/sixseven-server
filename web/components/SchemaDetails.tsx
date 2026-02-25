@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { fetchSampleData, quoteIdent } from "@/lib/schema-utils";
+import { useConnection } from "@/lib/ConnectionContext";
 import type { SelectedItem } from "@/lib/types";
 
 interface SchemaDetailsProps {
@@ -68,6 +69,7 @@ function TableDetails({
   database: string;
   table: string;
 }) {
+  const { connectionParams } = useConnection();
   const [sampleData, setSampleData] = useState<{
     columns: string[];
     rows: unknown[][];
@@ -78,7 +80,7 @@ function TableDetails({
     let cancelled = false;
     setLoading(true);
     setSampleData(null);
-    fetchSampleData(database, table)
+    fetchSampleData(database, table, connectionParams)
       .then((data) => {
         if (!cancelled) setSampleData(data);
       })
@@ -91,7 +93,7 @@ function TableDetails({
     return () => {
       cancelled = true;
     };
-  }, [database, table]);
+  }, [database, table, connectionParams]);
 
   return (
     <div className="p-6">
@@ -220,6 +222,7 @@ function EmbeddingDetails({
     provider: string;
   };
 }) {
+  const { connectionParams } = useConnection();
   const [populated, setPopulated] = useState<string | null>(null);
 
   useEffect(() => {
@@ -229,7 +232,7 @@ function EmbeddingDetails({
     fetch("/api/query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sql, database }),
+      body: JSON.stringify({ sql, database, connection: connectionParams }),
     })
       .then((res) => res.json())
       .then((data) => {
@@ -247,7 +250,7 @@ function EmbeddingDetails({
     return () => {
       cancelled = true;
     };
-  }, [database, embedding.tableName, embedding.columnName]);
+  }, [database, embedding.tableName, embedding.columnName, connectionParams]);
 
   return (
     <div className="p-6">

@@ -1,4 +1,5 @@
 import type { GraphNode, GraphEdge, TraverseResult } from "./graph-types";
+import type { ConnectionParams } from "./connection-types";
 
 const API_BASE = "/api";
 
@@ -14,7 +15,8 @@ export async function traverseNode(
   id: string,
   direction: "out" | "in" | "both",
   parentDepth: number,
-  edgeType?: string
+  edgeType?: string,
+  conn?: ConnectionParams
 ): Promise<TraverseResult> {
   const res = await fetch(`${API_BASE}/graph`, {
     method: "POST",
@@ -26,6 +28,7 @@ export async function traverseNode(
       id,
       direction,
       edgeType,
+      connection: conn,
     }),
   });
   if (!res.ok) {
@@ -42,7 +45,8 @@ export async function findShortestPath(
   sourceTable: string,
   sourceId: string,
   targetTable: string,
-  targetId: string
+  targetId: string,
+  conn?: ConnectionParams
 ): Promise<{ columns: string[]; rows: (string | number | boolean | null)[][] }> {
   const res = await fetch(`${API_BASE}/graph`, {
     method: "POST",
@@ -54,6 +58,7 @@ export async function findShortestPath(
       sourceId,
       targetTable,
       targetId,
+      connection: conn,
     }),
   });
   if (!res.ok) {
@@ -67,12 +72,13 @@ export async function findShortestPath(
 export async function fetchNodeDetails(
   database: string,
   table: string,
-  id: string
+  id: string,
+  conn?: ConnectionParams
 ): Promise<Record<string, unknown>> {
   const res = await fetch(`${API_BASE}/graph`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "node_details", database, table, id }),
+    body: JSON.stringify({ action: "node_details", database, table, id, connection: conn }),
   });
   if (!res.ok) {
     const body = await res.text();

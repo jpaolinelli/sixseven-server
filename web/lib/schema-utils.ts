@@ -4,15 +4,21 @@ import type {
   TableInfo,
   ColumnInfo,
   IndexInfo,
-  EdgeTypeInfo,
   EmbeddingInfo,
 } from "./types";
+import type { ConnectionParams } from "./connection-types";
 
 const API_BASE = "/api";
 
 /** Double-quote a SQL identifier to prevent injection. */
 export function quoteIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
+}
+
+/** Build query string with connection params for GET requests. */
+function connQueryString(conn?: ConnectionParams): string {
+  if (!conn) return "";
+  return `&connHost=${encodeURIComponent(conn.host)}&connPort=${conn.port}&connUser=${encodeURIComponent(conn.user)}`;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -24,21 +30,28 @@ async function fetchJson<T>(url: string): Promise<T> {
   return res.json();
 }
 
-export async function fetchDatabases(): Promise<DatabaseInfo[]> {
-  return fetchJson<DatabaseInfo[]>(`${API_BASE}/schema`);
+export async function fetchDatabases(
+  conn?: ConnectionParams
+): Promise<DatabaseInfo[]> {
+  const cq = conn
+    ? `?connHost=${encodeURIComponent(conn.host)}&connPort=${conn.port}&connUser=${encodeURIComponent(conn.user)}`
+    : "";
+  return fetchJson<DatabaseInfo[]>(`${API_BASE}/schema${cq}`);
 }
 
 export async function fetchDatabaseSchema(
-  database: string
+  database: string,
+  conn?: ConnectionParams
 ): Promise<DatabaseSchema> {
   return fetchJson<DatabaseSchema>(
-    `${API_BASE}/schema?database=${encodeURIComponent(database)}`
+    `${API_BASE}/schema?database=${encodeURIComponent(database)}${connQueryString(conn)}`
   );
 }
 
 export async function fetchSampleData(
   database: string,
-  table: string
+  table: string,
+  conn?: ConnectionParams
 ): Promise<{ columns: string[]; rows: unknown[][] }> {
   const res = await fetch(`${API_BASE}/query`, {
     method: "POST",
@@ -46,6 +59,7 @@ export async function fetchSampleData(
     body: JSON.stringify({
       sql: `SELECT * FROM ${quoteIdent(table)} LIMIT 10`,
       database,
+      connection: conn,
     }),
   });
   if (!res.ok) {

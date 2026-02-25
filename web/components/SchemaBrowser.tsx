@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { TreeNode } from "./TreeNode";
 import { fetchDatabases, fetchDatabaseSchema } from "@/lib/schema-utils";
+import { useConnection } from "@/lib/ConnectionContext";
 import type {
   DatabaseInfo,
   DatabaseSchema,
@@ -14,6 +15,7 @@ interface SchemaBrowserProps {
 }
 
 export function SchemaBrowser({ onSelect }: SchemaBrowserProps) {
+  const { connectionParams, status } = useConnection();
   const [databases, setDatabases] = useState<DatabaseInfo[]>([]);
   const [schemas, setSchemas] = useState<Record<string, DatabaseSchema>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
@@ -24,16 +26,20 @@ export function SchemaBrowser({ onSelect }: SchemaBrowserProps) {
   const loadDatabases = useCallback(async () => {
     try {
       setError(null);
-      const dbs = await fetchDatabases();
+      const dbs = await fetchDatabases(connectionParams);
       setDatabases(dbs);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load databases");
     }
-  }, []);
+  }, [connectionParams]);
 
+  // Reload when connection status changes to connected
   useEffect(() => {
-    loadDatabases();
-  }, [loadDatabases]);
+    if (status === "connected") {
+      setSchemas({});
+      loadDatabases();
+    }
+  }, [status, loadDatabases]);
 
   const loadSchema = async (dbName: string) => {
     if (schemas[dbName] || loading[dbName]) return;
@@ -44,7 +50,7 @@ export function SchemaBrowser({ onSelect }: SchemaBrowserProps) {
       return next;
     });
     try {
-      const schema = await fetchDatabaseSchema(dbName);
+      const schema = await fetchDatabaseSchema(dbName, connectionParams);
       setSchemas((prev) => ({ ...prev, [dbName]: schema }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load schema";
