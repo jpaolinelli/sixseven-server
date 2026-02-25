@@ -6,6 +6,7 @@ add_library(giodb_server STATIC
     event_loop.cpp
     pg_protocol.cpp
     server.cpp
+    session.cpp
     thread_pool.cpp
     promotion_manager.cpp
     replication_health_monitor.cpp
