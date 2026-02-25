@@ -3,12 +3,18 @@
 import { SchemaBrowser } from "@/components/SchemaBrowser";
 import { SchemaDetails } from "@/components/SchemaDetails";
 import { QueryEditor } from "@/components/QueryEditor";
+import { GraphExplorer } from "@/components/GraphExplorer";
 import { useState, useEffect, useCallback } from "react";
-import type { SelectedItem, DatabaseInfo, DatabaseSchema } from "@/lib/types";
+import type {
+  SelectedItem,
+  DatabaseInfo,
+  DatabaseSchema,
+  EdgeTypeInfo,
+} from "@/lib/types";
 import { fetchDatabases, fetchDatabaseSchema } from "@/lib/schema-utils";
 import type { SchemaCompletionData } from "@/lib/giodb-sql-lang";
 
-type ActivePanel = "schema" | "query";
+type ActivePanel = "schema" | "query" | "graph";
 
 export default function Home() {
   const [selected, setSelected] = useState<SelectedItem | null>(null);
@@ -18,6 +24,7 @@ export default function Home() {
     tables: [],
     edgeTypes: [],
   });
+  const [allEdgeTypeInfos, setAllEdgeTypeInfos] = useState<EdgeTypeInfo[]>([]);
 
   // Load databases for the query editor dropdown and autocomplete
   const loadSchemaForCompletion = useCallback(async () => {
@@ -28,6 +35,7 @@ export default function Home() {
       // Load schema for all non-system databases (for autocomplete)
       const allTables: SchemaCompletionData["tables"] = [];
       const allEdgeTypes: string[] = [];
+      const edgeTypeInfos: EdgeTypeInfo[] = [];
 
       for (const db of dbs.filter((d) => !d.isSystem)) {
         try {
@@ -44,6 +52,7 @@ export default function Home() {
           for (const et of schema.edgeTypes) {
             if (!allEdgeTypes.includes(et.name)) {
               allEdgeTypes.push(et.name);
+              edgeTypeInfos.push(et);
             }
           }
         } catch {
@@ -52,6 +61,7 @@ export default function Home() {
       }
 
       setSchemaData({ tables: allTables, edgeTypes: allEdgeTypes });
+      setAllEdgeTypeInfos(edgeTypeInfos);
     } catch {
       // Databases will be empty — editor still works
     }
@@ -96,17 +106,33 @@ export default function Home() {
           >
             Schema
           </button>
+          <button
+            className={`flex-1 px-3 py-1.5 text-xs font-medium ${
+              activePanel === "graph"
+                ? "text-blue-400 border-b-2 border-blue-400 bg-gray-900/50"
+                : "text-gray-500 hover:text-gray-300"
+            }`}
+            onClick={() => setActivePanel("graph")}
+          >
+            Graph
+          </button>
         </div>
 
         <SchemaBrowser onSelect={setSelected} />
       </div>
 
-      {/* Right panel: Query Editor or Schema Details */}
+      {/* Right panel: Query Editor, Schema Details, or Graph Explorer */}
       <div className="flex-1 overflow-hidden">
         {activePanel === "query" ? (
           <QueryEditor
             databases={databaseNames}
             schemaData={schemaData}
+            defaultDatabase={databaseNames[0] || ""}
+          />
+        ) : activePanel === "graph" ? (
+          <GraphExplorer
+            databases={databaseNames}
+            edgeTypes={allEdgeTypeInfos}
             defaultDatabase={databaseNames[0] || ""}
           />
         ) : selected ? (
