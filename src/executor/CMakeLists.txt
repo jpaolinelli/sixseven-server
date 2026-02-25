@@ -7,6 +7,7 @@ add_library(giodb_executor STATIC
     filter.cpp
     project.cpp
     sort.cpp
+    external_sort.cpp
     limit.cpp
     insert.cpp
     update.cpp
