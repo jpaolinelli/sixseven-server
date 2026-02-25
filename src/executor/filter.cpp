@@ -10,11 +10,11 @@ FilterOperator::FilterOperator(std::unique_ptr<Iterator> child,
                                const SubqueryContext* subquery_ctx)
     : child_(std::move(child)), predicate_(predicate), bound_(bound), subquery_ctx_(subquery_ctx) {}
 
-Result<void> FilterOperator::open() {
+Result<void> FilterOperator::do_open() {
     return child_->open();
 }
 
-Result<std::optional<Tuple>> FilterOperator::next() {
+Result<std::optional<Tuple>> FilterOperator::do_next() {
     while (true) {
         auto row = child_->next();
         if (!row) {
@@ -36,12 +36,24 @@ Result<std::optional<Tuple>> FilterOperator::next() {
     }
 }
 
-void FilterOperator::close() {
+void FilterOperator::do_close() {
     child_->close();
 }
 
 const OutputSchema& FilterOperator::output_schema() const {
     return child_->output_schema();
+}
+
+std::string FilterOperator::plan_node_name() const {
+    return "Filter";
+}
+
+std::vector<const Iterator*> FilterOperator::plan_children() const {
+    return {child_.get()};
+}
+
+std::vector<Iterator*> FilterOperator::plan_children_mutable() {
+    return {child_.get()};
 }
 
 } // namespace giodb

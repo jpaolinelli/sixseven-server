@@ -12,11 +12,11 @@ ProjectOperator::ProjectOperator(std::unique_ptr<Iterator> child,
     : child_(std::move(child)), projections_(std::move(projections)),
       schema_(std::move(output_schema)), bound_(bound), subquery_ctx_(subquery_ctx) {}
 
-Result<void> ProjectOperator::open() {
+Result<void> ProjectOperator::do_open() {
     return child_->open();
 }
 
-Result<std::optional<Tuple>> ProjectOperator::next() {
+Result<std::optional<Tuple>> ProjectOperator::do_next() {
     auto row = child_->next();
     if (!row) {
         return row;
@@ -41,12 +41,24 @@ Result<std::optional<Tuple>> ProjectOperator::next() {
     return ok(std::optional<Tuple>(Tuple{std::move(projected), input.rid}));
 }
 
-void ProjectOperator::close() {
+void ProjectOperator::do_close() {
     child_->close();
 }
 
 const OutputSchema& ProjectOperator::output_schema() const {
     return schema_;
+}
+
+std::string ProjectOperator::plan_node_name() const {
+    return "Project";
+}
+
+std::vector<const Iterator*> ProjectOperator::plan_children() const {
+    return {child_.get()};
+}
+
+std::vector<Iterator*> ProjectOperator::plan_children_mutable() {
+    return {child_.get()};
 }
 
 } // namespace giodb

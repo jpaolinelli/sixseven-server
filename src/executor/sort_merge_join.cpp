@@ -21,7 +21,7 @@ SortMergeJoinOperator::SortMergeJoinOperator(std::unique_ptr<Iterator> left,
 // open — materialise, sort, and merge
 // ---------------------------------------------------------------------------
 
-Result<void> SortMergeJoinOperator::open() {
+Result<void> SortMergeJoinOperator::do_open() {
     auto lr = left_->open();
     if (!lr) {
         return lr;
@@ -243,20 +243,56 @@ Result<void> SortMergeJoinOperator::open() {
 // next / close / output_schema
 // ---------------------------------------------------------------------------
 
-Result<std::optional<Tuple>> SortMergeJoinOperator::next() {
+Result<std::optional<Tuple>> SortMergeJoinOperator::do_next() {
     if (output_cursor_ >= output_.size()) {
         return ok(std::optional<Tuple>(std::nullopt));
     }
     return ok(std::optional<Tuple>(std::move(output_[output_cursor_++])));
 }
 
-void SortMergeJoinOperator::close() {
+void SortMergeJoinOperator::do_close() {
     output_.clear();
     output_cursor_ = 0;
 }
 
 const OutputSchema& SortMergeJoinOperator::output_schema() const {
     return schema_;
+}
+
+// ---------------------------------------------------------------------------
+// Plan inspection
+// ---------------------------------------------------------------------------
+
+std::string SortMergeJoinOperator::plan_node_name() const {
+    return "Merge Join";
+}
+
+std::string SortMergeJoinOperator::plan_node_detail() const {
+    switch (type_) {
+    case JoinType::INNER:
+        return "Inner Join";
+    case JoinType::LEFT:
+        return "Left Join";
+    case JoinType::RIGHT:
+        return "Right Join";
+    case JoinType::FULL:
+        return "Full Join";
+    case JoinType::CROSS:
+        return "Cross Join";
+    case JoinType::SEMI:
+        return "Semi Join";
+    case JoinType::ANTI:
+        return "Anti Join";
+    }
+    return "";
+}
+
+std::vector<const Iterator*> SortMergeJoinOperator::plan_children() const {
+    return {left_.get(), right_.get()};
+}
+
+std::vector<Iterator*> SortMergeJoinOperator::plan_children_mutable() {
+    return {left_.get(), right_.get()};
 }
 
 } // namespace giodb

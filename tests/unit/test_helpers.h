@@ -18,12 +18,15 @@ public:
     VectorIterator(OutputSchema schema, std::vector<Tuple> tuples)
         : schema_(std::move(schema)), tuples_(std::move(tuples)) {}
 
-    Result<void> open() override {
+    const OutputSchema& output_schema() const override { return schema_; }
+
+protected:
+    Result<void> do_open() override {
         cursor_ = 0;
         return ok();
     }
 
-    Result<std::optional<Tuple>> next() override {
+    Result<std::optional<Tuple>> do_next() override {
         if (cursor_ >= tuples_.size()) {
             return ok(std::optional<Tuple>(std::nullopt));
         }
@@ -32,9 +35,7 @@ public:
         return ok(std::optional<Tuple>(Tuple{tuples_[idx].values, tuples_[idx].rid}));
     }
 
-    void close() override { cursor_ = 0; }
-
-    const OutputSchema& output_schema() const override { return schema_; }
+    void do_close() override { cursor_ = 0; }
 
 private:
     OutputSchema schema_;

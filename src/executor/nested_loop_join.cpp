@@ -17,7 +17,7 @@ NestedLoopJoinOperator::NestedLoopJoinOperator(std::unique_ptr<Iterator> left,
 // open
 // ---------------------------------------------------------------------------
 
-Result<void> NestedLoopJoinOperator::open() {
+Result<void> NestedLoopJoinOperator::do_open() {
     auto lr = left_->open();
     if (!lr) {
         return lr;
@@ -65,7 +65,7 @@ Result<void> NestedLoopJoinOperator::open() {
 // next
 // ---------------------------------------------------------------------------
 
-Result<std::optional<Tuple>> NestedLoopJoinOperator::next() {
+Result<std::optional<Tuple>> NestedLoopJoinOperator::do_next() {
     // Phase 2: emit unmatched right tuples (RIGHT/FULL only).
     if (emitting_unmatched_right_) {
         while (unmatched_right_cursor_ < right_tuples_.size()) {
@@ -183,7 +183,7 @@ Result<std::optional<Tuple>> NestedLoopJoinOperator::next() {
 // close
 // ---------------------------------------------------------------------------
 
-void NestedLoopJoinOperator::close() {
+void NestedLoopJoinOperator::do_close() {
     right_tuples_.clear();
     right_matched_.clear();
     current_left_ = std::nullopt;
@@ -196,6 +196,42 @@ void NestedLoopJoinOperator::close() {
 
 const OutputSchema& NestedLoopJoinOperator::output_schema() const {
     return schema_;
+}
+
+// ---------------------------------------------------------------------------
+// Plan inspection
+// ---------------------------------------------------------------------------
+
+std::string NestedLoopJoinOperator::plan_node_name() const {
+    return "Nested Loop";
+}
+
+std::string NestedLoopJoinOperator::plan_node_detail() const {
+    switch (type_) {
+    case JoinType::INNER:
+        return "Inner Join";
+    case JoinType::LEFT:
+        return "Left Join";
+    case JoinType::RIGHT:
+        return "Right Join";
+    case JoinType::FULL:
+        return "Full Join";
+    case JoinType::CROSS:
+        return "Cross Join";
+    case JoinType::SEMI:
+        return "Semi Join";
+    case JoinType::ANTI:
+        return "Anti Join";
+    }
+    return "";
+}
+
+std::vector<const Iterator*> NestedLoopJoinOperator::plan_children() const {
+    return {left_.get(), right_.get()};
+}
+
+std::vector<Iterator*> NestedLoopJoinOperator::plan_children_mutable() {
+    return {left_.get(), right_.get()};
 }
 
 // ---------------------------------------------------------------------------

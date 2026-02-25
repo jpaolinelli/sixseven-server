@@ -369,7 +369,7 @@ size_t WindowOperator::resolve_bound(FrameBound bound,
     return current_row; // fallback
 }
 
-Result<void> WindowOperator::open() {
+Result<void> WindowOperator::do_open() {
     auto child_open = child_->open();
     if (!child_open) {
         return child_open;
@@ -707,7 +707,7 @@ Result<void> WindowOperator::open() {
     return ok();
 }
 
-Result<std::optional<Tuple>> WindowOperator::next() {
+Result<std::optional<Tuple>> WindowOperator::do_next() {
     if (cursor_ >= output_.size()) {
         return ok(std::optional<Tuple>(std::nullopt));
     }
@@ -715,13 +715,29 @@ Result<std::optional<Tuple>> WindowOperator::next() {
     return ok(std::optional<Tuple>(Tuple{t.values, t.rid}));
 }
 
-void WindowOperator::close() {
+void WindowOperator::do_close() {
     output_.clear();
     cursor_ = 0;
 }
 
 const OutputSchema& WindowOperator::output_schema() const {
     return schema_;
+}
+
+std::string WindowOperator::plan_node_name() const {
+    return "WindowAgg";
+}
+
+std::string WindowOperator::plan_node_detail() const {
+    return "";
+}
+
+std::vector<const Iterator*> WindowOperator::plan_children() const {
+    return {child_.get()};
+}
+
+std::vector<Iterator*> WindowOperator::plan_children_mutable() {
+    return {child_.get()};
 }
 
 } // namespace giodb

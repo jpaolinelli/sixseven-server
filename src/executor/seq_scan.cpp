@@ -13,7 +13,7 @@ SeqScanOperator::SeqScanOperator(TableHeap& heap,
     : heap_(heap), storage_schema_(storage_schema), schema_(std::move(output_schema)),
       predicate_(predicate), bound_(bound) {}
 
-Result<void> SeqScanOperator::open() {
+Result<void> SeqScanOperator::do_open() {
     auto it = heap_.begin();
     if (!it) {
         return make_error(it.error().code, it.error().message);
@@ -22,7 +22,7 @@ Result<void> SeqScanOperator::open() {
     return ok();
 }
 
-Result<std::optional<Tuple>> SeqScanOperator::next() {
+Result<std::optional<Tuple>> SeqScanOperator::do_next() {
     if (!iter_) {
         return make_error(StatusCode::INTERNAL_ERROR, "SeqScan: not opened");
     }
@@ -59,12 +59,23 @@ Result<std::optional<Tuple>> SeqScanOperator::next() {
     }
 }
 
-void SeqScanOperator::close() {
+void SeqScanOperator::do_close() {
     iter_.reset();
 }
 
 const OutputSchema& SeqScanOperator::output_schema() const {
     return schema_;
+}
+
+std::string SeqScanOperator::plan_node_name() const {
+    return "Seq Scan";
+}
+
+std::string SeqScanOperator::plan_node_detail() const {
+    if (!schema_.columns().empty() && !schema_.columns()[0].table_name.empty()) {
+        return "on " + schema_.columns()[0].table_name;
+    }
+    return "";
 }
 
 } // namespace giodb

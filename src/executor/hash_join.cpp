@@ -70,7 +70,7 @@ bool HashJoinOperator::values_equal(const Value& a, const Value& b) {
 // open
 // ---------------------------------------------------------------------------
 
-Result<void> HashJoinOperator::open() {
+Result<void> HashJoinOperator::do_open() {
     auto pr = probe_child_->open();
     if (!pr) {
         return pr;
@@ -254,20 +254,56 @@ Result<void> HashJoinOperator::run_grace(std::vector<Tuple>& build_tuples,
 // next / close / output_schema
 // ---------------------------------------------------------------------------
 
-Result<std::optional<Tuple>> HashJoinOperator::next() {
+Result<std::optional<Tuple>> HashJoinOperator::do_next() {
     if (output_cursor_ >= output_.size()) {
         return ok(std::optional<Tuple>(std::nullopt));
     }
     return ok(std::optional<Tuple>(std::move(output_[output_cursor_++])));
 }
 
-void HashJoinOperator::close() {
+void HashJoinOperator::do_close() {
     output_.clear();
     output_cursor_ = 0;
 }
 
 const OutputSchema& HashJoinOperator::output_schema() const {
     return schema_;
+}
+
+// ---------------------------------------------------------------------------
+// Plan inspection
+// ---------------------------------------------------------------------------
+
+std::string HashJoinOperator::plan_node_name() const {
+    return "Hash Join";
+}
+
+std::string HashJoinOperator::plan_node_detail() const {
+    switch (type_) {
+    case JoinType::INNER:
+        return "Inner Join";
+    case JoinType::LEFT:
+        return "Left Join";
+    case JoinType::RIGHT:
+        return "Right Join";
+    case JoinType::FULL:
+        return "Full Join";
+    case JoinType::CROSS:
+        return "Cross Join";
+    case JoinType::SEMI:
+        return "Semi Join";
+    case JoinType::ANTI:
+        return "Anti Join";
+    }
+    return "";
+}
+
+std::vector<const Iterator*> HashJoinOperator::plan_children() const {
+    return {probe_child_.get(), build_child_.get()};
+}
+
+std::vector<Iterator*> HashJoinOperator::plan_children_mutable() {
+    return {probe_child_.get(), build_child_.get()};
 }
 
 // ---------------------------------------------------------------------------

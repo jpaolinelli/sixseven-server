@@ -22,6 +22,7 @@ struct CreateTableStmt;
 struct DropDatabaseStmt;
 struct DropEdgeTypeStmt;
 struct DropTableStmt;
+struct ExplainStmt;
 struct LinkStmt;
 struct ReembedStmt;
 struct SetStmt;
@@ -153,6 +154,10 @@ private:
 
     /// Execute a REEMBED TABLE statement (bulk embedding regeneration).
     [[nodiscard]] Result<QueryResult> execute_reembed(const ReembedStmt& stmt);
+
+    /// Execute an EXPLAIN or EXPLAIN ANALYZE statement.
+    [[nodiscard]] Result<QueryResult> execute_explain(const ExplainStmt& stmt,
+                                                      const BoundStatement& bound);
 
     /// Execute a DML/query via the Planner + Iterator pipeline.
     /// After successful DML on sys_providers, automatically reloads the provider cache.

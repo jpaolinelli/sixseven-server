@@ -142,7 +142,7 @@ InsertOperator::InsertOperator(TableHeap& heap,
     : heap_(heap), storage_schema_(storage_schema), child_(std::move(child)),
       schema_(OutputSchema({OutputColumn{"", "count", TypeId::INT64, false, 0}})) {}
 
-Result<void> InsertOperator::open() {
+Result<void> InsertOperator::do_open() {
     executed_ = false;
     if (child_) {
         return child_->open();
@@ -150,7 +150,7 @@ Result<void> InsertOperator::open() {
     return ok();
 }
 
-Result<std::optional<Tuple>> InsertOperator::next() {
+Result<std::optional<Tuple>> InsertOperator::do_next() {
     if (executed_) {
         return ok(std::optional<Tuple>(std::nullopt));
     }
@@ -238,7 +238,7 @@ Result<std::optional<Tuple>> InsertOperator::next() {
     return ok(std::optional<Tuple>(std::move(result)));
 }
 
-void InsertOperator::close() {
+void InsertOperator::do_close() {
     if (child_) {
         child_->close();
     }
@@ -246,6 +246,18 @@ void InsertOperator::close() {
 
 const OutputSchema& InsertOperator::output_schema() const {
     return schema_;
+}
+
+std::vector<const Iterator*> InsertOperator::plan_children() const {
+    if (child_)
+        return {child_.get()};
+    return {};
+}
+
+std::vector<Iterator*> InsertOperator::plan_children_mutable() {
+    if (child_)
+        return {child_.get()};
+    return {};
 }
 
 } // namespace giodb

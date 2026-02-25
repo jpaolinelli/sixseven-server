@@ -38,10 +38,16 @@ public:
                    std::vector<UpdateAssignment> assignments,
                    const BoundStatement& bound);
 
-    Result<void> open() override;
-    Result<std::optional<Tuple>> next() override;
-    void close() override;
     const OutputSchema& output_schema() const override;
+    std::string plan_node_name() const override { return "Update"; }
+    std::string plan_node_detail() const override { return ""; }
+    std::vector<const Iterator*> plan_children() const override;
+
+protected:
+    Result<void> do_open() override;
+    Result<std::optional<Tuple>> do_next() override;
+    void do_close() override;
+    std::vector<Iterator*> plan_children_mutable() override;
 
 private:
     TableHeap& heap_;

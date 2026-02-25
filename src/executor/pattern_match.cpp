@@ -20,7 +20,14 @@ PatternMatchOperator::PatternMatchOperator(GraphEngine& graph_engine,
       config_(std::move(config)), schema_(std::move(schema)), where_expr_(where_expr),
       bound_(bound) {}
 
-Result<void> PatternMatchOperator::open() {
+std::string PatternMatchOperator::plan_node_name() const {
+    return "Pattern Match";
+}
+std::string PatternMatchOperator::plan_node_detail() const {
+    return "";
+}
+
+Result<void> PatternMatchOperator::do_open() {
     results_.clear();
     cursor_ = 0;
 
@@ -36,7 +43,7 @@ Result<void> PatternMatchOperator::open() {
     return execute_multi_hop();
 }
 
-Result<std::optional<Tuple>> PatternMatchOperator::next() {
+Result<std::optional<Tuple>> PatternMatchOperator::do_next() {
     while (cursor_ < results_.size()) {
         auto& tuple = results_[cursor_++];
 
@@ -55,7 +62,7 @@ Result<std::optional<Tuple>> PatternMatchOperator::next() {
     return ok(std::optional<Tuple>(std::nullopt));
 }
 
-void PatternMatchOperator::close() {
+void PatternMatchOperator::do_close() {
     results_.clear();
     cursor_ = 0;
 }
