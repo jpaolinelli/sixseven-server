@@ -3,6 +3,7 @@
 #include "giodb/common/logging.h"
 #include "giodb/executor/query_engine.h"
 #include "giodb/server/connection.h"
+#include "giodb/server/session.h"
 
 #include <algorithm>
 #include <array>
@@ -74,6 +75,35 @@ int32_t generate_secret_key() {
     static thread_local std::mt19937 rng(std::random_device{}());
     std::uniform_int_distribution<int32_t> dist;
     return dist(rng);
+}
+
+/// Case-insensitive string prefix check.
+bool starts_with_ci(std::string_view str, std::string_view prefix) {
+    if (str.size() < prefix.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < prefix.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(str[i])) !=
+            std::tolower(static_cast<unsigned char>(prefix[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Build a PostgreSQL CommandComplete tag from a QueryResult.
+std::string build_command_complete_tag(const QueryResult& qr) {
+    if (!qr.column_names.empty()) {
+        return "SELECT " + std::to_string(qr.rows.size());
+    }
+    if (qr.affected_rows >= 0) {
+        std::string tag = qr.message.empty() ? "UNKNOWN" : qr.message;
+        if (tag.find("INSERT") == 0) {
+            return "INSERT 0 " + std::to_string(qr.affected_rows);
+        }
+        return tag + " " + std::to_string(qr.affected_rows);
+    }
+    return qr.message.empty() ? "OK" : qr.message;
 }
 
 } // namespace
@@ -590,7 +620,21 @@ size_t MessageReader::remaining() const {
 // -- PgProtocolHandler --------------------------------------------------------
 
 PgProtocolHandler::PgProtocolHandler(int32_t backend_pid)
-    : backend_pid_(backend_pid), secret_key_(generate_secret_key()) {}
+    : backend_pid_(backend_pid), secret_key_(generate_secret_key()),
+      session_(std::make_unique<Session>(backend_pid)) {}
+
+PgProtocolHandler::~PgProtocolHandler() = default;
+PgProtocolHandler::PgProtocolHandler(PgProtocolHandler&&) noexcept = default;
+PgProtocolHandler& PgProtocolHandler::operator=(PgProtocolHandler&&) noexcept = default;
+
+const std::unordered_map<std::string, PreparedStatement>&
+PgProtocolHandler::prepared_statements() const {
+    return session_->prepared_statements();
+}
+
+const std::unordered_map<std::string, Portal>& PgProtocolHandler::portals() const {
+    return session_->portals();
+}
 
 void PgProtocolHandler::set_query_executor(QueryExecutor executor) {
     query_executor_ = std::move(executor);
@@ -925,6 +969,7 @@ Result<size_t> PgProtocolHandler::handle_frontend_message(Connection& conn) {
     }
     case MSG_TERMINATE: {
         GIODB_LOG_DEBUG("client sent Terminate");
+        session_->cleanup();
         state_ = ProtocolState::CLOSED;
         break;
     }
@@ -970,7 +1015,7 @@ Result<size_t> PgProtocolHandler::handle_frontend_message(Connection& conn) {
     default: {
         GIODB_LOG_WARN("unknown frontend message type: 0x{:02x}", msg_type);
         send_error_response(conn, "ERROR", "08P01", "unrecognized message type");
-        send_ready_for_query(conn, 'I');
+        send_ready_for_query(conn, session_->ready_for_query_status());
         break;
     }
     }
@@ -978,17 +1023,22 @@ Result<size_t> PgProtocolHandler::handle_frontend_message(Connection& conn) {
     return ok(total_len);
 }
 
+void PgProtocolHandler::send_query_result(Connection& conn, const QueryResult& qr) {
+    if (!qr.column_names.empty()) {
+        // SELECT: send RowDescription + DataRows + CommandComplete.
+        send_row_description(conn, qr);
+        for (const auto& row : qr.rows) {
+            send_data_row(conn, row, qr.column_types);
+        }
+    }
+    send_command_complete(conn, build_command_complete_tag(qr));
+}
+
 void PgProtocolHandler::handle_simple_query(Connection& conn, std::string_view sql) {
     // Handle empty query.
     if (sql.empty()) {
         send_empty_query_response(conn);
-        send_ready_for_query(conn, 'I');
-        return;
-    }
-
-    if (!query_executor_) {
-        send_error_response(conn, "ERROR", "XX000", "no query executor configured");
-        send_ready_for_query(conn, 'I');
+        send_ready_for_query(conn, session_->ready_for_query_status());
         return;
     }
 
@@ -997,50 +1047,137 @@ void PgProtocolHandler::handle_simple_query(Connection& conn, std::string_view s
     auto statements = split_sql_statements(sql);
     if (statements.empty()) {
         send_empty_query_response(conn);
-        send_ready_for_query(conn, 'I');
+        send_ready_for_query(conn, session_->ready_for_query_status());
         return;
     }
 
     for (const auto& stmt : statements) {
+        // Try session-level commands first (SET, SHOW, RESET, PREPARE,
+        // DEALLOCATE).  EXECUTE is handled specially below.
+        auto session_result = session_->try_handle_command(stmt);
+        if (session_result) {
+            if (!*session_result) {
+                const auto& err = session_result->error();
+                send_error_response(
+                    conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+                session_->update_transaction_state(stmt, false);
+                send_ready_for_query(conn, session_->ready_for_query_status());
+                return;
+            }
+            send_query_result(conn, **session_result);
+            session_->update_transaction_state(stmt, true);
+            continue;
+        }
+
+        // Handle SQL-level EXECUTE: look up prepared statement and execute its
+        // SQL through the query executor.
+        auto handled = try_handle_execute(conn, stmt);
+        if (handled) {
+            if (!*handled) {
+                // Error was already sent by try_handle_execute.
+                session_->update_transaction_state(stmt, false);
+                send_ready_for_query(conn, session_->ready_for_query_status());
+                return;
+            }
+            session_->update_transaction_state(stmt, true);
+            continue;
+        }
+
+        // Fall through to the query executor.
+        if (!query_executor_) {
+            send_error_response(conn, "ERROR", "XX000", "no query executor configured");
+            session_->update_transaction_state(stmt, false);
+            send_ready_for_query(conn, session_->ready_for_query_status());
+            return;
+        }
+
         auto result = query_executor_(stmt);
         if (!result) {
             // On error, send ErrorResponse and stop processing remaining statements.
             const auto& err = result.error();
             send_error_response(
                 conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
-            send_ready_for_query(conn, 'I');
+            session_->update_transaction_state(stmt, false);
+            send_ready_for_query(conn, session_->ready_for_query_status());
             return;
         }
 
-        const auto& qr = *result;
-
-        // Determine if this is a SELECT (has column names) or DML/DDL.
-        if (!qr.column_names.empty()) {
-            // SELECT: send RowDescription + DataRows + CommandComplete.
-            send_row_description(conn, qr);
-            for (const auto& row : qr.rows) {
-                send_data_row(conn, row, qr.column_types);
-            }
-            send_command_complete(conn, "SELECT " + std::to_string(qr.rows.size()));
-        } else if (qr.affected_rows >= 0) {
-            // DML: send CommandComplete with tag and row count.
-            std::string tag = qr.message.empty() ? "UNKNOWN" : qr.message;
-
-            // For INSERT, PG format is "INSERT 0 <count>".
-            if (tag.find("INSERT") == 0) {
-                tag = "INSERT 0 " + std::to_string(qr.affected_rows);
-            } else {
-                tag += " " + std::to_string(qr.affected_rows);
-            }
-            send_command_complete(conn, tag);
-        } else {
-            // DDL/utility: send CommandComplete with the message.
-            send_command_complete(conn, qr.message.empty() ? "OK" : qr.message);
-        }
+        send_query_result(conn, *result);
+        session_->update_transaction_state(stmt, true);
     }
 
     // A single ReadyForQuery at the end of the entire multi-statement batch.
-    send_ready_for_query(conn, 'I');
+    send_ready_for_query(conn, session_->ready_for_query_status());
+}
+
+// -- SQL-level EXECUTE handler ------------------------------------------------
+
+std::optional<Result<void>> PgProtocolHandler::try_handle_execute(Connection& conn,
+                                                                  const std::string& sql) {
+    // Check for "EXECUTE " prefix (case-insensitive).
+    if (!starts_with_ci(sql, "EXECUTE ")) {
+        return std::nullopt;
+    }
+
+    // Parse: EXECUTE name [(value, ...)]
+    auto rest = sql.substr(8);
+    // Trim leading whitespace.
+    auto start = rest.find_first_not_of(" \t");
+    if (start == std::string::npos) {
+        send_error_response(conn, "ERROR", "42601", "syntax error: EXECUTE requires a name");
+        return Result<void>(make_error(StatusCode::PARSE_ERROR, "EXECUTE requires a name"));
+    }
+    rest = rest.substr(start);
+
+    // Extract statement name.
+    std::string stmt_name;
+    std::string params_str;
+    auto paren_pos = rest.find('(');
+    if (paren_pos != std::string::npos) {
+        stmt_name = rest.substr(0, paren_pos);
+        // Trim trailing whitespace from name.
+        auto name_end = stmt_name.find_last_not_of(" \t");
+        if (name_end != std::string::npos) {
+            stmt_name = stmt_name.substr(0, name_end + 1);
+        }
+        // Extract parameters between parens.
+        auto close_paren = rest.rfind(')');
+        if (close_paren != std::string::npos && close_paren > paren_pos) {
+            params_str = rest.substr(paren_pos + 1, close_paren - paren_pos - 1);
+        }
+    } else {
+        // Trim trailing whitespace.
+        auto end = rest.find_last_not_of(" \t\n\r");
+        stmt_name = (end != std::string::npos) ? rest.substr(0, end + 1) : rest;
+    }
+
+    // Look up the prepared statement in the session.
+    const auto* stmt = session_->get_prepared_statement(stmt_name);
+    if (stmt == nullptr) {
+        send_error_response(
+            conn, "ERROR", "26000", "prepared statement \"" + stmt_name + "\" does not exist");
+        return Result<void>(make_error(StatusCode::INVALID_ARGUMENT,
+                                       "prepared statement \"" + stmt_name + "\" does not exist"));
+    }
+
+    // TODO(GDB-200): Substitute parameter values into the SQL.
+    // For now, execute the prepared SQL directly.
+    if (!query_executor_) {
+        send_error_response(conn, "ERROR", "XX000", "no query executor configured");
+        return Result<void>(make_error(StatusCode::INTERNAL_ERROR, "no query executor"));
+    }
+
+    GIODB_LOG_DEBUG("EXECUTE: stmt='{}', sql='{}'", stmt_name, stmt->sql);
+
+    auto result = query_executor_(stmt->sql);
+    if (!result) {
+        const auto& err = result.error();
+        send_error_response(conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+        return Result<void>(tl::unexpected(err));
+    }
+
+    send_query_result(conn, *result);
+    return ok();
 }
 
 // -- Extended query protocol handlers -----------------------------------------
@@ -1060,12 +1197,12 @@ void PgProtocolHandler::handle_parse(Connection& conn, const uint8_t* payload, s
 
     GIODB_LOG_DEBUG("Parse: name='{}', sql='{}', params={}", stmt_name, sql, num_params);
 
-    // Store the prepared statement.
+    // Store the prepared statement in the session.
     PreparedStatement stmt;
     stmt.name = stmt_name;
     stmt.sql = std::move(sql);
     stmt.param_oids = std::move(param_oids);
-    prepared_statements_[stmt_name] = std::move(stmt);
+    session_->add_prepared_statement(stmt_name, std::move(stmt));
 
     send_parse_complete(conn);
 }
@@ -1111,9 +1248,9 @@ void PgProtocolHandler::handle_bind(Connection& conn, const uint8_t* payload, si
         result_formats.push_back(reader.read_int16());
     }
 
-    // Look up the prepared statement.
-    auto it = prepared_statements_.find(stmt_name);
-    if (it == prepared_statements_.end()) {
+    // Look up the prepared statement in the session.
+    const auto* stmt = session_->get_prepared_statement(stmt_name);
+    if (stmt == nullptr) {
         send_error_response(
             conn, "ERROR", "26000", "prepared statement \"" + stmt_name + "\" does not exist");
         error_in_extended_ = true;
@@ -1124,10 +1261,10 @@ void PgProtocolHandler::handle_bind(Connection& conn, const uint8_t* payload, si
 
     Portal portal;
     portal.name = portal_name;
-    portal.sql = it->second.sql;
+    portal.sql = stmt->sql;
     portal.param_values = std::move(param_values);
     portal.result_format_codes = std::move(result_formats);
-    portals_[portal_name] = std::move(portal);
+    session_->add_portal(portal_name, std::move(portal));
 
     send_bind_complete(conn);
 }
@@ -1139,22 +1276,22 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
     auto name = std::string(reader.read_cstring());
 
     if (describe_type == 'S') {
-        auto it = prepared_statements_.find(name);
-        if (it == prepared_statements_.end()) {
+        const auto* stmt = session_->get_prepared_statement(name);
+        if (stmt == nullptr) {
             send_error_response(
                 conn, "ERROR", "26000", "prepared statement \"" + name + "\" does not exist");
             error_in_extended_ = true;
             return;
         }
         // Send ParameterDescription.
-        send_parameter_description(conn, it->second.param_oids);
+        send_parameter_description(conn, stmt->param_oids);
 
         // TODO(GDB-201): Parse the SQL to determine result columns and send
         // RowDescription for SELECT statements. For now, send NoData.
         send_no_data(conn);
     } else if (describe_type == 'P') {
-        auto it = portals_.find(name);
-        if (it == portals_.end()) {
+        const auto* portal = session_->get_portal(name);
+        if (portal == nullptr) {
             send_error_response(conn, "ERROR", "34000", "portal \"" + name + "\" does not exist");
             error_in_extended_ = true;
             return;
@@ -1175,15 +1312,15 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
     int32_t max_rows = reader.read_int32(); // 0 = no limit.
     (void)max_rows;                         // We execute all rows for now.
 
-    auto it = portals_.find(portal_name);
-    if (it == portals_.end()) {
+    const auto* portal_ptr = session_->get_portal(portal_name);
+    if (portal_ptr == nullptr) {
         send_error_response(
             conn, "ERROR", "34000", "portal \"" + portal_name + "\" does not exist");
         error_in_extended_ = true;
         return;
     }
 
-    const auto& portal = it->second;
+    const auto& portal = *portal_ptr;
 
     if (!query_executor_) {
         send_error_response(conn, "ERROR", "XX000", "no query executor configured");
@@ -1210,25 +1347,15 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
         for (const auto& row : qr.rows) {
             send_data_row(conn, row, qr.column_types);
         }
-        send_command_complete(conn, "SELECT " + std::to_string(qr.rows.size()));
-    } else if (qr.affected_rows >= 0) {
-        std::string tag = qr.message.empty() ? "UNKNOWN" : qr.message;
-        if (tag.find("INSERT") == 0) {
-            tag = "INSERT 0 " + std::to_string(qr.affected_rows);
-        } else {
-            tag += " " + std::to_string(qr.affected_rows);
-        }
-        send_command_complete(conn, tag);
-    } else {
-        send_command_complete(conn, qr.message.empty() ? "OK" : qr.message);
     }
+    send_command_complete(conn, build_command_complete_tag(qr));
 }
 
 void PgProtocolHandler::handle_sync(Connection& conn) {
     // Sync is the end of an extended query batch.
-    // Reset error state and send ReadyForQuery.
+    // Reset error state and send ReadyForQuery with session transaction state.
     error_in_extended_ = false;
-    send_ready_for_query(conn, 'I');
+    send_ready_for_query(conn, session_->ready_for_query_status());
 }
 
 void PgProtocolHandler::handle_close(Connection& conn, const uint8_t* payload, size_t len) {
@@ -1238,9 +1365,9 @@ void PgProtocolHandler::handle_close(Connection& conn, const uint8_t* payload, s
     auto name = std::string(reader.read_cstring());
 
     if (close_type == 'S') {
-        prepared_statements_.erase(name);
+        session_->remove_prepared_statement(name);
     } else if (close_type == 'P') {
-        portals_.erase(name);
+        session_->remove_portal(name);
     }
 
     send_close_complete(conn);

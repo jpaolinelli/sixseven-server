@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -19,6 +20,7 @@ namespace giodb {
 
 // Forward declarations.
 class Connection;
+class Session;
 struct QueryResult;
 
 // -- PostgreSQL type OIDs -----------------------------------------------------
@@ -139,9 +141,16 @@ struct Portal {
 /// Reads from the connection's read buffer, processes complete messages, writes
 /// response messages to the connection's write buffer, and consumes processed
 /// bytes from the read buffer.
+///
+/// Each handler owns a Session that holds per-connection state: session
+/// variables, prepared statements, portals, and transaction state.
 class PgProtocolHandler {
 public:
     explicit PgProtocolHandler(int32_t backend_pid);
+    ~PgProtocolHandler();
+
+    PgProtocolHandler(PgProtocolHandler&&) noexcept;
+    PgProtocolHandler& operator=(PgProtocolHandler&&) noexcept;
 
     /// Set the callback used to execute SQL queries.
     void set_query_executor(QueryExecutor executor);
@@ -159,13 +168,15 @@ public:
     int32_t backend_pid() const { return backend_pid_; }
     int32_t secret_key() const { return secret_key_; }
 
-    /// Access prepared statements (for testing).
-    const std::unordered_map<std::string, PreparedStatement>& prepared_statements() const {
-        return prepared_statements_;
-    }
+    /// Access the session (for testing and external access).
+    Session& session() { return *session_; }
+    const Session& session() const { return *session_; }
 
-    /// Access portals (for testing).
-    const std::unordered_map<std::string, Portal>& portals() const { return portals_; }
+    /// Access prepared statements (for testing — delegates to session).
+    const std::unordered_map<std::string, PreparedStatement>& prepared_statements() const;
+
+    /// Access portals (for testing — delegates to session).
+    const std::unordered_map<std::string, Portal>& portals() const;
 
 private:
     /// Try to parse and handle one complete message from the read buffer.
@@ -185,6 +196,13 @@ private:
     // -- Simple query protocol --
 
     void handle_simple_query(Connection& conn, std::string_view sql);
+
+    /// Send a QueryResult to the client (shared by simple query and EXECUTE).
+    void send_query_result(Connection& conn, const QueryResult& qr);
+
+    /// Try to handle SQL-level EXECUTE command.
+    /// Returns an optional<Result<void>>: present if handled, nullopt to pass through.
+    std::optional<Result<void>> try_handle_execute(Connection& conn, const std::string& sql);
 
     // -- Extended query protocol --
 
@@ -232,18 +250,15 @@ private:
     int32_t backend_pid_;
     int32_t secret_key_;
 
+    /// Per-connection session state (variables, prepared stmts, txn state).
+    std::unique_ptr<Session> session_;
+
     /// True when an error occurred during an extended query batch.
     /// Messages are skipped until the next Sync.
     bool error_in_extended_ = false;
 
     /// Startup parameters sent by the client (user, database, etc.).
     std::unordered_map<std::string, std::string> startup_params_;
-
-    /// Named prepared statements. Empty name ("") is the unnamed statement.
-    std::unordered_map<std::string, PreparedStatement> prepared_statements_;
-
-    /// Named portals. Empty name ("") is the unnamed portal.
-    std::unordered_map<std::string, Portal> portals_;
 
     // -- Authentication state --
 
