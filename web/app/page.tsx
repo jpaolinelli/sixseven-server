@@ -4,6 +4,7 @@ import { SchemaBrowser } from "@/components/SchemaBrowser";
 import { SchemaDetails } from "@/components/SchemaDetails";
 import { QueryEditor } from "@/components/QueryEditor";
 import { GraphExplorer } from "@/components/GraphExplorer";
+import { Dashboard } from "@/components/Dashboard";
 import { useState, useEffect, useCallback } from "react";
 import type {
   SelectedItem,
@@ -14,7 +15,7 @@ import type {
 import { fetchDatabases, fetchDatabaseSchema } from "@/lib/schema-utils";
 import type { SchemaCompletionData } from "@/lib/giodb-sql-lang";
 
-type ActivePanel = "schema" | "query" | "graph";
+type ActivePanel = "schema" | "query" | "graph" | "dashboard";
 
 export default function Home() {
   const [selected, setSelected] = useState<SelectedItem | null>(null);
@@ -116,12 +117,22 @@ export default function Home() {
           >
             Graph
           </button>
+          <button
+            className={`flex-1 px-3 py-1.5 text-xs font-medium ${
+              activePanel === "dashboard"
+                ? "text-blue-400 border-b-2 border-blue-400 bg-gray-900/50"
+                : "text-gray-500 hover:text-gray-300"
+            }`}
+            onClick={() => setActivePanel("dashboard")}
+          >
+            Dashboard
+          </button>
         </div>
 
         <SchemaBrowser onSelect={setSelected} />
       </div>
 
-      {/* Right panel: Query Editor, Schema Details, or Graph Explorer */}
+      {/* Right panel: Query Editor, Schema Details, Graph Explorer, or Dashboard */}
       <div className="flex-1 overflow-hidden">
         {activePanel === "query" ? (
           <QueryEditor
@@ -135,6 +146,8 @@ export default function Home() {
             edgeTypes={allEdgeTypeInfos}
             defaultDatabase={databaseNames[0] || ""}
           />
+        ) : activePanel === "dashboard" ? (
+          <Dashboard />
         ) : selected ? (
           <SchemaDetails item={selected} />
         ) : (
