@@ -40,6 +40,9 @@ struct Config {
     int32_t replication_synchronous_timeout_ms = 30000; ///< Timeout before fallback.
     std::string replication_synchronous_fallback = "error"; ///< error/warn/block.
 
+    // Server lifecycle settings.
+    int32_t shutdown_timeout_s = 30; ///< Seconds to wait for active queries on shutdown.
+
     // Health monitoring thresholds.
     int64_t replication_lag_warning_threshold_ms = 10000;        ///< Lag threshold for warnings.
     int64_t replication_disconnect_warning_threshold_ms = 60000; ///< Disconnect threshold.
