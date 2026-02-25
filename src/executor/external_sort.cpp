@@ -192,41 +192,9 @@ Result<void> ExternalSortOperator::generate_runs() {
     if (run_files_.empty()) {
         in_memory_mode_ = true;
 
-        const auto& schema = child_->output_schema();
-        const auto& sort_keys = keys_;
-        const auto& bound = bound_;
-
-        std::stable_sort(buffer.begin(),
-                         buffer.end(),
-                         [&schema, &sort_keys, &bound](const Tuple& a, const Tuple& b) -> bool {
-                             for (const auto& key : sort_keys) {
-                                 auto va = evaluate_expr(*key.expr, a, schema, bound);
-                                 auto vb = evaluate_expr(*key.expr, b, schema, bound);
-                                 if (!va || !vb) {
-                                     return false;
-                                 }
-                                 if (va->is_null() && vb->is_null()) {
-                                     continue;
-                                 }
-                                 if (va->is_null()) {
-                                     return key.direction == SortDirection::DESC;
-                                 }
-                                 if (vb->is_null()) {
-                                     return key.direction == SortDirection::ASC;
-                                 }
-                                 auto cmp = compare(*va, *vb);
-                                 if (!cmp) {
-                                     return false;
-                                 }
-                                 if (*cmp == std::strong_ordering::less) {
-                                     return key.direction == SortDirection::ASC;
-                                 }
-                                 if (*cmp == std::strong_ordering::greater) {
-                                     return key.direction == SortDirection::DESC;
-                                 }
-                             }
-                             return false;
-                         });
+        std::stable_sort(buffer.begin(), buffer.end(), [this](const Tuple& a, const Tuple& b) {
+            return compare_tuples(a, b);
+        });
 
         sorted_ = std::move(buffer);
         cursor_ = 0;
@@ -246,41 +214,9 @@ Result<void> ExternalSortOperator::generate_runs() {
 
 Result<void> ExternalSortOperator::flush_run(std::vector<Tuple>& buffer) {
     // Sort the buffer in memory.
-    const auto& schema = child_->output_schema();
-    const auto& sort_keys = keys_;
-    const auto& bound = bound_;
-
-    std::stable_sort(buffer.begin(),
-                     buffer.end(),
-                     [&schema, &sort_keys, &bound](const Tuple& a, const Tuple& b) -> bool {
-                         for (const auto& key : sort_keys) {
-                             auto va = evaluate_expr(*key.expr, a, schema, bound);
-                             auto vb = evaluate_expr(*key.expr, b, schema, bound);
-                             if (!va || !vb) {
-                                 return false;
-                             }
-                             if (va->is_null() && vb->is_null()) {
-                                 continue;
-                             }
-                             if (va->is_null()) {
-                                 return key.direction == SortDirection::DESC;
-                             }
-                             if (vb->is_null()) {
-                                 return key.direction == SortDirection::ASC;
-                             }
-                             auto cmp = compare(*va, *vb);
-                             if (!cmp) {
-                                 return false;
-                             }
-                             if (*cmp == std::strong_ordering::less) {
-                                 return key.direction == SortDirection::ASC;
-                             }
-                             if (*cmp == std::strong_ordering::greater) {
-                                 return key.direction == SortDirection::DESC;
-                             }
-                         }
-                         return false;
-                     });
+    std::stable_sort(buffer.begin(), buffer.end(), [this](const Tuple& a, const Tuple& b) {
+        return compare_tuples(a, b);
+    });
 
     // Write sorted tuples to a temp file.
     auto path = next_temp_path();
@@ -365,7 +301,7 @@ Result<void> ExternalSortOperator::merge_runs_to_file(size_t begin,
     };
 
     auto greater = [this](const Entry& a, const Entry& b) {
-        return !compare_tuples(a.tuple, b.tuple);
+        return compare_tuples(b.tuple, a.tuple);
     };
 
     std::vector<Entry> local_heap;
