@@ -4,6 +4,7 @@
 #include "giodb/common/result.h"
 #include "giodb/server/connection.h"
 #include "giodb/server/event_loop.h"
+#include "giodb/server/pg_protocol.h"
 #include "giodb/server/thread_pool.h"
 
 #include <atomic>
@@ -39,6 +40,9 @@ public:
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;
 
+    /// Set the callback used to execute SQL queries via the PG protocol.
+    void set_query_executor(QueryExecutor executor);
+
     /// Bind, listen, and run the event loop. Blocks until shutdown is requested.
     [[nodiscard]] Result<void> start();
 
@@ -70,10 +74,13 @@ private:
     std::unique_ptr<EventLoop> event_loop_;
     std::unique_ptr<ThreadPool> thread_pool_;
     std::unordered_map<int, Connection> connections_;
+    std::unordered_map<int, PgProtocolHandler> protocol_handlers_;
     mutable std::mutex connections_mutex_;
+    QueryExecutor query_executor_;
     int listen_fd_ = -1;
     uint16_t bound_port_ = 0;
     std::atomic<bool> running_{false};
+    std::atomic<int32_t> next_backend_pid_{1};
     std::chrono::steady_clock::time_point start_time_;
 };
 

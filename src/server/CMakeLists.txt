@@ -3,6 +3,7 @@
 add_library(giodb_server STATIC
     connection.cpp
     event_loop.cpp
+    pg_protocol.cpp
     server.cpp
     thread_pool.cpp
     promotion_manager.cpp
