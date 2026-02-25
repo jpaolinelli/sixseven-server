@@ -134,7 +134,7 @@ TEST_F(ServerTest, RejectsWhenMaxConnectionsReached) {
     t.join();
 }
 
-TEST_F(ServerTest, EchoesData) {
+TEST_F(ServerTest, PgStartupHandshake) {
     Server server(make_config());
     std::thread t([&server] { (void)server.start(); });
     wait_for_running(server);
@@ -142,16 +142,44 @@ TEST_F(ServerTest, EchoesData) {
     int client = connect_to(server.bound_port());
     ASSERT_GE(client, 0);
 
-    const std::string msg = "hello server";
-    ASSERT_EQ(::send(client, msg.data(), msg.size(), 0), static_cast<ssize_t>(msg.size()));
+    // Build a PG v3 StartupMessage: length(4) + version(4) + "user\0test\0\0".
+    std::vector<uint8_t> startup;
+    std::string params = std::string("user\0test\0", 10) + '\0'; // key=user, val=test, terminator.
+    uint32_t length = static_cast<uint32_t>(4 + 4 + params.size());
+    startup.push_back(static_cast<uint8_t>((length >> 24) & 0xFF));
+    startup.push_back(static_cast<uint8_t>((length >> 16) & 0xFF));
+    startup.push_back(static_cast<uint8_t>((length >> 8) & 0xFF));
+    startup.push_back(static_cast<uint8_t>(length & 0xFF));
+    // Protocol version 3.0 = 196608.
+    uint32_t version = 196608;
+    startup.push_back(static_cast<uint8_t>((version >> 24) & 0xFF));
+    startup.push_back(static_cast<uint8_t>((version >> 16) & 0xFF));
+    startup.push_back(static_cast<uint8_t>((version >> 8) & 0xFF));
+    startup.push_back(static_cast<uint8_t>(version & 0xFF));
+    startup.insert(startup.end(), params.begin(), params.end());
 
-    // Wait for echo.
+    ASSERT_EQ(::send(client, startup.data(), startup.size(), 0),
+              static_cast<ssize_t>(startup.size()));
+
+    // Wait for the server response.
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
-    char buf[256] = {};
+    char buf[4096] = {};
     ssize_t n = ::recv(client, buf, sizeof(buf), 0);
     ASSERT_GT(n, 0);
-    EXPECT_EQ(std::string(buf, static_cast<size_t>(n)), msg);
+
+    // First message should be AuthenticationOk: 'R' + int32(8) + int32(0).
+    EXPECT_EQ(static_cast<uint8_t>(buf[0]), 'R');
+
+    // Find ReadyForQuery 'Z' somewhere in the response.
+    bool found_ready = false;
+    for (ssize_t i = 0; i < n; ++i) {
+        if (static_cast<uint8_t>(buf[i]) == 'Z' && i + 5 < n) {
+            found_ready = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found_ready);
 
     ::close(client);
     server.shutdown();

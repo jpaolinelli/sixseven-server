@@ -1,0 +1,1215 @@
+#include "giodb/server/pg_protocol.h"
+
+#include "giodb/common/logging.h"
+#include "giodb/executor/query_engine.h"
+#include "giodb/server/connection.h"
+
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <iomanip>
+#include <random>
+#include <sstream>
+
+namespace giodb {
+
+// -- PostgreSQL protocol constants --------------------------------------------
+
+namespace {
+
+// Protocol version 3.0 as a 32-bit integer: major(16) << 16 | minor(16).
+constexpr int32_t PG_PROTOCOL_VERSION_3_0 = 196608; // (3 << 16) | 0
+
+// SSL request magic number.
+constexpr int32_t SSL_REQUEST_CODE = 80877103;
+
+// Cancel request magic number.
+constexpr int32_t CANCEL_REQUEST_CODE = 80877102;
+
+// Frontend message type bytes.
+constexpr uint8_t MSG_QUERY = 'Q';
+constexpr uint8_t MSG_TERMINATE = 'X';
+constexpr uint8_t MSG_PARSE = 'P';
+constexpr uint8_t MSG_BIND = 'B';
+constexpr uint8_t MSG_DESCRIBE = 'D';
+constexpr uint8_t MSG_EXECUTE = 'E';
+constexpr uint8_t MSG_SYNC = 'S';
+constexpr uint8_t MSG_CLOSE = 'C';
+constexpr uint8_t MSG_FLUSH = 'H';
+
+// Minimum startup message size: 4-byte length + 4-byte protocol version.
+constexpr size_t MIN_STARTUP_SIZE = 8;
+
+// PostgreSQL type OIDs.
+constexpr uint32_t PG_OID_BOOL = 16;
+constexpr uint32_t PG_OID_INT2 = 21;
+constexpr uint32_t PG_OID_INT4 = 23;
+constexpr uint32_t PG_OID_INT8 = 20;
+constexpr uint32_t PG_OID_FLOAT4 = 700;
+constexpr uint32_t PG_OID_FLOAT8 = 701;
+constexpr uint32_t PG_OID_NUMERIC = 1700;
+constexpr uint32_t PG_OID_TEXT = 25;
+constexpr uint32_t PG_OID_BYTEA = 17;
+constexpr uint32_t PG_OID_DATE = 1082;
+constexpr uint32_t PG_OID_TIME = 1083;
+constexpr uint32_t PG_OID_TIMESTAMP = 1114;
+constexpr uint32_t PG_OID_INTERVAL = 1186;
+constexpr uint32_t PG_OID_POINT = 600;
+constexpr uint32_t PG_OID_JSON = 114;
+constexpr uint32_t PG_OID_UUID = 2950;
+
+// Custom OIDs for GioDB-specific types (above the PostgreSQL reserved range).
+constexpr uint32_t PG_OID_EMBEDDING = 100000;
+
+/// Read a network-order (big-endian) int32 from a byte pointer.
+int32_t read_be_int32(const uint8_t* p) {
+    return static_cast<int32_t>((static_cast<uint32_t>(p[0]) << 24) |
+                                (static_cast<uint32_t>(p[1]) << 16) |
+                                (static_cast<uint32_t>(p[2]) << 8) | (static_cast<uint32_t>(p[3])));
+}
+
+/// Generate a random int32 for the cancel secret key.
+int32_t generate_secret_key() {
+    static thread_local std::mt19937 rng(std::random_device{}());
+    std::uniform_int_distribution<int32_t> dist;
+    return dist(rng);
+}
+
+} // namespace
+
+// -- Type OID mapping ---------------------------------------------------------
+
+uint32_t type_to_pg_oid(TypeId type) {
+    switch (type) {
+    case TypeId::BOOL:
+        return PG_OID_BOOL;
+    case TypeId::INT8:
+        return PG_OID_INT2; // Closest PG type for int8.
+    case TypeId::INT16:
+        return PG_OID_INT2;
+    case TypeId::INT32:
+        return PG_OID_INT4;
+    case TypeId::INT64:
+        return PG_OID_INT8;
+    case TypeId::UINT8:
+        return PG_OID_INT2;
+    case TypeId::UINT16:
+        return PG_OID_INT4;
+    case TypeId::UINT32:
+        return PG_OID_INT8;
+    case TypeId::UINT64:
+        return PG_OID_NUMERIC;
+    case TypeId::FLOAT32:
+        return PG_OID_FLOAT4;
+    case TypeId::FLOAT64:
+        return PG_OID_FLOAT8;
+    case TypeId::DECIMAL:
+        return PG_OID_NUMERIC;
+    case TypeId::STRING:
+        return PG_OID_TEXT;
+    case TypeId::BLOB:
+        return PG_OID_BYTEA;
+    case TypeId::DATE:
+        return PG_OID_DATE;
+    case TypeId::TIME:
+        return PG_OID_TIME;
+    case TypeId::TIMESTAMP:
+        return PG_OID_TIMESTAMP;
+    case TypeId::INTERVAL:
+        return PG_OID_INTERVAL;
+    case TypeId::POINT:
+        return PG_OID_POINT;
+    case TypeId::JSON:
+        return PG_OID_JSON;
+    case TypeId::UUID:
+        return PG_OID_UUID;
+    case TypeId::EMBEDDING:
+        return PG_OID_EMBEDDING;
+    }
+    return PG_OID_TEXT; // Fallback.
+}
+
+Result<TypeId> pg_oid_to_type(uint32_t oid) {
+    switch (oid) {
+    case PG_OID_BOOL:
+        return ok(TypeId::BOOL);
+    case PG_OID_INT2:
+        return ok(TypeId::INT16);
+    case PG_OID_INT4:
+        return ok(TypeId::INT32);
+    case PG_OID_INT8:
+        return ok(TypeId::INT64);
+    case PG_OID_FLOAT4:
+        return ok(TypeId::FLOAT32);
+    case PG_OID_FLOAT8:
+        return ok(TypeId::FLOAT64);
+    case PG_OID_NUMERIC:
+        return ok(TypeId::DECIMAL);
+    case PG_OID_TEXT:
+        return ok(TypeId::STRING);
+    case PG_OID_BYTEA:
+        return ok(TypeId::BLOB);
+    case PG_OID_DATE:
+        return ok(TypeId::DATE);
+    case PG_OID_TIME:
+        return ok(TypeId::TIME);
+    case PG_OID_TIMESTAMP:
+        return ok(TypeId::TIMESTAMP);
+    case PG_OID_INTERVAL:
+        return ok(TypeId::INTERVAL);
+    case PG_OID_POINT:
+        return ok(TypeId::POINT);
+    case PG_OID_JSON:
+        return ok(TypeId::JSON);
+    case PG_OID_UUID:
+        return ok(TypeId::UUID);
+    case PG_OID_EMBEDDING:
+        return ok(TypeId::EMBEDDING);
+    default:
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "unknown PostgreSQL OID: " + std::to_string(oid));
+    }
+}
+
+// -- SQLSTATE mapping ---------------------------------------------------------
+
+std::string_view status_to_sqlstate(StatusCode code) {
+    switch (code) {
+    case StatusCode::OK:
+        return "00000"; // Successful completion.
+    case StatusCode::NOT_FOUND:
+        return "42P01"; // Undefined table.
+    case StatusCode::ALREADY_EXISTS:
+        return "42P07"; // Duplicate table.
+    case StatusCode::INVALID_ARGUMENT:
+        return "22023"; // Invalid parameter value.
+    case StatusCode::INTERNAL_ERROR:
+        return "XX000"; // Internal error.
+    case StatusCode::NOT_IMPLEMENTED:
+        return "0A000"; // Feature not supported.
+    case StatusCode::IO_ERROR:
+        return "58030"; // IO error.
+    case StatusCode::PARSE_ERROR:
+        return "42601"; // Syntax error.
+    case StatusCode::TYPE_ERROR:
+        return "42804"; // Datatype mismatch.
+    case StatusCode::CONSTRAINT_VIOLATION:
+        return "23000"; // Integrity constraint.
+    case StatusCode::TXN_CONFLICT:
+        return "40001"; // Serialization failure.
+    case StatusCode::TXN_ABORTED:
+        return "25P02"; // In failed SQL transaction.
+    case StatusCode::NETWORK_ERROR:
+        return "08006"; // Connection failure.
+    case StatusCode::AUTH_ERROR:
+        return "28000"; // Invalid authorization.
+    case StatusCode::REPLICATION_ERROR:
+        return "XX001"; // Data corrupted.
+    case StatusCode::READ_ONLY:
+        return "25006"; // Read-only SQL transaction.
+    case StatusCode::LOCK_TIMEOUT:
+        return "55P03"; // Lock not available.
+    case StatusCode::DEADLOCK:
+        return "40P01"; // Deadlock detected.
+    }
+    return "XX000"; // Fallback.
+}
+
+// -- Value text formatting ----------------------------------------------------
+
+std::string value_to_pg_text(const Value& value) {
+    if (value.is_null()) {
+        return ""; // NULL values are indicated by -1 length, not this string.
+    }
+
+    switch (value.type_id()) {
+    case TypeId::BOOL:
+        return value.as_bool() ? "t" : "f";
+    case TypeId::INT8:
+        return std::to_string(value.as_int8());
+    case TypeId::INT16:
+        return std::to_string(value.as_int16());
+    case TypeId::INT32:
+        return std::to_string(value.as_int32());
+    case TypeId::INT64:
+        return std::to_string(value.as_int64());
+    case TypeId::UINT8:
+        return std::to_string(value.as_uint8());
+    case TypeId::UINT16:
+        return std::to_string(value.as_uint16());
+    case TypeId::UINT32:
+        return std::to_string(value.as_uint32());
+    case TypeId::UINT64:
+        return std::to_string(value.as_uint64());
+    case TypeId::FLOAT32: {
+        std::ostringstream oss;
+        oss << value.as_float32();
+        return oss.str();
+    }
+    case TypeId::FLOAT64: {
+        std::ostringstream oss;
+        oss << value.as_float64();
+        return oss.str();
+    }
+    case TypeId::DECIMAL: {
+        // Simplified: format as hi.lo pair.
+        const auto& d = value.as_decimal();
+        return std::to_string(d.hi) + "." + std::to_string(d.lo);
+    }
+    case TypeId::STRING:
+        return value.as_string();
+    case TypeId::BLOB: {
+        // PG bytea hex format: \x followed by hex digits.
+        const auto& blob = value.as_blob();
+        std::string result = "\\x";
+        result.reserve(2 + blob.size() * 2);
+        for (uint8_t byte : blob) {
+            static constexpr const char* hex = "0123456789abcdef";
+            result += hex[byte >> 4];
+            result += hex[byte & 0x0F];
+        }
+        return result;
+    }
+    case TypeId::DATE: {
+        // Format as ISO 8601: YYYY-MM-DD.
+        int32_t days = value.as_date().days_since_epoch;
+        // Simple calculation from days since epoch.
+        time_t secs = static_cast<time_t>(days) * 86400;
+        struct tm tm_buf{};
+        gmtime_r(&secs, &tm_buf);
+        std::ostringstream oss;
+        oss << std::setfill('0') << std::setw(4) << (tm_buf.tm_year + 1900) << '-' << std::setw(2)
+            << (tm_buf.tm_mon + 1) << '-' << std::setw(2) << tm_buf.tm_mday;
+        return oss.str();
+    }
+    case TypeId::TIME: {
+        // Format as HH:MM:SS.uuuuuu.
+        int64_t us = value.as_time().microseconds;
+        int64_t hours = us / 3600000000LL;
+        us %= 3600000000LL;
+        int64_t minutes = us / 60000000LL;
+        us %= 60000000LL;
+        int64_t seconds = us / 1000000LL;
+        int64_t frac = us % 1000000LL;
+        std::ostringstream oss;
+        oss << std::setfill('0') << std::setw(2) << hours << ':' << std::setw(2) << minutes << ':'
+            << std::setw(2) << seconds;
+        if (frac > 0) {
+            oss << '.' << std::setw(6) << frac;
+        }
+        return oss.str();
+    }
+    case TypeId::TIMESTAMP: {
+        // Format as ISO 8601: YYYY-MM-DD HH:MM:SS.uuuuuu.
+        int64_t us = value.as_timestamp().microseconds;
+        time_t secs = static_cast<time_t>(us / 1000000LL);
+        int64_t frac = us % 1000000LL;
+        if (frac < 0) {
+            secs -= 1;
+            frac += 1000000LL;
+        }
+        struct tm tm_buf{};
+        gmtime_r(&secs, &tm_buf);
+        std::ostringstream oss;
+        oss << std::setfill('0') << std::setw(4) << (tm_buf.tm_year + 1900) << '-' << std::setw(2)
+            << (tm_buf.tm_mon + 1) << '-' << std::setw(2) << tm_buf.tm_mday << ' ' << std::setw(2)
+            << tm_buf.tm_hour << ':' << std::setw(2) << tm_buf.tm_min << ':' << std::setw(2)
+            << tm_buf.tm_sec;
+        if (frac > 0) {
+            oss << '.' << std::setw(6) << frac;
+        }
+        return oss.str();
+    }
+    case TypeId::INTERVAL: {
+        const auto& iv = value.as_interval();
+        std::ostringstream oss;
+        if (iv.months != 0) {
+            oss << iv.months << " mon";
+            if (iv.microseconds != 0) {
+                oss << " ";
+            }
+        }
+        if (iv.microseconds != 0 || iv.months == 0) {
+            int64_t us = iv.microseconds;
+            if (us < 0) {
+                oss << "-";
+                us = -us;
+            }
+            int64_t hours = us / 3600000000LL;
+            us %= 3600000000LL;
+            int64_t minutes = us / 60000000LL;
+            us %= 60000000LL;
+            int64_t seconds = us / 1000000LL;
+            oss << std::setfill('0') << std::setw(2) << hours << ':' << std::setw(2) << minutes
+                << ':' << std::setw(2) << seconds;
+        }
+        return oss.str();
+    }
+    case TypeId::POINT: {
+        const auto& p = value.as_point();
+        std::ostringstream oss;
+        oss << '(' << p.x << ',' << p.y << ')';
+        return oss.str();
+    }
+    case TypeId::JSON:
+        return value.as_json().data;
+    case TypeId::UUID: {
+        const auto& uuid = value.as_uuid();
+        std::ostringstream oss;
+        oss << std::hex << std::setfill('0');
+        for (size_t i = 0; i < 16; ++i) {
+            if (i == 4 || i == 6 || i == 8 || i == 10) {
+                oss << '-';
+            }
+            oss << std::setw(2) << static_cast<unsigned>(uuid[i]);
+        }
+        return oss.str();
+    }
+    case TypeId::EMBEDDING: {
+        const auto& emb = value.as_embedding();
+        std::ostringstream oss;
+        oss << '[';
+        for (size_t i = 0; i < emb.size(); ++i) {
+            if (i > 0) {
+                oss << ',';
+            }
+            oss << emb[i];
+        }
+        oss << ']';
+        return oss.str();
+    }
+    }
+    return ""; // Unreachable.
+}
+
+// -- SQL splitting ------------------------------------------------------------
+
+std::vector<std::string> split_sql_statements(std::string_view sql) {
+    std::vector<std::string> stmts;
+    std::string current;
+    current.reserve(sql.size());
+
+    size_t i = 0;
+    while (i < sql.size()) {
+        char ch = sql[i];
+
+        // Single-quoted string literal.
+        if (ch == '\'') {
+            current += ch;
+            ++i;
+            while (i < sql.size()) {
+                current += sql[i];
+                if (sql[i] == '\'' && (i + 1 >= sql.size() || sql[i + 1] != '\'')) {
+                    ++i;
+                    break;
+                }
+                // Escaped quote '' inside single-quoted string.
+                if (sql[i] == '\'' && i + 1 < sql.size() && sql[i + 1] == '\'') {
+                    ++i;
+                    current += sql[i];
+                }
+                ++i;
+            }
+            continue;
+        }
+
+        // Double-quoted identifier.
+        if (ch == '"') {
+            current += ch;
+            ++i;
+            while (i < sql.size()) {
+                current += sql[i];
+                if (sql[i] == '"') {
+                    ++i;
+                    break;
+                }
+                ++i;
+            }
+            continue;
+        }
+
+        // Dollar-quoted string ($$...$$).
+        if (ch == '$' && i + 1 < sql.size() && sql[i + 1] == '$') {
+            current += "$$";
+            i += 2;
+            while (i + 1 < sql.size()) {
+                if (sql[i] == '$' && sql[i + 1] == '$') {
+                    current += "$$";
+                    i += 2;
+                    break;
+                }
+                current += sql[i];
+                ++i;
+            }
+            continue;
+        }
+
+        // Semicolon — statement separator.
+        if (ch == ';') {
+            // Trim whitespace.
+            auto start = current.find_first_not_of(" \t\n\r");
+            if (start != std::string::npos) {
+                auto end = current.find_last_not_of(" \t\n\r");
+                stmts.push_back(current.substr(start, end - start + 1));
+            }
+            current.clear();
+            ++i;
+            continue;
+        }
+
+        current += ch;
+        ++i;
+    }
+
+    // Final statement (no trailing semicolon).
+    auto start = current.find_first_not_of(" \t\n\r");
+    if (start != std::string::npos) {
+        auto end = current.find_last_not_of(" \t\n\r");
+        stmts.push_back(current.substr(start, end - start + 1));
+    }
+
+    return stmts;
+}
+
+// -- MessageWriter ------------------------------------------------------------
+
+void MessageWriter::begin_message(uint8_t type) {
+    buf_.clear();
+    has_type_ = true;
+    buf_.push_back(type);
+    // Reserve 4 bytes for the length field (will be patched in finish()).
+    length_offset_ = buf_.size();
+    buf_.resize(buf_.size() + 4, 0);
+}
+
+void MessageWriter::begin_message_no_type() {
+    buf_.clear();
+    has_type_ = false;
+    // Reserve 4 bytes for the length field.
+    length_offset_ = 0;
+    buf_.resize(4, 0);
+}
+
+void MessageWriter::write_byte(uint8_t val) {
+    buf_.push_back(val);
+}
+
+void MessageWriter::write_int16(int16_t val) {
+    auto uval = static_cast<uint16_t>(val);
+    buf_.push_back(static_cast<uint8_t>((uval >> 8) & 0xFF));
+    buf_.push_back(static_cast<uint8_t>(uval & 0xFF));
+}
+
+void MessageWriter::write_int32(int32_t val) {
+    auto uval = static_cast<uint32_t>(val);
+    buf_.push_back(static_cast<uint8_t>((uval >> 24) & 0xFF));
+    buf_.push_back(static_cast<uint8_t>((uval >> 16) & 0xFF));
+    buf_.push_back(static_cast<uint8_t>((uval >> 8) & 0xFF));
+    buf_.push_back(static_cast<uint8_t>(uval & 0xFF));
+}
+
+void MessageWriter::write_cstring(std::string_view str) {
+    buf_.insert(buf_.end(), str.begin(), str.end());
+    buf_.push_back(0);
+}
+
+void MessageWriter::write_bytes(const uint8_t* data, size_t len) {
+    buf_.insert(buf_.end(), data, data + len);
+}
+
+std::vector<uint8_t> MessageWriter::finish() {
+    // Patch the length field. Length includes itself but NOT the type byte.
+    auto length = static_cast<uint32_t>(buf_.size() - length_offset_);
+    buf_[length_offset_] = static_cast<uint8_t>((length >> 24) & 0xFF);
+    buf_[length_offset_ + 1] = static_cast<uint8_t>((length >> 16) & 0xFF);
+    buf_[length_offset_ + 2] = static_cast<uint8_t>((length >> 8) & 0xFF);
+    buf_[length_offset_ + 3] = static_cast<uint8_t>(length & 0xFF);
+    return std::move(buf_);
+}
+
+// -- MessageReader ------------------------------------------------------------
+
+MessageReader::MessageReader(const uint8_t* data, size_t len) : data_(data), len_(len) {}
+
+uint8_t MessageReader::read_byte() {
+    if (pos_ >= len_) {
+        return 0;
+    }
+    return data_[pos_++];
+}
+
+int16_t MessageReader::read_int16() {
+    if (pos_ + 2 > len_) {
+        return 0;
+    }
+    auto val = static_cast<int16_t>((static_cast<uint16_t>(data_[pos_]) << 8) |
+                                    static_cast<uint16_t>(data_[pos_ + 1]));
+    pos_ += 2;
+    return val;
+}
+
+int32_t MessageReader::read_int32() {
+    if (pos_ + 4 > len_) {
+        return 0;
+    }
+    auto val = read_be_int32(data_ + pos_);
+    pos_ += 4;
+    return val;
+}
+
+std::string_view MessageReader::read_cstring() {
+    const auto* start = data_ + pos_;
+    while (pos_ < len_ && data_[pos_] != 0) {
+        ++pos_;
+    }
+    auto result = std::string_view(reinterpret_cast<const char*>(start), data_ + pos_ - start);
+    if (pos_ < len_) {
+        ++pos_; // Skip the null terminator.
+    }
+    return result;
+}
+
+const uint8_t* MessageReader::read_bytes(size_t len) {
+    if (pos_ + len > len_) {
+        return nullptr;
+    }
+    const auto* result = data_ + pos_;
+    pos_ += len;
+    return result;
+}
+
+bool MessageReader::has_remaining() const {
+    return pos_ < len_;
+}
+
+size_t MessageReader::remaining() const {
+    return (pos_ < len_) ? (len_ - pos_) : 0;
+}
+
+// -- PgProtocolHandler --------------------------------------------------------
+
+PgProtocolHandler::PgProtocolHandler(int32_t backend_pid)
+    : backend_pid_(backend_pid), secret_key_(generate_secret_key()) {}
+
+void PgProtocolHandler::set_query_executor(QueryExecutor executor) {
+    query_executor_ = std::move(executor);
+}
+
+Result<void> PgProtocolHandler::process(Connection& conn) {
+    // Process as many complete messages as are available.
+    while (true) {
+        const auto& buf = conn.read_buffer();
+        if (buf.empty()) {
+            return ok();
+        }
+
+        auto consumed = process_one_message(conn);
+        if (!consumed) {
+            return tl::unexpected(consumed.error());
+        }
+        if (*consumed == 0) {
+            // Incomplete message — wait for more data.
+            return ok();
+        }
+        conn.consume_read(*consumed);
+    }
+}
+
+Result<size_t> PgProtocolHandler::process_one_message(Connection& conn) {
+    if (state_ == ProtocolState::WAIT_FOR_STARTUP) {
+        return handle_startup_message(conn);
+    }
+    return handle_frontend_message(conn);
+}
+
+Result<size_t> PgProtocolHandler::handle_startup_message(Connection& conn) {
+    const auto& buf = conn.read_buffer();
+
+    // Need at least 4 bytes for the length field.
+    if (buf.size() < 4) {
+        return ok(static_cast<size_t>(0));
+    }
+
+    auto msg_len = static_cast<uint32_t>(read_be_int32(buf.data()));
+
+    // Sanity check: startup message must be at least 8 bytes and at most 10KB.
+    if (msg_len < MIN_STARTUP_SIZE || msg_len > 10240) {
+        return make_error(StatusCode::PARSE_ERROR, "invalid startup message length");
+    }
+
+    // Wait for the complete message.
+    if (buf.size() < msg_len) {
+        return ok(static_cast<size_t>(0));
+    }
+
+    // Read the protocol version / request code.
+    int32_t version = read_be_int32(buf.data() + 4);
+
+    if (version == SSL_REQUEST_CODE) {
+        // Respond with 'N' (no SSL support for now).
+        uint8_t no_ssl = 'N';
+        conn.enqueue_write(&no_ssl, 1);
+        return ok(static_cast<size_t>(msg_len));
+    }
+
+    if (version == CANCEL_REQUEST_CODE) {
+        // Cancel request: 4-byte PID + 4-byte secret key.
+        // Not implemented yet — just consume the message.
+        GIODB_LOG_DEBUG("received cancel request (ignored)");
+        return ok(static_cast<size_t>(msg_len));
+    }
+
+    if (version != PG_PROTOCOL_VERSION_3_0) {
+        send_error_response(
+            conn, "FATAL", "08004", "unsupported protocol version: " + std::to_string(version));
+        state_ = ProtocolState::CLOSED;
+        return ok(static_cast<size_t>(msg_len));
+    }
+
+    // Parse startup parameters: null-terminated key=value pairs.
+    startup_params_.clear();
+    MessageReader reader(buf.data() + 8, msg_len - 8);
+    while (reader.has_remaining()) {
+        auto key = reader.read_cstring();
+        if (key.empty()) {
+            break; // Terminating null byte.
+        }
+        auto val = reader.read_cstring();
+        startup_params_[std::string(key)] = std::string(val);
+    }
+
+    GIODB_LOG_INFO("startup: user={}, database={}",
+                   startup_params_.count("user") > 0 ? startup_params_["user"] : "(none)",
+                   startup_params_.count("database") > 0 ? startup_params_["database"] : "(none)");
+
+    // Send authentication OK (no auth challenge for now).
+    send_auth_ok(conn);
+
+    // Send parameter status messages.
+    send_parameter_status(conn, "server_version", "15.0 (GioDB 0.1.0)");
+    send_parameter_status(conn, "server_encoding", "UTF8");
+    send_parameter_status(conn, "client_encoding", "UTF8");
+    send_parameter_status(conn, "DateStyle", "ISO, MDY");
+    send_parameter_status(conn, "integer_datetimes", "on");
+    send_parameter_status(conn, "standard_conforming_strings", "on");
+
+    // Send backend key data.
+    send_backend_key_data(conn);
+
+    // Send ReadyForQuery with idle status.
+    send_ready_for_query(conn, 'I');
+
+    state_ = ProtocolState::READY;
+    return ok(static_cast<size_t>(msg_len));
+}
+
+Result<size_t> PgProtocolHandler::handle_frontend_message(Connection& conn) {
+    const auto& buf = conn.read_buffer();
+
+    // Need at least 5 bytes: 1-byte type + 4-byte length.
+    if (buf.size() < 5) {
+        return ok(static_cast<size_t>(0));
+    }
+
+    uint8_t msg_type = buf[0];
+    auto body_len = static_cast<uint32_t>(read_be_int32(buf.data() + 1));
+
+    // Total message size: 1 (type byte) + body_len.
+    size_t total_len = 1 + static_cast<size_t>(body_len);
+
+    // Wait for the complete message.
+    if (buf.size() < total_len) {
+        return ok(static_cast<size_t>(0));
+    }
+
+    // Payload starts after type byte + 4-byte length.
+    const uint8_t* payload = buf.data() + 5;
+    size_t payload_len = body_len - 4; // body_len includes the 4-byte length field itself.
+
+    switch (msg_type) {
+    case MSG_QUERY: {
+        // Simple query: null-terminated SQL string.
+        std::string_view sql(reinterpret_cast<const char*>(payload), payload_len);
+        // Remove trailing null byte.
+        if (!sql.empty() && sql.back() == '\0') {
+            sql.remove_suffix(1);
+        }
+        GIODB_LOG_DEBUG("simple query: {}", sql);
+        handle_simple_query(conn, sql);
+        break;
+    }
+    case MSG_TERMINATE: {
+        GIODB_LOG_DEBUG("client sent Terminate");
+        state_ = ProtocolState::CLOSED;
+        break;
+    }
+    case MSG_PARSE: {
+        if (!error_in_extended_) {
+            handle_parse(conn, payload, payload_len);
+        }
+        break;
+    }
+    case MSG_BIND: {
+        if (!error_in_extended_) {
+            handle_bind(conn, payload, payload_len);
+        }
+        break;
+    }
+    case MSG_DESCRIBE: {
+        if (!error_in_extended_) {
+            handle_describe(conn, payload, payload_len);
+        }
+        break;
+    }
+    case MSG_EXECUTE: {
+        if (!error_in_extended_) {
+            handle_execute(conn, payload, payload_len);
+        }
+        break;
+    }
+    case MSG_SYNC: {
+        handle_sync(conn);
+        break;
+    }
+    case MSG_CLOSE: {
+        if (!error_in_extended_) {
+            handle_close(conn, payload, payload_len);
+        }
+        break;
+    }
+    case MSG_FLUSH: {
+        // Flush requests the server to send any pending output.
+        // Since we write immediately, this is a no-op.
+        break;
+    }
+    default: {
+        GIODB_LOG_WARN("unknown frontend message type: 0x{:02x}", msg_type);
+        send_error_response(conn, "ERROR", "08P01", "unrecognized message type");
+        send_ready_for_query(conn, 'I');
+        break;
+    }
+    }
+
+    return ok(total_len);
+}
+
+void PgProtocolHandler::handle_simple_query(Connection& conn, std::string_view sql) {
+    // Handle empty query.
+    if (sql.empty()) {
+        send_empty_query_response(conn);
+        send_ready_for_query(conn, 'I');
+        return;
+    }
+
+    if (!query_executor_) {
+        send_error_response(conn, "ERROR", "XX000", "no query executor configured");
+        send_ready_for_query(conn, 'I');
+        return;
+    }
+
+    // Split on semicolons — each statement produces its own result set.
+    // If no non-empty statements remain after splitting, treat as empty query.
+    auto statements = split_sql_statements(sql);
+    if (statements.empty()) {
+        send_empty_query_response(conn);
+        send_ready_for_query(conn, 'I');
+        return;
+    }
+
+    for (const auto& stmt : statements) {
+        auto result = query_executor_(stmt);
+        if (!result) {
+            // On error, send ErrorResponse and stop processing remaining statements.
+            const auto& err = result.error();
+            send_error_response(
+                conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+            send_ready_for_query(conn, 'I');
+            return;
+        }
+
+        const auto& qr = *result;
+
+        // Determine if this is a SELECT (has column names) or DML/DDL.
+        if (!qr.column_names.empty()) {
+            // SELECT: send RowDescription + DataRows + CommandComplete.
+            send_row_description(conn, qr);
+            for (const auto& row : qr.rows) {
+                send_data_row(conn, row, qr.column_types);
+            }
+            send_command_complete(conn, "SELECT " + std::to_string(qr.rows.size()));
+        } else if (qr.affected_rows >= 0) {
+            // DML: send CommandComplete with tag and row count.
+            std::string tag = qr.message.empty() ? "UNKNOWN" : qr.message;
+
+            // For INSERT, PG format is "INSERT 0 <count>".
+            if (tag.find("INSERT") == 0) {
+                tag = "INSERT 0 " + std::to_string(qr.affected_rows);
+            } else {
+                tag += " " + std::to_string(qr.affected_rows);
+            }
+            send_command_complete(conn, tag);
+        } else {
+            // DDL/utility: send CommandComplete with the message.
+            send_command_complete(conn, qr.message.empty() ? "OK" : qr.message);
+        }
+    }
+
+    // A single ReadyForQuery at the end of the entire multi-statement batch.
+    send_ready_for_query(conn, 'I');
+}
+
+// -- Extended query protocol handlers -----------------------------------------
+
+void PgProtocolHandler::handle_parse(Connection& conn, const uint8_t* payload, size_t len) {
+    MessageReader reader(payload, len);
+
+    auto stmt_name = std::string(reader.read_cstring());
+    auto sql = std::string(reader.read_cstring());
+    int16_t num_params = reader.read_int16();
+
+    std::vector<uint32_t> param_oids;
+    param_oids.reserve(static_cast<size_t>(num_params));
+    for (int16_t i = 0; i < num_params; ++i) {
+        param_oids.push_back(static_cast<uint32_t>(reader.read_int32()));
+    }
+
+    GIODB_LOG_DEBUG("Parse: name='{}', sql='{}', params={}", stmt_name, sql, num_params);
+
+    // Store the prepared statement.
+    PreparedStatement stmt;
+    stmt.name = stmt_name;
+    stmt.sql = std::move(sql);
+    stmt.param_oids = std::move(param_oids);
+    prepared_statements_[stmt_name] = std::move(stmt);
+
+    send_parse_complete(conn);
+}
+
+void PgProtocolHandler::handle_bind(Connection& conn, const uint8_t* payload, size_t len) {
+    MessageReader reader(payload, len);
+
+    auto portal_name = std::string(reader.read_cstring());
+    auto stmt_name = std::string(reader.read_cstring());
+
+    // Parameter format codes.
+    int16_t num_format_codes = reader.read_int16();
+    std::vector<int16_t> param_formats;
+    param_formats.reserve(static_cast<size_t>(num_format_codes));
+    for (int16_t i = 0; i < num_format_codes; ++i) {
+        param_formats.push_back(reader.read_int16());
+    }
+
+    // Parameter values.
+    int16_t num_params = reader.read_int16();
+    std::vector<std::string> param_values;
+    param_values.reserve(static_cast<size_t>(num_params));
+    for (int16_t i = 0; i < num_params; ++i) {
+        int32_t param_len = reader.read_int32();
+        if (param_len == -1) {
+            param_values.emplace_back(); // NULL parameter (empty string placeholder).
+        } else {
+            const auto* data = reader.read_bytes(static_cast<size_t>(param_len));
+            if (data != nullptr) {
+                param_values.emplace_back(reinterpret_cast<const char*>(data),
+                                          static_cast<size_t>(param_len));
+            } else {
+                param_values.emplace_back();
+            }
+        }
+    }
+
+    // Result format codes.
+    int16_t num_result_formats = reader.read_int16();
+    std::vector<int16_t> result_formats;
+    result_formats.reserve(static_cast<size_t>(num_result_formats));
+    for (int16_t i = 0; i < num_result_formats; ++i) {
+        result_formats.push_back(reader.read_int16());
+    }
+
+    // Look up the prepared statement.
+    auto it = prepared_statements_.find(stmt_name);
+    if (it == prepared_statements_.end()) {
+        send_error_response(
+            conn, "ERROR", "26000", "prepared statement \"" + stmt_name + "\" does not exist");
+        error_in_extended_ = true;
+        return;
+    }
+
+    GIODB_LOG_DEBUG("Bind: portal='{}', stmt='{}', params={}", portal_name, stmt_name, num_params);
+
+    Portal portal;
+    portal.name = portal_name;
+    portal.sql = it->second.sql;
+    portal.param_values = std::move(param_values);
+    portal.result_format_codes = std::move(result_formats);
+    portals_[portal_name] = std::move(portal);
+
+    send_bind_complete(conn);
+}
+
+void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload, size_t len) {
+    MessageReader reader(payload, len);
+
+    uint8_t describe_type = reader.read_byte(); // 'S' = statement, 'P' = portal.
+    auto name = std::string(reader.read_cstring());
+
+    if (describe_type == 'S') {
+        auto it = prepared_statements_.find(name);
+        if (it == prepared_statements_.end()) {
+            send_error_response(
+                conn, "ERROR", "26000", "prepared statement \"" + name + "\" does not exist");
+            error_in_extended_ = true;
+            return;
+        }
+        // Send ParameterDescription.
+        send_parameter_description(conn, it->second.param_oids);
+
+        // TODO(GDB-147): Parse the SQL to determine result columns and send
+        // RowDescription for SELECT statements. For now, send NoData.
+        send_no_data(conn);
+    } else if (describe_type == 'P') {
+        auto it = portals_.find(name);
+        if (it == portals_.end()) {
+            send_error_response(conn, "ERROR", "34000", "portal \"" + name + "\" does not exist");
+            error_in_extended_ = true;
+            return;
+        }
+        // TODO(GDB-147): Return RowDescription for SELECT portals.
+        // For now, send NoData.
+        send_no_data(conn);
+    } else {
+        send_error_response(conn, "ERROR", "08P01", "invalid Describe target type");
+        error_in_extended_ = true;
+    }
+}
+
+void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload, size_t len) {
+    MessageReader reader(payload, len);
+
+    auto portal_name = std::string(reader.read_cstring());
+    int32_t max_rows = reader.read_int32(); // 0 = no limit.
+    (void)max_rows;                         // We execute all rows for now.
+
+    auto it = portals_.find(portal_name);
+    if (it == portals_.end()) {
+        send_error_response(
+            conn, "ERROR", "34000", "portal \"" + portal_name + "\" does not exist");
+        error_in_extended_ = true;
+        return;
+    }
+
+    const auto& portal = it->second;
+
+    if (!query_executor_) {
+        send_error_response(conn, "ERROR", "XX000", "no query executor configured");
+        error_in_extended_ = true;
+        return;
+    }
+
+    GIODB_LOG_DEBUG("Execute: portal='{}', sql='{}'", portal_name, portal.sql);
+
+    // TODO(GDB-147): Substitute portal.param_values into the SQL before
+    // execution. Currently parameters ($1, $2, ...) are not replaced.
+    auto result = query_executor_(portal.sql);
+    if (!result) {
+        const auto& err = result.error();
+        send_error_response(conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+        error_in_extended_ = true;
+        return;
+    }
+
+    const auto& qr = *result;
+
+    if (!qr.column_names.empty()) {
+        // SELECT: send DataRows + CommandComplete (RowDescription already sent by Describe).
+        for (const auto& row : qr.rows) {
+            send_data_row(conn, row, qr.column_types);
+        }
+        send_command_complete(conn, "SELECT " + std::to_string(qr.rows.size()));
+    } else if (qr.affected_rows >= 0) {
+        std::string tag = qr.message.empty() ? "UNKNOWN" : qr.message;
+        if (tag.find("INSERT") == 0) {
+            tag = "INSERT 0 " + std::to_string(qr.affected_rows);
+        } else {
+            tag += " " + std::to_string(qr.affected_rows);
+        }
+        send_command_complete(conn, tag);
+    } else {
+        send_command_complete(conn, qr.message.empty() ? "OK" : qr.message);
+    }
+}
+
+void PgProtocolHandler::handle_sync(Connection& conn) {
+    // Sync is the end of an extended query batch.
+    // Reset error state and send ReadyForQuery.
+    error_in_extended_ = false;
+    send_ready_for_query(conn, 'I');
+}
+
+void PgProtocolHandler::handle_close(Connection& conn, const uint8_t* payload, size_t len) {
+    MessageReader reader(payload, len);
+
+    uint8_t close_type = reader.read_byte(); // 'S' = statement, 'P' = portal.
+    auto name = std::string(reader.read_cstring());
+
+    if (close_type == 'S') {
+        prepared_statements_.erase(name);
+    } else if (close_type == 'P') {
+        portals_.erase(name);
+    }
+
+    send_close_complete(conn);
+}
+
+// -- Message senders ----------------------------------------------------------
+
+void PgProtocolHandler::send_auth_ok(Connection& conn) {
+    // AuthenticationOk: type 'R', int32 length=8, int32 auth_type=0.
+    MessageWriter w;
+    w.begin_message('R');
+    w.write_int32(0); // AuthenticationOk.
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_parameter_status(Connection& conn,
+                                              std::string_view name,
+                                              std::string_view value) {
+    MessageWriter w;
+    w.begin_message('S');
+    w.write_cstring(name);
+    w.write_cstring(value);
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_backend_key_data(Connection& conn) {
+    MessageWriter w;
+    w.begin_message('K');
+    w.write_int32(backend_pid_);
+    w.write_int32(secret_key_);
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_ready_for_query(Connection& conn, char status) {
+    MessageWriter w;
+    w.begin_message('Z');
+    w.write_byte(static_cast<uint8_t>(status));
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_row_description(Connection& conn, const QueryResult& result) {
+    MessageWriter w;
+    w.begin_message('T');
+    w.write_int16(static_cast<int16_t>(result.column_names.size()));
+    for (size_t i = 0; i < result.column_names.size(); ++i) {
+        w.write_cstring(result.column_names[i]); // Column name.
+        w.write_int32(0);                        // Table OID (0 = not a table column).
+        w.write_int16(0);                        // Column attribute number.
+        w.write_int32(static_cast<int32_t>(type_to_pg_oid(result.column_types[i]))); // Type OID.
+        w.write_int16(-1); // Type size (-1 = variable length).
+        w.write_int32(-1); // Type modifier.
+        w.write_int16(0);  // Format code (0 = text).
+    }
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_data_row(Connection& conn,
+                                      const std::vector<Value>& row,
+                                      const std::vector<TypeId>& /*types*/) {
+    // TODO(GDB-147): Respect result_format_codes from Bind to send binary
+    // format when requested. Currently always sends text format (code 0).
+    MessageWriter w;
+    w.begin_message('D');
+    w.write_int16(static_cast<int16_t>(row.size()));
+    for (const auto& val : row) {
+        if (val.is_null()) {
+            w.write_int32(-1); // NULL indicator.
+        } else {
+            std::string text = value_to_pg_text(val);
+            w.write_int32(static_cast<int32_t>(text.size()));
+            w.write_bytes(reinterpret_cast<const uint8_t*>(text.data()), text.size());
+        }
+    }
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_command_complete(Connection& conn, const std::string& tag) {
+    MessageWriter w;
+    w.begin_message('C');
+    w.write_cstring(tag);
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_error_response(Connection& conn,
+                                            std::string_view severity,
+                                            std::string_view sqlstate,
+                                            std::string_view message) {
+    MessageWriter w;
+    w.begin_message('E');
+    w.write_byte('S');
+    w.write_cstring(severity); // Severity.
+    w.write_byte('V');
+    w.write_cstring(severity); // Severity (non-localized).
+    w.write_byte('C');
+    w.write_cstring(sqlstate); // SQLSTATE.
+    w.write_byte('M');
+    w.write_cstring(message); // Message.
+    w.write_byte(0);          // Terminator.
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_empty_query_response(Connection& conn) {
+    MessageWriter w;
+    w.begin_message('I');
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_parse_complete(Connection& conn) {
+    MessageWriter w;
+    w.begin_message('1');
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_bind_complete(Connection& conn) {
+    MessageWriter w;
+    w.begin_message('2');
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_close_complete(Connection& conn) {
+    MessageWriter w;
+    w.begin_message('3');
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_no_data(Connection& conn) {
+    MessageWriter w;
+    w.begin_message('n');
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_parameter_description(Connection& conn,
+                                                   const std::vector<uint32_t>& param_oids) {
+    MessageWriter w;
+    w.begin_message('t');
+    w.write_int16(static_cast<int16_t>(param_oids.size()));
+    for (uint32_t oid : param_oids) {
+        w.write_int32(static_cast<int32_t>(oid));
+    }
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+} // namespace giodb

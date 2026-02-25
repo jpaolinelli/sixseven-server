@@ -78,6 +78,7 @@ add_executable(giodb_unit_tests
     test_connection.cpp
     test_event_loop.cpp
     test_thread_pool.cpp
+    test_pg_protocol.cpp
     test_server.cpp
     test_server_lifecycle.cpp
 )

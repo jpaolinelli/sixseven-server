@@ -32,6 +32,10 @@ Result<void> set_nonblocking(int fd) {
 
 Server::Server(Config config) : config_(std::move(config)) {}
 
+void Server::set_query_executor(QueryExecutor executor) {
+    query_executor_ = std::move(executor);
+}
+
 Server::~Server() {
     request_shutdown();
     do_shutdown();
@@ -147,6 +151,7 @@ void Server::do_shutdown() {
             conn.close();
         }
         connections_.clear();
+        protocol_handlers_.clear();
     }
 
     GIODB_LOG_INFO("shutdown: complete");
@@ -234,28 +239,21 @@ void Server::accept_connection() {
     Connection conn(client_fd);
     // Connection now owns client_fd — do not call ::close(client_fd) directly.
 
-    // Transition INIT -> AUTH (in a real server, we'd send an auth request).
-    auto t1 = conn.transition_to(ConnectionState::AUTH);
-    if (!t1) {
-        GIODB_LOG_WARN("connection state error: {}", t1.error().message);
-        (void)event_loop_->remove_fd(client_fd);
-        return; // conn destructor closes the fd.
-    }
-    // For now, skip auth and go straight to READY.
-    auto t2 = conn.transition_to(ConnectionState::READY);
-    if (!t2) {
-        GIODB_LOG_WARN("connection state error: {}", t2.error().message);
-        (void)event_loop_->remove_fd(client_fd);
-        return; // conn destructor closes the fd.
-    }
-
     char addr_str[INET_ADDRSTRLEN];
     ::inet_ntop(AF_INET, &client_addr.sin_addr, addr_str, sizeof(addr_str));
     GIODB_LOG_INFO(
         "accepted connection fd={} from {}:{}", client_fd, addr_str, ntohs(client_addr.sin_port));
 
+    // Create a PG protocol handler for this connection.
+    int32_t pid = next_backend_pid_.fetch_add(1, std::memory_order_relaxed);
+    PgProtocolHandler handler(pid);
+    if (query_executor_) {
+        handler.set_query_executor(query_executor_);
+    }
+
     std::lock_guard lock(connections_mutex_);
     connections_.emplace(client_fd, std::move(conn));
+    protocol_handlers_.emplace(client_fd, std::move(handler));
 }
 
 void Server::handle_read(int fd) {
@@ -285,10 +283,28 @@ void Server::handle_read(int fd) {
         return;
     }
 
-    // Echo the received data back (placeholder until wire protocol is implemented).
-    const auto& rbuf = conn.read_buffer();
-    conn.enqueue_write(rbuf.data(), rbuf.size());
-    conn.consume_read(rbuf.size());
+    // Process data through the PostgreSQL wire protocol handler.
+    auto handler_it = protocol_handlers_.find(fd);
+    if (handler_it == protocol_handlers_.end()) {
+        GIODB_LOG_WARN("no protocol handler for fd={}", fd);
+        close_connection(fd);
+        return;
+    }
+
+    auto& handler = handler_it->second;
+    auto process_result = handler.process(conn);
+    if (!process_result) {
+        GIODB_LOG_WARN("protocol error on fd={}: {}", fd, process_result.error().message);
+        close_connection(fd);
+        return;
+    }
+
+    // Close connection if the protocol handler says we're done (Terminate message).
+    if (handler.state() == ProtocolState::CLOSED) {
+        GIODB_LOG_DEBUG("connection fd={} terminated by protocol", fd);
+        close_connection(fd);
+        return;
+    }
 
     // Enable write monitoring so the response gets flushed.
     if (conn.has_pending_writes()) {
@@ -328,6 +344,7 @@ void Server::close_connection(int fd) {
     // Note: caller must hold connections_mutex_.
     (void)event_loop_->remove_fd(fd);
     connections_.erase(fd);
+    protocol_handlers_.erase(fd);
     GIODB_LOG_DEBUG("connection fd={} removed", fd);
 }
 
