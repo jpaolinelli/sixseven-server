@@ -218,7 +218,7 @@ TEST_F(WalReceiverTest, StartAndStop) {
     opts.receive_timeout = std::chrono::milliseconds(100);
     receiver_ = std::make_unique<WalReceiver>(factory, wal_dir_->path(), *handler_, opts);
 
-    auto result = receiver_->start("localhost", 5432);
+    auto result = receiver_->start("localhost", 6767);
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // Give it a moment to connect.
@@ -246,7 +246,7 @@ TEST_F(WalReceiverTest, ReceiveAndReplayWalData) {
     opts.receive_timeout = std::chrono::milliseconds(200);
     receiver_ = std::make_unique<WalReceiver>(factory, wal_dir_->path(), *handler_, opts);
 
-    auto result = receiver_->start("localhost", 5432);
+    auto result = receiver_->start("localhost", 6767);
     ASSERT_TRUE(result.has_value());
 
     // Wait for connection.
@@ -301,7 +301,7 @@ TEST_F(WalReceiverTest, SkipsNonDataRecords) {
     opts.receive_timeout = std::chrono::milliseconds(200);
     receiver_ = std::make_unique<WalReceiver>(factory, wal_dir_->path(), *handler_, opts);
 
-    auto result = receiver_->start("localhost", 5432);
+    auto result = receiver_->start("localhost", 6767);
     ASSERT_TRUE(result.has_value());
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
@@ -350,7 +350,7 @@ TEST_F(WalReceiverTest, HandlesKeepalive) {
     opts.receive_timeout = std::chrono::milliseconds(200);
     receiver_ = std::make_unique<WalReceiver>(factory, wal_dir_->path(), *handler_, opts);
 
-    auto result = receiver_->start("localhost", 5432);
+    auto result = receiver_->start("localhost", 6767);
     ASSERT_TRUE(result.has_value());
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
@@ -396,7 +396,7 @@ TEST_F(WalReceiverTest, ReconnectsOnConnectionFailure) {
     opts.receive_timeout = std::chrono::milliseconds(200);
     receiver_ = std::make_unique<WalReceiver>(factory, wal_dir_->path(), *handler_, opts);
 
-    auto result = receiver_->start("localhost", 5432);
+    auto result = receiver_->start("localhost", 6767);
     ASSERT_TRUE(result.has_value());
 
     // Wait for reconnection (first attempt fails, second succeeds).
@@ -424,7 +424,7 @@ TEST_F(WalReceiverTest, ExponentialBackoff) {
     opts.receive_timeout = std::chrono::milliseconds(100);
     receiver_ = std::make_unique<WalReceiver>(factory, wal_dir_->path(), *handler_, opts);
 
-    auto result = receiver_->start("localhost", 5432);
+    auto result = receiver_->start("localhost", 6767);
     ASSERT_TRUE(result.has_value());
 
     // With 50ms initial interval and 200ms max, over 500ms we should see
@@ -469,7 +469,7 @@ TEST_F(WalReceiverTest, SendsStatusAfterWalData) {
     opts.receive_timeout = std::chrono::milliseconds(200);
     receiver_ = std::make_unique<WalReceiver>(factory, wal_dir_->path(), *handler_, opts);
 
-    auto result = receiver_->start("localhost", 5432);
+    auto result = receiver_->start("localhost", 6767);
     ASSERT_TRUE(result.has_value());
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 

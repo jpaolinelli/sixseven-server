@@ -160,7 +160,7 @@ TEST(StandbyConfigTest, DefaultsToNonStandby) {
     Config config = Config::load_defaults();
     EXPECT_FALSE(config.standby_mode);
     EXPECT_TRUE(config.replication_primary_host.empty());
-    EXPECT_EQ(config.replication_primary_port, 5432);
+    EXPECT_EQ(config.replication_primary_port, 6767);
     EXPECT_EQ(config.replication_retry_interval_ms, 5000);
     EXPECT_EQ(config.replication_max_retry_interval_ms, 60000);
 }

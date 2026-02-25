@@ -124,7 +124,7 @@ protected:
         opts.retry_interval = std::chrono::milliseconds(100);
         receiver_ = std::make_unique<WalReceiver>(factory, wal_dir_->path(), *handler_, opts);
 
-        auto start_result = receiver_->start("localhost", 5432);
+        auto start_result = receiver_->start("localhost", 6767);
         ASSERT_TRUE(start_result.has_value()) << start_result.error().message;
 
         // Give the receiver time to connect.

@@ -809,7 +809,7 @@ After all phases, this sequence validates the complete system:
 ./hybriddb-server --config hybriddb.conf
 
 # 2. Connect with psql (PG protocol compatibility)
-psql -h localhost -p 5432 -U admin hybriddb
+psql -h localhost -p 6767 -U admin hybriddb
 ```
 
 ```sql
@@ -879,7 +879,7 @@ cd web && npm run dev
 # 12. Client library
 python3 -c "
 import hybriddb
-conn = hybriddb.connect('localhost', 5432, 'admin', 'pass')
+conn = hybriddb.connect('localhost', 6767, 'admin', 'pass')
 rows = conn.execute('NEAREST 5 FROM users.bio_vec TO %s', ['ML engineer'])
 for row in rows:
     print(row['name'], row['distance'])

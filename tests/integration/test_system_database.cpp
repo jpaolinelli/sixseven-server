@@ -590,10 +590,10 @@ TEST_F(SystemDatabaseIntegrationTest, DefaultValueForSetting) {
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][1].as_string(), "info");
 
-    // The default value for server.port should be "5432".
+    // The default value for server.port should be "6767".
     auto port_qr = exec_ok("SHOW server.port");
     ASSERT_EQ(port_qr.rows.size(), 1u);
-    EXPECT_EQ(port_qr.rows[0][1].as_string(), "5432");
+    EXPECT_EQ(port_qr.rows[0][1].as_string(), "6767");
 }
 
 TEST_F(SystemDatabaseIntegrationTest, OverrideViaConfigFile) {
@@ -635,10 +635,10 @@ TEST_F(SystemDatabaseIntegrationTest, SetOverrideTakesHighestPriority) {
 }
 
 TEST_F(SystemDatabaseIntegrationTest, ConfigPriorityChainDefaultThenFileThenSysSettings) {
-    // 1. Default: logging.level = "info", port = 5432.
+    // 1. Default: logging.level = "info", port = 6767.
     Config config = Config::load_defaults();
     EXPECT_EQ(config.log_level, "info");
-    EXPECT_EQ(config.port, 5432);
+    EXPECT_EQ(config.port, 6767);
 
     // 2. File override: port = 7777.
     auto config_path = data_dir_ / "giodb.json";
@@ -657,8 +657,8 @@ TEST_F(SystemDatabaseIntegrationTest, ConfigPriorityChainDefaultThenFileThenSysS
 
     // sys_settings overrides everything (logging.level from SET, port from seed).
     EXPECT_EQ(config.log_level, "debug");
-    // Port from sys_settings (seeded from original defaults = 5432) overrides file.
-    EXPECT_EQ(config.port, 5432);
+    // Port from sys_settings (seeded from original defaults = 6767) overrides file.
+    EXPECT_EQ(config.port, 6767);
 }
 
 TEST_F(SystemDatabaseIntegrationTest, RemoveSetOverrideFallsBackToDefault) {
