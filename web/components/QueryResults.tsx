@@ -32,7 +32,7 @@ type ViewMode = "table" | "plan";
 
 const PAGE_SIZE = 50;
 
-function compareValues(
+export function compareValues(
   a: string | number | boolean | null,
   b: string | number | boolean | null,
   dir: "asc" | "desc"
@@ -72,7 +72,7 @@ export function QueryResults({
   const [page, setPage] = useState(0);
   const [columnWidths, setColumnWidths] = useState<Record<number, number>>({});
   const [viewMode, setViewMode] = useState<ViewMode>("table");
-  const [copyFeedback, setCopyFeedback] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<"idle" | "success" | "error">("idle");
   const resizeRef = useRef<{ col: number; startX: number; startW: number } | null>(null);
 
   // Detect EXPLAIN plan data
@@ -155,7 +155,15 @@ export function QueryResults({
     setFilters((prev) => ({ ...prev, [colIndex]: value }));
   }, []);
 
-  // Column resize handlers
+  // Column resize handlers — track cleanup functions for unmount safety
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      resizeCleanupRef.current?.();
+    };
+  }, []);
+
   const handleResizeStart = useCallback(
     (e: React.MouseEvent, colIndex: number) => {
       e.preventDefault();
@@ -173,13 +181,15 @@ export function QueryResults({
           [resizeRef.current!.col]: newWidth,
         }));
       };
-      const handleUp = () => {
+      const cleanup = () => {
         resizeRef.current = null;
         document.removeEventListener("mousemove", handleMove);
-        document.removeEventListener("mouseup", handleUp);
+        document.removeEventListener("mouseup", cleanup);
+        resizeCleanupRef.current = null;
       };
+      resizeCleanupRef.current = cleanup;
       document.addEventListener("mousemove", handleMove);
-      document.addEventListener("mouseup", handleUp);
+      document.addEventListener("mouseup", cleanup);
     },
     []
   );
@@ -187,10 +197,8 @@ export function QueryResults({
   // Export handlers
   const handleCopy = useCallback(async () => {
     const ok = await copyToClipboard(columns, sortedRows);
-    if (ok) {
-      setCopyFeedback(true);
-      setTimeout(() => setCopyFeedback(false), 1500);
-    }
+    setCopyFeedback(ok ? "success" : "error");
+    setTimeout(() => setCopyFeedback("idle"), 1500);
   }, [columns, sortedRows]);
 
   // Loading state
@@ -281,14 +289,20 @@ export function QueryResults({
         </button>
         <button
           className={`px-1.5 py-0.5 text-xs rounded ${
-            copyFeedback
+            copyFeedback === "success"
               ? "text-green-400 bg-green-950/30"
-              : "text-gray-500 hover:text-gray-300 hover:bg-gray-800"
+              : copyFeedback === "error"
+                ? "text-red-400 bg-red-950/30"
+                : "text-gray-500 hover:text-gray-300 hover:bg-gray-800"
           }`}
           onClick={handleCopy}
           title="Copy to clipboard"
         >
-          {copyFeedback ? "Copied!" : "Copy"}
+          {copyFeedback === "success"
+            ? "Copied!"
+            : copyFeedback === "error"
+              ? "Copy failed"
+              : "Copy"}
         </button>
 
         {/* Filter toggle */}
@@ -348,7 +362,7 @@ export function QueryResults({
                   </th>
                   {columns.map((col, i) => (
                     <th
-                      key={col}
+                      key={i}
                       className="text-left py-1.5 px-2 text-gray-400 font-medium border-r border-gray-800 last:border-r-0 select-none relative group"
                       style={
                         columnWidths[i]
@@ -378,7 +392,7 @@ export function QueryResults({
                     <th className="border-r border-gray-800" />
                     {columns.map((col, i) => (
                       <th
-                        key={`filter-${col}`}
+                        key={`filter-${i}`}
                         className="px-1 py-1 border-r border-gray-800 last:border-r-0"
                       >
                         <input

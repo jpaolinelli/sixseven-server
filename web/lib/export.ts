@@ -5,7 +5,7 @@
 
 type CellValue = string | number | boolean | null;
 
-function escapeCSV(value: CellValue): string {
+export function escapeCSV(value: CellValue): string {
   if (value === null) return "";
   const str = String(value);
   if (str.includes(",") || str.includes('"') || str.includes("\n")) {
@@ -14,13 +14,13 @@ function escapeCSV(value: CellValue): string {
   return str;
 }
 
-function buildCSV(columns: string[], rows: CellValue[][]): string {
+export function buildCSV(columns: string[], rows: CellValue[][]): string {
   const header = columns.map(escapeCSV).join(",");
   const body = rows.map((row) => row.map(escapeCSV).join(",")).join("\n");
   return header + "\n" + body;
 }
 
-function buildJSON(columns: string[], rows: CellValue[][]): string {
+export function buildJSON(columns: string[], rows: CellValue[][]): string {
   const objects = rows.map((row) => {
     const obj: Record<string, CellValue> = {};
     columns.forEach((col, i) => {
