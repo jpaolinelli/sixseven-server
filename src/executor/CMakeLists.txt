@@ -27,6 +27,7 @@ add_library(giodb_executor STATIC
     system_bootstrap.cpp
     settings_cache.cpp
     provider_cache.cpp
+    explain.cpp
     planner.cpp
     query_engine.cpp
 )

@@ -34,7 +34,7 @@ ExternalSortOperator::~ExternalSortOperator() {
 // Iterator interface
 // =============================================================================
 
-Result<void> ExternalSortOperator::open() {
+Result<void> ExternalSortOperator::do_open() {
     auto res = child_->open();
     if (!res) {
         return res;
@@ -75,7 +75,7 @@ Result<void> ExternalSortOperator::open() {
     return ok();
 }
 
-Result<std::optional<Tuple>> ExternalSortOperator::next() {
+Result<std::optional<Tuple>> ExternalSortOperator::do_next() {
     if (in_memory_mode_) {
         if (cursor_ >= sorted_.size()) {
             return ok(std::optional<Tuple>(std::nullopt));
@@ -104,7 +104,7 @@ Result<std::optional<Tuple>> ExternalSortOperator::next() {
     return ok(std::optional<Tuple>(std::move(result)));
 }
 
-void ExternalSortOperator::close() {
+void ExternalSortOperator::do_close() {
     sorted_.clear();
     cursor_ = 0;
     heap_.clear();
@@ -122,6 +122,22 @@ void ExternalSortOperator::close() {
 
 const OutputSchema& ExternalSortOperator::output_schema() const {
     return child_->output_schema();
+}
+
+std::string ExternalSortOperator::plan_node_name() const {
+    return "External Sort";
+}
+
+std::string ExternalSortOperator::plan_node_detail() const {
+    return "";
+}
+
+std::vector<const Iterator*> ExternalSortOperator::plan_children() const {
+    return {child_.get()};
+}
+
+std::vector<Iterator*> ExternalSortOperator::plan_children_mutable() {
+    return {child_.get()};
 }
 
 // =============================================================================

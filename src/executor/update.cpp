@@ -135,12 +135,12 @@ UpdateOperator::UpdateOperator(TableHeap& heap,
       assignments_(std::move(assignments)), bound_(bound),
       schema_(OutputSchema({OutputColumn{"", "count", TypeId::INT64, false, 0}})) {}
 
-Result<void> UpdateOperator::open() {
+Result<void> UpdateOperator::do_open() {
     executed_ = false;
     return child_->open();
 }
 
-Result<std::optional<Tuple>> UpdateOperator::next() {
+Result<std::optional<Tuple>> UpdateOperator::do_next() {
     if (executed_) {
         return ok(std::optional<Tuple>(std::nullopt));
     }
@@ -204,12 +204,20 @@ Result<std::optional<Tuple>> UpdateOperator::next() {
     return ok(std::optional<Tuple>(std::move(result)));
 }
 
-void UpdateOperator::close() {
+void UpdateOperator::do_close() {
     child_->close();
 }
 
 const OutputSchema& UpdateOperator::output_schema() const {
     return schema_;
+}
+
+std::vector<const Iterator*> UpdateOperator::plan_children() const {
+    return {child_.get()};
+}
+
+std::vector<Iterator*> UpdateOperator::plan_children_mutable() {
+    return {child_.get()};
 }
 
 } // namespace giodb

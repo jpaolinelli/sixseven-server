@@ -16,14 +16,21 @@ TraversalOperator::TraversalOperator(GraphEngine& graph_engine,
     : graph_engine_(graph_engine), config_(std::move(config)), schema_(std::move(schema)),
       where_expr_(where_expr), bound_(bound) {}
 
-Result<void> TraversalOperator::open() {
+std::string TraversalOperator::plan_node_name() const {
+    return "Graph Traverse";
+}
+std::string TraversalOperator::plan_node_detail() const {
+    return "";
+}
+
+Result<void> TraversalOperator::do_open() {
     results_.clear();
     edges_.clear();
     cursor_ = 0;
     return run_bfs();
 }
 
-Result<std::optional<Tuple>> TraversalOperator::next() {
+Result<std::optional<Tuple>> TraversalOperator::do_next() {
     while (cursor_ < results_.size()) {
         auto& tuple = results_[cursor_++];
 
@@ -43,7 +50,7 @@ Result<std::optional<Tuple>> TraversalOperator::next() {
     return ok(std::optional<Tuple>(std::nullopt));
 }
 
-void TraversalOperator::close() {
+void TraversalOperator::do_close() {
     results_.clear();
     edges_.clear();
     cursor_ = 0;

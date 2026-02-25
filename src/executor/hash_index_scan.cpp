@@ -19,7 +19,7 @@ HashIndexScanOperator::HashIndexScanOperator(const HashIndex& index,
       index_col_indexes_(std::move(index_col_indexes)), index_only_(index_only),
       predicate_(predicate), bound_(bound) {}
 
-Result<void> HashIndexScanOperator::open() {
+Result<void> HashIndexScanOperator::do_open() {
     // Perform the hash lookup and collect all matching RIDs.
     auto results = index_.search_all(lookup_key_);
     if (!results) {
@@ -30,7 +30,7 @@ Result<void> HashIndexScanOperator::open() {
     return ok();
 }
 
-Result<std::optional<Tuple>> HashIndexScanOperator::next() {
+Result<std::optional<Tuple>> HashIndexScanOperator::do_next() {
     while (current_rid_idx_ < matching_rids_.size()) {
         auto rid = matching_rids_[current_rid_idx_++];
 
@@ -81,13 +81,24 @@ Result<std::optional<Tuple>> HashIndexScanOperator::next() {
     return ok(std::optional<Tuple>(std::nullopt));
 }
 
-void HashIndexScanOperator::close() {
+void HashIndexScanOperator::do_close() {
     matching_rids_.clear();
     current_rid_idx_ = 0;
 }
 
 const OutputSchema& HashIndexScanOperator::output_schema() const {
     return schema_;
+}
+
+std::string HashIndexScanOperator::plan_node_name() const {
+    return "Hash Index Scan";
+}
+
+std::string HashIndexScanOperator::plan_node_detail() const {
+    if (!schema_.columns().empty() && !schema_.columns()[0].table_name.empty()) {
+        return "on " + schema_.columns()[0].table_name + " using hash index";
+    }
+    return "using hash index";
 }
 
 Tuple HashIndexScanOperator::build_tuple_from_key(const KeyType& key, const RID& rid) const {

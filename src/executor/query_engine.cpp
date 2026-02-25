@@ -2,6 +2,7 @@
 
 #include "giodb/catalog/schema.h"
 #include "giodb/common/logging.h"
+#include "giodb/executor/explain.h"
 #include "giodb/executor/expr_evaluator.h"
 #include "giodb/executor/planner.h"
 #include "giodb/executor/provider_cache.h"
@@ -259,7 +260,12 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
         return make_error(bound.error().code, bound.error().message);
     }
 
-    // 6. Dispatch graph DML after binding.
+    // 6. Dispatch EXPLAIN after binding.
+    if (auto* explain = dynamic_cast<const ExplainStmt*>(bound->stmt)) {
+        return execute_explain(*explain, *bound);
+    }
+
+    // 6b. Dispatch graph DML after binding.
     if (auto* link = dynamic_cast<const LinkStmt*>(bound->stmt)) {
         return execute_link(*link, *bound);
     }
@@ -267,7 +273,7 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
         return execute_unlink(*unlink, *bound);
     }
 
-    // 6b. Dispatch admin commands after binding.
+    // 6c. Dispatch admin commands after binding.
     if (auto* reembed = dynamic_cast<const ReembedStmt*>(bound->stmt)) {
         return execute_reembed(*reembed);
     }
@@ -859,6 +865,54 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
         qr.message += " (" + std::to_string(total_skipped) + " skipped)";
     }
     return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// EXPLAIN / EXPLAIN ANALYZE
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_explain(const ExplainStmt& stmt,
+                                                 const BoundStatement& /*bound*/) {
+    // Bind the inner statement.
+    Binder inner_binder(catalog_, current_database_id_);
+    auto inner_bound = inner_binder.bind(*stmt.statement);
+    if (!inner_bound) {
+        return make_error(inner_bound.error().code, inner_bound.error().message);
+    }
+
+    // Build iterator tree from the inner statement.
+    Planner planner(catalog_, storage_, current_database_id_, graph_engine_);
+    std::vector<ExprPtr> owned_exprs;
+    auto iter = planner.plan(*inner_bound, owned_exprs);
+    if (!iter) {
+        return make_error(iter.error().code, iter.error().message);
+    }
+
+    if (stmt.analyze) {
+        // EXPLAIN ANALYZE: enable instrumentation, execute, collect stats.
+        (*iter)->enable_instrumentation();
+
+        auto open_result = (*iter)->open();
+        if (!open_result) {
+            return make_error(open_result.error().code, open_result.error().message);
+        }
+
+        // Drain all rows.
+        while (true) {
+            auto row = (*iter)->next();
+            if (!row) {
+                (*iter)->close();
+                return make_error(row.error().code, row.error().message);
+            }
+            if (!row->has_value()) {
+                break;
+            }
+        }
+
+        (*iter)->close();
+    }
+
+    return ok(ExplainFormatter::to_query_result(**iter, stmt.format, stmt.analyze));
 }
 
 // ---------------------------------------------------------------------------

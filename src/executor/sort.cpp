@@ -12,7 +12,7 @@ SortOperator::SortOperator(std::unique_ptr<Iterator> child,
                            const BoundStatement& bound)
     : child_(std::move(child)), keys_(std::move(keys)), bound_(bound) {}
 
-Result<void> SortOperator::open() {
+Result<void> SortOperator::do_open() {
     auto open_result = child_->open();
     if (!open_result) {
         return open_result;
@@ -79,14 +79,14 @@ Result<void> SortOperator::open() {
     return ok();
 }
 
-Result<std::optional<Tuple>> SortOperator::next() {
+Result<std::optional<Tuple>> SortOperator::do_next() {
     if (cursor_ >= sorted_.size()) {
         return ok(std::optional<Tuple>(std::nullopt));
     }
     return ok(std::optional<Tuple>(std::move(sorted_[cursor_++])));
 }
 
-void SortOperator::close() {
+void SortOperator::do_close() {
     sorted_.clear();
     cursor_ = 0;
     child_->close();
@@ -94,6 +94,22 @@ void SortOperator::close() {
 
 const OutputSchema& SortOperator::output_schema() const {
     return child_->output_schema();
+}
+
+std::string SortOperator::plan_node_name() const {
+    return "Sort";
+}
+
+std::string SortOperator::plan_node_detail() const {
+    return "";
+}
+
+std::vector<const Iterator*> SortOperator::plan_children() const {
+    return {child_.get()};
+}
+
+std::vector<Iterator*> SortOperator::plan_children_mutable() {
+    return {child_.get()};
 }
 
 } // namespace giodb

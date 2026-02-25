@@ -2315,6 +2315,18 @@ Result<StmtPtr> Parser::parse_explain() {
         stmt->analyze = true;
     }
 
+    // Optional FORMAT TEXT|JSON (context-sensitive keyword).
+    if (match_ident_ci(peek(), "FORMAT")) {
+        advance(); // consume FORMAT
+        if (match(TokenType::TEXT)) {
+            stmt->format = ExplainFormat::TEXT;
+        } else if (match(TokenType::JSON_KW)) {
+            stmt->format = ExplainFormat::JSON;
+        } else {
+            return error("expected TEXT or JSON after FORMAT");
+        }
+    }
+
     // Parse the inner statement.
     auto inner = parse_statement();
     if (!inner)

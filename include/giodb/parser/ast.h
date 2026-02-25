@@ -632,10 +632,17 @@ struct ShowStmt : Stmt {
     void accept(AstVisitor& visitor) const override;
 };
 
-/// EXPLAIN [ANALYZE] statement.
+/// Output format for EXPLAIN.
+enum class ExplainFormat : uint8_t {
+    TEXT,
+    JSON,
+};
+
+/// EXPLAIN [ANALYZE] [FORMAT TEXT|JSON] statement.
 struct ExplainStmt : Stmt {
     StmtPtr statement;
     bool analyze = false;
+    ExplainFormat format = ExplainFormat::TEXT;
     void accept(AstVisitor& visitor) const override;
 };
 

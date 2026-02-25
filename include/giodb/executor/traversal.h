@@ -59,13 +59,19 @@ public:
                       const Expr* where_expr,
                       const BoundStatement& bound);
 
-    Result<void> open() override;
-    Result<std::optional<Tuple>> next() override;
-    void close() override;
     const OutputSchema& output_schema() const override;
 
     /// Access collected edges (for META EDGES protocol).
     [[nodiscard]] const std::vector<EdgeRow>& collected_edges() const { return edges_; }
+
+    // -- Plan inspection (for EXPLAIN) ----------------------------------------
+    [[nodiscard]] std::string plan_node_name() const override;
+    [[nodiscard]] std::string plan_node_detail() const override;
+
+protected:
+    Result<void> do_open() override;
+    Result<std::optional<Tuple>> do_next() override;
+    void do_close() override;
 
 private:
     /// Run the BFS traversal and populate results_.

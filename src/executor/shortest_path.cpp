@@ -14,20 +14,27 @@ ShortestPathOperator::ShortestPathOperator(GraphEngine& graph_engine,
                                            OutputSchema schema)
     : graph_engine_(graph_engine), config_(std::move(config)), schema_(std::move(schema)) {}
 
-Result<void> ShortestPathOperator::open() {
+std::string ShortestPathOperator::plan_node_name() const {
+    return "Shortest Path";
+}
+std::string ShortestPathOperator::plan_node_detail() const {
+    return "";
+}
+
+Result<void> ShortestPathOperator::do_open() {
     results_.clear();
     cursor_ = 0;
     return run_bidirectional_bfs();
 }
 
-Result<std::optional<Tuple>> ShortestPathOperator::next() {
+Result<std::optional<Tuple>> ShortestPathOperator::do_next() {
     if (cursor_ < results_.size()) {
         return ok(std::make_optional(std::move(results_[cursor_++])));
     }
     return ok(std::optional<Tuple>(std::nullopt));
 }
 
-void ShortestPathOperator::close() {
+void ShortestPathOperator::do_close() {
     results_.clear();
     cursor_ = 0;
 }

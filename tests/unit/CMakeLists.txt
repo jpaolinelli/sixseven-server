@@ -74,6 +74,7 @@ add_executable(giodb_unit_tests
     test_statistics.cpp
     test_cost_model.cpp
     test_rewrite_rules.cpp
+    test_explain.cpp
 )
 
 target_link_libraries(giodb_unit_tests

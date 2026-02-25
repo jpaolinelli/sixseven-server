@@ -18,7 +18,14 @@ NearestScanOperator::NearestScanOperator(TableHeap& heap,
     : heap_(heap), storage_schema_(storage_schema), config_(std::move(config)),
       schema_(std::move(schema)), where_expr_(where_expr), bound_(bound), hnsw_index_(hnsw_index) {}
 
-Result<void> NearestScanOperator::open() {
+std::string NearestScanOperator::plan_node_name() const {
+    return "Nearest Scan";
+}
+std::string NearestScanOperator::plan_node_detail() const {
+    return "";
+}
+
+Result<void> NearestScanOperator::do_open() {
     results_.clear();
     cursor_ = 0;
 
@@ -33,14 +40,14 @@ Result<void> NearestScanOperator::open() {
     return execute_brute_force();
 }
 
-Result<std::optional<Tuple>> NearestScanOperator::next() {
+Result<std::optional<Tuple>> NearestScanOperator::do_next() {
     if (cursor_ >= results_.size()) {
         return ok(std::optional<Tuple>(std::nullopt));
     }
     return ok(std::make_optional(std::move(results_[cursor_++])));
 }
 
-void NearestScanOperator::close() {
+void NearestScanOperator::do_close() {
     results_.clear();
     cursor_ = 0;
 }

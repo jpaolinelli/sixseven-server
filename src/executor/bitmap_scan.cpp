@@ -20,7 +20,7 @@ BitmapScanOperator::BitmapScanOperator(std::vector<BitmapIndexScan> scans,
       storage_schema_(storage_schema), schema_(std::move(output_schema)), predicate_(predicate),
       bound_(bound) {}
 
-Result<void> BitmapScanOperator::open() {
+Result<void> BitmapScanOperator::do_open() {
     if (scans_.empty()) {
         return make_error(StatusCode::INTERNAL_ERROR, "BitmapScan: no index scans provided");
     }
@@ -53,7 +53,7 @@ Result<void> BitmapScanOperator::open() {
     return ok();
 }
 
-Result<std::optional<Tuple>> BitmapScanOperator::next() {
+Result<std::optional<Tuple>> BitmapScanOperator::do_next() {
     while (rid_pos_ < rids_.size()) {
         const auto& rid = rids_[rid_pos_];
         ++rid_pos_;
@@ -88,13 +88,21 @@ Result<std::optional<Tuple>> BitmapScanOperator::next() {
     return ok(std::optional<Tuple>(std::nullopt));
 }
 
-void BitmapScanOperator::close() {
+void BitmapScanOperator::do_close() {
     rids_.clear();
     rid_pos_ = 0;
 }
 
 const OutputSchema& BitmapScanOperator::output_schema() const {
     return schema_;
+}
+
+std::string BitmapScanOperator::plan_node_name() const {
+    return "Bitmap Scan";
+}
+
+std::string BitmapScanOperator::plan_node_detail() const {
+    return combine_mode_ == BitmapCombineMode::AND ? "BitmapAnd" : "BitmapOr";
 }
 
 Result<std::vector<RID>> BitmapScanOperator::collect_rids(const BitmapIndexScan& scan) const {

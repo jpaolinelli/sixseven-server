@@ -374,7 +374,7 @@ bool HashAggregateOperator::keys_equal(const std::vector<Value>& a, const std::v
     return true;
 }
 
-Result<void> HashAggregateOperator::open() {
+Result<void> HashAggregateOperator::do_open() {
     auto child_open = child_->open();
     if (!child_open) {
         return child_open;
@@ -489,7 +489,7 @@ Result<void> HashAggregateOperator::open() {
     return ok();
 }
 
-Result<std::optional<Tuple>> HashAggregateOperator::next() {
+Result<std::optional<Tuple>> HashAggregateOperator::do_next() {
     if (cursor_ >= output_.size()) {
         return ok(std::optional<Tuple>(std::nullopt));
     }
@@ -497,13 +497,29 @@ Result<std::optional<Tuple>> HashAggregateOperator::next() {
     return ok(std::optional<Tuple>(Tuple{t.values, t.rid}));
 }
 
-void HashAggregateOperator::close() {
+void HashAggregateOperator::do_close() {
     output_.clear();
     cursor_ = 0;
 }
 
 const OutputSchema& HashAggregateOperator::output_schema() const {
     return schema_;
+}
+
+std::string HashAggregateOperator::plan_node_name() const {
+    return "HashAggregate";
+}
+
+std::string HashAggregateOperator::plan_node_detail() const {
+    return "";
+}
+
+std::vector<const Iterator*> HashAggregateOperator::plan_children() const {
+    return {child_.get()};
+}
+
+std::vector<Iterator*> HashAggregateOperator::plan_children_mutable() {
+    return {child_.get()};
 }
 
 } // namespace giodb

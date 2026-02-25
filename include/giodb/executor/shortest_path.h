@@ -35,10 +35,16 @@ class ShortestPathOperator : public Iterator {
 public:
     ShortestPathOperator(GraphEngine& graph_engine, ShortestPathConfig config, OutputSchema schema);
 
-    Result<void> open() override;
-    Result<std::optional<Tuple>> next() override;
-    void close() override;
     const OutputSchema& output_schema() const override;
+
+    // -- Plan inspection (for EXPLAIN) ----------------------------------------
+    [[nodiscard]] std::string plan_node_name() const override;
+    [[nodiscard]] std::string plan_node_detail() const override;
+
+protected:
+    Result<void> do_open() override;
+    Result<std::optional<Tuple>> do_next() override;
+    void do_close() override;
 
 private:
     /// Run bidirectional BFS and populate results_.

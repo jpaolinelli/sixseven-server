@@ -20,7 +20,7 @@ IndexScanOperator::IndexScanOperator(const BTreeIndex& index,
       end_key_(std::move(end_key)), index_col_indexes_(std::move(index_col_indexes)),
       index_only_(index_only), predicate_(predicate), bound_(bound) {}
 
-Result<void> IndexScanOperator::open() {
+Result<void> IndexScanOperator::do_open() {
     auto it = index_.range_scan(begin_key_, end_key_);
     if (!it) {
         return make_error(it.error().code, it.error().message);
@@ -29,7 +29,7 @@ Result<void> IndexScanOperator::open() {
     return ok();
 }
 
-Result<std::optional<Tuple>> IndexScanOperator::next() {
+Result<std::optional<Tuple>> IndexScanOperator::do_next() {
     if (!iter_) {
         return make_error(StatusCode::INTERNAL_ERROR, "IndexScan: not opened");
     }
@@ -90,12 +90,23 @@ Result<std::optional<Tuple>> IndexScanOperator::next() {
     }
 }
 
-void IndexScanOperator::close() {
+void IndexScanOperator::do_close() {
     iter_.reset();
 }
 
 const OutputSchema& IndexScanOperator::output_schema() const {
     return schema_;
+}
+
+std::string IndexScanOperator::plan_node_name() const {
+    return "Index Scan";
+}
+
+std::string IndexScanOperator::plan_node_detail() const {
+    if (!schema_.columns().empty() && !schema_.columns()[0].table_name.empty()) {
+        return "on " + schema_.columns()[0].table_name + " using index";
+    }
+    return "using index";
 }
 
 Tuple IndexScanOperator::build_tuple_from_key(const KeyType& key, const RID& rid) const {
