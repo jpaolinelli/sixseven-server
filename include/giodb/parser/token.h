@@ -105,6 +105,7 @@ enum class TokenType : uint8_t {
     UNION,
     UNIQUE,
     UPDATE,
+    USER,
     UUID_KW,
     VACUUM,
     VALUES,
@@ -138,6 +139,7 @@ enum class TokenType : uint8_t {
     TRAVERSE,
     TYPE,
     UNLINK,
+    PASSWORD,
     VIA,
 
     // -- Operators ------------------------------------------------------------
@@ -366,6 +368,8 @@ constexpr std::string_view token_type_name(TokenType type) {
         return "UNIQUE";
     case TokenType::UPDATE:
         return "UPDATE";
+    case TokenType::USER:
+        return "USER";
     case TokenType::UUID_KW:
         return "UUID";
     case TokenType::VACUUM:
@@ -420,6 +424,8 @@ constexpr std::string_view token_type_name(TokenType type) {
         return "TYPE";
     case TokenType::UNLINK:
         return "UNLINK";
+    case TokenType::PASSWORD:
+        return "PASSWORD";
     case TokenType::VIA:
         return "VIA";
     case TokenType::PLUS:

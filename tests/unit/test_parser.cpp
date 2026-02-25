@@ -1760,6 +1760,9 @@ public:
     void visit(const DropEdgeTypeStmt&) override { visited_type = "DropEdgeTypeStmt"; }
     void visit(const CreateDatabaseStmt&) override { visited_type = "CreateDatabaseStmt"; }
     void visit(const DropDatabaseStmt&) override { visited_type = "DropDatabaseStmt"; }
+    void visit(const CreateUserStmt&) override { visited_type = "CreateUserStmt"; }
+    void visit(const DropUserStmt&) override { visited_type = "DropUserStmt"; }
+    void visit(const AlterUserStmt&) override { visited_type = "AlterUserStmt"; }
 
     // -- DML --
     void visit(const InsertStmt&) override { visited_type = "InsertStmt"; }

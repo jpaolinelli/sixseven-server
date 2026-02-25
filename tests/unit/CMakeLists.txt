@@ -81,6 +81,7 @@ add_executable(giodb_unit_tests
     test_pg_protocol.cpp
     test_server.cpp
     test_server_lifecycle.cpp
+    test_auth.cpp
 )
 
 target_link_libraries(giodb_unit_tests

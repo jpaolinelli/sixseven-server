@@ -68,6 +68,8 @@ bool is_name_token(TokenType type) {
     case TokenType::VACUUM:
     case TokenType::MAX_DEPTH:
     case TokenType::DATABASE:
+    case TokenType::USER:
+    case TokenType::PASSWORD:
         return true;
     default:
         return false;
@@ -395,8 +397,10 @@ Result<StmtPtr> Parser::parse_create() {
             return tl::unexpected(type.error());
         return parse_create_edge_type();
     }
+    if (match(TokenType::USER))
+        return parse_create_user();
 
-    return error("expected TABLE, DATABASE, INDEX, UNIQUE INDEX, or EDGE TYPE after CREATE");
+    return error("expected TABLE, DATABASE, INDEX, UNIQUE INDEX, EDGE TYPE, or USER after CREATE");
 }
 
 Result<StmtPtr> Parser::parse_drop() {
@@ -414,17 +418,21 @@ Result<StmtPtr> Parser::parse_drop() {
             return tl::unexpected(type.error());
         return parse_drop_edge_type();
     }
+    if (match(TokenType::USER))
+        return parse_drop_user();
 
-    return error("expected TABLE, DATABASE, INDEX, or EDGE TYPE after DROP");
+    return error("expected TABLE, DATABASE, INDEX, EDGE TYPE, or USER after DROP");
 }
 
 Result<StmtPtr> Parser::parse_alter() {
     advance(); // consume ALTER
 
-    auto tbl = expect(TokenType::TABLE, "expected TABLE after ALTER");
-    if (!tbl)
-        return tl::unexpected(tbl.error());
-    return parse_alter_table();
+    if (match(TokenType::TABLE))
+        return parse_alter_table();
+    if (match(TokenType::USER))
+        return parse_alter_user();
+
+    return error("expected TABLE or USER after ALTER");
 }
 
 // -- DDL: CREATE TABLE --------------------------------------------------------
@@ -1064,6 +1072,80 @@ Result<StmtPtr> Parser::parse_drop_edge_type() {
     if (!name)
         return tl::unexpected(name.error());
     stmt->name = std::move(*name);
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- DDL: CREATE USER ---------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_create_user() {
+    auto stmt = std::make_unique<CreateUserStmt>();
+
+    // Username.
+    auto name = parse_name("user name");
+    if (!name)
+        return tl::unexpected(name.error());
+    stmt->username = std::move(*name);
+
+    // WITH PASSWORD 'password'.
+    auto with_tok = expect(TokenType::WITH, "expected WITH after user name");
+    if (!with_tok)
+        return tl::unexpected(with_tok.error());
+    auto pw_tok = expect(TokenType::PASSWORD, "expected PASSWORD after WITH");
+    if (!pw_tok)
+        return tl::unexpected(pw_tok.error());
+    auto pass = expect(TokenType::STRING_LITERAL, "expected password string");
+    if (!pass)
+        return tl::unexpected(pass.error());
+    stmt->password = std::string(pass->lexeme);
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- DDL: DROP USER -----------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_drop_user() {
+    auto stmt = std::make_unique<DropUserStmt>();
+
+    // IF EXISTS.
+    if (match(TokenType::IF)) {
+        auto exists = expect(TokenType::EXISTS, "expected EXISTS after IF");
+        if (!exists)
+            return tl::unexpected(exists.error());
+        stmt->if_exists = true;
+    }
+
+    // Username.
+    auto name = parse_name("user name");
+    if (!name)
+        return tl::unexpected(name.error());
+    stmt->username = std::move(*name);
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- DDL: ALTER USER ----------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_alter_user() {
+    auto stmt = std::make_unique<AlterUserStmt>();
+
+    // Username.
+    auto name = parse_name("user name");
+    if (!name)
+        return tl::unexpected(name.error());
+    stmt->username = std::move(*name);
+
+    // WITH PASSWORD 'new_password'.
+    auto with_tok = expect(TokenType::WITH, "expected WITH after user name");
+    if (!with_tok)
+        return tl::unexpected(with_tok.error());
+    auto pw_tok = expect(TokenType::PASSWORD, "expected PASSWORD after WITH");
+    if (!pw_tok)
+        return tl::unexpected(pw_tok.error());
+    auto pass = expect(TokenType::STRING_LITERAL, "expected password string");
+    if (!pass)
+        return tl::unexpected(pass.error());
+    stmt->password = std::string(pass->lexeme);
 
     return ok(StmtPtr(std::move(stmt)));
 }

@@ -36,6 +36,7 @@ constexpr uint8_t MSG_EXECUTE = 'E';
 constexpr uint8_t MSG_SYNC = 'S';
 constexpr uint8_t MSG_CLOSE = 'C';
 constexpr uint8_t MSG_FLUSH = 'H';
+constexpr uint8_t MSG_PASSWORD = 'p'; // PasswordMessage (also used for SASL responses).
 
 // Minimum startup message size: 4-byte length + 4-byte protocol version.
 constexpr size_t MIN_STARTUP_SIZE = 8;
@@ -595,6 +596,11 @@ void PgProtocolHandler::set_query_executor(QueryExecutor executor) {
     query_executor_ = std::move(executor);
 }
 
+void PgProtocolHandler::set_auth(AuthMethod method, UserManager* user_mgr) {
+    auth_method_ = method;
+    user_mgr_ = user_mgr;
+}
+
 Result<void> PgProtocolHandler::process(Connection& conn) {
     // Process as many complete messages as are available.
     while (true) {
@@ -618,6 +624,9 @@ Result<void> PgProtocolHandler::process(Connection& conn) {
 Result<size_t> PgProtocolHandler::process_one_message(Connection& conn) {
     if (state_ == ProtocolState::WAIT_FOR_STARTUP) {
         return handle_startup_message(conn);
+    }
+    if (state_ == ProtocolState::WAIT_FOR_AUTH) {
+        return handle_auth_message(conn);
     }
     return handle_frontend_message(conn);
 }
@@ -682,25 +691,201 @@ Result<size_t> PgProtocolHandler::handle_startup_message(Connection& conn) {
                    startup_params_.count("user") > 0 ? startup_params_["user"] : "(none)",
                    startup_params_.count("database") > 0 ? startup_params_["database"] : "(none)");
 
-    // Send authentication OK (no auth challenge for now).
-    send_auth_ok(conn);
+    // Dispatch based on authentication method.
+    switch (auth_method_) {
+    case AuthMethod::TRUST:
+        // No authentication required.
+        send_auth_ok(conn);
+        complete_startup(conn);
+        state_ = ProtocolState::READY;
+        break;
 
-    // Send parameter status messages.
+    case AuthMethod::MD5: {
+        // Check that the user exists.
+        std::string username = startup_params_.count("user") > 0 ? startup_params_["user"] : "";
+        if (user_mgr_ != nullptr && !user_mgr_->user_exists(username)) {
+            send_error_response(conn,
+                                "FATAL",
+                                "28000",
+                                "password authentication failed for user \"" + username + "\"");
+            state_ = ProtocolState::CLOSED;
+            return ok(static_cast<size_t>(msg_len));
+        }
+        // Generate random salt and send MD5 auth challenge.
+        auto salt_bytes = random_bytes(4);
+        std::copy_n(salt_bytes.begin(), 4, md5_salt_.begin());
+        send_auth_md5_password(conn, md5_salt_);
+        state_ = ProtocolState::WAIT_FOR_AUTH;
+        break;
+    }
+
+    case AuthMethod::SCRAM_SHA_256: {
+        // Check that the user exists.
+        std::string username = startup_params_.count("user") > 0 ? startup_params_["user"] : "";
+        if (user_mgr_ != nullptr && !user_mgr_->user_exists(username)) {
+            send_error_response(conn,
+                                "FATAL",
+                                "28000",
+                                "password authentication failed for user \"" + username + "\"");
+            state_ = ProtocolState::CLOSED;
+            return ok(static_cast<size_t>(msg_len));
+        }
+        // Send SASL mechanism list.
+        send_auth_sasl(conn);
+        scram_state_.emplace();
+        scram_first_done_ = false;
+        state_ = ProtocolState::WAIT_FOR_AUTH;
+        break;
+    }
+    }
+
+    return ok(static_cast<size_t>(msg_len));
+}
+
+void PgProtocolHandler::complete_startup(Connection& conn) {
     send_parameter_status(conn, "server_version", "15.0 (GioDB 0.1.0)");
     send_parameter_status(conn, "server_encoding", "UTF8");
     send_parameter_status(conn, "client_encoding", "UTF8");
     send_parameter_status(conn, "DateStyle", "ISO, MDY");
     send_parameter_status(conn, "integer_datetimes", "on");
     send_parameter_status(conn, "standard_conforming_strings", "on");
-
-    // Send backend key data.
     send_backend_key_data(conn);
-
-    // Send ReadyForQuery with idle status.
     send_ready_for_query(conn, 'I');
+}
 
-    state_ = ProtocolState::READY;
-    return ok(static_cast<size_t>(msg_len));
+Result<size_t> PgProtocolHandler::handle_auth_message(Connection& conn) {
+    const auto& buf = conn.read_buffer();
+
+    // Need at least 5 bytes: 1-byte type + 4-byte length.
+    if (buf.size() < 5) {
+        return ok(static_cast<size_t>(0));
+    }
+
+    uint8_t msg_type = buf[0];
+    auto body_len = static_cast<uint32_t>(read_be_int32(buf.data() + 1));
+    size_t total_len = 1 + static_cast<size_t>(body_len);
+
+    if (buf.size() < total_len) {
+        return ok(static_cast<size_t>(0));
+    }
+
+    if (msg_type != MSG_PASSWORD) {
+        send_error_response(
+            conn, "FATAL", "08P01", "expected password message during authentication");
+        state_ = ProtocolState::CLOSED;
+        return ok(total_len);
+    }
+
+    const uint8_t* payload = buf.data() + 5;
+    size_t payload_len = body_len - 4;
+
+    std::string username = startup_params_.count("user") > 0 ? startup_params_["user"] : "";
+
+    if (auth_method_ == AuthMethod::MD5) {
+        // PasswordMessage contains null-terminated string.
+        std::string client_response(reinterpret_cast<const char*>(payload), payload_len);
+        if (!client_response.empty() && client_response.back() == '\0') {
+            client_response.pop_back();
+        }
+
+        // Look up user.
+        std::optional<UserRecord> user;
+        if (user_mgr_ != nullptr) {
+            user = user_mgr_->get_user(username);
+        }
+
+        if (!user ||
+            !verify_md5_password(user->password_hash, username, md5_salt_, client_response)) {
+            send_error_response(conn,
+                                "FATAL",
+                                "28P01",
+                                "password authentication failed for user \"" + username + "\"");
+            state_ = ProtocolState::CLOSED;
+            return ok(total_len);
+        }
+
+        send_auth_ok(conn);
+        complete_startup(conn);
+        state_ = ProtocolState::READY;
+        return ok(total_len);
+    }
+
+    if (auth_method_ == AuthMethod::SCRAM_SHA_256) {
+        if (!scram_first_done_) {
+            // This is the SASLInitialResponse.
+            // Format: mechanism_name\0 [int32 length] [initial_response_data]
+            MessageReader reader(payload, payload_len);
+            auto mechanism = reader.read_cstring();
+
+            if (mechanism != "SCRAM-SHA-256") {
+                send_error_response(conn,
+                                    "FATAL",
+                                    "28000",
+                                    "unsupported SASL mechanism: " + std::string(mechanism));
+                state_ = ProtocolState::CLOSED;
+                return ok(total_len);
+            }
+
+            // Read initial response length and data.
+            int32_t resp_len = reader.read_int32();
+            std::string client_first;
+            if (resp_len > 0 && reader.remaining() >= static_cast<size_t>(resp_len)) {
+                const auto* data = reader.read_bytes(static_cast<size_t>(resp_len));
+                client_first.assign(reinterpret_cast<const char*>(data),
+                                    static_cast<size_t>(resp_len));
+            }
+
+            // Look up user.
+            std::optional<UserRecord> user;
+            if (user_mgr_ != nullptr) {
+                user = user_mgr_->get_user(username);
+            }
+
+            if (!user) {
+                send_error_response(conn,
+                                    "FATAL",
+                                    "28P01",
+                                    "password authentication failed for user \"" + username + "\"");
+                state_ = ProtocolState::CLOSED;
+                return ok(total_len);
+            }
+
+            auto server_first = scram_server_first(client_first, *user, *scram_state_);
+            if (!server_first) {
+                send_error_response(conn, "FATAL", "28000", server_first.error().message);
+                state_ = ProtocolState::CLOSED;
+                return ok(total_len);
+            }
+
+            send_auth_sasl_continue(conn, *server_first);
+            scram_first_done_ = true;
+            return ok(total_len);
+        }
+
+        // This is the SASLResponse (client-final-message).
+        std::string client_final(reinterpret_cast<const char*>(payload), payload_len);
+
+        auto server_final = scram_server_final(client_final, *scram_state_);
+        if (!server_final) {
+            send_error_response(conn,
+                                "FATAL",
+                                "28P01",
+                                "password authentication failed for user \"" + username + "\"");
+            state_ = ProtocolState::CLOSED;
+            return ok(total_len);
+        }
+
+        send_auth_sasl_final(conn, *server_final);
+        send_auth_ok(conn);
+        complete_startup(conn);
+        state_ = ProtocolState::READY;
+        return ok(total_len);
+    }
+
+    // Should not reach here for TRUST (it completes in startup).
+    send_error_response(conn, "FATAL", "XX000", "unexpected auth state");
+    state_ = ProtocolState::CLOSED;
+    return ok(total_len);
 }
 
 Result<size_t> PgProtocolHandler::handle_frontend_message(Connection& conn) {
@@ -1068,6 +1253,48 @@ void PgProtocolHandler::send_auth_ok(Connection& conn) {
     MessageWriter w;
     w.begin_message('R');
     w.write_int32(0); // AuthenticationOk.
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_auth_md5_password(Connection& conn,
+                                               const std::array<uint8_t, 4>& salt) {
+    // AuthenticationMD5Password: type 'R', auth_type=5, 4-byte salt.
+    MessageWriter w;
+    w.begin_message('R');
+    w.write_int32(5); // AuthenticationMD5Password.
+    w.write_bytes(salt.data(), 4);
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_auth_sasl(Connection& conn) {
+    // AuthenticationSASL: type 'R', auth_type=10, mechanism list.
+    MessageWriter w;
+    w.begin_message('R');
+    w.write_int32(10); // AuthenticationSASL.
+    w.write_cstring("SCRAM-SHA-256");
+    w.write_byte(0); // Terminating null for mechanism list.
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_auth_sasl_continue(Connection& conn, const std::string& data) {
+    // AuthenticationSASLContinue: type 'R', auth_type=11, data.
+    MessageWriter w;
+    w.begin_message('R');
+    w.write_int32(11); // AuthenticationSASLContinue.
+    w.write_bytes(reinterpret_cast<const uint8_t*>(data.data()), data.size());
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_auth_sasl_final(Connection& conn, const std::string& data) {
+    // AuthenticationSASLFinal: type 'R', auth_type=12, data.
+    MessageWriter w;
+    w.begin_message('R');
+    w.write_int32(12); // AuthenticationSASLFinal.
+    w.write_bytes(reinterpret_cast<const uint8_t*>(data.data()), data.size());
     auto msg = w.finish();
     conn.enqueue_write(msg.data(), msg.size());
 }

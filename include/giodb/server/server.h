@@ -43,6 +43,9 @@ public:
     /// Set the callback used to execute SQL queries via the PG protocol.
     void set_query_executor(QueryExecutor executor);
 
+    /// Set the user manager for authentication.
+    void set_user_manager(UserManager* user_mgr);
+
     /// Bind, listen, and run the event loop. Blocks until shutdown is requested.
     [[nodiscard]] Result<void> start();
 
@@ -77,6 +80,8 @@ private:
     std::unordered_map<int, PgProtocolHandler> protocol_handlers_;
     mutable std::mutex connections_mutex_;
     QueryExecutor query_executor_;
+    AuthMethod auth_method_ = AuthMethod::TRUST;
+    UserManager* user_mgr_ = nullptr;
     int listen_fd_ = -1;
     uint16_t bound_port_ = 0;
     std::atomic<bool> running_{false};

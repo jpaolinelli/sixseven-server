@@ -15,13 +15,17 @@
 namespace giodb {
 
 // Forward declarations.
+enum class AuthMethod : uint8_t;
+struct AlterUserStmt;
 struct BoundStatement;
 struct CreateDatabaseStmt;
 struct CreateEdgeTypeStmt;
 struct CreateTableStmt;
+struct CreateUserStmt;
 struct DropDatabaseStmt;
 struct DropEdgeTypeStmt;
 struct DropTableStmt;
+struct DropUserStmt;
 struct ExplainStmt;
 struct LinkStmt;
 struct ReembedStmt;
@@ -29,6 +33,7 @@ struct SetStmt;
 struct ShowStmt;
 struct UnlinkStmt;
 class HnswIndex;
+class UserManager;
 class ProviderCache;
 class ProviderRegistry;
 class ReplicationSlotManager;
@@ -119,7 +124,21 @@ public:
     /// Decrement the skip-masking counter.
     void pop_skip_masking();
 
+    /// Set the user manager for CREATE/DROP/ALTER USER commands.
+    void set_user_manager(UserManager* user_mgr);
+
+    /// Set the authentication method used for password hashing in CREATE/ALTER USER.
+    void set_auth_method(AuthMethod method);
+
 private:
+    /// Execute a CREATE USER statement.
+    [[nodiscard]] Result<QueryResult> execute_create_user(const CreateUserStmt& stmt);
+
+    /// Execute a DROP USER statement.
+    [[nodiscard]] Result<QueryResult> execute_drop_user(const DropUserStmt& stmt);
+
+    /// Execute an ALTER USER statement.
+    [[nodiscard]] Result<QueryResult> execute_alter_user(const AlterUserStmt& stmt);
     /// Execute a SET parameter = value statement.
     [[nodiscard]] Result<QueryResult> execute_set(const SetStmt& stmt);
 
@@ -177,6 +196,8 @@ private:
     WalSenderManager* sender_mgr_ = nullptr;
     WalReceiver* wal_receiver_ = nullptr;
     WalWriter* wal_writer_ = nullptr;
+    UserManager* user_mgr_ = nullptr;
+    AuthMethod auth_method_{};
     database_id_t current_database_id_ = default_database_id;
     int skip_masking_depth_ = 0;
     bool standby_mode_ = false;
