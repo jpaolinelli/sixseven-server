@@ -1292,3 +1292,200 @@ TEST(PgProtocol, ErrorInBatchSkipsUntilSync) {
     conn.close();
     ::close(client_fd);
 }
+
+// =============================================================================
+// SQL splitting tests
+// =============================================================================
+
+TEST(PgProtocol, SplitSqlBasic) {
+    auto stmts = split_sql_statements("SELECT 1; SELECT 2");
+    ASSERT_EQ(stmts.size(), 2u);
+    EXPECT_EQ(stmts[0], "SELECT 1");
+    EXPECT_EQ(stmts[1], "SELECT 2");
+}
+
+TEST(PgProtocol, SplitSqlTrailingSemicolon) {
+    auto stmts = split_sql_statements("SELECT 1;");
+    ASSERT_EQ(stmts.size(), 1u);
+    EXPECT_EQ(stmts[0], "SELECT 1");
+}
+
+TEST(PgProtocol, SplitSqlEmpty) {
+    EXPECT_TRUE(split_sql_statements("").empty());
+    EXPECT_TRUE(split_sql_statements("   ").empty());
+    EXPECT_TRUE(split_sql_statements(";;;").empty());
+}
+
+TEST(PgProtocol, SplitSqlSingleQuotedSemicolon) {
+    auto stmts = split_sql_statements("SELECT 'a;b'; SELECT 2");
+    ASSERT_EQ(stmts.size(), 2u);
+    EXPECT_EQ(stmts[0], "SELECT 'a;b'");
+    EXPECT_EQ(stmts[1], "SELECT 2");
+}
+
+TEST(PgProtocol, SplitSqlDoubleQuotedSemicolon) {
+    auto stmts = split_sql_statements("SELECT \"col;name\" FROM t; SELECT 2");
+    ASSERT_EQ(stmts.size(), 2u);
+    EXPECT_EQ(stmts[0], "SELECT \"col;name\" FROM t");
+    EXPECT_EQ(stmts[1], "SELECT 2");
+}
+
+TEST(PgProtocol, SplitSqlDollarQuotedSemicolon) {
+    auto stmts = split_sql_statements("SELECT $$a;b$$; SELECT 2");
+    ASSERT_EQ(stmts.size(), 2u);
+    EXPECT_EQ(stmts[0], "SELECT $$a;b$$");
+    EXPECT_EQ(stmts[1], "SELECT 2");
+}
+
+TEST(PgProtocol, SplitSqlEscapedQuote) {
+    // '' inside single-quoted string is an escaped single quote.
+    auto stmts = split_sql_statements("SELECT 'it''s'; SELECT 2");
+    ASSERT_EQ(stmts.size(), 2u);
+    EXPECT_EQ(stmts[0], "SELECT 'it''s'");
+    EXPECT_EQ(stmts[1], "SELECT 2");
+}
+
+TEST(PgProtocol, SplitSqlWhitespaceTrimming) {
+    auto stmts = split_sql_statements("  SELECT 1  ;  SELECT 2  ");
+    ASSERT_EQ(stmts.size(), 2u);
+    EXPECT_EQ(stmts[0], "SELECT 1");
+    EXPECT_EQ(stmts[1], "SELECT 2");
+}
+
+// =============================================================================
+// Multi-statement simple query protocol tests
+// =============================================================================
+
+TEST(PgProtocol, MultiStatementSimpleQuery) {
+    int client_fd = -1;
+    int server_fd = create_socketpair(client_fd);
+
+    Connection conn(server_fd);
+    PgProtocolHandler handler(20);
+
+    int call_count = 0;
+    handler.set_query_executor([&call_count](const std::string& sql) -> Result<QueryResult> {
+        ++call_count;
+        if (sql == "CREATE TABLE t (id INT)") {
+            QueryResult qr;
+            qr.message = "CREATE TABLE";
+            return ok(std::move(qr));
+        }
+        if (sql == "INSERT INTO t VALUES (1)") {
+            QueryResult qr;
+            qr.affected_rows = 1;
+            qr.message = "INSERT";
+            return ok(std::move(qr));
+        }
+        if (sql == "SELECT * FROM t") {
+            QueryResult qr;
+            qr.column_names = {"id"};
+            qr.column_types = {TypeId::INT32};
+            qr.rows = {{Value(static_cast<int32_t>(1))}};
+            return ok(std::move(qr));
+        }
+        return make_error(StatusCode::INTERNAL_ERROR, "unexpected query");
+    });
+
+    do_startup(client_fd, conn, handler);
+
+    // Send three statements in a single Query message.
+    auto query =
+        build_query_message("CREATE TABLE t (id INT); INSERT INTO t VALUES (1); SELECT * FROM t");
+    write_to_fd(client_fd, query);
+    (void)conn.read_from_socket();
+    auto result = handler.process(conn);
+    ASSERT_TRUE(result.has_value());
+
+    (void)conn.write_to_socket();
+    auto response = read_from_fd(client_fd);
+    ASSERT_FALSE(response.empty());
+
+    size_t pos = 0;
+    const uint8_t* payload = nullptr;
+    size_t payload_len = 0;
+
+    // Statement 1: CommandComplete for CREATE TABLE.
+    ASSERT_TRUE(find_message(response, pos, 'C', payload, payload_len));
+    MessageReader cc1(payload, payload_len);
+    EXPECT_EQ(cc1.read_cstring(), "CREATE TABLE");
+
+    // Statement 2: CommandComplete for INSERT.
+    ASSERT_TRUE(find_message(response, pos, 'C', payload, payload_len));
+    MessageReader cc2(payload, payload_len);
+    EXPECT_EQ(cc2.read_cstring(), "INSERT 0 1");
+
+    // Statement 3: RowDescription + DataRow + CommandComplete for SELECT.
+    ASSERT_TRUE(find_message(response, pos, 'T', payload, payload_len));
+    ASSERT_TRUE(find_message(response, pos, 'D', payload, payload_len));
+    ASSERT_TRUE(find_message(response, pos, 'C', payload, payload_len));
+    MessageReader cc3(payload, payload_len);
+    EXPECT_EQ(cc3.read_cstring(), "SELECT 1");
+
+    // Single ReadyForQuery at the end.
+    ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
+    EXPECT_EQ(payload[0], 'I');
+
+    // All three statements were executed.
+    EXPECT_EQ(call_count, 3);
+
+    conn.close();
+    ::close(client_fd);
+}
+
+TEST(PgProtocol, MultiStatementErrorStopsExecution) {
+    int client_fd = -1;
+    int server_fd = create_socketpair(client_fd);
+
+    Connection conn(server_fd);
+    PgProtocolHandler handler(21);
+
+    int call_count = 0;
+    handler.set_query_executor([&call_count](const std::string& sql) -> Result<QueryResult> {
+        ++call_count;
+        if (sql == "SELECT 1") {
+            QueryResult qr;
+            qr.column_names = {"col"};
+            qr.column_types = {TypeId::INT32};
+            qr.rows = {{Value(static_cast<int32_t>(1))}};
+            return ok(std::move(qr));
+        }
+        // Second statement fails.
+        return make_error(StatusCode::PARSE_ERROR, "syntax error");
+    });
+
+    do_startup(client_fd, conn, handler);
+
+    // Three statements; the second will fail.
+    auto query = build_query_message("SELECT 1; BAD SQL; SELECT 3");
+    write_to_fd(client_fd, query);
+    (void)conn.read_from_socket();
+    auto result = handler.process(conn);
+    ASSERT_TRUE(result.has_value());
+
+    (void)conn.write_to_socket();
+    auto response = read_from_fd(client_fd);
+    ASSERT_FALSE(response.empty());
+
+    size_t pos = 0;
+    const uint8_t* payload = nullptr;
+    size_t payload_len = 0;
+
+    // Statement 1 succeeds: RowDescription + DataRow + CommandComplete.
+    ASSERT_TRUE(find_message(response, pos, 'T', payload, payload_len));
+    ASSERT_TRUE(find_message(response, pos, 'D', payload, payload_len));
+    ASSERT_TRUE(find_message(response, pos, 'C', payload, payload_len));
+
+    // Statement 2 fails: ErrorResponse.
+    ASSERT_TRUE(find_message(response, pos, 'E', payload, payload_len));
+
+    // ReadyForQuery after error — third statement was NOT executed.
+    ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
+    EXPECT_EQ(payload[0], 'I');
+
+    // Only 2 calls: first succeeded, second failed, third skipped.
+    EXPECT_EQ(call_count, 2);
+
+    conn.close();
+    ::close(client_fd);
+}

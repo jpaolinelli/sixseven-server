@@ -382,6 +382,95 @@ std::string value_to_pg_text(const Value& value) {
     return ""; // Unreachable.
 }
 
+// -- SQL splitting ------------------------------------------------------------
+
+std::vector<std::string> split_sql_statements(std::string_view sql) {
+    std::vector<std::string> stmts;
+    std::string current;
+    current.reserve(sql.size());
+
+    size_t i = 0;
+    while (i < sql.size()) {
+        char ch = sql[i];
+
+        // Single-quoted string literal.
+        if (ch == '\'') {
+            current += ch;
+            ++i;
+            while (i < sql.size()) {
+                current += sql[i];
+                if (sql[i] == '\'' && (i + 1 >= sql.size() || sql[i + 1] != '\'')) {
+                    ++i;
+                    break;
+                }
+                // Escaped quote '' inside single-quoted string.
+                if (sql[i] == '\'' && i + 1 < sql.size() && sql[i + 1] == '\'') {
+                    ++i;
+                    current += sql[i];
+                }
+                ++i;
+            }
+            continue;
+        }
+
+        // Double-quoted identifier.
+        if (ch == '"') {
+            current += ch;
+            ++i;
+            while (i < sql.size()) {
+                current += sql[i];
+                if (sql[i] == '"') {
+                    ++i;
+                    break;
+                }
+                ++i;
+            }
+            continue;
+        }
+
+        // Dollar-quoted string ($$...$$).
+        if (ch == '$' && i + 1 < sql.size() && sql[i + 1] == '$') {
+            current += "$$";
+            i += 2;
+            while (i + 1 < sql.size()) {
+                if (sql[i] == '$' && sql[i + 1] == '$') {
+                    current += "$$";
+                    i += 2;
+                    break;
+                }
+                current += sql[i];
+                ++i;
+            }
+            continue;
+        }
+
+        // Semicolon — statement separator.
+        if (ch == ';') {
+            // Trim whitespace.
+            auto start = current.find_first_not_of(" \t\n\r");
+            if (start != std::string::npos) {
+                auto end = current.find_last_not_of(" \t\n\r");
+                stmts.push_back(current.substr(start, end - start + 1));
+            }
+            current.clear();
+            ++i;
+            continue;
+        }
+
+        current += ch;
+        ++i;
+    }
+
+    // Final statement (no trailing semicolon).
+    auto start = current.find_first_not_of(" \t\n\r");
+    if (start != std::string::npos) {
+        auto end = current.find_last_not_of(" \t\n\r");
+        stmts.push_back(current.substr(start, end - start + 1));
+    }
+
+    return stmts;
+}
+
 // -- MessageWriter ------------------------------------------------------------
 
 void MessageWriter::begin_message(uint8_t type) {
@@ -718,42 +807,54 @@ void PgProtocolHandler::handle_simple_query(Connection& conn, std::string_view s
         return;
     }
 
-    // Execute the query.
-    auto result = query_executor_(std::string(sql));
-    if (!result) {
-        const auto& err = result.error();
-        send_error_response(conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+    // Split on semicolons — each statement produces its own result set.
+    // If no non-empty statements remain after splitting, treat as empty query.
+    auto statements = split_sql_statements(sql);
+    if (statements.empty()) {
+        send_empty_query_response(conn);
         send_ready_for_query(conn, 'I');
         return;
     }
 
-    const auto& qr = *result;
-
-    // Determine if this is a SELECT (has column names) or DML/DDL.
-    if (!qr.column_names.empty()) {
-        // SELECT: send RowDescription + DataRows + CommandComplete.
-        send_row_description(conn, qr);
-        for (const auto& row : qr.rows) {
-            send_data_row(conn, row, qr.column_types);
+    for (const auto& stmt : statements) {
+        auto result = query_executor_(stmt);
+        if (!result) {
+            // On error, send ErrorResponse and stop processing remaining statements.
+            const auto& err = result.error();
+            send_error_response(
+                conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+            send_ready_for_query(conn, 'I');
+            return;
         }
-        send_command_complete(conn, "SELECT " + std::to_string(qr.rows.size()));
-    } else if (qr.affected_rows >= 0) {
-        // DML: send CommandComplete with tag and row count.
-        // The message field usually contains the command tag (INSERT, UPDATE, DELETE).
-        std::string tag = qr.message.empty() ? "UNKNOWN" : qr.message;
 
-        // For INSERT, PG format is "INSERT 0 <count>".
-        if (tag.find("INSERT") == 0) {
-            tag = "INSERT 0 " + std::to_string(qr.affected_rows);
+        const auto& qr = *result;
+
+        // Determine if this is a SELECT (has column names) or DML/DDL.
+        if (!qr.column_names.empty()) {
+            // SELECT: send RowDescription + DataRows + CommandComplete.
+            send_row_description(conn, qr);
+            for (const auto& row : qr.rows) {
+                send_data_row(conn, row, qr.column_types);
+            }
+            send_command_complete(conn, "SELECT " + std::to_string(qr.rows.size()));
+        } else if (qr.affected_rows >= 0) {
+            // DML: send CommandComplete with tag and row count.
+            std::string tag = qr.message.empty() ? "UNKNOWN" : qr.message;
+
+            // For INSERT, PG format is "INSERT 0 <count>".
+            if (tag.find("INSERT") == 0) {
+                tag = "INSERT 0 " + std::to_string(qr.affected_rows);
+            } else {
+                tag += " " + std::to_string(qr.affected_rows);
+            }
+            send_command_complete(conn, tag);
         } else {
-            tag += " " + std::to_string(qr.affected_rows);
+            // DDL/utility: send CommandComplete with the message.
+            send_command_complete(conn, qr.message.empty() ? "OK" : qr.message);
         }
-        send_command_complete(conn, tag);
-    } else {
-        // DDL/utility: send CommandComplete with the message.
-        send_command_complete(conn, qr.message.empty() ? "OK" : qr.message);
     }
 
+    // A single ReadyForQuery at the end of the entire multi-statement batch.
     send_ready_for_query(conn, 'I');
 }
 
@@ -863,8 +964,8 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
         // Send ParameterDescription.
         send_parameter_description(conn, it->second.param_oids);
 
-        // For a proper implementation we'd parse the SQL to determine the result columns.
-        // For now, send NoData (indicating the statement doesn't return rows, or we don't know).
+        // TODO(GDB-147): Parse the SQL to determine result columns and send
+        // RowDescription for SELECT statements. For now, send NoData.
         send_no_data(conn);
     } else if (describe_type == 'P') {
         auto it = portals_.find(name);
@@ -873,7 +974,7 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
             error_in_extended_ = true;
             return;
         }
-        // For a proper implementation we'd return the result columns of the portal.
+        // TODO(GDB-147): Return RowDescription for SELECT portals.
         // For now, send NoData.
         send_no_data(conn);
     } else {
@@ -907,8 +1008,8 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
 
     GIODB_LOG_DEBUG("Execute: portal='{}', sql='{}'", portal_name, portal.sql);
 
-    // Execute the SQL. For a full implementation we'd substitute parameters.
-    // For now, execute the SQL directly.
+    // TODO(GDB-147): Substitute portal.param_values into the SQL before
+    // execution. Currently parameters ($1, $2, ...) are not replaced.
     auto result = query_executor_(portal.sql);
     if (!result) {
         const auto& err = result.error();
@@ -1019,6 +1120,8 @@ void PgProtocolHandler::send_row_description(Connection& conn, const QueryResult
 void PgProtocolHandler::send_data_row(Connection& conn,
                                       const std::vector<Value>& row,
                                       const std::vector<TypeId>& /*types*/) {
+    // TODO(GDB-147): Respect result_format_codes from Bind to send binary
+    // format when requested. Currently always sends text format (code 0).
     MessageWriter w;
     w.begin_message('D');
     w.write_int16(static_cast<int16_t>(row.size()));

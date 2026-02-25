@@ -37,6 +37,15 @@ std::string_view status_to_sqlstate(StatusCode code);
 /// Convert a Value to its PostgreSQL text-format representation.
 std::string value_to_pg_text(const Value& value);
 
+// -- SQL splitting ------------------------------------------------------------
+
+/// Split a SQL string on semicolons into individual statements.
+/// Respects single-quoted ('...') and double-quoted ("...") strings,
+/// and dollar-quoted ($$...$$) strings so that semicolons inside literals
+/// are not treated as separators.  Leading/trailing whitespace is trimmed
+/// from each statement and empty statements are dropped.
+std::vector<std::string> split_sql_statements(std::string_view sql);
+
 // -- Message writer -----------------------------------------------------------
 
 /// Builds a single PostgreSQL wire-protocol backend message.
