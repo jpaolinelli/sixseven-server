@@ -964,7 +964,7 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
         // Send ParameterDescription.
         send_parameter_description(conn, it->second.param_oids);
 
-        // TODO(GDB-147): Parse the SQL to determine result columns and send
+        // TODO(GDB-201): Parse the SQL to determine result columns and send
         // RowDescription for SELECT statements. For now, send NoData.
         send_no_data(conn);
     } else if (describe_type == 'P') {
@@ -974,7 +974,7 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
             error_in_extended_ = true;
             return;
         }
-        // TODO(GDB-147): Return RowDescription for SELECT portals.
+        // TODO(GDB-201): Return RowDescription for SELECT portals.
         // For now, send NoData.
         send_no_data(conn);
     } else {
@@ -1008,7 +1008,7 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
 
     GIODB_LOG_DEBUG("Execute: portal='{}', sql='{}'", portal_name, portal.sql);
 
-    // TODO(GDB-147): Substitute portal.param_values into the SQL before
+    // TODO(GDB-200): Substitute portal.param_values into the SQL before
     // execution. Currently parameters ($1, $2, ...) are not replaced.
     auto result = query_executor_(portal.sql);
     if (!result) {
@@ -1120,7 +1120,7 @@ void PgProtocolHandler::send_row_description(Connection& conn, const QueryResult
 void PgProtocolHandler::send_data_row(Connection& conn,
                                       const std::vector<Value>& row,
                                       const std::vector<TypeId>& /*types*/) {
-    // TODO(GDB-147): Respect result_format_codes from Bind to send binary
+    // TODO(GDB-202): Respect result_format_codes from Bind to send binary
     // format when requested. Currently always sends text format (code 0).
     MessageWriter w;
     w.begin_message('D');
