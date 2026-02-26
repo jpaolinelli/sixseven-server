@@ -45,9 +45,9 @@ When asked to work the QA column:
 6. **Run ASan** → Build with AddressSanitizer preset and run. Record any findings.
 7. **Verify acceptance criteria** → Map every criterion to a passing test.
 8. **Compile findings** → Classify by severity (Critical / High / Medium / Low).
-9. **File bug tickets** → Create Jira bugs for Critical and High findings.
+9. **File bug tickets** → Create Jira `Bug` tickets in the same epic as the ticket under review for Critical and High findings. Mention the reviewed ticket in the description.
 10. **Produce QA report** → Structured report with verdict.
-11. **Transition ticket** → If QA PASS, transition the Jira ticket to "Done". If QA FAIL, leave it in its current status.
+11. **Transition ticket** → Transition the Jira ticket to "Done" regardless of verdict. Bug tickets filed in step 9 track any remaining work.
 
 ## Skills You Should Use
 
@@ -62,7 +62,7 @@ When asked to work the QA column:
 
 1. Write a test that reproduces it.
 2. Confirm the test fails.
-3. File a Jira bug ticket with reproduction steps and the test name.
+3. File a Jira `Bug` ticket in the same epic as the ticket under review. Include the reviewed ticket key in the description under "Found During".
 4. Include the bug in the QA report.
 
 ## If Unclear, Ask

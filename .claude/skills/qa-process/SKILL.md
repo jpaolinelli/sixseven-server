@@ -142,15 +142,16 @@ Classify every finding by severity:
 
 ## Step 8: File Bug Tickets
 
-For every Critical or High finding, create a Jira bug ticket:
+For every Critical or High finding, create a Jira `Bug` ticket in the **same epic as the ticket under review**:
 
 ```
 Project: GDB
 Type: Bug
-Summary: [QA] <Component>: <Short description of the bug>
+Epic: <same epic as the ticket under review>
+Summary: [BUG][<Severity>] <Component>: <Short description of the bug>
 Description:
   ## Found During
-  QA of <PARENT-TICKET-KEY>
+  QA of <TICKET-UNDER-REVIEW>
 
   ## Description
   <Clear description of the bug>
@@ -218,5 +219,4 @@ For Medium findings, include them in the QA report and let the user decide wheth
 
 ## Ticket Transitions
 
-- **QA PASS**: Transition the ticket to "Done".
-- **QA FAIL**: Leave the ticket in its current status. The filed bug tickets and QA report communicate what needs fixing.
+Transition the ticket to "Done" regardless of verdict. Bug tickets filed in step 8 are standalone tickets in the same epic and track any remaining work.

@@ -83,6 +83,10 @@ add_executable(giodb_unit_tests
     test_server.cpp
     test_server_lifecycle.cpp
     test_auth.cpp
+    test_qa_gdb_10.cpp
+    test_qa_gdb_12.cpp
+    test_qa_gdb_13.cpp
+    test_qa_gdb_15.cpp
 )
 
 target_link_libraries(giodb_unit_tests
