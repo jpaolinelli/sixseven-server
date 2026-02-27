@@ -319,8 +319,8 @@ TEST(QA_WalWriter, TruncateBeforeCurrentSegmentPreservesIt) {
     ASSERT_TRUE(writer.truncate_before(current).has_value());
 
     // Current segment should still exist.
-    auto seg_name = "wal_" + std::string(6 - std::to_string(current).length(), '0') +
-                    std::to_string(current);
+    auto seg_name =
+        "wal_" + std::string(6 - std::to_string(current).length(), '0') + std::to_string(current);
     EXPECT_TRUE(std::filesystem::exists(dir.path() / seg_name));
 
     // Can still write after truncation.
@@ -955,8 +955,7 @@ TEST(QA_WalWriter, ConcurrentAppendsWithSmallSegments) {
 
     EXPECT_EQ(errors.load(), 0);
     EXPECT_EQ(total_appended.load(), num_threads * records_per_thread);
-    EXPECT_EQ(writer.current_lsn(),
-              static_cast<lsn_t>(num_threads * records_per_thread + 1));
+    EXPECT_EQ(writer.current_lsn(), static_cast<lsn_t>(num_threads * records_per_thread + 1));
 
     // Multiple rotations should have occurred.
     EXPECT_GT(writer.current_segment_id(), 1u);
@@ -1130,8 +1129,22 @@ TEST(QA_WalWriter, ScanRecoveryWithTrailingGarbage) {
     auto seg_path = dir.path() / "wal_000001";
     {
         std::ofstream ofs(seg_path, std::ios::binary | std::ios::app);
-        std::vector<uint8_t> garbage = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04,
-                                        0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C};
+        std::vector<uint8_t> garbage = {0xDE,
+                                        0xAD,
+                                        0xBE,
+                                        0xEF,
+                                        0x01,
+                                        0x02,
+                                        0x03,
+                                        0x04,
+                                        0x05,
+                                        0x06,
+                                        0x07,
+                                        0x08,
+                                        0x09,
+                                        0x0A,
+                                        0x0B,
+                                        0x0C};
         ofs.write(reinterpret_cast<const char*>(garbage.data()),
                   static_cast<std::streamsize>(garbage.size()));
     }
