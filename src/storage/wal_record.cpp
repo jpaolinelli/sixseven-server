@@ -92,6 +92,12 @@ Result<WalRecord> deserialize_wal_record(std::span<const uint8_t> buf) {
                               std::to_string(buf.size()));
     }
 
+    // Validate record_length is large enough to hold at least the trailing CRC.
+    if (record_length < sizeof(uint32_t)) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "WAL record_length too small: " + std::to_string(record_length));
+    }
+
     // CRC check: covers everything after record_length, excluding the trailing CRC.
     size_t crc_start = offset;
     size_t crc_length = static_cast<size_t>(record_length) - sizeof(uint32_t);
