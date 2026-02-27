@@ -513,4 +513,94 @@ Result<void> Catalog::remove_embedding_provider(const std::string& name) {
     return ok();
 }
 
+// -- Persistence restore operations -------------------------------------------
+
+Result<void> Catalog::restore_table(database_id_t database_id, TableSchema schema) {
+    std::lock_guard lock(mu_);
+
+    if (!databases_by_id_.contains(database_id)) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "database with id " + std::to_string(database_id) + " not found");
+    }
+
+    auto& name_map = table_name_to_id_[database_id];
+    if (name_map.contains(schema.name)) {
+        return make_error(StatusCode::ALREADY_EXISTS, "table '" + schema.name + "' already exists");
+    }
+
+    table_id_t id = schema.table_id;
+    name_map[schema.name] = id;
+    table_to_database_[id] = database_id;
+    tables_by_id_[id] = std::move(schema);
+
+    // Advance auto-increment counter past this ID.
+    if (id >= next_table_id_) {
+        next_table_id_ = id + 1;
+    }
+
+    return ok();
+}
+
+Result<void> Catalog::restore_index(IndexDef def) {
+    std::lock_guard lock(mu_);
+
+    if (index_name_to_id_.contains(def.name)) {
+        return make_error(StatusCode::ALREADY_EXISTS, "index '" + def.name + "' already exists");
+    }
+
+    index_id_t id = def.index_id;
+    index_name_to_id_[def.name] = id;
+    indexes_by_id_[id] = std::move(def);
+
+    if (id >= next_index_id_) {
+        next_index_id_ = id + 1;
+    }
+
+    return ok();
+}
+
+Result<void> Catalog::restore_edge_type(EdgeTypeDef def) {
+    std::lock_guard lock(mu_);
+
+    if (edge_name_to_id_.contains(def.name)) {
+        return make_error(StatusCode::ALREADY_EXISTS,
+                          "edge type '" + def.name + "' already exists");
+    }
+
+    edge_id_t id = def.edge_id;
+    edge_name_to_id_[def.name] = id;
+    edge_types_by_id_[id] = std::move(def);
+
+    if (id >= next_edge_id_) {
+        next_edge_id_ = id + 1;
+    }
+
+    return ok();
+}
+
+void Catalog::restore_embedding_column(EmbeddingColumnDef def) {
+    std::lock_guard lock(mu_);
+    embedding_columns_.push_back(std::move(def));
+}
+
+void Catalog::set_next_table_id(table_id_t id) {
+    std::lock_guard lock(mu_);
+    next_table_id_ = id;
+}
+
+void Catalog::set_next_index_id(index_id_t id) {
+    std::lock_guard lock(mu_);
+    next_index_id_ = id;
+}
+
+void Catalog::set_next_edge_id(edge_id_t id) {
+    std::lock_guard lock(mu_);
+    next_edge_id_ = id;
+}
+
+table_id_t Catalog::next_table_id() const {
+    std::lock_guard lock(mu_);
+    return next_table_id_;
+}
+
 } // namespace giodb

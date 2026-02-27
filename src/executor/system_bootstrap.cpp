@@ -1,7 +1,9 @@
 #include "giodb/executor/system_bootstrap.h"
 
 #include "giodb/catalog/catalog.h"
+#include "giodb/catalog/schema.h"
 #include "giodb/common/logging.h"
+#include "giodb/executor/catalog_persistence.h"
 #include "giodb/executor/query_engine.h"
 #include "giodb/executor/storage_manager.h"
 
@@ -11,11 +13,12 @@
 namespace giodb {
 
 Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
-                                        Catalog& /*catalog*/,
+                                        Catalog& catalog,
                                         StorageManager& storage,
+                                        CatalogPersistence& persistence,
                                         const Config& config,
                                         const std::filesystem::path& data_dir) {
-    // 1. Create system database storage directory.
+    // 1. Create system database storage directory (idempotent).
     auto dir_result = storage.create_database_storage(system_database_id);
     if (!dir_result) {
         return make_error(dir_result.error().code,
@@ -23,50 +26,43 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
                               dir_result.error().message);
     }
 
-    // 2. Switch QueryEngine to the system database.
-    auto prev_db = engine.current_database_id();
-    engine.set_current_database(system_database_id);
+    bool first_run = !is_bootstrapped(data_dir);
 
-    // 3. Create sys_settings table.
-    auto create_result = engine.execute("CREATE TABLE sys_settings ("
-                                        "key VARCHAR, "
-                                        "value VARCHAR, "
-                                        "category VARCHAR, "
-                                        "description VARCHAR, "
-                                        "is_runtime_mutable BOOLEAN, "
-                                        "PRIMARY KEY (key)"
-                                        ")");
-    if (!create_result) {
-        engine.set_current_database(prev_db);
-        return make_error(create_result.error().code,
-                          "failed to create sys_settings table: " + create_result.error().message);
-    }
+    if (first_run) {
+        // -----------------------------------------------------------------
+        // First run: create all system tables from scratch.
+        // -----------------------------------------------------------------
+        GIODB_LOG_INFO("system bootstrap: first run — creating system tables");
 
-    GIODB_LOG_INFO("system bootstrap: sys_settings table created");
+        // Create sys_settings and sys_providers with reserved IDs.
+        auto r1 = persistence.create_sys_table_public(sys_settings_schema());
+        if (!r1) {
+            return make_error(r1.error().code,
+                              "failed to create sys_settings: " + r1.error().message);
+        }
 
-    // 3b. Create sys_providers table.
-    auto create_providers = engine.execute("CREATE TABLE sys_providers ("
-                                           "provider_id INT, "
-                                           "name VARCHAR, "
-                                           "type VARCHAR, "
-                                           "endpoint VARCHAR, "
-                                           "model VARCHAR, "
-                                           "api_key_encrypted VARCHAR, "
-                                           "is_default BOOLEAN, "
-                                           "created_at TIMESTAMP, "
-                                           "PRIMARY KEY (provider_id)"
-                                           ")");
-    if (!create_providers) {
-        engine.set_current_database(prev_db);
-        return make_error(create_providers.error().code,
-                          "failed to create sys_providers table: " +
-                              create_providers.error().message);
-    }
+        auto r2 = persistence.create_sys_table_public(sys_providers_schema());
+        if (!r2) {
+            return make_error(r2.error().code,
+                              "failed to create sys_providers: " + r2.error().message);
+        }
 
-    GIODB_LOG_INFO("system bootstrap: sys_providers table created");
+        // Create the 5 system catalog tables.
+        auto r3 = persistence.create_system_catalog_tables();
+        if (!r3) {
+            return make_error(r3.error().code,
+                              "failed to create system catalog tables: " + r3.error().message);
+        }
 
-    // 4. Seed default settings on first run.
-    if (!is_bootstrapped(data_dir)) {
+        // Ensure user table IDs start after all system tables.
+        if (catalog.next_table_id() < first_user_table_id) {
+            catalog.set_next_table_id(first_user_table_id);
+        }
+
+        // Seed default settings via SQL INSERT.
+        auto prev_db = engine.current_database_id();
+        engine.set_current_database(system_database_id);
+
         auto seed_result = seed_default_settings(engine, config);
         if (!seed_result) {
             engine.set_current_database(prev_db);
@@ -74,14 +70,43 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
                               "failed to seed default settings: " + seed_result.error().message);
         }
 
+        engine.set_current_database(prev_db);
+
         mark_bootstrapped(data_dir);
-        GIODB_LOG_INFO("system bootstrap: default settings seeded (first run)");
+        GIODB_LOG_INFO("system bootstrap: first run complete");
     } else {
-        GIODB_LOG_INFO("system bootstrap: skipping seed (already bootstrapped)");
+        // -----------------------------------------------------------------
+        // Subsequent run: load persisted catalog from disk.
+        // -----------------------------------------------------------------
+        GIODB_LOG_INFO("system bootstrap: loading persisted catalog");
+
+        // Open sys_settings and sys_providers.
+        auto r1 = persistence.open_sys_table_public(sys_settings_schema());
+        if (!r1) {
+            return make_error(r1.error().code,
+                              "failed to open sys_settings: " + r1.error().message);
+        }
+
+        auto r2 = persistence.open_sys_table_public(sys_providers_schema());
+        if (!r2) {
+            return make_error(r2.error().code,
+                              "failed to open sys_providers: " + r2.error().message);
+        }
+
+        // Load the full catalog (sys_tables, sys_columns, etc.).
+        auto load = persistence.load_catalog();
+        if (!load) {
+            return make_error(load.error().code, "failed to load catalog: " + load.error().message);
+        }
+
+        // Ensure user table IDs start after all system tables.
+        if (catalog.next_table_id() < first_user_table_id) {
+            catalog.set_next_table_id(first_user_table_id);
+        }
+
+        GIODB_LOG_INFO("system bootstrap: catalog loaded from disk");
     }
 
-    // 5. Restore previous database context.
-    engine.set_current_database(prev_db);
     return ok();
 }
 
@@ -115,7 +140,6 @@ bool SystemBootstrap::is_bootstrapped(const std::filesystem::path& data_dir) {
 }
 
 Result<void> SystemBootstrap::seed_default_settings(QueryEngine& engine, const Config& config) {
-    // Default settings as defined in the ticket.
     struct Setting {
         const char* key;
         std::string value;
@@ -210,7 +234,6 @@ Result<void> SystemBootstrap::seed_default_settings(QueryEngine& engine, const C
     };
 
     for (const auto& s : defaults) {
-        // Escape single quotes in values by doubling them.
         std::string escaped_value = s.value;
         std::string escaped_desc = s.description;
 

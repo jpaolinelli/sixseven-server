@@ -89,6 +89,40 @@ Result<void> StorageManager::create_table_storage(database_id_t db_id,
     return ok();
 }
 
+Result<void> StorageManager::open_table_storage(database_id_t db_id,
+                                                table_id_t table_id,
+                                                const TableSchema& table_schema) {
+    std::lock_guard lock(mu_);
+
+    if (tables_.count(table_id) != 0) {
+        return ok(); // Already open.
+    }
+
+    auto path = table_path(db_id, table_id);
+    if (!std::filesystem::exists(path)) {
+        return make_error(StatusCode::NOT_FOUND, "table file not found: " + path.string());
+    }
+
+    auto fid = dm_.open_file(path);
+    if (!fid) {
+        return make_error(fid.error().code, fid.error().message);
+    }
+
+    auto storage = std::make_unique<TableStorage>();
+    storage->file_id = *fid;
+    storage->bpm = std::make_unique<BufferPoolManager>(dm_, *fid, pool_size_);
+    storage->heap = std::make_unique<TableHeap>(*storage->bpm, dm_, *fid);
+    storage->storage_schema = build_storage_schema(table_schema);
+
+    tables_[table_id] = std::move(storage);
+    return ok();
+}
+
+bool StorageManager::table_file_exists(database_id_t db_id, table_id_t table_id) const {
+    auto path = table_path(db_id, table_id);
+    return std::filesystem::exists(path);
+}
+
 Result<TableStorage*> StorageManager::get_table_storage(table_id_t table_id) {
     std::lock_guard lock(mu_);
 

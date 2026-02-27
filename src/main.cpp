@@ -1,6 +1,7 @@
 #include "giodb/catalog/catalog.h"
 #include "giodb/common/config.h"
 #include "giodb/common/logging.h"
+#include "giodb/executor/catalog_persistence.h"
 #include "giodb/executor/query_engine.h"
 #include "giodb/executor/settings_cache.h"
 #include "giodb/executor/storage_manager.h"
@@ -84,10 +85,13 @@ int main(int argc, char* argv[]) {
     giodb::DiskManager disk_manager;
     giodb::Catalog catalog;
     giodb::StorageManager storage(disk_manager, data_dir);
+    giodb::CatalogPersistence persistence(catalog, storage);
     giodb::QueryEngine engine(catalog, storage);
+    engine.set_catalog_persistence(&persistence);
 
-    // Bootstrap system database (creates sys_settings, sys_providers, seeds defaults).
-    auto boot = giodb::SystemBootstrap::bootstrap(engine, catalog, storage, config, data_dir);
+    // Bootstrap system database (creates/loads system tables and catalog).
+    auto boot =
+        giodb::SystemBootstrap::bootstrap(engine, catalog, storage, persistence, config, data_dir);
     if (!boot) {
         GIODB_LOG_ERROR("bootstrap failed: {}", boot.error().message);
         return 1;

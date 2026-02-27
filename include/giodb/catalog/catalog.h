@@ -150,6 +150,34 @@ public:
     /// Fails with NOT_FOUND if the provider does not exist.
     [[nodiscard]] Result<void> remove_embedding_provider(const std::string& name);
 
+    // -- Persistence restore operations ----------------------------------------
+
+    /// Restore a table with a pre-assigned table_id (for catalog persistence).
+    /// Unlike create_table(), does NOT auto-assign a table_id.
+    [[nodiscard]] Result<void> restore_table(database_id_t database_id, TableSchema schema);
+
+    /// Restore an index with a pre-assigned index_id (for catalog persistence).
+    [[nodiscard]] Result<void> restore_index(IndexDef def);
+
+    /// Restore an edge type with a pre-assigned edge_id (for catalog persistence).
+    [[nodiscard]] Result<void> restore_edge_type(EdgeTypeDef def);
+
+    /// Restore an embedding column (for catalog persistence).
+    /// Skips table existence validation since tables may not be fully loaded yet.
+    void restore_embedding_column(EmbeddingColumnDef def);
+
+    /// Set the next auto-increment table ID. Used after loading persisted tables.
+    void set_next_table_id(table_id_t id);
+
+    /// Set the next auto-increment index ID. Used after loading persisted indexes.
+    void set_next_index_id(index_id_t id);
+
+    /// Set the next auto-increment edge ID. Used after loading persisted edge types.
+    void set_next_edge_id(edge_id_t id);
+
+    /// Get the current next_table_id value.
+    [[nodiscard]] table_id_t next_table_id() const;
+
 private:
     /// Drop a table by name (caller must hold mu_). Used internally by
     /// drop_table() and drop_database() with cascade.

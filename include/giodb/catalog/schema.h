@@ -110,6 +110,19 @@ struct ProviderConfig {
     bool is_default = false; ///< At most one provider can be default
 };
 
+/// Reserved table IDs for system catalog tables.
+/// These must be stable across restarts so files can be located.
+inline constexpr table_id_t sys_settings_table_id = 1;
+inline constexpr table_id_t sys_providers_table_id = 2;
+inline constexpr table_id_t sys_tables_table_id = 3;
+inline constexpr table_id_t sys_columns_table_id = 4;
+inline constexpr table_id_t sys_indexes_table_id = 5;
+inline constexpr table_id_t sys_edge_types_table_id = 6;
+inline constexpr table_id_t sys_embedding_columns_table_id = 7;
+
+/// First table ID available for user tables (after all system tables).
+inline constexpr table_id_t first_user_table_id = 8;
+
 /// Returns the system table schema for sys_databases(database_id INT32, name STRING).
 inline TableSchema sys_databases_schema() {
     TableSchema schema;
@@ -126,7 +139,7 @@ inline TableSchema sys_databases_schema() {
 /// Returns the system table schema for sys_settings.
 inline TableSchema sys_settings_schema() {
     TableSchema schema;
-    schema.table_id = 0; // System tables use reserved IDs.
+    schema.table_id = sys_settings_table_id;
     schema.name = "sys_settings";
     schema.columns = {
         {0, "key", TypeId::STRING, false, ""},
@@ -142,7 +155,7 @@ inline TableSchema sys_settings_schema() {
 /// Returns the system table schema for sys_providers.
 inline TableSchema sys_providers_schema() {
     TableSchema schema;
-    schema.table_id = 0; // System tables use reserved IDs.
+    schema.table_id = sys_providers_table_id;
     schema.name = "sys_providers";
     schema.columns = {
         {0, "provider_id", TypeId::INT32, false, ""},
@@ -172,6 +185,92 @@ inline TableSchema sys_replication_slots_schema() {
         {5, "created_at", TypeId::TIMESTAMP, true, ""},
     };
     schema.pk_columns = "slot_name";
+    return schema;
+}
+
+/// Returns the system table schema for sys_tables.
+/// Stores metadata for every user table in the catalog.
+inline TableSchema sys_tables_schema() {
+    TableSchema schema;
+    schema.table_id = sys_tables_table_id;
+    schema.name = "sys_tables";
+    schema.columns = {
+        {0, "table_id", TypeId::INT32, false, ""},
+        {1, "database_id", TypeId::INT32, false, ""},
+        {2, "name", TypeId::STRING, false, ""},
+        {3, "pk_columns", TypeId::STRING, true, ""},
+    };
+    schema.pk_columns = "table_id";
+    return schema;
+}
+
+/// Returns the system table schema for sys_columns.
+/// Stores column definitions for every user table.
+inline TableSchema sys_columns_schema() {
+    TableSchema schema;
+    schema.table_id = sys_columns_table_id;
+    schema.name = "sys_columns";
+    schema.columns = {
+        {0, "table_id", TypeId::INT32, false, ""},
+        {1, "ordinal", TypeId::INT32, false, ""},
+        {2, "name", TypeId::STRING, false, ""},
+        {3, "type_id", TypeId::INT32, false, ""},
+        {4, "nullable", TypeId::BOOL, false, ""},
+        {5, "default_expr", TypeId::STRING, true, ""},
+    };
+    schema.pk_columns = "table_id,ordinal";
+    return schema;
+}
+
+/// Returns the system table schema for sys_indexes.
+/// Stores index definitions.
+inline TableSchema sys_indexes_schema() {
+    TableSchema schema;
+    schema.table_id = sys_indexes_table_id;
+    schema.name = "sys_indexes";
+    schema.columns = {
+        {0, "index_id", TypeId::INT32, false, ""},
+        {1, "table_id", TypeId::INT32, false, ""},
+        {2, "name", TypeId::STRING, false, ""},
+        {3, "index_type", TypeId::STRING, false, ""},
+        {4, "columns", TypeId::STRING, false, ""},
+        {5, "is_unique", TypeId::BOOL, false, ""},
+    };
+    schema.pk_columns = "index_id";
+    return schema;
+}
+
+/// Returns the system table schema for sys_edge_types.
+/// Stores graph edge type definitions.
+inline TableSchema sys_edge_types_schema() {
+    TableSchema schema;
+    schema.table_id = sys_edge_types_table_id;
+    schema.name = "sys_edge_types";
+    schema.columns = {
+        {0, "edge_id", TypeId::INT32, false, ""},
+        {1, "name", TypeId::STRING, false, ""},
+        {2, "source_table_id", TypeId::INT32, false, ""},
+        {3, "target_table_id", TypeId::INT32, false, ""},
+        {4, "properties", TypeId::STRING, true, ""},
+    };
+    schema.pk_columns = "edge_id";
+    return schema;
+}
+
+/// Returns the system table schema for sys_embedding_columns.
+/// Stores EMBEDDING column configurations.
+inline TableSchema sys_embedding_columns_schema() {
+    TableSchema schema;
+    schema.table_id = sys_embedding_columns_table_id;
+    schema.name = "sys_embedding_columns";
+    schema.columns = {
+        {0, "table_id", TypeId::INT32, false, ""},
+        {1, "column_id", TypeId::INT32, false, ""},
+        {2, "dimension", TypeId::INT32, false, ""},
+        {3, "source_expr", TypeId::STRING, true, ""},
+        {4, "provider", TypeId::STRING, false, ""},
+    };
+    schema.pk_columns = "table_id,column_id";
     return schema;
 }
 

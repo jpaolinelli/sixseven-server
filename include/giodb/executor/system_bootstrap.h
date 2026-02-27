@@ -9,38 +9,37 @@ namespace giodb {
 
 // Forward declarations.
 class Catalog;
+class CatalogPersistence;
 class QueryEngine;
 class StorageManager;
 
-/// Bootstraps the system database and sys_settings table on server startup.
+/// Bootstraps the system database and system tables on server startup.
 ///
-/// On first initialization (no bootstrap flag file), creates the giodb_system
-/// database storage, the sys_settings table, and seeds it with default settings.
+/// On first initialization (no bootstrap flag file), creates all system tables
+/// (sys_settings, sys_providers, sys_tables, sys_columns, sys_indexes,
+/// sys_edge_types, sys_embedding_columns) and seeds default settings.
 ///
-/// On subsequent starts, recreates the catalog-level metadata (since the catalog
-/// is in-memory) but skips re-seeding if the bootstrap flag is present.
+/// On subsequent starts, loads the persisted catalog (user tables, indexes,
+/// edge types, embedding columns) from the system catalog tables, then opens
+/// sys_settings and sys_providers for query access.
 class SystemBootstrap {
 public:
-    /// Run bootstrap: create system database storage, sys_settings table,
-    /// and seed default settings on first run.
+    /// Run bootstrap: create or restore system tables and catalog state.
     ///
-    /// @param engine    QueryEngine (used to create tables and insert rows).
-    /// @param catalog   System catalog.
-    /// @param storage   StorageManager for physical storage.
-    /// @param config    Current Config (used for seeding default values).
-    /// @param data_dir  Root data directory.
+    /// @param engine      QueryEngine (used for SQL INSERTs during seeding).
+    /// @param catalog     System catalog.
+    /// @param storage     StorageManager for physical storage.
+    /// @param persistence CatalogPersistence for system table management.
+    /// @param config      Current Config (used for seeding default values).
+    /// @param data_dir    Root data directory.
     [[nodiscard]] static Result<void> bootstrap(QueryEngine& engine,
                                                 Catalog& catalog,
                                                 StorageManager& storage,
+                                                CatalogPersistence& persistence,
                                                 const Config& config,
                                                 const std::filesystem::path& data_dir);
 
     /// Load settings from the sys_settings table and apply them to the config.
-    /// Implements the config priority chain: defaults < file < sys_settings.
-    ///
-    /// @param engine    QueryEngine (used to query sys_settings).
-    /// @param catalog   System catalog.
-    /// @param config    Config to apply overrides to (modified in place).
     [[nodiscard]] static Result<void>
     load_settings(QueryEngine& engine, Catalog& catalog, Config& config);
 

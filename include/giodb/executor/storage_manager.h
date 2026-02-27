@@ -51,11 +51,23 @@ public:
     [[nodiscard]] Result<void>
     create_table_storage(database_id_t db_id, table_id_t table_id, const TableSchema& table_schema);
 
+    /// Open physical storage for an existing table from disk.
+    /// Opens the backing file and initializes the BufferPoolManager + TableHeap.
+    /// Fails with NOT_FOUND if the table file does not exist.
+    [[nodiscard]] Result<void>
+    open_table_storage(database_id_t db_id, table_id_t table_id, const TableSchema& table_schema);
+
+    /// Check whether a table storage file exists on disk.
+    [[nodiscard]] bool table_file_exists(database_id_t db_id, table_id_t table_id) const;
+
     /// Get the storage for an existing table.
     [[nodiscard]] Result<TableStorage*> get_table_storage(table_id_t table_id);
 
     /// Drop storage for a table. Flushes, closes the file, and removes it.
     [[nodiscard]] Result<void> drop_table_storage(database_id_t db_id, table_id_t table_id);
+
+    /// Build a byte-level Schema from a TableSchema (CatalogColumnDef -> ColumnDef).
+    [[nodiscard]] static Schema build_storage_schema(const TableSchema& ts);
 
 private:
     /// Build the directory path for a database: {data_dir}/databases/{db_id}/
@@ -63,9 +75,6 @@ private:
 
     /// Build the file path for a table: {data_dir}/databases/{db_id}/tables/table_{id}.db
     [[nodiscard]] std::filesystem::path table_path(database_id_t db_id, table_id_t id) const;
-
-    /// Build a byte-level Schema from a TableSchema (CatalogColumnDef -> ColumnDef).
-    [[nodiscard]] static Schema build_storage_schema(const TableSchema& ts);
 
     DiskManager& dm_;
     std::filesystem::path data_dir_;
