@@ -65,10 +65,8 @@ Result<Config> Config::load_from_file(const std::string& path) {
     }
     if (j.contains("master_key_path") && j["master_key_path"].is_string()) {
         config.master_key_path = j["master_key_path"].get<std::string>();
-    }
-
-    // Default master_key_path to <data_dir>/master.key if not explicitly set.
-    if (config.master_key_path.empty()) {
+    } else {
+        // Derive master_key_path from data_dir (which may have been overridden above).
         config.master_key_path = config.data_dir + "/master.key";
     }
 
