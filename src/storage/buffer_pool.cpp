@@ -181,19 +181,21 @@ Result<Page*> BufferPoolManager::fetch_page(PageId page_id) {
 Result<Page*> BufferPoolManager::new_page() {
     std::lock_guard<std::mutex> lock(latch_);
 
-    // Allocate a new page on disk.
-    auto alloc_result = disk_manager_.allocate_page(file_id_);
-    if (!alloc_result) {
-        return tl::unexpected(alloc_result.error());
-    }
-    PageId page_id = *alloc_result;
-
-    // Find a frame to hold the new page.
+    // Find a frame first to avoid leaking a disk page ID on failure.
     auto frame_result = find_victim_frame();
     if (!frame_result) {
         return tl::unexpected(frame_result.error());
     }
     FrameId frame_id = *frame_result;
+
+    // Allocate a new page on disk (only after securing a frame).
+    auto alloc_result = disk_manager_.allocate_page(file_id_);
+    if (!alloc_result) {
+        // Return frame to free list since allocation failed.
+        free_list_.push_back(frame_id);
+        return tl::unexpected(alloc_result.error());
+    }
+    PageId page_id = *alloc_result;
     Frame& frame = frames_[frame_id];
 
     // Initialize the page in-memory.

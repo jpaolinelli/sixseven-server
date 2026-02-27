@@ -88,6 +88,12 @@ double to_double(const Value& v) {
         return v.as_float32();
     case TypeId::FLOAT64:
         return v.as_float64();
+    case TypeId::DECIMAL: {
+        auto d = v.as_decimal();
+        // Interpret hi:lo as a signed 128-bit integer and convert to double.
+        // hi carries the sign and upper 64 bits; lo is the lower 64 bits.
+        return static_cast<double>(d.hi) * 18446744073709551616.0 + static_cast<double>(d.lo);
+    }
     default:
         return 0.0;
     }
@@ -233,6 +239,15 @@ bool can_coerce(TypeId from, TypeId to) {
 
     // Both are numeric: allow widening promotion.
     if (from_rank > 0 && to_rank > 0) {
+        // Reject signed→unsigned coercions: negative values have no valid
+        // representation in unsigned types.
+        bool from_signed = (from == TypeId::INT8 || from == TypeId::INT16 ||
+                            from == TypeId::INT32 || from == TypeId::INT64);
+        bool to_unsigned = (to == TypeId::UINT8 || to == TypeId::UINT16 ||
+                            to == TypeId::UINT32 || to == TypeId::UINT64);
+        if (from_signed && to_unsigned) {
+            return false;
+        }
         return to_rank >= from_rank;
     }
 

@@ -164,20 +164,16 @@ Result<void> Page::update_tuple(SlotId slot_id, std::span<const uint8_t> data) {
         return ok();
     }
 
-    // Doesn't fit in-place: delete the old tuple and allocate new space.
-    // Zero old tuple data.
-    std::memset(&data_[entry.offset], 0, entry.length);
-    // Mark old slot as deleted.
-    write_slot(slot_id, {0, 0});
-
-    // Check if there's enough space for the new data (no new slot entry needed).
+    // Doesn't fit in-place: check space first, then delete and reallocate.
     // We reuse the existing slot, so only need raw space for the tuple data.
     size_t raw_avail = data_offset() - slot_directory_end();
     if (new_len > raw_avail) {
-        // Restore the old slot entry since we can't complete the update.
-        write_slot(slot_id, entry);
         return make_error(StatusCode::INVALID_ARGUMENT, "not enough free space for updated tuple");
     }
+
+    // Space is available — safe to zero old data and reallocate.
+    std::memset(&data_[entry.offset], 0, entry.length);
+    write_slot(slot_id, {0, 0});
 
     // Allocate new space at the bottom.
     auto new_offset = static_cast<uint16_t>(data_offset() - new_len);
