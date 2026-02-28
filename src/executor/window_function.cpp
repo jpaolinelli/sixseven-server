@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <unordered_map>
 
@@ -369,6 +370,34 @@ size_t WindowOperator::resolve_bound(FrameBound bound,
     return current_row; // fallback
 }
 
+bool WindowOperator::is_frame_empty(const WindowFrameSpec& frame,
+                                    size_t current_row,
+                                    size_t partition_size) {
+    // Compute unclamped (signed) frame positions to detect logically inverted
+    // frames that resolve_bound's clamping would mask.
+    auto raw_pos = [](FrameBound bound, int64_t offset, int64_t pos, int64_t psize) -> int64_t {
+        switch (bound) {
+        case FrameBound::UNBOUNDED_PRECEDING:
+            return 0;
+        case FrameBound::N_PRECEDING:
+            return pos - std::max(offset, int64_t(0));
+        case FrameBound::CURRENT_ROW:
+            return pos;
+        case FrameBound::N_FOLLOWING:
+            return pos + std::max(offset, int64_t(0));
+        case FrameBound::UNBOUNDED_FOLLOWING:
+            return psize - 1;
+        }
+        return pos;
+    };
+
+    auto pos = static_cast<int64_t>(current_row);
+    auto psize = static_cast<int64_t>(partition_size);
+    int64_t raw_start = raw_pos(frame.start_bound, frame.start_offset, pos, psize);
+    int64_t raw_end = raw_pos(frame.end_bound, frame.end_offset, pos, psize);
+    return raw_start > raw_end || raw_start >= psize || raw_end < 0;
+}
+
 Result<void> WindowOperator::do_open() {
     auto child_open = child_->open();
     if (!child_open) {
@@ -612,9 +641,11 @@ Result<void> WindowOperator::do_open() {
                 }
 
                 case WindowFunc::FIRST_VALUE: {
-                    size_t frame_start =
-                        resolve_bound(wf.frame.start_bound, wf.frame.start_offset, pos, psize);
-                    if (wf.arg != nullptr) {
+                    if (is_frame_empty(wf.frame, pos, psize)) {
+                        result = Value::make_null();
+                    } else if (wf.arg != nullptr) {
+                        size_t frame_start =
+                            resolve_bound(wf.frame.start_bound, wf.frame.start_offset, pos, psize);
                         auto val =
                             evaluate_expr(*wf.arg, partition[frame_start], child_schema, bound_);
                         if (!val) {
@@ -628,9 +659,11 @@ Result<void> WindowOperator::do_open() {
                 }
 
                 case WindowFunc::LAST_VALUE: {
-                    size_t frame_end =
-                        resolve_bound(wf.frame.end_bound, wf.frame.end_offset, pos, psize);
-                    if (wf.arg != nullptr) {
+                    if (is_frame_empty(wf.frame, pos, psize)) {
+                        result = Value::make_null();
+                    } else if (wf.arg != nullptr) {
+                        size_t frame_end =
+                            resolve_bound(wf.frame.end_bound, wf.frame.end_offset, pos, psize);
                         auto val =
                             evaluate_expr(*wf.arg, partition[frame_end], child_schema, bound_);
                         if (!val) {
@@ -650,13 +683,7 @@ Result<void> WindowOperator::do_open() {
                 case WindowFunc::WIN_COUNT:
                 case WindowFunc::WIN_MIN:
                 case WindowFunc::WIN_MAX: {
-                    size_t frame_start =
-                        resolve_bound(wf.frame.start_bound, wf.frame.start_offset, pos, psize);
-                    size_t frame_end =
-                        resolve_bound(wf.frame.end_bound, wf.frame.end_offset, pos, psize);
-
-                    // Ensure frame_start <= frame_end.
-                    if (frame_start > frame_end) {
+                    if (is_frame_empty(wf.frame, pos, psize)) {
                         // Empty frame.
                         if (wf.func == WindowFunc::WIN_COUNT) {
                             result = Value(static_cast<int64_t>(0));
@@ -664,6 +691,10 @@ Result<void> WindowOperator::do_open() {
                             result = Value::make_null();
                         }
                     } else {
+                        size_t frame_start =
+                            resolve_bound(wf.frame.start_bound, wf.frame.start_offset, pos, psize);
+                        size_t frame_end =
+                            resolve_bound(wf.frame.end_bound, wf.frame.end_offset, pos, psize);
                         auto agg_result = evaluate_window_aggregate(wf.func,
                                                                     wf.arg,
                                                                     partition,

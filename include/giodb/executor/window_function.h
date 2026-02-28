@@ -115,6 +115,10 @@ private:
     static size_t
     resolve_bound(FrameBound bound, int64_t offset, size_t current_row, size_t partition_size);
 
+    /// Check if a window frame is logically empty (inverted) using unclamped positions.
+    static bool
+    is_frame_empty(const WindowFrameSpec& frame, size_t current_row, size_t partition_size);
+
     std::unique_ptr<Iterator> child_;
     std::vector<const Expr*> partition_by_;
     std::vector<SortKey> order_by_;
