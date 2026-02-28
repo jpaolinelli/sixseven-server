@@ -124,7 +124,8 @@ Result<void> EmbeddingWorkerPool::enqueue_batch(std::vector<EmbeddingJob> jobs) 
         for (const auto& job : jobs) {
             auto persist_result = persistence_->persist(job);
             if (!persist_result.has_value()) {
-                GIODB_LOG_WARN("failed to persist embedding job: {}", persist_result.error().message);
+                GIODB_LOG_WARN("failed to persist embedding job: {}",
+                               persist_result.error().message);
             }
         }
     }
@@ -306,8 +307,7 @@ void EmbeddingWorkerPool::process_batch(std::vector<EmbeddingJob>& batch) {
 
             // Remove from durable storage after successful processing.
             if (persistence_.has_value() && persistence_->remove) {
-                auto remove_result =
-                    persistence_->remove(job.table_id, job.row_id, job.column_id);
+                auto remove_result = persistence_->remove(job.table_id, job.row_id, job.column_id);
                 if (!remove_result.has_value()) {
                     GIODB_LOG_WARN("failed to remove persisted embedding job: {}",
                                    remove_result.error().message);

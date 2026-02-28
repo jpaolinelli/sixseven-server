@@ -61,8 +61,8 @@ private:
     JoinType type_;
     const Expr* on_expr_;
     const BoundStatement& bound_;
-    OutputSchema schema_;          // Combined schema for ON condition evaluation.
-    OutputSchema output_schema_;   // Actual output schema (left-only for SEMI/ANTI).
+    OutputSchema schema_;        // Combined schema for ON condition evaluation.
+    OutputSchema output_schema_; // Actual output schema (left-only for SEMI/ANTI).
 
     size_t left_col_count_ = 0;
     size_t right_col_count_ = 0;

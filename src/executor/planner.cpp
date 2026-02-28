@@ -602,11 +602,11 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
     return plan_select(stmt, bound, owned_exprs, {});
 }
 
-Result<std::unique_ptr<Iterator>> Planner::plan_select(
-    const SelectStmt& stmt,
-    const BoundStatement& bound,
-    std::vector<ExprPtr>& owned_exprs,
-    const std::unordered_map<std::string, const SelectStmt*>& outer_cte_map) {
+Result<std::unique_ptr<Iterator>>
+Planner::plan_select(const SelectStmt& stmt,
+                     const BoundStatement& bound,
+                     std::vector<ExprPtr>& owned_exprs,
+                     const std::unordered_map<std::string, const SelectStmt*>& outer_cte_map) {
     // -- 0. Build CTE map -------------------------------------------------------
     std::unordered_map<std::string, const SelectStmt*> cte_map = outer_cte_map;
     for (const auto& cte : stmt.ctes) {

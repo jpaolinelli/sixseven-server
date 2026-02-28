@@ -100,10 +100,7 @@ Result<uint64_t> GraphEngine::link(const std::string& edge_type,
     }
 
     // Log to WAL for durability.
-    log_edge_wal(WalRecordType::INSERT,
-                 it->second->config().edge_id,
-                 *result,
-                 edge_type);
+    log_edge_wal(WalRecordType::INSERT, it->second->config().edge_id, *result, edge_type);
 
     GIODB_LOG_DEBUG("LINK via '{}': edge_row_id={}", edge_type, *result);
     return ok(*result);
@@ -133,10 +130,8 @@ GraphEngine::unlink(const std::string& edge_type, const Value& source_pk, const 
     }
 
     // Log to WAL for durability.
-    log_edge_wal(WalRecordType::DELETE,
-                 it->second->config().edge_id,
-                 (*found)->edge_row_id,
-                 edge_type);
+    log_edge_wal(
+        WalRecordType::DELETE, it->second->config().edge_id, (*found)->edge_row_id, edge_type);
 
     GIODB_LOG_DEBUG("UNLINK via '{}': removed edge_row_id={}", edge_type, (*found)->edge_row_id);
     return ok();

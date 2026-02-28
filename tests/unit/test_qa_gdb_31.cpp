@@ -159,11 +159,11 @@ static TableSchema make_qa31_schema(const std::string& name) {
 }
 
 static EmbeddingJob make_qa31_insert_job(table_id_t table_id,
-                                          int64_t row_id,
-                                          int32_t col_id,
-                                          const std::string& text,
-                                          const std::string& provider = "qa31_test",
-                                          int32_t dim = 128) {
+                                         int64_t row_id,
+                                         int32_t col_id,
+                                         const std::string& text,
+                                         const std::string& provider = "qa31_test",
+                                         int32_t dim = 128) {
     EmbeddingJob job;
     job.table_id = table_id;
     job.row_id = row_id;
@@ -177,11 +177,11 @@ static EmbeddingJob make_qa31_insert_job(table_id_t table_id,
 }
 
 static EmbeddingJob make_qa31_update_job(table_id_t table_id,
-                                          int64_t row_id,
-                                          int32_t col_id,
-                                          const std::string& text,
-                                          const std::string& provider = "qa31_test",
-                                          int32_t dim = 128) {
+                                         int64_t row_id,
+                                         int32_t col_id,
+                                         const std::string& text,
+                                         const std::string& provider = "qa31_test",
+                                         int32_t dim = 128) {
     EmbeddingJob job;
     job.table_id = table_id;
     job.row_id = row_id;
