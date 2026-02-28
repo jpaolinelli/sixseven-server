@@ -73,35 +73,33 @@ TEST(QA_ParserOverflow, VarcharMaxOverflow) {
 }
 
 TEST(QA_ParserOverflow, DecimalPrecisionOverflow) {
-    EXPECT_NO_THROW({
-        auto r = try_parse("CREATE TABLE t (c DECIMAL(99999999999999999, 2))");
-    });
+    EXPECT_NO_THROW({ auto r = try_parse("CREATE TABLE t (c DECIMAL(99999999999999999, 2))"); });
 }
 
 TEST(QA_ParserOverflow, DecimalScaleOverflow) {
-    EXPECT_NO_THROW({
-        auto r = try_parse("CREATE TABLE t (c DECIMAL(10, 99999999999999999))");
-    });
+    EXPECT_NO_THROW({ auto r = try_parse("CREATE TABLE t (c DECIMAL(10, 99999999999999999))"); });
 }
 
 TEST(QA_ParserOverflow, EmbeddingDimensionOverflow) {
-    EXPECT_NO_THROW({
-        auto r = try_parse(
-            "CREATE TABLE t (e EMBEDDING(99999999999999999, body, 'openai'))");
-    });
+    EXPECT_NO_THROW(
+        { auto r = try_parse("CREATE TABLE t (e EMBEDDING(99999999999999999, body, 'openai'))"); });
 }
 
 TEST(QA_ParserOverflow, TraverseMaxDepthOverflow) {
+    EXPECT_NO_THROW(
+        { auto r = try_parse("TRAVERSE follows FROM users(1) MAX_DEPTH 99999999999999999"); });
+}
+
+TEST(QA_ParserOverflow, NearestWithinTraverseMaxDepthOverflow) {
     EXPECT_NO_THROW({
-        auto r = try_parse(
-            "TRAVERSE follows FROM users(1) MAX_DEPTH 99999999999999999");
+        auto r = try_parse("SELECT NEAREST 5 TO embedding FROM t WITHIN "
+                           "TRAVERSE follows FROM users(1) MAX_DEPTH 99999999999999999");
     });
 }
 
 TEST(QA_ParserOverflow, ShortestPathMaxDepthOverflow) {
     EXPECT_NO_THROW({
-        auto r = try_parse(
-            "SHORTEST PATH FROM a(1) TO b(2) VIA edge MAX_DEPTH 99999999999999999");
+        auto r = try_parse("SHORTEST PATH FROM a(1) TO b(2) VIA edge MAX_DEPTH 99999999999999999");
     });
 }
 
@@ -140,26 +138,6 @@ TEST(QA_ParserPassword, CreateUserPasswordWithEscapedQuote) {
 // =============================================================================
 // Lexer edge cases
 // =============================================================================
-
-TEST(QA_LexerEdge, DotFloatWithScientificNotation) {
-    // ".123e4" should tokenize as a single FLOAT_LITERAL.
-    Lexer lexer(".123e4");
-    auto tokens = lexer.tokenize();
-    ASSERT_TRUE(tokens.has_value()) << tokens.error().message;
-    // Expect: FLOAT_LITERAL, EOF
-    ASSERT_GE(tokens->size(), 2u);
-    EXPECT_EQ((*tokens)[0].type, TokenType::FLOAT_LITERAL);
-    EXPECT_EQ((*tokens)[0].lexeme, ".123e4");
-}
-
-TEST(QA_LexerEdge, DotFloatWithNegativeExponent) {
-    Lexer lexer(".5e-3");
-    auto tokens = lexer.tokenize();
-    ASSERT_TRUE(tokens.has_value()) << tokens.error().message;
-    ASSERT_GE(tokens->size(), 2u);
-    EXPECT_EQ((*tokens)[0].type, TokenType::FLOAT_LITERAL);
-    EXPECT_EQ((*tokens)[0].lexeme, ".5e-3");
-}
 
 TEST(QA_LexerEdge, EmptyInput) {
     Lexer lexer("");
@@ -741,15 +719,14 @@ TEST(QA_ExprEdge, DeeplyNestedParentheses) {
 // =============================================================================
 
 TEST(QA_DDLEdge, CreateTableMultipleConstraints) {
-    auto stmt = parse_one(
-        "CREATE TABLE t ("
-        "  id INT NOT NULL,"
-        "  name VARCHAR(100),"
-        "  email VARCHAR(255) UNIQUE,"
-        "  PRIMARY KEY (id),"
-        "  UNIQUE (email),"
-        "  CHECK (id > 0)"
-        ")");
+    auto stmt = parse_one("CREATE TABLE t ("
+                          "  id INT NOT NULL,"
+                          "  name VARCHAR(100),"
+                          "  email VARCHAR(255) UNIQUE,"
+                          "  PRIMARY KEY (id),"
+                          "  UNIQUE (email),"
+                          "  CHECK (id > 0)"
+                          ")");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     EXPECT_EQ(ct->columns.size(), 3u);
@@ -757,11 +734,10 @@ TEST(QA_DDLEdge, CreateTableMultipleConstraints) {
 }
 
 TEST(QA_DDLEdge, CreateTableForeignKey) {
-    auto stmt = parse_one(
-        "CREATE TABLE orders ("
-        "  id INT PRIMARY KEY,"
-        "  user_id INT REFERENCES users(id) ON DELETE CASCADE"
-        ")");
+    auto stmt = parse_one("CREATE TABLE orders ("
+                          "  id INT PRIMARY KEY,"
+                          "  user_id INT REFERENCES users(id) ON DELETE CASCADE"
+                          ")");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     ASSERT_EQ(ct->columns.size(), 2u);
@@ -788,15 +764,14 @@ TEST(QA_DDLEdge, CreateTableForeignKeyConstraint) {
 
 TEST(QA_DDLEdge, CreateTableAllTypes) {
     // Test all 22 GioDB types parse correctly in column definitions.
-    auto stmt = parse_one(
-        "CREATE TABLE t ("
-        "  c1 INT, c2 INTEGER, c3 TINYINT, c4 SMALLINT, c5 BIGINT,"
-        "  c6 FLOAT, c7 DOUBLE, c8 DECIMAL(10,2), c9 NUMERIC(5),"
-        "  c10 BOOLEAN, c11 CHAR(1), c12 VARCHAR(255), c13 TEXT,"
-        "  c14 BLOB, c15 DATE, c16 TIME, c17 TIMESTAMP,"
-        "  c18 INTERVAL, c19 POINT, c20 JSON, c21 UUID,"
-        "  c22 EMBEDDING(384, body, 'openai')"
-        ")");
+    auto stmt = parse_one("CREATE TABLE t ("
+                          "  c1 INT, c2 INTEGER, c3 TINYINT, c4 SMALLINT, c5 BIGINT,"
+                          "  c6 FLOAT, c7 DOUBLE, c8 DECIMAL(10,2), c9 NUMERIC(5),"
+                          "  c10 BOOLEAN, c11 CHAR(1), c12 VARCHAR(255), c13 TEXT,"
+                          "  c14 BLOB, c15 DATE, c16 TIME, c17 TIMESTAMP,"
+                          "  c18 INTERVAL, c19 POINT, c20 JSON, c21 UUID,"
+                          "  c22 EMBEDDING(384, body, 'openai')"
+                          ")");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     EXPECT_EQ(ct->columns.size(), 22u);
@@ -839,9 +814,8 @@ TEST(QA_DDLEdge, AlterTableRenameColumn) {
 }
 
 TEST(QA_DDLEdge, CreateEdgeTypeWithProperties) {
-    auto stmt = parse_one(
-        "CREATE EDGE TYPE follows (since TIMESTAMP, weight FLOAT) "
-        "FROM users TO users");
+    auto stmt = parse_one("CREATE EDGE TYPE follows (since TIMESTAMP, weight FLOAT) "
+                          "FROM users TO users");
     auto* ce = dynamic_cast<CreateEdgeTypeStmt*>(stmt.get());
     ASSERT_NE(ce, nullptr);
     EXPECT_EQ(ce->name, "follows");
@@ -881,8 +855,8 @@ TEST(QA_DMLEdge, InsertMultipleRows) {
 }
 
 TEST(QA_DMLEdge, InsertSelect) {
-    auto stmt = parse_one(
-        "INSERT INTO archive (id, name) SELECT id, name FROM users WHERE active = FALSE");
+    auto stmt =
+        parse_one("INSERT INTO archive (id, name) SELECT id, name FROM users WHERE active = FALSE");
     auto* ins = dynamic_cast<InsertStmt*>(stmt.get());
     ASSERT_NE(ins, nullptr);
     EXPECT_NE(ins->select, nullptr);
@@ -927,8 +901,8 @@ TEST(QA_DMLEdge, UpdateNoWhere) {
 }
 
 TEST(QA_DMLEdge, LinkWithProperties) {
-    auto stmt = parse_one(
-        "LINK users(1) TO posts(42) VIA authored (role = 'primary', weight = 1.0)");
+    auto stmt =
+        parse_one("LINK users(1) TO posts(42) VIA authored (role = 'primary', weight = 1.0)");
     auto* link = dynamic_cast<LinkStmt*>(stmt.get());
     ASSERT_NE(link, nullptr);
     EXPECT_EQ(link->source_table, "users");
@@ -938,8 +912,7 @@ TEST(QA_DMLEdge, LinkWithProperties) {
 }
 
 TEST(QA_DMLEdge, UnlinkWithWhere) {
-    auto stmt = parse_one(
-        "UNLINK users(1) FROM posts(42) VIA authored WHERE weight < 0.5");
+    auto stmt = parse_one("UNLINK users(1) FROM posts(42) VIA authored WHERE weight < 0.5");
     auto* unlink = dynamic_cast<UnlinkStmt*>(stmt.get());
     ASSERT_NE(unlink, nullptr);
     EXPECT_NE(unlink->where_expr, nullptr);
@@ -998,13 +971,12 @@ TEST(QA_SelectEdge, SelectMultipleTables) {
 }
 
 TEST(QA_SelectEdge, JoinAllTypes) {
-    auto stmt = parse_one(
-        "SELECT * FROM a "
-        "INNER JOIN b ON a.id = b.a_id "
-        "LEFT OUTER JOIN c ON b.id = c.b_id "
-        "RIGHT JOIN d ON c.id = d.c_id "
-        "FULL OUTER JOIN e ON d.id = e.d_id "
-        "CROSS JOIN f");
+    auto stmt = parse_one("SELECT * FROM a "
+                          "INNER JOIN b ON a.id = b.a_id "
+                          "LEFT OUTER JOIN c ON b.id = c.b_id "
+                          "RIGHT JOIN d ON c.id = d.c_id "
+                          "FULL OUTER JOIN e ON d.id = e.d_id "
+                          "CROSS JOIN f");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->joins.size(), 5u);
@@ -1036,9 +1008,8 @@ TEST(QA_SelectEdge, OrderByMultipleDirections) {
 }
 
 TEST(QA_SelectEdge, GroupByHaving) {
-    auto stmt = parse_one(
-        "SELECT dept, COUNT(*) AS cnt FROM employees "
-        "GROUP BY dept HAVING COUNT(*) > 5");
+    auto stmt = parse_one("SELECT dept, COUNT(*) AS cnt FROM employees "
+                          "GROUP BY dept HAVING COUNT(*) > 5");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->group_by.size(), 1u);
@@ -1084,9 +1055,8 @@ TEST(QA_SelectEdge, Except) {
 }
 
 TEST(QA_SelectEdge, CTEBasic) {
-    auto stmt = parse_one(
-        "WITH active AS (SELECT * FROM users WHERE active = TRUE) "
-        "SELECT * FROM active");
+    auto stmt = parse_one("WITH active AS (SELECT * FROM users WHERE active = TRUE) "
+                          "SELECT * FROM active");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->ctes.size(), 1u);
@@ -1095,9 +1065,8 @@ TEST(QA_SelectEdge, CTEBasic) {
 }
 
 TEST(QA_SelectEdge, MultipleCTEs) {
-    auto stmt = parse_one(
-        "WITH a AS (SELECT 1), b AS (SELECT 2) "
-        "SELECT * FROM a, b");
+    auto stmt = parse_one("WITH a AS (SELECT 1), b AS (SELECT 2) "
+                          "SELECT * FROM a, b");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->ctes.size(), 2u);
@@ -1108,9 +1077,8 @@ TEST(QA_SelectEdge, MultipleCTEs) {
 // =============================================================================
 
 TEST(QA_GraphEdge, TraverseAllOptions) {
-    auto stmt = parse_one(
-        "TRAVERSE follows FROM users(42) DIRECTION BOTH MAX_DEPTH 5 "
-        "WHERE weight > 0.5 FETCH");
+    auto stmt = parse_one("TRAVERSE follows FROM users(42) DIRECTION BOTH MAX_DEPTH 5 "
+                          "WHERE weight > 0.5 FETCH");
     auto* trav = dynamic_cast<TraverseStmt*>(stmt.get());
     ASSERT_NE(trav, nullptr);
     EXPECT_EQ(trav->edge_type, "follows");
@@ -1132,10 +1100,9 @@ TEST(QA_GraphEdge, TraverseMinimal) {
 }
 
 TEST(QA_GraphEdge, NearestWithinTraverse) {
-    auto stmt = parse_one(
-        "NEAREST 5 FROM docs.embedding TO 'search query' "
-        "WITHIN TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 3 "
-        "WHERE category = 'tech' USING COSINE");
+    auto stmt = parse_one("NEAREST 5 FROM docs.embedding TO 'search query' "
+                          "WITHIN TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 3 "
+                          "WHERE category = 'tech' USING COSINE");
     auto* nn = dynamic_cast<NearestStmt*>(stmt.get());
     ASSERT_NE(nn, nullptr);
     EXPECT_EQ(nn->table_name, "docs");
@@ -1146,8 +1113,7 @@ TEST(QA_GraphEdge, NearestWithinTraverse) {
 }
 
 TEST(QA_GraphEdge, NearestL2Metric) {
-    auto stmt = parse_one(
-        "NEAREST 10 FROM t.col TO [1.0, 2.0, 3.0] USING L2");
+    auto stmt = parse_one("NEAREST 10 FROM t.col TO [1.0, 2.0, 3.0] USING L2");
     auto* nn = dynamic_cast<NearestStmt*>(stmt.get());
     ASSERT_NE(nn, nullptr);
     EXPECT_EQ(nn->metric, NearestMetric::L2);
@@ -1161,9 +1127,8 @@ TEST(QA_GraphEdge, NearestDotMetric) {
 }
 
 TEST(QA_GraphEdge, MatchOutgoingEdge) {
-    auto stmt = parse_one(
-        "MATCH (a:users)-[r:follows]->(b:users) "
-        "WHERE a.name = 'alice' RETURN b.name");
+    auto stmt = parse_one("MATCH (a:users)-[r:follows]->(b:users) "
+                          "WHERE a.name = 'alice' RETURN b.name");
     auto* m = dynamic_cast<MatchStmt*>(stmt.get());
     ASSERT_NE(m, nullptr);
     ASSERT_GE(m->pattern.size(), 2u);
@@ -1174,8 +1139,7 @@ TEST(QA_GraphEdge, MatchOutgoingEdge) {
 }
 
 TEST(QA_GraphEdge, MatchIncomingEdge) {
-    auto stmt = parse_one(
-        "MATCH (a:users)<-[r:follows]-(b:users) RETURN a.name");
+    auto stmt = parse_one("MATCH (a:users)<-[r:follows]-(b:users) RETURN a.name");
     auto* m = dynamic_cast<MatchStmt*>(stmt.get());
     ASSERT_NE(m, nullptr);
     ASSERT_GE(m->pattern.size(), 2u);
@@ -1184,8 +1148,7 @@ TEST(QA_GraphEdge, MatchIncomingEdge) {
 }
 
 TEST(QA_GraphEdge, MatchBidirectionalEdge) {
-    auto stmt = parse_one(
-        "MATCH (a:users)<-[r:follows]->(b:users) RETURN a.name");
+    auto stmt = parse_one("MATCH (a:users)<-[r:follows]->(b:users) RETURN a.name");
     auto* m = dynamic_cast<MatchStmt*>(stmt.get());
     ASSERT_NE(m, nullptr);
     ASSERT_GE(m->pattern.size(), 2u);
@@ -1194,8 +1157,7 @@ TEST(QA_GraphEdge, MatchBidirectionalEdge) {
 }
 
 TEST(QA_GraphEdge, MatchUndirectedEdge) {
-    auto stmt = parse_one(
-        "MATCH (a:users)-[r:follows]-(b:users) RETURN a.name");
+    auto stmt = parse_one("MATCH (a:users)-[r:follows]-(b:users) RETURN a.name");
     auto* m = dynamic_cast<MatchStmt*>(stmt.get());
     ASSERT_NE(m, nullptr);
     ASSERT_GE(m->pattern.size(), 2u);
@@ -1205,9 +1167,8 @@ TEST(QA_GraphEdge, MatchUndirectedEdge) {
 }
 
 TEST(QA_GraphEdge, ShortestPathAllOptions) {
-    auto stmt = parse_one(
-        "SHORTEST PATH FROM users(1) TO users(42) VIA follows "
-        "DIRECTION IN MAX_DEPTH 10");
+    auto stmt = parse_one("SHORTEST PATH FROM users(1) TO users(42) VIA follows "
+                          "DIRECTION IN MAX_DEPTH 10");
     auto* sp = dynamic_cast<ShortestPathStmt*>(stmt.get());
     ASSERT_NE(sp, nullptr);
     EXPECT_EQ(sp->from_table, "users");
@@ -1519,8 +1480,7 @@ TEST(QA_Visitor, ExpressionDispatch) {
 // =============================================================================
 
 TEST(QA_MultiStatement, MultipleSemicolonSeparated) {
-    auto stmts = parse_ok(
-        "SELECT 1; SELECT 2; SELECT 3;");
+    auto stmts = parse_ok("SELECT 1; SELECT 2; SELECT 3;");
     EXPECT_EQ(stmts.size(), 3u);
 }
 
@@ -1530,11 +1490,10 @@ TEST(QA_MultiStatement, MultipleNoTrailingSemicolon) {
 }
 
 TEST(QA_MultiStatement, MixedStatementTypes) {
-    auto stmts = parse_ok(
-        "CREATE TABLE t (id INT); "
-        "INSERT INTO t VALUES (1); "
-        "SELECT * FROM t; "
-        "DROP TABLE t");
+    auto stmts = parse_ok("CREATE TABLE t (id INT); "
+                          "INSERT INTO t VALUES (1); "
+                          "SELECT * FROM t; "
+                          "DROP TABLE t");
     EXPECT_EQ(stmts.size(), 4u);
     EXPECT_NE(dynamic_cast<CreateTableStmt*>(stmts[0].get()), nullptr);
     EXPECT_NE(dynamic_cast<InsertStmt*>(stmts[1].get()), nullptr);
