@@ -302,10 +302,20 @@ Result<Token> Lexer::scan_token() {
     case ';':
         return make_token(TokenType::SEMICOLON);
     case '.':
-        // Check for float literal starting with dot: .123
+        // Check for float literal starting with dot: .123, .5e10, .5E-3
         if (!at_end() && std::isdigit(static_cast<unsigned char>(peek()))) {
             while (!at_end() && std::isdigit(static_cast<unsigned char>(peek()))) {
                 advance();
+            }
+            // Check for scientific notation: .5e10, .123E-3
+            if (has_valid_exponent()) {
+                advance(); // consume e/E
+                if (!at_end() && (peek() == '+' || peek() == '-')) {
+                    advance();
+                }
+                while (!at_end() && std::isdigit(static_cast<unsigned char>(peek()))) {
+                    advance();
+                }
             }
             return make_token(TokenType::FLOAT_LITERAL);
         }
