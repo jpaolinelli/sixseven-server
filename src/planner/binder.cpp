@@ -81,6 +81,36 @@ void collect_ungrouped_columns(const Expr& expr,
             collect_ungrouped_columns(*ce->else_expr, bound, out);
         return;
     }
+    if (auto* in = dynamic_cast<const InExpr*>(&expr)) {
+        if (in->expr)
+            collect_ungrouped_columns(*in->expr, bound, out);
+        for (auto& val : in->values) {
+            if (val)
+                collect_ungrouped_columns(*val, bound, out);
+        }
+        return;
+    }
+    if (auto* bet = dynamic_cast<const BetweenExpr*>(&expr)) {
+        if (bet->expr)
+            collect_ungrouped_columns(*bet->expr, bound, out);
+        if (bet->low)
+            collect_ungrouped_columns(*bet->low, bound, out);
+        if (bet->high)
+            collect_ungrouped_columns(*bet->high, bound, out);
+        return;
+    }
+    if (auto* isn = dynamic_cast<const IsNullExpr*>(&expr)) {
+        if (isn->expr)
+            collect_ungrouped_columns(*isn->expr, bound, out);
+        return;
+    }
+    if (auto* like = dynamic_cast<const LikeExpr*>(&expr)) {
+        if (like->expr)
+            collect_ungrouped_columns(*like->expr, bound, out);
+        if (like->pattern)
+            collect_ungrouped_columns(*like->pattern, bound, out);
+        return;
+    }
     // Literals, subqueries, etc. have no column refs to collect.
 }
 
