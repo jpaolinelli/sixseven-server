@@ -28,6 +28,62 @@ bool same_column_ref(const Expr& a, const Expr& b) {
     return ca->table == cb->table && ca->column == cb->column;
 }
 
+/// Recursively collect all ColumnRefExpr nodes from an expression tree,
+/// skipping sub-expressions that are aggregates (as determined by the bound
+/// expression type map).
+void collect_ungrouped_columns(const Expr& expr,
+                               const BoundStatement& bound,
+                               std::vector<const ColumnRefExpr*>& out) {
+    // If this expression is an aggregate, don't recurse into it.
+    auto it = bound.expr_types.find(&expr);
+    if (it != bound.expr_types.end() && it->second.is_aggregate) {
+        return;
+    }
+
+    if (auto* cref = dynamic_cast<const ColumnRefExpr*>(&expr)) {
+        out.push_back(cref);
+        return;
+    }
+    if (auto* bin = dynamic_cast<const BinaryExpr*>(&expr)) {
+        if (bin->lhs)
+            collect_ungrouped_columns(*bin->lhs, bound, out);
+        if (bin->rhs)
+            collect_ungrouped_columns(*bin->rhs, bound, out);
+        return;
+    }
+    if (auto* un = dynamic_cast<const UnaryExpr*>(&expr)) {
+        if (un->operand)
+            collect_ungrouped_columns(*un->operand, bound, out);
+        return;
+    }
+    if (auto* fn = dynamic_cast<const FunctionCallExpr*>(&expr)) {
+        for (auto& arg : fn->args) {
+            if (arg)
+                collect_ungrouped_columns(*arg, bound, out);
+        }
+        return;
+    }
+    if (auto* cast = dynamic_cast<const CastExpr*>(&expr)) {
+        if (cast->expr)
+            collect_ungrouped_columns(*cast->expr, bound, out);
+        return;
+    }
+    if (auto* ce = dynamic_cast<const CaseExpr*>(&expr)) {
+        if (ce->operand)
+            collect_ungrouped_columns(*ce->operand, bound, out);
+        for (auto& w : ce->whens) {
+            if (w.condition)
+                collect_ungrouped_columns(*w.condition, bound, out);
+            if (w.result)
+                collect_ungrouped_columns(*w.result, bound, out);
+        }
+        if (ce->else_expr)
+            collect_ungrouped_columns(*ce->else_expr, bound, out);
+        return;
+    }
+    // Literals, subqueries, etc. have no column refs to collect.
+}
+
 } // namespace
 
 // ===========================================================================
@@ -170,6 +226,18 @@ bool Binder::in_group_by(const Expr& expr, const std::vector<ExprPtr>& group_by)
 // ===========================================================================
 
 Result<BoundStatement> Binder::bind(const Stmt& stmt) {
+    // Clear CTE state only at the top-level entry point so CTEs don't leak
+    // between queries when the same Binder instance is reused. Recursive
+    // calls (e.g., binding CTE sub-queries) must preserve accumulated CTEs.
+    if (bind_depth_ == 0) {
+        cte_results_.clear();
+    }
+    ++bind_depth_;
+    struct DepthGuard {
+        int& depth;
+        ~DepthGuard() { --depth; }
+    } guard{bind_depth_};
+
     // DDL
     if (auto* s = dynamic_cast<const CreateTableStmt*>(&stmt)) {
         return bind_create_table(*s);
@@ -356,6 +424,12 @@ Result<ExprType> Binder::bind_binary(const BinaryExpr& expr, Scope& scope, Bound
                 StatusCode::TYPE_ERROR,
                 "incompatible types for arithmetic: " + std::string(type_name(lhs->type_id)) +
                     " and " + std::string(type_name(rhs->type_id)));
+        }
+        // Arithmetic requires numeric operands — reject STRING, BOOL, etc.
+        if (!is_numeric(*ct)) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              "arithmetic requires numeric types, got " +
+                                  std::string(type_name(*ct)));
         }
         et.type_id = *ct;
         break;
@@ -926,8 +1000,11 @@ Result<void> Binder::validate_aggregates(const SelectStmt& stmt,
             continue;
         }
 
-        // Otherwise, it must be in GROUP BY (for column refs).
-        if (auto* cref = dynamic_cast<const ColumnRefExpr*>(item.expr.get())) {
+        // Recursively collect all column refs in this expression,
+        // skipping aggregate sub-expressions. Each must be in GROUP BY.
+        std::vector<const ColumnRefExpr*> col_refs;
+        collect_ungrouped_columns(*item.expr, bound, col_refs);
+        for (auto* cref : col_refs) {
             if (has_group_by && !in_group_by(*cref, stmt.group_by)) {
                 return make_error(
                     StatusCode::TYPE_ERROR,
@@ -1058,6 +1135,17 @@ Result<BoundStatement> Binder::bind_select(const SelectStmt& stmt, Scope* parent
         if (bound.output_columns.size() != rhs->output_columns.size()) {
             return make_error(StatusCode::TYPE_ERROR,
                               "set operation requires same number of columns");
+        }
+        // Validate type compatibility between corresponding columns.
+        for (size_t i = 0; i < bound.output_columns.size(); ++i) {
+            auto ct = common_type(bound.output_columns[i].type_id, rhs->output_columns[i].type_id);
+            if (!ct) {
+                return make_error(
+                    StatusCode::TYPE_ERROR,
+                    "set operation column " + std::to_string(i + 1) + " has incompatible types: " +
+                        std::string(type_name(bound.output_columns[i].type_id)) + " vs " +
+                        std::string(type_name(rhs->output_columns[i].type_id)));
+            }
         }
     }
 
@@ -1646,6 +1734,13 @@ Result<BoundStatement> Binder::bind_traverse(const TraverseStmt& stmt) {
         return tl::unexpected(from.error());
     }
     bound.referenced_tables.push_back(from->table_id);
+
+    // Verify FROM table is an endpoint (source or target) of the edge type.
+    if (from->table_id != edge->source_table_id && from->table_id != edge->target_table_id) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "TRAVERSE FROM table " + stmt.from_table +
+                              " is not an endpoint of edge type " + stmt.edge_type);
+    }
 
     // Bind FROM key expression.
     Scope empty_scope;

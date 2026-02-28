@@ -256,7 +256,6 @@ TEST_F(QA_Binder, DeleteWhereBoolOk) {
 TEST_F(QA_Binder, TraverseFromUnrelatedTable) {
     // TRAVERSE purchased FROM orders — edge is users→products, not orders.
     // This should fail because orders is not an endpoint of the purchased edge.
-    GTEST_SKIP() << "GDB-221: TRAVERSE doesn't validate FROM table matches edge type";
     bind_error("TRAVERSE purchased FROM orders(1)", StatusCode::TYPE_ERROR);
 }
 
@@ -268,7 +267,6 @@ TEST_F(QA_Binder, TraverseFromUnrelatedTable) {
 TEST_F(QA_Binder, AggregateExprWithUngroupedColumnInExpression) {
     // id + 1 contains 'id' which is not in GROUP BY (age) —
     // should fail like a bare column ref would.
-    GTEST_SKIP() << "GDB-222: validate_aggregates misses ungrouped columns in complex expressions";
     bind_error("SELECT id + 1, COUNT(*) FROM users GROUP BY age", StatusCode::TYPE_ERROR);
 }
 
@@ -409,9 +407,7 @@ TEST_F(QA_Binder, CoercionInInsert) {
 }
 
 TEST_F(QA_Binder, StringSubtractFails) {
-    // STRING - STRING should fail, but the binder only checks common_type
-    // (which succeeds for STRING-STRING) without verifying the result is numeric.
-    GTEST_SKIP() << "GDB-223: STRING arithmetic (subtract/divide/modulo) not rejected";
+    // STRING - STRING should fail — arithmetic requires numeric types.
     bind_error("SELECT name - email FROM users", StatusCode::TYPE_ERROR);
 }
 
@@ -756,7 +752,6 @@ TEST_F(QA_Binder, SelfJoin) {
 
 TEST_F(QA_Binder, UnionTypeMismatch) {
     // UNION of INT32 column and STRING column should fail type check.
-    GTEST_SKIP() << "GDB-224: UNION doesn't validate column type compatibility";
     bind_error("SELECT id FROM users UNION SELECT name FROM users", StatusCode::TYPE_ERROR);
 }
 
@@ -833,7 +828,6 @@ TEST_F(QA_Binder, InsertIntoNonexistentColumn) {
 
 TEST_F(QA_Binder, BinderReuseAcrossQueries) {
     // CTE state should not leak between bind() calls.
-    GTEST_SKIP() << "GDB-225: CTE state leaks between bind() calls";
     auto b1 = bind_ok("WITH cte AS (SELECT id FROM users) SELECT id FROM cte");
     ASSERT_EQ(b1.output_columns.size(), 1u);
     bind_error("SELECT id FROM cte", StatusCode::NOT_FOUND);
