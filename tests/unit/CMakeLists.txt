@@ -106,6 +106,7 @@ add_executable(giodb_unit_tests
     test_qa_gdb_28.cpp
     test_qa_gdb_29.cpp
     test_qa_gdb_30.cpp
+    test_qa_gdb_31.cpp
 )
 
 target_link_libraries(giodb_unit_tests
