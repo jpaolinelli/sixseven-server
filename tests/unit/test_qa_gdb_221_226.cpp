@@ -142,8 +142,7 @@ protected:
         }
         auto result = binder->bind(*stmt);
         if (!result.has_value()) {
-            ADD_FAILURE() << "Bind failed for: " << sql
-                          << "\nError: " << result.error().message;
+            ADD_FAILURE() << "Bind failed for: " << sql << "\nError: " << result.error().message;
             return {};
         }
         return std::move(*result);
@@ -275,30 +274,28 @@ TEST_F(QA_BugfixBinder, GDB222_MixedGroupedUngroupedInExpr) {
 
 // Column inside CAST expression
 TEST_F(QA_BugfixBinder, GDB222_UngroupedColumnInCastExpr) {
-    bind_error("SELECT CAST(id AS VARCHAR), COUNT(*) FROM users GROUP BY age", StatusCode::TYPE_ERROR);
+    bind_error("SELECT CAST(id AS VARCHAR), COUNT(*) FROM users GROUP BY age",
+               StatusCode::TYPE_ERROR);
 }
 
-// Column inside IN expression — collect_ungrouped_columns doesn't handle InExpr
+// Column inside IN expression
 TEST_F(QA_BugfixBinder, GDB222_UngroupedColumnInInExpr) {
-    GTEST_SKIP() << "GDB-227: collect_ungrouped_columns doesn't handle InExpr";
     bind_error("SELECT id IN (1, 2, 3), COUNT(*) FROM users GROUP BY age", StatusCode::TYPE_ERROR);
 }
 
-// Column inside BETWEEN expression — collect_ungrouped_columns doesn't handle BetweenExpr
+// Column inside BETWEEN expression
 TEST_F(QA_BugfixBinder, GDB222_UngroupedColumnInBetweenExpr) {
-    GTEST_SKIP() << "GDB-227: collect_ungrouped_columns doesn't handle BetweenExpr";
-    bind_error("SELECT id BETWEEN 1 AND 10, COUNT(*) FROM users GROUP BY age", StatusCode::TYPE_ERROR);
+    bind_error("SELECT id BETWEEN 1 AND 10, COUNT(*) FROM users GROUP BY age",
+               StatusCode::TYPE_ERROR);
 }
 
-// Column inside IS NULL expression — collect_ungrouped_columns doesn't handle IsNullExpr
+// Column inside IS NULL expression
 TEST_F(QA_BugfixBinder, GDB222_UngroupedColumnInIsNullExpr) {
-    GTEST_SKIP() << "GDB-227: collect_ungrouped_columns doesn't handle IsNullExpr";
     bind_error("SELECT name IS NULL, COUNT(*) FROM users GROUP BY age", StatusCode::TYPE_ERROR);
 }
 
-// Column inside LIKE expression — collect_ungrouped_columns doesn't handle LikeExpr
+// Column inside LIKE expression
 TEST_F(QA_BugfixBinder, GDB222_UngroupedColumnInLikeExpr) {
-    GTEST_SKIP() << "GDB-227: collect_ungrouped_columns doesn't handle LikeExpr";
     bind_error("SELECT name LIKE '%a%', COUNT(*) FROM users GROUP BY age", StatusCode::TYPE_ERROR);
 }
 
@@ -398,7 +395,8 @@ TEST_F(QA_BugfixBinder, GDB224_UnionStringsOk) {
 
 // Multiple columns: one mismatch fails
 TEST_F(QA_BugfixBinder, GDB224_UnionMultiColumnOneMismatch) {
-    bind_error("SELECT id, name FROM users UNION SELECT name, id FROM users", StatusCode::TYPE_ERROR);
+    bind_error("SELECT id, name FROM users UNION SELECT name, id FROM users",
+               StatusCode::TYPE_ERROR);
 }
 
 // BOOL UNION INT — incompatible
@@ -552,7 +550,7 @@ TEST_F(QA_BugfixPipeline, GDB226_OrderByNonSelectedWithOffset) {
     auto qr = exec_ok("SELECT name FROM users ORDER BY age ASC LIMIT 2 OFFSET 1");
     ASSERT_EQ(qr.rows.size(), 2u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "bob");   // age 25
-    EXPECT_EQ(qr.rows[1][0].as_string(), "diana");  // age 28
+    EXPECT_EQ(qr.rows[1][0].as_string(), "diana"); // age 28
 }
 
 // ORDER BY column that IS selected — should still work
@@ -593,11 +591,11 @@ TEST_F(QA_BugfixPipeline, GDB226_AllRowsOrderByNonSelected) {
 
     auto qr = exec_ok("SELECT name FROM users ORDER BY age ASC");
     ASSERT_EQ(qr.rows.size(), 5u);
-    EXPECT_EQ(qr.rows[0][0].as_string(), "eve");      // 22
-    EXPECT_EQ(qr.rows[1][0].as_string(), "bob");      // 25
-    EXPECT_EQ(qr.rows[2][0].as_string(), "diana");    // 28
-    EXPECT_EQ(qr.rows[3][0].as_string(), "alice");    // 30
-    EXPECT_EQ(qr.rows[4][0].as_string(), "charlie");  // 35
+    EXPECT_EQ(qr.rows[0][0].as_string(), "eve");     // 22
+    EXPECT_EQ(qr.rows[1][0].as_string(), "bob");     // 25
+    EXPECT_EQ(qr.rows[2][0].as_string(), "diana");   // 28
+    EXPECT_EQ(qr.rows[3][0].as_string(), "alice");   // 30
+    EXPECT_EQ(qr.rows[4][0].as_string(), "charlie"); // 35
 }
 
 // ORDER BY non-selected column with WHERE filter
