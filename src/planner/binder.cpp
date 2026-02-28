@@ -377,9 +377,8 @@ Result<ExprType> Binder::bind_binary(const BinaryExpr& expr, Scope& scope, Bound
             if (!ct) {
                 return make_error(
                     StatusCode::TYPE_ERROR,
-                    "incompatible types for comparison: " +
-                        std::string(type_name(lhs->type_id)) + " and " +
-                        std::string(type_name(rhs->type_id)));
+                    "incompatible types for comparison: " + std::string(type_name(lhs->type_id)) +
+                        " and " + std::string(type_name(rhs->type_id)));
             }
         }
         et.type_id = TypeId::BOOL;
