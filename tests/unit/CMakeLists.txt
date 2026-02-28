@@ -110,6 +110,41 @@ add_executable(giodb_unit_tests
     test_qa_gdb_229_232.cpp
     test_qa_gdb_233_234.cpp
     test_qa_gdb_235_237.cpp
+    test_qa_gdb_92.cpp
+    test_qa_gdb_93.cpp
+    test_qa_gdb_94.cpp
+    test_qa_gdb_95.cpp
+    test_qa_gdb_96.cpp
+    test_qa_gdb_97.cpp
+    test_qa_gdb_98.cpp
+    test_qa_gdb_99.cpp
+    test_qa_gdb_100.cpp
+    test_qa_gdb_102.cpp
+    test_qa_gdb_103.cpp
+    test_qa_gdb_104.cpp
+    test_qa_gdb_105.cpp
+    test_qa_gdb_106.cpp
+    test_qa_gdb_122.cpp
+    test_qa_gdb_123.cpp
+    test_qa_gdb_124.cpp
+    test_qa_gdb_126.cpp
+    test_qa_gdb_129.cpp
+    test_qa_gdb_130.cpp
+    test_qa_gdb_131.cpp
+    test_qa_gdb_132.cpp
+    test_qa_gdb_137.cpp
+    test_qa_gdb_138.cpp
+    test_qa_gdb_139.cpp
+    test_qa_gdb_140.cpp
+    test_qa_gdb_141.cpp
+    test_qa_gdb_142.cpp
+    test_qa_gdb_143.cpp
+    test_qa_gdb_144.cpp
+    test_qa_gdb_145.cpp
+    test_qa_gdb_146.cpp
+    test_qa_gdb_147.cpp
+    test_qa_gdb_148.cpp
+    test_qa_gdb_149.cpp
 )
 
 target_link_libraries(giodb_unit_tests
