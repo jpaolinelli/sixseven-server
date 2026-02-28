@@ -23,6 +23,7 @@ add_library(giodb_executor STATIC
     shortest_path.cpp
     pattern_match.cpp
     nearest_scan.cpp
+    catalog_persistence.cpp
     storage_manager.cpp
     system_bootstrap.cpp
     settings_cache.cpp

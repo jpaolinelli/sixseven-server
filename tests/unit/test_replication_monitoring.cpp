@@ -7,6 +7,7 @@
 #include "giodb/executor/settings_cache.h"
 #include "giodb/executor/storage_manager.h"
 #include "giodb/executor/system_bootstrap.h"
+#include "giodb/executor/catalog_persistence.h"
 #include "giodb/server/replication_health_monitor.h"
 #include "giodb/server/replication_slot.h"
 #include "giodb/server/wal_receiver.h"
@@ -89,12 +90,13 @@ protected:
         dm_ = std::make_unique<DiskManager>();
         catalog_ = std::make_unique<Catalog>();
         storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
+        persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
         engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
         config_ = Config::load_defaults();
         cache_ = std::make_unique<SettingsCache>();
 
         // Bootstrap system database.
-        auto boot = SystemBootstrap::bootstrap(*engine_, *catalog_, *storage_, config_, data_dir_);
+        auto boot = SystemBootstrap::bootstrap(*engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
         ASSERT_TRUE(boot.has_value()) << boot.error().message;
         auto load = cache_->load(*engine_);
         ASSERT_TRUE(load.has_value()) << load.error().message;
@@ -154,6 +156,7 @@ protected:
     std::unique_ptr<DiskManager> dm_;
     std::unique_ptr<Catalog> catalog_;
     std::unique_ptr<StorageManager> storage_;
+    std::unique_ptr<CatalogPersistence> persistence_;
     std::unique_ptr<QueryEngine> engine_;
     std::unique_ptr<SettingsCache> cache_;
     std::unique_ptr<WalWriter> writer_;

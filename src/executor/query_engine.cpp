@@ -2,6 +2,7 @@
 
 #include "giodb/catalog/schema.h"
 #include "giodb/common/logging.h"
+#include "giodb/executor/catalog_persistence.h"
 #include "giodb/executor/explain.h"
 #include "giodb/executor/expr_evaluator.h"
 #include "giodb/executor/planner.h"
@@ -95,6 +96,10 @@ void QueryEngine::set_user_manager(UserManager* user_mgr) {
 
 void QueryEngine::set_auth_method(AuthMethod method) {
     auth_method_ = method;
+}
+
+void QueryEngine::set_catalog_persistence(CatalogPersistence* persistence) {
+    catalog_persistence_ = persistence;
 }
 
 // ---------------------------------------------------------------------------
@@ -449,6 +454,14 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
         return make_error(storage_result.error().code, storage_result.error().message);
     }
 
+    // Persist to system catalog tables.
+    if (catalog_persistence_ != nullptr) {
+        auto persist = catalog_persistence_->persist_table(current_database_id_, *schema);
+        if (!persist) {
+            GIODB_LOG_WARN("failed to persist table '{}': {}", stmt.name, persist.error().message);
+        }
+    }
+
     QueryResult qr;
     qr.message = "CREATE TABLE";
     return ok(std::move(qr));
@@ -475,6 +488,16 @@ Result<QueryResult> QueryEngine::execute_drop_table(const DropTableStmt& stmt) {
     auto drop_storage = storage_.drop_table_storage(current_database_id_, table_id);
     if (!drop_storage) {
         return make_error(drop_storage.error().code, drop_storage.error().message);
+    }
+
+    // Remove from persistence before dropping from catalog.
+    if (catalog_persistence_ != nullptr) {
+        auto remove = catalog_persistence_->remove_table(table_id);
+        if (!remove) {
+            GIODB_LOG_WARN("failed to remove table '{}' from persistence: {}",
+                           stmt.name,
+                           remove.error().message);
+        }
     }
 
     // Remove from catalog.

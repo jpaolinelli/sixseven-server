@@ -7,6 +7,7 @@
 #include "giodb/executor/query_engine.h"
 #include "giodb/executor/storage_manager.h"
 #include "giodb/executor/system_bootstrap.h"
+#include "giodb/executor/catalog_persistence.h"
 #include "giodb/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
@@ -31,12 +32,13 @@ protected:
         dm_ = std::make_unique<DiskManager>();
         catalog_ = std::make_unique<Catalog>();
         storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
+        persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
         engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
         config_ = Config::load_defaults();
         cache_ = std::make_unique<ProviderCache>();
 
         // Bootstrap system database + sys_settings + sys_providers.
-        auto boot = SystemBootstrap::bootstrap(*engine_, *catalog_, *storage_, config_, data_dir_);
+        auto boot = SystemBootstrap::bootstrap(*engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
         ASSERT_TRUE(boot.has_value()) << boot.error().message;
 
         // Load provider cache.
@@ -105,6 +107,7 @@ protected:
     std::unique_ptr<Catalog> catalog_;
     std::filesystem::path data_dir_;
     std::unique_ptr<StorageManager> storage_;
+    std::unique_ptr<CatalogPersistence> persistence_;
     std::unique_ptr<QueryEngine> engine_;
     std::unique_ptr<ProviderCache> cache_;
     Config config_;
@@ -726,6 +729,7 @@ protected:
         dm_ = std::make_unique<DiskManager>();
         catalog_ = std::make_unique<Catalog>();
         storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
+        persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
         engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
         config_ = Config::load_defaults();
         cache_ = std::make_unique<ProviderCache>();
@@ -740,7 +744,7 @@ protected:
         cache_->set_secrets_manager(secrets_manager_.get());
 
         // Bootstrap system database + sys_settings + sys_providers.
-        auto boot = SystemBootstrap::bootstrap(*engine_, *catalog_, *storage_, config_, data_dir_);
+        auto boot = SystemBootstrap::bootstrap(*engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
         ASSERT_TRUE(boot.has_value()) << boot.error().message;
 
         // Load provider cache.
@@ -816,6 +820,7 @@ protected:
     std::unique_ptr<Catalog> catalog_;
     std::filesystem::path data_dir_;
     std::unique_ptr<StorageManager> storage_;
+    std::unique_ptr<CatalogPersistence> persistence_;
     std::unique_ptr<QueryEngine> engine_;
     std::unique_ptr<ProviderCache> cache_;
     std::unique_ptr<SecretsManager> secrets_manager_;

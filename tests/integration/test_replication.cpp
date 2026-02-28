@@ -7,6 +7,7 @@
 #include "giodb/executor/settings_cache.h"
 #include "giodb/executor/storage_manager.h"
 #include "giodb/executor/system_bootstrap.h"
+#include "giodb/executor/catalog_persistence.h"
 #include "giodb/server/promotion_manager.h"
 #include "giodb/server/replication_connection.h"
 #include "giodb/server/replication_health_monitor.h"
@@ -261,7 +262,8 @@ TEST_F(ReplicationIntegrationTest, WriteRejectionOnStandby) {
     StorageManager storage(dm, data_dir);
     QueryEngine engine(catalog, storage);
     Config config = Config::load_defaults();
-    auto boot = SystemBootstrap::bootstrap(engine, catalog, storage, config, data_dir);
+    CatalogPersistence persistence(catalog, storage);
+    auto boot = SystemBootstrap::bootstrap(engine, catalog, storage, persistence, config, data_dir);
     ASSERT_TRUE(boot.has_value()) << boot.error().message;
     SettingsCache cache;
     ASSERT_TRUE(cache.load(engine).has_value());
@@ -350,7 +352,8 @@ TEST_F(ReplicationIntegrationTest, ReplicationLagMonitoring) {
     StorageManager storage(dm, data_dir);
     QueryEngine engine(catalog, storage);
     Config config = Config::load_defaults();
-    auto boot = SystemBootstrap::bootstrap(engine, catalog, storage, config, data_dir);
+    CatalogPersistence persistence(catalog, storage);
+    auto boot = SystemBootstrap::bootstrap(engine, catalog, storage, persistence, config, data_dir);
     ASSERT_TRUE(boot.has_value()) << boot.error().message;
     SettingsCache cache;
     ASSERT_TRUE(cache.load(engine).has_value());
@@ -396,7 +399,8 @@ TEST_F(ReplicationIntegrationTest, FailoverPromotion) {
     QueryEngine engine(catalog, storage);
     Config config = Config::load_defaults();
     config.standby_mode = true;
-    auto boot = SystemBootstrap::bootstrap(engine, catalog, storage, config, standby_data);
+    CatalogPersistence persistence(catalog, storage);
+    auto boot = SystemBootstrap::bootstrap(engine, catalog, storage, persistence, config, standby_data);
     ASSERT_TRUE(boot.has_value()) << boot.error().message;
     SettingsCache cache;
     ASSERT_TRUE(cache.load(engine).has_value());

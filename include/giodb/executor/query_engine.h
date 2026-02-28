@@ -15,6 +15,7 @@
 namespace giodb {
 
 // Forward declarations.
+class CatalogPersistence;
 enum class AuthMethod : uint8_t;
 struct AlterUserStmt;
 struct BoundStatement;
@@ -130,6 +131,9 @@ public:
     /// Set the authentication method used for password hashing in CREATE/ALTER USER.
     void set_auth_method(AuthMethod method);
 
+    /// Set the catalog persistence layer for persisting DDL changes.
+    void set_catalog_persistence(CatalogPersistence* persistence);
+
 private:
     /// Execute a CREATE USER statement.
     [[nodiscard]] Result<QueryResult> execute_create_user(const CreateUserStmt& stmt);
@@ -197,6 +201,7 @@ private:
     WalReceiver* wal_receiver_ = nullptr;
     WalWriter* wal_writer_ = nullptr;
     UserManager* user_mgr_ = nullptr;
+    CatalogPersistence* catalog_persistence_ = nullptr;
     AuthMethod auth_method_{};
     database_id_t current_database_id_ = default_database_id;
     int skip_masking_depth_ = 0;

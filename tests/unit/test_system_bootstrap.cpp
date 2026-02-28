@@ -2,6 +2,7 @@
 #include "giodb/common/config.h"
 #include "giodb/common/types.h"
 #include "giodb/common/value.h"
+#include "giodb/executor/catalog_persistence.h"
 #include "giodb/executor/query_engine.h"
 #include "giodb/executor/storage_manager.h"
 #include "giodb/executor/system_bootstrap.h"
@@ -29,6 +30,7 @@ protected:
         dm_ = std::make_unique<DiskManager>();
         catalog_ = std::make_unique<Catalog>();
         storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
+        persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
         engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
         config_ = Config::load_defaults();
     }
@@ -62,8 +64,8 @@ protected:
 
     /// Run bootstrap and assert it succeeds.
     void run_bootstrap() {
-        auto result =
-            SystemBootstrap::bootstrap(*engine_, *catalog_, *storage_, config_, data_dir_);
+        auto result = SystemBootstrap::bootstrap(
+            *engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
         ASSERT_TRUE(result.has_value()) << result.error().message;
     }
 
@@ -71,6 +73,7 @@ protected:
     std::unique_ptr<Catalog> catalog_;
     std::filesystem::path data_dir_;
     std::unique_ptr<StorageManager> storage_;
+    std::unique_ptr<CatalogPersistence> persistence_;
     std::unique_ptr<QueryEngine> engine_;
     Config config_;
 };
@@ -246,6 +249,7 @@ TEST_F(SystemBootstrapTest, SecondBootstrapSkipsSeedButCreatesTable) {
     dm_ = std::make_unique<DiskManager>();
     catalog_ = std::make_unique<Catalog>();
     storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
+    persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
     engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
 
     // Second bootstrap: should still create the table (in-memory catalog is fresh).
