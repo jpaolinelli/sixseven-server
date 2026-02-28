@@ -92,6 +92,8 @@ add_executable(giodb_unit_tests
     test_qa_gdb_18.cpp
     test_catalog_persistence.cpp
     test_qa_gdb_215.cpp
+    test_qa_gdb_19.cpp
+    test_qa_gdb_20.cpp
 )
 
 target_link_libraries(giodb_unit_tests

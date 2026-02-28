@@ -1,6 +1,8 @@
 #include "giodb/parser/parser.h"
 
 #include <algorithm>
+#include <stdexcept>
+#include <string>
 
 namespace giodb {
 
@@ -186,6 +188,17 @@ std::string unquote_string(std::string_view lexeme) {
         }
     }
     return result;
+}
+
+/// Safe std::stoi wrapper that returns a Result instead of throwing.
+Result<int> safe_stoi(std::string_view s) {
+    try {
+        return ok(std::stoi(std::string(s)));
+    } catch (const std::out_of_range&) {
+        return make_error(StatusCode::PARSE_ERROR, "integer literal out of range");
+    } catch (const std::invalid_argument&) {
+        return make_error(StatusCode::PARSE_ERROR, "invalid integer literal");
+    }
 }
 
 } // namespace
@@ -606,7 +619,10 @@ Result<TypeSpec> Parser::parse_type_spec() {
         auto dim = expect(TokenType::INTEGER_LITERAL, "expected dimension");
         if (!dim)
             return tl::unexpected(dim.error());
-        ts.param1 = std::stoi(std::string(dim->lexeme));
+        auto dim_val = safe_stoi(dim->lexeme);
+        if (!dim_val)
+            return tl::unexpected(dim_val.error());
+        ts.param1 = *dim_val;
 
         auto c1 = expect(TokenType::COMMA, "expected ',' after dimension");
         if (!c1)
@@ -640,13 +656,19 @@ Result<TypeSpec> Parser::parse_type_spec() {
         auto p1 = expect(TokenType::INTEGER_LITERAL, "expected parameter value");
         if (!p1)
             return tl::unexpected(p1.error());
-        ts.param1 = std::stoi(std::string(p1->lexeme));
+        auto p1_val = safe_stoi(p1->lexeme);
+        if (!p1_val)
+            return tl::unexpected(p1_val.error());
+        ts.param1 = *p1_val;
 
         if (match(TokenType::COMMA)) {
             auto p2 = expect(TokenType::INTEGER_LITERAL, "expected second parameter");
             if (!p2)
                 return tl::unexpected(p2.error());
-            ts.param2 = std::stoi(std::string(p2->lexeme));
+            auto p2_val = safe_stoi(p2->lexeme);
+            if (!p2_val)
+                return tl::unexpected(p2_val.error());
+            ts.param2 = *p2_val;
         }
 
         auto rp = expect(TokenType::RPAREN, "expected ')'");
@@ -1097,7 +1119,7 @@ Result<StmtPtr> Parser::parse_create_user() {
     auto pass = expect(TokenType::STRING_LITERAL, "expected password string");
     if (!pass)
         return tl::unexpected(pass.error());
-    stmt->password = std::string(pass->lexeme);
+    stmt->password = unquote_string(pass->lexeme);
 
     return ok(StmtPtr(std::move(stmt)));
 }
@@ -1145,7 +1167,7 @@ Result<StmtPtr> Parser::parse_alter_user() {
     auto pass = expect(TokenType::STRING_LITERAL, "expected password string");
     if (!pass)
         return tl::unexpected(pass.error());
-    stmt->password = std::string(pass->lexeme);
+    stmt->password = unquote_string(pass->lexeme);
 
     return ok(StmtPtr(std::move(stmt)));
 }
@@ -1833,7 +1855,10 @@ Result<StmtPtr> Parser::parse_traverse() {
         auto depth = expect(TokenType::INTEGER_LITERAL, "expected integer after MAX_DEPTH");
         if (!depth)
             return tl::unexpected(depth.error());
-        stmt->max_depth = std::stoi(std::string(depth->lexeme));
+        auto depth_val = safe_stoi(depth->lexeme);
+        if (!depth_val)
+            return tl::unexpected(depth_val.error());
+        stmt->max_depth = *depth_val;
     }
 
     // Optional WHERE.
@@ -1947,7 +1972,10 @@ Result<StmtPtr> Parser::parse_nearest() {
             auto depth = expect(TokenType::INTEGER_LITERAL, "expected integer after MAX_DEPTH");
             if (!depth)
                 return tl::unexpected(depth.error());
-            trav->max_depth = std::stoi(std::string(depth->lexeme));
+            auto depth_val = safe_stoi(depth->lexeme);
+            if (!depth_val)
+                return tl::unexpected(depth_val.error());
+            trav->max_depth = *depth_val;
         }
 
         stmt->within_traverse = std::move(trav);
@@ -2203,7 +2231,10 @@ Result<StmtPtr> Parser::parse_shortest_path() {
         auto depth = expect(TokenType::INTEGER_LITERAL, "expected integer after MAX_DEPTH");
         if (!depth)
             return tl::unexpected(depth.error());
-        stmt->max_depth = std::stoi(std::string(depth->lexeme));
+        auto depth_val = safe_stoi(depth->lexeme);
+        if (!depth_val)
+            return tl::unexpected(depth_val.error());
+        stmt->max_depth = *depth_val;
     }
 
     return ok(StmtPtr(std::move(stmt)));
