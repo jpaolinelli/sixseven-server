@@ -1,10 +1,13 @@
 #include "giodb/graph/graph_engine.h"
 
 #include "giodb/common/logging.h"
+#include "giodb/storage/wal.h"
+
+#include <cstring>
 
 namespace giodb {
 
-GraphEngine::GraphEngine(Catalog& catalog) : catalog_(catalog) {}
+GraphEngine::GraphEngine(Catalog& catalog, WalWriter* wal) : catalog_(catalog), wal_(wal) {}
 
 Result<edge_id_t> GraphEngine::create_edge_type(const std::string& name,
                                                 table_id_t source_table_id,
@@ -96,6 +99,9 @@ Result<uint64_t> GraphEngine::link(const std::string& edge_type,
         return tl::unexpected(result.error());
     }
 
+    // Log to WAL for durability.
+    log_edge_wal(WalRecordType::INSERT, it->second->config().edge_id, *result, edge_type);
+
     GIODB_LOG_DEBUG("LINK via '{}': edge_row_id={}", edge_type, *result);
     return ok(*result);
 }
@@ -122,6 +128,10 @@ GraphEngine::unlink(const std::string& edge_type, const Value& source_pk, const 
     if (!del.has_value()) {
         return tl::unexpected(del.error());
     }
+
+    // Log to WAL for durability.
+    log_edge_wal(
+        WalRecordType::DELETE, it->second->config().edge_id, (*found)->edge_row_id, edge_type);
 
     GIODB_LOG_DEBUG("UNLINK via '{}': removed edge_row_id={}", edge_type, (*found)->edge_row_id);
     return ok();
@@ -217,6 +227,35 @@ std::vector<std::string> GraphEngine::list_edge_types() const {
         names.push_back(name);
     }
     return names;
+}
+
+void GraphEngine::log_edge_wal(WalRecordType type,
+                               edge_id_t edge_id,
+                               uint64_t edge_row_id,
+                               const std::string& edge_type_name) {
+    if (wal_ == nullptr) {
+        return;
+    }
+
+    // Encode edge_row_id and edge type name into data payload.
+    std::vector<uint8_t> data;
+    data.resize(sizeof(uint64_t) + sizeof(uint32_t) + edge_type_name.size());
+    std::memcpy(data.data(), &edge_row_id, sizeof(uint64_t));
+    auto name_len = static_cast<uint32_t>(edge_type_name.size());
+    std::memcpy(data.data() + sizeof(uint64_t), &name_len, sizeof(uint32_t));
+    std::memcpy(data.data() + sizeof(uint64_t) + sizeof(uint32_t),
+                edge_type_name.data(),
+                edge_type_name.size());
+
+    WalRecord record;
+    record.type = type;
+    record.table_id = static_cast<uint32_t>(edge_id);
+    record.data = std::move(data);
+
+    auto result = wal_->append(record);
+    if (!result.has_value()) {
+        GIODB_LOG_WARN("Failed to log edge WAL record for '{}'", edge_type_name);
+    }
 }
 
 } // namespace giodb

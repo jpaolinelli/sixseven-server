@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <thread>
@@ -49,6 +50,16 @@ public:
 /// Parameters: (table_id, row_id, column_id, embedding_vector).
 using EmbeddingStoreCallback =
     std::function<Result<void>(table_id_t, int64_t, int32_t, std::span<const float>)>;
+
+/// Persistence interface for embedding job queue survival across restarts.
+struct EmbeddingJobPersistence {
+    /// Persist a job to durable storage (e.g., sys_embedding_jobs table).
+    std::function<Result<void>(const EmbeddingJob&)> persist;
+    /// Remove a completed job from durable storage.
+    std::function<Result<void>(table_id_t, int64_t, int32_t)> remove;
+    /// Load all pending jobs from durable storage on startup.
+    std::function<Result<std::vector<EmbeddingJob>>()> load;
+};
 
 /// Configuration for the embedding worker pool.
 struct EmbeddingWorkerConfig {
@@ -100,7 +111,12 @@ public:
     /// Set the callback for storing generated embeddings.
     void set_store_callback(EmbeddingStoreCallback callback);
 
-    /// Start the worker threads.
+    /// Set the persistence interface for job queue durability.
+    /// When set, jobs are persisted on enqueue and removed on completion.
+    void set_persistence(EmbeddingJobPersistence persistence);
+
+    /// Start the worker threads. If persistence is configured, loads
+    /// pending jobs from durable storage before starting workers.
     [[nodiscard]] Result<void> start();
 
     /// Stop the worker threads gracefully. Finishes the current batch,
@@ -155,6 +171,9 @@ private:
 
     // Store callback.
     EmbeddingStoreCallback store_callback_;
+
+    // Optional persistence for job queue durability across restarts.
+    std::optional<EmbeddingJobPersistence> persistence_;
 
     // Worker threads.
     std::vector<std::thread> workers_;

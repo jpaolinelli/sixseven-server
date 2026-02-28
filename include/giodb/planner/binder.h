@@ -110,6 +110,13 @@ public:
     /// Bind a parsed statement. Validates names, types, and semantics.
     [[nodiscard]] Result<BoundStatement> bind(const Stmt& stmt);
 
+    /// Inject outer CTE bindings so subquery binders can resolve CTE references.
+    /// Injected CTEs survive the top-level bind() call's CTE clearing.
+    void add_cte(const std::string& name, const BoundStatement& bound) {
+        cte_results_.emplace(name, bound);
+        has_outer_ctes_ = true;
+    }
+
 private:
     const Catalog& catalog_;
     database_id_t database_id_;
@@ -117,6 +124,10 @@ private:
     /// CTE results accumulated during binding. Inner subqueries can reference
     /// CTEs defined by their parent queries.
     std::unordered_map<std::string, BoundStatement> cte_results_;
+
+    /// Set when outer CTE bindings have been injected via add_cte().
+    /// Prevents bind() from clearing them at the top-level entry point.
+    bool has_outer_ctes_ = false;
 
     /// Recursion depth for bind() calls. Used to clear CTE state only at the
     /// top-level entry point, not during recursive calls for sub-queries/CTEs.

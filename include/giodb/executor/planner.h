@@ -64,6 +64,13 @@ private:
                                                                 const BoundStatement& bound,
                                                                 std::vector<ExprPtr>& owned_exprs);
 
+    /// Overload that merges an outer CTE map into the local CTE scope.
+    [[nodiscard]] Result<std::unique_ptr<Iterator>>
+    plan_select(const SelectStmt& stmt,
+                const BoundStatement& bound,
+                std::vector<ExprPtr>& owned_exprs,
+                const std::unordered_map<std::string, const SelectStmt*>& outer_cte_map);
+
     [[nodiscard]] Result<std::unique_ptr<Iterator>> plan_insert(const InsertStmt& stmt,
                                                                 const BoundStatement& bound);
 

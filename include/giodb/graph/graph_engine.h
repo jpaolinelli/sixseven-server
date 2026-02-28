@@ -4,6 +4,7 @@
 #include "giodb/common/result.h"
 #include "giodb/common/value.h"
 #include "giodb/graph/edge_table.h"
+#include "giodb/storage/wal_record.h"
 
 #include <functional>
 #include <memory>
@@ -29,9 +30,13 @@ namespace giodb {
 /// ```
 ///
 /// Thread safety: All public methods are protected by a mutex.
+class WalWriter;
+
 class GraphEngine {
 public:
-    explicit GraphEngine(Catalog& catalog);
+    /// @param catalog  System catalog for metadata.
+    /// @param wal      Optional WAL writer for durability. May be nullptr.
+    explicit GraphEngine(Catalog& catalog, WalWriter* wal = nullptr);
 
     /// Create an edge type and its backing EdgeTable.
     /// Registers the edge type in the catalog and creates the in-memory EdgeTable.
@@ -81,7 +86,14 @@ public:
     [[nodiscard]] std::vector<std::string> list_edge_types() const;
 
 private:
+    /// Log a LINK or UNLINK operation to the WAL.
+    void log_edge_wal(WalRecordType type,
+                      edge_id_t edge_id,
+                      uint64_t edge_row_id,
+                      const std::string& edge_type_name);
+
     Catalog& catalog_;
+    WalWriter* wal_ = nullptr;
     mutable std::mutex mu_;
     std::unordered_map<std::string, std::unique_ptr<EdgeTable>> edge_tables_;
 };

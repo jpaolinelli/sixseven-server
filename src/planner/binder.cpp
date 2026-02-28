@@ -259,7 +259,8 @@ Result<BoundStatement> Binder::bind(const Stmt& stmt) {
     // Clear CTE state only at the top-level entry point so CTEs don't leak
     // between queries when the same Binder instance is reused. Recursive
     // calls (e.g., binding CTE sub-queries) must preserve accumulated CTEs.
-    if (bind_depth_ == 0) {
+    // Also preserve CTEs injected via add_cte() (outer query scope).
+    if (bind_depth_ == 0 && !has_outer_ctes_) {
         cte_results_.clear();
     }
     ++bind_depth_;

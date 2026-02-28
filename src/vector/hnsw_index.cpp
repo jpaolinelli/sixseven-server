@@ -264,7 +264,7 @@ Result<uint32_t> HnswIndex::insert(std::span<const float> vector) {
                     nlist.begin(), nlist.end(), [](const HnswNeighbor& a, const HnswNeighbor& b) {
                         return a.distance < b.distance;
                     });
-                if (farthest != nlist.end() && neighbor.distance < farthest->distance) {
+                if (farthest != nlist.end() && neighbor.distance <= farthest->distance) {
                     *farthest = {new_id, neighbor.distance};
                 }
             }

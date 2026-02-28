@@ -11,7 +11,18 @@ NestedLoopJoinOperator::NestedLoopJoinOperator(std::unique_ptr<Iterator> left,
                                                const BoundStatement& bound,
                                                OutputSchema schema)
     : left_(std::move(left)), right_(std::move(right)), type_(type), on_expr_(on_expr),
-      bound_(bound), schema_(std::move(schema)) {}
+      bound_(bound), schema_(std::move(schema)), output_schema_(schema_) {
+    // SEMI/ANTI joins only output left-side columns, so build a trimmed schema.
+    if (type_ == JoinType::SEMI || type_ == JoinType::ANTI) {
+        size_t left_count = left_->output_schema().column_count();
+        std::vector<OutputColumn> left_cols;
+        left_cols.reserve(left_count);
+        for (size_t i = 0; i < left_count && i < schema_.column_count(); ++i) {
+            left_cols.push_back(schema_.column(i));
+        }
+        output_schema_ = OutputSchema(std::move(left_cols));
+    }
+}
 
 // ---------------------------------------------------------------------------
 // open
@@ -106,6 +117,7 @@ Result<std::optional<Tuple>> NestedLoopJoinOperator::do_next() {
             current_left_ = std::move(row->value());
             right_cursor_ = 0;
             left_matched_ = false;
+            saw_null_ = false;
         }
 
         // Scan right tuples for current left.
@@ -116,11 +128,24 @@ Result<std::optional<Tuple>> NestedLoopJoinOperator::do_next() {
             // CROSS JOIN: no predicate, always matches.
             bool match = (type_ == JoinType::CROSS);
             if (!match && on_expr_) {
-                auto pred = matches(combined);
-                if (!pred) {
-                    return make_error(pred.error().code, pred.error().message);
+                // For null-aware ANTI join, use evaluate_expr to detect NULLs.
+                if (null_aware_anti_ && type_ == JoinType::ANTI) {
+                    auto val = evaluate_expr(*on_expr_, combined, schema_, bound_);
+                    if (!val) {
+                        return make_error(val.error().code, val.error().message);
+                    }
+                    if (val->is_null()) {
+                        saw_null_ = true;
+                    } else if (val->type_id() == TypeId::BOOL && val->as_bool()) {
+                        match = true;
+                    }
+                } else {
+                    auto pred = matches(combined);
+                    if (!pred) {
+                        return make_error(pred.error().code, pred.error().message);
+                    }
+                    match = *pred;
                 }
-                match = *pred;
             } else if (!on_expr_ && type_ != JoinType::CROSS) {
                 // No predicate and not CROSS → treat as cross join (all match).
                 match = true;
@@ -160,6 +185,11 @@ Result<std::optional<Tuple>> NestedLoopJoinOperator::do_next() {
 
         // Right side exhausted for current left tuple.
         if (type_ == JoinType::ANTI && !left_matched_) {
+            // Null-aware: if any comparison yielded NULL, suppress emission.
+            if (saw_null_) {
+                current_left_ = std::nullopt;
+                continue;
+            }
             // No match found → emit left tuple.
             Tuple result;
             result.values = std::move(current_left_->values);
@@ -195,7 +225,7 @@ void NestedLoopJoinOperator::do_close() {
 // ---------------------------------------------------------------------------
 
 const OutputSchema& NestedLoopJoinOperator::output_schema() const {
-    return schema_;
+    return output_schema_;
 }
 
 // ---------------------------------------------------------------------------
