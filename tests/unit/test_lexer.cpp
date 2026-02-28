@@ -298,6 +298,35 @@ TEST(Lexer, IntegerScientificNotation) {
     EXPECT_EQ(tokens[0].lexeme, "1e6");
 }
 
+TEST(Lexer, LeadingDotScientificNotation) {
+    auto tokens = tokenize_ok(".123e4");
+    ASSERT_GE(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::FLOAT_LITERAL);
+    EXPECT_EQ(tokens[0].lexeme, ".123e4");
+}
+
+TEST(Lexer, LeadingDotScientificNegativeExponent) {
+    auto tokens = tokenize_ok(".5e-3");
+    ASSERT_GE(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::FLOAT_LITERAL);
+    EXPECT_EQ(tokens[0].lexeme, ".5e-3");
+}
+
+TEST(Lexer, LeadingDotScientificUpperE) {
+    auto tokens = tokenize_ok(".9E+2");
+    ASSERT_GE(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::FLOAT_LITERAL);
+    EXPECT_EQ(tokens[0].lexeme, ".9E+2");
+}
+
+TEST(Lexer, LeadingDotNoExponentDigitsStaysFloat) {
+    // .5e without digits after e — should NOT consume the 'e'
+    auto tokens = tokenize_ok(".5e");
+    ASSERT_GE(tokens.size(), 3u);
+    EXPECT_EQ(tokens[0].type, TokenType::FLOAT_LITERAL);
+    EXPECT_EQ(tokens[0].lexeme, ".5");
+}
+
 // -- String literals ----------------------------------------------------------
 
 TEST(Lexer, StringLiteral) {

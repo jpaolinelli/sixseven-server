@@ -365,9 +365,25 @@ Result<ExprType> Binder::bind_binary(const BinaryExpr& expr, Scope& scope, Bound
     case BinaryOp::LESS:
     case BinaryOp::GREATER:
     case BinaryOp::LESS_EQUAL:
-    case BinaryOp::GREATER_EQUAL:
+    case BinaryOp::GREATER_EQUAL: {
+        // Skip type compatibility check when either operand is a NULL literal,
+        // because NULL is typed as STRING (placeholder) and is polymorphic.
+        auto* lhs_lit = dynamic_cast<const LiteralExpr*>(expr.lhs.get());
+        auto* rhs_lit = dynamic_cast<const LiteralExpr*>(expr.rhs.get());
+        bool lhs_null = lhs_lit && lhs_lit->kind == LiteralKind::NULL_LITERAL;
+        bool rhs_null = rhs_lit && rhs_lit->kind == LiteralKind::NULL_LITERAL;
+        if (!lhs_null && !rhs_null) {
+            auto ct = common_type(lhs->type_id, rhs->type_id);
+            if (!ct) {
+                return make_error(
+                    StatusCode::TYPE_ERROR,
+                    "incompatible types for comparison: " + std::string(type_name(lhs->type_id)) +
+                        " and " + std::string(type_name(rhs->type_id)));
+            }
+        }
         et.type_id = TypeId::BOOL;
         break;
+    }
     case BinaryOp::AND:
     case BinaryOp::OR:
         if (lhs->type_id != TypeId::BOOL || rhs->type_id != TypeId::BOOL) {
@@ -1193,6 +1209,11 @@ Result<BoundStatement> Binder::bind_update(const UpdateStmt& stmt) {
         if (!et) {
             return tl::unexpected(et.error());
         }
+        if (et->type_id != TypeId::BOOL) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              "WHERE clause must be boolean, got " +
+                                  std::string(type_name(et->type_id)));
+        }
     }
 
     // RETURNING.
@@ -1225,6 +1246,11 @@ Result<BoundStatement> Binder::bind_delete(const DeleteStmt& stmt) {
         auto et = bind_expr(*stmt.where_expr, scope, bound);
         if (!et) {
             return tl::unexpected(et.error());
+        }
+        if (et->type_id != TypeId::BOOL) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              "WHERE clause must be boolean, got " +
+                                  std::string(type_name(et->type_id)));
         }
     }
 
