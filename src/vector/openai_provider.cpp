@@ -117,6 +117,8 @@ OpenAIProvider::request_embeddings(const std::vector<std::string>& texts) {
     std::vector<std::vector<float>> results;
     results.resize(texts.size());
 
+    std::vector<bool> received(texts.size(), false);
+
     for (const auto& entry : data) {
         if (!entry.contains("embedding") || !entry["embedding"].is_array()) {
             return make_error(StatusCode::PARSE_ERROR,
@@ -144,6 +146,16 @@ OpenAIProvider::request_embeddings(const std::vector<std::string>& texts) {
             return make_error(StatusCode::INVALID_ARGUMENT,
                               "dimension mismatch: expected " + std::to_string(dimension_) +
                                   ", got " + std::to_string(vec.size()));
+        }
+
+        received[index] = true;
+    }
+
+    // Validate that all requested texts received embeddings.
+    for (size_t i = 0; i < texts.size(); ++i) {
+        if (!received[i]) {
+            return make_error(StatusCode::PARSE_ERROR,
+                              "OpenAI response missing embedding at index " + std::to_string(i));
         }
     }
 

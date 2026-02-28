@@ -119,9 +119,10 @@ inline constexpr table_id_t sys_columns_table_id = 4;
 inline constexpr table_id_t sys_indexes_table_id = 5;
 inline constexpr table_id_t sys_edge_types_table_id = 6;
 inline constexpr table_id_t sys_embedding_columns_table_id = 7;
+inline constexpr table_id_t sys_embedding_jobs_table_id = 8;
 
 /// First table ID available for user tables (after all system tables).
-inline constexpr table_id_t first_user_table_id = 8;
+inline constexpr table_id_t first_user_table_id = 9;
 
 /// Returns the system table schema for sys_databases(database_id INT32, name STRING).
 inline TableSchema sys_databases_schema() {
@@ -271,6 +272,26 @@ inline TableSchema sys_embedding_columns_schema() {
         {4, "provider", TypeId::STRING, false, ""},
     };
     schema.pk_columns = "table_id,column_id";
+    return schema;
+}
+
+/// Returns the system table schema for sys_embedding_jobs.
+/// Persists pending embedding generation jobs so they survive server restarts.
+inline TableSchema sys_embedding_jobs_schema() {
+    TableSchema schema;
+    schema.table_id = sys_embedding_jobs_table_id;
+    schema.name = "sys_embedding_jobs";
+    schema.columns = {
+        {0, "table_id", TypeId::INT32, false, ""},
+        {1, "row_id", TypeId::INT64, false, ""},
+        {2, "column_id", TypeId::INT32, false, ""},
+        {3, "source_text", TypeId::STRING, false, ""},
+        {4, "provider", TypeId::STRING, false, ""},
+        {5, "dimension", TypeId::INT32, false, ""},
+        {6, "job_type", TypeId::INT32, false, ""},
+        {7, "retry_count", TypeId::INT32, false, ""},
+    };
+    schema.pk_columns = "table_id,row_id,column_id";
     return schema;
 }
 

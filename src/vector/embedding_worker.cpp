@@ -29,9 +29,32 @@ void EmbeddingWorkerPool::set_store_callback(EmbeddingStoreCallback callback) {
     store_callback_ = std::move(callback);
 }
 
+void EmbeddingWorkerPool::set_persistence(EmbeddingJobPersistence persistence) {
+    persistence_ = std::move(persistence);
+}
+
 Result<void> EmbeddingWorkerPool::start() {
     if (running_.load()) {
         return make_error(StatusCode::INVALID_ARGUMENT, "worker pool already running");
+    }
+
+    // Load persisted jobs before starting workers.
+    if (persistence_.has_value() && persistence_->load) {
+        auto loaded = persistence_->load();
+        if (!loaded.has_value()) {
+            return tl::unexpected(loaded.error());
+        }
+        if (!loaded->empty()) {
+            std::lock_guard lock(queue_mu_);
+            for (auto& job : *loaded) {
+                if (job.type == EmbeddingJob::Type::INSERT) {
+                    insert_queue_.push_back(std::move(job));
+                } else {
+                    update_queue_.push_back(std::move(job));
+                }
+            }
+            GIODB_LOG_INFO("loaded {} persisted embedding jobs", loaded->size());
+        }
     }
 
     running_.store(true);
@@ -69,6 +92,14 @@ Result<void> EmbeddingWorkerPool::stop() {
 }
 
 Result<void> EmbeddingWorkerPool::enqueue(EmbeddingJob job) {
+    // Persist to durable storage before enqueuing.
+    if (persistence_.has_value() && persistence_->persist) {
+        auto persist_result = persistence_->persist(job);
+        if (!persist_result.has_value()) {
+            GIODB_LOG_WARN("failed to persist embedding job: {}", persist_result.error().message);
+        }
+    }
+
     {
         std::lock_guard lock(queue_mu_);
 
@@ -88,6 +119,16 @@ Result<void> EmbeddingWorkerPool::enqueue(EmbeddingJob job) {
 }
 
 Result<void> EmbeddingWorkerPool::enqueue_batch(std::vector<EmbeddingJob> jobs) {
+    // Persist all jobs to durable storage before enqueuing.
+    if (persistence_.has_value() && persistence_->persist) {
+        for (const auto& job : jobs) {
+            auto persist_result = persistence_->persist(job);
+            if (!persist_result.has_value()) {
+                GIODB_LOG_WARN("failed to persist embedding job: {}", persist_result.error().message);
+            }
+        }
+    }
+
     {
         std::lock_guard lock(queue_mu_);
 
@@ -263,6 +304,16 @@ void EmbeddingWorkerPool::process_batch(std::vector<EmbeddingJob>& batch) {
                 }
             }
 
+            // Remove from durable storage after successful processing.
+            if (persistence_.has_value() && persistence_->remove) {
+                auto remove_result =
+                    persistence_->remove(job.table_id, job.row_id, job.column_id);
+                if (!remove_result.has_value()) {
+                    GIODB_LOG_WARN("failed to remove persisted embedding job: {}",
+                                   remove_result.error().message);
+                }
+            }
+
             jobs_processed_.fetch_add(1);
         }
     }
@@ -275,6 +326,10 @@ void EmbeddingWorkerPool::retry_job(EmbeddingJob job) {
                         job.table_id,
                         job.row_id,
                         job.column_id);
+        // Remove permanently failed job from durable storage.
+        if (persistence_.has_value() && persistence_->remove) {
+            (void)persistence_->remove(job.table_id, job.row_id, job.column_id);
+        }
         jobs_failed_.fetch_add(1);
         return;
     }

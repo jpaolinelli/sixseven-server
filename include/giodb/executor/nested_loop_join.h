@@ -61,7 +61,8 @@ private:
     JoinType type_;
     const Expr* on_expr_;
     const BoundStatement& bound_;
-    OutputSchema schema_;
+    OutputSchema schema_;          // Combined schema for ON condition evaluation.
+    OutputSchema output_schema_;   // Actual output schema (left-only for SEMI/ANTI).
 
     size_t left_col_count_ = 0;
     size_t right_col_count_ = 0;
@@ -81,6 +82,15 @@ private:
     // For RIGHT/FULL: emit unmatched right tuples after left is exhausted.
     bool emitting_unmatched_right_ = false;
     size_t unmatched_right_cursor_ = 0;
+
+    // For null-aware ANTI join (NOT IN with NULLs).
+    bool null_aware_anti_ = false;
+    bool saw_null_ = false;
+
+public:
+    /// Enable null-aware ANTI join semantics for NOT IN subquery rewrites.
+    /// When set, a NULL comparison result suppresses emission of the outer row.
+    void set_null_aware_anti(bool v) { null_aware_anti_ = v; }
 };
 
 } // namespace giodb

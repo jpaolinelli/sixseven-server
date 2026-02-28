@@ -573,7 +573,8 @@ TEST_F(CatalogPersistenceTest, SystemTableIdsAreStable) {
     EXPECT_EQ(sys_indexes_table_id, 5);
     EXPECT_EQ(sys_edge_types_table_id, 6);
     EXPECT_EQ(sys_embedding_columns_table_id, 7);
-    EXPECT_EQ(first_user_table_id, 8);
+    EXPECT_EQ(sys_embedding_jobs_table_id, 8);
+    EXPECT_EQ(first_user_table_id, 9);
 }
 
 TEST_F(CatalogPersistenceTest, SystemTableSchemaIdsMatch) {
@@ -584,6 +585,7 @@ TEST_F(CatalogPersistenceTest, SystemTableSchemaIdsMatch) {
     EXPECT_EQ(sys_indexes_schema().table_id, sys_indexes_table_id);
     EXPECT_EQ(sys_edge_types_schema().table_id, sys_edge_types_table_id);
     EXPECT_EQ(sys_embedding_columns_schema().table_id, sys_embedding_columns_table_id);
+    EXPECT_EQ(sys_embedding_jobs_schema().table_id, sys_embedding_jobs_table_id);
 }
 
 // =============================================================================

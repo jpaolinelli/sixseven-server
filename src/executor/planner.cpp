@@ -464,12 +464,20 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
                 // any filters, aggregations, etc. inside the subquery are
                 // correctly applied.
                 Binder binder(catalog_, database_id_);
+                // Inject outer CTE bindings so the subquery can reference CTEs.
+                for (const auto& [cte_name, cte_sel_ptr] : cte_map) {
+                    Binder cte_binder(catalog_, database_id_);
+                    auto cte_bound = cte_binder.bind(*cte_sel_ptr);
+                    if (cte_bound) {
+                        binder.add_cte(cte_name, *cte_bound);
+                    }
+                }
                 auto sub_bound = binder.bind(*sub_sel);
                 if (!sub_bound) {
                     return make_error(sub_bound.error().code, sub_bound.error().message);
                 }
 
-                auto sub_iter = plan_select(*sub_sel, *sub_bound, owned_exprs);
+                auto sub_iter = plan_select(*sub_sel, *sub_bound, owned_exprs, cte_map);
                 if (!sub_iter) {
                     return make_error(sub_iter.error().code, sub_iter.error().message);
                 }
@@ -530,12 +538,17 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
 
                 JoinType jtype = in_expr->negated ? JoinType::ANTI : JoinType::SEMI;
 
-                child = std::make_unique<NestedLoopJoinOperator>(std::move(child),
-                                                                 std::move(sub_source),
-                                                                 jtype,
-                                                                 on_ptr,
-                                                                 bound,
-                                                                 std::move(combined));
+                auto join_op = std::make_unique<NestedLoopJoinOperator>(std::move(child),
+                                                                        std::move(sub_source),
+                                                                        jtype,
+                                                                        on_ptr,
+                                                                        bound,
+                                                                        std::move(combined));
+                // NOT IN requires null-aware ANTI join semantics.
+                if (in_expr->negated) {
+                    join_op->set_null_aware_anti(true);
+                }
+                child = std::move(join_op);
                 return ok(static_cast<const Expr*>(nullptr));
             }
         }
@@ -586,8 +599,16 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
 Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
                                                        const BoundStatement& bound,
                                                        std::vector<ExprPtr>& owned_exprs) {
+    return plan_select(stmt, bound, owned_exprs, {});
+}
+
+Result<std::unique_ptr<Iterator>> Planner::plan_select(
+    const SelectStmt& stmt,
+    const BoundStatement& bound,
+    std::vector<ExprPtr>& owned_exprs,
+    const std::unordered_map<std::string, const SelectStmt*>& outer_cte_map) {
     // -- 0. Build CTE map -------------------------------------------------------
-    std::unordered_map<std::string, const SelectStmt*> cte_map;
+    std::unordered_map<std::string, const SelectStmt*> cte_map = outer_cte_map;
     for (const auto& cte : stmt.ctes) {
         if (cte.query) {
             auto* cte_sel = dynamic_cast<const SelectStmt*>(cte.query.get());
@@ -617,47 +638,27 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
     bool pushed_where = false;
     if (!has_joins && stmt.where_expr && !table_ref.subquery &&
         cte_map.find(to_upper(table_ref.name)) == cte_map.end()) {
-        // Check if WHERE contains subquery predicates.
-        bool has_subquery_predicate = false;
-        {
-            const auto* w = stmt.where_expr.get();
-            if (dynamic_cast<const ExistsExpr*>(w) || dynamic_cast<const SubqueryExpr*>(w)) {
-                has_subquery_predicate = true;
-            }
-            if (auto* un = dynamic_cast<const UnaryExpr*>(w)) {
-                if (un->op == UnaryOp::NOT && dynamic_cast<const ExistsExpr*>(un->operand.get())) {
-                    has_subquery_predicate = true;
+        // Recursively check if WHERE contains any subquery predicates.
+        std::function<bool(const Expr*)> contains_subquery = [&](const Expr* e) -> bool {
+            if (!e)
+                return false;
+            if (dynamic_cast<const ExistsExpr*>(e) || dynamic_cast<const SubqueryExpr*>(e))
+                return true;
+            if (auto* in = dynamic_cast<const InExpr*>(e))
+                return in->subquery != nullptr || contains_subquery(in->expr.get());
+            if (auto* un = dynamic_cast<const UnaryExpr*>(e))
+                return contains_subquery(un->operand.get());
+            if (auto* bin = dynamic_cast<const BinaryExpr*>(e))
+                return contains_subquery(bin->lhs.get()) || contains_subquery(bin->rhs.get());
+            if (auto* fn = dynamic_cast<const FunctionCallExpr*>(e)) {
+                for (const auto& arg : fn->args) {
+                    if (contains_subquery(arg.get()))
+                        return true;
                 }
             }
-            if (auto* in = dynamic_cast<const InExpr*>(w)) {
-                if (in->subquery) {
-                    has_subquery_predicate = true;
-                }
-            }
-            // Check in AND branches.
-            if (auto* bin = dynamic_cast<const BinaryExpr*>(w)) {
-                if (bin->op == BinaryOp::AND) {
-                    // If either side has subquery, don't push.
-                    auto check_sub = [](const Expr* e) {
-                        if (dynamic_cast<const ExistsExpr*>(e))
-                            return true;
-                        if (auto* u = dynamic_cast<const UnaryExpr*>(e)) {
-                            if (u->op == UnaryOp::NOT &&
-                                dynamic_cast<const ExistsExpr*>(u->operand.get()))
-                                return true;
-                        }
-                        if (auto* ie = dynamic_cast<const InExpr*>(e)) {
-                            if (ie->subquery)
-                                return true;
-                        }
-                        return false;
-                    };
-                    if (check_sub(bin->lhs.get()) || check_sub(bin->rhs.get())) {
-                        has_subquery_predicate = true;
-                    }
-                }
-            }
-        }
+            return false;
+        };
+        bool has_subquery_predicate = contains_subquery(stmt.where_expr.get());
 
         if (!has_subquery_predicate) {
             // Re-create the scan with the predicate pushed down.

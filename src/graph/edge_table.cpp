@@ -125,6 +125,8 @@ Result<void> EdgeTable::delete_edge(uint64_t edge_row_id) {
     KeyType rev_key = {row.target_pk, row_id_val};
     auto rev_result = reverse_index_->remove(rev_key);
     if (!rev_result.has_value()) {
+        // Rollback forward index removal.
+        (void)forward_index_->insert(fwd_key, encode_rid(edge_row_id));
         return tl::unexpected(rev_result.error());
     }
 
@@ -133,6 +135,9 @@ Result<void> EdgeTable::delete_edge(uint64_t edge_row_id) {
         KeyType unique_key = {row.source_pk, row.target_pk};
         auto uniq_result = unique_index_->remove(unique_key);
         if (!uniq_result.has_value()) {
+            // Rollback forward and reverse index removals.
+            (void)forward_index_->insert(fwd_key, encode_rid(edge_row_id));
+            (void)reverse_index_->insert(rev_key, encode_rid(edge_row_id));
             return tl::unexpected(uniq_result.error());
         }
     }

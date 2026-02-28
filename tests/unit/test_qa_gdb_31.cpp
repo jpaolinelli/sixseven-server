@@ -846,13 +846,10 @@ TEST(QA_OpenAIProvider, BatchEmbedEmptyDataArray) {
     OpenAIProvider provider("sk-test", "text-embedding-3-small", 3, std::move(mock));
 
     auto result = provider.embed("test");
-    // BUG: Provider succeeds but returns a 0-dimension vector instead of the
-    // expected 3 dimensions. request_embeddings() does results.resize(texts.size())
-    // creating an empty default vector, then the data[] loop doesn't execute,
-    // so no dimension validation happens. The caller receives a vector with
-    // wrong dimension (0 instead of 3).
-    ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->empty()); // Should be dimension 3, but is 0.
+    // FIX (GDB-237): Provider now correctly rejects empty data array,
+    // returning a PARSE_ERROR because no embeddings were received.
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
 TEST(QA_OpenAIProvider, BatchEmbedCountMismatch) {
@@ -865,14 +862,10 @@ TEST(QA_OpenAIProvider, BatchEmbedCountMismatch) {
     OpenAIProvider provider("sk-test", "text-embedding-3-small", 3, std::move(mock));
 
     auto result = provider.embed_batch({"hello", "world"});
-    // BUG: Provider returns 2 vectors but the second one is empty (dimension 0).
-    // request_embeddings() does results.resize(texts.size()) creating 2 default
-    // vectors. Only index 0 gets populated from data. Index 1 remains as an
-    // empty vector. No validation checks that all indices received embeddings.
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->size(), 2u);          // 2 vectors returned
-    EXPECT_EQ((*result)[0].size(), 3u);     // First has correct dimension
-    EXPECT_EQ((*result)[1].size(), 0u);     // Second has WRONG dimension (0)
+    // FIX (GDB-237): Provider now correctly detects that embedding at index 1
+    // is missing and returns a PARSE_ERROR.
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
 TEST(QA_OpenAIProvider, EmptyApiKey) {
