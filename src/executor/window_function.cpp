@@ -683,13 +683,7 @@ Result<void> WindowOperator::do_open() {
                 case WindowFunc::WIN_COUNT:
                 case WindowFunc::WIN_MIN:
                 case WindowFunc::WIN_MAX: {
-                    size_t frame_start =
-                        resolve_bound(wf.frame.start_bound, wf.frame.start_offset, pos, psize);
-                    size_t frame_end =
-                        resolve_bound(wf.frame.end_bound, wf.frame.end_offset, pos, psize);
-
-                    // Ensure frame_start <= frame_end.
-                    if (frame_start > frame_end) {
+                    if (is_frame_empty(wf.frame, pos, psize)) {
                         // Empty frame.
                         if (wf.func == WindowFunc::WIN_COUNT) {
                             result = Value(static_cast<int64_t>(0));
@@ -697,6 +691,10 @@ Result<void> WindowOperator::do_open() {
                             result = Value::make_null();
                         }
                     } else {
+                        size_t frame_start =
+                            resolve_bound(wf.frame.start_bound, wf.frame.start_offset, pos, psize);
+                        size_t frame_end =
+                            resolve_bound(wf.frame.end_bound, wf.frame.end_offset, pos, psize);
                         auto agg_result = evaluate_window_aggregate(wf.func,
                                                                     wf.arg,
                                                                     partition,
