@@ -118,6 +118,10 @@ private:
     /// CTEs defined by their parent queries.
     std::unordered_map<std::string, BoundStatement> cte_results_;
 
+    /// Recursion depth for bind() calls. Used to clear CTE state only at the
+    /// top-level entry point, not during recursive calls for sub-queries/CTEs.
+    int bind_depth_ = 0;
+
     // -- Statement handlers ---------------------------------------------------
 
     Result<BoundStatement> bind_select(const SelectStmt& stmt);

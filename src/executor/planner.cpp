@@ -874,7 +874,24 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
                 std::move(child), *having_ptr, bound, &subquery_ctx_);
         }
 
-        // -- 3f. Build rewritten projections ----------------------------------
+        // -- 3f. ORDER BY (before projection, with aggregate rewriting) --------
+        if (!stmt.order_by.empty()) {
+            std::vector<SortKey> keys;
+            keys.reserve(stmt.order_by.size());
+            for (const auto& ob : stmt.order_by) {
+                if (contains_any_aggregate(*ob.expr, bound)) {
+                    auto rewritten = rewrite_expr(*ob.expr, agg_map);
+                    auto* ptr = rewritten.get();
+                    owned_exprs.push_back(std::move(rewritten));
+                    keys.push_back({ptr, ob.direction});
+                } else {
+                    keys.push_back({ob.expr.get(), ob.direction});
+                }
+            }
+            child = std::make_unique<SortOperator>(std::move(child), std::move(keys), bound);
+        }
+
+        // -- 3g. Build rewritten projections ----------------------------------
         std::vector<ProjectionExpr> projections;
         for (const auto& item : stmt.items) {
             if (item.is_star || !item.table_star.empty()) {
@@ -915,7 +932,19 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
                                                   bound,
                                                   &subquery_ctx_);
     } else {
-        // -- 3 (no aggregation). Projection ----------------------------------
+        // -- 3 (no aggregation). Sort then Projection -------------------------
+
+        // ORDER BY must happen before projection so that sort keys referencing
+        // columns not in the SELECT list are still available.
+        if (!stmt.order_by.empty()) {
+            std::vector<SortKey> keys;
+            keys.reserve(stmt.order_by.size());
+            for (const auto& ob : stmt.order_by) {
+                keys.push_back({ob.expr.get(), ob.direction});
+            }
+            child = std::make_unique<SortOperator>(std::move(child), std::move(keys), bound);
+        }
+
         std::vector<ProjectionExpr> projections;
         projections.reserve(stmt.items.size());
 
@@ -954,16 +983,6 @@ Result<std::unique_ptr<Iterator>> Planner::plan_select(const SelectStmt& stmt,
                                                   std::move(output_schema),
                                                   bound,
                                                   &subquery_ctx_);
-    }
-
-    // -- 4. ORDER BY ---------------------------------------------------------
-    if (!stmt.order_by.empty()) {
-        std::vector<SortKey> keys;
-        keys.reserve(stmt.order_by.size());
-        for (const auto& ob : stmt.order_by) {
-            keys.push_back({ob.expr.get(), ob.direction});
-        }
-        child = std::make_unique<SortOperator>(std::move(child), std::move(keys), bound);
     }
 
     // -- 5. LIMIT / OFFSET ---------------------------------------------------
