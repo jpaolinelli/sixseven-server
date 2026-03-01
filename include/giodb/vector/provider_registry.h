@@ -22,6 +22,7 @@ namespace giodb {
 ///   - "ollama/<model>"  — Ollama REST API
 ///   - "openai/<model>"  — OpenAI Embeddings API
 ///   - "builtin/<dim>"   — Local hash-based provider (no network)
+///   - "onnx/<model>"    — Local ONNX Runtime inference
 ///
 /// Usage:
 /// ```
