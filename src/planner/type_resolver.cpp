@@ -242,7 +242,7 @@ Result<TypeId> function_return_type(const std::string& name, const std::vector<T
     }
 
     // UUID
-    if (upper == "GEN_RANDOM_UUID" || upper == "UUID_GENERATE_V4") {
+    if (upper == "GEN_UUID" || upper == "GEN_RANDOM_UUID" || upper == "UUID_GENERATE_V4") {
         return ok(TypeId::UUID);
     }
 
