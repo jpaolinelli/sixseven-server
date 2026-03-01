@@ -17,6 +17,7 @@ namespace giodb {
 // Forward declarations.
 class CatalogPersistence;
 enum class AuthMethod : uint8_t;
+struct AlterTableStmt;
 struct AlterUserStmt;
 struct BoundStatement;
 struct CreateDatabaseStmt;
@@ -140,6 +141,9 @@ private:
 
     /// Execute a DROP USER statement.
     [[nodiscard]] Result<QueryResult> execute_drop_user(const DropUserStmt& stmt);
+
+    /// Execute an ALTER TABLE statement (ADD/DROP/RENAME COLUMN).
+    [[nodiscard]] Result<QueryResult> execute_alter_table(const AlterTableStmt& stmt);
 
     /// Execute an ALTER USER statement.
     [[nodiscard]] Result<QueryResult> execute_alter_user(const AlterUserStmt& stmt);

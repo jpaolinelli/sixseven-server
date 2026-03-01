@@ -585,4 +585,32 @@ Result<void> CatalogPersistence::persist_embedding_column(const EmbeddingColumnD
                        Value(def.provider)});
 }
 
+Result<void> CatalogPersistence::persist_columns_update(const TableSchema& schema) {
+    // Delete all existing sys_columns rows for this table.
+    auto del = delete_rows(sys_columns_table_id,
+                           [table_id = schema.table_id](const std::vector<Value>& v) {
+                               return v[0].as_int32() == table_id;
+                           });
+    if (!del) {
+        return del;
+    }
+
+    // Re-insert all columns from the updated schema.
+    for (const auto& col : schema.columns) {
+        auto r = insert_row(sys_columns_table_id,
+                            {Value(schema.table_id),
+                             Value(col.ordinal),
+                             Value(col.name),
+                             Value(static_cast<int32_t>(col.type_id)),
+                             Value(col.nullable),
+                             col.default_expr.empty() ? Value() : Value(col.default_expr),
+                             Value(col.is_autoincrement)});
+        if (!r) {
+            return r;
+        }
+    }
+
+    return ok();
+}
+
 } // namespace giodb

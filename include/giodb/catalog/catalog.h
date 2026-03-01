@@ -79,6 +79,21 @@ public:
     /// List all table schemas in the given database.
     [[nodiscard]] std::vector<TableSchema> list_tables(database_id_t database_id) const;
 
+    /// Add a column to an existing table. Assigns the next ordinal.
+    /// Fails with NOT_FOUND if the table does not exist.
+    /// Fails with ALREADY_EXISTS if a column with the same name exists.
+    [[nodiscard]] Result<void> add_column(table_id_t table_id, CatalogColumnDef column);
+
+    /// Drop a column from an existing table by name. Renumbers ordinals.
+    /// Fails with NOT_FOUND if the table or column does not exist.
+    [[nodiscard]] Result<void> drop_column(table_id_t table_id, const std::string& column_name);
+
+    /// Rename a column in an existing table.
+    /// Fails with NOT_FOUND if the table or column does not exist.
+    /// Fails with ALREADY_EXISTS if the new name conflicts.
+    [[nodiscard]] Result<void>
+    rename_column(table_id_t table_id, const std::string& old_name, const std::string& new_name);
+
     // -- Index operations -----------------------------------------------------
 
     /// Create a new index. Assigns a sequential index_id.

@@ -26,6 +26,7 @@
 
 #include <chrono>
 #include <span>
+#include <sstream>
 #include <string>
 
 namespace giodb {
@@ -156,7 +157,8 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
                         dynamic_cast<const ReembedStmt*>(raw) != nullptr ||
                         dynamic_cast<const CreateUserStmt*>(raw) != nullptr ||
                         dynamic_cast<const DropUserStmt*>(raw) != nullptr ||
-                        dynamic_cast<const AlterUserStmt*>(raw) != nullptr;
+                        dynamic_cast<const AlterUserStmt*>(raw) != nullptr ||
+                        dynamic_cast<const AlterTableStmt*>(raw) != nullptr;
 
         if (is_write) {
             // Determine whether this is DML or DDL for the error message.
@@ -168,7 +170,8 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
                           dynamic_cast<const DropEdgeTypeStmt*>(raw) != nullptr ||
                           dynamic_cast<const CreateUserStmt*>(raw) != nullptr ||
                           dynamic_cast<const DropUserStmt*>(raw) != nullptr ||
-                          dynamic_cast<const AlterUserStmt*>(raw) != nullptr;
+                          dynamic_cast<const AlterUserStmt*>(raw) != nullptr ||
+                          dynamic_cast<const AlterTableStmt*>(raw) != nullptr;
 
             if (is_ddl) {
                 return make_error(StatusCode::READ_ONLY,
@@ -215,6 +218,9 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
     }
     if (auto* drop_user = dynamic_cast<const DropUserStmt*>(stmt_ptr->get())) {
         return execute_drop_user(*drop_user);
+    }
+    if (auto* alter_table = dynamic_cast<const AlterTableStmt*>(stmt_ptr->get())) {
+        return execute_alter_table(*alter_table);
     }
     if (auto* alter_user = dynamic_cast<const AlterUserStmt*>(stmt_ptr->get())) {
         return execute_alter_user(*alter_user);
@@ -1703,6 +1709,272 @@ Result<QueryResult> QueryEngine::execute_drop_user(const DropUserStmt& stmt) {
 
     QueryResult qr;
     qr.message = "DROP USER";
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// DDL: ALTER TABLE
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_alter_table(const AlterTableStmt& stmt) {
+    // Look up the table schema.
+    auto schema = catalog_.get_table(current_database_id_, stmt.table_name);
+    if (!schema) {
+        return make_error(schema.error().code, schema.error().message);
+    }
+
+    auto table_id = schema->table_id;
+
+    switch (stmt.action) {
+    case AlterAction::ADD_COLUMN: {
+        // Resolve the column type.
+        auto type_result = resolve_type_spec(stmt.column.type);
+        if (!type_result) {
+            return make_error(type_result.error().code, type_result.error().message);
+        }
+
+        // Build the catalog column definition.
+        CatalogColumnDef ccd;
+        ccd.name = stmt.column.name;
+        ccd.type_id = *type_result;
+        ccd.nullable = stmt.column.nullable;
+        if (stmt.column.default_expr) {
+            ccd.default_expr = expr_to_sql(*stmt.column.default_expr);
+        }
+
+        // If NOT NULL and no DEFAULT, check that the table is empty.
+        if (!ccd.nullable && ccd.default_expr.empty()) {
+            auto ts = storage_.get_table_storage(table_id);
+            if (ts) {
+                auto it = (*ts)->heap->begin();
+                if (it) {
+                    if (it->next().has_value()) {
+                        return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                                          "cannot add NOT NULL column '" + ccd.name +
+                                              "' without DEFAULT to a table with existing rows");
+                    }
+                }
+            }
+        }
+
+        // Build old storage schema for data migration.
+        auto old_storage_schema = StorageManager::build_storage_schema(*schema);
+
+        // Add the column to the catalog.
+        auto add_result = catalog_.add_column(table_id, ccd);
+        if (!add_result) {
+            return make_error(add_result.error().code, add_result.error().message);
+        }
+
+        // Migrate existing tuples: append NULL for the new column.
+        auto ts = storage_.get_table_storage(table_id);
+        if (ts) {
+            auto updated_schema = catalog_.get_table_by_id(table_id);
+            if (!updated_schema) {
+                return make_error(updated_schema.error().code, updated_schema.error().message);
+            }
+            auto new_storage_schema = StorageManager::build_storage_schema(*updated_schema);
+
+            // Collect all tuples first to avoid mutating during iteration.
+            std::vector<std::pair<RID, std::vector<uint8_t>>> tuples;
+            auto it = (*ts)->heap->begin();
+            if (it) {
+                while (auto row = it->next()) {
+                    tuples.push_back(std::move(*row));
+                }
+            }
+
+            // Rewrite each tuple with the new column (NULL value).
+            for (auto& [rid, data] : tuples) {
+                auto values = TupleSerializer::deserialize(data, old_storage_schema);
+                if (!values) {
+                    continue;
+                }
+                values->emplace_back(); // NULL value for the new column.
+
+                auto new_data = TupleSerializer::serialize(*values, new_storage_schema);
+                if (!new_data) {
+                    return make_error(new_data.error().code, new_data.error().message);
+                }
+                auto upd = (*ts)->heap->update_tuple(rid, *new_data);
+                if (!upd) {
+                    return make_error(upd.error().code, upd.error().message);
+                }
+            }
+
+            // Update the storage schema.
+            (*ts)->storage_schema = new_storage_schema;
+        }
+        break;
+    }
+
+    case AlterAction::DROP_COLUMN: {
+        // Find the column index to drop.
+        int32_t drop_index = -1;
+        for (int32_t i = 0; i < static_cast<int32_t>(schema->columns.size()); ++i) {
+            auto upper_name = schema->columns[static_cast<size_t>(i)].name;
+            auto upper_target = stmt.column_name;
+            std::transform(upper_name.begin(),
+                           upper_name.end(),
+                           upper_name.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+            std::transform(upper_target.begin(),
+                           upper_target.end(),
+                           upper_target.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+            if (upper_name == upper_target) {
+                drop_index = i;
+                break;
+            }
+        }
+
+        if (drop_index < 0) {
+            return make_error(StatusCode::NOT_FOUND,
+                              "column '" + stmt.column_name + "' not found in table '" +
+                                  stmt.table_name + "'");
+        }
+
+        // Prevent dropping PK columns.
+        if (!schema->pk_columns.empty()) {
+            auto upper_target = stmt.column_name;
+            std::transform(upper_target.begin(),
+                           upper_target.end(),
+                           upper_target.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+
+            std::istringstream ss(schema->pk_columns);
+            std::string part;
+            while (std::getline(ss, part, ',')) {
+                auto upper_part = part;
+                std::transform(upper_part.begin(),
+                               upper_part.end(),
+                               upper_part.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                if (upper_part == upper_target) {
+                    return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                                      "cannot drop primary key column '" + stmt.column_name + "'");
+                }
+            }
+        }
+
+        // Cannot drop the last column.
+        if (schema->columns.size() <= 1) {
+            return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                              "cannot drop the only column in table '" + stmt.table_name + "'");
+        }
+
+        // Build old storage schema for data migration.
+        auto old_storage_schema = StorageManager::build_storage_schema(*schema);
+
+        // Drop the column from the catalog.
+        auto drop_result = catalog_.drop_column(table_id, stmt.column_name);
+        if (!drop_result) {
+            return make_error(drop_result.error().code, drop_result.error().message);
+        }
+
+        // Migrate existing tuples: remove the dropped column.
+        auto ts = storage_.get_table_storage(table_id);
+        if (ts) {
+            auto updated_schema = catalog_.get_table_by_id(table_id);
+            if (!updated_schema) {
+                return make_error(updated_schema.error().code, updated_schema.error().message);
+            }
+            auto new_storage_schema = StorageManager::build_storage_schema(*updated_schema);
+
+            // Collect all tuples first.
+            std::vector<std::pair<RID, std::vector<uint8_t>>> tuples;
+            auto it = (*ts)->heap->begin();
+            if (it) {
+                while (auto row = it->next()) {
+                    tuples.push_back(std::move(*row));
+                }
+            }
+
+            // Rewrite each tuple without the dropped column.
+            for (auto& [rid, data] : tuples) {
+                auto values = TupleSerializer::deserialize(data, old_storage_schema);
+                if (!values) {
+                    continue;
+                }
+                values->erase(values->begin() + drop_index);
+
+                auto new_data = TupleSerializer::serialize(*values, new_storage_schema);
+                if (!new_data) {
+                    return make_error(new_data.error().code, new_data.error().message);
+                }
+                auto upd = (*ts)->heap->update_tuple(rid, *new_data);
+                if (!upd) {
+                    return make_error(upd.error().code, upd.error().message);
+                }
+            }
+
+            // Update the storage schema.
+            (*ts)->storage_schema = new_storage_schema;
+        }
+        break;
+    }
+
+    case AlterAction::RENAME_COLUMN: {
+        // Validate column exists.
+        bool found = false;
+        for (const auto& col : schema->columns) {
+            auto upper_name = col.name;
+            auto upper_target = stmt.column_name;
+            std::transform(upper_name.begin(),
+                           upper_name.end(),
+                           upper_name.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+            std::transform(upper_target.begin(),
+                           upper_target.end(),
+                           upper_target.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+            if (upper_name == upper_target) {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            return make_error(StatusCode::NOT_FOUND,
+                              "column '" + stmt.column_name + "' not found in table '" +
+                                  stmt.table_name + "'");
+        }
+
+        auto rename_result =
+            catalog_.rename_column(table_id, stmt.column_name, stmt.new_column_name);
+        if (!rename_result) {
+            return make_error(rename_result.error().code, rename_result.error().message);
+        }
+
+        // Update storage schema (column names changed, no data migration needed).
+        auto ts = storage_.get_table_storage(table_id);
+        if (ts) {
+            auto updated_schema = catalog_.get_table_by_id(table_id);
+            if (updated_schema) {
+                (*ts)->storage_schema = StorageManager::build_storage_schema(*updated_schema);
+            }
+        }
+        break;
+    }
+    }
+
+    // Persist updated columns to sys_columns.
+    if (catalog_persistence_ != nullptr) {
+        auto updated_schema = catalog_.get_table_by_id(table_id);
+        if (updated_schema) {
+            auto persist = catalog_persistence_->persist_columns_update(*updated_schema);
+            if (!persist) {
+                GIODB_LOG_WARN("failed to persist ALTER TABLE for '{}': {}",
+                               stmt.table_name,
+                               persist.error().message);
+            }
+        }
+    }
+
+    GIODB_LOG_INFO("altered table '{}'", stmt.table_name);
+
+    QueryResult qr;
+    qr.message = "ALTER TABLE";
     return ok(std::move(qr));
 }
 
