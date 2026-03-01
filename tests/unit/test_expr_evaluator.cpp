@@ -7,8 +7,10 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
+#include <regex>
 #include <string>
 #include <vector>
 
@@ -81,6 +83,12 @@ ExprPtr col_ref(const std::string& table, const std::string& name) {
     auto e = std::make_unique<ColumnRefExpr>();
     e->table = table;
     e->column = name;
+    return e;
+}
+
+ExprPtr fn_call(const std::string& name) {
+    auto e = std::make_unique<FunctionCallExpr>();
+    e->name = name;
     return e;
 }
 
@@ -833,4 +841,202 @@ TEST(ExprEvaluator, ConcatWithNull) {
     auto result = evaluate_expr(*expr, tuple, schema, bound);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_TRUE(result->is_null());
+}
+
+// =============================================================================
+// gen_uuid() function
+// =============================================================================
+
+TEST(ExprEvaluator, GenUuidReturnsUuidType) {
+    auto bound = empty_bound();
+    OutputSchema schema;
+    Tuple tuple{{}, std::nullopt};
+
+    auto result = evaluate_expr(*fn_call("gen_uuid"), tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_FALSE(result->is_null());
+    EXPECT_EQ(result->type_id(), TypeId::UUID);
+}
+
+TEST(ExprEvaluator, GenUuidVersion4Format) {
+    auto bound = empty_bound();
+    OutputSchema schema;
+    Tuple tuple{{}, std::nullopt};
+
+    auto result = evaluate_expr(*fn_call("gen_uuid"), tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    const auto& uuid = result->as_uuid();
+    // Version 4: byte 6 high nibble should be 0x4_.
+    EXPECT_EQ((uuid[6] >> 4) & 0x0F, 4);
+    // Variant 1: byte 8 high bits should be 10xx (0x8_, 0x9_, 0xA_, 0xB_).
+    EXPECT_GE((uuid[8] >> 6) & 0x03, 2);
+    EXPECT_LE((uuid[8] >> 6) & 0x03, 2); // Must be exactly 0b10.
+}
+
+TEST(ExprEvaluator, GenUuidUniqueness) {
+    auto bound = empty_bound();
+    OutputSchema schema;
+    Tuple tuple{{}, std::nullopt};
+
+    auto r1 = evaluate_expr(*fn_call("gen_uuid"), tuple, schema, bound);
+    auto r2 = evaluate_expr(*fn_call("gen_uuid"), tuple, schema, bound);
+    ASSERT_TRUE(r1.has_value()) << r1.error().message;
+    ASSERT_TRUE(r2.has_value()) << r2.error().message;
+
+    // Two generated UUIDs should be different.
+    EXPECT_NE(r1->as_uuid(), r2->as_uuid());
+}
+
+TEST(ExprEvaluator, GenRandomUuidAlias) {
+    auto bound = empty_bound();
+    OutputSchema schema;
+    Tuple tuple{{}, std::nullopt};
+
+    auto result = evaluate_expr(*fn_call("gen_random_uuid"), tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->type_id(), TypeId::UUID);
+}
+
+TEST(ExprEvaluator, UuidGenerateV4Alias) {
+    auto bound = empty_bound();
+    OutputSchema schema;
+    Tuple tuple{{}, std::nullopt};
+
+    auto result = evaluate_expr(*fn_call("uuid_generate_v4"), tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->type_id(), TypeId::UUID);
+}
+
+TEST(ExprEvaluator, GenUuidCaseInsensitive) {
+    auto bound = empty_bound();
+    OutputSchema schema;
+    Tuple tuple{{}, std::nullopt};
+
+    auto result = evaluate_expr(*fn_call("GEN_UUID"), tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->type_id(), TypeId::UUID);
+}
+
+// =============================================================================
+// CURRENT_TIMESTAMP / NOW()
+// =============================================================================
+
+TEST(ExprEvaluator, NowReturnsTimestamp) {
+    auto bound = empty_bound();
+    OutputSchema schema;
+    Tuple tuple{{}, std::nullopt};
+
+    auto result = evaluate_expr(*fn_call("now"), tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_FALSE(result->is_null());
+    EXPECT_EQ(result->type_id(), TypeId::TIMESTAMP);
+
+    // The timestamp should be close to the current wall-clock time.
+    auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                      std::chrono::system_clock::now().time_since_epoch())
+                      .count();
+    auto diff = std::abs(result->as_timestamp().microseconds - now_us);
+    EXPECT_LT(diff, 1000000); // Within 1 second.
+}
+
+TEST(ExprEvaluator, CurrentTimestampAsFunction) {
+    auto bound = empty_bound();
+    OutputSchema schema;
+    Tuple tuple{{}, std::nullopt};
+
+    auto result = evaluate_expr(*fn_call("CURRENT_TIMESTAMP"), tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->type_id(), TypeId::TIMESTAMP);
+}
+
+TEST(ExprEvaluator, CurrentTimestampAsColumnRef) {
+    auto bound = empty_bound();
+    OutputSchema schema;
+    Tuple tuple{{}, std::nullopt};
+
+    // CURRENT_TIMESTAMP parsed as bare identifier (ColumnRefExpr).
+    auto result = evaluate_expr(*col_ref("CURRENT_TIMESTAMP"), tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->type_id(), TypeId::TIMESTAMP);
+
+    auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                      std::chrono::system_clock::now().time_since_epoch())
+                      .count();
+    auto diff = std::abs(result->as_timestamp().microseconds - now_us);
+    EXPECT_LT(diff, 1000000);
+}
+
+// =============================================================================
+// CURRENT_DATE
+// =============================================================================
+
+TEST(ExprEvaluator, CurrentDateAsFunction) {
+    auto bound = empty_bound();
+    OutputSchema schema;
+    Tuple tuple{{}, std::nullopt};
+
+    auto result = evaluate_expr(*fn_call("CURRENT_DATE"), tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_FALSE(result->is_null());
+    EXPECT_EQ(result->type_id(), TypeId::DATE);
+
+    // The date should be close to today.
+    auto now_days = std::chrono::duration_cast<std::chrono::days>(
+                        std::chrono::floor<std::chrono::days>(
+                            std::chrono::system_clock::now().time_since_epoch()))
+                        .count();
+    auto diff = std::abs(static_cast<int64_t>(result->as_date().days_since_epoch) -
+                         static_cast<int64_t>(now_days));
+    EXPECT_LE(diff, 1); // Within 1 day (handles midnight edge).
+}
+
+TEST(ExprEvaluator, CurrentDateAsColumnRef) {
+    auto bound = empty_bound();
+    OutputSchema schema;
+    Tuple tuple{{}, std::nullopt};
+
+    auto result = evaluate_expr(*col_ref("CURRENT_DATE"), tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->type_id(), TypeId::DATE);
+}
+
+// =============================================================================
+// CURRENT_TIME
+// =============================================================================
+
+TEST(ExprEvaluator, CurrentTimeAsFunction) {
+    auto bound = empty_bound();
+    OutputSchema schema;
+    Tuple tuple{{}, std::nullopt};
+
+    auto result = evaluate_expr(*fn_call("CURRENT_TIME"), tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_FALSE(result->is_null());
+    EXPECT_EQ(result->type_id(), TypeId::TIME);
+
+    // Microseconds since midnight must be in valid range [0, 86400000000).
+    auto us = result->as_time().microseconds;
+    EXPECT_GE(us, 0);
+    EXPECT_LT(us, 86400000000LL);
+}
+
+TEST(ExprEvaluator, CurrentTimeAsColumnRef) {
+    auto bound = empty_bound();
+    OutputSchema schema;
+    Tuple tuple{{}, std::nullopt};
+
+    auto result = evaluate_expr(*col_ref("current_time"), tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->type_id(), TypeId::TIME);
+}
+
+TEST(ExprEvaluator, CurrentTimeCaseInsensitiveColumnRef) {
+    auto bound = empty_bound();
+    OutputSchema schema;
+    Tuple tuple{{}, std::nullopt};
+
+    auto result = evaluate_expr(*col_ref("Current_Timestamp"), tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->type_id(), TypeId::TIMESTAMP);
 }

@@ -14,8 +14,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <random>
 #include <string>
 
 namespace giodb {
@@ -32,6 +34,58 @@ const SystemFunctionContext* get_system_function_context() {
 }
 
 namespace {
+
+// ---------------------------------------------------------------------------
+// UUID v4 generation
+// ---------------------------------------------------------------------------
+
+Uuid generate_uuid_v4() {
+    static thread_local std::mt19937_64 rng([] {
+        std::random_device rd;
+        return rd();
+    }());
+
+    Uuid uuid{};
+    // Fill with random bytes (two 64-bit randoms cover 16 bytes).
+    auto r0 = rng();
+    auto r1 = rng();
+    std::memcpy(uuid.data(), &r0, 8);
+    std::memcpy(uuid.data() + 8, &r1, 8);
+
+    // Set version 4: byte 6 high nibble = 0100.
+    uuid[6] = static_cast<uint8_t>((uuid[6] & 0x0F) | 0x40);
+    // Set variant 1: byte 8 high bits = 10xx.
+    uuid[8] = static_cast<uint8_t>((uuid[8] & 0x3F) | 0x80);
+
+    return uuid;
+}
+
+// ---------------------------------------------------------------------------
+// Temporal helpers (wall-clock time)
+// ---------------------------------------------------------------------------
+
+Timestamp current_timestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+    return Timestamp{us};
+}
+
+Date current_date() {
+    auto now = std::chrono::system_clock::now();
+    auto days = std::chrono::duration_cast<std::chrono::days>(
+                    std::chrono::floor<std::chrono::days>(now.time_since_epoch()))
+                    .count();
+    return Date{static_cast<int32_t>(days)};
+}
+
+Time current_time() {
+    auto now = std::chrono::system_clock::now();
+    auto since_epoch = now.time_since_epoch();
+    auto today = std::chrono::floor<std::chrono::days>(since_epoch);
+    auto time_of_day =
+        std::chrono::duration_cast<std::chrono::microseconds>(since_epoch - today).count();
+    return Time{time_of_day};
+}
 
 // ---------------------------------------------------------------------------
 // Forward declaration of the internal evaluator
@@ -84,6 +138,24 @@ Result<Value> eval_literal(const LiteralExpr& expr) {
 
 Result<Value>
 eval_column_ref(const ColumnRefExpr& expr, const Tuple& tuple, const OutputSchema& schema) {
+    // Handle temporal pseudo-columns parsed as bare identifiers.
+    if (expr.table.empty()) {
+        std::string upper;
+        upper.reserve(expr.column.size());
+        for (char c : expr.column) {
+            upper += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        }
+        if (upper == "CURRENT_TIMESTAMP") {
+            return ok(Value(current_timestamp()));
+        }
+        if (upper == "CURRENT_DATE") {
+            return ok(Value(current_date()));
+        }
+        if (upper == "CURRENT_TIME") {
+            return ok(Value(current_time()));
+        }
+    }
+
     std::optional<size_t> idx;
     if (!expr.table.empty()) {
         idx = schema.find_column(expr.table, expr.column);
@@ -775,6 +847,22 @@ Result<Value> eval_function(const FunctionCallExpr& expr,
     upper.reserve(expr.name.size());
     for (char c : expr.name) {
         upper += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    }
+
+    // UUID generation.
+    if (upper == "GEN_UUID" || upper == "GEN_RANDOM_UUID" || upper == "UUID_GENERATE_V4") {
+        return ok(Value(generate_uuid_v4()));
+    }
+
+    // Date/time functions.
+    if (upper == "NOW" || upper == "CURRENT_TIMESTAMP") {
+        return ok(Value(current_timestamp()));
+    }
+    if (upper == "CURRENT_DATE") {
+        return ok(Value(current_date()));
+    }
+    if (upper == "CURRENT_TIME") {
+        return ok(Value(current_time()));
     }
 
     // Replication system functions.
