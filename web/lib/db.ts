@@ -55,7 +55,7 @@ export async function ping(conn?: ConnectionParams): Promise<boolean> {
   const db = process.env.GIODB_DEFAULT_DATABASE || "giodb";
   const pool = getPool(db, conn);
   try {
-    await pool.query("SELECT 1");
+    await pool.query("SHOW DATABASES");
     return true;
   } catch {
     return false;
