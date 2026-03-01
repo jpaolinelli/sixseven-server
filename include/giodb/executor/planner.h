@@ -109,6 +109,12 @@ private:
                      const BoundStatement& bound,
                      std::vector<ExprPtr>& owned_exprs);
 
+    /// Bind all CTEs from a CTE map and inject them into a Binder using a
+    /// fixpoint loop so later CTEs can reference earlier ones regardless of
+    /// iteration order.
+    void inject_cte_bindings(Binder& binder,
+                             const std::unordered_map<std::string, const SelectStmt*>& cte_map);
+
     /// Extract EXISTS/NOT EXISTS/IN-subquery conditions from a WHERE clause
     /// and rewrite them as SEMI/ANTI joins. Returns the remaining WHERE
     /// predicate (may be nullptr if all conditions were rewritten).

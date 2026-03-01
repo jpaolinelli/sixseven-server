@@ -430,27 +430,20 @@ TEST_F(QA_PlannerBugs, GDB232_MultipleCTEsOneReferencedInInSubquery) {
 TEST_F(QA_PlannerBugs, GDB232_NestedCTEsReferencedInSubquery) {
     // Nested CTEs: one CTE references another CTE, and the second CTE is
     // used in an IN subquery. Tests that CTE resolution works transitively.
-    //
-    // QA FINDING (Medium): The CTE injection in rewrite_subquery_predicates
-    // creates a fresh Binder for each CTE, but doesn't provide prior CTEs
-    // to later CTE binders. So eng_users (which references base_depts)
-    // fails to bind because base_depts is not available in its binder.
-    auto result = engine_->execute("WITH base_depts AS (SELECT departments.id FROM departments "
-                                   "WHERE departments.dept_name = 'engineering'), "
-                                   "eng_users AS (SELECT users.id AS uid FROM users "
-                                   "WHERE users.dept_id IN (SELECT base_depts.id FROM base_depts)) "
-                                   "SELECT orders.id FROM orders "
-                                   "WHERE orders.user_id IN (SELECT eng_users.uid FROM eng_users)");
+    // Fixed in GDB-239: CTE injection loop now accumulates previously bound
+    // CTEs so later CTEs can reference earlier ones.
+    auto qr = exec_ok("WITH base_depts AS (SELECT departments.id FROM departments "
+                      "WHERE departments.dept_name = 'engineering'), "
+                      "eng_users AS (SELECT users.id AS uid FROM users "
+                      "WHERE users.dept_id IN (SELECT base_depts.id FROM base_depts)) "
+                      "SELECT orders.id FROM orders "
+                      "WHERE orders.user_id IN (SELECT eng_users.uid FROM eng_users)");
 
-    // Currently fails — CTE binder doesn't have prior CTEs.
-    // If this starts passing in the future, verify correctness.
-    if (result.has_value()) {
-        auto ids = collect_column_ints(*result, 0);
-        EXPECT_EQ(ids.size(), 3u);
-        EXPECT_TRUE(ids.count(100));
-        EXPECT_TRUE(ids.count(101));
-        EXPECT_TRUE(ids.count(102));
-    }
+    auto ids = collect_column_ints(qr, 0);
+    EXPECT_EQ(ids.size(), 3u);
+    EXPECT_TRUE(ids.count(100));
+    EXPECT_TRUE(ids.count(101));
+    EXPECT_TRUE(ids.count(102));
 }
 
 TEST_F(QA_PlannerBugs, GDB232_CTEUsedInBothFromAndInSubquery) {
