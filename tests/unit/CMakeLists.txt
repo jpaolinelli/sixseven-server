@@ -109,6 +109,7 @@ add_executable(giodb_unit_tests
     test_qa_gdb_31.cpp
     test_qa_gdb_229_232.cpp
     test_qa_gdb_233_234.cpp
+    test_qa_gdb_239.cpp
     test_qa_gdb_238.cpp
     test_qa_gdb_235_237.cpp
     test_qa_gdb_92.cpp

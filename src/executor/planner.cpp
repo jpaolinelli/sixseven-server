@@ -278,6 +278,35 @@ OutputSchema Planner::build_table_output_schema(const TableSchema& ts,
 }
 
 // ---------------------------------------------------------------------------
+// CTE injection helper
+// ---------------------------------------------------------------------------
+
+void Planner::inject_cte_bindings(
+    Binder& binder, const std::unordered_map<std::string, const SelectStmt*>& cte_map) {
+    // Use a fixpoint loop: CTEs may reference earlier CTEs, and since
+    // cte_map is unordered we retry until no more progress is made.
+    std::unordered_map<std::string, BoundStatement> already_bound;
+    bool progress = true;
+    while (progress) {
+        progress = false;
+        for (const auto& [cte_name, cte_sel_ptr] : cte_map) {
+            if (already_bound.count(cte_name))
+                continue;
+            Binder cte_binder(catalog_, database_id_);
+            for (const auto& [prev_name, prev_bound] : already_bound) {
+                cte_binder.add_cte(prev_name, prev_bound);
+            }
+            auto cte_bound = cte_binder.bind(*cte_sel_ptr);
+            if (cte_bound) {
+                binder.add_cte(cte_name, *cte_bound);
+                already_bound[cte_name] = *cte_bound;
+                progress = true;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Plan FROM source: table, CTE, or derived table
 // ---------------------------------------------------------------------------
 
@@ -320,13 +349,17 @@ Planner::plan_from_source(const TableRef& table_ref,
     if (cte_it != cte_map.end()) {
         const auto* cte_sel = cte_it->second;
 
+        // Bind with all sibling CTEs available so nested CTE references
+        // (e.g. eng_users referencing base_depts) resolve correctly.
+        // Use a fixpoint loop to handle arbitrary dependency ordering.
         Binder binder(catalog_, database_id_);
+        inject_cte_bindings(binder, cte_map);
         auto sub_bound = binder.bind(*cte_sel);
         if (!sub_bound) {
             return make_error(sub_bound.error().code, sub_bound.error().message);
         }
 
-        auto sub_iter = plan_select(*cte_sel, *sub_bound, owned_exprs);
+        auto sub_iter = plan_select(*cte_sel, *sub_bound, owned_exprs, cte_map);
         if (!sub_iter) {
             return make_error(sub_iter.error().code, sub_iter.error().message);
         }
@@ -465,13 +498,7 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
                 // correctly applied.
                 Binder binder(catalog_, database_id_);
                 // Inject outer CTE bindings so the subquery can reference CTEs.
-                for (const auto& [cte_name, cte_sel_ptr] : cte_map) {
-                    Binder cte_binder(catalog_, database_id_);
-                    auto cte_bound = cte_binder.bind(*cte_sel_ptr);
-                    if (cte_bound) {
-                        binder.add_cte(cte_name, *cte_bound);
-                    }
-                }
+                inject_cte_bindings(binder, cte_map);
                 auto sub_bound = binder.bind(*sub_sel);
                 if (!sub_bound) {
                     return make_error(sub_bound.error().code, sub_bound.error().message);
