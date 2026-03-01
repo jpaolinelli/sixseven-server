@@ -61,7 +61,13 @@ void ThreadPool::worker_loop() {
             task = std::move(tasks_.front());
             tasks_.pop();
         }
-        task();
+        try {
+            task();
+        } catch (const std::exception& e) {
+            GIODB_LOG_ERROR("thread pool task threw exception: {}", e.what());
+        } catch (...) {
+            GIODB_LOG_ERROR("thread pool task threw unknown exception");
+        }
     }
 }
 

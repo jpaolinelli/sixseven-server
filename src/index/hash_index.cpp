@@ -47,9 +47,18 @@ Result<void> HashIndex::insert(const KeyType& key, const RID& rid) {
 
     // Split if the bucket exceeds capacity.
     if (bucket->entries.size() > config_.bucket_capacity) {
-        auto result = split_bucket(idx);
-        if (!result) {
-            return result;
+        // Guard against pathological case: all entries share the same hash
+        // value. Splitting can never separate them, so skip to prevent
+        // unbounded directory growth (GDB-244).
+        bool all_same_hash = std::all_of(
+            bucket->entries.begin(), bucket->entries.end(), [&](const HashBucketEntry& e) {
+                return e.hash == bucket->entries[0].hash;
+            });
+        if (!all_same_hash) {
+            auto result = split_bucket(idx);
+            if (!result) {
+                return result;
+            }
         }
     }
 

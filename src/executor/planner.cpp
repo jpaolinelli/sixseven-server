@@ -349,17 +349,20 @@ Planner::plan_from_source(const TableRef& table_ref,
     if (cte_it != cte_map.end()) {
         const auto* cte_sel = cte_it->second;
 
-        // Bind with all sibling CTEs available so nested CTE references
+        // Bind with sibling CTEs available so nested CTE references
         // (e.g. eng_users referencing base_depts) resolve correctly.
-        // Use a fixpoint loop to handle arbitrary dependency ordering.
+        // Exclude the CTE itself to prevent self-shadowing: within its
+        // own definition, table names resolve to the real catalog table.
         Binder binder(catalog_, database_id_);
-        inject_cte_bindings(binder, cte_map);
+        auto siblings = cte_map;
+        siblings.erase(to_upper(table_ref.name));
+        inject_cte_bindings(binder, siblings);
         auto sub_bound = binder.bind(*cte_sel);
         if (!sub_bound) {
             return make_error(sub_bound.error().code, sub_bound.error().message);
         }
 
-        auto sub_iter = plan_select(*cte_sel, *sub_bound, owned_exprs, cte_map);
+        auto sub_iter = plan_select(*cte_sel, *sub_bound, owned_exprs, siblings);
         if (!sub_iter) {
             return make_error(sub_iter.error().code, sub_iter.error().message);
         }

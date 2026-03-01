@@ -381,10 +381,9 @@ TEST(QA144ThreadPool, LargeWorkerPool) {
     EXPECT_EQ(counter.load(), N);
 }
 
-// BUG: Worker loop does not catch exceptions — std::terminate is called.
-// Filed as GDB-245. A production thread pool must wrap task() in try-catch
-// so that a single bad task doesn't crash the entire server process.
-TEST(QA144ThreadPool, DISABLED_TasksThatThrowDontCrash) {
+// GDB-245 fix: worker_loop() now wraps task() in try-catch so that a single
+// bad task doesn't crash the server.
+TEST(QA144ThreadPool, TasksThatThrowDontCrash) {
     ThreadPool pool(2);
     std::atomic<int> counter{0};
 
