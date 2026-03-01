@@ -1,6 +1,9 @@
 #include "giodb/catalog/catalog.h"
 
+#include "giodb/common/types.h"
+
 #include <algorithm>
+#include <limits>
 
 namespace giodb {
 
@@ -601,6 +604,116 @@ void Catalog::set_next_edge_id(edge_id_t id) {
 table_id_t Catalog::next_table_id() const {
     std::lock_guard lock(mu_);
     return next_table_id_;
+}
+
+// -- Auto-increment counter operations ----------------------------------------
+
+void Catalog::init_autoincrement(table_id_t table_id, int64_t start_value) {
+    std::lock_guard lock(mu_);
+    autoincrement_counters_[table_id] = start_value;
+}
+
+Result<int64_t> Catalog::next_autoincrement(table_id_t table_id, TypeId type_id) {
+    std::lock_guard lock(mu_);
+    auto it = autoincrement_counters_.find(table_id);
+    if (it == autoincrement_counters_.end()) {
+        return make_error(StatusCode::INTERNAL_ERROR,
+                          "no autoincrement counter for table " + std::to_string(table_id));
+    }
+
+    int64_t value = it->second;
+
+    // Check overflow based on the column's integer type.
+    switch (type_id) {
+    case TypeId::INT8:
+        if (value > std::numeric_limits<int8_t>::max()) {
+            return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                              "AUTOINCREMENT overflow: value " + std::to_string(value) +
+                                  " exceeds INT8 max (" +
+                                  std::to_string(std::numeric_limits<int8_t>::max()) + ")");
+        }
+        break;
+    case TypeId::INT16:
+        if (value > std::numeric_limits<int16_t>::max()) {
+            return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                              "AUTOINCREMENT overflow: value " + std::to_string(value) +
+                                  " exceeds INT16 max (" +
+                                  std::to_string(std::numeric_limits<int16_t>::max()) + ")");
+        }
+        break;
+    case TypeId::INT32:
+        if (value > std::numeric_limits<int32_t>::max()) {
+            return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                              "AUTOINCREMENT overflow: value " + std::to_string(value) +
+                                  " exceeds INT32 max (" +
+                                  std::to_string(std::numeric_limits<int32_t>::max()) + ")");
+        }
+        break;
+    case TypeId::INT64:
+        if (value == std::numeric_limits<int64_t>::max()) {
+            return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                              "AUTOINCREMENT overflow: INT64 counter exhausted");
+        }
+        break;
+    case TypeId::UINT8:
+        if (value > std::numeric_limits<uint8_t>::max()) {
+            return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                              "AUTOINCREMENT overflow: value " + std::to_string(value) +
+                                  " exceeds UINT8 max (" +
+                                  std::to_string(std::numeric_limits<uint8_t>::max()) + ")");
+        }
+        break;
+    case TypeId::UINT16:
+        if (value > std::numeric_limits<uint16_t>::max()) {
+            return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                              "AUTOINCREMENT overflow: value " + std::to_string(value) +
+                                  " exceeds UINT16 max (" +
+                                  std::to_string(std::numeric_limits<uint16_t>::max()) + ")");
+        }
+        break;
+    case TypeId::UINT32:
+        if (value > std::numeric_limits<uint32_t>::max()) {
+            return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                              "AUTOINCREMENT overflow: value " + std::to_string(value) +
+                                  " exceeds UINT32 max (" +
+                                  std::to_string(std::numeric_limits<uint32_t>::max()) + ")");
+        }
+        break;
+    case TypeId::UINT64:
+        // int64_t can't represent the full UINT64 range, but for practical purposes
+        // we treat the counter as a signed int64 value (max ~9.2 quintillion).
+        if (value == std::numeric_limits<int64_t>::max()) {
+            return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                              "AUTOINCREMENT overflow: UINT64 counter exhausted");
+        }
+        break;
+    default:
+        return make_error(StatusCode::TYPE_ERROR, "AUTOINCREMENT requires an integer type");
+    }
+
+    it->second = value + 1;
+    return ok(value);
+}
+
+void Catalog::advance_autoincrement(table_id_t table_id, int64_t value) {
+    std::lock_guard lock(mu_);
+    auto it = autoincrement_counters_.find(table_id);
+    if (it != autoincrement_counters_.end() && value >= it->second) {
+        if (value >= std::numeric_limits<int64_t>::max()) {
+            it->second = std::numeric_limits<int64_t>::max();
+        } else {
+            it->second = value + 1;
+        }
+    }
+}
+
+int64_t Catalog::get_autoincrement_counter(table_id_t table_id) const {
+    std::lock_guard lock(mu_);
+    auto it = autoincrement_counters_.find(table_id);
+    if (it == autoincrement_counters_.end()) {
+        return 0;
+    }
+    return it->second;
 }
 
 } // namespace giodb

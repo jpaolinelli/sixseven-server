@@ -150,6 +150,23 @@ public:
     /// Fails with NOT_FOUND if the provider does not exist.
     [[nodiscard]] Result<void> remove_embedding_provider(const std::string& name);
 
+    // -- Auto-increment counter operations ------------------------------------
+
+    /// Initialize the auto-increment counter for a table. Called on CREATE TABLE.
+    void init_autoincrement(table_id_t table_id, int64_t start_value = 1);
+
+    /// Get the next auto-increment value for a table and advance the counter.
+    /// Checks overflow for the given column type.
+    [[nodiscard]] Result<int64_t> next_autoincrement(table_id_t table_id, TypeId type_id);
+
+    /// Advance the auto-increment counter past an explicit value.
+    /// Used when the user provides an explicit value in INSERT.
+    void advance_autoincrement(table_id_t table_id, int64_t value);
+
+    /// Get the current auto-increment counter value for a table.
+    /// Returns 0 if no counter is set.
+    [[nodiscard]] int64_t get_autoincrement_counter(table_id_t table_id) const;
+
     // -- Persistence restore operations ----------------------------------------
 
     /// Restore a table with a pre-assigned table_id (for catalog persistence).
@@ -226,6 +243,9 @@ private:
 
     /// Embedding provider configurations keyed by name.
     std::unordered_map<std::string, EmbeddingProviderConfig> embedding_providers_;
+
+    /// Per-table auto-increment counters. Stores the next value to assign.
+    std::unordered_map<table_id_t, int64_t> autoincrement_counters_;
 };
 
 } // namespace giodb

@@ -20,7 +20,7 @@ class WalWriter;
 /// SubqueryExpr, ExistsExpr, and InExpr-with-subquery nodes inline.
 /// Without this context, those nodes return NOT_IMPLEMENTED errors.
 struct SubqueryContext {
-    const Catalog& catalog;
+    Catalog& catalog;
     StorageManager& storage;
 };
 

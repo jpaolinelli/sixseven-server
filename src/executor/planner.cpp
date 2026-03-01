@@ -209,7 +209,7 @@ ExprPtr rewrite_expr(const Expr& expr,
 
 } // anonymous namespace
 
-Planner::Planner(const Catalog& catalog,
+Planner::Planner(Catalog& catalog,
                  StorageManager& storage,
                  database_id_t database_id,
                  GraphEngine* graph_engine,
@@ -1063,6 +1063,25 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
     std::vector<std::vector<const Expr*>> value_rows;
     value_rows.reserve(stmt.values.size());
 
+    // Collect auto-increment column info.
+    std::vector<AutoIncrementCol> ai_cols;
+    for (size_t j = 0; j < table_schema->columns.size(); ++j) {
+        if (table_schema->columns[j].is_autoincrement) {
+            // Determine if the column is in the explicit column list.
+            bool in_list = false;
+            if (!stmt.columns.empty()) {
+                for (const auto& col_name : stmt.columns) {
+                    if (table_schema->columns[j].name == col_name) {
+                        in_list = true;
+                        break;
+                    }
+                }
+            }
+            ai_cols.push_back(
+                {j, table_schema->columns[j].type_id, table_schema->table_id, !in_list});
+        }
+    }
+
     if (stmt.columns.empty()) {
         // All columns in schema order.
         for (const auto& row : stmt.values) {
@@ -1090,7 +1109,8 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
                     break;
                 }
             }
-            if (in_list) continue;
+            if (in_list)
+                continue;
 
             const auto& def = table_schema->columns[j].default_expr;
             if (!def.empty()) {
@@ -1111,6 +1131,14 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
                 }
                 default_ptrs[j] = expr->get();
                 owned_defaults.push_back(std::move(*expr));
+            } else if (table_schema->columns[j].is_autoincrement) {
+                // Auto-increment column omitted — use NULL placeholder.
+                // The InsertOperator will replace it with the next counter value.
+                auto null_expr = std::make_unique<LiteralExpr>();
+                null_expr->kind = LiteralKind::NULL_LITERAL;
+                null_expr->value = "NULL";
+                default_ptrs[j] = null_expr.get();
+                owned_defaults.push_back(std::move(null_expr));
             } else if (table_schema->columns[j].nullable) {
                 // No default, but nullable — use NULL.
                 auto null_expr = std::make_unique<LiteralExpr>();
@@ -1146,9 +1174,10 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
                     if (default_ptrs[j] != nullptr) {
                         reordered[j] = default_ptrs[j];
                     } else {
-                        return make_error(StatusCode::INVALID_ARGUMENT,
-                                          "missing value for non-nullable column without default: " +
-                                              table_schema->columns[j].name);
+                        return make_error(
+                            StatusCode::INVALID_ARGUMENT,
+                            "missing value for non-nullable column without default: " +
+                                table_schema->columns[j].name);
                     }
                 }
             }
@@ -1158,11 +1187,19 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
         auto iter = std::make_unique<InsertOperator>(
             *storage->heap, storage->storage_schema, std::move(value_rows), bound);
         iter->owned_default_exprs_ = std::move(owned_defaults);
+        if (!ai_cols.empty()) {
+            iter->autoincrement_cols_ = std::move(ai_cols);
+            iter->catalog_ = &catalog_;
+        }
         return ok(std::unique_ptr<Iterator>(std::move(iter)));
     }
 
     auto iter = std::make_unique<InsertOperator>(
         *storage->heap, storage->storage_schema, std::move(value_rows), bound);
+    if (!ai_cols.empty()) {
+        iter->autoincrement_cols_ = std::move(ai_cols);
+        iter->catalog_ = &catalog_;
+    }
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
 }
 

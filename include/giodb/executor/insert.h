@@ -1,5 +1,6 @@
 #pragma once
 
+#include "giodb/common/types.h"
 #include "giodb/executor/iterator.h"
 #include "giodb/executor/tuple.h"
 #include "giodb/parser/ast.h"
@@ -12,6 +13,16 @@
 #include <vector>
 
 namespace giodb {
+
+class Catalog;
+
+/// Describes an auto-increment column for the InsertOperator.
+struct AutoIncrementCol {
+    size_t col_idx;      ///< Column index in the storage schema.
+    TypeId type_id;      ///< Column type for overflow checking and value creation.
+    table_id_t table_id; ///< Table ID for catalog counter lookup.
+    bool is_placeholder; ///< True if the column was omitted and filled with a NULL placeholder.
+};
 
 /// Insert operator: evaluates value rows (or pulls from a child iterator
 /// for INSERT...SELECT), serialises them, and inserts into a TableHeap.
@@ -45,6 +56,13 @@ public:
     /// Set by the planner after construction; must outlive the operator.
     std::vector<ExprPtr> owned_default_exprs_;
 
+    /// Auto-increment column info. Set by the planner after construction.
+    std::vector<AutoIncrementCol> autoincrement_cols_;
+
+    /// Catalog reference for auto-increment counter management.
+    /// Set by the planner if the table has auto-increment columns.
+    Catalog* catalog_ = nullptr;
+
 protected:
     Result<void> do_open() override;
     Result<std::optional<Tuple>> do_next() override;
@@ -52,6 +70,9 @@ protected:
     std::vector<Iterator*> plan_children_mutable() override;
 
 private:
+    /// Create a Value from an int64_t counter for the given type.
+    static Result<Value> make_autoincrement_value(int64_t counter, TypeId type_id);
+
     TableHeap& heap_;
     const Schema& storage_schema_;
     std::vector<std::vector<const Expr*>> value_rows_;

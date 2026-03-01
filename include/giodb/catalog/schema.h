@@ -44,6 +44,7 @@ struct CatalogColumnDef {
     TypeId type_id = TypeId::INT32;
     bool nullable = true;
     std::string default_expr;
+    bool is_autoincrement = false;
 };
 
 /// Full metadata for a table in the system catalog.
@@ -218,6 +219,7 @@ inline TableSchema sys_columns_schema() {
         {3, "type_id", TypeId::INT32, false, ""},
         {4, "nullable", TypeId::BOOL, false, ""},
         {5, "default_expr", TypeId::STRING, true, ""},
+        {6, "is_autoincrement", TypeId::BOOL, false, ""},
     };
     schema.pk_columns = "table_id,ordinal";
     return schema;
