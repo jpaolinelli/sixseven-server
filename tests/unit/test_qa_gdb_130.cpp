@@ -510,16 +510,17 @@ TEST(QA_GDB_130_Registry, ClearCacheCreatesNewInstance) {
 }
 
 // ---------------------------------------------------------------------------
-// ONNX Provider: Verify not implemented
+// ONNX Provider: Verify recognized (GDB-243 implemented the ONNX provider)
 // ---------------------------------------------------------------------------
 
-TEST(QA_GDB_130_ONNX, OnnxProviderTypeNotRecognized) {
+TEST(QA_GDB_130_ONNX, OnnxProviderTypeRecognizedButModelNotFound) {
     Catalog catalog;
     ProviderRegistry registry(catalog);
 
-    // The ONNX provider is listed in the acceptance criteria but
-    // has not been implemented.  The registry should reject it.
+    // The ONNX provider is now implemented (GDB-243). The registry recognizes
+    // "onnx" as a valid type but fails with IO_ERROR because "model-path"
+    // does not exist as a file.
     auto result = registry.resolve("onnx/model-path");
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_EQ(result.error().code, StatusCode::IO_ERROR);
 }

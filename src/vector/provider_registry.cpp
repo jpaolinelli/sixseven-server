@@ -3,6 +3,7 @@
 #include "giodb/common/logging.h"
 #include "giodb/vector/builtin_provider.h"
 #include "giodb/vector/ollama_provider.h"
+#include "giodb/vector/onnx_provider.h"
 #include "giodb/vector/openai_provider.h"
 
 namespace giodb {
@@ -123,6 +124,20 @@ ProviderRegistry::create_provider(const EmbeddingProviderConfig& config) {
         }
         auto provider = std::make_shared<BuiltinProvider>(dim);
         GIODB_LOG_INFO("created builtin provider: dimension={}", dim);
+        return ok(std::shared_ptr<EmbeddingProvider>(std::move(provider)));
+    }
+
+    if (config.type == "onnx") {
+        if (config.model.empty()) {
+            return make_error(StatusCode::INVALID_ARGUMENT, "ONNX provider requires a model path");
+        }
+        auto session = create_onnx_session(config.model);
+        if (!session.has_value()) {
+            return tl::unexpected(session.error());
+        }
+        size_t dim = config.dimension > 0 ? static_cast<size_t>(config.dimension) : 384;
+        auto provider = std::make_shared<OnnxProvider>(config.model, dim, std::move(*session));
+        GIODB_LOG_INFO("created ONNX provider: model={}, dimension={}", config.model, dim);
         return ok(std::shared_ptr<EmbeddingProvider>(std::move(provider)));
     }
 

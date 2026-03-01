@@ -1,5 +1,6 @@
 # giodb::vector sources
 find_package(httplib CONFIG REQUIRED)
+find_package(onnxruntime CONFIG REQUIRED)
 
 add_library(giodb_vector STATIC
     distance.cpp
@@ -11,7 +12,8 @@ add_library(giodb_vector STATIC
     ollama_provider.cpp
     openai_provider.cpp
     builtin_provider.cpp
+    onnx_provider.cpp
     provider_registry.cpp
 )
 target_include_directories(giodb_vector PUBLIC ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(giodb_vector PUBLIC giodb_common giodb_storage giodb_catalog httplib::httplib)
+target_link_libraries(giodb_vector PUBLIC giodb_common giodb_storage giodb_catalog httplib::httplib onnxruntime::onnxruntime)

@@ -149,6 +149,7 @@ add_executable(giodb_unit_tests
     test_qa_gdb_147.cpp
     test_qa_gdb_148.cpp
     test_qa_gdb_149.cpp
+    test_onnx_provider.cpp
     test_qa_gdb_241.cpp
     test_qa_gdb_242.cpp
 )
