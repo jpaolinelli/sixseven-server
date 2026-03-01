@@ -2,6 +2,8 @@
 /// Tests split correctness, cascading splits, sibling pointer integrity,
 /// boundary capacities, and various insert orderings.
 
+#include "giodb/storage/wal.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -12,7 +14,6 @@
 #include <set>
 #include <vector>
 
-#include "giodb/storage/wal.h"
 #include "test_btree_helpers.h"
 
 using namespace giodb;
@@ -241,8 +242,7 @@ TEST(QA_GDB93_SiblingIntegrity, SplitPreservesAllEntries) {
         for (int i = 1; i <= count; ++i) {
             auto s = tree.search(make_key(i * 10));
             ASSERT_TRUE(s.has_value());
-            ASSERT_TRUE(s->has_value())
-                << "max=" << max_keys << " key=" << i * 10 << " not found";
+            ASSERT_TRUE(s->has_value()) << "max=" << max_keys << " key=" << i * 10 << " not found";
         }
     }
 }
@@ -322,9 +322,6 @@ TEST(QA_GDB93_Duplicates, ManyDuplicatesCauseSplits) {
     ASSERT_TRUE(s->has_value());
 
     // Full range scan (no begin key) should find all 20
-    // NOTE: range_scan with begin_key=42 only returns entries from the
-    // rightmost leaf due to find_leaf routing equal keys right.
-    // See bug GDB-TBD for the fix. Using open-begin scan to verify inserts.
     auto scan = tree.range_scan(std::nullopt, std::nullopt);
     ASSERT_TRUE(scan.has_value());
     auto entries = collect_scan(*scan);
@@ -333,9 +330,9 @@ TEST(QA_GDB93_Duplicates, ManyDuplicatesCauseSplits) {
 }
 
 TEST(QA_GDB93_Duplicates, RangeScanWithBeginKeyMissesDuplicates) {
-    // BUG: range_scan(begin_key=K) with many duplicate keys spanning
-    // multiple leaves only returns entries from the rightmost leaf because
-    // find_leaf() routes key >= separator to the right child.
+    // FIXED (GDB-240): range_scan(begin_key=K) with many duplicate keys
+    // spanning multiple leaves now correctly walks backward through
+    // prev_leaf_id pointers to find the leftmost leaf.
     auto tree = make_test_index(4, 4, false);
 
     for (int i = 0; i < 20; ++i) {
@@ -343,16 +340,12 @@ TEST(QA_GDB93_Duplicates, RangeScanWithBeginKeyMissesDuplicates) {
     }
     EXPECT_EQ(tree.size(), 20u);
 
-    // This scan starts from begin_key=42, which routes to the LAST leaf.
-    // It should return all 20 entries but doesn't.
     auto scan = tree.range_scan(make_key(42), std::nullopt);
     ASSERT_TRUE(scan.has_value());
     auto entries = collect_scan(*scan);
     ASSERT_TRUE(entries.has_value());
 
-    // BUG: returns only entries from the last leaf, not all 20.
-    // When this bug is fixed, this assertion should be EXPECT_EQ(..., 20u).
-    EXPECT_LT(entries->size(), 20u);
+    EXPECT_EQ(entries->size(), 20u);
 }
 
 TEST(QA_GDB93_Duplicates, DuplicatesInterleavedWithUniques) {
@@ -420,15 +413,19 @@ TEST(QA_GDB93_Composite, SplitWithCompositeKeys) {
     BTreeIndex tree(std::move(config));
 
     std::vector<std::pair<int64_t, std::string>> entries = {
-        {1, "apple"}, {1, "banana"}, {1, "cherry"},
-        {2, "date"},  {2, "elderberry"}, {3, "fig"},
-        {3, "grape"}, {4, "honeydew"},
+        {1, "apple"},
+        {1, "banana"},
+        {1, "cherry"},
+        {2, "date"},
+        {2, "elderberry"},
+        {3, "fig"},
+        {3, "grape"},
+        {4, "honeydew"},
     };
 
     for (size_t i = 0; i < entries.size(); ++i) {
-        auto ins = tree.insert(
-            make_composite_key(entries[i].first, entries[i].second),
-            make_rid(static_cast<uint32_t>(i + 1)));
+        auto ins = tree.insert(make_composite_key(entries[i].first, entries[i].second),
+                               make_rid(static_cast<uint32_t>(i + 1)));
         ASSERT_TRUE(ins.has_value()) << "insert failed at index " << i;
     }
     EXPECT_EQ(tree.size(), entries.size());

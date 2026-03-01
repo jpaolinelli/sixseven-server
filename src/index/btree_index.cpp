@@ -460,6 +460,33 @@ Result<BTreeIterator> BTreeIndex::range_scan(const std::optional<KeyType>& begin
         }
         start_leaf_id = *leaf_id_result;
 
+        // find_leaf() routes key >= separator to the right child, so with
+        // duplicate keys spanning multiple leaves it may land on the last
+        // leaf containing begin_key instead of the first.  Walk backward
+        // through prev_leaf_id pointers to find the true leftmost leaf.
+        while (true) {
+            const auto* cur = get_leaf_node(start_leaf_id);
+            if (cur == nullptr) {
+                return make_error(StatusCode::INTERNAL_ERROR, "leaf not found");
+            }
+            PageId prev_id = cur->prev_leaf_id();
+            if (prev_id == invalid_page_id) {
+                break;
+            }
+            const auto* prev = get_leaf_node(prev_id);
+            if (prev == nullptr || prev->key_count() == 0) {
+                break;
+            }
+            auto cmp = compare_keys(prev->key_at(prev->key_count() - 1), *begin_key);
+            if (!cmp.has_value()) {
+                return tl::unexpected(cmp.error());
+            }
+            if (*cmp == std::strong_ordering::less) {
+                break; // Previous leaf's last key < begin_key, stop.
+            }
+            start_leaf_id = prev_id;
+        }
+
         const auto* leaf = get_leaf_node(start_leaf_id);
         if (leaf == nullptr) {
             return make_error(StatusCode::INTERNAL_ERROR, "leaf not found");
