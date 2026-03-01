@@ -100,19 +100,9 @@ TEST(QA_GDB_142, BucketCapacityPlusOneTriggersSplit) {
 // Pathological: all keys hash to same value (bucket overflow guard)
 // =============================================================================
 
-// BUG (GDB-244): Pathological hash collision causes unbounded directory growth.
-// When all entries in a bucket share the same hash, every subsequent insert
-// that overflows the bucket triggers a split that doubles the directory without
-// actually redistributing any entries. After ~30 inserts past capacity the
-// directory reaches 2^30+ slots and the process OOMs / segfaults.
-//
-// Reproduction: insert > bucket_capacity entries with the same key into a small-
-// capacity hash index. The "all_same" guard in split_bucket prevents infinite
-// recursion within a single split, but does NOT prevent repeated futile splits
-// across successive inserts.
-//
-// This test is disabled because it crashes.
-TEST(QA_GDB_142, DISABLED_AllSameKeysDifferentRIDs) {
+// GDB-244 fix: insert() now skips split_bucket() when all entries share the
+// same hash value, preventing unbounded directory growth.
+TEST(QA_GDB_142, AllSameKeysDifferentRIDs) {
     auto idx = make_index(4);
 
     for (int i = 0; i < 100; ++i) {

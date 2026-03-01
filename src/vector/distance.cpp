@@ -51,6 +51,10 @@ namespace {
         return 1.0F; // Zero-vector edge case: treat as maximum distance.
     }
     float similarity = dot / denom;
+    // Propagate NaN from input vectors (fmin/fmax would discard it).
+    if (std::isnan(similarity)) {
+        return similarity;
+    }
     // Clamp to [-1, 1] to handle floating-point rounding.
     similarity = std::fmin(1.0F, std::fmax(-1.0F, similarity));
     return 1.0F - similarity;
@@ -155,6 +159,9 @@ float cosine_distance_neon(const float* a, const float* b, uint32_t dim) {
         return 1.0F;
     }
     float similarity = dot / denom;
+    if (std::isnan(similarity)) {
+        return similarity;
+    }
     similarity = std::fmin(1.0F, std::fmax(-1.0F, similarity));
     return 1.0F - similarity;
 }
@@ -255,6 +262,9 @@ float cosine_distance_avx2(const float* a, const float* b, uint32_t dim) {
         return 1.0F;
     }
     float similarity = dot / denom;
+    if (std::isnan(similarity)) {
+        return similarity;
+    }
     similarity = std::fmin(1.0F, std::fmax(-1.0F, similarity));
     return 1.0F - similarity;
 }
@@ -334,6 +344,9 @@ float cosine_distance_avx512(const float* a, const float* b, uint32_t dim) {
         return 1.0F;
     }
     float similarity = dot / denom;
+    if (std::isnan(similarity)) {
+        return similarity;
+    }
     similarity = std::fmin(1.0F, std::fmax(-1.0F, similarity));
     return 1.0F - similarity;
 }
