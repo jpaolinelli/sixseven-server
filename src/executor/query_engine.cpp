@@ -31,6 +31,18 @@
 
 namespace giodb {
 
+namespace {
+
+/// Convert a string to uppercase for case-insensitive comparisons.
+std::string to_upper(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+    });
+    return s;
+}
+
+} // namespace
+
 QueryEngine::QueryEngine(Catalog& catalog, StorageManager& storage, GraphEngine* graph_engine)
     : catalog_(catalog), storage_(storage), graph_engine_(graph_engine) {}
 
@@ -1784,13 +1796,39 @@ Result<QueryResult> QueryEngine::execute_alter_table(const AlterTableStmt& stmt)
                 }
             }
 
-            // Rewrite each tuple with the new column (NULL value).
+            // Evaluate the DEFAULT expression once if one is provided.
+            Value default_value; // NULL by default.
+            if (!ccd.default_expr.empty()) {
+                Lexer def_lexer(ccd.default_expr);
+                auto def_tokens = def_lexer.tokenize();
+                if (!def_tokens) {
+                    return make_error(StatusCode::INTERNAL_ERROR,
+                                      "failed to parse default for column: " + ccd.name);
+                }
+                Parser def_parser(std::move(*def_tokens));
+                auto def_expr = def_parser.parse_expression();
+                if (!def_expr) {
+                    return make_error(StatusCode::INTERNAL_ERROR,
+                                      "failed to parse default for column: " + ccd.name);
+                }
+                Tuple dummy_tuple;
+                OutputSchema dummy_schema;
+                BoundStatement dummy_bound;
+                auto eval_result =
+                    evaluate_expr(**def_expr, dummy_tuple, dummy_schema, dummy_bound);
+                if (!eval_result) {
+                    return make_error(eval_result.error().code, eval_result.error().message);
+                }
+                default_value = std::move(*eval_result);
+            }
+
+            // Rewrite each tuple with the new column.
             for (auto& [rid, data] : tuples) {
                 auto values = TupleSerializer::deserialize(data, old_storage_schema);
                 if (!values) {
                     continue;
                 }
-                values->emplace_back(); // NULL value for the new column.
+                values->push_back(default_value);
 
                 auto new_data = TupleSerializer::serialize(*values, new_storage_schema);
                 if (!new_data) {
@@ -1811,18 +1849,9 @@ Result<QueryResult> QueryEngine::execute_alter_table(const AlterTableStmt& stmt)
     case AlterAction::DROP_COLUMN: {
         // Find the column index to drop.
         int32_t drop_index = -1;
+        auto upper_target = to_upper(stmt.column_name);
         for (int32_t i = 0; i < static_cast<int32_t>(schema->columns.size()); ++i) {
-            auto upper_name = schema->columns[static_cast<size_t>(i)].name;
-            auto upper_target = stmt.column_name;
-            std::transform(upper_name.begin(),
-                           upper_name.end(),
-                           upper_name.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-            std::transform(upper_target.begin(),
-                           upper_target.end(),
-                           upper_target.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-            if (upper_name == upper_target) {
+            if (to_upper(schema->columns[static_cast<size_t>(i)].name) == upper_target) {
                 drop_index = i;
                 break;
             }
@@ -1836,21 +1865,10 @@ Result<QueryResult> QueryEngine::execute_alter_table(const AlterTableStmt& stmt)
 
         // Prevent dropping PK columns.
         if (!schema->pk_columns.empty()) {
-            auto upper_target = stmt.column_name;
-            std::transform(upper_target.begin(),
-                           upper_target.end(),
-                           upper_target.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-
             std::istringstream ss(schema->pk_columns);
             std::string part;
             while (std::getline(ss, part, ',')) {
-                auto upper_part = part;
-                std::transform(upper_part.begin(),
-                               upper_part.end(),
-                               upper_part.begin(),
-                               [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-                if (upper_part == upper_target) {
+                if (to_upper(part) == upper_target) {
                     return make_error(StatusCode::CONSTRAINT_VIOLATION,
                                       "cannot drop primary key column '" + stmt.column_name + "'");
                 }
@@ -1917,18 +1935,9 @@ Result<QueryResult> QueryEngine::execute_alter_table(const AlterTableStmt& stmt)
     case AlterAction::RENAME_COLUMN: {
         // Validate column exists.
         bool found = false;
+        auto upper_rename_target = to_upper(stmt.column_name);
         for (const auto& col : schema->columns) {
-            auto upper_name = col.name;
-            auto upper_target = stmt.column_name;
-            std::transform(upper_name.begin(),
-                           upper_name.end(),
-                           upper_name.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-            std::transform(upper_target.begin(),
-                           upper_target.end(),
-                           upper_target.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-            if (upper_name == upper_target) {
+            if (to_upper(col.name) == upper_rename_target) {
                 found = true;
                 break;
             }

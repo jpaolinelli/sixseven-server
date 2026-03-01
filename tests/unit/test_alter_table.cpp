@@ -128,6 +128,34 @@ TEST_F(AlterTableTest, AddColumnNotNullOnEmptyTable) {
     EXPECT_EQ(qr.message, "ALTER TABLE");
 }
 
+TEST_F(AlterTableTest, AddColumnNotNullWithDefaultOnNonEmptyTable) {
+    exec_ok("CREATE TABLE users (id INT, name VARCHAR)");
+    exec_ok("INSERT INTO users VALUES (1, 'alice')");
+    exec_ok("INSERT INTO users VALUES (2, 'bob')");
+
+    // NOT NULL + DEFAULT should succeed and backfill existing rows.
+    exec_ok("ALTER TABLE users ADD COLUMN age INT NOT NULL DEFAULT 25");
+
+    auto select = exec_ok("SELECT id, name, age FROM users ORDER BY id");
+    ASSERT_EQ(select.rows.size(), 2u);
+    EXPECT_EQ(select.rows[0][2].as_int32(), 25);
+    EXPECT_EQ(select.rows[1][2].as_int32(), 25);
+}
+
+TEST_F(AlterTableTest, AddColumnNullableWithDefault) {
+    exec_ok("CREATE TABLE t (id INT)");
+    exec_ok("INSERT INTO t VALUES (1)");
+    exec_ok("INSERT INTO t VALUES (2)");
+
+    // Nullable column with DEFAULT should also backfill.
+    exec_ok("ALTER TABLE t ADD COLUMN label VARCHAR DEFAULT 'unknown'");
+
+    auto select = exec_ok("SELECT id, label FROM t ORDER BY id");
+    ASSERT_EQ(select.rows.size(), 2u);
+    EXPECT_EQ(select.rows[0][1].as_string(), "unknown");
+    EXPECT_EQ(select.rows[1][1].as_string(), "unknown");
+}
+
 // =============================================================================
 // DROP COLUMN
 // =============================================================================
