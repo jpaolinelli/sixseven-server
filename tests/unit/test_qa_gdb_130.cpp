@@ -6,12 +6,12 @@
 /// health check failures, registry edge cases, and verifies ONNX provider
 /// is not implemented.
 
+#include "giodb/catalog/catalog.h"
 #include "giodb/vector/builtin_provider.h"
 #include "giodb/vector/http_client.h"
 #include "giodb/vector/ollama_provider.h"
 #include "giodb/vector/openai_provider.h"
 #include "giodb/vector/provider_registry.h"
-#include "giodb/catalog/catalog.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -36,7 +36,8 @@ public:
     void set_network_error(const std::string& msg) { network_error_ = msg; }
 
     Result<HttpResponse>
-    post(const std::string& url, const std::string& body,
+    post(const std::string& url,
+         const std::string& body,
          const std::vector<std::pair<std::string, std::string>>& headers) override {
         last_post_url_ = url;
         last_post_body_ = body;
@@ -95,15 +96,10 @@ TEST(QA_GDB_130_OpenAI, EmbeddingContainsNonNumber) {
     })");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
-    // BUG: Same as GDB-241 — val.get<float>() throws uncaught
-    // nlohmann::json::type_error when embedding array has non-numeric values.
-    try {
-        auto result = provider.embed("hello");
-        // If it doesn't throw, fine.
-        (void)result;
-    } catch (const std::exception& e) {
-        EXPECT_NE(std::string(e.what()).find("type must be number"), std::string::npos);
-    }
+    // GDB-242: Returns PARSE_ERROR instead of throwing.
+    auto result = provider.embed("hello");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
 TEST(QA_GDB_130_OpenAI, EmbeddingContainsNull) {
@@ -113,12 +109,10 @@ TEST(QA_GDB_130_OpenAI, EmbeddingContainsNull) {
     })");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
-    try {
-        auto result = provider.embed("hello");
-        (void)result;
-    } catch (const std::exception& e) {
-        EXPECT_NE(std::string(e.what()).find("type must be number"), std::string::npos);
-    }
+    // GDB-242: Returns PARSE_ERROR instead of throwing.
+    auto result = provider.embed("hello");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
 // ---------------------------------------------------------------------------
@@ -132,14 +126,10 @@ TEST(QA_GDB_130_OpenAI, IndexIsString) {
     })");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
-    // entry["index"].get<size_t>() will throw on non-numeric index.
-    try {
-        auto result = provider.embed("hello");
-        (void)result;
-    } catch (const std::exception& e) {
-        // Known: uncaught nlohmann::json exception.
-        EXPECT_NE(std::string(e.what()).find("type must be number"), std::string::npos);
-    }
+    // GDB-242: Returns PARSE_ERROR instead of throwing.
+    auto result = provider.embed("hello");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
 TEST(QA_GDB_130_OpenAI, IndexIsNegative) {
@@ -437,8 +427,7 @@ TEST(QA_GDB_130_OpenAI, EmbeddingFieldIsNotArray) {
 
 TEST(QA_GDB_130_OpenAI, NameIncludesModel) {
     auto mock = std::make_unique<MockHttpClient>();
-    OpenAIProvider provider("sk-test", "text-embedding-3-small", 1536,
-                            std::move(mock));
+    OpenAIProvider provider("sk-test", "text-embedding-3-small", 1536, std::move(mock));
     EXPECT_EQ(provider.name(), "openai/text-embedding-3-small");
 }
 
