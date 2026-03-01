@@ -152,6 +152,7 @@ add_executable(giodb_unit_tests
     test_onnx_provider.cpp
     test_qa_gdb_241.cpp
     test_qa_gdb_242.cpp
+    test_qa_gdb_243.cpp
 )
 
 target_link_libraries(giodb_unit_tests

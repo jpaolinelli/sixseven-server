@@ -290,6 +290,10 @@ std::vector<int64_t> OnnxProvider::tokenize(const std::string& text, size_t max_
     //    (Avoids special token IDs: PAD=0, UNK=100, CLS=101, SEP=102, MASK=103.)
     // 3. Add CLS at start, SEP at end, pad with 0.
 
+    if (max_length == 0) {
+        return {};
+    }
+
     constexpr int64_t CLS_TOKEN = 101;
     constexpr int64_t SEP_TOKEN = 102;
     constexpr int64_t PAD_TOKEN = 0;
