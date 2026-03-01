@@ -2,11 +2,11 @@
 #include "giodb/common/config.h"
 #include "giodb/common/types.h"
 #include "giodb/common/value.h"
+#include "giodb/executor/catalog_persistence.h"
 #include "giodb/executor/query_engine.h"
 #include "giodb/executor/settings_cache.h"
 #include "giodb/executor/storage_manager.h"
 #include "giodb/executor/system_bootstrap.h"
-#include "giodb/executor/catalog_persistence.h"
 #include "giodb/server/replication_slot.h"
 #include "giodb/storage/disk_manager.h"
 
@@ -38,7 +38,8 @@ protected:
         cache_ = std::make_unique<SettingsCache>();
 
         // Bootstrap system database + sys_settings.
-        auto boot = SystemBootstrap::bootstrap(*engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
+        auto boot = SystemBootstrap::bootstrap(
+            *engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
         ASSERT_TRUE(boot.has_value()) << boot.error().message;
 
         // Load settings cache.
@@ -245,10 +246,12 @@ TEST_F(SetShowTest, ShowColumns) {
             "PRIMARY KEY (id))");
 
     auto qr = exec_ok("SHOW COLUMNS FROM test_show_cols");
-    ASSERT_EQ(qr.column_names.size(), 3u);
+    ASSERT_EQ(qr.column_names.size(), 5u);
     EXPECT_EQ(qr.column_names[0], "column_name");
     EXPECT_EQ(qr.column_names[1], "type");
     EXPECT_EQ(qr.column_names[2], "nullable");
+    EXPECT_EQ(qr.column_names[3], "default");
+    EXPECT_EQ(qr.column_names[4], "autoincrement");
     ASSERT_EQ(qr.rows.size(), 3u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "id");
     EXPECT_EQ(qr.rows[1][0].as_string(), "name");

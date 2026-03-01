@@ -1455,6 +1455,44 @@ Result<BoundStatement> Binder::bind_create_table(const CreateTableStmt& stmt) {
         }
     }
 
+    // Validate AUTOINCREMENT constraints.
+    for (const auto& col : stmt.columns) {
+        if (!col.is_autoincrement) {
+            continue;
+        }
+
+        // Must be an integer type.
+        auto tid = resolve_type_spec(col.type);
+        if (!tid || !is_integer(*tid)) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              "AUTOINCREMENT requires an integer type, column '" + col.name +
+                                  "' has type " + col.type.name);
+        }
+
+        // Cannot have DEFAULT.
+        if (col.default_expr) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "AUTOINCREMENT column '" + col.name + "' cannot have DEFAULT");
+        }
+
+        // Must be PRIMARY KEY (check table-level constraints).
+        bool is_pk = false;
+        for (const auto& constraint : stmt.constraints) {
+            if (constraint.kind == TableConstraint::Kind::PRIMARY_KEY) {
+                for (const auto& pk_col : constraint.columns) {
+                    if (to_upper(pk_col) == to_upper(col.name)) {
+                        is_pk = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!is_pk) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "AUTOINCREMENT column '" + col.name + "' must be PRIMARY KEY");
+        }
+    }
+
     return ok(std::move(bound));
 }
 

@@ -176,6 +176,7 @@ Result<void> CatalogPersistence::load_catalog() {
             col.type_id = static_cast<TypeId>(v[3].as_int32());
             col.nullable = v[4].as_bool();
             col.default_expr = v[5].is_null() ? "" : v[5].as_string();
+            col.is_autoincrement = v.size() > 6 && !v[6].is_null() && v[6].as_bool();
             table_it->second.columns.push_back(std::move(col));
         }
     }
@@ -216,6 +217,69 @@ Result<void> CatalogPersistence::load_catalog() {
             GIODB_LOG_WARN("catalog persistence: failed to open storage for table '{}': {}",
                            info.name,
                            open.error().message);
+            continue;
+        }
+
+        // Initialize autoincrement counters by scanning existing data.
+        for (const auto& col : schema.columns) {
+            if (!col.is_autoincrement) {
+                continue;
+            }
+            int64_t max_val = 0;
+            auto ts_ai = storage_.get_table_storage(info.table_id);
+            if (ts_ai) {
+                auto ai_schema = StorageManager::build_storage_schema(schema);
+                auto ai_it = (*ts_ai)->heap->begin();
+                if (ai_it) {
+                    while (auto row = ai_it->next()) {
+                        auto vals = TupleSerializer::deserialize(row->second, ai_schema);
+                        if (!vals) {
+                            continue;
+                        }
+                        auto& v_ai = (*vals)[static_cast<size_t>(col.ordinal)];
+                        if (v_ai.is_null()) {
+                            continue;
+                        }
+                        int64_t row_val = 0;
+                        switch (col.type_id) {
+                        case TypeId::INT8:
+                            row_val = v_ai.as_int8();
+                            break;
+                        case TypeId::INT16:
+                            row_val = v_ai.as_int16();
+                            break;
+                        case TypeId::INT32:
+                            row_val = v_ai.as_int32();
+                            break;
+                        case TypeId::INT64:
+                            row_val = v_ai.as_int64();
+                            break;
+                        case TypeId::UINT8:
+                            row_val = v_ai.as_uint8();
+                            break;
+                        case TypeId::UINT16:
+                            row_val = v_ai.as_uint16();
+                            break;
+                        case TypeId::UINT32:
+                            row_val = v_ai.as_uint32();
+                            break;
+                        case TypeId::UINT64:
+                            row_val = static_cast<int64_t>(v_ai.as_uint64());
+                            break;
+                        default:
+                            break;
+                        }
+                        if (row_val > max_val) {
+                            max_val = row_val;
+                        }
+                    }
+                }
+            }
+            catalog_.init_autoincrement(info.table_id, max_val + 1);
+            GIODB_LOG_DEBUG("catalog persistence: autoincrement for table '{}' starts at {}",
+                            info.name,
+                            max_val + 1);
+            break; // Only one autoincrement column per table.
         }
     }
 
@@ -427,7 +491,8 @@ Result<void> CatalogPersistence::persist_table(database_id_t db_id, const TableS
                              Value(col.name),
                              Value(static_cast<int32_t>(col.type_id)),
                              Value(col.nullable),
-                             col.default_expr.empty() ? Value() : Value(col.default_expr)});
+                             col.default_expr.empty() ? Value() : Value(col.default_expr),
+                             Value(col.is_autoincrement)});
         if (!r) {
             return r;
         }

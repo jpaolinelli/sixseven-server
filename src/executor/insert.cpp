@@ -1,5 +1,6 @@
 #include "giodb/executor/insert.h"
 
+#include "giodb/catalog/catalog.h"
 #include "giodb/common/coercion.h"
 #include "giodb/common/types.h"
 #include "giodb/executor/expr_evaluator.h"
@@ -127,6 +128,30 @@ Result<Value> fit_to_storage(const Value& val, TypeId target) {
                           std::string(type_name(target)));
 }
 
+/// Extract an int64 from a Value for autoincrement counter advancement.
+int64_t value_to_int64(const Value& val) {
+    switch (val.type_id()) {
+    case TypeId::INT8:
+        return val.as_int8();
+    case TypeId::INT16:
+        return val.as_int16();
+    case TypeId::INT32:
+        return val.as_int32();
+    case TypeId::INT64:
+        return val.as_int64();
+    case TypeId::UINT8:
+        return val.as_uint8();
+    case TypeId::UINT16:
+        return val.as_uint16();
+    case TypeId::UINT32:
+        return val.as_uint32();
+    case TypeId::UINT64:
+        return static_cast<int64_t>(val.as_uint64());
+    default:
+        return 0;
+    }
+}
+
 } // namespace
 
 InsertOperator::InsertOperator(TableHeap& heap,
@@ -148,6 +173,29 @@ Result<void> InsertOperator::do_open() {
         return child_->open();
     }
     return ok();
+}
+
+Result<Value> InsertOperator::make_autoincrement_value(int64_t counter, TypeId type_id) {
+    switch (type_id) {
+    case TypeId::INT8:
+        return ok(Value(static_cast<int8_t>(counter)));
+    case TypeId::INT16:
+        return ok(Value(static_cast<int16_t>(counter)));
+    case TypeId::INT32:
+        return ok(Value(static_cast<int32_t>(counter)));
+    case TypeId::INT64:
+        return ok(Value(counter));
+    case TypeId::UINT8:
+        return ok(Value(static_cast<uint8_t>(counter)));
+    case TypeId::UINT16:
+        return ok(Value(static_cast<uint16_t>(counter)));
+    case TypeId::UINT32:
+        return ok(Value(static_cast<uint32_t>(counter)));
+    case TypeId::UINT64:
+        return ok(Value(static_cast<uint64_t>(counter)));
+    default:
+        return make_error(StatusCode::TYPE_ERROR, "unsupported autoincrement type");
+    }
 }
 
 Result<std::optional<Tuple>> InsertOperator::do_next() {
@@ -219,6 +267,31 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
                     }
                 }
                 values.push_back(std::move(*val));
+            }
+
+            // Handle auto-increment columns.
+            if (catalog_ != nullptr) {
+                for (const auto& ai : autoincrement_cols_) {
+                    if (ai.col_idx >= values.size()) {
+                        continue;
+                    }
+                    if (ai.is_placeholder || values[ai.col_idx].is_null()) {
+                        // Column was omitted — assign next auto-increment value.
+                        auto next = catalog_->next_autoincrement(ai.table_id, ai.type_id);
+                        if (!next) {
+                            return make_error(next.error().code, next.error().message);
+                        }
+                        auto ai_val = make_autoincrement_value(*next, ai.type_id);
+                        if (!ai_val) {
+                            return make_error(ai_val.error().code, ai_val.error().message);
+                        }
+                        values[ai.col_idx] = std::move(*ai_val);
+                    } else {
+                        // Explicit value provided — advance counter past it.
+                        int64_t explicit_val = value_to_int64(values[ai.col_idx]);
+                        catalog_->advance_autoincrement(ai.table_id, explicit_val);
+                    }
+                }
             }
 
             auto bytes = TupleSerializer::serialize(values, storage_schema_);

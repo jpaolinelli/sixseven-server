@@ -19,6 +19,7 @@ enum class TokenType : uint8_t {
     AND,
     AS,
     ASC,
+    AUTOINCREMENT,
     BEGIN,
     BETWEEN,
     BIGINT,
@@ -196,6 +197,8 @@ constexpr std::string_view token_type_name(TokenType type) {
         return "AS";
     case TokenType::ASC:
         return "ASC";
+    case TokenType::AUTOINCREMENT:
+        return "AUTOINCREMENT";
     case TokenType::BEGIN:
         return "BEGIN";
     case TokenType::BETWEEN:

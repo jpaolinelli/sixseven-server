@@ -19,6 +19,7 @@ const std::unordered_map<std::string, TokenType>& keyword_map() {
         {"AND", TokenType::AND},
         {"AS", TokenType::AS},
         {"ASC", TokenType::ASC},
+        {"AUTOINCREMENT", TokenType::AUTOINCREMENT},
         {"AVG", TokenType::AVG},
         {"BEGIN", TokenType::BEGIN},
         {"BETWEEN", TokenType::BETWEEN},

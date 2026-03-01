@@ -40,7 +40,7 @@ public:
     /// @param hnsw_indexes     Optional map of index name → loaded HnswIndex.
     /// @param btree_indexes    Optional map of index_id → loaded BTreeIndex.
     /// @param hash_indexes     Optional map of index_id → loaded HashIndex.
-    Planner(const Catalog& catalog,
+    Planner(Catalog& catalog,
             StorageManager& storage,
             database_id_t database_id = default_database_id,
             GraphEngine* graph_engine = nullptr,
@@ -151,7 +151,7 @@ private:
     [[nodiscard]] Result<std::unique_ptr<Iterator>> plan_nearest(const NearestStmt& stmt,
                                                                  const BoundStatement& bound);
 
-    const Catalog& catalog_;
+    Catalog& catalog_;
     StorageManager& storage_;
     database_id_t database_id_;
     GraphEngine* graph_engine_;

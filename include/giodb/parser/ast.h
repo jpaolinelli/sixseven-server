@@ -139,6 +139,7 @@ struct AstColumnDef {
     TypeSpec type;
     bool nullable = true;
     bool is_unique = false;
+    bool is_autoincrement = false;
     ExprPtr default_expr;
     ExprPtr check_expr;
     std::string fk_table;

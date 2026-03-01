@@ -2,6 +2,7 @@
 
 #include "giodb/catalog/schema.h"
 #include "giodb/common/logging.h"
+#include "giodb/common/types.h"
 #include "giodb/executor/catalog_persistence.h"
 #include "giodb/executor/explain.h"
 #include "giodb/executor/expr_evaluator.h"
@@ -402,7 +403,8 @@ static std::string expr_to_sql(const Expr& expr) {
     if (auto* fn = dynamic_cast<const FunctionCallExpr*>(&expr)) {
         std::string s = fn->name + "(";
         for (size_t i = 0; i < fn->args.size(); ++i) {
-            if (i > 0) s += ", ";
+            if (i > 0)
+                s += ", ";
             s += expr_to_sql(*fn->args[i]);
         }
         s += ")";
@@ -410,7 +412,8 @@ static std::string expr_to_sql(const Expr& expr) {
     }
     if (auto* col_ref = dynamic_cast<const ColumnRefExpr*>(&expr)) {
         // Bare identifiers like CURRENT_TIMESTAMP are parsed as column refs.
-        if (!col_ref->table.empty()) return col_ref->table + "." + col_ref->column;
+        if (!col_ref->table.empty())
+            return col_ref->table + "." + col_ref->column;
         return col_ref->column;
     }
     if (auto* bin = dynamic_cast<const BinaryExpr*>(&expr)) {
@@ -421,7 +424,8 @@ static std::string expr_to_sql(const Expr& expr) {
         return "(" + expr_to_sql(*bin->lhs) + " " + op_str + " " + expr_to_sql(*bin->rhs) + ")";
     }
     if (auto* un = dynamic_cast<const UnaryExpr*>(&expr)) {
-        if (un->op == UnaryOp::NEGATE) return "-" + expr_to_sql(*un->operand);
+        if (un->op == UnaryOp::NEGATE)
+            return "-" + expr_to_sql(*un->operand);
         return "NOT " + expr_to_sql(*un->operand);
     }
     if (auto* cast = dynamic_cast<const CastExpr*>(&expr)) {
@@ -445,6 +449,7 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
         ccd.name = col.name;
         ccd.type_id = *type_result;
         ccd.nullable = col.nullable;
+        ccd.is_autoincrement = col.is_autoincrement;
         if (col.default_expr) {
             ccd.default_expr = expr_to_sql(*col.default_expr);
         }
@@ -479,6 +484,59 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
         }
     }
 
+    // Validate AUTOINCREMENT constraints.
+    for (size_t i = 0; i < stmt.columns.size(); ++i) {
+        const auto& col = stmt.columns[i];
+        if (!col.is_autoincrement) {
+            continue;
+        }
+
+        // Must be an integer type.
+        if (!is_integer(ts.columns[i].type_id)) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              "AUTOINCREMENT requires an integer type, column '" + col.name +
+                                  "' has type " + col.type.name);
+        }
+
+        // Cannot have DEFAULT.
+        if (col.default_expr) {
+            return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                              "AUTOINCREMENT column '" + col.name + "' cannot have DEFAULT");
+        }
+
+        // Must be PRIMARY KEY. Check both inline PRIMARY KEY (sets is_unique
+        // + !nullable on the column) and table-level constraints.
+        bool is_pk = (col.is_unique && !col.nullable);
+        if (!is_pk) {
+            for (const auto& constraint : stmt.constraints) {
+                if (constraint.kind == TableConstraint::Kind::PRIMARY_KEY) {
+                    for (const auto& pk_col : constraint.columns) {
+                        auto upper_pk = pk_col;
+                        auto upper_name = col.name;
+                        std::transform(
+                            upper_pk.begin(),
+                            upper_pk.end(),
+                            upper_pk.begin(),
+                            [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                        std::transform(
+                            upper_name.begin(),
+                            upper_name.end(),
+                            upper_name.begin(),
+                            [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                        if (upper_pk == upper_name) {
+                            is_pk = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (!is_pk) {
+            return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                              "AUTOINCREMENT column '" + col.name + "' must be PRIMARY KEY");
+        }
+    }
+
     // Register in catalog.
     auto table_id = catalog_.create_table(current_database_id_, std::move(ts));
     if (!table_id) {
@@ -494,6 +552,14 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
     auto schema = catalog_.get_table(current_database_id_, stmt.name);
     if (!schema) {
         return make_error(schema.error().code, schema.error().message);
+    }
+
+    // Initialize auto-increment counter if any column has AUTOINCREMENT.
+    for (const auto& col : schema->columns) {
+        if (col.is_autoincrement) {
+            catalog_.init_autoincrement(schema->table_id);
+            break;
+        }
     }
 
     // Create physical storage.
@@ -1353,11 +1419,15 @@ Result<QueryResult> QueryEngine::execute_show(const ShowStmt& stmt) {
         }
 
         QueryResult qr;
-        qr.column_names = {"column_name", "type", "nullable"};
-        qr.column_types = {TypeId::STRING, TypeId::STRING, TypeId::BOOL};
+        qr.column_names = {"column_name", "type", "nullable", "default", "autoincrement"};
+        qr.column_types = {
+            TypeId::STRING, TypeId::STRING, TypeId::BOOL, TypeId::STRING, TypeId::BOOL};
         for (const auto& col : schema->columns) {
-            qr.rows.push_back(
-                {Value(col.name), Value(std::string(type_name(col.type_id))), Value(col.nullable)});
+            qr.rows.push_back({Value(col.name),
+                               Value(std::string(type_name(col.type_id))),
+                               Value(col.nullable),
+                               col.default_expr.empty() ? Value() : Value(col.default_expr),
+                               Value(col.is_autoincrement)});
         }
         return ok(std::move(qr));
     }

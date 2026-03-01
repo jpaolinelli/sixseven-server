@@ -543,6 +543,9 @@ Result<AstColumnDef> Parser::parse_column_def() {
                 return tl::unexpected(key_tok.error());
             col.nullable = false; // PRIMARY KEY implies NOT NULL.
             col.is_unique = true;
+        } else if (match(TokenType::AUTOINCREMENT)) {
+            col.is_autoincrement = true;
+            col.nullable = false; // AUTOINCREMENT implies NOT NULL.
         } else if (match(TokenType::DEFAULT)) {
             auto expr = parse_expression();
             if (!expr)
