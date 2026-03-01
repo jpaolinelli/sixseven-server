@@ -47,6 +47,11 @@ Result<std::vector<float>> OllamaProvider::embed(const std::string& text) {
     std::vector<float> embedding;
     embedding.reserve(embedding_json.size());
     for (const auto& val : embedding_json) {
+        if (!val.is_number()) {
+            return make_error(StatusCode::PARSE_ERROR,
+                              "embedding contains non-numeric value at index " +
+                                  std::to_string(embedding.size()));
+        }
         embedding.push_back(val.get<float>());
     }
 
