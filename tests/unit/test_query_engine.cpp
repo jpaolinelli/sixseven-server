@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -632,4 +633,141 @@ TEST_F(QueryEngineTest, GlobalAggregationNoGroupBy) {
     EXPECT_EQ(qr.rows[0][0].as_int64(), 3);             // COUNT(*)
     EXPECT_EQ(qr.rows[0][1].as_int64(), 60);            // SUM
     EXPECT_DOUBLE_EQ(qr.rows[0][2].as_float64(), 20.0); // AVG
+}
+
+// =============================================================================
+// INSERT with DEFAULT expressions (GDB-250)
+// =============================================================================
+
+TEST_F(QueryEngineTest, InsertWithDefaultGenUuidAndTimestamp) {
+    // AC: INSERT with DEFAULT columns works end-to-end.
+    exec_ok("CREATE TABLE users ("
+            "  id UUID PRIMARY KEY DEFAULT gen_uuid(),"
+            "  name TEXT NOT NULL,"
+            "  age INT,"
+            "  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            ")");
+
+    auto before = std::chrono::duration_cast<std::chrono::microseconds>(
+                      std::chrono::system_clock::now().time_since_epoch())
+                      .count();
+
+    auto ins = exec_ok("INSERT INTO users (name, age) VALUES ('Alice', 30)");
+    EXPECT_EQ(ins.affected_rows, 1);
+
+    auto after = std::chrono::duration_cast<std::chrono::microseconds>(
+                     std::chrono::system_clock::now().time_since_epoch())
+                     .count();
+
+    auto qr = exec_ok("SELECT id, name, age, created_at FROM users");
+    ASSERT_EQ(qr.rows.size(), 1u);
+
+    // id should be a valid UUID (not null).
+    EXPECT_FALSE(qr.rows[0][0].is_null());
+    EXPECT_EQ(qr.rows[0][0].type_id(), TypeId::UUID);
+    const auto& uuid = qr.rows[0][0].as_uuid();
+    EXPECT_EQ((uuid[6] >> 4) & 0x0F, 4); // Version 4.
+
+    // name and age should be the provided values.
+    EXPECT_EQ(qr.rows[0][1].as_string(), "Alice");
+    EXPECT_EQ(qr.rows[0][2].as_int32(), 30);
+
+    // created_at should be a recent timestamp.
+    EXPECT_FALSE(qr.rows[0][3].is_null());
+    EXPECT_EQ(qr.rows[0][3].type_id(), TypeId::TIMESTAMP);
+    auto ts = qr.rows[0][3].as_timestamp().microseconds;
+    EXPECT_GE(ts, before);
+    EXPECT_LE(ts, after);
+}
+
+TEST_F(QueryEngineTest, InsertAllColumnsNoDefaultsApplied) {
+    // AC: INSERT without an explicit column list still works (all values provided).
+    exec_ok("CREATE TABLE items ("
+            "  id INT PRIMARY KEY,"
+            "  name TEXT NOT NULL,"
+            "  score INT DEFAULT 0"
+            ")");
+
+    exec_ok("INSERT INTO items VALUES (1, 'widget', 99)");
+
+    auto qr = exec_ok("SELECT id, name, score FROM items");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 1);
+    EXPECT_EQ(qr.rows[0][1].as_string(), "widget");
+    // The provided value (99) should be used, not the default (0).
+    EXPECT_EQ(qr.rows[0][2].as_int32(), 99);
+}
+
+TEST_F(QueryEngineTest, InsertMixOfProvidedAndDefaults) {
+    // AC: INSERT with only some defaults works (mix of provided values and defaults).
+    exec_ok("CREATE TABLE logs ("
+            "  id UUID DEFAULT gen_uuid(),"
+            "  msg TEXT NOT NULL,"
+            "  level INT DEFAULT 0,"
+            "  ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            ")");
+
+    // Provide msg and level, let id and ts use defaults.
+    exec_ok("INSERT INTO logs (msg, level) VALUES ('hello', 1)");
+
+    auto qr = exec_ok("SELECT id, msg, level, ts FROM logs");
+    ASSERT_EQ(qr.rows.size(), 1u);
+
+    EXPECT_FALSE(qr.rows[0][0].is_null()); // id defaulted to UUID
+    EXPECT_EQ(qr.rows[0][0].type_id(), TypeId::UUID);
+    EXPECT_EQ(qr.rows[0][1].as_string(), "hello");
+    EXPECT_EQ(qr.rows[0][2].as_int32(), 1); // Provided, not the default 0
+    EXPECT_FALSE(qr.rows[0][3].is_null());  // ts defaulted to CURRENT_TIMESTAMP
+    EXPECT_EQ(qr.rows[0][3].type_id(), TypeId::TIMESTAMP);
+}
+
+TEST_F(QueryEngineTest, InsertNullForNullableColumnWithNoDefault) {
+    // AC: NULL is used for nullable columns with no DEFAULT when omitted from INSERT.
+    exec_ok("CREATE TABLE profiles ("
+            "  id INT PRIMARY KEY,"
+            "  name TEXT NOT NULL,"
+            "  bio TEXT"
+            ")");
+
+    // Omit bio (nullable, no default) — should get NULL.
+    exec_ok("INSERT INTO profiles (id, name) VALUES (1, 'Alice')");
+
+    auto qr = exec_ok("SELECT id, name, bio FROM profiles");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 1);
+    EXPECT_EQ(qr.rows[0][1].as_string(), "Alice");
+    EXPECT_TRUE(qr.rows[0][2].is_null()); // bio should be NULL.
+}
+
+TEST_F(QueryEngineTest, InsertErrorForNonNullableColumnWithNoDefault) {
+    // AC: Non-nullable columns without a DEFAULT that are omitted produce a clear error.
+    exec_ok("CREATE TABLE strict ("
+            "  id INT PRIMARY KEY,"
+            "  name TEXT NOT NULL,"
+            "  email TEXT NOT NULL"
+            ")");
+
+    // Omit email (non-nullable, no default) — should error.
+    exec_error("INSERT INTO strict (id, name) VALUES (1, 'Alice')", StatusCode::INVALID_ARGUMENT);
+}
+
+TEST_F(QueryEngineTest, InsertMultipleRowsEachGetUniqueDefaults) {
+    // Each row should get a unique gen_uuid() value.
+    exec_ok("CREATE TABLE multi ("
+            "  id UUID DEFAULT gen_uuid(),"
+            "  val INT"
+            ")");
+
+    exec_ok("INSERT INTO multi (val) VALUES (1)");
+    exec_ok("INSERT INTO multi (val) VALUES (2)");
+
+    auto qr = exec_ok("SELECT id, val FROM multi ORDER BY val");
+    ASSERT_EQ(qr.rows.size(), 2u);
+
+    EXPECT_FALSE(qr.rows[0][0].is_null());
+    EXPECT_FALSE(qr.rows[1][0].is_null());
+    EXPECT_EQ(qr.rows[0][0].type_id(), TypeId::UUID);
+    EXPECT_EQ(qr.rows[1][0].type_id(), TypeId::UUID);
+    // The two UUIDs should be different.
+    EXPECT_NE(qr.rows[0][0].as_uuid(), qr.rows[1][0].as_uuid());
 }

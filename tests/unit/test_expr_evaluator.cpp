@@ -10,7 +10,6 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
-#include <regex>
 #include <string>
 #include <vector>
 
@@ -869,9 +868,8 @@ TEST(ExprEvaluator, GenUuidVersion4Format) {
     const auto& uuid = result->as_uuid();
     // Version 4: byte 6 high nibble should be 0x4_.
     EXPECT_EQ((uuid[6] >> 4) & 0x0F, 4);
-    // Variant 1: byte 8 high bits should be 10xx (0x8_, 0x9_, 0xA_, 0xB_).
-    EXPECT_GE((uuid[8] >> 6) & 0x03, 2);
-    EXPECT_LE((uuid[8] >> 6) & 0x03, 2); // Must be exactly 0b10.
+    // Variant 1: byte 8 high bits should be 10xx (value 2).
+    EXPECT_EQ((uuid[8] >> 6) & 0x03, 2);
 }
 
 TEST(ExprEvaluator, GenUuidUniqueness) {
