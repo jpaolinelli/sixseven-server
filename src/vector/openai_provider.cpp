@@ -127,6 +127,10 @@ OpenAIProvider::request_embeddings(const std::vector<std::string>& texts) {
 
         size_t index = 0;
         if (entry.contains("index")) {
+            if (!entry["index"].is_number()) {
+                return make_error(StatusCode::PARSE_ERROR,
+                                  "OpenAI response entry has non-numeric 'index' field");
+            }
             index = entry["index"].get<size_t>();
         }
 
@@ -139,6 +143,11 @@ OpenAIProvider::request_embeddings(const std::vector<std::string>& texts) {
         auto& vec = results[index];
         vec.reserve(embedding_json.size());
         for (const auto& val : embedding_json) {
+            if (!val.is_number()) {
+                return make_error(StatusCode::PARSE_ERROR,
+                                  "embedding contains non-numeric value at index " +
+                                      std::to_string(vec.size()));
+            }
             vec.push_back(val.get<float>());
         }
 
