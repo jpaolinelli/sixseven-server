@@ -4,6 +4,7 @@
 #include "giodb/common/coercion.h"
 #include "giodb/common/types.h"
 #include "giodb/executor/planner.h"
+#include "giodb/executor/seq_scan.h"
 #include "giodb/executor/storage_manager.h"
 #include "giodb/parser/lexer.h"
 #include "giodb/parser/parser.h"
@@ -841,7 +842,11 @@ Result<Value> eval_array(const ArrayExpr& expr,
 // EXISTS expression
 // ---------------------------------------------------------------------------
 
-Result<Value> eval_exists(const ExistsExpr& expr, const SubqueryContext* subquery_ctx) {
+Result<Value> eval_exists(const ExistsExpr& expr,
+                          const Tuple& outer_tuple,
+                          const OutputSchema& outer_schema,
+                          const BoundStatement& outer_bound,
+                          const SubqueryContext* subquery_ctx) {
     if (!subquery_ctx) {
         return make_error(StatusCode::NOT_IMPLEMENTED,
                           "EXISTS subquery evaluation requires SubqueryContext");
@@ -852,31 +857,121 @@ Result<Value> eval_exists(const ExistsExpr& expr, const SubqueryContext* subquer
         return make_error(StatusCode::INTERNAL_ERROR, "EXISTS subquery is not a SELECT");
     }
 
+    // Try non-correlated binding first.
     Binder binder(subquery_ctx->catalog);
     auto sub_bound = binder.bind(*sel);
-    if (!sub_bound) {
-        return make_error(sub_bound.error().code, sub_bound.error().message);
+
+    if (sub_bound) {
+        // Non-correlated: plan and execute normally.
+        Planner planner(subquery_ctx->catalog, subquery_ctx->storage);
+        std::vector<ExprPtr> owned;
+        auto iter = planner.plan(*sub_bound, owned);
+        if (!iter) {
+            return make_error(iter.error().code, iter.error().message);
+        }
+
+        auto open_res = (*iter)->open();
+        if (!open_res) {
+            return make_error(open_res.error().code, open_res.error().message);
+        }
+
+        auto row = (*iter)->next();
+        (*iter)->close();
+
+        if (!row) {
+            return make_error(row.error().code, row.error().message);
+        }
+        return ok(Value(row->has_value()));
     }
 
-    Planner planner(subquery_ctx->catalog, subquery_ctx->storage);
-    std::vector<ExprPtr> owned;
-    auto iter = planner.plan(*sub_bound, owned);
-    if (!iter) {
-        return make_error(iter.error().code, iter.error().message);
+    // Correlated subquery: binding failed because of outer column references.
+    // Fall back to manual correlation: scan the inner table, combine each row
+    // with the outer tuple, and evaluate the WHERE condition.
+    if (sel->from.empty()) {
+        return make_error(StatusCode::INTERNAL_ERROR,
+                          "correlated EXISTS subquery has no FROM clause");
     }
 
-    auto open_res = (*iter)->open();
+    const auto& inner_ref = sel->from[0];
+    const auto& inner_name = inner_ref.name;
+    const auto& inner_alias = inner_ref.alias.empty() ? inner_name : inner_ref.alias;
+
+    auto table_schema = subquery_ctx->catalog.get_table(default_database_id, inner_name);
+    if (!table_schema) {
+        return make_error(table_schema.error().code, table_schema.error().message);
+    }
+
+    auto ts = subquery_ctx->storage.get_table_storage(table_schema->table_id);
+    if (!ts) {
+        return make_error(ts.error().code, ts.error().message);
+    }
+
+    // Build inner output schema using the inner table alias.
+    std::vector<OutputColumn> inner_cols;
+    inner_cols.reserve(table_schema->columns.size());
+    for (const auto& col : table_schema->columns) {
+        inner_cols.push_back({inner_alias, col.name, col.type_id, col.nullable, 0});
+    }
+    auto inner_schema = OutputSchema(std::move(inner_cols));
+
+    // Build combined schema: outer columns + inner columns, so the WHERE
+    // expression can resolve references from both scopes.
+    std::vector<OutputColumn> combined_cols;
+    combined_cols.reserve(outer_schema.column_count() + inner_schema.column_count());
+    for (size_t i = 0; i < outer_schema.column_count(); ++i) {
+        combined_cols.push_back(outer_schema.column(i));
+    }
+    for (size_t i = 0; i < inner_schema.column_count(); ++i) {
+        combined_cols.push_back(inner_schema.column(i));
+    }
+    auto combined_schema = OutputSchema(std::move(combined_cols));
+
+    // Scan the inner table without a predicate.
+    auto* storage = *ts;
+    SeqScanOperator scan(*storage->heap, storage->storage_schema, inner_schema);
+    auto open_res = scan.open();
     if (!open_res) {
         return make_error(open_res.error().code, open_res.error().message);
     }
 
-    auto row = (*iter)->next();
-    (*iter)->close();
+    while (true) {
+        auto row = scan.next();
+        if (!row) {
+            scan.close();
+            return make_error(row.error().code, row.error().message);
+        }
+        if (!row->has_value()) {
+            break;
+        }
 
-    if (!row) {
-        return make_error(row.error().code, row.error().message);
+        // Combine outer + inner tuple.
+        Tuple combined;
+        combined.values = outer_tuple.values;
+        for (auto& v : row->value().values) {
+            combined.values.push_back(v);
+        }
+
+        // Evaluate the subquery WHERE against the combined row.
+        if (sel->where_expr) {
+            auto pass =
+                evaluate_predicate(*sel->where_expr, combined, combined_schema, outer_bound);
+            if (!pass) {
+                scan.close();
+                return make_error(pass.error().code, pass.error().message);
+            }
+            if (*pass) {
+                scan.close();
+                return ok(Value(true));
+            }
+        } else {
+            // No WHERE — any row existing makes EXISTS true.
+            scan.close();
+            return ok(Value(true));
+        }
     }
-    return ok(Value(row->has_value()));
+
+    scan.close();
+    return ok(Value(false));
 }
 
 // ---------------------------------------------------------------------------
@@ -987,7 +1082,7 @@ Result<Value> eval(const Expr& expr,
         return eval_array(*arr, tuple, schema, bound, subquery_ctx);
     }
     if (auto* exists = dynamic_cast<const ExistsExpr*>(&expr)) {
-        return eval_exists(*exists, subquery_ctx);
+        return eval_exists(*exists, tuple, schema, bound, subquery_ctx);
     }
     if (auto* sub = dynamic_cast<const SubqueryExpr*>(&expr)) {
         return eval_scalar_subquery(*sub, subquery_ctx);
