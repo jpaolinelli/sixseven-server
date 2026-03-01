@@ -6,12 +6,12 @@
 /// long text, unicode, batch with empty strings, partial batch failure, provider
 /// name parsing, health check edge cases, zero-dimension provider.
 
+#include "giodb/catalog/catalog.h"
 #include "giodb/vector/builtin_provider.h"
 #include "giodb/vector/http_client.h"
 #include "giodb/vector/ollama_provider.h"
 #include "giodb/vector/openai_provider.h"
 #include "giodb/vector/provider_registry.h"
-#include "giodb/catalog/catalog.h"
 
 #include <gtest/gtest.h>
 
@@ -36,7 +36,8 @@ public:
     void set_network_error(const std::string& msg) { network_error_ = msg; }
 
     Result<HttpResponse>
-    post(const std::string& url, const std::string& body,
+    post(const std::string& url,
+         const std::string& body,
          const std::vector<std::pair<std::string, std::string>>& /*headers*/) override {
         last_post_url_ = url;
         last_post_body_ = body;
@@ -119,17 +120,10 @@ TEST(QA_GDB_129_Ollama, EmbeddingContainsNonNumber) {
     mock->set_post_response(200, R"({"embedding": [0.1, "bad", 0.3]})");
 
     OllamaProvider provider("http://localhost:11434", "test", 3, std::move(mock));
-    // BUG: OllamaProvider throws uncaught nlohmann::json exception instead of
-    // returning a Result error. Filed as GDB-XXX.
-    // For now, verify it doesn't crash by catching the exception.
-    try {
-        auto result = provider.embed("hello");
-        // If it doesn't throw, either result is fine.
-        (void)result;
-    } catch (const std::exception& e) {
-        // Known bug: nlohmann::json::type_error thrown.
-        EXPECT_NE(std::string(e.what()).find("type must be number"), std::string::npos);
-    }
+    auto result = provider.embed("hello");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
+    EXPECT_NE(result.error().message.find("non-numeric"), std::string::npos);
 }
 
 TEST(QA_GDB_129_Ollama, TruncatedJson) {
@@ -400,8 +394,7 @@ TEST(QA_GDB_129_OpenAI, CustomBaseUrl) {
         "data": [{"embedding": [0.1, 0.2, 0.3], "index": 0}]
     })");
 
-    OpenAIProvider provider("sk-test", "test", 3, std::move(mock),
-                            "https://custom.endpoint.com");
+    OpenAIProvider provider("sk-test", "test", 3, std::move(mock), "https://custom.endpoint.com");
     auto result = provider.embed("hello");
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(mock_ptr->last_post_url_, "https://custom.endpoint.com/v1/embeddings");
