@@ -699,7 +699,11 @@ void Catalog::advance_autoincrement(table_id_t table_id, int64_t value) {
     std::lock_guard lock(mu_);
     auto it = autoincrement_counters_.find(table_id);
     if (it != autoincrement_counters_.end() && value >= it->second) {
-        it->second = value + 1;
+        if (value >= std::numeric_limits<int64_t>::max()) {
+            it->second = std::numeric_limits<int64_t>::max();
+        } else {
+            it->second = value + 1;
+        }
     }
 }
 
