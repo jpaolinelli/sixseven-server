@@ -98,12 +98,11 @@ GioDB supports primary/standby replication. Start a standby with `--standby` or 
 
 | Type | Description |
 |------|-------------|
-| `INT8`, `INT16`, `INT32`, `INT64` | Signed integers |
-| `UINT8`, `UINT16`, `UINT32`, `UINT64` | Unsigned integers |
-| `FLOAT32`, `FLOAT64` | IEEE floating point |
-| `DECIMAL(p, s)` | Fixed-point decimal |
-| `BOOL` | Boolean |
-| `STRING`, `VARCHAR(n)`, `CHAR(n)` | Text |
+| `TINYINT`, `SMALLINT`, `INT`/`INTEGER`, `BIGINT` | Signed integers (8, 16, 32, 64-bit) |
+| `FLOAT`, `DOUBLE` | IEEE floating point (32, 64-bit) |
+| `DECIMAL(p, s)`, `NUMERIC(p, s)` | Fixed-point decimal |
+| `BOOLEAN` | Boolean |
+| `CHAR(n)`, `VARCHAR(n)`, `TEXT` | Text |
 | `BLOB` | Binary data |
 | `DATE`, `TIME`, `TIMESTAMP`, `INTERVAL` | Temporal types |
 | `POINT` | 2D spatial point |
@@ -125,13 +124,13 @@ DROP DATABASE analytics IF EXISTS CASCADE;
 ```sql
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_uuid(),
-    name STRING NOT NULL,
-    age INT32 CHECK (age > 0),
+    name TEXT NOT NULL,
+    age INT CHECK (age > 0),
     email VARCHAR(255) UNIQUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-ALTER TABLE users ADD COLUMN bio STRING;
+ALTER TABLE users ADD COLUMN bio TEXT;
 ALTER TABLE users DROP COLUMN bio;
 ALTER TABLE users RENAME COLUMN email TO email_address;
 
@@ -223,7 +222,7 @@ SELECT id FROM table1 INTERSECT SELECT id FROM table2;
 SELECT id FROM table1 EXCEPT SELECT id FROM table2;
 
 -- Type casting
-SELECT price::INT32 FROM products;
+SELECT price::INT FROM products;
 SELECT CAST(created_at AS DATE) FROM events;
 
 -- CASE expressions
@@ -273,7 +272,7 @@ Define relationships between tables:
 ```sql
 CREATE EDGE TYPE follows FROM users TO users;
 CREATE EDGE TYPE authored FROM users TO posts;
-CREATE EDGE TYPE rated (score FLOAT64, review STRING) FROM users TO products;
+CREATE EDGE TYPE rated (score DOUBLE, review TEXT) FROM users TO products;
 
 DROP EDGE TYPE follows;
 ```
@@ -358,9 +357,9 @@ The `EMBEDDING` type auto-generates vector embeddings from source columns when r
 
 ```sql
 CREATE TABLE articles (
-    id INT32 PRIMARY KEY,
-    title STRING NOT NULL,
-    body STRING,
+    id INT PRIMARY KEY,
+    title TEXT NOT NULL,
+    body TEXT,
     title_vec EMBEDDING(384, source='title', provider='builtin/384'),
     body_vec EMBEDDING(1536, source='body', provider='openai/text-embedding-3-small')
 );
@@ -414,8 +413,8 @@ SET embedding_api_key = 'sk-...';
 
 -- Use in an EMBEDDING column
 CREATE TABLE docs (
-    id INT32 PRIMARY KEY,
-    content STRING,
+    id INT PRIMARY KEY,
+    content TEXT,
     vec EMBEDDING(1536, source='content', provider='openai/text-embedding-3-small')
 );
 ```
@@ -437,8 +436,8 @@ Uses a local Ollama server for embedding generation. No API key required.
 SET embedding_provider_url = 'http://localhost:11434';
 
 CREATE TABLE docs (
-    id INT32 PRIMARY KEY,
-    content STRING,
+    id INT PRIMARY KEY,
+    content TEXT,
     vec EMBEDDING(384, source='content', provider='ollama/all-minilm')
 );
 ```
@@ -456,8 +455,8 @@ Runs a local ONNX model for embedding inference. No network required.
 
 ```sql
 CREATE TABLE docs (
-    id INT32 PRIMARY KEY,
-    content STRING,
+    id INT PRIMARY KEY,
+    content TEXT,
     vec EMBEDDING(384, source='content', provider='onnx/path/to/model.onnx')
 );
 ```
@@ -474,8 +473,8 @@ A deterministic hash-projection provider for testing. No network, no model files
 
 ```sql
 CREATE TABLE docs (
-    id INT32 PRIMARY KEY,
-    content STRING,
+    id INT PRIMARY KEY,
+    content TEXT,
     vec EMBEDDING(384, source='content', provider='builtin/384')
 );
 ```
