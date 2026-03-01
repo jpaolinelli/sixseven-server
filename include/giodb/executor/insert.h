@@ -41,6 +41,10 @@ public:
     std::string plan_node_detail() const override { return ""; }
     std::vector<const Iterator*> plan_children() const override;
 
+    /// Owns default expressions parsed by the planner for missing INSERT columns.
+    /// Set by the planner after construction; must outlive the operator.
+    std::vector<ExprPtr> owned_default_exprs_;
+
 protected:
     Result<void> do_open() override;
     Result<std::optional<Tuple>> do_next() override;

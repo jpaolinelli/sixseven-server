@@ -17,6 +17,8 @@
 #include "giodb/executor/subquery_source.h"
 #include "giodb/executor/traversal.h"
 #include "giodb/executor/update.h"
+#include "giodb/parser/lexer.h"
+#include "giodb/parser/parser.h"
 #include "giodb/planner/type_resolver.h"
 #include "giodb/vector/embedding_column.h"
 
@@ -1074,6 +1076,53 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
     } else {
         // Build mapping: storage_col_index -> expression_index_in_values.
         size_t ncols = table_schema->columns.size();
+
+        // Pre-parse default expressions for columns not in the INSERT list.
+        // These are owned by the InsertOperator and live as long as it does.
+        std::vector<ExprPtr> owned_defaults;
+        std::vector<const Expr*> default_ptrs(ncols, nullptr);
+        for (size_t j = 0; j < ncols; ++j) {
+            // Skip columns that appear in the INSERT column list.
+            bool in_list = false;
+            for (const auto& col_name : stmt.columns) {
+                if (table_schema->columns[j].name == col_name) {
+                    in_list = true;
+                    break;
+                }
+            }
+            if (in_list) continue;
+
+            const auto& def = table_schema->columns[j].default_expr;
+            if (!def.empty()) {
+                // Parse the default expression string back into an AST node.
+                Lexer lexer(def);
+                auto tokens = lexer.tokenize();
+                if (!tokens) {
+                    return make_error(StatusCode::INTERNAL_ERROR,
+                                      "failed to parse default for column: " +
+                                          table_schema->columns[j].name);
+                }
+                Parser parser(std::move(*tokens));
+                auto expr = parser.parse_expression();
+                if (!expr) {
+                    return make_error(StatusCode::INTERNAL_ERROR,
+                                      "failed to parse default for column: " +
+                                          table_schema->columns[j].name);
+                }
+                default_ptrs[j] = expr->get();
+                owned_defaults.push_back(std::move(*expr));
+            } else if (table_schema->columns[j].nullable) {
+                // No default, but nullable — use NULL.
+                auto null_expr = std::make_unique<LiteralExpr>();
+                null_expr->kind = LiteralKind::NULL_LITERAL;
+                null_expr->value = "NULL";
+                default_ptrs[j] = null_expr.get();
+                owned_defaults.push_back(std::move(null_expr));
+            }
+            // If not nullable and no default, default_ptrs[j] stays nullptr
+            // and we'll error below when the column isn't provided.
+        }
+
         for (const auto& row : stmt.values) {
             std::vector<const Expr*> reordered(ncols, nullptr);
             for (size_t i = 0; i < stmt.columns.size(); ++i) {
@@ -1091,17 +1140,25 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
                                       "column not found: " + stmt.columns[i]);
                 }
             }
-            // Columns not mentioned get nullptr — InsertOperator evaluates
-            // nullptr as NULL (the expression evaluator is not called).
-            // For now we require all columns to be provided.
+            // Fill missing columns with defaults or NULL.
             for (size_t j = 0; j < ncols; ++j) {
                 if (reordered[j] == nullptr) {
-                    return make_error(StatusCode::INVALID_ARGUMENT,
-                                      "missing value for column: " + table_schema->columns[j].name);
+                    if (default_ptrs[j] != nullptr) {
+                        reordered[j] = default_ptrs[j];
+                    } else {
+                        return make_error(StatusCode::INVALID_ARGUMENT,
+                                          "missing value for non-nullable column without default: " +
+                                              table_schema->columns[j].name);
+                    }
                 }
             }
             value_rows.push_back(std::move(reordered));
         }
+
+        auto iter = std::make_unique<InsertOperator>(
+            *storage->heap, storage->storage_schema, std::move(value_rows), bound);
+        iter->owned_default_exprs_ = std::move(owned_defaults);
+        return ok(std::unique_ptr<Iterator>(std::move(iter)));
     }
 
     auto iter = std::make_unique<InsertOperator>(

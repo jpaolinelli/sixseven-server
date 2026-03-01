@@ -32,6 +32,10 @@ public:
     /// Parse all semicolon-separated statements until EOF.
     [[nodiscard]] Result<std::vector<StmtPtr>> parse_all();
 
+    /// Parse a single expression. Public so that callers (e.g. the planner)
+    /// can parse default-value strings stored in the catalog.
+    [[nodiscard]] Result<ExprPtr> parse_expression();
+
 private:
     // -- Token navigation ---------------------------------------------------
 
@@ -124,7 +128,6 @@ private:
 
     // -- Expression parsing -------------------------------------------------
 
-    [[nodiscard]] Result<ExprPtr> parse_expression();
     [[nodiscard]] Result<ExprPtr> parse_or();
     [[nodiscard]] Result<ExprPtr> parse_and();
     [[nodiscard]] Result<ExprPtr> parse_not();
