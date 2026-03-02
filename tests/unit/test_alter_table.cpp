@@ -156,6 +156,43 @@ TEST_F(AlterTableTest, AddColumnNullableWithDefault) {
     EXPECT_EQ(select.rows[1][1].as_string(), "unknown");
 }
 
+TEST_F(AlterTableTest, AddManyIntColumnsWithDefault) {
+    exec_ok("CREATE TABLE t (id INT)");
+    exec_ok("INSERT INTO t VALUES (1)");
+
+    // Add 20 INT columns with DEFAULT values. Previously caused heap-buffer-overflow
+    // because the evaluator returned INT64 but the column expected INT32.
+    for (int i = 0; i < 20; ++i) {
+        exec_ok("ALTER TABLE t ADD COLUMN col" + std::to_string(i) + " INT DEFAULT " +
+                std::to_string(i * 10));
+    }
+
+    auto select = exec_ok("SELECT id, col0, col9, col19 FROM t");
+    ASSERT_EQ(select.rows.size(), 1u);
+    EXPECT_EQ(select.rows[0][0].as_int32(), 1);
+    EXPECT_EQ(select.rows[0][1].as_int32(), 0);
+    EXPECT_EQ(select.rows[0][2].as_int32(), 90);
+    EXPECT_EQ(select.rows[0][3].as_int32(), 190);
+}
+
+TEST_F(AlterTableTest, AddColumnDefaultTypeCoercion) {
+    exec_ok("CREATE TABLE t (id INT)");
+    exec_ok("INSERT INTO t VALUES (1)");
+
+    // INT column with integer literal DEFAULT — must coerce INT64 to INT32.
+    exec_ok("ALTER TABLE t ADD COLUMN a INT DEFAULT 42");
+    // FLOAT column with integer literal DEFAULT — must coerce INT64 to FLOAT.
+    exec_ok("ALTER TABLE t ADD COLUMN b FLOAT DEFAULT 7");
+    // BIGINT column with integer literal DEFAULT — stays INT64.
+    exec_ok("ALTER TABLE t ADD COLUMN c BIGINT DEFAULT 999");
+
+    auto select = exec_ok("SELECT a, b, c FROM t");
+    ASSERT_EQ(select.rows.size(), 1u);
+    EXPECT_EQ(select.rows[0][0].as_int32(), 42);
+    EXPECT_FLOAT_EQ(select.rows[0][1].as_float32(), 7.0F);
+    EXPECT_EQ(select.rows[0][2].as_int64(), 999);
+}
+
 // =============================================================================
 // DROP COLUMN
 // =============================================================================

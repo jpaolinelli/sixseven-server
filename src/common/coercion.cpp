@@ -243,8 +243,8 @@ bool can_coerce(TypeId from, TypeId to) {
         // representation in unsigned types.
         bool from_signed = (from == TypeId::INT8 || from == TypeId::INT16 ||
                             from == TypeId::INT32 || from == TypeId::INT64);
-        bool to_unsigned = (to == TypeId::UINT8 || to == TypeId::UINT16 ||
-                            to == TypeId::UINT32 || to == TypeId::UINT64);
+        bool to_unsigned = (to == TypeId::UINT8 || to == TypeId::UINT16 || to == TypeId::UINT32 ||
+                            to == TypeId::UINT64);
         if (from_signed && to_unsigned) {
             return false;
         }
@@ -309,6 +309,35 @@ Result<Value> coerce(const Value& value, TypeId target) {
 
     return make_error(StatusCode::TYPE_ERROR,
                       "cannot coerce " + std::string(type_name(from)) + " to " +
+                          std::string(type_name(target)));
+}
+
+// -- fit_to_storage -----------------------------------------------------------
+
+Result<Value> fit_to_storage(const Value& val, TypeId target) {
+    if (val.is_null() || val.type_id() == target) {
+        return ok(val);
+    }
+    // Try standard widening coercion first.
+    if (can_coerce(val.type_id(), target)) {
+        return coerce(val, target);
+    }
+    // Allow numeric narrowing (e.g. INT64 → INT32).
+    if (is_numeric(val.type_id()) && is_integer(target)) {
+        int64_t v = to_int64(val);
+        return ok(int64_to_value(v, target));
+    }
+    if (is_numeric(val.type_id()) && is_floating(target)) {
+        double d = to_double(val);
+        if (target == TypeId::FLOAT32) {
+            return ok(Value(static_cast<float>(d)));
+        }
+        if (target == TypeId::FLOAT64) {
+            return ok(Value(d));
+        }
+    }
+    return make_error(StatusCode::TYPE_ERROR,
+                      "cannot fit " + std::string(type_name(val.type_id())) + " to " +
                           std::string(type_name(target)));
 }
 
