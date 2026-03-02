@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <sstream>
 
 namespace giodb {
 
@@ -259,6 +260,166 @@ std::vector<TableSchema> Catalog::list_tables(database_id_t database_id) const {
     });
 
     return result;
+}
+
+// -- Column mutation operations -----------------------------------------------
+
+Result<void> Catalog::add_column(table_id_t table_id, CatalogColumnDef column) {
+    std::lock_guard lock(mu_);
+
+    auto it = tables_by_id_.find(table_id);
+    if (it == tables_by_id_.end()) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "table with id " + std::to_string(table_id) + " not found");
+    }
+
+    auto& schema = it->second;
+
+    // Check for duplicate column name (case-insensitive).
+    for (const auto& col : schema.columns) {
+        auto upper_existing = col.name;
+        auto upper_new = column.name;
+        std::transform(upper_existing.begin(),
+                       upper_existing.end(),
+                       upper_existing.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        std::transform(upper_new.begin(), upper_new.end(), upper_new.begin(), [](unsigned char c) {
+            return static_cast<char>(std::toupper(c));
+        });
+        if (upper_existing == upper_new) {
+            return make_error(StatusCode::ALREADY_EXISTS,
+                              "column '" + column.name + "' already exists");
+        }
+    }
+
+    // Assign ordinal as next sequential value.
+    column.ordinal = static_cast<int32_t>(schema.columns.size());
+    schema.columns.push_back(std::move(column));
+
+    return ok();
+}
+
+Result<void> Catalog::drop_column(table_id_t table_id, const std::string& column_name) {
+    std::lock_guard lock(mu_);
+
+    auto it = tables_by_id_.find(table_id);
+    if (it == tables_by_id_.end()) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "table with id " + std::to_string(table_id) + " not found");
+    }
+
+    auto& schema = it->second;
+
+    // Find the column (case-insensitive).
+    auto col_it = schema.columns.end();
+    for (auto ci = schema.columns.begin(); ci != schema.columns.end(); ++ci) {
+        auto upper_existing = ci->name;
+        auto upper_target = column_name;
+        std::transform(upper_existing.begin(),
+                       upper_existing.end(),
+                       upper_existing.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        std::transform(upper_target.begin(),
+                       upper_target.end(),
+                       upper_target.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        if (upper_existing == upper_target) {
+            col_it = ci;
+            break;
+        }
+    }
+
+    if (col_it == schema.columns.end()) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "column '" + column_name + "' not found in table '" + schema.name + "'");
+    }
+
+    schema.columns.erase(col_it);
+
+    // Renumber ordinals.
+    for (int32_t i = 0; i < static_cast<int32_t>(schema.columns.size()); ++i) {
+        schema.columns[static_cast<size_t>(i)].ordinal = i;
+    }
+
+    return ok();
+}
+
+Result<void> Catalog::rename_column(table_id_t table_id,
+                                    const std::string& old_name,
+                                    const std::string& new_name) {
+    std::lock_guard lock(mu_);
+
+    auto it = tables_by_id_.find(table_id);
+    if (it == tables_by_id_.end()) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "table with id " + std::to_string(table_id) + " not found");
+    }
+
+    auto& schema = it->second;
+
+    // Check that the new name doesn't already exist (case-insensitive).
+    auto upper_new = new_name;
+    std::transform(upper_new.begin(), upper_new.end(), upper_new.begin(), [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+    });
+
+    for (const auto& col : schema.columns) {
+        auto upper_existing = col.name;
+        std::transform(upper_existing.begin(),
+                       upper_existing.end(),
+                       upper_existing.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        if (upper_existing == upper_new) {
+            return make_error(StatusCode::ALREADY_EXISTS,
+                              "column '" + new_name + "' already exists");
+        }
+    }
+
+    // Find and rename the column.
+    auto upper_old = old_name;
+    std::transform(upper_old.begin(), upper_old.end(), upper_old.begin(), [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+    });
+
+    for (auto& col : schema.columns) {
+        auto upper_existing = col.name;
+        std::transform(upper_existing.begin(),
+                       upper_existing.end(),
+                       upper_existing.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        if (upper_existing == upper_old) {
+            // Update pk_columns if this column is part of the primary key.
+            if (!schema.pk_columns.empty()) {
+                // pk_columns is comma-separated. Replace matching name.
+                std::string new_pk;
+                std::istringstream ss(schema.pk_columns);
+                std::string part;
+                while (std::getline(ss, part, ',')) {
+                    auto upper_part = part;
+                    std::transform(
+                        upper_part.begin(),
+                        upper_part.end(),
+                        upper_part.begin(),
+                        [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                    if (!new_pk.empty()) {
+                        new_pk += ",";
+                    }
+                    if (upper_part == upper_old) {
+                        new_pk += new_name;
+                    } else {
+                        new_pk += part;
+                    }
+                }
+                schema.pk_columns = new_pk;
+            }
+
+            col.name = new_name;
+            return ok();
+        }
+    }
+
+    return make_error(StatusCode::NOT_FOUND,
+                      "column '" + old_name + "' not found in table '" + schema.name + "'");
 }
 
 // -- Index operations ---------------------------------------------------------

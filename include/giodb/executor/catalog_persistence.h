@@ -56,6 +56,10 @@ public:
     /// Persist a newly registered embedding column (insert into sys_embedding_columns).
     [[nodiscard]] Result<void> persist_embedding_column(const EmbeddingColumnDef& def);
 
+    /// Re-persist all columns for a table after ALTER TABLE.
+    /// Deletes all existing sys_columns rows for the table and re-inserts from the schema.
+    [[nodiscard]] Result<void> persist_columns_update(const TableSchema& schema);
+
     /// Register a system table schema in the catalog and create its physical storage.
     /// Used by SystemBootstrap for sys_settings/sys_providers in addition to catalog tables.
     [[nodiscard]] Result<void> create_sys_table_public(const TableSchema& schema);

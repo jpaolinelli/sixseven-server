@@ -41,6 +41,8 @@ add_executable(giodb_unit_tests
     test_window_function.cpp
     test_storage_manager.cpp
     test_query_engine.cpp
+    test_alter_table.cpp
+    test_qa_gdb_254.cpp
     test_database_context.cpp
     test_subquery.cpp
     test_edge_table.cpp
