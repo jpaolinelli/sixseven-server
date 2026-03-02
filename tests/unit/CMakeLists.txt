@@ -159,6 +159,7 @@ add_executable(giodb_unit_tests
     test_qa_gdb_250.cpp
     test_autoincrement.cpp
     test_qa_gdb_251.cpp
+    test_qa_gdb_260.cpp
 )
 
 target_link_libraries(giodb_unit_tests
