@@ -9,6 +9,8 @@
 #include "giodb/graph/graph_engine.h"
 #include "giodb/server/server.h"
 #include "giodb/storage/disk_manager.h"
+#include "giodb/vector/builtin_provider.h"
+#include "giodb/vector/embedding_worker.h"
 #include "giodb/vector/provider_registry.h"
 
 #include <csignal>
@@ -90,9 +92,13 @@ int main(int argc, char* argv[]) {
     giodb::CatalogPersistence persistence(catalog, storage);
     giodb::GraphEngine graph_engine(catalog);
     giodb::ProviderRegistry provider_registry(catalog);
+    giodb::EmbeddingWorkerPool embedding_pool;
+    embedding_pool.register_provider("builtin/384", std::make_shared<giodb::BuiltinProvider>(384));
+
     giodb::QueryEngine engine(catalog, storage, &graph_engine);
     engine.set_provider_registry(&provider_registry);
     engine.set_catalog_persistence(&persistence);
+    engine.set_embedding_worker_pool(&embedding_pool);
 
     // Bootstrap system database (creates/loads system tables and catalog).
     auto boot =
@@ -111,6 +117,12 @@ int main(int argc, char* argv[]) {
     }
     engine.set_settings_cache(&settings_cache);
 
+    // Start embedding worker pool for async EMBEDDING column generation.
+    auto pool_start = embedding_pool.start();
+    if (!pool_start) {
+        GIODB_LOG_WARN("embedding worker pool failed to start: {}", pool_start.error().message);
+    }
+
     // Switch engine to default user database.
     engine.set_current_database(giodb::default_database_id);
 
@@ -127,6 +139,14 @@ int main(int argc, char* argv[]) {
 
     auto result = server.start();
     g_server = nullptr;
+
+    // Stop embedding worker pool before teardown.
+    if (embedding_pool.is_running()) {
+        auto pool_stop = embedding_pool.stop();
+        if (!pool_stop) {
+            GIODB_LOG_WARN("embedding worker pool stop failed: {}", pool_stop.error().message);
+        }
+    }
 
     if (!result) {
         GIODB_LOG_ERROR("server error: {}", result.error().message);

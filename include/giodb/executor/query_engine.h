@@ -36,6 +36,7 @@ struct ReembedStmt;
 struct SetStmt;
 struct ShowStmt;
 struct UnlinkStmt;
+class EmbeddingWorkerPool;
 class HnswIndex;
 class UserManager;
 class ProviderCache;
@@ -137,6 +138,10 @@ public:
     /// Set the catalog persistence layer for persisting DDL changes.
     void set_catalog_persistence(CatalogPersistence* persistence);
 
+    /// Set the embedding worker pool for async embedding on INSERT.
+    /// Also configures the store callback to write embeddings back to tuples.
+    void set_embedding_worker_pool(EmbeddingWorkerPool* pool);
+
 private:
     /// Execute a CREATE USER statement.
     [[nodiscard]] Result<QueryResult> execute_create_user(const CreateUserStmt& stmt);
@@ -213,6 +218,7 @@ private:
     WalReceiver* wal_receiver_ = nullptr;
     WalWriter* wal_writer_ = nullptr;
     UserManager* user_mgr_ = nullptr;
+    EmbeddingWorkerPool* embedding_pool_ = nullptr;
     CatalogPersistence* catalog_persistence_ = nullptr;
     AuthMethod auth_method_{};
     database_id_t current_database_id_ = default_database_id;

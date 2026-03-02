@@ -10,6 +10,7 @@
 #include "giodb/executor/planner.h"
 #include "giodb/executor/provider_cache.h"
 #include "giodb/executor/settings_cache.h"
+#include "giodb/index/rid.h"
 #include "giodb/parser/ast.h"
 #include "giodb/parser/lexer.h"
 #include "giodb/parser/parser.h"
@@ -22,6 +23,7 @@
 #include "giodb/storage/wal.h"
 #include "giodb/table/tuple.h"
 #include "giodb/vector/embedding_column.h"
+#include "giodb/vector/embedding_worker.h"
 #include "giodb/vector/hnsw_index.h"
 #include "giodb/vector/provider_registry.h"
 
@@ -115,6 +117,64 @@ void QueryEngine::set_auth_method(AuthMethod method) {
 
 void QueryEngine::set_catalog_persistence(CatalogPersistence* persistence) {
     catalog_persistence_ = persistence;
+}
+
+void QueryEngine::set_embedding_worker_pool(EmbeddingWorkerPool* pool) {
+    embedding_pool_ = pool;
+    if (pool != nullptr) {
+        pool->set_store_callback([this](table_id_t table_id,
+                                        int64_t row_id,
+                                        int32_t column_id,
+                                        std::span<const float> embedding) -> Result<void> {
+            // Decode RID from packed int64_t.
+            RID rid{static_cast<PageId>(static_cast<uint64_t>(row_id) >> 32),
+                    static_cast<SlotId>(row_id & 0xFFFF)};
+
+            auto ts = storage_.get_table_storage(table_id);
+            if (!ts) {
+                return make_error(ts.error().code, ts.error().message);
+            }
+            auto* table_storage = *ts;
+
+            // Read existing tuple.
+            auto data = table_storage->heap->get_tuple(rid);
+            if (!data) {
+                return make_error(data.error().code, data.error().message);
+            }
+
+            auto values = TupleSerializer::deserialize(*data, table_storage->storage_schema);
+            if (!values) {
+                return make_error(values.error().code, values.error().message);
+            }
+
+            // Find the embedding column by ordinal and update it.
+            auto table_schema = catalog_.get_table_by_id(table_id);
+            if (!table_schema) {
+                return make_error(table_schema.error().code, table_schema.error().message);
+            }
+
+            for (size_t i = 0; i < table_schema->columns.size(); ++i) {
+                if (table_schema->columns[i].ordinal == column_id) {
+                    (*values)[i] =
+                        Value(Embedding(std::vector<float>(embedding.begin(), embedding.end())));
+                    break;
+                }
+            }
+
+            // Re-serialize and update tuple.
+            auto serialized = TupleSerializer::serialize(*values, table_storage->storage_schema);
+            if (!serialized) {
+                return make_error(serialized.error().code, serialized.error().message);
+            }
+
+            auto update = table_storage->heap->update_tuple(rid, *serialized);
+            if (!update) {
+                return make_error(update.error().code, update.error().message);
+            }
+
+            return ok();
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1102,7 +1162,15 @@ Result<QueryResult> QueryEngine::execute_explain(const ExplainStmt& stmt,
     }
 
     // Build iterator tree from the inner statement.
-    Planner planner(catalog_, storage_, current_database_id_, graph_engine_, provider_registry_);
+    Planner planner(catalog_,
+                    storage_,
+                    current_database_id_,
+                    graph_engine_,
+                    provider_registry_,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    embedding_pool_);
     std::vector<ExprPtr> owned_exprs;
     auto iter = planner.plan(*inner_bound, owned_exprs);
     if (!iter) {
@@ -1223,7 +1291,15 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
     }
 
     // Build iterator tree.
-    Planner planner(catalog_, storage_, current_database_id_, graph_engine_, provider_registry_);
+    Planner planner(catalog_,
+                    storage_,
+                    current_database_id_,
+                    graph_engine_,
+                    provider_registry_,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    embedding_pool_);
     std::vector<ExprPtr> owned_exprs;
     auto iter = planner.plan(bound, owned_exprs);
     if (!iter) {

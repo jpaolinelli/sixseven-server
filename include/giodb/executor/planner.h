@@ -21,6 +21,8 @@
 
 namespace giodb {
 
+class EmbeddingWorkerPool;
+
 /// Translates a BoundStatement into a physical operator (Iterator) tree.
 ///
 /// The planner directly constructs Volcano iterators without an
@@ -40,6 +42,7 @@ public:
     /// @param hnsw_indexes     Optional map of index name → loaded HnswIndex.
     /// @param btree_indexes    Optional map of index_id → loaded BTreeIndex.
     /// @param hash_indexes     Optional map of index_id → loaded HashIndex.
+    /// @param embedding_pool   Optional EmbeddingWorkerPool for async INSERT embedding.
     Planner(Catalog& catalog,
             StorageManager& storage,
             database_id_t database_id = default_database_id,
@@ -47,7 +50,8 @@ public:
             ProviderRegistry* provider_registry = nullptr,
             std::unordered_map<std::string, HnswIndex*>* hnsw_indexes = nullptr,
             std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes = nullptr,
-            std::unordered_map<index_id_t, HashIndex*>* hash_indexes = nullptr);
+            std::unordered_map<index_id_t, HashIndex*>* hash_indexes = nullptr,
+            EmbeddingWorkerPool* embedding_pool = nullptr);
 
     /// Build an iterator tree for a DML/query statement.
     ///
@@ -159,6 +163,7 @@ private:
     std::unordered_map<std::string, HnswIndex*>* hnsw_indexes_;
     std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes_;
     std::unordered_map<index_id_t, HashIndex*>* hash_indexes_;
+    EmbeddingWorkerPool* embedding_pool_;
     SubqueryContext subquery_ctx_;
 };
 

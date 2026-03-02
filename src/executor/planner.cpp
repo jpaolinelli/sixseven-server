@@ -216,10 +216,11 @@ Planner::Planner(Catalog& catalog,
                  ProviderRegistry* provider_registry,
                  std::unordered_map<std::string, HnswIndex*>* hnsw_indexes,
                  std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes,
-                 std::unordered_map<index_id_t, HashIndex*>* hash_indexes)
+                 std::unordered_map<index_id_t, HashIndex*>* hash_indexes,
+                 EmbeddingWorkerPool* embedding_pool)
     : catalog_(catalog), storage_(storage), database_id_(database_id), graph_engine_(graph_engine),
       provider_registry_(provider_registry), hnsw_indexes_(hnsw_indexes),
-      btree_indexes_(btree_indexes), hash_indexes_(hash_indexes),
+      btree_indexes_(btree_indexes), hash_indexes_(hash_indexes), embedding_pool_(embedding_pool),
       subquery_ctx_{catalog_, storage_} {}
 
 // ---------------------------------------------------------------------------
@@ -1191,6 +1192,20 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
             iter->autoincrement_cols_ = std::move(ai_cols);
             iter->catalog_ = &catalog_;
         }
+
+        // Wire embedding infrastructure if the table has EMBEDDING columns.
+        if (embedding_pool_ != nullptr) {
+            auto emb_cols = catalog_.list_embedding_columns(table_schema->table_id);
+            if (!emb_cols.empty()) {
+                iter->embedding_table_id_ = table_schema->table_id;
+                iter->embedding_pool_ = embedding_pool_;
+                iter->embedding_cols_ = std::move(emb_cols);
+                for (const auto& col : table_schema->columns) {
+                    iter->column_names_.push_back(col.name);
+                }
+            }
+        }
+
         return ok(std::unique_ptr<Iterator>(std::move(iter)));
     }
 
@@ -1200,6 +1215,20 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
         iter->autoincrement_cols_ = std::move(ai_cols);
         iter->catalog_ = &catalog_;
     }
+
+    // Wire embedding infrastructure if the table has EMBEDDING columns.
+    if (embedding_pool_ != nullptr) {
+        auto emb_cols = catalog_.list_embedding_columns(table_schema->table_id);
+        if (!emb_cols.empty()) {
+            iter->embedding_table_id_ = table_schema->table_id;
+            iter->embedding_pool_ = embedding_pool_;
+            iter->embedding_cols_ = std::move(emb_cols);
+            for (const auto& col : table_schema->columns) {
+                iter->column_names_.push_back(col.name);
+            }
+        }
+    }
+
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
 }
 
