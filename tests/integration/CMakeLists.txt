@@ -14,4 +14,4 @@ target_link_libraries(giodb_integration_tests
 )
 
 include(GoogleTest)
-gtest_discover_tests(giodb_integration_tests)
+gtest_discover_tests(giodb_integration_tests PROPERTIES LABELS "integration")

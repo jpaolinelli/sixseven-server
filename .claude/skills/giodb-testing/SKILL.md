@@ -8,11 +8,14 @@ user-invocable: false
 
 ## Framework
 
-Google Test (gtest). All tests live in `tests/unit/test_<name>.cpp`.
+Google Test (gtest). Dev tests live in `tests/unit/test_<name>.cpp`. QA regression tests live in `tests/qa/test_qa_<ticket>.cpp`.
 
 ## File Registration
 
-Every new test file must be added to `tests/unit/CMakeLists.txt` in the `giodb_unit_tests` target source list.
+Test files are auto-detected by CMake via `file(GLOB CONFIGURE_DEPENDS ...)`. No manual registration is needed — just add the file to the correct directory:
+
+- `tests/unit/` for dev tests → `giodb_unit_tests` target (CTest label: `unit`)
+- `tests/qa/` for QA regression tests → `giodb_qa_tests` target (CTest label: `qa`)
 
 ## Test Naming
 
