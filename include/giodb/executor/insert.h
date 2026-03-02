@@ -1,8 +1,10 @@
 #pragma once
 
+#include "giodb/catalog/schema.h"
 #include "giodb/common/types.h"
 #include "giodb/executor/iterator.h"
 #include "giodb/executor/tuple.h"
+#include "giodb/index/rid.h"
 #include "giodb/parser/ast.h"
 #include "giodb/planner/binder.h"
 #include "giodb/table/table_heap.h"
@@ -10,11 +12,13 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace giodb {
 
 class Catalog;
+class EmbeddingWorkerPool;
 
 /// Describes an auto-increment column for the InsertOperator.
 struct AutoIncrementCol {
@@ -63,6 +67,18 @@ public:
     /// Set by the planner if the table has auto-increment columns.
     Catalog* catalog_ = nullptr;
 
+    /// Table ID for embedding job creation. Set by the planner.
+    table_id_t embedding_table_id_ = 0;
+
+    /// Column names in schema order, for resolving source_expr to value index.
+    std::vector<std::string> column_names_;
+
+    /// Embedding column definitions for this table. Set by the planner.
+    std::vector<EmbeddingColumnDef> embedding_cols_;
+
+    /// Embedding worker pool for async embedding generation. Set by the planner.
+    EmbeddingWorkerPool* embedding_pool_ = nullptr;
+
 protected:
     Result<void> do_open() override;
     Result<std::optional<Tuple>> do_next() override;
@@ -72,6 +88,10 @@ protected:
 private:
     /// Create a Value from an int64_t counter for the given type.
     static Result<Value> make_autoincrement_value(int64_t counter, TypeId type_id);
+
+    /// Enqueue async embedding jobs for EMBEDDING columns on the table.
+    /// Best-effort: logs warnings on failure but does not propagate errors.
+    void enqueue_embedding_jobs(const RID& rid, const std::vector<Value>& values);
 
     TableHeap& heap_;
     const Schema& storage_schema_;

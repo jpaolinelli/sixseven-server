@@ -2,8 +2,10 @@
 
 #include "giodb/catalog/catalog.h"
 #include "giodb/common/coercion.h"
+#include "giodb/common/logging.h"
 #include "giodb/common/types.h"
 #include "giodb/executor/expr_evaluator.h"
+#include "giodb/vector/embedding_worker.h"
 
 namespace giodb {
 
@@ -118,6 +120,7 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
             if (!rid) {
                 return make_error(rid.error().code, rid.error().message);
             }
+            enqueue_embedding_jobs(*rid, values);
             ++count;
         }
     } else {
@@ -183,6 +186,7 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
             if (!rid) {
                 return make_error(rid.error().code, rid.error().message);
             }
+            enqueue_embedding_jobs(*rid, values);
             ++count;
         }
     }
@@ -212,6 +216,47 @@ std::vector<Iterator*> InsertOperator::plan_children_mutable() {
     if (child_)
         return {child_.get()};
     return {};
+}
+
+void InsertOperator::enqueue_embedding_jobs(const RID& rid, const std::vector<Value>& values) {
+    if (embedding_pool_ == nullptr || embedding_cols_.empty()) {
+        return;
+    }
+
+    // Encode RID as int64_t: page_id in upper 32 bits, slot_id in lower 16.
+    auto row_id = (static_cast<int64_t>(rid.page_id) << 32) | static_cast<int64_t>(rid.slot_id);
+
+    std::vector<EmbeddingJob> jobs;
+    jobs.reserve(embedding_cols_.size());
+
+    for (const auto& emb : embedding_cols_) {
+        EmbeddingJob job;
+        job.table_id = embedding_table_id_;
+        job.row_id = row_id;
+        job.column_id = emb.column_id;
+        job.provider = emb.provider;
+        job.dimension = emb.dimension;
+        job.type = EmbeddingJob::Type::INSERT;
+
+        // Resolve source column by name and extract text value.
+        for (size_t i = 0; i < column_names_.size() && i < values.size(); ++i) {
+            if (column_names_[i] == emb.source_expr) {
+                if (!values[i].is_null() && values[i].type_id() == TypeId::STRING) {
+                    job.source_text = values[i].as_string();
+                }
+                break;
+            }
+        }
+
+        jobs.push_back(std::move(job));
+    }
+
+    if (!jobs.empty()) {
+        auto result = embedding_pool_->enqueue_batch(std::move(jobs));
+        if (!result) {
+            GIODB_LOG_WARN("failed to enqueue embedding jobs: {}", result.error().message);
+        }
+    }
 }
 
 } // namespace giodb
