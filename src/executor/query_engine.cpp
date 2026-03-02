@@ -1071,7 +1071,7 @@ Result<QueryResult> QueryEngine::execute_explain(const ExplainStmt& stmt,
     }
 
     // Build iterator tree from the inner statement.
-    Planner planner(catalog_, storage_, current_database_id_, graph_engine_);
+    Planner planner(catalog_, storage_, current_database_id_, graph_engine_, provider_registry_);
     std::vector<ExprPtr> owned_exprs;
     auto iter = planner.plan(*inner_bound, owned_exprs);
     if (!iter) {
@@ -1192,7 +1192,7 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
     }
 
     // Build iterator tree.
-    Planner planner(catalog_, storage_, current_database_id_, graph_engine_);
+    Planner planner(catalog_, storage_, current_database_id_, graph_engine_, provider_registry_);
     std::vector<ExprPtr> owned_exprs;
     auto iter = planner.plan(bound, owned_exprs);
     if (!iter) {

@@ -9,6 +9,7 @@
 #include "giodb/graph/graph_engine.h"
 #include "giodb/server/server.h"
 #include "giodb/storage/disk_manager.h"
+#include "giodb/vector/provider_registry.h"
 
 #include <csignal>
 #include <filesystem>
@@ -88,7 +89,9 @@ int main(int argc, char* argv[]) {
     giodb::StorageManager storage(disk_manager, data_dir);
     giodb::CatalogPersistence persistence(catalog, storage);
     giodb::GraphEngine graph_engine(catalog);
+    giodb::ProviderRegistry provider_registry(catalog);
     giodb::QueryEngine engine(catalog, storage, &graph_engine);
+    engine.set_provider_registry(&provider_registry);
     engine.set_catalog_persistence(&persistence);
 
     // Bootstrap system database (creates/loads system tables and catalog).
