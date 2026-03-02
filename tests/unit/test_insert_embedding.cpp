@@ -206,6 +206,58 @@ TEST_F(InsertEmbeddingTest, MultipleEmbeddingColumns) {
     EXPECT_EQ(select.rows[0][2].as_embedding().size(), 8u);
 }
 
+// -- GDB-297: Batch poisoning — NULL source must not lose valid embeddings -----
+
+TEST_F(InsertEmbeddingTest, MixedNullAndValidSourceTextGeneratesValidEmbeddings) {
+    exec_ok("CREATE TABLE articles ("
+            "  id INT,"
+            "  title TEXT,"
+            "  title_vec EMBEDDING(4, title, 'builtin/4')"
+            ")");
+
+    // Multi-row INSERT with a mix of NULL and non-NULL source texts.
+    exec_ok("INSERT INTO articles (id, title) VALUES "
+            "(1, 'valid text one'), "
+            "(2, NULL), "
+            "(3, 'valid text two'), "
+            "(4, NULL)");
+
+    ASSERT_TRUE(wait_for_pool());
+
+    auto select = exec_ok("SELECT id, title_vec FROM articles");
+    ASSERT_EQ(select.rows.size(), 4u);
+
+    // Rows 1 and 3 (valid source text) must have embeddings.
+    EXPECT_FALSE(select.rows[0][1].is_null()) << "row 1 should have embedding";
+    EXPECT_EQ(select.rows[0][1].as_embedding().size(), 4u);
+
+    EXPECT_FALSE(select.rows[2][1].is_null()) << "row 3 should have embedding";
+    EXPECT_EQ(select.rows[2][1].as_embedding().size(), 4u);
+
+    // Rows 2 and 4 (NULL source text) must have NULL embeddings.
+    EXPECT_TRUE(select.rows[1][1].is_null()) << "row 2 should be null";
+    EXPECT_TRUE(select.rows[3][1].is_null()) << "row 4 should be null";
+}
+
+TEST_F(InsertEmbeddingTest, AllNullSourceTextEnqueuesNoJobs) {
+    exec_ok("CREATE TABLE all_null ("
+            "  id INT,"
+            "  content TEXT,"
+            "  content_vec EMBEDDING(4, content, 'builtin/4')"
+            ")");
+
+    auto before = pool_->stats();
+
+    exec_ok("INSERT INTO all_null (id, content) VALUES (1, NULL), (2, NULL), (3, NULL)");
+
+    ASSERT_TRUE(wait_for_pool());
+
+    // No jobs should have been enqueued for all-NULL source texts.
+    auto after = pool_->stats();
+    EXPECT_EQ(after.jobs_processed, before.jobs_processed);
+    EXPECT_EQ(after.jobs_failed, before.jobs_failed);
+}
+
 TEST_F(InsertEmbeddingTest, WorkerPoolStatsReflectInsertJobs) {
     exec_ok("CREATE TABLE stats_test ("
             "  id INT,"

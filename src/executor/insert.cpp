@@ -248,6 +248,12 @@ void InsertOperator::enqueue_embedding_jobs(const RID& rid, const std::vector<Va
             }
         }
 
+        // Skip jobs with empty source text — NULL source means NULL embedding,
+        // no need to enqueue a job that will always fail at the provider level.
+        if (job.source_text.empty()) {
+            continue;
+        }
+
         jobs.push_back(std::move(job));
     }
 
