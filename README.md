@@ -351,9 +351,11 @@ SHORTEST PATH FROM users(1) TO users(100)
 
 ## Vector Search
 
+> See the [Vector Search Guide](docs/vector-search.md) for detailed usage, k-tuning advice, and performance tips.
+
 ### EMBEDDING Columns
 
-The `EMBEDDING` type auto-generates vector embeddings from source columns when rows are inserted or updated:
+The `EMBEDDING` type auto-generates vector embeddings from source columns when rows are inserted or updated. A companion HNSW index is created automatically for each embedding column.
 
 ```sql
 CREATE TABLE articles (
@@ -370,6 +372,8 @@ VALUES (1, 'AI in 2025', 'Latest trends in artificial intelligence');
 ```
 
 ### NEAREST (Similarity Search)
+
+Find the `k` most similar rows to a query. The first argument controls how many neighbors to return — use lower k (3-5) for precision, higher k (10-20) for broader recall. Results are sorted by distance ascending and include a `_distance` column.
 
 ```sql
 -- Text query (auto-embedded using the column's provider)
