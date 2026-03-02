@@ -14,13 +14,27 @@ export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset default && cmake --build build
 
 Must complete with zero errors and zero warnings (`-Werror` is enabled).
 
-## Tests
+## Tests (Developer)
+
+Build and run developer unit tests only:
 
 ```bash
-export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset default && cmake --build build/debug --target giodb_unit_tests && ctest --test-dir build/debug --output-on-failure
+export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset default && cmake --build build/debug --target giodb_unit_tests && ./build/debug/tests/unit/giodb_unit_tests
 ```
 
-All tests must pass. If any fail, read the failure output and fix before proceeding.
+All dev tests must pass. If any fail, read the failure output and fix before proceeding.
+
+## QA Tests
+
+QA regression tests are a separate target. These are **not** run by implementers during development — they run in CI and during the QA process.
+
+```bash
+# Build QA tests
+cmake --build build/debug --target giodb_qa_tests
+
+# Run tests for a specific ticket only
+./build/debug/tests/qa/giodb_qa_tests --gtest_filter="*GDB<N>*"
+```
 
 ## clang-format
 
@@ -61,7 +75,7 @@ If `build/debug/compile_commands.json` does not exist, build the project first.
 
 ## AddressSanitizer
 
-For deeper memory safety checks:
+For deeper memory safety checks on developer tests:
 
 ```bash
 export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset asan
@@ -71,6 +85,13 @@ ASAN_OPTIONS=detect_leaks=1:halt_on_error=0 ./build/asan/tests/unit/giodb_unit_t
 
 Detects: buffer overflows, use-after-free, memory leaks, stack overflows.
 
+For QA tests under ASan (used by the QA process, not implementers):
+
+```bash
+cmake --build build/asan --target giodb_qa_tests
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=0 ./build/asan/tests/qa/giodb_qa_tests --gtest_filter="*GDB<N>*"
+```
+
 ## Pre-Commit Checklist
 
 Before every commit, run these in order:
@@ -78,6 +99,6 @@ Before every commit, run these in order:
 1. `clang-format -i` on all changed `.h` and `.cpp` files
 2. `clang-tidy` on all changed `.cpp` files (fix any warnings)
 3. Build the project (zero warnings)
-4. Run all tests (all pass)
+4. Run `giodb_unit_tests` (all dev tests pass)
 
 Never commit if any of these steps fail.
