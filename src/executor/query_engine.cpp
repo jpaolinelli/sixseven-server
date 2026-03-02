@@ -1,6 +1,7 @@
 #include "giodb/executor/query_engine.h"
 
 #include "giodb/catalog/schema.h"
+#include "giodb/common/coercion.h"
 #include "giodb/common/logging.h"
 #include "giodb/common/types.h"
 #include "giodb/executor/catalog_persistence.h"
@@ -1819,7 +1820,15 @@ Result<QueryResult> QueryEngine::execute_alter_table(const AlterTableStmt& stmt)
                 if (!eval_result) {
                     return make_error(eval_result.error().code, eval_result.error().message);
                 }
-                default_value = std::move(*eval_result);
+                // Fit the evaluated value to the column's declared type.
+                // The expression evaluator may return a wider type (e.g., INT64
+                // for an integer literal) than the column expects (e.g., INT32).
+                // Standard coerce() only allows widening; DML needs narrowing too.
+                auto fitted = fit_to_storage(*eval_result, ccd.type_id);
+                if (!fitted) {
+                    return make_error(fitted.error().code, fitted.error().message);
+                }
+                default_value = std::move(*fitted);
             }
 
             // Rewrite each tuple with the new column.
