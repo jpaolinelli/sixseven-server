@@ -112,8 +112,11 @@ jobs:
       - name: Build
         run: cmake --build build/debug
 
-      - name: Test
-        run: ctest --test-dir build/debug --output-on-failure
+      - name: Run unit tests
+        run: ctest --test-dir build/debug -L unit --output-on-failure
+
+      - name: Run QA regression tests
+        run: ctest --test-dir build/debug -L qa --output-on-failure
 
       - name: Upload binaries
         if: github.ref == 'refs/heads/main'
