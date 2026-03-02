@@ -565,11 +565,52 @@ cmake --preset tsan             # ThreadSanitizer
 cmake --build build/debug
 cmake --build build/release
 
-# Run tests
-cmake --build build/debug --target giodb_unit_tests
-./build/debug/tests/unit/giodb_unit_tests
+# Run all tests
 ctest --test-dir build/debug --output-on-failure
 ```
+
+### Testing
+
+Tests are split into three categories, each with its own CMake target and CTest label:
+
+| Category | Target | Directory | CTest Label |
+|----------|--------|-----------|-------------|
+| Dev unit tests | `giodb_unit_tests` | `tests/unit/` | `unit` |
+| QA regression tests | `giodb_qa_tests` | `tests/qa/` | `qa` |
+| Integration tests | `giodb_integration_tests` | `tests/integration/` | `integration` |
+
+```bash
+# Build and run all tests
+cmake --build build/debug
+ctest --test-dir build/debug --output-on-failure
+
+# Run only dev unit tests (fastest, use during development)
+cmake --build build/debug --target giodb_unit_tests
+ctest --test-dir build/debug -L unit --output-on-failure
+
+# Run only QA regression tests
+cmake --build build/debug --target giodb_qa_tests
+ctest --test-dir build/debug -L qa --output-on-failure
+
+# Run only integration tests
+cmake --build build/debug --target giodb_integration_tests
+ctest --test-dir build/debug -L integration --output-on-failure
+
+# Run a specific test by name (supports wildcards)
+./build/debug/tests/unit/giodb_unit_tests --gtest_filter="BufferPool*"
+./build/debug/tests/qa/giodb_qa_tests --gtest_filter="*GDB258*"
+
+# Run a specific test suite
+./build/debug/tests/unit/giodb_unit_tests --gtest_filter="ExprEvaluator.*"
+
+# List all available tests without running them
+./build/debug/tests/unit/giodb_unit_tests --gtest_list_tests
+./build/debug/tests/qa/giodb_qa_tests --gtest_list_tests
+```
+
+New test files are auto-detected by CMake — just add them to the correct directory:
+- `tests/unit/test_<name>.cpp` for dev tests
+- `tests/qa/test_qa_<ticket>.cpp` for QA regression tests
 
 ### Pre-commit hooks
 

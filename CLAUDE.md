@@ -38,10 +38,23 @@ cmake --preset tsan             # ThreadSanitizer
 cmake --build build/debug
 cmake --build build/release
 
-# Run tests
+# Dev tests only (fast, local development)
 cmake --build build/debug --target giodb_unit_tests
 ./build/debug/tests/unit/giodb_unit_tests
+
+# QA regression tests
+cmake --build build/debug --target giodb_qa_tests
+./build/debug/tests/qa/giodb_qa_tests
+
+# QA tests for a specific ticket
+./build/debug/tests/qa/giodb_qa_tests --gtest_filter="*GDB258*"
+
+# All tests via CTest (CI behavior)
 ctest --test-dir build/debug --output-on-failure
+
+# CTest by label
+ctest --test-dir build/debug -L unit --output-on-failure
+ctest --test-dir build/debug -L qa --output-on-failure
 
 # Run server
 ./build/debug/src/giodb-server [config.json]
@@ -55,7 +68,8 @@ ctest --test-dir build/debug --output-on-failure
 ```
 include/giodb/<module>/   — Public headers
 src/<module>/             — Implementation files
-tests/unit/               — Unit tests (Google Test)
+tests/unit/               — Dev unit tests (Google Test)
+tests/qa/                 — QA regression tests (test_qa_*.cpp)
 tests/integration/        — Integration tests
 tests/e2e/                — End-to-end tests
 tests/fuzz/               — Fuzz tests
@@ -108,9 +122,11 @@ Initialize at startup: `giodb::init_logging("info");`
 ## Testing
 
 - Every new source file needs a corresponding `test_<name>.cpp` in `tests/unit/`
+- QA regression tests go in `tests/qa/` with `test_qa_<ticket>.cpp` naming
 - Use Google Test: `TEST(SuiteName, TestName) { ... }`
-- Add test files to `tests/unit/CMakeLists.txt`
-- Test target: `giodb_unit_tests`
+- Dev test target: `giodb_unit_tests` (all `tests/unit/*.cpp`)
+- QA test target: `giodb_qa_tests` (all `tests/qa/*.cpp`)
+- CTest labels: `unit` for dev tests, `qa` for QA tests, `integration` for integration tests
 
 ## Dependencies (vcpkg)
 

@@ -109,7 +109,8 @@ Operators compose into a pull-based tree: `SeqScan -> Project -> Sort -> Limit`.
 ```
 include/giodb/<module>/   — Public headers
 src/<module>/             — Implementation files
-tests/unit/               — Unit tests (Google Test)
+tests/unit/               — Dev unit tests (Google Test)
+tests/qa/                 — QA regression tests (test_qa_*.cpp)
 tests/integration/        — Integration tests
 tests/e2e/                — End-to-end tests
 tests/fuzz/               — Fuzz tests

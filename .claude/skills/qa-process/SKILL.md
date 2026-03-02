@@ -51,7 +51,7 @@ Read with a tester's eye — look for:
 
 ## Step 4: Write Adversarial Tests
 
-This is the core of QA. Write new test cases designed to **break** the implementation. Create a test file `tests/unit/test_qa_<ticket_key>.cpp` (lowercase ticket key, e.g., `test_qa_gdb_42.cpp`).
+This is the core of QA. Write new test cases designed to **break** the implementation. Create a test file `tests/qa/test_qa_<ticket_key>.cpp` (lowercase ticket key, e.g., `test_qa_gdb_42.cpp`).
 
 ### Categories of Adversarial Tests
 
@@ -100,9 +100,9 @@ This is the core of QA. Write new test cases designed to **break** the implement
 - Every test must assert a specific expected outcome — not just "doesn't crash."
 - Group related adversarial tests under a descriptive suite name: `QA_<Component>`.
 
-### Register the Test File
+### Test File Location
 
-Add the new test file to `tests/unit/CMakeLists.txt`.
+QA test files go in `tests/qa/` and are auto-detected by CMake (no manual registration needed).
 
 ## Step 5: Run Tests with AddressSanitizer
 
