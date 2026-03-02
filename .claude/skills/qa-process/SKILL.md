@@ -12,6 +12,13 @@ QA is not code review. Code review reads the code and checks quality. QA **runs*
 
 Think like an adversary. Every function is guilty until proven innocent.
 
+## What QA Does NOT Do
+
+- **QA does NOT run the full `giodb_qa_tests` suite locally.** Use `--gtest_filter` to run only tests for the ticket under review. The full QA regression suite runs in CI.
+- **QA does NOT modify developer tests in `giodb_unit_tests`.** Dev tests in `tests/unit/` are owned by implementers.
+- **QA does NOT add tests to `giodb_unit_tests`.** All QA tests go in `giodb_qa_tests` (`tests/qa/` directory).
+- **QA does NOT fix implementation bugs.** QA finds bugs, writes reproducing tests, and files tickets. Fixing is the implementer's job.
+
 ## Step 1: Understand the Ticket
 
 Read the parent ticket and all subtasks. Extract every acceptance criterion as a discrete, testable claim. For each criterion, think about:
@@ -22,13 +29,19 @@ Read the parent ticket and all subtasks. Extract every acceptance criterion as a
 
 ## Step 2: Build and Run Existing Tests
 
-Run the full build and test suite:
+First, build and run the developer unit tests to verify nothing is broken by the implementation:
 
 ```bash
-export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset default && cmake --build build/debug --target giodb_unit_tests && ctest --test-dir build/debug --output-on-failure
+export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset default && cmake --build build/debug --target giodb_unit_tests && ctest --test-dir build/debug -L unit --output-on-failure
 ```
 
-Record the results. If existing tests fail, that is an immediate QA finding.
+Record the results. If existing unit tests fail, that is an immediate QA finding.
+
+Then build the QA test target (needed for Steps 4–5):
+
+```bash
+cmake --build build/debug --target giodb_qa_tests
+```
 
 ## Step 3: Read the Implementation
 
@@ -36,7 +49,8 @@ Read every file added or modified for the ticket:
 
 - **Headers**: `include/giodb/<module>/*.h`
 - **Implementations**: `src/<module>/*.cpp`
-- **Tests**: `tests/unit/test_*.cpp`
+- **Dev tests**: `tests/unit/test_*.cpp`
+- **QA tests**: `tests/qa/test_qa_*.cpp`
 
 Read with a tester's eye — look for:
 
@@ -102,21 +116,35 @@ This is the core of QA. Write new test cases designed to **break** the implement
 
 ### Test File Location
 
-QA test files go in `tests/qa/` and are auto-detected by CMake (no manual registration needed).
+QA test files go in `tests/qa/` and are auto-detected by the `giodb_qa_tests` CMake target (no manual registration needed). File naming convention: `test_qa_gdb_<ticket_number>.cpp` (e.g., `test_qa_gdb_42.cpp`). For tickets covering multiple related items, use: `test_qa_gdb_<N1>_<N2>.cpp`.
 
-## Step 5: Run Tests with AddressSanitizer
+> **Important**: QA tests go in `giodb_qa_tests` (the `tests/qa/` directory), **NOT** in `giodb_unit_tests` (the `tests/unit/` directory). Never add QA tests to the dev test target.
 
-Build and run with ASan to catch memory bugs:
+## Step 5: Run Ticket-Specific QA Tests
+
+Run only the tests for the ticket under review — **not** the full QA suite:
+
+```bash
+./build/debug/tests/qa/giodb_qa_tests --gtest_filter="*GDB<N>*"
+```
+
+Replace `<N>` with the ticket number (e.g., `--gtest_filter="*GDB42*"` for GDB-42).
+
+Record all results. Fix any test infrastructure issues (compile errors, missing includes) but do **not** fix bugs in the implementation — that is the implementer's job.
+
+## Step 6: Run Tests with AddressSanitizer
+
+Build and run **QA tests** with ASan to catch memory bugs:
 
 ```bash
 export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset asan
-cmake --build build/asan --target giodb_unit_tests
-ASAN_OPTIONS=detect_leaks=1:halt_on_error=0 ./build/asan/tests/unit/giodb_unit_tests
+cmake --build build/asan --target giodb_qa_tests
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=0 ./build/asan/tests/qa/giodb_qa_tests --gtest_filter="*GDB<N>*"
 ```
 
 ASan detects: buffer overflows, use-after-free, memory leaks, stack overflows, double-free. Any ASan finding is a QA bug.
 
-## Step 6: Verify Acceptance Criteria
+## Step 7: Verify Acceptance Criteria
 
 For each acceptance criterion, trace through the code path that satisfies it:
 
@@ -131,7 +159,7 @@ Build the criteria table:
 |-----------|---------|----------|-------|
 | description | test names | PASS / FAIL / UNTESTED | details |
 
-## Step 7: Compile Findings
+## Step 8: Compile Findings
 
 Classify every finding by severity:
 
@@ -140,7 +168,7 @@ Classify every finding by severity:
 - **Medium**: Edge case failures, missing validation, inconsistent error messages.
 - **Low**: Minor behavioral quirks, missing edge case tests, cosmetic issues.
 
-## Step 8: File Bug Tickets
+## Step 9: File Bug Tickets
 
 For every Critical or High finding, create a Jira `Bug` ticket in the **same epic as the ticket under review**:
 
@@ -175,7 +203,7 @@ Description:
 
 For Medium findings, include them in the QA report and let the user decide whether to file tickets.
 
-## Step 9: QA Report Format
+## Step 10: QA Report Format
 
 ```
 # <TICKET-ID> — <Summary> — QA Report
@@ -219,4 +247,4 @@ For Medium findings, include them in the QA report and let the user decide wheth
 
 ## Ticket Transitions
 
-Transition the ticket to "Done" regardless of verdict. Bug tickets filed in step 8 are standalone tickets in the same epic and track any remaining work.
+Transition the ticket to "Done" regardless of verdict. Bug tickets filed in step 9 are standalone tickets in the same epic and track any remaining work.
