@@ -10,6 +10,17 @@ user-invocable: false
 
 Google Test (gtest). Dev tests live in `tests/unit/test_<name>.cpp`. QA regression tests live in `tests/qa/test_qa_<ticket>.cpp`.
 
+## Test Targets
+
+The project has two separate test executables:
+
+| Target | Directory | File Pattern | CTest Label | Purpose |
+|--------|-----------|-------------|-------------|---------|
+| `giodb_unit_tests` | `tests/unit/` | `test_<name>.cpp` | `unit` | Developer functional tests |
+| `giodb_qa_tests` | `tests/qa/` | `test_qa_gdb_<N>.cpp` | `qa` | QA regression / adversarial tests |
+
+> **Important**: Developer tests MUST NOT be added to `giodb_qa_tests`. QA tests MUST NOT be added to `giodb_unit_tests`. Each target has a strict ownership boundary.
+
 ## File Registration
 
 Test files are auto-detected by CMake via `file(GLOB CONFIGURE_DEPENDS ...)`. No manual registration is needed — just add the file to the correct directory:
@@ -137,7 +148,15 @@ EXPECT_EQ(rows[0].values[col_idx].as_int32(), expected_value);
 
 ## Build and Run
 
+Build and run developer unit tests (default for implementers):
+
 ```bash
 cmake --build build/debug --target giodb_unit_tests
-ctest --test-dir build/debug --output-on-failure
+./build/debug/tests/unit/giodb_unit_tests
+```
+
+To run via CTest with the `unit` label only:
+
+```bash
+ctest --test-dir build/debug -L unit --output-on-failure
 ```

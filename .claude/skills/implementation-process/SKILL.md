@@ -26,12 +26,13 @@ For each subtask, follow these steps in order:
 
 ### 3. Test
 
-- Create `tests/unit/test_<name>.cpp` for each new component.
-- Add test files to `tests/unit/CMakeLists.txt`.
+- Create `tests/unit/test_<name>.cpp` for each new component (these go in the `giodb_unit_tests` target).
+- Test files in `tests/unit/` are auto-detected by CMake — no manual registration needed.
 - Follow the testing patterns (see `giodb-testing` skill).
 - Cover every acceptance criterion with at least one test.
 - Cover edge cases: empty inputs, NULLs, error conditions, boundaries.
 - Every test must assert something substantive — no empty or trivial tests.
+- **Do NOT add tests to `giodb_qa_tests`** — QA tests are owned by the QA process.
 
 ### 4. Quality Gate
 
@@ -40,9 +41,11 @@ Before marking a subtask done, run the full pre-commit checklist (see `quality-c
 1. `clang-format -i` on all new/changed files.
 2. `clang-tidy` on all new/changed `.cpp` files.
 3. Build with zero warnings.
-4. All tests pass.
+4. Run `giodb_unit_tests` — all dev tests pass.
 
 Fix any issues before proceeding.
+
+> **Note**: Implementers do NOT run or modify QA tests (`giodb_qa_tests`). QA tests are owned by the QA process and run in CI.
 
 ### 5. Transition
 
