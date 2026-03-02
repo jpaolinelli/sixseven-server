@@ -3,6 +3,7 @@
 #include "giodb/common/value.h"
 #include "giodb/executor/query_engine.h"
 #include "giodb/executor/storage_manager.h"
+#include "giodb/graph/graph_engine.h"
 #include "giodb/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
@@ -770,4 +771,131 @@ TEST_F(QueryEngineTest, InsertMultipleRowsEachGetUniqueDefaults) {
     EXPECT_EQ(qr.rows[1][0].type_id(), TypeId::UUID);
     // The two UUIDs should be different.
     EXPECT_NE(qr.rows[0][0].as_uuid(), qr.rows[1][0].as_uuid());
+}
+
+// =============================================================================
+// Graph operations without GraphEngine (GDB-256 regression: nullptr guard)
+// =============================================================================
+
+TEST_F(QueryEngineTest, CreateEdgeTypeFailsWithoutGraphEngine) {
+    exec_ok("CREATE TABLE users2 (id INT PRIMARY KEY, name VARCHAR)");
+    exec_error("CREATE EDGE TYPE knows FROM users2 TO users2", StatusCode::INTERNAL_ERROR);
+}
+
+TEST_F(QueryEngineTest, DropEdgeTypeFailsWithoutGraphEngine) {
+    exec_error("DROP EDGE TYPE knows", StatusCode::INTERNAL_ERROR);
+}
+
+TEST_F(QueryEngineTest, LinkFailsWithoutGraphEngine) {
+    exec_ok("CREATE TABLE users2 (id INT PRIMARY KEY, name VARCHAR)");
+    // The binder resolves the edge type first — NOT_FOUND because it doesn't exist.
+    exec_error("LINK users2(1) TO users2(2) VIA knows", StatusCode::NOT_FOUND);
+}
+
+TEST_F(QueryEngineTest, UnlinkFailsWithoutGraphEngine) {
+    exec_ok("CREATE TABLE users2 (id INT PRIMARY KEY, name VARCHAR)");
+    // The binder resolves the edge type first — NOT_FOUND because it doesn't exist.
+    exec_error("UNLINK users2(1) FROM users2(2) VIA knows", StatusCode::NOT_FOUND);
+}
+
+// =============================================================================
+// Graph operations WITH GraphEngine (GDB-256: verifies the fix)
+// =============================================================================
+
+class QueryEngineGraphTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_qe_graph";
+        std::filesystem::remove_all(data_dir_);
+        std::filesystem::create_directories(data_dir_);
+
+        storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
+        graph_engine_ = std::make_unique<GraphEngine>(catalog_);
+        engine_ = std::make_unique<QueryEngine>(catalog_, *storage_, graph_engine_.get());
+    }
+
+    void TearDown() override {
+        engine_.reset();
+        graph_engine_.reset();
+        storage_.reset();
+        std::filesystem::remove_all(data_dir_);
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << result.error().message;
+        return std::move(*result);
+    }
+
+    void exec_error(const std::string& sql, StatusCode expected) {
+        auto result = engine_->execute(sql);
+        EXPECT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().code, expected);
+    }
+
+    DiskManager dm_;
+    Catalog catalog_;
+    std::filesystem::path data_dir_;
+    std::unique_ptr<StorageManager> storage_;
+    std::unique_ptr<GraphEngine> graph_engine_;
+    std::unique_ptr<QueryEngine> engine_;
+};
+
+TEST_F(QueryEngineGraphTest, CreateEdgeTypeSucceeds) {
+    exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR)");
+    auto qr = exec_ok("CREATE EDGE TYPE knows FROM users TO users");
+    EXPECT_EQ(qr.message, "CREATE EDGE TYPE");
+}
+
+TEST_F(QueryEngineGraphTest, DropEdgeTypeSucceeds) {
+    exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR)");
+    exec_ok("CREATE EDGE TYPE knows FROM users TO users");
+    auto qr = exec_ok("DROP EDGE TYPE knows");
+    EXPECT_EQ(qr.message, "DROP EDGE TYPE");
+}
+
+TEST_F(QueryEngineGraphTest, LinkAndUnlinkSucceed) {
+    exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR)");
+    exec_ok("INSERT INTO users VALUES (1, 'alice')");
+    exec_ok("INSERT INTO users VALUES (2, 'bob')");
+    exec_ok("CREATE EDGE TYPE knows FROM users TO users");
+
+    auto link = exec_ok("LINK users(1) TO users(2) VIA knows");
+    EXPECT_EQ(link.affected_rows, 1);
+    EXPECT_EQ(link.message, "LINK");
+
+    auto unlink = exec_ok("UNLINK users(1) FROM users(2) VIA knows");
+    EXPECT_EQ(unlink.affected_rows, 1);
+    EXPECT_EQ(unlink.message, "UNLINK");
+}
+
+TEST_F(QueryEngineGraphTest, CreateEdgeTypeDuplicateFails) {
+    exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR)");
+    exec_ok("CREATE EDGE TYPE knows FROM users TO users");
+    exec_error("CREATE EDGE TYPE knows FROM users TO users", StatusCode::ALREADY_EXISTS);
+}
+
+TEST_F(QueryEngineGraphTest, DropEdgeTypeNotFoundFails) {
+    exec_error("DROP EDGE TYPE nonexistent", StatusCode::NOT_FOUND);
+}
+
+TEST_F(QueryEngineGraphTest, DropEdgeTypeIfExists) {
+    auto qr = exec_ok("DROP EDGE TYPE IF EXISTS nonexistent");
+    EXPECT_EQ(qr.message, "DROP EDGE TYPE");
+}
+
+TEST_F(QueryEngineGraphTest, FullGraphCRUDPipeline) {
+    // End-to-end: create tables, create edge type, link, unlink, drop edge type.
+    exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR)");
+    exec_ok("CREATE TABLE posts (id INT PRIMARY KEY, title VARCHAR)");
+    exec_ok("INSERT INTO users VALUES (1, 'alice')");
+    exec_ok("INSERT INTO posts VALUES (10, 'hello world')");
+
+    exec_ok("CREATE EDGE TYPE authored FROM users TO posts");
+    exec_ok("LINK users(1) TO posts(10) VIA authored");
+    exec_ok("UNLINK users(1) FROM posts(10) VIA authored");
+    exec_ok("DROP EDGE TYPE authored");
+
+    // After drop, edge type no longer exists in graph engine.
+    exec_error("LINK users(1) TO posts(10) VIA authored", StatusCode::NOT_FOUND);
 }
