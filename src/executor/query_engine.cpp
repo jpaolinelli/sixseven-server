@@ -605,6 +605,37 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
         }
     }
 
+    // Register EMBEDDING column metadata and auto-create HNSW indexes.
+    std::vector<EmbeddingColumnDef> emb_defs;
+    for (size_t i = 0; i < stmt.columns.size(); ++i) {
+        const auto& col = stmt.columns[i];
+        if (!col.type.source.empty()) { // EMBEDDING column
+            EmbeddingColumnDef def;
+            def.table_id = *table_id;
+            def.column_id = static_cast<int32_t>(i);
+            def.dimension = col.type.param1.value_or(0);
+            def.source_expr = col.type.source;
+            def.provider = col.type.provider;
+            emb_defs.push_back(std::move(def));
+        }
+    }
+    if (!emb_defs.empty()) {
+        EmbeddingColumnManager emb_mgr(catalog_);
+        auto reg = emb_mgr.register_table_embeddings(*table_id, emb_defs);
+        if (!reg) {
+            return make_error(reg.error().code, reg.error().message);
+        }
+        // Persist each embedding column to sys_embedding_columns.
+        if (catalog_persistence_ != nullptr) {
+            for (const auto& def : emb_defs) {
+                auto p = catalog_persistence_->persist_embedding_column(def);
+                if (!p) {
+                    GIODB_LOG_WARN("failed to persist embedding column: {}", p.error().message);
+                }
+            }
+        }
+    }
+
     QueryResult qr;
     qr.message = "CREATE TABLE";
     return ok(std::move(qr));
