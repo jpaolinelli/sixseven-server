@@ -171,7 +171,9 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
                         dynamic_cast<const CreateUserStmt*>(raw) != nullptr ||
                         dynamic_cast<const DropUserStmt*>(raw) != nullptr ||
                         dynamic_cast<const AlterUserStmt*>(raw) != nullptr ||
-                        dynamic_cast<const AlterTableStmt*>(raw) != nullptr;
+                        dynamic_cast<const AlterTableStmt*>(raw) != nullptr ||
+                        dynamic_cast<const CreateIndexStmt*>(raw) != nullptr ||
+                        dynamic_cast<const DropIndexStmt*>(raw) != nullptr;
 
         if (is_write) {
             // Determine whether this is DML or DDL for the error message.
@@ -184,7 +186,9 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
                           dynamic_cast<const CreateUserStmt*>(raw) != nullptr ||
                           dynamic_cast<const DropUserStmt*>(raw) != nullptr ||
                           dynamic_cast<const AlterUserStmt*>(raw) != nullptr ||
-                          dynamic_cast<const AlterTableStmt*>(raw) != nullptr;
+                          dynamic_cast<const AlterTableStmt*>(raw) != nullptr ||
+                          dynamic_cast<const CreateIndexStmt*>(raw) != nullptr ||
+                          dynamic_cast<const DropIndexStmt*>(raw) != nullptr;
 
             if (is_ddl) {
                 return make_error(StatusCode::READ_ONLY,
@@ -237,6 +241,12 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
     }
     if (auto* alter_user = dynamic_cast<const AlterUserStmt*>(stmt_ptr->get())) {
         return execute_alter_user(*alter_user);
+    }
+    if (auto* create_index = dynamic_cast<const CreateIndexStmt*>(stmt_ptr->get())) {
+        return execute_create_index(*create_index);
+    }
+    if (auto* drop_index = dynamic_cast<const DropIndexStmt*>(stmt_ptr->get())) {
+        return execute_drop_index(*drop_index);
     }
 
     // 4b. Handle SELECT <system_function()> without FROM clause.
@@ -2015,6 +2025,128 @@ Result<QueryResult> QueryEngine::execute_alter_user(const AlterUserStmt& stmt) {
 
     QueryResult qr;
     qr.message = "ALTER USER";
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// DDL: CREATE INDEX
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_create_index(const CreateIndexStmt& stmt) {
+    // Resolve the table.
+    auto schema = catalog_.get_table(current_database_id_, stmt.table_name);
+    if (!schema) {
+        return make_error(schema.error().code, schema.error().message);
+    }
+
+    // Check for duplicate index name.
+    auto existing = catalog_.get_index(stmt.name);
+    if (existing) {
+        if (stmt.if_not_exists) {
+            QueryResult qr;
+            qr.message = "CREATE INDEX";
+            return ok(std::move(qr));
+        }
+        return make_error(StatusCode::ALREADY_EXISTS, "index '" + stmt.name + "' already exists");
+    }
+
+    // Validate all indexed columns exist in the table.
+    for (const auto& col_name : stmt.columns) {
+        bool found = false;
+        auto upper_col = to_upper(col_name);
+        for (const auto& col : schema->columns) {
+            if (to_upper(col.name) == upper_col) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            return make_error(StatusCode::NOT_FOUND,
+                              "column '" + col_name + "' not found in table '" + stmt.table_name +
+                                  "'");
+        }
+    }
+
+    // Build the index definition.
+    IndexDef def;
+    def.table_id = schema->table_id;
+    def.name = stmt.name;
+    def.index_type = stmt.method.empty() ? "btree" : stmt.method;
+    def.is_unique = stmt.is_unique;
+
+    // Build comma-separated column list.
+    std::string cols;
+    for (size_t i = 0; i < stmt.columns.size(); ++i) {
+        if (i > 0) {
+            cols += ",";
+        }
+        cols += stmt.columns[i];
+    }
+    def.columns = cols;
+
+    // Register in catalog.
+    auto index_id = catalog_.create_index(std::move(def));
+    if (!index_id) {
+        return make_error(index_id.error().code, index_id.error().message);
+    }
+
+    // Persist to system catalog tables.
+    if (catalog_persistence_ != nullptr) {
+        auto created_def = catalog_.get_index(stmt.name);
+        if (created_def) {
+            auto persist = catalog_persistence_->persist_index(*created_def);
+            if (!persist) {
+                GIODB_LOG_WARN(
+                    "failed to persist index '{}': {}", stmt.name, persist.error().message);
+            }
+        }
+    }
+
+    GIODB_LOG_INFO("created index '{}' on table '{}'", stmt.name, stmt.table_name);
+
+    QueryResult qr;
+    qr.message = "CREATE INDEX";
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// DDL: DROP INDEX
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_drop_index(const DropIndexStmt& stmt) {
+    // Look up the index to get its ID for persistence removal.
+    auto idx = catalog_.get_index(stmt.name);
+    if (!idx) {
+        if (stmt.if_exists) {
+            QueryResult qr;
+            qr.message = "DROP INDEX";
+            return ok(std::move(qr));
+        }
+        return make_error(idx.error().code, idx.error().message);
+    }
+
+    auto index_id = idx->index_id;
+
+    // Remove from persistence before dropping from catalog.
+    if (catalog_persistence_ != nullptr) {
+        auto remove = catalog_persistence_->remove_index(index_id);
+        if (!remove) {
+            GIODB_LOG_WARN("failed to remove index '{}' from persistence: {}",
+                           stmt.name,
+                           remove.error().message);
+        }
+    }
+
+    // Remove from catalog.
+    auto drop_result = catalog_.drop_index(stmt.name);
+    if (!drop_result) {
+        return make_error(drop_result.error().code, drop_result.error().message);
+    }
+
+    GIODB_LOG_INFO("dropped index '{}'", stmt.name);
+
+    QueryResult qr;
+    qr.message = "DROP INDEX";
     return ok(std::move(qr));
 }
 

@@ -22,10 +22,12 @@ struct AlterUserStmt;
 struct BoundStatement;
 struct CreateDatabaseStmt;
 struct CreateEdgeTypeStmt;
+struct CreateIndexStmt;
 struct CreateTableStmt;
 struct CreateUserStmt;
 struct DropDatabaseStmt;
 struct DropEdgeTypeStmt;
+struct DropIndexStmt;
 struct DropTableStmt;
 struct DropUserStmt;
 struct ExplainStmt;
@@ -164,6 +166,12 @@ private:
 
     /// Execute a DDL DROP TABLE statement.
     [[nodiscard]] Result<QueryResult> execute_drop_table(const DropTableStmt& stmt);
+
+    /// Execute a DDL CREATE INDEX statement.
+    [[nodiscard]] Result<QueryResult> execute_create_index(const CreateIndexStmt& stmt);
+
+    /// Execute a DDL DROP INDEX statement.
+    [[nodiscard]] Result<QueryResult> execute_drop_index(const DropIndexStmt& stmt);
 
     /// Execute a DDL CREATE EDGE TYPE statement.
     [[nodiscard]] Result<QueryResult> execute_create_edge_type(const CreateEdgeTypeStmt& stmt);
