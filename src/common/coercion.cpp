@@ -1,5 +1,7 @@
 #include "giodb/common/coercion.h"
 
+#include "giodb/common/uuid.h"
+
 #include <cmath>
 #include <compare>
 #include <cstdint>
@@ -251,6 +253,11 @@ bool can_coerce(TypeId from, TypeId to) {
         return to_rank >= from_rank;
     }
 
+    // STRING → UUID: allow implicit coercion from string literals.
+    if (from == TypeId::STRING && to == TypeId::UUID) {
+        return true;
+    }
+
     return false;
 }
 
@@ -305,6 +312,15 @@ Result<Value> coerce(const Value& value, TypeId target) {
     // FLOAT32 to FLOAT64
     if (from == TypeId::FLOAT32 && target == TypeId::FLOAT64) {
         return ok(Value(static_cast<double>(value.as_float32())));
+    }
+
+    // STRING → UUID
+    if (from == TypeId::STRING && target == TypeId::UUID) {
+        auto parsed = parse_uuid(value.as_string());
+        if (!parsed) {
+            return tl::unexpected(parsed.error());
+        }
+        return ok(Value(*parsed));
     }
 
     return make_error(StatusCode::TYPE_ERROR,
