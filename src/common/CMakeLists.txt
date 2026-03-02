@@ -9,6 +9,7 @@ add_library(giodb_common STATIC
     logging.cpp
     config.cpp
     coercion.cpp
+    uuid.cpp
     secrets_manager.cpp
 )
 

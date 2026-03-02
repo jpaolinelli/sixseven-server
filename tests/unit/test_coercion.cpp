@@ -1,4 +1,5 @@
 #include "giodb/common/coercion.h"
+#include "giodb/common/uuid.h"
 
 #include <gtest/gtest.h>
 
@@ -61,6 +62,12 @@ TEST(Coercion, IncompatibleTypes) {
     EXPECT_FALSE(can_coerce(TypeId::BOOL, TypeId::INT32));
     EXPECT_FALSE(can_coerce(TypeId::DATE, TypeId::INT32));
     EXPECT_FALSE(can_coerce(TypeId::BLOB, TypeId::STRING));
+}
+
+TEST(Coercion, StringToUuid) {
+    EXPECT_TRUE(can_coerce(TypeId::STRING, TypeId::UUID));
+    // UUID→STRING is not supported.
+    EXPECT_FALSE(can_coerce(TypeId::UUID, TypeId::STRING));
 }
 
 // -- coerce -------------------------------------------------------------------
@@ -129,6 +136,70 @@ TEST(Coercion, CoerceFloat32ToFloat64) {
     auto result = coerce(v, TypeId::FLOAT64);
     ASSERT_TRUE(result.has_value());
     EXPECT_NEAR(result->as_float64(), 3.14, 0.001);
+}
+
+TEST(Coercion, CoerceStringToUuid) {
+    Value v(std::string{"d1458b55-f0bf-44d4-b191-e52f1ef1f60a"});
+    auto result = coerce(v, TypeId::UUID);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->type_id(), TypeId::UUID);
+
+    Uuid expected = {0xd1,
+                     0x45,
+                     0x8b,
+                     0x55,
+                     0xf0,
+                     0xbf,
+                     0x44,
+                     0xd4,
+                     0xb1,
+                     0x91,
+                     0xe5,
+                     0x2f,
+                     0x1e,
+                     0xf1,
+                     0xf6,
+                     0x0a};
+    EXPECT_EQ(result->as_uuid(), expected);
+}
+
+TEST(Coercion, CoerceStringToUuidInvalid) {
+    Value v(std::string{"not-a-uuid"});
+    auto result = coerce(v, TypeId::UUID);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(Coercion, CoerceNullToUuid) {
+    Value v;
+    auto result = coerce(v, TypeId::UUID);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result->is_null());
+}
+
+TEST(Coercion, FitStringToUuid) {
+    Value v(std::string{"550e8400-e29b-41d4-a716-446655440000"});
+    auto result = fit_to_storage(v, TypeId::UUID);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->type_id(), TypeId::UUID);
+
+    Uuid expected = {0x55,
+                     0x0e,
+                     0x84,
+                     0x00,
+                     0xe2,
+                     0x9b,
+                     0x41,
+                     0xd4,
+                     0xa7,
+                     0x16,
+                     0x44,
+                     0x66,
+                     0x55,
+                     0x44,
+                     0x00,
+                     0x00};
+    EXPECT_EQ(result->as_uuid(), expected);
 }
 
 // -- compare ------------------------------------------------------------------
