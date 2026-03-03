@@ -23,7 +23,19 @@ describe("isNodeCentricResult", () => {
     expect(isNodeCentricResult(["__NODE", "name"])).toBe(true);
   });
 
-  it("returns false when __node is absent", () => {
+  it("returns true when __depth column is present without __node", () => {
+    expect(isNodeCentricResult(["name", "__depth"])).toBe(true);
+  });
+
+  it("returns true when __source column is present without __node", () => {
+    expect(isNodeCentricResult(["name", "__source"])).toBe(true);
+  });
+
+  it("returns true with case-insensitive __DEPTH", () => {
+    expect(isNodeCentricResult(["name", "__DEPTH"])).toBe(true);
+  });
+
+  it("returns false when no node meta-columns are present", () => {
     expect(isNodeCentricResult(["name", "email", "id"])).toBe(false);
   });
 
@@ -65,6 +77,10 @@ describe("isGraphResult", () => {
 
   it("returns true for edge-centric results", () => {
     expect(isGraphResult(["__from", "__to", "weight"])).toBe(true);
+  });
+
+  it("returns true when only __depth is present (GDB-309)", () => {
+    expect(isGraphResult(["name", "__depth"])).toBe(true);
   });
 
   it("returns false for standard table results", () => {

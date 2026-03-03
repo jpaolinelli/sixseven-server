@@ -12,10 +12,11 @@ const EDGE_META_COLUMNS = ["__from", "__to"];
 
 type CellValue = string | number | boolean | null;
 
-/** Check if result columns indicate a graph (node-centric) result. */
+/** Check if result columns indicate a graph (node-centric) result.
+ *  Matches any node meta-column: __node, __depth, or __source. */
 export function isNodeCentricResult(columns: string[]): boolean {
   const lower = columns.map((c) => c.toLowerCase());
-  return lower.includes("__node");
+  return NODE_META_COLUMNS.some((meta) => lower.includes(meta));
 }
 
 /** Check if result columns indicate an edge-centric result. */
