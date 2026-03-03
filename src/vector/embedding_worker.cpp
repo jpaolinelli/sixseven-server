@@ -3,6 +3,7 @@
 #include "giodb/common/logging.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 
 namespace giodb {
@@ -251,10 +252,34 @@ void EmbeddingWorkerPool::process_batch(std::vector<EmbeddingJob>& batch) {
             provider = it->second;
         }
 
+        // Partition indices: skip jobs with empty/blank source_text (defensive guard).
+        // NULL or whitespace-only source means NULL embedding — complete immediately.
+        std::vector<size_t> valid_indices;
+        valid_indices.reserve(indices.size());
+        for (auto idx : indices) {
+            const auto& src = batch[idx].source_text;
+            if (src.empty() || std::all_of(src.begin(), src.end(), [](unsigned char c) {
+                    return std::isspace(c);
+                })) {
+                // Remove from persistence — nothing to embed for NULL source.
+                if (persistence_.has_value() && persistence_->remove) {
+                    (void)persistence_->remove(
+                        batch[idx].table_id, batch[idx].row_id, batch[idx].column_id);
+                }
+                jobs_processed_.fetch_add(1);
+            } else {
+                valid_indices.push_back(idx);
+            }
+        }
+
+        if (valid_indices.empty()) {
+            continue;
+        }
+
         // Collect texts for batch embedding.
         std::vector<std::string> texts;
-        texts.reserve(indices.size());
-        for (auto idx : indices) {
+        texts.reserve(valid_indices.size());
+        for (auto idx : valid_indices) {
             texts.push_back(batch[idx].source_text);
         }
 
@@ -271,28 +296,28 @@ void EmbeddingWorkerPool::process_batch(std::vector<EmbeddingJob>& batch) {
                            provider_name,
                            embeddings_result.error().message);
 
-            // Retry all jobs in this provider group.
-            for (auto idx : indices) {
+            // Retry all valid jobs in this provider group.
+            for (auto idx : valid_indices) {
                 retry_job(std::move(batch[idx]));
             }
             continue;
         }
 
         auto& embeddings = *embeddings_result;
-        if (embeddings.size() != indices.size()) {
+        if (embeddings.size() != valid_indices.size()) {
             GIODB_LOG_ERROR("provider {} returned {} embeddings, expected {}",
                             provider_name,
                             embeddings.size(),
-                            indices.size());
-            for (auto idx : indices) {
+                            valid_indices.size());
+            for (auto idx : valid_indices) {
                 retry_job(std::move(batch[idx]));
             }
             continue;
         }
 
         // Store each embedding.
-        for (size_t i = 0; i < indices.size(); ++i) {
-            auto& job = batch[indices[i]];
+        for (size_t i = 0; i < valid_indices.size(); ++i) {
+            auto& job = batch[valid_indices[i]];
             auto& embedding = embeddings[i];
 
             if (store_callback_) {

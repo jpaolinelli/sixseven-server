@@ -445,6 +445,126 @@ TEST(EmbeddingWorker, MultipleWorkersProcessConcurrently) {
     EXPECT_EQ(s.jobs_failed, 0u);
 }
 
+// -- GDB-297: Defensive filter for empty source_text in process_batch ---------
+
+TEST(EmbeddingWorker, EmptySourceTextJobsFilteredInProcessBatch) {
+    auto provider = std::make_shared<TestProvider>(128);
+
+    std::atomic<int> store_count{0};
+    std::mutex stored_mu;
+    std::vector<int64_t> stored_row_ids;
+
+    EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = 32});
+    pool.register_provider("test", provider);
+    pool.set_store_callback(
+        [&](table_id_t, int64_t row_id, int32_t, std::span<const float>) -> Result<void> {
+            std::lock_guard lock(stored_mu);
+            stored_row_ids.push_back(row_id);
+            store_count.fetch_add(1);
+            return ok();
+        });
+
+    // Enqueue a mix of valid and empty-text jobs.
+    std::vector<EmbeddingJob> jobs;
+    jobs.push_back(make_insert_job(1, 1, 0, "valid text"));    // valid
+    jobs.push_back(make_insert_job(1, 2, 0, ""));              // empty — should be skipped
+    jobs.push_back(make_insert_job(1, 3, 0, "another valid")); // valid
+    jobs.push_back(make_insert_job(1, 4, 0, ""));              // empty — should be skipped
+
+    ASSERT_TRUE(pool.start().has_value());
+    ASSERT_TRUE(pool.enqueue_batch(std::move(jobs)).has_value());
+
+    // Wait for processing.
+    for (int i = 0; i < 100 && store_count.load() < 2; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    ASSERT_TRUE(pool.stop().has_value());
+
+    // Only the two valid jobs should have been stored.
+    EXPECT_EQ(store_count.load(), 2);
+
+    std::lock_guard lock(stored_mu);
+    ASSERT_EQ(stored_row_ids.size(), 2u);
+    // Both valid row_ids should appear (order may vary).
+    EXPECT_TRUE(std::find(stored_row_ids.begin(), stored_row_ids.end(), 1) != stored_row_ids.end());
+    EXPECT_TRUE(std::find(stored_row_ids.begin(), stored_row_ids.end(), 3) != stored_row_ids.end());
+
+    // All 4 jobs should be counted as processed (2 valid + 2 filtered).
+    auto s = pool.stats();
+    EXPECT_EQ(s.jobs_processed, 4u);
+    EXPECT_EQ(s.jobs_failed, 0u);
+}
+
+TEST(EmbeddingWorker, AllEmptySourceTextBatchCompletesWithoutProviderCall) {
+    auto provider = std::make_shared<TestProvider>(128);
+
+    EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = 32});
+    pool.register_provider("test", provider);
+    pool.set_store_callback(
+        [](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> { return ok(); });
+
+    // Enqueue only empty-text jobs.
+    std::vector<EmbeddingJob> jobs;
+    jobs.push_back(make_insert_job(1, 1, 0, ""));
+    jobs.push_back(make_insert_job(1, 2, 0, ""));
+
+    ASSERT_TRUE(pool.start().has_value());
+    ASSERT_TRUE(pool.enqueue_batch(std::move(jobs)).has_value());
+
+    // Wait for processing.
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    ASSERT_TRUE(pool.stop().has_value());
+
+    // Provider should never have been called.
+    EXPECT_EQ(provider->batch_call_count(), 0);
+    EXPECT_EQ(provider->call_count(), 0);
+
+    // All jobs should be counted as processed.
+    auto s = pool.stats();
+    EXPECT_EQ(s.jobs_processed, 2u);
+    EXPECT_EQ(s.jobs_failed, 0u);
+}
+
+TEST(EmbeddingWorker, WhitespaceOnlySourceTextFilteredInProcessBatch) {
+    auto provider = std::make_shared<TestProvider>(128);
+
+    std::atomic<int> store_count{0};
+
+    EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = 32});
+    pool.register_provider("test", provider);
+    pool.set_store_callback(
+        [&](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> {
+            store_count.fetch_add(1);
+            return ok();
+        });
+
+    // Enqueue jobs with whitespace-only and valid texts.
+    std::vector<EmbeddingJob> jobs;
+    jobs.push_back(make_insert_job(1, 1, 0, "valid"));
+    jobs.push_back(make_insert_job(1, 2, 0, "   "));   // whitespace-only
+    jobs.push_back(make_insert_job(1, 3, 0, "\t\n ")); // tabs/newlines
+    jobs.push_back(make_insert_job(1, 4, 0, "also valid"));
+
+    ASSERT_TRUE(pool.start().has_value());
+    ASSERT_TRUE(pool.enqueue_batch(std::move(jobs)).has_value());
+
+    // Wait for processing.
+    for (int i = 0; i < 100 && store_count.load() < 2; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    ASSERT_TRUE(pool.stop().has_value());
+
+    // Only the two valid jobs should have been stored.
+    EXPECT_EQ(store_count.load(), 2);
+
+    // All 4 jobs should be counted as processed.
+    auto s = pool.stats();
+    EXPECT_EQ(s.jobs_processed, 4u);
+    EXPECT_EQ(s.jobs_failed, 0u);
+}
+
 // -- Store callback failure ---------------------------------------------------
 
 TEST(EmbeddingWorker, StoreCallbackFailureRetriesJob) {

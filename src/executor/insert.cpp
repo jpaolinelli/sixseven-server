@@ -7,6 +7,9 @@
 #include "giodb/executor/expr_evaluator.h"
 #include "giodb/vector/embedding_worker.h"
 
+#include <algorithm>
+#include <cctype>
+
 namespace giodb {
 
 namespace {
@@ -246,6 +249,15 @@ void InsertOperator::enqueue_embedding_jobs(const RID& rid, const std::vector<Va
                 }
                 break;
             }
+        }
+
+        // Skip jobs with empty or whitespace-only source text — NULL/blank source
+        // means NULL embedding; no need to enqueue a job that will always fail.
+        if (job.source_text.empty() ||
+            std::all_of(job.source_text.begin(), job.source_text.end(), [](unsigned char c) {
+                return std::isspace(c);
+            })) {
+            continue;
         }
 
         jobs.push_back(std::move(job));
