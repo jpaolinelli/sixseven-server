@@ -74,6 +74,12 @@ enum class TraverseDirection : uint8_t {
     BOTH,
 };
 
+/// Graph traversal output mode.
+enum class TraverseMode : uint8_t {
+    NODES, ///< Default: one row per visited node (GDB-265).
+    EDGES, ///< One row per edge between discovered nodes (GDB-298).
+};
+
 /// Vector similarity metric for NEAREST.
 enum class NearestMetric : uint8_t {
     COSINE,
@@ -567,13 +573,14 @@ struct SelectStmt : Stmt {
 };
 
 /// TRAVERSE edge_type FROM table(pk) [DIRECTION ...] [MAX_DEPTH n]
-///   [WHERE expr] [FETCH].
+///   [MODE NODES|EDGES] [WHERE expr] [FETCH].
 struct TraverseStmt : Stmt {
     std::string edge_type;
     std::string from_table;
     ExprPtr from_key;
     TraverseDirection direction = TraverseDirection::OUT;
     std::optional<int32_t> max_depth;
+    TraverseMode mode = TraverseMode::NODES;
     ExprPtr where_expr;
     bool fetch = false;
     void accept(AstVisitor& visitor) const override;

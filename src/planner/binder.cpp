@@ -289,39 +289,68 @@ Result<ScopeTable> Binder::build_traverse_scope(const TableRef& tref, BoundState
         return tl::unexpected(target_schema.error());
     }
 
-    // 5. Determine PK type from the target table.
-    TypeId pk_type = TypeId::INT64;
-    if (!target_schema->pk_columns.empty()) {
-        for (const auto& col : target_schema->columns) {
-            if (col.name == target_schema->pk_columns) {
-                pk_type = col.type_id;
-                break;
+    // 5. Resolve PK types for both edge endpoints.
+    auto resolve_pk_type = [](const TableSchema& schema) {
+        TypeId pk = TypeId::INT64;
+        if (!schema.pk_columns.empty()) {
+            for (const auto& col : schema.columns) {
+                if (col.name == schema.pk_columns) {
+                    pk = col.type_id;
+                    break;
+                }
             }
         }
-    }
+        return pk;
+    };
 
-    // 6. Build ScopeTable: target table columns + meta-columns + edge properties.
+    TypeId target_pk_type = resolve_pk_type(*target_schema);
+
+    // 6. Build ScopeTable depending on mode.
     std::string alias = tref.alias.empty() ? trav->edge_type : tref.alias;
     ScopeTable st;
     st.table_id = target_schema->table_id;
     st.alias = alias;
 
-    // Target table columns.
-    for (const auto& col : target_schema->columns) {
-        ResolvedColumn rc;
-        rc.table_id = target_schema->table_id;
-        rc.ordinal = col.ordinal;
-        rc.table_name = alias;
-        rc.column_name = col.name;
-        rc.type_id = col.type_id;
-        rc.nullable = col.nullable;
-        st.columns.push_back(std::move(rc));
-    }
+    if (trav->mode == TraverseMode::EDGES) {
+        // Edge mode: __from, __to, __depth + edge property columns.
+        // Resolve source table PK type (may differ from target for heterogeneous).
+        auto source_schema = catalog_.get_table_by_id(edge->source_table_id);
+        if (!source_schema) {
+            return tl::unexpected(source_schema.error());
+        }
+        TypeId source_pk_type = resolve_pk_type(*source_schema);
+        TypeId edge_target_pk_type = target_pk_type;
+        // For heterogeneous IN, target table is actually the source table of the
+        // edge, so we need the edge's actual target PK type too.
+        if (edge->source_table_id != edge->target_table_id) {
+            auto edge_target_schema = catalog_.get_table_by_id(edge->target_table_id);
+            if (!edge_target_schema) {
+                return tl::unexpected(edge_target_schema.error());
+            }
+            edge_target_pk_type = resolve_pk_type(*edge_target_schema);
+        }
 
-    // Meta-columns: __node, __depth, __source.
-    st.columns.push_back({0, -1, alias, "__node", pk_type, false});
-    st.columns.push_back({0, -1, alias, "__depth", TypeId::INT64, false});
-    st.columns.push_back({0, -1, alias, "__source", pk_type, true});
+        // __from = edge source PK type, __to = edge target PK type.
+        st.columns.push_back({0, -1, alias, "__from", source_pk_type, false});
+        st.columns.push_back({0, -1, alias, "__to", edge_target_pk_type, false});
+        st.columns.push_back({0, -1, alias, "__depth", TypeId::INT64, false});
+    } else {
+        // Node mode (default): target table columns + __node, __depth, __source.
+        for (const auto& col : target_schema->columns) {
+            ResolvedColumn rc;
+            rc.table_id = target_schema->table_id;
+            rc.ordinal = col.ordinal;
+            rc.table_name = alias;
+            rc.column_name = col.name;
+            rc.type_id = col.type_id;
+            rc.nullable = col.nullable;
+            st.columns.push_back(std::move(rc));
+        }
+
+        st.columns.push_back({0, -1, alias, "__node", target_pk_type, false});
+        st.columns.push_back({0, -1, alias, "__depth", TypeId::INT64, false});
+        st.columns.push_back({0, -1, alias, "__source", target_pk_type, true});
+    }
 
     // Edge property columns (parsed from catalog's "name:TYPE,..." format).
     if (!edge->properties.empty()) {

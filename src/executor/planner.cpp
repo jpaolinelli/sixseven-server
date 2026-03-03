@@ -1,6 +1,7 @@
 #include "giodb/executor/planner.h"
 
 #include "giodb/executor/delete.h"
+#include "giodb/executor/edge_traversal.h"
 #include "giodb/executor/enriched_traversal.h"
 #include "giodb/executor/filter.h"
 #include "giodb/executor/hash_aggregate.h"
@@ -471,7 +472,67 @@ Planner::plan_from_source(const TableRef& table_ref,
         // (matches the binder's behavior in build_traverse_scope).
         const auto& trav_alias = alias.empty() ? trav->edge_type : alias;
 
-        // Build enriched output schema: target columns + meta-columns + edge properties.
+        const bool heterogeneous = edge_def->source_table_id != edge_def->target_table_id;
+        const Expr* trav_where = trav->where_expr ? trav->where_expr.get() : nullptr;
+
+        // Branch on mode: edge-centric vs node-centric.
+        if (trav->mode == TraverseMode::EDGES) {
+            // Edge mode: __from, __to, __depth + edge property columns.
+            // Resolve source PK type.
+            auto source_schema = catalog_.get_table_by_id(edge_def->source_table_id);
+            if (!source_schema) {
+                return make_error(source_schema.error().code, source_schema.error().message);
+            }
+            TypeId source_pk_type = TypeId::INT64;
+            for (const auto& col : source_schema->columns) {
+                if (col.name == source_schema->pk_columns) {
+                    source_pk_type = col.type_id;
+                    break;
+                }
+            }
+
+            // Resolve target PK type from the edge's target table (not the BFS
+            // target, which may differ for IN direction).
+            TypeId edge_target_pk_type = TypeId::INT64;
+            if (heterogeneous) {
+                auto edge_tgt_schema = catalog_.get_table_by_id(edge_def->target_table_id);
+                if (!edge_tgt_schema) {
+                    return make_error(edge_tgt_schema.error().code,
+                                      edge_tgt_schema.error().message);
+                }
+                for (const auto& col : edge_tgt_schema->columns) {
+                    if (col.name == edge_tgt_schema->pk_columns) {
+                        edge_target_pk_type = col.type_id;
+                        break;
+                    }
+                }
+            } else {
+                edge_target_pk_type = source_pk_type; // homogeneous
+            }
+
+            std::vector<OutputColumn> out_cols;
+            out_cols.push_back({trav_alias, "__from", source_pk_type, false, 0});
+            out_cols.push_back({trav_alias, "__to", edge_target_pk_type, false, 0});
+            out_cols.push_back({trav_alias, "__depth", TypeId::INT64, false, 0});
+
+            // Append edge property columns.
+            auto edge_table = graph_engine_->get_edge_table(trav->edge_type);
+            if (edge_table) {
+                for (const auto& prop_col : (*edge_table)->config().property_columns) {
+                    out_cols.push_back(
+                        {trav->edge_type, prop_col.name, prop_col.type, true /*nullable*/, 0});
+                }
+            }
+
+            auto edge_schema = OutputSchema(std::move(out_cols));
+
+            auto op = std::make_unique<EdgeTraversalOperator>(
+                *graph_engine_, std::move(config), edge_schema, trav_where, bound, heterogeneous);
+
+            return ok(PlannedSource{std::move(op), std::move(edge_schema)});
+        }
+
+        // Node mode (default): target columns + meta-columns + edge properties.
         std::vector<OutputColumn> out_cols;
         for (const auto& col : target_schema->columns) {
             out_cols.push_back({trav_alias, col.name, col.type_id, col.nullable, target_table_id});
@@ -490,12 +551,6 @@ Planner::plan_from_source(const TableRef& table_ref,
         }
 
         auto enriched_schema = OutputSchema(std::move(out_cols));
-
-        // Pass the TraverseStmt's WHERE (consumed by parser) to the enriched
-        // operator for post-filter on table columns and meta-columns.
-        const Expr* trav_where = trav->where_expr ? trav->where_expr.get() : nullptr;
-
-        const bool heterogeneous = edge_def->source_table_id != edge_def->target_table_id;
 
         auto op = std::make_unique<EnrichedTraversalOperator>(*graph_engine_,
                                                               std::move(config),
