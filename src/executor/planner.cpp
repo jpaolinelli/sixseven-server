@@ -422,6 +422,15 @@ Planner::plan_from_source(const TableRef& table_ref,
             return make_error(from_schema.error().code, from_schema.error().message);
         }
 
+        // Reject DIRECTION BOTH on heterogeneous edges (different source/target tables).
+        if (trav->direction == TraverseDirection::BOTH &&
+            edge_def->source_table_id != edge_def->target_table_id) {
+            return make_error(
+                StatusCode::TYPE_ERROR,
+                "DIRECTION BOTH not supported for edge type '" + trav->edge_type +
+                    "' because it connects different tables; use DIRECTION OUT or DIRECTION IN");
+        }
+
         // Determine target table based on direction.
         table_id_t target_table_id = 0;
         if (trav->direction == TraverseDirection::BOTH) {
@@ -486,6 +495,8 @@ Planner::plan_from_source(const TableRef& table_ref,
         // operator for post-filter on table columns and meta-columns.
         const Expr* trav_where = trav->where_expr ? trav->where_expr.get() : nullptr;
 
+        const bool heterogeneous = edge_def->source_table_id != edge_def->target_table_id;
+
         auto op = std::make_unique<EnrichedTraversalOperator>(*graph_engine_,
                                                               std::move(config),
                                                               enriched_schema,
@@ -494,7 +505,8 @@ Planner::plan_from_source(const TableRef& table_ref,
                                                               *target_storage->heap,
                                                               target_storage->storage_schema,
                                                               pk_col_idx,
-                                                              target_schema->columns.size());
+                                                              target_schema->columns.size(),
+                                                              heterogeneous);
 
         return ok(PlannedSource{std::move(op), std::move(enriched_schema)});
     }

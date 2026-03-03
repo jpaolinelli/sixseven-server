@@ -264,7 +264,15 @@ Result<ScopeTable> Binder::build_traverse_scope(const TableRef& tref, BoundState
     // 3. Determine target table based on direction.
     //    OUT: traversal reaches the target end of edges.
     //    IN:  traversal reaches the source end of edges.
-    //    BOTH: reaches the other endpoint from the FROM table.
+    //    BOTH: only valid for homogeneous edges (same source/target table).
+    if (trav->direction == TraverseDirection::BOTH &&
+        edge->source_table_id != edge->target_table_id) {
+        return make_error(
+            StatusCode::TYPE_ERROR,
+            "DIRECTION BOTH not supported for edge type '" + trav->edge_type +
+                "' because it connects different tables; use DIRECTION OUT or DIRECTION IN");
+    }
+
     table_id_t target_table_id = 0;
     if (trav->direction == TraverseDirection::BOTH) {
         target_table_id = (from_schema->table_id == edge->source_table_id) ? edge->target_table_id
