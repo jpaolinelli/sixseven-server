@@ -462,7 +462,7 @@ Planner::plan_from_source(const TableRef& table_ref,
         // (matches the binder's behavior in build_traverse_scope).
         const auto& trav_alias = alias.empty() ? trav->edge_type : alias;
 
-        // Build enriched output schema: target columns + meta-columns.
+        // Build enriched output schema: target columns + meta-columns + edge properties.
         std::vector<OutputColumn> out_cols;
         for (const auto& col : target_schema->columns) {
             out_cols.push_back({trav_alias, col.name, col.type_id, col.nullable, target_table_id});
@@ -470,6 +470,15 @@ Planner::plan_from_source(const TableRef& table_ref,
         out_cols.push_back({trav_alias, "__node", pk_type, false, 0});
         out_cols.push_back({trav_alias, "__depth", TypeId::INT64, false, 0});
         out_cols.push_back({trav_alias, "__source", pk_type, true, 0});
+
+        // Append edge property columns (nullable — start node has no incoming edge).
+        auto edge_table = graph_engine_->get_edge_table(trav->edge_type);
+        if (edge_table) {
+            for (const auto& prop_col : (*edge_table)->config().property_columns) {
+                out_cols.push_back(
+                    {trav->edge_type, prop_col.name, prop_col.type, true /*nullable*/, 0});
+            }
+        }
 
         auto enriched_schema = OutputSchema(std::move(out_cols));
 

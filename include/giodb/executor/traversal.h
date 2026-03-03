@@ -31,6 +31,7 @@ struct TraversalResult {
     Value node_pk;
     int32_t depth = 0;
     Value source_pk;
+    std::vector<Value> edge_properties; ///< Properties from the edge used to reach this node.
 };
 
 /// BFS traversal executor operator.
