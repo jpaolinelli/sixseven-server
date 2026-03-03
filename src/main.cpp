@@ -90,7 +90,7 @@ int main(int argc, char* argv[]) {
     giodb::Catalog catalog;
     giodb::StorageManager storage(disk_manager, data_dir);
     giodb::CatalogPersistence persistence(catalog, storage);
-    giodb::GraphEngine graph_engine(catalog);
+    giodb::GraphEngine graph_engine(catalog, disk_manager, data_dir);
     giodb::ProviderRegistry provider_registry(catalog);
     giodb::EmbeddingWorkerPool embedding_pool;
     embedding_pool.register_provider("builtin/384", std::make_shared<giodb::BuiltinProvider>(384));
@@ -105,6 +105,13 @@ int main(int argc, char* argv[]) {
         giodb::SystemBootstrap::bootstrap(engine, catalog, storage, persistence, config, data_dir);
     if (!boot) {
         GIODB_LOG_ERROR("bootstrap failed: {}", boot.error().message);
+        return 1;
+    }
+
+    // Load persisted edge data from disk.
+    auto edge_load = graph_engine.load_edges();
+    if (!edge_load) {
+        GIODB_LOG_ERROR("edge data load failed: {}", edge_load.error().message);
         return 1;
     }
 

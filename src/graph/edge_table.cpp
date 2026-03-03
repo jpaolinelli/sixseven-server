@@ -102,6 +102,66 @@ Result<uint64_t> EdgeTable::insert_edge(const Value& source_pk,
     return ok(row_id);
 }
 
+Result<void> EdgeTable::restore_edge(uint64_t edge_row_id,
+                                     const Value& source_pk,
+                                     const Value& target_pk,
+                                     const std::vector<Value>& properties) {
+    std::unique_lock lock(mu_);
+
+    if (edge_row_id > kMaxEncodableRowId) {
+        return make_error(StatusCode::INTERNAL_ERROR,
+                          "edge row ID overflow: exceeded 48-bit RID encoding capacity");
+    }
+
+    if (edges_.count(edge_row_id) > 0) {
+        return make_error(StatusCode::ALREADY_EXISTS,
+                          "duplicate edge row ID during restore: " + std::to_string(edge_row_id));
+    }
+
+    Value row_id_val(static_cast<int64_t>(edge_row_id));
+
+    // Insert into forward adjacency index.
+    KeyType fwd_key = {source_pk, row_id_val};
+    auto fwd_result = forward_index_->insert(fwd_key, encode_rid(edge_row_id));
+    if (!fwd_result.has_value()) {
+        return tl::unexpected(fwd_result.error());
+    }
+
+    // Insert into reverse adjacency index.
+    KeyType rev_key = {target_pk, row_id_val};
+    auto rev_result = reverse_index_->insert(rev_key, encode_rid(edge_row_id));
+    if (!rev_result.has_value()) {
+        (void)forward_index_->remove(fwd_key);
+        return tl::unexpected(rev_result.error());
+    }
+
+    // Insert into unique constraint index if enabled.
+    if (unique_index_) {
+        KeyType unique_key = {source_pk, target_pk};
+        auto uniq_result = unique_index_->insert(unique_key, encode_rid(edge_row_id));
+        if (!uniq_result.has_value()) {
+            (void)forward_index_->remove(fwd_key);
+            (void)reverse_index_->remove(rev_key);
+            return tl::unexpected(uniq_result.error());
+        }
+    }
+
+    // Store the edge row.
+    EdgeRow row;
+    row.edge_row_id = edge_row_id;
+    row.source_pk = source_pk;
+    row.target_pk = target_pk;
+    row.properties = properties;
+    edges_.emplace(edge_row_id, std::move(row));
+
+    // Advance next_row_id_ past any restored IDs.
+    if (edge_row_id >= next_row_id_) {
+        next_row_id_ = edge_row_id + 1;
+    }
+
+    return ok();
+}
+
 Result<void> EdgeTable::delete_edge(uint64_t edge_row_id) {
     std::unique_lock lock(mu_);
 
