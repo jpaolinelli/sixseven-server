@@ -21,7 +21,7 @@ import {
   clearHistory,
   type HistoryEntry,
 } from "@/lib/query-history";
-import { isTraverseQuery, buildEdgeQuery } from "@/lib/graph-query-utils";
+import { isTraverseQuery, buildEdgeQuery, buildSourceNodeQuery } from "@/lib/graph-query-utils";
 
 interface QueryTab {
   id: string;
@@ -33,6 +33,9 @@ interface QueryTab {
     rows: (string | number | boolean | null)[][];
     edgeColumns?: string[];
     edgeRows?: (string | number | boolean | null)[][];
+    /** Source (starting) node data for graph visualization. */
+    sourceNodeColumns?: string[];
+    sourceNodeRows?: (string | number | boolean | null)[][];
     error?: string | null;
     durationMs?: number;
     isTraverseResult?: boolean;
@@ -118,12 +121,24 @@ export function QueryEditor({
         });
 
         // If this is a TRAVERSE query, also fire the MODE EDGES variant
+        // and a SELECT * node query for full graph metadata (__node, __source)
         const isTraverse = isTraverseQuery(sql);
         const edgeFetch = isTraverse
           ? fetch("/api/query", {
               ...fetchOpts,
               body: JSON.stringify({
                 sql: buildEdgeQuery(sql),
+                database: activeTab.database,
+                connection: connectionParams,
+              }),
+            })
+          : null;
+        const sourceNodeSql = isTraverse ? buildSourceNodeQuery(sql) : null;
+        const sourceNodeFetch = sourceNodeSql
+          ? fetch("/api/query", {
+              ...fetchOpts,
+              body: JSON.stringify({
+                sql: sourceNodeSql,
                 database: activeTab.database,
                 connection: connectionParams,
               }),
@@ -153,9 +168,11 @@ export function QueryEditor({
 
         const data = await res.json();
 
-        // Await edge results if available (don't fail the main query if edges fail)
+        // Await edge + graph-node results if available (failures are non-fatal)
         let edgeColumns: string[] | undefined;
         let edgeRows: (string | number | boolean | null)[][] | undefined;
+        let sourceNodeColumns: string[] | undefined;
+        let sourceNodeRows: (string | number | boolean | null)[][] | undefined;
         if (edgeFetch) {
           try {
             const edgeRes = await edgeFetch;
@@ -166,6 +183,18 @@ export function QueryEditor({
             }
           } catch {
             // Edge query failure is non-fatal — graph view just won't have edges
+          }
+        }
+        if (sourceNodeFetch) {
+          try {
+            const snRes = await sourceNodeFetch;
+            if (snRes.ok) {
+              const snData = await snRes.json();
+              sourceNodeColumns = snData.columns || [];
+              sourceNodeRows = snData.rows || [];
+            }
+          } catch {
+            // Source node fetch failure is non-fatal — placeholder will be used
           }
         }
 
@@ -181,6 +210,8 @@ export function QueryEditor({
                     rows: data.rows || [],
                     edgeColumns,
                     edgeRows,
+                    sourceNodeColumns,
+                    sourceNodeRows,
                     durationMs,
                     isTraverseResult: isTraverse,
                   },
@@ -418,6 +449,8 @@ export function QueryEditor({
                 rows={activeTab.results.rows}
                 edgeColumns={activeTab.results.edgeColumns}
                 edgeRows={activeTab.results.edgeRows}
+                sourceNodeColumns={activeTab.results.sourceNodeColumns}
+                sourceNodeRows={activeTab.results.sourceNodeRows}
                 error={activeTab.results.error}
                 durationMs={activeTab.results.durationMs}
                 isLoading={activeTab.isExecuting}

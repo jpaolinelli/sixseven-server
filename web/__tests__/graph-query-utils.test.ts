@@ -5,6 +5,8 @@ import {
   isGraphResult,
   isTraverseQuery,
   buildEdgeQuery,
+  parseTraverseSource,
+  buildSourceNodeQuery,
   classifyColumns,
   parseNodesFromResult,
   parseEdgesFromResult,
@@ -190,11 +192,78 @@ describe("buildEdgeQuery", () => {
     );
   });
 
-  it("handles query with ORDER BY and LIMIT (GDB-311)", () => {
+  it("strips ORDER BY and LIMIT that may reference node-mode columns", () => {
     const sql = "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT ORDER BY name LIMIT 10";
     expect(buildEdgeQuery(sql)).toBe(
-      "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES ORDER BY name LIMIT 10"
+      "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES"
     );
+  });
+
+  it("strips ORDER BY but keeps FETCH and WHERE", () => {
+    const sql = "SELECT name FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH AS t ORDER BY name LIMIT 5";
+    expect(buildEdgeQuery(sql)).toBe(
+      "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES FETCH AS t"
+    );
+  });
+
+  it("strips standalone LIMIT without ORDER BY", () => {
+    const sql = "SELECT * FROM TRAVERSE follows FROM users(1) LIMIT 100";
+    expect(buildEdgeQuery(sql)).toBe(
+      "SELECT * FROM TRAVERSE follows FROM users(1) MODE EDGES"
+    );
+  });
+});
+
+// ── parseTraverseSource ──
+
+describe("parseTraverseSource", () => {
+  it("extracts table and pk from TRAVERSE query", () => {
+    const result = parseTraverseSource(
+      "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT"
+    );
+    expect(result).toEqual({ table: "users", pk: "1" });
+  });
+
+  it("handles quoted pk values", () => {
+    const result = parseTraverseSource(
+      "SELECT * FROM TRAVERSE friends FROM people('abc-123')"
+    );
+    expect(result).toEqual({ table: "people", pk: "'abc-123'" });
+  });
+
+  it("handles case-insensitive keywords", () => {
+    const result = parseTraverseSource(
+      "select * from traverse follows from Users(42)"
+    );
+    expect(result).toEqual({ table: "Users", pk: "42" });
+  });
+
+  it("returns null for non-TRAVERSE queries", () => {
+    expect(parseTraverseSource("SELECT * FROM users")).toBeNull();
+  });
+
+  it("returns null for empty string", () => {
+    expect(parseTraverseSource("")).toBeNull();
+  });
+});
+
+// ── buildSourceNodeQuery ──
+
+describe("buildSourceNodeQuery", () => {
+  it("builds SELECT * query for source node", () => {
+    expect(
+      buildSourceNodeQuery("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT")
+    ).toBe("SELECT * FROM users WHERE id = 1");
+  });
+
+  it("handles string PKs with single quotes", () => {
+    expect(
+      buildSourceNodeQuery("SELECT * FROM TRAVERSE follows FROM items(abc)")
+    ).toBe("SELECT * FROM items WHERE id = 'abc'");
+  });
+
+  it("returns null for non-TRAVERSE queries", () => {
+    expect(buildSourceNodeQuery("SELECT * FROM users")).toBeNull();
   });
 });
 
@@ -430,6 +499,55 @@ describe("buildGraphData", () => {
     // Should create placeholder nodes from edge endpoints
     expect(graph.nodes).toHaveLength(2);
     expect(graph.edges).toHaveLength(1);
+  });
+
+  it("uses source node data instead of placeholder for starting node", () => {
+    // TRAVERSE returns only Bob (depth 1), not Alice (depth 0)
+    const nodeColumns = ["name", "__node", "__depth", "__source"];
+    const nodeRows = [["bob", 2, 1, "users"]];
+    const edgeColumns = ["__from", "__to"];
+    const edgeRows = [[1, 2]]; // Alice(1) -> Bob(2)
+
+    // Source node fetched separately: SELECT * FROM users WHERE id = 1
+    const sourceNodeColumns = ["id", "name", "age", "email"];
+    const sourceNodeRows = [[1, "Alice", 30, "alice@example.com"]];
+
+    const graph = buildGraphData(
+      nodeColumns, nodeRows,
+      edgeColumns, edgeRows,
+      sourceNodeColumns, sourceNodeRows
+    );
+
+    expect(graph.nodes).toHaveLength(2);
+    // Alice should be labeled with her name, not just "1"
+    const alice = graph.nodes.find((n) => n.pk === "1");
+    expect(alice).toBeDefined();
+    expect(alice?.label).toBe("Alice");
+    expect(alice?.attributes).toHaveProperty("name", "Alice");
+    expect(alice?.attributes).toHaveProperty("age", 30);
+
+    // Bob should still be resolved correctly
+    const bob = graph.nodes.find((n) => n.pk === "2");
+    expect(bob).toBeDefined();
+    expect(bob?.label).toBe("bob");
+  });
+
+  it("falls back to placeholder when source node data is missing", () => {
+    const nodeColumns = ["name", "__node", "__depth", "__source"];
+    const nodeRows = [["bob", 2, 1, "users"]];
+    const edgeColumns = ["__from", "__to"];
+    const edgeRows = [[1, 2]];
+
+    const graph = buildGraphData(
+      nodeColumns, nodeRows,
+      edgeColumns, edgeRows,
+      undefined, undefined // no source node data
+    );
+
+    expect(graph.nodes).toHaveLength(2);
+    const placeholder = graph.nodes.find((n) => n.pk === "1");
+    expect(placeholder?.label).toBe("1"); // bare PK, no name
+    expect(placeholder?.attributes).toEqual({});
   });
 });
 

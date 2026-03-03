@@ -38,6 +38,10 @@ interface QueryResultsProps {
   edgeColumns?: string[];
   /** Edge-centric result rows (from dual-query MODE EDGES). */
   edgeRows?: CellValue[][];
+  /** Source (starting) node columns for graph visualization. */
+  sourceNodeColumns?: string[];
+  /** Source (starting) node rows for graph visualization. */
+  sourceNodeRows?: CellValue[][];
   error?: string | null;
   durationMs?: number;
   isLoading?: boolean;
@@ -81,6 +85,8 @@ export function QueryResults({
   rows,
   edgeColumns,
   edgeRows,
+  sourceNodeColumns,
+  sourceNodeRows,
   error,
   durationMs,
   isLoading,
@@ -105,6 +111,7 @@ export function QueryResults({
   const [edgeColumnWidths, setEdgeColumnWidths] = useState<Record<number, number>>({});
 
   // Graph view state
+  const [graphLabelAttr, setGraphLabelAttr] = useState<string>("__auto__");
   const [selectedGraphItem, setSelectedGraphItem] = useState<
     | { type: "node"; node: GraphViewNode }
     | { type: "edge"; edge: GraphViewEdge }
@@ -131,15 +138,49 @@ export function QueryResults({
   );
 
   // Build graph data when we have both node and edge results
-  const graphData: GraphViewData | null = useMemo(() => {
+  const rawGraphData: GraphViewData | null = useMemo(() => {
     if (!hasGraphResult) return null;
     return buildGraphData(
       columns,
       rows,
       edgeColumns ?? [],
-      edgeRows ?? []
+      edgeRows ?? [],
+      sourceNodeColumns,
+      sourceNodeRows
     );
-  }, [hasGraphResult, columns, rows, edgeColumns, edgeRows]);
+  }, [hasGraphResult, columns, rows, edgeColumns, edgeRows, sourceNodeColumns, sourceNodeRows]);
+
+  // Collect available label attributes from all graph nodes
+  const graphLabelOptions: string[] = useMemo(() => {
+    if (!rawGraphData) return [];
+    const attrSet = new Set<string>();
+    for (const node of rawGraphData.nodes) {
+      for (const key of Object.keys(node.attributes)) {
+        attrSet.add(key);
+      }
+    }
+    return Array.from(attrSet).sort();
+  }, [rawGraphData]);
+
+  // Apply the selected label attribute to graph nodes
+  const graphData: GraphViewData | null = useMemo(() => {
+    if (!rawGraphData) return null;
+    if (graphLabelAttr === "__auto__") return rawGraphData;
+
+    return {
+      ...rawGraphData,
+      nodes: rawGraphData.nodes.map((n) => {
+        if (graphLabelAttr === "__pk__") {
+          return { ...n, label: n.pk };
+        }
+        const val = n.attributes[graphLabelAttr];
+        return {
+          ...n,
+          label: val !== null && val !== undefined ? String(val) : n.pk,
+        };
+      }),
+    };
+  }, [rawGraphData, graphLabelAttr]);
 
   // Auto-switch view mode based on result type
   useEffect(() => {
@@ -618,7 +659,7 @@ export function QueryResults({
           )}
         </div>
 
-        {/* Graph layout selector */}
+        {/* Graph layout selector + label picker */}
         {viewMode === "graph" && (
           <>
             <div className="w-px h-4 bg-gray-800" />
@@ -638,6 +679,27 @@ export function QueryResults({
                 </button>
               ))}
             </div>
+            {graphLabelOptions.length > 0 && (
+              <>
+                <div className="w-px h-4 bg-gray-800" />
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-gray-500">Label:</span>
+                  <select
+                    className="bg-gray-900 border border-gray-700 rounded px-1.5 py-0.5 text-xs text-gray-300 focus:outline-none focus:border-gray-500"
+                    value={graphLabelAttr}
+                    onChange={(e) => setGraphLabelAttr(e.target.value)}
+                  >
+                    <option value="__auto__">Auto</option>
+                    {graphLabelOptions.map((attr) => (
+                      <option key={attr} value={attr}>
+                        {attr}
+                      </option>
+                    ))}
+                    <option value="__pk__">PK</option>
+                  </select>
+                </div>
+              </>
+            )}
           </>
         )}
 
