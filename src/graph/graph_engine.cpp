@@ -24,12 +24,15 @@ Result<edge_id_t> GraphEngine::create_edge_type(const std::string& name,
                           "edge type '" + name + "' already exists in graph engine");
     }
 
-    // Build property list for catalog (comma-separated column names).
+    // Build property list for catalog (comma-separated name:TYPE pairs).
     std::string props_str;
     for (size_t i = 0; i < property_columns.size(); ++i) {
-        if (i > 0)
+        if (i > 0) {
             props_str += ",";
+        }
         props_str += property_columns[i].name;
+        props_str += ":";
+        props_str += type_name(property_columns[i].type);
     }
 
     // Register in catalog.

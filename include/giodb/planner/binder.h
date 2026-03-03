@@ -198,6 +198,9 @@ private:
     /// Build a ScopeTable from a catalog TableSchema.
     ScopeTable make_scope_table(const TableSchema& schema, const std::string& alias) const;
 
+    /// Build a ScopeTable for a TRAVERSE source in FROM/JOIN.
+    Result<ScopeTable> build_traverse_scope(const TableRef& tref, BoundStatement& bound);
+
     /// Resolve a table in the current database, wrapping NOT_FOUND errors with
     /// the database name for clearer diagnostics.
     Result<TableSchema> resolve_table(const std::string& table_name) const;

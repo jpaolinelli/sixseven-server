@@ -71,12 +71,47 @@ protected:
             ASSERT_TRUE(r.has_value());
         }
 
+        // Table: posts(id INT32, title STRING, body STRING)
+        {
+            TableSchema s;
+            s.name = "posts";
+            s.columns = {
+                {0, "id", TypeId::INT32, false, ""},
+                {1, "title", TypeId::STRING, true, ""},
+                {2, "body", TypeId::STRING, true, ""},
+            };
+            s.pk_columns = "id";
+            auto r = catalog.create_table(default_database_id, std::move(s));
+            ASSERT_TRUE(r.has_value());
+        }
+
         // Edge type: purchased (FROM users TO products)
         {
             EdgeTypeDef e;
             e.name = "purchased";
             e.source_table_id = 1; // users
             e.target_table_id = 3; // products
+            auto r = catalog.create_edge_type(std::move(e));
+            ASSERT_TRUE(r.has_value());
+        }
+
+        // Edge type: follows (users -> users) with weight property
+        {
+            EdgeTypeDef e;
+            e.name = "follows";
+            e.source_table_id = 1; // users
+            e.target_table_id = 1; // users (self-referential)
+            e.properties = "weight:FLOAT64";
+            auto r = catalog.create_edge_type(std::move(e));
+            ASSERT_TRUE(r.has_value());
+        }
+
+        // Edge type: authored (users -> posts) — heterogeneous edge
+        {
+            EdgeTypeDef e;
+            e.name = "authored";
+            e.source_table_id = 1; // users
+            e.target_table_id = 4; // posts
             auto r = catalog.create_edge_type(std::move(e));
             ASSERT_TRUE(r.has_value());
         }
@@ -755,7 +790,7 @@ TEST_F(BinderTest, CreateIndexTableNotFound) {
 }
 
 TEST_F(BinderTest, CreateEdgeTypeValid) {
-    auto bound = bind_ok("CREATE EDGE TYPE follows (since TIMESTAMP) FROM users TO users");
+    auto bound = bind_ok("CREATE EDGE TYPE mentors (since TIMESTAMP) FROM users TO users");
     EXPECT_EQ(bound.referenced_tables.size(), 2u);
 }
 
@@ -806,6 +841,104 @@ TEST_F(BinderTest, TraverseEdgeNotFound) {
 
 TEST_F(BinderTest, TraverseTableNotFound) {
     bind_error("TRAVERSE purchased FROM nonexistent(1)", StatusCode::NOT_FOUND);
+}
+
+// ===========================================================================
+// SELECT ... FROM TRAVERSE binding tests (GDB-264)
+// ===========================================================================
+
+// AC1: SELECT name resolves from the target table (self-referential: users→users).
+TEST_F(BinderTest, TraverseFromResolvesTargetColumn) {
+    auto bound = bind_ok("SELECT name FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+    EXPECT_EQ(bound.output_columns[0].column_name, "name");
+    EXPECT_EQ(bound.output_columns[0].type_id, TypeId::STRING);
+}
+
+// AC2: SELECT __depth resolves the meta-column with correct type.
+TEST_F(BinderTest, TraverseFromResolvesMetaDepth) {
+    auto bound = bind_ok("SELECT __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+    EXPECT_EQ(bound.output_columns[0].column_name, "__depth");
+    EXPECT_EQ(bound.output_columns[0].type_id, TypeId::INT64);
+}
+
+// AC2: __node meta-column resolves with PK type.
+TEST_F(BinderTest, TraverseFromResolvesMetaNode) {
+    auto bound = bind_ok("SELECT __node FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+    EXPECT_EQ(bound.output_columns[0].column_name, "__node");
+    EXPECT_EQ(bound.output_columns[0].type_id, TypeId::INT32); // users PK type
+}
+
+// AC2: __source meta-column is nullable.
+TEST_F(BinderTest, TraverseFromResolvesMetaSource) {
+    auto bound = bind_ok("SELECT __source FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+    EXPECT_EQ(bound.output_columns[0].column_name, "__source");
+    EXPECT_TRUE(bound.output_columns[0].nullable);
+}
+
+// AC3: SELECT nonexistent column produces a binding error.
+TEST_F(BinderTest, TraverseFromNonexistentColumnError) {
+    bind_error("SELECT nonexistent FROM TRAVERSE follows FROM users(1) DIRECTION OUT",
+               StatusCode::NOT_FOUND);
+}
+
+// AC4: Heterogeneous edges — OUT traversal exposes target table columns.
+TEST_F(BinderTest, TraverseFromHeterogeneousOutExposesTargetColumns) {
+    auto bound = bind_ok("SELECT title FROM TRAVERSE authored FROM users(1) DIRECTION OUT");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+    EXPECT_EQ(bound.output_columns[0].column_name, "title");
+    EXPECT_EQ(bound.output_columns[0].type_id, TypeId::STRING);
+}
+
+// AC4: Heterogeneous edges — user columns are NOT accessible from OUT traversal.
+TEST_F(BinderTest, TraverseFromHeterogeneousOutDoesNotExposeSourceColumns) {
+    // 'email' is a users column, not a posts column.
+    bind_error("SELECT email FROM TRAVERSE authored FROM users(1) DIRECTION OUT",
+               StatusCode::NOT_FOUND);
+}
+
+// AC5: Error when FROM table is not an endpoint of the edge type.
+TEST_F(BinderTest, TraverseFromTableNotEndpointError) {
+    bind_error("SELECT id FROM TRAVERSE authored FROM orders(1) DIRECTION OUT",
+               StatusCode::TYPE_ERROR);
+}
+
+// AC6: Edge property columns accessible via edge type qualifier.
+TEST_F(BinderTest, TraverseFromEdgePropertyQualified) {
+    auto bound = bind_ok("SELECT follows.weight FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+    EXPECT_EQ(bound.output_columns[0].column_name, "weight");
+    EXPECT_EQ(bound.output_columns[0].type_id, TypeId::FLOAT64);
+}
+
+// AC7: Internal from_key and where_expr are bound correctly.
+TEST_F(BinderTest, TraverseFromWithWhereBindsCorrectly) {
+    auto bound =
+        bind_ok("SELECT name FROM TRAVERSE follows FROM users(1) DIRECTION OUT WHERE __depth < 3");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+    EXPECT_EQ(bound.output_columns[0].column_name, "name");
+}
+
+// Edge not found in SELECT FROM TRAVERSE.
+TEST_F(BinderTest, TraverseFromEdgeNotFoundError) {
+    bind_error("SELECT id FROM TRAVERSE nonexistent FROM users(1) DIRECTION OUT",
+               StatusCode::NOT_FOUND);
+}
+
+// FROM table not found in SELECT FROM TRAVERSE.
+TEST_F(BinderTest, TraverseFromSourceTableNotFoundError) {
+    bind_error("SELECT id FROM TRAVERSE follows FROM nonexistent(1) DIRECTION OUT",
+               StatusCode::NOT_FOUND);
+}
+
+// Star expansion includes target columns + meta-columns + edge properties.
+TEST_F(BinderTest, TraverseFromStarExpansion) {
+    auto bound = bind_ok("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    // users has 5 cols + 3 meta (__node, __depth, __source) + 1 edge prop (weight) = 9
+    EXPECT_EQ(bound.output_columns.size(), 9u);
 }
 
 TEST_F(BinderTest, NearestValid) {
