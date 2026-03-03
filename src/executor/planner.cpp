@@ -1,6 +1,7 @@
 #include "giodb/executor/planner.h"
 
 #include "giodb/executor/delete.h"
+#include "giodb/executor/enriched_traversal.h"
 #include "giodb/executor/filter.h"
 #include "giodb/executor/hash_aggregate.h"
 #include "giodb/executor/hash_index_scan.h"
@@ -380,7 +381,116 @@ Planner::plan_from_source(const TableRef& table_ref,
         return ok(PlannedSource{std::move(source_op), std::move(schema)});
     }
 
-    // Case 3: Physical table.
+    // Case 3: TRAVERSE source (FROM TRAVERSE ...).
+    if (table_ref.traverse_source) {
+        auto* trav = dynamic_cast<const TraverseStmt*>(table_ref.traverse_source.get());
+        if (!trav) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "expected TraverseStmt in traverse_source");
+        }
+
+        if (!graph_engine_) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "graph engine not available for TRAVERSE");
+        }
+
+        // Evaluate the start key.
+        Tuple empty_tuple;
+        OutputSchema empty_schema;
+        auto key_val = evaluate_expr(*trav->from_key, empty_tuple, empty_schema, bound);
+        if (!key_val) {
+            return make_error(key_val.error().code, key_val.error().message);
+        }
+
+        // Build TraversalConfig.
+        TraversalConfig config;
+        config.edge_type = trav->edge_type;
+        config.start_key = std::move(*key_val);
+        config.direction = trav->direction;
+        config.max_depth = trav->max_depth.value_or(100);
+        config.fetch = true; // Always fetch for enrichment.
+
+        // Resolve edge type.
+        auto edge_def = catalog_.get_edge_type(trav->edge_type);
+        if (!edge_def) {
+            return make_error(edge_def.error().code, edge_def.error().message);
+        }
+
+        // Resolve FROM table.
+        auto from_schema = catalog_.get_table(database_id_, trav->from_table);
+        if (!from_schema) {
+            return make_error(from_schema.error().code, from_schema.error().message);
+        }
+
+        // Determine target table based on direction.
+        table_id_t target_table_id = 0;
+        if (trav->direction == TraverseDirection::BOTH) {
+            target_table_id = (from_schema->table_id == edge_def->source_table_id)
+                                  ? edge_def->target_table_id
+                                  : edge_def->source_table_id;
+        } else if (trav->direction == TraverseDirection::OUT) {
+            target_table_id = edge_def->target_table_id;
+        } else {
+            target_table_id = edge_def->source_table_id;
+        }
+
+        // Resolve target table schema.
+        auto target_schema = catalog_.get_table_by_id(target_table_id);
+        if (!target_schema) {
+            return make_error(target_schema.error().code, target_schema.error().message);
+        }
+
+        // Get target table storage.
+        auto target_ts = storage_.get_table_storage(target_table_id);
+        if (!target_ts) {
+            return make_error(target_ts.error().code, target_ts.error().message);
+        }
+        auto* target_storage = *target_ts;
+
+        // Find PK column info.
+        TypeId pk_type = TypeId::INT64;
+        size_t pk_col_idx = 0;
+        for (size_t i = 0; i < target_schema->columns.size(); ++i) {
+            if (target_schema->columns[i].name == target_schema->pk_columns) {
+                pk_type = target_schema->columns[i].type_id;
+                pk_col_idx = i;
+                break;
+            }
+        }
+
+        // Use edge type as default alias when no explicit alias is provided
+        // (matches the binder's behavior in build_traverse_scope).
+        const auto& trav_alias = alias.empty() ? trav->edge_type : alias;
+
+        // Build enriched output schema: target columns + meta-columns.
+        std::vector<OutputColumn> out_cols;
+        for (const auto& col : target_schema->columns) {
+            out_cols.push_back({trav_alias, col.name, col.type_id, col.nullable, target_table_id});
+        }
+        out_cols.push_back({trav_alias, "__node", pk_type, false, 0});
+        out_cols.push_back({trav_alias, "__depth", TypeId::INT64, false, 0});
+        out_cols.push_back({trav_alias, "__source", pk_type, true, 0});
+
+        auto enriched_schema = OutputSchema(std::move(out_cols));
+
+        // Pass the TraverseStmt's WHERE (consumed by parser) to the enriched
+        // operator for post-filter on table columns and meta-columns.
+        const Expr* trav_where = trav->where_expr ? trav->where_expr.get() : nullptr;
+
+        auto op = std::make_unique<EnrichedTraversalOperator>(*graph_engine_,
+                                                              std::move(config),
+                                                              enriched_schema,
+                                                              trav_where,
+                                                              bound,
+                                                              *target_storage->heap,
+                                                              target_storage->storage_schema,
+                                                              pk_col_idx,
+                                                              target_schema->columns.size());
+
+        return ok(PlannedSource{std::move(op), std::move(enriched_schema)});
+    }
+
+    // Case 4: Physical table.
     auto table_schema = catalog_.get_table(database_id_, table_ref.name);
     if (!table_schema) {
         return make_error(table_schema.error().code, table_schema.error().message);
@@ -669,7 +779,7 @@ Planner::plan_select(const SelectStmt& stmt,
     // -- 2. Optionally push WHERE into scan (only for physical tables with no joins).
     // For subquery/CTE sources or when joins are present, don't push WHERE.
     bool pushed_where = false;
-    if (!has_joins && stmt.where_expr && !table_ref.subquery &&
+    if (!has_joins && stmt.where_expr && !table_ref.subquery && !table_ref.traverse_source &&
         cte_map.find(to_upper(table_ref.name)) == cte_map.end()) {
         // Recursively check if WHERE contains any subquery predicates.
         std::function<bool(const Expr*)> contains_subquery = [&](const Expr* e) -> bool {

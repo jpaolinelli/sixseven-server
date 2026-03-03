@@ -355,17 +355,13 @@ Result<ScopeTable> Binder::build_traverse_scope(const TableRef& tref, BoundState
         }
     }
 
-    // 8. Bind internal where_expr against meta-column scope.
+    // 8. Bind internal where_expr against the full enriched scope
+    //    (target table columns + meta-columns) so filters on table columns
+    //    like `WHERE name LIKE 'J%'` resolve correctly.
     if (trav->where_expr) {
-        Scope meta_scope;
-        ScopeTable meta_st;
-        meta_st.table_id = 0;
-        meta_st.alias = "";
-        meta_st.columns.push_back({0, -1, "", "__node", pk_type, false});
-        meta_st.columns.push_back({0, -1, "", "__depth", TypeId::INT64, false});
-        meta_st.columns.push_back({0, -1, "", "__source", pk_type, true});
-        meta_scope.add_table(std::move(meta_st));
-        auto et = bind_expr(*trav->where_expr, meta_scope, bound);
+        Scope enriched_scope;
+        enriched_scope.add_table(st);
+        auto et = bind_expr(*trav->where_expr, enriched_scope, bound);
         if (!et) {
             return tl::unexpected(et.error());
         }

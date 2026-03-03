@@ -1,0 +1,258 @@
+#include "giodb/catalog/catalog.h"
+#include "giodb/common/result.h"
+#include "giodb/common/types.h"
+#include "giodb/common/value.h"
+#include "giodb/executor/query_engine.h"
+#include "giodb/executor/storage_manager.h"
+#include "giodb/graph/graph_engine.h"
+#include "giodb/storage/disk_manager.h"
+
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace giodb {
+namespace {
+
+/// Test fixture for enriched traversal via SELECT ... FROM TRAVERSE.
+///
+/// Builds graph AND actual table storage with row data:
+///   users: (1, "Alice"), (2, "Bob"), (3, "Jane"), (4, "Jake"), (5, "Zara")
+///   edges: 1→2, 1→3, 2→4, 3→4, 4→5
+class EnrichedTraversalTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_enriched_trav";
+        std::filesystem::remove_all(data_dir_);
+        std::filesystem::create_directories(data_dir_);
+
+        storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
+        graph_engine_ = std::make_unique<GraphEngine>(catalog_);
+        engine_ = std::make_unique<QueryEngine>(catalog_, *storage_, graph_engine_.get());
+
+        // Create table and insert rows.
+        exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR)");
+        exec_ok("INSERT INTO users VALUES (1, 'Alice')");
+        exec_ok("INSERT INTO users VALUES (2, 'Bob')");
+        exec_ok("INSERT INTO users VALUES (3, 'Jane')");
+        exec_ok("INSERT INTO users VALUES (4, 'Jake')");
+        exec_ok("INSERT INTO users VALUES (5, 'Zara')");
+
+        // Create edge type and build graph.
+        exec_ok("CREATE EDGE TYPE follows FROM users TO users");
+        exec_ok("LINK users(1) TO users(2) VIA follows");
+        exec_ok("LINK users(1) TO users(3) VIA follows");
+        exec_ok("LINK users(2) TO users(4) VIA follows");
+        exec_ok("LINK users(3) TO users(4) VIA follows");
+        exec_ok("LINK users(4) TO users(5) VIA follows");
+    }
+
+    void TearDown() override {
+        engine_.reset();
+        graph_engine_.reset();
+        storage_.reset();
+        std::filesystem::remove_all(data_dir_);
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        return std::move(*result);
+    }
+
+    void exec_error(const std::string& sql, StatusCode expected) {
+        auto result = engine_->execute(sql);
+        EXPECT_FALSE(result.has_value()) << sql << " should have failed";
+        EXPECT_EQ(result.error().code, expected);
+    }
+
+    DiskManager dm_;
+    Catalog catalog_;
+    std::filesystem::path data_dir_;
+    std::unique_ptr<StorageManager> storage_;
+    std::unique_ptr<GraphEngine> graph_engine_;
+    std::unique_ptr<QueryEngine> engine_;
+};
+
+// ============================================================================
+// 1. BasicEnrichment — SELECT * returns target columns + meta-columns
+// ============================================================================
+
+TEST_F(EnrichedTraversalTest, BasicEnrichment) {
+    auto qr = exec_ok("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+
+    // Should have: id, name, __node, __depth, __source
+    ASSERT_GE(qr.column_names.size(), 5u);
+    EXPECT_EQ(qr.column_names[0], "id");
+    EXPECT_EQ(qr.column_names[1], "name");
+
+    // Find meta-column positions.
+    size_t node_idx = 0;
+    size_t depth_idx = 0;
+    size_t source_idx = 0;
+    for (size_t i = 0; i < qr.column_names.size(); ++i) {
+        if (qr.column_names[i] == "__node")
+            node_idx = i;
+        if (qr.column_names[i] == "__depth")
+            depth_idx = i;
+        if (qr.column_names[i] == "__source")
+            source_idx = i;
+    }
+
+    // BFS from 1: visits 2, 3 (depth 1), 4 (depth 2), 5 (depth 3)
+    ASSERT_EQ(qr.rows.size(), 4u);
+
+    // Verify enriched data: id column matches __node meta-column.
+    for (const auto& row : qr.rows) {
+        EXPECT_EQ(row[0].as_int32(), static_cast<int32_t>(row[node_idx].as_int64()))
+            << "id should match __node for row";
+    }
+
+    // Verify depth 1 nodes have source=1.
+    for (const auto& row : qr.rows) {
+        if (row[depth_idx].as_int64() == 1) {
+            EXPECT_EQ(row[source_idx].as_int64(), 1);
+        }
+    }
+
+    // Verify name column is populated (not null).
+    for (const auto& row : qr.rows) {
+        EXPECT_FALSE(row[1].is_null()) << "name should be enriched from table";
+    }
+}
+
+// ============================================================================
+// 2. ColumnSelection — SELECT name, __depth returns only those columns
+// ============================================================================
+
+TEST_F(EnrichedTraversalTest, ColumnSelection) {
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+
+    ASSERT_EQ(qr.column_names.size(), 2u);
+    EXPECT_EQ(qr.column_names[0], "name");
+    EXPECT_EQ(qr.column_names[1], "__depth");
+
+    ASSERT_EQ(qr.rows.size(), 4u);
+
+    // Depth-1 names should be Bob and Jane (order may vary).
+    std::vector<std::string> depth1_names;
+    for (const auto& row : qr.rows) {
+        if (row[1].as_int64() == 1) {
+            depth1_names.push_back(row[0].as_string());
+        }
+    }
+    std::sort(depth1_names.begin(), depth1_names.end());
+    ASSERT_EQ(depth1_names.size(), 2u);
+    EXPECT_EQ(depth1_names[0], "Bob");
+    EXPECT_EQ(depth1_names[1], "Jane");
+}
+
+// ============================================================================
+// 3. WhereOnTableColumn — WHERE name LIKE 'J%' filters on enriched data
+// ============================================================================
+
+TEST_F(EnrichedTraversalTest, WhereOnTableColumn) {
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "WHERE name LIKE 'J%'");
+
+    // "Jane" (depth 1) and "Jake" (depth 2) match J%.
+    ASSERT_EQ(qr.rows.size(), 2u);
+
+    std::vector<std::string> names;
+    for (const auto& row : qr.rows) {
+        names.push_back(row[0].as_string());
+    }
+    std::sort(names.begin(), names.end());
+    EXPECT_EQ(names[0], "Jake");
+    EXPECT_EQ(names[1], "Jane");
+}
+
+// ============================================================================
+// 4. WhereOnDepth — WHERE __depth = 1 filters on meta-column
+// ============================================================================
+
+TEST_F(EnrichedTraversalTest, WhereOnDepth) {
+    auto qr = exec_ok("SELECT name FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "WHERE __depth = 1");
+
+    // Depth 1: Bob and Jane.
+    ASSERT_EQ(qr.rows.size(), 2u);
+
+    std::vector<std::string> names;
+    for (const auto& row : qr.rows) {
+        names.push_back(row[0].as_string());
+    }
+    std::sort(names.begin(), names.end());
+    EXPECT_EQ(names[0], "Bob");
+    EXPECT_EQ(names[1], "Jane");
+}
+
+// ============================================================================
+// 5. OrderByAndLimit — ORDER BY __depth, name LIMIT 2
+// ============================================================================
+
+TEST_F(EnrichedTraversalTest, OrderByAndLimit) {
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "ORDER BY __depth, name LIMIT 2");
+
+    ASSERT_EQ(qr.rows.size(), 2u);
+    // Depth 1 sorted: Bob, Jane — limit 2 picks both.
+    EXPECT_EQ(qr.rows[0][0].as_string(), "Bob");
+    EXPECT_EQ(qr.rows[0][1].as_int64(), 1);
+    EXPECT_EQ(qr.rows[1][0].as_string(), "Jane");
+    EXPECT_EQ(qr.rows[1][1].as_int64(), 1);
+}
+
+// ============================================================================
+// 6. EmptyTraversal — no outgoing edges returns empty result set
+// ============================================================================
+
+TEST_F(EnrichedTraversalTest, EmptyTraversal) {
+    // Node 5 has no outgoing edges.
+    auto qr = exec_ok("SELECT * FROM TRAVERSE follows FROM users(5) DIRECTION OUT");
+    EXPECT_TRUE(qr.rows.empty());
+}
+
+// ============================================================================
+// 7. DanglingEdge — PK in graph but not in table gives NULLs for table cols
+// ============================================================================
+
+TEST_F(EnrichedTraversalTest, DanglingEdge) {
+    // Link to node 999 which doesn't exist in the users table.
+    exec_ok("LINK users(5) TO users(999) VIA follows");
+
+    auto qr = exec_ok(
+        "SELECT id, name, __node, __depth FROM TRAVERSE follows FROM users(5) DIRECTION OUT");
+
+    // Should get 1 row for node 999.
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][2].as_int64(), 999); // __node = 999
+
+    // Table columns should be NULL for the dangling edge.
+    EXPECT_TRUE(qr.rows[0][0].is_null()) << "id should be NULL for dangling edge";
+    EXPECT_TRUE(qr.rows[0][1].is_null()) << "name should be NULL for dangling edge";
+}
+
+// ============================================================================
+// 8. StandaloneBackcompat — standalone TRAVERSE still returns (node, depth)
+// ============================================================================
+
+TEST_F(EnrichedTraversalTest, StandaloneBackcompat) {
+    auto qr = exec_ok("TRAVERSE follows FROM users(1) DIRECTION OUT");
+
+    // Standalone TRAVERSE returns node, depth columns.
+    ASSERT_GE(qr.column_names.size(), 2u);
+    EXPECT_EQ(qr.column_names[0], "node");
+    EXPECT_EQ(qr.column_names[1], "depth");
+
+    // BFS from 1: 4 reachable nodes.
+    ASSERT_EQ(qr.rows.size(), 4u);
+}
+
+} // namespace
+} // namespace giodb
