@@ -234,6 +234,146 @@ ScopeTable Binder::make_scope_table(const TableSchema& schema, const std::string
     return st;
 }
 
+Result<ScopeTable> Binder::build_traverse_scope(const TableRef& tref, BoundStatement& bound) {
+    auto* trav = dynamic_cast<const TraverseStmt*>(tref.traverse_source.get());
+    if (!trav) {
+        return make_error(StatusCode::INTERNAL_ERROR, "expected TraverseStmt in traverse_source");
+    }
+
+    // 1. Resolve edge type.
+    auto edge = catalog_.get_edge_type(trav->edge_type);
+    if (!edge) {
+        return tl::unexpected(edge.error());
+    }
+    bound.referenced_edge_types.push_back(edge->edge_id);
+
+    // 2. Resolve FROM table and verify it's an endpoint of the edge type.
+    auto from_schema = resolve_table(trav->from_table);
+    if (!from_schema) {
+        return tl::unexpected(from_schema.error());
+    }
+    bound.referenced_tables.push_back(from_schema->table_id);
+
+    if (from_schema->table_id != edge->source_table_id &&
+        from_schema->table_id != edge->target_table_id) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "TRAVERSE FROM table " + trav->from_table +
+                              " is not an endpoint of edge type " + trav->edge_type);
+    }
+
+    // 3. Determine target table based on direction.
+    //    OUT: traversal reaches the target end of edges.
+    //    IN:  traversal reaches the source end of edges.
+    //    BOTH: reaches the other endpoint from the FROM table.
+    table_id_t target_table_id = 0;
+    if (trav->direction == TraverseDirection::BOTH) {
+        target_table_id = (from_schema->table_id == edge->source_table_id) ? edge->target_table_id
+                                                                           : edge->source_table_id;
+    } else if (trav->direction == TraverseDirection::OUT) {
+        target_table_id = edge->target_table_id;
+    } else {
+        target_table_id = edge->source_table_id;
+    }
+
+    // 4. Resolve target table schema.
+    auto target_schema = catalog_.get_table_by_id(target_table_id);
+    if (!target_schema) {
+        return tl::unexpected(target_schema.error());
+    }
+
+    // 5. Determine PK type from the target table.
+    TypeId pk_type = TypeId::INT64;
+    if (!target_schema->pk_columns.empty()) {
+        for (const auto& col : target_schema->columns) {
+            if (col.name == target_schema->pk_columns) {
+                pk_type = col.type_id;
+                break;
+            }
+        }
+    }
+
+    // 6. Build ScopeTable: target table columns + meta-columns + edge properties.
+    std::string alias = tref.alias.empty() ? trav->edge_type : tref.alias;
+    ScopeTable st;
+    st.table_id = target_schema->table_id;
+    st.alias = alias;
+
+    // Target table columns.
+    for (const auto& col : target_schema->columns) {
+        ResolvedColumn rc;
+        rc.table_id = target_schema->table_id;
+        rc.ordinal = col.ordinal;
+        rc.table_name = alias;
+        rc.column_name = col.name;
+        rc.type_id = col.type_id;
+        rc.nullable = col.nullable;
+        st.columns.push_back(std::move(rc));
+    }
+
+    // Meta-columns: __node, __depth, __source.
+    st.columns.push_back({0, -1, alias, "__node", pk_type, false});
+    st.columns.push_back({0, -1, alias, "__depth", TypeId::INT64, false});
+    st.columns.push_back({0, -1, alias, "__source", pk_type, true});
+
+    // Edge property columns (parsed from catalog's "name:TYPE,..." format).
+    if (!edge->properties.empty()) {
+        std::string_view props(edge->properties);
+        while (!props.empty()) {
+            auto comma = props.find(',');
+            auto entry = props.substr(0, comma);
+            props = (comma == std::string_view::npos) ? "" : props.substr(comma + 1);
+
+            auto colon = entry.find(':');
+            std::string prop_name(entry.substr(0, colon));
+            TypeId prop_type = TypeId::STRING; // default if no type specified
+            if (colon != std::string_view::npos) {
+                TypeSpec spec;
+                spec.name = std::string(entry.substr(colon + 1));
+                auto tid = resolve_type_spec(spec);
+                if (tid) {
+                    prop_type = *tid;
+                }
+            }
+
+            ResolvedColumn rc;
+            rc.table_id = 0;
+            rc.ordinal = -1;
+            rc.table_name = trav->edge_type; // qualified by edge type name
+            rc.column_name = prop_name;
+            rc.type_id = prop_type;
+            rc.nullable = true;
+            st.columns.push_back(std::move(rc));
+        }
+    }
+
+    // 7. Bind internal from_key expression.
+    Scope empty_scope;
+    if (trav->from_key) {
+        auto et = bind_expr(*trav->from_key, empty_scope, bound);
+        if (!et) {
+            return tl::unexpected(et.error());
+        }
+    }
+
+    // 8. Bind internal where_expr against meta-column scope.
+    if (trav->where_expr) {
+        Scope meta_scope;
+        ScopeTable meta_st;
+        meta_st.table_id = 0;
+        meta_st.alias = "";
+        meta_st.columns.push_back({0, -1, "", "__node", pk_type, false});
+        meta_st.columns.push_back({0, -1, "", "__depth", TypeId::INT64, false});
+        meta_st.columns.push_back({0, -1, "", "__source", pk_type, true});
+        meta_scope.add_table(std::move(meta_st));
+        auto et = bind_expr(*trav->where_expr, meta_scope, bound);
+        if (!et) {
+            return tl::unexpected(et.error());
+        }
+    }
+
+    return ok(std::move(st));
+}
+
 bool Binder::contains_aggregate(const Expr& expr, const BoundStatement& bound) const {
     auto it = bound.expr_types.find(&expr);
     if (it != bound.expr_types.end()) {
@@ -850,9 +990,16 @@ Binder::build_from_scope(const SelectStmt& stmt, Scope* parent, BoundStatement& 
         cte_results_.emplace(to_upper(cte.name), std::move(*sub));
     }
 
-    // FROM tables — check CTEs first, then catalog.
+    // FROM tables — check TRAVERSE source, CTEs, then catalog.
     for (auto& tref : stmt.from) {
-        if (tref.subquery) {
+        if (tref.traverse_source) {
+            // TRAVERSE source in FROM.
+            auto scope_result = build_traverse_scope(tref, bound);
+            if (!scope_result) {
+                return tl::unexpected(scope_result.error());
+            }
+            scope.add_table(std::move(*scope_result));
+        } else if (tref.subquery) {
             // Subquery in FROM.
             auto sub = bind(*tref.subquery);
             if (!sub) {
@@ -895,7 +1042,13 @@ Binder::build_from_scope(const SelectStmt& stmt, Scope* parent, BoundStatement& 
     // JOIN tables.
     for (auto& join : stmt.joins) {
         auto& jtref = join.table;
-        if (jtref.subquery) {
+        if (jtref.traverse_source) {
+            auto scope_result = build_traverse_scope(jtref, bound);
+            if (!scope_result) {
+                return tl::unexpected(scope_result.error());
+            }
+            scope.add_table(std::move(*scope_result));
+        } else if (jtref.subquery) {
             auto sub = bind(*jtref.subquery);
             if (!sub) {
                 return tl::unexpected(sub.error());
