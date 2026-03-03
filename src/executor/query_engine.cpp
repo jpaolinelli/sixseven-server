@@ -797,6 +797,18 @@ Result<QueryResult> QueryEngine::execute_create_edge_type(const CreateEdgeTypeSt
         return make_error(result.error().code, result.error().message);
     }
 
+    // Persist edge type metadata to sys_edge_types.
+    if (catalog_persistence_ != nullptr) {
+        auto et = catalog_.get_edge_type(stmt.name);
+        if (et) {
+            auto persist = catalog_persistence_->persist_edge_type(*et);
+            if (!persist) {
+                GIODB_LOG_WARN(
+                    "failed to persist edge type '{}': {}", stmt.name, persist.error().message);
+            }
+        }
+    }
+
     QueryResult qr;
     qr.message = "CREATE EDGE TYPE";
     return ok(std::move(qr));
@@ -812,6 +824,13 @@ Result<QueryResult> QueryEngine::execute_drop_edge_type(const DropEdgeTypeStmt& 
                           "graph engine not available for DROP EDGE TYPE");
     }
 
+    // Look up edge_id before dropping (needed for persistence removal).
+    edge_id_t edge_id = 0;
+    auto et = catalog_.get_edge_type(stmt.name);
+    if (et) {
+        edge_id = et->edge_id;
+    }
+
     auto result = graph_engine_->drop_edge_type(stmt.name);
     if (!result) {
         if (stmt.if_exists && result.error().code == StatusCode::NOT_FOUND) {
@@ -820,6 +839,16 @@ Result<QueryResult> QueryEngine::execute_drop_edge_type(const DropEdgeTypeStmt& 
             return ok(std::move(qr));
         }
         return make_error(result.error().code, result.error().message);
+    }
+
+    // Remove edge type metadata from sys_edge_types.
+    if (catalog_persistence_ != nullptr && edge_id != 0) {
+        auto persist = catalog_persistence_->remove_edge_type(edge_id);
+        if (!persist) {
+            GIODB_LOG_WARN("failed to remove persisted edge type '{}': {}",
+                           stmt.name,
+                           persist.error().message);
+        }
     }
 
     QueryResult qr;
