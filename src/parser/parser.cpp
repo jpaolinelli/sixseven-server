@@ -1788,6 +1788,26 @@ Result<TableRef> Parser::parse_table_ref() {
         return ok(std::move(ref));
     }
 
+    // TRAVERSE source: TRAVERSE ... [AS] alias
+    if (peek().type == TokenType::TRAVERSE) {
+        auto traverse = parse_traverse();
+        if (!traverse)
+            return tl::unexpected(traverse.error());
+        ref.traverse_source = std::move(*traverse);
+
+        // Optional alias (explicit AS or implicit).
+        if (match(TokenType::AS)) {
+            auto alias = parse_name("traverse alias");
+            if (!alias)
+                return tl::unexpected(alias.error());
+            ref.alias = std::move(*alias);
+        } else if (is_name_token(peek().type) && !is_clause_keyword(peek().type)) {
+            ref.alias = std::string(advance().lexeme);
+        }
+
+        return ok(std::move(ref));
+    }
+
     // Regular table name.
     auto name = parse_name("table name");
     if (!name)

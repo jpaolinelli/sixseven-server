@@ -1443,6 +1443,105 @@ TEST(Parser, TraverseAllOptions) {
     EXPECT_TRUE(tr->fetch);
 }
 
+// -- TRAVERSE-in-FROM tests (GDB-263) -----------------------------------------
+
+TEST(Parser, TraverseInFromBasic) {
+    auto stmt = parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->from.size(), 1u);
+    ASSERT_NE(sel->from[0].traverse_source, nullptr);
+    EXPECT_TRUE(sel->from[0].name.empty());
+    EXPECT_TRUE(sel->from[0].alias.empty());
+    auto* tr = dynamic_cast<TraverseStmt*>(sel->from[0].traverse_source.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->edge_type, "follows");
+    EXPECT_EQ(tr->from_table, "users");
+    EXPECT_EQ(tr->direction, TraverseDirection::OUT);
+}
+
+TEST(Parser, TraverseInFromWithAlias) {
+    auto stmt = parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->from.size(), 1u);
+    ASSERT_NE(sel->from[0].traverse_source, nullptr);
+    EXPECT_EQ(sel->from[0].alias, "t");
+    auto* tr = dynamic_cast<TraverseStmt*>(sel->from[0].traverse_source.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->edge_type, "follows");
+}
+
+TEST(Parser, TraverseInFromImplicitAlias) {
+    auto stmt = parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT trav");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->from.size(), 1u);
+    ASSERT_NE(sel->from[0].traverse_source, nullptr);
+    EXPECT_EQ(sel->from[0].alias, "trav");
+}
+
+TEST(Parser, TraverseInFromAllClauses) {
+    auto stmt = parse_one("SELECT * FROM TRAVERSE knows FROM users(42) DIRECTION BOTH MAX_DEPTH 5 "
+                          "WHERE weight > 0.5 FETCH AS t");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->from.size(), 1u);
+    ASSERT_NE(sel->from[0].traverse_source, nullptr);
+    EXPECT_EQ(sel->from[0].alias, "t");
+    auto* tr = dynamic_cast<TraverseStmt*>(sel->from[0].traverse_source.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->edge_type, "knows");
+    EXPECT_EQ(tr->direction, TraverseDirection::BOTH);
+    ASSERT_TRUE(tr->max_depth.has_value());
+    EXPECT_EQ(*tr->max_depth, 5);
+    EXPECT_NE(tr->where_expr, nullptr);
+    EXPECT_TRUE(tr->fetch);
+}
+
+TEST(Parser, TraverseInFromDirectionIn) {
+    auto stmt = parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION IN");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->from.size(), 1u);
+    auto* tr = dynamic_cast<TraverseStmt*>(sel->from[0].traverse_source.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->direction, TraverseDirection::IN);
+}
+
+TEST(Parser, TraverseInFromMaxDepthOnly) {
+    auto stmt = parse_one("SELECT * FROM TRAVERSE follows FROM users(1) MAX_DEPTH 3");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->from.size(), 1u);
+    auto* tr = dynamic_cast<TraverseStmt*>(sel->from[0].traverse_source.get());
+    ASSERT_NE(tr, nullptr);
+    ASSERT_TRUE(tr->max_depth.has_value());
+    EXPECT_EQ(*tr->max_depth, 3);
+}
+
+TEST(Parser, TraverseStandaloneStillWorks) {
+    // Backward compatibility: standalone TRAVERSE still parses as TraverseStmt.
+    auto stmt = parse_one("TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto* tr = dynamic_cast<TraverseStmt*>(stmt.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->edge_type, "follows");
+    EXPECT_EQ(tr->from_table, "users");
+    EXPECT_EQ(tr->direction, TraverseDirection::OUT);
+}
+
+TEST(Parser, TraverseInFromMalformedMissingEdge) {
+    expect_parse_error("SELECT * FROM TRAVERSE FROM users(1)");
+}
+
+TEST(Parser, TraverseInFromMalformedMissingFrom) {
+    expect_parse_error("SELECT * FROM TRAVERSE follows users(1)");
+}
+
+TEST(Parser, TraverseInFromMalformedMissingKey) {
+    expect_parse_error("SELECT * FROM TRAVERSE follows FROM users");
+}
+
 // -- SHORTEST PATH tests ------------------------------------------------------
 
 TEST(Parser, ShortestPathBasic) {

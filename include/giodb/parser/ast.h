@@ -165,11 +165,12 @@ struct TableConstraint {
     ReferentialAction on_delete = ReferentialAction::RESTRICT;
 };
 
-/// Table reference in FROM clause (table name or subquery).
+/// Table reference in FROM clause (table name, subquery, or TRAVERSE source).
 struct TableRef {
     std::string name;
     std::string alias;
     StmtPtr subquery;
+    StmtPtr traverse_source;
 };
 
 /// JOIN clause.
