@@ -258,6 +258,37 @@ TEST_F(InsertEmbeddingTest, AllNullSourceTextEnqueuesNoJobs) {
     EXPECT_EQ(after.jobs_failed, before.jobs_failed);
 }
 
+TEST_F(InsertEmbeddingTest, WhitespaceOnlySourceDoesNotPoisonValidEmbeddings) {
+    exec_ok("CREATE TABLE ws_test ("
+            "  id INT,"
+            "  title TEXT,"
+            "  title_vec EMBEDDING(4, title, 'builtin/4')"
+            ")");
+
+    // Mix of valid text, whitespace-only, and NULL source texts.
+    exec_ok("INSERT INTO ws_test (id, title) VALUES "
+            "(1, 'valid text'), "
+            "(2, '   '), "
+            "(3, 'also valid'), "
+            "(4, NULL)");
+
+    ASSERT_TRUE(wait_for_pool());
+
+    auto select = exec_ok("SELECT id, title_vec FROM ws_test");
+    ASSERT_EQ(select.rows.size(), 4u);
+
+    // Rows 1 and 3 (valid source text) must have embeddings.
+    EXPECT_FALSE(select.rows[0][1].is_null()) << "row 1 should have embedding";
+    EXPECT_EQ(select.rows[0][1].as_embedding().size(), 4u);
+
+    EXPECT_FALSE(select.rows[2][1].is_null()) << "row 3 should have embedding";
+    EXPECT_EQ(select.rows[2][1].as_embedding().size(), 4u);
+
+    // Rows 2 (whitespace-only) and 4 (NULL) should have NULL embeddings.
+    EXPECT_TRUE(select.rows[1][1].is_null()) << "row 2 (whitespace) should be null";
+    EXPECT_TRUE(select.rows[3][1].is_null()) << "row 4 (NULL) should be null";
+}
+
 TEST_F(InsertEmbeddingTest, WorkerPoolStatsReflectInsertJobs) {
     exec_ok("CREATE TABLE stats_test ("
             "  id INT,"

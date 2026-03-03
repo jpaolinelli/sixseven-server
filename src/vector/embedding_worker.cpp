@@ -3,6 +3,7 @@
 #include "giodb/common/logging.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 
 namespace giodb {
@@ -251,12 +252,15 @@ void EmbeddingWorkerPool::process_batch(std::vector<EmbeddingJob>& batch) {
             provider = it->second;
         }
 
-        // Partition indices: skip jobs with empty source_text (defensive guard).
-        // NULL source text means NULL embedding — complete them immediately.
+        // Partition indices: skip jobs with empty/blank source_text (defensive guard).
+        // NULL or whitespace-only source means NULL embedding — complete immediately.
         std::vector<size_t> valid_indices;
         valid_indices.reserve(indices.size());
         for (auto idx : indices) {
-            if (batch[idx].source_text.empty()) {
+            const auto& src = batch[idx].source_text;
+            if (src.empty() || std::all_of(src.begin(), src.end(), [](unsigned char c) {
+                    return std::isspace(c);
+                })) {
                 // Remove from persistence — nothing to embed for NULL source.
                 if (persistence_.has_value() && persistence_->remove) {
                     (void)persistence_->remove(
