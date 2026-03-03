@@ -21,6 +21,7 @@ add_library(giodb_executor STATIC
     subquery_source.cpp
     traversal.cpp
     enriched_traversal.cpp
+    edge_traversal.cpp
     shortest_path.cpp
     pattern_match.cpp
     nearest_scan.cpp

@@ -1884,6 +1884,20 @@ Result<StmtPtr> Parser::parse_traverse() {
         stmt->max_depth = *depth_val;
     }
 
+    // Optional MODE NODES|EDGES.
+    if (match_ident_ci(peek(), "MODE")) {
+        advance(); // consume MODE
+        if (match_ident_ci(peek(), "EDGES")) {
+            advance();
+            stmt->mode = TraverseMode::EDGES;
+        } else if (match_ident_ci(peek(), "NODES")) {
+            advance();
+            stmt->mode = TraverseMode::NODES;
+        } else {
+            return error("expected EDGES or NODES after MODE");
+        }
+    }
+
     // Optional WHERE.
     if (match(TokenType::WHERE)) {
         auto expr = parse_expression();
