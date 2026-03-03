@@ -204,5 +204,42 @@ TEST_F(HeterogeneousTraversalTest, SelectStarInReturnsSourceSchema) {
     EXPECT_EQ(qr.rows[0][1].as_string(), "Alice");
 }
 
+// ============================================================================
+// 8. GDB-304 regression: overlapping PKs across tables must not collide
+//    in the BFS visited set.
+// ============================================================================
+
+TEST_F(HeterogeneousTraversalTest, PKCollisionOutDirection) {
+    // Insert a post whose PK matches a user PK (both id=1).
+    exec_ok("INSERT INTO posts VALUES (1, 'Collider')");
+    exec_ok("LINK users(1) TO posts(1) VIA authored");
+
+    auto qr = exec_ok("SELECT title FROM TRAVERSE authored FROM users(1) DIRECTION OUT");
+
+    // User 1 authored posts 10, 20, AND 1 — all three must appear.
+    std::vector<std::string> titles;
+    for (const auto& row : qr.rows) {
+        titles.push_back(row[0].as_string());
+    }
+    std::sort(titles.begin(), titles.end());
+
+    ASSERT_EQ(titles.size(), 3u);
+    EXPECT_EQ(titles[0], "Collider");
+    EXPECT_EQ(titles[1], "Hello");
+    EXPECT_EQ(titles[2], "World");
+}
+
+TEST_F(HeterogeneousTraversalTest, PKCollisionInDirection) {
+    // Post id=1 exists in posts but also user id=1 exists.
+    exec_ok("INSERT INTO posts VALUES (1, 'Collider')");
+    exec_ok("LINK users(1) TO posts(1) VIA authored");
+
+    auto qr = exec_ok("SELECT name FROM TRAVERSE authored FROM posts(1) DIRECTION IN");
+
+    // Post 1 was authored by user 1 (Alice) — must not be skipped.
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "Alice");
+}
+
 } // namespace
 } // namespace giodb

@@ -495,6 +495,8 @@ Planner::plan_from_source(const TableRef& table_ref,
         // operator for post-filter on table columns and meta-columns.
         const Expr* trav_where = trav->where_expr ? trav->where_expr.get() : nullptr;
 
+        const bool heterogeneous = edge_def->source_table_id != edge_def->target_table_id;
+
         auto op = std::make_unique<EnrichedTraversalOperator>(*graph_engine_,
                                                               std::move(config),
                                                               enriched_schema,
@@ -503,7 +505,8 @@ Planner::plan_from_source(const TableRef& table_ref,
                                                               *target_storage->heap,
                                                               target_storage->storage_schema,
                                                               pk_col_idx,
-                                                              target_schema->columns.size());
+                                                              target_schema->columns.size(),
+                                                              heterogeneous);
 
         return ok(PlannedSource{std::move(op), std::move(enriched_schema)});
     }

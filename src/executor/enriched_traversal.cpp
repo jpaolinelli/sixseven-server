@@ -17,11 +17,12 @@ EnrichedTraversalOperator::EnrichedTraversalOperator(GraphEngine& graph_engine,
                                                      TableHeap& target_heap,
                                                      const Schema& target_storage_schema,
                                                      size_t target_pk_col_idx,
-                                                     size_t target_column_count)
+                                                     size_t target_column_count,
+                                                     bool heterogeneous)
     : graph_engine_(graph_engine), config_(std::move(config)), schema_(std::move(schema)),
       where_expr_(where_expr), bound_(bound), target_heap_(target_heap),
       target_storage_schema_(target_storage_schema), target_pk_col_idx_(target_pk_col_idx),
-      target_column_count_(target_column_count) {}
+      target_column_count_(target_column_count), heterogeneous_(heterogeneous) {}
 
 std::string EnrichedTraversalOperator::plan_node_name() const {
     return "Enriched Graph Traverse";
@@ -86,7 +87,12 @@ Result<void> EnrichedTraversalOperator::run_bfs() {
     std::deque<TraversalResult> queue;
 
     // Seed the BFS with the start node (no incoming edge, so empty edge_properties).
-    visited.insert(config_.start_key);
+    // For heterogeneous edges the start node lives in a different table than the
+    // target nodes, so adding its PK to the visited set would incorrectly suppress
+    // target nodes whose PK happens to match (e.g. users(1) → posts(1)).
+    if (!heterogeneous_) {
+        visited.insert(config_.start_key);
+    }
     queue.push_back({config_.start_key, 0, Value(), {}});
 
     while (!queue.empty()) {
