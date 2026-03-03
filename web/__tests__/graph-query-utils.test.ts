@@ -131,14 +131,14 @@ describe("isTraverseQuery", () => {
 // ── buildEdgeQuery ──
 
 describe("buildEdgeQuery", () => {
-  it("appends MODE EDGES to a TRAVERSE query", () => {
+  it("inserts MODE EDGES after TRAVERSE core", () => {
     const sql = "SELECT * FROM TRAVERSE follows FROM users(1)";
     expect(buildEdgeQuery(sql)).toBe(
       "SELECT * FROM TRAVERSE follows FROM users(1) MODE EDGES"
     );
   });
 
-  it("strips trailing semicolons before appending", () => {
+  it("strips trailing semicolons", () => {
     const sql = "SELECT * FROM TRAVERSE follows FROM users(1);";
     expect(buildEdgeQuery(sql)).toBe(
       "SELECT * FROM TRAVERSE follows FROM users(1) MODE EDGES"
@@ -160,6 +160,41 @@ describe("buildEdgeQuery", () => {
   it("detects MODE EDGES case-insensitively", () => {
     const sql = "SELECT * FROM TRAVERSE follows FROM users(1) mode edges";
     expect(buildEdgeQuery(sql)).toBe(sql);
+  });
+
+  it("replaces SELECT list with * for edge-compatible schema (GDB-311)", () => {
+    const sql = "SELECT name, email FROM TRAVERSE follows FROM users(1)";
+    expect(buildEdgeQuery(sql)).toBe(
+      "SELECT * FROM TRAVERSE follows FROM users(1) MODE EDGES"
+    );
+  });
+
+  it("inserts MODE EDGES before FETCH (GDB-311)", () => {
+    const sql = "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH";
+    expect(buildEdgeQuery(sql)).toBe(
+      "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES FETCH"
+    );
+  });
+
+  it("inserts MODE EDGES before WHERE (GDB-311)", () => {
+    const sql = "SELECT * FROM TRAVERSE follows FROM users(1) WHERE __depth > 1";
+    expect(buildEdgeQuery(sql)).toBe(
+      "SELECT * FROM TRAVERSE follows FROM users(1) MODE EDGES WHERE __depth > 1"
+    );
+  });
+
+  it("inserts MODE EDGES after DIRECTION and MAX_DEPTH (GDB-311)", () => {
+    const sql = "SELECT name FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 3 FETCH";
+    expect(buildEdgeQuery(sql)).toBe(
+      "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 3 MODE EDGES FETCH"
+    );
+  });
+
+  it("handles query with ORDER BY and LIMIT (GDB-311)", () => {
+    const sql = "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT ORDER BY name LIMIT 10";
+    expect(buildEdgeQuery(sql)).toBe(
+      "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES ORDER BY name LIMIT 10"
+    );
   });
 });
 
@@ -223,11 +258,34 @@ describe("parseNodesFromResult", () => {
     expect(nodes).toHaveLength(1);
   });
 
-  it("returns empty array when __node column is missing", () => {
+  it("returns empty array when no node meta-columns are present", () => {
     const columns = ["name", "email"];
     const rows = [["alice", "alice@example.com"]];
     const nodes = parseNodesFromResult(columns, rows);
     expect(nodes).toEqual([]);
+  });
+
+  it("uses row index as PK when __node is absent but __depth is present (GDB-310)", () => {
+    const columns = ["name", "__depth"];
+    const rows = [
+      ["alice", 0],
+      ["bob", 1],
+    ];
+    const nodes = parseNodesFromResult(columns, rows);
+    expect(nodes).toHaveLength(2);
+    expect(nodes[0].pk).toBe("0");
+    expect(nodes[0].label).toBe("alice");
+    expect(nodes[0].id).toBe("node:0");
+    expect(nodes[1].pk).toBe("1");
+    expect(nodes[1].label).toBe("bob");
+  });
+
+  it("uses __source for table when __node is absent (GDB-310)", () => {
+    const columns = ["name", "__depth", "__source"];
+    const rows = [["alice", 0, "users"]];
+    const nodes = parseNodesFromResult(columns, rows);
+    expect(nodes[0].table).toBe("users");
+    expect(nodes[0].id).toBe("users:0");
   });
 
   it("uses 'node' as default table when __source is missing", () => {

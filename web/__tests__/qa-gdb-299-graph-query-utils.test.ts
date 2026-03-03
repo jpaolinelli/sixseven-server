@@ -133,8 +133,8 @@ describe("QA_GDB299_buildEdgeQuery", () => {
   it("handles query ending with MODE (but not MODE EDGES)", () => {
     const sql = "SELECT * FROM TRAVERSE follows FROM users(1) MODE";
     const result = buildEdgeQuery(sql);
-    // Should append MODE EDGES since "MODE EDGES" pattern not found
-    expect(result).toBe("SELECT * FROM TRAVERSE follows FROM users(1) MODE MODE EDGES");
+    // MODE EDGES inserted after TRAVERSE core; stray MODE remains after it
+    expect(result).toBe("SELECT * FROM TRAVERSE follows FROM users(1) MODE EDGES MODE");
   });
 
   it("does not modify query with MODE EDGES in middle", () => {
@@ -675,8 +675,9 @@ describe("QA_GDB299_Integration", () => {
     const sql = "SELECT name, email FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 3";
     expect(isTraverseQuery(sql)).toBe(true);
     const edgeSql = buildEdgeQuery(sql);
+    // GDB-311: SELECT list replaced with * and MODE EDGES in correct position
     expect(edgeSql).toBe(
-      "SELECT name, email FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 3 MODE EDGES"
+      "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 3 MODE EDGES"
     );
   });
 

@@ -39,13 +39,38 @@ export function isTraverseQuery(sql: string): boolean {
 }
 
 /**
- * Build an edge-mode variant of a TRAVERSE query by appending MODE EDGES.
+ * Build an edge-mode variant of a TRAVERSE query.
+ *
+ * 1. Replaces the SELECT list with `*` (edge mode has a different output schema).
+ * 2. Inserts MODE EDGES in the correct grammar position — after the TRAVERSE core
+ *    (edge_type, FROM table(key), DIRECTION, MAX_DEPTH) and before WHERE/FETCH.
+ *
  * If the query already has MODE EDGES, returns it unchanged.
  */
 export function buildEdgeQuery(sql: string): string {
   if (/\bMODE\s+EDGES\b/i.test(sql)) return sql;
-  // Remove trailing semicolons/whitespace, then append MODE EDGES
-  return sql.replace(/\s*;?\s*$/, "") + " MODE EDGES";
+
+  // Remove trailing semicolons/whitespace
+  let edgeSql = sql.replace(/\s*;?\s*$/, "");
+
+  // Replace SELECT list with SELECT * (edge mode columns differ from node mode)
+  edgeSql = edgeSql.replace(
+    /^(\s*SELECT)\s+.+?(\s+FROM\s+TRAVERSE\b)/is,
+    "$1 *$2"
+  );
+
+  // Insert MODE EDGES after the TRAVERSE core:
+  //   TRAVERSE <edge> FROM <table>(<key>) [DIRECTION <dir>] [MAX_DEPTH <n>]
+  const corePattern =
+    /\bFROM\s+TRAVERSE\s+\S+\s+FROM\s+\S+\s*\([^)]*\)(?:\s+DIRECTION\s+(?:IN|OUT|BOTH))?(?:\s+MAX_DEPTH\s+\d+)?/i;
+  const match = corePattern.exec(edgeSql);
+  if (match) {
+    const pos = match.index + match[0].length;
+    return edgeSql.substring(0, pos) + " MODE EDGES" + edgeSql.substring(pos);
+  }
+
+  // Fallback: append at end (non-TRAVERSE or unusual SQL)
+  return edgeSql + " MODE EDGES";
 }
 
 /** Column index lookup for a result set. */
@@ -107,6 +132,9 @@ export function classifyColumns(columns: string[]): {
  *
  * Expected meta-columns: __node (PK), __depth, __source (optional).
  * All other columns are user attributes.
+ *
+ * When __node is absent (user selected only __depth or __source),
+ * each row becomes a unique node using its row index as a fallback PK.
  */
 export function parseNodesFromResult(
   columns: string[],
@@ -114,13 +142,18 @@ export function parseNodesFromResult(
 ): GraphViewNode[] {
   const nodeIdx = colIndex(columns, "__node");
   const sourceIdx = colIndex(columns, "__source");
-  if (nodeIdx === -1) return [];
+  const hasNodeCol = nodeIdx !== -1;
+
+  // Need at least one node meta-column to be a graph result
+  if (!isNodeCentricResult(columns)) return [];
 
   const seen = new Set<string>();
   const nodes: GraphViewNode[] = [];
 
-  for (const row of rows) {
-    const pk = String(row[nodeIdx] ?? "");
+  for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+    const row = rows[rowIdx];
+    // Use __node PK if available, otherwise row index as fallback
+    const pk = hasNodeCol ? String(row[nodeIdx] ?? "") : String(rowIdx);
     // Determine table from __source or use a generic label
     const table = sourceIdx >= 0 ? String(row[sourceIdx] ?? "node") : "node";
     const id = `${table}:${pk}`;
