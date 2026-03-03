@@ -21,6 +21,7 @@ import {
   clearHistory,
   type HistoryEntry,
 } from "@/lib/query-history";
+import { isTraverseQuery, buildEdgeQuery } from "@/lib/graph-query-utils";
 
 interface QueryTab {
   id: string;
@@ -30,6 +31,8 @@ interface QueryTab {
   results: {
     columns: string[];
     rows: (string | number | boolean | null)[][];
+    edgeColumns?: string[];
+    edgeRows?: (string | number | boolean | null)[][];
     error?: string | null;
     durationMs?: number;
   } | null;
@@ -98,9 +101,14 @@ export function QueryEditor({
 
       const startTime = performance.now();
       try {
-        const res = await fetch("/api/query", {
+        // Execute the primary query
+        const fetchOpts = {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+        };
+
+        const primaryFetch = fetch("/api/query", {
+          ...fetchOpts,
           body: JSON.stringify({
             sql,
             database: activeTab.database,
@@ -108,6 +116,20 @@ export function QueryEditor({
           }),
         });
 
+        // If this is a TRAVERSE query, also fire the MODE EDGES variant
+        const isTraverse = isTraverseQuery(sql);
+        const edgeFetch = isTraverse
+          ? fetch("/api/query", {
+              ...fetchOpts,
+              body: JSON.stringify({
+                sql: buildEdgeQuery(sql),
+                database: activeTab.database,
+                connection: connectionParams,
+              }),
+            })
+          : null;
+
+        const res = await primaryFetch;
         const durationMs = Math.round(performance.now() - startTime);
 
         if (!res.ok) {
@@ -129,6 +151,23 @@ export function QueryEditor({
         }
 
         const data = await res.json();
+
+        // Await edge results if available (don't fail the main query if edges fail)
+        let edgeColumns: string[] | undefined;
+        let edgeRows: (string | number | boolean | null)[][] | undefined;
+        if (edgeFetch) {
+          try {
+            const edgeRes = await edgeFetch;
+            if (edgeRes.ok) {
+              const edgeData = await edgeRes.json();
+              edgeColumns = edgeData.columns || [];
+              edgeRows = edgeData.rows || [];
+            }
+          } catch {
+            // Edge query failure is non-fatal — graph view just won't have edges
+          }
+        }
+
         addToHistory(sql, activeTab.database, durationMs);
         setTabs((prev) =>
           prev.map((t) =>
@@ -139,6 +178,8 @@ export function QueryEditor({
                   results: {
                     columns: data.columns || [],
                     rows: data.rows || [],
+                    edgeColumns,
+                    edgeRows,
                     durationMs,
                   },
                 }
@@ -373,6 +414,8 @@ export function QueryEditor({
               <QueryResults
                 columns={activeTab.results.columns}
                 rows={activeTab.results.rows}
+                edgeColumns={activeTab.results.edgeColumns}
+                edgeRows={activeTab.results.edgeRows}
                 error={activeTab.results.error}
                 durationMs={activeTab.results.durationMs}
                 isLoading={activeTab.isExecuting}
