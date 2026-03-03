@@ -39,13 +39,78 @@ export function isTraverseQuery(sql: string): boolean {
 }
 
 /**
- * Build an edge-mode variant of a TRAVERSE query by appending MODE EDGES.
+ * Build an edge-mode variant of a TRAVERSE query.
+ *
+ * 1. Replaces the SELECT list with `*` (edge mode has a different output schema).
+ * 2. Inserts MODE EDGES in the correct grammar position — after the TRAVERSE core
+ *    (edge_type, FROM table(key), DIRECTION, MAX_DEPTH) and before WHERE/FETCH.
+ *
  * If the query already has MODE EDGES, returns it unchanged.
  */
 export function buildEdgeQuery(sql: string): string {
   if (/\bMODE\s+EDGES\b/i.test(sql)) return sql;
-  // Remove trailing semicolons/whitespace, then append MODE EDGES
-  return sql.replace(/\s*;?\s*$/, "") + " MODE EDGES";
+
+  // Remove trailing semicolons/whitespace
+  let edgeSql = sql.replace(/\s*;?\s*$/, "");
+
+  // Replace SELECT list with SELECT * (edge mode columns differ from node mode)
+  // Use [\s\S] instead of . with 's' flag for ES2017 compatibility
+  edgeSql = edgeSql.replace(
+    /^(\s*SELECT)\s+[\s\S]+?(\s+FROM\s+TRAVERSE\b)/i,
+    "$1 *$2"
+  );
+
+  // Strip ORDER BY and LIMIT — they may reference node-mode columns
+  // that don't exist in edge mode (e.g. ORDER BY name).
+  edgeSql = edgeSql.replace(/\s+ORDER\s+BY\s+[\s\S]+$/i, "");
+  edgeSql = edgeSql.replace(/\s+LIMIT\s+\d+\s*$/i, "");
+
+  // Insert MODE EDGES after the TRAVERSE core:
+  //   TRAVERSE <edge> FROM <table>(<key>) [DIRECTION <dir>] [MAX_DEPTH <n>]
+  const corePattern =
+    /\bFROM\s+TRAVERSE\s+\S+\s+FROM\s+\S+\s*\([^)]*\)(?:\s+DIRECTION\s+(?:IN|OUT|BOTH))?(?:\s+MAX_DEPTH\s+\d+)?/i;
+  const match = corePattern.exec(edgeSql);
+  if (match) {
+    const pos = match.index + match[0].length;
+    return edgeSql.substring(0, pos) + " MODE EDGES" + edgeSql.substring(pos);
+  }
+
+  // Fallback: append at end (non-TRAVERSE or unusual SQL)
+  return edgeSql + " MODE EDGES";
+}
+
+/**
+ * Parse the starting node from a TRAVERSE query.
+ * Extracts the source table and primary key from "FROM TRAVERSE <edge> FROM <table>(<pk>)".
+ * Returns null if the pattern is not found.
+ */
+export function parseTraverseSource(
+  sql: string
+): { table: string; pk: string } | null {
+  const match = sql.match(
+    /\bFROM\s+TRAVERSE\s+\S+\s+FROM\s+(\w+)\s*\(\s*([^)]+?)\s*\)/i
+  );
+  if (!match) return null;
+  return { table: match[1], pk: match[2] };
+}
+
+/**
+ * Build a query to fetch the starting (source) node of a TRAVERSE.
+ * The TRAVERSE result set does not include the starting node (depth 0),
+ * so we fetch it separately for use in the graph visualization.
+ *
+ * Returns null if the source cannot be parsed from the SQL.
+ */
+export function buildSourceNodeQuery(sql: string): string | null {
+  const source = parseTraverseSource(sql);
+  if (!source) return null;
+
+  // Quote numeric PKs as-is, quote string PKs with single quotes
+  const pkLiteral = /^\d+$/.test(source.pk)
+    ? source.pk
+    : `'${source.pk.replace(/'/g, "''")}'`;
+
+  return `SELECT * FROM ${source.table} WHERE id = ${pkLiteral}`;
 }
 
 /** Column index lookup for a result set. */
@@ -107,6 +172,9 @@ export function classifyColumns(columns: string[]): {
  *
  * Expected meta-columns: __node (PK), __depth, __source (optional).
  * All other columns are user attributes.
+ *
+ * When __node is absent (user selected only __depth or __source),
+ * each row becomes a unique node using its row index as a fallback PK.
  */
 export function parseNodesFromResult(
   columns: string[],
@@ -114,13 +182,18 @@ export function parseNodesFromResult(
 ): GraphViewNode[] {
   const nodeIdx = colIndex(columns, "__node");
   const sourceIdx = colIndex(columns, "__source");
-  if (nodeIdx === -1) return [];
+  const hasNodeCol = nodeIdx !== -1;
+
+  // Need at least one node meta-column to be a graph result
+  if (!isNodeCentricResult(columns)) return [];
 
   const seen = new Set<string>();
   const nodes: GraphViewNode[] = [];
 
-  for (const row of rows) {
-    const pk = String(row[nodeIdx] ?? "");
+  for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+    const row = rows[rowIdx];
+    // Use __node PK if available, otherwise row index as fallback
+    const pk = hasNodeCol ? String(row[nodeIdx] ?? "") : String(rowIdx);
     // Determine table from __source or use a generic label
     const table = sourceIdx >= 0 ? String(row[sourceIdx] ?? "node") : "node";
     const id = `${table}:${pk}`;
@@ -210,17 +283,61 @@ function detectEdgeType(columns: string[]): string | null {
 }
 
 /**
- * Build complete graph data from both node-centric and edge-centric results.
- * The node result provides node positions/attributes, the edge result provides connections.
+ * Build a GraphViewNode from a source-node query result (SELECT * FROM table WHERE id = pk).
+ * Returns null if the data is missing or incomplete.
+ */
+function parseSourceNode(
+  sourceColumns: string[] | undefined,
+  sourceRows: CellValue[][] | undefined
+): GraphViewNode | null {
+  if (!sourceColumns || !sourceRows || sourceRows.length === 0) return null;
+
+  const row = sourceRows[0];
+  // Look for the "id" column to get the PK
+  const idIdx = colIndex(sourceColumns, "id");
+  if (idIdx === -1) return null;
+
+  const pk = String(row[idIdx] ?? "");
+
+  // Collect attributes (all columns except id)
+  const attributes: Record<string, CellValue> = {};
+  for (let i = 0; i < sourceColumns.length; i++) {
+    if (i !== idIdx) {
+      attributes[sourceColumns[i]] = row[i];
+    }
+  }
+
+  // Label: use a display-friendly column (name, title, label) or fallback to PK
+  const labelCol = sourceColumns.find((c) =>
+    ["name", "title", "label", "username", "email"].includes(c.toLowerCase())
+  );
+  const label = labelCol
+    ? String(row[sourceColumns.indexOf(labelCol)] ?? pk)
+    : pk;
+
+  return { id: "", label, table: "", pk, attributes }; // id/table set by caller
+}
+
+/**
+ * Build complete graph data from node-centric and edge-centric results,
+ * plus an optional source node (the starting node of the TRAVERSE).
+ *
+ * The TRAVERSE result set does not include the starting node (depth 0),
+ * so it is fetched separately and merged here for a complete graph.
  */
 export function buildGraphData(
   nodeColumns: string[],
   nodeRows: CellValue[][],
   edgeColumns: string[],
-  edgeRows: CellValue[][]
+  edgeRows: CellValue[][],
+  sourceNodeColumns?: string[],
+  sourceNodeRows?: CellValue[][]
 ): GraphViewData {
   const nodes = parseNodesFromResult(nodeColumns, nodeRows);
   const edges = parseEdgesFromResult(edgeColumns, edgeRows);
+
+  // Parse source node data (the starting node of the TRAVERSE)
+  const sourceNode = parseSourceNode(sourceNodeColumns, sourceNodeRows);
 
   // Build a set of node IDs for edge resolution
   const nodeById = new Map<string, GraphViewNode>();
@@ -239,30 +356,33 @@ export function buildGraphData(
     };
   });
 
-  // Add placeholder nodes for edge endpoints that aren't in the node set
+  // Add missing nodes for edge endpoints that aren't in the node set.
+  // If we have source node data, use it instead of a bare placeholder.
   const nodeIds = new Set(nodes.map((n) => n.id));
   for (const edge of resolvedEdges) {
-    if (!nodeIds.has(edge.from)) {
-      const pk = edge.from.includes(":") ? edge.from.split(":")[1] : edge.from;
-      nodes.push({
-        id: edge.from,
-        label: pk,
-        table: "node",
-        pk,
-        attributes: {},
-      });
-      nodeIds.add(edge.from);
-    }
-    if (!nodeIds.has(edge.to)) {
-      const pk = edge.to.includes(":") ? edge.to.split(":")[1] : edge.to;
-      nodes.push({
-        id: edge.to,
-        label: pk,
-        table: "node",
-        pk,
-        attributes: {},
-      });
-      nodeIds.add(edge.to);
+    for (const endpointId of [edge.from, edge.to]) {
+      if (nodeIds.has(endpointId)) continue;
+
+      const pk = endpointId.includes(":") ? endpointId.split(":")[1] : endpointId;
+
+      // Check if the source node matches this endpoint
+      if (sourceNode && sourceNode.pk === pk) {
+        nodes.push({
+          ...sourceNode,
+          id: endpointId,
+          table: endpointId.includes(":") ? endpointId.split(":")[0] : "node",
+        });
+      } else {
+        // Bare placeholder (no data available)
+        nodes.push({
+          id: endpointId,
+          label: pk,
+          table: "node",
+          pk,
+          attributes: {},
+        });
+      }
+      nodeIds.add(endpointId);
     }
   }
 
