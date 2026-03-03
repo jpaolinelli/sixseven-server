@@ -41,6 +41,8 @@ interface QueryResultsProps {
   error?: string | null;
   durationMs?: number;
   isLoading?: boolean;
+  /** True when the executed SQL was a TRAVERSE query (fallback for graph detection). */
+  isTraverseResult?: boolean;
 }
 
 type SortDirection = "asc" | "desc" | null;
@@ -82,6 +84,7 @@ export function QueryResults({
   error,
   durationMs,
   isLoading,
+  isTraverseResult,
 }: QueryResultsProps) {
   const [sortColumn, setSortColumn] = useState<number | null>(null);
   const [sortDir, setSortDir] = useState<SortDirection>(null);
@@ -111,10 +114,10 @@ export function QueryResults({
   const graphContainerRef = useRef<HTMLDivElement>(null);
   const networkRef = useRef<any>(null);
 
-  // Detect graph results
+  // Detect graph results (meta-column detection OR TRAVERSE query fallback)
   const hasGraphResult = useMemo(
-    () => isNodeCentricResult(columns),
-    [columns]
+    () => isNodeCentricResult(columns) || !!isTraverseResult,
+    [columns, isTraverseResult]
   );
   const hasEdgeData = useMemo(
     () => !!(edgeColumns && edgeColumns.length > 0 && edgeRows && edgeRows.length > 0),

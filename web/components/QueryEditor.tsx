@@ -35,6 +35,7 @@ interface QueryTab {
     edgeRows?: (string | number | boolean | null)[][];
     error?: string | null;
     durationMs?: number;
+    isTraverseResult?: boolean;
   } | null;
   isExecuting: boolean;
 }
@@ -181,6 +182,7 @@ export function QueryEditor({
                     edgeColumns,
                     edgeRows,
                     durationMs,
+                    isTraverseResult: isTraverse,
                   },
                 }
               : t
@@ -419,6 +421,7 @@ export function QueryEditor({
                 error={activeTab.results.error}
                 durationMs={activeTab.results.durationMs}
                 isLoading={activeTab.isExecuting}
+                isTraverseResult={activeTab.results.isTraverseResult}
               />
             ) : activeTab.isExecuting ? (
               <QueryResults
