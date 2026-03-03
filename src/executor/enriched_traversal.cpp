@@ -85,9 +85,9 @@ Result<void> EnrichedTraversalOperator::run_bfs() {
     // BFS queue: (node_pk, depth, source_pk).
     std::deque<TraversalResult> queue;
 
-    // Seed the BFS with the start node.
+    // Seed the BFS with the start node (no incoming edge, so empty edge_properties).
     visited.insert(config_.start_key);
-    queue.push_back({config_.start_key, 0, Value()});
+    queue.push_back({config_.start_key, 0, Value(), {}});
 
     while (!queue.empty()) {
         auto current = std::move(queue.front());
@@ -121,7 +121,7 @@ Result<void> EnrichedTraversalOperator::run_bfs() {
             }
 
             visited.insert(neighbor_pk);
-            queue.push_back({neighbor_pk, current.depth + 1, current.node_pk});
+            queue.push_back({neighbor_pk, current.depth + 1, current.node_pk, edge.properties});
         }
     }
 
@@ -233,6 +233,18 @@ Result<void> EnrichedTraversalOperator::enrich_results() {
         tuple.values.push_back(bfs.node_pk);
         tuple.values.push_back(Value(static_cast<int64_t>(bfs.depth)));
         tuple.values.push_back(bfs.source_pk);
+
+        // Edge property values (after meta-columns).
+        // The number of expected properties is schema_.column_count() minus
+        // target_column_count_ minus 3 (meta-columns).
+        size_t expected_props = schema_.column_count() - target_column_count_ - 3;
+        for (size_t i = 0; i < expected_props; ++i) {
+            if (i < bfs.edge_properties.size()) {
+                tuple.values.push_back(bfs.edge_properties[i]);
+            } else {
+                tuple.values.push_back(Value()); // NULL for missing properties
+            }
+        }
 
         enriched_results_.push_back(std::move(tuple));
     }

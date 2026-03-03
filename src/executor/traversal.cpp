@@ -69,7 +69,7 @@ Result<void> TraversalOperator::run_bfs() {
 
     // Seed the BFS with the start node.
     visited.insert(config_.start_key);
-    queue.push_back({config_.start_key, 0, Value()});
+    queue.push_back({config_.start_key, 0, Value(), {}});
 
     while (!queue.empty()) {
         auto current = std::move(queue.front());
@@ -116,7 +116,7 @@ Result<void> TraversalOperator::run_bfs() {
                 edges_.push_back(std::move(edge));
             }
 
-            queue.push_back({neighbor_pk, current.depth + 1, current.node_pk});
+            queue.push_back({neighbor_pk, current.depth + 1, current.node_pk, {}});
         }
     }
 
