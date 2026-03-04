@@ -12,6 +12,7 @@ add_library(giodb_vector STATIC
     ollama_provider.cpp
     openai_provider.cpp
     builtin_provider.cpp
+    pre_tokenizer.cpp
     text_normalizer.cpp
     tokenizer.cpp
     tokenizer_json_loader.cpp
