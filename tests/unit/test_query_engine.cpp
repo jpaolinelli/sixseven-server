@@ -967,3 +967,39 @@ TEST_F(QueryEngineGraphTest, LinkWithInvalidUuidFails) {
 
     exec_error("LINK nodes('not-a-uuid') TO nodes('also-bad') VIA links", StatusCode::TYPE_ERROR);
 }
+
+// =============================================================================
+// GDB-313: TRAVERSE / SHORTEST PATH with UUID primary keys (key coercion)
+// =============================================================================
+
+TEST_F(QueryEngineGraphTest, TraverseWithUuidPrimaryKey) {
+    exec_ok("CREATE TABLE people (id UUID PRIMARY KEY, name VARCHAR)");
+    exec_ok("INSERT INTO people VALUES "
+            "('6f2fff6c-9762-4191-86e1-d34597e3c75a', 'Alice')");
+    exec_ok("INSERT INTO people VALUES "
+            "('d1458b55-f0bf-44d4-b191-e52f1ef1f60a', 'Bob')");
+    exec_ok("CREATE EDGE TYPE follows FROM people TO people");
+    exec_ok("LINK people('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
+            "TO people('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA follows");
+
+    auto qr = exec_ok("SELECT name, __depth "
+                      "FROM TRAVERSE follows "
+                      "FROM people('6f2fff6c-9762-4191-86e1-d34597e3c75a') DIRECTION OUT FETCH");
+    ASSERT_GE(qr.rows.size(), 1u);
+}
+
+TEST_F(QueryEngineGraphTest, ShortestPathWithUuidPrimaryKey) {
+    exec_ok("CREATE TABLE people (id UUID PRIMARY KEY, name VARCHAR)");
+    exec_ok("INSERT INTO people VALUES "
+            "('6f2fff6c-9762-4191-86e1-d34597e3c75a', 'Alice')");
+    exec_ok("INSERT INTO people VALUES "
+            "('d1458b55-f0bf-44d4-b191-e52f1ef1f60a', 'Bob')");
+    exec_ok("CREATE EDGE TYPE follows FROM people TO people");
+    exec_ok("LINK people('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
+            "TO people('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA follows");
+
+    auto qr = exec_ok("SHORTEST PATH "
+                      "FROM people('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
+                      "TO people('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA follows");
+    ASSERT_GE(qr.rows.size(), 1u);
+}
