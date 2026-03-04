@@ -71,6 +71,12 @@ protected:
         EXPECT_EQ(result.error().code, expected);
     }
 
+    static int64_t val_to_int64(const Value& v) {
+        if (v.type_id() == TypeId::INT32)
+            return v.as_int32();
+        return v.as_int64();
+    }
+
     DiskManager dm_;
     Catalog catalog_;
     std::filesystem::path data_dir_;
@@ -109,14 +115,14 @@ TEST_F(EnrichedTraversalTest, BasicEnrichment) {
 
     // Verify enriched data: id column matches __node meta-column.
     for (const auto& row : qr.rows) {
-        EXPECT_EQ(row[0].as_int32(), static_cast<int32_t>(row[node_idx].as_int64()))
+        EXPECT_EQ(row[0].as_int32(), static_cast<int32_t>(val_to_int64(row[node_idx])))
             << "id should match __node for row";
     }
 
     // Verify depth 1 nodes have source=1.
     for (const auto& row : qr.rows) {
-        if (row[depth_idx].as_int64() == 1) {
-            EXPECT_EQ(row[source_idx].as_int64(), 1);
+        if (val_to_int64(row[depth_idx]) == 1) {
+            EXPECT_EQ(val_to_int64(row[source_idx]), 1);
         }
     }
 
@@ -142,7 +148,7 @@ TEST_F(EnrichedTraversalTest, ColumnSelection) {
     // Depth-1 names should be Bob and Jane (order may vary).
     std::vector<std::string> depth1_names;
     for (const auto& row : qr.rows) {
-        if (row[1].as_int64() == 1) {
+        if (val_to_int64(row[1]) == 1) {
             depth1_names.push_back(row[0].as_string());
         }
     }
@@ -203,9 +209,9 @@ TEST_F(EnrichedTraversalTest, OrderByAndLimit) {
     ASSERT_EQ(qr.rows.size(), 2u);
     // Depth 1 sorted: Bob, Jane — limit 2 picks both.
     EXPECT_EQ(qr.rows[0][0].as_string(), "Bob");
-    EXPECT_EQ(qr.rows[0][1].as_int64(), 1);
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 1);
     EXPECT_EQ(qr.rows[1][0].as_string(), "Jane");
-    EXPECT_EQ(qr.rows[1][1].as_int64(), 1);
+    EXPECT_EQ(val_to_int64(qr.rows[1][1]), 1);
 }
 
 // ============================================================================
@@ -231,7 +237,7 @@ TEST_F(EnrichedTraversalTest, DanglingEdge) {
 
     // Should get 1 row for node 999.
     ASSERT_EQ(qr.rows.size(), 1u);
-    EXPECT_EQ(qr.rows[0][2].as_int64(), 999); // __node = 999
+    EXPECT_EQ(val_to_int64(qr.rows[0][2]), 999); // __node = 999
 
     // Table columns should be NULL for the dangling edge.
     EXPECT_TRUE(qr.rows[0][0].is_null()) << "id should be NULL for dangling edge";

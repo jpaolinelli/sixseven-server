@@ -81,6 +81,13 @@ protected:
         }
     }
 
+    /// Extract an integer from a Value that may be INT32 or INT64.
+    static int64_t val_to_int64(const Value& v) {
+        if (v.type_id() == TypeId::INT32)
+            return v.as_int32();
+        return v.as_int64();
+    }
+
     /// Collect (from, to) pairs from edge query results.
     std::vector<std::pair<int64_t, int64_t>> collect_edges(const QueryResult& qr) {
         std::vector<std::pair<int64_t, int64_t>> edges;
@@ -93,7 +100,7 @@ protected:
                 to_idx = i;
         }
         for (const auto& row : qr.rows) {
-            edges.emplace_back(row[from_idx].as_int64(), row[to_idx].as_int64());
+            edges.emplace_back(val_to_int64(row[from_idx]), val_to_int64(row[to_idx]));
         }
         std::sort(edges.begin(), edges.end());
         return edges;
@@ -211,8 +218,8 @@ TEST_F(EdgeTraversalTest, WhereOnEdgeProperties) {
 
     // Only edge 1→3 (weight 0.8) passes the filter.
     ASSERT_EQ(qr.rows.size(), 1u);
-    EXPECT_EQ(qr.rows[0][0].as_int64(), 1);
-    EXPECT_EQ(qr.rows[0][1].as_int64(), 3);
+    EXPECT_EQ(val_to_int64(qr.rows[0][0]), 1);
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 3);
 }
 
 // ============================================================================
@@ -227,8 +234,8 @@ TEST_F(EdgeTraversalTest, OrderByAndLimit) {
     ASSERT_EQ(qr.rows.size(), 3u);
 
     // Depth 1 edges: 1→2, 1→3  (from=1, depth=max(0,1)=1)
-    EXPECT_EQ(qr.rows[0][2].as_int64(), 1); // depth
-    EXPECT_EQ(qr.rows[1][2].as_int64(), 1);
+    EXPECT_EQ(val_to_int64(qr.rows[0][2]), 1); // depth
+    EXPECT_EQ(val_to_int64(qr.rows[1][2]), 1);
 }
 
 // ============================================================================
@@ -334,8 +341,8 @@ TEST_F(EdgeTraversalTest, DepthIsMaxOfEndpoints) {
     // Build a map from (from, to) -> depth for verification.
     std::map<std::pair<int64_t, int64_t>, int64_t> edge_depths;
     for (const auto& row : qr.rows) {
-        auto key = std::make_pair(row[0].as_int64(), row[1].as_int64());
-        edge_depths[key] = row[2].as_int64();
+        auto key = std::make_pair(val_to_int64(row[0]), val_to_int64(row[1]));
+        edge_depths[key] = val_to_int64(row[2]);
     }
 
     EXPECT_EQ(edge_depths[std::make_pair(1L, 2L)], 1);

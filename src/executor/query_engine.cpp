@@ -573,6 +573,16 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
         }
     }
 
+    // Also detect inline column-level PRIMARY KEY declarations.
+    if (ts.pk_columns.empty()) {
+        for (const auto& col : stmt.columns) {
+            if (col.is_primary_key) {
+                ts.pk_columns = col.name;
+                break;
+            }
+        }
+    }
+
     // Validate AUTOINCREMENT constraints.
     for (size_t i = 0; i < stmt.columns.size(); ++i) {
         const auto& col = stmt.columns[i];
@@ -857,6 +867,60 @@ Result<QueryResult> QueryEngine::execute_drop_edge_type(const DropEdgeTypeStmt& 
 }
 
 // ---------------------------------------------------------------------------
+// LINK / UNLINK key coercion
+// ---------------------------------------------------------------------------
+
+Result<std::pair<Value, Value>> QueryEngine::coerce_link_keys(const std::string& edge_type,
+                                                              const Value& src_key,
+                                                              const Value& tgt_key) {
+    auto edge = catalog_.get_edge_type(edge_type);
+    if (!edge) {
+        return tl::unexpected(edge.error());
+    }
+
+    auto src_schema = catalog_.get_table_by_id(edge->source_table_id);
+    if (!src_schema) {
+        return tl::unexpected(src_schema.error());
+    }
+
+    auto tgt_schema = catalog_.get_table_by_id(edge->target_table_id);
+    if (!tgt_schema) {
+        return tl::unexpected(tgt_schema.error());
+    }
+
+    // Resolve PK type from schema.
+    auto resolve_pk_type = [](const TableSchema& schema) {
+        TypeId pk = TypeId::INT64;
+        if (!schema.pk_columns.empty()) {
+            for (const auto& col : schema.columns) {
+                if (col.name == schema.pk_columns) {
+                    pk = col.type_id;
+                    break;
+                }
+            }
+        }
+        return pk;
+    };
+
+    TypeId src_pk_type = resolve_pk_type(*src_schema);
+    TypeId tgt_pk_type = resolve_pk_type(*tgt_schema);
+
+    auto coerced_src = fit_to_storage(src_key, src_pk_type);
+    if (!coerced_src) {
+        return make_error(coerced_src.error().code,
+                          "LINK source key: " + coerced_src.error().message);
+    }
+
+    auto coerced_tgt = fit_to_storage(tgt_key, tgt_pk_type);
+    if (!coerced_tgt) {
+        return make_error(coerced_tgt.error().code,
+                          "LINK target key: " + coerced_tgt.error().message);
+    }
+
+    return ok(std::make_pair(std::move(*coerced_src), std::move(*coerced_tgt)));
+}
+
+// ---------------------------------------------------------------------------
 // LINK
 // ---------------------------------------------------------------------------
 
@@ -878,6 +942,13 @@ Result<QueryResult> QueryEngine::execute_link(const LinkStmt& stmt, const BoundS
         return make_error(tgt_key.error().code, tgt_key.error().message);
     }
 
+    // Coerce key values to match the PK types of the source/target tables.
+    auto coerced = coerce_link_keys(stmt.edge_type, *src_key, *tgt_key);
+    if (!coerced) {
+        return make_error(coerced.error().code, coerced.error().message);
+    }
+    auto& [coerced_src, coerced_tgt] = *coerced;
+
     // Evaluate property values.
     std::vector<Value> props;
     for (const auto& assign : stmt.properties) {
@@ -888,7 +959,7 @@ Result<QueryResult> QueryEngine::execute_link(const LinkStmt& stmt, const BoundS
         props.push_back(std::move(*val));
     }
 
-    auto result = graph_engine_->link(stmt.edge_type, *src_key, *tgt_key, props);
+    auto result = graph_engine_->link(stmt.edge_type, coerced_src, coerced_tgt, props);
     if (!result) {
         return make_error(result.error().code, result.error().message);
     }
@@ -922,7 +993,14 @@ Result<QueryResult> QueryEngine::execute_unlink(const UnlinkStmt& stmt,
         return make_error(tgt_key.error().code, tgt_key.error().message);
     }
 
-    auto result = graph_engine_->unlink(stmt.edge_type, *src_key, *tgt_key);
+    // Coerce key values to match the PK types of the source/target tables.
+    auto coerced = coerce_link_keys(stmt.edge_type, *src_key, *tgt_key);
+    if (!coerced) {
+        return make_error(coerced.error().code, coerced.error().message);
+    }
+    auto& [coerced_src, coerced_tgt] = *coerced;
+
+    auto result = graph_engine_->unlink(stmt.edge_type, coerced_src, coerced_tgt);
     if (!result) {
         return make_error(result.error().code, result.error().message);
     }

@@ -145,6 +145,7 @@ struct AstColumnDef {
     TypeSpec type;
     bool nullable = true;
     bool is_unique = false;
+    bool is_primary_key = false;
     bool is_autoincrement = false;
     ExprPtr default_expr;
     ExprPtr check_expr;

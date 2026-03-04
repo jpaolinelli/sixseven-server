@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace giodb {
@@ -198,6 +199,10 @@ private:
     /// Execute an EXPLAIN or EXPLAIN ANALYZE statement.
     [[nodiscard]] Result<QueryResult> execute_explain(const ExplainStmt& stmt,
                                                       const BoundStatement& bound);
+
+    /// Coerce LINK/UNLINK key values to match the PK types of the source/target tables.
+    [[nodiscard]] Result<std::pair<Value, Value>>
+    coerce_link_keys(const std::string& edge_type, const Value& src_key, const Value& tgt_key);
 
     /// Execute a DML/query via the Planner + Iterator pipeline.
     /// After successful DML on sys_providers, automatically reloads the provider cache.
