@@ -667,7 +667,9 @@ Result<TypeSpec> Parser::parse_type_spec() {
                     return tl::unexpected(param_val.error());
 
                 std::string name_lower = *param_name;
-                std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(),
+                std::transform(name_lower.begin(),
+                               name_lower.end(),
+                               name_lower.begin(),
                                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
                 if (name_lower == "source") {

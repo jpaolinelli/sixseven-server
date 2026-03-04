@@ -41,9 +41,8 @@ static void parse_error(std::string_view sql) {
 // -- Named-parameter syntax: source='...', provider='...' --------------------
 
 TEST(QA_GDB257, NamedParameterSourceThenProvider) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (id INT PRIMARY KEY, "
-        "vec EMBEDDING(384, source='title', provider='openai'))");
+    auto stmt = parse_one("CREATE TABLE t (id INT PRIMARY KEY, "
+                          "vec EMBEDDING(384, source='title', provider='openai'))");
     ASSERT_NE(stmt, nullptr);
     auto* create = dynamic_cast<const CreateTableStmt*>(stmt.get());
     ASSERT_NE(create, nullptr);
@@ -55,9 +54,8 @@ TEST(QA_GDB257, NamedParameterSourceThenProvider) {
 }
 
 TEST(QA_GDB257, NamedParameterProviderThenSource) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (id INT PRIMARY KEY, "
-        "vec EMBEDDING(384, provider='builtin/384', source='body'))");
+    auto stmt = parse_one("CREATE TABLE t (id INT PRIMARY KEY, "
+                          "vec EMBEDDING(384, provider='builtin/384', source='body'))");
     ASSERT_NE(stmt, nullptr);
     auto* create = dynamic_cast<const CreateTableStmt*>(stmt.get());
     ASSERT_NE(create, nullptr);
@@ -69,9 +67,8 @@ TEST(QA_GDB257, NamedParameterProviderThenSource) {
 // -- Positional syntax still works -------------------------------------------
 
 TEST(QA_GDB257, PositionalSyntaxStillWorks) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (id INT PRIMARY KEY, "
-        "vec EMBEDDING(384, description, 'openai'))");
+    auto stmt = parse_one("CREATE TABLE t (id INT PRIMARY KEY, "
+                          "vec EMBEDDING(384, description, 'openai'))");
     ASSERT_NE(stmt, nullptr);
     auto* create = dynamic_cast<const CreateTableStmt*>(stmt.get());
     ASSERT_NE(create, nullptr);
@@ -83,27 +80,23 @@ TEST(QA_GDB257, PositionalSyntaxStillWorks) {
 // -- Error cases -------------------------------------------------------------
 
 TEST(QA_GDB257, DuplicateSourceParameter) {
-    parse_error(
-        "CREATE TABLE t (id INT PRIMARY KEY, "
-        "vec EMBEDDING(384, source='a', source='b'))");
+    parse_error("CREATE TABLE t (id INT PRIMARY KEY, "
+                "vec EMBEDDING(384, source='a', source='b'))");
 }
 
 TEST(QA_GDB257, UnknownNamedParameter) {
-    parse_error(
-        "CREATE TABLE t (id INT PRIMARY KEY, "
-        "vec EMBEDDING(384, source='a', model='gpt'))");
+    parse_error("CREATE TABLE t (id INT PRIMARY KEY, "
+                "vec EMBEDDING(384, source='a', model='gpt'))");
 }
 
 TEST(QA_GDB257, MissingSourceParameter) {
-    parse_error(
-        "CREATE TABLE t (id INT PRIMARY KEY, "
-        "vec EMBEDDING(384, provider='openai'))");
+    parse_error("CREATE TABLE t (id INT PRIMARY KEY, "
+                "vec EMBEDDING(384, provider='openai'))");
 }
 
 TEST(QA_GDB257, MissingProviderParameter) {
-    parse_error(
-        "CREATE TABLE t (id INT PRIMARY KEY, "
-        "vec EMBEDDING(384, source='title'))");
+    parse_error("CREATE TABLE t (id INT PRIMARY KEY, "
+                "vec EMBEDDING(384, source='title'))");
 }
 
 } // namespace
