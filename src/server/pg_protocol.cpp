@@ -78,6 +78,23 @@ int32_t generate_secret_key() {
     return dist(rng);
 }
 
+/// Resolve the format code for a given column index per PostgreSQL protocol rules.
+/// - Empty vector: all columns text (0).
+/// - Single element: applies to all columns.
+/// - N elements: per-column format code.
+int16_t resolve_format_code(const std::vector<int16_t>& format_codes, size_t col_index) {
+    if (format_codes.empty()) {
+        return 0;
+    }
+    if (format_codes.size() == 1) {
+        return format_codes[0];
+    }
+    if (col_index < format_codes.size()) {
+        return format_codes[col_index];
+    }
+    return 0;
+}
+
 /// Case-insensitive string prefix check.
 bool starts_with_ci(std::string_view str, std::string_view prefix) {
     if (str.size() < prefix.size()) {
@@ -412,6 +429,107 @@ std::string value_to_pg_text(const Value& value) {
     }
     }
     return ""; // Unreachable.
+}
+
+// -- Value binary formatting --------------------------------------------------
+
+namespace {
+
+/// Write a big-endian int16 into a byte buffer.
+void push_be16(std::vector<uint8_t>& buf, int16_t val) {
+    auto uval = static_cast<uint16_t>(val);
+    buf.push_back(static_cast<uint8_t>((uval >> 8) & 0xFF));
+    buf.push_back(static_cast<uint8_t>(uval & 0xFF));
+}
+
+/// Write a big-endian int32 into a byte buffer.
+void push_be32(std::vector<uint8_t>& buf, int32_t val) {
+    auto uval = static_cast<uint32_t>(val);
+    buf.push_back(static_cast<uint8_t>((uval >> 24) & 0xFF));
+    buf.push_back(static_cast<uint8_t>((uval >> 16) & 0xFF));
+    buf.push_back(static_cast<uint8_t>((uval >> 8) & 0xFF));
+    buf.push_back(static_cast<uint8_t>(uval & 0xFF));
+}
+
+/// Write a big-endian int64 into a byte buffer.
+void push_be64(std::vector<uint8_t>& buf, int64_t val) {
+    auto uval = static_cast<uint64_t>(val);
+    buf.push_back(static_cast<uint8_t>((uval >> 56) & 0xFF));
+    buf.push_back(static_cast<uint8_t>((uval >> 48) & 0xFF));
+    buf.push_back(static_cast<uint8_t>((uval >> 40) & 0xFF));
+    buf.push_back(static_cast<uint8_t>((uval >> 32) & 0xFF));
+    buf.push_back(static_cast<uint8_t>((uval >> 24) & 0xFF));
+    buf.push_back(static_cast<uint8_t>((uval >> 16) & 0xFF));
+    buf.push_back(static_cast<uint8_t>((uval >> 8) & 0xFF));
+    buf.push_back(static_cast<uint8_t>(uval & 0xFF));
+}
+
+} // namespace
+
+std::vector<uint8_t> value_to_pg_binary(const Value& value) {
+    if (value.is_null()) {
+        return {}; // NULL is indicated by -1 length; caller handles it.
+    }
+
+    std::vector<uint8_t> buf;
+
+    switch (value.type_id()) {
+    case TypeId::BOOL:
+        buf.push_back(value.as_bool() ? 1 : 0);
+        break;
+    case TypeId::INT8:
+        // Maps to PG int2 (2 bytes big-endian).
+        push_be16(buf, static_cast<int16_t>(value.as_int8()));
+        break;
+    case TypeId::INT16:
+        push_be16(buf, value.as_int16());
+        break;
+    case TypeId::INT32:
+        push_be32(buf, value.as_int32());
+        break;
+    case TypeId::INT64:
+        push_be64(buf, value.as_int64());
+        break;
+    case TypeId::UINT8:
+        // Maps to PG int2 (2 bytes big-endian).
+        push_be16(buf, static_cast<int16_t>(value.as_uint8()));
+        break;
+    case TypeId::UINT16:
+        // Maps to PG int4 (4 bytes big-endian).
+        push_be32(buf, static_cast<int32_t>(value.as_uint16()));
+        break;
+    case TypeId::UINT32:
+        // Maps to PG int8 (8 bytes big-endian).
+        push_be64(buf, static_cast<int64_t>(value.as_uint32()));
+        break;
+    case TypeId::FLOAT32: {
+        float f = value.as_float32();
+        uint32_t bits = 0;
+        std::memcpy(&bits, &f, sizeof(bits));
+        push_be32(buf, static_cast<int32_t>(bits));
+        break;
+    }
+    case TypeId::FLOAT64: {
+        double d = value.as_float64();
+        uint64_t bits = 0;
+        std::memcpy(&bits, &d, sizeof(bits));
+        push_be64(buf, static_cast<int64_t>(bits));
+        break;
+    }
+    case TypeId::STRING: {
+        const auto& s = value.as_string();
+        buf.insert(buf.end(), s.begin(), s.end());
+        break;
+    }
+    default: {
+        // Unsupported types fall back to text representation.
+        std::string text = value_to_pg_text(value);
+        buf.insert(buf.end(), text.begin(), text.end());
+        break;
+    }
+    }
+
+    return buf;
 }
 
 // -- Parameter substitution ---------------------------------------------------
@@ -1338,9 +1456,10 @@ Result<size_t> PgProtocolHandler::handle_frontend_message(Connection& conn) {
 void PgProtocolHandler::send_query_result(Connection& conn, const QueryResult& qr) {
     if (!qr.column_names.empty()) {
         // SELECT: send RowDescription + DataRows + CommandComplete.
+        // Simple query always uses text format (empty format_codes).
         send_row_description(conn, qr);
         for (const auto& row : qr.rows) {
-            send_data_row(conn, row, qr.column_types);
+            send_data_row(conn, row, qr.column_types, {});
         }
     }
     send_command_complete(conn, build_command_complete_tag(qr));
@@ -1624,7 +1743,7 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
                 return;
             }
             if (!columns->empty()) {
-                send_row_description(conn, *columns);
+                send_row_description(conn, *columns, {});
             } else {
                 send_no_data(conn);
             }
@@ -1649,7 +1768,7 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
                 return;
             }
             if (!columns->empty()) {
-                send_row_description(conn, *columns);
+                send_row_description(conn, *columns, portal->result_format_codes);
             } else {
                 send_no_data(conn);
             }
@@ -1709,7 +1828,7 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
     if (!qr.column_names.empty()) {
         // SELECT: send DataRows + CommandComplete (RowDescription already sent by Describe).
         for (const auto& row : qr.rows) {
-            send_data_row(conn, row, qr.column_types);
+            send_data_row(conn, row, qr.column_types, portal.result_format_codes);
         }
     }
     send_command_complete(conn, build_command_complete_tag(qr));
@@ -1836,18 +1955,19 @@ void PgProtocolHandler::send_row_description(Connection& conn, const QueryResult
 }
 
 void PgProtocolHandler::send_row_description(Connection& conn,
-                                             const std::vector<ColumnDescription>& columns) {
+                                             const std::vector<ColumnDescription>& columns,
+                                             const std::vector<int16_t>& format_codes) {
     MessageWriter w;
     w.begin_message('T');
     w.write_int16(static_cast<int16_t>(columns.size()));
-    for (const auto& col : columns) {
-        w.write_cstring(col.name); // Column name.
-        w.write_int32(0);          // Table OID.
-        w.write_int16(0);          // Column attribute number.
-        w.write_int32(static_cast<int32_t>(type_to_pg_oid(col.type_id))); // Type OID.
-        w.write_int16(-1);                                                // Type size.
-        w.write_int32(-1);                                                // Type modifier.
-        w.write_int16(0);                                                 // Format code (text).
+    for (size_t i = 0; i < columns.size(); ++i) {
+        w.write_cstring(columns[i].name); // Column name.
+        w.write_int32(0);                 // Table OID.
+        w.write_int16(0);                 // Column attribute number.
+        w.write_int32(static_cast<int32_t>(type_to_pg_oid(columns[i].type_id))); // Type OID.
+        w.write_int16(-1);                                                       // Type size.
+        w.write_int32(-1);                                                       // Type modifier.
+        w.write_int16(resolve_format_code(format_codes, i));                     // Format code.
     }
     auto msg = w.finish();
     conn.enqueue_write(msg.data(), msg.size());
@@ -1855,16 +1975,22 @@ void PgProtocolHandler::send_row_description(Connection& conn,
 
 void PgProtocolHandler::send_data_row(Connection& conn,
                                       const std::vector<Value>& row,
-                                      const std::vector<TypeId>& /*types*/) {
-    // TODO(GDB-202): Respect result_format_codes from Bind to send binary
-    // format when requested. Currently always sends text format (code 0).
+                                      const std::vector<TypeId>& /*types*/,
+                                      const std::vector<int16_t>& format_codes) {
     MessageWriter w;
     w.begin_message('D');
     w.write_int16(static_cast<int16_t>(row.size()));
-    for (const auto& val : row) {
+    for (size_t i = 0; i < row.size(); ++i) {
+        const auto& val = row[i];
         if (val.is_null()) {
             w.write_int32(-1); // NULL indicator.
+        } else if (resolve_format_code(format_codes, i) == 1) {
+            // Binary format.
+            auto bin = value_to_pg_binary(val);
+            w.write_int32(static_cast<int32_t>(bin.size()));
+            w.write_bytes(bin.data(), bin.size());
         } else {
+            // Text format.
             std::string text = value_to_pg_text(val);
             w.write_int32(static_cast<int32_t>(text.size()));
             w.write_bytes(reinterpret_cast<const uint8_t*>(text.data()), text.size());
