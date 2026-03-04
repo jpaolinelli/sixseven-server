@@ -413,6 +413,301 @@ std::string value_to_pg_text(const Value& value) {
     return ""; // Unreachable.
 }
 
+// -- Parameter substitution ---------------------------------------------------
+
+namespace {
+
+/// Return true if the OID is a numeric type that should be unquoted in SQL.
+bool is_numeric_oid(uint32_t oid) {
+    return oid == PG_OID_INT2 || oid == PG_OID_INT4 || oid == PG_OID_INT8 || oid == PG_OID_FLOAT4 ||
+           oid == PG_OID_FLOAT8 || oid == PG_OID_NUMERIC;
+}
+
+/// Validate that a string looks like a valid numeric literal.
+/// Accepts optional leading minus, digits, optional decimal point + digits,
+/// optional 'e'/'E' exponent with optional sign.
+bool is_valid_numeric_literal(const std::string& s) {
+    if (s.empty()) {
+        return false;
+    }
+    size_t i = 0;
+    if (s[i] == '-' || s[i] == '+') {
+        ++i;
+    }
+    if (i == s.size()) {
+        return false;
+    }
+    bool has_digit = false;
+    while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) {
+        has_digit = true;
+        ++i;
+    }
+    if (i < s.size() && s[i] == '.') {
+        ++i;
+        while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) {
+            has_digit = true;
+            ++i;
+        }
+    }
+    if (!has_digit) {
+        return false;
+    }
+    if (i < s.size() && (s[i] == 'e' || s[i] == 'E')) {
+        ++i;
+        if (i < s.size() && (s[i] == '+' || s[i] == '-')) {
+            ++i;
+        }
+        if (i == s.size() || !std::isdigit(static_cast<unsigned char>(s[i]))) {
+            return false;
+        }
+        while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) {
+            ++i;
+        }
+    }
+    return i == s.size();
+}
+
+/// Escape a string value for embedding in a SQL single-quoted literal.
+/// Doubles any single quotes inside the string.
+std::string escape_sql_string(const std::string& s) {
+    std::string result;
+    result.reserve(s.size() + s.size() / 8);
+    for (char c : s) {
+        if (c == '\'') {
+            result += "''";
+        } else {
+            result += c;
+        }
+    }
+    return result;
+}
+
+/// Format a single parameter value as a SQL literal.
+/// Returns the SQL literal string (e.g. "42", "'hello'", "NULL").
+Result<std::string> format_param_as_sql(const std::optional<std::string>& value, uint32_t oid) {
+    if (!value.has_value()) {
+        return ok(std::string("NULL"));
+    }
+    const auto& val = *value;
+
+    if (oid == PG_OID_BOOL) {
+        // Normalize boolean values.
+        if (val == "t" || val == "true" || val == "TRUE" || val == "1") {
+            return ok(std::string("TRUE"));
+        }
+        if (val == "f" || val == "false" || val == "FALSE" || val == "0") {
+            return ok(std::string("FALSE"));
+        }
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "invalid boolean parameter value: '" + val + "'");
+    }
+
+    if (is_numeric_oid(oid)) {
+        if (!is_valid_numeric_literal(val)) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "invalid numeric parameter value: '" + val + "'");
+        }
+        return ok(val);
+    }
+
+    // All other types (text, date, timestamp, etc.): single-quote with escaping.
+    return ok("'" + escape_sql_string(val) + "'");
+}
+
+} // namespace
+
+Result<std::string>
+substitute_parameters(const std::string& sql,
+                      const std::vector<std::optional<std::string>>& param_values,
+                      const std::vector<uint32_t>& param_oids) {
+    if (param_values.empty()) {
+        return ok(sql);
+    }
+
+    std::string result;
+    result.reserve(sql.size() + param_values.size() * 8);
+
+    bool in_single_quote = false;
+    bool in_double_quote = false;
+
+    for (size_t i = 0; i < sql.size(); ++i) {
+        char c = sql[i];
+
+        // Track quote state so we don't substitute inside string literals.
+        if (c == '\'' && !in_double_quote) {
+            in_single_quote = !in_single_quote;
+            result += c;
+            continue;
+        }
+        if (c == '"' && !in_single_quote) {
+            in_double_quote = !in_double_quote;
+            result += c;
+            continue;
+        }
+
+        if (in_single_quote || in_double_quote) {
+            result += c;
+            continue;
+        }
+
+        if (c == '$' && i + 1 < sql.size() &&
+            std::isdigit(static_cast<unsigned char>(sql[i + 1]))) {
+            // Parse the parameter number ($1, $2, ..., $N).
+            size_t start = i + 1;
+            size_t end = start;
+            while (end < sql.size() && std::isdigit(static_cast<unsigned char>(sql[end]))) {
+                ++end;
+            }
+            auto param_num_str = sql.substr(start, end - start);
+            int param_num = std::stoi(param_num_str);
+
+            if (param_num < 1 || static_cast<size_t>(param_num) > param_values.size()) {
+                return make_error(StatusCode::INVALID_ARGUMENT,
+                                  "parameter $" + param_num_str + " out of range (have " +
+                                      std::to_string(param_values.size()) + " parameters)");
+            }
+
+            size_t idx = static_cast<size_t>(param_num - 1);
+            uint32_t oid = idx < param_oids.size() ? param_oids[idx] : 0;
+            auto formatted = format_param_as_sql(param_values[idx], oid);
+            if (!formatted) {
+                return make_error(formatted.error().code, formatted.error().message);
+            }
+            result += *formatted;
+            i = end - 1; // -1 because the loop will ++i.
+        } else {
+            result += c;
+        }
+    }
+
+    return ok(std::move(result));
+}
+
+namespace {
+
+/// Split a comma-separated SQL parameter list into raw SQL expressions.
+/// Preserves the exact text of each expression (including quotes for strings).
+/// For example, "42, 'hello', NULL" → {"42", "'hello'", "NULL"}.
+std::vector<std::string> split_execute_expressions(const std::string& params_str) {
+    std::vector<std::string> exprs;
+    if (params_str.empty()) {
+        return exprs;
+    }
+
+    size_t i = 0;
+    auto skip_ws = [&]() {
+        while (i < params_str.size() && (params_str[i] == ' ' || params_str[i] == '\t')) {
+            ++i;
+        }
+    };
+
+    while (i < params_str.size()) {
+        skip_ws();
+        if (i >= params_str.size()) {
+            break;
+        }
+
+        size_t start = i;
+        if (params_str[i] == '\'') {
+            // Quoted string literal — consume the whole string including quotes.
+            ++i; // Skip opening quote.
+            while (i < params_str.size()) {
+                if (params_str[i] == '\'') {
+                    ++i;
+                    if (i < params_str.size() && params_str[i] == '\'') {
+                        ++i; // Escaped quote — skip both.
+                    } else {
+                        break; // End of string.
+                    }
+                } else {
+                    ++i;
+                }
+            }
+        } else {
+            // Unquoted token: read until comma or end.
+            while (i < params_str.size() && params_str[i] != ',') {
+                ++i;
+            }
+        }
+
+        auto token = params_str.substr(start, i - start);
+        // Trim trailing whitespace.
+        auto end_pos = token.find_last_not_of(" \t");
+        if (end_pos != std::string::npos) {
+            token = token.substr(0, end_pos + 1);
+        }
+        exprs.push_back(std::move(token));
+
+        skip_ws();
+        if (i < params_str.size() && params_str[i] == ',') {
+            ++i; // Skip comma.
+        }
+    }
+
+    return exprs;
+}
+
+/// Replace $1, $2, ... in SQL with raw SQL expression strings.
+/// Used for SQL-level EXECUTE where parameters are already SQL expressions.
+Result<std::string> substitute_sql_expressions(const std::string& sql,
+                                               const std::vector<std::string>& exprs) {
+    if (exprs.empty()) {
+        return ok(sql);
+    }
+
+    std::string result;
+    result.reserve(sql.size() + exprs.size() * 8);
+
+    bool in_single_quote = false;
+    bool in_double_quote = false;
+
+    for (size_t i = 0; i < sql.size(); ++i) {
+        char c = sql[i];
+
+        if (c == '\'' && !in_double_quote) {
+            in_single_quote = !in_single_quote;
+            result += c;
+            continue;
+        }
+        if (c == '"' && !in_single_quote) {
+            in_double_quote = !in_double_quote;
+            result += c;
+            continue;
+        }
+
+        if (in_single_quote || in_double_quote) {
+            result += c;
+            continue;
+        }
+
+        if (c == '$' && i + 1 < sql.size() &&
+            std::isdigit(static_cast<unsigned char>(sql[i + 1]))) {
+            size_t start = i + 1;
+            size_t end = start;
+            while (end < sql.size() && std::isdigit(static_cast<unsigned char>(sql[end]))) {
+                ++end;
+            }
+            auto param_num_str = sql.substr(start, end - start);
+            int param_num = std::stoi(param_num_str);
+
+            if (param_num < 1 || static_cast<size_t>(param_num) > exprs.size()) {
+                return make_error(StatusCode::INVALID_ARGUMENT,
+                                  "parameter $" + param_num_str + " out of range (have " +
+                                      std::to_string(exprs.size()) + " parameters)");
+            }
+
+            result += exprs[static_cast<size_t>(param_num - 1)];
+            i = end - 1;
+        } else {
+            result += c;
+        }
+    }
+
+    return ok(std::move(result));
+}
+
+} // namespace
+
 // -- SQL splitting ------------------------------------------------------------
 
 std::vector<std::string> split_sql_statements(std::string_view sql) {
@@ -1160,16 +1455,30 @@ std::optional<Result<void>> PgProtocolHandler::try_handle_execute(Connection& co
                                        "prepared statement \"" + stmt_name + "\" does not exist"));
     }
 
-    // TODO(GDB-200): Substitute parameter values into the SQL.
-    // For now, execute the prepared SQL directly.
     if (!query_executor_) {
         send_error_response(conn, "ERROR", "XX000", "no query executor configured");
         return Result<void>(make_error(StatusCode::INTERNAL_ERROR, "no query executor"));
     }
 
-    GIODB_LOG_DEBUG("EXECUTE: stmt='{}', sql='{}'", stmt_name, stmt->sql);
+    // Substitute parameter expressions into the SQL.
+    // SQL-level EXECUTE parameters are raw SQL expressions (e.g. 42, 'hello', NULL),
+    // so they are substituted directly without additional quoting.
+    std::string exec_sql = stmt->sql;
+    if (!params_str.empty()) {
+        auto exprs = split_execute_expressions(params_str);
+        auto substituted = substitute_sql_expressions(stmt->sql, exprs);
+        if (!substituted) {
+            const auto& err = substituted.error();
+            send_error_response(
+                conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+            return Result<void>(tl::unexpected(err));
+        }
+        exec_sql = std::move(*substituted);
+    }
 
-    auto result = query_executor_(stmt->sql);
+    GIODB_LOG_DEBUG("EXECUTE: stmt='{}', sql='{}'", stmt_name, exec_sql);
+
+    auto result = query_executor_(exec_sql);
     if (!result) {
         const auto& err = result.error();
         send_error_response(conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
@@ -1223,19 +1532,19 @@ void PgProtocolHandler::handle_bind(Connection& conn, const uint8_t* payload, si
 
     // Parameter values.
     int16_t num_params = reader.read_int16();
-    std::vector<std::string> param_values;
+    std::vector<std::optional<std::string>> param_values;
     param_values.reserve(static_cast<size_t>(num_params));
     for (int16_t i = 0; i < num_params; ++i) {
         int32_t param_len = reader.read_int32();
         if (param_len == -1) {
-            param_values.emplace_back(); // NULL parameter (empty string placeholder).
+            param_values.emplace_back(std::nullopt); // NULL parameter.
         } else {
             const auto* data = reader.read_bytes(static_cast<size_t>(param_len));
             if (data != nullptr) {
-                param_values.emplace_back(reinterpret_cast<const char*>(data),
-                                          static_cast<size_t>(param_len));
+                param_values.emplace_back(std::string(reinterpret_cast<const char*>(data),
+                                                      static_cast<size_t>(param_len)));
             } else {
-                param_values.emplace_back();
+                param_values.emplace_back(std::nullopt);
             }
         }
     }
@@ -1263,6 +1572,7 @@ void PgProtocolHandler::handle_bind(Connection& conn, const uint8_t* payload, si
     portal.name = portal_name;
     portal.sql = stmt->sql;
     portal.param_values = std::move(param_values);
+    portal.param_oids = stmt->param_oids;
     portal.result_format_codes = std::move(result_formats);
     session_->add_portal(portal_name, std::move(portal));
 
@@ -1328,11 +1638,18 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
         return;
     }
 
-    GIODB_LOG_DEBUG("Execute: portal='{}', sql='{}'", portal_name, portal.sql);
+    // Substitute parameter values into the SQL.
+    auto substituted = substitute_parameters(portal.sql, portal.param_values, portal.param_oids);
+    if (!substituted) {
+        const auto& err = substituted.error();
+        send_error_response(conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+        error_in_extended_ = true;
+        return;
+    }
 
-    // TODO(GDB-200): Substitute portal.param_values into the SQL before
-    // execution. Currently parameters ($1, $2, ...) are not replaced.
-    auto result = query_executor_(portal.sql);
+    GIODB_LOG_DEBUG("Execute: portal='{}', sql='{}'", portal_name, *substituted);
+
+    auto result = query_executor_(*substituted);
     if (!result) {
         const auto& err = result.error();
         send_error_response(conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);

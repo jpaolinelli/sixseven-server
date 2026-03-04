@@ -42,6 +42,17 @@ std::string_view status_to_sqlstate(StatusCode code);
 /// Convert a Value to its PostgreSQL text-format representation.
 std::string value_to_pg_text(const Value& value);
 
+// -- Parameter substitution ---------------------------------------------------
+
+/// Substitute $1, $2, ... placeholders in SQL with parameter values.
+/// Uses param_oids to determine quoting: numeric types are unquoted,
+/// string-like types are single-quoted with escaping.
+/// NULL parameters (nullopt) are substituted as the literal SQL NULL.
+[[nodiscard]] Result<std::string>
+substitute_parameters(const std::string& sql,
+                      const std::vector<std::optional<std::string>>& param_values,
+                      const std::vector<uint32_t>& param_oids);
+
 // -- SQL splitting ------------------------------------------------------------
 
 /// Split a SQL string on semicolons into individual statements.
@@ -132,7 +143,8 @@ struct PreparedStatement {
 struct Portal {
     std::string name;
     std::string sql;
-    std::vector<std::string> param_values;
+    std::vector<std::optional<std::string>> param_values; ///< nullopt = SQL NULL.
+    std::vector<uint32_t> param_oids;                     ///< Type OIDs from Parse.
     std::vector<int16_t> result_format_codes;
 };
 
