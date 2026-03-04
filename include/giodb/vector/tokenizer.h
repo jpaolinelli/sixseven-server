@@ -13,6 +13,7 @@ enum class TokenizerModelType {
     HASH,      ///< Simple hash-based tokenization (no real subwords).
     WORDPIECE, ///< WordPiece (BERT-style).
     BPE,       ///< Byte-Pair Encoding (GPT-style).
+    UNIGRAM,   ///< Unigram (SentencePiece-style).
 };
 
 /// Text normalizer applied before tokenization.
@@ -60,6 +61,15 @@ struct TokenizerConfig {
 
     /// Prefix for continuation subword tokens (e.g., "##" for WordPiece).
     std::string subword_prefix;
+
+    /// BPE merge rules in priority order (only used for BPE models).
+    std::vector<std::string> merges;
+
+    /// Whether the normalizer lowercases text.
+    bool normalizer_lowercase = true;
+
+    /// Whether the normalizer strips accents.
+    bool normalizer_strip_accents = false;
 };
 
 /// Abstract base class for text tokenizers.

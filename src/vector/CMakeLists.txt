@@ -13,6 +13,7 @@ add_library(giodb_vector STATIC
     openai_provider.cpp
     builtin_provider.cpp
     tokenizer.cpp
+    tokenizer_json_loader.cpp
     onnx_provider.cpp
     provider_registry.cpp
 )
