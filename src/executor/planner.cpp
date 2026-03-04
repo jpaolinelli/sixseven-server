@@ -1,5 +1,6 @@
 #include "giodb/executor/planner.h"
 
+#include "giodb/common/coercion.h"
 #include "giodb/executor/delete.h"
 #include "giodb/executor/edge_traversal.h"
 #include "giodb/executor/enriched_traversal.h"
@@ -467,6 +468,14 @@ Planner::plan_from_source(const TableRef& table_ref,
                 break;
             }
         }
+
+        // Coerce the start key to the PK type (e.g., STRING → UUID).
+        auto coerced_key = fit_to_storage(config.start_key, pk_type);
+        if (!coerced_key) {
+            return make_error(coerced_key.error().code,
+                              "TRAVERSE start key: " + coerced_key.error().message);
+        }
+        config.start_key = std::move(*coerced_key);
 
         // Use edge type as default alias when no explicit alias is provided
         // (matches the binder's behavior in build_traverse_scope).
@@ -1510,14 +1519,6 @@ Result<std::unique_ptr<Iterator>> Planner::plan_traverse(const TraverseStmt& stm
         return make_error(key_val.error().code, key_val.error().message);
     }
 
-    TraversalConfig config;
-    config.edge_type = stmt.edge_type;
-    config.start_key = std::move(*key_val);
-    config.direction = stmt.direction;
-    config.max_depth = stmt.max_depth.value_or(100);
-    config.fetch = stmt.fetch;
-    config.collect_edges = true;
-
     // Build output schema.
     // Determine PK type from the edge type definition.
     auto edge_def = catalog_.get_edge_type(stmt.edge_type);
@@ -1541,6 +1542,21 @@ Result<std::unique_ptr<Iterator>> Planner::plan_traverse(const TraverseStmt& stm
             }
         }
     }
+
+    // Coerce the start key to the PK type (e.g., STRING → UUID).
+    auto coerced_key = fit_to_storage(*key_val, pk_type);
+    if (!coerced_key) {
+        return make_error(coerced_key.error().code,
+                          "TRAVERSE start key: " + coerced_key.error().message);
+    }
+
+    TraversalConfig config;
+    config.edge_type = stmt.edge_type;
+    config.start_key = std::move(*coerced_key);
+    config.direction = stmt.direction;
+    config.max_depth = stmt.max_depth.value_or(100);
+    config.fetch = stmt.fetch;
+    config.collect_edges = true;
 
     std::vector<OutputColumn> out_cols;
     out_cols.push_back({"", "node", pk_type, false, 0});
@@ -1579,13 +1595,6 @@ Result<std::unique_ptr<Iterator>> Planner::plan_shortest_path(const ShortestPath
         return make_error(to_val.error().code, to_val.error().message);
     }
 
-    ShortestPathConfig sp_config;
-    sp_config.edge_type = stmt.edge_type;
-    sp_config.from_key = std::move(*from_val);
-    sp_config.to_key = std::move(*to_val);
-    sp_config.direction = stmt.direction;
-    sp_config.max_depth = stmt.max_depth.value_or(100);
-
     // Determine PK type.
     TypeId pk_type = TypeId::INT64;
     if (!bound.referenced_tables.empty()) {
@@ -1601,6 +1610,25 @@ Result<std::unique_ptr<Iterator>> Planner::plan_shortest_path(const ShortestPath
             }
         }
     }
+
+    // Coerce the from/to keys to the PK type (e.g., STRING → UUID).
+    auto coerced_from = fit_to_storage(*from_val, pk_type);
+    if (!coerced_from) {
+        return make_error(coerced_from.error().code,
+                          "SHORTEST PATH from key: " + coerced_from.error().message);
+    }
+    auto coerced_to = fit_to_storage(*to_val, pk_type);
+    if (!coerced_to) {
+        return make_error(coerced_to.error().code,
+                          "SHORTEST PATH to key: " + coerced_to.error().message);
+    }
+
+    ShortestPathConfig sp_config;
+    sp_config.edge_type = stmt.edge_type;
+    sp_config.from_key = std::move(*coerced_from);
+    sp_config.to_key = std::move(*coerced_to);
+    sp_config.direction = stmt.direction;
+    sp_config.max_depth = stmt.max_depth.value_or(100);
 
     std::vector<OutputColumn> out_cols;
     out_cols.push_back({"", "node", pk_type, false, 0});
