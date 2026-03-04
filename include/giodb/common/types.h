@@ -1,8 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace giodb {
@@ -101,6 +103,83 @@ constexpr std::string_view type_name(TypeId id) {
         return "EMBEDDING";
     }
     return "UNKNOWN";
+}
+
+/// Parse a type name string (case-insensitive) to a TypeId.
+/// Returns nullopt if the string does not match any known type.
+inline std::optional<TypeId> parse_type_id(std::string_view name) {
+    std::string upper;
+    upper.reserve(name.size());
+    for (char c : name) {
+        upper += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    }
+    if (upper == "INT8") {
+        return TypeId::INT8;
+    }
+    if (upper == "INT16") {
+        return TypeId::INT16;
+    }
+    if (upper == "INT32") {
+        return TypeId::INT32;
+    }
+    if (upper == "INT64") {
+        return TypeId::INT64;
+    }
+    if (upper == "UINT8") {
+        return TypeId::UINT8;
+    }
+    if (upper == "UINT16") {
+        return TypeId::UINT16;
+    }
+    if (upper == "UINT32") {
+        return TypeId::UINT32;
+    }
+    if (upper == "UINT64") {
+        return TypeId::UINT64;
+    }
+    if (upper == "FLOAT32") {
+        return TypeId::FLOAT32;
+    }
+    if (upper == "FLOAT64") {
+        return TypeId::FLOAT64;
+    }
+    if (upper == "DECIMAL") {
+        return TypeId::DECIMAL;
+    }
+    if (upper == "BOOL") {
+        return TypeId::BOOL;
+    }
+    if (upper == "STRING") {
+        return TypeId::STRING;
+    }
+    if (upper == "BLOB") {
+        return TypeId::BLOB;
+    }
+    if (upper == "DATE") {
+        return TypeId::DATE;
+    }
+    if (upper == "TIME") {
+        return TypeId::TIME;
+    }
+    if (upper == "TIMESTAMP") {
+        return TypeId::TIMESTAMP;
+    }
+    if (upper == "INTERVAL") {
+        return TypeId::INTERVAL;
+    }
+    if (upper == "POINT") {
+        return TypeId::POINT;
+    }
+    if (upper == "JSON") {
+        return TypeId::JSON;
+    }
+    if (upper == "UUID") {
+        return TypeId::UUID;
+    }
+    if (upper == "EMBEDDING") {
+        return TypeId::EMBEDDING;
+    }
+    return std::nullopt;
 }
 
 /// Return the fixed byte size for a type, or nullopt for variable-length types.

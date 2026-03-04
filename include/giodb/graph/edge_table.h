@@ -84,6 +84,14 @@ public:
     [[nodiscard]] Result<std::optional<EdgeRow>> find_edge(const Value& source_pk,
                                                            const Value& target_pk) const;
 
+    /// Restore an edge with a specific row ID (used during startup recovery).
+    /// Inserts the edge into all indexes and the edge map without assigning a new ID.
+    /// Updates next_row_id_ to ensure future inserts don't collide.
+    [[nodiscard]] Result<void> restore_edge(uint64_t edge_row_id,
+                                            const Value& source_pk,
+                                            const Value& target_pk,
+                                            const std::vector<Value>& properties);
+
     /// Return the total number of edges in the table.
     [[nodiscard]] uint64_t size() const;
 
