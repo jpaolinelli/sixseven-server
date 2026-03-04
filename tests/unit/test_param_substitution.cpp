@@ -203,6 +203,24 @@ TEST(ParamSubstitution, ParamZeroOutOfRange) {
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
+TEST(ParamSubstitution, VeryLargeParamNumberDoesNotCrash) {
+    // $99999999999 exceeds INT_MAX — must return an error, not throw.
+    std::vector<std::optional<std::string>> params = {"42"};
+    std::vector<uint32_t> oids = {23};
+    auto result = substitute_parameters("SELECT $99999999999", params, oids);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST(ParamSubstitution, ParamNumberJustOverIntMaxDoesNotCrash) {
+    // $2147483648 is INT_MAX + 1 — must return an error, not throw.
+    std::vector<std::optional<std::string>> params = {"42"};
+    std::vector<uint32_t> oids = {23};
+    auto result = substitute_parameters("SELECT $2147483648", params, oids);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
 TEST(ParamSubstitution, DollarInsideQuotedStringNotSubstituted) {
     std::vector<std::optional<std::string>> params = {"42"};
     std::vector<uint32_t> oids = {23};

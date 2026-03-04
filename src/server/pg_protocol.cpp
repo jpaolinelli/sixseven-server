@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstring>
 #include <iomanip>
 #include <random>
@@ -559,7 +560,14 @@ substitute_parameters(const std::string& sql,
                 ++end;
             }
             auto param_num_str = sql.substr(start, end - start);
-            int param_num = std::stoi(param_num_str);
+            int param_num = 0;
+            auto [ptr, ec] =
+                std::from_chars(param_num_str.data(),
+                                param_num_str.data() + param_num_str.size(), param_num);
+            if (ec != std::errc{} || ptr != param_num_str.data() + param_num_str.size()) {
+                return make_error(StatusCode::INVALID_ARGUMENT,
+                                  "parameter $" + param_num_str + " is not a valid number");
+            }
 
             if (param_num < 1 || static_cast<size_t>(param_num) > param_values.size()) {
                 return make_error(StatusCode::INVALID_ARGUMENT,
@@ -688,7 +696,14 @@ Result<std::string> substitute_sql_expressions(const std::string& sql,
                 ++end;
             }
             auto param_num_str = sql.substr(start, end - start);
-            int param_num = std::stoi(param_num_str);
+            int param_num = 0;
+            auto [ptr, ec] =
+                std::from_chars(param_num_str.data(),
+                                param_num_str.data() + param_num_str.size(), param_num);
+            if (ec != std::errc{} || ptr != param_num_str.data() + param_num_str.size()) {
+                return make_error(StatusCode::INVALID_ARGUMENT,
+                                  "parameter $" + param_num_str + " is not a valid number");
+            }
 
             if (param_num < 1 || static_cast<size_t>(param_num) > exprs.size()) {
                 return make_error(StatusCode::INVALID_ARGUMENT,
