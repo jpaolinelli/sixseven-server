@@ -192,8 +192,12 @@ export function parseNodesFromResult(
 
   for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
     const row = rows[rowIdx];
-    // Use __node PK if available, otherwise row index as fallback
-    const pk = hasNodeCol ? String(row[nodeIdx] ?? "") : String(rowIdx);
+    // Use __node PK if available, otherwise row index as fallback.
+    // When __node is null, assign a synthetic unique ID per row to prevent
+    // multiple null-PK rows from collapsing into a single node.
+    const rawPk = hasNodeCol ? row[nodeIdx] : rowIdx;
+    const isNullPk = hasNodeCol && (rawPk === null || rawPk === undefined);
+    const pk = isNullPk ? `__null_${rowIdx}` : String(rawPk ?? rowIdx);
     // Determine table from __source or use a generic label
     const table = sourceIdx >= 0 ? String(row[sourceIdx] ?? "node") : "node";
     const id = `${table}:${pk}`;
@@ -236,6 +240,7 @@ export function parseEdgesFromResult(
   const toIdx = colIndex(columns, "__to");
   if (fromIdx === -1 || toIdx === -1) return [];
 
+  const seen = new Set<string>();
   const edges: GraphViewEdge[] = [];
 
   for (const row of rows) {
@@ -254,6 +259,10 @@ export function parseEdgesFromResult(
     // Extract edge type from property column names (e.g., "follows.weight" → "follows")
     const edgeType = detectEdgeType(columns) || "edge";
     const id = `${from}->${edgeType}->${to}`;
+
+    // Deduplicate edges with the same id.
+    if (seen.has(id)) continue;
+    seen.add(id);
 
     edges.push({
       id,

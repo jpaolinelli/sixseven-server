@@ -204,6 +204,9 @@ private:
     [[nodiscard]] Result<std::pair<Value, Value>>
     coerce_link_keys(const std::string& edge_type, const Value& src_key, const Value& tgt_key);
 
+    /// Verify that a row with the given PK value exists in the specified table.
+    [[nodiscard]] Result<bool> verify_pk_exists(table_id_t table_id, const Value& pk_value);
+
     /// Execute a DML/query via the Planner + Iterator pipeline.
     /// After successful DML on sys_providers, automatically reloads the provider cache.
     [[nodiscard]] Result<QueryResult> execute_plan(const BoundStatement& bound);

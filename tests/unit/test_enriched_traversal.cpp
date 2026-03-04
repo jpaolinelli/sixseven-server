@@ -229,8 +229,10 @@ TEST_F(EnrichedTraversalTest, EmptyTraversal) {
 // ============================================================================
 
 TEST_F(EnrichedTraversalTest, DanglingEdge) {
-    // Link to node 999 which doesn't exist in the users table.
-    exec_ok("LINK users(5) TO users(999) VIA follows");
+    // Create a dangling edge via the graph engine directly (bypassing
+    // execute_link validation which now rejects non-existent PKs).
+    auto link_result = graph_engine_->link("follows", Value(int64_t{5}), Value(int64_t{999}), {});
+    ASSERT_TRUE(link_result.has_value()) << link_result.error().message;
 
     auto qr = exec_ok(
         "SELECT id, name, __node, __depth FROM TRAVERSE follows FROM users(5) DIRECTION OUT");

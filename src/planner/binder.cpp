@@ -375,7 +375,7 @@ Result<ScopeTable> Binder::build_traverse_scope(const TableRef& tref, BoundState
             ResolvedColumn rc;
             rc.table_id = 0;
             rc.ordinal = -1;
-            rc.table_name = trav->edge_type; // qualified by edge type name
+            rc.table_name = alias; // use alias (matches table/meta columns)
             rc.column_name = prop_name;
             rc.type_id = prop_type;
             rc.nullable = true;
