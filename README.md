@@ -535,23 +535,88 @@ CREATE TABLE docs (
 
 Start Ollama first: `ollama serve` then `ollama pull all-minilm`.
 
-### ONNX
+### ONNX (Offline / Network-Free)
 
-Runs a local ONNX model for embedding inference. No network required.
+Runs a local ONNX model for embedding inference. No network access required after model download — ideal for air-gapped environments, CI pipelines, and local development.
 
 ```sql
 CREATE TABLE docs (
     id INT PRIMARY KEY,
     content TEXT,
-    vec EMBEDDING(384, source='content', provider='onnx/path/to/model.onnx')
+    vec EMBEDDING(384, source='content', provider='onnx/models/all-MiniLM-L6-v2/model.onnx')
 );
 ```
 
 | Parameter | Required | Example |
 |-----------|----------|---------|
-| Model path | Yes (in provider name) | Path to `.onnx` model file |
+| Model path | Yes (in provider name) | Relative or absolute path to `.onnx` file |
 
-Uses a hash-based tokenizer with max sequence length of 128 tokens.
+#### Downloading ONNX Models
+
+Any ONNX-exported transformer embedding model that accepts `input_ids` and `attention_mask` inputs will work. The recommended approach is to download pre-converted models from Hugging Face.
+
+**Option 1 — Download a pre-converted model (recommended):**
+
+```bash
+# Install the Hugging Face CLI
+pip install huggingface-hub
+
+# all-MiniLM-L6-v2 (384 dimensions, ~80 MB) — best balance of size and quality
+huggingface-cli download onnx-community/all-MiniLM-L6-v2-ONNX \
+    --local-dir models/all-MiniLM-L6-v2
+
+# bge-small-en-v1.5 (384 dimensions, ~130 MB)
+huggingface-cli download onnx-community/bge-small-en-v1.5-ONNX \
+    --local-dir models/bge-small-en-v1.5
+```
+
+**Option 2 — Export any Hugging Face model to ONNX yourself:**
+
+```bash
+pip install optimum onnxruntime sentence-transformers
+
+# Export to ONNX format
+optimum-cli export onnx \
+    --model sentence-transformers/all-MiniLM-L6-v2 \
+    models/all-MiniLM-L6-v2
+```
+
+This produces `model.onnx` (and optionally `model.onnx_data`) in the output directory.
+
+#### Recommended Models
+
+| Model | Dimensions | Size | Notes |
+|-------|-----------|------|-------|
+| `all-MiniLM-L6-v2` | 384 | ~80 MB | Best for general-purpose semantic search |
+| `all-MiniLM-L12-v2` | 384 | ~120 MB | Higher quality, slightly slower |
+| `bge-small-en-v1.5` | 384 | ~130 MB | Strong retrieval performance |
+| `nomic-embed-text-v1.5` | 768 | ~550 MB | High quality, larger dimension |
+
+#### Usage
+
+Point the provider to the `.onnx` file inside the downloaded model directory:
+
+```sql
+-- Relative path (from server working directory)
+CREATE TABLE articles (
+    id INT PRIMARY KEY,
+    title TEXT NOT NULL,
+    title_vec EMBEDDING(384, source='title', provider='onnx/models/all-MiniLM-L6-v2/onnx/model.onnx')
+);
+
+-- Absolute path
+CREATE TABLE articles (
+    id INT PRIMARY KEY,
+    title TEXT NOT NULL,
+    title_vec EMBEDDING(384, source='title', provider='onnx//home/user/models/model.onnx')
+);
+```
+
+#### Current Limitations
+
+- **Tokenizer**: Uses a hash-based tokenizer (not WordPiece/BPE). Token IDs are deterministic and consistent, enabling reliable word-overlap similarity, but they do not match the pretrained model's vocabulary. This means embeddings are functional for fuzzy matching but do not capture the full semantic quality of the original model. A proper tokenizer integration is planned.
+- **Sequence length**: Max 128 tokens (longer text is truncated).
+- **Batch size**: Inference runs one input at a time (no batched GPU inference).
 
 ### Builtin
 
