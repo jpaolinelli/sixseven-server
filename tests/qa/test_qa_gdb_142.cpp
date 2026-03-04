@@ -29,7 +29,8 @@ using namespace giodb;
 
 namespace {
 
-HashIndex make_index(uint32_t capacity = 4, bool unique = false,
+HashIndex make_index(uint32_t capacity = 4,
+                     bool unique = false,
                      std::vector<TypeId> types = {TypeId::INT64}) {
     HashIndexConfig cfg;
     cfg.key_types = std::move(types);
@@ -38,9 +39,15 @@ HashIndex make_index(uint32_t capacity = 4, bool unique = false,
     return HashIndex(std::move(cfg));
 }
 
-KeyType key(int64_t v) { return {Value(v)}; }
-KeyType skey(const std::string& s) { return {Value(s)}; }
-RID rid(uint32_t p, uint16_t s = 0) { return {p, s}; }
+KeyType key(int64_t v) {
+    return {Value(v)};
+}
+KeyType skey(const std::string& s) {
+    return {Value(s)};
+}
+RID rid(uint32_t p, uint16_t s = 0) {
+    return {p, s};
+}
 
 } // namespace
 
@@ -592,8 +599,7 @@ TEST(QA_GDB_142, NegativeKeys) {
     auto idx = make_index(4);
 
     for (int i = -50; i < 0; ++i) {
-        ASSERT_TRUE(
-            idx.insert(key(i), rid(static_cast<uint32_t>(i + 100))).has_value());
+        ASSERT_TRUE(idx.insert(key(i), rid(static_cast<uint32_t>(i + 100))).has_value());
     }
 
     EXPECT_EQ(idx.size(), 50u);

@@ -111,8 +111,11 @@ protected:
             owned.push_back(std::move(expr));
         }
 
-        void add_agg(AggFunc func, ExprPtr arg = nullptr, const std::string& sep = "",
-                     TypeId out_type = TypeId::INT64, bool nullable = true) {
+        void add_agg(AggFunc func,
+                     ExprPtr arg = nullptr,
+                     const std::string& sep = "",
+                     TypeId out_type = TypeId::INT64,
+                     bool nullable = true) {
             AggregateDescriptor desc;
             desc.func = func;
             desc.separator = sep;
@@ -174,8 +177,7 @@ protected:
 
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
-        EXPECT_TRUE(result.has_value()) << "SQL failed: " << sql << "\n"
-                                        << result.error().message;
+        EXPECT_TRUE(result.has_value()) << "SQL failed: " << sql << "\n" << result.error().message;
         return std::move(*result);
     }
 
@@ -520,12 +522,12 @@ TEST_F(QA_HashAggregate, AllAggregatesAllNulls) {
     auto rows = run(*agg);
     ASSERT_EQ(rows.size(), 1u);
 
-    EXPECT_EQ(rows[0].values[1].as_int64(), 2);      // COUNT(*) counts all rows
-    EXPECT_EQ(rows[0].values[2].as_int64(), 0);      // COUNT(col) = 0 (all NULL)
-    EXPECT_TRUE(rows[0].values[3].is_null());          // SUM = NULL
-    EXPECT_TRUE(rows[0].values[4].is_null());          // AVG = NULL
-    EXPECT_TRUE(rows[0].values[5].is_null());          // MIN = NULL
-    EXPECT_TRUE(rows[0].values[6].is_null());          // MAX = NULL
+    EXPECT_EQ(rows[0].values[1].as_int64(), 2); // COUNT(*) counts all rows
+    EXPECT_EQ(rows[0].values[2].as_int64(), 0); // COUNT(col) = 0 (all NULL)
+    EXPECT_TRUE(rows[0].values[3].is_null());   // SUM = NULL
+    EXPECT_TRUE(rows[0].values[4].is_null());   // AVG = NULL
+    EXPECT_TRUE(rows[0].values[5].is_null());   // MIN = NULL
+    EXPECT_TRUE(rows[0].values[6].is_null());   // MAX = NULL
 }
 
 // Global aggregation (no GROUP BY) with empty input
@@ -546,12 +548,12 @@ TEST_F(QA_HashAggregate, GlobalAggEmptyInput) {
     // Per SQL standard, global aggregation on empty table still returns one row.
     ASSERT_EQ(rows.size(), 1u);
 
-    EXPECT_EQ(rows[0].values[0].as_int64(), 0);  // COUNT(*) = 0
-    EXPECT_EQ(rows[0].values[1].as_int64(), 0);  // COUNT(col) = 0
-    EXPECT_TRUE(rows[0].values[2].is_null());      // SUM = NULL
-    EXPECT_TRUE(rows[0].values[3].is_null());      // AVG = NULL
-    EXPECT_TRUE(rows[0].values[4].is_null());      // MIN = NULL
-    EXPECT_TRUE(rows[0].values[5].is_null());      // MAX = NULL
+    EXPECT_EQ(rows[0].values[0].as_int64(), 0); // COUNT(*) = 0
+    EXPECT_EQ(rows[0].values[1].as_int64(), 0); // COUNT(col) = 0
+    EXPECT_TRUE(rows[0].values[2].is_null());   // SUM = NULL
+    EXPECT_TRUE(rows[0].values[3].is_null());   // AVG = NULL
+    EXPECT_TRUE(rows[0].values[4].is_null());   // MIN = NULL
+    EXPECT_TRUE(rows[0].values[5].is_null());   // MAX = NULL
 }
 
 // Global aggregation with all NULLs
@@ -575,8 +577,8 @@ TEST_F(QA_HashAggregate, GlobalAggAllNulls) {
     ASSERT_EQ(rows.size(), 1u);
 
     EXPECT_EQ(rows[0].values[0].as_int64(), 3); // COUNT(*) counts all rows
-    EXPECT_TRUE(rows[0].values[1].is_null());     // SUM = NULL (all skipped)
-    EXPECT_TRUE(rows[0].values[2].is_null());     // AVG = NULL
+    EXPECT_TRUE(rows[0].values[1].is_null());   // SUM = NULL (all skipped)
+    EXPECT_TRUE(rows[0].values[2].is_null());   // AVG = NULL
 }
 
 // ===========================================================================
@@ -750,11 +752,11 @@ TEST_F(QA_HashAggregate, MultiKeyGroupByWithNulls) {
     ASSERT_NE(a_null, nullptr);
     ASSERT_NE(null_null, nullptr);
 
-    EXPECT_EQ(null_1->values[2].as_int64(), 30);   // SUM(10+20)
-    EXPECT_EQ(null_1->values[3].as_int64(), 2);    // COUNT(*)
+    EXPECT_EQ(null_1->values[2].as_int64(), 30); // SUM(10+20)
+    EXPECT_EQ(null_1->values[3].as_int64(), 2);  // COUNT(*)
 
-    EXPECT_EQ(a_null->values[2].as_int64(), 30);   // SUM(30)
-    EXPECT_EQ(a_null->values[3].as_int64(), 1);    // COUNT(*)
+    EXPECT_EQ(a_null->values[2].as_int64(), 30); // SUM(30)
+    EXPECT_EQ(a_null->values[3].as_int64(), 1);  // COUNT(*)
 
     EXPECT_EQ(null_null->values[2].as_int64(), 90); // SUM(40+50)
     EXPECT_EQ(null_null->values[3].as_int64(), 2);  // COUNT(*)
@@ -823,8 +825,7 @@ TEST_F(QA_HashAggregate, NextPastEnd) {
 TEST_F(QA_HashAggregate, StressManyGroups) {
     std::vector<Tuple> data;
     for (int i = 0; i < 1000; ++i) {
-        data.push_back(
-            Tuple{{Value(std::string("g" + std::to_string(i))), Value(int32_t(i))}, {}});
+        data.push_back(Tuple{{Value(std::string("g" + std::to_string(i))), Value(int32_t(i))}, {}});
     }
 
     BoundStatement bound;
@@ -867,10 +868,10 @@ TEST_F(QA_HashAggregate, StressManyRowsSingleGroup) {
 
     auto rows = run(*agg);
     ASSERT_EQ(rows.size(), 1u);
-    EXPECT_EQ(rows[0].values[1].as_int64(), 5000);        // COUNT(*)
+    EXPECT_EQ(rows[0].values[1].as_int64(), 5000);         // COUNT(*)
     EXPECT_EQ(rows[0].values[2].as_int64(), expected_sum); // SUM
-    EXPECT_EQ(rows[0].values[3].as_int32(), 0);           // MIN
-    EXPECT_EQ(rows[0].values[4].as_int32(), 4999);        // MAX
+    EXPECT_EQ(rows[0].values[3].as_int32(), 0);            // MIN
+    EXPECT_EQ(rows[0].values[4].as_int32(), 4999);         // MAX
 }
 
 // ===========================================================================
@@ -962,8 +963,7 @@ TEST_F(QA_AggregateE2E, CountDistinctE2E) {
 TEST_F(QA_AggregateE2E, HavingWithGreaterEqual) {
     setup_employees();
 
-    auto qr =
-        exec_ok("SELECT dept, COUNT(*) FROM emp GROUP BY dept HAVING COUNT(*) >= 2");
+    auto qr = exec_ok("SELECT dept, COUNT(*) FROM emp GROUP BY dept HAVING COUNT(*) >= 2");
     ASSERT_EQ(qr.rows.size(), 2u); // eng(3), sales(2) pass; hr(1) filtered
 
     for (auto& row : qr.rows) {
@@ -974,8 +974,7 @@ TEST_F(QA_AggregateE2E, HavingWithGreaterEqual) {
 TEST_F(QA_AggregateE2E, HavingWithEqual) {
     setup_employees();
 
-    auto qr =
-        exec_ok("SELECT dept, COUNT(*) FROM emp GROUP BY dept HAVING COUNT(*) = 3");
+    auto qr = exec_ok("SELECT dept, COUNT(*) FROM emp GROUP BY dept HAVING COUNT(*) = 3");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "eng");
 }
@@ -983,8 +982,7 @@ TEST_F(QA_AggregateE2E, HavingWithEqual) {
 TEST_F(QA_AggregateE2E, HavingFiltersAllGroups) {
     setup_employees();
 
-    auto qr =
-        exec_ok("SELECT dept, COUNT(*) FROM emp GROUP BY dept HAVING COUNT(*) > 100");
+    auto qr = exec_ok("SELECT dept, COUNT(*) FROM emp GROUP BY dept HAVING COUNT(*) > 100");
     EXPECT_EQ(qr.rows.size(), 0u); // No group has > 100 rows
 }
 
@@ -992,8 +990,7 @@ TEST_F(QA_AggregateE2E, HavingFiltersAllGroups) {
 TEST_F(QA_AggregateE2E, HavingWithSum) {
     setup_employees();
 
-    auto qr =
-        exec_ok("SELECT dept, SUM(salary) FROM emp GROUP BY dept HAVING SUM(salary) > 100");
+    auto qr = exec_ok("SELECT dept, SUM(salary) FROM emp GROUP BY dept HAVING SUM(salary) > 100");
     // eng=330, sales=185, hr=80 → eng and sales pass
     ASSERT_EQ(qr.rows.size(), 2u);
 }
@@ -1002,9 +999,8 @@ TEST_F(QA_AggregateE2E, HavingWithSum) {
 TEST_F(QA_AggregateE2E, MultipleAggregatesE2E) {
     setup_employees();
 
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*), SUM(salary), AVG(salary), MIN(salary), MAX(salary) "
-        "FROM emp GROUP BY dept");
+    auto qr = exec_ok("SELECT dept, COUNT(*), SUM(salary), AVG(salary), MIN(salary), MAX(salary) "
+                      "FROM emp GROUP BY dept");
     ASSERT_EQ(qr.rows.size(), 3u);
 
     for (auto& row : qr.rows) {
@@ -1035,8 +1031,7 @@ TEST_F(QA_AggregateE2E, MultipleAggregatesE2E) {
 TEST_F(QA_AggregateE2E, GroupByWithOrderBy) {
     setup_employees();
 
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) FROM emp GROUP BY dept ORDER BY dept");
+    auto qr = exec_ok("SELECT dept, COUNT(*) FROM emp GROUP BY dept ORDER BY dept");
     ASSERT_EQ(qr.rows.size(), 3u);
 
     // Alphabetical order: eng, hr, sales
@@ -1049,8 +1044,7 @@ TEST_F(QA_AggregateE2E, GroupByWithOrderBy) {
 TEST_F(QA_AggregateE2E, GroupByWithLimit) {
     setup_employees();
 
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) FROM emp GROUP BY dept LIMIT 2");
+    auto qr = exec_ok("SELECT dept, COUNT(*) FROM emp GROUP BY dept LIMIT 2");
     EXPECT_EQ(qr.rows.size(), 2u); // Only 2 of the 3 groups
 }
 
@@ -1062,10 +1056,10 @@ TEST_F(QA_AggregateE2E, GlobalAggEmptyTableE2E) {
     ASSERT_EQ(qr.rows.size(), 1u);
 
     EXPECT_EQ(qr.rows[0][0].as_int64(), 0); // COUNT(*) = 0
-    EXPECT_TRUE(qr.rows[0][1].is_null());     // SUM = NULL
-    EXPECT_TRUE(qr.rows[0][2].is_null());     // AVG = NULL
-    EXPECT_TRUE(qr.rows[0][3].is_null());     // MIN = NULL
-    EXPECT_TRUE(qr.rows[0][4].is_null());     // MAX = NULL
+    EXPECT_TRUE(qr.rows[0][1].is_null());   // SUM = NULL
+    EXPECT_TRUE(qr.rows[0][2].is_null());   // AVG = NULL
+    EXPECT_TRUE(qr.rows[0][3].is_null());   // MIN = NULL
+    EXPECT_TRUE(qr.rows[0][4].is_null());   // MAX = NULL
 }
 
 // GROUP BY with empty table returns no rows
@@ -1135,8 +1129,8 @@ TEST_F(QA_AggregateE2E, AcceptanceCriteriaIntegrationTest) {
 TEST_F(QA_AggregateE2E, HavingWithOrderBy) {
     setup_employees();
 
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) FROM emp GROUP BY dept HAVING COUNT(*) > 1 ORDER BY dept");
+    auto qr =
+        exec_ok("SELECT dept, COUNT(*) FROM emp GROUP BY dept HAVING COUNT(*) > 1 ORDER BY dept");
     ASSERT_EQ(qr.rows.size(), 2u);
 
     EXPECT_EQ(qr.rows[0][0].as_string(), "eng");
@@ -1152,8 +1146,7 @@ TEST_F(QA_AggregateE2E, HavingWithOrderBy) {
 TEST_F(QA_AggregateE2E, OrderByAggregateColumn) {
     setup_employees();
 
-    auto qr = exec_ok(
-        "SELECT dept, SUM(salary) FROM emp GROUP BY dept ORDER BY SUM(salary) DESC");
+    auto qr = exec_ok("SELECT dept, SUM(salary) FROM emp GROUP BY dept ORDER BY SUM(salary) DESC");
     ASSERT_EQ(qr.rows.size(), 3u);
 
     // eng=330, sales=185, hr=80 → descending
@@ -1175,8 +1168,7 @@ TEST_F(QA_AggregateE2E, StringAggE2E) {
     exec_ok("INSERT INTO items VALUES ('fruit', 'banana')");
     exec_ok("INSERT INTO items VALUES ('veg', 'carrot')");
 
-    auto qr = exec_ok(
-        "SELECT cat, STRING_AGG(name, ', ') FROM items GROUP BY cat");
+    auto qr = exec_ok("SELECT cat, STRING_AGG(name, ', ') FROM items GROUP BY cat");
     ASSERT_EQ(qr.rows.size(), 2u);
 
     for (auto& row : qr.rows) {
@@ -1247,8 +1239,8 @@ TEST_F(QA_HashAggregate, ManyDuplicateGroupKeys) {
     ASSERT_NE(a, nullptr);
     ASSERT_NE(b, nullptr);
 
-    EXPECT_EQ(a->values[1].as_int64(), 50);  // COUNT(*)
-    EXPECT_EQ(a->values[2].as_int64(), 50);  // SUM(50 * 1)
+    EXPECT_EQ(a->values[1].as_int64(), 50); // COUNT(*)
+    EXPECT_EQ(a->values[2].as_int64(), 50); // SUM(50 * 1)
     EXPECT_EQ(b->values[1].as_int64(), 50);
     EXPECT_EQ(b->values[2].as_int64(), 100); // SUM(50 * 2)
 }

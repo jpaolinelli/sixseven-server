@@ -95,7 +95,8 @@ protected:
     /// Find column index by name (asserts it exists).
     size_t col_idx(const QueryResult& qr, const std::string& name) {
         for (size_t i = 0; i < qr.column_names.size(); ++i) {
-            if (qr.column_names[i] == name) return i;
+            if (qr.column_names[i] == name)
+                return i;
         }
         ADD_FAILURE() << "column not found: " << name;
         return 0;
@@ -112,12 +113,10 @@ protected:
         // Try INT64 first (literal type), then INT32.
         try {
             return v.as_int64();
-        } catch (...) {
-        }
+        } catch (...) {}
         try {
             return static_cast<int64_t>(v.as_int32());
-        } catch (...) {
-        }
+        } catch (...) {}
         ADD_FAILURE() << "value is not an integer";
         return 0;
     }
@@ -139,10 +138,9 @@ TEST_F(QA_GDB266, AC1_SelectEdgePropertyReturnsValues) {
     exec_ok("LINK users(1) TO users(2) VIA follows (weight = 10)");
     exec_ok("LINK users(1) TO users(3) VIA follows (weight = 20)");
 
-    auto qr = exec_ok(
-        "SELECT name, weight, __depth "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "ORDER BY name");
+    auto qr = exec_ok("SELECT name, weight, __depth "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "ORDER BY name");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     ASSERT_EQ(qr.rows[0].size(), 3u);
@@ -171,10 +169,9 @@ TEST_F(QA_GDB266, AC2_EdgePropertiesFromShortestPathEdge) {
     exec_ok("LINK users(2) TO users(4) VIA follows (weight = 30)");
     exec_ok("LINK users(3) TO users(4) VIA follows (weight = 40)");
 
-    auto qr = exec_ok(
-        "SELECT __node, __depth, weight "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "ORDER BY __node");
+    auto qr = exec_ok("SELECT __node, __depth, weight "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "ORDER BY __node");
 
     ASSERT_EQ(qr.rows.size(), 3u);
 
@@ -201,8 +198,7 @@ TEST_F(QA_GDB266, AC3_SelectStarShowsEdgePropertiesAfterMeta) {
     exec_ok("CREATE EDGE TYPE follows (weight INT) FROM users TO users");
     exec_ok("LINK users(1) TO users(2) VIA follows (weight = 42)");
 
-    auto qr = exec_ok(
-        "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
 
     // Expected columns: id, name, __node, __depth, __source, weight.
     ASSERT_EQ(qr.column_names.size(), 6u);
@@ -227,10 +223,9 @@ TEST_F(QA_GDB266, AC4_EdgePropertiesNullableForDifferentPaths) {
     exec_ok("LINK users(1) TO users(2) VIA follows (weight = 10)");
     exec_ok("LINK users(2) TO users(3) VIA follows (weight = 20)");
 
-    auto qr = exec_ok(
-        "SELECT __node, weight "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "ORDER BY __node");
+    auto qr = exec_ok("SELECT __node, weight "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "ORDER BY __node");
 
     ASSERT_EQ(qr.rows.size(), 2u);
 
@@ -251,8 +246,7 @@ TEST_F(QA_GDB266, AC5_ZeroPropertiesNoExtraColumns) {
     exec_ok("CREATE EDGE TYPE follows FROM users TO users");
     exec_ok("LINK users(1) TO users(2) VIA follows");
 
-    auto qr = exec_ok(
-        "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
 
     // Should have exactly: id, name, __node, __depth, __source (5 columns).
     ASSERT_EQ(qr.column_names.size(), 5u);
@@ -275,10 +269,9 @@ TEST_F(QA_GDB266, AC6_MultipleEdgeProperties) {
     exec_ok("LINK users(1) TO users(2) VIA follows (weight = 10, label = 'friend')");
     exec_ok("LINK users(1) TO users(3) VIA follows (weight = 5, label = 'colleague')");
 
-    auto qr = exec_ok(
-        "SELECT name, weight, label "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "ORDER BY name");
+    auto qr = exec_ok("SELECT name, weight, label "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "ORDER BY name");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     ASSERT_EQ(qr.column_names.size(), 3u);
@@ -302,8 +295,7 @@ TEST_F(QA_GDB266, SelectStarMultiplePropertiesOrder) {
     exec_ok("CREATE EDGE TYPE follows (weight INT, label VARCHAR) FROM users TO users");
     exec_ok("LINK users(1) TO users(2) VIA follows (weight = 10, label = 'test')");
 
-    auto qr = exec_ok(
-        "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
 
     // id, name, __node, __depth, __source, weight, label.
     ASSERT_EQ(qr.column_names.size(), 7u);
@@ -323,9 +315,8 @@ TEST_F(QA_GDB266, FloatEdgeProperty) {
     exec_ok("CREATE EDGE TYPE follows (score DOUBLE) FROM users TO users");
     exec_ok("LINK users(1) TO users(2) VIA follows (score = 3.14)");
 
-    auto qr = exec_ok(
-        "SELECT name, score "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT name, score "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
 
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Bob");
@@ -342,10 +333,9 @@ TEST_F(QA_GDB266, WhereOnEdgeProperty) {
     exec_ok("LINK users(1) TO users(2) VIA follows (weight = 10)");
     exec_ok("LINK users(1) TO users(3) VIA follows (weight = 5)");
 
-    auto qr = exec_ok(
-        "SELECT name, weight "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "WHERE weight > 7");
+    auto qr = exec_ok("SELECT name, weight "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "WHERE weight > 7");
 
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Bob");
@@ -362,10 +352,9 @@ TEST_F(QA_GDB266, OrderByEdgeProperty) {
     exec_ok("LINK users(1) TO users(3) VIA follows (weight = 10)");
     exec_ok("LINK users(2) TO users(4) VIA follows (weight = 30)");
 
-    auto qr = exec_ok(
-        "SELECT name, weight "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "ORDER BY weight");
+    auto qr = exec_ok("SELECT name, weight "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "ORDER BY weight");
 
     ASSERT_EQ(qr.rows.size(), 3u);
     EXPECT_EQ(get_int(qr.rows[0][1]), 10);
@@ -381,9 +370,8 @@ TEST_F(QA_GDB266, QualifiedEdgePropertyReference) {
     exec_ok("CREATE EDGE TYPE follows (weight INT) FROM users TO users");
     exec_ok("LINK users(1) TO users(2) VIA follows (weight = 42)");
 
-    auto qr = exec_ok(
-        "SELECT follows.weight "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT follows.weight "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
 
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(get_int(qr.rows[0][0]), 42);
@@ -401,9 +389,8 @@ TEST_F(QA_GDB266, AliasedTraverseEdgeProperty) {
     // accessible via 't.weight' (same as t.name and t.__depth).
     // The binder sets table_name = trav->edge_type for edge properties,
     // while other columns use alias. This test verifies if the alias works.
-    auto result = engine_->execute(
-        "SELECT t.name, t.weight "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t");
+    auto result = engine_->execute("SELECT t.name, t.weight "
+                                   "FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t");
 
     if (result.has_value()) {
         // If it works, verify the values.
@@ -412,9 +399,8 @@ TEST_F(QA_GDB266, AliasedTraverseEdgeProperty) {
         EXPECT_EQ(get_int(result->rows[0][1]), 99);
     } else {
         // If it fails, this is a bug: edge properties aren't accessible via alias.
-        ADD_FAILURE()
-            << "BUG: Edge properties not accessible via TRAVERSE alias. "
-            << "t.weight should work but got: " << result.error().message;
+        ADD_FAILURE() << "BUG: Edge properties not accessible via TRAVERSE alias. "
+                      << "t.weight should work but got: " << result.error().message;
     }
 }
 
@@ -428,10 +414,9 @@ TEST_F(QA_GDB266, DirectionInEdgeProperties) {
     exec_ok("LINK users(3) TO users(2) VIA follows (weight = 20)");
 
     // From user 2 going IN: reaches 1 (via 1→2, w=10) and 3 (via 3→2, w=20).
-    auto qr = exec_ok(
-        "SELECT name, weight "
-        "FROM TRAVERSE follows FROM users(2) DIRECTION IN "
-        "ORDER BY name");
+    auto qr = exec_ok("SELECT name, weight "
+                      "FROM TRAVERSE follows FROM users(2) DIRECTION IN "
+                      "ORDER BY name");
 
     ASSERT_EQ(qr.rows.size(), 2u);
 
@@ -454,10 +439,9 @@ TEST_F(QA_GDB266, DirectionBothEdgeProperties) {
     exec_ok("LINK users(3) TO users(2) VIA follows (weight = 20)");
 
     // From user 2 BOTH: reaches 1 and 3.
-    auto qr = exec_ok(
-        "SELECT __node, weight "
-        "FROM TRAVERSE follows FROM users(2) DIRECTION BOTH "
-        "ORDER BY __node");
+    auto qr = exec_ok("SELECT __node, weight "
+                      "FROM TRAVERSE follows FROM users(2) DIRECTION BOTH "
+                      "ORDER BY __node");
 
     ASSERT_EQ(qr.rows.size(), 2u);
 
@@ -483,9 +467,8 @@ TEST_F(QA_GDB266, DanglingEdgeWithProperties) {
     EXPECT_FALSE(r.has_value()) << "LINK to non-existent PK should fail";
 
     // Only the valid edge should exist.
-    auto qr = exec_ok(
-        "SELECT id, name, weight "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT id, name, weight "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_int32(), 2);
     EXPECT_EQ(qr.rows[0][1].as_string(), "Bob");
@@ -520,10 +503,9 @@ TEST_F(QA_GDB266, MultiHopEdgeProperties) {
     exec_ok("LINK users(2) TO users(3) VIA follows (weight = 20)");
     exec_ok("LINK users(3) TO users(4) VIA follows (weight = 30)");
 
-    auto qr = exec_ok(
-        "SELECT name, __depth, weight "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "ORDER BY __depth");
+    auto qr = exec_ok("SELECT name, __depth, weight "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "ORDER BY __depth");
 
     ASSERT_EQ(qr.rows.size(), 3u);
 
@@ -553,9 +535,8 @@ TEST_F(QA_GDB266, AggregateOnEdgeProperty) {
     exec_ok("LINK users(1) TO users(3) VIA follows (weight = 20)");
     exec_ok("LINK users(2) TO users(4) VIA follows (weight = 30)");
 
-    auto qr = exec_ok(
-        "SELECT SUM(weight) "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT SUM(weight) "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
 
     ASSERT_EQ(qr.rows.size(), 1u);
     // 10 + 20 + 30 = 60.
@@ -572,10 +553,9 @@ TEST_F(QA_GDB266, GroupByEdgeProperty) {
     exec_ok("LINK users(1) TO users(3) VIA follows (label = 'colleague')");
     exec_ok("LINK users(2) TO users(4) VIA follows (label = 'friend')");
 
-    auto qr = exec_ok(
-        "SELECT label, COUNT(*) "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "GROUP BY label ORDER BY label");
+    auto qr = exec_ok("SELECT label, COUNT(*) "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "GROUP BY label ORDER BY label");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "colleague");
@@ -594,9 +574,8 @@ TEST_F(QA_GDB266, MaxDepthWithEdgeProperties) {
     exec_ok("LINK users(2) TO users(3) VIA follows (weight = 20)");
     exec_ok("LINK users(3) TO users(4) VIA follows (weight = 30)");
 
-    auto qr = exec_ok(
-        "SELECT name, weight "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 1");
+    auto qr = exec_ok("SELECT name, weight "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 1");
 
     // Only depth 1: Bob (weight=10).
     ASSERT_EQ(qr.rows.size(), 1u);
@@ -617,10 +596,9 @@ TEST_F(QA_GDB266, HeterogeneousEdgeWithProperties) {
     exec_ok("LINK users(1) TO posts(100) VIA authored (rating = 5)");
     exec_ok("LINK users(1) TO posts(101) VIA authored (rating = 3)");
 
-    auto qr = exec_ok(
-        "SELECT title, rating "
-        "FROM TRAVERSE authored FROM users(1) DIRECTION OUT "
-        "ORDER BY title");
+    auto qr = exec_ok("SELECT title, rating "
+                      "FROM TRAVERSE authored FROM users(1) DIRECTION OUT "
+                      "ORDER BY title");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Hello World");
@@ -642,10 +620,9 @@ TEST_F(QA_GDB266, HeterogeneousEdgeInDirectionWithProperties) {
     exec_ok("LINK users(2) TO posts(100) VIA authored (rating = 8)");
 
     // IN from post 100: reaches users who authored it.
-    auto qr = exec_ok(
-        "SELECT name, rating "
-        "FROM TRAVERSE authored FROM posts(100) DIRECTION IN "
-        "ORDER BY name");
+    auto qr = exec_ok("SELECT name, rating "
+                      "FROM TRAVERSE authored FROM posts(100) DIRECTION IN "
+                      "ORDER BY name");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Alice");
@@ -661,8 +638,7 @@ TEST_F(QA_GDB266, HeterogeneousEdgeInDirectionWithProperties) {
 TEST_F(QA_GDB266, EmptyTraversalSchemaWithProperties) {
     exec_ok("CREATE EDGE TYPE follows (weight INT, label VARCHAR) FROM users TO users");
 
-    auto qr = exec_ok(
-        "SELECT * FROM TRAVERSE follows FROM users(5) DIRECTION OUT");
+    auto qr = exec_ok("SELECT * FROM TRAVERSE follows FROM users(5) DIRECTION OUT");
 
     EXPECT_TRUE(qr.rows.empty());
     // Schema should have: id, name, __node, __depth, __source, weight, label.
@@ -681,10 +657,9 @@ TEST_F(QA_GDB266, CycleDetectionWithEdgeProperties) {
     exec_ok("LINK users(2) TO users(3) VIA follows (weight = 20)");
     exec_ok("LINK users(3) TO users(1) VIA follows (weight = 30)");
 
-    auto qr = exec_ok(
-        "SELECT __node, weight "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "ORDER BY __node");
+    auto qr = exec_ok("SELECT __node, weight "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "ORDER BY __node");
 
     // BFS: 1→2 (w=10), 2→3 (w=20). 3→1 is a cycle, skipped.
     ASSERT_EQ(qr.rows.size(), 2u);
@@ -704,9 +679,8 @@ TEST_F(QA_GDB266, ExpressionOnEdgeProperty) {
     exec_ok("CREATE EDGE TYPE follows (weight INT) FROM users TO users");
     exec_ok("LINK users(1) TO users(2) VIA follows (weight = 15)");
 
-    auto qr = exec_ok(
-        "SELECT name, weight * 2 AS doubled "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT name, weight * 2 AS doubled "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
 
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Bob");
@@ -722,10 +696,9 @@ TEST_F(QA_GDB266, WhereCombinedTableAndEdgeProperty) {
     exec_ok("LINK users(1) TO users(2) VIA follows (weight = 10)");
     exec_ok("LINK users(1) TO users(3) VIA follows (weight = 5)");
 
-    auto qr = exec_ok(
-        "SELECT name, weight "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "WHERE name LIKE 'B%' AND weight > 5");
+    auto qr = exec_ok("SELECT name, weight "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "WHERE name LIKE 'B%' AND weight > 5");
 
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Bob");
@@ -741,18 +714,16 @@ TEST_F(QA_GDB266, StressManyNodesWithProperties) {
     exec_ok("CREATE EDGE TYPE next (weight INT) FROM chain TO chain");
 
     for (int i = 1; i <= 50; ++i) {
-        exec_ok("INSERT INTO chain VALUES (" + std::to_string(i) + ", 'node_" +
-                std::to_string(i) + "')");
+        exec_ok("INSERT INTO chain VALUES (" + std::to_string(i) + ", 'node_" + std::to_string(i) +
+                "')");
     }
     for (int i = 1; i < 50; ++i) {
-        exec_ok("LINK chain(" + std::to_string(i) + ") TO chain(" +
-                std::to_string(i + 1) + ") VIA next (weight = " +
-                std::to_string(i * 10) + ")");
+        exec_ok("LINK chain(" + std::to_string(i) + ") TO chain(" + std::to_string(i + 1) +
+                ") VIA next (weight = " + std::to_string(i * 10) + ")");
     }
 
-    auto qr = exec_ok(
-        "SELECT label, weight, __depth "
-        "FROM TRAVERSE next FROM chain(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT label, weight, __depth "
+                      "FROM TRAVERSE next FROM chain(1) DIRECTION OUT");
 
     // Should get 49 nodes (2 through 50).
     ASSERT_EQ(qr.rows.size(), 49u);
@@ -783,10 +754,8 @@ TEST_F(QA_GDB266, RepeatedExecutionWithProperties) {
     exec_ok("CREATE EDGE TYPE follows (weight INT) FROM users TO users");
     exec_ok("LINK users(1) TO users(2) VIA follows (weight = 10)");
 
-    auto qr1 = exec_ok(
-        "SELECT weight FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
-    auto qr2 = exec_ok(
-        "SELECT weight FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr1 = exec_ok("SELECT weight FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr2 = exec_ok("SELECT weight FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
 
     ASSERT_EQ(qr1.rows.size(), qr2.rows.size());
     for (size_t i = 0; i < qr1.rows.size(); ++i) {
@@ -802,9 +771,8 @@ TEST_F(QA_GDB266, SelectOnlyEdgeProperties) {
     exec_ok("CREATE EDGE TYPE follows (weight INT, label VARCHAR) FROM users TO users");
     exec_ok("LINK users(1) TO users(2) VIA follows (weight = 10, label = 'test')");
 
-    auto qr = exec_ok(
-        "SELECT weight, label "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT weight, label "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
 
     ASSERT_EQ(qr.column_names.size(), 2u);
     EXPECT_EQ(qr.column_names[0], "weight");
@@ -823,9 +791,8 @@ TEST_F(QA_GDB266, StringEdgePropertySpecialChars) {
     exec_ok("CREATE EDGE TYPE follows (label VARCHAR) FROM users TO users");
     exec_ok("LINK users(1) TO users(2) VIA follows (label = 'hello, world')");
 
-    auto qr = exec_ok(
-        "SELECT name, label "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT name, label "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
 
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][1].as_string(), "hello, world");

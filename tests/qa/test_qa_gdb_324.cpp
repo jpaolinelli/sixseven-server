@@ -76,9 +76,15 @@ void write_wordpiece_json(const std::filesystem::path& path) {
     nlohmann::json doc;
     doc["model"]["type"] = "WordPiece";
     doc["model"]["continuing_subword_prefix"] = "##";
-    doc["model"]["vocab"] = {{"[PAD]", 0},   {"[UNK]", 100}, {"[CLS]", 101},
-                             {"[SEP]", 102},  {"[MASK]", 103}, {"hello", 104},
-                             {"world", 105},  {"##ing", 106},  {"test", 107}};
+    doc["model"]["vocab"] = {{"[PAD]", 0},
+                             {"[UNK]", 100},
+                             {"[CLS]", 101},
+                             {"[SEP]", 102},
+                             {"[MASK]", 103},
+                             {"hello", 104},
+                             {"world", 105},
+                             {"##ing", 106},
+                             {"test", 107}};
     doc["added_tokens"] =
         nlohmann::json::array({{{"id", 0}, {"content", "[PAD]"}, {"special", true}},
                                {{"id", 100}, {"content", "[UNK]"}, {"special", true}},
@@ -98,10 +104,17 @@ void write_wordpiece_json(const std::filesystem::path& path) {
 void write_bpe_json(const std::filesystem::path& path) {
     nlohmann::json doc;
     doc["model"]["type"] = "BPE";
-    doc["model"]["vocab"] = {{"[PAD]", 0},  {"[UNK]", 100}, {"[CLS]", 101},
-                             {"[SEP]", 102}, {"h", 200},     {"e", 201},
-                             {"l", 202},     {"o", 203},     {"he", 204},
-                             {"ll", 205},    {"hello", 206}};
+    doc["model"]["vocab"] = {{"[PAD]", 0},
+                             {"[UNK]", 100},
+                             {"[CLS]", 101},
+                             {"[SEP]", 102},
+                             {"h", 200},
+                             {"e", 201},
+                             {"l", 202},
+                             {"o", 203},
+                             {"he", 204},
+                             {"ll", 205},
+                             {"hello", 206}};
     doc["model"]["merges"] = {"h e", "l l", "he ll", "hell o"};
     doc["added_tokens"] =
         nlohmann::json::array({{{"id", 0}, {"content", "[PAD]"}, {"special", true}},
@@ -320,8 +333,12 @@ TEST_F(QA_GDB324, EmbedUsesProvidedWordPieceTokenizer) {
     // Build a WordPiece config with known vocab.
     TokenizerConfig config;
     config.model_type = TokenizerModelType::WORDPIECE;
-    config.vocab = {{"[PAD]", 0},   {"[UNK]", 100}, {"[CLS]", 101},
-                    {"[SEP]", 102}, {"[MASK]", 103}, {"hello", 200}};
+    config.vocab = {{"[PAD]", 0},
+                    {"[UNK]", 100},
+                    {"[CLS]", 101},
+                    {"[SEP]", 102},
+                    {"[MASK]", 103},
+                    {"hello", 200}};
     config.special_tokens = {0, 100, 101, 102, 103};
     config.subword_prefix = "##";
     config.normalizer = NormalizerType::LOWERCASE;
@@ -352,10 +369,17 @@ TEST_F(QA_GDB324, EmbedUsesProvidedBPETokenizer) {
 
     TokenizerConfig config;
     config.model_type = TokenizerModelType::BPE;
-    config.vocab = {{"[PAD]", 0},  {"[UNK]", 100}, {"[CLS]", 101},
-                    {"[SEP]", 102}, {"h", 200},     {"e", 201},
-                    {"l", 202},     {"o", 203},     {"he", 204},
-                    {"ll", 205},    {"hello", 206}};
+    config.vocab = {{"[PAD]", 0},
+                    {"[UNK]", 100},
+                    {"[CLS]", 101},
+                    {"[SEP]", 102},
+                    {"h", 200},
+                    {"e", 201},
+                    {"l", 202},
+                    {"o", 203},
+                    {"he", 204},
+                    {"ll", 205},
+                    {"hello", 206}};
     config.special_tokens = {0, 100, 101, 102, 103};
     config.merges = {"h e", "l l", "he ll", "hell o"};
     config.normalizer = NormalizerType::LOWERCASE;
@@ -384,8 +408,12 @@ TEST_F(QA_GDB324, DefaultHashTokenizerProducesDifferentTokensThanWordPiece) {
 
     TokenizerConfig config;
     config.model_type = TokenizerModelType::WORDPIECE;
-    config.vocab = {{"[PAD]", 0},   {"[UNK]", 100}, {"[CLS]", 101},
-                    {"[SEP]", 102}, {"hello", 500},  {"world", 501}};
+    config.vocab = {{"[PAD]", 0},
+                    {"[UNK]", 100},
+                    {"[CLS]", 101},
+                    {"[SEP]", 102},
+                    {"hello", 500},
+                    {"world", 501}};
     config.special_tokens = {0, 100, 101, 102, 103};
     config.subword_prefix = "##";
     config.normalizer = NormalizerType::LOWERCASE;
@@ -404,8 +432,7 @@ TEST_F(QA_GDB324, DefaultHashTokenizerProducesDifferentTokensThanWordPiece) {
 TEST_F(QA_GDB324, AttentionMaskConsistentWithCustomTokenizer) {
     TokenizerConfig config;
     config.model_type = TokenizerModelType::WORDPIECE;
-    config.vocab = {{"[PAD]", 0},   {"[UNK]", 100}, {"[CLS]", 101},
-                    {"[SEP]", 102}, {"hello", 200}};
+    config.vocab = {{"[PAD]", 0}, {"[UNK]", 100}, {"[CLS]", 101}, {"[SEP]", 102}, {"hello", 200}};
     config.special_tokens = {0, 100, 101, 102, 103};
     config.subword_prefix = "##";
     config.normalizer = NormalizerType::LOWERCASE;
@@ -672,8 +699,12 @@ TEST_F(QA_GDB324, EmbedBatchUsesCustomTokenizerForAllTexts) {
 
     TokenizerConfig config;
     config.model_type = TokenizerModelType::WORDPIECE;
-    config.vocab = {{"[PAD]", 0},   {"[UNK]", 100}, {"[CLS]", 101},
-                    {"[SEP]", 102}, {"hello", 200},  {"world", 201}};
+    config.vocab = {{"[PAD]", 0},
+                    {"[UNK]", 100},
+                    {"[CLS]", 101},
+                    {"[SEP]", 102},
+                    {"hello", 200},
+                    {"world", 201}};
     config.special_tokens = {0, 100, 101, 102, 103};
     config.subword_prefix = "##";
     config.normalizer = NormalizerType::LOWERCASE;
@@ -711,8 +742,8 @@ TEST_F(QA_GDB324, StressSequentialEmbeddings) {
 
     for (int i = 0; i < 500; ++i) {
         auto result = provider.embed("text number " + std::to_string(i));
-        ASSERT_TRUE(result.has_value()) << "Failed at iteration " << i << ": "
-                                        << result.error().message;
+        ASSERT_TRUE(result.has_value())
+            << "Failed at iteration " << i << ": " << result.error().message;
     }
     EXPECT_EQ(mock_ptr->run_call_count_, 500);
 }

@@ -170,8 +170,7 @@ TEST(QA_EdgeTableDeleteRollback, InsertDeleteReinsertCyclesWithUniqueIndex) {
         // All indexes should be empty.
         auto found_after = table.find_edge(pk(42), pk(99));
         ASSERT_TRUE(found_after.has_value());
-        EXPECT_FALSE(found_after->has_value())
-            << "unique index stale after delete in cycle " << c;
+        EXPECT_FALSE(found_after->has_value()) << "unique index stale after delete in cycle " << c;
     }
 }
 
@@ -371,8 +370,8 @@ TEST(QA_EdgeTableDeleteRollback, InterleavedInsertDeletePartialSubset) {
 
             auto to = table.get_edges_to(pk(i + 3000));
             ASSERT_TRUE(to.has_value());
-            EXPECT_TRUE(to->empty()) << "deleted edge target pk " << (i + 3000)
-                                     << " still in reverse index";
+            EXPECT_TRUE(to->empty())
+                << "deleted edge target pk " << (i + 3000) << " still in reverse index";
 
             // Re-insert should succeed (unique index cleaned).
             auto reins = table.insert_edge(pk(i), pk(i + 3000), {});
@@ -381,7 +380,8 @@ TEST(QA_EdgeTableDeleteRollback, InterleavedInsertDeletePartialSubset) {
             // Delete again for clean final state.
             ASSERT_TRUE(table.delete_edge(*reins).has_value());
         } else {
-            EXPECT_EQ(from->size(), 1u) << "surviving edge pk " << i << " missing from forward index";
+            EXPECT_EQ(from->size(), 1u)
+                << "surviving edge pk " << i << " missing from forward index";
         }
     }
 }
@@ -394,15 +394,13 @@ TEST(QA_EdgeTableDeleteRollback, InterleavedInsertDeletePartialSubset) {
 class WalTestDir {
 public:
     WalTestDir() {
-        path_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb_233_234"
-                / std::to_string(counter_++);
+        path_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb_233_234" /
+                std::to_string(counter_++);
         std::filesystem::remove_all(path_);
         std::filesystem::create_directories(path_);
     }
 
-    ~WalTestDir() {
-        std::filesystem::remove_all(path_);
-    }
+    ~WalTestDir() { std::filesystem::remove_all(path_); }
 
     const std::filesystem::path& path() const { return path_; }
 
@@ -422,9 +420,8 @@ TEST(QA_GraphEngineWAL, NullptrWalBackwardCompat) {
     auto t2 = catalog.create_table(default_database_id, make_table_schema("posts"));
     ASSERT_TRUE(t2.has_value());
 
-    ASSERT_TRUE(engine
-                    .create_edge_type("follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        engine.create_edge_type("follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {}).has_value());
 
     // LINK with nullptr WAL.
     auto link = engine.link("follows", pk(1), pk(2));
@@ -461,8 +458,7 @@ TEST(QA_GraphEngineWAL, LinkWritesWalRecord) {
     auto t1 = catalog.create_table(default_database_id, make_table_schema("nodes"));
     ASSERT_TRUE(t1.has_value());
 
-    ASSERT_TRUE(engine
-                    .create_edge_type("connects", *t1, *t1, TypeId::INT64, TypeId::INT64, {})
+    ASSERT_TRUE(engine.create_edge_type("connects", *t1, *t1, TypeId::INT64, TypeId::INT64, {})
                     .has_value());
 
     auto link = engine.link("connects", pk(10), pk(20));
@@ -510,8 +506,7 @@ TEST(QA_GraphEngineWAL, UnlinkWritesWalRecord) {
     auto t1 = catalog.create_table(default_database_id, make_table_schema("nodes"));
     ASSERT_TRUE(t1.has_value());
 
-    ASSERT_TRUE(engine
-                    .create_edge_type("connects", *t1, *t1, TypeId::INT64, TypeId::INT64, {})
+    ASSERT_TRUE(engine.create_edge_type("connects", *t1, *t1, TypeId::INT64, TypeId::INT64, {})
                     .has_value());
 
     // LINK first.
@@ -564,9 +559,8 @@ TEST(QA_GraphEngineWAL, MultipleLinkUnlinkAccumulateWalRecords) {
     auto t1 = catalog.create_table(default_database_id, make_table_schema("nodes"));
     ASSERT_TRUE(t1.has_value());
 
-    ASSERT_TRUE(engine
-                    .create_edge_type("follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        engine.create_edge_type("follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {}).has_value());
 
     constexpr int link_count = 5;
 
@@ -626,8 +620,7 @@ TEST(QA_GraphEngineWAL, FailedLinkDoesNotWriteWalRecord) {
     ASSERT_TRUE(t1.has_value());
 
     // Create with duplicate prevention enabled.
-    ASSERT_TRUE(engine
-                    .create_edge_type("follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {}, true)
+    ASSERT_TRUE(engine.create_edge_type("follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {}, true)
                     .has_value());
 
     // First LINK succeeds.

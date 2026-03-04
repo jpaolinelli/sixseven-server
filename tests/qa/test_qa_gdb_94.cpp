@@ -352,7 +352,8 @@ TEST(QA_GDB94_Iterator, ManualIteration) {
     while (!scan->is_end()) {
         auto entry = scan->next();
         ASSERT_TRUE(entry.has_value());
-        if (!entry->has_value()) break;
+        if (!entry->has_value())
+            break;
         collected.push_back(key_val(entry->value().first));
     }
 
@@ -408,8 +409,7 @@ TEST(QA_GDB94_Composite, RangeScanComposite) {
     (void)tree.insert(make_composite_key(3, "elderberry"), make_rid(5));
 
     // Range scan [1,"banana") to (2,"date")
-    auto scan = tree.range_scan(
-        make_composite_key(1, "banana"), make_composite_key(2, "date"));
+    auto scan = tree.range_scan(make_composite_key(1, "banana"), make_composite_key(2, "date"));
     ASSERT_TRUE(scan.has_value());
     auto entries = collect_scan(*scan);
     ASSERT_TRUE(entries.has_value());

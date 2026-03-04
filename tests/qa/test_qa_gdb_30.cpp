@@ -101,11 +101,12 @@ TEST(QA_Distance, AllNaNVector) {
     constexpr float nan = std::numeric_limits<float>::quiet_NaN();
     std::vector<float> a = {nan, nan, nan, nan};
     std::vector<float> b = {1.0F, 2.0F, 3.0F, 4.0F};
-    for (auto metric : {DistanceMetric::L2, DistanceMetric::DOT_PRODUCT,
-                        DistanceMetric::INNER_PRODUCT, DistanceMetric::COSINE}) {
+    for (auto metric : {DistanceMetric::L2,
+                        DistanceMetric::DOT_PRODUCT,
+                        DistanceMetric::INNER_PRODUCT,
+                        DistanceMetric::COSINE}) {
         float d = compute_distance(metric, a, b);
-        EXPECT_TRUE(std::isnan(d))
-            << "metric=" << distance_metric_name(metric) << " got " << d;
+        EXPECT_TRUE(std::isnan(d)) << "metric=" << distance_metric_name(metric) << " got " << d;
     }
 }
 
@@ -552,8 +553,10 @@ TEST(QA_DistanceBatch, AllMetricsConsistent) {
         ptrs[i] = candidates[i].data();
     }
 
-    for (auto metric : {DistanceMetric::L2, DistanceMetric::COSINE,
-                        DistanceMetric::DOT_PRODUCT, DistanceMetric::INNER_PRODUCT}) {
+    for (auto metric : {DistanceMetric::L2,
+                        DistanceMetric::COSINE,
+                        DistanceMetric::DOT_PRODUCT,
+                        DistanceMetric::INNER_PRODUCT}) {
         std::vector<float> batch_out(count);
         compute_distance_batch(metric, query, ptrs.data(), count, dim, batch_out.data());
 
@@ -626,8 +629,8 @@ TEST(QA_DistanceBatch, LargeCount) {
 TEST(QA_Distance, EmptyVectorsAllMetrics) {
     std::vector<float> a;
     std::vector<float> b;
-    for (auto metric : {DistanceMetric::L2, DistanceMetric::DOT_PRODUCT,
-                        DistanceMetric::INNER_PRODUCT}) {
+    for (auto metric :
+         {DistanceMetric::L2, DistanceMetric::DOT_PRODUCT, DistanceMetric::INNER_PRODUCT}) {
         float d = compute_distance(metric, a, b);
         EXPECT_FLOAT_EQ(d, 0.0F) << "metric=" << distance_metric_name(metric);
     }
@@ -674,8 +677,8 @@ TEST(QA_Distance, L2KnownValue16D) {
     // 16 elements = exactly 1 AVX-512 register, 2 AVX2, 4 NEON.
     std::vector<float> a(16);
     std::vector<float> b(16);
-    std::iota(a.begin(), a.end(), 1.0F);   // [1, 2, ..., 16]
-    std::iota(b.begin(), b.end(), 17.0F);  // [17, 18, ..., 32]
+    std::iota(a.begin(), a.end(), 1.0F);  // [1, 2, ..., 16]
+    std::iota(b.begin(), b.end(), 17.0F); // [17, 18, ..., 32]
     // Each diff is 16. L2 = 16 * 16^2 = 16 * 256 = 4096.
     float d = compute_distance(DistanceMetric::L2, a, b);
     EXPECT_NEAR(d, 4096.0F, 1e-2F);
@@ -783,8 +786,7 @@ TEST(QA_Distance, CosineScaleInvarianceExtreme) {
                 b[i] = a[i] * scale;
             }
             float d = compute_distance(DistanceMetric::COSINE, a, b);
-            EXPECT_NEAR(d, 0.0F, 1e-4F)
-                << "dim=" << dim << " scale=" << scale;
+            EXPECT_NEAR(d, 0.0F, 1e-4F) << "dim=" << dim << " scale=" << scale;
         }
     }
 }
@@ -819,7 +821,6 @@ TEST(QA_Distance, L2TriangleInequality) {
         float d_ac = std::sqrt(compute_distance(DistanceMetric::L2, a, c));
         float d_cb = std::sqrt(compute_distance(DistanceMetric::L2, c, b));
 
-        EXPECT_LE(d_ab, d_ac + d_cb + 1e-4F)
-            << "Triangle inequality violated: trial=" << trial;
+        EXPECT_LE(d_ab, d_ac + d_cb + 1e-4F) << "Triangle inequality violated: trial=" << trial;
     }
 }

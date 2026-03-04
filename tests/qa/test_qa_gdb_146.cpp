@@ -250,8 +250,7 @@ TEST(QA146ValueText, MaxInt64) {
 }
 
 TEST(QA146ValueText, MinInt64) {
-    EXPECT_EQ(value_to_pg_text(Value(std::numeric_limits<int64_t>::min())),
-              "-9223372036854775808");
+    EXPECT_EQ(value_to_pg_text(Value(std::numeric_limits<int64_t>::min())), "-9223372036854775808");
 }
 
 TEST(QA146ValueText, ZeroFloat) {
@@ -266,10 +265,10 @@ TEST(QA146ValueText, ZeroFloat) {
 TEST(QA146TypeOid, AllTypesHaveOids) {
     // Every TypeId should map to a non-zero OID.
     std::vector<TypeId> all_types = {
-        TypeId::INT8,    TypeId::INT16,   TypeId::INT32,   TypeId::INT64,     TypeId::UINT8,
-        TypeId::UINT16,  TypeId::UINT32,  TypeId::UINT64,  TypeId::FLOAT32,   TypeId::FLOAT64,
-        TypeId::DECIMAL, TypeId::BOOL,    TypeId::STRING,  TypeId::BLOB,      TypeId::DATE,
-        TypeId::TIME,    TypeId::TIMESTAMP, TypeId::INTERVAL, TypeId::POINT,  TypeId::JSON,
+        TypeId::INT8,    TypeId::INT16,     TypeId::INT32,    TypeId::INT64,   TypeId::UINT8,
+        TypeId::UINT16,  TypeId::UINT32,    TypeId::UINT64,   TypeId::FLOAT32, TypeId::FLOAT64,
+        TypeId::DECIMAL, TypeId::BOOL,      TypeId::STRING,   TypeId::BLOB,    TypeId::DATE,
+        TypeId::TIME,    TypeId::TIMESTAMP, TypeId::INTERVAL, TypeId::POINT,   TypeId::JSON,
         TypeId::UUID,    TypeId::EMBEDDING,
     };
     for (auto type : all_types) {
@@ -280,9 +279,21 @@ TEST(QA146TypeOid, AllTypesHaveOids) {
 TEST(QA146TypeOid, OidRoundTripConsistency) {
     // For types that have a direct PG equivalent, round-trip should work.
     std::vector<TypeId> direct_types = {
-        TypeId::BOOL,   TypeId::INT16,  TypeId::INT32,     TypeId::INT64,   TypeId::FLOAT32,
-        TypeId::FLOAT64, TypeId::STRING, TypeId::BLOB,     TypeId::DATE,    TypeId::TIME,
-        TypeId::TIMESTAMP, TypeId::INTERVAL, TypeId::POINT, TypeId::JSON,   TypeId::UUID,
+        TypeId::BOOL,
+        TypeId::INT16,
+        TypeId::INT32,
+        TypeId::INT64,
+        TypeId::FLOAT32,
+        TypeId::FLOAT64,
+        TypeId::STRING,
+        TypeId::BLOB,
+        TypeId::DATE,
+        TypeId::TIME,
+        TypeId::TIMESTAMP,
+        TypeId::INTERVAL,
+        TypeId::POINT,
+        TypeId::JSON,
+        TypeId::UUID,
         TypeId::EMBEDDING,
     };
     for (auto type : direct_types) {
@@ -612,9 +623,19 @@ TEST_F(QA146ProtocolTest, InvalidProtocolVersionClosesHandler) {
 
     // Send startup with wrong protocol version (2.0 instead of 3.0).
     uint8_t msg[] = {
-        0, 0, 0, 13, // length=13
-        0, 2, 0, 0,  // version 2.0
-        'u', 's', 'e', 'r', 0 // "user" param
+        0,
+        0,
+        0,
+        13, // length=13
+        0,
+        2,
+        0,
+        0, // version 2.0
+        'u',
+        's',
+        'e',
+        'r',
+        0 // "user" param
     };
     send_raw(msg, sizeof(msg));
 
@@ -643,4 +664,3 @@ TEST_F(QA146ProtocolTest, BackendPidAndSecretKeyAreSet) {
     // (Could be any int32 value including 0, so just verify no crash.)
     (void)handler.secret_key();
 }
-

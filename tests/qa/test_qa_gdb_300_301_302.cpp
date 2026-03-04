@@ -81,9 +81,8 @@ protected:
 // GDB-302 regression: verify enriched tuple column count matches schema.
 // This exercises the assertion added in enriched_traversal.cpp.
 TEST_F(QA_GDB300_301_302, EnrichedTupleColumnCountMatchesSchema) {
-    auto qr = exec_ok(
-        "SELECT id, name, __node, __depth, __source "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT id, name, __node, __depth, __source "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
     // 5 columns: id, name, __node, __depth, __source
     ASSERT_EQ(qr.column_names.size(), 5u);
     // 2 reachable nodes from user 1.
@@ -96,8 +95,7 @@ TEST_F(QA_GDB300_301_302, EnrichedTupleColumnCountMatchesSchema) {
 
 // GDB-300/301 regression: normal traversal with SELECT * works correctly.
 TEST_F(QA_GDB300_301_302, SelectStarTraverseWorks) {
-    auto qr = exec_ok(
-        "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
     ASSERT_EQ(qr.rows.size(), 2u);
     // All rows should have non-null PKs.
     for (const auto& row : qr.rows) {
@@ -113,9 +111,8 @@ TEST_F(QA_GDB300_301_302, EnrichedWithEdgeProperties) {
     exec_ok("CREATE EDGE TYPE links (weight INT) FROM items TO items");
     exec_ok("LINK items(10) TO items(20) VIA links (weight = 5)");
 
-    auto qr = exec_ok(
-        "SELECT id, title, __node, __depth, weight "
-        "FROM TRAVERSE links FROM items(10) DIRECTION OUT");
+    auto qr = exec_ok("SELECT id, title, __node, __depth, weight "
+                      "FROM TRAVERSE links FROM items(10) DIRECTION OUT");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0].size(), 5u);
     EXPECT_EQ(val_to_int64(qr.rows[0][0]), 20);

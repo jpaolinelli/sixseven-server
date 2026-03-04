@@ -591,7 +591,8 @@ TEST(QA_GDB322_Stress, ManyWordsWithTruncation) {
     // Generate a long input with many words.
     std::string input;
     for (int i = 0; i < 100; ++i) {
-        if (i > 0) input += ' ';
+        if (i > 0)
+            input += ' ';
         input += "hello";
     }
     auto config = make_qa_config();
@@ -610,7 +611,8 @@ TEST(QA_GDB322_Stress, ManySubwordWords) {
     // "embedding" repeated many times -> lots of subword tokens.
     std::string input;
     for (int i = 0; i < 50; ++i) {
-        if (i > 0) input += ' ';
+        if (i > 0)
+            input += ' ';
         input += "embedding";
     }
     auto config = make_qa_config();

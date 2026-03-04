@@ -59,9 +59,8 @@ static void parse_error(std::string_view sql) {
 
 // Case-insensitive parameter names (SOURCE, PROVIDER).
 TEST(QA_GDB257_Adv, CaseInsensitiveParamNames) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (id INT PRIMARY KEY, "
-        "vec EMBEDDING(384, SOURCE='title', PROVIDER='openai'))");
+    auto stmt = parse_one("CREATE TABLE t (id INT PRIMARY KEY, "
+                          "vec EMBEDDING(384, SOURCE='title', PROVIDER='openai'))");
     ASSERT_NE(stmt, nullptr);
     auto* create = dynamic_cast<const CreateTableStmt*>(stmt.get());
     ASSERT_NE(create, nullptr);
@@ -72,9 +71,8 @@ TEST(QA_GDB257_Adv, CaseInsensitiveParamNames) {
 
 // Mixed case parameter names.
 TEST(QA_GDB257_Adv, MixedCaseParamNames) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (id INT PRIMARY KEY, "
-        "vec EMBEDDING(384, Source='body', Provider='builtin/384'))");
+    auto stmt = parse_one("CREATE TABLE t (id INT PRIMARY KEY, "
+                          "vec EMBEDDING(384, Source='body', Provider='builtin/384'))");
     ASSERT_NE(stmt, nullptr);
     auto* create = dynamic_cast<const CreateTableStmt*>(stmt.get());
     ASSERT_NE(create, nullptr);
@@ -85,9 +83,8 @@ TEST(QA_GDB257_Adv, MixedCaseParamNames) {
 
 // Empty string value for source should parse (validation is downstream).
 TEST(QA_GDB257_Adv, EmptySourceValue) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (id INT PRIMARY KEY, "
-        "vec EMBEDDING(384, source='', provider='openai'))");
+    auto stmt = parse_one("CREATE TABLE t (id INT PRIMARY KEY, "
+                          "vec EMBEDDING(384, source='', provider='openai'))");
     ASSERT_NE(stmt, nullptr);
     auto* create = dynamic_cast<const CreateTableStmt*>(stmt.get());
     ASSERT_NE(create, nullptr);
@@ -97,9 +94,8 @@ TEST(QA_GDB257_Adv, EmptySourceValue) {
 
 // Source value with special characters (concatenation expression).
 TEST(QA_GDB257_Adv, SourceWithConcatExpression) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (id INT PRIMARY KEY, "
-        "vec EMBEDDING(384, source='title || body', provider='openai'))");
+    auto stmt = parse_one("CREATE TABLE t (id INT PRIMARY KEY, "
+                          "vec EMBEDDING(384, source='title || body', provider='openai'))");
     ASSERT_NE(stmt, nullptr);
     auto* create = dynamic_cast<const CreateTableStmt*>(stmt.get());
     ASSERT_NE(create, nullptr);
@@ -109,24 +105,21 @@ TEST(QA_GDB257_Adv, SourceWithConcatExpression) {
 
 // Duplicate provider parameter should error.
 TEST(QA_GDB257_Adv, DuplicateProviderParameter) {
-    parse_error(
-        "CREATE TABLE t (id INT PRIMARY KEY, "
-        "vec EMBEDDING(384, provider='a', provider='b'))");
+    parse_error("CREATE TABLE t (id INT PRIMARY KEY, "
+                "vec EMBEDDING(384, provider='a', provider='b'))");
 }
 
 // Only one named param (missing second) should error.
 TEST(QA_GDB257_Adv, OnlyOneNamedParam) {
     // Only source, missing provider — parser loop tries to parse second param.
-    parse_error(
-        "CREATE TABLE t (id INT PRIMARY KEY, "
-        "vec EMBEDDING(384, source='title'))");
+    parse_error("CREATE TABLE t (id INT PRIMARY KEY, "
+                "vec EMBEDDING(384, source='title'))");
 }
 
 // Dimension 0 with named params should parse (dimension validation is downstream).
 TEST(QA_GDB257_Adv, ZeroDimensionWithNamedParams) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (id INT PRIMARY KEY, "
-        "vec EMBEDDING(0, source='title', provider='openai'))");
+    auto stmt = parse_one("CREATE TABLE t (id INT PRIMARY KEY, "
+                          "vec EMBEDDING(0, source='title', provider='openai'))");
     ASSERT_NE(stmt, nullptr);
     auto* create = dynamic_cast<const CreateTableStmt*>(stmt.get());
     ASSERT_NE(create, nullptr);
@@ -136,9 +129,8 @@ TEST(QA_GDB257_Adv, ZeroDimensionWithNamedParams) {
 
 // Large dimension with named params.
 TEST(QA_GDB257_Adv, LargeDimensionWithNamedParams) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (id INT PRIMARY KEY, "
-        "vec EMBEDDING(4096, source='title', provider='openai'))");
+    auto stmt = parse_one("CREATE TABLE t (id INT PRIMARY KEY, "
+                          "vec EMBEDDING(4096, source='title', provider='openai'))");
     ASSERT_NE(stmt, nullptr);
     auto* create = dynamic_cast<const CreateTableStmt*>(stmt.get());
     ASSERT_NE(create, nullptr);
@@ -277,9 +269,8 @@ protected:
 
 // Multiple edge properties via alias.
 TEST_F(QA_GDB303_Adv, MultipleEdgePropertiesViaAlias) {
-    auto qr = exec_ok(
-        "SELECT t.weight, t.label "
-        "FROM TRAVERSE knows FROM people(1) DIRECTION OUT AS t");
+    auto qr = exec_ok("SELECT t.weight, t.label "
+                      "FROM TRAVERSE knows FROM people(1) DIRECTION OUT AS t");
     ASSERT_EQ(qr.rows.size(), 2u);
     // Verify column names are correct.
     ASSERT_GE(qr.column_names.size(), 2u);
@@ -289,10 +280,9 @@ TEST_F(QA_GDB303_Adv, MultipleEdgePropertiesViaAlias) {
 
 // WHERE clause referencing edge property via alias.
 TEST_F(QA_GDB303_Adv, WhereClauseOnAliasedEdgeProperty) {
-    auto qr = exec_ok(
-        "SELECT t.name, t.weight "
-        "FROM TRAVERSE knows FROM people(1) DIRECTION OUT AS t "
-        "WHERE t.weight > 7");
+    auto qr = exec_ok("SELECT t.name, t.weight "
+                      "FROM TRAVERSE knows FROM people(1) DIRECTION OUT AS t "
+                      "WHERE t.weight > 7");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Bob");
     EXPECT_EQ(val_to_int64(qr.rows[0][1]), 10);
@@ -300,17 +290,15 @@ TEST_F(QA_GDB303_Adv, WhereClauseOnAliasedEdgeProperty) {
 
 // Edge mode: multiple properties via alias.
 TEST_F(QA_GDB303_Adv, EdgeModeMultiplePropertiesViaAlias) {
-    auto qr = exec_ok(
-        "SELECT t.weight, t.label "
-        "FROM TRAVERSE knows FROM people(1) DIRECTION OUT MODE EDGES AS t");
+    auto qr = exec_ok("SELECT t.weight, t.label "
+                      "FROM TRAVERSE knows FROM people(1) DIRECTION OUT MODE EDGES AS t");
     ASSERT_EQ(qr.rows.size(), 2u);
 }
 
 // Table column + edge property + meta column via same alias.
 TEST_F(QA_GDB303_Adv, MixedColumnsViaAlias) {
-    auto qr = exec_ok(
-        "SELECT t.name, t.weight, t.__node, t.__depth "
-        "FROM TRAVERSE knows FROM people(1) DIRECTION OUT AS t");
+    auto qr = exec_ok("SELECT t.name, t.weight, t.__node, t.__depth "
+                      "FROM TRAVERSE knows FROM people(1) DIRECTION OUT AS t");
     ASSERT_EQ(qr.rows.size(), 2u);
     ASSERT_EQ(qr.column_names.size(), 4u);
     // Verify all columns present in each row.
@@ -321,9 +309,8 @@ TEST_F(QA_GDB303_Adv, MixedColumnsViaAlias) {
 
 // Unqualified edge property access still works with alias defined.
 TEST_F(QA_GDB303_Adv, UnqualifiedPropertyWithAliasPresent) {
-    auto qr = exec_ok(
-        "SELECT weight, label "
-        "FROM TRAVERSE knows FROM people(1) DIRECTION OUT AS t");
+    auto qr = exec_ok("SELECT weight, label "
+                      "FROM TRAVERSE knows FROM people(1) DIRECTION OUT AS t");
     ASSERT_EQ(qr.rows.size(), 2u);
 }
 
@@ -552,9 +539,8 @@ TEST_F(QA_GDB300_Adv, DeepTraversalColumnCountConsistency) {
                 ") VIA chain");
     }
 
-    auto qr = exec_ok(
-        "SELECT id, label, __node, __depth, __source "
-        "FROM TRAVERSE chain FROM nodes(1) DIRECTION OUT MAX_DEPTH 10");
+    auto qr = exec_ok("SELECT id, label, __node, __depth, __source "
+                      "FROM TRAVERSE chain FROM nodes(1) DIRECTION OUT MAX_DEPTH 10");
     ASSERT_EQ(qr.column_names.size(), 5u);
     // All rows have consistent column count.
     for (const auto& row : qr.rows) {
@@ -574,9 +560,8 @@ TEST_F(QA_GDB300_Adv, TraversalWithEdgePropertiesColumnCount) {
     exec_ok("LINK users(1) TO users(2) VIA follows (weight = 5, tag = 'a')");
     exec_ok("LINK users(2) TO users(3) VIA follows (weight = 10, tag = 'b')");
 
-    auto qr = exec_ok(
-        "SELECT id, name, __node, __depth, __source, weight, tag "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 3");
+    auto qr = exec_ok("SELECT id, name, __node, __depth, __source, weight, tag "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 3");
     ASSERT_EQ(qr.column_names.size(), 7u);
     for (const auto& row : qr.rows) {
         EXPECT_EQ(row.size(), 7u);
@@ -591,8 +576,7 @@ TEST_F(QA_GDB300_Adv, SelectStarWithEdgeProperties) {
     exec_ok("CREATE EDGE TYPE follows (weight INT) FROM users TO users");
     exec_ok("LINK users(1) TO users(2) VIA follows (weight = 42)");
 
-    auto qr = exec_ok(
-        "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
     // id, name, __node, __depth, __source, weight = 6 columns
     ASSERT_EQ(qr.column_names.size(), 6u);
     ASSERT_EQ(qr.rows.size(), 1u);

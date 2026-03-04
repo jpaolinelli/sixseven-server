@@ -397,13 +397,17 @@ void write_to_fd148(int fd, const std::vector<uint8_t>& data) {
 std::vector<uint8_t> read_from_fd148(int fd, size_t max_bytes = 16384) {
     std::vector<uint8_t> buf(max_bytes);
     auto n = ::read(fd, buf.data(), buf.size());
-    if (n <= 0) return {};
+    if (n <= 0)
+        return {};
     buf.resize(static_cast<size_t>(n));
     return buf;
 }
 
-bool find_message148(const std::vector<uint8_t>& data, size_t& pos, uint8_t type,
-                     const uint8_t*& payload, size_t& payload_len) {
+bool find_message148(const std::vector<uint8_t>& data,
+                     size_t& pos,
+                     uint8_t type,
+                     const uint8_t*& payload,
+                     size_t& payload_len) {
     while (pos + 5 <= data.size()) {
         uint8_t msg_type = data[pos];
         uint32_t length = (static_cast<uint32_t>(data[pos + 1]) << 24) |
@@ -411,7 +415,8 @@ bool find_message148(const std::vector<uint8_t>& data, size_t& pos, uint8_t type
                           (static_cast<uint32_t>(data[pos + 3]) << 8) |
                           static_cast<uint32_t>(data[pos + 4]);
         size_t total = 1 + static_cast<size_t>(length);
-        if (pos + total > data.size()) return false;
+        if (pos + total > data.size())
+            return false;
         if (msg_type == type) {
             payload = data.data() + pos + 5;
             payload_len = length - 4;
@@ -430,8 +435,8 @@ bool has_message148(const std::vector<uint8_t>& data, uint8_t type) {
     return find_message148(data, pos, type, payload, payload_len);
 }
 
-std::vector<uint8_t> build_startup148(
-    const std::vector<std::pair<std::string, std::string>>& params) {
+std::vector<uint8_t>
+build_startup148(const std::vector<std::pair<std::string, std::string>>& params) {
     std::vector<uint8_t> payload;
     uint32_t version = 0x00030000;
     payload.push_back(static_cast<uint8_t>((version >> 24) & 0xFF));

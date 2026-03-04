@@ -1,14 +1,14 @@
 /// QA adversarial tests for GDB-98: System catalog tables (sys_tables, sys_columns, sys_indexes).
 /// Tests catalog CRUD, schema integrity, cascade deletes, and edge cases.
 
+#include "giodb/catalog/catalog.h"
+#include "giodb/catalog/schema.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <string>
 #include <vector>
-
-#include "giodb/catalog/catalog.h"
-#include "giodb/catalog/schema.h"
 
 using namespace giodb;
 
@@ -26,8 +26,11 @@ static TableSchema make_schema(const std::string& name,
     return schema;
 }
 
-static CatalogColumnDef make_col(int32_t ordinal, const std::string& name, TypeId type,
-                                 bool nullable = true, const std::string& default_expr = "") {
+static CatalogColumnDef make_col(int32_t ordinal,
+                                 const std::string& name,
+                                 TypeId type,
+                                 bool nullable = true,
+                                 const std::string& default_expr = "") {
     return {ordinal, name, type, nullable, default_expr};
 }
 
@@ -284,10 +287,22 @@ TEST(QA_GDB98_Columns, AllTypeIds) {
     Catalog catalog;
     // Test all standard column types work
     TypeId types[] = {
-        TypeId::INT8, TypeId::INT16, TypeId::INT32, TypeId::INT64,
-        TypeId::UINT8, TypeId::UINT16, TypeId::UINT32, TypeId::UINT64,
-        TypeId::FLOAT32, TypeId::FLOAT64, TypeId::BOOL, TypeId::STRING,
-        TypeId::BLOB, TypeId::DATE, TypeId::TIME, TypeId::TIMESTAMP,
+        TypeId::INT8,
+        TypeId::INT16,
+        TypeId::INT32,
+        TypeId::INT64,
+        TypeId::UINT8,
+        TypeId::UINT16,
+        TypeId::UINT32,
+        TypeId::UINT64,
+        TypeId::FLOAT32,
+        TypeId::FLOAT64,
+        TypeId::BOOL,
+        TypeId::STRING,
+        TypeId::BLOB,
+        TypeId::DATE,
+        TypeId::TIME,
+        TypeId::TIMESTAMP,
     };
 
     std::vector<CatalogColumnDef> cols;
@@ -303,8 +318,7 @@ TEST(QA_GDB98_Columns, AllTypeIds) {
     EXPECT_EQ(t->columns.size(), 16u);
 
     for (int i = 0; i < 16; ++i) {
-        EXPECT_EQ(t->columns[i].type_id, types[i])
-            << "Type mismatch at column " << i;
+        EXPECT_EQ(t->columns[i].type_id, types[i]) << "Type mismatch at column " << i;
     }
 }
 
@@ -315,7 +329,7 @@ TEST(QA_GDB98_Columns, AllTypeIds) {
 TEST(QA_GDB98_Indexes, CreateAndRetrieve) {
     Catalog catalog;
     auto tid = catalog.create_table(default_database_id,
-                                     make_schema("users", {make_col(0, "id", TypeId::INT32)}));
+                                    make_schema("users", {make_col(0, "id", TypeId::INT32)}));
     ASSERT_TRUE(tid.has_value());
 
     IndexDef idef;
@@ -423,8 +437,10 @@ TEST(QA_GDB98_SysSchema, SysTablesSchema) {
     // Verify key columns exist
     bool has_table_id = false, has_name = false;
     for (const auto& col : schema.columns) {
-        if (col.name == "table_id") has_table_id = true;
-        if (col.name == "name") has_name = true;
+        if (col.name == "table_id")
+            has_table_id = true;
+        if (col.name == "name")
+            has_name = true;
     }
     EXPECT_TRUE(has_table_id);
     EXPECT_TRUE(has_name);
@@ -435,10 +451,14 @@ TEST(QA_GDB98_SysSchema, SysColumnsSchema) {
     EXPECT_EQ(schema.name, "sys_columns");
     bool has_table_id = false, has_ordinal = false, has_name = false, has_type_id = false;
     for (const auto& col : schema.columns) {
-        if (col.name == "table_id") has_table_id = true;
-        if (col.name == "ordinal") has_ordinal = true;
-        if (col.name == "name") has_name = true;
-        if (col.name == "type_id") has_type_id = true;
+        if (col.name == "table_id")
+            has_table_id = true;
+        if (col.name == "ordinal")
+            has_ordinal = true;
+        if (col.name == "name")
+            has_name = true;
+        if (col.name == "type_id")
+            has_type_id = true;
     }
     EXPECT_TRUE(has_table_id);
     EXPECT_TRUE(has_ordinal);
@@ -451,9 +471,12 @@ TEST(QA_GDB98_SysSchema, SysIndexesSchema) {
     EXPECT_EQ(schema.name, "sys_indexes");
     bool has_index_id = false, has_table_id = false, has_is_unique = false;
     for (const auto& col : schema.columns) {
-        if (col.name == "index_id") has_index_id = true;
-        if (col.name == "table_id") has_table_id = true;
-        if (col.name == "is_unique") has_is_unique = true;
+        if (col.name == "index_id")
+            has_index_id = true;
+        if (col.name == "table_id")
+            has_table_id = true;
+        if (col.name == "is_unique")
+            has_is_unique = true;
     }
     EXPECT_TRUE(has_index_id);
     EXPECT_TRUE(has_table_id);
@@ -524,8 +547,7 @@ TEST(QA_GDB98_List, ListTablesSorted) {
     Catalog catalog;
     // Create in reverse order
     for (int i = 5; i >= 1; --i) {
-        (void)catalog.create_table(default_database_id,
-                                   make_schema("t" + std::to_string(i)));
+        (void)catalog.create_table(default_database_id, make_schema("t" + std::to_string(i)));
     }
 
     auto tables = catalog.list_tables(default_database_id);
@@ -570,8 +592,7 @@ TEST(QA_GDB98_Stress, ManyTablesAndIndexes) {
 
     // Drop half the tables and verify cascade
     for (int i = 0; i < 25; ++i) {
-        auto dr = catalog.drop_table(default_database_id,
-                                     "table_" + std::to_string(i));
+        auto dr = catalog.drop_table(default_database_id, "table_" + std::to_string(i));
         ASSERT_TRUE(dr.has_value());
     }
 

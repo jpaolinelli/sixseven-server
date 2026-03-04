@@ -243,13 +243,8 @@ TEST_F(QA140IndexScanTest, MaxInt64Key) {
     int64_t max_val = std::numeric_limits<int64_t>::max();
     insert_indexed_row(heap, index, max_val, "max", 1);
 
-    IndexScanOperator scan(index,
-                           heap,
-                           storage_schema_,
-                           output_schema_,
-                           KeyType{Value(max_val)},
-                           std::nullopt,
-                           {0});
+    IndexScanOperator scan(
+        index, heap, storage_schema_, output_schema_, KeyType{Value(max_val)}, std::nullopt, {0});
 
     auto results = collect_all(scan);
     ASSERT_EQ(results.size(), 1u);
@@ -263,13 +258,8 @@ TEST_F(QA140IndexScanTest, MinInt64Key) {
     int64_t min_val = std::numeric_limits<int64_t>::min();
     insert_indexed_row(heap, index, min_val, "min", 1);
 
-    IndexScanOperator scan(index,
-                           heap,
-                           storage_schema_,
-                           output_schema_,
-                           std::nullopt,
-                           std::nullopt,
-                           {0});
+    IndexScanOperator scan(
+        index, heap, storage_schema_, output_schema_, std::nullopt, std::nullopt, {0});
 
     auto results = collect_all(scan);
     ASSERT_EQ(results.size(), 1u);
@@ -406,14 +396,8 @@ TEST_F(QA140IndexScanTest, IndexOnlyRidPopulated) {
     OutputColumn id_col{"", "id", TypeId::INT64, false, 0};
     auto index_only_schema = OutputSchema({id_col});
 
-    IndexScanOperator scan(index,
-                           heap,
-                           storage_schema_,
-                           index_only_schema,
-                           std::nullopt,
-                           std::nullopt,
-                           {0},
-                           true);
+    IndexScanOperator scan(
+        index, heap, storage_schema_, index_only_schema, std::nullopt, std::nullopt, {0}, true);
 
     auto open = scan.open();
     ASSERT_TRUE(open.has_value()) << open.error().message;

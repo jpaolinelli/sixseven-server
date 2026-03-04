@@ -266,9 +266,7 @@ TEST(QA139_Predicate, ThreeTablePredicateNotJoin) {
 
 TEST(QA139_Predicate, JoinPredicateReversedTableOrder) {
     // customers.id = orders.customer_id
-    auto pred = mk_bin(BinaryOp::EQUAL,
-                       mk_col("customers", "id"),
-                       mk_col("orders", "customer_id"));
+    auto pred = mk_bin(BinaryOp::EQUAL, mk_col("customers", "id"), mk_col("orders", "customer_id"));
     std::vector<const Expr*> conjuncts = {pred.get()};
 
     // Should still be found when queried with (orders, customers).
@@ -401,9 +399,7 @@ TEST(QA139_Subquery, NotOfNonExistsIsInner) {
 }
 
 TEST(QA139_Subquery, CorrelatedWithMultipleOuterTables) {
-    auto expr = mk_bin(BinaryOp::EQUAL,
-                       mk_col("outer1", "id"),
-                       mk_col("inner", "ref"));
+    auto expr = mk_bin(BinaryOp::EQUAL, mk_col("outer1", "id"), mk_col("inner", "ref"));
     std::unordered_set<std::string> outer_tables = {"outer1", "outer2"};
     EXPECT_TRUE(is_correlated_subquery(*expr, outer_tables));
 }

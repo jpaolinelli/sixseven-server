@@ -237,8 +237,7 @@ TEST(QA_GDB_126_InnerProduct, ConsistentWithDotNegation) {
 
         float dot = compute_distance(DistanceMetric::DOT_PRODUCT, a, b);
         float ip = compute_distance(DistanceMetric::INNER_PRODUCT, a, b);
-        EXPECT_NEAR(ip, -dot, tolerance(dot))
-            << "INNER_PRODUCT != -DOT_PRODUCT at dim=" << dim;
+        EXPECT_NEAR(ip, -dot, tolerance(dot)) << "INNER_PRODUCT != -DOT_PRODUCT at dim=" << dim;
     }
 }
 
@@ -310,14 +309,12 @@ TEST(QA_GDB_126_Batch, LargeBatch) {
     }
 
     std::vector<float> batch_out(count);
-    compute_distance_batch(
-        DistanceMetric::L2, query, ptrs.data(), count, dim, batch_out.data());
+    compute_distance_batch(DistanceMetric::L2, query, ptrs.data(), count, dim, batch_out.data());
 
     // Verify each result against individual computation.
     for (uint32_t i = 0; i < count; ++i) {
         float single = compute_distance(DistanceMetric::L2, query, candidates[i]);
-        EXPECT_NEAR(batch_out[i], single, tolerance(single))
-            << "Mismatch at candidate " << i;
+        EXPECT_NEAR(batch_out[i], single, tolerance(single)) << "Mismatch at candidate " << i;
     }
 }
 
@@ -341,8 +338,10 @@ TEST(QA_GDB_126_Batch, AllMetricsConsistent) {
         ptrs[i] = candidates[i].data();
     }
 
-    for (auto metric : {DistanceMetric::L2, DistanceMetric::COSINE,
-                        DistanceMetric::DOT_PRODUCT, DistanceMetric::INNER_PRODUCT}) {
+    for (auto metric : {DistanceMetric::L2,
+                        DistanceMetric::COSINE,
+                        DistanceMetric::DOT_PRODUCT,
+                        DistanceMetric::INNER_PRODUCT}) {
         std::vector<float> batch_out(count);
         compute_distance_batch(metric, query, ptrs.data(), count, dim, batch_out.data());
 
@@ -370,11 +369,11 @@ TEST(QA_GDB_126_Batch, BatchDim1) {
     std::vector<float> out(count);
     compute_distance_batch(DistanceMetric::L2, query, ptrs.data(), count, dim, out.data());
 
-    EXPECT_NEAR(out[0], 4.0F, 1e-6F);  // (3-1)^2 = 4
-    EXPECT_NEAR(out[1], 1.0F, 1e-6F);  // (3-2)^2 = 1
-    EXPECT_NEAR(out[2], 0.0F, 1e-6F);  // (3-3)^2 = 0
-    EXPECT_NEAR(out[3], 1.0F, 1e-6F);  // (3-4)^2 = 1
-    EXPECT_NEAR(out[4], 4.0F, 1e-6F);  // (3-5)^2 = 4
+    EXPECT_NEAR(out[0], 4.0F, 1e-6F); // (3-1)^2 = 4
+    EXPECT_NEAR(out[1], 1.0F, 1e-6F); // (3-2)^2 = 1
+    EXPECT_NEAR(out[2], 0.0F, 1e-6F); // (3-3)^2 = 0
+    EXPECT_NEAR(out[3], 1.0F, 1e-6F); // (3-4)^2 = 1
+    EXPECT_NEAR(out[4], 4.0F, 1e-6F); // (3-5)^2 = 4
 }
 
 // ---------------------------------------------------------------------------
@@ -464,8 +463,7 @@ TEST(QA_GDB_126_Stress, ManyRandomDimensions) {
         EXPECT_NEAR(l2, ref_l2(a, b), tolerance(ref_l2(a, b))) << "L2 mismatch at dim=" << dim;
 
         float dot = compute_distance(DistanceMetric::DOT_PRODUCT, a, b);
-        EXPECT_NEAR(dot, ref_dot(a, b), tolerance(ref_dot(a, b)))
-            << "DOT mismatch at dim=" << dim;
+        EXPECT_NEAR(dot, ref_dot(a, b), tolerance(ref_dot(a, b))) << "DOT mismatch at dim=" << dim;
 
         float cos = compute_distance(DistanceMetric::COSINE, a, b);
         EXPECT_NEAR(cos, ref_cosine(a, b), 1e-4F) << "COSINE mismatch at dim=" << dim;

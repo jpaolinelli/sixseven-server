@@ -545,8 +545,7 @@ TEST(QA_GDB_122_Stress, ManyNodeRoundTrips) {
         for (size_t layer = 0; layer <= node.max_layer; ++layer) {
             uint32_t n_neighbors = (layer == 0) ? (i % 10) : (i % 5);
             for (uint32_t j = 0; j < n_neighbors; ++j) {
-                node.neighbors[layer].push_back(
-                    {j + i * 100, static_cast<float>(j) * 0.01F});
+                node.neighbors[layer].push_back({j + i * 100, static_cast<float>(j) * 0.01F});
             }
         }
 
@@ -559,8 +558,7 @@ TEST(QA_GDB_122_Stress, ManyNodeRoundTrips) {
         EXPECT_EQ(result->max_layer, node.max_layer);
         ASSERT_EQ(result->neighbors.size(), node.neighbors.size());
         for (size_t layer = 0; layer < node.neighbors.size(); ++layer) {
-            EXPECT_EQ(result->neighbors[layer].size(),
-                       node.neighbors[layer].size());
+            EXPECT_EQ(result->neighbors[layer].size(), node.neighbors[layer].size());
         }
     }
 }

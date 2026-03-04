@@ -60,8 +60,8 @@ TEST(QA_GDB96_Insert, ConcurrentSmallCapacity) {
         threads.emplace_back([&tree, &failures, t]() {
             int start = t * keys_per_thread;
             for (int i = 0; i < keys_per_thread; ++i) {
-                auto ins = tree.insert(make_key(start + i),
-                                       make_rid(static_cast<uint32_t>(start + i)));
+                auto ins =
+                    tree.insert(make_key(start + i), make_rid(static_cast<uint32_t>(start + i)));
                 if (!ins.has_value()) {
                     failures.fetch_add(1);
                 }
@@ -223,14 +223,16 @@ TEST(QA_GDB96_Mixed, MultipleWritersMultipleReaders) {
     std::thread writer1([&]() {
         for (int i = initial; i < initial + 100; ++i) {
             auto ins = tree.insert(make_key(i), make_rid(static_cast<uint32_t>(i)));
-            if (!ins.has_value()) write_fail.fetch_add(1);
+            if (!ins.has_value())
+                write_fail.fetch_add(1);
         }
     });
 
     std::thread writer2([&]() {
         for (int i = initial + 100; i < initial + 200; ++i) {
             auto ins = tree.insert(make_key(i), make_rid(static_cast<uint32_t>(i)));
-            if (!ins.has_value()) write_fail.fetch_add(1);
+            if (!ins.has_value())
+                write_fail.fetch_add(1);
         }
         done.store(true);
     });
@@ -253,7 +255,8 @@ TEST(QA_GDB96_Mixed, MultipleWritersMultipleReaders) {
 
     writer1.join();
     writer2.join();
-    for (auto& th : readers) th.join();
+    for (auto& th : readers)
+        th.join();
 
     EXPECT_EQ(write_fail.load(), 0);
     EXPECT_EQ(read_fail.load(), 0);
@@ -279,8 +282,10 @@ TEST(QA_GDB96_Scan, ScanDuringInserts) {
     // Writer: insert odd keys
     std::thread writer([&]() {
         for (int i = 0; i < initial; ++i) {
-            auto ins = tree.insert(make_key(i * 2 + 1), make_rid(static_cast<uint32_t>(i + initial)));
-            if (!ins.has_value()) ins_fail.fetch_add(1);
+            auto ins =
+                tree.insert(make_key(i * 2 + 1), make_rid(static_cast<uint32_t>(i + initial)));
+            if (!ins.has_value())
+                ins_fail.fetch_add(1);
         }
         done.store(true);
     });
@@ -300,7 +305,8 @@ TEST(QA_GDB96_Scan, ScanDuringInserts) {
                     scan_fail.fetch_add(1);
                     break;
                 }
-                if (!entry->has_value()) break;
+                if (!entry->has_value())
+                    break;
             }
         }
     });
@@ -340,7 +346,8 @@ TEST(QA_GDB96_Scan, MultipleConcurrentScans) {
                     failures.fetch_add(1);
                     return;
                 }
-                if (!entry->has_value()) break;
+                if (!entry->has_value())
+                    break;
                 int64_t val = std::get<int64_t>(entry->value().first[0].data());
                 if (val <= prev) {
                     failures.fetch_add(1);
@@ -426,13 +433,15 @@ TEST(QA_GDB96_Iterator, MultipleIteratorsAllowed) {
     while (!scan1->is_end()) {
         auto e = scan1->next();
         ASSERT_TRUE(e.has_value());
-        if (!e->has_value()) break;
+        if (!e->has_value())
+            break;
         ++count1;
     }
     while (!scan2->is_end()) {
         auto e = scan2->next();
         ASSERT_TRUE(e.has_value());
-        if (!e->has_value()) break;
+        if (!e->has_value())
+            break;
         ++count2;
     }
     EXPECT_EQ(count1, 50);
@@ -461,7 +470,8 @@ TEST(QA_GDB96_Stress, HighContentionInsertSearchDelete) {
             int start = initial + t * 100;
             for (int i = start; i < start + 100; ++i) {
                 auto ins = tree.insert(make_key(i), make_rid(static_cast<uint32_t>(i)));
-                if (!ins.has_value()) failures.fetch_add(1);
+                if (!ins.has_value())
+                    failures.fetch_add(1);
             }
         });
     }
@@ -473,7 +483,8 @@ TEST(QA_GDB96_Stress, HighContentionInsertSearchDelete) {
             for (int i = start; i < start + 150 && i < initial; ++i) {
                 auto s = tree.search(make_key(i));
                 // Key might have been deleted by the time we search
-                if (!s.has_value()) failures.fetch_add(1);
+                if (!s.has_value())
+                    failures.fetch_add(1);
             }
         });
     }
@@ -482,13 +493,15 @@ TEST(QA_GDB96_Stress, HighContentionInsertSearchDelete) {
     threads.emplace_back([&tree, &failures]() {
         for (int i = 0; i < 50; ++i) {
             auto del = tree.remove(make_key(i));
-            if (!del.has_value()) failures.fetch_add(1);
+            if (!del.has_value())
+                failures.fetch_add(1);
         }
     });
     threads.emplace_back([&tree, &failures]() {
         for (int i = 250; i < initial; ++i) {
             auto del = tree.remove(make_key(i));
-            if (!del.has_value()) failures.fetch_add(1);
+            if (!del.has_value())
+                failures.fetch_add(1);
         }
     });
 
@@ -515,13 +528,15 @@ TEST(QA_GDB96_Stress, RapidInsertDeleteCycles) {
             inserters.emplace_back([&tree, &failures, c, t]() {
                 int base = c * keys_per_cycle + t * 25;
                 for (int i = 0; i < 25; ++i) {
-                    auto ins = tree.insert(make_key(base + i),
-                                           make_rid(static_cast<uint32_t>(base + i)));
-                    if (!ins.has_value()) failures.fetch_add(1);
+                    auto ins =
+                        tree.insert(make_key(base + i), make_rid(static_cast<uint32_t>(base + i)));
+                    if (!ins.has_value())
+                        failures.fetch_add(1);
                 }
             });
         }
-        for (auto& th : inserters) th.join();
+        for (auto& th : inserters)
+            th.join();
 
         // Delete phase: 4 threads delete disjoint ranges
         std::vector<std::thread> deleters;
@@ -530,11 +545,13 @@ TEST(QA_GDB96_Stress, RapidInsertDeleteCycles) {
                 int base = c * keys_per_cycle + t * 25;
                 for (int i = 0; i < 25; ++i) {
                     auto del = tree.remove(make_key(base + i));
-                    if (!del.has_value() || !*del) failures.fetch_add(1);
+                    if (!del.has_value() || !*del)
+                        failures.fetch_add(1);
                 }
             });
         }
-        for (auto& th : deleters) th.join();
+        for (auto& th : deleters)
+            th.join();
     }
 
     EXPECT_EQ(failures.load(), 0);
@@ -620,7 +637,8 @@ TEST(QA_GDB96_BulkLoad, BulkLoadThenConcurrentSearch) {
         });
     }
 
-    for (auto& th : threads) th.join();
+    for (auto& th : threads)
+        th.join();
     EXPECT_EQ(failures.load(), 0);
 }
 
@@ -638,11 +656,13 @@ TEST(QA_GDB96_Edge, ConcurrentInsertToEmpty) {
     for (int t = 0; t < 4; ++t) {
         threads.emplace_back([&tree, &failures, t]() {
             auto ins = tree.insert(make_key(t), make_rid(static_cast<uint32_t>(t)));
-            if (!ins.has_value()) failures.fetch_add(1);
+            if (!ins.has_value())
+                failures.fetch_add(1);
         });
     }
 
-    for (auto& th : threads) th.join();
+    for (auto& th : threads)
+        th.join();
     EXPECT_EQ(failures.load(), 0);
     EXPECT_EQ(tree.size(), 4u);
 }
@@ -665,7 +685,8 @@ TEST(QA_GDB96_Edge, ConcurrentSearchOnEmpty) {
         });
     }
 
-    for (auto& th : threads) th.join();
+    for (auto& th : threads)
+        th.join();
     EXPECT_EQ(failures.load(), 0);
 }
 
@@ -688,7 +709,8 @@ TEST(QA_GDB96_Edge, ConcurrentDeleteToEmpty) {
         });
     }
 
-    for (auto& th : threads) th.join();
+    for (auto& th : threads)
+        th.join();
     EXPECT_EQ(failures.load(), 0);
     EXPECT_TRUE(tree.empty());
 }

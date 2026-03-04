@@ -487,7 +487,8 @@ TEST_F(QA_GDB323_BPETokenizer, ManyWordsStress) {
     // Build a string with 100 words.
     std::string input;
     for (int i = 0; i < 100; ++i) {
-        if (i > 0) input += " ";
+        if (i > 0)
+            input += " ";
         input += "hello";
     }
     auto ids = tokenizer_->encode(input, 512);
@@ -610,13 +611,11 @@ TEST_F(QA_GDB323_BPETokenizer, EncodeDeterministic) {
 
 TEST_F(QA_GDB323_BPETokenizer, OutputSizeAlwaysMatchesMaxLength) {
     // Test a range of max_lengths from 0 to 20 with various inputs.
-    std::vector<std::string> inputs = {"", "a", "hello", "hello world",
-                                        "a a a a a a a a a a"};
+    std::vector<std::string> inputs = {"", "a", "hello", "hello world", "a a a a a a a a a a"};
     for (const auto& input : inputs) {
         for (size_t max_len = 0; max_len <= 20; ++max_len) {
             auto ids = tokenizer_->encode(input, max_len);
-            EXPECT_EQ(ids.size(), max_len)
-                << "Input: \"" << input << "\", max_length: " << max_len;
+            EXPECT_EQ(ids.size(), max_len) << "Input: \"" << input << "\", max_length: " << max_len;
         }
     }
 }

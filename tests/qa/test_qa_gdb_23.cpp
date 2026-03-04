@@ -79,12 +79,15 @@ static ExprPtr eq_pred() {
     return e;
 }
 
-static std::vector<Tuple> run_nlj(std::vector<Tuple> left, std::vector<Tuple> right,
-                                   JoinType type, const Expr* pred) {
+static std::vector<Tuple>
+run_nlj(std::vector<Tuple> left, std::vector<Tuple> right, JoinType type, const Expr* pred) {
     BoundStatement bound;
     NestedLoopJoinOperator join(
         std::make_unique<VectorIterator>(make_left_schema(), std::move(left)),
-        std::make_unique<VectorIterator>(make_right_schema(), std::move(right)), type, pred, bound,
+        std::make_unique<VectorIterator>(make_right_schema(), std::move(right)),
+        type,
+        pred,
+        bound,
         make_combined_schema());
     return collect_all(join);
 }
@@ -309,8 +312,12 @@ TEST(QA_NestedLoopJoin, LeftJoinAllMatchWithDuplicates) {
 // QA_HashJoin — Adversarial tests
 // ===========================================================================
 
-static ExprPtr probe_key_expr() { return col_ref("probe", "id"); }
-static ExprPtr build_key_expr() { return col_ref("build", "id"); }
+static ExprPtr probe_key_expr() {
+    return col_ref("probe", "id");
+}
+static ExprPtr build_key_expr() {
+    return col_ref("build", "id");
+}
 
 static OutputSchema make_probe_schema() {
     return OutputSchema({
@@ -351,14 +358,21 @@ static Tuple build_null_key(const std::string& dept) {
     return Tuple{{Value::make_null(), Value(dept)}, {}};
 }
 
-static std::vector<Tuple> run_hash_join(std::vector<Tuple> probe, std::vector<Tuple> build,
-                                         JoinType type, size_t work_mem = 0) {
+static std::vector<Tuple> run_hash_join(std::vector<Tuple> probe,
+                                        std::vector<Tuple> build,
+                                        JoinType type,
+                                        size_t work_mem = 0) {
     auto pk = probe_key_expr();
     auto bk = build_key_expr();
     BoundStatement bound;
     HashJoinOperator join(std::make_unique<VectorIterator>(make_probe_schema(), std::move(probe)),
                           std::make_unique<VectorIterator>(make_build_schema(), std::move(build)),
-                          type, pk.get(), bk.get(), bound, make_hj_combined_schema(), work_mem);
+                          type,
+                          pk.get(),
+                          bk.get(),
+                          bound,
+                          make_hj_combined_schema(),
+                          work_mem);
     return collect_all(join);
 }
 
@@ -458,8 +472,8 @@ TEST(QA_HashJoin, WorkMemExactlyAtBuildSize) {
 }
 
 TEST(QA_HashJoin, GraceHashJoinNullKeys) {
-    auto probe =
-        std::vector<Tuple>{probe_null_key("null_p"), probe_tuple(1, "alice"), probe_tuple(2, "bob")};
+    auto probe = std::vector<Tuple>{
+        probe_null_key("null_p"), probe_tuple(1, "alice"), probe_tuple(2, "bob")};
     auto build = std::vector<Tuple>{build_null_key("null_b"), build_tuple(1, "eng")};
 
     // work_mem=1 forces grace hash join.
@@ -550,15 +564,19 @@ TEST(QA_HashJoin, GraceHashJoinLargeDataset) {
 // QA_SortMergeJoin — Adversarial tests
 // ===========================================================================
 
-static std::vector<Tuple> run_smj(std::vector<Tuple> left, std::vector<Tuple> right,
-                                   JoinType type) {
+static std::vector<Tuple>
+run_smj(std::vector<Tuple> left, std::vector<Tuple> right, JoinType type) {
     auto lk = col_ref("left", "id");
     auto rk = col_ref("right", "id");
     BoundStatement bound;
     SortMergeJoinOperator join(
         std::make_unique<VectorIterator>(make_left_schema(), std::move(left)),
-        std::make_unique<VectorIterator>(make_right_schema(), std::move(right)), type, lk.get(),
-        rk.get(), bound, make_combined_schema());
+        std::make_unique<VectorIterator>(make_right_schema(), std::move(right)),
+        type,
+        lk.get(),
+        rk.get(),
+        bound,
+        make_combined_schema());
     return collect_all(join);
 }
 
@@ -578,11 +596,16 @@ TEST(QA_SortMergeJoin, AllSameKeyInner) {
 
 TEST(QA_SortMergeJoin, ReverseSortedInput) {
     auto left = std::vector<Tuple>{
-        left_tuple(5, "e"), left_tuple(4, "d"), left_tuple(3, "c"),
-        left_tuple(2, "b"), left_tuple(1, "a"),
+        left_tuple(5, "e"),
+        left_tuple(4, "d"),
+        left_tuple(3, "c"),
+        left_tuple(2, "b"),
+        left_tuple(1, "a"),
     };
     auto right = std::vector<Tuple>{
-        right_tuple(5, "E"), right_tuple(3, "C"), right_tuple(1, "A"),
+        right_tuple(5, "E"),
+        right_tuple(3, "C"),
+        right_tuple(1, "A"),
     };
 
     auto rows = run_smj(std::move(left), std::move(right), JoinType::INNER);
@@ -837,8 +860,7 @@ TEST(QA_JoinConsistency, InnerJoinAllThreeOperatorsAgree) {
     auto hj_rows = run_hash_join(std::move(probe_data), std::move(build_data), JoinType::INNER);
 
     // SMJ
-    auto smj_rows =
-        run_smj(std::vector<Tuple>(left), std::vector<Tuple>(right), JoinType::INNER);
+    auto smj_rows = run_smj(std::vector<Tuple>(left), std::vector<Tuple>(right), JoinType::INNER);
 
     // All three should produce 3 matches (keys 2, 3, 5).
     EXPECT_EQ(nlj_rows.size(), 3u);

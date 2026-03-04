@@ -30,8 +30,7 @@ protected:
     void SetUp() override {
         const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
         temp_dir_ = std::filesystem::temp_directory_path() /
-                    ("giodb_qa_gdb15_" + std::string(info->test_suite_name()) + "_" +
-                     info->name());
+                    ("giodb_qa_gdb15_" + std::string(info->test_suite_name()) + "_" + info->name());
         std::filesystem::create_directories(temp_dir_);
 
         auto create_result = dm_.create_file(temp_dir_ / "test.gdb");
@@ -202,8 +201,7 @@ TEST_F(QABufferPoolTest, FetchHeaderPageFails) {
     auto result = bpm.fetch_page(0);
     // Page 0 is the header. DiskManager should reject reads of the header
     // as a user data page (checksum or bounds error).
-    EXPECT_FALSE(result.has_value())
-        << "Fetching page_id=0 (header page) should fail";
+    EXPECT_FALSE(result.has_value()) << "Fetching page_id=0 (header page) should fail";
 }
 
 /// fetch_page for a page_id that has never been allocated should fail.
@@ -212,8 +210,7 @@ TEST_F(QABufferPoolTest, FetchNonexistentPageFails) {
 
     // Page IDs > allocated page count are out of bounds.
     auto result = bpm.fetch_page(999999);
-    EXPECT_FALSE(result.has_value())
-        << "Fetching an unallocated page_id should return an error";
+    EXPECT_FALSE(result.has_value()) << "Fetching an unallocated page_id should return an error";
 }
 
 /// After deleting a page from the buffer pool, unpinning it should fail
@@ -361,7 +358,8 @@ TEST_F(QABufferPoolTest, SingleFramePoolRecyclesCorrctly) {
         ASSERT_TRUE(bpm.flush_page(pid).has_value());
         ASSERT_TRUE(bpm.unpin_page(pid, false).has_value());
         ASSERT_TRUE(bpm.delete_page(pid).has_value());
-        EXPECT_EQ(bpm.pool_page_count(), 0u) << "Pool should be empty after delete, iteration " << i;
+        EXPECT_EQ(bpm.pool_page_count(), 0u)
+            << "Pool should be empty after delete, iteration " << i;
     }
 }
 
@@ -585,8 +583,7 @@ TEST_F(QABufferPoolTest, BUG_NewPageLeaksDiskPageWhenPoolFull) {
 
     auto count1 = dm_.file_page_count(file_id_);
     ASSERT_TRUE(count1.has_value());
-    EXPECT_EQ(*count1, initial + 1)
-        << "Successful new_page() should allocate exactly 1 disk page";
+    EXPECT_EQ(*count1, initial + 1) << "Successful new_page() should allocate exactly 1 disk page";
 
     // Failed new_page() — pool is full (1 frame, 1 pinned page).
     // Bug: allocate_page() is called before find_victim_frame(),
@@ -626,8 +623,7 @@ TEST_F(QABufferPoolTest, BUG_RepeatedFailedNewPageLeaksMultiplePages) {
     constexpr int FAILED_CALLS = 5;
     for (int i = 0; i < FAILED_CALLS; ++i) {
         auto px = bpm.new_page();
-        ASSERT_FALSE(px.has_value())
-            << "new_page() call " << i << " should fail (pool full)";
+        ASSERT_FALSE(px.has_value()) << "new_page() call " << i << " should fail (pool full)";
     }
 
     auto count_final = dm_.file_page_count(file_id_);
@@ -638,8 +634,7 @@ TEST_F(QABufferPoolTest, BUG_RepeatedFailedNewPageLeaksMultiplePages) {
     // This assertion FAILS: actual is count_filled + FAILED_CALLS.
     EXPECT_EQ(*count_final, count_filled)
         << "REGRESSION: " << FAILED_CALLS << " failed new_page() calls leaked "
-        << (*count_final - count_filled)
-        << " disk page IDs (expected 0 leaks)";
+        << (*count_final - count_filled) << " disk page IDs (expected 0 leaks)";
 }
 
 // =============================================================================
@@ -686,8 +681,7 @@ TEST_F(QABufferPoolTest, ConcurrentCreateFlushDeleteStress) {
 
     // Allow some errors (pool full is expected under concurrent load),
     // but not excessive errors.
-    EXPECT_LT(errors.load(), 50)
-        << "Too many errors under concurrent stress: " << errors.load();
+    EXPECT_LT(errors.load(), 50) << "Too many errors under concurrent stress: " << errors.load();
 }
 
 /// Stress: concurrent fetch/unpin with LRU-K eviction under memory pressure.
@@ -738,6 +732,5 @@ TEST_F(QABufferPoolTest, ConcurrentEvictionStressNoDeadlock) {
         th.join();
     }
 
-    EXPECT_EQ(errors.load(), 0)
-        << "Concurrent eviction stress produced errors: " << errors.load();
+    EXPECT_EQ(errors.load(), 0) << "Concurrent eviction stress produced errors: " << errors.load();
 }

@@ -63,13 +63,12 @@ protected:
     }
 
     /// Run BFS and return (node_pk, depth) pairs.
-    std::vector<std::pair<int64_t, int64_t>>
-    run_bfs(int64_t start,
-            TraverseDirection dir = TraverseDirection::OUT,
-            int32_t max_depth = 100,
-            size_t max_visited = 100000,
-            bool fetch = false,
-            bool collect_edges = false) {
+    std::vector<std::pair<int64_t, int64_t>> run_bfs(int64_t start,
+                                                     TraverseDirection dir = TraverseDirection::OUT,
+                                                     int32_t max_depth = 100,
+                                                     size_t max_visited = 100000,
+                                                     bool fetch = false,
+                                                     bool collect_edges = false) {
         TraversalConfig config;
         config.edge_type = "follows";
         config.start_key = Value(start);
@@ -230,8 +229,7 @@ TEST_F(QA_Traversal, LongChainStress) {
     auto results = run_bfs(1, TraverseDirection::OUT, 200);
     ASSERT_EQ(results.size(), 199u);
     // Last node should be at depth 199.
-    auto it = std::find_if(
-        results.begin(), results.end(), [](auto& p) { return p.first == 200; });
+    auto it = std::find_if(results.begin(), results.end(), [](auto& p) { return p.first == 200; });
     ASSERT_NE(it, results.end());
     EXPECT_EQ(it->second, 199);
 }
@@ -409,8 +407,7 @@ protected:
         auto tid = catalog_->create_table(default_database_id, std::move(ts));
         ASSERT_TRUE(tid.has_value()) << tid.error().message;
 
-        auto eid = graph_->create_edge_type(
-            "edge", *tid, *tid, TypeId::INT64, TypeId::INT64, {});
+        auto eid = graph_->create_edge_type("edge", *tid, *tid, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
     }
 
@@ -789,8 +786,14 @@ TEST_F(QA_PatternMatch, SingleHopNoEdges) {
     OutputSchema schema(std::move(out_cols));
 
     BoundStatement bound;
-    PatternMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                            std::move(config), std::move(schema), nullptr, bound);
+    PatternMatchOperator op(*graph_,
+                            *catalog_,
+                            *storage_,
+                            default_database_id,
+                            std::move(config),
+                            std::move(schema),
+                            nullptr,
+                            bound);
 
     auto open_result = op.open();
     ASSERT_TRUE(open_result.has_value());
@@ -815,8 +818,14 @@ TEST_F(QA_PatternMatch, EmptySourceTable) {
     OutputSchema schema(std::move(out_cols));
 
     BoundStatement bound;
-    PatternMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                            std::move(config), std::move(schema), nullptr, bound);
+    PatternMatchOperator op(*graph_,
+                            *catalog_,
+                            *storage_,
+                            default_database_id,
+                            std::move(config),
+                            std::move(schema),
+                            nullptr,
+                            bound);
 
     auto open_result = op.open();
     ASSERT_TRUE(open_result.has_value());
@@ -847,8 +856,14 @@ TEST_F(QA_PatternMatch, SingleHopAllResults) {
     OutputSchema schema(std::move(out_cols));
 
     BoundStatement bound;
-    PatternMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                            std::move(config), std::move(schema), nullptr, bound);
+    PatternMatchOperator op(*graph_,
+                            *catalog_,
+                            *storage_,
+                            default_database_id,
+                            std::move(config),
+                            std::move(schema),
+                            nullptr,
+                            bound);
 
     auto open_result = op.open();
     ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
@@ -902,8 +917,14 @@ TEST_F(QA_PatternMatch, MultiHopThreeHopChain) {
     OutputSchema schema(std::move(out_cols));
 
     BoundStatement bound;
-    PatternMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                            std::move(config), std::move(schema), nullptr, bound);
+    PatternMatchOperator op(*graph_,
+                            *catalog_,
+                            *storage_,
+                            default_database_id,
+                            std::move(config),
+                            std::move(schema),
+                            nullptr,
+                            bound);
 
     auto open_result = op.open();
     ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
@@ -949,8 +970,14 @@ TEST_F(QA_PatternMatch, SingleHopBothDirection) {
     OutputSchema schema(std::move(out_cols));
 
     BoundStatement bound;
-    PatternMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                            std::move(config), std::move(schema), nullptr, bound);
+    PatternMatchOperator op(*graph_,
+                            *catalog_,
+                            *storage_,
+                            default_database_id,
+                            std::move(config),
+                            std::move(schema),
+                            nullptr,
+                            bound);
 
     auto open_result = op.open();
     ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
@@ -991,8 +1018,14 @@ TEST_F(QA_PatternMatch, NonexistentEdgeType) {
     OutputSchema schema(std::move(out_cols));
 
     BoundStatement bound;
-    PatternMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                            std::move(config), std::move(schema), nullptr, bound);
+    PatternMatchOperator op(*graph_,
+                            *catalog_,
+                            *storage_,
+                            default_database_id,
+                            std::move(config),
+                            std::move(schema),
+                            nullptr,
+                            bound);
 
     auto open_result = op.open();
     // Should return an error for nonexistent edge type.
@@ -1016,8 +1049,14 @@ TEST_F(QA_PatternMatch, ReopenAfterClose) {
     OutputSchema schema(std::move(out_cols));
 
     BoundStatement bound;
-    PatternMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                            std::move(config), std::move(schema), nullptr, bound);
+    PatternMatchOperator op(*graph_,
+                            *catalog_,
+                            *storage_,
+                            default_database_id,
+                            std::move(config),
+                            std::move(schema),
+                            nullptr,
+                            bound);
 
     // First run.
     auto r1 = op.open();
@@ -1068,8 +1107,14 @@ TEST_F(QA_PatternMatch, SingleHopINDirection) {
     OutputSchema schema(std::move(out_cols));
 
     BoundStatement bound;
-    PatternMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                            std::move(config), std::move(schema), nullptr, bound);
+    PatternMatchOperator op(*graph_,
+                            *catalog_,
+                            *storage_,
+                            default_database_id,
+                            std::move(config),
+                            std::move(schema),
+                            nullptr,
+                            bound);
 
     auto open_result = op.open();
     ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
@@ -1111,8 +1156,14 @@ TEST_F(QA_PatternMatch, SelfLoopEdge) {
     OutputSchema schema(std::move(out_cols));
 
     BoundStatement bound;
-    PatternMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                            std::move(config), std::move(schema), nullptr, bound);
+    PatternMatchOperator op(*graph_,
+                            *catalog_,
+                            *storage_,
+                            default_database_id,
+                            std::move(config),
+                            std::move(schema),
+                            nullptr,
+                            bound);
 
     auto open_result = op.open();
     ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
@@ -1248,8 +1299,14 @@ TEST_F(QA_PatternMatch, AC_MatchPatternsProduceCorrectJoinResults) {
     OutputSchema schema(std::move(out_cols));
 
     BoundStatement bound;
-    PatternMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                            std::move(config), std::move(schema), nullptr, bound);
+    PatternMatchOperator op(*graph_,
+                            *catalog_,
+                            *storage_,
+                            default_database_id,
+                            std::move(config),
+                            std::move(schema),
+                            nullptr,
+                            bound);
 
     auto open_result = op.open();
     ASSERT_TRUE(open_result.has_value()) << open_result.error().message;

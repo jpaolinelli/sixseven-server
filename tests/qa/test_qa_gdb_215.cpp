@@ -116,8 +116,7 @@ TEST_F(QA_CatalogPersistence, TableIdNoCollisionAfterRestart) {
     exec_ok("CREATE TABLE t_d (id INT)");
     auto td = catalog_->get_table(default_database_id, "t_d");
     ASSERT_TRUE(td.has_value());
-    EXPECT_GT(td->table_id, max_id_before)
-        << "new table ID should be greater than max restored ID";
+    EXPECT_GT(td->table_id, max_id_before) << "new table ID should be greater than max restored ID";
 }
 
 // =============================================================================
@@ -128,7 +127,7 @@ TEST_F(QA_CatalogPersistence, TableIdCounterHandlesGapsFromDrops) {
     run_bootstrap();
     engine_->set_current_database(default_database_id);
 
-    exec_ok("CREATE TABLE keep (id INT)");   // table_id = 8
+    exec_ok("CREATE TABLE keep (id INT)");    // table_id = 8
     exec_ok("CREATE TABLE drop_me (id INT)"); // table_id = 9
     exec_ok("CREATE TABLE last (id INT)");    // table_id = 10
 
@@ -205,8 +204,7 @@ TEST_F(QA_CatalogPersistence, ManyTablesSurviveRestart) {
 
     constexpr int NUM_TABLES = 50;
     for (int i = 0; i < NUM_TABLES; ++i) {
-        std::string sql =
-            "CREATE TABLE stress_" + std::to_string(i) + " (id INT, val VARCHAR)";
+        std::string sql = "CREATE TABLE stress_" + std::to_string(i) + " (id INT, val VARCHAR)";
         exec_ok(sql);
     }
 
@@ -218,8 +216,7 @@ TEST_F(QA_CatalogPersistence, ManyTablesSurviveRestart) {
     for (int i = 0; i < NUM_TABLES; ++i) {
         std::string name = "stress_" + std::to_string(i);
         auto schema = catalog_->get_table(default_database_id, name);
-        ASSERT_TRUE(schema.has_value())
-            << "table '" << name << "' not found after restart";
+        ASSERT_TRUE(schema.has_value()) << "table '" << name << "' not found after restart";
         ASSERT_EQ(schema->columns.size(), 2u);
     }
 }
@@ -255,8 +252,7 @@ TEST_F(QA_CatalogPersistence, WideTableManyColumnsSurviveRestart) {
     ASSERT_EQ(restored->columns.size(), 20u);
 
     for (int i = 0; i < 20; ++i) {
-        EXPECT_EQ(restored->columns[static_cast<size_t>(i)].name,
-                   "col_" + std::to_string(i));
+        EXPECT_EQ(restored->columns[static_cast<size_t>(i)].name, "col_" + std::to_string(i));
         EXPECT_EQ(restored->columns[static_cast<size_t>(i)].type_id, TypeId::INT32);
         EXPECT_EQ(restored->columns[static_cast<size_t>(i)].ordinal, i);
     }
@@ -656,9 +652,8 @@ TEST_F(QA_CatalogPersistence, CompositePrimaryKeySurvivesRestart) {
     run_bootstrap();
     engine_->set_current_database(default_database_id);
 
-    exec_ok(
-        "CREATE TABLE composite_pk (a INT, b INT, c VARCHAR, "
-        "PRIMARY KEY (a, b))");
+    exec_ok("CREATE TABLE composite_pk (a INT, b INT, c VARCHAR, "
+            "PRIMARY KEY (a, b))");
 
     auto orig = catalog_->get_table(default_database_id, "composite_pk");
     ASSERT_TRUE(orig.has_value());
@@ -702,10 +697,9 @@ TEST_F(QA_CatalogPersistence, AllDataTypesSurviveRestart) {
     run_bootstrap();
     engine_->set_current_database(default_database_id);
 
-    exec_ok(
-        "CREATE TABLE all_types ("
-        "c_int INT, c_bigint BIGINT, c_float FLOAT, c_double DOUBLE, "
-        "c_bool BOOLEAN, c_varchar VARCHAR, c_timestamp TIMESTAMP)");
+    exec_ok("CREATE TABLE all_types ("
+            "c_int INT, c_bigint BIGINT, c_float FLOAT, c_double DOUBLE, "
+            "c_bool BOOLEAN, c_varchar VARCHAR, c_timestamp TIMESTAMP)");
 
     restart();
     run_bootstrap();

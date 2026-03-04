@@ -2,12 +2,12 @@
 #include "giodb/common/config.h"
 #include "giodb/common/types.h"
 #include "giodb/common/value.h"
+#include "giodb/executor/catalog_persistence.h"
 #include "giodb/executor/expr_evaluator.h"
 #include "giodb/executor/query_engine.h"
 #include "giodb/executor/settings_cache.h"
 #include "giodb/executor/storage_manager.h"
 #include "giodb/executor/system_bootstrap.h"
-#include "giodb/executor/catalog_persistence.h"
 #include "giodb/server/replication_health_monitor.h"
 #include "giodb/server/replication_slot.h"
 #include "giodb/server/wal_receiver.h"
@@ -96,7 +96,8 @@ protected:
         cache_ = std::make_unique<SettingsCache>();
 
         // Bootstrap system database.
-        auto boot = SystemBootstrap::bootstrap(*engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
+        auto boot = SystemBootstrap::bootstrap(
+            *engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
         ASSERT_TRUE(boot.has_value()) << boot.error().message;
         auto load = cache_->load(*engine_);
         ASSERT_TRUE(load.has_value()) << load.error().message;

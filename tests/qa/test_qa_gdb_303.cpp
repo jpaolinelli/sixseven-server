@@ -72,24 +72,22 @@ protected:
 
 // Edge property accessible without alias (should still work).
 TEST_F(QA_GDB303, EdgePropertyWithoutAlias) {
-    auto qr = exec_ok(
-        "SELECT follows.weight FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT follows.weight FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(val_to_int64(qr.rows[0][0]), 99);
 }
 
 // Edge property accessible via alias (the bug fix).
 TEST_F(QA_GDB303, EdgePropertyViaAlias) {
-    auto qr = exec_ok(
-        "SELECT t.weight FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t");
+    auto qr = exec_ok("SELECT t.weight FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(val_to_int64(qr.rows[0][0]), 99);
 }
 
 // Table columns and meta-columns accessible via alias (regression).
 TEST_F(QA_GDB303, TableColumnsViaAlias) {
-    auto qr = exec_ok(
-        "SELECT t.name, t.__depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t");
+    auto qr =
+        exec_ok("SELECT t.name, t.__depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Bob");
 }

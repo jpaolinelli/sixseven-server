@@ -85,10 +85,8 @@ namespace {
 
 class MockIter : public Iterator {
 public:
-    MockIter(std::string name, std::string detail,
-             std::vector<std::unique_ptr<MockIter>> children)
-        : name_(std::move(name)), detail_(std::move(detail)),
-          children_(std::move(children)) {}
+    MockIter(std::string name, std::string detail, std::vector<std::unique_ptr<MockIter>> children)
+        : name_(std::move(name)), detail_(std::move(detail)), children_(std::move(children)) {}
 
     const OutputSchema& output_schema() const override { return schema_; }
     std::string plan_node_name() const override { return name_; }
@@ -224,12 +222,8 @@ TEST_F(QA143ExplainTest, ExplainOrderByLimit) {
 
     auto plan = plan_text("EXPLAIN SELECT * FROM ordered ORDER BY score LIMIT 5");
 
-    EXPECT_NE(plan.find("Limit"), std::string::npos)
-        << "Expected Limit in plan, got:\n"
-        << plan;
-    EXPECT_NE(plan.find("Sort"), std::string::npos)
-        << "Expected Sort in plan, got:\n"
-        << plan;
+    EXPECT_NE(plan.find("Limit"), std::string::npos) << "Expected Limit in plan, got:\n" << plan;
+    EXPECT_NE(plan.find("Sort"), std::string::npos) << "Expected Sort in plan, got:\n" << plan;
 }
 
 // =============================================================================
@@ -242,7 +236,8 @@ TEST_F(QA143ExplainTest, ExplainAnalyzeGroupBy) {
     exec_ok("INSERT INTO groups VALUES (1, 20)");
     exec_ok("INSERT INTO groups VALUES (2, 30)");
 
-    auto plan = plan_text("EXPLAIN ANALYZE SELECT category, SUM(amount) FROM groups GROUP BY category");
+    auto plan =
+        plan_text("EXPLAIN ANALYZE SELECT category, SUM(amount) FROM groups GROUP BY category");
 
     EXPECT_NE(plan.find("actual rows="), std::string::npos);
     EXPECT_NE(plan.find("HashAggregate"), std::string::npos)
@@ -557,8 +552,7 @@ TEST_F(QA143ExplainTest, ExplainMultiJoin) {
     exec_ok("CREATE TABLE b (id INT, aid INT)");
     exec_ok("CREATE TABLE c (id INT, bid INT)");
 
-    auto plan = plan_text(
-        "EXPLAIN SELECT * FROM a JOIN b ON a.id = b.aid JOIN c ON b.id = c.bid");
+    auto plan = plan_text("EXPLAIN SELECT * FROM a JOIN b ON a.id = b.aid JOIN c ON b.id = c.bid");
 
     // Should have at least two join operators or nested join structure.
     EXPECT_FALSE(plan.empty());
@@ -630,6 +624,5 @@ TEST(QA143Formatter, LoopsGreaterThanOneShown) {
     EXPECT_EQ(root->loops(), 2);
 
     auto text = ExplainFormatter::format_text(*root, true);
-    EXPECT_NE(text.find("loops=2"), std::string::npos)
-        << "Expected loops=2 in text, got: " << text;
+    EXPECT_NE(text.find("loops=2"), std::string::npos) << "Expected loops=2 in text, got: " << text;
 }

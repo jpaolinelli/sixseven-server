@@ -47,7 +47,9 @@ protected:
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
 
         pool_ = std::make_unique<EmbeddingWorkerPool>(
-            EmbeddingWorkerConfig{.num_workers = 1, .max_batch_size = 32, .max_retries = 2,
+            EmbeddingWorkerConfig{.num_workers = 1,
+                                  .max_batch_size = 32,
+                                  .max_retries = 2,
                                   .base_backoff = std::chrono::milliseconds{10},
                                   .max_backoff = std::chrono::milliseconds{50}});
         pool_->register_provider("builtin/4", std::make_shared<BuiltinProvider>(4));
@@ -464,9 +466,9 @@ TEST(QA_GDB297_Worker, EmptyTextJobsNotSentToProvider) {
     // Mix of empty and valid source texts.
     std::vector<EmbeddingJob> jobs;
     jobs.push_back(make_job(1, 10, 0, "valid one"));
-    jobs.push_back(make_job(1, 20, 0, ""));          // empty
+    jobs.push_back(make_job(1, 20, 0, "")); // empty
     jobs.push_back(make_job(1, 30, 0, "valid two"));
-    jobs.push_back(make_job(1, 40, 0, ""));          // empty
+    jobs.push_back(make_job(1, 40, 0, "")); // empty
     jobs.push_back(make_job(1, 50, 0, "valid three"));
 
     ASSERT_TRUE(pool.start().has_value());
@@ -531,22 +533,22 @@ TEST(QA_GDB297_Worker, PersistenceRemoveCalledForSkippedEmptyJobs) {
     pool.register_provider("tracking", provider);
     pool.set_store_callback(
         [](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> { return ok(); });
-    pool.set_persistence(EmbeddingJobPersistence{
-        .persist = [](const EmbeddingJob&) -> Result<void> { return ok(); },
-        .remove =
-            [&](table_id_t, int64_t row_id, int32_t) -> Result<void> {
-                std::lock_guard lock(remove_mu);
-                removed_rows.push_back(row_id);
-                remove_count.fetch_add(1);
-                return ok();
-            },
-        .load = []() -> Result<std::vector<EmbeddingJob>> { return ok(std::vector<EmbeddingJob>{}); }
-    });
+    pool.set_persistence(
+        EmbeddingJobPersistence{.persist = [](const EmbeddingJob&) -> Result<void> { return ok(); },
+                                .remove = [&](table_id_t, int64_t row_id, int32_t) -> Result<void> {
+                                    std::lock_guard lock(remove_mu);
+                                    removed_rows.push_back(row_id);
+                                    remove_count.fetch_add(1);
+                                    return ok();
+                                },
+                                .load = []() -> Result<std::vector<EmbeddingJob>> {
+                                    return ok(std::vector<EmbeddingJob>{});
+                                }});
 
     std::vector<EmbeddingJob> jobs;
     jobs.push_back(make_job(1, 100, 0, "valid"));
-    jobs.push_back(make_job(1, 200, 0, ""));   // empty — should trigger remove
-    jobs.push_back(make_job(1, 300, 0, ""));   // empty — should trigger remove
+    jobs.push_back(make_job(1, 200, 0, "")); // empty — should trigger remove
+    jobs.push_back(make_job(1, 300, 0, "")); // empty — should trigger remove
 
     ASSERT_TRUE(pool.start().has_value());
     ASSERT_TRUE(pool.enqueue_batch(std::move(jobs)).has_value());
@@ -566,8 +568,10 @@ TEST(QA_GDB297_Worker, PersistenceRemoveCalledForSkippedEmptyJobs) {
     bool found_200 = false;
     bool found_300 = false;
     for (auto row : removed_rows) {
-        if (row == 200) found_200 = true;
-        if (row == 300) found_300 = true;
+        if (row == 200)
+            found_200 = true;
+        if (row == 300)
+            found_300 = true;
     }
     EXPECT_TRUE(found_200) << "persistence remove not called for empty job row 200";
     EXPECT_TRUE(found_300) << "persistence remove not called for empty job row 300";
@@ -601,7 +605,7 @@ TEST_F(QA_GDB297, AffectedRowCountCorrectWithMixedNulls) {
     exec_ok("CREATE TABLE t_arc (id INT, title TEXT, vec EMBEDDING(4, title, 'builtin/4'))");
 
     auto qr = exec_ok("INSERT INTO t_arc (id, title) VALUES "
-                       "(1, 'a'), (2, NULL), (3, 'c'), (4, NULL)");
+                      "(1, 'a'), (2, NULL), (3, 'c'), (4, NULL)");
     EXPECT_EQ(qr.affected_rows, 4);
 }
 

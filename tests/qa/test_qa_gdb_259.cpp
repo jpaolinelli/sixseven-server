@@ -575,8 +575,7 @@ TEST_F(QA_GDB259, RegisterNegativeDimensionFails) {
     // Create a plain table in catalog.
     TableSchema ts;
     ts.name = "neg_dim";
-    ts.columns = {{0, "id", TypeId::INT32, false, ""},
-                  {1, "vec", TypeId::EMBEDDING, true, ""}};
+    ts.columns = {{0, "id", TypeId::INT32, false, ""}, {1, "vec", TypeId::EMBEDDING, true, ""}};
     auto tid = catalog_.create_table(default_database_id, std::move(ts));
     ASSERT_TRUE(tid.has_value());
 

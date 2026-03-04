@@ -151,8 +151,7 @@ TEST_F(QA_AlterTable, AddColumnDefaultBackfillAllRows) {
     auto qr = exec_ok("SELECT id, tag FROM t ORDER BY id");
     ASSERT_EQ(qr.rows.size(), 50u);
     for (size_t i = 0; i < 50; ++i) {
-        EXPECT_EQ(qr.rows[i][1].as_string(), "migrated")
-            << "Row " << i << " missing default value";
+        EXPECT_EQ(qr.rows[i][1].as_string(), "migrated") << "Row " << i << " missing default value";
     }
 }
 
@@ -280,7 +279,7 @@ TEST_F(QA_AlterTable, DropColumnManyRows) {
     exec_ok("CREATE TABLE t (a INT, b VARCHAR, c INT)");
     for (int i = 0; i < 100; ++i) {
         exec_ok("INSERT INTO t VALUES (" + std::to_string(i) + ", 'row" + std::to_string(i) +
-                 "', " + std::to_string(i * 10) + ")");
+                "', " + std::to_string(i * 10) + ")");
     }
 
     exec_ok("ALTER TABLE t DROP COLUMN b");
@@ -442,7 +441,7 @@ TEST_F(QA_AlterTable, AddManyColumns) {
     // Add 20 columns.
     for (int i = 0; i < 20; ++i) {
         exec_ok("ALTER TABLE t ADD COLUMN col" + std::to_string(i) + " INT DEFAULT " +
-                 std::to_string(i * 10));
+                std::to_string(i * 10));
     }
 
     auto qr = exec_ok("SELECT * FROM t");
@@ -597,7 +596,7 @@ TEST_F(QA_AlterTable, MigrationIntegrityMultipleCycles) {
     exec_ok("CREATE TABLE t (id INT, name VARCHAR)");
     for (int i = 0; i < 10; ++i) {
         exec_ok("INSERT INTO t VALUES (" + std::to_string(i) + ", 'name" + std::to_string(i) +
-                 "')");
+                "')");
     }
 
     // Cycle: add column, verify, drop column, verify.

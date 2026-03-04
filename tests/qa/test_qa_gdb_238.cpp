@@ -107,10 +107,11 @@ protected:
 
 TEST_F(QA_GDB238, OriginalBugCase_ExistsInsideOrWithIn) {
     // Exact reproduction of the bug from the ticket.
-    auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE users.id > 0 "
-                      "AND (users.dept_id = 10 OR EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)) "
-                      "AND users.dept_id IN (SELECT departments.id FROM departments)");
+    auto qr = exec_ok(
+        "SELECT users.name FROM users "
+        "WHERE users.id > 0 "
+        "AND (users.dept_id = 10 OR EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)) "
+        "AND users.dept_id IN (SELECT departments.id FROM departments)");
 
     auto names = collect_names(qr);
     // alice (dept 10 → OR true), charlie (dept 10 → OR true).
@@ -127,7 +128,8 @@ TEST_F(QA_GDB238, OriginalBugCase_ExistsInsideOrWithIn) {
 TEST_F(QA_GDB238, ExistsInsideOr_RightSide) {
     // EXISTS on the right side of OR, plain condition on left.
     auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.dept_id = 20 OR EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id))");
+                      "WHERE (users.dept_id = 20 OR EXISTS (SELECT 1 FROM orders WHERE "
+                      "orders.user_id = users.id))");
 
     auto names = collect_names(qr);
     // alice: has orders → EXISTS true → OR true
@@ -143,7 +145,8 @@ TEST_F(QA_GDB238, ExistsInsideOr_RightSide) {
 TEST_F(QA_GDB238, ExistsInsideOr_LeftSide) {
     // EXISTS on the left side of OR.
     auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id) OR users.dept_id = 30)");
+                      "WHERE (EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id) OR "
+                      "users.dept_id = 30)");
 
     auto names = collect_names(qr);
     // alice: has orders → true. bob: no orders, dept 20 → false.
@@ -158,7 +161,8 @@ TEST_F(QA_GDB238, ExistsInsideOr_BothSidesAreExists) {
     // Both sides of OR are correlated EXISTS.
     auto qr = exec_ok("SELECT users.name FROM users "
                       "WHERE (EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id) "
-                      "    OR EXISTS (SELECT 1 FROM departments WHERE departments.id = users.dept_id AND departments.dept_name = 'hr'))");
+                      "    OR EXISTS (SELECT 1 FROM departments WHERE departments.id = "
+                      "users.dept_id AND departments.dept_name = 'hr'))");
 
     auto names = collect_names(qr);
     // alice: has orders → true. bob: no orders, dept 20 (sales) → false.
@@ -171,8 +175,9 @@ TEST_F(QA_GDB238, ExistsInsideOr_BothSidesAreExists) {
 
 TEST_F(QA_GDB238, ExistsInsideOr_AllMatch) {
     // OR condition where everyone matches either side.
-    auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.id > 0 OR EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id))");
+    auto qr = exec_ok(
+        "SELECT users.name FROM users "
+        "WHERE (users.id > 0 OR EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id))");
 
     auto names = collect_names(qr);
     // users.id > 0 is true for all 4 users → short circuit, all match.
@@ -182,7 +187,8 @@ TEST_F(QA_GDB238, ExistsInsideOr_AllMatch) {
 TEST_F(QA_GDB238, ExistsInsideOr_NoneMatch) {
     // OR condition where nobody matches either side.
     auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.id > 999 OR EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id AND orders.amount > 99999))");
+                      "WHERE (users.id > 999 OR EXISTS (SELECT 1 FROM orders WHERE orders.user_id "
+                      "= users.id AND orders.amount > 99999))");
 
     auto names = collect_names(qr);
     // No user has id > 999, and no order has amount > 99999.
@@ -196,7 +202,8 @@ TEST_F(QA_GDB238, ExistsInsideOr_NoneMatch) {
 TEST_F(QA_GDB238, NotExistsInsideOr) {
     // NOT EXISTS inside OR: users who either have dept 10 OR have no orders.
     auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.dept_id = 10 OR NOT EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id))");
+                      "WHERE (users.dept_id = 10 OR NOT EXISTS (SELECT 1 FROM orders WHERE "
+                      "orders.user_id = users.id))");
 
     auto names = collect_names(qr);
     // alice: dept 10 → true. bob: no orders → NOT EXISTS true.
@@ -207,8 +214,10 @@ TEST_F(QA_GDB238, NotExistsInsideOr) {
 TEST_F(QA_GDB238, NotExistsInsideOr_CombinedWithIn) {
     // NOT EXISTS inside OR combined with IN subquery via AND.
     auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.dept_id = 10 OR NOT EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)) "
-                      "AND users.dept_id IN (SELECT departments.id FROM departments WHERE departments.dept_name = 'sales')");
+                      "WHERE (users.dept_id = 10 OR NOT EXISTS (SELECT 1 FROM orders WHERE "
+                      "orders.user_id = users.id)) "
+                      "AND users.dept_id IN (SELECT departments.id FROM departments WHERE "
+                      "departments.dept_name = 'sales')");
 
     auto names = collect_names(qr);
     // OR: alice (dept 10), bob (no orders), charlie (dept 10), diana (no orders) → all pass OR.
@@ -225,7 +234,8 @@ TEST_F(QA_GDB238, ExistsInsideOr_EmptyInnerTable) {
     exec_ok("CREATE TABLE empty_tbl (id INT, ref_id INT)");
 
     auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.dept_id = 10 OR EXISTS (SELECT 1 FROM empty_tbl WHERE empty_tbl.ref_id = users.id))");
+                      "WHERE (users.dept_id = 10 OR EXISTS (SELECT 1 FROM empty_tbl WHERE "
+                      "empty_tbl.ref_id = users.id))");
 
     auto names = collect_names(qr);
     // Empty table → EXISTS always false. Only dept 10 matches: alice, charlie.
@@ -273,7 +283,8 @@ TEST_F(QA_GDB238, ExistsInsideOr_ColumnNameCollision) {
     exec_ok("INSERT INTO items VALUES (2, 3)");
 
     auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.dept_id = 30 OR EXISTS (SELECT 1 FROM items WHERE items.owner_id = users.id))");
+                      "WHERE (users.dept_id = 30 OR EXISTS (SELECT 1 FROM items WHERE "
+                      "items.owner_id = users.id))");
 
     auto names = collect_names(qr);
     // alice: items.owner_id=1 matches users.id=1 → EXISTS true.
@@ -291,8 +302,9 @@ TEST_F(QA_GDB238, ExistsInsideOr_ColumnNameCollision) {
 // =============================================================================
 
 TEST_F(QA_GDB238, ExistsInsideOr_AliasedInnerTable) {
-    auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.dept_id = 30 OR EXISTS (SELECT 1 FROM orders o WHERE o.user_id = users.id))");
+    auto qr = exec_ok(
+        "SELECT users.name FROM users "
+        "WHERE (users.dept_id = 30 OR EXISTS (SELECT 1 FROM orders o WHERE o.user_id = users.id))");
 
     auto names = collect_names(qr);
     // alice: has orders → true. bob: no orders, dept 20 → false.
@@ -310,7 +322,8 @@ TEST_F(QA_GDB238, ExistsInsideOr_AliasedInnerTable) {
 TEST_F(QA_GDB238, ExistsInsideOr_NestedAndInsideOr) {
     // (condition AND EXISTS(...)) OR another_condition
     auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.dept_id = 10 AND EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)) "
+                      "WHERE (users.dept_id = 10 AND EXISTS (SELECT 1 FROM orders WHERE "
+                      "orders.user_id = users.id)) "
                       "OR users.dept_id = 30");
 
     auto names = collect_names(qr);
@@ -329,7 +342,8 @@ TEST_F(QA_GDB238, ExistsInsideOr_NestedAndInsideOr) {
 TEST_F(QA_GDB238, ExistsInsideOr_MultipleCorrelationConditions) {
     // Correlated EXISTS with AND in the subquery WHERE.
     auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.dept_id = 30 OR EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id AND orders.amount > 250))");
+                      "WHERE (users.dept_id = 30 OR EXISTS (SELECT 1 FROM orders WHERE "
+                      "orders.user_id = users.id AND orders.amount > 250))");
 
     auto names = collect_names(qr);
     // alice: orders with amount > 250 → 500, 300 → EXISTS true.
@@ -364,7 +378,8 @@ TEST_F(QA_GDB238, ExistsInsideOr_ManyOuterRows) {
     }
 
     auto qr = exec_ok("SELECT big_users.name FROM big_users "
-                      "WHERE (big_users.dept_id = 10 OR EXISTS (SELECT 1 FROM big_orders WHERE big_orders.user_id = big_users.id))");
+                      "WHERE (big_users.dept_id = 10 OR EXISTS (SELECT 1 FROM big_orders WHERE "
+                      "big_orders.user_id = big_users.id))");
 
     // dept 10: i%3==0 → 33 users (3,6,9,...,99).
     // Even users: 50 users (2,4,6,...,100).
@@ -386,7 +401,8 @@ TEST_F(QA_GDB238, ExistsInsideOr_NullOuterValue) {
     exec_ok("INSERT INTO users VALUES (5, 'eve', NULL)");
 
     auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.dept_id = 10 OR EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id))");
+                      "WHERE (users.dept_id = 10 OR EXISTS (SELECT 1 FROM orders WHERE "
+                      "orders.user_id = users.id))");
 
     auto names = collect_names(qr);
     // alice: dept 10 → true. bob: dept 20, no orders → false.
@@ -404,7 +420,8 @@ TEST_F(QA_GDB238, ExistsInsideOr_NullInInnerTable) {
     exec_ok("INSERT INTO sparse_orders VALUES (2, 1)");
 
     auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.dept_id = 30 OR EXISTS (SELECT 1 FROM sparse_orders WHERE sparse_orders.user_id = users.id))");
+                      "WHERE (users.dept_id = 30 OR EXISTS (SELECT 1 FROM sparse_orders WHERE "
+                      "sparse_orders.user_id = users.id))");
 
     auto names = collect_names(qr);
     // alice: sparse_orders has user_id=1 match → true.
@@ -422,10 +439,11 @@ TEST_F(QA_GDB238, ExistsInsideOr_NullInInnerTable) {
 
 TEST_F(QA_GDB238, ExistsInsideOr_AndOutsideBothSides) {
     // AND on both sides: cond1 AND (cond2 OR EXISTS) AND cond3
-    auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE users.id >= 2 "
-                      "AND (users.dept_id = 10 OR EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)) "
-                      "AND users.id <= 3");
+    auto qr = exec_ok(
+        "SELECT users.name FROM users "
+        "WHERE users.id >= 2 "
+        "AND (users.dept_id = 10 OR EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)) "
+        "AND users.id <= 3");
 
     auto names = collect_names(qr);
     // id >= 2 AND id <= 3: bob (2), charlie (3).
@@ -479,8 +497,9 @@ TEST_F(QA_GDB238, ExistsAndIn_Regression) {
 
 TEST_F(QA_GDB238, NonCorrelatedExistsInsideOr) {
     // Non-correlated EXISTS (no outer references) inside OR.
-    auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.dept_id = 999 OR EXISTS (SELECT 1 FROM orders WHERE orders.amount > 400))");
+    auto qr = exec_ok(
+        "SELECT users.name FROM users "
+        "WHERE (users.dept_id = 999 OR EXISTS (SELECT 1 FROM orders WHERE orders.amount > 400))");
 
     auto names = collect_names(qr);
     // Non-correlated EXISTS: orders with amount > 400 → yes (500) → true for all.
@@ -489,8 +508,9 @@ TEST_F(QA_GDB238, NonCorrelatedExistsInsideOr) {
 
 TEST_F(QA_GDB238, NonCorrelatedExistsInsideOr_NoMatch) {
     // Non-correlated EXISTS returns false (no orders with huge amount).
-    auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.dept_id = 10 OR EXISTS (SELECT 1 FROM orders WHERE orders.amount > 99999))");
+    auto qr = exec_ok(
+        "SELECT users.name FROM users "
+        "WHERE (users.dept_id = 10 OR EXISTS (SELECT 1 FROM orders WHERE orders.amount > 99999))");
 
     auto names = collect_names(qr);
     // EXISTS false, only dept 10: alice, charlie.
@@ -505,8 +525,10 @@ TEST_F(QA_GDB238, NonCorrelatedExistsInsideOr_NoMatch) {
 
 TEST_F(QA_GDB238, MultipleOrWithExistsCombinedAndIn) {
     auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.dept_id = 10 OR EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)) "
-                      "AND users.dept_id IN (SELECT departments.id FROM departments WHERE departments.dept_name = 'engineering')");
+                      "WHERE (users.dept_id = 10 OR EXISTS (SELECT 1 FROM orders WHERE "
+                      "orders.user_id = users.id)) "
+                      "AND users.dept_id IN (SELECT departments.id FROM departments WHERE "
+                      "departments.dept_name = 'engineering')");
 
     auto names = collect_names(qr);
     // OR: alice (dept 10), charlie (dept 10). bob (dept 20, no orders → false).
@@ -524,7 +546,8 @@ TEST_F(QA_GDB238, MultipleOrWithExistsCombinedAndIn) {
 TEST_F(QA_GDB238, ExistsInsideOr_InequalityCorrelation) {
     // Correlated EXISTS with > instead of =.
     auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.dept_id = 30 OR EXISTS (SELECT 1 FROM orders WHERE orders.user_id > users.id))");
+                      "WHERE (users.dept_id = 30 OR EXISTS (SELECT 1 FROM orders WHERE "
+                      "orders.user_id > users.id))");
 
     auto names = collect_names(qr);
     // alice (id=1): orders with user_id > 1 → user_id=3 → EXISTS true.
@@ -548,7 +571,8 @@ TEST_F(QA_GDB238, NotExistsInsideOr_WithNotIn) {
     exec_ok("INSERT INTO exclude_ids VALUES (2)");
 
     auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE (users.dept_id = 10 OR NOT EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)) "
+                      "WHERE (users.dept_id = 10 OR NOT EXISTS (SELECT 1 FROM orders WHERE "
+                      "orders.user_id = users.id)) "
                       "AND users.id NOT IN (SELECT exclude_ids.val FROM exclude_ids)");
 
     auto names = collect_names(qr);
@@ -565,7 +589,8 @@ TEST_F(QA_GDB238, NotExistsInsideOr_WithNotIn) {
 
 TEST_F(QA_GDB238, ExistsInsideOr_SelectStar) {
     auto qr = exec_ok("SELECT * FROM users "
-                      "WHERE (users.dept_id = 10 OR EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id))");
+                      "WHERE (users.dept_id = 10 OR EXISTS (SELECT 1 FROM orders WHERE "
+                      "orders.user_id = users.id))");
 
     // alice and charlie have dept 10, alice and charlie have orders.
     // Union: alice, charlie. (bob and diana excluded.)
@@ -580,10 +605,12 @@ TEST_F(QA_GDB238, ExistsInsideOr_SelectStar) {
 
 TEST_F(QA_GDB238, ExistsInsideOr_WithCountAggregate) {
     auto qr = exec_ok("SELECT COUNT(*) FROM users "
-                      "WHERE (users.dept_id = 10 OR EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id))");
+                      "WHERE (users.dept_id = 10 OR EXISTS (SELECT 1 FROM orders WHERE "
+                      "orders.user_id = users.id))");
 
     ASSERT_EQ(qr.rows.size(), 1u);
-    // alice (dept 10), charlie (dept 10). Others: bob no orders + dept 20, diana no orders + dept 30.
+    // alice (dept 10), charlie (dept 10). Others: bob no orders + dept 20, diana no orders +
+    // dept 30.
     auto count = qr.rows[0][0].as_int64();
     EXPECT_EQ(count, 2);
 }

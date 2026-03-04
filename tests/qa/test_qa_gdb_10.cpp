@@ -43,7 +43,8 @@ TEST(QA_Logging, InitCalledMultipleTimes) {
 }
 
 TEST(QA_Logging, AllValidLevels) {
-    std::vector<std::string> levels = {"trace", "debug", "info", "warn", "error", "critical", "off"};
+    std::vector<std::string> levels = {
+        "trace", "debug", "info", "warn", "error", "critical", "off"};
     for (const auto& level : levels) {
         EXPECT_NO_THROW(giodb::init_logging(level));
     }
@@ -161,18 +162,29 @@ TEST(QA_StatusCode, AllCodesHaveNames) {
     for (auto code : all_codes) {
         const char* name = status_code_name(code);
         EXPECT_NE(name, nullptr);
-        EXPECT_STRNE(name, "UNKNOWN") << "StatusCode " << static_cast<int>(code) << " returns UNKNOWN";
+        EXPECT_STRNE(name, "UNKNOWN")
+            << "StatusCode " << static_cast<int>(code) << " returns UNKNOWN";
     }
 }
 
 TEST(QA_StatusCode, EveryCodeUsableInError) {
     // Every StatusCode should be constructible as an Error.
     std::vector<StatusCode> codes = {
-        StatusCode::OK,           StatusCode::NOT_FOUND,   StatusCode::ALREADY_EXISTS,
-        StatusCode::INTERNAL_ERROR, StatusCode::IO_ERROR,    StatusCode::PARSE_ERROR,
-        StatusCode::TYPE_ERROR,   StatusCode::TXN_CONFLICT, StatusCode::TXN_ABORTED,
-        StatusCode::NETWORK_ERROR, StatusCode::AUTH_ERROR,   StatusCode::REPLICATION_ERROR,
-        StatusCode::READ_ONLY,    StatusCode::LOCK_TIMEOUT, StatusCode::DEADLOCK,
+        StatusCode::OK,
+        StatusCode::NOT_FOUND,
+        StatusCode::ALREADY_EXISTS,
+        StatusCode::INTERNAL_ERROR,
+        StatusCode::IO_ERROR,
+        StatusCode::PARSE_ERROR,
+        StatusCode::TYPE_ERROR,
+        StatusCode::TXN_CONFLICT,
+        StatusCode::TXN_ABORTED,
+        StatusCode::NETWORK_ERROR,
+        StatusCode::AUTH_ERROR,
+        StatusCode::REPLICATION_ERROR,
+        StatusCode::READ_ONLY,
+        StatusCode::LOCK_TIMEOUT,
+        StatusCode::DEADLOCK,
     };
     for (auto code : codes) {
         Result<int> r = make_error(code, "test");
@@ -324,7 +336,8 @@ TEST_F(QA_ConfigFile, VeryLargeJson) {
     // Generate a large but valid JSON with many unknown fields.
     std::string json = "{";
     for (int i = 0; i < 1000; ++i) {
-        if (i > 0) json += ",";
+        if (i > 0)
+            json += ",";
         json += "\"field_" + std::to_string(i) + "\": " + std::to_string(i);
     }
     json += ", \"port\": 1234}";

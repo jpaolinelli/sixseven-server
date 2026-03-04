@@ -125,8 +125,7 @@ TEST_F(QA_AutoIncrement, AutoincrementBeforePrimaryKey) {
 TEST_F(QA_AutoIncrement, AutoincrementWithTableLevelPK) {
     // AUTOINCREMENT on column with table-level PRIMARY KEY constraint.
     run_bootstrap();
-    auto qr = exec_ok(
-        "CREATE TABLE t_tlpk (id INT AUTOINCREMENT, name VARCHAR, PRIMARY KEY(id))");
+    auto qr = exec_ok("CREATE TABLE t_tlpk (id INT AUTOINCREMENT, name VARCHAR, PRIMARY KEY(id))");
     EXPECT_EQ(qr.message, "CREATE TABLE");
 
     exec_ok("INSERT INTO t_tlpk (name) VALUES ('hello')");
@@ -143,8 +142,7 @@ TEST_F(QA_AutoIncrement, RejectsAutoincrementOnNonPKNoConstraint) {
 
 TEST_F(QA_AutoIncrement, RejectsAutoincrementOnStringType) {
     run_bootstrap();
-    exec_error("CREATE TABLE t_str (id TEXT PRIMARY KEY AUTOINCREMENT)",
-               StatusCode::TYPE_ERROR);
+    exec_error("CREATE TABLE t_str (id TEXT PRIMARY KEY AUTOINCREMENT)", StatusCode::TYPE_ERROR);
 }
 
 TEST_F(QA_AutoIncrement, RejectsAutoincrementOnTimestamp) {
@@ -207,7 +205,7 @@ TEST_F(QA_AutoIncrement, OverflowTinyintAtExactMax) {
     run_bootstrap();
     exec_ok("CREATE TABLE t_ov8 (id TINYINT PRIMARY KEY AUTOINCREMENT, v INT)");
     exec_ok("INSERT INTO t_ov8 (id, v) VALUES (126, 1)"); // counter -> 127
-    exec_ok("INSERT INTO t_ov8 (v) VALUES (2)");           // should get 127 (last valid)
+    exec_ok("INSERT INTO t_ov8 (v) VALUES (2)");          // should get 127 (last valid)
 
     auto qr = exec_ok("SELECT id FROM t_ov8 ORDER BY id");
     ASSERT_EQ(qr.rows.size(), 2u);
@@ -425,7 +423,7 @@ TEST_F(QA_AutoIncrement, PersistenceWithDeletedRowsPreservesMaxCounter) {
     exec_ok("CREATE TABLE t_pdel (id INT PRIMARY KEY AUTOINCREMENT, v VARCHAR)");
 
     exec_ok("INSERT INTO t_pdel (v) VALUES ('a'), ('b'), ('c')"); // ids 1,2,3
-    exec_ok("DELETE FROM t_pdel WHERE id = 3"); // delete max row
+    exec_ok("DELETE FROM t_pdel WHERE id = 3");                   // delete max row
 
     restart();
 
@@ -513,9 +511,9 @@ TEST_F(QA_AutoIncrement, ThreeTablesIndependentCountersWithGaps) {
     exec_ok("INSERT INTO t_a (id, v) VALUES (100, 'a1')");
     exec_ok("INSERT INTO t_b (v) VALUES ('b1')");
     exec_ok("INSERT INTO t_c (id, v) VALUES (50, 'c1')");
-    exec_ok("INSERT INTO t_a (v) VALUES ('a2')");   // should be 101
-    exec_ok("INSERT INTO t_b (v) VALUES ('b2')");   // should be 2
-    exec_ok("INSERT INTO t_c (v) VALUES ('c2')");   // should be 51
+    exec_ok("INSERT INTO t_a (v) VALUES ('a2')"); // should be 101
+    exec_ok("INSERT INTO t_b (v) VALUES ('b2')"); // should be 2
+    exec_ok("INSERT INTO t_c (v) VALUES ('c2')"); // should be 51
 
     auto qa = exec_ok("SELECT id FROM t_a ORDER BY id");
     ASSERT_EQ(qa.rows.size(), 2u);
@@ -620,8 +618,7 @@ TEST_F(QA_AutoIncrement, InsertOnlyAutoincrementColumn) {
 TEST_F(QA_AutoIncrement, AutoincrementColumnNotFirst) {
     // Autoincrement column is NOT the first column in the table.
     run_bootstrap();
-    exec_ok(
-        "CREATE TABLE t_mid (name VARCHAR, id INT PRIMARY KEY AUTOINCREMENT, age INT)");
+    exec_ok("CREATE TABLE t_mid (name VARCHAR, id INT PRIMARY KEY AUTOINCREMENT, age INT)");
 
     exec_ok("INSERT INTO t_mid (name, age) VALUES ('alice', 30)");
     exec_ok("INSERT INTO t_mid (name, age) VALUES ('bob', 25)");
@@ -639,8 +636,7 @@ TEST_F(QA_AutoIncrement, AutoincrementColumnNotFirst) {
 TEST_F(QA_AutoIncrement, AutoincrementColumnLastPosition) {
     // Autoincrement column is the LAST column.
     run_bootstrap();
-    exec_ok(
-        "CREATE TABLE t_last (name VARCHAR, age INT, id INT PRIMARY KEY AUTOINCREMENT)");
+    exec_ok("CREATE TABLE t_last (name VARCHAR, age INT, id INT PRIMARY KEY AUTOINCREMENT)");
 
     exec_ok("INSERT INTO t_last (name, age) VALUES ('alice', 30)");
 

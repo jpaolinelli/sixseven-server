@@ -1,13 +1,13 @@
 /// QA adversarial tests for GDB-99: sys_edge_types and sys_embedding_columns.
 /// Tests edge type CRUD, embedding column registration, cascade deletes, validation.
 
+#include "giodb/catalog/catalog.h"
+#include "giodb/catalog/schema.h"
+
 #include <gtest/gtest.h>
 
 #include <string>
 #include <vector>
-
-#include "giodb/catalog/catalog.h"
-#include "giodb/catalog/schema.h"
 
 using namespace giodb;
 
@@ -217,10 +217,14 @@ TEST(QA_GDB99_SysSchema, SysEdgeTypesSchema) {
     bool has_edge_id = false, has_name = false;
     bool has_src = false, has_tgt = false;
     for (const auto& col : schema.columns) {
-        if (col.name == "edge_id") has_edge_id = true;
-        if (col.name == "name") has_name = true;
-        if (col.name == "source_table_id") has_src = true;
-        if (col.name == "target_table_id") has_tgt = true;
+        if (col.name == "edge_id")
+            has_edge_id = true;
+        if (col.name == "name")
+            has_name = true;
+        if (col.name == "source_table_id")
+            has_src = true;
+        if (col.name == "target_table_id")
+            has_tgt = true;
     }
     EXPECT_TRUE(has_edge_id);
     EXPECT_TRUE(has_name);
@@ -235,10 +239,14 @@ TEST(QA_GDB99_SysSchema, SysEmbeddingColumnsSchema) {
     bool has_table_id = false, has_column_id = false;
     bool has_dim = false, has_provider = false;
     for (const auto& col : schema.columns) {
-        if (col.name == "table_id") has_table_id = true;
-        if (col.name == "column_id") has_column_id = true;
-        if (col.name == "dimension") has_dim = true;
-        if (col.name == "provider") has_provider = true;
+        if (col.name == "table_id")
+            has_table_id = true;
+        if (col.name == "column_id")
+            has_column_id = true;
+        if (col.name == "dimension")
+            has_dim = true;
+        if (col.name == "provider")
+            has_provider = true;
     }
     EXPECT_TRUE(has_table_id);
     EXPECT_TRUE(has_column_id);
@@ -419,16 +427,14 @@ TEST(QA_GDB99_Stress, ManyEdgeTypesAndEmbeddings) {
     // Create 10 tables
     std::vector<table_id_t> table_ids;
     for (int i = 0; i < 10; ++i) {
-        auto t = catalog.create_table(default_database_id,
-                                      make_table("t" + std::to_string(i)));
+        auto t = catalog.create_table(default_database_id, make_table("t" + std::to_string(i)));
         ASSERT_TRUE(t.has_value());
         table_ids.push_back(*t);
     }
 
     // Create edge types between all adjacent pairs
     for (int i = 0; i < 9; ++i) {
-        EdgeTypeDef def{0, "e_" + std::to_string(i),
-                        table_ids[i], table_ids[i + 1], ""};
+        EdgeTypeDef def{0, "e_" + std::to_string(i), table_ids[i], table_ids[i + 1], ""};
         auto r = catalog.create_edge_type(def);
         ASSERT_TRUE(r.has_value());
     }
@@ -437,8 +443,7 @@ TEST(QA_GDB99_Stress, ManyEdgeTypesAndEmbeddings) {
 
     // Register embedding column on each table
     for (int i = 0; i < 10; ++i) {
-        auto r = catalog.register_embedding_column(
-            {table_ids[i], 0, 384, "text", "provider"});
+        auto r = catalog.register_embedding_column({table_ids[i], 0, 384, "text", "provider"});
         ASSERT_TRUE(r.has_value());
     }
 

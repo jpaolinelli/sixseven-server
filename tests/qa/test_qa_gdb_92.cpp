@@ -443,40 +443,40 @@ TEST(QA_GDB92_LeafUnderfull, VariousMaxKeys) {
         for (int i = 0; i < 4; ++i) {
             (void)leaf.insert(make_key(i), make_rid(static_cast<uint32_t>(i)));
         }
-        EXPECT_TRUE(leaf.is_underfull(false));   // 4 < 5
+        EXPECT_TRUE(leaf.is_underfull(false)); // 4 < 5
         (void)leaf.insert(make_key(100), make_rid(100));
-        EXPECT_FALSE(leaf.is_underfull(false));  // 5 >= 5
+        EXPECT_FALSE(leaf.is_underfull(false)); // 5 >= 5
     }
 
     // max_keys=3: min = (3+1)/2 = 2
     {
         BTreeLeafNode leaf(1, 3);
         (void)leaf.insert(make_key(1), make_rid(1));
-        EXPECT_TRUE(leaf.is_underfull(false));   // 1 < 2
+        EXPECT_TRUE(leaf.is_underfull(false)); // 1 < 2
         (void)leaf.insert(make_key(2), make_rid(2));
-        EXPECT_FALSE(leaf.is_underfull(false));  // 2 >= 2
+        EXPECT_FALSE(leaf.is_underfull(false)); // 2 >= 2
     }
 
     // max_keys=1: min = (1+1)/2 = 1
     {
         BTreeLeafNode leaf(1, 1);
-        EXPECT_TRUE(leaf.is_underfull(false));   // 0 < 1
+        EXPECT_TRUE(leaf.is_underfull(false)); // 0 < 1
         (void)leaf.insert(make_key(1), make_rid(1));
-        EXPECT_FALSE(leaf.is_underfull(false));  // 1 >= 1
+        EXPECT_FALSE(leaf.is_underfull(false)); // 1 >= 1
     }
 
     // max_keys=2: min = (2+1)/2 = 1
     {
         BTreeLeafNode leaf(1, 2);
-        EXPECT_TRUE(leaf.is_underfull(false));   // 0 < 1
+        EXPECT_TRUE(leaf.is_underfull(false)); // 0 < 1
         (void)leaf.insert(make_key(1), make_rid(1));
-        EXPECT_FALSE(leaf.is_underfull(false));  // 1 >= 1
+        EXPECT_FALSE(leaf.is_underfull(false)); // 1 >= 1
     }
 }
 
 TEST(QA_GDB92_LeafUnderfull, RootNeverUnderfull) {
     BTreeLeafNode leaf(1, 10);
-    EXPECT_FALSE(leaf.is_underfull(true));  // Root with 0 keys is NOT underfull
+    EXPECT_FALSE(leaf.is_underfull(true)); // Root with 0 keys is NOT underfull
 }
 
 // =============================================================================
@@ -594,9 +594,8 @@ TEST(QA_GDB92_InternalRouting, ManyKeys) {
 
     node.children().push_back(100); // child for keys < 10
     for (int i = 0; i < 10; ++i) {
-        (void)node.insert_at(static_cast<uint16_t>(i),
-                             make_key((i + 1) * 10),
-                             static_cast<PageId>(200 + i));
+        (void)node.insert_at(
+            static_cast<uint16_t>(i), make_key((i + 1) * 10), static_cast<PageId>(200 + i));
     }
     // Keys: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
     // Children: [100, 200, 201, ..., 209]
@@ -632,8 +631,7 @@ TEST(QA_GDB92_InternalCapacity, FillToMax) {
     node.children().push_back(100);
     for (int i = 0; i < max_keys; ++i) {
         auto ins = node.insert_at(
-            static_cast<uint16_t>(i), make_key(i * 10),
-            static_cast<PageId>(200 + i));
+            static_cast<uint16_t>(i), make_key(i * 10), static_cast<PageId>(200 + i));
         ASSERT_TRUE(ins.has_value());
     }
 
@@ -648,14 +646,13 @@ TEST(QA_GDB92_InternalCapacity, InsertWhenFullFails) {
 
     node.children().push_back(100);
     for (int i = 0; i < max_keys; ++i) {
-        (void)node.insert_at(static_cast<uint16_t>(i), make_key(i * 10),
-                             static_cast<PageId>(200 + i));
+        (void)node.insert_at(
+            static_cast<uint16_t>(i), make_key(i * 10), static_cast<PageId>(200 + i));
     }
 
     EXPECT_TRUE(node.is_full());
 
-    auto ins = node.insert_at(static_cast<uint16_t>(max_keys),
-                              make_key(max_keys * 10), 999);
+    auto ins = node.insert_at(static_cast<uint16_t>(max_keys), make_key(max_keys * 10), 999);
     ASSERT_FALSE(ins.has_value());
     EXPECT_EQ(ins.error().code, StatusCode::INTERNAL_ERROR);
 }
@@ -729,26 +726,26 @@ TEST(QA_GDB92_InternalUnderfull, VariousMaxKeys) {
         BTreeInternalNode node(1, 10);
         node.children().push_back(100);
         for (int i = 0; i < 4; ++i) {
-            (void)node.insert_at(static_cast<uint16_t>(i), make_key(i * 10),
-                                 static_cast<PageId>(200 + i));
+            (void)node.insert_at(
+                static_cast<uint16_t>(i), make_key(i * 10), static_cast<PageId>(200 + i));
         }
-        EXPECT_TRUE(node.is_underfull(false));   // 4 < 5
+        EXPECT_TRUE(node.is_underfull(false)); // 4 < 5
         (void)node.insert_at(4, make_key(40), 300);
-        EXPECT_FALSE(node.is_underfull(false));  // 5 >= 5
+        EXPECT_FALSE(node.is_underfull(false)); // 5 >= 5
     }
 
     // max_keys=1: min = (1+1)/2 = 1
     {
         BTreeInternalNode node(1, 1);
         node.children().push_back(100);
-        EXPECT_TRUE(node.is_underfull(false));   // 0 < 1
+        EXPECT_TRUE(node.is_underfull(false)); // 0 < 1
     }
 }
 
 TEST(QA_GDB92_InternalUnderfull, RootNeverUnderfull) {
     BTreeInternalNode node(1, 10);
     node.children().push_back(100);
-    EXPECT_FALSE(node.is_underfull(true));  // Root with 0 keys is NOT underfull
+    EXPECT_FALSE(node.is_underfull(true)); // Root with 0 keys is NOT underfull
 }
 
 // =============================================================================
@@ -832,8 +829,7 @@ TEST(QA_GDB92_Stress, LeafInsertSearchDeleteMany) {
     for (uint16_t i = 1; i < leaf.key_count(); ++i) {
         auto cmp = compare_keys(leaf.key_at(i - 1), leaf.key_at(i));
         ASSERT_TRUE(cmp.has_value());
-        EXPECT_EQ(*cmp, std::strong_ordering::less)
-            << "keys not sorted at index " << i;
+        EXPECT_EQ(*cmp, std::strong_ordering::less) << "keys not sorted at index " << i;
     }
 
     // Delete all in random order
@@ -853,9 +849,8 @@ TEST(QA_GDB92_Stress, InternalNodeSearchConsistency) {
 
     node.children().push_back(0); // leftmost child
     for (int i = 0; i < count; ++i) {
-        (void)node.insert_at(static_cast<uint16_t>(i),
-                             make_key((i + 1) * 10),
-                             static_cast<PageId>(i + 1));
+        (void)node.insert_at(
+            static_cast<uint16_t>(i), make_key((i + 1) * 10), static_cast<PageId>(i + 1));
     }
 
     // Search for each key and verify routing consistency
@@ -881,8 +876,7 @@ TEST(QA_GDB92_Stress, InternalNodeSearchConsistency) {
 // =============================================================================
 
 TEST(QA_GDB92_RID, MaxValues) {
-    RID rid{std::numeric_limits<PageId>::max(),
-            std::numeric_limits<SlotId>::max()};
+    RID rid{std::numeric_limits<PageId>::max(), std::numeric_limits<SlotId>::max()};
 
     BTreeLeafNode leaf(1, 10);
     auto ins = leaf.insert(make_key(42), rid);

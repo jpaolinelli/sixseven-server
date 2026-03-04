@@ -436,7 +436,9 @@ TEST(QA_EmbeddingPersistence, PersistCalledOnEnqueue) {
         return ok();
     };
     persistence.remove = [](table_id_t, int64_t, int32_t) -> Result<void> { return ok(); };
-    persistence.load = []() -> Result<std::vector<EmbeddingJob>> { return ok(std::vector<EmbeddingJob>{}); };
+    persistence.load = []() -> Result<std::vector<EmbeddingJob>> {
+        return ok(std::vector<EmbeddingJob>{});
+    };
 
     pool.set_persistence(std::move(persistence));
 
@@ -484,7 +486,9 @@ TEST(QA_EmbeddingPersistence, RemoveCalledAfterSuccess) {
         removed_keys.emplace_back(t, r, c);
         return ok();
     };
-    persistence.load = []() -> Result<std::vector<EmbeddingJob>> { return ok(std::vector<EmbeddingJob>{}); };
+    persistence.load = []() -> Result<std::vector<EmbeddingJob>> {
+        return ok(std::vector<EmbeddingJob>{});
+    };
 
     pool.set_persistence(std::move(persistence));
     ASSERT_TRUE(pool.start().has_value());
@@ -597,7 +601,9 @@ TEST(QA_EmbeddingPersistence, BatchEnqueuePersistsAll) {
         return ok();
     };
     persistence.remove = [](table_id_t, int64_t, int32_t) -> Result<void> { return ok(); };
-    persistence.load = []() -> Result<std::vector<EmbeddingJob>> { return ok(std::vector<EmbeddingJob>{}); };
+    persistence.load = []() -> Result<std::vector<EmbeddingJob>> {
+        return ok(std::vector<EmbeddingJob>{});
+    };
 
     pool.set_persistence(std::move(persistence));
 
@@ -634,7 +640,9 @@ TEST(QA_EmbeddingPersistence, MaxRetriesTriggersRemove) {
         remove_count.fetch_add(1);
         return ok();
     };
-    persistence.load = []() -> Result<std::vector<EmbeddingJob>> { return ok(std::vector<EmbeddingJob>{}); };
+    persistence.load = []() -> Result<std::vector<EmbeddingJob>> {
+        return ok(std::vector<EmbeddingJob>{});
+    };
 
     pool.set_persistence(std::move(persistence));
     ASSERT_TRUE(pool.start().has_value());

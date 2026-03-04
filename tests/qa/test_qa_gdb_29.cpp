@@ -112,8 +112,7 @@ TEST(QA_HnswSerialization, NodeWithHighLayer) {
 
     // Put one neighbor on each layer.
     for (uint8_t l = 0; l <= 10; ++l) {
-        node.neighbors[l].push_back(
-            {static_cast<uint32_t>(l + 100), static_cast<float>(l) * 0.1F});
+        node.neighbors[l].push_back({static_cast<uint32_t>(l + 100), static_cast<float>(l) * 0.1F});
     }
 
     auto bytes = serialize_hnsw_node(node);
@@ -673,8 +672,8 @@ TEST(QA_HnswDelete, DeleteAndReinsertManyRounds) {
         for (int i = 0; i < 5; ++i) {
             std::vector<float> vec = {static_cast<float>(next_id), 0.0F};
             auto ir = index.insert(vec);
-            ASSERT_TRUE(ir.has_value()) << "Round " << round << " insert " << i << ": "
-                                        << ir.error().message;
+            ASSERT_TRUE(ir.has_value())
+                << "Round " << round << " insert " << i << ": " << ir.error().message;
             EXPECT_EQ(ir.value(), next_id);
             next_id++;
         }
@@ -682,8 +681,8 @@ TEST(QA_HnswDelete, DeleteAndReinsertManyRounds) {
         // Delete the first 3 of the 5 just inserted.
         for (uint32_t i = next_id - 5; i < next_id - 2; ++i) {
             auto dr = index.remove(i);
-            ASSERT_TRUE(dr.has_value()) << "Round " << round << " delete " << i << ": "
-                                        << dr.error().message;
+            ASSERT_TRUE(dr.has_value())
+                << "Round " << round << " delete " << i << ": " << dr.error().message;
         }
 
         // Compact.
@@ -979,8 +978,8 @@ TEST(QA_HnswStress, InsertSearchDelete500Vectors) {
         }
     }
     // High self-match rate expected (should be near 100%).
-    EXPECT_GT(self_match_count, n * 95 / 100) << "Self-match rate too low: " << self_match_count
-                                               << "/" << n;
+    EXPECT_GT(self_match_count, n * 95 / 100)
+        << "Self-match rate too low: " << self_match_count << "/" << n;
 
     // Delete 25% of nodes.
     const uint32_t num_deletes = n / 4;
@@ -1074,8 +1073,8 @@ TEST(QA_HnswAC, PersistsAcrossRestart) {
         meta_pid = index.meta_page_id();
 
         for (int i = 0; i < 50; ++i) {
-            std::vector<float> vec = {static_cast<float>(i), static_cast<float>(i % 5),
-                                      static_cast<float>(i % 7), 0.0F};
+            std::vector<float> vec = {
+                static_cast<float>(i), static_cast<float>(i % 5), static_cast<float>(i % 7), 0.0F};
             ASSERT_TRUE(index.insert(vec).has_value());
         }
         EXPECT_EQ(index.node_count(), 50u);

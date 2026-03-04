@@ -90,7 +90,8 @@ protected:
     /// Find column index by name (asserts it exists).
     size_t col_idx(const QueryResult& qr, const std::string& name) {
         for (size_t i = 0; i < qr.column_names.size(); ++i) {
-            if (qr.column_names[i] == name) return i;
+            if (qr.column_names[i] == name)
+                return i;
         }
         ADD_FAILURE() << "column not found: " << name;
         return 0;
@@ -106,12 +107,10 @@ protected:
         }
         try {
             return v.as_int64();
-        } catch (...) {
-        }
+        } catch (...) {}
         try {
             return static_cast<int64_t>(v.as_int32());
-        } catch (...) {
-        }
+        } catch (...) {}
         ADD_FAILURE() << "value is not an integer";
         return 0;
     }
@@ -153,8 +152,7 @@ TEST_F(QA_GDB265, AC1_SelectStarReturnsColumnsAndMeta) {
     auto node_idx = col_idx(qr, "__node");
     for (const auto& row : qr.rows) {
         EXPECT_FALSE(row[name_idx].is_null()) << "name should be enriched";
-        EXPECT_EQ(get_int(row[id_idx]), get_int(row[node_idx]))
-            << "id should match __node";
+        EXPECT_EQ(get_int(row[id_idx]), get_int(row[node_idx])) << "id should match __node";
     }
 }
 
@@ -163,8 +161,7 @@ TEST_F(QA_GDB265, AC1_SelectStarReturnsColumnsAndMeta) {
 // ============================================================================
 
 TEST_F(QA_GDB265, AC2_ProjectionWorksCorrectly) {
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
 
     ASSERT_EQ(qr.column_names.size(), 2u);
     EXPECT_EQ(qr.column_names[0], "name");
@@ -183,9 +180,8 @@ TEST_F(QA_GDB265, AC2_ProjectionWorksCorrectly) {
 // ============================================================================
 
 TEST_F(QA_GDB265, AC3_WhereOnTableColumn) {
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "WHERE name LIKE 'J%'");
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "WHERE name LIKE 'J%'");
 
     // Jane (depth 1) and Jake (depth 2) match J%.
     ASSERT_EQ(qr.rows.size(), 2u);
@@ -204,9 +200,8 @@ TEST_F(QA_GDB265, AC3_WhereOnTableColumn) {
 // ============================================================================
 
 TEST_F(QA_GDB265, AC4_WhereOnMetaColumn) {
-    auto qr = exec_ok(
-        "SELECT name FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "WHERE __depth = 1");
+    auto qr = exec_ok("SELECT name FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "WHERE __depth = 1");
 
     ASSERT_EQ(qr.rows.size(), 2u);
 
@@ -224,9 +219,8 @@ TEST_F(QA_GDB265, AC4_WhereOnMetaColumn) {
 // ============================================================================
 
 TEST_F(QA_GDB265, AC5_OrderByAndLimit) {
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "ORDER BY __depth, name LIMIT 2");
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "ORDER BY __depth, name LIMIT 2");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     // Depth 1 sorted: Bob, Jane.
@@ -237,9 +231,8 @@ TEST_F(QA_GDB265, AC5_OrderByAndLimit) {
 }
 
 TEST_F(QA_GDB265, AC5_OrderByNameDesc) {
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "ORDER BY name DESC LIMIT 3");
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "ORDER BY name DESC LIMIT 3");
 
     ASSERT_EQ(qr.rows.size(), 3u);
     // Descending: Zara, Jane, Jake.
@@ -253,8 +246,7 @@ TEST_F(QA_GDB265, AC5_OrderByNameDesc) {
 // ============================================================================
 
 TEST_F(QA_GDB265, AC6_EmptyTraversalLeafNode) {
-    auto qr = exec_ok(
-        "SELECT * FROM TRAVERSE follows FROM users(5) DIRECTION OUT");
+    auto qr = exec_ok("SELECT * FROM TRAVERSE follows FROM users(5) DIRECTION OUT");
     EXPECT_TRUE(qr.rows.empty());
     // Schema should still be correct even with no rows.
     ASSERT_EQ(qr.column_names.size(), 5u);
@@ -262,8 +254,7 @@ TEST_F(QA_GDB265, AC6_EmptyTraversalLeafNode) {
 
 TEST_F(QA_GDB265, AC6_EmptyTraversalNoIncomingEdges) {
     // Node 1 has no incoming edges.
-    auto qr = exec_ok(
-        "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION IN");
+    auto qr = exec_ok("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION IN");
     EXPECT_TRUE(qr.rows.empty());
 }
 
@@ -291,9 +282,8 @@ TEST_F(QA_GDB265, AC7_StandaloneTraverseBackcompat) {
 // ============================================================================
 
 TEST_F(QA_GDB265, BoundaryMaxDepth1) {
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "MAX_DEPTH 1");
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "MAX_DEPTH 1");
 
     // Only depth-1 neighbors: Bob (2) and Jane (3).
     ASSERT_EQ(qr.rows.size(), 2u);
@@ -315,8 +305,7 @@ TEST_F(QA_GDB265, BoundaryMaxDepth1) {
 // ============================================================================
 
 TEST_F(QA_GDB265, BoundaryMaxDepth0) {
-    auto qr = exec_ok(
-        "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 0");
+    auto qr = exec_ok("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 0");
 
     // Start node itself is at depth 0 and excluded from results.
     // MAX_DEPTH=0 means don't expand beyond depth 0, so nothing is emitted.
@@ -328,9 +317,8 @@ TEST_F(QA_GDB265, BoundaryMaxDepth0) {
 // ============================================================================
 
 TEST_F(QA_GDB265, BoundaryDeepChainDepthValues) {
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "ORDER BY __depth");
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "ORDER BY __depth");
 
     ASSERT_EQ(qr.rows.size(), 4u);
 
@@ -355,8 +343,7 @@ TEST_F(QA_GDB265, CycleDetectionCircularGraph) {
     // Create cycle: 5→1 (so 1→2→4→5→1 is a cycle).
     exec_ok("LINK users(5) TO users(1) VIA follows");
 
-    auto qr = exec_ok(
-        "SELECT __node, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT __node, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
 
     // BFS should still visit exactly 4 distinct nodes: 2,3,4,5.
     // Node 1 is already visited (start), so cycle back to 1 is skipped.
@@ -380,8 +367,7 @@ TEST_F(QA_GDB265, CycleDetectionCircularGraph) {
 
 TEST_F(QA_GDB265, DirectionInEnrichment) {
     // From user 5 going IN: 5←4, then 4←2, 4←3, then 2←1, 3←1.
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(5) DIRECTION IN");
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(5) DIRECTION IN");
 
     // Should reach: 4 (depth 1), 2 and 3 (depth 2), 1 (depth 3) = 4 nodes.
     ASSERT_EQ(qr.rows.size(), 4u);
@@ -408,9 +394,8 @@ TEST_F(QA_GDB265, DirectionInEnrichment) {
 
 TEST_F(QA_GDB265, DirectionBothEnrichment) {
     // From user 4 going BOTH: reaches 2,3,5 (depth 1), then 1 (depth 2).
-    auto qr = exec_ok(
-        "SELECT name, __depth, __source FROM TRAVERSE follows FROM users(4) "
-        "DIRECTION BOTH");
+    auto qr = exec_ok("SELECT name, __depth, __source FROM TRAVERSE follows FROM users(4) "
+                      "DIRECTION BOTH");
 
     // Should reach 4 nodes.
     ASSERT_EQ(qr.rows.size(), 4u);
@@ -426,9 +411,8 @@ TEST_F(QA_GDB265, DirectionBothEnrichment) {
 // ============================================================================
 
 TEST_F(QA_GDB265, SourceMetaColumnCorrectness) {
-    auto qr = exec_ok(
-        "SELECT __node, __depth, __source "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT __node, __depth, __source "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
 
     ASSERT_EQ(qr.rows.size(), 4u);
 
@@ -475,9 +459,8 @@ TEST_F(QA_GDB265, MultipleDanglingEdges) {
 // ============================================================================
 
 TEST_F(QA_GDB265, WhereNoMatches) {
-    auto qr = exec_ok(
-        "SELECT name FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "WHERE name = 'NonExistent'");
+    auto qr = exec_ok("SELECT name FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "WHERE name = 'NonExistent'");
 
     EXPECT_TRUE(qr.rows.empty());
 }
@@ -487,9 +470,8 @@ TEST_F(QA_GDB265, WhereNoMatches) {
 // ============================================================================
 
 TEST_F(QA_GDB265, WhereCombinedTableAndMeta) {
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "WHERE __depth = 1 AND name > 'C'");
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "WHERE __depth = 1 AND name > 'C'");
 
     // Depth 1: Bob and Jane. Only Jane > 'C'.
     ASSERT_EQ(qr.rows.size(), 1u);
@@ -502,9 +484,8 @@ TEST_F(QA_GDB265, WhereCombinedTableAndMeta) {
 // ============================================================================
 
 TEST_F(QA_GDB265, WhereDepthRange) {
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "WHERE __depth >= 2 ORDER BY __depth");
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "WHERE __depth >= 2 ORDER BY __depth");
 
     // Depth 2: Jake, Depth 3: Zara.
     ASSERT_EQ(qr.rows.size(), 2u);
@@ -517,9 +498,8 @@ TEST_F(QA_GDB265, WhereDepthRange) {
 // ============================================================================
 
 TEST_F(QA_GDB265, ProjectOnlyMetaColumns) {
-    auto qr = exec_ok(
-        "SELECT __node, __depth, __source "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT __node, __depth, __source "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
 
     ASSERT_EQ(qr.column_names.size(), 3u);
     EXPECT_EQ(qr.column_names[0], "__node");
@@ -539,8 +519,7 @@ TEST_F(QA_GDB265, ProjectOnlyMetaColumns) {
 // ============================================================================
 
 TEST_F(QA_GDB265, ProjectSingleTableColumn) {
-    auto qr = exec_ok(
-        "SELECT name FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT name FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
 
     ASSERT_EQ(qr.column_names.size(), 1u);
     EXPECT_EQ(qr.column_names[0], "name");
@@ -552,9 +531,8 @@ TEST_F(QA_GDB265, ProjectSingleTableColumn) {
 // ============================================================================
 
 TEST_F(QA_GDB265, AliasedTraverseSource) {
-    auto qr = exec_ok(
-        "SELECT t.name, t.__depth "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t");
+    auto qr = exec_ok("SELECT t.name, t.__depth "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t");
 
     ASSERT_EQ(qr.column_names.size(), 2u);
     ASSERT_EQ(qr.rows.size(), 4u);
@@ -575,10 +553,9 @@ TEST_F(QA_GDB265, NullColumnsInTable) {
     exec_ok("LINK items(1) TO items(2) VIA links");
     exec_ok("LINK items(1) TO items(3) VIA links");
 
-    auto qr = exec_ok(
-        "SELECT label, score, __node "
-        "FROM TRAVERSE links FROM items(1) DIRECTION OUT "
-        "ORDER BY __node");
+    auto qr = exec_ok("SELECT label, score, __node "
+                      "FROM TRAVERSE links FROM items(1) DIRECTION OUT "
+                      "ORDER BY __node");
 
     ASSERT_EQ(qr.rows.size(), 2u);
 
@@ -598,13 +575,11 @@ TEST_F(QA_GDB265, NullColumnsInTable) {
 TEST_F(QA_GDB265, SelfReferencingEdgeType) {
     // 'follows' is already users→users. Verify both directions enrich from
     // the same table.
-    auto out = exec_ok(
-        "SELECT name FROM TRAVERSE follows FROM users(4) DIRECTION OUT");
+    auto out = exec_ok("SELECT name FROM TRAVERSE follows FROM users(4) DIRECTION OUT");
     ASSERT_EQ(out.rows.size(), 1u);
     EXPECT_EQ(out.rows[0][0].as_string(), "Zara");
 
-    auto in = exec_ok(
-        "SELECT name FROM TRAVERSE follows FROM users(4) DIRECTION IN");
+    auto in = exec_ok("SELECT name FROM TRAVERSE follows FROM users(4) DIRECTION IN");
     // IN from 4: 2 (Bob) and 3 (Jane) at depth 1, then 1 (Alice) at depth 2.
     ASSERT_EQ(in.rows.size(), 3u);
     std::vector<std::string> names;
@@ -622,8 +597,7 @@ TEST_F(QA_GDB265, SelfReferencingEdgeType) {
 // ============================================================================
 
 TEST_F(QA_GDB265, AggregateOnEnrichedResult) {
-    auto qr = exec_ok(
-        "SELECT COUNT(*) FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT COUNT(*) FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
 
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_int64(), 4);
@@ -634,9 +608,8 @@ TEST_F(QA_GDB265, AggregateOnEnrichedResult) {
 // ============================================================================
 
 TEST_F(QA_GDB265, GroupByDepth) {
-    auto qr = exec_ok(
-        "SELECT __depth, COUNT(*) FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "GROUP BY __depth ORDER BY __depth");
+    auto qr = exec_ok("SELECT __depth, COUNT(*) FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "GROUP BY __depth ORDER BY __depth");
 
     ASSERT_EQ(qr.rows.size(), 3u);
     // Depth 1: 2 nodes (Bob, Jane)
@@ -655,9 +628,8 @@ TEST_F(QA_GDB265, GroupByDepth) {
 // ============================================================================
 
 TEST_F(QA_GDB265, OrderByWithOffset) {
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "ORDER BY __depth, name LIMIT 2 OFFSET 1");
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "ORDER BY __depth, name LIMIT 2 OFFSET 1");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     // Skips Bob (first depth 1), gets Jane (depth 1) and Jake (depth 2).
@@ -675,16 +647,15 @@ TEST_F(QA_GDB265, StressManyNodes) {
     exec_ok("CREATE EDGE TYPE next FROM chain TO chain");
 
     for (int i = 1; i <= 100; ++i) {
-        exec_ok("INSERT INTO chain VALUES (" + std::to_string(i) + ", 'node_" +
-                std::to_string(i) + "')");
+        exec_ok("INSERT INTO chain VALUES (" + std::to_string(i) + ", 'node_" + std::to_string(i) +
+                "')");
     }
     for (int i = 1; i < 100; ++i) {
-        exec_ok("LINK chain(" + std::to_string(i) + ") TO chain(" +
-                std::to_string(i + 1) + ") VIA next");
+        exec_ok("LINK chain(" + std::to_string(i) + ") TO chain(" + std::to_string(i + 1) +
+                ") VIA next");
     }
 
-    auto qr = exec_ok(
-        "SELECT label, __depth FROM TRAVERSE next FROM chain(1) DIRECTION OUT");
+    auto qr = exec_ok("SELECT label, __depth FROM TRAVERSE next FROM chain(1) DIRECTION OUT");
 
     // Should get 99 nodes (2 through 100).
     ASSERT_EQ(qr.rows.size(), 99u);
@@ -708,9 +679,8 @@ TEST_F(QA_GDB265, StressManyNodes) {
 
 TEST_F(QA_GDB265, DiamondGraphNoDuplicates) {
     // Graph: 1→2, 1→3, 2→4, 3→4. Node 4 is reachable via two paths.
-    auto qr = exec_ok(
-        "SELECT __node, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "WHERE __node = 4");
+    auto qr = exec_ok("SELECT __node, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "WHERE __node = 4");
 
     // Node 4 should appear exactly once.
     ASSERT_EQ(qr.rows.size(), 1u);
@@ -723,8 +693,7 @@ TEST_F(QA_GDB265, DiamondGraphNoDuplicates) {
 // ============================================================================
 
 TEST_F(QA_GDB265, StartFromMiddleNodeOut) {
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(2) DIRECTION OUT");
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(2) DIRECTION OUT");
 
     // 2→4 (depth 1), 4→5 (depth 2). Nodes 1 and 3 not reachable going OUT.
     ASSERT_EQ(qr.rows.size(), 2u);
@@ -743,9 +712,8 @@ TEST_F(QA_GDB265, StartFromMiddleNodeOut) {
 // ============================================================================
 
 TEST_F(QA_GDB265, SchemaColumnTypesCorrect) {
-    auto qr = exec_ok(
-        "SELECT id, name, __node, __depth, __source "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT LIMIT 1");
+    auto qr = exec_ok("SELECT id, name, __node, __depth, __source "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT LIMIT 1");
 
     ASSERT_EQ(qr.rows.size(), 1u);
 
@@ -788,8 +756,7 @@ TEST_F(QA_GDB265, WhereOnDanglingEdgeIsNotNull) {
 // ============================================================================
 
 TEST_F(QA_GDB265, LimitZero) {
-    auto qr = exec_ok(
-        "SELECT name FROM TRAVERSE follows FROM users(1) DIRECTION OUT LIMIT 0");
+    auto qr = exec_ok("SELECT name FROM TRAVERSE follows FROM users(1) DIRECTION OUT LIMIT 0");
     EXPECT_TRUE(qr.rows.empty());
 }
 
@@ -798,10 +765,10 @@ TEST_F(QA_GDB265, LimitZero) {
 // ============================================================================
 
 TEST_F(QA_GDB265, RepeatedExecution) {
-    auto qr1 = exec_ok(
-        "SELECT __node FROM TRAVERSE follows FROM users(1) DIRECTION OUT ORDER BY __node");
-    auto qr2 = exec_ok(
-        "SELECT __node FROM TRAVERSE follows FROM users(1) DIRECTION OUT ORDER BY __node");
+    auto qr1 =
+        exec_ok("SELECT __node FROM TRAVERSE follows FROM users(1) DIRECTION OUT ORDER BY __node");
+    auto qr2 =
+        exec_ok("SELECT __node FROM TRAVERSE follows FROM users(1) DIRECTION OUT ORDER BY __node");
 
     ASSERT_EQ(qr1.rows.size(), qr2.rows.size());
     for (size_t i = 0; i < qr1.rows.size(); ++i) {
@@ -823,9 +790,8 @@ TEST_F(QA_GDB265, HeterogeneousEdgeEnrichment) {
     exec_ok("LINK users(1) TO posts(100) VIA authored");
     exec_ok("LINK users(1) TO posts(101) VIA authored");
 
-    auto qr = exec_ok(
-        "SELECT title, __depth FROM TRAVERSE authored FROM users(1) DIRECTION OUT "
-        "ORDER BY title");
+    auto qr = exec_ok("SELECT title, __depth FROM TRAVERSE authored FROM users(1) DIRECTION OUT "
+                      "ORDER BY title");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Hello World");
@@ -848,9 +814,8 @@ TEST_F(QA_GDB265, HeterogeneousEdgeInDirection) {
     exec_ok("LINK users(2) TO posts(100) VIA authored");
 
     // IN from posts → should reach users table.
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE authored FROM posts(100) DIRECTION IN "
-        "ORDER BY name");
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE authored FROM posts(100) DIRECTION IN "
+                      "ORDER BY name");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Alice");
@@ -862,10 +827,9 @@ TEST_F(QA_GDB265, HeterogeneousEdgeInDirection) {
 // ============================================================================
 
 TEST_F(QA_GDB265, ExpressionOnEnrichedColumn) {
-    auto qr = exec_ok(
-        "SELECT name, __depth + 10 AS boosted_depth "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "WHERE __depth = 1 ORDER BY name");
+    auto qr = exec_ok("SELECT name, __depth + 10 AS boosted_depth "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "WHERE __depth = 1 ORDER BY name");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     EXPECT_EQ(qr.rows[0][1].as_int64(), 11);
@@ -877,9 +841,8 @@ TEST_F(QA_GDB265, ExpressionOnEnrichedColumn) {
 // ============================================================================
 
 TEST_F(QA_GDB265, LargeMaxDepthSmallGraph) {
-    auto qr = exec_ok(
-        "SELECT __node, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "MAX_DEPTH 1000");
+    auto qr = exec_ok("SELECT __node, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "MAX_DEPTH 1000");
 
     // Same result as default — graph only has depth 3.
     ASSERT_EQ(qr.rows.size(), 4u);

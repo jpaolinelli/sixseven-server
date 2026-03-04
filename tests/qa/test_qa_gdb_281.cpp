@@ -157,8 +157,22 @@ TEST(QA_GDB281_ParseUuid, NilUuid) {
 TEST(QA_GDB281_ParseUuid, MaxUuid) {
     auto result = parse_uuid("ffffffff-ffff-ffff-ffff-ffffffffffff");
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    Uuid expected = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+    Uuid expected = {0xff,
+                     0xff,
+                     0xff,
+                     0xff,
+                     0xff,
+                     0xff,
+                     0xff,
+                     0xff,
+                     0xff,
+                     0xff,
+                     0xff,
+                     0xff,
+                     0xff,
+                     0xff,
+                     0xff,
+                     0xff};
     EXPECT_EQ(*result, expected);
 }
 
@@ -176,8 +190,22 @@ TEST(QA_GDB281_ParseUuid, KnownUuidByteMapping) {
     // UUID: 01020304-0506-0708-090a-0b0c0d0e0f10
     auto result = parse_uuid("01020304-0506-0708-090a-0b0c0d0e0f10");
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    Uuid expected = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-                     0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10};
+    Uuid expected = {0x01,
+                     0x02,
+                     0x03,
+                     0x04,
+                     0x05,
+                     0x06,
+                     0x07,
+                     0x08,
+                     0x09,
+                     0x0a,
+                     0x0b,
+                     0x0c,
+                     0x0d,
+                     0x0e,
+                     0x0f,
+                     0x10};
     EXPECT_EQ(*result, expected);
 }
 
@@ -258,8 +286,22 @@ TEST(QA_GDB281_Coerce, CoerceValidStringToUuid) {
     auto result = coerce(v, TypeId::UUID);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->type_id(), TypeId::UUID);
-    Uuid expected = {0x55, 0x0e, 0x84, 0x00, 0xe2, 0x9b, 0x41, 0xd4,
-                     0xa7, 0x16, 0x44, 0x66, 0x55, 0x44, 0x00, 0x00};
+    Uuid expected = {0x55,
+                     0x0e,
+                     0x84,
+                     0x00,
+                     0xe2,
+                     0x9b,
+                     0x41,
+                     0xd4,
+                     0xa7,
+                     0x16,
+                     0x44,
+                     0x66,
+                     0x55,
+                     0x44,
+                     0x00,
+                     0x00};
     EXPECT_EQ(result->as_uuid(), expected);
 }
 
@@ -285,8 +327,22 @@ TEST(QA_GDB281_Coerce, CoerceNullToUuidPreservesNull) {
 }
 
 TEST(QA_GDB281_Coerce, CoerceUuidToUuidIdentity) {
-    Uuid uuid = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-                 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10};
+    Uuid uuid = {0x01,
+                 0x02,
+                 0x03,
+                 0x04,
+                 0x05,
+                 0x06,
+                 0x07,
+                 0x08,
+                 0x09,
+                 0x0a,
+                 0x0b,
+                 0x0c,
+                 0x0d,
+                 0x0e,
+                 0x0f,
+                 0x10};
     Value v(uuid);
     auto result = coerce(v, TypeId::UUID);
     ASSERT_TRUE(result.has_value());
@@ -334,8 +390,22 @@ TEST(QA_GDB281_FitToStorage, IntToUuidReturnsError) {
 }
 
 TEST(QA_GDB281_FitToStorage, UuidToUuidIdentity) {
-    Uuid uuid = {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11,
-                 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99};
+    Uuid uuid = {0xaa,
+                 0xbb,
+                 0xcc,
+                 0xdd,
+                 0xee,
+                 0xff,
+                 0x00,
+                 0x11,
+                 0x22,
+                 0x33,
+                 0x44,
+                 0x55,
+                 0x66,
+                 0x77,
+                 0x88,
+                 0x99};
     Value v(uuid);
     auto result = fit_to_storage(v, TypeId::UUID);
     ASSERT_TRUE(result.has_value());
@@ -395,31 +465,41 @@ protected:
 TEST_F(QA_GDB281_E2E, InsertUuidStringLiteralIntoUuidColumn) {
     // The reproducer from the bug report.
     exec_ok("CREATE TABLE users_articles (user_id UUID, article_id INT)");
-    auto ins = exec_ok(
-        "INSERT INTO users_articles (user_id, article_id) "
-        "VALUES ('d1458b55-f0bf-44d4-b191-e52f1ef1f60a', 1)");
+    auto ins = exec_ok("INSERT INTO users_articles (user_id, article_id) "
+                       "VALUES ('d1458b55-f0bf-44d4-b191-e52f1ef1f60a', 1)");
     EXPECT_EQ(ins.affected_rows, 1);
 
     auto qr = exec_ok("SELECT user_id, article_id FROM users_articles");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].type_id(), TypeId::UUID);
-    Uuid expected = {0xd1, 0x45, 0x8b, 0x55, 0xf0, 0xbf, 0x44, 0xd4,
-                     0xb1, 0x91, 0xe5, 0x2f, 0x1e, 0xf1, 0xf6, 0x0a};
+    Uuid expected = {0xd1,
+                     0x45,
+                     0x8b,
+                     0x55,
+                     0xf0,
+                     0xbf,
+                     0x44,
+                     0xd4,
+                     0xb1,
+                     0x91,
+                     0xe5,
+                     0x2f,
+                     0x1e,
+                     0xf1,
+                     0xf6,
+                     0x0a};
     EXPECT_EQ(qr.rows[0][0].as_uuid(), expected);
     EXPECT_EQ(qr.rows[0][1].as_int32(), 1);
 }
 
 TEST_F(QA_GDB281_E2E, InsertMultipleUuidStringLiterals) {
     exec_ok("CREATE TABLE items (id UUID, name TEXT)");
-    exec_ok(
-        "INSERT INTO items (id, name) "
-        "VALUES ('00000000-0000-0000-0000-000000000001', 'first')");
-    exec_ok(
-        "INSERT INTO items (id, name) "
-        "VALUES ('00000000-0000-0000-0000-000000000002', 'second')");
-    exec_ok(
-        "INSERT INTO items (id, name) "
-        "VALUES ('ffffffff-ffff-ffff-ffff-ffffffffffff', 'max')");
+    exec_ok("INSERT INTO items (id, name) "
+            "VALUES ('00000000-0000-0000-0000-000000000001', 'first')");
+    exec_ok("INSERT INTO items (id, name) "
+            "VALUES ('00000000-0000-0000-0000-000000000002', 'second')");
+    exec_ok("INSERT INTO items (id, name) "
+            "VALUES ('ffffffff-ffff-ffff-ffff-ffffffffffff', 'max')");
 
     auto qr = exec_ok("SELECT id, name FROM items");
     ASSERT_EQ(qr.rows.size(), 3u);
@@ -430,8 +510,22 @@ TEST_F(QA_GDB281_E2E, InsertMultipleUuidStringLiterals) {
     EXPECT_EQ(qr.rows[0][1].as_string(), "first");
 
     // Verify max UUID row.
-    Uuid id_max = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                   0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+    Uuid id_max = {0xff,
+                   0xff,
+                   0xff,
+                   0xff,
+                   0xff,
+                   0xff,
+                   0xff,
+                   0xff,
+                   0xff,
+                   0xff,
+                   0xff,
+                   0xff,
+                   0xff,
+                   0xff,
+                   0xff,
+                   0xff};
     EXPECT_EQ(qr.rows[2][0].as_uuid(), id_max);
     EXPECT_EQ(qr.rows[2][1].as_string(), "max");
 }
@@ -485,8 +579,22 @@ TEST_F(QA_GDB281_E2E, InsertUppercaseUuidString) {
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].type_id(), TypeId::UUID);
     // Same byte values as lowercase.
-    Uuid expected = {0xd1, 0x45, 0x8b, 0x55, 0xf0, 0xbf, 0x44, 0xd4,
-                     0xb1, 0x91, 0xe5, 0x2f, 0x1e, 0xf1, 0xf6, 0x0a};
+    Uuid expected = {0xd1,
+                     0x45,
+                     0x8b,
+                     0x55,
+                     0xf0,
+                     0xbf,
+                     0x44,
+                     0xd4,
+                     0xb1,
+                     0x91,
+                     0xe5,
+                     0x2f,
+                     0x1e,
+                     0xf1,
+                     0xf6,
+                     0x0a};
     EXPECT_EQ(qr.rows[0][0].as_uuid(), expected);
 }
 
@@ -496,8 +604,22 @@ TEST_F(QA_GDB281_E2E, InsertMixedCaseUuidString) {
 
     auto qr = exec_ok("SELECT id FROM t");
     ASSERT_EQ(qr.rows.size(), 1u);
-    Uuid expected = {0xd1, 0x45, 0x8b, 0x55, 0xf0, 0xbf, 0x44, 0xd4,
-                     0xb1, 0x91, 0xe5, 0x2f, 0x1e, 0xf1, 0xf6, 0x0a};
+    Uuid expected = {0xd1,
+                     0x45,
+                     0x8b,
+                     0x55,
+                     0xf0,
+                     0xbf,
+                     0x44,
+                     0xd4,
+                     0xb1,
+                     0x91,
+                     0xe5,
+                     0x2f,
+                     0x1e,
+                     0xf1,
+                     0xf6,
+                     0x0a};
     EXPECT_EQ(qr.rows[0][0].as_uuid(), expected);
 }
 
@@ -508,9 +630,8 @@ TEST_F(QA_GDB281_E2E, MixGenUuidAndStringLiteral) {
     // Insert with gen_uuid() default.
     exec_ok("INSERT INTO t (name) VALUES ('auto')");
     // Insert with explicit UUID string literal.
-    exec_ok(
-        "INSERT INTO t (id, name) "
-        "VALUES ('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 'manual')");
+    exec_ok("INSERT INTO t (id, name) "
+            "VALUES ('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 'manual')");
 
     auto qr = exec_ok("SELECT id, name FROM t");
     ASSERT_EQ(qr.rows.size(), 2u);
@@ -520,8 +641,22 @@ TEST_F(QA_GDB281_E2E, MixGenUuidAndStringLiteral) {
     EXPECT_EQ(qr.rows[0][0].type_id(), TypeId::UUID);
 
     // Manual UUID should match what was inserted.
-    Uuid manual = {0xaa, 0xaa, 0xaa, 0xaa, 0xbb, 0xbb, 0xcc, 0xcc,
-                   0xdd, 0xdd, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee};
+    Uuid manual = {0xaa,
+                   0xaa,
+                   0xaa,
+                   0xaa,
+                   0xbb,
+                   0xbb,
+                   0xcc,
+                   0xcc,
+                   0xdd,
+                   0xdd,
+                   0xee,
+                   0xee,
+                   0xee,
+                   0xee,
+                   0xee,
+                   0xee};
     EXPECT_EQ(qr.rows[1][0].as_uuid(), manual);
     EXPECT_EQ(qr.rows[1][1].as_string(), "manual");
 }
@@ -535,10 +670,12 @@ TEST_F(QA_GDB281_E2E, StressInsertManyUuidStringLiterals) {
     for (int i = 0; i < 20; ++i) {
         // Generate a UUID string with the counter in the last 2 hex digits.
         char buf[128];
-        snprintf(buf, sizeof(buf),
+        snprintf(buf,
+                 sizeof(buf),
                  "INSERT INTO t (id, seq) VALUES "
                  "('00000000-0000-0000-0000-%012x', %d)",
-                 i, i);
+                 i,
+                 i);
         exec_ok(buf);
     }
 
@@ -561,12 +698,10 @@ TEST_F(QA_GDB281_E2E, StressInsertManyUuidStringLiterals) {
 
 TEST_F(QA_GDB281_E2E, SelectWhereUuidMatchesInserted) {
     exec_ok("CREATE TABLE t (id UUID, name TEXT)");
-    exec_ok(
-        "INSERT INTO t (id, name) VALUES "
-        "('11111111-1111-1111-1111-111111111111', 'one')");
-    exec_ok(
-        "INSERT INTO t (id, name) VALUES "
-        "('22222222-2222-2222-2222-222222222222', 'two')");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('11111111-1111-1111-1111-111111111111', 'one')");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('22222222-2222-2222-2222-222222222222', 'two')");
 
     // Query all rows — the inserted UUIDs should be retrievable.
     auto qr = exec_ok("SELECT id, name FROM t");
@@ -579,9 +714,8 @@ TEST_F(QA_GDB281_E2E, SelectWhereUuidMatchesInserted) {
 
 TEST_F(QA_GDB281_E2E, UuidColumnDoesNotAffectOtherColumns) {
     exec_ok("CREATE TABLE t (id UUID, count INT, label TEXT)");
-    exec_ok(
-        "INSERT INTO t (id, count, label) VALUES "
-        "('abcdefab-cdef-abcd-efab-cdefabcdefab', 42, 'hello')");
+    exec_ok("INSERT INTO t (id, count, label) VALUES "
+            "('abcdefab-cdef-abcd-efab-cdefabcdefab', 42, 'hello')");
 
     auto qr = exec_ok("SELECT id, count, label FROM t");
     ASSERT_EQ(qr.rows.size(), 1u);

@@ -158,8 +158,7 @@ TEST(QA_GDB105, FromSubqueryImplicitAlias) {
 // =============================================================================
 
 TEST(QA_GDB105, InnerJoin) {
-    auto stmt = parse_one(
-        "SELECT * FROM users INNER JOIN orders ON users.id = orders.user_id");
+    auto stmt = parse_one("SELECT * FROM users INNER JOIN orders ON users.id = orders.user_id");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->joins.size(), 1u);
@@ -168,48 +167,43 @@ TEST(QA_GDB105, InnerJoin) {
 }
 
 TEST(QA_GDB105, BareJoinIsInner) {
-    auto stmt = parse_one(
-        "SELECT * FROM users JOIN orders ON users.id = orders.user_id");
+    auto stmt = parse_one("SELECT * FROM users JOIN orders ON users.id = orders.user_id");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->joins[0].type, JoinType::INNER);
 }
 
 TEST(QA_GDB105, LeftJoin) {
-    auto stmt = parse_one(
-        "SELECT * FROM users LEFT JOIN orders ON users.id = orders.user_id");
+    auto stmt = parse_one("SELECT * FROM users LEFT JOIN orders ON users.id = orders.user_id");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->joins[0].type, JoinType::LEFT);
 }
 
 TEST(QA_GDB105, LeftOuterJoin) {
-    auto stmt = parse_one(
-        "SELECT * FROM users LEFT OUTER JOIN orders ON users.id = orders.user_id");
+    auto stmt =
+        parse_one("SELECT * FROM users LEFT OUTER JOIN orders ON users.id = orders.user_id");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->joins[0].type, JoinType::LEFT);
 }
 
 TEST(QA_GDB105, RightJoin) {
-    auto stmt = parse_one(
-        "SELECT * FROM users RIGHT JOIN orders ON users.id = orders.user_id");
+    auto stmt = parse_one("SELECT * FROM users RIGHT JOIN orders ON users.id = orders.user_id");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->joins[0].type, JoinType::RIGHT);
 }
 
 TEST(QA_GDB105, FullJoin) {
-    auto stmt = parse_one(
-        "SELECT * FROM a FULL JOIN b ON a.id = b.id");
+    auto stmt = parse_one("SELECT * FROM a FULL JOIN b ON a.id = b.id");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->joins[0].type, JoinType::FULL);
 }
 
 TEST(QA_GDB105, FullOuterJoin) {
-    auto stmt = parse_one(
-        "SELECT * FROM a FULL OUTER JOIN b ON a.id = b.id");
+    auto stmt = parse_one("SELECT * FROM a FULL OUTER JOIN b ON a.id = b.id");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->joins[0].type, JoinType::FULL);
@@ -224,11 +218,10 @@ TEST(QA_GDB105, CrossJoin) {
 }
 
 TEST(QA_GDB105, MultipleJoins) {
-    auto stmt = parse_one(
-        "SELECT * FROM a "
-        "JOIN b ON a.id = b.a_id "
-        "LEFT JOIN c ON b.id = c.b_id "
-        "CROSS JOIN d");
+    auto stmt = parse_one("SELECT * FROM a "
+                          "JOIN b ON a.id = b.a_id "
+                          "LEFT JOIN c ON b.id = c.b_id "
+                          "CROSS JOIN d");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->joins.size(), 3u);
@@ -238,8 +231,7 @@ TEST(QA_GDB105, MultipleJoins) {
 }
 
 TEST(QA_GDB105, JoinWithComplexCondition) {
-    auto stmt = parse_one(
-        "SELECT * FROM a JOIN b ON a.id = b.a_id AND a.status = 'active'");
+    auto stmt = parse_one("SELECT * FROM a JOIN b ON a.id = b.a_id AND a.status = 'active'");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* and_expr = dynamic_cast<BinaryExpr*>(sel->joins[0].on_expr.get());
@@ -248,8 +240,7 @@ TEST(QA_GDB105, JoinWithComplexCondition) {
 }
 
 TEST(QA_GDB105, JoinWithTableAlias) {
-    auto stmt = parse_one(
-        "SELECT u.name FROM users u JOIN orders o ON u.id = o.user_id");
+    auto stmt = parse_one("SELECT u.name FROM users u JOIN orders o ON u.id = o.user_id");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->joins[0].table.alias, "o");
@@ -267,8 +258,7 @@ TEST(QA_GDB105, WhereBasic) {
 }
 
 TEST(QA_GDB105, WhereComplex) {
-    auto stmt = parse_one(
-        "SELECT * FROM t WHERE a > 5 AND (b = 'x' OR c IS NULL)");
+    auto stmt = parse_one("SELECT * FROM t WHERE a > 5 AND (b = 'x' OR c IS NULL)");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* and_expr = dynamic_cast<BinaryExpr*>(sel->where_expr.get());
@@ -288,16 +278,14 @@ TEST(QA_GDB105, GroupByBasic) {
 }
 
 TEST(QA_GDB105, GroupByMultiple) {
-    auto stmt = parse_one(
-        "SELECT dept, role, COUNT(*) FROM emp GROUP BY dept, role");
+    auto stmt = parse_one("SELECT dept, role, COUNT(*) FROM emp GROUP BY dept, role");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->group_by.size(), 2u);
 }
 
 TEST(QA_GDB105, GroupByWithHaving) {
-    auto stmt = parse_one(
-        "SELECT dept, COUNT(*) AS cnt FROM emp GROUP BY dept HAVING cnt > 5");
+    auto stmt = parse_one("SELECT dept, COUNT(*) AS cnt FROM emp GROUP BY dept HAVING cnt > 5");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_NE(sel->having_expr, nullptr);
@@ -437,8 +425,7 @@ TEST(QA_GDB105, Except) {
 // =============================================================================
 
 TEST(QA_GDB105, CTEBasic) {
-    auto stmt = parse_one(
-        "WITH temp AS (SELECT id FROM users) SELECT * FROM temp");
+    auto stmt = parse_one("WITH temp AS (SELECT id FROM users) SELECT * FROM temp");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->ctes.size(), 1u);
@@ -446,8 +433,7 @@ TEST(QA_GDB105, CTEBasic) {
 }
 
 TEST(QA_GDB105, CTEMultiple) {
-    auto stmt = parse_one(
-        "WITH a AS (SELECT 1), b AS (SELECT 2) SELECT * FROM a, b");
+    auto stmt = parse_one("WITH a AS (SELECT 1), b AS (SELECT 2) SELECT * FROM a, b");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->ctes.size(), 2u);
@@ -468,8 +454,7 @@ TEST(QA_GDB105, CTEMissingParen) {
 // =============================================================================
 
 TEST(QA_GDB105, WhereInSubquery) {
-    auto stmt = parse_one(
-        "SELECT * FROM t1 WHERE id IN (SELECT ref_id FROM t2)");
+    auto stmt = parse_one("SELECT * FROM t1 WHERE id IN (SELECT ref_id FROM t2)");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* in_expr = dynamic_cast<InExpr*>(sel->where_expr.get());
@@ -478,8 +463,7 @@ TEST(QA_GDB105, WhereInSubquery) {
 }
 
 TEST(QA_GDB105, WhereExistsSubquery) {
-    auto stmt = parse_one(
-        "SELECT * FROM t1 WHERE EXISTS (SELECT 1 FROM t2 WHERE t2.id = t1.id)");
+    auto stmt = parse_one("SELECT * FROM t1 WHERE EXISTS (SELECT 1 FROM t2 WHERE t2.id = t1.id)");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* exists = dynamic_cast<ExistsExpr*>(sel->where_expr.get());
@@ -487,8 +471,7 @@ TEST(QA_GDB105, WhereExistsSubquery) {
 }
 
 TEST(QA_GDB105, WhereScalarSubquery) {
-    auto stmt = parse_one(
-        "SELECT * FROM t WHERE a = (SELECT MAX(b) FROM t2)");
+    auto stmt = parse_one("SELECT * FROM t WHERE a = (SELECT MAX(b) FROM t2)");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* eq = dynamic_cast<BinaryExpr*>(sel->where_expr.get());
@@ -502,15 +485,14 @@ TEST(QA_GDB105, WhereScalarSubquery) {
 // =============================================================================
 
 TEST(QA_GDB105, FullQuery) {
-    auto stmt = parse_one(
-        "SELECT DISTINCT u.name, COUNT(*) AS cnt "
-        "FROM users u "
-        "JOIN orders o ON u.id = o.user_id "
-        "WHERE u.active = TRUE "
-        "GROUP BY u.name "
-        "HAVING COUNT(*) > 5 "
-        "ORDER BY cnt DESC "
-        "LIMIT 10 OFFSET 0");
+    auto stmt = parse_one("SELECT DISTINCT u.name, COUNT(*) AS cnt "
+                          "FROM users u "
+                          "JOIN orders o ON u.id = o.user_id "
+                          "WHERE u.active = TRUE "
+                          "GROUP BY u.name "
+                          "HAVING COUNT(*) > 5 "
+                          "ORDER BY cnt DESC "
+                          "LIMIT 10 OFFSET 0");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_TRUE(sel->distinct);
@@ -536,8 +518,7 @@ TEST(QA_GDB105, SelectMixedStarAndColumns) {
 }
 
 TEST(QA_GDB105, NestedSubqueryInFrom) {
-    auto stmt = parse_one(
-        "SELECT * FROM (SELECT * FROM (SELECT 1 AS x) AS inner_t) AS outer_t");
+    auto stmt = parse_one("SELECT * FROM (SELECT * FROM (SELECT 1 AS x) AS inner_t) AS outer_t");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     EXPECT_NE(sel->from[0].subquery, nullptr);
@@ -550,8 +531,7 @@ TEST(QA_GDB105, NestedSubqueryInFrom) {
 TEST(QA_GDB105, ManyJoins) {
     std::string sql = "SELECT * FROM t0";
     for (int i = 1; i <= 20; ++i) {
-        sql += " JOIN t" + std::to_string(i) + " ON t0.id = t" +
-               std::to_string(i) + ".ref_id";
+        sql += " JOIN t" + std::to_string(i) + " ON t0.id = t" + std::to_string(i) + ".ref_id";
     }
     auto stmt = parse_one(sql);
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());

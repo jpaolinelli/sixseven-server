@@ -217,8 +217,7 @@ TEST(QA_GDB_241_Ollama, SingleNonNumericElement) {
 
 TEST(QA_GDB_241_OpenAI, NonNumericStringValue) {
     auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200,
-                            R"({"data": [{"embedding": [0.1, "bad", 0.3], "index": 0}]})");
+    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, "bad", 0.3], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     // This should return a Result error, not throw an exception.
@@ -229,8 +228,7 @@ TEST(QA_GDB_241_OpenAI, NonNumericStringValue) {
 
 TEST(QA_GDB_241_OpenAI, BooleanValue) {
     auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200,
-                            R"({"data": [{"embedding": [0.1, true, 0.3], "index": 0}]})");
+    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, true, 0.3], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
@@ -240,8 +238,7 @@ TEST(QA_GDB_241_OpenAI, BooleanValue) {
 
 TEST(QA_GDB_241_OpenAI, NullValue) {
     auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200,
-                            R"({"data": [{"embedding": [0.1, null, 0.3], "index": 0}]})");
+    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, null, 0.3], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
@@ -251,8 +248,7 @@ TEST(QA_GDB_241_OpenAI, NullValue) {
 
 TEST(QA_GDB_241_OpenAI, NestedObjectValue) {
     auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200,
-                            R"({"data": [{"embedding": [0.1, {"x": 1}, 0.3], "index": 0}]})");
+    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, {"x": 1}, 0.3], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");

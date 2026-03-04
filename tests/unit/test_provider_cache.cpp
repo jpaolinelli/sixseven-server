@@ -3,11 +3,11 @@
 #include "giodb/common/secrets_manager.h"
 #include "giodb/common/types.h"
 #include "giodb/common/value.h"
+#include "giodb/executor/catalog_persistence.h"
 #include "giodb/executor/provider_cache.h"
 #include "giodb/executor/query_engine.h"
 #include "giodb/executor/storage_manager.h"
 #include "giodb/executor/system_bootstrap.h"
-#include "giodb/executor/catalog_persistence.h"
 #include "giodb/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
@@ -38,7 +38,8 @@ protected:
         cache_ = std::make_unique<ProviderCache>();
 
         // Bootstrap system database + sys_settings + sys_providers.
-        auto boot = SystemBootstrap::bootstrap(*engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
+        auto boot = SystemBootstrap::bootstrap(
+            *engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
         ASSERT_TRUE(boot.has_value()) << boot.error().message;
 
         // Load provider cache.
@@ -744,7 +745,8 @@ protected:
         cache_->set_secrets_manager(secrets_manager_.get());
 
         // Bootstrap system database + sys_settings + sys_providers.
-        auto boot = SystemBootstrap::bootstrap(*engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
+        auto boot = SystemBootstrap::bootstrap(
+            *engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
         ASSERT_TRUE(boot.has_value()) << boot.error().message;
 
         // Load provider cache.

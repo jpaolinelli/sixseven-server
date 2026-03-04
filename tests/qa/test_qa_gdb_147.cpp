@@ -52,13 +52,17 @@ void write_to_fd147(int fd, const std::vector<uint8_t>& data) {
 std::vector<uint8_t> read_from_fd147(int fd, size_t max_bytes = 16384) {
     std::vector<uint8_t> buf(max_bytes);
     auto n = ::read(fd, buf.data(), buf.size());
-    if (n <= 0) return {};
+    if (n <= 0)
+        return {};
     buf.resize(static_cast<size_t>(n));
     return buf;
 }
 
-bool find_message147(const std::vector<uint8_t>& data, size_t& pos, uint8_t type,
-                     const uint8_t*& payload, size_t& payload_len) {
+bool find_message147(const std::vector<uint8_t>& data,
+                     size_t& pos,
+                     uint8_t type,
+                     const uint8_t*& payload,
+                     size_t& payload_len) {
     while (pos + 5 <= data.size()) {
         uint8_t msg_type = data[pos];
         uint32_t length = (static_cast<uint32_t>(data[pos + 1]) << 24) |
@@ -66,7 +70,8 @@ bool find_message147(const std::vector<uint8_t>& data, size_t& pos, uint8_t type
                           (static_cast<uint32_t>(data[pos + 3]) << 8) |
                           static_cast<uint32_t>(data[pos + 4]);
         size_t total = 1 + static_cast<size_t>(length);
-        if (pos + total > data.size()) return false;
+        if (pos + total > data.size())
+            return false;
         if (msg_type == type) {
             payload = data.data() + pos + 5;
             payload_len = length - 4;
@@ -96,8 +101,8 @@ size_t count_message_type(const std::vector<uint8_t>& data, uint8_t type) {
     return count;
 }
 
-std::vector<uint8_t> build_startup147(
-    const std::vector<std::pair<std::string, std::string>>& params) {
+std::vector<uint8_t>
+build_startup147(const std::vector<std::pair<std::string, std::string>>& params) {
     std::vector<uint8_t> payload;
     uint32_t version = 0x00030000;
     payload.push_back(static_cast<uint8_t>((version >> 24) & 0xFF));
@@ -121,7 +126,8 @@ std::vector<uint8_t> build_startup147(
     return msg;
 }
 
-std::vector<uint8_t> build_parse147(std::string_view stmt_name, std::string_view sql,
+std::vector<uint8_t> build_parse147(std::string_view stmt_name,
+                                    std::string_view sql,
                                     const std::vector<uint32_t>& param_oids = {}) {
     std::vector<uint8_t> body;
     body.insert(body.end(), stmt_name.begin(), stmt_name.end());
@@ -148,7 +154,8 @@ std::vector<uint8_t> build_parse147(std::string_view stmt_name, std::string_view
     return msg;
 }
 
-std::vector<uint8_t> build_bind147(std::string_view portal_name, std::string_view stmt_name,
+std::vector<uint8_t> build_bind147(std::string_view portal_name,
+                                   std::string_view stmt_name,
                                    const std::vector<std::string>& param_values = {}) {
     std::vector<uint8_t> body;
     body.insert(body.end(), portal_name.begin(), portal_name.end());
@@ -185,7 +192,8 @@ std::vector<uint8_t> build_bind147(std::string_view portal_name, std::string_vie
 
 /// Build a Bind message with explicit NULL parameters (length = -1).
 std::vector<uint8_t> build_bind_with_nulls147(std::string_view portal_name,
-                                              std::string_view stmt_name, size_t num_nulls) {
+                                              std::string_view stmt_name,
+                                              size_t num_nulls) {
     std::vector<uint8_t> body;
     body.insert(body.end(), portal_name.begin(), portal_name.end());
     body.push_back(0);
@@ -234,7 +242,9 @@ std::vector<uint8_t> build_execute147(std::string_view portal_name, int32_t max_
     return msg;
 }
 
-std::vector<uint8_t> build_sync147() { return {'S', 0, 0, 0, 4}; }
+std::vector<uint8_t> build_sync147() {
+    return {'S', 0, 0, 0, 4};
+}
 
 std::vector<uint8_t> build_close147(char type, std::string_view name) {
     std::vector<uint8_t> msg;
@@ -264,7 +274,9 @@ std::vector<uint8_t> build_describe147(char type, std::string_view name) {
     return msg;
 }
 
-std::vector<uint8_t> build_flush147() { return {'H', 0, 0, 0, 4}; }
+std::vector<uint8_t> build_flush147() {
+    return {'H', 0, 0, 0, 4};
+}
 
 void append(std::vector<uint8_t>& dest, const std::vector<uint8_t>& src) {
     dest.insert(dest.end(), src.begin(), src.end());
@@ -722,10 +734,10 @@ TEST_F(QA147ExtendedTest, ErrorResetAfterSync) {
 TEST_F(QA147ExtendedTest, ErrorSkipsAllRemainingUntilSync) {
     // Bind(fail) + Parse(skip) + Bind(skip) + Execute(skip) + Sync.
     std::vector<uint8_t> batch;
-    append(batch, build_bind147("", "nonexistent"));  // fails
+    append(batch, build_bind147("", "nonexistent"));   // fails
     append(batch, build_parse147("late", "SELECT 1")); // skipped
-    append(batch, build_bind147("", "late"));           // skipped
-    append(batch, build_execute147(""));                // skipped
+    append(batch, build_bind147("", "late"));          // skipped
+    append(batch, build_execute147(""));               // skipped
     append(batch, build_sync147());
     auto resp = send_and_process(batch);
 

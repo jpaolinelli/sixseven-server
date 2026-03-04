@@ -71,12 +71,10 @@ protected:
         }
         try {
             return v.as_int64();
-        } catch (...) {
-        }
+        } catch (...) {}
         try {
             return static_cast<int64_t>(v.as_int32());
-        } catch (...) {
-        }
+        } catch (...) {}
         ADD_FAILURE() << "value is not an integer";
         return 0;
     }
@@ -139,8 +137,8 @@ TEST_F(QA_GDB298_EdgeTraversal, AC1_CompleteGraphEdgeCount) {
         }
     }
 
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
 
     // BFS from 1 OUT discovers all 5 nodes. All 20 edges should appear.
     ASSERT_EQ(qr.rows.size(), 20u);
@@ -150,8 +148,9 @@ TEST_F(QA_GDB298_EdgeTraversal, AC1_CompleteGraphEdgeCount) {
     for (int i = 1; i <= 5; ++i) {
         for (int j = 1; j <= 5; ++j) {
             if (i != j) {
-                EXPECT_NE(std::find(edges.begin(), edges.end(), std::make_pair((int64_t)i, (int64_t)j)),
-                          edges.end())
+                EXPECT_NE(
+                    std::find(edges.begin(), edges.end(), std::make_pair((int64_t)i, (int64_t)j)),
+                    edges.end())
                     << "Missing edge " << i << " -> " << j;
             }
         }
@@ -166,8 +165,8 @@ TEST_F(QA_GDB298_EdgeTraversal, AC1_LinearChainEdges) {
     link(3, 4);
     link(4, 5);
 
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
 
     auto edges = collect_edges(qr);
     ASSERT_EQ(edges.size(), 4u);
@@ -193,8 +192,8 @@ TEST_F(QA_GDB298_EdgeTraversal, AC2_MultipleCrossEdges) {
     link(3, 2); // cross-edge
     link(4, 2); // cross-edge (back-edge)
 
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
 
     auto edges = collect_edges(qr);
     ASSERT_EQ(edges.size(), 7u);
@@ -223,8 +222,8 @@ TEST_F(QA_GDB298_EdgeTraversal, AC3_AllBidirectionalPairs) {
     link(2, 3);
     link(3, 2);
 
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
 
     auto edges = collect_edges(qr);
     // 6 bidirectional edges between 3 nodes.
@@ -252,8 +251,8 @@ TEST_F(QA_GDB298_EdgeTraversal, AC4_MultipleEdgeProperties) {
     exec_ok("LINK people(1) TO people(3) VIA friendship (weight = 0.9, since = 2021)");
 
     auto qr = exec_ok("SELECT __from, __to, friendship.weight, friendship.since "
-                       "FROM TRAVERSE friendship FROM people(1) DIRECTION OUT MODE EDGES "
-                       "ORDER BY __to");
+                      "FROM TRAVERSE friendship FROM people(1) DIRECTION OUT MODE EDGES "
+                      "ORDER BY __to");
 
     ASSERT_EQ(qr.rows.size(), 2u);
 
@@ -290,13 +289,13 @@ TEST_F(QA_GDB298_EdgeTraversal, AC5_WhereOnEdgePropertyLessThan) {
     exec_ok("LINK people(2) TO people(3) VIA knows (weight = 0.4)");
 
     auto qr = exec_ok("SELECT __from, __to "
-                       "FROM TRAVERSE knows FROM people(1) DIRECTION OUT MODE EDGES "
-                       "WHERE knows.weight < 0.5");
+                      "FROM TRAVERSE knows FROM people(1) DIRECTION OUT MODE EDGES "
+                      "WHERE knows.weight < 0.5");
 
     auto edges = collect_edges(qr);
     ASSERT_EQ(edges.size(), 2u);
-    EXPECT_EQ(edges[0], std::make_pair(1L, 2L));  // weight=0.2
-    EXPECT_EQ(edges[1], std::make_pair(2L, 3L));  // weight=0.4
+    EXPECT_EQ(edges[0], std::make_pair(1L, 2L)); // weight=0.2
+    EXPECT_EQ(edges[1], std::make_pair(2L, 3L)); // weight=0.4
 }
 
 TEST_F(QA_GDB298_EdgeTraversal, AC5_WhereFiltersAllEdges) {
@@ -308,8 +307,8 @@ TEST_F(QA_GDB298_EdgeTraversal, AC5_WhereFiltersAllEdges) {
 
     // WHERE filters out all edges.
     auto qr = exec_ok("SELECT __from, __to "
-                       "FROM TRAVERSE knows FROM people(1) DIRECTION OUT MODE EDGES "
-                       "WHERE knows.weight > 0.99");
+                      "FROM TRAVERSE knows FROM people(1) DIRECTION OUT MODE EDGES "
+                      "WHERE knows.weight > 0.99");
 
     EXPECT_TRUE(qr.rows.empty());
 }
@@ -327,14 +326,14 @@ TEST_F(QA_GDB298_EdgeTraversal, AC6_OrderByDepthDescWithLimit) {
     link(4, 5);
 
     auto qr = exec_ok("SELECT __from, __to, __depth "
-                       "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES "
-                       "ORDER BY __depth DESC LIMIT 2");
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES "
+                      "ORDER BY __depth DESC LIMIT 2");
 
     ASSERT_EQ(qr.rows.size(), 2u);
 
     // Deepest edges first: 4→5 (depth 4), 3→4 (depth 3)
-    EXPECT_EQ(qr.rows[0][2].as_int64(), 4);  // depth of edge 4→5
-    EXPECT_EQ(qr.rows[1][2].as_int64(), 3);  // depth of edge 3→4
+    EXPECT_EQ(qr.rows[0][2].as_int64(), 4); // depth of edge 4→5
+    EXPECT_EQ(qr.rows[1][2].as_int64(), 3); // depth of edge 3→4
 }
 
 TEST_F(QA_GDB298_EdgeTraversal, AC6_LimitZeroReturnsEmpty) {
@@ -343,8 +342,8 @@ TEST_F(QA_GDB298_EdgeTraversal, AC6_LimitZeroReturnsEmpty) {
     link(1, 3);
 
     auto qr = exec_ok("SELECT __from, __to "
-                       "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES "
-                       "LIMIT 0");
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES "
+                      "LIMIT 0");
 
     EXPECT_TRUE(qr.rows.empty());
 }
@@ -354,8 +353,8 @@ TEST_F(QA_GDB298_EdgeTraversal, AC6_LimitLargerThanResultSet) {
     link(1, 2);
 
     auto qr = exec_ok("SELECT __from, __to "
-                       "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES "
-                       "LIMIT 1000");
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES "
+                      "LIMIT 1000");
 
     // Only 1 edge exists.
     ASSERT_EQ(qr.rows.size(), 1u);
@@ -379,8 +378,8 @@ TEST_F(QA_GDB298_EdgeTraversal, AC7_HeterogeneousMultipleEdgesOut) {
     exec_ok("LINK authors(1) TO books(20) VIA wrote");
     exec_ok("LINK authors(1) TO books(30) VIA wrote");
 
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE wrote FROM authors(1) DIRECTION OUT MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE wrote FROM authors(1) DIRECTION OUT MODE EDGES");
 
     auto edges = collect_edges(qr);
     ASSERT_EQ(edges.size(), 3u);
@@ -403,8 +402,8 @@ TEST_F(QA_GDB298_EdgeTraversal, AC7_HeterogeneousInDirection) {
     exec_ok("LINK authors(2) TO books(10) VIA wrote");
     exec_ok("LINK authors(3) TO books(10) VIA wrote");
 
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE wrote FROM books(10) DIRECTION IN MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE wrote FROM books(10) DIRECTION IN MODE EDGES");
 
     auto edges = collect_edges(qr);
     ASSERT_EQ(edges.size(), 3u);
@@ -423,9 +422,8 @@ TEST_F(QA_GDB298_EdgeTraversal, AC7_HeterogeneousBothRejected) {
     exec_ok("CREATE EDGE TYPE wrote FROM authors TO books");
 
     // DIRECTION BOTH on heterogeneous edge should be rejected.
-    exec_error(
-        "SELECT __from, __to FROM TRAVERSE wrote FROM authors(1) DIRECTION BOTH MODE EDGES",
-        StatusCode::TYPE_ERROR);
+    exec_error("SELECT __from, __to FROM TRAVERSE wrote FROM authors(1) DIRECTION BOTH MODE EDGES",
+               StatusCode::TYPE_ERROR);
 }
 
 // ============================================================================
@@ -455,7 +453,7 @@ TEST_F(QA_GDB298_EdgeTraversal, AC8_DefaultModeHasNoFromTo) {
     }
     EXPECT_TRUE(has_id);
     EXPECT_TRUE(has_node);
-    EXPECT_EQ(qr.rows.size(), 2u);  // 2 discovered nodes, not 2 edges
+    EXPECT_EQ(qr.rows.size(), 2u); // 2 discovered nodes, not 2 edges
 }
 
 TEST_F(QA_GDB298_EdgeTraversal, AC8_ExplicitModeNodesMatchesDefault) {
@@ -464,12 +462,12 @@ TEST_F(QA_GDB298_EdgeTraversal, AC8_ExplicitModeNodesMatchesDefault) {
     link(1, 3);
     link(2, 4);
 
-    auto qr_default = exec_ok(
-        "SELECT id, name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "ORDER BY id");
-    auto qr_explicit = exec_ok(
-        "SELECT id, name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "MODE NODES ORDER BY id");
+    auto qr_default =
+        exec_ok("SELECT id, name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                "ORDER BY id");
+    auto qr_explicit =
+        exec_ok("SELECT id, name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                "MODE NODES ORDER BY id");
 
     ASSERT_EQ(qr_default.rows.size(), qr_explicit.rows.size());
     ASSERT_EQ(qr_default.column_names, qr_explicit.column_names);
@@ -488,8 +486,8 @@ TEST_F(QA_GDB298_EdgeTraversal, AC9_IsolatedNodeNoEdges) {
     link(1, 2);
     // Node 3 is isolated — no edges at all.
 
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(3) DIRECTION OUT MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(3) DIRECTION OUT MODE EDGES");
     EXPECT_TRUE(qr.rows.empty());
 }
 
@@ -499,8 +497,8 @@ TEST_F(QA_GDB298_EdgeTraversal, AC9_NoIncomingEdgesInDirection) {
     link(1, 3);
 
     // Node 1 has no incoming edges.
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION IN MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION IN MODE EDGES");
     EXPECT_TRUE(qr.rows.empty());
 }
 
@@ -511,9 +509,9 @@ TEST_F(QA_GDB298_EdgeTraversal, AC9_MaxDepthZeroNoSelfLoop) {
 
     // MAX_DEPTH 0: BFS doesn't expand, only start node discovered.
     // No self-loop on node 1 → no edges.
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 0 "
-        "MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 0 "
+                "MODE EDGES");
     EXPECT_TRUE(qr.rows.empty());
 }
 
@@ -523,10 +521,10 @@ TEST_F(QA_GDB298_EdgeTraversal, AC9_MaxDepthZeroNoSelfLoop) {
 
 TEST_F(QA_GDB298_EdgeTraversal, AC10_SelfLoopOnly) {
     setup_users(1);
-    link(1, 1);  // Self-loop only.
+    link(1, 1); // Self-loop only.
 
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
 
     auto edges = collect_edges(qr);
     ASSERT_EQ(edges.size(), 1u);
@@ -536,11 +534,11 @@ TEST_F(QA_GDB298_EdgeTraversal, AC10_SelfLoopOnly) {
 TEST_F(QA_GDB298_EdgeTraversal, AC10_SelfLoopAtNonStartNode) {
     setup_users(3);
     link(1, 2);
-    link(2, 2);  // Self-loop at non-start node.
+    link(2, 2); // Self-loop at non-start node.
     link(2, 3);
 
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
 
     auto edges = collect_edges(qr);
     // Expected edges: 1→2, 2→2, 2→3
@@ -552,14 +550,14 @@ TEST_F(QA_GDB298_EdgeTraversal, AC10_SelfLoopAtNonStartNode) {
 
 TEST_F(QA_GDB298_EdgeTraversal, AC10_SelfLoopWithMaxDepthZero) {
     setup_users(2);
-    link(1, 1);  // Self-loop on start node.
+    link(1, 1); // Self-loop on start node.
     link(1, 2);
 
     // MAX_DEPTH 0: only start node discovered.
     // Self-loop 1→1 should still appear (both endpoints are discovered).
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 0 "
-        "MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 0 "
+                "MODE EDGES");
 
     auto edges = collect_edges(qr);
     ASSERT_EQ(edges.size(), 1u);
@@ -578,10 +576,9 @@ TEST_F(QA_GDB298_EdgeTraversal, DepthIsMaxOfEndpointsForCrossEdge) {
     link(1, 3);
     link(3, 2);
 
-    auto qr = exec_ok(
-        "SELECT __from, __to, __depth "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES "
-        "ORDER BY __from, __to");
+    auto qr = exec_ok("SELECT __from, __to, __depth "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES "
+                      "ORDER BY __from, __to");
 
     ASSERT_EQ(qr.rows.size(), 3u);
 
@@ -591,9 +588,9 @@ TEST_F(QA_GDB298_EdgeTraversal, DepthIsMaxOfEndpointsForCrossEdge) {
         edge_depths[key] = row[2].as_int64();
     }
 
-    EXPECT_EQ(edge_depths[std::make_pair(1L, 2L)], 1);  // max(0, 1) = 1
-    EXPECT_EQ(edge_depths[std::make_pair(1L, 3L)], 1);  // max(0, 1) = 1
-    EXPECT_EQ(edge_depths[std::make_pair(3L, 2L)], 1);  // max(1, 1) = 1
+    EXPECT_EQ(edge_depths[std::make_pair(1L, 2L)], 1); // max(0, 1) = 1
+    EXPECT_EQ(edge_depths[std::make_pair(1L, 3L)], 1); // max(0, 1) = 1
+    EXPECT_EQ(edge_depths[std::make_pair(3L, 2L)], 1); // max(1, 1) = 1
 }
 
 TEST_F(QA_GDB298_EdgeTraversal, DepthForBackEdgeToStart) {
@@ -602,11 +599,10 @@ TEST_F(QA_GDB298_EdgeTraversal, DepthForBackEdgeToStart) {
     setup_users(3);
     link(1, 2);
     link(2, 3);
-    link(3, 1);  // back-edge
+    link(3, 1); // back-edge
 
-    auto qr = exec_ok(
-        "SELECT __from, __to, __depth "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    auto qr = exec_ok("SELECT __from, __to, __depth "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
 
     std::map<std::pair<int64_t, int64_t>, int64_t> edge_depths;
     for (const auto& row : qr.rows) {
@@ -614,7 +610,7 @@ TEST_F(QA_GDB298_EdgeTraversal, DepthForBackEdgeToStart) {
         edge_depths[key] = row[2].as_int64();
     }
 
-    EXPECT_EQ(edge_depths[std::make_pair(3L, 1L)], 2);  // max(2, 0) = 2
+    EXPECT_EQ(edge_depths[std::make_pair(3L, 1L)], 2); // max(2, 0) = 2
 }
 
 // ============================================================================
@@ -627,12 +623,12 @@ TEST_F(QA_GDB298_EdgeTraversal, MaxDepth1ExcludesDeeperEdges) {
     link(1, 2);
     link(2, 3);
     link(3, 4);
-    link(2, 4);  // cross-edge between discovered nodes (if depth allows)
+    link(2, 4); // cross-edge between discovered nodes (if depth allows)
 
     // MAX_DEPTH 1: discovers {1, 2}.
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 1 "
-        "MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 1 "
+                "MODE EDGES");
 
     auto edges = collect_edges(qr);
     // Only edges between {1, 2}: 1→2.
@@ -646,12 +642,12 @@ TEST_F(QA_GDB298_EdgeTraversal, MaxDepth2IncludesCrossEdge) {
     link(1, 2);
     link(2, 3);
     link(3, 4);
-    link(2, 4);  // cross-edge
+    link(2, 4); // cross-edge
 
     // MAX_DEPTH 2: discovers {1, 2, 3, 4} because 4 is reachable via 2→4 at depth 2.
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 2 "
-        "MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 2 "
+                "MODE EDGES");
 
     auto edges = collect_edges(qr);
     // Edges between {1, 2, 3, 4}: 1→2, 2→3, 2→4, 3→4
@@ -690,8 +686,8 @@ TEST_F(QA_GDB298_EdgeTraversal, DirectionInOnlyIncomingEdges) {
     link(3, 1);
     link(1, 4);
 
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION IN MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION IN MODE EDGES");
 
     auto edges = collect_edges(qr);
     // Discovered: {1, 2, 3}. Edges between them: 2→1, 3→1.
@@ -712,8 +708,7 @@ TEST_F(QA_GDB298_EdgeTraversal, SelectStarWithEdgeProperties) {
     exec_ok("CREATE EDGE TYPE knows(weight FLOAT, tag VARCHAR) FROM people TO people");
     exec_ok("LINK people(1) TO people(2) VIA knows (weight = 0.5, tag = 'friend')");
 
-    auto qr = exec_ok(
-        "SELECT * FROM TRAVERSE knows FROM people(1) DIRECTION OUT MODE EDGES");
+    auto qr = exec_ok("SELECT * FROM TRAVERSE knows FROM people(1) DIRECTION OUT MODE EDGES");
 
     // Expect: __from, __to, __depth, weight, tag
     ASSERT_EQ(qr.column_names.size(), 5u);
@@ -738,10 +733,9 @@ TEST_F(QA_GDB298_EdgeTraversal, WhereOnFromColumn) {
     link(3, 4);
 
     // Filter to edges originating from node 1.
-    auto qr = exec_ok(
-        "SELECT __from, __to "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES "
-        "WHERE __from = 1");
+    auto qr = exec_ok("SELECT __from, __to "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES "
+                      "WHERE __from = 1");
 
     auto edges = collect_edges(qr);
     ASSERT_EQ(edges.size(), 2u);
@@ -757,10 +751,9 @@ TEST_F(QA_GDB298_EdgeTraversal, WhereOnToColumn) {
     link(3, 4);
 
     // Filter to edges targeting node 4.
-    auto qr = exec_ok(
-        "SELECT __from, __to "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES "
-        "WHERE __to = 4");
+    auto qr = exec_ok("SELECT __from, __to "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES "
+                      "WHERE __to = 4");
 
     auto edges = collect_edges(qr);
     ASSERT_EQ(edges.size(), 2u);
@@ -785,8 +778,8 @@ TEST_F(QA_GDB298_EdgeTraversal, StressStarTopology) {
         exec_ok("LINK nodes(1) TO nodes(" + std::to_string(i) + ") VIA link");
     }
 
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE link FROM nodes(1) DIRECTION OUT MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE link FROM nodes(1) DIRECTION OUT MODE EDGES");
 
     // 50 edges from node 1 to each other node.
     ASSERT_EQ(qr.rows.size(), static_cast<size_t>(N));
@@ -810,8 +803,8 @@ TEST_F(QA_GDB298_EdgeTraversal, StressDenseSubgraph) {
         }
     }
 
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE conn FROM nodes(1) DIRECTION OUT MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE conn FROM nodes(1) DIRECTION OUT MODE EDGES");
 
     // N*(N-1) = 56 edges.
     ASSERT_EQ(qr.rows.size(), static_cast<size_t>(N * (N - 1)));
@@ -826,8 +819,8 @@ TEST_F(QA_GDB298_EdgeTraversal, ParserModeEdgesCaseInsensitive) {
     link(1, 2);
 
     // Lowercase "mode edges" should work via case-insensitive matching.
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT mode edges");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT mode edges");
 
     ASSERT_EQ(qr.rows.size(), 1u);
 }
@@ -837,9 +830,8 @@ TEST_F(QA_GDB298_EdgeTraversal, ParserInvalidModeKeyword) {
     link(1, 2);
 
     // "MODE VERTEX" is invalid — should error.
-    exec_error(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE VERTEX",
-        StatusCode::PARSE_ERROR);
+    exec_error("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE VERTEX",
+               StatusCode::PARSE_ERROR);
 }
 
 // ============================================================================
@@ -849,12 +841,12 @@ TEST_F(QA_GDB298_EdgeTraversal, ParserInvalidModeKeyword) {
 TEST_F(QA_GDB298_EdgeTraversal, OnlySpecifiedEdgeTypeReturned) {
     setup_users(3);
     exec_ok("CREATE EDGE TYPE blocks FROM users TO users");
-    link(1, 2);                                              // follows
-    exec_ok("LINK users(1) TO users(3) VIA blocks");         // blocks
-    exec_ok("LINK users(1) TO users(2) VIA blocks");         // blocks
+    link(1, 2);                                      // follows
+    exec_ok("LINK users(1) TO users(3) VIA blocks"); // blocks
+    exec_ok("LINK users(1) TO users(2) VIA blocks"); // blocks
 
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
 
     // Only follows edges: 1→2.
     auto edges = collect_edges(qr);
@@ -872,10 +864,10 @@ TEST_F(QA_GDB298_EdgeTraversal, RepeatedExecutionConsistentResults) {
     link(1, 3);
 
     // Execute the same query twice — results should be identical.
-    auto qr1 = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
-    auto qr2 = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    auto qr1 =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    auto qr2 =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
 
     auto edges1 = collect_edges(qr1);
     auto edges2 = collect_edges(qr2);
@@ -891,16 +883,16 @@ TEST_F(QA_GDB298_EdgeTraversal, EdgesAddedIncrementally) {
     link(1, 2);
     link(1, 3);
 
-    auto qr1 = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    auto qr1 =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
     ASSERT_EQ(qr1.rows.size(), 2u);
 
     // Add more edges.
     link(2, 4);
     link(3, 4);
 
-    auto qr2 = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    auto qr2 =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
     auto edges = collect_edges(qr2);
     ASSERT_EQ(edges.size(), 4u);
 }
@@ -921,10 +913,9 @@ TEST_F(QA_GDB298_EdgeTraversal, HeterogeneousEdgeProperties) {
     exec_ok("LINK authors(1) TO books(10) VIA wrote (year = 2020)");
     exec_ok("LINK authors(1) TO books(20) VIA wrote (year = 2023)");
 
-    auto qr = exec_ok(
-        "SELECT __from, __to, wrote.year "
-        "FROM TRAVERSE wrote FROM authors(1) DIRECTION OUT MODE EDGES "
-        "ORDER BY wrote.year");
+    auto qr = exec_ok("SELECT __from, __to, wrote.year "
+                      "FROM TRAVERSE wrote FROM authors(1) DIRECTION OUT MODE EDGES "
+                      "ORDER BY wrote.year");
 
     ASSERT_EQ(qr.rows.size(), 2u);
 
@@ -947,11 +938,11 @@ TEST_F(QA_GDB298_EdgeTraversal, DisconnectedSubgraphExcludesUnreachable) {
     setup_users(5);
     link(1, 2);
     link(2, 3);
-    link(4, 5);  // Unreachable from node 1.
+    link(4, 5); // Unreachable from node 1.
     link(5, 4);
 
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
 
     auto edges = collect_edges(qr);
     ASSERT_EQ(edges.size(), 2u);
@@ -979,12 +970,11 @@ TEST_F(QA_GDB298_EdgeTraversal, WhereOrderByLimitCombined) {
     exec_ok("LINK people(1) TO people(4) VIA knows (weight = 0.5)");
     exec_ok("LINK people(2) TO people(3) VIA knows (weight = 0.7)");
 
-    auto qr = exec_ok(
-        "SELECT __from, __to, knows.weight "
-        "FROM TRAVERSE knows FROM people(1) DIRECTION OUT MODE EDGES "
-        "WHERE knows.weight > 0.3 "
-        "ORDER BY knows.weight DESC "
-        "LIMIT 2");
+    auto qr = exec_ok("SELECT __from, __to, knows.weight "
+                      "FROM TRAVERSE knows FROM people(1) DIRECTION OUT MODE EDGES "
+                      "WHERE knows.weight > 0.3 "
+                      "ORDER BY knows.weight DESC "
+                      "LIMIT 2");
 
     ASSERT_EQ(qr.rows.size(), 2u);
 
@@ -1009,9 +999,8 @@ TEST_F(QA_GDB298_EdgeTraversal, SelfLoopWithProperties) {
     exec_ok("CREATE EDGE TYPE refers(note VARCHAR) FROM people TO people");
     exec_ok("LINK people(1) TO people(1) VIA refers (note = 'self-ref')");
 
-    auto qr = exec_ok(
-        "SELECT __from, __to, refers.note "
-        "FROM TRAVERSE refers FROM people(1) DIRECTION OUT MODE EDGES");
+    auto qr = exec_ok("SELECT __from, __to, refers.note "
+                      "FROM TRAVERSE refers FROM people(1) DIRECTION OUT MODE EDGES");
 
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(get_int(qr.rows[0][0]), 1);
@@ -1036,8 +1025,8 @@ TEST_F(QA_GDB298_EdgeTraversal, TriangleCycleAllEdgesReturned) {
     link(2, 3);
     link(3, 1);
 
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    auto qr =
+        exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
 
     auto edges = collect_edges(qr);
     ASSERT_EQ(edges.size(), 3u);

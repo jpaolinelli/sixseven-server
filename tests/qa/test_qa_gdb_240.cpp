@@ -163,8 +163,7 @@ TEST(QA_GDB240, MultipleGroupsDuplicates) {
 
     for (int k : {10, 20, 30}) {
         for (int i = 0; i < 8; ++i) {
-            (void)tree.insert(make_key(k),
-                              make_rid(static_cast<uint32_t>(k * 100 + i)));
+            (void)tree.insert(make_key(k), make_rid(static_cast<uint32_t>(k * 100 + i)));
         }
     }
     EXPECT_EQ(tree.size(), 24u);
@@ -466,8 +465,8 @@ TEST(QA_GDB240, CompositeKeyPartialDuplicates) {
 
     std::vector<std::string> suffixes = {"a", "b", "c", "d", "e"};
     for (size_t i = 0; i < suffixes.size(); ++i) {
-        auto ins = tree.insert(make_composite_key(10, suffixes[i]),
-                               make_rid(static_cast<uint32_t>(i)));
+        auto ins =
+            tree.insert(make_composite_key(10, suffixes[i]), make_rid(static_cast<uint32_t>(i)));
         ASSERT_TRUE(ins.has_value()) << "insert failed at suffix=" << suffixes[i];
     }
     (void)tree.insert(make_composite_key(20, "a"), make_rid(99));
