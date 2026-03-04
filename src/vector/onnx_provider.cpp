@@ -248,14 +248,18 @@ Result<OnnxModelPaths> resolve_onnx_model_paths(const std::string& path) {
     OnnxModelPaths result;
 
     if (fs::is_directory(path)) {
-        // Look for model.onnx inside the directory.
-        auto model_file = fs::path(path) / "model.onnx";
+        // Look for model.ort (ORT format) or model.onnx inside the directory.
+        auto model_file = fs::path(path) / "model.ort";
+        if (!fs::exists(model_file)) {
+            model_file = fs::path(path) / "model.onnx";
+        }
         if (!fs::exists(model_file)) {
             // Try onnx/model.onnx subdirectory.
             model_file = fs::path(path) / "onnx" / "model.onnx";
         }
         if (!fs::exists(model_file)) {
-            return make_error(StatusCode::IO_ERROR, "no model.onnx found in directory: " + path);
+            return make_error(StatusCode::IO_ERROR,
+                              "no model.ort or model.onnx found in directory: " + path);
         }
         result.model_path = model_file.string();
 
