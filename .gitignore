@@ -35,6 +35,9 @@ desktop.ini
 # Cache
 .cache/
 
+# Test model fixtures (downloaded on demand)
+tests/fixtures/models/
+
 # Data directory (runtime)
 data/
 
