@@ -8,6 +8,7 @@
 #include "giodb/catalog/catalog.h"
 #include "giodb/vector/onnx_provider.h"
 #include "giodb/vector/provider_registry.h"
+#include "giodb/vector/tokenizer.h"
 
 #include <gtest/gtest.h>
 
@@ -96,7 +97,8 @@ TEST(QA_GDB_243_Tokenizer, MaxLengthZeroCrash) {
     // After overflow, tokens accumulate, then resize(0) + back() = UB.
     // This test verifies the function does not crash.
     // If the implementation is buggy, ASan/UBSan will catch the UB.
-    auto tokens = OnnxProvider::tokenize("hello", 0);
+    HashTokenizer tok;
+    auto tokens = tok.encode("hello", 0);
     // At minimum, should not crash. Exact behavior is implementation-defined
     // but the result should have size 0 if max_length = 0.
     EXPECT_EQ(tokens.size(), 0u);
@@ -104,7 +106,8 @@ TEST(QA_GDB_243_Tokenizer, MaxLengthZeroCrash) {
 
 TEST(QA_GDB_243_Tokenizer, MaxLengthOne) {
     // Only room for one token — should have SEP.
-    auto tokens = OnnxProvider::tokenize("hello", 1);
+    HashTokenizer tok;
+    auto tokens = tok.encode("hello", 1);
     ASSERT_EQ(tokens.size(), 1u);
     // Last token should be SEP (102) due to truncation logic.
     EXPECT_EQ(tokens[0], 102);
@@ -112,7 +115,8 @@ TEST(QA_GDB_243_Tokenizer, MaxLengthOne) {
 
 TEST(QA_GDB_243_Tokenizer, MaxLengthTwo) {
     // Room for CLS + SEP only, no word tokens.
-    auto tokens = OnnxProvider::tokenize("hello", 2);
+    HashTokenizer tok;
+    auto tokens = tok.encode("hello", 2);
     ASSERT_EQ(tokens.size(), 2u);
     EXPECT_EQ(tokens[0], 101); // CLS
     EXPECT_EQ(tokens[1], 102); // SEP
@@ -120,7 +124,8 @@ TEST(QA_GDB_243_Tokenizer, MaxLengthTwo) {
 
 TEST(QA_GDB_243_Tokenizer, MaxLengthThree) {
     // Room for CLS + one word + SEP.
-    auto tokens = OnnxProvider::tokenize("hello", 3);
+    HashTokenizer tok;
+    auto tokens = tok.encode("hello", 3);
     ASSERT_EQ(tokens.size(), 3u);
     EXPECT_EQ(tokens[0], 101); // CLS
     EXPECT_NE(tokens[1], 0);   // "hello" word token
@@ -128,7 +133,8 @@ TEST(QA_GDB_243_Tokenizer, MaxLengthThree) {
 }
 
 TEST(QA_GDB_243_Tokenizer, SingleCharInput) {
-    auto tokens = OnnxProvider::tokenize("a", 10);
+    HashTokenizer tok;
+    auto tokens = tok.encode("a", 10);
     ASSERT_EQ(tokens.size(), 10u);
     EXPECT_EQ(tokens[0], 101); // CLS
     EXPECT_NE(tokens[1], 0);   // "a" word token
@@ -139,7 +145,8 @@ TEST(QA_GDB_243_Tokenizer, SingleCharInput) {
 }
 
 TEST(QA_GDB_243_Tokenizer, NumericInput) {
-    auto tokens = OnnxProvider::tokenize("12345", 10);
+    HashTokenizer tok;
+    auto tokens = tok.encode("12345", 10);
     ASSERT_EQ(tokens.size(), 10u);
     EXPECT_EQ(tokens[0], 101); // CLS
     EXPECT_NE(tokens[1], 0);   // numeric token
@@ -148,7 +155,8 @@ TEST(QA_GDB_243_Tokenizer, NumericInput) {
 
 TEST(QA_GDB_243_Tokenizer, SpecialCharactersOnly) {
     // All punctuation, no alphanumeric — no word tokens produced.
-    auto tokens = OnnxProvider::tokenize("!@#$%^&*()", 10);
+    HashTokenizer tok;
+    auto tokens = tok.encode("!@#$%^&*()", 10);
     ASSERT_EQ(tokens.size(), 10u);
     EXPECT_EQ(tokens[0], 101); // CLS
     EXPECT_EQ(tokens[1], 102); // SEP
@@ -159,7 +167,8 @@ TEST(QA_GDB_243_Tokenizer, SpecialCharactersOnly) {
 
 TEST(QA_GDB_243_Tokenizer, MixedUnicodeAndAscii) {
     // Non-ASCII bytes are not alphanumeric — only ASCII letters produce tokens.
-    auto tokens = OnnxProvider::tokenize("hello 世界 world", 10);
+    HashTokenizer tok;
+    auto tokens = tok.encode("hello 世界 world", 10);
     ASSERT_EQ(tokens.size(), 10u);
     EXPECT_EQ(tokens[0], 101); // CLS
     // "hello" and "world" should produce word tokens.
@@ -171,14 +180,16 @@ TEST(QA_GDB_243_Tokenizer, ExactlyMaxLengthWords) {
     constexpr size_t MAX_LEN = 10;
     std::string text;
     for (size_t i = 0; i < MAX_LEN - 2; ++i) {
-        if (i > 0) text += " ";
+        if (i > 0)
+            text += " ";
         text += "w" + std::to_string(i);
     }
 
-    auto tokens = OnnxProvider::tokenize(text, MAX_LEN);
+    HashTokenizer tok;
+    auto tokens = tok.encode(text, MAX_LEN);
     ASSERT_EQ(tokens.size(), MAX_LEN);
-    EXPECT_EQ(tokens[0], 101);              // CLS
-    EXPECT_EQ(tokens[MAX_LEN - 1], 102);    // SEP
+    EXPECT_EQ(tokens[0], 101);           // CLS
+    EXPECT_EQ(tokens[MAX_LEN - 1], 102); // SEP
     // All middle positions should be word tokens.
     for (size_t i = 1; i < MAX_LEN - 1; ++i) {
         EXPECT_NE(tokens[i], 0) << "position " << i << " should be a word token";
@@ -193,16 +204,18 @@ TEST(QA_GDB_243_Tokenizer, MoreWordsThanMaxLength) {
         text += "word" + std::to_string(i) + " ";
     }
 
-    auto tokens = OnnxProvider::tokenize(text, MAX_LEN);
+    HashTokenizer tok;
+    auto tokens = tok.encode(text, MAX_LEN);
     ASSERT_EQ(tokens.size(), MAX_LEN);
-    EXPECT_EQ(tokens[0], 101);              // CLS
-    EXPECT_EQ(tokens[MAX_LEN - 1], 102);    // SEP preserved after truncation
+    EXPECT_EQ(tokens[0], 101);           // CLS
+    EXPECT_EQ(tokens[MAX_LEN - 1], 102); // SEP preserved after truncation
 }
 
 TEST(QA_GDB_243_Tokenizer, VeryLongSingleWord) {
     // A single very long word (no spaces) — should produce exactly one word token.
+    HashTokenizer tok;
     std::string long_word(10000, 'a');
-    auto tokens = OnnxProvider::tokenize(long_word, 10);
+    auto tokens = tok.encode(long_word, 10);
     ASSERT_EQ(tokens.size(), 10u);
     EXPECT_EQ(tokens[0], 101); // CLS
     EXPECT_NE(tokens[1], 0);   // the single word token
@@ -210,7 +223,8 @@ TEST(QA_GDB_243_Tokenizer, VeryLongSingleWord) {
 }
 
 TEST(QA_GDB_243_Tokenizer, ConsecutiveSpaces) {
-    auto tokens = OnnxProvider::tokenize("hello     world", 10);
+    HashTokenizer tok;
+    auto tokens = tok.encode("hello     world", 10);
     ASSERT_EQ(tokens.size(), 10u);
     EXPECT_EQ(tokens[0], 101); // CLS
     EXPECT_NE(tokens[1], 0);   // "hello"
@@ -219,14 +233,16 @@ TEST(QA_GDB_243_Tokenizer, ConsecutiveSpaces) {
 }
 
 TEST(QA_GDB_243_Tokenizer, LeadingAndTrailingSpaces) {
-    auto tokens1 = OnnxProvider::tokenize("hello", 10);
-    auto tokens2 = OnnxProvider::tokenize("  hello  ", 10);
+    HashTokenizer tok;
+    auto tokens1 = tok.encode("hello", 10);
+    auto tokens2 = tok.encode("  hello  ", 10);
     // The word token should be the same regardless of whitespace.
     EXPECT_EQ(tokens1[1], tokens2[1]);
 }
 
 TEST(QA_GDB_243_Tokenizer, TabsAndNewlines) {
-    auto tokens = OnnxProvider::tokenize("hello\tworld\nfoo", 10);
+    HashTokenizer tok;
+    auto tokens = tok.encode("hello\tworld\nfoo", 10);
     ASSERT_EQ(tokens.size(), 10u);
     EXPECT_EQ(tokens[0], 101); // CLS
     EXPECT_NE(tokens[1], 0);   // "hello"
@@ -240,29 +256,33 @@ TEST(QA_GDB_243_Tokenizer, TabsAndNewlines) {
 // ===========================================================================
 
 TEST(QA_GDB_243_AttentionMask, EmptyTokens) {
+    HashTokenizer tok;
     std::vector<int64_t> tokens;
-    auto mask = OnnxProvider::make_attention_mask(tokens);
+    auto mask = tok.attention_mask(tokens);
     EXPECT_TRUE(mask.empty());
 }
 
 TEST(QA_GDB_243_AttentionMask, SingleNonZeroToken) {
+    HashTokenizer tok;
     std::vector<int64_t> tokens = {101};
-    auto mask = OnnxProvider::make_attention_mask(tokens);
+    auto mask = tok.attention_mask(tokens);
     ASSERT_EQ(mask.size(), 1u);
     EXPECT_EQ(mask[0], 1);
 }
 
 TEST(QA_GDB_243_AttentionMask, SingleZeroToken) {
+    HashTokenizer tok;
     std::vector<int64_t> tokens = {0};
-    auto mask = OnnxProvider::make_attention_mask(tokens);
+    auto mask = tok.attention_mask(tokens);
     ASSERT_EQ(mask.size(), 1u);
     EXPECT_EQ(mask[0], 0);
 }
 
 TEST(QA_GDB_243_AttentionMask, NegativeTokenTreatedAsNonPadding) {
     // Negative token IDs are non-zero, should have mask = 1.
+    HashTokenizer tok;
     std::vector<int64_t> tokens = {-1, -100, 0};
-    auto mask = OnnxProvider::make_attention_mask(tokens);
+    auto mask = tok.attention_mask(tokens);
     ASSERT_EQ(mask.size(), 3u);
     EXPECT_EQ(mask[0], 1);
     EXPECT_EQ(mask[1], 1);
@@ -341,7 +361,8 @@ TEST(QA_GDB_243_Embed, NaNInEmbedding) {
 
 TEST(QA_GDB_243_Embed, InfinityInEmbedding) {
     auto mock = std::make_unique<MockOnnxSession>();
-    mock->set_embedding({std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()});
+    mock->set_embedding(
+        {std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()});
 
     OnnxProvider provider("model.onnx", 2, std::move(mock));
     auto result = provider.embed("hello");
@@ -554,21 +575,23 @@ TEST(QA_GDB_243_Embed, DimensionZeroEmbedFails) {
 // ===========================================================================
 
 TEST(QA_GDB_243_Tokenizer, SameWordAlwaysProducesSameToken) {
-    // Run tokenize 100 times — must be deterministic.
-    auto reference = OnnxProvider::tokenize("determinism", 5);
+    // Run encode 100 times — must be deterministic.
+    HashTokenizer tok;
+    auto reference = tok.encode("determinism", 5);
     for (int i = 0; i < 100; ++i) {
-        auto tokens = OnnxProvider::tokenize("determinism", 5);
+        auto tokens = tok.encode("determinism", 5);
         EXPECT_EQ(tokens, reference) << "non-deterministic at iteration " << i;
     }
 }
 
 TEST(QA_GDB_243_Tokenizer, DifferentWordsProduceDifferentHashes) {
     // Check that common words have distinct hashes (no trivial collisions).
-    std::vector<std::string> words = {"the", "quick", "brown", "fox", "jumps",
-                                      "over", "lazy", "dog", "hello", "world"};
+    HashTokenizer tok;
+    std::vector<std::string> words = {
+        "the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog", "hello", "world"};
     std::vector<int64_t> hashes;
     for (const auto& word : words) {
-        auto tokens = OnnxProvider::tokenize(word, 5);
+        auto tokens = tok.encode(word, 5);
         // tokens[1] is the word hash.
         hashes.push_back(tokens[1]);
     }
@@ -580,6 +603,7 @@ TEST(QA_GDB_243_Tokenizer, DifferentWordsProduceDifferentHashes) {
 }
 
 TEST(QA_GDB_243_Tokenizer, DefaultMaxLengthIsMAX_SEQ_LENGTH) {
-    auto tokens = OnnxProvider::tokenize("hello");
-    EXPECT_EQ(tokens.size(), OnnxProvider::MAX_SEQ_LENGTH);
+    HashTokenizer tok;
+    auto tokens = tok.encode("hello", tok.max_sequence_length());
+    EXPECT_EQ(tokens.size(), HashTokenizer::DEFAULT_MAX_SEQ_LENGTH);
 }
