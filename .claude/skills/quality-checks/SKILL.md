@@ -36,20 +36,6 @@ cmake --build build/debug --target giodb_qa_tests
 ./build/debug/tests/qa/giodb_qa_tests --gtest_filter="*GDB<N>*"
 ```
 
-## clang-format
-
-### Check for violations (dry run)
-
-```bash
-clang-format --dry-run -Werror <files>
-```
-
-### Auto-fix formatting
-
-```bash
-clang-format -i <files>
-```
-
 ### Finding changed files to format
 
 ```bash
@@ -60,18 +46,6 @@ git diff --name-only --cached -- 'include/*.h' 'src/*.cpp' 'src/*.h' 'tests/*.cp
 # Untracked new files
 git ls-files --others --exclude-standard -- 'include/' 'src/' 'tests/' | grep -E '\.(h|cpp)$'
 ```
-
-## clang-tidy
-
-Run on `.cpp` implementation files (headers are checked transitively):
-
-```bash
-/opt/homebrew/opt/llvm/bin/clang-tidy <cpp-files> -p build/debug
-```
-
-**Prerequisite**: The project must be built first — clang-tidy needs `build/debug/compile_commands.json`.
-
-If `build/debug/compile_commands.json` does not exist, build the project first.
 
 ## AddressSanitizer
 
@@ -96,9 +70,7 @@ ASAN_OPTIONS=detect_leaks=1:halt_on_error=0 ./build/asan/tests/qa/giodb_qa_tests
 
 Before every commit, run these in order:
 
-1. `clang-format -i` on all changed `.h` and `.cpp` files
-2. `clang-tidy` on all changed `.cpp` files (fix any warnings)
-3. Build the project (zero warnings)
-4. Run `giodb_unit_tests` (all dev tests pass)
+1. Build the project (zero warnings)
+2. Ticket-Specific Tests all PASS
 
 Never commit if any of these steps fail.

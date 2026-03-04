@@ -132,7 +132,7 @@ Replace `<N>` with the ticket number (e.g., `--gtest_filter="*GDB42*"` for GDB-4
 
 Record all results. Fix any test infrastructure issues (compile errors, missing includes) but do **not** fix bugs in the implementation — that is the implementer's job.
 
-## Step 6: Run Tests with AddressSanitizer
+## Step 6: Run Run Ticket-Specific Tests with AddressSanitizer
 
 Build and run **QA tests** with ASan to catch memory bugs:
 
@@ -170,7 +170,7 @@ Classify every finding by severity:
 
 ## Step 9: File Bug Tickets
 
-For every Critical or High finding, create a Jira `Bug` ticket in the **same epic as the ticket under review**:
+For every finding, create a Jira `Bug` ticket in the **same epic as the ticket under review**:
 
 ```
 Project: GDB
