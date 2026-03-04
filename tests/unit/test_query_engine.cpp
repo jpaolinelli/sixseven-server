@@ -899,3 +899,71 @@ TEST_F(QueryEngineGraphTest, FullGraphCRUDPipeline) {
     // After drop, edge type no longer exists in graph engine.
     exec_error("LINK users(1) TO posts(10) VIA authored", StatusCode::NOT_FOUND);
 }
+
+// =============================================================================
+// GDB-307: LINK/UNLINK with UUID primary keys (key coercion)
+// =============================================================================
+
+TEST_F(QueryEngineGraphTest, LinkWithUuidPrimaryKey) {
+    exec_ok("CREATE TABLE people (id UUID PRIMARY KEY, name VARCHAR)");
+    exec_ok("INSERT INTO people VALUES "
+            "('6f2fff6c-9762-4191-86e1-d34597e3c75a', 'Alice')");
+    exec_ok("INSERT INTO people VALUES "
+            "('d1458b55-f0bf-44d4-b191-e52f1ef1f60a', 'Bob')");
+    exec_ok("CREATE EDGE TYPE follows FROM people TO people");
+
+    auto link = exec_ok("LINK people('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
+                        "TO people('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA follows");
+    EXPECT_EQ(link.affected_rows, 1);
+    EXPECT_EQ(link.message, "LINK");
+}
+
+TEST_F(QueryEngineGraphTest, UnlinkWithUuidPrimaryKey) {
+    exec_ok("CREATE TABLE people (id UUID PRIMARY KEY, name VARCHAR)");
+    exec_ok("INSERT INTO people VALUES "
+            "('6f2fff6c-9762-4191-86e1-d34597e3c75a', 'Alice')");
+    exec_ok("INSERT INTO people VALUES "
+            "('d1458b55-f0bf-44d4-b191-e52f1ef1f60a', 'Bob')");
+    exec_ok("CREATE EDGE TYPE follows FROM people TO people");
+    exec_ok("LINK people('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
+            "TO people('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA follows");
+
+    auto unlink = exec_ok("UNLINK people('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
+                          "FROM people('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA follows");
+    EXPECT_EQ(unlink.affected_rows, 1);
+    EXPECT_EQ(unlink.message, "UNLINK");
+}
+
+TEST_F(QueryEngineGraphTest, LinkWithStringPrimaryKey) {
+    exec_ok("CREATE TABLE tags (slug VARCHAR PRIMARY KEY, label VARCHAR)");
+    exec_ok("INSERT INTO tags VALUES ('cpp', 'C++')");
+    exec_ok("INSERT INTO tags VALUES ('db', 'Database')");
+    exec_ok("CREATE EDGE TYPE related FROM tags TO tags");
+
+    auto link = exec_ok("LINK tags('cpp') TO tags('db') VIA related");
+    EXPECT_EQ(link.affected_rows, 1);
+}
+
+TEST_F(QueryEngineGraphTest, LinkWithHeterogeneousPkTypes) {
+    exec_ok("CREATE TABLE authors (id UUID PRIMARY KEY, name VARCHAR)");
+    exec_ok("CREATE TABLE articles (id INT PRIMARY KEY, title VARCHAR)");
+    exec_ok("INSERT INTO authors VALUES "
+            "('aabbccdd-1122-3344-5566-778899aabbcc', 'Eve')");
+    exec_ok("INSERT INTO articles VALUES (42, 'GioDB Internals')");
+    exec_ok("CREATE EDGE TYPE wrote FROM authors TO articles");
+
+    auto link = exec_ok("LINK authors('aabbccdd-1122-3344-5566-778899aabbcc') "
+                        "TO articles(42) VIA wrote");
+    EXPECT_EQ(link.affected_rows, 1);
+
+    auto unlink = exec_ok("UNLINK authors('aabbccdd-1122-3344-5566-778899aabbcc') "
+                          "FROM articles(42) VIA wrote");
+    EXPECT_EQ(unlink.affected_rows, 1);
+}
+
+TEST_F(QueryEngineGraphTest, LinkWithInvalidUuidFails) {
+    exec_ok("CREATE TABLE nodes (id UUID PRIMARY KEY, name VARCHAR)");
+    exec_ok("CREATE EDGE TYPE links FROM nodes TO nodes");
+
+    exec_error("LINK nodes('not-a-uuid') TO nodes('also-bad') VIA links", StatusCode::TYPE_ERROR);
+}

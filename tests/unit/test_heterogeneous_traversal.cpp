@@ -81,6 +81,12 @@ protected:
         }
     }
 
+    static int64_t val_to_int64(const Value& v) {
+        if (v.type_id() == TypeId::INT32)
+            return v.as_int32();
+        return v.as_int64();
+    }
+
     DiskManager dm_;
     Catalog catalog_;
     std::filesystem::path data_dir_;
@@ -106,7 +112,7 @@ TEST_F(HeterogeneousTraversalTest, OutFromSourceReturnsTargetColumns) {
     std::vector<std::string> titles;
     for (const auto& row : qr.rows) {
         titles.push_back(row[0].as_string());
-        EXPECT_EQ(row[1].as_int64(), 1); // All at depth 1.
+        EXPECT_EQ(val_to_int64(row[1]), 1); // All at depth 1.
     }
     std::sort(titles.begin(), titles.end());
     EXPECT_EQ(titles[0], "Hello");
@@ -127,7 +133,7 @@ TEST_F(HeterogeneousTraversalTest, InFromTargetReturnsSourceColumns) {
     // Post 10 was authored by user 1 (Alice).
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Alice");
-    EXPECT_EQ(qr.rows[0][1].as_int64(), 1);
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 1);
 }
 
 // ============================================================================
@@ -149,7 +155,7 @@ TEST_F(HeterogeneousTraversalTest, BothOnHomogeneousEdgeWorks) {
     // User 1 follows user 2 (OUT), no one follows user 1 (IN) in our data.
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Bob");
-    EXPECT_EQ(qr.rows[0][1].as_int64(), 1);
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 1);
 }
 
 // ============================================================================
@@ -181,7 +187,7 @@ TEST_F(HeterogeneousTraversalTest, SelectStarOutReturnsTargetSchema) {
 
     // Verify enriched data: id matches __node.
     for (const auto& row : qr.rows) {
-        EXPECT_EQ(row[0].as_int32(), static_cast<int32_t>(row[2].as_int64()));
+        EXPECT_EQ(row[0].as_int32(), static_cast<int32_t>(val_to_int64(row[2])));
     }
 }
 
