@@ -170,7 +170,7 @@ Classify every finding by severity:
 
 ## Step 9: File Bug Tickets
 
-For every Critical or High finding, create a Jira `Bug` ticket in the **same epic as the ticket under review**:
+For every finding, create a Jira `Bug` ticket in the **same epic as the ticket under review**:
 
 ```
 Project: GDB
