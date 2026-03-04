@@ -3,6 +3,7 @@ find_package(httplib CONFIG REQUIRED)
 find_package(onnxruntime CONFIG REQUIRED)
 
 add_library(giodb_vector STATIC
+    bpe_tokenizer.cpp
     distance.cpp
     hnsw_page.cpp
     hnsw_index.cpp
