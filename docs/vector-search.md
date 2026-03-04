@@ -239,6 +239,17 @@ The auto-created HNSW index uses these defaults:
 | `ef_construction` | 200 | Search width during index build. Higher = better recall, slower inserts |
 | `ef_search` | 64 | Search width during queries. Higher = better recall, slower queries |
 
+### ONNX Tokenization
+
+When using ONNX models with a `tokenizer.json`, the tokenizer pipeline runs locally before inference:
+
+1. **Normalization** — lowercasing, accent stripping, control character removal (configured per model)
+2. **Pre-tokenization** — splitting on whitespace and/or punctuation boundaries
+3. **Subword tokenization** — WordPiece (BERT-family) or BPE (GPT-family) segmentation
+4. **Special tokens** — CLS/SEP wrapping, padding, and truncation to the max sequence length
+
+This ensures token IDs match the pretrained model's vocabulary for full semantic embedding quality. Models without a `tokenizer.json` fall back to a hash-based tokenizer that provides functional but reduced-quality embeddings.
+
 ### Dimension Impact
 
 Higher-dimension embeddings (e.g., 1536 vs 384) require more computation per distance calculation. If latency matters, prefer smaller models when accuracy is acceptable.

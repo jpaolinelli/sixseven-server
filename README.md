@@ -540,16 +540,44 @@ Start Ollama first: `ollama serve` then `ollama pull all-minilm`.
 Runs a local ONNX model for embedding inference. No network access required after model download — ideal for air-gapped environments, CI pipelines, and local development.
 
 ```sql
+-- Point to a model directory (recommended — auto-discovers model + tokenizer)
 CREATE TABLE docs (
     id INT PRIMARY KEY,
     content TEXT,
-    vec EMBEDDING(384, source='content', provider='onnx/models/all-MiniLM-L6-v2/model.onnx')
+    vec EMBEDDING(384, source='content', provider='onnx/models/all-MiniLM-L6-v2')
 );
 ```
 
 | Parameter | Required | Example |
 |-----------|----------|---------|
-| Model path | Yes (in provider name) | Relative or absolute path to `.onnx` file |
+| Model path | Yes (in provider name) | Directory path or direct `.onnx` file path |
+
+#### Model Directory Format
+
+The recommended layout is a directory containing the model and tokenizer:
+
+```
+models/all-MiniLM-L6-v2/
+    model.onnx          # ONNX model file (or onnx/model.onnx)
+    tokenizer.json      # Hugging Face tokenizer config
+```
+
+When the provider path points to a directory, GioDB auto-discovers:
+1. The model file (`model.ort`, `model.onnx`, or `onnx/model.onnx`)
+2. The tokenizer (`tokenizer.json` in the directory root)
+
+**Backward compatibility:** Pointing directly to a `.onnx` file still works. If a `tokenizer.json` exists alongside the model file, it will be loaded automatically. Without a tokenizer file, GioDB falls back to a hash-based tokenizer.
+
+#### Tokenizer Support
+
+When a `tokenizer.json` is found, GioDB loads the pretrained tokenizer for full semantic quality. Supported tokenizer types:
+
+| Algorithm | Models | Description |
+|-----------|--------|-------------|
+| WordPiece | BERT, MiniLM, BGE, most sentence-transformers | Greedy longest-match subword tokenization |
+| BPE | GPT-2, RoBERTa, nomic-embed | Byte-pair encoding with learned merge rules |
+
+The tokenizer handles text normalization (lowercasing, accent stripping, whitespace cleanup), pre-tokenization (punctuation/whitespace splitting), and subword segmentation using the model's vocabulary.
 
 #### Downloading ONNX Models
 
@@ -581,23 +609,28 @@ optimum-cli export onnx \
     models/all-MiniLM-L6-v2
 ```
 
-This produces `model.onnx` (and optionally `model.onnx_data`) in the output directory.
+This produces `model.onnx` (and optionally `model.onnx_data`) in the output directory along with `tokenizer.json`.
 
 #### Recommended Models
 
-| Model | Dimensions | Size | Notes |
-|-------|-----------|------|-------|
-| `all-MiniLM-L6-v2` | 384 | ~80 MB | Best for general-purpose semantic search |
-| `all-MiniLM-L12-v2` | 384 | ~120 MB | Higher quality, slightly slower |
-| `bge-small-en-v1.5` | 384 | ~130 MB | Strong retrieval performance |
-| `nomic-embed-text-v1.5` | 768 | ~550 MB | High quality, larger dimension |
+| Model | Dimensions | Size | Tokenizer | Notes |
+|-------|-----------|------|-----------|-------|
+| `all-MiniLM-L6-v2` | 384 | ~80 MB | WordPiece | Best for general-purpose semantic search |
+| `all-MiniLM-L12-v2` | 384 | ~120 MB | WordPiece | Higher quality, slightly slower |
+| `bge-small-en-v1.5` | 384 | ~130 MB | WordPiece | Strong retrieval performance |
+| `nomic-embed-text-v1.5` | 768 | ~550 MB | BPE | High quality, larger dimension |
 
 #### Usage
 
-Point the provider to the `.onnx` file inside the downloaded model directory:
-
 ```sql
--- Relative path (from server working directory)
+-- Directory path (recommended — auto-discovers model.onnx + tokenizer.json)
+CREATE TABLE articles (
+    id INT PRIMARY KEY,
+    title TEXT NOT NULL,
+    title_vec EMBEDDING(384, source='title', provider='onnx/models/all-MiniLM-L6-v2')
+);
+
+-- Direct .onnx file path (tokenizer.json loaded from same directory if present)
 CREATE TABLE articles (
     id INT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -614,7 +647,6 @@ CREATE TABLE articles (
 
 #### Current Limitations
 
-- **Tokenizer**: Uses a hash-based tokenizer (not WordPiece/BPE). Token IDs are deterministic and consistent, enabling reliable word-overlap similarity, but they do not match the pretrained model's vocabulary. This means embeddings are functional for fuzzy matching but do not capture the full semantic quality of the original model. A proper tokenizer integration is planned.
 - **Sequence length**: Max 128 tokens (longer text is truncated).
 - **Batch size**: Inference runs one input at a time (no batched GPU inference).
 

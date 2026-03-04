@@ -64,6 +64,14 @@ uint32_t decode_utf8(const std::string& s, size_t& pos) {
         cp = (cp << 6) | (cont & 0x3F);
     }
 
+    // Reject overlong encodings (RFC 3629 Section 3).
+    // Each byte count has a minimum codepoint value; anything below is overlong.
+    static constexpr uint32_t MIN_CP[] = {0, 0x80, 0x800, 0x10000};
+    if (cp < MIN_CP[extra]) {
+        ++pos;
+        return 0xFFFD;
+    }
+
     pos += 1 + extra;
     return cp;
 }
@@ -380,7 +388,7 @@ uint32_t decompose_base(uint32_t cp) {
 }
 
 /// Lowercase a Unicode codepoint.
-/// Handles ASCII and Latin-1 Supplement uppercase (U+00C0-U+00DE).
+/// Handles ASCII, Latin-1 Supplement (U+00C0-U+00DE), and Latin Extended-A (U+0100-U+017E).
 uint32_t to_lower(uint32_t cp) {
     if (cp >= 'A' && cp <= 'Z') {
         return cp + 32;
@@ -389,8 +397,26 @@ uint32_t to_lower(uint32_t cp) {
     if (cp >= 0x00C0 && cp <= 0x00DE && cp != 0x00D7) {
         return cp + 32;
     }
-    // Latin Extended-A pairs: even = uppercase, odd = lowercase.
-    if (cp >= 0x0100 && cp <= 0x017E && (cp % 2 == 0)) {
+    // Latin Extended-A: three sub-ranges with different even/odd patterns.
+    // 0x0100-0x0137: even = uppercase, odd = lowercase.
+    if (cp >= 0x0100 && cp <= 0x0137 && (cp % 2 == 0)) {
+        return cp + 1;
+    }
+    // 0x0138 (ĸ): standalone lowercase character, no uppercase form.
+    // 0x0139-0x0148: odd = uppercase, even = lowercase.
+    if (cp >= 0x0139 && cp <= 0x0148 && (cp % 2 == 1)) {
+        return cp + 1;
+    }
+    // 0x014A-0x0177: even = uppercase, odd = lowercase.
+    if (cp >= 0x014A && cp <= 0x0177 && (cp % 2 == 0)) {
+        return cp + 1;
+    }
+    // 0x0178 (Ÿ): uppercase, lowercase is U+00FF (ÿ).
+    if (cp == 0x0178) {
+        return 0x00FF;
+    }
+    // 0x0179-0x017E: odd = uppercase, even = lowercase.
+    if (cp >= 0x0179 && cp <= 0x017E && (cp % 2 == 1)) {
         return cp + 1;
     }
     return cp;
@@ -461,17 +487,20 @@ std::string BertNormalizer::normalize(const std::string& text) const {
         encode_utf8(cp, result);
     }
 
-    // Trim leading and trailing whitespace.
-    size_t start = 0;
-    while (start < result.size() && result[start] == ' ') {
-        ++start;
-    }
-    size_t end = result.size();
-    while (end > start && result[end - 1] == ' ') { // NOLINT(bugprone-infinite-loop)
-        --end;
+    // Trim leading and trailing whitespace (only when clean_text is enabled).
+    if (clean_text_) {
+        size_t start = 0;
+        while (start < result.size() && result[start] == ' ') {
+            ++start;
+        }
+        size_t end = result.size();
+        while (end > start && result[end - 1] == ' ') { // NOLINT(bugprone-infinite-loop)
+            --end;
+        }
+        return result.substr(start, end - start);
     }
 
-    return result.substr(start, end - start);
+    return result;
 }
 
 // --- LowercaseNormalizer ---
