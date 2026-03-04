@@ -1515,6 +1515,104 @@ TEST(PgProtocol, DescribePortalNoDataForDML) {
     ::close(client_fd);
 }
 
+TEST(PgProtocol, DescribeStatementDescriberError) {
+    int client_fd = -1;
+    int server_fd = create_socketpair(client_fd);
+
+    Connection conn(server_fd);
+    PgProtocolHandler handler(34);
+
+    // Describer that always returns an error (e.g., table not found during bind).
+    handler.set_query_describer(
+        [](const std::string& /*sql*/) -> Result<std::vector<ColumnDescription>> {
+            return make_error(StatusCode::NOT_FOUND, "table \"nonexistent\" does not exist");
+        });
+
+    do_startup(client_fd, conn, handler);
+
+    auto parse = build_parse_message("bad_stmt", "SELECT * FROM nonexistent");
+    auto describe = build_describe_message('S', "bad_stmt");
+    auto sync = build_sync_message();
+
+    std::vector<uint8_t> batch;
+    batch.insert(batch.end(), parse.begin(), parse.end());
+    batch.insert(batch.end(), describe.begin(), describe.end());
+    batch.insert(batch.end(), sync.begin(), sync.end());
+
+    write_to_fd(client_fd, batch);
+    (void)conn.read_from_socket();
+    (void)handler.process(conn);
+    (void)conn.write_to_socket();
+    auto response = read_from_fd(client_fd);
+
+    size_t pos = 0;
+    const uint8_t* payload = nullptr;
+    size_t payload_len = 0;
+
+    // ParseComplete ('1').
+    ASSERT_TRUE(find_message(response, pos, '1', payload, payload_len));
+    // ParameterDescription ('t').
+    ASSERT_TRUE(find_message(response, pos, 't', payload, payload_len));
+    // ErrorResponse ('E') — describer failed.
+    ASSERT_TRUE(find_message(response, pos, 'E', payload, payload_len));
+    // ReadyForQuery ('Z') from Sync.
+    ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
+
+    conn.close();
+    ::close(client_fd);
+}
+
+TEST(PgProtocol, DescribePortalDescriberError) {
+    int client_fd = -1;
+    int server_fd = create_socketpair(client_fd);
+
+    Connection conn(server_fd);
+    PgProtocolHandler handler(35);
+
+    handler.set_query_executor(
+        [](const std::string& /*sql*/) -> Result<QueryResult> { return ok(QueryResult{}); });
+
+    handler.set_query_describer(
+        [](const std::string& /*sql*/) -> Result<std::vector<ColumnDescription>> {
+            return make_error(StatusCode::NOT_FOUND, "table \"nonexistent\" does not exist");
+        });
+
+    do_startup(client_fd, conn, handler);
+
+    auto parse = build_parse_message("", "SELECT * FROM nonexistent");
+    auto bind = build_bind_message("bad_portal", "");
+    auto describe = build_describe_message('P', "bad_portal");
+    auto sync = build_sync_message();
+
+    std::vector<uint8_t> batch;
+    batch.insert(batch.end(), parse.begin(), parse.end());
+    batch.insert(batch.end(), bind.begin(), bind.end());
+    batch.insert(batch.end(), describe.begin(), describe.end());
+    batch.insert(batch.end(), sync.begin(), sync.end());
+
+    write_to_fd(client_fd, batch);
+    (void)conn.read_from_socket();
+    (void)handler.process(conn);
+    (void)conn.write_to_socket();
+    auto response = read_from_fd(client_fd);
+
+    size_t pos = 0;
+    const uint8_t* payload = nullptr;
+    size_t payload_len = 0;
+
+    // ParseComplete ('1').
+    ASSERT_TRUE(find_message(response, pos, '1', payload, payload_len));
+    // BindComplete ('2').
+    ASSERT_TRUE(find_message(response, pos, '2', payload, payload_len));
+    // ErrorResponse ('E') — describer failed.
+    ASSERT_TRUE(find_message(response, pos, 'E', payload, payload_len));
+    // ReadyForQuery ('Z') from Sync.
+    ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
+
+    conn.close();
+    ::close(client_fd);
+}
+
 TEST(PgProtocol, ErrorInBatchSkipsUntilSync) {
     int client_fd = -1;
     int server_fd = create_socketpair(client_fd);

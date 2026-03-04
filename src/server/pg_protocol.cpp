@@ -1616,7 +1616,14 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
         // Describe result columns: parse + bind (no execution).
         if (query_describer_) {
             auto columns = query_describer_(stmt->sql);
-            if (columns && !columns->empty()) {
+            if (!columns) {
+                const auto& err = columns.error();
+                send_error_response(
+                    conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+                error_in_extended_ = true;
+                return;
+            }
+            if (!columns->empty()) {
                 send_row_description(conn, *columns);
             } else {
                 send_no_data(conn);
@@ -1634,7 +1641,14 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
         // Describe result columns for the portal's SQL.
         if (query_describer_) {
             auto columns = query_describer_(portal->sql);
-            if (columns && !columns->empty()) {
+            if (!columns) {
+                const auto& err = columns.error();
+                send_error_response(
+                    conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+                error_in_extended_ = true;
+                return;
+            }
+            if (!columns->empty()) {
                 send_row_description(conn, *columns);
             } else {
                 send_no_data(conn);
