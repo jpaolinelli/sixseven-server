@@ -131,14 +131,13 @@ ProviderRegistry::create_provider(const EmbeddingProviderConfig& config) {
         if (config.model.empty()) {
             return make_error(StatusCode::INVALID_ARGUMENT, "ONNX provider requires a model path");
         }
-        auto session = create_onnx_session(config.model);
-        if (!session.has_value()) {
-            return tl::unexpected(session.error());
-        }
         size_t dim = config.dimension > 0 ? static_cast<size_t>(config.dimension) : 384;
-        auto provider = std::make_shared<OnnxProvider>(config.model, dim, std::move(*session));
+        auto provider = create_onnx_provider(config.model, dim);
+        if (!provider.has_value()) {
+            return tl::unexpected(provider.error());
+        }
         GIODB_LOG_INFO("created ONNX provider: model={}, dimension={}", config.model, dim);
-        return ok(std::shared_ptr<EmbeddingProvider>(std::move(provider)));
+        return ok(std::shared_ptr<EmbeddingProvider>(std::move(*provider)));
     }
 
     return make_error(StatusCode::INVALID_ARGUMENT, "unknown provider type: '" + config.type + "'");

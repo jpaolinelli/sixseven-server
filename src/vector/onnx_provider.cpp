@@ -1,6 +1,9 @@
 #include "giodb/vector/onnx_provider.h"
 
 #include "giodb/common/logging.h"
+#include "giodb/vector/bpe_tokenizer.h"
+#include "giodb/vector/tokenizer_json_loader.h"
+#include "giodb/vector/wordpiece_tokenizer.h"
 
 #include <onnxruntime/onnxruntime_cxx_api.h>
 
@@ -229,6 +232,101 @@ Result<std::unique_ptr<OnnxSession>> create_onnx_session(const std::string& mode
                           "failed to load ONNX model '" + model_path +
                               "': " + std::string(e.what()));
     }
+}
+
+// ---------------------------------------------------------------------------
+// resolve_onnx_model_paths — directory vs file auto-discovery
+// ---------------------------------------------------------------------------
+
+Result<OnnxModelPaths> resolve_onnx_model_paths(const std::string& path) {
+    namespace fs = std::filesystem;
+
+    if (!fs::exists(path)) {
+        return make_error(StatusCode::IO_ERROR, "path not found: " + path);
+    }
+
+    OnnxModelPaths result;
+
+    if (fs::is_directory(path)) {
+        // Look for model.onnx inside the directory.
+        auto model_file = fs::path(path) / "model.onnx";
+        if (!fs::exists(model_file)) {
+            // Try onnx/model.onnx subdirectory.
+            model_file = fs::path(path) / "onnx" / "model.onnx";
+        }
+        if (!fs::exists(model_file)) {
+            return make_error(StatusCode::IO_ERROR, "no model.onnx found in directory: " + path);
+        }
+        result.model_path = model_file.string();
+
+        // Check for tokenizer.json in the directory root.
+        auto tokenizer_file = fs::path(path) / "tokenizer.json";
+        if (fs::exists(tokenizer_file)) {
+            result.tokenizer_path = tokenizer_file.string();
+        }
+    } else {
+        // Direct .onnx file path.
+        result.model_path = path;
+
+        // Check for tokenizer.json alongside the model file.
+        auto tokenizer_file = fs::path(path).parent_path() / "tokenizer.json";
+        if (fs::exists(tokenizer_file)) {
+            result.tokenizer_path = tokenizer_file.string();
+        }
+    }
+
+    return ok(std::move(result));
+}
+
+// ---------------------------------------------------------------------------
+// create_onnx_provider — high-level factory
+// ---------------------------------------------------------------------------
+
+Result<std::unique_ptr<OnnxProvider>> create_onnx_provider(const std::string& path, size_t dim) {
+    auto paths = resolve_onnx_model_paths(path);
+    if (!paths.has_value()) {
+        return tl::unexpected(paths.error());
+    }
+
+    auto session = create_onnx_session(paths->model_path);
+    if (!session.has_value()) {
+        return tl::unexpected(session.error());
+    }
+
+    std::unique_ptr<Tokenizer> tokenizer;
+
+    if (!paths->tokenizer_path.empty()) {
+        auto config = load_tokenizer_config(paths->tokenizer_path);
+        if (!config.has_value()) {
+            GIODB_LOG_WARN("failed to load tokenizer from '{}': {}; falling back to hash tokenizer",
+                           paths->tokenizer_path,
+                           config.error().message);
+            tokenizer = std::make_unique<HashTokenizer>(OnnxProvider::MAX_SEQ_LENGTH);
+        } else {
+            switch (config->model_type) {
+            case TokenizerModelType::WORDPIECE:
+                tokenizer = std::make_unique<WordPieceTokenizer>(*config);
+                GIODB_LOG_INFO("loaded WordPiece tokenizer from '{}'", paths->tokenizer_path);
+                break;
+            case TokenizerModelType::BPE:
+                tokenizer = std::make_unique<BPETokenizer>(*config);
+                GIODB_LOG_INFO("loaded BPE tokenizer from '{}'", paths->tokenizer_path);
+                break;
+            default:
+                GIODB_LOG_WARN("unsupported tokenizer model type in '{}'; "
+                               "falling back to hash tokenizer",
+                               paths->tokenizer_path);
+                tokenizer = std::make_unique<HashTokenizer>(OnnxProvider::MAX_SEQ_LENGTH);
+                break;
+            }
+        }
+    } else {
+        GIODB_LOG_WARN("no tokenizer.json found for model '{}'; using hash tokenizer",
+                       paths->model_path);
+        tokenizer = std::make_unique<HashTokenizer>(OnnxProvider::MAX_SEQ_LENGTH);
+    }
+
+    return ok(std::make_unique<OnnxProvider>(path, dim, std::move(*session), std::move(tokenizer)));
 }
 
 // ---------------------------------------------------------------------------

@@ -1,16 +1,21 @@
 /// @file test_onnx_provider.cpp
-/// @brief Unit tests for OnnxProvider (GDB-243).
+/// @brief Unit tests for OnnxProvider (GDB-243, GDB-324).
 ///
 /// Tests the OnnxProvider implementation using a mock ONNX session,
 /// covering: single/batch embedding, tokenizer, attention mask,
-/// error handling, health check, registry integration, and edge cases.
+/// error handling, health check, registry integration, auto-discovery,
+/// and tokenizer integration.
 
 #include "giodb/catalog/catalog.h"
+#include "giodb/vector/bpe_tokenizer.h"
 #include "giodb/vector/onnx_provider.h"
 #include "giodb/vector/provider_registry.h"
 #include "giodb/vector/tokenizer.h"
+#include "giodb/vector/tokenizer_json_loader.h"
+#include "giodb/vector/wordpiece_tokenizer.h"
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <cmath>
 #include <filesystem>
@@ -466,4 +471,268 @@ TEST(OnnxProvider, CreateSessionInvalidModel) {
 
     // Cleanup.
     std::filesystem::remove_all(temp_dir);
+}
+
+// ---------------------------------------------------------------------------
+// Model directory auto-discovery (GDB-343)
+// ---------------------------------------------------------------------------
+
+class OnnxAutoDiscovery : public ::testing::Test {
+protected:
+    void SetUp() override {
+        base_dir_ = std::filesystem::temp_directory_path() / "giodb_test_autodiscovery";
+        std::filesystem::create_directories(base_dir_);
+    }
+
+    void TearDown() override { std::filesystem::remove_all(base_dir_); }
+
+    void write_file(const std::filesystem::path& path, const std::string& content) {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream out(path);
+        out << content;
+    }
+
+    std::filesystem::path base_dir_;
+};
+
+TEST_F(OnnxAutoDiscovery, DirectoryWithModelOnnx) {
+    auto model_dir = base_dir_ / "my_model";
+    write_file(model_dir / "model.onnx", "fake_model_data");
+
+    auto result = resolve_onnx_model_paths(model_dir.string());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->model_path, (model_dir / "model.onnx").string());
+    EXPECT_TRUE(result->tokenizer_path.empty());
+}
+
+TEST_F(OnnxAutoDiscovery, DirectoryWithModelOnnxAndTokenizer) {
+    auto model_dir = base_dir_ / "my_model";
+    write_file(model_dir / "model.onnx", "fake_model_data");
+    write_file(model_dir / "tokenizer.json", "{}");
+
+    auto result = resolve_onnx_model_paths(model_dir.string());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->model_path, (model_dir / "model.onnx").string());
+    EXPECT_EQ(result->tokenizer_path, (model_dir / "tokenizer.json").string());
+}
+
+TEST_F(OnnxAutoDiscovery, DirectoryWithOnnxSubdirectory) {
+    auto model_dir = base_dir_ / "my_model";
+    write_file(model_dir / "onnx" / "model.onnx", "fake_model_data");
+    write_file(model_dir / "tokenizer.json", "{}");
+
+    auto result = resolve_onnx_model_paths(model_dir.string());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->model_path, (model_dir / "onnx" / "model.onnx").string());
+    EXPECT_EQ(result->tokenizer_path, (model_dir / "tokenizer.json").string());
+}
+
+TEST_F(OnnxAutoDiscovery, DirectoryWithoutModelOnnxFails) {
+    auto model_dir = base_dir_ / "empty_model";
+    std::filesystem::create_directories(model_dir);
+
+    auto result = resolve_onnx_model_paths(model_dir.string());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::IO_ERROR);
+}
+
+TEST_F(OnnxAutoDiscovery, DirectOnnxFilePath) {
+    auto model_file = base_dir_ / "model.onnx";
+    write_file(model_file, "fake_model_data");
+
+    auto result = resolve_onnx_model_paths(model_file.string());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->model_path, model_file.string());
+    EXPECT_TRUE(result->tokenizer_path.empty());
+}
+
+TEST_F(OnnxAutoDiscovery, DirectOnnxFileWithTokenizerAlongside) {
+    write_file(base_dir_ / "model.onnx", "fake_model_data");
+    write_file(base_dir_ / "tokenizer.json", "{}");
+
+    auto result = resolve_onnx_model_paths((base_dir_ / "model.onnx").string());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->model_path, (base_dir_ / "model.onnx").string());
+    EXPECT_EQ(result->tokenizer_path, (base_dir_ / "tokenizer.json").string());
+}
+
+TEST_F(OnnxAutoDiscovery, NonexistentPathFails) {
+    auto result = resolve_onnx_model_paths("/nonexistent/path/model");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::IO_ERROR);
+}
+
+// ---------------------------------------------------------------------------
+// Tokenizer wiring (GDB-344)
+// ---------------------------------------------------------------------------
+
+TEST(OnnxProvider, ConstructorWithCustomTokenizer) {
+    auto mock = std::make_unique<MockOnnxSession>();
+    auto* mock_ptr = mock.get();
+    mock_ptr->set_embedding({0.1F, 0.2F, 0.3F});
+
+    // Build a minimal WordPiece config.
+    TokenizerConfig config;
+    config.model_type = TokenizerModelType::WORDPIECE;
+    config.vocab = {{"hello", 1000}, {"world", 1001}, {"##lo", 1002}};
+    config.special_tokens = {0, 100, 101, 102, 103};
+    config.subword_prefix = "##";
+    config.normalizer = NormalizerType::LOWERCASE;
+    config.pre_tokenizer = PreTokenizerType::PUNCTUATION;
+
+    auto tokenizer = std::make_unique<WordPieceTokenizer>(config);
+
+    OnnxProvider provider("model.onnx", 3, std::move(mock), std::move(tokenizer));
+    auto result = provider.embed("hello world");
+
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(mock_ptr->run_call_count_, 1);
+
+    // Verify the tokenizer is the WordPiece one (vocab_size = config vocab size).
+    EXPECT_EQ(provider.tokenizer().vocab_size(), 3u);
+}
+
+TEST(OnnxProvider, DefaultConstructorUsesHashTokenizer) {
+    auto mock = std::make_unique<MockOnnxSession>();
+    OnnxProvider provider("model.onnx", 3, std::move(mock));
+
+    // HashTokenizer has VOCAB_SIZE = 30000.
+    EXPECT_EQ(provider.tokenizer().vocab_size(), HashTokenizer::VOCAB_SIZE);
+}
+
+// ---------------------------------------------------------------------------
+// Provider with model directory containing tokenizer.json (GDB-324 AC)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Write a minimal but valid WordPiece tokenizer.json file.
+void write_wordpiece_tokenizer_json(const std::filesystem::path& path) {
+    nlohmann::json doc;
+
+    // Model section.
+    doc["model"]["type"] = "WordPiece";
+    doc["model"]["continuing_subword_prefix"] = "##";
+    doc["model"]["vocab"] = {{"[PAD]", 0},
+                             {"[UNK]", 100},
+                             {"[CLS]", 101},
+                             {"[SEP]", 102},
+                             {"[MASK]", 103},
+                             {"hello", 104},
+                             {"world", 105},
+                             {"##ing", 106},
+                             {"test", 107},
+                             {"##ed", 108}};
+
+    // Added tokens.
+    doc["added_tokens"] =
+        nlohmann::json::array({{{"id", 0}, {"content", "[PAD]"}, {"special", true}},
+                               {{"id", 100}, {"content", "[UNK]"}, {"special", true}},
+                               {{"id", 101}, {"content", "[CLS]"}, {"special", true}},
+                               {{"id", 102}, {"content", "[SEP]"}, {"special", true}},
+                               {{"id", 103}, {"content", "[MASK]"}, {"special", true}}});
+
+    // Normalizer.
+    doc["normalizer"]["type"] = "BertNormalizer";
+    doc["normalizer"]["lowercase"] = true;
+    doc["normalizer"]["strip_accents"] = false;
+
+    // Pre-tokenizer.
+    doc["pre_tokenizer"]["type"] = "BertPreTokenizer";
+
+    std::ofstream out(path);
+    out << doc.dump(2);
+}
+
+/// Write a minimal but valid BPE tokenizer.json file.
+void write_bpe_tokenizer_json(const std::filesystem::path& path) {
+    nlohmann::json doc;
+
+    doc["model"]["type"] = "BPE";
+    doc["model"]["vocab"] = {{"[PAD]", 0},
+                             {"[UNK]", 100},
+                             {"[CLS]", 101},
+                             {"[SEP]", 102},
+                             {"h", 200},
+                             {"e", 201},
+                             {"l", 202},
+                             {"o", 203},
+                             {"he", 204},
+                             {"ll", 205},
+                             {"hello", 206}};
+    doc["model"]["merges"] = {"h e", "l l", "he ll", "hell o"};
+
+    doc["added_tokens"] =
+        nlohmann::json::array({{{"id", 0}, {"content", "[PAD]"}, {"special", true}},
+                               {{"id", 100}, {"content", "[UNK]"}, {"special", true}},
+                               {{"id", 101}, {"content", "[CLS]"}, {"special", true}},
+                               {{"id", 102}, {"content", "[SEP]"}, {"special", true}}});
+
+    doc["normalizer"]["type"] = "Lowercase";
+    doc["normalizer"]["lowercase"] = true;
+
+    doc["pre_tokenizer"]["type"] = "Whitespace";
+
+    std::ofstream out(path);
+    out << doc.dump(2);
+}
+
+} // namespace
+
+TEST_F(OnnxAutoDiscovery, ProviderWithWordPieceTokenizerDirectory) {
+    // Set up a model directory with model.onnx and a WordPiece tokenizer.json.
+    auto model_dir = base_dir_ / "minilm";
+    write_file(model_dir / "model.onnx", "fake_model_data");
+    write_wordpiece_tokenizer_json(model_dir / "tokenizer.json");
+
+    // Resolve paths and verify tokenizer is detected.
+    auto paths = resolve_onnx_model_paths(model_dir.string());
+    ASSERT_TRUE(paths.has_value()) << paths.error().message;
+    EXPECT_FALSE(paths->tokenizer_path.empty());
+
+    // Load the tokenizer config and verify type.
+    auto config = load_tokenizer_config(paths->tokenizer_path);
+    ASSERT_TRUE(config.has_value()) << config.error().message;
+    EXPECT_EQ(config->model_type, TokenizerModelType::WORDPIECE);
+
+    // Create a WordPiece tokenizer from the config and use it with the provider.
+    auto tokenizer = std::make_unique<WordPieceTokenizer>(*config);
+    auto mock = std::make_unique<MockOnnxSession>();
+    auto* mock_ptr = mock.get();
+    std::vector<float> emb(384, 0.5F);
+    mock_ptr->set_embedding(emb);
+
+    OnnxProvider provider(model_dir.string(), 384, std::move(mock), std::move(tokenizer));
+    auto result = provider.embed("hello world");
+
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(mock_ptr->run_call_count_, 1);
+    // Verify the real tokenizer was used (vocab_size matches config).
+    EXPECT_EQ(provider.tokenizer().vocab_size(), 10u);
+}
+
+TEST_F(OnnxAutoDiscovery, ProviderWithBPETokenizerDirectory) {
+    auto model_dir = base_dir_ / "nomic";
+    write_file(model_dir / "model.onnx", "fake_model_data");
+    write_bpe_tokenizer_json(model_dir / "tokenizer.json");
+
+    auto paths = resolve_onnx_model_paths(model_dir.string());
+    ASSERT_TRUE(paths.has_value()) << paths.error().message;
+
+    auto config = load_tokenizer_config(paths->tokenizer_path);
+    ASSERT_TRUE(config.has_value()) << config.error().message;
+    EXPECT_EQ(config->model_type, TokenizerModelType::BPE);
+
+    auto tokenizer = std::make_unique<BPETokenizer>(*config);
+    auto mock = std::make_unique<MockOnnxSession>();
+    auto* mock_ptr = mock.get();
+    std::vector<float> emb(384, 0.5F);
+    mock_ptr->set_embedding(emb);
+
+    OnnxProvider provider(model_dir.string(), 384, std::move(mock), std::move(tokenizer));
+    auto result = provider.embed("hello");
+
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(mock_ptr->run_call_count_, 1);
+    EXPECT_EQ(provider.tokenizer().vocab_size(), 11u);
 }
