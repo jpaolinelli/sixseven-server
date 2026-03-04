@@ -1246,6 +1246,373 @@ TEST(PgProtocol, DescribeStatement) {
     ::close(client_fd);
 }
 
+TEST(PgProtocol, DescribeStatementRowDescription) {
+    int client_fd = -1;
+    int server_fd = create_socketpair(client_fd);
+
+    Connection conn(server_fd);
+    PgProtocolHandler handler(30);
+
+    // Set a describer that returns columns for SELECT statements.
+    handler.set_query_describer(
+        [](const std::string& sql) -> Result<std::vector<ColumnDescription>> {
+            if (sql.find("SELECT") != std::string::npos ||
+                sql.find("select") != std::string::npos) {
+                return ok(std::vector<ColumnDescription>{
+                    {"id", TypeId::INT32},
+                    {"name", TypeId::STRING},
+                });
+            }
+            return ok(std::vector<ColumnDescription>{});
+        });
+
+    do_startup(client_fd, conn, handler);
+
+    // Parse a SELECT + Describe.
+    auto parse = build_parse_message("sel_stmt", "SELECT id, name FROM t", {});
+    auto describe = build_describe_message('S', "sel_stmt");
+    auto sync = build_sync_message();
+
+    std::vector<uint8_t> batch;
+    batch.insert(batch.end(), parse.begin(), parse.end());
+    batch.insert(batch.end(), describe.begin(), describe.end());
+    batch.insert(batch.end(), sync.begin(), sync.end());
+
+    write_to_fd(client_fd, batch);
+    (void)conn.read_from_socket();
+    (void)handler.process(conn);
+    (void)conn.write_to_socket();
+    auto response = read_from_fd(client_fd);
+
+    size_t pos = 0;
+    const uint8_t* payload = nullptr;
+    size_t payload_len = 0;
+
+    // ParseComplete ('1').
+    ASSERT_TRUE(find_message(response, pos, '1', payload, payload_len));
+    // ParameterDescription ('t') — 0 params.
+    ASSERT_TRUE(find_message(response, pos, 't', payload, payload_len));
+    // RowDescription ('T') — 2 columns.
+    ASSERT_TRUE(find_message(response, pos, 'T', payload, payload_len));
+
+    MessageReader rd_reader(payload, payload_len);
+    int16_t num_cols = rd_reader.read_int16();
+    EXPECT_EQ(num_cols, 2);
+
+    // Column 1: "id", INT32 (OID 23).
+    auto col1_name = std::string(rd_reader.read_cstring());
+    EXPECT_EQ(col1_name, "id");
+    rd_reader.read_int32(); // table OID
+    rd_reader.read_int16(); // column attr number
+    int32_t col1_oid = rd_reader.read_int32();
+    EXPECT_EQ(col1_oid, 23); // int4
+    rd_reader.read_int16();  // type size
+    rd_reader.read_int32();  // type modifier
+    rd_reader.read_int16();  // format code
+
+    // Column 2: "name", STRING (OID 25).
+    auto col2_name = std::string(rd_reader.read_cstring());
+    EXPECT_EQ(col2_name, "name");
+    rd_reader.read_int32(); // table OID
+    rd_reader.read_int16(); // column attr number
+    int32_t col2_oid = rd_reader.read_int32();
+    EXPECT_EQ(col2_oid, 25); // text
+    rd_reader.read_int16();  // type size
+    rd_reader.read_int32();  // type modifier
+    rd_reader.read_int16();  // format code
+
+    // ReadyForQuery.
+    ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
+
+    conn.close();
+    ::close(client_fd);
+}
+
+TEST(PgProtocol, DescribeStatementNoDataForDML) {
+    int client_fd = -1;
+    int server_fd = create_socketpair(client_fd);
+
+    Connection conn(server_fd);
+    PgProtocolHandler handler(31);
+
+    // Describer returns empty for non-SELECT.
+    handler.set_query_describer(
+        [](const std::string& /*sql*/) -> Result<std::vector<ColumnDescription>> {
+            return ok(std::vector<ColumnDescription>{});
+        });
+
+    do_startup(client_fd, conn, handler);
+
+    // Parse an INSERT + Describe.
+    auto parse = build_parse_message("ins_stmt", "INSERT INTO t VALUES (1)", {});
+    auto describe = build_describe_message('S', "ins_stmt");
+    auto sync = build_sync_message();
+
+    std::vector<uint8_t> batch;
+    batch.insert(batch.end(), parse.begin(), parse.end());
+    batch.insert(batch.end(), describe.begin(), describe.end());
+    batch.insert(batch.end(), sync.begin(), sync.end());
+
+    write_to_fd(client_fd, batch);
+    (void)conn.read_from_socket();
+    (void)handler.process(conn);
+    (void)conn.write_to_socket();
+    auto response = read_from_fd(client_fd);
+
+    size_t pos = 0;
+    const uint8_t* payload = nullptr;
+    size_t payload_len = 0;
+
+    // ParseComplete ('1').
+    ASSERT_TRUE(find_message(response, pos, '1', payload, payload_len));
+    // ParameterDescription ('t').
+    ASSERT_TRUE(find_message(response, pos, 't', payload, payload_len));
+    // NoData ('n') — not a SELECT.
+    ASSERT_TRUE(find_message(response, pos, 'n', payload, payload_len));
+    // ReadyForQuery.
+    ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
+
+    conn.close();
+    ::close(client_fd);
+}
+
+TEST(PgProtocol, DescribePortalRowDescription) {
+    int client_fd = -1;
+    int server_fd = create_socketpair(client_fd);
+
+    Connection conn(server_fd);
+    PgProtocolHandler handler(32);
+
+    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+        QueryResult qr;
+        qr.column_names = {"id", "name"};
+        qr.column_types = {TypeId::INT32, TypeId::STRING};
+        qr.rows = {{Value(static_cast<int32_t>(1)), Value(std::string("alice"))}};
+        return ok(std::move(qr));
+    });
+
+    handler.set_query_describer(
+        [](const std::string& sql) -> Result<std::vector<ColumnDescription>> {
+            if (sql.find("SELECT") != std::string::npos ||
+                sql.find("select") != std::string::npos) {
+                return ok(std::vector<ColumnDescription>{
+                    {"id", TypeId::INT32},
+                    {"name", TypeId::STRING},
+                });
+            }
+            return ok(std::vector<ColumnDescription>{});
+        });
+
+    do_startup(client_fd, conn, handler);
+
+    // Parse + Bind + Describe Portal + Sync.
+    auto parse = build_parse_message("", "SELECT id, name FROM t");
+    auto bind = build_bind_message("myportal", "");
+    auto describe = build_describe_message('P', "myportal");
+    auto sync = build_sync_message();
+
+    std::vector<uint8_t> batch;
+    batch.insert(batch.end(), parse.begin(), parse.end());
+    batch.insert(batch.end(), bind.begin(), bind.end());
+    batch.insert(batch.end(), describe.begin(), describe.end());
+    batch.insert(batch.end(), sync.begin(), sync.end());
+
+    write_to_fd(client_fd, batch);
+    (void)conn.read_from_socket();
+    (void)handler.process(conn);
+    (void)conn.write_to_socket();
+    auto response = read_from_fd(client_fd);
+
+    size_t pos = 0;
+    const uint8_t* payload = nullptr;
+    size_t payload_len = 0;
+
+    // ParseComplete ('1').
+    ASSERT_TRUE(find_message(response, pos, '1', payload, payload_len));
+    // BindComplete ('2').
+    ASSERT_TRUE(find_message(response, pos, '2', payload, payload_len));
+    // RowDescription ('T') for portal.
+    ASSERT_TRUE(find_message(response, pos, 'T', payload, payload_len));
+
+    MessageReader rd_reader(payload, payload_len);
+    int16_t num_cols = rd_reader.read_int16();
+    EXPECT_EQ(num_cols, 2);
+
+    auto col1_name = std::string(rd_reader.read_cstring());
+    EXPECT_EQ(col1_name, "id");
+    rd_reader.read_int32();                // table OID
+    rd_reader.read_int16();                // column attr number
+    EXPECT_EQ(rd_reader.read_int32(), 23); // INT32 OID
+    rd_reader.read_int16();                // type size
+    rd_reader.read_int32();                // type modifier
+    rd_reader.read_int16();                // format code
+
+    auto col2_name = std::string(rd_reader.read_cstring());
+    EXPECT_EQ(col2_name, "name");
+    rd_reader.read_int32();
+    rd_reader.read_int16();
+    EXPECT_EQ(rd_reader.read_int32(), 25); // STRING OID
+    rd_reader.read_int16();
+    rd_reader.read_int32();
+    rd_reader.read_int16();
+
+    // ReadyForQuery.
+    ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
+
+    conn.close();
+    ::close(client_fd);
+}
+
+TEST(PgProtocol, DescribePortalNoDataForDML) {
+    int client_fd = -1;
+    int server_fd = create_socketpair(client_fd);
+
+    Connection conn(server_fd);
+    PgProtocolHandler handler(33);
+
+    handler.set_query_executor(
+        [](const std::string& /*sql*/) -> Result<QueryResult> { return ok(QueryResult{}); });
+
+    handler.set_query_describer(
+        [](const std::string& /*sql*/) -> Result<std::vector<ColumnDescription>> {
+            return ok(std::vector<ColumnDescription>{});
+        });
+
+    do_startup(client_fd, conn, handler);
+
+    // Parse INSERT + Bind + Describe Portal + Sync.
+    auto parse = build_parse_message("", "INSERT INTO t VALUES (1)");
+    auto bind = build_bind_message("myportal", "");
+    auto describe = build_describe_message('P', "myportal");
+    auto sync = build_sync_message();
+
+    std::vector<uint8_t> batch;
+    batch.insert(batch.end(), parse.begin(), parse.end());
+    batch.insert(batch.end(), bind.begin(), bind.end());
+    batch.insert(batch.end(), describe.begin(), describe.end());
+    batch.insert(batch.end(), sync.begin(), sync.end());
+
+    write_to_fd(client_fd, batch);
+    (void)conn.read_from_socket();
+    (void)handler.process(conn);
+    (void)conn.write_to_socket();
+    auto response = read_from_fd(client_fd);
+
+    size_t pos = 0;
+    const uint8_t* payload = nullptr;
+    size_t payload_len = 0;
+
+    // ParseComplete ('1').
+    ASSERT_TRUE(find_message(response, pos, '1', payload, payload_len));
+    // BindComplete ('2').
+    ASSERT_TRUE(find_message(response, pos, '2', payload, payload_len));
+    // NoData ('n') for DML portal.
+    ASSERT_TRUE(find_message(response, pos, 'n', payload, payload_len));
+    // ReadyForQuery.
+    ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
+
+    conn.close();
+    ::close(client_fd);
+}
+
+TEST(PgProtocol, DescribeStatementDescriberError) {
+    int client_fd = -1;
+    int server_fd = create_socketpair(client_fd);
+
+    Connection conn(server_fd);
+    PgProtocolHandler handler(34);
+
+    // Describer that always returns an error (e.g., table not found during bind).
+    handler.set_query_describer(
+        [](const std::string& /*sql*/) -> Result<std::vector<ColumnDescription>> {
+            return make_error(StatusCode::NOT_FOUND, "table \"nonexistent\" does not exist");
+        });
+
+    do_startup(client_fd, conn, handler);
+
+    auto parse = build_parse_message("bad_stmt", "SELECT * FROM nonexistent");
+    auto describe = build_describe_message('S', "bad_stmt");
+    auto sync = build_sync_message();
+
+    std::vector<uint8_t> batch;
+    batch.insert(batch.end(), parse.begin(), parse.end());
+    batch.insert(batch.end(), describe.begin(), describe.end());
+    batch.insert(batch.end(), sync.begin(), sync.end());
+
+    write_to_fd(client_fd, batch);
+    (void)conn.read_from_socket();
+    (void)handler.process(conn);
+    (void)conn.write_to_socket();
+    auto response = read_from_fd(client_fd);
+
+    size_t pos = 0;
+    const uint8_t* payload = nullptr;
+    size_t payload_len = 0;
+
+    // ParseComplete ('1').
+    ASSERT_TRUE(find_message(response, pos, '1', payload, payload_len));
+    // ParameterDescription ('t').
+    ASSERT_TRUE(find_message(response, pos, 't', payload, payload_len));
+    // ErrorResponse ('E') — describer failed.
+    ASSERT_TRUE(find_message(response, pos, 'E', payload, payload_len));
+    // ReadyForQuery ('Z') from Sync.
+    ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
+
+    conn.close();
+    ::close(client_fd);
+}
+
+TEST(PgProtocol, DescribePortalDescriberError) {
+    int client_fd = -1;
+    int server_fd = create_socketpair(client_fd);
+
+    Connection conn(server_fd);
+    PgProtocolHandler handler(35);
+
+    handler.set_query_executor(
+        [](const std::string& /*sql*/) -> Result<QueryResult> { return ok(QueryResult{}); });
+
+    handler.set_query_describer(
+        [](const std::string& /*sql*/) -> Result<std::vector<ColumnDescription>> {
+            return make_error(StatusCode::NOT_FOUND, "table \"nonexistent\" does not exist");
+        });
+
+    do_startup(client_fd, conn, handler);
+
+    auto parse = build_parse_message("", "SELECT * FROM nonexistent");
+    auto bind = build_bind_message("bad_portal", "");
+    auto describe = build_describe_message('P', "bad_portal");
+    auto sync = build_sync_message();
+
+    std::vector<uint8_t> batch;
+    batch.insert(batch.end(), parse.begin(), parse.end());
+    batch.insert(batch.end(), bind.begin(), bind.end());
+    batch.insert(batch.end(), describe.begin(), describe.end());
+    batch.insert(batch.end(), sync.begin(), sync.end());
+
+    write_to_fd(client_fd, batch);
+    (void)conn.read_from_socket();
+    (void)handler.process(conn);
+    (void)conn.write_to_socket();
+    auto response = read_from_fd(client_fd);
+
+    size_t pos = 0;
+    const uint8_t* payload = nullptr;
+    size_t payload_len = 0;
+
+    // ParseComplete ('1').
+    ASSERT_TRUE(find_message(response, pos, '1', payload, payload_len));
+    // BindComplete ('2').
+    ASSERT_TRUE(find_message(response, pos, '2', payload, payload_len));
+    // ErrorResponse ('E') — describer failed.
+    ASSERT_TRUE(find_message(response, pos, 'E', payload, payload_len));
+    // ReadyForQuery ('Z') from Sync.
+    ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
+
+    conn.close();
+    ::close(client_fd);
+}
+
 TEST(PgProtocol, ErrorInBatchSkipsUntilSync) {
     int client_fd = -1;
     int server_fd = create_socketpair(client_fd);

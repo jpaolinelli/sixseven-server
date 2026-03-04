@@ -41,6 +41,10 @@ void Server::set_query_executor(QueryExecutor executor) {
     query_executor_ = std::move(executor);
 }
 
+void Server::set_query_describer(QueryDescriber describer) {
+    query_describer_ = std::move(describer);
+}
+
 void Server::set_user_manager(UserManager* user_mgr) {
     user_mgr_ = user_mgr;
 }
@@ -258,6 +262,9 @@ void Server::accept_connection() {
     PgProtocolHandler handler(pid);
     if (query_executor_) {
         handler.set_query_executor(query_executor_);
+    }
+    if (query_describer_) {
+        handler.set_query_describer(query_describer_);
     }
     handler.set_auth(auth_method_, user_mgr_);
 

@@ -67,6 +67,12 @@ struct QueryResult {
     std::string message;
 };
 
+/// Describes a single result column (name + type) for Describe responses.
+struct ColumnDescription {
+    std::string name;
+    TypeId type_id = TypeId::INT32;
+};
+
 /// Top-level query execution engine.
 ///
 /// Ties together the full SQL pipeline:
@@ -84,6 +90,11 @@ public:
     /// Execute a SQL statement string and return the result.
     /// Uses the current database context for name resolution.
     [[nodiscard]] Result<QueryResult> execute(const std::string& sql);
+
+    /// Describe the result columns of a SQL statement without executing it.
+    /// Returns column metadata for SELECT statements (parse + bind only).
+    /// Returns an empty vector for non-SELECT statements (INSERT/UPDATE/DELETE/DDL).
+    [[nodiscard]] Result<std::vector<ColumnDescription>> describe(const std::string& sql);
 
     /// Set the current database context by ID.
     void set_current_database(database_id_t database_id);
