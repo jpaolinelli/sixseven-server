@@ -132,7 +132,7 @@ Replace `<N>` with the ticket number (e.g., `--gtest_filter="*GDB42*"` for GDB-4
 
 Record all results. Fix any test infrastructure issues (compile errors, missing includes) but do **not** fix bugs in the implementation — that is the implementer's job.
 
-## Step 6: Run Tests with AddressSanitizer
+## Step 6: Run Run Ticket-Specific Tests with AddressSanitizer
 
 Build and run **QA tests** with ASan to catch memory bugs:
 

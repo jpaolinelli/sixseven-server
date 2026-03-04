@@ -53,6 +53,7 @@ Check for:
 - **Meaningful assertions**: Every test asserts something substantive. Flag empty or trivial tests.
 - **Edge cases**: Empty inputs, NULLs, error conditions, boundary values tested.
 - **Integration**: At least one end-to-end test through the full SQL pipeline.
+- **Tests** DO NOT RUN TESTS, just verify they exist and are of high quality.
 
 ## Step 5: Review Output Format
 
@@ -60,7 +61,7 @@ Check for:
 # <TICKET-ID> — <Summary> — v<N> Review
 
 ## Build & Test Status
-✅ or ❌ — X/Y tests pass, formatting/tidy status
+✅, formatting/tidy status
 
 ## Files Reviewed
 | Category | Files | Lines |
@@ -99,3 +100,4 @@ Summary justification.
 
 - First review = **v1**, subsequent = **v2**, **v3**, etc.
 - On re-review: verify previously reported issues are fixed, check for regressions.
+- If APPROVED, transition ticket to QA with the PR summary as a comment.
