@@ -204,7 +204,8 @@ Result<void> EnrichedTraversalOperator::enrich_results() {
                 GIODB_LOG_WARN(
                     "enriched traversal: skipping row — PK column index {} out of bounds (row has "
                     "{} columns)",
-                    target_pk_col_idx_, deserialized->size());
+                    target_pk_col_idx_,
+                    deserialized->size());
                 continue;
             }
 

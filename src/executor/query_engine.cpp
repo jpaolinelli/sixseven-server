@@ -938,11 +938,18 @@ Result<bool> QueryEngine::verify_pk_exists(table_id_t table_id, const Value& pk_
 
     // Find PK column index.
     size_t pk_col_idx = 0;
+    bool pk_found = false;
     for (size_t i = 0; i < schema->columns.size(); ++i) {
         if (schema->columns[i].name == schema->pk_columns) {
             pk_col_idx = i;
+            pk_found = true;
             break;
         }
+    }
+    if (!pk_found) {
+        return make_error(StatusCode::INTERNAL_ERROR,
+                          "PK column '" + schema->pk_columns +
+                              "' not found in table schema for PK existence check");
     }
 
     auto iter = table_storage->heap->begin();
@@ -1071,6 +1078,30 @@ Result<QueryResult> QueryEngine::execute_unlink(const UnlinkStmt& stmt,
         return make_error(coerced.error().code, coerced.error().message);
     }
     auto& [coerced_src, coerced_tgt] = *coerced;
+
+    // Verify source and target rows exist.
+    auto edge = catalog_.get_edge_type(stmt.edge_type);
+    if (!edge) {
+        return tl::unexpected(edge.error());
+    }
+
+    auto src_exists = verify_pk_exists(edge->source_table_id, coerced_src);
+    if (!src_exists) {
+        return make_error(src_exists.error().code, src_exists.error().message);
+    }
+    if (!*src_exists) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "UNLINK source row not found in '" + stmt.source_table + "'");
+    }
+
+    auto tgt_exists = verify_pk_exists(edge->target_table_id, coerced_tgt);
+    if (!tgt_exists) {
+        return make_error(tgt_exists.error().code, tgt_exists.error().message);
+    }
+    if (!*tgt_exists) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "UNLINK target row not found in '" + stmt.target_table + "'");
+    }
 
     auto result = graph_engine_->unlink(stmt.edge_type, coerced_src, coerced_tgt);
     if (!result) {

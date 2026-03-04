@@ -1003,3 +1003,27 @@ TEST_F(QueryEngineGraphTest, ShortestPathWithUuidPrimaryKey) {
                       "TO people('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA follows");
     ASSERT_GE(qr.rows.size(), 1u);
 }
+
+// GDB-315: UNLINK should validate PK existence (symmetric with LINK).
+TEST_F(QueryEngineGraphTest, UnlinkNonExistentSourceFails) {
+    exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR)");
+    exec_ok("INSERT INTO users VALUES (1, 'alice')");
+    exec_ok("CREATE EDGE TYPE knows FROM users TO users");
+
+    exec_error("UNLINK users(999) FROM users(1) VIA knows", StatusCode::NOT_FOUND);
+}
+
+TEST_F(QueryEngineGraphTest, UnlinkNonExistentTargetFails) {
+    exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR)");
+    exec_ok("INSERT INTO users VALUES (1, 'alice')");
+    exec_ok("CREATE EDGE TYPE knows FROM users TO users");
+
+    exec_error("UNLINK users(1) FROM users(999) VIA knows", StatusCode::NOT_FOUND);
+}
+
+TEST_F(QueryEngineGraphTest, UnlinkBothNonExistentFails) {
+    exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR)");
+    exec_ok("CREATE EDGE TYPE knows FROM users TO users");
+
+    exec_error("UNLINK users(888) FROM users(999) VIA knows", StatusCode::NOT_FOUND);
+}
