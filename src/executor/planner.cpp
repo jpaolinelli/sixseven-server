@@ -461,12 +461,19 @@ Planner::plan_from_source(const TableRef& table_ref,
         // Find PK column info.
         TypeId pk_type = TypeId::INT64;
         size_t pk_col_idx = 0;
+        bool pk_found = false;
         for (size_t i = 0; i < target_schema->columns.size(); ++i) {
             if (target_schema->columns[i].name == target_schema->pk_columns) {
                 pk_type = target_schema->columns[i].type_id;
                 pk_col_idx = i;
+                pk_found = true;
                 break;
             }
+        }
+        if (!pk_found) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "PK column '" + target_schema->pk_columns +
+                                  "' not found in target table for enriched traversal");
         }
 
         // Coerce the start key to the PK type (e.g., STRING → UUID).
@@ -529,7 +536,7 @@ Planner::plan_from_source(const TableRef& table_ref,
             if (edge_table) {
                 for (const auto& prop_col : (*edge_table)->config().property_columns) {
                     out_cols.push_back(
-                        {trav->edge_type, prop_col.name, prop_col.type, true /*nullable*/, 0});
+                        {trav_alias, prop_col.name, prop_col.type, true /*nullable*/, 0});
                 }
             }
 
@@ -555,7 +562,7 @@ Planner::plan_from_source(const TableRef& table_ref,
         if (edge_table) {
             for (const auto& prop_col : (*edge_table)->config().property_columns) {
                 out_cols.push_back(
-                    {trav->edge_type, prop_col.name, prop_col.type, true /*nullable*/, 0});
+                    {trav_alias, prop_col.name, prop_col.type, true /*nullable*/, 0});
             }
         }
 

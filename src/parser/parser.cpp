@@ -618,6 +618,9 @@ Result<TypeSpec> Parser::parse_type_spec() {
     });
 
     // EMBEDDING(dim, source, 'provider')
+    // Supports both positional and named-parameter syntax:
+    //   EMBEDDING(384, title, 'openai')
+    //   EMBEDDING(384, source='title', provider='openai')
     if (ts.name == "EMBEDDING" && match(TokenType::LPAREN)) {
         // Dimension.
         auto dim = expect(TokenType::INTEGER_LITERAL, "expected dimension");
@@ -632,21 +635,90 @@ Result<TypeSpec> Parser::parse_type_spec() {
         if (!c1)
             return tl::unexpected(c1.error());
 
-        // Source column name.
-        auto src = parse_name("source column");
-        if (!src)
-            return tl::unexpected(src.error());
-        ts.source = std::move(*src);
+        // Detect named-parameter syntax: source='...' or positional: column_name
+        const auto& next_tok = peek();
+        bool named_syntax = false;
+        if (next_tok.type == TokenType::IDENTIFIER) {
+            // Look ahead: if identifier followed by '=', it's named syntax.
+            size_t save_pos = current_;
+            advance(); // consume the identifier
+            if (peek().type == TokenType::EQUAL) {
+                named_syntax = true;
+            }
+            current_ = save_pos; // restore position
+        }
 
-        auto c2 = expect(TokenType::COMMA, "expected ',' after source");
-        if (!c2)
-            return tl::unexpected(c2.error());
+        if (named_syntax) {
+            // Named-parameter syntax: source='...', provider='...'
+            // Parse in any order.
+            bool got_source = false;
+            bool got_provider = false;
+            for (int param_count = 0; param_count < 2; ++param_count) {
+                auto param_name = parse_name("parameter name");
+                if (!param_name)
+                    return tl::unexpected(param_name.error());
 
-        // Provider (string literal).
-        auto prov = expect(TokenType::STRING_LITERAL, "expected provider string");
-        if (!prov)
-            return tl::unexpected(prov.error());
-        ts.provider = unquote_string(prov->lexeme);
+                auto eq = expect(TokenType::EQUAL, "expected '=' after parameter name");
+                if (!eq)
+                    return tl::unexpected(eq.error());
+
+                auto param_val = expect(TokenType::STRING_LITERAL, "expected string value");
+                if (!param_val)
+                    return tl::unexpected(param_val.error());
+
+                std::string name_lower = *param_name;
+                std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+                if (name_lower == "source") {
+                    if (got_source) {
+                        return make_error(StatusCode::PARSE_ERROR, "duplicate 'source' parameter");
+                    }
+                    ts.source = unquote_string(param_val->lexeme);
+                    got_source = true;
+                } else if (name_lower == "provider") {
+                    if (got_provider) {
+                        return make_error(StatusCode::PARSE_ERROR,
+                                          "duplicate 'provider' parameter");
+                    }
+                    ts.provider = unquote_string(param_val->lexeme);
+                    got_provider = true;
+                } else {
+                    return make_error(StatusCode::PARSE_ERROR,
+                                      "unknown EMBEDDING parameter '" + *param_name + "'");
+                }
+
+                if (param_count == 0) {
+                    auto comma = expect(TokenType::COMMA, "expected ','");
+                    if (!comma)
+                        return tl::unexpected(comma.error());
+                }
+            }
+
+            if (!got_source) {
+                return make_error(StatusCode::PARSE_ERROR,
+                                  "EMBEDDING missing required 'source' parameter");
+            }
+            if (!got_provider) {
+                return make_error(StatusCode::PARSE_ERROR,
+                                  "EMBEDDING missing required 'provider' parameter");
+            }
+        } else {
+            // Positional syntax: source_column, 'provider'
+            auto src = parse_name("source column");
+            if (!src)
+                return tl::unexpected(src.error());
+            ts.source = std::move(*src);
+
+            auto c2 = expect(TokenType::COMMA, "expected ',' after source");
+            if (!c2)
+                return tl::unexpected(c2.error());
+
+            auto prov = expect(TokenType::STRING_LITERAL, "expected provider string");
+            if (!prov)
+                return tl::unexpected(prov.error());
+            ts.provider = unquote_string(prov->lexeme);
+        }
 
         auto rp = expect(TokenType::RPAREN, "expected ')'");
         if (!rp)
@@ -850,6 +922,17 @@ Result<StmtPtr> Parser::parse_create_database() {
     if (!name)
         return tl::unexpected(name.error());
     stmt->database_name = std::move(*name);
+
+    // Also support IF NOT EXISTS after the database name.
+    if (!stmt->if_not_exists && match(TokenType::IF)) {
+        auto not_kw = expect(TokenType::NOT, "expected NOT after IF");
+        if (!not_kw)
+            return tl::unexpected(not_kw.error());
+        auto exists = expect(TokenType::EXISTS, "expected EXISTS after IF NOT");
+        if (!exists)
+            return tl::unexpected(exists.error());
+        stmt->if_not_exists = true;
+    }
 
     return ok(StmtPtr(std::move(stmt)));
 }

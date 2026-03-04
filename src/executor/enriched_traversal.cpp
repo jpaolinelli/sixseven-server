@@ -1,8 +1,10 @@
 #include "giodb/executor/enriched_traversal.h"
 
+#include "giodb/common/logging.h"
 #include "giodb/common/value_hash.h"
 #include "giodb/executor/expr_evaluator.h"
 
+#include <cassert>
 #include <deque>
 #include <unordered_map>
 #include <unordered_set>
@@ -193,10 +195,16 @@ Result<void> EnrichedTraversalOperator::enrich_results() {
             auto [rid, data] = *row;
             auto deserialized = TupleSerializer::deserialize(data, target_storage_schema_);
             if (!deserialized) {
+                GIODB_LOG_WARN("enriched traversal: skipping row — deserialization failed: {}",
+                               deserialized.error().message);
                 continue;
             }
 
             if (target_pk_col_idx_ >= deserialized->size()) {
+                GIODB_LOG_WARN(
+                    "enriched traversal: skipping row — PK column index {} out of bounds (row has "
+                    "{} columns)",
+                    target_pk_col_idx_, deserialized->size());
                 continue;
             }
 
@@ -252,6 +260,8 @@ Result<void> EnrichedTraversalOperator::enrich_results() {
             }
         }
 
+        assert(tuple.values.size() == schema_.column_count() &&
+               "enriched tuple column count must match schema");
         enriched_results_.push_back(std::move(tuple));
     }
 

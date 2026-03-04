@@ -190,30 +190,30 @@ describe("QA_GDB299_classifyColumns", () => {
 // ── parseNodesFromResult: adversarial ──
 
 describe("QA_GDB299_parseNodesFromResult", () => {
-  it("handles null __node value — collapses to empty string PK", () => {
+  it("handles null __node value — assigns synthetic unique PK", () => {
     const columns = ["name", "__node", "__depth", "__source"];
     const rows: (string | number | boolean | null)[][] = [
       ["alice", null, 0, "users"],
     ];
     const nodes = parseNodesFromResult(columns, rows);
-    // null ?? "" → "" — null PK becomes empty string
+    // null PK gets a synthetic unique ID to prevent data loss
     expect(nodes).toHaveLength(1);
-    expect(nodes[0].pk).toBe("");
-    expect(nodes[0].id).toBe("users:");
+    expect(nodes[0].pk).toBe("__null_0");
+    expect(nodes[0].id).toBe("users:__null_0");
   });
 
-  it("multiple null __node values from same table collapse into one node (data loss)", () => {
-    // Medium severity: if multiple rows have null __node, they are deduplicated
-    // into a single node, silently losing data.
+  it("multiple null __node values from same table produce separate nodes (fixed)", () => {
+    // Fixed: null-PK rows now get synthetic unique IDs so they don't collapse.
     const columns = ["name", "__node", "__depth", "__source"];
     const rows: (string | number | boolean | null)[][] = [
       ["alice", null, 0, "users"],
       ["bob", null, 1, "users"],   // different person, same null PK
     ];
     const nodes = parseNodesFromResult(columns, rows);
-    // Both rows produce id "users:" → only first is kept
-    expect(nodes).toHaveLength(1);
-    expect(nodes[0].label).toBe("alice"); // bob is silently lost
+    // Each null-PK row gets a unique synthetic ID
+    expect(nodes).toHaveLength(2);
+    expect(nodes[0].label).toBe("alice");
+    expect(nodes[1].label).toBe("bob");
   });
 
   it("handles null __source value", () => {
@@ -297,15 +297,15 @@ describe("QA_GDB299_parseNodesFromResult", () => {
     expect(nodes).toHaveLength(1000);
   });
 
-  it("handles row with fewer cells than columns — undefined becomes empty PK", () => {
+  it("handles row with fewer cells than columns — undefined becomes synthetic PK", () => {
     const columns = ["name", "email", "__node", "__depth", "__source"];
     const rows: (string | number | boolean | null)[][] = [
       ["alice", "a@b.com"], // only 2 cells, missing __node etc
     ];
     const nodes = parseNodesFromResult(columns, rows);
-    // row[nodeIdx] is undefined → undefined ?? "" → "" (empty PK)
+    // row[nodeIdx] is undefined → treated as null → synthetic PK
     expect(nodes).toHaveLength(1);
-    expect(nodes[0].pk).toBe("");
+    expect(nodes[0].pk).toBe("__null_0");
   });
 
   it("handles row with more cells than columns", () => {
@@ -358,16 +358,16 @@ describe("QA_GDB299_parseEdgesFromResult", () => {
     expect(edges[0].to).toBe(""); // null ?? "" → ""
   });
 
-  it("does NOT deduplicate duplicate edges", () => {
+  it("deduplicates duplicate edges (fixed)", () => {
     const columns = ["__from", "__to"];
     const rows: (string | number | boolean | null)[][] = [
       [1, 2],
       [1, 2], // exact duplicate
     ];
     const edges = parseEdgesFromResult(columns, rows);
-    // Both edges are kept — this may cause overlapping edges in graph view
-    expect(edges).toHaveLength(2);
-    expect(edges[0].id).toBe(edges[1].id); // same ID!
+    // Duplicate edges are now deduplicated
+    expect(edges).toHaveLength(1);
+    expect(edges[0].id).toBe("1->edge->2");
   });
 
   it("handles self-loop edge (from == to)", () => {

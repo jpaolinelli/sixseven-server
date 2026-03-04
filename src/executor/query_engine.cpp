@@ -921,6 +921,54 @@ Result<std::pair<Value, Value>> QueryEngine::coerce_link_keys(const std::string&
 }
 
 // ---------------------------------------------------------------------------
+// LINK / UNLINK PK existence check
+// ---------------------------------------------------------------------------
+
+Result<bool> QueryEngine::verify_pk_exists(table_id_t table_id, const Value& pk_value) {
+    auto ts = storage_.get_table_storage(table_id);
+    if (!ts) {
+        return tl::unexpected(ts.error());
+    }
+    auto* table_storage = *ts;
+
+    auto schema = catalog_.get_table_by_id(table_id);
+    if (!schema) {
+        return tl::unexpected(schema.error());
+    }
+
+    // Find PK column index.
+    size_t pk_col_idx = 0;
+    for (size_t i = 0; i < schema->columns.size(); ++i) {
+        if (schema->columns[i].name == schema->pk_columns) {
+            pk_col_idx = i;
+            break;
+        }
+    }
+
+    auto iter = table_storage->heap->begin();
+    if (!iter) {
+        return tl::unexpected(iter.error());
+    }
+
+    while (true) {
+        auto row = iter->next();
+        if (!row) {
+            break;
+        }
+        auto [rid, data] = *row;
+        auto values = TupleSerializer::deserialize(data, table_storage->storage_schema);
+        if (!values || pk_col_idx >= values->size()) {
+            continue;
+        }
+        auto cmp = compare((*values)[pk_col_idx], pk_value);
+        if (cmp && *cmp == std::strong_ordering::equal) {
+            return ok(true);
+        }
+    }
+    return ok(false);
+}
+
+// ---------------------------------------------------------------------------
 // LINK
 // ---------------------------------------------------------------------------
 
@@ -948,6 +996,30 @@ Result<QueryResult> QueryEngine::execute_link(const LinkStmt& stmt, const BoundS
         return make_error(coerced.error().code, coerced.error().message);
     }
     auto& [coerced_src, coerced_tgt] = *coerced;
+
+    // Verify source and target rows exist.
+    auto edge = catalog_.get_edge_type(stmt.edge_type);
+    if (!edge) {
+        return tl::unexpected(edge.error());
+    }
+
+    auto src_exists = verify_pk_exists(edge->source_table_id, coerced_src);
+    if (!src_exists) {
+        return make_error(src_exists.error().code, src_exists.error().message);
+    }
+    if (!*src_exists) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "LINK source row not found in '" + stmt.source_table + "'");
+    }
+
+    auto tgt_exists = verify_pk_exists(edge->target_table_id, coerced_tgt);
+    if (!tgt_exists) {
+        return make_error(tgt_exists.error().code, tgt_exists.error().message);
+    }
+    if (!*tgt_exists) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "LINK target row not found in '" + stmt.target_table + "'");
+    }
 
     // Evaluate property values.
     std::vector<Value> props;
