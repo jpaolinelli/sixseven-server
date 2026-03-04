@@ -16,6 +16,7 @@ add_library(giodb_vector STATIC
     text_normalizer.cpp
     tokenizer.cpp
     tokenizer_json_loader.cpp
+    wordpiece_tokenizer.cpp
     onnx_provider.cpp
     provider_registry.cpp
 )
