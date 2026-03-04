@@ -561,9 +561,8 @@ substitute_parameters(const std::string& sql,
             }
             auto param_num_str = sql.substr(start, end - start);
             int param_num = 0;
-            auto [ptr, ec] =
-                std::from_chars(param_num_str.data(),
-                                param_num_str.data() + param_num_str.size(), param_num);
+            auto [ptr, ec] = std::from_chars(
+                param_num_str.data(), param_num_str.data() + param_num_str.size(), param_num);
             if (ec != std::errc{} || ptr != param_num_str.data() + param_num_str.size()) {
                 return make_error(StatusCode::INVALID_ARGUMENT,
                                   "parameter $" + param_num_str + " is not a valid number");
@@ -697,9 +696,8 @@ Result<std::string> substitute_sql_expressions(const std::string& sql,
             }
             auto param_num_str = sql.substr(start, end - start);
             int param_num = 0;
-            auto [ptr, ec] =
-                std::from_chars(param_num_str.data(),
-                                param_num_str.data() + param_num_str.size(), param_num);
+            auto [ptr, ec] = std::from_chars(
+                param_num_str.data(), param_num_str.data() + param_num_str.size(), param_num);
             if (ec != std::errc{} || ptr != param_num_str.data() + param_num_str.size()) {
                 return make_error(StatusCode::INVALID_ARGUMENT,
                                   "parameter $" + param_num_str + " is not a valid number");
@@ -948,6 +946,10 @@ const std::unordered_map<std::string, Portal>& PgProtocolHandler::portals() cons
 
 void PgProtocolHandler::set_query_executor(QueryExecutor executor) {
     query_executor_ = std::move(executor);
+}
+
+void PgProtocolHandler::set_query_describer(QueryDescriber describer) {
+    query_describer_ = std::move(describer);
 }
 
 void PgProtocolHandler::set_auth(AuthMethod method, UserManager* user_mgr) {
@@ -1611,9 +1613,17 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
         // Send ParameterDescription.
         send_parameter_description(conn, stmt->param_oids);
 
-        // TODO(GDB-201): Parse the SQL to determine result columns and send
-        // RowDescription for SELECT statements. For now, send NoData.
-        send_no_data(conn);
+        // Describe result columns: parse + bind (no execution).
+        if (query_describer_) {
+            auto columns = query_describer_(stmt->sql);
+            if (columns && !columns->empty()) {
+                send_row_description(conn, *columns);
+            } else {
+                send_no_data(conn);
+            }
+        } else {
+            send_no_data(conn);
+        }
     } else if (describe_type == 'P') {
         const auto* portal = session_->get_portal(name);
         if (portal == nullptr) {
@@ -1621,9 +1631,17 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
             error_in_extended_ = true;
             return;
         }
-        // TODO(GDB-201): Return RowDescription for SELECT portals.
-        // For now, send NoData.
-        send_no_data(conn);
+        // Describe result columns for the portal's SQL.
+        if (query_describer_) {
+            auto columns = query_describer_(portal->sql);
+            if (columns && !columns->empty()) {
+                send_row_description(conn, *columns);
+            } else {
+                send_no_data(conn);
+            }
+        } else {
+            send_no_data(conn);
+        }
     } else {
         send_error_response(conn, "ERROR", "08P01", "invalid Describe target type");
         error_in_extended_ = true;
@@ -1798,6 +1816,24 @@ void PgProtocolHandler::send_row_description(Connection& conn, const QueryResult
         w.write_int16(-1); // Type size (-1 = variable length).
         w.write_int32(-1); // Type modifier.
         w.write_int16(0);  // Format code (0 = text).
+    }
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_row_description(Connection& conn,
+                                             const std::vector<ColumnDescription>& columns) {
+    MessageWriter w;
+    w.begin_message('T');
+    w.write_int16(static_cast<int16_t>(columns.size()));
+    for (const auto& col : columns) {
+        w.write_cstring(col.name); // Column name.
+        w.write_int32(0);          // Table OID.
+        w.write_int16(0);          // Column attribute number.
+        w.write_int32(static_cast<int32_t>(type_to_pg_oid(col.type_id))); // Type OID.
+        w.write_int16(-1);                                                // Type size.
+        w.write_int32(-1);                                                // Type modifier.
+        w.write_int16(0);                                                 // Format code (text).
     }
     auto msg = w.finish();
     conn.enqueue_write(msg.data(), msg.size());

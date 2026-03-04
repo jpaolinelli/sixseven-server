@@ -144,6 +144,12 @@ int main(int argc, char* argv[]) {
             return engine.execute(sql);
         });
 
+    // Wire query describer: route Describe to the shared QueryEngine.
+    server.set_query_describer(
+        [&engine](const std::string& sql) -> giodb::Result<std::vector<giodb::ColumnDescription>> {
+            return engine.describe(sql);
+        });
+
     auto result = server.start();
     g_server = nullptr;
 

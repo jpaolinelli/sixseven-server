@@ -1027,3 +1027,65 @@ TEST_F(QueryEngineGraphTest, UnlinkBothNonExistentFails) {
 
     exec_error("UNLINK users(888) FROM users(999) VIA knows", StatusCode::NOT_FOUND);
 }
+
+// =============================================================================
+// Describe tests (column metadata without execution)
+// =============================================================================
+
+TEST_F(QueryEngineTest, DescribeSelectReturnsColumns) {
+    create_test_table();
+
+    auto result = engine_->describe("SELECT id, name FROM users");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->size(), 2u);
+    EXPECT_EQ((*result)[0].name, "id");
+    EXPECT_EQ((*result)[0].type_id, TypeId::INT32);
+    EXPECT_EQ((*result)[1].name, "name");
+    EXPECT_EQ((*result)[1].type_id, TypeId::STRING);
+}
+
+TEST_F(QueryEngineTest, DescribeSelectStarReturnsAllColumns) {
+    create_test_table();
+
+    auto result = engine_->describe("SELECT * FROM users");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->size(), 3u);
+    EXPECT_EQ((*result)[0].name, "id");
+    EXPECT_EQ((*result)[1].name, "name");
+    EXPECT_EQ((*result)[2].name, "age");
+}
+
+TEST_F(QueryEngineTest, DescribeInsertReturnsEmpty) {
+    create_test_table();
+
+    auto result = engine_->describe("INSERT INTO users VALUES (1, 'alice', 30)");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_TRUE(result->empty());
+}
+
+TEST_F(QueryEngineTest, DescribeUpdateReturnsEmpty) {
+    create_test_table();
+
+    auto result = engine_->describe("UPDATE users SET name = 'bob' WHERE id = 1");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_TRUE(result->empty());
+}
+
+TEST_F(QueryEngineTest, DescribeDeleteReturnsEmpty) {
+    create_test_table();
+
+    auto result = engine_->describe("DELETE FROM users WHERE id = 1");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_TRUE(result->empty());
+}
+
+TEST_F(QueryEngineTest, DescribeCreateTableReturnsEmpty) {
+    auto result = engine_->describe("CREATE TABLE foo (id INT)");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_TRUE(result->empty());
+}
+
+TEST_F(QueryEngineTest, DescribeInvalidSqlReturnsError) {
+    auto result = engine_->describe("NOT VALID SQL AT ALL");
+    EXPECT_FALSE(result.has_value());
+}

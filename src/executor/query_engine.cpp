@@ -402,6 +402,46 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
 }
 
 // ---------------------------------------------------------------------------
+// Describe (column metadata without execution)
+// ---------------------------------------------------------------------------
+
+Result<std::vector<ColumnDescription>> QueryEngine::describe(const std::string& sql) {
+    // 1. Lex.
+    Lexer lexer(sql);
+    auto tokens = lexer.tokenize();
+    if (!tokens) {
+        return make_error(tokens.error().code, tokens.error().message);
+    }
+
+    // 2. Parse.
+    Parser parser(std::move(*tokens));
+    auto stmt_ptr = parser.parse();
+    if (!stmt_ptr) {
+        return make_error(stmt_ptr.error().code, stmt_ptr.error().message);
+    }
+
+    // 3. Only SELECT statements produce result columns.
+    if (dynamic_cast<const SelectStmt*>(stmt_ptr->get()) == nullptr) {
+        return ok(std::vector<ColumnDescription>{});
+    }
+
+    // 4. Bind to resolve column names and types.
+    Binder binder(catalog_, current_database_id_);
+    auto bound = binder.bind(**stmt_ptr);
+    if (!bound) {
+        return make_error(bound.error().code, bound.error().message);
+    }
+
+    // 5. Convert resolved columns to ColumnDescription.
+    std::vector<ColumnDescription> columns;
+    columns.reserve(bound->output_columns.size());
+    for (const auto& col : bound->output_columns) {
+        columns.push_back({col.column_name, col.type_id});
+    }
+    return ok(std::move(columns));
+}
+
+// ---------------------------------------------------------------------------
 // DDL: CREATE DATABASE
 // ---------------------------------------------------------------------------
 

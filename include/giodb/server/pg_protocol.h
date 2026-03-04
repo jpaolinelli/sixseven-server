@@ -21,6 +21,7 @@ namespace giodb {
 // Forward declarations.
 class Connection;
 class Session;
+struct ColumnDescription;
 struct QueryResult;
 
 // -- PostgreSQL type OIDs -----------------------------------------------------
@@ -124,6 +125,12 @@ private:
 /// Callback type for executing SQL. Provided by the server.
 using QueryExecutor = std::function<Result<QueryResult>(const std::string& sql)>;
 
+/// Callback type for describing SQL result columns without executing.
+/// Returns column metadata (names + types) for SELECT statements,
+/// or an empty vector for non-SELECT statements.
+using QueryDescriber =
+    std::function<Result<std::vector<ColumnDescription>>(const std::string& sql)>;
+
 /// Protocol state machine phases.
 enum class ProtocolState : uint8_t {
     WAIT_FOR_STARTUP,
@@ -166,6 +173,9 @@ public:
 
     /// Set the callback used to execute SQL queries.
     void set_query_executor(QueryExecutor executor);
+
+    /// Set the callback used to describe SQL result columns without executing.
+    void set_query_describer(QueryDescriber describer);
 
     /// Set the authentication method and user manager for this handler.
     void set_auth(AuthMethod method, UserManager* user_mgr);
@@ -232,6 +242,7 @@ private:
     void send_backend_key_data(Connection& conn);
     void send_ready_for_query(Connection& conn, char status);
     void send_row_description(Connection& conn, const QueryResult& result);
+    void send_row_description(Connection& conn, const std::vector<ColumnDescription>& columns);
     void send_data_row(Connection& conn,
                        const std::vector<Value>& row,
                        const std::vector<TypeId>& types);
@@ -259,6 +270,7 @@ private:
 
     ProtocolState state_ = ProtocolState::WAIT_FOR_STARTUP;
     QueryExecutor query_executor_;
+    QueryDescriber query_describer_;
     int32_t backend_pid_;
     int32_t secret_key_;
 
