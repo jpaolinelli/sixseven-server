@@ -112,17 +112,16 @@ protected:
         }
         try {
             return v.as_int64();
-        } catch (...) {
-        }
+        } catch (...) {}
         try {
             return static_cast<int64_t>(v.as_int32());
-        } catch (...) {
-        }
+        } catch (...) {}
         ADD_FAILURE() << "value is not an integer";
         return 0;
     }
 
-    void exec_error_msg(const std::string& sql, StatusCode expected_code,
+    void exec_error_msg(const std::string& sql,
+                        StatusCode expected_code,
                         const std::string& msg_substring) {
         auto result = engine_->execute(sql);
         ASSERT_FALSE(result.has_value()) << sql << " should have failed";
@@ -272,25 +271,27 @@ TEST_F(QA_GDB267_HeteroTraversal, AC3_BothOnHetero_FromTargetRejected) {
 /// Verify the error message contains actionable guidance.
 TEST_F(QA_GDB267_HeteroTraversal, AC3_BothOnHetero_ErrorMessageIsInformative) {
     exec_error_msg("SELECT * FROM TRAVERSE authored FROM users(1) DIRECTION BOTH",
-                   StatusCode::TYPE_ERROR, "DIRECTION BOTH not supported");
+                   StatusCode::TYPE_ERROR,
+                   "DIRECTION BOTH not supported");
 }
 
 /// Verify error message mentions the edge type name.
 TEST_F(QA_GDB267_HeteroTraversal, AC3_BothOnHetero_ErrorMessageMentionsEdgeType) {
     exec_error_msg("SELECT * FROM TRAVERSE authored FROM users(1) DIRECTION BOTH",
-                   StatusCode::TYPE_ERROR, "authored");
+                   StatusCode::TYPE_ERROR,
+                   "authored");
 }
 
 /// Verify error message suggests alternatives (OUT or IN).
 TEST_F(QA_GDB267_HeteroTraversal, AC3_BothOnHetero_ErrorMessageSuggestsAlternatives) {
     exec_error_msg("SELECT * FROM TRAVERSE authored FROM users(1) DIRECTION BOTH",
-                   StatusCode::TYPE_ERROR, "DIRECTION OUT or DIRECTION IN");
+                   StatusCode::TYPE_ERROR,
+                   "DIRECTION OUT or DIRECTION IN");
 }
 
 /// Verify BOTH rejection also applies to the "rated" edge type (with properties).
 TEST_F(QA_GDB267_HeteroTraversal, AC3_BothOnHetero_AlsoRejectsEdgeWithProperties) {
-    exec_error("SELECT * FROM TRAVERSE rated FROM users(1) DIRECTION BOTH",
-               StatusCode::TYPE_ERROR);
+    exec_error("SELECT * FROM TRAVERSE rated FROM users(1) DIRECTION BOTH", StatusCode::TYPE_ERROR);
 }
 
 // ============================================================================
@@ -344,15 +345,13 @@ TEST_F(QA_GDB267_HeteroTraversal, AC4_BothOnHomogeneous_FromMiddleNode) {
 
 /// Source node with no outgoing edges returns empty result.
 TEST_F(QA_GDB267_HeteroTraversal, Boundary_SourceWithNoEdgesReturnsEmpty) {
-    auto qr =
-        exec_ok("SELECT title FROM TRAVERSE authored FROM users(3) DIRECTION OUT");
+    auto qr = exec_ok("SELECT title FROM TRAVERSE authored FROM users(3) DIRECTION OUT");
     EXPECT_EQ(qr.rows.size(), 0u);
 }
 
 /// Target node with no incoming edges returns empty result.
 TEST_F(QA_GDB267_HeteroTraversal, Boundary_TargetWithNoIncomingEdgesReturnsEmpty) {
-    auto qr =
-        exec_ok("SELECT name FROM TRAVERSE authored FROM posts(40) DIRECTION IN");
+    auto qr = exec_ok("SELECT name FROM TRAVERSE authored FROM posts(40) DIRECTION IN");
     EXPECT_EQ(qr.rows.size(), 0u);
 }
 
@@ -390,14 +389,14 @@ TEST_F(QA_GDB267_HeteroTraversal, Error_FromTableNotEndpoint) {
 
 /// Non-existent edge type → error.
 TEST_F(QA_GDB267_HeteroTraversal, Error_NonExistentEdgeType) {
-    auto result = engine_->execute("SELECT * FROM TRAVERSE nonexistent FROM users(1) DIRECTION OUT");
+    auto result =
+        engine_->execute("SELECT * FROM TRAVERSE nonexistent FROM users(1) DIRECTION OUT");
     EXPECT_FALSE(result.has_value());
 }
 
 /// Non-existent FROM table → error.
 TEST_F(QA_GDB267_HeteroTraversal, Error_NonExistentFromTable) {
-    auto result =
-        engine_->execute("SELECT * FROM TRAVERSE authored FROM ghosts(1) DIRECTION OUT");
+    auto result = engine_->execute("SELECT * FROM TRAVERSE authored FROM ghosts(1) DIRECTION OUT");
     EXPECT_FALSE(result.has_value());
 }
 
@@ -416,9 +415,8 @@ TEST_F(QA_GDB267_HeteroTraversal, Where_FilterOnTargetColumn) {
 
 /// WHERE filter on meta-column __depth.
 TEST_F(QA_GDB267_HeteroTraversal, Where_FilterOnMetaColumn) {
-    auto qr = exec_ok(
-        "SELECT title, __depth FROM TRAVERSE authored FROM users(1) DIRECTION OUT "
-        "WHERE __depth = 1");
+    auto qr = exec_ok("SELECT title, __depth FROM TRAVERSE authored FROM users(1) DIRECTION OUT "
+                      "WHERE __depth = 1");
 
     // All results are at depth 1 for single-hop edges.
     ASSERT_EQ(qr.rows.size(), 2u);
@@ -426,9 +424,8 @@ TEST_F(QA_GDB267_HeteroTraversal, Where_FilterOnMetaColumn) {
 
 /// WHERE filter that eliminates all rows → empty result.
 TEST_F(QA_GDB267_HeteroTraversal, Where_FilterEliminatesAllRows) {
-    auto qr = exec_ok(
-        "SELECT title FROM TRAVERSE authored FROM users(1) DIRECTION OUT "
-        "WHERE title = 'nonexistent'");
+    auto qr = exec_ok("SELECT title FROM TRAVERSE authored FROM users(1) DIRECTION OUT "
+                      "WHERE title = 'nonexistent'");
 
     EXPECT_EQ(qr.rows.size(), 0u);
 }
@@ -436,8 +433,8 @@ TEST_F(QA_GDB267_HeteroTraversal, Where_FilterEliminatesAllRows) {
 /// Referencing a source-table column name that doesn't exist in target → error.
 /// "name" exists in users but NOT in posts.
 TEST_F(QA_GDB267_HeteroTraversal, Where_ReferenceSourceColumnInTargetContextFails) {
-    auto result = engine_->execute(
-        "SELECT name FROM TRAVERSE authored FROM users(1) DIRECTION OUT");
+    auto result =
+        engine_->execute("SELECT name FROM TRAVERSE authored FROM users(1) DIRECTION OUT");
     // "name" is a users column, but OUT traversal returns posts columns.
     EXPECT_FALSE(result.has_value());
 }
@@ -485,8 +482,7 @@ TEST_F(QA_GDB267_HeteroTraversal, EdgeProps_SelectStarIncludesEdgeProps) {
 /// Multi-hop BOTH traversal discovers transitive neighbors.
 /// Chain: 1→2→3. From user 1, BOTH should reach user 2 (depth 1) and user 3 (depth 2).
 TEST_F(QA_GDB267_HeteroTraversal, MultiHop_BothOnHomogeneousChain) {
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION BOTH");
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION BOTH");
 
     ASSERT_EQ(qr.rows.size(), 2u);
 
@@ -504,8 +500,7 @@ TEST_F(QA_GDB267_HeteroTraversal, MultiHop_BothOnHomogeneousChain) {
 
 /// Multi-hop BOTH on homogeneous with default depth returns all reachable.
 TEST_F(QA_GDB267_HeteroTraversal, MultiHop_BothDefaultDepthReturnsAll) {
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION BOTH");
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION BOTH");
 
     // Chain 1→2→3. From user 1, BOTH should find user 2 (depth 1), user 3 (depth 2).
     ASSERT_EQ(qr.rows.size(), 2u);
@@ -529,8 +524,8 @@ TEST_F(QA_GDB267_HeteroTraversal, MetaSource_CorrectForHeteroOut) {
 
 /// __source for IN direction should be the post node that led to the user.
 TEST_F(QA_GDB267_HeteroTraversal, MetaSource_CorrectForHeteroIn) {
-    auto qr = exec_ok(
-        "SELECT name, __node, __source FROM TRAVERSE authored FROM posts(10) DIRECTION IN");
+    auto qr =
+        exec_ok("SELECT name, __node, __source FROM TRAVERSE authored FROM posts(10) DIRECTION IN");
 
     ASSERT_EQ(qr.rows.size(), 1u);
     // __source should be 10 (post 10 is the start node).
@@ -599,7 +594,7 @@ TEST_F(QA_GDB267_HeteroTraversal, Bug_PKCollisionInVisitedSet) {
     // Assert what SHOULD happen (3 rows including post 1):
     // This currently FAILS due to the PK collision bug.
     EXPECT_EQ(qr.rows.size(), 3u) << "BFS visited set PK collision: post(1) skipped because "
-                                      "user(1) has the same PK value in visited set";
+                                     "user(1) has the same PK value in visited set";
 }
 
 /// Same PK collision bug but with IN direction.
@@ -616,7 +611,7 @@ TEST_F(QA_GDB267_HeteroTraversal, Bug_PKCollisionInDirection) {
 
     // KNOWN BUG: Returns 0 rows instead of 1 because user(1)'s PK collides.
     EXPECT_EQ(qr.rows.size(), 1u) << "BFS visited set PK collision: user(1) skipped because "
-                                      "start node posts(1) has the same PK value";
+                                     "start node posts(1) has the same PK value";
 }
 
 // ============================================================================

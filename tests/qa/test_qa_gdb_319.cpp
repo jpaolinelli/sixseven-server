@@ -477,7 +477,8 @@ TEST(QA_GDB319_Normalizer, StripAccentsNullDefaultsFalse) {
 }
 
 TEST(QA_GDB319_Normalizer, NormalizerObjectNoTypeField) {
-    // normalizer section exists but has no "type" — normalizer stays default
+    // normalizer section exists but has no "type" — enum inferred from lowercase flag.
+    // Fixed by GDB-352: previously stayed at default LOWERCASE even when lowercase=false.
     TempJsonFile file(R"({
         "model":{"type":"WordPiece","vocab":{"a":0}},
         "normalizer":{"lowercase":false}
@@ -485,12 +486,9 @@ TEST(QA_GDB319_Normalizer, NormalizerObjectNoTypeField) {
                       "norm_no_type");
     auto result = load_tokenizer_config(file.path());
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    // normalizer stays at default LOWERCASE since no type was parsed
-    // BUT normalizer_lowercase was set to false from the JSON
     EXPECT_FALSE(result->normalizer_lowercase);
-    // The normalizer enum stays at the struct default (LOWERCASE) because
-    // the parse_normalizer_type call was never made — this might be surprising
-    EXPECT_EQ(result->normalizer, NormalizerType::LOWERCASE);
+    // Now correctly inferred as NONE when lowercase is false.
+    EXPECT_EQ(result->normalizer, NormalizerType::NONE);
 }
 
 // ===================================================================

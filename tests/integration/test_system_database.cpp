@@ -5,12 +5,12 @@
 #include "giodb/common/secrets_manager.h"
 #include "giodb/common/types.h"
 #include "giodb/common/value.h"
+#include "giodb/executor/catalog_persistence.h"
 #include "giodb/executor/provider_cache.h"
 #include "giodb/executor/query_engine.h"
 #include "giodb/executor/settings_cache.h"
 #include "giodb/executor/storage_manager.h"
 #include "giodb/executor/system_bootstrap.h"
-#include "giodb/executor/catalog_persistence.h"
 #include "giodb/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
@@ -53,7 +53,8 @@ protected:
         secrets_manager_ = std::make_unique<SecretsManager>(std::move(*mgr));
 
         // Bootstrap system database.
-        auto boot = SystemBootstrap::bootstrap(*engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
+        auto boot = SystemBootstrap::bootstrap(
+            *engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
         ASSERT_TRUE(boot.has_value()) << boot.error().message;
 
         // Create and load caches.
@@ -231,7 +232,8 @@ TEST_F(SystemDatabaseIntegrationTest, ReInitDoesNotDuplicateSystemDatabase) {
 
     // Run bootstrap again on the same engine (simulates re-init path).
     // This should not create a duplicate system database.
-    auto boot = SystemBootstrap::bootstrap(*engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
+    auto boot = SystemBootstrap::bootstrap(
+        *engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
     // Bootstrap may fail because the tables already exist — that's acceptable.
     // The key assertion is that list_databases still shows exactly one.
 

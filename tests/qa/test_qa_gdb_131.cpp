@@ -76,8 +76,8 @@ protected:
         std::filesystem::remove(table_path_);
     }
 
-    void insert_row(TableHeap& heap, int32_t id, const std::string& name,
-                    const Embedding& embedding) {
+    void
+    insert_row(TableHeap& heap, int32_t id, const std::string& name, const Embedding& embedding) {
         std::vector<Value> vals = {Value(id), Value(name), Value(embedding)};
         auto bytes = TupleSerializer::serialize(vals, storage_schema_);
         ASSERT_TRUE(bytes.has_value()) << bytes.error().message;
@@ -408,8 +408,12 @@ TEST_F(QA131NearestScanTest, HnswMatchesBruteForceTopResult) {
     ASSERT_TRUE(hnsw.create(hnsw_config).has_value());
 
     Embedding embs[] = {
-        {1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F},
-        {0.5F, 0.5F, 0.0F}, {0.3F, 0.3F, 0.3F}, {0.9F, 0.1F, 0.0F},
+        {1.0F, 0.0F, 0.0F},
+        {0.0F, 1.0F, 0.0F},
+        {0.0F, 0.0F, 1.0F},
+        {0.5F, 0.5F, 0.0F},
+        {0.3F, 0.3F, 0.3F},
+        {0.9F, 0.1F, 0.0F},
     };
 
     for (int i = 0; i < 6; ++i) {
@@ -476,8 +480,11 @@ TEST_F(QA131NearestScanTest, HnswGraphScopeFilteredSearch) {
     ASSERT_TRUE(hnsw.create(hnsw_config).has_value());
 
     Embedding embs[] = {
-        {1.0F, 0.0F}, {0.9F, 0.1F}, {0.8F, 0.2F},
-        {0.5F, 0.5F}, {0.0F, 1.0F},
+        {1.0F, 0.0F},
+        {0.9F, 0.1F},
+        {0.8F, 0.2F},
+        {0.5F, 0.5F},
+        {0.0F, 1.0F},
     };
 
     for (int i = 0; i < 5; ++i) {
@@ -601,8 +608,8 @@ TEST_F(QA131NearestScanTest, LargeDatasetBruteForce) {
 
 TEST_F(QA131NearestScanTest, GraphScopeWithNullEmbeddingNode) {
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    insert_row(heap, 1, "valid", {1.0F, 0.0F, 0.0F}); // ordinal 0
-    insert_row_null_embedding(heap, 2, "null_emb");      // ordinal 1
+    insert_row(heap, 1, "valid", {1.0F, 0.0F, 0.0F});  // ordinal 0
+    insert_row_null_embedding(heap, 2, "null_emb");    // ordinal 1
     insert_row(heap, 3, "valid2", {0.0F, 1.0F, 0.0F}); // ordinal 2
 
     NearestScanConfig config;
@@ -634,9 +641,9 @@ TEST_F(QA131NearestScanTest, GraphScopeWithNullEmbeddingNode) {
 TEST_F(QA131NearestScanTest, CosineUnitVectorsCorrectOrder) {
     TableHeap heap(*table_bpm_, dm_, table_fid_);
     // All unit vectors in 2D.
-    insert_row(heap, 1, "same", {1.0F, 0.0F});           // cos_dist = 0
-    insert_row(heap, 2, "45deg", {0.707F, 0.707F});       // cos_dist ~0.293
-    insert_row(heap, 3, "opposite", {-1.0F, 0.0F});       // cos_dist = 2.0
+    insert_row(heap, 1, "same", {1.0F, 0.0F});      // cos_dist = 0
+    insert_row(heap, 2, "45deg", {0.707F, 0.707F}); // cos_dist ~0.293
+    insert_row(heap, 3, "opposite", {-1.0F, 0.0F}); // cos_dist = 2.0
 
     NearestScanConfig config;
     config.k = 3;

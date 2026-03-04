@@ -34,7 +34,8 @@ using namespace giodb;
 
 namespace {
 
-HashIndex make_index(uint32_t capacity = 4, bool unique = false,
+HashIndex make_index(uint32_t capacity = 4,
+                     bool unique = false,
                      std::vector<TypeId> types = {TypeId::INT64}) {
     HashIndexConfig cfg;
     cfg.key_types = std::move(types);
@@ -43,8 +44,12 @@ HashIndex make_index(uint32_t capacity = 4, bool unique = false,
     return HashIndex(std::move(cfg));
 }
 
-KeyType key(int64_t v) { return {Value(v)}; }
-RID rid(uint32_t p, uint16_t s = 0) { return {p, s}; }
+KeyType key(int64_t v) {
+    return {Value(v)};
+}
+RID rid(uint32_t p, uint16_t s = 0) {
+    return {p, s};
+}
 
 class MockHttpClient : public HttpClient {
 public:
@@ -208,8 +213,7 @@ TEST(QA_GDB_244, ConcurrentSameKeyInserts) {
     for (int t = 0; t < num_threads; ++t) {
         threads.emplace_back([&idx, &errors, t]() {
             for (int i = 0; i < per_thread; ++i) {
-                auto r = idx.insert(key(42),
-                                    rid(static_cast<uint32_t>(t * per_thread + i)));
+                auto r = idx.insert(key(42), rid(static_cast<uint32_t>(t * per_thread + i)));
                 if (!r.has_value()) {
                     errors.fetch_add(1);
                 }
@@ -314,8 +318,8 @@ TEST(QA_GDB_245, ThrowNonStdExceptionType) {
     ThreadPool pool(2);
     std::atomic<int> counter{0};
 
-    pool.submit([] { throw 42; });  // Not a std::exception.
-    pool.submit([] { throw "c-string"; });  // Also not std::exception.
+    pool.submit([] { throw 42; });         // Not a std::exception.
+    pool.submit([] { throw "c-string"; }); // Also not std::exception.
 
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
@@ -387,7 +391,7 @@ TEST(QA_GDB_245, DoubleShutdownIsSafe) {
 
     pool.submit([&counter] { counter.fetch_add(1); });
     pool.shutdown();
-    pool.shutdown();  // Second shutdown should be a no-op.
+    pool.shutdown(); // Second shutdown should be a no-op.
 
     EXPECT_EQ(counter.load(), 1);
 }
@@ -412,8 +416,7 @@ TEST(QA_GDB_246, NestedArrayValue) {
 // Non-numeric at first position.
 TEST(QA_GDB_246, NonNumericAtFirstPosition) {
     auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200,
-                            R"({"data": [{"embedding": ["bad", 0.2, 0.3], "index": 0}]})");
+    mock->set_post_response(200, R"({"data": [{"embedding": ["bad", 0.2, 0.3], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
@@ -425,8 +428,7 @@ TEST(QA_GDB_246, NonNumericAtFirstPosition) {
 // Non-numeric at last position.
 TEST(QA_GDB_246, NonNumericAtLastPosition) {
     auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200,
-                            R"({"data": [{"embedding": [0.1, 0.2, null], "index": 0}]})");
+    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, 0.2, null], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
@@ -438,8 +440,7 @@ TEST(QA_GDB_246, NonNumericAtLastPosition) {
 // All non-numeric values.
 TEST(QA_GDB_246, AllNonNumericValues) {
     auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200,
-                            R"({"data": [{"embedding": ["a", "b", "c"], "index": 0}]})");
+    mock->set_post_response(200, R"({"data": [{"embedding": ["a", "b", "c"], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
@@ -451,8 +452,7 @@ TEST(QA_GDB_246, AllNonNumericValues) {
 // Valid integer embedding values accepted.
 TEST(QA_GDB_246, ValidIntegerValuesAccepted) {
     auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200,
-                            R"({"data": [{"embedding": [1, 2, 3], "index": 0}]})");
+    mock->set_post_response(200, R"({"data": [{"embedding": [1, 2, 3], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
@@ -466,8 +466,7 @@ TEST(QA_GDB_246, ValidIntegerValuesAccepted) {
 // Valid negative float values accepted.
 TEST(QA_GDB_246, ValidNegativeFloatsAccepted) {
     auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200,
-                            R"({"data": [{"embedding": [-0.5, -1.0, -0.001], "index": 0}]})");
+    mock->set_post_response(200, R"({"data": [{"embedding": [-0.5, -1.0, -0.001], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
@@ -492,8 +491,7 @@ TEST(QA_GDB_246, BatchEmbedWithNonNumeric) {
 // Boolean false value (would be silently coerced to 0.0 without the fix).
 TEST(QA_GDB_246, BooleanFalseValue) {
     auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200,
-                            R"({"data": [{"embedding": [0.1, false, 0.3], "index": 0}]})");
+    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, false, 0.3], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
@@ -504,8 +502,7 @@ TEST(QA_GDB_246, BooleanFalseValue) {
 // Empty string value.
 TEST(QA_GDB_246, EmptyStringValue) {
     auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200,
-                            R"({"data": [{"embedding": [0.1, "", 0.3], "index": 0}]})");
+    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, "", 0.3], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
@@ -516,8 +513,7 @@ TEST(QA_GDB_246, EmptyStringValue) {
 // health_check path also goes through request_embeddings validation.
 TEST(QA_GDB_246, HealthCheckWithNonNumericEmbedding) {
     auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200,
-                            R"({"data": [{"embedding": [0.1, "bad", 0.3], "index": 0}]})");
+    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, "bad", 0.3], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.health_check();

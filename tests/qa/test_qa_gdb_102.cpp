@@ -47,63 +47,204 @@ public:
     int total = 0;
 
     // -- Expressions --
-    void visit(const LiteralExpr&) override { last_type = "LiteralExpr"; ++total; }
-    void visit(const ColumnRefExpr&) override { last_type = "ColumnRefExpr"; ++total; }
-    void visit(const BinaryExpr&) override { last_type = "BinaryExpr"; ++total; }
-    void visit(const UnaryExpr&) override { last_type = "UnaryExpr"; ++total; }
-    void visit(const FunctionCallExpr&) override { last_type = "FunctionCallExpr"; ++total; }
-    void visit(const CastExpr&) override { last_type = "CastExpr"; ++total; }
-    void visit(const CaseExpr&) override { last_type = "CaseExpr"; ++total; }
-    void visit(const InExpr&) override { last_type = "InExpr"; ++total; }
-    void visit(const BetweenExpr&) override { last_type = "BetweenExpr"; ++total; }
-    void visit(const IsNullExpr&) override { last_type = "IsNullExpr"; ++total; }
-    void visit(const LikeExpr&) override { last_type = "LikeExpr"; ++total; }
-    void visit(const ExistsExpr&) override { last_type = "ExistsExpr"; ++total; }
-    void visit(const SubqueryExpr&) override { last_type = "SubqueryExpr"; ++total; }
-    void visit(const ArrayExpr&) override { last_type = "ArrayExpr"; ++total; }
+    void visit(const LiteralExpr&) override {
+        last_type = "LiteralExpr";
+        ++total;
+    }
+    void visit(const ColumnRefExpr&) override {
+        last_type = "ColumnRefExpr";
+        ++total;
+    }
+    void visit(const BinaryExpr&) override {
+        last_type = "BinaryExpr";
+        ++total;
+    }
+    void visit(const UnaryExpr&) override {
+        last_type = "UnaryExpr";
+        ++total;
+    }
+    void visit(const FunctionCallExpr&) override {
+        last_type = "FunctionCallExpr";
+        ++total;
+    }
+    void visit(const CastExpr&) override {
+        last_type = "CastExpr";
+        ++total;
+    }
+    void visit(const CaseExpr&) override {
+        last_type = "CaseExpr";
+        ++total;
+    }
+    void visit(const InExpr&) override {
+        last_type = "InExpr";
+        ++total;
+    }
+    void visit(const BetweenExpr&) override {
+        last_type = "BetweenExpr";
+        ++total;
+    }
+    void visit(const IsNullExpr&) override {
+        last_type = "IsNullExpr";
+        ++total;
+    }
+    void visit(const LikeExpr&) override {
+        last_type = "LikeExpr";
+        ++total;
+    }
+    void visit(const ExistsExpr&) override {
+        last_type = "ExistsExpr";
+        ++total;
+    }
+    void visit(const SubqueryExpr&) override {
+        last_type = "SubqueryExpr";
+        ++total;
+    }
+    void visit(const ArrayExpr&) override {
+        last_type = "ArrayExpr";
+        ++total;
+    }
 
     // -- DDL --
-    void visit(const CreateTableStmt&) override { last_type = "CreateTableStmt"; ++total; }
-    void visit(const DropTableStmt&) override { last_type = "DropTableStmt"; ++total; }
-    void visit(const AlterTableStmt&) override { last_type = "AlterTableStmt"; ++total; }
-    void visit(const CreateIndexStmt&) override { last_type = "CreateIndexStmt"; ++total; }
-    void visit(const DropIndexStmt&) override { last_type = "DropIndexStmt"; ++total; }
-    void visit(const CreateEdgeTypeStmt&) override { last_type = "CreateEdgeTypeStmt"; ++total; }
-    void visit(const DropEdgeTypeStmt&) override { last_type = "DropEdgeTypeStmt"; ++total; }
-    void visit(const CreateDatabaseStmt&) override { last_type = "CreateDatabaseStmt"; ++total; }
-    void visit(const DropDatabaseStmt&) override { last_type = "DropDatabaseStmt"; ++total; }
-    void visit(const CreateUserStmt&) override { last_type = "CreateUserStmt"; ++total; }
-    void visit(const DropUserStmt&) override { last_type = "DropUserStmt"; ++total; }
-    void visit(const AlterUserStmt&) override { last_type = "AlterUserStmt"; ++total; }
+    void visit(const CreateTableStmt&) override {
+        last_type = "CreateTableStmt";
+        ++total;
+    }
+    void visit(const DropTableStmt&) override {
+        last_type = "DropTableStmt";
+        ++total;
+    }
+    void visit(const AlterTableStmt&) override {
+        last_type = "AlterTableStmt";
+        ++total;
+    }
+    void visit(const CreateIndexStmt&) override {
+        last_type = "CreateIndexStmt";
+        ++total;
+    }
+    void visit(const DropIndexStmt&) override {
+        last_type = "DropIndexStmt";
+        ++total;
+    }
+    void visit(const CreateEdgeTypeStmt&) override {
+        last_type = "CreateEdgeTypeStmt";
+        ++total;
+    }
+    void visit(const DropEdgeTypeStmt&) override {
+        last_type = "DropEdgeTypeStmt";
+        ++total;
+    }
+    void visit(const CreateDatabaseStmt&) override {
+        last_type = "CreateDatabaseStmt";
+        ++total;
+    }
+    void visit(const DropDatabaseStmt&) override {
+        last_type = "DropDatabaseStmt";
+        ++total;
+    }
+    void visit(const CreateUserStmt&) override {
+        last_type = "CreateUserStmt";
+        ++total;
+    }
+    void visit(const DropUserStmt&) override {
+        last_type = "DropUserStmt";
+        ++total;
+    }
+    void visit(const AlterUserStmt&) override {
+        last_type = "AlterUserStmt";
+        ++total;
+    }
 
     // -- DML --
-    void visit(const InsertStmt&) override { last_type = "InsertStmt"; ++total; }
-    void visit(const UpdateStmt&) override { last_type = "UpdateStmt"; ++total; }
-    void visit(const DeleteStmt&) override { last_type = "DeleteStmt"; ++total; }
-    void visit(const LinkStmt&) override { last_type = "LinkStmt"; ++total; }
-    void visit(const UnlinkStmt&) override { last_type = "UnlinkStmt"; ++total; }
+    void visit(const InsertStmt&) override {
+        last_type = "InsertStmt";
+        ++total;
+    }
+    void visit(const UpdateStmt&) override {
+        last_type = "UpdateStmt";
+        ++total;
+    }
+    void visit(const DeleteStmt&) override {
+        last_type = "DeleteStmt";
+        ++total;
+    }
+    void visit(const LinkStmt&) override {
+        last_type = "LinkStmt";
+        ++total;
+    }
+    void visit(const UnlinkStmt&) override {
+        last_type = "UnlinkStmt";
+        ++total;
+    }
 
     // -- Query --
-    void visit(const SelectStmt&) override { last_type = "SelectStmt"; ++total; }
-    void visit(const TraverseStmt&) override { last_type = "TraverseStmt"; ++total; }
-    void visit(const NearestStmt&) override { last_type = "NearestStmt"; ++total; }
-    void visit(const MatchStmt&) override { last_type = "MatchStmt"; ++total; }
-    void visit(const ShortestPathStmt&) override { last_type = "ShortestPathStmt"; ++total; }
+    void visit(const SelectStmt&) override {
+        last_type = "SelectStmt";
+        ++total;
+    }
+    void visit(const TraverseStmt&) override {
+        last_type = "TraverseStmt";
+        ++total;
+    }
+    void visit(const NearestStmt&) override {
+        last_type = "NearestStmt";
+        ++total;
+    }
+    void visit(const MatchStmt&) override {
+        last_type = "MatchStmt";
+        ++total;
+    }
+    void visit(const ShortestPathStmt&) override {
+        last_type = "ShortestPathStmt";
+        ++total;
+    }
 
     // -- TCL --
-    void visit(const BeginStmt&) override { last_type = "BeginStmt"; ++total; }
-    void visit(const CommitStmt&) override { last_type = "CommitStmt"; ++total; }
-    void visit(const RollbackStmt&) override { last_type = "RollbackStmt"; ++total; }
-    void visit(const SavepointStmt&) override { last_type = "SavepointStmt"; ++total; }
+    void visit(const BeginStmt&) override {
+        last_type = "BeginStmt";
+        ++total;
+    }
+    void visit(const CommitStmt&) override {
+        last_type = "CommitStmt";
+        ++total;
+    }
+    void visit(const RollbackStmt&) override {
+        last_type = "RollbackStmt";
+        ++total;
+    }
+    void visit(const SavepointStmt&) override {
+        last_type = "SavepointStmt";
+        ++total;
+    }
 
     // -- Admin --
-    void visit(const SetStmt&) override { last_type = "SetStmt"; ++total; }
-    void visit(const ShowStmt&) override { last_type = "ShowStmt"; ++total; }
-    void visit(const ExplainStmt&) override { last_type = "ExplainStmt"; ++total; }
-    void visit(const DescribeStmt&) override { last_type = "DescribeStmt"; ++total; }
-    void visit(const ReembedStmt&) override { last_type = "ReembedStmt"; ++total; }
-    void visit(const VacuumStmt&) override { last_type = "VacuumStmt"; ++total; }
-    void visit(const AnalyzeStmt&) override { last_type = "AnalyzeStmt"; ++total; }
+    void visit(const SetStmt&) override {
+        last_type = "SetStmt";
+        ++total;
+    }
+    void visit(const ShowStmt&) override {
+        last_type = "ShowStmt";
+        ++total;
+    }
+    void visit(const ExplainStmt&) override {
+        last_type = "ExplainStmt";
+        ++total;
+    }
+    void visit(const DescribeStmt&) override {
+        last_type = "DescribeStmt";
+        ++total;
+    }
+    void visit(const ReembedStmt&) override {
+        last_type = "ReembedStmt";
+        ++total;
+    }
+    void visit(const VacuumStmt&) override {
+        last_type = "VacuumStmt";
+        ++total;
+    }
+    void visit(const AnalyzeStmt&) override {
+        last_type = "AnalyzeStmt";
+        ++total;
+    }
 };
 
 } // anonymous namespace
@@ -240,47 +381,113 @@ TEST(QA_GDB102, VisitorDispatch_AllStatementTypes) {
     CountingVisitor v;
 
     // DDL (12 types)
-    CreateTableStmt s1; s1.accept(v); EXPECT_EQ(v.last_type, "CreateTableStmt");
-    DropTableStmt s2; s2.accept(v); EXPECT_EQ(v.last_type, "DropTableStmt");
-    AlterTableStmt s3; s3.accept(v); EXPECT_EQ(v.last_type, "AlterTableStmt");
-    CreateIndexStmt s4; s4.accept(v); EXPECT_EQ(v.last_type, "CreateIndexStmt");
-    DropIndexStmt s5; s5.accept(v); EXPECT_EQ(v.last_type, "DropIndexStmt");
-    CreateEdgeTypeStmt s6; s6.accept(v); EXPECT_EQ(v.last_type, "CreateEdgeTypeStmt");
-    DropEdgeTypeStmt s7; s7.accept(v); EXPECT_EQ(v.last_type, "DropEdgeTypeStmt");
-    CreateDatabaseStmt s8; s8.accept(v); EXPECT_EQ(v.last_type, "CreateDatabaseStmt");
-    DropDatabaseStmt s9; s9.accept(v); EXPECT_EQ(v.last_type, "DropDatabaseStmt");
-    CreateUserStmt s10; s10.accept(v); EXPECT_EQ(v.last_type, "CreateUserStmt");
-    DropUserStmt s11; s11.accept(v); EXPECT_EQ(v.last_type, "DropUserStmt");
-    AlterUserStmt s12; s12.accept(v); EXPECT_EQ(v.last_type, "AlterUserStmt");
+    CreateTableStmt s1;
+    s1.accept(v);
+    EXPECT_EQ(v.last_type, "CreateTableStmt");
+    DropTableStmt s2;
+    s2.accept(v);
+    EXPECT_EQ(v.last_type, "DropTableStmt");
+    AlterTableStmt s3;
+    s3.accept(v);
+    EXPECT_EQ(v.last_type, "AlterTableStmt");
+    CreateIndexStmt s4;
+    s4.accept(v);
+    EXPECT_EQ(v.last_type, "CreateIndexStmt");
+    DropIndexStmt s5;
+    s5.accept(v);
+    EXPECT_EQ(v.last_type, "DropIndexStmt");
+    CreateEdgeTypeStmt s6;
+    s6.accept(v);
+    EXPECT_EQ(v.last_type, "CreateEdgeTypeStmt");
+    DropEdgeTypeStmt s7;
+    s7.accept(v);
+    EXPECT_EQ(v.last_type, "DropEdgeTypeStmt");
+    CreateDatabaseStmt s8;
+    s8.accept(v);
+    EXPECT_EQ(v.last_type, "CreateDatabaseStmt");
+    DropDatabaseStmt s9;
+    s9.accept(v);
+    EXPECT_EQ(v.last_type, "DropDatabaseStmt");
+    CreateUserStmt s10;
+    s10.accept(v);
+    EXPECT_EQ(v.last_type, "CreateUserStmt");
+    DropUserStmt s11;
+    s11.accept(v);
+    EXPECT_EQ(v.last_type, "DropUserStmt");
+    AlterUserStmt s12;
+    s12.accept(v);
+    EXPECT_EQ(v.last_type, "AlterUserStmt");
 
     // DML (5 types)
-    InsertStmt s13; s13.accept(v); EXPECT_EQ(v.last_type, "InsertStmt");
-    UpdateStmt s14; s14.accept(v); EXPECT_EQ(v.last_type, "UpdateStmt");
-    DeleteStmt s15; s15.accept(v); EXPECT_EQ(v.last_type, "DeleteStmt");
-    LinkStmt s16; s16.accept(v); EXPECT_EQ(v.last_type, "LinkStmt");
-    UnlinkStmt s17; s17.accept(v); EXPECT_EQ(v.last_type, "UnlinkStmt");
+    InsertStmt s13;
+    s13.accept(v);
+    EXPECT_EQ(v.last_type, "InsertStmt");
+    UpdateStmt s14;
+    s14.accept(v);
+    EXPECT_EQ(v.last_type, "UpdateStmt");
+    DeleteStmt s15;
+    s15.accept(v);
+    EXPECT_EQ(v.last_type, "DeleteStmt");
+    LinkStmt s16;
+    s16.accept(v);
+    EXPECT_EQ(v.last_type, "LinkStmt");
+    UnlinkStmt s17;
+    s17.accept(v);
+    EXPECT_EQ(v.last_type, "UnlinkStmt");
 
     // Query (5 types)
-    SelectStmt s18; s18.accept(v); EXPECT_EQ(v.last_type, "SelectStmt");
-    TraverseStmt s19; s19.accept(v); EXPECT_EQ(v.last_type, "TraverseStmt");
-    NearestStmt s20; s20.accept(v); EXPECT_EQ(v.last_type, "NearestStmt");
-    MatchStmt s21; s21.accept(v); EXPECT_EQ(v.last_type, "MatchStmt");
-    ShortestPathStmt s22; s22.accept(v); EXPECT_EQ(v.last_type, "ShortestPathStmt");
+    SelectStmt s18;
+    s18.accept(v);
+    EXPECT_EQ(v.last_type, "SelectStmt");
+    TraverseStmt s19;
+    s19.accept(v);
+    EXPECT_EQ(v.last_type, "TraverseStmt");
+    NearestStmt s20;
+    s20.accept(v);
+    EXPECT_EQ(v.last_type, "NearestStmt");
+    MatchStmt s21;
+    s21.accept(v);
+    EXPECT_EQ(v.last_type, "MatchStmt");
+    ShortestPathStmt s22;
+    s22.accept(v);
+    EXPECT_EQ(v.last_type, "ShortestPathStmt");
 
     // TCL (4 types)
-    BeginStmt s23; s23.accept(v); EXPECT_EQ(v.last_type, "BeginStmt");
-    CommitStmt s24; s24.accept(v); EXPECT_EQ(v.last_type, "CommitStmt");
-    RollbackStmt s25; s25.accept(v); EXPECT_EQ(v.last_type, "RollbackStmt");
-    SavepointStmt s26; s26.accept(v); EXPECT_EQ(v.last_type, "SavepointStmt");
+    BeginStmt s23;
+    s23.accept(v);
+    EXPECT_EQ(v.last_type, "BeginStmt");
+    CommitStmt s24;
+    s24.accept(v);
+    EXPECT_EQ(v.last_type, "CommitStmt");
+    RollbackStmt s25;
+    s25.accept(v);
+    EXPECT_EQ(v.last_type, "RollbackStmt");
+    SavepointStmt s26;
+    s26.accept(v);
+    EXPECT_EQ(v.last_type, "SavepointStmt");
 
     // Admin (7 types)
-    SetStmt s27; s27.accept(v); EXPECT_EQ(v.last_type, "SetStmt");
-    ShowStmt s28; s28.accept(v); EXPECT_EQ(v.last_type, "ShowStmt");
-    ExplainStmt s29; s29.accept(v); EXPECT_EQ(v.last_type, "ExplainStmt");
-    DescribeStmt s30; s30.accept(v); EXPECT_EQ(v.last_type, "DescribeStmt");
-    ReembedStmt s31; s31.accept(v); EXPECT_EQ(v.last_type, "ReembedStmt");
-    VacuumStmt s32; s32.accept(v); EXPECT_EQ(v.last_type, "VacuumStmt");
-    AnalyzeStmt s33; s33.accept(v); EXPECT_EQ(v.last_type, "AnalyzeStmt");
+    SetStmt s27;
+    s27.accept(v);
+    EXPECT_EQ(v.last_type, "SetStmt");
+    ShowStmt s28;
+    s28.accept(v);
+    EXPECT_EQ(v.last_type, "ShowStmt");
+    ExplainStmt s29;
+    s29.accept(v);
+    EXPECT_EQ(v.last_type, "ExplainStmt");
+    DescribeStmt s30;
+    s30.accept(v);
+    EXPECT_EQ(v.last_type, "DescribeStmt");
+    ReembedStmt s31;
+    s31.accept(v);
+    EXPECT_EQ(v.last_type, "ReembedStmt");
+    VacuumStmt s32;
+    s32.accept(v);
+    EXPECT_EQ(v.last_type, "VacuumStmt");
+    AnalyzeStmt s33;
+    s33.accept(v);
+    EXPECT_EQ(v.last_type, "AnalyzeStmt");
 
     // 12 DDL + 5 DML + 5 Query + 4 TCL + 7 Admin = 33 statements total
     EXPECT_EQ(v.total, 33);
@@ -570,12 +777,20 @@ TEST(QA_GDB102, RollbackStmtDefaults) {
 TEST(QA_GDB102, BinaryOpAllValues) {
     // Verify all 14 binary ops are distinct
     std::vector<BinaryOp> ops = {
-        BinaryOp::ADD, BinaryOp::SUBTRACT, BinaryOp::MULTIPLY,
-        BinaryOp::DIVIDE, BinaryOp::MODULO,
-        BinaryOp::EQUAL, BinaryOp::NOT_EQUAL,
-        BinaryOp::LESS, BinaryOp::GREATER,
-        BinaryOp::LESS_EQUAL, BinaryOp::GREATER_EQUAL,
-        BinaryOp::AND, BinaryOp::OR, BinaryOp::CONCAT,
+        BinaryOp::ADD,
+        BinaryOp::SUBTRACT,
+        BinaryOp::MULTIPLY,
+        BinaryOp::DIVIDE,
+        BinaryOp::MODULO,
+        BinaryOp::EQUAL,
+        BinaryOp::NOT_EQUAL,
+        BinaryOp::LESS,
+        BinaryOp::GREATER,
+        BinaryOp::LESS_EQUAL,
+        BinaryOp::GREATER_EQUAL,
+        BinaryOp::AND,
+        BinaryOp::OR,
+        BinaryOp::CONCAT,
     };
 
     // Each should be unique
@@ -588,8 +803,13 @@ TEST(QA_GDB102, BinaryOpAllValues) {
 
 TEST(QA_GDB102, JoinTypeAllValues) {
     std::vector<JoinType> types = {
-        JoinType::INNER, JoinType::LEFT, JoinType::RIGHT,
-        JoinType::FULL, JoinType::CROSS, JoinType::SEMI, JoinType::ANTI,
+        JoinType::INNER,
+        JoinType::LEFT,
+        JoinType::RIGHT,
+        JoinType::FULL,
+        JoinType::CROSS,
+        JoinType::SEMI,
+        JoinType::ANTI,
     };
     for (size_t i = 0; i < types.size(); ++i) {
         for (size_t j = i + 1; j < types.size(); ++j) {
@@ -600,11 +820,18 @@ TEST(QA_GDB102, JoinTypeAllValues) {
 
 TEST(QA_GDB102, ShowTargetAllValues) {
     std::vector<ShowTarget> targets = {
-        ShowTarget::DATABASES, ShowTarget::TABLES, ShowTarget::COLUMNS,
-        ShowTarget::EDGE_TYPES, ShowTarget::INDEXES, ShowTarget::EMBEDDINGS,
-        ShowTarget::PROVIDERS, ShowTarget::REPLICATION_SLOTS,
-        ShowTarget::REPLICATION_STATUS, ShowTarget::STANDBY_STATUS,
-        ShowTarget::PARAMETER, ShowTarget::ALL,
+        ShowTarget::DATABASES,
+        ShowTarget::TABLES,
+        ShowTarget::COLUMNS,
+        ShowTarget::EDGE_TYPES,
+        ShowTarget::INDEXES,
+        ShowTarget::EMBEDDINGS,
+        ShowTarget::PROVIDERS,
+        ShowTarget::REPLICATION_SLOTS,
+        ShowTarget::REPLICATION_STATUS,
+        ShowTarget::STANDBY_STATUS,
+        ShowTarget::PARAMETER,
+        ShowTarget::ALL,
     };
     for (size_t i = 0; i < targets.size(); ++i) {
         for (size_t j = i + 1; j < targets.size(); ++j) {
@@ -615,8 +842,11 @@ TEST(QA_GDB102, ShowTargetAllValues) {
 
 TEST(QA_GDB102, LiteralKindAllValues) {
     std::vector<LiteralKind> kinds = {
-        LiteralKind::INTEGER, LiteralKind::FLOAT, LiteralKind::STRING,
-        LiteralKind::BOOLEAN, LiteralKind::NULL_LITERAL,
+        LiteralKind::INTEGER,
+        LiteralKind::FLOAT,
+        LiteralKind::STRING,
+        LiteralKind::BOOLEAN,
+        LiteralKind::NULL_LITERAL,
     };
     for (size_t i = 0; i < kinds.size(); ++i) {
         for (size_t j = i + 1; j < kinds.size(); ++j) {
@@ -660,7 +890,9 @@ TEST(QA_GDB102, TableConstraintKindAllValues) {
 
 TEST(QA_GDB102, NearestMetricAllValues) {
     std::vector<NearestMetric> metrics = {
-        NearestMetric::COSINE, NearestMetric::L2, NearestMetric::DOT,
+        NearestMetric::COSINE,
+        NearestMetric::L2,
+        NearestMetric::DOT,
     };
     for (size_t i = 0; i < metrics.size(); ++i) {
         for (size_t j = i + 1; j < metrics.size(); ++j) {
@@ -1047,8 +1279,11 @@ TEST(QA_GDB102, MultipleJoinsOnSelect) {
 
     // Add 5 joins of different types
     JoinType types[] = {
-        JoinType::INNER, JoinType::LEFT, JoinType::RIGHT,
-        JoinType::FULL, JoinType::CROSS,
+        JoinType::INNER,
+        JoinType::LEFT,
+        JoinType::RIGHT,
+        JoinType::FULL,
+        JoinType::CROSS,
     };
 
     for (int i = 0; i < 5; ++i) {
@@ -1181,11 +1416,18 @@ TEST(QA_GDB102, TraverseAllDirections) {
 TEST(QA_GDB102, ShowTargetAllVariants) {
     // Construct ShowStmt for each target type
     ShowTarget targets[] = {
-        ShowTarget::DATABASES, ShowTarget::TABLES, ShowTarget::COLUMNS,
-        ShowTarget::EDGE_TYPES, ShowTarget::INDEXES, ShowTarget::EMBEDDINGS,
-        ShowTarget::PROVIDERS, ShowTarget::REPLICATION_SLOTS,
-        ShowTarget::REPLICATION_STATUS, ShowTarget::STANDBY_STATUS,
-        ShowTarget::PARAMETER, ShowTarget::ALL,
+        ShowTarget::DATABASES,
+        ShowTarget::TABLES,
+        ShowTarget::COLUMNS,
+        ShowTarget::EDGE_TYPES,
+        ShowTarget::INDEXES,
+        ShowTarget::EMBEDDINGS,
+        ShowTarget::PROVIDERS,
+        ShowTarget::REPLICATION_SLOTS,
+        ShowTarget::REPLICATION_STATUS,
+        ShowTarget::STANDBY_STATUS,
+        ShowTarget::PARAMETER,
+        ShowTarget::ALL,
     };
 
     for (auto t : targets) {

@@ -9,6 +9,7 @@
 #include "giodb/parser/parser.h"
 
 #include <gtest/gtest.h>
+
 #include <string>
 
 using namespace giodb;
@@ -117,9 +118,8 @@ TEST(QA_GDB_106_Traverse, FetchFlag) {
 }
 
 TEST(QA_GDB_106_Traverse, AllOptions) {
-    auto stmt = parse_one(
-        "TRAVERSE follows FROM users(42) DIRECTION BOTH MAX_DEPTH 10 "
-        "WHERE depth > 0 FETCH");
+    auto stmt = parse_one("TRAVERSE follows FROM users(42) DIRECTION BOTH MAX_DEPTH 10 "
+                          "WHERE depth > 0 FETCH");
     auto* t = dynamic_cast<TraverseStmt*>(stmt.get());
     ASSERT_NE(t, nullptr);
     EXPECT_EQ(t->edge_type, "follows");
@@ -190,8 +190,7 @@ TEST(QA_GDB_106_Traverse, DirectionAfterMaxDepth) {
     // reversing should leave MAX_DEPTH as unparsed trailing tokens.
     // With parse() (single statement), trailing tokens are not validated.
     // Let's just verify the correct order works.
-    auto stmt = parse_one(
-        "TRAVERSE follows FROM users(1) DIRECTION IN MAX_DEPTH 3");
+    auto stmt = parse_one("TRAVERSE follows FROM users(1) DIRECTION IN MAX_DEPTH 3");
     auto* t = dynamic_cast<TraverseStmt*>(stmt.get());
     ASSERT_NE(t, nullptr);
     EXPECT_EQ(t->direction, TraverseDirection::IN);
@@ -204,8 +203,7 @@ TEST(QA_GDB_106_Traverse, DirectionAfterMaxDepth) {
 // ---------------------------------------------------------------------------
 
 TEST(QA_GDB_106_Nearest, BasicNearest) {
-    auto stmt = parse_one(
-        "NEAREST 5 FROM products.embedding TO [1.0, 2.0, 3.0]");
+    auto stmt = parse_one("NEAREST 5 FROM products.embedding TO [1.0, 2.0, 3.0]");
     ASSERT_NE(stmt, nullptr);
     auto* n = dynamic_cast<NearestStmt*>(stmt.get());
     ASSERT_NE(n, nullptr);
@@ -217,8 +215,7 @@ TEST(QA_GDB_106_Nearest, BasicNearest) {
 }
 
 TEST(QA_GDB_106_Nearest, WithTextTarget) {
-    auto stmt = parse_one(
-        "NEAREST 10 FROM docs.embed TO 'machine learning'");
+    auto stmt = parse_one("NEAREST 10 FROM docs.embed TO 'machine learning'");
     auto* n = dynamic_cast<NearestStmt*>(stmt.get());
     ASSERT_NE(n, nullptr);
     auto* lit = dynamic_cast<LiteralExpr*>(n->target.get());
@@ -227,40 +224,35 @@ TEST(QA_GDB_106_Nearest, WithTextTarget) {
 }
 
 TEST(QA_GDB_106_Nearest, UsingCosine) {
-    auto stmt = parse_one(
-        "NEAREST 5 FROM t.col TO [1.0] USING COSINE");
+    auto stmt = parse_one("NEAREST 5 FROM t.col TO [1.0] USING COSINE");
     auto* n = dynamic_cast<NearestStmt*>(stmt.get());
     ASSERT_NE(n, nullptr);
     EXPECT_EQ(n->metric, NearestMetric::COSINE);
 }
 
 TEST(QA_GDB_106_Nearest, UsingL2) {
-    auto stmt = parse_one(
-        "NEAREST 5 FROM t.col TO [1.0] USING L2");
+    auto stmt = parse_one("NEAREST 5 FROM t.col TO [1.0] USING L2");
     auto* n = dynamic_cast<NearestStmt*>(stmt.get());
     ASSERT_NE(n, nullptr);
     EXPECT_EQ(n->metric, NearestMetric::L2);
 }
 
 TEST(QA_GDB_106_Nearest, UsingDot) {
-    auto stmt = parse_one(
-        "NEAREST 5 FROM t.col TO [1.0] USING DOT");
+    auto stmt = parse_one("NEAREST 5 FROM t.col TO [1.0] USING DOT");
     auto* n = dynamic_cast<NearestStmt*>(stmt.get());
     ASSERT_NE(n, nullptr);
     EXPECT_EQ(n->metric, NearestMetric::DOT);
 }
 
 TEST(QA_GDB_106_Nearest, WithWhere) {
-    auto stmt = parse_one(
-        "NEAREST 5 FROM t.col TO [1.0] WHERE active = true");
+    auto stmt = parse_one("NEAREST 5 FROM t.col TO [1.0] WHERE active = true");
     auto* n = dynamic_cast<NearestStmt*>(stmt.get());
     ASSERT_NE(n, nullptr);
     EXPECT_NE(n->where_expr, nullptr);
 }
 
 TEST(QA_GDB_106_Nearest, WithWhereAndUsing) {
-    auto stmt = parse_one(
-        "NEAREST 5 FROM t.col TO [1.0] WHERE active = true USING L2");
+    auto stmt = parse_one("NEAREST 5 FROM t.col TO [1.0] WHERE active = true USING L2");
     auto* n = dynamic_cast<NearestStmt*>(stmt.get());
     ASSERT_NE(n, nullptr);
     EXPECT_NE(n->where_expr, nullptr);
@@ -268,9 +260,8 @@ TEST(QA_GDB_106_Nearest, WithWhereAndUsing) {
 }
 
 TEST(QA_GDB_106_Nearest, WithinTraverse) {
-    auto stmt = parse_one(
-        "NEAREST 5 FROM products.embedding TO 'laptop' "
-        "WITHIN TRAVERSE similar FROM products(1)");
+    auto stmt = parse_one("NEAREST 5 FROM products.embedding TO 'laptop' "
+                          "WITHIN TRAVERSE similar FROM products(1)");
     auto* n = dynamic_cast<NearestStmt*>(stmt.get());
     ASSERT_NE(n, nullptr);
     ASSERT_NE(n->within_traverse, nullptr);
@@ -281,9 +272,8 @@ TEST(QA_GDB_106_Nearest, WithinTraverse) {
 }
 
 TEST(QA_GDB_106_Nearest, WithinTraverseWithDirection) {
-    auto stmt = parse_one(
-        "NEAREST 5 FROM t.col TO 'x' "
-        "WITHIN TRAVERSE e FROM t(1) DIRECTION BOTH");
+    auto stmt = parse_one("NEAREST 5 FROM t.col TO 'x' "
+                          "WITHIN TRAVERSE e FROM t(1) DIRECTION BOTH");
     auto* n = dynamic_cast<NearestStmt*>(stmt.get());
     ASSERT_NE(n, nullptr);
     auto* trav = dynamic_cast<TraverseStmt*>(n->within_traverse.get());
@@ -292,9 +282,8 @@ TEST(QA_GDB_106_Nearest, WithinTraverseWithDirection) {
 }
 
 TEST(QA_GDB_106_Nearest, WithinTraverseWithMaxDepth) {
-    auto stmt = parse_one(
-        "NEAREST 5 FROM t.col TO 'x' "
-        "WITHIN TRAVERSE e FROM t(1) MAX_DEPTH 3");
+    auto stmt = parse_one("NEAREST 5 FROM t.col TO 'x' "
+                          "WITHIN TRAVERSE e FROM t(1) MAX_DEPTH 3");
     auto* n = dynamic_cast<NearestStmt*>(stmt.get());
     ASSERT_NE(n, nullptr);
     auto* trav = dynamic_cast<TraverseStmt*>(n->within_traverse.get());
@@ -304,10 +293,9 @@ TEST(QA_GDB_106_Nearest, WithinTraverseWithMaxDepth) {
 }
 
 TEST(QA_GDB_106_Nearest, WithinTraverseAndWhereAndUsing) {
-    auto stmt = parse_one(
-        "NEAREST 10 FROM products.embed TO [1.0, 2.0] "
-        "WITHIN TRAVERSE related FROM products(42) DIRECTION IN MAX_DEPTH 2 "
-        "WHERE price < 100 USING DOT");
+    auto stmt = parse_one("NEAREST 10 FROM products.embed TO [1.0, 2.0] "
+                          "WITHIN TRAVERSE related FROM products(42) DIRECTION IN MAX_DEPTH 2 "
+                          "WHERE price < 100 USING DOT");
     auto* n = dynamic_cast<NearestStmt*>(stmt.get());
     ASSERT_NE(n, nullptr);
     ASSERT_NE(n->within_traverse, nullptr);
@@ -337,13 +325,11 @@ TEST(QA_GDB_106_Nearest, MissingTo) {
 }
 
 TEST(QA_GDB_106_Nearest, InvalidMetric) {
-    expect_parse_error(
-        "NEAREST 5 FROM t.col TO [1.0] USING MANHATTAN");
+    expect_parse_error("NEAREST 5 FROM t.col TO [1.0] USING MANHATTAN");
 }
 
 TEST(QA_GDB_106_Nearest, WithinWithoutTraverse) {
-    expect_parse_error(
-        "NEAREST 5 FROM t.col TO 'x' WITHIN e FROM t(1)");
+    expect_parse_error("NEAREST 5 FROM t.col TO 'x' WITHIN e FROM t(1)");
 }
 
 // ---------------------------------------------------------------------------
@@ -472,9 +458,8 @@ TEST(QA_GDB_106_Match, BareEdgeWithBracketsNonDirectional) {
 }
 
 TEST(QA_GDB_106_Match, ThreeNodePath) {
-    auto stmt = parse_one(
-        "MATCH (a:Person)-[:KNOWS]->(b:Person)-[:WORKS_AT]->(c:Company) "
-        "RETURN a, c");
+    auto stmt = parse_one("MATCH (a:Person)-[:KNOWS]->(b:Person)-[:WORKS_AT]->(c:Company) "
+                          "RETURN a, c");
     auto* m = dynamic_cast<MatchStmt*>(stmt.get());
     ASSERT_NE(m, nullptr);
     ASSERT_EQ(m->pattern.size(), 3);
@@ -494,16 +479,14 @@ TEST(QA_GDB_106_Match, ThreeNodePath) {
 }
 
 TEST(QA_GDB_106_Match, WithWhere) {
-    auto stmt = parse_one(
-        "MATCH (a:Person)-[:KNOWS]->(b) WHERE a.age > 30 RETURN a, b");
+    auto stmt = parse_one("MATCH (a:Person)-[:KNOWS]->(b) WHERE a.age > 30 RETURN a, b");
     auto* m = dynamic_cast<MatchStmt*>(stmt.get());
     ASSERT_NE(m, nullptr);
     EXPECT_NE(m->where_expr, nullptr);
 }
 
 TEST(QA_GDB_106_Match, MultipleReturnItems) {
-    auto stmt = parse_one(
-        "MATCH (a)-[r:LIKES]->(b) RETURN a, r, b, a.name AS n");
+    auto stmt = parse_one("MATCH (a)-[r:LIKES]->(b) RETURN a, r, b, a.name AS n");
     auto* m = dynamic_cast<MatchStmt*>(stmt.get());
     ASSERT_NE(m, nullptr);
     EXPECT_EQ(m->return_items.size(), 4);
@@ -539,8 +522,7 @@ TEST(QA_GDB_106_Match, MissingEdgeBracketClose) {
 // ---------------------------------------------------------------------------
 
 TEST(QA_GDB_106_ShortestPath, Basic) {
-    auto stmt = parse_one(
-        "SHORTEST PATH FROM users(1) TO users(10) VIA follows");
+    auto stmt = parse_one("SHORTEST PATH FROM users(1) TO users(10) VIA follows");
     ASSERT_NE(stmt, nullptr);
     auto* sp = dynamic_cast<ShortestPathStmt*>(stmt.get());
     ASSERT_NE(sp, nullptr);
@@ -552,16 +534,14 @@ TEST(QA_GDB_106_ShortestPath, Basic) {
 }
 
 TEST(QA_GDB_106_ShortestPath, WithDirection) {
-    auto stmt = parse_one(
-        "SHORTEST PATH FROM a(1) TO b(2) VIA e DIRECTION BOTH");
+    auto stmt = parse_one("SHORTEST PATH FROM a(1) TO b(2) VIA e DIRECTION BOTH");
     auto* sp = dynamic_cast<ShortestPathStmt*>(stmt.get());
     ASSERT_NE(sp, nullptr);
     EXPECT_EQ(sp->direction, TraverseDirection::BOTH);
 }
 
 TEST(QA_GDB_106_ShortestPath, WithMaxDepth) {
-    auto stmt = parse_one(
-        "SHORTEST PATH FROM a(1) TO b(2) VIA e MAX_DEPTH 7");
+    auto stmt = parse_one("SHORTEST PATH FROM a(1) TO b(2) VIA e MAX_DEPTH 7");
     auto* sp = dynamic_cast<ShortestPathStmt*>(stmt.get());
     ASSERT_NE(sp, nullptr);
     ASSERT_TRUE(sp->max_depth.has_value());
@@ -569,9 +549,8 @@ TEST(QA_GDB_106_ShortestPath, WithMaxDepth) {
 }
 
 TEST(QA_GDB_106_ShortestPath, AllOptions) {
-    auto stmt = parse_one(
-        "SHORTEST PATH FROM users(1) TO users(99) VIA knows "
-        "DIRECTION IN MAX_DEPTH 20");
+    auto stmt = parse_one("SHORTEST PATH FROM users(1) TO users(99) VIA knows "
+                          "DIRECTION IN MAX_DEPTH 20");
     auto* sp = dynamic_cast<ShortestPathStmt*>(stmt.get());
     ASSERT_NE(sp, nullptr);
     EXPECT_EQ(sp->from_table, "users");
@@ -583,8 +562,7 @@ TEST(QA_GDB_106_ShortestPath, AllOptions) {
 }
 
 TEST(QA_GDB_106_ShortestPath, ExpressionKeys) {
-    auto stmt = parse_one(
-        "SHORTEST PATH FROM t(1 + 1) TO t(2 * 3) VIA e");
+    auto stmt = parse_one("SHORTEST PATH FROM t(1 + 1) TO t(2 * 3) VIA e");
     auto* sp = dynamic_cast<ShortestPathStmt*>(stmt.get());
     ASSERT_NE(sp, nullptr);
     EXPECT_NE(dynamic_cast<BinaryExpr*>(sp->from_key.get()), nullptr);
@@ -592,8 +570,7 @@ TEST(QA_GDB_106_ShortestPath, ExpressionKeys) {
 }
 
 TEST(QA_GDB_106_ShortestPath, DifferentTables) {
-    auto stmt = parse_one(
-        "SHORTEST PATH FROM airports('JFK') TO airports('LAX') VIA routes");
+    auto stmt = parse_one("SHORTEST PATH FROM airports('JFK') TO airports('LAX') VIA routes");
     auto* sp = dynamic_cast<ShortestPathStmt*>(stmt.get());
     ASSERT_NE(sp, nullptr);
     EXPECT_EQ(sp->from_table, "airports");
@@ -979,8 +956,7 @@ TEST(QA_GDB_106_Explain, AnalyzeFormatJson) {
 }
 
 TEST(QA_GDB_106_Explain, ExplainInsert) {
-    auto stmt = parse_one(
-        "EXPLAIN INSERT INTO t (a) VALUES (1)");
+    auto stmt = parse_one("EXPLAIN INSERT INTO t (a) VALUES (1)");
     auto* e = dynamic_cast<ExplainStmt*>(stmt.get());
     ASSERT_NE(e, nullptr);
     EXPECT_NE(dynamic_cast<InsertStmt*>(e->statement.get()), nullptr);

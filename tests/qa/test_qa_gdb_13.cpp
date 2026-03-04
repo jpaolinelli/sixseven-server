@@ -307,9 +307,14 @@ TEST(QA_Page, RawBytesRoundTrip) {
 
 TEST(QA_Page, AllPageTypes) {
     const PageType types[] = {
-        PageType::DATA,          PageType::BTREE_INTERNAL, PageType::BTREE_LEAF,
-        PageType::OVERFLOW_PAGE, PageType::FREE_LIST,      PageType::HNSW_NODE,
-        PageType::HNSW_META,     PageType::HNSW_VECTOR_DATA,
+        PageType::DATA,
+        PageType::BTREE_INTERNAL,
+        PageType::BTREE_LEAF,
+        PageType::OVERFLOW_PAGE,
+        PageType::FREE_LIST,
+        PageType::HNSW_NODE,
+        PageType::HNSW_META,
+        PageType::HNSW_VECTOR_DATA,
     };
     for (auto t : types) {
         Page page(0, t);
@@ -827,8 +832,11 @@ TEST(QA_Overflow, FreeAndRestore) {
 // --- All-zeros data round-trip at multiple sizes ---------------------------
 
 TEST(QA_Overflow, AllZerosAtVariousSizes) {
-    const size_t sizes[] = {1, overflow_threshold + 1, overflow_chunk_capacity,
-                            overflow_chunk_capacity * 3, 1024 * 1024};
+    const size_t sizes[] = {1,
+                            overflow_threshold + 1,
+                            overflow_chunk_capacity,
+                            overflow_chunk_capacity * 3,
+                            1024 * 1024};
 
     for (size_t sz : sizes) {
         InMemoryPageAllocator alloc;

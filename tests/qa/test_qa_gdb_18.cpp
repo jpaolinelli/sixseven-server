@@ -396,7 +396,8 @@ TEST(QA_Catalog, StressCreateManyTables) {
     for (int i = 0; i < N; ++i) {
         auto result =
             catalog.create_table(default_database_id, make_test_schema("t" + std::to_string(i)));
-        ASSERT_TRUE(result.has_value()) << "Failed at table " << i << ": " << result.error().message;
+        ASSERT_TRUE(result.has_value())
+            << "Failed at table " << i << ": " << result.error().message;
     }
 
     auto tables = catalog.list_tables(default_database_id);

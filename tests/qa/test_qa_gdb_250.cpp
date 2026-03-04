@@ -33,7 +33,6 @@ ExprPtr fn_call(const std::string& name) {
     return e;
 }
 
-
 static BoundStatement empty_bound() {
     return BoundStatement{};
 }
@@ -64,7 +63,8 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         if (!result.has_value()) {
-            ADD_FAILURE() << "exec_ok failed for: " << sql << "\n  error: " << result.error().message;
+            ADD_FAILURE() << "exec_ok failed for: " << sql
+                          << "\n  error: " << result.error().message;
             return QueryResult{};
         }
         return std::move(*result);
@@ -75,9 +75,8 @@ protected:
         EXPECT_FALSE(result.has_value()) << "expected error but got success for: " << sql;
         if (!result.has_value()) {
             EXPECT_EQ(result.error().code, expected)
-                << "expected " << static_cast<int>(expected)
-                << " but got " << static_cast<int>(result.error().code)
-                << ": " << result.error().message;
+                << "expected " << static_cast<int>(expected) << " but got "
+                << static_cast<int>(result.error().code) << ": " << result.error().message;
         }
     }
 
@@ -368,7 +367,7 @@ TEST_F(QA_GDB250, ComplexMixOfDefaultsAndNulls) {
     exec_ok("CREATE TABLE complex ("
             "  id UUID DEFAULT gen_uuid(),"
             "  name TEXT NOT NULL,"
-            "  bio TEXT,"                           // nullable, no default -> NULL
+            "  bio TEXT," // nullable, no default -> NULL
             "  score INT DEFAULT 0,"
             "  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
             ")");
@@ -382,9 +381,9 @@ TEST_F(QA_GDB250, ComplexMixOfDefaultsAndNulls) {
     EXPECT_FALSE(qr.rows[0][0].is_null()); // id: UUID default
     EXPECT_EQ(qr.rows[0][0].type_id(), TypeId::UUID);
     EXPECT_EQ(qr.rows[0][1].as_string(), "Alice");
-    EXPECT_TRUE(qr.rows[0][2].is_null()); // bio: nullable, no default
+    EXPECT_TRUE(qr.rows[0][2].is_null());   // bio: nullable, no default
     EXPECT_EQ(qr.rows[0][3].as_int32(), 0); // score: default 0
-    EXPECT_FALSE(qr.rows[0][4].is_null()); // created_at: CURRENT_TIMESTAMP default
+    EXPECT_FALSE(qr.rows[0][4].is_null());  // created_at: CURRENT_TIMESTAMP default
     EXPECT_EQ(qr.rows[0][4].type_id(), TypeId::TIMESTAMP);
 }
 
@@ -440,8 +439,7 @@ TEST_F(QA_GDB250, ErrorOnMissingNonNullableWithNoDefault) {
             ")");
 
     // Omit email — non-nullable, no default → must error.
-    exec_error("INSERT INTO strict (id, name) VALUES (1, 'Alice')",
-               StatusCode::INVALID_ARGUMENT);
+    exec_error("INSERT INTO strict (id, name) VALUES (1, 'Alice')", StatusCode::INVALID_ARGUMENT);
 }
 
 TEST_F(QA_GDB250, ErrorOnMissingMultipleNonNullableColumns) {
@@ -453,8 +451,7 @@ TEST_F(QA_GDB250, ErrorOnMissingMultipleNonNullableColumns) {
             ")");
 
     // Only provide id — all of a, b, c are missing.
-    exec_error("INSERT INTO multi_strict (id) VALUES (1)",
-               StatusCode::INVALID_ARGUMENT);
+    exec_error("INSERT INTO multi_strict (id) VALUES (1)", StatusCode::INVALID_ARGUMENT);
 }
 
 // =============================================================================

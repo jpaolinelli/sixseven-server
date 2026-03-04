@@ -420,8 +420,7 @@ TEST_F(QA_WindowFunction, NtileBuckets1AllInSameBucket) {
     ASSERT_EQ(rows.size(), 3u);
 
     for (auto& row : rows) {
-        EXPECT_EQ(win_col(row, 3, 0).as_int64(), 1)
-            << "NTILE(1) should put all rows in bucket 1";
+        EXPECT_EQ(win_col(row, 3, 0).as_int64(), 1) << "NTILE(1) should put all rows in bucket 1";
     }
 }
 
@@ -625,8 +624,7 @@ TEST_F(QA_WindowFunction, NullPartitionKeysGroupTogether) {
     // eng partition should have 1 row -> COUNT=1.
     for (auto& row : rows) {
         if (row.values[0].is_null()) {
-            EXPECT_EQ(win_col(row, 3, 0).as_int64(), 2)
-                << "NULL partition should group together";
+            EXPECT_EQ(win_col(row, 3, 0).as_int64(), 2) << "NULL partition should group together";
         } else {
             EXPECT_EQ(win_col(row, 3, 0).as_int64(), 1);
         }
@@ -661,7 +659,7 @@ TEST_F(QA_WindowFunction, DescOrderByAffectsRanking) {
     for (auto& row : rows) {
         if (row.values[2].as_int32() == 120) {
             EXPECT_EQ(win_col(row, 3, 0).as_int64(), 1); // ROW_NUMBER
-            EXPECT_TRUE(win_col(row, 3, 1).is_null());    // LAG = NULL (first in desc)
+            EXPECT_TRUE(win_col(row, 3, 1).is_null());   // LAG = NULL (first in desc)
         }
         if (row.values[2].as_int32() == 110) {
             EXPECT_EQ(win_col(row, 3, 0).as_int64(), 2);
@@ -977,8 +975,7 @@ TEST_F(QA_WindowFunction, MultipleWindowFunctionsDifferentFrames) {
 
     // Single row SUM = own salary.
     for (auto& row : rows) {
-        EXPECT_EQ(win_col(row, 3, 1).as_int64(),
-                  static_cast<int64_t>(row.values[2].as_int32()));
+        EXPECT_EQ(win_col(row, 3, 1).as_int64(), static_cast<int64_t>(row.values[2].as_int32()));
     }
 
     // ROW_NUMBER 1-3.

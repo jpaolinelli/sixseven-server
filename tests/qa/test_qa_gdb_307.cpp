@@ -347,17 +347,17 @@ TEST_F(QA_GDB307_LinkKeyCoercion, LinkUnlinkRelinkUuid) {
 
     // LINK
     auto r1 = exec_ok("LINK people('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
-                       "TO people('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA follows");
+                      "TO people('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA follows");
     EXPECT_EQ(r1.affected_rows, 1);
 
     // UNLINK
     auto r2 = exec_ok("UNLINK people('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
-                       "FROM people('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA follows");
+                      "FROM people('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA follows");
     EXPECT_EQ(r2.affected_rows, 1);
 
     // Re-LINK
     auto r3 = exec_ok("LINK people('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
-                       "TO people('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA follows");
+                      "TO people('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA follows");
     EXPECT_EQ(r3.affected_rows, 1);
 }
 
@@ -374,16 +374,16 @@ TEST_F(QA_GDB307_LinkKeyCoercion, StressManyUuidLinks) {
         char buf[64];
         snprintf(buf, sizeof(buf), "%08x-0000-0000-0000-%012x", i, i);
         uuids.emplace_back(buf);
-        exec_ok("INSERT INTO people VALUES ('" + uuids.back() + "', 'Node" +
-                std::to_string(i) + "')");
+        exec_ok("INSERT INTO people VALUES ('" + uuids.back() + "', 'Node" + std::to_string(i) +
+                "')");
     }
 
     exec_ok("CREATE EDGE TYPE knows FROM people TO people");
 
     // Create a chain of edges: 0→1, 1→2, ..., 18→19.
     for (int i = 0; i < 19; ++i) {
-        auto r = exec_ok("LINK people('" + uuids[i] + "') TO people('" + uuids[i + 1] +
-                         "') VIA knows");
+        auto r =
+            exec_ok("LINK people('" + uuids[i] + "') TO people('" + uuids[i + 1] + "') VIA knows");
         EXPECT_EQ(r.affected_rows, 1) << "LINK failed at i=" << i;
     }
 
@@ -416,9 +416,9 @@ TEST_F(QA_GDB307_LinkKeyCoercion, TraverseAfterUuidLink) {
 
     // TRAVERSE OUT from Alice should find Bob and Charlie.
     auto qr = exec_ok("SELECT name, __depth "
-                       "FROM TRAVERSE follows "
-                       "FROM people('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
-                       "DIRECTION OUT");
+                      "FROM TRAVERSE follows "
+                      "FROM people('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
+                      "DIRECTION OUT");
     ASSERT_EQ(qr.rows.size(), 2u);
 
     std::vector<std::string> names;
@@ -482,9 +482,8 @@ TEST_F(QA_GDB307_LinkKeyCoercion, IntSourceUuidTarget) {
                         "TO employees('aabbccdd-1122-3344-5566-778899aabbcc') VIA has_member");
     EXPECT_EQ(link.affected_rows, 1);
 
-    auto unlink =
-        exec_ok("UNLINK departments(1) "
-                "FROM employees('aabbccdd-1122-3344-5566-778899aabbcc') VIA has_member");
+    auto unlink = exec_ok("UNLINK departments(1) "
+                          "FROM employees('aabbccdd-1122-3344-5566-778899aabbcc') VIA has_member");
     EXPECT_EQ(unlink.affected_rows, 1);
 }
 

@@ -167,6 +167,9 @@ Result<TokenizerConfig> load_tokenizer_config(const std::string& path) {
 
         if (norm.contains("type") && norm["type"].is_string()) {
             config.normalizer = parse_normalizer_type(norm["type"].get<std::string>(), lowercase);
+        } else {
+            // No type field: infer from the lowercase flag.
+            config.normalizer = lowercase ? NormalizerType::LOWERCASE : NormalizerType::NONE;
         }
     }
 

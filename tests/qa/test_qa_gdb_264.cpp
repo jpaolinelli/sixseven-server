@@ -635,8 +635,7 @@ TEST_F(QA_GDB264, PropertyTypeINT32) {
 }
 
 TEST_F(QA_GDB264, PropertyTypeSTRING) {
-    auto bound =
-        bind_ok("SELECT contains.note FROM TRAVERSE contains FROM users(1) DIRECTION OUT");
+    auto bound = bind_ok("SELECT contains.note FROM TRAVERSE contains FROM users(1) DIRECTION OUT");
     ASSERT_EQ(bound.output_columns.size(), 1u);
     EXPECT_EQ(bound.output_columns[0].type_id, TypeId::STRING);
 }
@@ -671,8 +670,8 @@ TEST_F(QA_GDB264, WhereExprWithNonMetaColumnFails) {
     // GDB-265 changed the WHERE scope to include enriched target table columns
     // (not just meta-columns).  "name" is a users column, so it now binds
     // successfully in the enriched scope.
-    auto bound = bind_ok(
-        "SELECT id FROM TRAVERSE follows FROM users(1) DIRECTION OUT WHERE name = 'alice'");
+    auto bound =
+        bind_ok("SELECT id FROM TRAVERSE follows FROM users(1) DIRECTION OUT WHERE name = 'alice'");
     ASSERT_EQ(bound.output_columns.size(), 1u);
     EXPECT_EQ(bound.output_columns[0].column_name, "id");
 }

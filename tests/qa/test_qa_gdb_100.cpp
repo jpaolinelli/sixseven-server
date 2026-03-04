@@ -47,7 +47,8 @@ protected:
     static std::vector<uint8_t> make_unique_tuple(size_t len, uint8_t id) {
         std::vector<uint8_t> data(len, id);
         // Embed id at the start for identification
-        if (len >= 1) data[0] = id;
+        if (len >= 1)
+            data[0] = id;
         return data;
     }
 
@@ -334,7 +335,8 @@ TEST_F(QA_GDB100, ScanSkipsDeletedAcrossPages) {
         auto& [rid, data] = *entry;
         EXPECT_EQ(data.size(), 200u);
         // The fill byte should be an odd number (even-indexed tuples were deleted)
-        EXPECT_TRUE(data[0] % 2 == 1) << "Expected odd fill byte, got " << static_cast<int>(data[0]);
+        EXPECT_TRUE(data[0] % 2 == 1)
+            << "Expected odd fill byte, got " << static_cast<int>(data[0]);
         ++count;
     }
     EXPECT_EQ(count, 50);

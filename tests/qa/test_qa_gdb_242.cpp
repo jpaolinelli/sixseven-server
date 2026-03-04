@@ -462,11 +462,10 @@ TEST(QA_GDB_242, LargeBatchWithBadEntryAtEnd) {
     for (size_t i = 0; i < batch_size; ++i) {
         if (i == batch_size - 1) {
             // Last entry has a non-numeric value.
-            data.push_back({{"embedding", nlohmann::json::array({"bad", 0.2f, 0.3f})},
-                            {"index", i}});
+            data.push_back(
+                {{"embedding", nlohmann::json::array({"bad", 0.2f, 0.3f})}, {"index", i}});
         } else {
-            data.push_back({{"embedding", std::vector<float>{0.1f, 0.2f, 0.3f}},
-                            {"index", i}});
+            data.push_back({{"embedding", std::vector<float>{0.1f, 0.2f, 0.3f}}, {"index", i}});
         }
     }
     auto response = nlohmann::json{{"data", data}}.dump();

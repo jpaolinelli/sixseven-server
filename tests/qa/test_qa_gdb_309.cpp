@@ -96,12 +96,10 @@ protected:
         }
         try {
             return v.as_int64();
-        } catch (...) {
-        }
+        } catch (...) {}
         try {
             return static_cast<int64_t>(v.as_int32());
-        } catch (...) {
-        }
+        } catch (...) {}
         ADD_FAILURE() << "value is not an integer";
         return 0;
     }
@@ -109,7 +107,8 @@ protected:
     /// Get column index by name, or -1 if not found.
     int col_idx(const QueryResult& qr, const std::string& name) const {
         for (size_t i = 0; i < qr.column_names.size(); ++i) {
-            if (qr.column_names[i] == name) return static_cast<int>(i);
+            if (qr.column_names[i] == name)
+                return static_cast<int>(i);
         }
         return -1;
     }
@@ -132,10 +131,9 @@ TEST_F(QA_GDB309_GraphViewToggle, UserScenario_SelectNameDepthWithOrderByLimit) 
     link(1, 2);
     link(1, 3);
 
-    auto qr = exec_ok(
-        "SELECT name, __depth "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH AS t "
-        "ORDER BY name LIMIT 10");
+    auto qr = exec_ok("SELECT name, __depth "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH AS t "
+                      "ORDER BY name LIMIT 10");
 
     // Server should return rows for discovered nodes (2 and 3).
     ASSERT_EQ(qr.rows.size(), 2u);
@@ -184,9 +182,8 @@ TEST_F(QA_GDB309_GraphViewToggle, SelectOnlyDepth_ReturnsDepthValues) {
     link(2, 3);
     link(3, 4);
 
-    auto qr = exec_ok(
-        "SELECT __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH "
-        "ORDER BY __depth");
+    auto qr = exec_ok("SELECT __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH "
+                      "ORDER BY __depth");
 
     ASSERT_EQ(qr.rows.size(), 3u);
     ASSERT_EQ(qr.column_names.size(), 1u);
@@ -206,9 +203,9 @@ TEST_F(QA_GDB309_GraphViewToggle, SelectOnlySource_ReturnsSourceValues) {
     link(1, 2);
     link(1, 3);
 
-    auto qr = exec_ok(
-        "SELECT name, __source FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH "
-        "ORDER BY name");
+    auto qr =
+        exec_ok("SELECT name, __source FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH "
+                "ORDER BY name");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     ASSERT_EQ(qr.column_names.size(), 2u);
@@ -229,9 +226,8 @@ TEST_F(QA_GDB309_GraphViewToggle, SelectOnlyNode_ReturnsNodePKs) {
     link(1, 2);
     link(1, 3);
 
-    auto qr = exec_ok(
-        "SELECT __node FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH "
-        "ORDER BY __node");
+    auto qr = exec_ok("SELECT __node FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH "
+                      "ORDER BY __node");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     ASSERT_EQ(qr.column_names.size(), 1u);
@@ -253,9 +249,8 @@ TEST_F(QA_GDB309_GraphViewToggle, ModeEdges_CorrectPosition_BeforeFetch) {
     link(1, 3);
 
     // MODE EDGES before WHERE and FETCH (correct position per grammar).
-    auto qr = exec_ok(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "MODE EDGES");
+    auto qr = exec_ok("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                      "MODE EDGES");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     EXPECT_TRUE(has_column(qr, "__from"));
@@ -268,9 +263,9 @@ TEST_F(QA_GDB309_GraphViewToggle, ModeEdges_WithOrderByAndLimit) {
     link(1, 3);
     link(2, 4);
 
-    auto qr = exec_ok(
-        "SELECT __from, __to, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "MODE EDGES ORDER BY __depth DESC LIMIT 2");
+    auto qr =
+        exec_ok("SELECT __from, __to, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                "MODE EDGES ORDER BY __depth DESC LIMIT 2");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     // Top 2 by depth DESC.
@@ -285,9 +280,9 @@ TEST_F(QA_GDB309_GraphViewToggle, ModeEdges_AfterOrderByLimit_Fails) {
     // This is what buildEdgeQuery produces: MODE EDGES after ORDER BY LIMIT.
     // The parser doesn't see MODE as a traverse keyword at this position —
     // it gets interpreted as an alias or column reference, causing a binding error.
-    auto result = engine_->execute(
-        "SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "ORDER BY __from LIMIT 10 MODE EDGES");
+    auto result =
+        engine_->execute("SELECT __from, __to FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                         "ORDER BY __from LIMIT 10 MODE EDGES");
 
     // The query should fail because MODE EDGES in this position is not recognized
     // as the traverse mode keyword.
@@ -302,9 +297,9 @@ TEST_F(QA_GDB309_GraphViewToggle, ModeEdges_AfterFetchAs_SilentlyIgnored) {
     // This is what buildEdgeQuery produces for the user's exact query.
     // MODE EDGES is placed after FETCH AS alias and ORDER BY — the server
     // accepts this but silently runs in NODE mode (not edge mode).
-    auto result = engine_->execute(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "FETCH AS t ORDER BY name LIMIT 10 MODE EDGES");
+    auto result =
+        engine_->execute("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                         "FETCH AS t ORDER BY name LIMIT 10 MODE EDGES");
 
     if (result.has_value()) {
         // If the query succeeds, it's running in node mode (not edge mode).
@@ -330,8 +325,7 @@ TEST_F(QA_GDB309_GraphViewToggle, ModeEdges_SelectStar_HasFromToDepth) {
     setup_users(2);
     link(1, 2);
 
-    auto qr = exec_ok(
-        "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    auto qr = exec_ok("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
 
     EXPECT_TRUE(has_column(qr, "__from"));
     EXPECT_TRUE(has_column(qr, "__to"));
@@ -355,9 +349,8 @@ TEST_F(QA_GDB309_GraphViewToggle, ModeEdges_SelectUserColumn_Error) {
 
     // 'name' is a table column, not available in edge-centric mode.
     // Edge mode schema is: __from, __to, __depth, [edge_properties...]
-    exec_error(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES",
-        StatusCode::NOT_FOUND);
+    exec_error("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES",
+               StatusCode::NOT_FOUND);
 }
 
 // ============================================================================
@@ -372,14 +365,12 @@ TEST_F(QA_GDB309_GraphViewToggle, DualQuery_NodeAndEdge_Consistent) {
     link(2, 4);
 
     // Node-centric query (what user runs).
-    auto nodes = exec_ok(
-        "SELECT name, __node, __depth, __source "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH ORDER BY __node");
+    auto nodes = exec_ok("SELECT name, __node, __depth, __source "
+                         "FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH ORDER BY __node");
 
     // Edge-centric query (what frontend should auto-generate).
-    auto edges = exec_ok(
-        "SELECT __from, __to, __depth "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    auto edges = exec_ok("SELECT __from, __to, __depth "
+                         "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
 
     // Node result: 3 nodes discovered (2, 3, 4).
     ASSERT_EQ(nodes.rows.size(), 3u);
@@ -417,9 +408,9 @@ TEST_F(QA_GDB309_GraphViewToggle, EmptyTraversal_IsolatedNode) {
     setup_users(1);
     // Node 1 has no edges.
 
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH "
-        "ORDER BY name LIMIT 10");
+    auto qr =
+        exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH "
+                "ORDER BY name LIMIT 10");
 
     EXPECT_TRUE(qr.rows.empty());
     // Columns should still be present even with 0 rows.
@@ -440,16 +431,14 @@ TEST_F(QA_GDB309_GraphViewToggle, EdgeProperties_InBothModes) {
     exec_ok("LINK people(1) TO people(2) VIA knows (weight = 0.75)");
 
     // Node mode SELECT * includes edge properties after meta-columns.
-    auto nodes = exec_ok(
-        "SELECT * FROM TRAVERSE knows FROM people(1) DIRECTION OUT FETCH");
+    auto nodes = exec_ok("SELECT * FROM TRAVERSE knows FROM people(1) DIRECTION OUT FETCH");
     EXPECT_TRUE(has_column(nodes, "__node"));
     EXPECT_TRUE(has_column(nodes, "__depth"));
     ASSERT_EQ(nodes.rows.size(), 1u);
 
     // Edge mode: weight column explicitly accessible.
-    auto edges = exec_ok(
-        "SELECT __from, __to, knows.weight "
-        "FROM TRAVERSE knows FROM people(1) DIRECTION OUT MODE EDGES");
+    auto edges = exec_ok("SELECT __from, __to, knows.weight "
+                         "FROM TRAVERSE knows FROM people(1) DIRECTION OUT MODE EDGES");
     EXPECT_TRUE(has_column(edges, "weight"));
     ASSERT_EQ(edges.rows.size(), 1u);
 
@@ -475,9 +464,9 @@ TEST_F(QA_GDB309_GraphViewToggle, Heterogeneous_SelectDepthOnly) {
     exec_ok("LINK authors(1) TO books(20) VIA wrote");
 
     // User selects only title and __depth — no __node.
-    auto qr = exec_ok(
-        "SELECT title, __depth FROM TRAVERSE wrote FROM authors(1) DIRECTION OUT FETCH "
-        "ORDER BY title");
+    auto qr =
+        exec_ok("SELECT title, __depth FROM TRAVERSE wrote FROM authors(1) DIRECTION OUT FETCH "
+                "ORDER BY title");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     ASSERT_EQ(qr.column_names.size(), 2u);
@@ -501,9 +490,9 @@ TEST_F(QA_GDB309_GraphViewToggle, DeepChain_DepthIncrements) {
         link(i, i + 1);
     }
 
-    auto qr = exec_ok(
-        "SELECT __depth, __node FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH "
-        "ORDER BY __depth");
+    auto qr =
+        exec_ok("SELECT __depth, __node FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH "
+                "ORDER BY __depth");
 
     ASSERT_EQ(qr.rows.size(), static_cast<size_t>(N));
 
@@ -529,16 +518,15 @@ TEST_F(QA_GDB309_GraphViewToggle, FetchAs_MetaColumnsStillAccessible) {
     link(1, 2);
 
     // FETCH AS t — the alias allows using table columns by name.
-    auto qr = exec_ok(
-        "SELECT name, __node, __depth, __source "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH AS t");
+    auto qr = exec_ok("SELECT name, __node, __depth, __source "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH AS t");
 
     ASSERT_EQ(qr.rows.size(), 1u);
     ASSERT_EQ(qr.column_names.size(), 4u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "User2");
-    EXPECT_EQ(get_int(qr.rows[0][1]), 2);  // __node
-    EXPECT_EQ(qr.rows[0][2].as_int64(), 1);  // __depth
-    EXPECT_EQ(get_int(qr.rows[0][3]), 1);  // __source (parent is 1)
+    EXPECT_EQ(get_int(qr.rows[0][1]), 2);   // __node
+    EXPECT_EQ(qr.rows[0][2].as_int64(), 1); // __depth
+    EXPECT_EQ(get_int(qr.rows[0][3]), 1);   // __source (parent is 1)
 }
 
 // ============================================================================
@@ -552,9 +540,9 @@ TEST_F(QA_GDB309_GraphViewToggle, WhereOnDepth_FiltersCorrectly) {
     link(3, 4);
     link(4, 5);
 
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH "
-        "WHERE __depth <= 2 ORDER BY __depth");
+    auto qr =
+        exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH "
+                "WHERE __depth <= 2 ORDER BY __depth");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "User2"); // depth 1
@@ -567,9 +555,9 @@ TEST_F(QA_GDB309_GraphViewToggle, WhereOnSource_FiltersCorrectly) {
     link(1, 3);
     link(2, 4);
 
-    auto qr = exec_ok(
-        "SELECT name, __source FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH "
-        "WHERE __source = 1 ORDER BY name");
+    auto qr =
+        exec_ok("SELECT name, __source FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH "
+                "WHERE __source = 1 ORDER BY name");
 
     // Only nodes directly reachable from node 1: User2 and User3.
     ASSERT_EQ(qr.rows.size(), 2u);
@@ -587,9 +575,9 @@ TEST_F(QA_GDB309_GraphViewToggle, SelectDepthAndSource_NoNode) {
     link(1, 2);
     link(2, 3);
 
-    auto qr = exec_ok(
-        "SELECT __depth, __source FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH "
-        "ORDER BY __depth");
+    auto qr =
+        exec_ok("SELECT __depth, __source FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH "
+                "ORDER BY __depth");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     ASSERT_EQ(qr.column_names.size(), 2u);
@@ -614,9 +602,9 @@ TEST_F(QA_GDB309_GraphViewToggle, DirectionBoth_SelectNameAndDepth) {
     link(1, 2);
     link(3, 1);
 
-    auto qr = exec_ok(
-        "SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION BOTH FETCH "
-        "ORDER BY name");
+    auto qr =
+        exec_ok("SELECT name, __depth FROM TRAVERSE follows FROM users(1) DIRECTION BOTH FETCH "
+                "ORDER BY name");
 
     // Discovers User2 (out) and User3 (in).
     ASSERT_EQ(qr.rows.size(), 2u);

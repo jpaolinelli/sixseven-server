@@ -66,11 +66,13 @@ public:
     explicit StubTokenizer(size_t max_seq = 64) : max_seq_(max_seq) {}
 
     [[nodiscard]] std::vector<int64_t> encode(const std::string& /*text*/,
-                                               size_t max_length) const override {
+                                              size_t max_length) const override {
         // Always returns [1, 2, 0, 0, ...] padded to max_length.
         std::vector<int64_t> tokens(max_length, 0);
-        if (max_length > 0) tokens[0] = 1;
-        if (max_length > 1) tokens[1] = 2;
+        if (max_length > 0)
+            tokens[0] = 1;
+        if (max_length > 1)
+            tokens[1] = 2;
         return tokens;
     }
 
@@ -228,10 +230,10 @@ TEST(QA_GDB318_Encode, ExactSizeNoTruncationNoPadding) {
     HashTokenizer tok;
     auto tokens = tok.encode("hello world", 4);
     ASSERT_EQ(tokens.size(), 4u);
-    EXPECT_EQ(tokens[0], 101); // CLS
+    EXPECT_EQ(tokens[0], 101);                         // CLS
     EXPECT_GE(tokens[1], HashTokenizer::VOCAB_OFFSET); // hello
     EXPECT_GE(tokens[2], HashTokenizer::VOCAB_OFFSET); // world
-    EXPECT_EQ(tokens[3], 102); // SEP
+    EXPECT_EQ(tokens[3], 102);                         // SEP
 }
 
 TEST(QA_GDB318_Encode, LargeMaxLength) {
@@ -406,7 +408,8 @@ TEST(QA_GDB318_Encode, AllWordTokensInValidRange) {
     for (size_t i = 1; i < sep_pos; ++i) {
         EXPECT_GE(tokens[i], HashTokenizer::VOCAB_OFFSET)
             << "word token at " << i << " below VOCAB_OFFSET";
-        EXPECT_LT(tokens[i], HashTokenizer::VOCAB_OFFSET + static_cast<int64_t>(HashTokenizer::VOCAB_SIZE))
+        EXPECT_LT(tokens[i],
+                  HashTokenizer::VOCAB_OFFSET + static_cast<int64_t>(HashTokenizer::VOCAB_SIZE))
             << "word token at " << i << " exceeds VOCAB_OFFSET + VOCAB_SIZE";
     }
 }
@@ -421,7 +424,8 @@ TEST(QA_GDB318_Encode, WordTokensNeverCollideWithSpecialTokens) {
     auto tokens = tok.encode(text, 120);
 
     for (size_t i = 1; i < tokens.size(); ++i) {
-        if (tokens[i] == 0 || tokens[i] == 102) continue; // PAD or SEP
+        if (tokens[i] == 0 || tokens[i] == 102)
+            continue; // PAD or SEP
         EXPECT_GE(tokens[i], HashTokenizer::VOCAB_OFFSET)
             << "token at " << i << " is in special token range";
     }
@@ -666,8 +670,8 @@ TEST(QA_GDB318_Stress, EncodeVeryLongText) {
     HashTokenizer tok;
     auto tokens = tok.encode(text, 128);
     ASSERT_EQ(tokens.size(), 128u);
-    EXPECT_EQ(tokens[0], 101);    // CLS
-    EXPECT_EQ(tokens[127], 102);  // SEP at end (truncation preserves it)
+    EXPECT_EQ(tokens[0], 101);   // CLS
+    EXPECT_EQ(tokens[127], 102); // SEP at end (truncation preserves it)
 }
 
 // ===========================================================================

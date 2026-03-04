@@ -59,8 +59,7 @@ TEST(QA_GDB104, InsertBasic) {
 }
 
 TEST(QA_GDB104, InsertMultipleRows) {
-    auto stmt = parse_one(
-        "INSERT INTO t (a, b) VALUES (1, 2), (3, 4), (5, 6)");
+    auto stmt = parse_one("INSERT INTO t (a, b) VALUES (1, 2), (3, 4), (5, 6)");
     auto* ins = dynamic_cast<InsertStmt*>(stmt.get());
     ASSERT_NE(ins, nullptr);
     EXPECT_EQ(ins->values.size(), 3u);
@@ -148,8 +147,7 @@ TEST(QA_GDB104, UpdateBasic) {
 }
 
 TEST(QA_GDB104, UpdateMultipleAssignments) {
-    auto stmt = parse_one(
-        "UPDATE t SET a = 1, b = 'hello', c = TRUE WHERE id > 0");
+    auto stmt = parse_one("UPDATE t SET a = 1, b = 'hello', c = TRUE WHERE id > 0");
     auto* upd = dynamic_cast<UpdateStmt*>(stmt.get());
     ASSERT_NE(upd, nullptr);
     EXPECT_EQ(upd->assignments.size(), 3u);
@@ -234,8 +232,7 @@ TEST(QA_GDB104, LinkBasic) {
 }
 
 TEST(QA_GDB104, LinkWithProperties) {
-    auto stmt = parse_one(
-        "LINK users(1) TO posts(10) VIA rated (score = 4.5, review = 'good')");
+    auto stmt = parse_one("LINK users(1) TO posts(10) VIA rated (score = 4.5, review = 'good')");
     auto* lnk = dynamic_cast<LinkStmt*>(stmt.get());
     ASSERT_NE(lnk, nullptr);
     EXPECT_EQ(lnk->properties.size(), 2u);
@@ -275,8 +272,7 @@ TEST(QA_GDB104, UnlinkBasic) {
 }
 
 TEST(QA_GDB104, UnlinkWithWhere) {
-    auto stmt = parse_one(
-        "UNLINK users(1) FROM posts(10) VIA rated WHERE score < 3");
+    auto stmt = parse_one("UNLINK users(1) FROM posts(10) VIA rated WHERE score < 3");
     auto* ulnk = dynamic_cast<UnlinkStmt*>(stmt.get());
     ASSERT_NE(ulnk, nullptr);
     EXPECT_NE(ulnk->where_expr, nullptr);
@@ -523,8 +519,8 @@ TEST(QA_GDB104, NotLike) {
 }
 
 TEST(QA_GDB104, CaseSearched) {
-    auto stmt = parse_one(
-        "SELECT CASE WHEN a > 0 THEN 'pos' WHEN a < 0 THEN 'neg' ELSE 'zero' END");
+    auto stmt =
+        parse_one("SELECT CASE WHEN a > 0 THEN 'pos' WHEN a < 0 THEN 'neg' ELSE 'zero' END");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* ce = dynamic_cast<CaseExpr*>(sel->items[0].expr.get());
@@ -535,8 +531,7 @@ TEST(QA_GDB104, CaseSearched) {
 }
 
 TEST(QA_GDB104, CaseSimple) {
-    auto stmt = parse_one(
-        "SELECT CASE status WHEN 1 THEN 'active' WHEN 0 THEN 'inactive' END");
+    auto stmt = parse_one("SELECT CASE status WHEN 1 THEN 'active' WHEN 0 THEN 'inactive' END");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* ce = dynamic_cast<CaseExpr*>(sel->items[0].expr.get());
@@ -786,8 +781,7 @@ TEST(QA_GDB104, ArrayLiteralNested) {
 // =============================================================================
 
 TEST(QA_GDB104, ComplexWhereClause) {
-    auto stmt = parse_one(
-        "SELECT a FROM t WHERE (a > 5 AND b < 10) OR c IS NOT NULL");
+    auto stmt = parse_one("SELECT a FROM t WHERE (a > 5 AND b < 10) OR c IS NOT NULL");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* or_expr = dynamic_cast<BinaryExpr*>(sel->where_expr.get());
@@ -796,8 +790,7 @@ TEST(QA_GDB104, ComplexWhereClause) {
 }
 
 TEST(QA_GDB104, BetweenInWhere) {
-    auto stmt = parse_one(
-        "SELECT * FROM t WHERE a BETWEEN 1 AND 10 AND b = 'x'");
+    auto stmt = parse_one("SELECT * FROM t WHERE a BETWEEN 1 AND 10 AND b = 'x'");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     // The AND between BETWEEN bounds should not interfere with outer AND.
@@ -818,8 +811,7 @@ TEST(QA_GDB104, DeeplyNestedParens) {
 }
 
 TEST(QA_GDB104, ExpressionInInsertValue) {
-    auto stmt = parse_one(
-        "INSERT INTO t (a) VALUES (CASE WHEN 1 > 0 THEN 'yes' ELSE 'no' END)");
+    auto stmt = parse_one("INSERT INTO t (a) VALUES (CASE WHEN 1 > 0 THEN 'yes' ELSE 'no' END)");
     auto* ins = dynamic_cast<InsertStmt*>(stmt.get());
     ASSERT_NE(ins, nullptr);
     auto* ce = dynamic_cast<CaseExpr*>(ins->values[0][0].get());
@@ -830,9 +822,12 @@ TEST(QA_GDB104, ComparisonAllOps) {
     // Test all 6 comparison operators parse correctly.
     const char* ops[] = {"=", "!=", "<", ">", "<=", ">="};
     BinaryOp expected[] = {
-        BinaryOp::EQUAL,      BinaryOp::NOT_EQUAL,
-        BinaryOp::LESS,       BinaryOp::GREATER,
-        BinaryOp::LESS_EQUAL, BinaryOp::GREATER_EQUAL,
+        BinaryOp::EQUAL,
+        BinaryOp::NOT_EQUAL,
+        BinaryOp::LESS,
+        BinaryOp::GREATER,
+        BinaryOp::LESS_EQUAL,
+        BinaryOp::GREATER_EQUAL,
     };
     for (int i = 0; i < 6; ++i) {
         std::string sql = std::string("SELECT a ") + ops[i] + " b";

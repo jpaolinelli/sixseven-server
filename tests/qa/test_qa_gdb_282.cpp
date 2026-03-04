@@ -41,7 +41,9 @@ protected:
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
 
         pool_ = std::make_unique<EmbeddingWorkerPool>(
-            EmbeddingWorkerConfig{.num_workers = 1, .max_batch_size = 32, .max_retries = 2,
+            EmbeddingWorkerConfig{.num_workers = 1,
+                                  .max_batch_size = 32,
+                                  .max_retries = 2,
                                   .base_backoff = std::chrono::milliseconds{10},
                                   .max_backoff = std::chrono::milliseconds{50}});
         pool_->register_provider("builtin/4", std::make_shared<BuiltinProvider>(4));
@@ -271,7 +273,8 @@ TEST_F(QA_GDB282, ReorderedColumnDifferentEmbeddingColumns) {
             "  body_vec EMBEDDING(8, body, 'builtin/8')"
             ")");
 
-    exec_ok("INSERT INTO t_reorder2 (body, id, title) VALUES ('body content', 42, 'title content')");
+    exec_ok(
+        "INSERT INTO t_reorder2 (body, id, title) VALUES ('body content', 42, 'title content')");
 
     ASSERT_TRUE(wait_for_pool());
 
@@ -649,7 +652,7 @@ TEST_F(QA_GDB282, AffectedRowCountCorrectWithEmbedding) {
     EXPECT_EQ(qr1.affected_rows, 1);
 
     auto qr3 = exec_ok("INSERT INTO t_count (id, title) VALUES "
-                        "(2, 'two'), (3, 'three'), (4, 'four')");
+                       "(2, 'two'), (3, 'three'), (4, 'four')");
     EXPECT_EQ(qr3.affected_rows, 3);
 }
 
@@ -764,4 +767,3 @@ TEST_F(QA_GDB282, BUG_BatchPoisoningNullSourceLosesValidEmbeddings) {
     EXPECT_EQ(qr.rows[2][1].as_embedding().size(), 4u);
     EXPECT_TRUE(qr.rows[3][1].is_null()) << "row 4 correctly null";
 }
-

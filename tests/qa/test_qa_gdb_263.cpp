@@ -182,8 +182,8 @@ TEST(QA_GDB263, AC3_MaxDepth) {
 }
 
 TEST(QA_GDB263, AC3_Where) {
-    auto stmt = parse_one(
-        "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT WHERE weight > 0.5");
+    auto stmt =
+        parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT WHERE weight > 0.5");
     auto* sel = as_select(stmt);
     ASSERT_NE(sel, nullptr);
     auto* tr = as_traverse(sel->from[0]);
@@ -340,8 +340,7 @@ TEST(QA_GDB263, WhereAmbiguity_GreedilyConsumedByTraverse) {
     // creating ambiguity. The parser gives WHERE to TRAVERSE.
     //
     // This test documents the current behavior (WHERE goes to TRAVERSE).
-    auto stmt =
-        parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT WHERE 1 = 1");
+    auto stmt = parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT WHERE 1 = 1");
     auto* sel = as_select(stmt);
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->from.size(), 1u);
@@ -393,8 +392,7 @@ TEST(QA_GDB263, AliasNotConsumedForJOIN) {
 }
 
 TEST(QA_GDB263, AliasNotConsumedForORDER) {
-    auto stmt = parse_one(
-        "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT ORDER BY 1");
+    auto stmt = parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT ORDER BY 1");
     auto* sel = as_select(stmt);
     ASSERT_NE(sel, nullptr);
     EXPECT_TRUE(sel->from[0].alias.empty());
@@ -402,8 +400,7 @@ TEST(QA_GDB263, AliasNotConsumedForORDER) {
 }
 
 TEST(QA_GDB263, AliasNotConsumedForLIMIT) {
-    auto stmt =
-        parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT LIMIT 10");
+    auto stmt = parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT LIMIT 10");
     auto* sel = as_select(stmt);
     ASSERT_NE(sel, nullptr);
     EXPECT_TRUE(sel->from[0].alias.empty());
@@ -411,8 +408,7 @@ TEST(QA_GDB263, AliasNotConsumedForLIMIT) {
 }
 
 TEST(QA_GDB263, AliasNotConsumedForGROUP) {
-    auto stmt = parse_one(
-        "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT GROUP BY 1");
+    auto stmt = parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT GROUP BY 1");
     auto* sel = as_select(stmt);
     ASSERT_NE(sel, nullptr);
     EXPECT_TRUE(sel->from[0].alias.empty());
@@ -445,8 +441,8 @@ TEST(QA_GDB263, TraverseAsSecondFromSource) {
 
 TEST(QA_GDB263, TraverseAsFirstWithTrailingTable) {
     // FROM TRAVERSE ..., table — TRAVERSE first, then a regular table.
-    auto stmt = parse_one(
-        "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t, other_table");
+    auto stmt =
+        parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t, other_table");
     auto* sel = as_select(stmt);
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->from.size(), 2u);
@@ -461,9 +457,8 @@ TEST(QA_GDB263, TraverseAsFirstWithTrailingTable) {
 
 TEST(QA_GDB263, TwoTraverseSources) {
     // FROM TRAVERSE ..., TRAVERSE ... — two TRAVERSE sources.
-    auto stmt =
-        parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t1, "
-                  "TRAVERSE knows FROM users(2) DIRECTION IN AS t2");
+    auto stmt = parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t1, "
+                          "TRAVERSE knows FROM users(2) DIRECTION IN AS t2");
     auto* sel = as_select(stmt);
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->from.size(), 2u);
@@ -525,8 +520,7 @@ TEST(QA_GDB263, KeyExpressionIsArithmetic) {
 }
 
 TEST(QA_GDB263, KeyExpressionIsString) {
-    auto stmt =
-        parse_one("SELECT * FROM TRAVERSE follows FROM users('abc-uuid') DIRECTION OUT");
+    auto stmt = parse_one("SELECT * FROM TRAVERSE follows FROM users('abc-uuid') DIRECTION OUT");
     auto* sel = as_select(stmt);
     ASSERT_NE(sel, nullptr);
     auto* tr = as_traverse(sel->from[0]);
@@ -608,9 +602,8 @@ TEST(QA_GDB263, TraverseWhereDoesNotConsumeOuterWhere) {
     // The outer WHERE then belongs to the SELECT.
     //
     // With explicit alias: ... FETCH AS t WHERE t.x = 1
-    auto stmt =
-        parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-                  "WHERE depth < 3 FETCH AS t WHERE t.id = 1");
+    auto stmt = parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                          "WHERE depth < 3 FETCH AS t WHERE t.id = 1");
     auto* sel = as_select(stmt);
     ASSERT_NE(sel, nullptr);
 
@@ -629,8 +622,7 @@ TEST(QA_GDB263, TraverseWhereDoesNotConsumeOuterWhere) {
 // =============================================================================
 
 TEST(QA_GDB263, SelectSpecificColumnsFromTraverse) {
-    auto stmt =
-        parse_one("SELECT a, b, c FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    auto stmt = parse_one("SELECT a, b, c FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
     auto* sel = as_select(stmt);
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->items.size(), 3u);
@@ -703,8 +695,7 @@ TEST(QA_GDB263, TraverseInFromWithUnion) {
 // =============================================================================
 
 TEST(QA_GDB263, EdgeTypeWithUnderscore) {
-    auto stmt =
-        parse_one("SELECT * FROM TRAVERSE has_parent FROM nodes(1) DIRECTION OUT");
+    auto stmt = parse_one("SELECT * FROM TRAVERSE has_parent FROM nodes(1) DIRECTION OUT");
     auto* sel = as_select(stmt);
     ASSERT_NE(sel, nullptr);
     auto* tr = as_traverse(sel->from[0]);
@@ -713,8 +704,7 @@ TEST(QA_GDB263, EdgeTypeWithUnderscore) {
 }
 
 TEST(QA_GDB263, FromTableWithUnderscore) {
-    auto stmt =
-        parse_one("SELECT * FROM TRAVERSE follows FROM user_profiles(1) DIRECTION OUT");
+    auto stmt = parse_one("SELECT * FROM TRAVERSE follows FROM user_profiles(1) DIRECTION OUT");
     auto* sel = as_select(stmt);
     ASSERT_NE(sel, nullptr);
     auto* tr = as_traverse(sel->from[0]);
@@ -748,8 +738,8 @@ TEST(QA_GDB263, MinimalTraverseInFrom) {
 TEST(QA_GDB263, ImplicitAliasStopsAtComma) {
     // "FROM TRAVERSE ... DIRECTION OUT, other" — the comma separates FROM
     // sources, should not be swallowed into alias detection.
-    auto stmt = parse_one(
-        "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT, other_table");
+    auto stmt =
+        parse_one("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT, other_table");
     auto* sel = as_select(stmt);
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->from.size(), 2u);

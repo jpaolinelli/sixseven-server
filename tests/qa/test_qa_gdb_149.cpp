@@ -806,8 +806,8 @@ TEST(QA_GDB_149, ManySessions100Independent) {
 
     // Set a unique value on each session.
     for (int i = 0; i < 100; ++i) {
-        auto r = sessions[static_cast<size_t>(i)].set_variable(
-            "work_mem", std::to_string(i) + "MB");
+        auto r =
+            sessions[static_cast<size_t>(i)].set_variable("work_mem", std::to_string(i) + "MB");
         ASSERT_TRUE(r.has_value());
     }
 

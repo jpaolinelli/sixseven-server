@@ -740,15 +740,14 @@ TEST(QA_Lexer, AlternatingTokenTypes) {
 // =============================================================================
 
 TEST(QA_Lexer, CreateTableWithAllTypes) {
-    auto tokens = tokenize_ok(
-        "CREATE TABLE t ("
-        "a INT, b BIGINT, c SMALLINT, d TINYINT, "
-        "e FLOAT, f DOUBLE, g DECIMAL, "
-        "h BOOLEAN, i TEXT, j VARCHAR, k CHAR, "
-        "l BLOB, m DATE, n TIME, o TIMESTAMP, "
-        "p INTERVAL, q POINT, r JSON, s UUID, "
-        "t EMBEDDING"
-        ");");
+    auto tokens = tokenize_ok("CREATE TABLE t ("
+                              "a INT, b BIGINT, c SMALLINT, d TINYINT, "
+                              "e FLOAT, f DOUBLE, g DECIMAL, "
+                              "h BOOLEAN, i TEXT, j VARCHAR, k CHAR, "
+                              "l BLOB, m DATE, n TIME, o TIMESTAMP, "
+                              "p INTERVAL, q POINT, r JSON, s UUID, "
+                              "t EMBEDDING"
+                              ");");
     ASSERT_TRUE(tokens.size() > 50u);
     // Just verify it tokenizes without error and has correct structure.
     EXPECT_EQ(tokens[0].type, TokenType::CREATE);
@@ -757,25 +756,23 @@ TEST(QA_Lexer, CreateTableWithAllTypes) {
 }
 
 TEST(QA_Lexer, ComplexSelectWithComments) {
-    auto tokens = tokenize_ok(
-        "-- Get active users\n"
-        "SELECT /* columns */ id, name\n"
-        "FROM users -- main table\n"
-        "WHERE active = TRUE\n"
-        "  AND age >= 18 -- adults only\n"
-        "ORDER BY name ASC\n"
-        "LIMIT 10 OFFSET 0;");
+    auto tokens = tokenize_ok("-- Get active users\n"
+                              "SELECT /* columns */ id, name\n"
+                              "FROM users -- main table\n"
+                              "WHERE active = TRUE\n"
+                              "  AND age >= 18 -- adults only\n"
+                              "ORDER BY name ASC\n"
+                              "LIMIT 10 OFFSET 0;");
     ASSERT_TRUE(tokens.size() > 15u);
     EXPECT_EQ(tokens[0].type, TokenType::SELECT);
 }
 
 TEST(QA_Lexer, GioDBTraverseFullQuery) {
-    auto tokens = tokenize_ok(
-        "TRAVERSE users "
-        "VIA follows "
-        "DIRECTION 'out' "
-        "MAX_DEPTH 5 "
-        "RETURN PATH;");
+    auto tokens = tokenize_ok("TRAVERSE users "
+                              "VIA follows "
+                              "DIRECTION 'out' "
+                              "MAX_DEPTH 5 "
+                              "RETURN PATH;");
     // TRAVERSE users VIA follows DIRECTION 'out' MAX_DEPTH 5 RETURN PATH ;
     ASSERT_GE(tokens.size(), 11u);
     EXPECT_EQ(tokens[0].type, TokenType::TRAVERSE);
@@ -897,15 +894,24 @@ TEST(QA_Lexer, AllGioDBKeywordsCaseInsensitive) {
         TokenType expected;
     };
     KW keywords[] = {
-        {"direction", TokenType::DIRECTION}, {"edge", TokenType::EDGE},
-        {"embedding", TokenType::EMBEDDING}, {"fetch", TokenType::FETCH},
-        {"link", TokenType::LINK},           {"match", TokenType::MATCH},
-        {"max_depth", TokenType::MAX_DEPTH}, {"nearest", TokenType::NEAREST},
-        {"path", TokenType::PATH},           {"recursive", TokenType::RECURSIVE},
-        {"reembed", TokenType::REEMBED},     {"return", TokenType::RETURN},
-        {"shortest", TokenType::SHORTEST},   {"traverse", TokenType::TRAVERSE},
-        {"type", TokenType::TYPE},           {"unlink", TokenType::UNLINK},
-        {"password", TokenType::PASSWORD},   {"via", TokenType::VIA},
+        {"direction", TokenType::DIRECTION},
+        {"edge", TokenType::EDGE},
+        {"embedding", TokenType::EMBEDDING},
+        {"fetch", TokenType::FETCH},
+        {"link", TokenType::LINK},
+        {"match", TokenType::MATCH},
+        {"max_depth", TokenType::MAX_DEPTH},
+        {"nearest", TokenType::NEAREST},
+        {"path", TokenType::PATH},
+        {"recursive", TokenType::RECURSIVE},
+        {"reembed", TokenType::REEMBED},
+        {"return", TokenType::RETURN},
+        {"shortest", TokenType::SHORTEST},
+        {"traverse", TokenType::TRAVERSE},
+        {"type", TokenType::TYPE},
+        {"unlink", TokenType::UNLINK},
+        {"password", TokenType::PASSWORD},
+        {"via", TokenType::VIA},
     };
 
     for (auto& [text, expected] : keywords) {

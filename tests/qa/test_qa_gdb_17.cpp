@@ -538,8 +538,7 @@ TEST(BTreeQA_RangeScan, NegativeKeys) {
 
     // Insert negative keys.
     for (int i = -10; i <= 10; ++i) {
-        ASSERT_TRUE(
-            tree.insert(make_key(i), make_rid(static_cast<uint32_t>(i + 100))).has_value());
+        ASSERT_TRUE(tree.insert(make_key(i), make_rid(static_cast<uint32_t>(i + 100))).has_value());
     }
 
     // Range [-5, 5).
@@ -804,8 +803,7 @@ TEST(BTreeQA_Composite, RangeScanComposite) {
     ASSERT_TRUE(tree.insert(make_composite_key(3, "alpha"), make_rid(5)).has_value());
 
     // Range scan for all entries with first column >= 1 and < 3.
-    auto scan =
-        tree.range_scan(make_composite_key(1, ""), make_composite_key(3, ""));
+    auto scan = tree.range_scan(make_composite_key(1, ""), make_composite_key(3, ""));
     ASSERT_TRUE(scan.has_value());
 
     auto entries = collect_scan(*scan);
@@ -824,9 +822,8 @@ TEST(BTreeQA_Composite, SplitsWithCompositeKeys) {
     // Insert enough to force splits.
     for (int i = 1; i <= 10; ++i) {
         std::string name = "key_" + std::to_string(i);
-        ASSERT_TRUE(
-            tree.insert(make_composite_key(i, name), make_rid(static_cast<uint32_t>(i)))
-                .has_value());
+        ASSERT_TRUE(tree.insert(make_composite_key(i, name), make_rid(static_cast<uint32_t>(i)))
+                        .has_value());
     }
     EXPECT_EQ(tree.size(), 10u);
 
@@ -1055,8 +1052,7 @@ TEST(BTreeQA_Concurrency, ConcurrentInsertOverlappingKeys) {
     for (int t = 0; t < num_threads; ++t) {
         threads.emplace_back([&tree, &failures, t]() {
             for (int i = 0; i < keys_per_thread; ++i) {
-                auto ins =
-                    tree.insert(make_key(i), make_rid(static_cast<uint32_t>(t * 1000 + i)));
+                auto ins = tree.insert(make_key(i), make_rid(static_cast<uint32_t>(t * 1000 + i)));
                 if (!ins.has_value()) {
                     failures.fetch_add(1);
                 }

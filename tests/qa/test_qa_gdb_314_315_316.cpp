@@ -29,15 +29,13 @@ namespace {
 class QA_GDB314_315_316 : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ =
-            std::filesystem::temp_directory_path() / "giodb_qa_gdb314_315_316";
+        data_dir_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb314_315_316";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         graph_engine_ = std::make_unique<GraphEngine>(catalog_);
-        engine_ = std::make_unique<QueryEngine>(
-            catalog_, *storage_, graph_engine_.get());
+        engine_ = std::make_unique<QueryEngine>(catalog_, *storage_, graph_engine_.get());
 
         // Base schema: two tables with edges between them.
         exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR)");
@@ -70,8 +68,7 @@ protected:
         if (!result.has_value()) {
             EXPECT_EQ(result.error().code, expected)
                 << "Expected " << static_cast<int>(expected) << " but got "
-                << static_cast<int>(result.error().code) << ": "
-                << result.error().message;
+                << static_cast<int>(result.error().code) << ": " << result.error().message;
         }
     }
 
@@ -117,16 +114,13 @@ TEST_F(QA_GDB314_315_316, GDB314_LinkWithStringPKTableWorks) {
 TEST_F(QA_GDB314_315_316, GDB314_LinkWithUuidPKTableWorks) {
     // UUID PK — confirm pk_found guard works with UUID columns.
     exec_ok("CREATE TABLE items (id UUID PRIMARY KEY, name VARCHAR)");
-    exec_ok(
-        "INSERT INTO items VALUES "
-        "('6f2fff6c-9762-4191-86e1-d34597e3c75a', 'item1')");
-    exec_ok(
-        "INSERT INTO items VALUES "
-        "('d1458b55-f0bf-44d4-b191-e52f1ef1f60a', 'item2')");
+    exec_ok("INSERT INTO items VALUES "
+            "('6f2fff6c-9762-4191-86e1-d34597e3c75a', 'item1')");
+    exec_ok("INSERT INTO items VALUES "
+            "('d1458b55-f0bf-44d4-b191-e52f1ef1f60a', 'item2')");
     exec_ok("CREATE EDGE TYPE relates FROM items TO items");
-    exec_ok(
-        "LINK items('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
-        "TO items('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA relates");
+    exec_ok("LINK items('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
+            "TO items('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA relates");
 }
 
 TEST_F(QA_GDB314_315_316, GDB314_UnlinkWithValidPKAfterGuardWorks) {
@@ -142,37 +136,30 @@ TEST_F(QA_GDB314_315_316, GDB314_UnlinkWithValidPKAfterGuardWorks) {
 // -- Non-existent source/target --
 
 TEST_F(QA_GDB314_315_316, GDB315_UnlinkNonExistentSourceFails) {
-    exec_error(
-        "UNLINK users(999) FROM users(2) VIA follows", StatusCode::NOT_FOUND);
+    exec_error("UNLINK users(999) FROM users(2) VIA follows", StatusCode::NOT_FOUND);
 }
 
 TEST_F(QA_GDB314_315_316, GDB315_UnlinkNonExistentTargetFails) {
-    exec_error(
-        "UNLINK users(1) FROM users(999) VIA follows", StatusCode::NOT_FOUND);
+    exec_error("UNLINK users(1) FROM users(999) VIA follows", StatusCode::NOT_FOUND);
 }
 
 TEST_F(QA_GDB314_315_316, GDB315_UnlinkBothNonExistentFails) {
-    exec_error(
-        "UNLINK users(888) FROM users(999) VIA follows", StatusCode::NOT_FOUND);
+    exec_error("UNLINK users(888) FROM users(999) VIA follows", StatusCode::NOT_FOUND);
 }
 
 // -- Boundary PK values --
 
 TEST_F(QA_GDB314_315_316, GDB315_UnlinkNegativePKFails) {
-    exec_error(
-        "UNLINK users(-1) FROM users(1) VIA follows", StatusCode::NOT_FOUND);
+    exec_error("UNLINK users(-1) FROM users(1) VIA follows", StatusCode::NOT_FOUND);
 }
 
 TEST_F(QA_GDB314_315_316, GDB315_UnlinkZeroPKFails) {
     // PK 0 doesn't exist in our test data.
-    exec_error(
-        "UNLINK users(0) FROM users(1) VIA follows", StatusCode::NOT_FOUND);
+    exec_error("UNLINK users(0) FROM users(1) VIA follows", StatusCode::NOT_FOUND);
 }
 
 TEST_F(QA_GDB314_315_316, GDB315_UnlinkLargePKFails) {
-    exec_error(
-        "UNLINK users(2147483647) FROM users(1) VIA follows",
-        StatusCode::NOT_FOUND);
+    exec_error("UNLINK users(2147483647) FROM users(1) VIA follows", StatusCode::NOT_FOUND);
 }
 
 // -- UNLINK valid edge that exists --
@@ -204,64 +191,52 @@ TEST_F(QA_GDB314_315_316, GDB315_UnlinkNoEdgeBetweenValidPKs) {
 
 TEST_F(QA_GDB314_315_316, GDB315_UnlinkUuidNonExistentSourceFails) {
     exec_ok("CREATE TABLE docs (id UUID PRIMARY KEY, title VARCHAR)");
-    exec_ok(
-        "INSERT INTO docs VALUES "
-        "('6f2fff6c-9762-4191-86e1-d34597e3c75a', 'Doc1')");
-    exec_ok(
-        "INSERT INTO docs VALUES "
-        "('d1458b55-f0bf-44d4-b191-e52f1ef1f60a', 'Doc2')");
+    exec_ok("INSERT INTO docs VALUES "
+            "('6f2fff6c-9762-4191-86e1-d34597e3c75a', 'Doc1')");
+    exec_ok("INSERT INTO docs VALUES "
+            "('d1458b55-f0bf-44d4-b191-e52f1ef1f60a', 'Doc2')");
     exec_ok("CREATE EDGE TYPE refs FROM docs TO docs");
-    exec_ok(
-        "LINK docs('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
-        "TO docs('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA refs");
+    exec_ok("LINK docs('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
+            "TO docs('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA refs");
 
     // Non-existent UUID source.
-    exec_error(
-        "UNLINK docs('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') "
-        "FROM docs('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA refs",
-        StatusCode::NOT_FOUND);
+    exec_error("UNLINK docs('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') "
+               "FROM docs('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA refs",
+               StatusCode::NOT_FOUND);
 }
 
 TEST_F(QA_GDB314_315_316, GDB315_UnlinkUuidNonExistentTargetFails) {
     exec_ok("CREATE TABLE notes (id UUID PRIMARY KEY, body VARCHAR)");
-    exec_ok(
-        "INSERT INTO notes VALUES "
-        "('6f2fff6c-9762-4191-86e1-d34597e3c75a', 'Note1')");
+    exec_ok("INSERT INTO notes VALUES "
+            "('6f2fff6c-9762-4191-86e1-d34597e3c75a', 'Note1')");
     exec_ok("CREATE EDGE TYPE links FROM notes TO notes");
 
-    exec_error(
-        "UNLINK notes('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
-        "FROM notes('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') VIA links",
-        StatusCode::NOT_FOUND);
+    exec_error("UNLINK notes('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
+               "FROM notes('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') VIA links",
+               StatusCode::NOT_FOUND);
 }
 
 TEST_F(QA_GDB314_315_316, GDB315_UnlinkUuidValidEdgeSucceeds) {
     exec_ok("CREATE TABLE pages (id UUID PRIMARY KEY, text VARCHAR)");
-    exec_ok(
-        "INSERT INTO pages VALUES "
-        "('6f2fff6c-9762-4191-86e1-d34597e3c75a', 'Page1')");
-    exec_ok(
-        "INSERT INTO pages VALUES "
-        "('d1458b55-f0bf-44d4-b191-e52f1ef1f60a', 'Page2')");
+    exec_ok("INSERT INTO pages VALUES "
+            "('6f2fff6c-9762-4191-86e1-d34597e3c75a', 'Page1')");
+    exec_ok("INSERT INTO pages VALUES "
+            "('d1458b55-f0bf-44d4-b191-e52f1ef1f60a', 'Page2')");
     exec_ok("CREATE EDGE TYPE cites FROM pages TO pages");
-    exec_ok(
-        "LINK pages('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
-        "TO pages('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA cites");
-    exec_ok(
-        "UNLINK pages('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
-        "FROM pages('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA cites");
+    exec_ok("LINK pages('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
+            "TO pages('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA cites");
+    exec_ok("UNLINK pages('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
+            "FROM pages('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA cites");
 }
 
 // -- UNLINK symmetry with LINK --
 
 TEST_F(QA_GDB314_315_316, GDB315_LinkAndUnlinkSymmetricErrors) {
     // Verify LINK and UNLINK produce same error for the same bad PK.
-    auto link_result =
-        engine_->execute("LINK users(999) TO users(1) VIA follows");
+    auto link_result = engine_->execute("LINK users(999) TO users(1) VIA follows");
     ASSERT_FALSE(link_result.has_value());
 
-    auto unlink_result =
-        engine_->execute("UNLINK users(999) FROM users(1) VIA follows");
+    auto unlink_result = engine_->execute("UNLINK users(999) FROM users(1) VIA follows");
     ASSERT_FALSE(unlink_result.has_value());
 
     // Both should return NOT_FOUND.
@@ -278,14 +253,10 @@ TEST_F(QA_GDB314_315_316, GDB315_CrossTableUnlinkValidation) {
     exec_ok("LINK users(1) TO products(10) VIA purchased");
 
     // Source exists, target doesn't.
-    exec_error(
-        "UNLINK users(1) FROM products(999) VIA purchased",
-        StatusCode::NOT_FOUND);
+    exec_error("UNLINK users(1) FROM products(999) VIA purchased", StatusCode::NOT_FOUND);
 
     // Source doesn't exist, target exists.
-    exec_error(
-        "UNLINK users(999) FROM products(10) VIA purchased",
-        StatusCode::NOT_FOUND);
+    exec_error("UNLINK users(999) FROM products(10) VIA purchased", StatusCode::NOT_FOUND);
 
     // Both exist — should succeed.
     exec_ok("UNLINK users(1) FROM products(10) VIA purchased");
@@ -300,20 +271,15 @@ TEST_F(QA_GDB314_315_316, GDB315_StringPKUnlinkNonExistentFails) {
     exec_ok("CREATE EDGE TYPE related FROM tags TO tags");
     exec_ok("LINK tags('cpp') TO tags('rust') VIA related");
 
-    exec_error(
-        "UNLINK tags('python') FROM tags('rust') VIA related",
-        StatusCode::NOT_FOUND);
+    exec_error("UNLINK tags('python') FROM tags('rust') VIA related", StatusCode::NOT_FOUND);
 
-    exec_error(
-        "UNLINK tags('cpp') FROM tags('java') VIA related",
-        StatusCode::NOT_FOUND);
+    exec_error("UNLINK tags('cpp') FROM tags('java') VIA related", StatusCode::NOT_FOUND);
 }
 
 // -- UNLINK with invalid edge type --
 
 TEST_F(QA_GDB314_315_316, GDB315_UnlinkInvalidEdgeType) {
-    auto result =
-        engine_->execute("UNLINK users(1) FROM users(2) VIA nonexistent");
+    auto result = engine_->execute("UNLINK users(1) FROM users(2) VIA nonexistent");
     EXPECT_FALSE(result.has_value());
     // Should fail before PK validation even happens.
 }
@@ -326,8 +292,7 @@ TEST_F(QA_GDB314_315_316, GDB315_UnlinkAfterSourceDeleted) {
     exec_ok("DELETE FROM users WHERE id = 1");
 
     // Now source PK 1 doesn't exist — UNLINK should fail with NOT_FOUND.
-    exec_error(
-        "UNLINK users(1) FROM users(3) VIA follows", StatusCode::NOT_FOUND);
+    exec_error("UNLINK users(1) FROM users(3) VIA follows", StatusCode::NOT_FOUND);
 }
 
 TEST_F(QA_GDB314_315_316, GDB315_UnlinkAfterTargetDeleted) {
@@ -335,8 +300,7 @@ TEST_F(QA_GDB314_315_316, GDB315_UnlinkAfterTargetDeleted) {
     exec_ok("DELETE FROM users WHERE id = 3");
 
     // Target PK 3 doesn't exist — UNLINK should fail with NOT_FOUND.
-    exec_error(
-        "UNLINK users(1) FROM users(3) VIA follows", StatusCode::NOT_FOUND);
+    exec_error("UNLINK users(1) FROM users(3) VIA follows", StatusCode::NOT_FOUND);
 }
 
 // ============================================================================
@@ -347,16 +311,14 @@ TEST_F(QA_GDB314_315_316, GDB315_UnlinkAfterTargetDeleted) {
 
 TEST_F(QA_GDB314_315_316, GDB316_ParserEmbeddingTypeStillParses) {
     // parser.cpp was reformatted — verify EMBEDDING type parsing works.
-    auto result = engine_->execute(
-        "CREATE TABLE emb_test (id INT PRIMARY KEY, "
-        "vec EMBEDDING(384, source='name', provider='builtin/384'))");
+    auto result = engine_->execute("CREATE TABLE emb_test (id INT PRIMARY KEY, "
+                                   "vec EMBEDDING(384, source='name', provider='builtin/384'))");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 }
 
 TEST_F(QA_GDB314_315_316, GDB316_TraverseAfterFormatFix) {
     // enriched_traversal.cpp was reformatted — verify traversal still works.
-    exec_ok(
-        "SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH");
+    exec_ok("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH");
 }
 
 } // namespace

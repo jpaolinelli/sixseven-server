@@ -139,9 +139,8 @@ TEST(QA_GDB103, CreateTableMultiplePrimaryKeysInline) {
 
 TEST(QA_GDB103, CreateTableAllConstraintTypes) {
     // Column with every constraint type in one definition.
-    auto stmt = parse_one(
-        "CREATE TABLE t (a INT NOT NULL UNIQUE DEFAULT 42 CHECK(a > 0) "
-        "REFERENCES other(id) ON DELETE CASCADE)");
+    auto stmt = parse_one("CREATE TABLE t (a INT NOT NULL UNIQUE DEFAULT 42 CHECK(a > 0) "
+                          "REFERENCES other(id) ON DELETE CASCADE)");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     EXPECT_EQ(ct->columns.size(), 1u);
@@ -156,8 +155,7 @@ TEST(QA_GDB103, CreateTableAllConstraintTypes) {
 }
 
 TEST(QA_GDB103, CreateTableForeignKeyOnDeleteRestrict) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (a INT REFERENCES other(id) ON DELETE RESTRICT)");
+    auto stmt = parse_one("CREATE TABLE t (a INT REFERENCES other(id) ON DELETE RESTRICT)");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     EXPECT_EQ(ct->columns[0].fk_on_delete, ReferentialAction::RESTRICT);
@@ -173,8 +171,7 @@ TEST(QA_GDB103, CreateTableForeignKeyNoOnDelete) {
 
 TEST(QA_GDB103, CreateTableForeignKeyOnDeleteInvalid) {
     // ON DELETE with invalid action.
-    expect_parse_error(
-        "CREATE TABLE t (a INT REFERENCES other(id) ON DELETE FROBNICATE)");
+    expect_parse_error("CREATE TABLE t (a INT REFERENCES other(id) ON DELETE FROBNICATE)");
 }
 
 TEST(QA_GDB103, CreateTableForeignKeyOnMissingDelete) {
@@ -184,8 +181,8 @@ TEST(QA_GDB103, CreateTableForeignKeyOnMissingDelete) {
 
 TEST(QA_GDB103, CreateTableConstraintForeignKey) {
     // Table-level FOREIGN KEY constraint.
-    auto stmt = parse_one(
-        "CREATE TABLE t (a INT, FOREIGN KEY(a) REFERENCES other(id) ON DELETE CASCADE)");
+    auto stmt =
+        parse_one("CREATE TABLE t (a INT, FOREIGN KEY(a) REFERENCES other(id) ON DELETE CASCADE)");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     EXPECT_EQ(ct->constraints.size(), 1u);
@@ -196,8 +193,7 @@ TEST(QA_GDB103, CreateTableConstraintForeignKey) {
 
 TEST(QA_GDB103, CreateTableNamedConstraint) {
     // CONSTRAINT name PRIMARY KEY(...)
-    auto stmt = parse_one(
-        "CREATE TABLE t (a INT, CONSTRAINT pk_t PRIMARY KEY(a))");
+    auto stmt = parse_one("CREATE TABLE t (a INT, CONSTRAINT pk_t PRIMARY KEY(a))");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     EXPECT_EQ(ct->constraints.size(), 1u);
@@ -212,8 +208,7 @@ TEST(QA_GDB103, CreateTableNamedConstraintFollowedByInvalid) {
 
 TEST(QA_GDB103, CreateTableCheckConstraintTable) {
     // Table-level CHECK constraint.
-    auto stmt = parse_one(
-        "CREATE TABLE t (a INT, b INT, CHECK(a > b))");
+    auto stmt = parse_one("CREATE TABLE t (a INT, b INT, CHECK(a > b))");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     EXPECT_EQ(ct->constraints.size(), 1u);
@@ -223,8 +218,7 @@ TEST(QA_GDB103, CreateTableCheckConstraintTable) {
 
 TEST(QA_GDB103, CreateTableUniqueConstraint) {
     // Table-level UNIQUE constraint with multiple columns.
-    auto stmt = parse_one(
-        "CREATE TABLE t (a INT, b INT, UNIQUE(a, b))");
+    auto stmt = parse_one("CREATE TABLE t (a INT, b INT, UNIQUE(a, b))");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     EXPECT_EQ(ct->constraints.size(), 1u);
@@ -234,15 +228,14 @@ TEST(QA_GDB103, CreateTableUniqueConstraint) {
 
 TEST(QA_GDB103, CreateTableMultipleMixedConstraints) {
     // Mix of column-level and table-level constraints.
-    auto stmt = parse_one(
-        "CREATE TABLE t ("
-        "  a INT NOT NULL UNIQUE,"
-        "  b INT CHECK(b > 0),"
-        "  c INT REFERENCES other(id),"
-        "  PRIMARY KEY(a),"
-        "  FOREIGN KEY(c) REFERENCES other(id) ON DELETE CASCADE,"
-        "  UNIQUE(a, b)"
-        ")");
+    auto stmt = parse_one("CREATE TABLE t ("
+                          "  a INT NOT NULL UNIQUE,"
+                          "  b INT CHECK(b > 0),"
+                          "  c INT REFERENCES other(id),"
+                          "  PRIMARY KEY(a),"
+                          "  FOREIGN KEY(c) REFERENCES other(id) ON DELETE CASCADE,"
+                          "  UNIQUE(a, b)"
+                          ")");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     EXPECT_EQ(ct->columns.size(), 3u);
@@ -256,11 +249,9 @@ TEST(QA_GDB103, CreateTableMultipleMixedConstraints) {
 TEST(QA_GDB103, TypeSpecAllBaseTypes) {
     // Verify all 22 GioDB base types parse correctly.
     const char* types[] = {
-        "INT",       "INTEGER",   "TINYINT",   "SMALLINT", "BIGINT",
-        "FLOAT",     "DOUBLE",    "DECIMAL",   "NUMERIC",  "BOOLEAN",
-        "CHAR",      "VARCHAR",   "TEXT",      "BLOB",     "DATE",
-        "TIME",      "TIMESTAMP", "INTERVAL",  "POINT",    "JSON",
-        "UUID",
+        "INT",     "INTEGER", "TINYINT",   "SMALLINT", "BIGINT",  "FLOAT", "DOUBLE",
+        "DECIMAL", "NUMERIC", "BOOLEAN",   "CHAR",     "VARCHAR", "TEXT",  "BLOB",
+        "DATE",    "TIME",    "TIMESTAMP", "INTERVAL", "POINT",   "JSON",  "UUID",
     };
     for (const char* type_name : types) {
         std::string sql = std::string("CREATE TABLE t (a ") + type_name + ")";
@@ -297,8 +288,7 @@ TEST(QA_GDB103, TypeSpecVarcharWithLength) {
 }
 
 TEST(QA_GDB103, TypeSpecEmbeddingFull) {
-    auto stmt = parse_one(
-        "CREATE TABLE t (a EMBEDDING(384, content, 'openai'))");
+    auto stmt = parse_one("CREATE TABLE t (a EMBEDDING(384, content, 'openai'))");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
     ASSERT_NE(ct, nullptr);
     EXPECT_EQ(ct->columns[0].type.name, "EMBEDDING");
@@ -405,8 +395,7 @@ TEST(QA_GDB103, DropTableIfMissingExists) {
 // =============================================================================
 
 TEST(QA_GDB103, AlterTableAddColumnFull) {
-    auto stmt = parse_one(
-        "ALTER TABLE users ADD COLUMN email VARCHAR(255) NOT NULL");
+    auto stmt = parse_one("ALTER TABLE users ADD COLUMN email VARCHAR(255) NOT NULL");
     auto* at = dynamic_cast<AlterTableStmt*>(stmt.get());
     ASSERT_NE(at, nullptr);
     EXPECT_EQ(at->table_name, "users");
@@ -569,8 +558,8 @@ TEST(QA_GDB103, CreateEdgeTypeBasic) {
 }
 
 TEST(QA_GDB103, CreateEdgeTypeWithProperties) {
-    auto stmt = parse_one(
-        "CREATE EDGE TYPE rated (score FLOAT, review TEXT) FROM users TO products");
+    auto stmt =
+        parse_one("CREATE EDGE TYPE rated (score FLOAT, review TEXT) FROM users TO products");
     auto* ce = dynamic_cast<CreateEdgeTypeStmt*>(stmt.get());
     ASSERT_NE(ce, nullptr);
     EXPECT_EQ(ce->properties.size(), 2u);
@@ -667,8 +656,7 @@ TEST(QA_GDB103, DropDatabaseMissingName) {
 
 TEST(QA_GDB103, ErrorRecoveryMultipleErrors) {
     // Multiple invalid statements — error recovery should collect all errors.
-    auto result = parse_result(
-        "CREATE TABLE; DROP TABLE; ALTER TABLE");
+    auto result = parse_result("CREATE TABLE; DROP TABLE; ALTER TABLE");
     ASSERT_FALSE(result.has_value());
     // Error message should mention count.
     auto msg = result.error().message;
@@ -677,8 +665,7 @@ TEST(QA_GDB103, ErrorRecoveryMultipleErrors) {
 
 TEST(QA_GDB103, ErrorRecoveryValidAmongInvalid) {
     // Valid statement mixed with invalid ones — parse_all returns error.
-    auto result = parse_result(
-        "CREATE TABLE t (a INT); DROP TABLE; CREATE TABLE u (b INT)");
+    auto result = parse_result("CREATE TABLE t (a INT); DROP TABLE; CREATE TABLE u (b INT)");
     // parse_all returns error if ANY statement fails.
     EXPECT_FALSE(result.has_value());
 }
@@ -693,13 +680,12 @@ TEST(QA_GDB103, ErrorMessageContainsLineColumn) {
 
 TEST(QA_GDB103, ParseMultipleValidDDL) {
     // Multiple valid DDL statements separated by semicolons.
-    auto stmts = parse_ok(
-        "CREATE TABLE t (a INT);"
-        "DROP TABLE t;"
-        "CREATE INDEX idx ON t(a);"
-        "DROP INDEX idx;"
-        "CREATE EDGE TYPE e FROM t TO t;"
-        "DROP EDGE TYPE e");
+    auto stmts = parse_ok("CREATE TABLE t (a INT);"
+                          "DROP TABLE t;"
+                          "CREATE INDEX idx ON t(a);"
+                          "DROP INDEX idx;"
+                          "CREATE EDGE TYPE e FROM t TO t;"
+                          "DROP EDGE TYPE e");
     EXPECT_EQ(stmts.size(), 6u);
 }
 

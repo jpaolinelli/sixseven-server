@@ -64,9 +64,7 @@ protected:
         }
     }
 
-    void wire_registry() {
-        engine_->set_provider_registry(provider_registry_.get());
-    }
+    void wire_registry() { engine_->set_provider_registry(provider_registry_.get()); }
 
     void create_embedding_table() {
         exec_ok("CREATE TABLE articles (id INT, title VARCHAR, title_vec EMBEDDING)");
@@ -270,8 +268,7 @@ TEST_F(QA_GDB258, ExplainNearestTextFailsWithoutRegistry) {
     create_embedding_table();
     insert_row(1, "test", {1.0F, 0.0F, 0.0F, 0.0F});
 
-    exec_error("EXPLAIN NEAREST 1 FROM articles.title_vec TO 'test'",
-               StatusCode::NOT_IMPLEMENTED);
+    exec_error("EXPLAIN NEAREST 1 FROM articles.title_vec TO 'test'", StatusCode::NOT_IMPLEMENTED);
 }
 
 // =============================================================================
@@ -344,7 +341,7 @@ TEST_F(QA_GDB258, NearestSkipsRowsWithNullEmbedding) {
     std::vector<Value> null_values;
     null_values.push_back(Value(int32_t{2}));
     null_values.push_back(Value(std::string("null_emb")));
-    null_values.emplace_back();  // NULL embedding
+    null_values.emplace_back(); // NULL embedding
 
     auto serialized = TupleSerializer::serialize(null_values, table_storage->storage_schema);
     ASSERT_TRUE(serialized.has_value()) << serialized.error().message;
@@ -377,7 +374,7 @@ TEST_F(QA_GDB258, ReembedHandlesNullSourceText) {
 
     std::vector<Value> null_title_values;
     null_title_values.push_back(Value(int32_t{2}));
-    null_title_values.emplace_back();  // NULL title
+    null_title_values.emplace_back(); // NULL title
     null_title_values.push_back(Value(Embedding{0.0F, 0.0F, 0.0F, 0.0F}));
 
     auto serialized = TupleSerializer::serialize(null_title_values, table_storage->storage_schema);

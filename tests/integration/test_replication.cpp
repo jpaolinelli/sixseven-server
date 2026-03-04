@@ -3,11 +3,11 @@
 #include "giodb/common/result.h"
 #include "giodb/common/types.h"
 #include "giodb/common/value.h"
+#include "giodb/executor/catalog_persistence.h"
 #include "giodb/executor/query_engine.h"
 #include "giodb/executor/settings_cache.h"
 #include "giodb/executor/storage_manager.h"
 #include "giodb/executor/system_bootstrap.h"
-#include "giodb/executor/catalog_persistence.h"
 #include "giodb/server/promotion_manager.h"
 #include "giodb/server/replication_connection.h"
 #include "giodb/server/replication_health_monitor.h"
@@ -400,7 +400,8 @@ TEST_F(ReplicationIntegrationTest, FailoverPromotion) {
     Config config = Config::load_defaults();
     config.standby_mode = true;
     CatalogPersistence persistence(catalog, storage);
-    auto boot = SystemBootstrap::bootstrap(engine, catalog, storage, persistence, config, standby_data);
+    auto boot =
+        SystemBootstrap::bootstrap(engine, catalog, storage, persistence, config, standby_data);
     ASSERT_TRUE(boot.has_value()) << boot.error().message;
     SettingsCache cache;
     ASSERT_TRUE(cache.load(engine).has_value());

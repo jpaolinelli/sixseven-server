@@ -221,15 +221,17 @@ TEST_F(QA_Subquery, NotInSubqueryAllNulls) {
 
 TEST_F(QA_Subquery, InSubqueryEmptyResult) {
     // IN with empty subquery result → no matches.
-    auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE users.id IN (SELECT orders.user_id FROM orders WHERE orders.id = 9999)");
+    auto qr =
+        exec_ok("SELECT users.name FROM users "
+                "WHERE users.id IN (SELECT orders.user_id FROM orders WHERE orders.id = 9999)");
     EXPECT_EQ(qr.rows.size(), 0u);
 }
 
 TEST_F(QA_Subquery, NotInSubqueryEmptyResult) {
     // NOT IN with empty subquery result → all rows match.
-    auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE users.id NOT IN (SELECT orders.user_id FROM orders WHERE orders.id = 9999)");
+    auto qr =
+        exec_ok("SELECT users.name FROM users "
+                "WHERE users.id NOT IN (SELECT orders.user_id FROM orders WHERE orders.id = 9999)");
     EXPECT_EQ(qr.rows.size(), 4u);
 }
 
@@ -275,7 +277,8 @@ TEST_F(QA_Subquery, ScalarSubqueryMultipleRowsErrors) {
 }
 
 TEST_F(QA_Subquery, ScalarSubqueryWithAggregateCount) {
-    auto qr = exec_ok("SELECT users.name, (SELECT COUNT(*) FROM orders) FROM users WHERE users.id = 1");
+    auto qr =
+        exec_ok("SELECT users.name, (SELECT COUNT(*) FROM orders) FROM users WHERE users.id = 1");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][1].as_int64(), 3);
 }
@@ -312,9 +315,9 @@ TEST_F(QA_Subquery, ScalarSubqueryInWhereClause) {
 
 TEST_F(QA_Subquery, CTEReferencedMultipleTimesInJoin) {
     // CTE used twice in the same query: as both sides of a self-join.
-    auto qr = exec_ok(
-        "WITH eng AS (SELECT users.id, users.name FROM users WHERE users.dept_id = 10) "
-        "SELECT e1.name, e2.name FROM eng AS e1 JOIN eng AS e2 ON e1.id = e2.id");
+    auto qr =
+        exec_ok("WITH eng AS (SELECT users.id, users.name FROM users WHERE users.dept_id = 10) "
+                "SELECT e1.name, e2.name FROM eng AS e1 JOIN eng AS e2 ON e1.id = e2.id");
 
     // Should produce: (alice, alice), (charlie, charlie)
     EXPECT_EQ(qr.rows.size(), 2u);
@@ -338,7 +341,8 @@ TEST_F(QA_Subquery, MultipleCTEsInSingleQuery) {
     // Multiple CTEs defined in the same WITH clause.
     auto qr = exec_ok(
         "WITH eng_users AS (SELECT users.id, users.name FROM users WHERE users.dept_id = 10), "
-        "big_orders AS (SELECT orders.user_id, orders.amount FROM orders WHERE orders.amount > 400) "
+        "big_orders AS (SELECT orders.user_id, orders.amount FROM orders WHERE orders.amount > "
+        "400) "
         "SELECT eng_users.name, big_orders.amount "
         "FROM eng_users JOIN big_orders ON eng_users.id = big_orders.user_id");
 
@@ -350,21 +354,20 @@ TEST_F(QA_Subquery, MultipleCTEsInSingleQuery) {
 
 TEST_F(QA_Subquery, CTEWithNoRows) {
     // CTE that produces zero rows.
-    auto qr = exec_ok(
-        "WITH no_users AS (SELECT users.id, users.name FROM users WHERE users.id = 9999) "
-        "SELECT no_users.name FROM no_users");
+    auto qr =
+        exec_ok("WITH no_users AS (SELECT users.id, users.name FROM users WHERE users.id = 9999) "
+                "SELECT no_users.name FROM no_users");
 
     EXPECT_EQ(qr.rows.size(), 0u);
 }
 
 TEST_F(QA_Subquery, CTEWithAggregation) {
     // CTE that contains aggregation.
-    auto qr = exec_ok(
-        "WITH order_counts AS (SELECT orders.user_id, COUNT(*) AS cnt FROM orders "
-        "GROUP BY orders.user_id) "
-        "SELECT users.name, order_counts.cnt "
-        "FROM users JOIN order_counts ON users.id = order_counts.user_id "
-        "ORDER BY order_counts.cnt DESC");
+    auto qr = exec_ok("WITH order_counts AS (SELECT orders.user_id, COUNT(*) AS cnt FROM orders "
+                      "GROUP BY orders.user_id) "
+                      "SELECT users.name, order_counts.cnt "
+                      "FROM users JOIN order_counts ON users.id = order_counts.user_id "
+                      "ORDER BY order_counts.cnt DESC");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     // alice has 2 orders, charlie has 1.
@@ -414,8 +417,9 @@ TEST_F(QA_Subquery, ExistsWithNullJoinKey) {
     // User with NULL dept_id.
     exec_ok("INSERT INTO users VALUES (5, 'eve', NULL)");
 
-    auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE EXISTS (SELECT 1 FROM departments WHERE departments.id = users.dept_id)");
+    auto qr =
+        exec_ok("SELECT users.name FROM users "
+                "WHERE EXISTS (SELECT 1 FROM departments WHERE departments.id = users.dept_id)");
 
     auto names = collect_column_strings(qr, 0);
     // eve has dept_id=NULL, so the comparison NULL=departments.id yields NULL → no match.
@@ -427,8 +431,9 @@ TEST_F(QA_Subquery, ExistsWithNullJoinKey) {
 TEST_F(QA_Subquery, NotExistsWithNullJoinKey) {
     exec_ok("INSERT INTO users VALUES (5, 'eve', NULL)");
 
-    auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE NOT EXISTS (SELECT 1 FROM departments WHERE departments.id = users.dept_id)");
+    auto qr = exec_ok(
+        "SELECT users.name FROM users "
+        "WHERE NOT EXISTS (SELECT 1 FROM departments WHERE departments.id = users.dept_id)");
 
     auto names = collect_column_strings(qr, 0);
     // eve's NULL dept_id means departments.id = NULL is never true, so NOT EXISTS is true.
@@ -449,11 +454,10 @@ TEST_F(QA_Subquery, ScalarSubqueryReturnsNullAggregateOnEmpty) {
 
 TEST_F(QA_Subquery, ExistsAndInSubqueryTogether) {
     // Use both EXISTS and IN in the same WHERE.
-    auto qr = exec_ok(
-        "SELECT users.name FROM users "
-        "WHERE EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id) "
-        "AND users.dept_id IN (SELECT departments.id FROM departments "
-        "WHERE departments.dept_name = 'engineering')");
+    auto qr = exec_ok("SELECT users.name FROM users "
+                      "WHERE EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id) "
+                      "AND users.dept_id IN (SELECT departments.id FROM departments "
+                      "WHERE departments.dept_name = 'engineering')");
 
     auto names = collect_column_strings(qr, 0);
     // Users with orders (alice, charlie) AND in engineering dept (10).
@@ -464,10 +468,10 @@ TEST_F(QA_Subquery, ExistsAndInSubqueryTogether) {
 }
 
 TEST_F(QA_Subquery, ExistsWithCTE) {
-    auto qr = exec_ok(
-        "WITH big_orders AS (SELECT orders.user_id FROM orders WHERE orders.amount >= 300) "
-        "SELECT users.name FROM users "
-        "WHERE EXISTS (SELECT 1 FROM big_orders WHERE big_orders.user_id = users.id)");
+    auto qr =
+        exec_ok("WITH big_orders AS (SELECT orders.user_id FROM orders WHERE orders.amount >= 300) "
+                "SELECT users.name FROM users "
+                "WHERE EXISTS (SELECT 1 FROM big_orders WHERE big_orders.user_id = users.id)");
 
     auto names = collect_column_strings(qr, 0);
     // alice has orders 500 and 300 (both >= 300), charlie has 200 (< 300).
@@ -476,11 +480,10 @@ TEST_F(QA_Subquery, ExistsWithCTE) {
 }
 
 TEST_F(QA_Subquery, InSubqueryWithCTE) {
-    auto qr = exec_ok(
-        "WITH active_dept AS (SELECT departments.id FROM departments "
-        "WHERE departments.dept_name = 'engineering') "
-        "SELECT users.name FROM users "
-        "WHERE users.dept_id IN (SELECT active_dept.id FROM active_dept)");
+    auto qr = exec_ok("WITH active_dept AS (SELECT departments.id FROM departments "
+                      "WHERE departments.dept_name = 'engineering') "
+                      "SELECT users.name FROM users "
+                      "WHERE users.dept_id IN (SELECT active_dept.id FROM active_dept)");
 
     auto names = collect_column_strings(qr, 0);
     EXPECT_EQ(names.size(), 2u);
@@ -525,7 +528,8 @@ TEST_F(QA_Subquery, ExistsLargeRightSide) {
 
 TEST_F(QA_Subquery, ScalarSubqueryMultipleRows) {
     // Multiple scalar subqueries for different outer rows.
-    auto qr = exec_ok("SELECT users.name, (SELECT COUNT(*) FROM orders) FROM users ORDER BY users.id");
+    auto qr =
+        exec_ok("SELECT users.name, (SELECT COUNT(*) FROM orders) FROM users ORDER BY users.id");
 
     ASSERT_EQ(qr.rows.size(), 4u);
     // Every row should see count=3.
@@ -571,17 +575,16 @@ TEST_F(QA_Subquery, AC_ScalarSubqueryErrorsOnMultipleRows) {
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_int64(), 3);
 
-    exec_error(
-        "SELECT (SELECT orders.amount FROM orders) FROM users WHERE users.id = 1",
-        StatusCode::INVALID_ARGUMENT);
+    exec_error("SELECT (SELECT orders.amount FROM orders) FROM users WHERE users.id = 1",
+               StatusCode::INVALID_ARGUMENT);
 }
 
 TEST_F(QA_Subquery, AC_CTEReferencedMultipleTimes) {
     // AC: CTEs can be referenced multiple times in main query.
-    auto qr = exec_ok(
-        "WITH eng AS (SELECT users.id, users.name FROM users WHERE users.dept_id = 10) "
-        "SELECT e1.name, e2.name FROM eng AS e1 JOIN eng AS e2 ON e1.id = e2.id "
-        "ORDER BY e1.id");
+    auto qr =
+        exec_ok("WITH eng AS (SELECT users.id, users.name FROM users WHERE users.dept_id = 10) "
+                "SELECT e1.name, e2.name FROM eng AS e1 JOIN eng AS e2 ON e1.id = e2.id "
+                "ORDER BY e1.id");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     // Self-join should produce same name pairs.
@@ -627,7 +630,8 @@ TEST_F(QA_Subquery, AC_UnitTestsForEachSubqueryType) {
     EXPECT_GT(r4.rows.size(), 0u);
 
     // Scalar subquery in SELECT
-    auto r5 = exec_ok("SELECT users.name, (SELECT COUNT(*) FROM orders) FROM users WHERE users.id = 1");
+    auto r5 =
+        exec_ok("SELECT users.name, (SELECT COUNT(*) FROM orders) FROM users WHERE users.id = 1");
     EXPECT_EQ(r5.rows.size(), 1u);
 
     // Scalar subquery in WHERE

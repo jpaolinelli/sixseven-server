@@ -43,8 +43,7 @@ std::string minilm_fixture() {
 class TempJsonFile {
 public:
     explicit TempJsonFile(const std::string& content, const std::string& suffix = "")
-        : path_(std::filesystem::temp_directory_path() /
-                ("giodb_qa_325_" + suffix + ".json")) {
+        : path_(std::filesystem::temp_directory_path() / ("giodb_qa_325_" + suffix + ".json")) {
         std::ofstream out(path_);
         out << content;
     }
@@ -61,9 +60,17 @@ private:
 TokenizerConfig make_wordpiece_config() {
     TokenizerConfig config;
     config.vocab = {
-        {"hello", 7592}, {"world", 2088}, {"the", 1996}, {"em", 7861},
-        {"##bed", 8270}, {"##ding", 4667}, {"!", 999},    {",", 1010},
-        {"a", 200},      {"b", 201},       {"##c", 202},
+        {"hello", 7592},
+        {"world", 2088},
+        {"the", 1996},
+        {"em", 7861},
+        {"##bed", 8270},
+        {"##ding", 4667},
+        {"!", 999},
+        {",", 1010},
+        {"a", 200},
+        {"b", 201},
+        {"##c", 202},
     };
     config.special_tokens = {.pad = 0, .unk = 100, .cls = 101, .sep = 102, .mask = 103};
     config.model_type = TokenizerModelType::WORDPIECE;
@@ -79,22 +86,41 @@ TokenizerConfig make_wordpiece_config() {
 TokenizerConfig make_bpe_config() {
     TokenizerConfig config;
     config.vocab = {
-        {"h", 100},  {"e", 101},  {"l", 102},  {"o", 103},
-        {"w", 104},  {"r", 105},  {"d", 106},  {"a", 108},
-        {"t", 109},  {"n", 110},
+        {"h", 100},
+        {"e", 101},
+        {"l", 102},
+        {"o", 103},
+        {"w", 104},
+        {"r", 105},
+        {"d", 106},
+        {"a", 108},
+        {"t", 109},
+        {"n", 110},
         {"\xC4\xA0", 200},
-        {"he", 300}, {"hel", 301}, {"hell", 302}, {"hello", 303},
-        {"\xC4\xA0w", 400}, {"\xC4\xA0wo", 401}, {"\xC4\xA0wor", 402},
-        {"\xC4\xA0worl", 403}, {"\xC4\xA0world", 404},
+        {"he", 300},
+        {"hel", 301},
+        {"hell", 302},
+        {"hello", 303},
+        {"\xC4\xA0w", 400},
+        {"\xC4\xA0wo", 401},
+        {"\xC4\xA0wor", 402},
+        {"\xC4\xA0worl", 403},
+        {"\xC4\xA0world", 404},
     };
     config.special_tokens = {.pad = 1, .unk = 3, .cls = 0, .sep = 2, .mask = 4};
     config.model_type = TokenizerModelType::BPE;
     config.normalizer = NormalizerType::NONE;
     config.pre_tokenizer = PreTokenizerType::WHITESPACE;
     config.merges = {
-        "h e", "he l", "hel l", "hell o",
-        "\xC4\xA0 w", "\xC4\xA0w o", "\xC4\xA0wo r",
-        "\xC4\xA0wor l", "\xC4\xA0worl d",
+        "h e",
+        "he l",
+        "hel l",
+        "hell o",
+        "\xC4\xA0 w",
+        "\xC4\xA0w o",
+        "\xC4\xA0wo r",
+        "\xC4\xA0wor l",
+        "\xC4\xA0worl d",
     };
     return config;
 }
@@ -113,8 +139,7 @@ TEST(QA_GDB325_JsonLoader, EmptyVocabIsAccepted) {
 
 TEST(QA_GDB325_JsonLoader, NegativeTokenIdAccepted) {
     // Negative IDs are valid in the JSON — no range check.
-    TempJsonFile file(R"({"model": {"type": "WordPiece", "vocab": {"hello": -1}}})",
-                      "neg_id");
+    TempJsonFile file(R"({"model": {"type": "WordPiece", "vocab": {"hello": -1}}})", "neg_id");
     auto result = load_tokenizer_config(file.path());
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->vocab.at("hello"), -1);
@@ -122,18 +147,16 @@ TEST(QA_GDB325_JsonLoader, NegativeTokenIdAccepted) {
 
 TEST(QA_GDB325_JsonLoader, DuplicateVocabKeysLastWins) {
     // JSON spec: duplicate keys → last value wins (nlohmann::json behavior).
-    TempJsonFile file(
-        R"({"model": {"type": "WordPiece", "vocab": {"hello": 1, "hello": 2}}})",
-        "dup_keys");
+    TempJsonFile file(R"({"model": {"type": "WordPiece", "vocab": {"hello": 1, "hello": 2}}})",
+                      "dup_keys");
     auto result = load_tokenizer_config(file.path());
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->vocab.at("hello"), 2);
 }
 
 TEST(QA_GDB325_JsonLoader, VeryLargeVocabId) {
-    TempJsonFile file(
-        R"({"model": {"type": "WordPiece", "vocab": {"x": 9223372036854775807}}})",
-        "large_id");
+    TempJsonFile file(R"({"model": {"type": "WordPiece", "vocab": {"x": 9223372036854775807}}})",
+                      "large_id");
     auto result = load_tokenizer_config(file.path());
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->vocab.at("x"), INT64_MAX);
@@ -155,9 +178,8 @@ TEST(QA_GDB325_JsonLoader, ModelNullReturnsError) {
 
 TEST(QA_GDB325_JsonLoader, MergesNonArrayIgnored) {
     // "merges" as a string should be silently ignored.
-    TempJsonFile file(
-        R"({"model": {"type": "BPE", "vocab": {"a": 0}, "merges": "not_array"}})",
-        "merges_str");
+    TempJsonFile file(R"({"model": {"type": "BPE", "vocab": {"a": 0}, "merges": "not_array"}})",
+                      "merges_str");
     auto result = load_tokenizer_config(file.path());
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_TRUE(result->merges.empty());
@@ -211,8 +233,8 @@ TEST(QA_GDB325_JsonLoader, RealMiniLMFixtureLoadAndRoundTrip) {
     WordPieceTokenizer tok(*config);
     auto ids = tok.encode("adversarial test input", 128);
     ASSERT_EQ(ids.size(), 128u);
-    EXPECT_EQ(ids[0], 101);  // CLS
-    EXPECT_NE(ids[1], 0);    // At least one content token
+    EXPECT_EQ(ids[0], 101); // CLS
+    EXPECT_NE(ids[1], 0);   // At least one content token
 }
 
 // =====================================================================
@@ -249,7 +271,8 @@ TEST(QA_GDB325_TextNormalizer, TruncatedThreeByteSequence) {
 TEST(QA_GDB325_TextNormalizer, InvalidContinuationByte) {
     BertNormalizer norm;
     // 0xC3 followed by 0xFF (not a valid continuation byte 10xxxxxx).
-    std::string input("a\xC3\xFF""b");
+    std::string input("a\xC3\xFF"
+                      "b");
     auto result = norm.normalize(input);
     // Should not crash and should contain 'a' and 'b'.
     EXPECT_NE(result.find('a'), std::string::npos);
@@ -257,8 +280,10 @@ TEST(QA_GDB325_TextNormalizer, InvalidContinuationByte) {
 }
 
 TEST(QA_GDB325_TextNormalizer, LongStringPerformance) {
-    BertNormalizer norm(/*lowercase=*/true, /*strip_accents=*/true,
-                        /*handle_chinese=*/true, /*clean_text=*/true);
+    BertNormalizer norm(/*lowercase=*/true,
+                        /*strip_accents=*/true,
+                        /*handle_chinese=*/true,
+                        /*clean_text=*/true);
     // 100k character string.
     std::string input(100000, 'A');
     auto result = norm.normalize(input);
@@ -312,17 +337,20 @@ TEST(QA_GDB325_TextNormalizer, UnicodeWhitespace_EmSpace) {
 
 TEST(QA_GDB325_TextNormalizer, LowercaseNormalizerInvalidUtf8) {
     LowercaseNormalizer norm;
-    std::string input("\xFF\xFE""test");
+    std::string input("\xFF\xFE"
+                      "test");
     // Should not crash.
     auto result = norm.normalize(input);
     EXPECT_NE(result.find("test"), std::string::npos);
 }
 
 TEST(QA_GDB325_TextNormalizer, BertNormalizerCJKBoundaryCodepoints) {
-    BertNormalizer norm(/*lowercase=*/true, /*strip_accents=*/false,
+    BertNormalizer norm(/*lowercase=*/true,
+                        /*strip_accents=*/false,
                         /*handle_chinese=*/true);
     // First CJK ideograph: U+4E00 (UTF-8: E4 B8 80).
-    std::string input = "a\xE4\xB8\x80""b";
+    std::string input = "a\xE4\xB8\x80"
+                        "b";
     auto result = norm.normalize(input);
     // Should add spaces: "a" + " " + CJK + " " + "b"
     EXPECT_EQ(result, "a \xE4\xB8\x80 b");
@@ -330,8 +358,10 @@ TEST(QA_GDB325_TextNormalizer, BertNormalizerCJKBoundaryCodepoints) {
 
 TEST(QA_GDB325_TextNormalizer, FactoryCreateNormalizerAllTypes) {
     // Verify factory produces non-null for all NormalizerType values.
-    for (auto type : {NormalizerType::NONE, NormalizerType::LOWERCASE,
-                      NormalizerType::BERT, NormalizerType::NFC}) {
+    for (auto type : {NormalizerType::NONE,
+                      NormalizerType::LOWERCASE,
+                      NormalizerType::BERT,
+                      NormalizerType::NFC}) {
         TokenizerConfig config;
         config.normalizer = type;
         auto norm = create_normalizer(config);
@@ -400,15 +430,16 @@ TEST(QA_GDB325_PreTokenizer, WhitespaceOnlyCarriageReturn) {
 TEST(QA_GDB325_PreTokenizer, MixedUnicodeAndAscii) {
     BertPreTokenizer pt;
     // UTF-8 characters are not ASCII, so they're treated as word characters.
-    std::string input = "\xC3\xA9""hello"; // e-acute + "hello"
+    std::string input = "\xC3\xA9"
+                        "hello"; // e-acute + "hello"
     auto tokens = pt.pre_tokenize(input);
     ASSERT_EQ(tokens.size(), 1u);
     EXPECT_EQ(tokens[0], input); // All kept as one token.
 }
 
 TEST(QA_GDB325_PreTokenizer, FactoryCreatePreTokenizerAllTypes) {
-    for (auto type : {PreTokenizerType::NONE, PreTokenizerType::WHITESPACE,
-                      PreTokenizerType::PUNCTUATION}) {
+    for (auto type :
+         {PreTokenizerType::NONE, PreTokenizerType::WHITESPACE, PreTokenizerType::PUNCTUATION}) {
         TokenizerConfig config;
         config.pre_tokenizer = type;
         auto pt = create_pre_tokenizer(config);
@@ -423,7 +454,8 @@ TEST(QA_GDB325_PreTokenizer, WhitespaceSplitLongInput) {
     // 1000 words of "word" separated by spaces.
     std::string input;
     for (int i = 0; i < 1000; ++i) {
-        if (i > 0) input += " ";
+        if (i > 0)
+            input += " ";
         input += "word";
     }
     auto tokens = pt.pre_tokenize(input);
@@ -622,7 +654,8 @@ TEST_F(QA_GDB325_WordPieceE2E, VeryLongSentence) {
     // Generate a sentence with 200 words.
     std::string sentence;
     for (int i = 0; i < 200; ++i) {
-        if (i > 0) sentence += " ";
+        if (i > 0)
+            sentence += " ";
         sentence += "hello";
     }
     auto ids = tokenizer_->encode(sentence, 128);
@@ -669,9 +702,7 @@ TEST_F(QA_GDB325_WordPieceE2E, ConsistentReEncoding) {
 
 class QA_GDB325_BPETest : public ::testing::Test {
 protected:
-    void SetUp() override {
-        tokenizer_ = std::make_unique<BPETokenizer>(make_bpe_config());
-    }
+    void SetUp() override { tokenizer_ = std::make_unique<BPETokenizer>(make_bpe_config()); }
     std::unique_ptr<BPETokenizer> tokenizer_;
 };
 
@@ -719,12 +750,13 @@ TEST_F(QA_GDB325_BPETest, ManyWordsStress) {
     // 100 words: "hello" repeated.
     std::string input;
     for (int i = 0; i < 100; ++i) {
-        if (i > 0) input += " ";
+        if (i > 0)
+            input += " ";
         input += "hello";
     }
     auto ids = tokenizer_->encode(input, 256);
     ASSERT_EQ(ids.size(), 256u);
-    EXPECT_EQ(ids[0], 0); // CLS
+    EXPECT_EQ(ids[0], 0);   // CLS
     EXPECT_EQ(ids[1], 303); // First "hello"
     // Verify it doesn't crash and returns correct size.
 }

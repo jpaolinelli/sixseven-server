@@ -618,14 +618,12 @@ TEST(QA137_SelectivityTest, HistogramSingleBucket) {
     };
 
     // Value at lower bound.
-    double sel_low =
-        estimate_range_selectivity(stats, BinaryOp::LESS_EQUAL, Value(int32_t{1}));
+    double sel_low = estimate_range_selectivity(stats, BinaryOp::LESS_EQUAL, Value(int32_t{1}));
     EXPECT_GE(sel_low, 0.0);
     EXPECT_LE(sel_low, 1.0);
 
     // Value at upper bound.
-    double sel_high =
-        estimate_range_selectivity(stats, BinaryOp::LESS_EQUAL, Value(int32_t{100}));
+    double sel_high = estimate_range_selectivity(stats, BinaryOp::LESS_EQUAL, Value(int32_t{100}));
     EXPECT_GT(sel_high, sel_low);
 }
 
@@ -716,8 +714,7 @@ TEST_F(QA137AnalyzeTest, McvOrderedByFrequency) {
 
     // MCV should be sorted by frequency descending.
     for (size_t i = 1; i < name_stats->mcv_list.size(); ++i) {
-        EXPECT_GE(name_stats->mcv_list[i - 1].frequency,
-                  name_stats->mcv_list[i].frequency)
+        EXPECT_GE(name_stats->mcv_list[i - 1].frequency, name_stats->mcv_list[i].frequency)
             << "MCV not sorted at index " << i;
     }
 }

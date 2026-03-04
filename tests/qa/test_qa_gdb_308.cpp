@@ -96,26 +96,21 @@ TEST_F(QA_GDB308, BothNonExistentFails) {
 // LINK with UUID table and valid UUID PKs.
 TEST_F(QA_GDB308, UUIDTableValidPKs) {
     exec_ok("CREATE TABLE docs (id UUID PRIMARY KEY, title VARCHAR)");
-    exec_ok(
-        "INSERT INTO docs VALUES ('6f2fff6c-9762-4191-86e1-d34597e3c75a', 'Doc1')");
-    exec_ok(
-        "INSERT INTO docs VALUES ('d1458b55-f0bf-44d4-b191-e52f1ef1f60a', 'Doc2')");
+    exec_ok("INSERT INTO docs VALUES ('6f2fff6c-9762-4191-86e1-d34597e3c75a', 'Doc1')");
+    exec_ok("INSERT INTO docs VALUES ('d1458b55-f0bf-44d4-b191-e52f1ef1f60a', 'Doc2')");
     exec_ok("CREATE EDGE TYPE refs FROM docs TO docs");
-    exec_ok(
-        "LINK docs('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
-        "TO docs('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA refs");
+    exec_ok("LINK docs('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
+            "TO docs('d1458b55-f0bf-44d4-b191-e52f1ef1f60a') VIA refs");
 }
 
 // LINK with UUID table and non-existent UUID should fail.
 TEST_F(QA_GDB308, UUIDTableNonExistentFails) {
     exec_ok("CREATE TABLE items (id UUID PRIMARY KEY, name VARCHAR)");
-    exec_ok(
-        "INSERT INTO items VALUES ('6f2fff6c-9762-4191-86e1-d34597e3c75a', 'Item1')");
+    exec_ok("INSERT INTO items VALUES ('6f2fff6c-9762-4191-86e1-d34597e3c75a', 'Item1')");
     exec_ok("CREATE EDGE TYPE links FROM items TO items");
-    exec_error(
-        "LINK items('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
-        "TO items('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') VIA links",
-        StatusCode::NOT_FOUND);
+    exec_error("LINK items('6f2fff6c-9762-4191-86e1-d34597e3c75a') "
+               "TO items('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') VIA links",
+               StatusCode::NOT_FOUND);
 }
 
 } // namespace

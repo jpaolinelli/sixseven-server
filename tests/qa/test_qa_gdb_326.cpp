@@ -232,8 +232,7 @@ TEST_F(QA_GDB326, GDB326_L2NormMatchesReference) {
     double ref_norm = ref.at(text).at("l2_norm").get<double>();
 
     // Allow some tolerance for floating-point differences.
-    EXPECT_NEAR(computed_norm, ref_norm, 0.5)
-        << "L2 norm diverges significantly from reference";
+    EXPECT_NEAR(computed_norm, ref_norm, 0.5) << "L2 norm diverges significantly from reference";
 }
 
 // ===========================================================================
@@ -269,8 +268,8 @@ TEST_F(QA_GDB326, GDB326_SentenceSemanticSimilarity) {
     double sim_unrelated = cosine_similarity(*sent1, *sent3);
 
     EXPECT_GT(sim_related, sim_unrelated)
-        << "Similar sentences (" << sim_related
-        << ") should score higher than unrelated (" << sim_unrelated << ")";
+        << "Similar sentences (" << sim_related << ") should score higher than unrelated ("
+        << sim_unrelated << ")";
 }
 
 /// Antonyms should be less similar than synonyms.
@@ -409,8 +408,7 @@ TEST_F(QA_GDB326, GDB326_ReferenceDataIntegrity) {
         ASSERT_TRUE(ref.at(key).contains("full")) << "Missing 'full' vector for: " << key;
 
         auto& full = ref.at(key).at("full");
-        EXPECT_EQ(full.size(), kDim)
-            << "Reference vector dimension mismatch for: " << key;
+        EXPECT_EQ(full.size(), kDim) << "Reference vector dimension mismatch for: " << key;
     }
 }
 
@@ -467,7 +465,8 @@ TEST_F(QA_GDB326, GDB326_SequentialStress) {
 
     for (int i = 0; i < iterations; ++i) {
         auto result = provider_->embed("stress test sentence " + std::to_string(i));
-        ASSERT_TRUE(result.has_value()) << "Failed at iteration " << i << ": " << result.error().message;
+        ASSERT_TRUE(result.has_value())
+            << "Failed at iteration " << i << ": " << result.error().message;
         EXPECT_EQ(result->size(), kDim) << "Wrong dim at iteration " << i;
     }
 }

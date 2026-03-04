@@ -377,5 +377,43 @@ TEST(TokenizerJsonLoader, MissingSubwordPrefixDefaultsToEmpty) {
     EXPECT_TRUE(result->subword_prefix.empty());
 }
 
+// ===================================================================
+// GDB-352: Normalizer enum when no type field
+// ===================================================================
+
+TEST(TokenizerJsonLoader, NormalizerNoTypeFieldLowercaseTrue) {
+    TempJsonFile file(R"({
+        "model": {"type": "WordPiece", "vocab": {"a": 0}},
+        "normalizer": {"lowercase": true}
+    })");
+    auto result = load_tokenizer_config(file.path());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->normalizer, NormalizerType::LOWERCASE);
+    EXPECT_TRUE(result->normalizer_lowercase);
+}
+
+TEST(TokenizerJsonLoader, NormalizerNoTypeFieldLowercaseFalse) {
+    TempJsonFile file(R"({
+        "model": {"type": "WordPiece", "vocab": {"a": 0}},
+        "normalizer": {"lowercase": false}
+    })");
+    auto result = load_tokenizer_config(file.path());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->normalizer, NormalizerType::NONE);
+    EXPECT_FALSE(result->normalizer_lowercase);
+}
+
+TEST(TokenizerJsonLoader, NormalizerNoTypeFieldDefaultsToLowercase) {
+    // No "type" key, no "lowercase" key — defaults to lowercase=true → LOWERCASE.
+    TempJsonFile file(R"({
+        "model": {"type": "WordPiece", "vocab": {"a": 0}},
+        "normalizer": {}
+    })");
+    auto result = load_tokenizer_config(file.path());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->normalizer, NormalizerType::LOWERCASE);
+    EXPECT_TRUE(result->normalizer_lowercase);
+}
+
 } // namespace
 } // namespace giodb

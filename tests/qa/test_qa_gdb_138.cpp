@@ -580,8 +580,7 @@ TEST(QA138_CostModel, HashJoinFormulaVerification) {
     auto cost = cm.hash_join_cost(build, probe, 0.01);
 
     double expected_startup = 100.0 + 500.0 * 0.01;
-    double expected_total = expected_startup + 200.0 + 2000.0 * 0.01 +
-                            (500.0 + 2000.0) * 0.0025;
+    double expected_total = expected_startup + 200.0 + 2000.0 * 0.01 + (500.0 + 2000.0) * 0.0025;
     double expected_rows = 500.0 * 2000.0 * 0.01;
 
     EXPECT_NEAR(cost.startup_cost, expected_startup, 0.01);
