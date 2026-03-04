@@ -29,10 +29,10 @@ Read the parent ticket and all subtasks. Extract every acceptance criterion as a
 
 ## Step 2: Build
 
-First, build and run the developer unit tests to verify nothing is broken by the implementation:
+First, build
 
 ```bash
-export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset default && cmake --build build/debug --target giodb_unit_tests
+export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset default && cmake --build build/debug
 ```
 
 Record the results. 
@@ -132,9 +132,9 @@ Replace `<N>` with the ticket number (e.g., `--gtest_filter="*GDB42*"` for GDB-4
 
 Record all results. Fix any test infrastructure issues (compile errors, missing includes) but do **not** fix bugs in the implementation — that is the implementer's job.
 
-## Step 6: Run Run Ticket-Specific Tests with AddressSanitizer
+## Step 6: Run Ticket-Specific Tests with AddressSanitizer
 
-Build and run **QA tests** with ASan to catch memory bugs:
+Build and run **Ticket-Specific QA tests** with ASan to catch memory bugs:
 
 ```bash
 export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset asan
