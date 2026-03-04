@@ -43,6 +43,11 @@ std::string_view status_to_sqlstate(StatusCode code);
 /// Convert a Value to its PostgreSQL text-format representation.
 std::string value_to_pg_text(const Value& value);
 
+/// Convert a Value to its PostgreSQL binary-format representation.
+/// Returns raw bytes for supported types (BOOL, INT8–INT64, UINT8–UINT32,
+/// FLOAT32, FLOAT64, STRING). Unsupported types fall back to text.
+std::vector<uint8_t> value_to_pg_binary(const Value& value);
+
 // -- Parameter substitution ---------------------------------------------------
 
 /// Substitute $1, $2, ... placeholders in SQL with parameter values.
@@ -242,10 +247,13 @@ private:
     void send_backend_key_data(Connection& conn);
     void send_ready_for_query(Connection& conn, char status);
     void send_row_description(Connection& conn, const QueryResult& result);
-    void send_row_description(Connection& conn, const std::vector<ColumnDescription>& columns);
+    void send_row_description(Connection& conn,
+                              const std::vector<ColumnDescription>& columns,
+                              const std::vector<int16_t>& format_codes);
     void send_data_row(Connection& conn,
                        const std::vector<Value>& row,
-                       const std::vector<TypeId>& types);
+                       const std::vector<TypeId>& types,
+                       const std::vector<int16_t>& format_codes);
     void send_command_complete(Connection& conn, const std::string& tag);
     void send_error_response(Connection& conn,
                              std::string_view severity,

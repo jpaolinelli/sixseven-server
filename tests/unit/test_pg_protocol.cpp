@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -1855,4 +1856,187 @@ TEST(PgProtocol, MultiStatementErrorStopsExecution) {
 
     conn.close();
     ::close(client_fd);
+}
+
+// =============================================================================
+// Binary value formatting tests (GDB-202)
+// =============================================================================
+
+// Helper: read a big-endian int16 from bytes.
+static int16_t read_be16(const std::vector<uint8_t>& buf, size_t offset = 0) {
+    return static_cast<int16_t>((static_cast<uint16_t>(buf[offset]) << 8) |
+                                static_cast<uint16_t>(buf[offset + 1]));
+}
+
+// Helper: read a big-endian int32 from bytes.
+static int32_t read_be32(const std::vector<uint8_t>& buf, size_t offset = 0) {
+    return static_cast<int32_t>((static_cast<uint32_t>(buf[offset]) << 24) |
+                                (static_cast<uint32_t>(buf[offset + 1]) << 16) |
+                                (static_cast<uint32_t>(buf[offset + 2]) << 8) |
+                                static_cast<uint32_t>(buf[offset + 3]));
+}
+
+// Helper: read a big-endian int64 from bytes.
+static int64_t read_be64(const std::vector<uint8_t>& buf, size_t offset = 0) {
+    return static_cast<int64_t>((static_cast<uint64_t>(buf[offset]) << 56) |
+                                (static_cast<uint64_t>(buf[offset + 1]) << 48) |
+                                (static_cast<uint64_t>(buf[offset + 2]) << 40) |
+                                (static_cast<uint64_t>(buf[offset + 3]) << 32) |
+                                (static_cast<uint64_t>(buf[offset + 4]) << 24) |
+                                (static_cast<uint64_t>(buf[offset + 5]) << 16) |
+                                (static_cast<uint64_t>(buf[offset + 6]) << 8) |
+                                static_cast<uint64_t>(buf[offset + 7]));
+}
+
+TEST(PgProtocol, BinaryBool) {
+    auto bin_true = value_to_pg_binary(Value(true));
+    ASSERT_EQ(bin_true.size(), 1u);
+    EXPECT_EQ(bin_true[0], 1);
+
+    auto bin_false = value_to_pg_binary(Value(false));
+    ASSERT_EQ(bin_false.size(), 1u);
+    EXPECT_EQ(bin_false[0], 0);
+}
+
+TEST(PgProtocol, BinaryInt32) {
+    auto bin = value_to_pg_binary(Value(static_cast<int32_t>(42)));
+    ASSERT_EQ(bin.size(), 4u);
+    EXPECT_EQ(read_be32(bin), 42);
+
+    auto bin_neg = value_to_pg_binary(Value(static_cast<int32_t>(-1)));
+    ASSERT_EQ(bin_neg.size(), 4u);
+    EXPECT_EQ(read_be32(bin_neg), -1);
+
+    auto bin_zero = value_to_pg_binary(Value(static_cast<int32_t>(0)));
+    ASSERT_EQ(bin_zero.size(), 4u);
+    EXPECT_EQ(read_be32(bin_zero), 0);
+
+    auto bin_max = value_to_pg_binary(Value(std::numeric_limits<int32_t>::max()));
+    ASSERT_EQ(bin_max.size(), 4u);
+    EXPECT_EQ(read_be32(bin_max), std::numeric_limits<int32_t>::max());
+
+    auto bin_min = value_to_pg_binary(Value(std::numeric_limits<int32_t>::min()));
+    ASSERT_EQ(bin_min.size(), 4u);
+    EXPECT_EQ(read_be32(bin_min), std::numeric_limits<int32_t>::min());
+}
+
+TEST(PgProtocol, BinaryInt64) {
+    auto bin = value_to_pg_binary(Value(static_cast<int64_t>(123456789012345LL)));
+    ASSERT_EQ(bin.size(), 8u);
+    EXPECT_EQ(read_be64(bin), 123456789012345LL);
+
+    auto bin_neg = value_to_pg_binary(Value(static_cast<int64_t>(-100)));
+    ASSERT_EQ(bin_neg.size(), 8u);
+    EXPECT_EQ(read_be64(bin_neg), -100LL);
+
+    auto bin_max = value_to_pg_binary(Value(std::numeric_limits<int64_t>::max()));
+    ASSERT_EQ(bin_max.size(), 8u);
+    EXPECT_EQ(read_be64(bin_max), std::numeric_limits<int64_t>::max());
+}
+
+TEST(PgProtocol, BinaryInt16) {
+    auto bin = value_to_pg_binary(Value(static_cast<int16_t>(1234)));
+    ASSERT_EQ(bin.size(), 2u);
+    EXPECT_EQ(read_be16(bin), 1234);
+
+    auto bin_neg = value_to_pg_binary(Value(static_cast<int16_t>(-1)));
+    ASSERT_EQ(bin_neg.size(), 2u);
+    EXPECT_EQ(read_be16(bin_neg), -1);
+}
+
+TEST(PgProtocol, BinaryInt8) {
+    // INT8 maps to PG int2 (2 bytes).
+    auto bin = value_to_pg_binary(Value(static_cast<int8_t>(42)));
+    ASSERT_EQ(bin.size(), 2u);
+    EXPECT_EQ(read_be16(bin), 42);
+
+    auto bin_neg = value_to_pg_binary(Value(static_cast<int8_t>(-1)));
+    ASSERT_EQ(bin_neg.size(), 2u);
+    EXPECT_EQ(read_be16(bin_neg), -1);
+}
+
+TEST(PgProtocol, BinaryFloat32) {
+    float val = 3.14f;
+    auto bin = value_to_pg_binary(Value(val));
+    ASSERT_EQ(bin.size(), 4u);
+
+    // Reconstruct float from big-endian bytes.
+    uint32_t bits = static_cast<uint32_t>(read_be32(bin));
+    float result = 0;
+    std::memcpy(&result, &bits, sizeof(result));
+    EXPECT_FLOAT_EQ(result, val);
+}
+
+TEST(PgProtocol, BinaryFloat64) {
+    double val = 2.718281828459045;
+    auto bin = value_to_pg_binary(Value(val));
+    ASSERT_EQ(bin.size(), 8u);
+
+    // Reconstruct double from big-endian bytes.
+    uint64_t bits = static_cast<uint64_t>(read_be64(bin));
+    double result = 0;
+    std::memcpy(&result, &bits, sizeof(result));
+    EXPECT_DOUBLE_EQ(result, val);
+}
+
+TEST(PgProtocol, BinaryFloat32SpecialValues) {
+    // Zero.
+    auto bin_zero = value_to_pg_binary(Value(0.0f));
+    ASSERT_EQ(bin_zero.size(), 4u);
+    uint32_t bits_zero = static_cast<uint32_t>(read_be32(bin_zero));
+    float f_zero = 0;
+    std::memcpy(&f_zero, &bits_zero, sizeof(f_zero));
+    EXPECT_EQ(f_zero, 0.0f);
+
+    // Negative.
+    auto bin_neg = value_to_pg_binary(Value(-1.5f));
+    ASSERT_EQ(bin_neg.size(), 4u);
+    uint32_t bits_neg = static_cast<uint32_t>(read_be32(bin_neg));
+    float f_neg = 0;
+    std::memcpy(&f_neg, &bits_neg, sizeof(f_neg));
+    EXPECT_FLOAT_EQ(f_neg, -1.5f);
+}
+
+TEST(PgProtocol, BinaryString) {
+    auto bin = value_to_pg_binary(Value(std::string("hello")));
+    ASSERT_EQ(bin.size(), 5u);
+    EXPECT_EQ(std::string(bin.begin(), bin.end()), "hello");
+}
+
+TEST(PgProtocol, BinaryStringEmpty) {
+    auto bin = value_to_pg_binary(Value(std::string("")));
+    EXPECT_EQ(bin.size(), 0u);
+}
+
+TEST(PgProtocol, BinaryNull) {
+    Value null_val;
+    EXPECT_TRUE(null_val.is_null());
+    auto bin = value_to_pg_binary(null_val);
+    EXPECT_EQ(bin.size(), 0u);
+}
+
+TEST(PgProtocol, BinaryUnsignedTypes) {
+    // UINT8 → PG int2 (2 bytes).
+    auto bin_u8 = value_to_pg_binary(Value(static_cast<uint8_t>(255)));
+    ASSERT_EQ(bin_u8.size(), 2u);
+    EXPECT_EQ(read_be16(bin_u8), 255);
+
+    // UINT16 → PG int4 (4 bytes).
+    auto bin_u16 = value_to_pg_binary(Value(static_cast<uint16_t>(65535)));
+    ASSERT_EQ(bin_u16.size(), 4u);
+    EXPECT_EQ(read_be32(bin_u16), 65535);
+
+    // UINT32 → PG int8 (8 bytes).
+    auto bin_u32 = value_to_pg_binary(Value(static_cast<uint32_t>(4294967295u)));
+    ASSERT_EQ(bin_u32.size(), 8u);
+    EXPECT_EQ(read_be64(bin_u32), 4294967295LL);
+}
+
+TEST(PgProtocol, BinaryFallbackToText) {
+    // Types without native binary support fall back to text representation.
+    // Date uses text fallback.
+    Date date{19737}; // 2024-01-15
+    auto bin = value_to_pg_binary(Value(date));
+    std::string text(bin.begin(), bin.end());
+    EXPECT_EQ(text, "2024-01-15");
 }
