@@ -2,6 +2,7 @@
 
 #include "giodb/common/result.h"
 #include "giodb/vector/embedding_worker.h"
+#include "giodb/vector/tokenizer.h"
 
 #include <cstdint>
 #include <memory>
@@ -63,10 +64,22 @@ create_onnx_session(const std::string& model_path);
 /// ```
 class OnnxProvider : public EmbeddingProvider {
 public:
+    /// Maximum token sequence length for model input.
+    static constexpr size_t MAX_SEQ_LENGTH = 128;
+
     /// @param model_path Path to the ONNX model file.
     /// @param dim        Expected embedding dimension.
     /// @param session    ONNX inference session (real or mock).
     OnnxProvider(std::string model_path, size_t dim, std::unique_ptr<OnnxSession> session);
+
+    /// @param model_path Path to the ONNX model file.
+    /// @param dim        Expected embedding dimension.
+    /// @param session    ONNX inference session (real or mock).
+    /// @param tokenizer  Tokenizer instance to use for text encoding.
+    OnnxProvider(std::string model_path,
+                 size_t dim,
+                 std::unique_ptr<OnnxSession> session,
+                 std::unique_ptr<Tokenizer> tokenizer);
 
     [[nodiscard]] Result<std::vector<float>> embed(const std::string& text) override;
 
@@ -77,28 +90,14 @@ public:
     [[nodiscard]] size_t dimension() const override;
     [[nodiscard]] Result<void> health_check() override;
 
-    /// Maximum token sequence length for model input.
-    static constexpr size_t MAX_SEQ_LENGTH = 128;
-
-    /// Tokenize text into integer token IDs.
-    ///
-    /// Uses a simple hash-based tokenizer: splits on whitespace/punctuation,
-    /// lowercases, then hashes each word to a stable integer in [104, 30103].
-    /// Adds CLS (101) and SEP (102) tokens, pads with 0.
-    ///
-    /// @param text       Input text to tokenize.
-    /// @param max_length Maximum sequence length (including special tokens).
-    /// @return Token ID vector of exactly max_length elements.
-    static std::vector<int64_t> tokenize(const std::string& text,
-                                         size_t max_length = MAX_SEQ_LENGTH);
-
-    /// Build attention mask from token IDs (1 for non-padding, 0 for padding).
-    static std::vector<int64_t> make_attention_mask(const std::vector<int64_t>& tokens);
+    /// Access the tokenizer used by this provider.
+    [[nodiscard]] const Tokenizer& tokenizer() const;
 
 private:
     std::string model_path_;
     size_t dimension_;
     std::unique_ptr<OnnxSession> session_;
+    std::unique_ptr<Tokenizer> tokenizer_;
 };
 
 } // namespace giodb

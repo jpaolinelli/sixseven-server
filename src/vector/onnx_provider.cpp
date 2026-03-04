@@ -5,11 +5,9 @@
 #include <onnxruntime/onnxruntime_cxx_api.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
-#include <functional>
 #include <numeric>
 #include <sstream>
 
@@ -238,15 +236,23 @@ Result<std::unique_ptr<OnnxSession>> create_onnx_session(const std::string& mode
 // ---------------------------------------------------------------------------
 
 OnnxProvider::OnnxProvider(std::string model_path, size_t dim, std::unique_ptr<OnnxSession> session)
-    : model_path_(std::move(model_path)), dimension_(dim), session_(std::move(session)) {}
+    : model_path_(std::move(model_path)), dimension_(dim), session_(std::move(session)),
+      tokenizer_(std::make_unique<HashTokenizer>(MAX_SEQ_LENGTH)) {}
+
+OnnxProvider::OnnxProvider(std::string model_path,
+                           size_t dim,
+                           std::unique_ptr<OnnxSession> session,
+                           std::unique_ptr<Tokenizer> tokenizer)
+    : model_path_(std::move(model_path)), dimension_(dim), session_(std::move(session)),
+      tokenizer_(std::move(tokenizer)) {}
 
 Result<std::vector<float>> OnnxProvider::embed(const std::string& text) {
     if (text.empty()) {
         return make_error(StatusCode::INVALID_ARGUMENT, "cannot embed empty text");
     }
 
-    auto tokens = tokenize(text, MAX_SEQ_LENGTH);
-    auto mask = make_attention_mask(tokens);
+    auto tokens = tokenizer_->encode(text, MAX_SEQ_LENGTH);
+    auto mask = tokenizer_->attention_mask(tokens);
 
     return session_->run(tokens, mask, dimension_);
 }
@@ -279,73 +285,8 @@ Result<void> OnnxProvider::health_check() {
     return session_->health_check();
 }
 
-// ---------------------------------------------------------------------------
-// Tokenizer
-// ---------------------------------------------------------------------------
-
-std::vector<int64_t> OnnxProvider::tokenize(const std::string& text, size_t max_length) {
-    // Simple hash-based tokenizer.
-    // 1. Split into lowercase words on whitespace/punctuation.
-    // 2. Hash each word to a stable integer in [104, 30103].
-    //    (Avoids special token IDs: PAD=0, UNK=100, CLS=101, SEP=102, MASK=103.)
-    // 3. Add CLS at start, SEP at end, pad with 0.
-
-    if (max_length == 0) {
-        return {};
-    }
-
-    constexpr int64_t CLS_TOKEN = 101;
-    constexpr int64_t SEP_TOKEN = 102;
-    constexpr int64_t PAD_TOKEN = 0;
-    constexpr int64_t VOCAB_OFFSET = 104;
-    constexpr int64_t VOCAB_SIZE = 30000;
-
-    std::vector<int64_t> tokens;
-    tokens.push_back(CLS_TOKEN);
-
-    std::string current_word;
-    for (char c : text) {
-        if (std::isalnum(static_cast<unsigned char>(c))) {
-            current_word += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        } else {
-            if (!current_word.empty()) {
-                if (tokens.size() < max_length - 1) {
-                    auto hash = std::hash<std::string>{}(current_word);
-                    tokens.push_back(static_cast<int64_t>(hash % VOCAB_SIZE) + VOCAB_OFFSET);
-                }
-                current_word.clear();
-            }
-        }
-    }
-    // Flush the last word.
-    if (!current_word.empty() && tokens.size() < max_length - 1) {
-        auto hash = std::hash<std::string>{}(current_word);
-        tokens.push_back(static_cast<int64_t>(hash % VOCAB_SIZE) + VOCAB_OFFSET);
-    }
-
-    tokens.push_back(SEP_TOKEN);
-
-    // Pad to max_length.
-    while (tokens.size() < max_length) {
-        tokens.push_back(PAD_TOKEN);
-    }
-
-    // Truncate if somehow exceeded (shouldn't happen with the checks above).
-    if (tokens.size() > max_length) {
-        tokens.resize(max_length);
-        tokens.back() = SEP_TOKEN;
-    }
-
-    return tokens;
-}
-
-std::vector<int64_t> OnnxProvider::make_attention_mask(const std::vector<int64_t>& tokens) {
-    std::vector<int64_t> mask;
-    mask.reserve(tokens.size());
-    for (int64_t token : tokens) {
-        mask.push_back(token != 0 ? 1 : 0);
-    }
-    return mask;
+const Tokenizer& OnnxProvider::tokenizer() const {
+    return *tokenizer_;
 }
 
 } // namespace giodb

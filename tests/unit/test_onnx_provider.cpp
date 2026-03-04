@@ -8,6 +8,7 @@
 #include "giodb/catalog/catalog.h"
 #include "giodb/vector/onnx_provider.h"
 #include "giodb/vector/provider_registry.h"
+#include "giodb/vector/tokenizer.h"
 
 #include <gtest/gtest.h>
 
@@ -235,11 +236,12 @@ TEST(OnnxProvider, HealthCheckFailure) {
 }
 
 // ---------------------------------------------------------------------------
-// Tokenizer
+// Tokenizer (HashTokenizer via Tokenizer interface)
 // ---------------------------------------------------------------------------
 
 TEST(OnnxProvider, TokenizeBasicText) {
-    auto tokens = OnnxProvider::tokenize("hello world", 10);
+    HashTokenizer tok;
+    auto tokens = tok.encode("hello world", 10);
 
     ASSERT_EQ(tokens.size(), 10u);
     // CLS at start.
@@ -256,14 +258,16 @@ TEST(OnnxProvider, TokenizeBasicText) {
 }
 
 TEST(OnnxProvider, TokenizeDeterministic) {
-    auto tokens1 = OnnxProvider::tokenize("hello world", 10);
-    auto tokens2 = OnnxProvider::tokenize("hello world", 10);
+    HashTokenizer tok;
+    auto tokens1 = tok.encode("hello world", 10);
+    auto tokens2 = tok.encode("hello world", 10);
     EXPECT_EQ(tokens1, tokens2);
 }
 
 TEST(OnnxProvider, TokenizeDifferentTextsDifferentTokens) {
-    auto tokens1 = OnnxProvider::tokenize("hello", 10);
-    auto tokens2 = OnnxProvider::tokenize("goodbye", 10);
+    HashTokenizer tok;
+    auto tokens1 = tok.encode("hello", 10);
+    auto tokens2 = tok.encode("goodbye", 10);
     // Word tokens should differ (CLS/SEP/padding are the same).
     EXPECT_NE(tokens1[1], tokens2[1]);
 }
@@ -275,7 +279,8 @@ TEST(OnnxProvider, TokenizeLongTextTruncated) {
         long_text += "word" + std::to_string(i) + " ";
     }
 
-    auto tokens = OnnxProvider::tokenize(long_text, 10);
+    HashTokenizer tok;
+    auto tokens = tok.encode(long_text, 10);
     ASSERT_EQ(tokens.size(), 10u);
     // Should have CLS at start.
     EXPECT_EQ(tokens[0], 101);
@@ -284,7 +289,8 @@ TEST(OnnxProvider, TokenizeLongTextTruncated) {
 }
 
 TEST(OnnxProvider, TokenizePunctuationSplitsWords) {
-    auto tokens = OnnxProvider::tokenize("hello,world", 10);
+    HashTokenizer tok;
+    auto tokens = tok.encode("hello,world", 10);
     ASSERT_EQ(tokens.size(), 10u);
     // "hello" and "world" should produce two separate word tokens.
     EXPECT_EQ(tokens[0], 101); // CLS
@@ -294,14 +300,16 @@ TEST(OnnxProvider, TokenizePunctuationSplitsWords) {
 }
 
 TEST(OnnxProvider, TokenizeCaseInsensitive) {
-    auto tokens_lower = OnnxProvider::tokenize("hello", 10);
-    auto tokens_upper = OnnxProvider::tokenize("HELLO", 10);
+    HashTokenizer tok;
+    auto tokens_lower = tok.encode("hello", 10);
+    auto tokens_upper = tok.encode("HELLO", 10);
     // Both should produce the same word token.
     EXPECT_EQ(tokens_lower[1], tokens_upper[1]);
 }
 
 TEST(OnnxProvider, TokenizeEmptyTextOnlySpecialTokens) {
-    auto tokens = OnnxProvider::tokenize("", 10);
+    HashTokenizer tok;
+    auto tokens = tok.encode("", 10);
     ASSERT_EQ(tokens.size(), 10u);
     EXPECT_EQ(tokens[0], 101); // CLS
     EXPECT_EQ(tokens[1], 102); // SEP
@@ -311,14 +319,16 @@ TEST(OnnxProvider, TokenizeEmptyTextOnlySpecialTokens) {
 }
 
 TEST(OnnxProvider, TokenizeWhitespaceOnlyTextOnlySpecialTokens) {
-    auto tokens = OnnxProvider::tokenize("   \t\n  ", 10);
+    HashTokenizer tok;
+    auto tokens = tok.encode("   \t\n  ", 10);
     ASSERT_EQ(tokens.size(), 10u);
     EXPECT_EQ(tokens[0], 101); // CLS
     EXPECT_EQ(tokens[1], 102); // SEP
 }
 
 TEST(OnnxProvider, TokenizeWordTokensInValidRange) {
-    auto tokens = OnnxProvider::tokenize("the quick brown fox", 10);
+    HashTokenizer tok;
+    auto tokens = tok.encode("the quick brown fox", 10);
     // Word tokens should be in [104, 30103].
     for (size_t i = 1; i <= 4; ++i) {
         EXPECT_GE(tokens[i], 104) << "token at " << i << " below range";
@@ -331,8 +341,9 @@ TEST(OnnxProvider, TokenizeWordTokensInValidRange) {
 // ---------------------------------------------------------------------------
 
 TEST(OnnxProvider, AttentionMaskNonPaddingIsOne) {
-    auto tokens = OnnxProvider::tokenize("hello world", 8);
-    auto mask = OnnxProvider::make_attention_mask(tokens);
+    HashTokenizer tok;
+    auto tokens = tok.encode("hello world", 8);
+    auto mask = tok.attention_mask(tokens);
 
     ASSERT_EQ(mask.size(), 8u);
     // CLS=101, "hello", "world", SEP=102 → all non-zero → mask = 1.
@@ -348,8 +359,9 @@ TEST(OnnxProvider, AttentionMaskNonPaddingIsOne) {
 }
 
 TEST(OnnxProvider, AttentionMaskAllPadding) {
+    HashTokenizer tok;
     std::vector<int64_t> tokens(10, 0);
-    auto mask = OnnxProvider::make_attention_mask(tokens);
+    auto mask = tok.attention_mask(tokens);
 
     ASSERT_EQ(mask.size(), 10u);
     for (auto m : mask) {
