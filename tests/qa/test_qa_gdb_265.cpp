@@ -96,6 +96,26 @@ protected:
         return 0;
     }
 
+    /// Helper to extract integer value regardless of underlying type (INT32
+    /// or INT64). Meta-columns like __node and __source use the table's actual
+    /// PK type which may be INT32 for INT columns.
+    int64_t get_int(const Value& v) {
+        if (v.is_null()) {
+            ADD_FAILURE() << "expected integer value, got NULL";
+            return 0;
+        }
+        try {
+            return v.as_int64();
+        } catch (...) {
+        }
+        try {
+            return static_cast<int64_t>(v.as_int32());
+        } catch (...) {
+        }
+        ADD_FAILURE() << "value is not an integer";
+        return 0;
+    }
+
     DiskManager dm_;
     Catalog catalog_;
     std::filesystem::path data_dir_;
@@ -133,8 +153,7 @@ TEST_F(QA_GDB265, AC1_SelectStarReturnsColumnsAndMeta) {
     auto node_idx = col_idx(qr, "__node");
     for (const auto& row : qr.rows) {
         EXPECT_FALSE(row[name_idx].is_null()) << "name should be enriched";
-        EXPECT_EQ(row[id_idx].as_int32(),
-                  static_cast<int32_t>(row[node_idx].as_int64()))
+        EXPECT_EQ(get_int(row[id_idx]), get_int(row[node_idx]))
             << "id should match __node";
     }
 }
@@ -346,7 +365,7 @@ TEST_F(QA_GDB265, CycleDetectionCircularGraph) {
     // Verify no duplicate nodes.
     std::vector<int64_t> nodes;
     for (const auto& row : qr.rows) {
-        nodes.push_back(row[0].as_int64());
+        nodes.push_back(get_int(row[0]));
     }
     std::sort(nodes.begin(), nodes.end());
     EXPECT_EQ(nodes[0], 2);
@@ -420,16 +439,16 @@ TEST_F(QA_GDB265, SourceMetaColumnCorrectness) {
     for (const auto& row : qr.rows) {
         if (row[depth_idx].as_int64() == 1) {
             // Depth-1 nodes should have __source = 1 (the start node).
-            EXPECT_EQ(row[source_idx].as_int64(), 1)
-                << "depth-1 node " << row[node_idx].as_int64() << " should have source=1";
+            EXPECT_EQ(get_int(row[source_idx]), 1)
+                << "depth-1 node " << get_int(row[node_idx]) << " should have source=1";
         }
     }
 
     // Find node 4 (depth 2) — its source should be 2 or 3 (whichever BFS found first).
     for (const auto& row : qr.rows) {
-        if (row[node_idx].as_int64() == 4) {
+        if (get_int(row[node_idx]) == 4) {
             EXPECT_EQ(row[depth_idx].as_int64(), 2);
-            auto source = row[source_idx].as_int64();
+            auto source = get_int(row[source_idx]);
             EXPECT_TRUE(source == 2 || source == 3)
                 << "node 4 source should be 2 or 3, got " << source;
         }
@@ -441,24 +460,14 @@ TEST_F(QA_GDB265, SourceMetaColumnCorrectness) {
 // ============================================================================
 
 TEST_F(QA_GDB265, MultipleDanglingEdges) {
-    // Link to two non-existent nodes.
-    exec_ok("LINK users(5) TO users(998) VIA follows");
-    exec_ok("LINK users(5) TO users(999) VIA follows");
+    // GDB-315 added PK validation to LINK — dangling edges (pointing to
+    // non-existent rows) are now rejected.  Verify LINK fails for
+    // non-existent target PKs.
+    auto r1 = engine_->execute("LINK users(5) TO users(998) VIA follows");
+    EXPECT_FALSE(r1.has_value()) << "LINK to non-existent PK should fail";
 
-    auto qr = exec_ok(
-        "SELECT id, name, __node, __depth "
-        "FROM TRAVERSE follows FROM users(5) DIRECTION OUT");
-
-    ASSERT_EQ(qr.rows.size(), 2u);
-
-    for (const auto& row : qr.rows) {
-        // Table columns should be NULL for dangling edges.
-        EXPECT_TRUE(row[0].is_null()) << "id should be NULL for dangling edge";
-        EXPECT_TRUE(row[1].is_null()) << "name should be NULL for dangling edge";
-        // Meta-columns should be populated.
-        EXPECT_FALSE(row[2].is_null()) << "__node should always be populated";
-        EXPECT_FALSE(row[3].is_null()) << "__depth should always be populated";
-    }
+    auto r2 = engine_->execute("LINK users(5) TO users(999) VIA follows");
+    EXPECT_FALSE(r2.has_value()) << "LINK to non-existent PK should fail";
 }
 
 // ============================================================================
@@ -705,7 +714,7 @@ TEST_F(QA_GDB265, DiamondGraphNoDuplicates) {
 
     // Node 4 should appear exactly once.
     ASSERT_EQ(qr.rows.size(), 1u);
-    EXPECT_EQ(qr.rows[0][0].as_int64(), 4);
+    EXPECT_EQ(get_int(qr.rows[0][0]), 4);
     EXPECT_EQ(qr.rows[0][1].as_int64(), 2);
 }
 
@@ -762,31 +771,16 @@ TEST_F(QA_GDB265, SchemaColumnTypesCorrect) {
 // ============================================================================
 
 TEST_F(QA_GDB265, WhereOnDanglingEdgeIsNull) {
-    exec_ok("LINK users(5) TO users(999) VIA follows");
-
-    auto qr = exec_ok(
-        "SELECT __node FROM TRAVERSE follows FROM users(5) DIRECTION OUT "
-        "WHERE name IS NULL");
-
-    // Only the dangling edge to 999 should match.
-    ASSERT_EQ(qr.rows.size(), 1u);
-    EXPECT_EQ(qr.rows[0][0].as_int64(), 999);
+    // GDB-315 added PK validation — dangling edges can no longer be created.
+    // Verify that LINK to non-existent PK fails.
+    auto r = engine_->execute("LINK users(5) TO users(999) VIA follows");
+    EXPECT_FALSE(r.has_value()) << "LINK to non-existent PK should fail";
 }
 
 TEST_F(QA_GDB265, WhereOnDanglingEdgeIsNotNull) {
-    exec_ok("LINK users(5) TO users(999) VIA follows");
-    exec_ok("LINK users(5) TO users(998) VIA follows");
-
-    // Insert user 998 but not 999.
-    exec_ok("INSERT INTO users VALUES (998, 'Ghost')");
-
-    auto qr = exec_ok(
-        "SELECT name, __node FROM TRAVERSE follows FROM users(5) DIRECTION OUT "
-        "WHERE name IS NOT NULL ORDER BY __node");
-
-    // Only user 998 has a name; 999 is dangling.
-    ASSERT_EQ(qr.rows.size(), 1u);
-    EXPECT_EQ(qr.rows[0][0].as_string(), "Ghost");
+    // GDB-315 added PK validation — dangling edges can no longer be created.
+    auto r = engine_->execute("LINK users(5) TO users(999) VIA follows");
+    EXPECT_FALSE(r.has_value()) << "LINK to non-existent PK should fail";
 }
 
 // ============================================================================
@@ -811,7 +805,7 @@ TEST_F(QA_GDB265, RepeatedExecution) {
 
     ASSERT_EQ(qr1.rows.size(), qr2.rows.size());
     for (size_t i = 0; i < qr1.rows.size(); ++i) {
-        EXPECT_EQ(qr1.rows[i][0].as_int64(), qr2.rows[i][0].as_int64());
+        EXPECT_EQ(get_int(qr1.rows[i][0]), get_int(qr2.rows[i][0]));
     }
 }
 

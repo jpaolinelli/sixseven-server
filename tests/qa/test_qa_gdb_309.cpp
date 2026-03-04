@@ -86,6 +86,26 @@ protected:
                qr.column_names.end();
     }
 
+    /// Helper to extract integer value regardless of underlying type (INT32
+    /// or INT64). Meta-columns like __node and __source use the table's actual
+    /// PK type.
+    int64_t get_int(const Value& v) {
+        if (v.is_null()) {
+            ADD_FAILURE() << "expected integer value, got NULL";
+            return 0;
+        }
+        try {
+            return v.as_int64();
+        } catch (...) {
+        }
+        try {
+            return static_cast<int64_t>(v.as_int32());
+        } catch (...) {
+        }
+        ADD_FAILURE() << "value is not an integer";
+        return 0;
+    }
+
     /// Get column index by name, or -1 if not found.
     int col_idx(const QueryResult& qr, const std::string& name) const {
         for (size_t i = 0; i < qr.column_names.size(); ++i) {
@@ -196,8 +216,8 @@ TEST_F(QA_GDB309_GraphViewToggle, SelectOnlySource_ReturnsSourceValues) {
     int src_idx = col_idx(qr, "__source");
     ASSERT_GE(src_idx, 0);
     // Source of both nodes should be 1 (the start node).
-    EXPECT_EQ(qr.rows[0][src_idx].as_int64(), 1);
-    EXPECT_EQ(qr.rows[1][src_idx].as_int64(), 1);
+    EXPECT_EQ(get_int(qr.rows[0][src_idx]), 1);
+    EXPECT_EQ(get_int(qr.rows[1][src_idx]), 1);
 }
 
 // ============================================================================
@@ -216,8 +236,8 @@ TEST_F(QA_GDB309_GraphViewToggle, SelectOnlyNode_ReturnsNodePKs) {
     ASSERT_EQ(qr.rows.size(), 2u);
     ASSERT_EQ(qr.column_names.size(), 1u);
     EXPECT_EQ(qr.column_names[0], "__node");
-    EXPECT_EQ(qr.rows[0][0].as_int64(), 2);
-    EXPECT_EQ(qr.rows[1][0].as_int64(), 3);
+    EXPECT_EQ(get_int(qr.rows[0][0]), 2);
+    EXPECT_EQ(get_int(qr.rows[1][0]), 3);
 }
 
 // ============================================================================
@@ -374,7 +394,7 @@ TEST_F(QA_GDB309_GraphViewToggle, DualQuery_NodeAndEdge_Consistent) {
     int node_pk_idx = col_idx(nodes, "__node");
     ASSERT_GE(node_pk_idx, 0);
     for (const auto& row : nodes.rows) {
-        discovered_pks.insert(row[node_pk_idx].as_int64());
+        discovered_pks.insert(get_int(row[node_pk_idx]));
     }
 
     int from_idx = col_idx(edges, "__from");
@@ -382,10 +402,10 @@ TEST_F(QA_GDB309_GraphViewToggle, DualQuery_NodeAndEdge_Consistent) {
     ASSERT_GE(from_idx, 0);
     ASSERT_GE(to_idx, 0);
     for (const auto& row : edges.rows) {
-        EXPECT_TRUE(discovered_pks.count(row[from_idx].as_int64()) > 0)
-            << "Edge __from " << row[from_idx].as_int64() << " not in discovered nodes";
-        EXPECT_TRUE(discovered_pks.count(row[to_idx].as_int64()) > 0)
-            << "Edge __to " << row[to_idx].as_int64() << " not in discovered nodes";
+        EXPECT_TRUE(discovered_pks.count(get_int(row[from_idx])) > 0)
+            << "Edge __from " << get_int(row[from_idx]) << " not in discovered nodes";
+        EXPECT_TRUE(discovered_pks.count(get_int(row[to_idx])) > 0)
+            << "Edge __to " << get_int(row[to_idx]) << " not in discovered nodes";
     }
 }
 
@@ -495,7 +515,7 @@ TEST_F(QA_GDB309_GraphViewToggle, DeepChain_DepthIncrements) {
     for (int i = 0; i < N; ++i) {
         EXPECT_EQ(qr.rows[i][depth_idx].as_int64(), i + 1)
             << "Node at index " << i << " should have depth " << (i + 1);
-        EXPECT_EQ(qr.rows[i][node_idx].as_int64(), i + 2)
+        EXPECT_EQ(get_int(qr.rows[i][node_idx]), i + 2)
             << "Node at index " << i << " should be user " << (i + 2);
     }
 }
@@ -516,9 +536,9 @@ TEST_F(QA_GDB309_GraphViewToggle, FetchAs_MetaColumnsStillAccessible) {
     ASSERT_EQ(qr.rows.size(), 1u);
     ASSERT_EQ(qr.column_names.size(), 4u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "User2");
-    EXPECT_EQ(qr.rows[0][1].as_int64(), 2);  // __node
+    EXPECT_EQ(get_int(qr.rows[0][1]), 2);  // __node
     EXPECT_EQ(qr.rows[0][2].as_int64(), 1);  // __depth
-    EXPECT_EQ(qr.rows[0][3].as_int64(), 1);  // __source (parent is 1)
+    EXPECT_EQ(get_int(qr.rows[0][3]), 1);  // __source (parent is 1)
 }
 
 // ============================================================================
@@ -578,11 +598,11 @@ TEST_F(QA_GDB309_GraphViewToggle, SelectDepthAndSource_NoNode) {
 
     // User2: depth 1, source 1
     EXPECT_EQ(qr.rows[0][0].as_int64(), 1);
-    EXPECT_EQ(qr.rows[0][1].as_int64(), 1);
+    EXPECT_EQ(get_int(qr.rows[0][1]), 1);
 
     // User3: depth 2, source 2
     EXPECT_EQ(qr.rows[1][0].as_int64(), 2);
-    EXPECT_EQ(qr.rows[1][1].as_int64(), 2);
+    EXPECT_EQ(get_int(qr.rows[1][1]), 2);
 }
 
 // ============================================================================

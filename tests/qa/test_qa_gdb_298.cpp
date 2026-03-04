@@ -62,6 +62,25 @@ protected:
         }
     }
 
+    /// Helper to extract integer value regardless of underlying type (INT32
+    /// or INT64). Meta-columns like __from/__to use the table's actual PK type.
+    int64_t get_int(const Value& v) {
+        if (v.is_null()) {
+            ADD_FAILURE() << "expected integer value, got NULL";
+            return 0;
+        }
+        try {
+            return v.as_int64();
+        } catch (...) {
+        }
+        try {
+            return static_cast<int64_t>(v.as_int32());
+        } catch (...) {
+        }
+        ADD_FAILURE() << "value is not an integer";
+        return 0;
+    }
+
     /// Collect (from, to) pairs sorted.
     std::vector<std::pair<int64_t, int64_t>> collect_edges(const QueryResult& qr) {
         std::vector<std::pair<int64_t, int64_t>> edges;
@@ -74,7 +93,7 @@ protected:
                 to_idx = i;
         }
         for (const auto& row : qr.rows) {
-            edges.emplace_back(row[from_idx].as_int64(), row[to_idx].as_int64());
+            edges.emplace_back(get_int(row[from_idx]), get_int(row[to_idx]));
         }
         std::sort(edges.begin(), edges.end());
         return edges;
@@ -568,7 +587,7 @@ TEST_F(QA_GDB298_EdgeTraversal, DepthIsMaxOfEndpointsForCrossEdge) {
 
     std::map<std::pair<int64_t, int64_t>, int64_t> edge_depths;
     for (const auto& row : qr.rows) {
-        auto key = std::make_pair(row[0].as_int64(), row[1].as_int64());
+        auto key = std::make_pair(get_int(row[0]), get_int(row[1]));
         edge_depths[key] = row[2].as_int64();
     }
 
@@ -591,7 +610,7 @@ TEST_F(QA_GDB298_EdgeTraversal, DepthForBackEdgeToStart) {
 
     std::map<std::pair<int64_t, int64_t>, int64_t> edge_depths;
     for (const auto& row : qr.rows) {
-        auto key = std::make_pair(row[0].as_int64(), row[1].as_int64());
+        auto key = std::make_pair(get_int(row[0]), get_int(row[1]));
         edge_depths[key] = row[2].as_int64();
     }
 
@@ -995,8 +1014,8 @@ TEST_F(QA_GDB298_EdgeTraversal, SelfLoopWithProperties) {
         "FROM TRAVERSE refers FROM people(1) DIRECTION OUT MODE EDGES");
 
     ASSERT_EQ(qr.rows.size(), 1u);
-    EXPECT_EQ(qr.rows[0][0].as_int64(), 1);
-    EXPECT_EQ(qr.rows[0][1].as_int64(), 1);
+    EXPECT_EQ(get_int(qr.rows[0][0]), 1);
+    EXPECT_EQ(get_int(qr.rows[0][1]), 1);
 
     size_t n_idx = 0;
     for (size_t i = 0; i < qr.column_names.size(); ++i) {

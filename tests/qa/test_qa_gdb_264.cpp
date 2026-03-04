@@ -327,17 +327,16 @@ TEST_F(QA_GDB264, AC4_InDoesNotExposeTargetColumns) {
 }
 
 TEST_F(QA_GDB264, AC4_BothFromSourceGoesToTarget) {
-    // BOTH from users: since users is source, target is posts.
-    auto bound = bind_ok("SELECT title FROM TRAVERSE authored FROM users(1) DIRECTION BOTH");
-    ASSERT_EQ(bound.output_columns.size(), 1u);
-    EXPECT_EQ(bound.output_columns[0].column_name, "title");
+    // GDB-267 intentionally restricted DIRECTION BOTH to homogeneous edges.
+    // Heterogeneous edges (like "authored": users→posts) reject BOTH.
+    bind_error("SELECT title FROM TRAVERSE authored FROM users(1) DIRECTION BOTH",
+               StatusCode::TYPE_ERROR);
 }
 
 TEST_F(QA_GDB264, AC4_BothFromTargetGoesToSource) {
-    // BOTH from posts: since posts is target, target becomes users (source).
-    auto bound = bind_ok("SELECT name FROM TRAVERSE authored FROM posts(1) DIRECTION BOTH");
-    ASSERT_EQ(bound.output_columns.size(), 1u);
-    EXPECT_EQ(bound.output_columns[0].column_name, "name");
+    // GDB-267 intentionally restricted DIRECTION BOTH to homogeneous edges.
+    bind_error("SELECT name FROM TRAVERSE authored FROM posts(1) DIRECTION BOTH",
+               StatusCode::TYPE_ERROR);
 }
 
 TEST_F(QA_GDB264, AC4_HeterogeneousEdgeStarExpansionOnlyTarget) {
@@ -669,10 +668,13 @@ TEST_F(QA_GDB264, CombineTargetMetaAndEdgeProperty) {
 // =============================================================================
 
 TEST_F(QA_GDB264, WhereExprWithNonMetaColumnFails) {
-    // TRAVERSE internal WHERE is bound against meta-only scope.
-    // "name" is NOT a meta-column → should fail.
-    bind_error("SELECT id FROM TRAVERSE follows FROM users(1) DIRECTION OUT WHERE name = 'alice'",
-               StatusCode::NOT_FOUND);
+    // GDB-265 changed the WHERE scope to include enriched target table columns
+    // (not just meta-columns).  "name" is a users column, so it now binds
+    // successfully in the enriched scope.
+    auto bound = bind_ok(
+        "SELECT id FROM TRAVERSE follows FROM users(1) DIRECTION OUT WHERE name = 'alice'");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+    EXPECT_EQ(bound.output_columns[0].column_name, "id");
 }
 
 TEST_F(QA_GDB264, WhereExprDepthComparisonBinds) {

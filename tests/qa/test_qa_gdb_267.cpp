@@ -102,6 +102,26 @@ protected:
         }
     }
 
+    /// Helper to extract integer value regardless of underlying type (INT32
+    /// or INT64). Meta-columns like __node and __source use the table's actual
+    /// PK type.
+    int64_t get_int(const Value& v) {
+        if (v.is_null()) {
+            ADD_FAILURE() << "expected integer value, got NULL";
+            return 0;
+        }
+        try {
+            return v.as_int64();
+        } catch (...) {
+        }
+        try {
+            return static_cast<int64_t>(v.as_int32());
+        } catch (...) {
+        }
+        ADD_FAILURE() << "value is not an integer";
+        return 0;
+    }
+
     void exec_error_msg(const std::string& sql, StatusCode expected_code,
                         const std::string& msg_substring) {
         auto result = engine_->execute(sql);
@@ -503,7 +523,7 @@ TEST_F(QA_GDB267_HeteroTraversal, MetaSource_CorrectForHeteroOut) {
     ASSERT_EQ(qr.rows.size(), 2u);
     for (const auto& row : qr.rows) {
         // __source should be 1 (user 1 is the start node that reached these posts).
-        EXPECT_EQ(row[2].as_int64(), 1);
+        EXPECT_EQ(get_int(row[2]), 1);
     }
 }
 
@@ -514,7 +534,7 @@ TEST_F(QA_GDB267_HeteroTraversal, MetaSource_CorrectForHeteroIn) {
 
     ASSERT_EQ(qr.rows.size(), 1u);
     // __source should be 10 (post 10 is the start node).
-    EXPECT_EQ(qr.rows[0][2].as_int64(), 10);
+    EXPECT_EQ(get_int(qr.rows[0][2]), 10);
 }
 
 // ============================================================================

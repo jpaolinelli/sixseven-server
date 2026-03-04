@@ -179,15 +179,15 @@ TEST_F(QA_GDB266, AC2_EdgePropertiesFromShortestPathEdge) {
     ASSERT_EQ(qr.rows.size(), 3u);
 
     // Node 2 reached via 1→2 (weight=10).
-    EXPECT_EQ(qr.rows[0][0].as_int64(), 2);
+    EXPECT_EQ(get_int(qr.rows[0][0]), 2);
     EXPECT_EQ(get_int(qr.rows[0][2]), 10);
 
     // Node 3 reached via 1→3 (weight=20).
-    EXPECT_EQ(qr.rows[1][0].as_int64(), 3);
+    EXPECT_EQ(get_int(qr.rows[1][0]), 3);
     EXPECT_EQ(get_int(qr.rows[1][2]), 20);
 
     // Node 4: BFS order may pick 2→4 or 3→4.
-    EXPECT_EQ(qr.rows[2][0].as_int64(), 4);
+    EXPECT_EQ(get_int(qr.rows[2][0]), 4);
     auto weight_for_4 = get_int(qr.rows[2][2]);
     EXPECT_TRUE(weight_for_4 == 30 || weight_for_4 == 40)
         << "node 4 weight should be 30 or 40, got " << weight_for_4;
@@ -235,11 +235,11 @@ TEST_F(QA_GDB266, AC4_EdgePropertiesNullableForDifferentPaths) {
     ASSERT_EQ(qr.rows.size(), 2u);
 
     // Node 2: weight from 1→2 = 10.
-    EXPECT_EQ(qr.rows[0][0].as_int64(), 2);
+    EXPECT_EQ(get_int(qr.rows[0][0]), 2);
     EXPECT_EQ(get_int(qr.rows[0][1]), 10);
 
     // Node 3: weight from 2→3 = 20.
-    EXPECT_EQ(qr.rows[1][0].as_int64(), 3);
+    EXPECT_EQ(get_int(qr.rows[1][0]), 3);
     EXPECT_EQ(get_int(qr.rows[1][1]), 20);
 }
 
@@ -461,8 +461,8 @@ TEST_F(QA_GDB266, DirectionBothEdgeProperties) {
 
     ASSERT_EQ(qr.rows.size(), 2u);
 
-    EXPECT_EQ(qr.rows[0][0].as_int64(), 1);
-    EXPECT_EQ(qr.rows[1][0].as_int64(), 3);
+    EXPECT_EQ(get_int(qr.rows[0][0]), 1);
+    EXPECT_EQ(get_int(qr.rows[1][0]), 3);
 
     // Both should have non-null weights.
     EXPECT_FALSE(qr.rows[0][1].is_null());
@@ -474,29 +474,22 @@ TEST_F(QA_GDB266, DirectionBothEdgeProperties) {
 // ============================================================================
 
 TEST_F(QA_GDB266, DanglingEdgeWithProperties) {
+    // GDB-315 added PK validation — dangling edges (pointing to non-existent
+    // rows) can no longer be created.  Verify LINK to non-existent PK fails.
     exec_ok("CREATE EDGE TYPE follows (weight INT) FROM users TO users");
     exec_ok("LINK users(1) TO users(2) VIA follows (weight = 10)");
-    // Link to non-existent user 999.
-    exec_ok("LINK users(1) TO users(999) VIA follows (weight = 77)");
 
+    auto r = engine_->execute("LINK users(1) TO users(999) VIA follows (weight = 77)");
+    EXPECT_FALSE(r.has_value()) << "LINK to non-existent PK should fail";
+
+    // Only the valid edge should exist.
     auto qr = exec_ok(
-        "SELECT id, name, __node, weight "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "ORDER BY __node");
-
-    ASSERT_EQ(qr.rows.size(), 2u);
-
-    // Node 2: table columns populated, weight=10.
+        "SELECT id, name, weight "
+        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_int32(), 2);
     EXPECT_EQ(qr.rows[0][1].as_string(), "Bob");
-    EXPECT_EQ(get_int(qr.rows[0][3]), 10);
-
-    // Node 999: table columns NULL (dangling), but weight still present.
-    EXPECT_TRUE(qr.rows[1][0].is_null()) << "id should be NULL for dangling edge";
-    EXPECT_TRUE(qr.rows[1][1].is_null()) << "name should be NULL for dangling edge";
-    EXPECT_EQ(qr.rows[1][2].as_int64(), 999);
-    EXPECT_EQ(get_int(qr.rows[1][3]), 77)
-        << "edge property should be present for dangling edge";
+    EXPECT_EQ(get_int(qr.rows[0][2]), 10);
 }
 
 // ============================================================================
@@ -696,10 +689,10 @@ TEST_F(QA_GDB266, CycleDetectionWithEdgeProperties) {
     // BFS: 1→2 (w=10), 2→3 (w=20). 3→1 is a cycle, skipped.
     ASSERT_EQ(qr.rows.size(), 2u);
 
-    EXPECT_EQ(qr.rows[0][0].as_int64(), 2);
+    EXPECT_EQ(get_int(qr.rows[0][0]), 2);
     EXPECT_EQ(get_int(qr.rows[0][1]), 10);
 
-    EXPECT_EQ(qr.rows[1][0].as_int64(), 3);
+    EXPECT_EQ(get_int(qr.rows[1][0]), 3);
     EXPECT_EQ(get_int(qr.rows[1][1]), 20);
 }
 
