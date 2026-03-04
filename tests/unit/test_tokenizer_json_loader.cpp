@@ -90,7 +90,7 @@ TEST(TokenizerJsonLoader, LoadMiniLM_Normalizer) {
     auto result = load_tokenizer_config(minilm_fixture());
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
-    EXPECT_EQ(result->normalizer, NormalizerType::LOWERCASE);
+    EXPECT_EQ(result->normalizer, NormalizerType::BERT);
     EXPECT_TRUE(result->normalizer_lowercase);
     // strip_accents is null in MiniLM → defaults to false.
     EXPECT_FALSE(result->normalizer_strip_accents);
@@ -304,7 +304,7 @@ TEST(TokenizerJsonLoader, NormalizerLowercaseFalse) {
     })");
     auto result = load_tokenizer_config(file.path());
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ(result->normalizer, NormalizerType::NONE);
+    EXPECT_EQ(result->normalizer, NormalizerType::BERT);
     EXPECT_FALSE(result->normalizer_lowercase);
 }
 

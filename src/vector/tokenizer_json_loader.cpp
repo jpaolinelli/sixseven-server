@@ -26,7 +26,10 @@ Result<TokenizerModelType> parse_model_type(const std::string& type_str) {
 
 /// Map a JSON normalizer type string to NormalizerType.
 NormalizerType parse_normalizer_type(const std::string& type_str, bool lowercase) {
-    if (type_str == "BertNormalizer" || type_str == "Lowercase") {
+    if (type_str == "BertNormalizer") {
+        return NormalizerType::BERT;
+    }
+    if (type_str == "Lowercase") {
         return lowercase ? NormalizerType::LOWERCASE : NormalizerType::NONE;
     }
     if (type_str == "NFC" || type_str == "NFKC") {
