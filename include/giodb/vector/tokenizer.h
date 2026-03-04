@@ -21,6 +21,7 @@ enum class NormalizerType {
     NONE,      ///< No normalization.
     LOWERCASE, ///< Lowercase all characters.
     NFC,       ///< Unicode NFC normalization.
+    BERT,      ///< BERT normalization (lowercase, accent strip, cleanup, CJK spacing).
 };
 
 /// Pre-tokenizer that splits text before subword tokenization.
