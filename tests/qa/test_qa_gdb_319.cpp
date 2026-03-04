@@ -29,8 +29,7 @@ std::string minilm_fixture() {
 class TempJsonFile {
 public:
     explicit TempJsonFile(const std::string& content, const std::string& suffix = "")
-        : path_(std::filesystem::temp_directory_path() /
-                ("giodb_qa_319_" + suffix + ".json")) {
+        : path_(std::filesystem::temp_directory_path() / ("giodb_qa_319_" + suffix + ".json")) {
         std::ofstream out(path_);
         out << content;
     }
@@ -116,8 +115,7 @@ TEST(QA_GDB319_Vocab, EmptyVocabObjectAccepted) {
 }
 
 TEST(QA_GDB319_Vocab, SingleEntryVocab) {
-    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":{"hello":42}}})",
-                      "single_vocab");
+    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":{"hello":42}}})", "single_vocab");
     auto result = load_tokenizer_config(file.path());
     ASSERT_TRUE(result.has_value()) << result.error().message;
     ASSERT_EQ(result->vocab.size(), 1u);
@@ -125,8 +123,7 @@ TEST(QA_GDB319_Vocab, SingleEntryVocab) {
 }
 
 TEST(QA_GDB319_Vocab, NegativeVocabId) {
-    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":{"tok":-1}}})",
-                      "neg_vocab");
+    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":{"tok":-1}}})", "neg_vocab");
     auto result = load_tokenizer_config(file.path());
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->vocab.at("tok"), -1);
@@ -142,16 +139,14 @@ TEST(QA_GDB319_Vocab, LargeVocabId) {
 }
 
 TEST(QA_GDB319_Vocab, ZeroVocabId) {
-    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":{"tok":0}}})",
-                      "zero_id");
+    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":{"tok":0}}})", "zero_id");
     auto result = load_tokenizer_config(file.path());
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->vocab.at("tok"), 0);
 }
 
 TEST(QA_GDB319_Vocab, FloatVocabIdRejected) {
-    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":{"tok":1.5}}})",
-                      "float_id");
+    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":{"tok":1.5}}})", "float_id");
     auto result = load_tokenizer_config(file.path());
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
@@ -159,17 +154,15 @@ TEST(QA_GDB319_Vocab, FloatVocabIdRejected) {
 
 TEST(QA_GDB319_Vocab, EmptyStringKey) {
     // Empty string is a valid JSON key
-    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":{"":0}}})",
-                      "empty_key");
+    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":{"":0}}})", "empty_key");
     auto result = load_tokenizer_config(file.path());
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->vocab.at(""), 0);
 }
 
 TEST(QA_GDB319_Vocab, UnicodeTokenKeys) {
-    TempJsonFile file(
-        R"({"model":{"type":"WordPiece","vocab":{"café":0,"日本語":1,"🚀":2}}})",
-        "unicode_keys");
+    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":{"café":0,"日本語":1,"🚀":2}}})",
+                      "unicode_keys");
     auto result = load_tokenizer_config(file.path());
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->vocab.size(), 3u);
@@ -180,9 +173,7 @@ TEST(QA_GDB319_Vocab, UnicodeTokenKeys) {
 
 TEST(QA_GDB319_Vocab, DuplicateKeysLastWins) {
     // JSON with duplicate keys — nlohmann::json keeps last value
-    TempJsonFile file(
-        R"({"model":{"type":"WordPiece","vocab":{"tok":1,"tok":2}}})",
-        "dup_keys");
+    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":{"tok":1,"tok":2}}})", "dup_keys");
     auto result = load_tokenizer_config(file.path());
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->vocab.at("tok"), 2);
@@ -272,8 +263,7 @@ TEST(QA_GDB319_AddedTokens, AllFiveSpecialTokens) {
 }
 
 TEST(QA_GDB319_AddedTokens, NoAddedTokensSectionKeepsDefaults) {
-    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":{"a":0}}})",
-                      "no_added");
+    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":{"a":0}}})", "no_added");
     auto result = load_tokenizer_config(file.path());
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->special_tokens.pad, 0);
@@ -401,7 +391,7 @@ TEST(QA_GDB319_AddedTokens, StringIdSkipped) {
 TEST(QA_GDB319_Normalizer, BertNormalizerWithLowercase) {
     auto result = load_tokenizer_config(minilm_fixture());
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ(result->normalizer, NormalizerType::LOWERCASE);
+    EXPECT_EQ(result->normalizer, NormalizerType::BERT);
     EXPECT_TRUE(result->normalizer_lowercase);
 }
 
@@ -413,7 +403,7 @@ TEST(QA_GDB319_Normalizer, BertNormalizerWithoutLowercase) {
                       "no_lower");
     auto result = load_tokenizer_config(file.path());
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ(result->normalizer, NormalizerType::NONE);
+    EXPECT_EQ(result->normalizer, NormalizerType::BERT);
     EXPECT_FALSE(result->normalizer_lowercase);
 }
 
@@ -719,24 +709,21 @@ TEST(QA_GDB319_Errors, MissingVocab) {
 }
 
 TEST(QA_GDB319_Errors, VocabIsArray) {
-    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":["a","b"]}})",
-                      "vocab_array");
+    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":["a","b"]}})", "vocab_array");
     auto result = load_tokenizer_config(file.path());
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
 TEST(QA_GDB319_Errors, VocabIsNull) {
-    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":null}})",
-                      "vocab_null");
+    TempJsonFile file(R"({"model":{"type":"WordPiece","vocab":null}})", "vocab_null");
     auto result = load_tokenizer_config(file.path());
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
 TEST(QA_GDB319_Errors, UnsupportedModelType) {
-    TempJsonFile file(R"({"model":{"type":"Char","vocab":{"a":0}}})",
-                      "bad_type");
+    TempJsonFile file(R"({"model":{"type":"Char","vocab":{"a":0}}})", "bad_type");
     auto result = load_tokenizer_config(file.path());
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
@@ -799,7 +786,7 @@ TEST(QA_GDB319_Integration, FullMiniLMRoundTrip) {
     EXPECT_EQ(config.special_tokens.mask, 103);
 
     // Normalizer
-    EXPECT_EQ(config.normalizer, NormalizerType::LOWERCASE);
+    EXPECT_EQ(config.normalizer, NormalizerType::BERT);
     EXPECT_TRUE(config.normalizer_lowercase);
     EXPECT_FALSE(config.normalizer_strip_accents);
 
@@ -869,7 +856,7 @@ TEST(QA_GDB319_Normalizer, LowercaseFieldMissingDefaultsTrue) {
     ASSERT_TRUE(result.has_value()) << result.error().message;
     // lowercase defaults to true inside the parsing code
     EXPECT_TRUE(result->normalizer_lowercase);
-    EXPECT_EQ(result->normalizer, NormalizerType::LOWERCASE);
+    EXPECT_EQ(result->normalizer, NormalizerType::BERT);
 }
 
 TEST(QA_GDB319_Normalizer, LowercaseFieldNull) {
@@ -892,11 +879,11 @@ TEST(QA_GDB319_Stress, LargeVocab) {
     // Build a JSON string with 10000 vocab entries
     std::string vocab_entries;
     for (int i = 0; i < 10000; ++i) {
-        if (i > 0) vocab_entries += ",";
+        if (i > 0)
+            vocab_entries += ",";
         vocab_entries += "\"token_" + std::to_string(i) + "\":" + std::to_string(i);
     }
-    std::string json =
-        R"({"model":{"type":"WordPiece","vocab":{)" + vocab_entries + "}}}";
+    std::string json = R"({"model":{"type":"WordPiece","vocab":{)" + vocab_entries + "}}}";
 
     TempJsonFile file(json, "stress_vocab");
     auto result = load_tokenizer_config(file.path());
@@ -910,11 +897,11 @@ TEST(QA_GDB319_Stress, LargeMergesList) {
     // Build a BPE config with 5000 merges
     std::string merges;
     for (int i = 0; i < 5000; ++i) {
-        if (i > 0) merges += ",";
+        if (i > 0)
+            merges += ",";
         merges += "\"a" + std::to_string(i) + " b" + std::to_string(i) + "\"";
     }
-    std::string json =
-        R"({"model":{"type":"BPE","vocab":{"a":0},"merges":[)" + merges + "]}}";
+    std::string json = R"({"model":{"type":"BPE","vocab":{"a":0},"merges":[)" + merges + "]}}";
 
     TempJsonFile file(json, "stress_merges");
     auto result = load_tokenizer_config(file.path());
