@@ -11,6 +11,18 @@
 
 namespace giodb {
 
+/// Resolved file paths for an ONNX model directory.
+///
+/// Returned by resolve_onnx_model_paths() after inspecting a path
+/// that may be a directory or a direct .onnx file.
+struct OnnxModelPaths {
+    /// Path to the .onnx model file (always set on success).
+    std::string model_path;
+
+    /// Path to tokenizer.json, empty if not found.
+    std::string tokenizer_path;
+};
+
 /// Abstract interface for ONNX model inference sessions.
 ///
 /// Wraps the ONNX Runtime session to allow mocking in tests.
@@ -42,6 +54,16 @@ public:
 /// @return Initialized session, or IO_ERROR if the file cannot be loaded.
 [[nodiscard]] Result<std::unique_ptr<OnnxSession>>
 create_onnx_session(const std::string& model_path);
+
+/// Resolve a model path that may be a directory or a direct .onnx file.
+///
+/// If the path is a directory, looks for model.onnx and tokenizer.json
+/// inside it. If the path is a .onnx file, uses it directly and checks
+/// for tokenizer.json in the same directory.
+///
+/// @param path Directory containing the model or path to a .onnx file.
+/// @return Resolved model and tokenizer paths, or IO_ERROR.
+[[nodiscard]] Result<OnnxModelPaths> resolve_onnx_model_paths(const std::string& path);
 
 /// Embedding provider that loads an ONNX model and runs local inference.
 ///
@@ -99,5 +121,17 @@ private:
     std::unique_ptr<OnnxSession> session_;
     std::unique_ptr<Tokenizer> tokenizer_;
 };
+
+/// Create an OnnxProvider from a model path (directory or .onnx file).
+///
+/// Resolves paths, creates the ONNX session, loads the tokenizer from
+/// tokenizer.json if present (falling back to HashTokenizer), and
+/// assembles the provider.
+///
+/// @param path  Directory containing the model or path to a .onnx file.
+/// @param dim   Expected embedding dimension.
+/// @return Configured OnnxProvider, or error.
+[[nodiscard]] Result<std::unique_ptr<OnnxProvider>> create_onnx_provider(const std::string& path,
+                                                                         size_t dim);
 
 } // namespace giodb
