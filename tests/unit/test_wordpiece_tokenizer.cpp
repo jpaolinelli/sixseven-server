@@ -1,7 +1,9 @@
+#include "giodb/vector/tokenizer_json_loader.h"
 #include "giodb/vector/wordpiece_tokenizer.h"
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -236,6 +238,155 @@ TEST_F(WordPieceTokenizerTest, ConfigurableSubwordPrefix) {
     // Should produce same token IDs since vocab maps to same values.
     std::vector<int64_t> expected = {101, 7861, 8270, 4667, 102, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     EXPECT_EQ(ids, expected);
+}
+
+// ===================================================================
+// End-to-end tests with real all-MiniLM-L6-v2 tokenizer.json fixture.
+//
+// Token IDs generated from Python:
+//   from transformers import AutoTokenizer
+//   tok = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+//   tok.encode(text)
+// ===================================================================
+
+/// Return absolute path to the MiniLM tokenizer fixture.
+std::string minilm_fixture() {
+    return (std::filesystem::path(__FILE__).parent_path().parent_path() / "fixtures" /
+            "tokenizer_minilm.json")
+        .string();
+}
+
+class WordPieceE2ETest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        auto config = load_tokenizer_config(minilm_fixture());
+        ASSERT_TRUE(config.has_value()) << config.error().message;
+        tokenizer_ = std::make_unique<WordPieceTokenizer>(*config);
+    }
+
+    std::unique_ptr<WordPieceTokenizer> tokenizer_;
+};
+
+TEST_F(WordPieceE2ETest, HelloWorld) {
+    // Python: [101, 7592, 2088, 102]
+    auto ids = tokenizer_->encode("hello world", 128);
+    ASSERT_GE(ids.size(), 4u);
+    EXPECT_EQ(ids[0], 101);  // [CLS]
+    EXPECT_EQ(ids[1], 7592); // hello
+    EXPECT_EQ(ids[2], 2088); // world
+    EXPECT_EQ(ids[3], 102);  // [SEP]
+    for (size_t i = 4; i < ids.size(); ++i) {
+        EXPECT_EQ(ids[i], 0); // [PAD]
+    }
+}
+
+TEST_F(WordPieceE2ETest, MachineLearning) {
+    // Python: [101, 3698, 4083, 102]
+    auto ids = tokenizer_->encode("machine learning", 128);
+    ASSERT_GE(ids.size(), 4u);
+    EXPECT_EQ(ids[0], 101);  // [CLS]
+    EXPECT_EQ(ids[1], 3698); // machine
+    EXPECT_EQ(ids[2], 4083); // learning
+    EXPECT_EQ(ids[3], 102);  // [SEP]
+}
+
+TEST_F(WordPieceE2ETest, TheQuickBrownFox) {
+    // Python: [101, 1996, 4248, 2829, 4419, 102]
+    auto ids = tokenizer_->encode("the quick brown fox", 128);
+    ASSERT_GE(ids.size(), 6u);
+    EXPECT_EQ(ids[0], 101);  // [CLS]
+    EXPECT_EQ(ids[1], 1996); // the
+    EXPECT_EQ(ids[2], 4248); // quick
+    EXPECT_EQ(ids[3], 2829); // brown
+    EXPECT_EQ(ids[4], 4419); // fox
+    EXPECT_EQ(ids[5], 102);  // [SEP]
+}
+
+TEST_F(WordPieceE2ETest, Embedding) {
+    // Python: [101, 7861, 8270, 4667, 102]
+    // "embedding" -> ["em", "##bed", "##ding"]
+    auto ids = tokenizer_->encode("embedding", 128);
+    ASSERT_GE(ids.size(), 5u);
+    EXPECT_EQ(ids[0], 101);  // [CLS]
+    EXPECT_EQ(ids[1], 7861); // em
+    EXPECT_EQ(ids[2], 8270); // ##bed
+    EXPECT_EQ(ids[3], 4667); // ##ding
+    EXPECT_EQ(ids[4], 102);  // [SEP]
+}
+
+TEST_F(WordPieceE2ETest, EmptyInput) {
+    // Python: [101, 102]
+    auto ids = tokenizer_->encode("", 128);
+    ASSERT_GE(ids.size(), 2u);
+    EXPECT_EQ(ids[0], 101); // [CLS]
+    EXPECT_EQ(ids[1], 102); // [SEP]
+    for (size_t i = 2; i < ids.size(); ++i) {
+        EXPECT_EQ(ids[i], 0);
+    }
+}
+
+TEST_F(WordPieceE2ETest, CaseInsensitive) {
+    // Python: "Hello World" and "hello world" both produce [101, 7592, 2088, 102]
+    auto ids_lower = tokenizer_->encode("hello world", 128);
+    auto ids_upper = tokenizer_->encode("Hello World", 128);
+    EXPECT_EQ(ids_lower, ids_upper);
+}
+
+TEST_F(WordPieceE2ETest, LongSentence) {
+    // Python: [101, 1996, 4248, 2829, 4419, 14523, 2058, 1996, 13971, 3899, 102]
+    auto ids = tokenizer_->encode("the quick brown fox jumps over the lazy dog", 128);
+    ASSERT_GE(ids.size(), 11u);
+    EXPECT_EQ(ids[0], 101);   // [CLS]
+    EXPECT_EQ(ids[1], 1996);  // the
+    EXPECT_EQ(ids[2], 4248);  // quick
+    EXPECT_EQ(ids[3], 2829);  // brown
+    EXPECT_EQ(ids[4], 4419);  // fox
+    EXPECT_EQ(ids[5], 14523); // jumps
+    EXPECT_EQ(ids[6], 2058);  // over
+    EXPECT_EQ(ids[7], 1996);  // the
+    EXPECT_EQ(ids[8], 13971); // lazy
+    EXPECT_EQ(ids[9], 3899);  // dog
+    EXPECT_EQ(ids[10], 102);  // [SEP]
+}
+
+TEST_F(WordPieceE2ETest, Contraction) {
+    // Python: "I don't know" -> [101, 1045, 2123, 1005, 1056, 2113, 102]
+    auto ids = tokenizer_->encode("I don't know", 128);
+    ASSERT_GE(ids.size(), 7u);
+    EXPECT_EQ(ids[0], 101);  // [CLS]
+    EXPECT_EQ(ids[1], 1045); // i
+    EXPECT_EQ(ids[2], 2123); // don
+    EXPECT_EQ(ids[3], 1005); // '
+    EXPECT_EQ(ids[4], 1056); // t
+    EXPECT_EQ(ids[5], 2113); // know
+    EXPECT_EQ(ids[6], 102);  // [SEP]
+}
+
+TEST_F(WordPieceE2ETest, MultipleSubwordSplits) {
+    // "embedding" -> ["em", "##bed", "##ding"] uses subword decomposition.
+    // "hello" is a whole word. Test the full pipeline together.
+    // Python: "hello embedding" -> [101, 7592, 7861, 8270, 4667, 102]
+    auto ids = tokenizer_->encode("hello embedding", 128);
+    ASSERT_GE(ids.size(), 6u);
+    EXPECT_EQ(ids[0], 101);  // [CLS]
+    EXPECT_EQ(ids[1], 7592); // hello
+    EXPECT_EQ(ids[2], 7861); // em
+    EXPECT_EQ(ids[3], 8270); // ##bed
+    EXPECT_EQ(ids[4], 4667); // ##ding
+    EXPECT_EQ(ids[5], 102);  // [SEP]
+}
+
+TEST_F(WordPieceE2ETest, VocabSizeMatchesFixture) {
+    EXPECT_EQ(tokenizer_->vocab_size(), 30522u);
+}
+
+TEST_F(WordPieceE2ETest, AttentionMask) {
+    auto ids = tokenizer_->encode("hello world", 8);
+    auto mask = tokenizer_->attention_mask(ids);
+    ASSERT_EQ(mask.size(), 8u);
+    // CLS, hello, world, SEP -> 1; rest -> 0.
+    std::vector<int64_t> expected = {1, 1, 1, 1, 0, 0, 0, 0};
+    EXPECT_EQ(mask, expected);
 }
 
 } // namespace
