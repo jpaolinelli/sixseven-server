@@ -203,7 +203,14 @@ Description:
 
 For Medium findings, include them in the QA report and let the user decide whether to file tickets.
 
-## Step 10: QA Report Format
+## Step 11: Run all QA tests and Commit tests
+
+1) Run all QA tests
+2) Check for regressions
+3) Check if QA tests are out dated and need updating, if they need update them go ahead and update them.
+4) Make sure you commit QA test changes
+
+## Step 11: QA Report Format
 
 ```
 # <TICKET-ID> — <Summary> — QA Report
