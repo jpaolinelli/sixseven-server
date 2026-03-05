@@ -1,6 +1,6 @@
-#include "giodb/txn/mvcc.h"
+#include "sixseven/txn/mvcc.h"
 
-namespace giodb {
+namespace sixseven {
 
 bool is_visible(const MvccTupleHeader& header,
                 const Snapshot& snapshot,
@@ -110,4 +110,4 @@ bool is_dead(const MvccTupleHeader& header,
     return header.xmax < xmin_horizon;
 }
 
-} // namespace giodb
+} // namespace sixseven

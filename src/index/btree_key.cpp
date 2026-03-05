@@ -1,8 +1,8 @@
-#include "giodb/index/btree_key.h"
+#include "sixseven/index/btree_key.h"
 
-#include "giodb/common/coercion.h"
+#include "sixseven/common/coercion.h"
 
-namespace giodb {
+namespace sixseven {
 
 Result<std::strong_ordering> compare_keys(const KeyType& lhs, const KeyType& rhs) {
     if (lhs.size() != rhs.size()) {
@@ -24,4 +24,4 @@ Result<std::strong_ordering> compare_keys(const KeyType& lhs, const KeyType& rhs
     return ok(std::strong_ordering::equal);
 }
 
-} // namespace giodb
+} // namespace sixseven

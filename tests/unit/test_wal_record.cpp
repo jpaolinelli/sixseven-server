@@ -1,4 +1,4 @@
-#include "giodb/storage/wal_record.h"
+#include "sixseven/storage/wal_record.h"
 
 #include <gtest/gtest.h>
 
@@ -6,7 +6,7 @@
 #include <cstring>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Serialization Helpers

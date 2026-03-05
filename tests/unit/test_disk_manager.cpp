@@ -1,4 +1,4 @@
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
@@ -8,7 +8,7 @@
 #include <fstream>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Test fixture with temp directory -----------------------------------------
 
@@ -17,7 +17,7 @@ protected:
     void SetUp() override {
         const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
         temp_dir_ = std::filesystem::temp_directory_path() /
-                    ("giodb_test_" + std::string(info->test_suite_name()) + "_" + info->name());
+                    ("sixseven_test_" + std::string(info->test_suite_name()) + "_" + info->name());
         std::filesystem::create_directories(temp_dir_);
     }
 

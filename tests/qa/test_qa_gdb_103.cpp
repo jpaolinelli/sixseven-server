@@ -4,12 +4,12 @@
 /// Tests cover: edge cases, boundary values, error paths, constraint
 /// combinations, type spec parsing, and error recovery for all DDL statements.
 
-#include "giodb/parser/lexer.h"
-#include "giodb/parser/parser.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/parser.h"
 
 #include <gtest/gtest.h>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -247,7 +247,7 @@ TEST(QA_GDB103, CreateTableMultipleMixedConstraints) {
 // =============================================================================
 
 TEST(QA_GDB103, TypeSpecAllBaseTypes) {
-    // Verify all 22 GioDB base types parse correctly.
+    // Verify all 22 SixSevenDB base types parse correctly.
     const char* types[] = {
         "INT",     "INTEGER", "TINYINT",   "SMALLINT", "BIGINT",  "FLOAT", "DOUBLE",
         "DECIMAL", "NUMERIC", "BOOLEAN",   "CHAR",     "VARCHAR", "TEXT",  "BLOB",

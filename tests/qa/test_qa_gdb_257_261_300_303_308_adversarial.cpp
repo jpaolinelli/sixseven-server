@@ -1,13 +1,13 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/result.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/graph/graph_engine.h"
-#include "giodb/parser/lexer.h"
-#include "giodb/parser/parser.h"
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/result.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/graph/graph_engine.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/parser.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
@@ -17,7 +17,7 @@
 #include <memory>
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 // ============================================================================
@@ -145,7 +145,7 @@ TEST(QA_GDB257_Adv, LargeDimensionWithNamedParams) {
 class QA_GDB261_Adv : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb261_adv";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb261_adv";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -215,7 +215,7 @@ TEST(QA_GDB261_Parse, PartialIfNotAfterName) {
 class QA_GDB303_Adv : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb303_adv";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb303_adv";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -321,7 +321,7 @@ TEST_F(QA_GDB303_Adv, UnqualifiedPropertyWithAliasPresent) {
 class QA_GDB308_Adv : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb308_adv";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb308_adv";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -487,7 +487,7 @@ TEST_F(QA_GDB308_Adv, EmptyTableFails) {
 class QA_GDB300_Adv : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb300_adv";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb300_adv";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -584,4 +584,4 @@ TEST_F(QA_GDB300_Adv, SelectStarWithEdgeProperties) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

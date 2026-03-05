@@ -1,4 +1,4 @@
-#include "giodb/storage/buffer_pool.h"
+#include "sixseven/storage/buffer_pool.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -8,7 +8,7 @@
 #include <cstring>
 #include <limits>
 
-namespace giodb {
+namespace sixseven {
 
 // -- LRU-K Replacer -----------------------------------------------------------
 
@@ -468,4 +468,4 @@ void BufferPoolManager::flusher_loop(std::chrono::milliseconds interval) {
     }
 }
 
-} // namespace giodb
+} // namespace sixseven

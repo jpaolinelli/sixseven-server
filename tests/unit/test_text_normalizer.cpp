@@ -1,9 +1,9 @@
-#include "giodb/vector/text_normalizer.h"
-#include "giodb/vector/tokenizer.h"
+#include "sixseven/vector/text_normalizer.h"
+#include "sixseven/vector/tokenizer.h"
 
 #include <gtest/gtest.h>
 
-using namespace giodb;
+using namespace sixseven;
 
 // ===================================================================
 // BertNormalizer — Lowercase

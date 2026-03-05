@@ -1,11 +1,11 @@
-#include "giodb/common/config.h"
+#include "sixseven/common/config.h"
 
 #include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <fstream>
 
-namespace giodb {
+namespace sixseven {
 
 Config Config::load_defaults() {
     Config config;
@@ -199,4 +199,4 @@ void Config::apply_setting(const std::string& key, const std::string& value) {
     // Unknown keys are silently ignored.
 }
 
-} // namespace giodb
+} // namespace sixseven

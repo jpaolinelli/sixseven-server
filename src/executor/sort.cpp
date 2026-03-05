@@ -1,11 +1,11 @@
-#include "giodb/executor/sort.h"
+#include "sixseven/executor/sort.h"
 
-#include "giodb/common/coercion.h"
-#include "giodb/executor/expr_evaluator.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/executor/expr_evaluator.h"
 
 #include <algorithm>
 
-namespace giodb {
+namespace sixseven {
 
 SortOperator::SortOperator(std::unique_ptr<Iterator> child,
                            std::vector<SortKey> keys,
@@ -112,4 +112,4 @@ std::vector<Iterator*> SortOperator::plan_children_mutable() {
     return {child_.get()};
 }
 
-} // namespace giodb
+} // namespace sixseven

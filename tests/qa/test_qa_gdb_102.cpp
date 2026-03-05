@@ -1,14 +1,14 @@
 /// QA adversarial tests for GDB-102: AST node types for all statement categories.
 /// Tests visitor dispatch, default values, deep nesting, and edge cases.
 
-#include "giodb/parser/ast.h"
+#include "sixseven/parser/ast.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Helper factories

@@ -6,13 +6,13 @@
 /// error handling, health check, registry integration, auto-discovery,
 /// and tokenizer integration.
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/vector/bpe_tokenizer.h"
-#include "giodb/vector/onnx_provider.h"
-#include "giodb/vector/provider_registry.h"
-#include "giodb/vector/tokenizer.h"
-#include "giodb/vector/tokenizer_json_loader.h"
-#include "giodb/vector/wordpiece_tokenizer.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/vector/bpe_tokenizer.h"
+#include "sixseven/vector/onnx_provider.h"
+#include "sixseven/vector/provider_registry.h"
+#include "sixseven/vector/tokenizer.h"
+#include "sixseven/vector/tokenizer_json_loader.h"
+#include "sixseven/vector/wordpiece_tokenizer.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -23,7 +23,7 @@
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 namespace {
 
@@ -455,7 +455,7 @@ TEST(OnnxProvider, CreateSessionFileNotFound) {
 
 TEST(OnnxProvider, CreateSessionInvalidModel) {
     // Create a temp file that isn't a valid ONNX model.
-    auto temp_dir = std::filesystem::temp_directory_path() / "giodb_test_onnx";
+    auto temp_dir = std::filesystem::temp_directory_path() / "sixseven_test_onnx";
     std::filesystem::create_directories(temp_dir);
     auto bad_model = temp_dir / "bad_model.onnx";
 
@@ -480,7 +480,7 @@ TEST(OnnxProvider, CreateSessionInvalidModel) {
 class OnnxAutoDiscovery : public ::testing::Test {
 protected:
     void SetUp() override {
-        base_dir_ = std::filesystem::temp_directory_path() / "giodb_test_autodiscovery";
+        base_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_autodiscovery";
         std::filesystem::create_directories(base_dir_);
     }
 

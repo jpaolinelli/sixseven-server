@@ -1,11 +1,11 @@
-#include "giodb/executor/sort_merge_join.h"
+#include "sixseven/executor/sort_merge_join.h"
 
-#include "giodb/common/coercion.h"
-#include "giodb/executor/expr_evaluator.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/executor/expr_evaluator.h"
 
 #include <algorithm>
 
-namespace giodb {
+namespace sixseven {
 
 SortMergeJoinOperator::SortMergeJoinOperator(std::unique_ptr<Iterator> left,
                                              std::unique_ptr<Iterator> right,
@@ -295,4 +295,4 @@ std::vector<Iterator*> SortMergeJoinOperator::plan_children_mutable() {
     return {left_.get(), right_.get()};
 }
 
-} // namespace giodb
+} // namespace sixseven

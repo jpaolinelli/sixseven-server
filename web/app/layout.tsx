@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "GioDB Admin",
-  description: "GioDB Web Administration Console",
+  title: "SixSevenDB Admin",
+  description: "SixSevenDB Web Administration Console",
 };
 
 export default function RootLayout({

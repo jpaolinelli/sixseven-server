@@ -1,9 +1,9 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/graph/graph_engine.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/graph/graph_engine.h"
 
 #include <gtest/gtest.h>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Helpers ------------------------------------------------------------------
 

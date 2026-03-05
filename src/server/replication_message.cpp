@@ -1,10 +1,10 @@
-#include "giodb/server/replication_message.h"
+#include "sixseven/server/replication_message.h"
 
-#include "giodb/storage/disk_manager.h" // crc32c()
+#include "sixseven/storage/disk_manager.h" // crc32c()
 
 #include <cstring>
 
-namespace giodb {
+namespace sixseven {
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -387,4 +387,4 @@ Result<HotStandbyFeedbackMessage> deserialize_hot_standby_feedback(std::span<con
     return ok(msg);
 }
 
-} // namespace giodb
+} // namespace sixseven

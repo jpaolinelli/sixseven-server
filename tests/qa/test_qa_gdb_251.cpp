@@ -1,12 +1,12 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/config.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/catalog_persistence.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/executor/system_bootstrap.h"
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/config.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/catalog_persistence.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/executor/system_bootstrap.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
@@ -18,7 +18,7 @@
 #include <thread>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test fixture (mirrors AutoIncrementTest with persistence support)
@@ -27,7 +27,7 @@ using namespace giodb;
 class QA_AutoIncrement : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_qa_gdb_251";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_qa_gdb_251";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 

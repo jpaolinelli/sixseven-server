@@ -1,4 +1,4 @@
-Build the GioDB project in debug mode.
+Build the SixSevenDB project in debug mode.
 
 Run: `export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset default && cmake --build build/debug`
 

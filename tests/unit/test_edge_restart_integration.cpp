@@ -1,25 +1,25 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/catalog/schema.h"
-#include "giodb/common/config.h"
-#include "giodb/executor/catalog_persistence.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/executor/system_bootstrap.h"
-#include "giodb/graph/graph_engine.h"
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/catalog/schema.h"
+#include "sixseven/common/config.h"
+#include "sixseven/executor/catalog_persistence.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/executor/system_bootstrap.h"
+#include "sixseven/graph/graph_engine.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
 #include <filesystem>
 
-using namespace giodb;
+using namespace sixseven;
 namespace fs = std::filesystem;
 
 /// Full-stack integration test that exercises the real restart path:
 /// fresh DiskManager + Catalog + StorageManager + CatalogPersistence +
 /// GraphEngine + QueryEngine, bootstrapped exactly like main.cpp.
 TEST(EdgeRestartIntegrationTest, EdgesAndTablesRecoveredAfterFullRestart) {
-    auto data_dir = fs::temp_directory_path() / "giodb_test_edge_restart_integration";
+    auto data_dir = fs::temp_directory_path() / "sixseven_test_edge_restart_integration";
     fs::remove_all(data_dir);
     fs::create_directories(data_dir);
     auto config = Config::load_defaults();
@@ -113,7 +113,7 @@ TEST(EdgeRestartIntegrationTest, EdgesAndTablesRecoveredAfterFullRestart) {
 }
 
 TEST(EdgeRestartIntegrationTest, DroppedEdgeTypeNotRecoveredAfterRestart) {
-    auto data_dir = fs::temp_directory_path() / "giodb_test_edge_drop_restart";
+    auto data_dir = fs::temp_directory_path() / "sixseven_test_edge_drop_restart";
     fs::remove_all(data_dir);
     fs::create_directories(data_dir);
     auto config = Config::load_defaults();

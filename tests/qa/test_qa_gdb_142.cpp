@@ -5,11 +5,11 @@
 /// directory growth, delete-after-split, non-unique duplicates across splits,
 /// zero-hash types, concurrent insert+delete, extreme key values, mixed types.
 
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/index/btree_key.h"
-#include "giodb/index/hash_index.h"
-#include "giodb/index/rid.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/index/btree_key.h"
+#include "sixseven/index/hash_index.h"
+#include "sixseven/index/rid.h"
 
 #include <gtest/gtest.h>
 
@@ -21,7 +21,7 @@
 #include <thread>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test helpers

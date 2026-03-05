@@ -1,4 +1,4 @@
-#include "giodb/server/sync_replication.h"
+#include "sixseven/server/sync_replication.h"
 
 #include <gtest/gtest.h>
 
@@ -8,7 +8,7 @@
 #include <thread>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Parsing tests ------------------------------------------------------------
 

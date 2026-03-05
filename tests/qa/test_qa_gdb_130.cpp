@@ -6,12 +6,12 @@
 /// health check failures, registry edge cases, and verifies ONNX provider
 /// is not implemented.
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/vector/builtin_provider.h"
-#include "giodb/vector/http_client.h"
-#include "giodb/vector/ollama_provider.h"
-#include "giodb/vector/openai_provider.h"
-#include "giodb/vector/provider_registry.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/vector/builtin_provider.h"
+#include "sixseven/vector/http_client.h"
+#include "sixseven/vector/ollama_provider.h"
+#include "sixseven/vector/openai_provider.h"
+#include "sixseven/vector/provider_registry.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -19,7 +19,7 @@
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 namespace {
 

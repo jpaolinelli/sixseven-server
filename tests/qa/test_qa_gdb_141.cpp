@@ -6,14 +6,14 @@
 /// stability, plan node names, re-open, RID preservation, very long strings,
 /// all-same age multi-column tiebreak, two-tuple crossover, null-only sort.
 
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/external_sort.h"
-#include "giodb/executor/iterator.h"
-#include "giodb/executor/sort.h"
-#include "giodb/executor/tuple.h"
-#include "giodb/parser/ast.h"
-#include "giodb/planner/binder.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/external_sort.h"
+#include "sixseven/executor/iterator.h"
+#include "sixseven/executor/sort.h"
+#include "sixseven/executor/tuple.h"
+#include "sixseven/parser/ast.h"
+#include "sixseven/planner/binder.h"
 
 #include <gtest/gtest.h>
 
@@ -24,7 +24,7 @@
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // In-memory source iterator
@@ -88,7 +88,7 @@ Tuple qa_row_nullable(int32_t id, std::optional<std::string> name, int32_t age) 
 class QA141ExternalSortTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        temp_dir_ = std::filesystem::temp_directory_path() / "giodb_qa141_esort";
+        temp_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa141_esort";
         std::filesystem::remove_all(temp_dir_);
 
         OutputColumn c1{"", "id", TypeId::INT32, false, 0};

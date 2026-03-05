@@ -2,18 +2,18 @@
 /// Tests BFS traversal, shortest path, and MATCH pattern matching operators
 /// with edge cases, boundary values, and adversarial inputs.
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/result.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/pattern_match.h"
-#include "giodb/executor/shortest_path.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/executor/traversal.h"
-#include "giodb/graph/graph_engine.h"
-#include "giodb/parser/ast.h"
-#include "giodb/planner/binder.h"
-#include "giodb/storage/disk_manager.h"
-#include "giodb/table/tuple.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/result.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/pattern_match.h"
+#include "sixseven/executor/shortest_path.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/executor/traversal.h"
+#include "sixseven/graph/graph_engine.h"
+#include "sixseven/parser/ast.h"
+#include "sixseven/planner/binder.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/table/tuple.h"
 
 #include <gtest/gtest.h>
 
@@ -26,7 +26,7 @@
 #include <string>
 #include <vector>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 // ============================================================================
@@ -698,7 +698,7 @@ TEST_F(QA_ShortestPath, ReopenAfterClose) {
 class QA_PatternMatch : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_qa_pattern_match";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_qa_pattern_match";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -1342,4 +1342,4 @@ TEST_F(QA_Traversal, AC_UnitTestsExistForTraversal) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

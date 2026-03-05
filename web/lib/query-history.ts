@@ -5,7 +5,7 @@
  * Provides search/filter and CRUD operations.
  */
 
-const STORAGE_KEY = "giodb-query-history";
+const STORAGE_KEY = "sixseven-query-history";
 const MAX_HISTORY = 100;
 
 export interface HistoryEntry {

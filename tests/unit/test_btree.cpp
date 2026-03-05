@@ -7,8 +7,8 @@
 
 #include "test_btree_helpers.h"
 
-using namespace giodb;
-using namespace giodb::test;
+using namespace sixseven;
+using namespace sixseven::test;
 
 // =============================================================================
 // GDB-93: Insert with Page Splits

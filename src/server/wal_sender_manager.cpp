@@ -1,11 +1,11 @@
-#include "giodb/server/wal_sender_manager.h"
+#include "sixseven/server/wal_sender_manager.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <algorithm>
 #include <unordered_set>
 
-namespace giodb {
+namespace sixseven {
 
 WalSenderManager::WalSenderManager(std::filesystem::path wal_dir,
                                    WalArchiveManager* archive_mgr,
@@ -55,7 +55,7 @@ Result<void> WalSenderManager::accept_connection(std::unique_ptr<ReplicationConn
     }
 
     senders_.push_back(std::move(sender));
-    GIODB_LOG_INFO("accepted replication connection from {} (active: {})", peer, senders_.size());
+    SIXSEVEN_LOG_INFO("accepted replication connection from {} (active: {})", peer, senders_.size());
     return ok();
 }
 
@@ -74,7 +74,7 @@ void WalSenderManager::cleanup_stopped() {
         return s->state() == WalSender::State::STOPPED;
     });
     if (removed > 0) {
-        GIODB_LOG_DEBUG("cleaned up {} stopped WalSenders", removed);
+        SIXSEVEN_LOG_DEBUG("cleaned up {} stopped WalSenders", removed);
     }
 }
 
@@ -132,4 +132,4 @@ std::vector<WalSenderManager::SenderStatus> WalSenderManager::get_sender_statuse
     return statuses;
 }
 
-} // namespace giodb
+} // namespace sixseven

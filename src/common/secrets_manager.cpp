@@ -1,6 +1,6 @@
-#include "giodb/common/secrets_manager.h"
+#include "sixseven/common/secrets_manager.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -11,7 +11,7 @@
 #include <filesystem>
 #include <fstream>
 
-namespace giodb {
+namespace sixseven {
 
 // ---------------------------------------------------------------------------
 // Base64 encode/decode using OpenSSL EVP
@@ -82,7 +82,7 @@ Result<SecretsManager> SecretsManager::create(const std::string& master_key_path
                                   " bytes, got " + std::to_string(key_file.gcount()) + ")");
         }
 
-        GIODB_LOG_INFO("secrets manager: loaded master key from {}", master_key_path);
+        SIXSEVEN_LOG_INFO("secrets manager: loaded master key from {}", master_key_path);
     } else {
         // Generate a new random key.
         mgr.master_key_.resize(kKeySize);
@@ -112,7 +112,7 @@ Result<SecretsManager> SecretsManager::create(const std::string& master_key_path
                                          std::filesystem::perms::owner_write,
                                      std::filesystem::perm_options::replace);
 
-        GIODB_LOG_INFO("secrets manager: generated new master key at {}", master_key_path);
+        SIXSEVEN_LOG_INFO("secrets manager: generated new master key at {}", master_key_path);
     }
 
     return ok(std::move(mgr));
@@ -281,4 +281,4 @@ bool SecretsManager::looks_encrypted(const std::string& value) {
     });
 }
 
-} // namespace giodb
+} // namespace sixseven

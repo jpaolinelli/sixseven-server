@@ -1,6 +1,6 @@
-#include "giodb/server/event_loop.h"
+#include "sixseven/server/event_loop.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <cerrno>
 #include <cstring>
@@ -14,7 +14,7 @@
 #include <unistd.h>
 #endif
 
-namespace giodb {
+namespace sixseven {
 
 #ifdef __APPLE__
 
@@ -258,4 +258,4 @@ std::unique_ptr<EventLoop> EventLoop::create() {
 
 #endif
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,8 +1,8 @@
-#include "giodb/executor/project.h"
+#include "sixseven/executor/project.h"
 
-#include "giodb/executor/expr_evaluator.h"
+#include "sixseven/executor/expr_evaluator.h"
 
-namespace giodb {
+namespace sixseven {
 
 ProjectOperator::ProjectOperator(std::unique_ptr<Iterator> child,
                                  std::vector<ProjectionExpr> projections,
@@ -61,4 +61,4 @@ std::vector<Iterator*> ProjectOperator::plan_children_mutable() {
     return {child_.get()};
 }
 
-} // namespace giodb
+} // namespace sixseven

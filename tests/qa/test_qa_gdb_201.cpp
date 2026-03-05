@@ -1,16 +1,16 @@
 /// @file test_qa_gdb_201.cpp
 /// @brief QA adversarial tests for GDB-201: Describe RowDescription for statements and portals.
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/catalog/schema.h"
-#include "giodb/common/result.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/server/connection.h"
-#include "giodb/server/pg_protocol.h"
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/catalog/schema.h"
+#include "sixseven/common/result.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/server/connection.h"
+#include "sixseven/server/pg_protocol.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
@@ -25,7 +25,7 @@
 #include <string_view>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Wire protocol helpers (mirrored from test_pg_protocol.cpp)
@@ -1260,7 +1260,7 @@ TEST(QA_GDB201_Protocol, PortalDescribeDoesNotIncludeParameterDescription) {
 class QA_GDB201_QueryEngine : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb201";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb201";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 

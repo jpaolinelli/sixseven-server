@@ -1,4 +1,4 @@
-#include "giodb/storage/page.h"
+#include "sixseven/storage/page.h"
 
 #include <gtest/gtest.h>
 
@@ -6,7 +6,7 @@
 #include <numeric>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Helper: create a tuple of N bytes filled with a pattern byte -----------
 

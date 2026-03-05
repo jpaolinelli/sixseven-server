@@ -5,9 +5,9 @@
 /// Focuses on edge cases, boundary values, error paths, and adversarial sequences
 /// not covered by the implementation's own test suite.
 
-#include "giodb/storage/overflow.h"
-#include "giodb/storage/page.h"
-#include "giodb/table/tuple.h"
+#include "sixseven/storage/overflow.h"
+#include "sixseven/storage/page.h"
+#include "sixseven/table/tuple.h"
 
 #include <gtest/gtest.h>
 
@@ -16,7 +16,7 @@
 #include <numeric>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // ============================================================================
 // Helpers

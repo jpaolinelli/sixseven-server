@@ -1,11 +1,11 @@
-#include "giodb/common/config.h"
-#include "giodb/server/promotion_manager.h"
-#include "giodb/server/replication_connection.h"
-#include "giodb/server/replication_message.h"
-#include "giodb/server/wal_receiver.h"
-#include "giodb/storage/disk_manager.h"
-#include "giodb/storage/wal.h"
-#include "giodb/storage/wal_record.h"
+#include "sixseven/common/config.h"
+#include "sixseven/server/promotion_manager.h"
+#include "sixseven/server/replication_connection.h"
+#include "sixseven/server/replication_message.h"
+#include "sixseven/server/wal_receiver.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/storage/wal.h"
+#include "sixseven/storage/wal_record.h"
 
 #include <gtest/gtest.h>
 
@@ -18,8 +18,8 @@
 
 #include "test_wal_helpers.h"
 
-using namespace giodb;
-using namespace giodb::test;
+using namespace sixseven;
+using namespace sixseven::test;
 
 // =============================================================================
 // Mock/helper classes
@@ -82,7 +82,7 @@ class PromotionTest : public ::testing::Test {
 protected:
     void SetUp() override {
         wal_dir_ = std::make_unique<TempWalDir>();
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_promotion_data";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_promotion_data";
         std::filesystem::create_directories(data_dir_);
 
         config_ = Config::load_defaults();
@@ -339,7 +339,7 @@ TEST(PromotionConfigTest, ApplySettingPromoteMaxLagBytes) {
 }
 
 TEST(PromotionConfigTest, LoadFromJsonWithPromoteMaxLagBytes) {
-    auto tmp = std::filesystem::temp_directory_path() / "giodb_test_promotion_config.json";
+    auto tmp = std::filesystem::temp_directory_path() / "sixseven_test_promotion_config.json";
 
     {
         std::ofstream f(tmp);
@@ -369,7 +369,7 @@ TEST(PromotionConfigTest, LoadFromJsonWithPromoteMaxLagBytes) {
 // =============================================================================
 
 TEST(DiskManagerReopenTest, ReopenReadonlyFileAsReadWrite) {
-    auto tmp_dir = std::filesystem::temp_directory_path() / "giodb_test_dm_reopen";
+    auto tmp_dir = std::filesystem::temp_directory_path() / "sixseven_test_dm_reopen";
     std::filesystem::create_directories(tmp_dir);
     auto file_path = tmp_dir / "reopen_test.db";
 
@@ -434,7 +434,7 @@ TEST(DiskManagerReopenTest, ReopenReadonlyFileAsReadWrite) {
 }
 
 TEST(DiskManagerReopenTest, ReopenAlreadyWritableFileErrors) {
-    auto tmp_dir = std::filesystem::temp_directory_path() / "giodb_test_dm_reopen_err";
+    auto tmp_dir = std::filesystem::temp_directory_path() / "sixseven_test_dm_reopen_err";
     std::filesystem::create_directories(tmp_dir);
     auto file_path = tmp_dir / "already_rw.db";
 

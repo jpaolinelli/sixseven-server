@@ -5,12 +5,12 @@
 /// aliases work correctly, all TRAVERSE clauses function inside FROM, standalone
 /// TRAVERSE remains backward-compatible, and parser errors are clear.
 
-#include "giodb/parser/lexer.h"
-#include "giodb/parser/parser.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/parser.h"
 
 #include <gtest/gtest.h>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Helpers

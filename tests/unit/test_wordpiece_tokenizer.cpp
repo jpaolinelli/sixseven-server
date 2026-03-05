@@ -1,5 +1,5 @@
-#include "giodb/vector/tokenizer_json_loader.h"
-#include "giodb/vector/wordpiece_tokenizer.h"
+#include "sixseven/vector/tokenizer_json_loader.h"
+#include "sixseven/vector/wordpiece_tokenizer.h"
 
 #include <gtest/gtest.h>
 
@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 /// Build a minimal vocabulary from all-MiniLM-L6-v2 containing only
@@ -390,4 +390,4 @@ TEST_F(WordPieceE2ETest, AttentionMask) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

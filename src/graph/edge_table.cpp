@@ -1,9 +1,9 @@
-#include "giodb/graph/edge_table.h"
+#include "sixseven/graph/edge_table.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/index/btree_iterator.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/index/btree_iterator.h"
 
-namespace giodb {
+namespace sixseven {
 
 EdgeTable::EdgeTable(EdgeTableConfig config) : config_(std::move(config)) {
     // Forward adjacency index: composite key (source_pk, edge_row_id).
@@ -98,7 +98,7 @@ Result<uint64_t> EdgeTable::insert_edge(const Value& source_pk,
     row.properties = properties;
     edges_.emplace(row_id, std::move(row));
 
-    GIODB_LOG_DEBUG("inserted edge {} in edge type '{}'", row_id, config_.name);
+    SIXSEVEN_LOG_DEBUG("inserted edge {} in edge type '{}'", row_id, config_.name);
     return ok(row_id);
 }
 
@@ -205,7 +205,7 @@ Result<void> EdgeTable::delete_edge(uint64_t edge_row_id) {
     // Remove from storage.
     edges_.erase(it);
 
-    GIODB_LOG_DEBUG("deleted edge {} from edge type '{}'", edge_row_id, config_.name);
+    SIXSEVEN_LOG_DEBUG("deleted edge {} from edge type '{}'", edge_row_id, config_.name);
     return ok();
 }
 
@@ -369,4 +369,4 @@ uint64_t EdgeTable::decode_rid(const RID& rid) {
     return static_cast<uint64_t>(rid.page_id) | (static_cast<uint64_t>(rid.slot_id) << 32);
 }
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,12 +1,12 @@
-#include "giodb/planner/cost_model.h"
-#include "giodb/planner/optimizer.h"
+#include "sixseven/planner/cost_model.h"
+#include "sixseven/planner/optimizer.h"
 
 #include <gtest/gtest.h>
 
 #include <cmath>
 #include <memory>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Cost model tests

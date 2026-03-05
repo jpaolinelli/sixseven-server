@@ -7,10 +7,10 @@
 /// search with filter + tombstone interaction, persistence after delete,
 /// insert after compaction, multi-round delete/compact.
 
-#include "giodb/storage/buffer_pool.h"
-#include "giodb/storage/disk_manager.h"
-#include "giodb/vector/hnsw_index.h"
-#include "giodb/vector/hnsw_page.h"
+#include "sixseven/storage/buffer_pool.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/vector/hnsw_index.h"
+#include "sixseven/vector/hnsw_page.h"
 
 #include <gtest/gtest.h>
 
@@ -21,14 +21,14 @@
 #include <set>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 namespace {
 
 class TempDir {
 public:
     TempDir() {
-        path_ = std::filesystem::temp_directory_path() / "giodb_qa124_XXXXXX";
+        path_ = std::filesystem::temp_directory_path() / "sixseven_qa124_XXXXXX";
         std::string tmpl = path_.string();
         char* result = mkdtemp(tmpl.data());
         EXPECT_NE(result, nullptr);

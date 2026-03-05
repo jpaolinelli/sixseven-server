@@ -5,12 +5,12 @@
 /// variants, null safety, provider registry integration, and end-to-end
 /// tokenizer wiring.
 
-#include "giodb/vector/bpe_tokenizer.h"
-#include "giodb/vector/onnx_provider.h"
-#include "giodb/vector/provider_registry.h"
-#include "giodb/vector/tokenizer.h"
-#include "giodb/vector/tokenizer_json_loader.h"
-#include "giodb/vector/wordpiece_tokenizer.h"
+#include "sixseven/vector/bpe_tokenizer.h"
+#include "sixseven/vector/onnx_provider.h"
+#include "sixseven/vector/provider_registry.h"
+#include "sixseven/vector/tokenizer.h"
+#include "sixseven/vector/tokenizer_json_loader.h"
+#include "sixseven/vector/wordpiece_tokenizer.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 namespace {
 
@@ -155,7 +155,7 @@ void write_file(const std::filesystem::path& path, const std::string& content) {
 class QA_GDB324 : public ::testing::Test {
 protected:
     void SetUp() override {
-        base_dir_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb324";
+        base_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb324";
         std::filesystem::remove_all(base_dir_);
         std::filesystem::create_directories(base_dir_);
     }

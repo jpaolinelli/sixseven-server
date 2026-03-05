@@ -1,12 +1,12 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/graph/graph_engine.h"
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/graph/graph_engine.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
 #include <filesystem>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -29,7 +29,7 @@ static Value pk(int64_t v) {
 class EdgePersistenceTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_edge_persist";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_edge_persist";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 

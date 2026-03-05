@@ -1,12 +1,12 @@
-#include "giodb/executor/pattern_match.h"
+#include "sixseven/executor/pattern_match.h"
 
-#include "giodb/common/coercion.h"
-#include "giodb/executor/expr_evaluator.h"
-#include "giodb/table/tuple.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/table/tuple.h"
 
 #include <unordered_map>
 
-namespace giodb {
+namespace sixseven {
 
 PatternMatchOperator::PatternMatchOperator(GraphEngine& graph_engine,
                                            const Catalog& catalog,
@@ -455,4 +455,4 @@ Result<std::vector<Value>> PatternMatchOperator::fetch_node_data(const std::stri
     return make_error(StatusCode::NOT_FOUND, "node with pk not found in table " + table_name);
 }
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,9 +1,9 @@
 /// QA adversarial tests for GDB-27: Edge Storage (Graph Engine).
 /// Tests edge table operations, adjacency indexes, LINK/UNLINK, and edge properties.
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/graph/edge_table.h"
-#include "giodb/graph/graph_engine.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/graph/edge_table.h"
+#include "sixseven/graph/graph_engine.h"
 
 #include <gtest/gtest.h>
 
@@ -12,7 +12,7 @@
 #include <set>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Helpers ------------------------------------------------------------------
 

@@ -1,9 +1,9 @@
-#include "giodb/index/btree_iterator.h"
+#include "sixseven/index/btree_iterator.h"
 
-#include "giodb/index/btree_index.h"
-#include "giodb/index/btree_node.h"
+#include "sixseven/index/btree_index.h"
+#include "sixseven/index/btree_node.h"
 
-namespace giodb {
+namespace sixseven {
 
 BTreeIterator::BTreeIterator(const BTreeIndex& index,
                              PageId start_leaf_id,
@@ -65,4 +65,4 @@ bool BTreeIterator::is_end() const {
     return exhausted_;
 }
 
-} // namespace giodb
+} // namespace sixseven

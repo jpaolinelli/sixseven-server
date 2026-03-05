@@ -1,12 +1,12 @@
-#include "giodb/graph/graph_engine.h"
+#include "sixseven/graph/graph_engine.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/common/types.h"
-#include "giodb/storage/wal.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/common/types.h"
+#include "sixseven/storage/wal.h"
 
 #include <cstring>
 
-namespace giodb {
+namespace sixseven {
 
 GraphEngine::GraphEngine(Catalog& catalog, WalWriter* wal) : catalog_(catalog), wal_(wal) {}
 
@@ -200,7 +200,7 @@ Result<void> GraphEngine::persist_edge(const std::string& edge_type,
 
     auto flush = storage.bpm->flush_all();
     if (!flush) {
-        GIODB_LOG_WARN("edge flush failed for '{}': {}", edge_type, flush.error().message);
+        SIXSEVEN_LOG_WARN("edge flush failed for '{}': {}", edge_type, flush.error().message);
     }
 
     return ok();
@@ -229,7 +229,7 @@ Result<void> GraphEngine::delete_persisted_edge(const std::string& edge_type,
 
     auto flush = storage.bpm->flush_all();
     if (!flush) {
-        GIODB_LOG_WARN("edge flush failed for '{}': {}", edge_type, flush.error().message);
+        SIXSEVEN_LOG_WARN("edge flush failed for '{}': {}", edge_type, flush.error().message);
     }
 
     return ok();
@@ -291,12 +291,12 @@ Result<edge_id_t> GraphEngine::create_edge_type(const std::string& name,
         auto storage_result =
             create_edge_storage(*edge_id_result, source_pk_type, target_pk_type, property_columns);
         if (!storage_result) {
-            GIODB_LOG_WARN(
+            SIXSEVEN_LOG_WARN(
                 "failed to create edge storage for '{}': {}", name, storage_result.error().message);
         }
     }
 
-    GIODB_LOG_INFO("created edge type '{}' (id={})", name, *edge_id_result);
+    SIXSEVEN_LOG_INFO("created edge type '{}' (id={})", name, *edge_id_result);
     return ok(*edge_id_result);
 }
 
@@ -333,7 +333,7 @@ Result<void> GraphEngine::drop_edge_type(const std::string& name) {
     // Remove the backing EdgeTable.
     edge_tables_.erase(it);
 
-    GIODB_LOG_INFO("dropped edge type '{}'", name);
+    SIXSEVEN_LOG_INFO("dropped edge type '{}'", name);
     return ok();
 }
 
@@ -357,14 +357,14 @@ Result<uint64_t> GraphEngine::link(const std::string& edge_type,
     if (has_persistence()) {
         auto persist = persist_edge(edge_type, *result, source_pk, target_pk, properties);
         if (!persist) {
-            GIODB_LOG_WARN("edge persist failed for '{}': {}", edge_type, persist.error().message);
+            SIXSEVEN_LOG_WARN("edge persist failed for '{}': {}", edge_type, persist.error().message);
         }
     }
 
     // Log to WAL for durability.
     log_edge_wal(WalRecordType::INSERT, it->second->config().edge_id, *result, edge_type);
 
-    GIODB_LOG_DEBUG("LINK via '{}': edge_row_id={}", edge_type, *result);
+    SIXSEVEN_LOG_DEBUG("LINK via '{}': edge_row_id={}", edge_type, *result);
     return ok(*result);
 }
 
@@ -397,7 +397,7 @@ GraphEngine::unlink(const std::string& edge_type, const Value& source_pk, const 
     if (has_persistence()) {
         auto persist_del = delete_persisted_edge(edge_type, edge_row_id);
         if (!persist_del) {
-            GIODB_LOG_WARN(
+            SIXSEVEN_LOG_WARN(
                 "edge persist delete failed for '{}': {}", edge_type, persist_del.error().message);
         }
     }
@@ -405,7 +405,7 @@ GraphEngine::unlink(const std::string& edge_type, const Value& source_pk, const 
     // Log to WAL for durability.
     log_edge_wal(WalRecordType::DELETE, it->second->config().edge_id, edge_row_id, edge_type);
 
-    GIODB_LOG_DEBUG("UNLINK via '{}': removed edge_row_id={}", edge_type, edge_row_id);
+    SIXSEVEN_LOG_DEBUG("UNLINK via '{}': removed edge_row_id={}", edge_type, edge_row_id);
     return ok();
 }
 
@@ -455,14 +455,14 @@ Result<uint64_t> GraphEngine::unlink_where(const std::string& edge_type,
         if (has_persistence()) {
             auto persist_del = delete_persisted_edge(edge_type, row_id);
             if (!persist_del) {
-                GIODB_LOG_WARN("edge persist delete failed for '{}': {}",
+                SIXSEVEN_LOG_WARN("edge persist delete failed for '{}': {}",
                                edge_type,
                                persist_del.error().message);
             }
         }
     }
 
-    GIODB_LOG_DEBUG("UNLINK WHERE via '{}': removed {} edges", edge_type, to_delete.size());
+    SIXSEVEN_LOG_DEBUG("UNLINK WHERE via '{}': removed {} edges", edge_type, to_delete.size());
     return ok(static_cast<uint64_t>(to_delete.size()));
 }
 
@@ -575,13 +575,13 @@ Result<void> GraphEngine::load_edges() {
         auto path = edge_file_path(et.edge_id);
         if (!std::filesystem::exists(path)) {
             // No storage file — edge type has no persisted edges.
-            GIODB_LOG_DEBUG("no edge storage file for '{}', skipping load", et.name);
+            SIXSEVEN_LOG_DEBUG("no edge storage file for '{}', skipping load", et.name);
             continue;
         }
 
         auto fid = dm_->open_file(path);
         if (!fid) {
-            GIODB_LOG_WARN(
+            SIXSEVEN_LOG_WARN(
                 "failed to open edge storage for '{}': {}", et.name, fid.error().message);
             continue;
         }
@@ -597,7 +597,7 @@ Result<void> GraphEngine::load_edges() {
         auto& edge_table = *edge_tables_[et.name];
         auto iter = storage->heap->begin();
         if (!iter) {
-            GIODB_LOG_WARN(
+            SIXSEVEN_LOG_WARN(
                 "failed to iterate edge storage for '{}': {}", et.name, iter.error().message);
             edge_storage_[et.name] = std::move(storage);
             continue;
@@ -606,13 +606,13 @@ Result<void> GraphEngine::load_edges() {
         while (auto row = iter->next()) {
             auto values = TupleSerializer::deserialize(row->second, storage->storage_schema);
             if (!values) {
-                GIODB_LOG_WARN("skipping corrupt edge row in '{}'", et.name);
+                SIXSEVEN_LOG_WARN("skipping corrupt edge row in '{}'", et.name);
                 continue;
             }
 
             auto& v = *values;
             if (v.size() < 3) {
-                GIODB_LOG_WARN("skipping short edge row in '{}'", et.name);
+                SIXSEVEN_LOG_WARN("skipping short edge row in '{}'", et.name);
                 continue;
             }
 
@@ -628,7 +628,7 @@ Result<void> GraphEngine::load_edges() {
 
             auto restore = edge_table.restore_edge(edge_row_id, src_pk, tgt_pk, props);
             if (!restore) {
-                GIODB_LOG_WARN("failed to restore edge {} in '{}': {}",
+                SIXSEVEN_LOG_WARN("failed to restore edge {} in '{}': {}",
                                edge_row_id,
                                et.name,
                                restore.error().message);
@@ -644,7 +644,7 @@ Result<void> GraphEngine::load_edges() {
     }
 
     if (total_edges > 0) {
-        GIODB_LOG_INFO(
+        SIXSEVEN_LOG_INFO(
             "loaded {} edge(s) across {} edge type(s) from disk", total_edges, edge_types.size());
     }
 
@@ -676,8 +676,8 @@ void GraphEngine::log_edge_wal(WalRecordType type,
 
     auto result = wal_->append(record);
     if (!result.has_value()) {
-        GIODB_LOG_WARN("Failed to log edge WAL record for '{}'", edge_type_name);
+        SIXSEVEN_LOG_WARN("Failed to log edge WAL record for '{}'", edge_type_name);
     }
 }
 
-} // namespace giodb
+} // namespace sixseven

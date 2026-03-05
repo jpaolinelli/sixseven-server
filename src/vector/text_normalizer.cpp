@@ -1,13 +1,13 @@
-#include "giodb/vector/text_normalizer.h"
+#include "sixseven/vector/text_normalizer.h"
 
-#include "giodb/vector/tokenizer.h"
+#include "sixseven/vector/tokenizer.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -544,4 +544,4 @@ std::unique_ptr<TextNormalizer> create_normalizer(const TokenizerConfig& config)
     return std::make_unique<NullNormalizer>(); // Unreachable, satisfies compiler.
 }
 
-} // namespace giodb
+} // namespace sixseven

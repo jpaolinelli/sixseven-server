@@ -1,10 +1,10 @@
-#include "giodb/executor/update.h"
+#include "sixseven/executor/update.h"
 
-#include "giodb/common/coercion.h"
-#include "giodb/common/types.h"
-#include "giodb/executor/expr_evaluator.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/common/types.h"
+#include "sixseven/executor/expr_evaluator.h"
 
-namespace giodb {
+namespace sixseven {
 
 UpdateOperator::UpdateOperator(TableHeap& heap,
                                const Schema& storage_schema,
@@ -100,4 +100,4 @@ std::vector<Iterator*> UpdateOperator::plan_children_mutable() {
     return {child_.get()};
 }
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,4 +1,4 @@
-#include "giodb/vector/embedding_worker.h"
+#include "sixseven/vector/embedding_worker.h"
 
 #include <gtest/gtest.h>
 
@@ -8,7 +8,7 @@
 #include <thread>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Test EmbeddingProvider that returns deterministic vectors -----------------
 

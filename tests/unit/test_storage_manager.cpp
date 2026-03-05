@@ -1,7 +1,7 @@
-#include "giodb/catalog/schema.h"
-#include "giodb/common/types.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/catalog/schema.h"
+#include "sixseven/common/types.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
@@ -9,7 +9,7 @@
 #include <memory>
 #include <string>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test fixture
@@ -18,7 +18,7 @@ using namespace giodb;
 class StorageManagerTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_storage_mgr";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_storage_mgr";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
     }

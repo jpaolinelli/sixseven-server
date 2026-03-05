@@ -1,4 +1,4 @@
-#include "giodb/server/server.h"
+#include "sixseven/server/server.h"
 
 #include <gtest/gtest.h>
 
@@ -11,7 +11,7 @@
 #include <cstring>
 #include <thread>
 
-namespace giodb {
+namespace sixseven {
 
 class ServerTest : public ::testing::Test {
 protected:
@@ -222,4 +222,4 @@ TEST_F(ServerTest, HandlesClientDisconnect) {
     t.join();
 }
 
-} // namespace giodb
+} // namespace sixseven

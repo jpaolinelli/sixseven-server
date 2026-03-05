@@ -1,6 +1,6 @@
-#include "giodb/index/btree_key.h"
-#include "giodb/index/hash_index.h"
-#include "giodb/index/rid.h"
+#include "sixseven/index/btree_key.h"
+#include "sixseven/index/hash_index.h"
+#include "sixseven/index/rid.h"
 
 #include <gtest/gtest.h>
 
@@ -10,7 +10,7 @@
 #include <thread>
 #include <vector>
 
-namespace giodb::test {
+namespace sixseven::test {
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -507,4 +507,4 @@ TEST(HashIndexConfig, ReturnsCorrectConfig) {
     EXPECT_TRUE(idx.config().is_unique);
 }
 
-} // namespace giodb::test
+} // namespace sixseven::test

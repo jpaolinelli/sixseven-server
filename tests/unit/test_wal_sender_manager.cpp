@@ -1,7 +1,7 @@
-#include "giodb/server/replication_connection.h"
-#include "giodb/server/replication_message.h"
-#include "giodb/server/wal_sender_manager.h"
-#include "giodb/storage/wal.h"
+#include "sixseven/server/replication_connection.h"
+#include "sixseven/server/replication_message.h"
+#include "sixseven/server/wal_sender_manager.h"
+#include "sixseven/storage/wal.h"
 
 #include <gtest/gtest.h>
 
@@ -15,8 +15,8 @@
 
 #include "test_wal_helpers.h"
 
-using namespace giodb;
-using namespace giodb::test;
+using namespace sixseven;
+using namespace sixseven::test;
 
 // -- Simple mock connection for manager tests ---------------------------------
 

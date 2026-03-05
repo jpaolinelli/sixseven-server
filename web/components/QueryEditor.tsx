@@ -3,7 +3,7 @@
 /**
  * QueryEditor — Full query editor with:
  *  - Multi-tab support
- *  - CodeMirror editor with GioDB syntax highlighting & autocomplete
+ *  - CodeMirror editor with SixSevenDB syntax highlighting & autocomplete
  *  - Query execution with results display
  *  - Persistent query history (localStorage)
  *  - Keyboard shortcuts
@@ -13,7 +13,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { SqlEditor } from "./SqlEditor";
 import { QueryResults } from "./QueryResults";
 import { useConnection } from "@/lib/ConnectionContext";
-import type { SchemaCompletionData } from "@/lib/giodb-sql-lang";
+import type { SchemaCompletionData } from "@/lib/sixseven-sql-lang";
 import {
   loadHistory,
   addToHistory,

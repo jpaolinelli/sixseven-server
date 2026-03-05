@@ -1,10 +1,10 @@
-#include "giodb/executor/storage_manager.h"
+#include "sixseven/executor/storage_manager.h"
 
-#include "giodb/common/status.h"
+#include "sixseven/common/status.h"
 
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 
 StorageManager::StorageManager(DiskManager& dm, std::filesystem::path data_dir, uint32_t pool_size)
     : dm_(dm), data_dir_(std::move(data_dir)), pool_size_(pool_size) {
@@ -164,4 +164,4 @@ Result<void> StorageManager::drop_table_storage(database_id_t db_id, table_id_t 
     return ok();
 }
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,9 +1,9 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
@@ -11,7 +11,7 @@
 #include <memory>
 #include <string>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test fixture for per-connection database context (GDB-184)
@@ -20,7 +20,7 @@ using namespace giodb;
 class DatabaseContextTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_dbctx";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_dbctx";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -64,7 +64,7 @@ protected:
 // Default database context
 // =============================================================================
 
-TEST_F(DatabaseContextTest, DefaultDatabaseIsGiodb) {
+TEST_F(DatabaseContextTest, DefaultDatabaseIsSixseven) {
     EXPECT_EQ(engine_->current_database_id(), default_database_id);
 }
 
@@ -139,7 +139,7 @@ TEST_F(DatabaseContextTest, TablesAreIsolatedAcrossDatabases) {
     EXPECT_EQ(qr.rows[0][1].as_string(), "other_db");
 
     // Switch back to default database — should see default data.
-    use_database("giodb");
+    use_database("sixseven");
 
     auto qr2 = exec_ok("SELECT * FROM shared_name");
     ASSERT_EQ(qr2.rows.size(), 1u);
@@ -175,7 +175,7 @@ TEST_F(DatabaseContextTest, InsertIsolatedAcrossDatabases) {
     EXPECT_EQ(qr.rows[0][1].as_int32(), 999);
 
     // default db sees 100.
-    use_database("giodb");
+    use_database("sixseven");
     auto qr2 = exec_ok("SELECT * FROM accounts");
     ASSERT_EQ(qr2.rows.size(), 1u);
     EXPECT_EQ(qr2.rows[0][1].as_int32(), 100);
@@ -199,7 +199,7 @@ TEST_F(DatabaseContextTest, UpdateIsolatedAcrossDatabases) {
     EXPECT_EQ(qr.rows[0][1].as_int32(), 99);
 
     // Default db should still have 10.
-    use_database("giodb");
+    use_database("sixseven");
     auto qr2 = exec_ok("SELECT * FROM counters");
     ASSERT_EQ(qr2.rows.size(), 1u);
     EXPECT_EQ(qr2.rows[0][1].as_int32(), 10);
@@ -225,7 +225,7 @@ TEST_F(DatabaseContextTest, DeleteIsolatedAcrossDatabases) {
     EXPECT_EQ(qr.rows[0][0].as_int32(), 4);
 
     // Default db should still have both rows.
-    use_database("giodb");
+    use_database("sixseven");
     auto qr2 = exec_ok("SELECT * FROM items");
     ASSERT_EQ(qr2.rows.size(), 2u);
 }
@@ -238,8 +238,8 @@ TEST_F(DatabaseContextTest, ErrorMessageIncludesDatabaseName) {
     auto result = engine_->execute("SELECT * FROM nonexistent_table");
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
-    // Error should reference the database name 'giodb'.
-    EXPECT_NE(result.error().message.find("'giodb'"), std::string::npos)
+    // Error should reference the database name 'sixseven'.
+    EXPECT_NE(result.error().message.find("'sixseven'"), std::string::npos)
         << "Error message should include database name: " << result.error().message;
 }
 

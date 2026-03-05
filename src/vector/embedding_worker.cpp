@@ -1,12 +1,12 @@
-#include "giodb/vector/embedding_worker.h"
+#include "sixseven/vector/embedding_worker.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <algorithm>
 #include <cctype>
 #include <chrono>
 
-namespace giodb {
+namespace sixseven {
 
 EmbeddingWorkerPool::EmbeddingWorkerPool(EmbeddingWorkerConfig config)
     : config_(std::move(config)) {}
@@ -15,7 +15,7 @@ EmbeddingWorkerPool::~EmbeddingWorkerPool() {
     if (running_.load()) {
         auto result = stop();
         if (!result.has_value()) {
-            GIODB_LOG_ERROR("failed to stop embedding worker pool: {}", result.error().message);
+            SIXSEVEN_LOG_ERROR("failed to stop embedding worker pool: {}", result.error().message);
         }
     }
 }
@@ -54,7 +54,7 @@ Result<void> EmbeddingWorkerPool::start() {
                     update_queue_.push_back(std::move(job));
                 }
             }
-            GIODB_LOG_INFO("loaded {} persisted embedding jobs", loaded->size());
+            SIXSEVEN_LOG_INFO("loaded {} persisted embedding jobs", loaded->size());
         }
     }
 
@@ -66,7 +66,7 @@ Result<void> EmbeddingWorkerPool::start() {
         workers_.emplace_back([this]() { worker_loop(); });
     }
 
-    GIODB_LOG_INFO("embedding worker pool started: workers={}", config_.num_workers);
+    SIXSEVEN_LOG_INFO("embedding worker pool started: workers={}", config_.num_workers);
     return ok();
 }
 
@@ -86,7 +86,7 @@ Result<void> EmbeddingWorkerPool::stop() {
     }
     workers_.clear();
 
-    GIODB_LOG_INFO("embedding worker pool stopped: processed={}, failed={}",
+    SIXSEVEN_LOG_INFO("embedding worker pool stopped: processed={}, failed={}",
                    jobs_processed_.load(),
                    jobs_failed_.load());
     return ok();
@@ -97,7 +97,7 @@ Result<void> EmbeddingWorkerPool::enqueue(EmbeddingJob job) {
     if (persistence_.has_value() && persistence_->persist) {
         auto persist_result = persistence_->persist(job);
         if (!persist_result.has_value()) {
-            GIODB_LOG_WARN("failed to persist embedding job: {}", persist_result.error().message);
+            SIXSEVEN_LOG_WARN("failed to persist embedding job: {}", persist_result.error().message);
         }
     }
 
@@ -106,7 +106,7 @@ Result<void> EmbeddingWorkerPool::enqueue(EmbeddingJob job) {
 
         auto total = insert_queue_.size() + update_queue_.size();
         if (total >= config_.queue_warning_threshold) {
-            GIODB_LOG_WARN("embedding queue depth exceeds threshold: {}", total);
+            SIXSEVEN_LOG_WARN("embedding queue depth exceeds threshold: {}", total);
         }
 
         if (job.type == EmbeddingJob::Type::INSERT) {
@@ -125,7 +125,7 @@ Result<void> EmbeddingWorkerPool::enqueue_batch(std::vector<EmbeddingJob> jobs) 
         for (const auto& job : jobs) {
             auto persist_result = persistence_->persist(job);
             if (!persist_result.has_value()) {
-                GIODB_LOG_WARN("failed to persist embedding job: {}",
+                SIXSEVEN_LOG_WARN("failed to persist embedding job: {}",
                                persist_result.error().message);
             }
         }
@@ -144,7 +144,7 @@ Result<void> EmbeddingWorkerPool::enqueue_batch(std::vector<EmbeddingJob> jobs) 
 
         auto total = insert_queue_.size() + update_queue_.size();
         if (total >= config_.queue_warning_threshold) {
-            GIODB_LOG_WARN("embedding queue depth exceeds threshold: {}", total);
+            SIXSEVEN_LOG_WARN("embedding queue depth exceeds threshold: {}", total);
         }
     }
     queue_cv_.notify_all();
@@ -245,7 +245,7 @@ void EmbeddingWorkerPool::process_batch(std::vector<EmbeddingJob>& batch) {
             std::lock_guard lock(provider_mu_);
             auto it = providers_.find(provider_name);
             if (it == providers_.end()) {
-                GIODB_LOG_ERROR("no provider registered for: {}", provider_name);
+                SIXSEVEN_LOG_ERROR("no provider registered for: {}", provider_name);
                 jobs_failed_.fetch_add(indices.size());
                 continue;
             }
@@ -292,7 +292,7 @@ void EmbeddingWorkerPool::process_batch(std::vector<EmbeddingJob>& batch) {
         total_latency_ms_.fetch_add(static_cast<uint64_t>(elapsed.count()));
 
         if (!embeddings_result.has_value()) {
-            GIODB_LOG_WARN("embedding batch failed for provider {}: {}",
+            SIXSEVEN_LOG_WARN("embedding batch failed for provider {}: {}",
                            provider_name,
                            embeddings_result.error().message);
 
@@ -305,7 +305,7 @@ void EmbeddingWorkerPool::process_batch(std::vector<EmbeddingJob>& batch) {
 
         auto& embeddings = *embeddings_result;
         if (embeddings.size() != valid_indices.size()) {
-            GIODB_LOG_ERROR("provider {} returned {} embeddings, expected {}",
+            SIXSEVEN_LOG_ERROR("provider {} returned {} embeddings, expected {}",
                             provider_name,
                             embeddings.size(),
                             valid_indices.size());
@@ -324,7 +324,7 @@ void EmbeddingWorkerPool::process_batch(std::vector<EmbeddingJob>& batch) {
                 auto store_result =
                     store_callback_(job.table_id, job.row_id, job.column_id, embedding);
                 if (!store_result.has_value()) {
-                    GIODB_LOG_ERROR("failed to store embedding: {}", store_result.error().message);
+                    SIXSEVEN_LOG_ERROR("failed to store embedding: {}", store_result.error().message);
                     retry_job(std::move(job));
                     continue;
                 }
@@ -334,7 +334,7 @@ void EmbeddingWorkerPool::process_batch(std::vector<EmbeddingJob>& batch) {
             if (persistence_.has_value() && persistence_->remove) {
                 auto remove_result = persistence_->remove(job.table_id, job.row_id, job.column_id);
                 if (!remove_result.has_value()) {
-                    GIODB_LOG_WARN("failed to remove persisted embedding job: {}",
+                    SIXSEVEN_LOG_WARN("failed to remove persisted embedding job: {}",
                                    remove_result.error().message);
                 }
             }
@@ -347,7 +347,7 @@ void EmbeddingWorkerPool::process_batch(std::vector<EmbeddingJob>& batch) {
 void EmbeddingWorkerPool::retry_job(EmbeddingJob job) {
     job.retry_count++;
     if (job.retry_count > static_cast<int32_t>(config_.max_retries)) {
-        GIODB_LOG_ERROR("embedding job exceeded max retries: table={}, row={}, col={}",
+        SIXSEVEN_LOG_ERROR("embedding job exceeded max retries: table={}, row={}, col={}",
                         job.table_id,
                         job.row_id,
                         job.column_id);
@@ -360,7 +360,7 @@ void EmbeddingWorkerPool::retry_job(EmbeddingJob job) {
     }
 
     auto delay = backoff_delay(job.retry_count);
-    GIODB_LOG_DEBUG("retrying embedding job in {}ms: table={}, row={}, col={}, attempt={}",
+    SIXSEVEN_LOG_DEBUG("retrying embedding job in {}ms: table={}, row={}, col={}, attempt={}",
                     delay.count(),
                     job.table_id,
                     job.row_id,
@@ -393,4 +393,4 @@ std::chrono::milliseconds EmbeddingWorkerPool::backoff_delay(int32_t retry_count
     return std::chrono::milliseconds(delay_ms);
 }
 
-} // namespace giodb
+} // namespace sixseven

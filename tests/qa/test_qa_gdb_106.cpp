@@ -5,14 +5,14 @@
 /// Covers edge cases, boundary values, error paths, and stress tests for
 /// graph/vector queries and administrative commands.
 
-#include "giodb/parser/lexer.h"
-#include "giodb/parser/parser.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/parser.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 
-using namespace giodb;
+using namespace sixseven;
 
 // ---------------------------------------------------------------------------
 // Helpers

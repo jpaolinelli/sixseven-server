@@ -1,6 +1,6 @@
-#include "giodb/server/connection.h"
+#include "sixseven/server/connection.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <sys/socket.h>
 #include <unistd.h>
@@ -8,7 +8,7 @@
 #include <cerrno>
 #include <cstring>
 
-namespace giodb {
+namespace sixseven {
 
 const char* connection_state_name(ConnectionState state) {
     switch (state) {
@@ -89,7 +89,7 @@ Result<void> Connection::transition_to(ConnectionState new_state) {
                               connection_state_name(new_state));
     }
 
-    GIODB_LOG_DEBUG("connection fd={} state {} -> {}",
+    SIXSEVEN_LOG_DEBUG("connection fd={} state {} -> {}",
                     fd_,
                     connection_state_name(state_),
                     connection_state_name(new_state));
@@ -164,4 +164,4 @@ void Connection::close() {
     state_ = ConnectionState::CLOSED;
 }
 
-} // namespace giodb
+} // namespace sixseven

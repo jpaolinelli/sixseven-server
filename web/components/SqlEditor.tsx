@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * SqlEditor — CodeMirror 6 wrapper with GioDB SQL syntax highlighting,
+ * SqlEditor — CodeMirror 6 wrapper with SixSevenDB SQL syntax highlighting,
  * autocomplete, and keyboard shortcuts.
  */
 
@@ -14,10 +14,10 @@ import { autocompletion } from "@codemirror/autocomplete";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, indentOnInput } from "@codemirror/language";
 import {
-  giodbSQL,
-  giodbCompletionSource,
+  sixsevenSQL,
+  sixsevenCompletionSource,
   type SchemaCompletionData,
-} from "@/lib/giodb-sql-lang";
+} from "@/lib/sixseven-sql-lang";
 
 interface SqlEditorProps {
   /** Initial SQL content. */
@@ -92,7 +92,7 @@ export function SqlEditor({
     if (!containerRef.current) return;
 
     const completionSource = schemaData
-      ? giodbCompletionSource(schemaData)
+      ? sixsevenCompletionSource(schemaData)
       : undefined;
 
     const extensions = [
@@ -103,8 +103,8 @@ export function SqlEditor({
       // History (undo/redo)
       history(),
       keymap.of([...historyKeymap, ...defaultKeymap, ...searchKeymap]),
-      // GioDB SQL language
-      giodbSQL(),
+      // SixSevenDB SQL language
+      sixsevenSQL(),
       // Syntax highlighting
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
       // Bracket matching

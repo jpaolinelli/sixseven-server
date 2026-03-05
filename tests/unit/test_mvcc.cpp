@@ -1,11 +1,11 @@
-#include "giodb/txn/mvcc.h"
-#include "giodb/txn/mvcc_tuple.h"
-#include "giodb/txn/transaction.h"
-#include "giodb/txn/txn_manager.h"
+#include "sixseven/txn/mvcc.h"
+#include "sixseven/txn/mvcc_tuple.h"
+#include "sixseven/txn/transaction.h"
+#include "sixseven/txn/txn_manager.h"
 
 #include <gtest/gtest.h>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // MvccTupleHeader serialization tests

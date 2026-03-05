@@ -1,13 +1,13 @@
-#include "giodb/common/result.h"
-#include "giodb/common/types.h"
-#include "giodb/parser/lexer.h"
-#include "giodb/parser/parser.h"
+#include "sixseven/common/result.h"
+#include "sixseven/common/types.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/parser.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 // ============================================================================
@@ -100,4 +100,4 @@ TEST(QA_GDB257, MissingProviderParameter) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

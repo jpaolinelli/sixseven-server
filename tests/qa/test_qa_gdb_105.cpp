@@ -5,12 +5,12 @@
 /// Tests cover: all SELECT clauses, JOIN types, aliases, subqueries, CTEs,
 /// set operations, DISTINCT, and error paths.
 
-#include "giodb/parser/lexer.h"
-#include "giodb/parser/parser.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/parser.h"
 
 #include <gtest/gtest.h>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Helpers ------------------------------------------------------------------
 

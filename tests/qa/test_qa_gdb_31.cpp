@@ -1,12 +1,12 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/types.h"
-#include "giodb/vector/builtin_provider.h"
-#include "giodb/vector/embedding_column.h"
-#include "giodb/vector/embedding_worker.h"
-#include "giodb/vector/http_client.h"
-#include "giodb/vector/ollama_provider.h"
-#include "giodb/vector/openai_provider.h"
-#include "giodb/vector/provider_registry.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/types.h"
+#include "sixseven/vector/builtin_provider.h"
+#include "sixseven/vector/embedding_column.h"
+#include "sixseven/vector/embedding_worker.h"
+#include "sixseven/vector/http_client.h"
+#include "sixseven/vector/ollama_provider.h"
+#include "sixseven/vector/openai_provider.h"
+#include "sixseven/vector/provider_registry.h"
 
 #include <gtest/gtest.h>
 
@@ -20,7 +20,7 @@
 #include <thread>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Mock HTTP client (reusable)

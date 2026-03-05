@@ -31,7 +31,7 @@ describe("connection-profiles", () => {
         name: "Local",
         host: "localhost",
         port: 6767,
-        user: "giodb",
+        user: "sixseven",
         isDefault: true,
       });
     });
@@ -40,7 +40,7 @@ describe("connection-profiles", () => {
       const saved = [
         { id: "1", name: "Prod", host: "prod.example.com", port: 5432, user: "admin" },
       ];
-      store.set("giodb-server-profiles", JSON.stringify(saved));
+      store.set("sixseven-server-profiles", JSON.stringify(saved));
 
       const profiles = loadProfiles();
       expect(profiles).toHaveLength(1);
@@ -48,14 +48,14 @@ describe("connection-profiles", () => {
     });
 
     it("returns default profile when localStorage has invalid JSON", () => {
-      store.set("giodb-server-profiles", "not-json");
+      store.set("sixseven-server-profiles", "not-json");
       const profiles = loadProfiles();
       expect(profiles).toHaveLength(1);
       expect(profiles[0].id).toBe("default");
     });
 
     it("returns default profile when localStorage has empty array", () => {
-      store.set("giodb-server-profiles", "[]");
+      store.set("sixseven-server-profiles", "[]");
       const profiles = loadProfiles();
       expect(profiles).toHaveLength(1);
       expect(profiles[0].id).toBe("default");
@@ -92,7 +92,7 @@ describe("connection-profiles", () => {
 
   describe("updateProfile", () => {
     it("updates an existing profile", () => {
-      const profile = addProfile("Test", "test.example.com", 6767, "giodb");
+      const profile = addProfile("Test", "test.example.com", 6767, "sixseven");
 
       updateProfile({
         ...profile,
@@ -122,7 +122,7 @@ describe("connection-profiles", () => {
 
   describe("deleteProfile", () => {
     it("removes a profile by ID", () => {
-      const profile = addProfile("ToDelete", "delete.example.com", 6767, "giodb");
+      const profile = addProfile("ToDelete", "delete.example.com", 6767, "sixseven");
       expect(loadProfiles().find((p) => p.id === profile.id)).toBeTruthy();
 
       deleteProfile(profile.id);

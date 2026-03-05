@@ -1,11 +1,11 @@
-#include "giodb/server/event_loop.h"
+#include "sixseven/server/event_loop.h"
 
 #include <gtest/gtest.h>
 
 #include <sys/socket.h>
 #include <unistd.h>
 
-namespace giodb {
+namespace sixseven {
 
 class EventLoopTest : public ::testing::Test {
 protected:
@@ -117,4 +117,4 @@ TEST_F(EventLoopTest, RemoveNonexistentFdIsNoOp) {
     EXPECT_TRUE(result.has_value());
 }
 
-} // namespace giodb
+} // namespace sixseven

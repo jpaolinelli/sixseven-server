@@ -1,6 +1,6 @@
-#include "giodb/server/auth.h"
+#include "sixseven/server/auth.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <algorithm>
 #include <cctype>
@@ -20,7 +20,7 @@
 #include <openssl/sha.h>
 #endif
 
-namespace giodb {
+namespace sixseven {
 
 // -- Auth method parsing ------------------------------------------------------
 
@@ -351,25 +351,25 @@ bool UserManager::user_exists(const std::string& username) const {
 
 void UserManager::ensure_default_admin(AuthMethod method) {
     std::lock_guard<std::mutex> lock(mu_);
-    if (users_.count("giodb") > 0) {
+    if (users_.count("sixseven") > 0) {
         return;
     }
 
     UserRecord record;
     switch (method) {
     case AuthMethod::TRUST:
-        record.username = "giodb";
+        record.username = "sixseven";
         break;
     case AuthMethod::MD5:
-        record = hash_password_md5("giodb", "giodb");
+        record = hash_password_md5("sixseven", "sixseven");
         break;
     case AuthMethod::SCRAM_SHA_256:
-        record = hash_password_scram("giodb", "giodb");
+        record = hash_password_scram("sixseven", "sixseven");
         break;
     }
 
-    users_["giodb"] = std::move(record);
-    GIODB_LOG_INFO("created default admin user 'giodb'");
+    users_["sixseven"] = std::move(record);
+    SIXSEVEN_LOG_INFO("created default admin user 'sixseven'");
 }
 
 // -- MD5 verification ---------------------------------------------------------
@@ -556,4 +556,4 @@ Result<std::string> scram_server_final(const std::string& client_final_message,
     return ok(server_final);
 }
 
-} // namespace giodb
+} // namespace sixseven

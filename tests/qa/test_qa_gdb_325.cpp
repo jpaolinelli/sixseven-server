@@ -8,12 +8,12 @@
 /// - WordPieceTokenizer: boundary max_length, all-UNK, stress, truncation
 /// - BPETokenizer: byte-level edge cases, merge edge cases, stress
 
-#include "giodb/vector/bpe_tokenizer.h"
-#include "giodb/vector/pre_tokenizer.h"
-#include "giodb/vector/text_normalizer.h"
-#include "giodb/vector/tokenizer.h"
-#include "giodb/vector/tokenizer_json_loader.h"
-#include "giodb/vector/wordpiece_tokenizer.h"
+#include "sixseven/vector/bpe_tokenizer.h"
+#include "sixseven/vector/pre_tokenizer.h"
+#include "sixseven/vector/text_normalizer.h"
+#include "sixseven/vector/tokenizer.h"
+#include "sixseven/vector/tokenizer_json_loader.h"
+#include "sixseven/vector/wordpiece_tokenizer.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -24,7 +24,7 @@
 #include <unordered_map>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 namespace {
 
@@ -43,7 +43,7 @@ std::string minilm_fixture() {
 class TempJsonFile {
 public:
     explicit TempJsonFile(const std::string& content, const std::string& suffix = "")
-        : path_(std::filesystem::temp_directory_path() / ("giodb_qa_325_" + suffix + ".json")) {
+        : path_(std::filesystem::temp_directory_path() / ("sixseven_qa_325_" + suffix + ".json")) {
         std::ofstream out(path_);
         out << content;
     }

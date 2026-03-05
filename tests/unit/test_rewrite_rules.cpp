@@ -1,4 +1,4 @@
-#include "giodb/planner/rewrite_rules.h"
+#include "sixseven/planner/rewrite_rules.h"
 
 #include <gtest/gtest.h>
 
@@ -7,7 +7,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 // ============================================================================
@@ -705,4 +705,4 @@ TEST(CollectColumnRefs, InExprValues) {
 }
 
 } // anonymous namespace
-} // namespace giodb
+} // namespace sixseven

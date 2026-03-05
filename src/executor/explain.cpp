@@ -1,11 +1,11 @@
-#include "giodb/executor/explain.h"
+#include "sixseven/executor/explain.h"
 
 #include <nlohmann/json.hpp>
 
 #include <sstream>
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 
 // ---------------------------------------------------------------------------
 // Text format
@@ -139,4 +139,4 @@ ExplainFormatter::to_query_result(const Iterator& root, ExplainFormat format, bo
     return qr;
 }
 
-} // namespace giodb
+} // namespace sixseven

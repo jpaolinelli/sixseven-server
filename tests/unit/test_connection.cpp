@@ -1,4 +1,4 @@
-#include "giodb/server/connection.h"
+#include "sixseven/server/connection.h"
 
 #include <gtest/gtest.h>
 
@@ -7,7 +7,7 @@
 
 #include <cstring>
 
-namespace giodb {
+namespace sixseven {
 
 // ─── connection_state_name ──────────────────────────────────────────────────
 
@@ -238,4 +238,4 @@ TEST_F(ConnectionStateTest, MoveAssignment) {
     EXPECT_EQ(conn1.fd(), -1); // NOLINT(bugprone-use-after-move)
 }
 
-} // namespace giodb
+} // namespace sixseven

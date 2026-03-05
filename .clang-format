@@ -10,7 +10,7 @@ SortIncludes: CaseSensitive
 IncludeBlocks: Regroup
 IncludeCategories:
   # Project headers
-  - Regex: '^"giodb/'
+  - Regex: '^"sixseven/'
     Priority: 1
   # Third-party headers
   - Regex: '^<(nlohmann|spdlog|tl|gtest|gmock|benchmark)/'

@@ -8,20 +8,20 @@
 /// GDB-225: CTE state cleared between bind() calls
 /// GDB-226: ORDER BY on non-selected column produces correct results
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/parser/lexer.h"
-#include "giodb/parser/parser.h"
-#include "giodb/planner/binder.h"
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/parser.h"
+#include "sixseven/planner/binder.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
 #include <filesystem>
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 
 // ===========================================================================
 // Binder-level fixture (GDB-221, GDB-222, GDB-223, GDB-224, GDB-225)
@@ -478,7 +478,7 @@ TEST_F(QA_BugfixBinder, GDB225_CteWorksWithinQuery) {
 class QA_BugfixPipeline : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb221_226";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb221_226";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -651,4 +651,4 @@ TEST_F(QA_BugfixPipeline, GDB226_SingleRowOrderByNonSelected) {
     EXPECT_EQ(qr.rows[0][0].as_string(), "alice");
 }
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,10 +1,10 @@
-#include "giodb/vector/ollama_provider.h"
+#include "sixseven/vector/ollama_provider.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <nlohmann/json.hpp>
 
-namespace giodb {
+namespace sixseven {
 
 OllamaProvider::OllamaProvider(std::string base_url,
                                std::string model,
@@ -119,7 +119,7 @@ Result<void> OllamaProvider::health_check() {
                 auto model_name = model_entry["name"].get<std::string>();
                 // Ollama model names may include tags like ":latest".
                 if (model_name == model_ || model_name.starts_with(model_ + ":")) {
-                    GIODB_LOG_DEBUG("Ollama health check passed: model '{}' available", model_);
+                    SIXSEVEN_LOG_DEBUG("Ollama health check passed: model '{}' available", model_);
                     return ok();
                 }
             }
@@ -129,4 +129,4 @@ Result<void> OllamaProvider::health_check() {
     return make_error(StatusCode::NOT_FOUND, "model '" + model_ + "' not found on Ollama server");
 }
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,14 +1,14 @@
 /// @file tests/qa/test_qa_gdb_320.cpp
 /// QA adversarial tests for GDB-320: Text Normalizer.
 
-#include "giodb/vector/text_normalizer.h"
-#include "giodb/vector/tokenizer.h"
+#include "sixseven/vector/text_normalizer.h"
+#include "sixseven/vector/tokenizer.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 
-using namespace giodb;
+using namespace sixseven;
 
 // ===================================================================
 // QA_BertNormalizer — Boundary & Edge Cases

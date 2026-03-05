@@ -1,12 +1,12 @@
-#include "giodb/executor/external_sort.h"
+#include "sixseven/executor/external_sort.h"
 
-#include "giodb/common/coercion.h"
-#include "giodb/executor/expr_evaluator.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/executor/expr_evaluator.h"
 
 #include <algorithm>
 #include <cstring>
 
-namespace giodb {
+namespace sixseven {
 
 // =============================================================================
 // Construction / destruction
@@ -22,7 +22,7 @@ ExternalSortOperator::ExternalSortOperator(std::unique_ptr<Iterator> child,
       work_mem_bytes_(work_mem_bytes), max_merge_width_(max_merge_width),
       temp_dir_(std::move(temp_dir)) {
     if (temp_dir_.empty()) {
-        temp_dir_ = std::filesystem::temp_directory_path() / "giodb_sort";
+        temp_dir_ = std::filesystem::temp_directory_path() / "sixseven_sort";
     }
 }
 
@@ -823,4 +823,4 @@ void ExternalSortOperator::cleanup_temp_files() {
     std::filesystem::remove(temp_dir_, ec);
 }
 
-} // namespace giodb
+} // namespace sixseven

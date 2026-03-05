@@ -1,13 +1,13 @@
-#include "giodb/executor/shortest_path.h"
+#include "sixseven/executor/shortest_path.h"
 
-#include "giodb/common/coercion.h"
-#include "giodb/common/value_hash.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/common/value_hash.h"
 
 #include <deque>
 #include <unordered_map>
 #include <unordered_set>
 
-namespace giodb {
+namespace sixseven {
 
 ShortestPathOperator::ShortestPathOperator(GraphEngine& graph_engine,
                                            ShortestPathConfig config,
@@ -212,4 +212,4 @@ Result<std::vector<Value>> ShortestPathOperator::get_neighbors(const Value& node
     return ok(std::move(result));
 }
 
-} // namespace giodb
+} // namespace sixseven

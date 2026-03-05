@@ -1,11 +1,11 @@
-#include "giodb/storage/serialization.h"
+#include "sixseven/storage/serialization.h"
 
 #include <gtest/gtest.h>
 
 #include <cmath>
 #include <limits>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Helper: round-trip a value through serialize/deserialize ------------------
 

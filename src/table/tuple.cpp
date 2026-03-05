@@ -1,8 +1,8 @@
-#include "giodb/table/tuple.h"
+#include "sixseven/table/tuple.h"
 
 #include <cstring>
 
-namespace giodb {
+namespace sixseven {
 
 // -- Schema -------------------------------------------------------------------
 
@@ -570,4 +570,4 @@ size_t compute_tuple_size(const std::vector<Value>& values, const Schema& schema
 
 } // namespace TupleSerializer
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,5 +1,5 @@
-#include "giodb/vector/hnsw_index.h"
-#include "giodb/vector/hnsw_page.h"
+#include "sixseven/vector/hnsw_index.h"
+#include "sixseven/vector/hnsw_page.h"
 
 #include <gtest/gtest.h>
 
@@ -14,7 +14,7 @@
 #include <thread>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test Helpers
@@ -25,7 +25,7 @@ namespace {
 class TempDir {
 public:
     TempDir() {
-        path_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb29_XXXXXX";
+        path_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb29_XXXXXX";
         std::string tmpl = path_.string();
         char* result = mkdtemp(tmpl.data());
         EXPECT_NE(result, nullptr);

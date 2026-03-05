@@ -1,10 +1,10 @@
-#include "giodb/parser/lexer.h"
+#include "sixseven/parser/lexer.h"
 
 #include <algorithm>
 #include <cctype>
 #include <unordered_map>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -500,4 +500,4 @@ Token Lexer::make_token(TokenType type) const {
         type, source_.substr(start_, current_ - start_), token_start_line_, token_start_column_};
 }
 
-} // namespace giodb
+} // namespace sixseven

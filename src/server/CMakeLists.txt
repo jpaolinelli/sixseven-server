@@ -1,6 +1,6 @@
-# giodb::server sources
+# sixseven::server sources
 
-add_library(giodb_server STATIC
+add_library(sixseven_server STATIC
     auth.cpp
     connection.cpp
     event_loop.cpp
@@ -18,6 +18,6 @@ add_library(giodb_server STATIC
     wal_sender_manager.cpp
 )
 
-target_include_directories(giodb_server PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(sixseven_server PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
-target_link_libraries(giodb_server PUBLIC giodb_storage giodb_common)
+target_link_libraries(sixseven_server PUBLIC sixseven_storage sixseven_common)

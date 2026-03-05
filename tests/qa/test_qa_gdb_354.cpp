@@ -7,13 +7,13 @@
 ///
 /// Fix: Trimming is now guarded by `if (clean_text_)`.
 
-#include "giodb/vector/text_normalizer.h"
+#include "sixseven/vector/text_normalizer.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 // ===================================================================
@@ -150,4 +150,4 @@ TEST(QA_GDB354, CleanTextFalse100BothSides) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

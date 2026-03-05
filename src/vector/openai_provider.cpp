@@ -1,10 +1,10 @@
-#include "giodb/vector/openai_provider.h"
+#include "sixseven/vector/openai_provider.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <nlohmann/json.hpp>
 
-namespace giodb {
+namespace sixseven {
 
 OpenAIProvider::OpenAIProvider(std::string api_key,
                                std::string model,
@@ -54,7 +54,7 @@ Result<void> OpenAIProvider::health_check() {
                               std::to_string(result->empty() ? 0 : result->front().size()));
     }
 
-    GIODB_LOG_DEBUG("OpenAI health check passed: model '{}' available", model_);
+    SIXSEVEN_LOG_DEBUG("OpenAI health check passed: model '{}' available", model_);
     return ok();
 }
 
@@ -171,4 +171,4 @@ OpenAIProvider::request_embeddings(const std::vector<std::string>& texts) {
     return ok(std::move(results));
 }
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,6 +1,6 @@
-# giodb::storage sources
+# sixseven::storage sources
 
-add_library(giodb_storage STATIC
+add_library(sixseven_storage STATIC
     serialization.cpp
     page.cpp
     overflow.cpp
@@ -12,6 +12,6 @@ add_library(giodb_storage STATIC
     wal_archive.cpp
 )
 
-target_include_directories(giodb_storage PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(sixseven_storage PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
-target_link_libraries(giodb_storage PUBLIC giodb_common)
+target_link_libraries(sixseven_storage PUBLIC sixseven_common)

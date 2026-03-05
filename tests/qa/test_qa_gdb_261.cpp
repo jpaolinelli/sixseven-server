@@ -1,9 +1,9 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/result.h"
-#include "giodb/common/types.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/result.h"
+#include "sixseven/common/types.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
@@ -11,7 +11,7 @@
 #include <memory>
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 // ============================================================================
@@ -21,7 +21,7 @@ namespace {
 class QA_GDB261 : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb261";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb261";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -80,4 +80,4 @@ TEST_F(QA_GDB261, WithoutIfNotExistsDuplicateFails) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

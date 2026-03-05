@@ -1,9 +1,9 @@
-#include "giodb/common/result.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/server/connection.h"
-#include "giodb/server/pg_protocol.h"
+#include "sixseven/common/result.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/server/connection.h"
+#include "sixseven/server/pg_protocol.h"
 
 #include <gtest/gtest.h>
 
@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // substitute_parameters() unit tests

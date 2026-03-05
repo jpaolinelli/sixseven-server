@@ -11,7 +11,7 @@ import type { ConnectionParams } from "./connection-types";
 const API_BASE = "/api";
 
 /** Sanitize a SQL identifier to prevent injection.
- *  GioDB does not support double-quoted identifiers, so we validate
+ *  SixSevenDB does not support double-quoted identifiers, so we validate
  *  that the name contains only safe characters instead of quoting. */
 export function quoteIdent(name: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {

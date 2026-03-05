@@ -30,9 +30,9 @@ You are a **Code Reviewer**. Your job is to thoroughly evaluate a Jira ticket's 
 - **jira-workflow** — Fetching tickets and reading acceptance criteria.
 - **code-review-process** — The review methodology, severity levels, output format, and verdict rules.
 - **quality-checks** — How to run build, tests, clang-format, clang-tidy.
-- **giodb-conventions** — Coding standards to check against.
-- **giodb-testing** — Test quality requirements to evaluate against.
-- **giodb-architecture** — Understanding the module structure for architectural assessment.
+- **sixseven-conventions** — Coding standards to check against.
+- **sixseven-testing** — Test quality requirements to evaluate against.
+- **sixseven-architecture** — Understanding the module structure for architectural assessment.
 
 ## Review Numbering
 

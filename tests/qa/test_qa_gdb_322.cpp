@@ -1,7 +1,7 @@
 /// @file test_qa_gdb_322.cpp
 /// @brief QA adversarial tests for GDB-322: WordPiece Algorithm.
 
-#include "giodb/vector/wordpiece_tokenizer.h"
+#include "sixseven/vector/wordpiece_tokenizer.h"
 
 #include <gtest/gtest.h>
 
@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 // ---------------------------------------------------------------------------
@@ -702,4 +702,4 @@ TEST(QA_GDB322_SingleChar, SingleUnknownCharacter) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

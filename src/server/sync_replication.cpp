@@ -1,10 +1,10 @@
-#include "giodb/server/sync_replication.h"
+#include "sixseven/server/sync_replication.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <algorithm>
 
-namespace giodb {
+namespace sixseven {
 
 // -- Free functions -----------------------------------------------------------
 
@@ -77,7 +77,7 @@ void SyncReplicationManager::configure(SyncReplicationConfig config) {
     // Wake all waiters so they re-evaluate with new config.
     sync_cv_.notify_all();
 
-    GIODB_LOG_INFO(
+    SIXSEVEN_LOG_INFO(
         "sync replication configured: level={}, commit_count={}, timeout={}ms, fallback={}",
         sync_level_name(config_.level),
         config_.commit_count,
@@ -139,13 +139,13 @@ SyncWaitResult SyncReplicationManager::wait_for_sync(lsn_t commit_lsn) {
 
     // Timeout fired.
     if (config_.fallback == SyncFallback::WARN) {
-        GIODB_LOG_WARN("sync replication timeout for LSN {} after {}ms — falling back to async",
+        SIXSEVEN_LOG_WARN("sync replication timeout for LSN {} after {}ms — falling back to async",
                        commit_lsn,
                        config_.timeout.count());
         return SyncWaitResult::TIMED_OUT_WARN;
     }
 
-    GIODB_LOG_ERROR("sync replication timeout for LSN {} after {}ms — commit failed",
+    SIXSEVEN_LOG_ERROR("sync replication timeout for LSN {} after {}ms — commit failed",
                     commit_lsn,
                     config_.timeout.count());
     return SyncWaitResult::TIMED_OUT_ERROR;
@@ -241,4 +241,4 @@ lsn_t SyncReplicationManager::relevant_lsn(const ReplicaProgress& progress) cons
     return invalid_lsn;
 }
 
-} // namespace giodb
+} // namespace sixseven

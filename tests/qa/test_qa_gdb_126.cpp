@@ -5,7 +5,7 @@
 /// exact SIMD lane boundaries, subnormal inputs, mixed special values,
 /// large batch operations, INNER_PRODUCT consistency, and COSINE precision.
 
-#include "giodb/vector/distance.h"
+#include "sixseven/vector/distance.h"
 
 #include <gtest/gtest.h>
 
@@ -16,7 +16,7 @@
 #include <random>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 namespace {
 

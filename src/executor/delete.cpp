@@ -1,6 +1,6 @@
-#include "giodb/executor/delete.h"
+#include "sixseven/executor/delete.h"
 
-namespace giodb {
+namespace sixseven {
 
 DeleteOperator::DeleteOperator(TableHeap& heap, std::unique_ptr<Iterator> child)
     : heap_(heap), child_(std::move(child)),
@@ -61,4 +61,4 @@ std::vector<Iterator*> DeleteOperator::plan_children_mutable() {
     return {child_.get()};
 }
 
-} // namespace giodb
+} // namespace sixseven

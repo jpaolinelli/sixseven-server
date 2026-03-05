@@ -1,13 +1,13 @@
-#include "giodb/storage/wal_recovery.h"
+#include "sixseven/storage/wal_recovery.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/storage/wal.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/storage/wal.h"
 
 #include <algorithm>
 #include <cstring>
 #include <set>
 
-namespace giodb {
+namespace sixseven {
 
 // -- Checkpoint data helpers --------------------------------------------------
 
@@ -141,7 +141,7 @@ Result<RecoveryStats> WalRecovery::recover() {
                         active_txns.insert(txn_id);
                     }
                 } else {
-                    GIODB_LOG_WARN("WAL recovery: failed to decode checkpoint data: {}",
+                    SIXSEVEN_LOG_WARN("WAL recovery: failed to decode checkpoint data: {}",
                                    active.error().message);
                 }
             }
@@ -197,7 +197,7 @@ Result<RecoveryStats> WalRecovery::recover() {
     stats.committed_txn_ids = committed_txns;
     stats.aborted_txn_ids = aborted_txns;
 
-    GIODB_LOG_INFO("WAL recovery analysis: {} records scanned, checkpoint_lsn={}, max_lsn={}, "
+    SIXSEVEN_LOG_INFO("WAL recovery analysis: {} records scanned, checkpoint_lsn={}, max_lsn={}, "
                    "{} committed, {} aborted/in-progress",
                    stats.records_scanned,
                    last_checkpoint_lsn,
@@ -220,7 +220,7 @@ Result<RecoveryStats> WalRecovery::recover() {
         ++stats.records_redone;
     }
 
-    GIODB_LOG_INFO("WAL recovery redo: {} records replayed", stats.records_redone);
+    SIXSEVEN_LOG_INFO("WAL recovery redo: {} records replayed", stats.records_redone);
 
     // ---- Phase 3: Undo ------------------------------------------------------
     // Reverse data records of aborted/in-progress transactions in reverse
@@ -238,9 +238,9 @@ Result<RecoveryStats> WalRecovery::recover() {
         ++stats.records_undone;
     }
 
-    GIODB_LOG_INFO("WAL recovery undo: {} records reversed", stats.records_undone);
+    SIXSEVEN_LOG_INFO("WAL recovery undo: {} records reversed", stats.records_undone);
 
     return ok(stats);
 }
 
-} // namespace giodb
+} // namespace sixseven

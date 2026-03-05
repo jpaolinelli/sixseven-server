@@ -1,12 +1,12 @@
-#include "giodb/parser/lexer.h"
-#include "giodb/parser/token.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/token.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Helper -------------------------------------------------------------------
 
@@ -767,7 +767,7 @@ TEST(QA_Lexer, ComplexSelectWithComments) {
     EXPECT_EQ(tokens[0].type, TokenType::SELECT);
 }
 
-TEST(QA_Lexer, GioDBTraverseFullQuery) {
+TEST(QA_Lexer, SixSevenDBTraverseFullQuery) {
     auto tokens = tokenize_ok("TRAVERSE users "
                               "VIA follows "
                               "DIRECTION 'out' "
@@ -885,10 +885,10 @@ TEST(QA_Lexer, KeywordLexemePreservesCase) {
 }
 
 // =============================================================================
-// Every GioDB-specific keyword (comprehensive)
+// Every SixSevenDB-specific keyword (comprehensive)
 // =============================================================================
 
-TEST(QA_Lexer, AllGioDBKeywordsCaseInsensitive) {
+TEST(QA_Lexer, AllSixSevenDBKeywordsCaseInsensitive) {
     struct KW {
         const char* text;
         TokenType expected;

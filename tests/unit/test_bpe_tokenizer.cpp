@@ -1,4 +1,4 @@
-#include "giodb/vector/bpe_tokenizer.h"
+#include "sixseven/vector/bpe_tokenizer.h"
 
 #include <gtest/gtest.h>
 
@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 // ---------------------------------------------------------------------------
@@ -365,4 +365,4 @@ TEST_F(BPETokenizerTest, ThreeWords) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

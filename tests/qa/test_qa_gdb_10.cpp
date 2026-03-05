@@ -4,10 +4,10 @@
 /// Tests cover: logging edge cases, Result/Error edge cases, Config boundary
 /// values, apply_setting adversarial inputs, and StatusCode completeness.
 
-#include "giodb/common/config.h"
-#include "giodb/common/logging.h"
-#include "giodb/common/result.h"
-#include "giodb/common/status.h"
+#include "sixseven/common/config.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/common/result.h"
+#include "sixseven/common/status.h"
 
 #include <gtest/gtest.h>
 
@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // ============================================================================
 // QA_Logging — adversarial logging tests
@@ -28,17 +28,17 @@ using namespace giodb;
 
 TEST(QA_Logging, InitWithInvalidLevel) {
     // Invalid level string should not crash — spdlog uses "off" as fallback.
-    EXPECT_NO_THROW(giodb::init_logging("nonexistent_level"));
+    EXPECT_NO_THROW(sixseven::init_logging("nonexistent_level"));
 }
 
 TEST(QA_Logging, InitWithEmptyString) {
-    EXPECT_NO_THROW(giodb::init_logging(""));
+    EXPECT_NO_THROW(sixseven::init_logging(""));
 }
 
 TEST(QA_Logging, InitCalledMultipleTimes) {
     // Re-initializing logging should not crash or leak.
     for (int i = 0; i < 100; ++i) {
-        EXPECT_NO_THROW(giodb::init_logging("info"));
+        EXPECT_NO_THROW(sixseven::init_logging("info"));
     }
 }
 
@@ -46,16 +46,16 @@ TEST(QA_Logging, AllValidLevels) {
     std::vector<std::string> levels = {
         "trace", "debug", "info", "warn", "error", "critical", "off"};
     for (const auto& level : levels) {
-        EXPECT_NO_THROW(giodb::init_logging(level));
+        EXPECT_NO_THROW(sixseven::init_logging(level));
     }
 }
 
 TEST(QA_Logging, LogWithFormatArgs) {
-    giodb::init_logging("trace");
+    sixseven::init_logging("trace");
     EXPECT_NO_THROW({
-        GIODB_LOG_INFO("int: {}", 42);
-        GIODB_LOG_INFO("string: {}", std::string("hello"));
-        GIODB_LOG_INFO("double: {:.2f}", 3.14159);
+        SIXSEVEN_LOG_INFO("int: {}", 42);
+        SIXSEVEN_LOG_INFO("string: {}", std::string("hello"));
+        SIXSEVEN_LOG_INFO("double: {:.2f}", 3.14159);
     });
 }
 
@@ -203,7 +203,7 @@ protected:
 
     void SetUp() override {
         auto tmp_dir = std::filesystem::temp_directory_path();
-        auto tmpl = (tmp_dir / "giodb_qa_XXXXXX").string();
+        auto tmpl = (tmp_dir / "sixseven_qa_XXXXXX").string();
         std::vector<char> buf(tmpl.begin(), tmpl.end());
         buf.push_back('\0');
         int fd = mkstemp(buf.data());
@@ -290,10 +290,10 @@ TEST_F(QA_ConfigFile, EmptyDataDir) {
 }
 
 TEST_F(QA_ConfigFile, DataDirWithSpecialChars) {
-    write_file(R"({"data_dir": "/tmp/giodb test dir/data"})");
+    write_file(R"({"data_dir": "/tmp/sixseven test dir/data"})");
     auto result = Config::load_from_file(tmp_path_);
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->data_dir, "/tmp/giodb test dir/data");
+    EXPECT_EQ(result->data_dir, "/tmp/sixseven test dir/data");
 }
 
 TEST_F(QA_ConfigFile, UnknownFieldsIgnored) {

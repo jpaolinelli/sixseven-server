@@ -1,7 +1,7 @@
-#include "giodb/executor/window_function.h"
+#include "sixseven/executor/window_function.h"
 
-#include "giodb/common/coercion.h"
-#include "giodb/executor/expr_evaluator.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/executor/expr_evaluator.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,7 +10,7 @@
 #include <functional>
 #include <unordered_map>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -771,4 +771,4 @@ std::vector<Iterator*> WindowOperator::plan_children_mutable() {
     return {child_.get()};
 }
 
-} // namespace giodb
+} // namespace sixseven

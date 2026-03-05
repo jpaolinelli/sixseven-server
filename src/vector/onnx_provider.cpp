@@ -1,9 +1,9 @@
-#include "giodb/vector/onnx_provider.h"
+#include "sixseven/vector/onnx_provider.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/vector/bpe_tokenizer.h"
-#include "giodb/vector/tokenizer_json_loader.h"
-#include "giodb/vector/wordpiece_tokenizer.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/vector/bpe_tokenizer.h"
+#include "sixseven/vector/tokenizer_json_loader.h"
+#include "sixseven/vector/wordpiece_tokenizer.h"
 
 #include <onnxruntime/onnxruntime_cxx_api.h>
 
@@ -14,7 +14,7 @@
 #include <numeric>
 #include <sstream>
 
-namespace giodb {
+namespace sixseven {
 
 // ---------------------------------------------------------------------------
 // RealOnnxSession — wraps Ort::Session for actual ONNX Runtime inference
@@ -196,7 +196,7 @@ Result<std::unique_ptr<OnnxSession>> create_onnx_session(const std::string& mode
     }
 
     try {
-        Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "giodb_onnx");
+        Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "sixseven_onnx");
 
         Ort::SessionOptions options;
         options.SetIntraOpNumThreads(1);
@@ -220,7 +220,7 @@ Result<std::unique_ptr<OnnxSession>> create_onnx_session(const std::string& mode
             output_names.emplace_back(name.get());
         }
 
-        GIODB_LOG_INFO("loaded ONNX model '{}': {} inputs, {} outputs",
+        SIXSEVEN_LOG_INFO("loaded ONNX model '{}': {} inputs, {} outputs",
                        model_path,
                        input_names.size(),
                        output_names.size());
@@ -302,7 +302,7 @@ Result<std::unique_ptr<OnnxProvider>> create_onnx_provider(const std::string& pa
     if (!paths->tokenizer_path.empty()) {
         auto config = load_tokenizer_config(paths->tokenizer_path);
         if (!config.has_value()) {
-            GIODB_LOG_WARN("failed to load tokenizer from '{}': {}; falling back to hash tokenizer",
+            SIXSEVEN_LOG_WARN("failed to load tokenizer from '{}': {}; falling back to hash tokenizer",
                            paths->tokenizer_path,
                            config.error().message);
             tokenizer = std::make_unique<HashTokenizer>(OnnxProvider::MAX_SEQ_LENGTH);
@@ -310,14 +310,14 @@ Result<std::unique_ptr<OnnxProvider>> create_onnx_provider(const std::string& pa
             switch (config->model_type) {
             case TokenizerModelType::WORDPIECE:
                 tokenizer = std::make_unique<WordPieceTokenizer>(*config);
-                GIODB_LOG_INFO("loaded WordPiece tokenizer from '{}'", paths->tokenizer_path);
+                SIXSEVEN_LOG_INFO("loaded WordPiece tokenizer from '{}'", paths->tokenizer_path);
                 break;
             case TokenizerModelType::BPE:
                 tokenizer = std::make_unique<BPETokenizer>(*config);
-                GIODB_LOG_INFO("loaded BPE tokenizer from '{}'", paths->tokenizer_path);
+                SIXSEVEN_LOG_INFO("loaded BPE tokenizer from '{}'", paths->tokenizer_path);
                 break;
             default:
-                GIODB_LOG_WARN("unsupported tokenizer model type in '{}'; "
+                SIXSEVEN_LOG_WARN("unsupported tokenizer model type in '{}'; "
                                "falling back to hash tokenizer",
                                paths->tokenizer_path);
                 tokenizer = std::make_unique<HashTokenizer>(OnnxProvider::MAX_SEQ_LENGTH);
@@ -325,7 +325,7 @@ Result<std::unique_ptr<OnnxProvider>> create_onnx_provider(const std::string& pa
             }
         }
     } else {
-        GIODB_LOG_WARN("no tokenizer.json found for model '{}'; using hash tokenizer",
+        SIXSEVEN_LOG_WARN("no tokenizer.json found for model '{}'; using hash tokenizer",
                        paths->model_path);
         tokenizer = std::make_unique<HashTokenizer>(OnnxProvider::MAX_SEQ_LENGTH);
     }
@@ -391,4 +391,4 @@ const Tokenizer& OnnxProvider::tokenizer() const {
     return *tokenizer_;
 }
 
-} // namespace giodb
+} // namespace sixseven

@@ -5,7 +5,7 @@
 /// Covers boundary values, corrupted/truncated data, extreme values, and
 /// round-trip edge cases for HnswNode, HnswMeta, and vector serialization.
 
-#include "giodb/vector/hnsw_page.h"
+#include "sixseven/vector/hnsw_page.h"
 
 #include <gtest/gtest.h>
 
@@ -14,7 +14,7 @@
 #include <limits>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // ---------------------------------------------------------------------------
 // HnswNode serialization edge cases

@@ -1,8 +1,8 @@
-#include "giodb/common/result.h"
+#include "sixseven/common/result.h"
 
 #include <gtest/gtest.h>
 
-using namespace giodb;
+using namespace sixseven;
 
 TEST(Result, SuccessConstruction) {
     Result<int> r = ok(42);

@@ -1,17 +1,17 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/nearest_scan.h"
-#include "giodb/executor/tuple.h"
-#include "giodb/graph/graph_engine.h"
-#include "giodb/parser/ast.h"
-#include "giodb/planner/binder.h"
-#include "giodb/storage/buffer_pool.h"
-#include "giodb/storage/disk_manager.h"
-#include "giodb/table/table_heap.h"
-#include "giodb/table/tuple.h"
-#include "giodb/vector/distance.h"
-#include "giodb/vector/hnsw_index.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/nearest_scan.h"
+#include "sixseven/executor/tuple.h"
+#include "sixseven/graph/graph_engine.h"
+#include "sixseven/parser/ast.h"
+#include "sixseven/planner/binder.h"
+#include "sixseven/storage/buffer_pool.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/table/table_heap.h"
+#include "sixseven/table/tuple.h"
+#include "sixseven/vector/distance.h"
+#include "sixseven/vector/hnsw_index.h"
 
 #include <gtest/gtest.h>
 
@@ -26,7 +26,7 @@
 #include <unordered_set>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test fixture
@@ -36,7 +36,7 @@ class NearestScanTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // Set up table storage.
-        table_path_ = std::filesystem::temp_directory_path() / "giodb_test_nearest.db";
+        table_path_ = std::filesystem::temp_directory_path() / "sixseven_test_nearest.db";
         std::filesystem::remove(table_path_);
 
         auto fid = dm_.create_file(table_path_, false, true);
@@ -46,7 +46,7 @@ protected:
         table_bpm_ = std::make_unique<BufferPoolManager>(dm_, table_file_id_, 64);
 
         // Set up HNSW index storage.
-        hnsw_path_ = std::filesystem::temp_directory_path() / "giodb_test_nearest_hnsw.db";
+        hnsw_path_ = std::filesystem::temp_directory_path() / "sixseven_test_nearest_hnsw.db";
         std::filesystem::remove(hnsw_path_);
 
         auto hfid = dm_.create_file(hnsw_path_, false, true);

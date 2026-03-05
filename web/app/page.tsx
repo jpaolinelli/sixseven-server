@@ -15,7 +15,7 @@ import type {
   EdgeTypeInfo,
 } from "@/lib/types";
 import { fetchDatabases, fetchDatabaseSchema } from "@/lib/schema-utils";
-import type { SchemaCompletionData } from "@/lib/giodb-sql-lang";
+import type { SchemaCompletionData } from "@/lib/sixseven-sql-lang";
 
 type ActivePanel = "schema" | "query" | "graph" | "dashboard";
 
@@ -99,7 +99,7 @@ function AppContent() {
       {/* Left panel: Schema Browser */}
       <div className="w-80 border-r border-gray-800 flex flex-col overflow-hidden shrink-0">
         <div className="p-3 border-b border-gray-800 flex items-center gap-2">
-          <span className="text-sm font-semibold text-gray-100">GioDB</span>
+          <span className="text-sm font-semibold text-gray-100">SixSevenDB</span>
           <span className="text-xs text-gray-500">Admin</span>
           <div className="ml-auto relative">
             <ConnectionManager />

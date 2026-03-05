@@ -1,4 +1,4 @@
-# GioDB
+# SixSevenDB
 
 A hybrid relational, graph, and vector database built in C++20 with PostgreSQL wire protocol compatibility.
 
@@ -36,7 +36,7 @@ cmake --preset default
 cmake --build build/debug
 
 # Start the server
-./build/debug/src/giodb-server
+./build/debug/src/sixseven-server
 
 # Connect with psql (default port 6767, trust auth)
 psql -h localhost -p 6767
@@ -47,7 +47,7 @@ psql -h localhost -p 6767
 Create a `config.json` file and pass it as the first argument:
 
 ```bash
-./build/debug/src/giodb-server config.json
+./build/debug/src/sixseven-server config.json
 ```
 
 All fields are optional and fall back to defaults:
@@ -83,7 +83,7 @@ All fields are optional and fall back to defaults:
 
 ### Replication
 
-GioDB supports primary/standby replication. Start a standby with `--standby` or set `standby_mode` in config:
+SixSevenDB supports primary/standby replication. Start a standby with `--standby` or set `standby_mode` in config:
 
 | Field | Default | Description |
 |-------|---------|-------------|
@@ -487,7 +487,7 @@ WITHIN TRAVERSE authored FROM users(1) DIRECTION OUT MAX_DEPTH 2;
 
 ## Embedding Providers
 
-GioDB supports four embedding provider types. The provider name format is `"type/model"`.
+SixSevenDB supports four embedding provider types. The provider name format is `"type/model"`.
 
 ### OpenAI
 
@@ -562,15 +562,15 @@ models/all-MiniLM-L6-v2/
     tokenizer.json      # Hugging Face tokenizer config
 ```
 
-When the provider path points to a directory, GioDB auto-discovers:
+When the provider path points to a directory, SixSevenDB auto-discovers:
 1. The model file (`model.ort`, `model.onnx`, or `onnx/model.onnx`)
 2. The tokenizer (`tokenizer.json` in the directory root)
 
-**Backward compatibility:** Pointing directly to a `.onnx` file still works. If a `tokenizer.json` exists alongside the model file, it will be loaded automatically. Without a tokenizer file, GioDB falls back to a hash-based tokenizer.
+**Backward compatibility:** Pointing directly to a `.onnx` file still works. If a `tokenizer.json` exists alongside the model file, it will be loaded automatically. Without a tokenizer file, SixSevenDB falls back to a hash-based tokenizer.
 
 #### Tokenizer Support
 
-When a `tokenizer.json` is found, GioDB loads the pretrained tokenizer for full semantic quality. Supported tokenizer types:
+When a `tokenizer.json` is found, SixSevenDB loads the pretrained tokenizer for full semantic quality. Supported tokenizer types:
 
 | Algorithm | Models | Description |
 |-----------|--------|-------------|
@@ -754,9 +754,9 @@ Tests are split into three categories, each with its own CMake target and CTest 
 
 | Category | Target | Directory | CTest Label |
 |----------|--------|-----------|-------------|
-| Dev unit tests | `giodb_unit_tests` | `tests/unit/` | `unit` |
-| QA regression tests | `giodb_qa_tests` | `tests/qa/` | `qa` |
-| Integration tests | `giodb_integration_tests` | `tests/integration/` | `integration` |
+| Dev unit tests | `sixseven_unit_tests` | `tests/unit/` | `unit` |
+| QA regression tests | `sixseven_qa_tests` | `tests/qa/` | `qa` |
+| Integration tests | `sixseven_integration_tests` | `tests/integration/` | `integration` |
 
 ```bash
 # Build and run all tests
@@ -764,27 +764,27 @@ cmake --build build/debug
 ctest --test-dir build/debug --output-on-failure
 
 # Run only dev unit tests (fastest, use during development)
-cmake --build build/debug --target giodb_unit_tests
+cmake --build build/debug --target sixseven_unit_tests
 ctest --test-dir build/debug -L unit --output-on-failure
 
 # Run only QA regression tests
-cmake --build build/debug --target giodb_qa_tests
+cmake --build build/debug --target sixseven_qa_tests
 ctest --test-dir build/debug -L qa --output-on-failure
 
 # Run only integration tests
-cmake --build build/debug --target giodb_integration_tests
+cmake --build build/debug --target sixseven_integration_tests
 ctest --test-dir build/debug -L integration --output-on-failure
 
 # Run a specific test by name (supports wildcards)
-./build/debug/tests/unit/giodb_unit_tests --gtest_filter="BufferPool*"
-./build/debug/tests/qa/giodb_qa_tests --gtest_filter="*GDB258*"
+./build/debug/tests/unit/sixseven_unit_tests --gtest_filter="BufferPool*"
+./build/debug/tests/qa/sixseven_qa_tests --gtest_filter="*GDB258*"
 
 # Run a specific test suite
-./build/debug/tests/unit/giodb_unit_tests --gtest_filter="ExprEvaluator.*"
+./build/debug/tests/unit/sixseven_unit_tests --gtest_filter="ExprEvaluator.*"
 
 # List all available tests without running them
-./build/debug/tests/unit/giodb_unit_tests --gtest_list_tests
-./build/debug/tests/qa/giodb_qa_tests --gtest_list_tests
+./build/debug/tests/unit/sixseven_unit_tests --gtest_list_tests
+./build/debug/tests/qa/sixseven_qa_tests --gtest_list_tests
 ```
 
 New test files are auto-detected by CMake — just add them to the correct directory:

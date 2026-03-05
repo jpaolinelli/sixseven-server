@@ -5,7 +5,7 @@
 /// concurrent shutdown from multiple threads, health info after shutdown,
 /// request_shutdown vs shutdown semantics, connections during shutdown.
 
-#include "giodb/server/server.h"
+#include "sixseven/server/server.h"
 
 #include <gtest/gtest.h>
 
@@ -20,7 +20,7 @@
 #include <thread>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 class QA145LifecycleTest : public ::testing::Test {
 protected:

@@ -1,7 +1,7 @@
-#include "giodb/executor/hash_aggregate.h"
+#include "sixseven/executor/hash_aggregate.h"
 
-#include "giodb/common/coercion.h"
-#include "giodb/executor/expr_evaluator.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/executor/expr_evaluator.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -522,4 +522,4 @@ std::vector<Iterator*> HashAggregateOperator::plan_children_mutable() {
     return {child_.get()};
 }
 
-} // namespace giodb
+} // namespace sixseven

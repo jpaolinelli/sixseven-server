@@ -1,13 +1,13 @@
-#include "giodb/parser/ast.h"
-#include "giodb/parser/lexer.h"
-#include "giodb/parser/parser.h"
+#include "sixseven/parser/ast.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/parser.h"
 
 #include <gtest/gtest.h>
 
 #include <climits>
 #include <string>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Helpers
@@ -763,7 +763,7 @@ TEST(QA_DDLEdge, CreateTableForeignKeyConstraint) {
 }
 
 TEST(QA_DDLEdge, CreateTableAllTypes) {
-    // Test all 22 GioDB types parse correctly in column definitions.
+    // Test all 22 SixSevenDB types parse correctly in column definitions.
     auto stmt = parse_one("CREATE TABLE t ("
                           "  c1 INT, c2 INTEGER, c3 TINYINT, c4 SMALLINT, c5 BIGINT,"
                           "  c6 FLOAT, c7 DOUBLE, c8 DECIMAL(10,2), c9 NUMERIC(5),"

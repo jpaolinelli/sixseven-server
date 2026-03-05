@@ -1,12 +1,12 @@
-#include "giodb/vector/http_client.h"
+#include "sixseven/vector/http_client.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <httplib.h>
 
 #include <regex>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -126,4 +126,4 @@ std::unique_ptr<HttpClient> make_http_client(HttpClientConfig config) {
     return std::make_unique<RealHttpClient>(std::move(config));
 }
 
-} // namespace giodb
+} // namespace sixseven

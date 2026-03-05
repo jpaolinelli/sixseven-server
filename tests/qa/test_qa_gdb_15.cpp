@@ -6,7 +6,7 @@
 ///   3. BUG regression tests (tests that expose known bugs)
 ///   4. Concurrency stress tests
 
-#include "giodb/storage/buffer_pool.h"
+#include "sixseven/storage/buffer_pool.h"
 
 #include <gtest/gtest.h>
 
@@ -19,7 +19,7 @@
 #include <thread>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test fixture
@@ -30,7 +30,7 @@ protected:
     void SetUp() override {
         const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
         temp_dir_ = std::filesystem::temp_directory_path() /
-                    ("giodb_qa_gdb15_" + std::string(info->test_suite_name()) + "_" + info->name());
+                    ("sixseven_qa_gdb15_" + std::string(info->test_suite_name()) + "_" + info->name());
         std::filesystem::create_directories(temp_dir_);
 
         auto create_result = dm_.create_file(temp_dir_ / "test.gdb");

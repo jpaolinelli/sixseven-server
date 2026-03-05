@@ -2,13 +2,13 @@
  * Server profile persistence via localStorage.
  *
  * Stores named server profiles so users can switch between
- * different GioDB server instances.
+ * different SixSevenDB server instances.
  */
 
 import type { ServerProfile } from "./connection-types";
 
-const PROFILES_KEY = "giodb-server-profiles";
-const ACTIVE_KEY = "giodb-active-profile";
+const PROFILES_KEY = "sixseven-server-profiles";
+const ACTIVE_KEY = "sixseven-active-profile";
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -19,7 +19,7 @@ const DEFAULT_PROFILE: ServerProfile = {
   name: "Local",
   host: "localhost",
   port: 6767,
-  user: "giodb",
+  user: "sixseven",
   isDefault: true,
 };
 

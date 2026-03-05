@@ -1,9 +1,9 @@
-#include "giodb/vector/bpe_tokenizer.h"
+#include "sixseven/vector/bpe_tokenizer.h"
 
 #include <limits>
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -235,4 +235,4 @@ size_t BPETokenizer::max_sequence_length() const {
     return 1024;
 }
 
-} // namespace giodb
+} // namespace sixseven

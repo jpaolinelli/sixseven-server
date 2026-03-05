@@ -1,9 +1,9 @@
-#include "giodb/common/coercion.h"
-#include "giodb/planner/statistics.h"
-#include "giodb/storage/buffer_pool.h"
-#include "giodb/storage/disk_manager.h"
-#include "giodb/table/table_heap.h"
-#include "giodb/table/tuple.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/planner/statistics.h"
+#include "sixseven/storage/buffer_pool.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/table/table_heap.h"
+#include "sixseven/table/tuple.h"
 
 #include <gtest/gtest.h>
 
@@ -11,7 +11,7 @@
 #include <filesystem>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // StatisticsStore tests
@@ -112,7 +112,7 @@ TEST(StatisticsStoreTest, Clear) {
 class AnalyzeTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        path_ = std::filesystem::temp_directory_path() / "giodb_test_statistics.db";
+        path_ = std::filesystem::temp_directory_path() / "sixseven_test_statistics.db";
         std::filesystem::remove(path_);
 
         auto fid = dm_.create_file(path_, false, true);
@@ -461,7 +461,7 @@ TEST_F(SelectivityTest, EmptyStats) {
 class AnalyzeSelectivityTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        path_ = std::filesystem::temp_directory_path() / "giodb_test_analyze_sel.db";
+        path_ = std::filesystem::temp_directory_path() / "sixseven_test_analyze_sel.db";
         std::filesystem::remove(path_);
 
         auto fid = dm_.create_file(path_, false, true);

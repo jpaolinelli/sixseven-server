@@ -9,11 +9,11 @@
 /// Fix: When no "type" field is present, infer normalizer enum from the
 /// lowercase flag: true → LOWERCASE, false → NONE.
 
-#include "giodb/common/result.h"
-#include "giodb/common/status.h"
-#include "giodb/vector/text_normalizer.h"
-#include "giodb/vector/tokenizer.h"
-#include "giodb/vector/tokenizer_json_loader.h"
+#include "sixseven/common/result.h"
+#include "sixseven/common/status.h"
+#include "sixseven/vector/text_normalizer.h"
+#include "sixseven/vector/tokenizer.h"
+#include "sixseven/vector/tokenizer_json_loader.h"
 
 #include <gtest/gtest.h>
 
@@ -21,14 +21,14 @@
 #include <fstream>
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 /// Write a temporary JSON file and return its path.
 class TempJson352 {
 public:
     explicit TempJson352(const std::string& content, const std::string& suffix = "")
-        : path_(std::filesystem::temp_directory_path() / ("giodb_qa_352_" + suffix + ".json")) {
+        : path_(std::filesystem::temp_directory_path() / ("sixseven_qa_352_" + suffix + ".json")) {
         std::ofstream out(path_);
         out << content;
     }
@@ -243,4 +243,4 @@ TEST(QA_GDB352, LowercaseFieldIsZeroIgnored) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

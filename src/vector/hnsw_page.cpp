@@ -1,8 +1,8 @@
-#include "giodb/vector/hnsw_page.h"
+#include "sixseven/vector/hnsw_page.h"
 
 #include <cstring>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -251,4 +251,4 @@ Result<std::vector<float>> deserialize_hnsw_vector(std::span<const uint8_t> data
     return ok(std::move(vec));
 }
 
-} // namespace giodb
+} // namespace sixseven

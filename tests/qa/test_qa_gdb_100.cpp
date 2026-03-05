@@ -1,9 +1,9 @@
 /// QA adversarial tests for GDB-100: TableHeap tuple storage with sequential scan.
 /// Tests edge cases in insert, get, update, delete, and iteration.
 
-#include "giodb/storage/buffer_pool.h"
-#include "giodb/storage/disk_manager.h"
-#include "giodb/table/table_heap.h"
+#include "sixseven/storage/buffer_pool.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/table/table_heap.h"
 
 #include <gtest/gtest.h>
 
@@ -14,7 +14,7 @@
 #include <set>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test Fixture
@@ -23,7 +23,7 @@ using namespace giodb;
 class QA_GDB100 : public ::testing::Test {
 protected:
     void SetUp() override {
-        path_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb100.db";
+        path_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb100.db";
         std::filesystem::remove(path_);
 
         auto fid = dm_.create_file(path_, false, true);

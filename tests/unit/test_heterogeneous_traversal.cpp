@@ -1,11 +1,11 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/result.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/graph/graph_engine.h"
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/result.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/graph/graph_engine.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 /// Test fixture for heterogeneous edge traversal (edges connecting different tables).
@@ -31,7 +31,7 @@ namespace {
 class HeterogeneousTraversalTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_hetero_trav";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_hetero_trav";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -248,4 +248,4 @@ TEST_F(HeterogeneousTraversalTest, PKCollisionInDirection) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

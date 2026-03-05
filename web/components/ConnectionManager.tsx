@@ -173,7 +173,7 @@ function ProfileModal({
       name: "",
       host: "localhost",
       port: 6767,
-      user: "giodb",
+      user: "sixseven",
     });
     setIsNew(true);
   };
@@ -323,7 +323,7 @@ function ProfileModal({
                     onChange={(e) =>
                       setEditing({ ...editing, user: e.target.value })
                     }
-                    placeholder="giodb"
+                    placeholder="sixseven"
                   />
                 </label>
               </div>

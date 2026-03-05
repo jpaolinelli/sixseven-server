@@ -1,4 +1,4 @@
-#include "giodb/vector/builtin_provider.h"
+#include "sixseven/vector/builtin_provider.h"
 
 #include <algorithm>
 #include <cctype>
@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <numeric>
 
-namespace giodb {
+namespace sixseven {
 
 BuiltinProvider::BuiltinProvider(size_t dim) : dimension_(dim) {}
 
@@ -121,4 +121,4 @@ std::vector<std::string> BuiltinProvider::tokenize(const std::string& text) {
     return words;
 }
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,8 +1,8 @@
-#include "giodb/parser/ast.h"
+#include "sixseven/parser/ast.h"
 
 #include <gtest/gtest.h>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Helper factories --------------------------------------------------------
 

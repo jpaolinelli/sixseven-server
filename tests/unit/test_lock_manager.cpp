@@ -1,5 +1,5 @@
-#include "giodb/txn/deadlock_detector.h"
-#include "giodb/txn/lock_manager.h"
+#include "sixseven/txn/deadlock_detector.h"
+#include "sixseven/txn/lock_manager.h"
 
 #include <gtest/gtest.h>
 
@@ -7,7 +7,7 @@
 #include <chrono>
 #include <thread>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Lock compatibility matrix tests

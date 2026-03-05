@@ -1,13 +1,13 @@
-#include "giodb/planner/binder.h"
+#include "sixseven/planner/binder.h"
 
-#include "giodb/common/coercion.h"
-#include "giodb/planner/type_resolver.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/planner/type_resolver.h"
 
 #include <algorithm>
 #include <cctype>
 #include <unordered_set>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -2262,4 +2262,4 @@ Result<BoundStatement> Binder::bind_passthrough(const Stmt& stmt) {
     return ok(std::move(bound));
 }
 
-} // namespace giodb
+} // namespace sixseven

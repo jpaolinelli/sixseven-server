@@ -1,5 +1,5 @@
-#include "giodb/vector/hnsw_index.h"
-#include "giodb/vector/hnsw_page.h"
+#include "sixseven/vector/hnsw_index.h"
+#include "sixseven/vector/hnsw_page.h"
 
 #include <gtest/gtest.h>
 
@@ -11,7 +11,7 @@
 #include <thread>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // HNSW Node Serialization Tests
@@ -295,7 +295,7 @@ namespace {
 class TempDir {
 public:
     TempDir() {
-        path_ = std::filesystem::temp_directory_path() / "giodb_hnsw_test_XXXXXX";
+        path_ = std::filesystem::temp_directory_path() / "sixseven_hnsw_test_XXXXXX";
         // Create a unique temp directory.
         std::string tmpl = path_.string();
         char* result = mkdtemp(tmpl.data());

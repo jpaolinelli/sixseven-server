@@ -1,13 +1,13 @@
-#include "giodb/index/hash_index.h"
+#include "sixseven/index/hash_index.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/storage/wal.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/storage/wal.h"
 
 #include <algorithm>
 #include <cstring>
 #include <functional>
 
-namespace giodb {
+namespace sixseven {
 
 // ---------------------------------------------------------------------------
 // Construction
@@ -324,4 +324,4 @@ void HashIndex::log_directory_growth(uint32_t old_depth, uint32_t new_depth) {
     (void)wal_->append(record); // Best-effort WAL logging.
 }
 
-} // namespace giodb
+} // namespace sixseven

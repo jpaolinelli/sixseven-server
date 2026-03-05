@@ -1,5 +1,5 @@
-#include "giodb/vector/pre_tokenizer.h"
-#include "giodb/vector/tokenizer.h"
+#include "sixseven/vector/pre_tokenizer.h"
+#include "sixseven/vector/tokenizer.h"
 
 #include <gtest/gtest.h>
 
@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // Helper to convert vector<string_view> to vector<string> for easier assertions.
 static std::vector<std::string> to_strings(const std::vector<std::string_view>& views) {

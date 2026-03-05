@@ -1,9 +1,9 @@
-#include "giodb/executor/index_scan.h"
+#include "sixseven/executor/index_scan.h"
 
-#include "giodb/executor/expr_evaluator.h"
-#include "giodb/table/tuple.h"
+#include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/table/tuple.h"
 
-namespace giodb {
+namespace sixseven {
 
 IndexScanOperator::IndexScanOperator(const BTreeIndex& index,
                                      TableHeap& heap,
@@ -124,4 +124,4 @@ Tuple IndexScanOperator::build_tuple_from_key(const KeyType& key, const RID& rid
     return Tuple{std::move(values), rid};
 }
 
-} // namespace giodb
+} // namespace sixseven

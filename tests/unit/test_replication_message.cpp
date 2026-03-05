@@ -1,9 +1,9 @@
-#include "giodb/server/replication_message.h"
-#include "giodb/storage/wal_record.h"
+#include "sixseven/server/replication_message.h"
+#include "sixseven/storage/wal_record.h"
 
 #include <gtest/gtest.h>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Round-trip tests ---------------------------------------------------------
 

@@ -1,12 +1,12 @@
-#include "giodb/vector/provider_registry.h"
+#include "sixseven/vector/provider_registry.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/vector/builtin_provider.h"
-#include "giodb/vector/ollama_provider.h"
-#include "giodb/vector/onnx_provider.h"
-#include "giodb/vector/openai_provider.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/vector/builtin_provider.h"
+#include "sixseven/vector/ollama_provider.h"
+#include "sixseven/vector/onnx_provider.h"
+#include "sixseven/vector/openai_provider.h"
 
-namespace giodb {
+namespace sixseven {
 
 ProviderRegistry::ProviderRegistry(Catalog& catalog) : catalog_(catalog) {
     // Default HTTP client factory.
@@ -93,7 +93,7 @@ ProviderRegistry::create_provider(const EmbeddingProviderConfig& config) {
             config.model,
             config.dimension > 0 ? static_cast<size_t>(config.dimension) : 384,
             std::move(client));
-        GIODB_LOG_INFO("created Ollama provider: model={}, url={}", config.model, config.base_url);
+        SIXSEVEN_LOG_INFO("created Ollama provider: model={}, url={}", config.model, config.base_url);
         return ok(std::shared_ptr<EmbeddingProvider>(std::move(provider)));
     }
 
@@ -108,7 +108,7 @@ ProviderRegistry::create_provider(const EmbeddingProviderConfig& config) {
             config.dimension > 0 ? static_cast<size_t>(config.dimension) : 1536,
             std::move(client),
             config.base_url.empty() ? "https://api.openai.com" : config.base_url);
-        GIODB_LOG_INFO("created OpenAI provider: model={}", config.model);
+        SIXSEVEN_LOG_INFO("created OpenAI provider: model={}", config.model);
         return ok(std::shared_ptr<EmbeddingProvider>(std::move(provider)));
     }
 
@@ -123,7 +123,7 @@ ProviderRegistry::create_provider(const EmbeddingProviderConfig& config) {
             }
         }
         auto provider = std::make_shared<BuiltinProvider>(dim);
-        GIODB_LOG_INFO("created builtin provider: dimension={}", dim);
+        SIXSEVEN_LOG_INFO("created builtin provider: dimension={}", dim);
         return ok(std::shared_ptr<EmbeddingProvider>(std::move(provider)));
     }
 
@@ -136,11 +136,11 @@ ProviderRegistry::create_provider(const EmbeddingProviderConfig& config) {
         if (!provider.has_value()) {
             return tl::unexpected(provider.error());
         }
-        GIODB_LOG_INFO("created ONNX provider: model={}, dimension={}", config.model, dim);
+        SIXSEVEN_LOG_INFO("created ONNX provider: model={}, dimension={}", config.model, dim);
         return ok(std::shared_ptr<EmbeddingProvider>(std::move(*provider)));
     }
 
     return make_error(StatusCode::INVALID_ARGUMENT, "unknown provider type: '" + config.type + "'");
 }
 
-} // namespace giodb
+} // namespace sixseven

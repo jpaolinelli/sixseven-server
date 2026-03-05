@@ -1,8 +1,8 @@
-#include "giodb/common/types.h"
+#include "sixseven/common/types.h"
 
 #include <gtest/gtest.h>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- type_name ----------------------------------------------------------------
 

@@ -1,13 +1,13 @@
-#include "giodb/server/session.h"
+#include "sixseven/server/session.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/executor/query_engine.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/executor/query_engine.h"
 
 #include <algorithm>
 #include <cctype>
 #include <sstream>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -78,7 +78,7 @@ Result<void> Session::set_variable(const std::string& name, const std::string& v
                           "unrecognized session variable \"" + name + "\"");
     }
     variables_[lower_name] = value;
-    GIODB_LOG_DEBUG("session {}: SET {} = '{}'", backend_pid_, lower_name, value);
+    SIXSEVEN_LOG_DEBUG("session {}: SET {} = '{}'", backend_pid_, lower_name, value);
     return ok();
 }
 
@@ -99,13 +99,13 @@ Result<void> Session::reset_variable(const std::string& name) {
                           "unrecognized session variable \"" + name + "\"");
     }
     variables_[lower_name] = def_it->second;
-    GIODB_LOG_DEBUG("session {}: RESET {}", backend_pid_, lower_name);
+    SIXSEVEN_LOG_DEBUG("session {}: RESET {}", backend_pid_, lower_name);
     return ok();
 }
 
 void Session::reset_all_variables() {
     variables_ = DEFAULT_VARIABLES;
-    GIODB_LOG_DEBUG("session {}: RESET ALL", backend_pid_);
+    SIXSEVEN_LOG_DEBUG("session {}: RESET ALL", backend_pid_);
 }
 
 std::vector<std::pair<std::string, std::string>> Session::get_all_variables() const {
@@ -190,7 +190,7 @@ char Session::ready_for_query_status() const {
 // -- Session lifecycle --------------------------------------------------------
 
 void Session::cleanup() {
-    GIODB_LOG_DEBUG("session {}: cleanup", backend_pid_);
+    SIXSEVEN_LOG_DEBUG("session {}: cleanup", backend_pid_);
     prepared_statements_.clear();
     portals_.clear();
     reset_all_variables();
@@ -403,7 +403,7 @@ std::optional<Result<QueryResult>> Session::try_handle_prepare(const std::string
             make_error(StatusCode::PARSE_ERROR, "syntax error: PREPARE requires a statement"));
     }
 
-    GIODB_LOG_DEBUG("session {}: PREPARE {} (sql='{}')", backend_pid_, stmt_name, stmt_sql);
+    SIXSEVEN_LOG_DEBUG("session {}: PREPARE {} (sql='{}')", backend_pid_, stmt_name, stmt_sql);
 
     PreparedStatement stmt;
     stmt.name = stmt_name;
@@ -473,4 +473,4 @@ void Session::update_transaction_state(const std::string& sql, bool success) {
     }
 }
 
-} // namespace giodb
+} // namespace sixseven

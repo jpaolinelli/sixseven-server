@@ -1,9 +1,9 @@
-#include "giodb/server/replication_health_monitor.h"
+#include "sixseven/server/replication_health_monitor.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/server/replication_slot.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/server/replication_slot.h"
 
-namespace giodb {
+namespace sixseven {
 
 ReplicationHealthMonitor::ReplicationHealthMonitor(HealthMonitorConfig config) : config_(config) {}
 
@@ -34,7 +34,7 @@ void ReplicationHealthMonitor::check_health(const WalSenderManager& sender_mgr,
             auto lag_bytes =
                 static_cast<int64_t>(current_lsn) - static_cast<int64_t>(s.applied_lsn);
             if (lag_bytes > config_.lag_warning_threshold.count()) {
-                GIODB_LOG_WARN("replication lag for {} is {} bytes (threshold: {} ms equivalent)",
+                SIXSEVEN_LOG_WARN("replication lag for {} is {} bytes (threshold: {} ms equivalent)",
                                id,
                                lag_bytes,
                                config_.lag_warning_threshold.count());
@@ -48,7 +48,7 @@ void ReplicationHealthMonitor::check_health(const WalSenderManager& sender_mgr,
             auto disconnected_duration =
                 std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second);
             if (disconnected_duration > config_.disconnect_warning_threshold) {
-                GIODB_LOG_ERROR("replica {} disconnected for {} ms (threshold: {} ms)",
+                SIXSEVEN_LOG_ERROR("replica {} disconnected for {} ms (threshold: {} ms)",
                                 it->first,
                                 disconnected_duration.count(),
                                 config_.disconnect_warning_threshold.count());
@@ -66,4 +66,4 @@ void ReplicationHealthMonitor::check_health(const WalSenderManager& sender_mgr,
     }
 }
 
-} // namespace giodb
+} // namespace sixseven

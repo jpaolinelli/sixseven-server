@@ -1,8 +1,8 @@
-#include "giodb/txn/deadlock_detector.h"
+#include "sixseven/txn/deadlock_detector.h"
 
 #include <algorithm>
 
-namespace giodb {
+namespace sixseven {
 
 void DeadlockDetector::add_edge(txn_id_t waiter, txn_id_t holder) {
     if (waiter == holder) {
@@ -81,4 +81,4 @@ bool DeadlockDetector::dfs(txn_id_t current,
     return false;
 }
 
-} // namespace giodb
+} // namespace sixseven

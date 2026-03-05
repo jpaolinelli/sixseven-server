@@ -6,10 +6,10 @@
 /// binary data in write buffers, thread pool with zero workers,
 /// server rapid connect/disconnect, concurrent connect stress.
 
-#include "giodb/server/connection.h"
-#include "giodb/server/event_loop.h"
-#include "giodb/server/server.h"
-#include "giodb/server/thread_pool.h"
+#include "sixseven/server/connection.h"
+#include "sixseven/server/event_loop.h"
+#include "sixseven/server/server.h"
+#include "sixseven/server/thread_pool.h"
 
 #include <gtest/gtest.h>
 
@@ -24,7 +24,7 @@
 #include <thread>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // EventLoop adversarial tests

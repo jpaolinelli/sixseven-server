@@ -6,9 +6,9 @@ const pools = new Map<string, pg.Pool>();
 /** Build a pool key that includes connection params + database. */
 function poolKey(conn: ConnectionParams | undefined, database: string): string {
   if (!conn) {
-    const host = process.env.GIODB_HOST || "localhost";
-    const port = process.env.GIODB_PORT || "6767";
-    const user = process.env.GIODB_USER || "giodb";
+    const host = process.env.SIXSEVEN_HOST || "localhost";
+    const port = process.env.SIXSEVEN_PORT || "6767";
+    const user = process.env.SIXSEVEN_USER || "sixseven";
     return `${host}:${port}:${user}:${database}`;
   }
   return `${conn.host}:${conn.port}:${conn.user}:${database}`;
@@ -22,9 +22,9 @@ export function getPool(
   let pool = pools.get(key);
   if (!pool) {
     pool = new pg.Pool({
-      host: conn?.host || process.env.GIODB_HOST || "localhost",
-      port: conn?.port || parseInt(process.env.GIODB_PORT || "6767", 10),
-      user: conn?.user || process.env.GIODB_USER || "giodb",
+      host: conn?.host || process.env.SIXSEVEN_HOST || "localhost",
+      port: conn?.port || parseInt(process.env.SIXSEVEN_PORT || "6767", 10),
+      user: conn?.user || process.env.SIXSEVEN_USER || "sixseven",
       database,
       max: 5,
       connectionTimeoutMillis: 5000,
@@ -40,7 +40,7 @@ export async function query(
   database?: string,
   conn?: ConnectionParams
 ): Promise<{ columns: string[]; rows: unknown[][] }> {
-  const db = database || process.env.GIODB_DEFAULT_DATABASE || "giodb";
+  const db = database || process.env.SIXSEVEN_DEFAULT_DATABASE || "sixseven";
   const pool = getPool(db, conn);
   const result = await pool.query(sql);
   const columns = result.fields.map((f) => f.name);
@@ -52,7 +52,7 @@ export async function query(
 
 /** Test connectivity to a server. Returns true if reachable. */
 export async function ping(conn?: ConnectionParams): Promise<boolean> {
-  const db = process.env.GIODB_DEFAULT_DATABASE || "giodb";
+  const db = process.env.SIXSEVEN_DEFAULT_DATABASE || "sixseven";
   const pool = getPool(db, conn);
   try {
     await pool.query("SHOW DATABASES");

@@ -5,16 +5,16 @@
 /// Tests the is_number() validation added to OllamaProvider::embed().
 /// Also probes OpenAIProvider for the same vulnerability pattern.
 
-#include "giodb/vector/http_client.h"
-#include "giodb/vector/ollama_provider.h"
-#include "giodb/vector/openai_provider.h"
+#include "sixseven/vector/http_client.h"
+#include "sixseven/vector/ollama_provider.h"
+#include "sixseven/vector/openai_provider.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 namespace {
 

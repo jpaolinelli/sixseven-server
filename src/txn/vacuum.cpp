@@ -1,9 +1,9 @@
-#include "giodb/txn/vacuum.h"
+#include "sixseven/txn/vacuum.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/txn/mvcc_tuple.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/txn/mvcc_tuple.h"
 
-namespace giodb {
+namespace sixseven {
 
 // =============================================================================
 // Vacuum
@@ -29,14 +29,14 @@ Result<VacuumStats> Vacuum::run() {
     for (uint32_t pid = 1; pid < total_pages; ++pid) {
         auto dead = vacuum_page(pid, horizon);
         if (!dead) {
-            GIODB_LOG_WARN("vacuum: failed to process page {}: {}", pid, dead.error().message);
+            SIXSEVEN_LOG_WARN("vacuum: failed to process page {}: {}", pid, dead.error().message);
             continue;
         }
         stats.pages_scanned++;
         stats.dead_tuples += *dead;
     }
 
-    GIODB_LOG_DEBUG(
+    SIXSEVEN_LOG_DEBUG(
         "vacuum: scanned {} pages, removed {} dead tuples", stats.pages_scanned, stats.dead_tuples);
     return ok(stats);
 }
@@ -54,7 +54,7 @@ Result<VacuumStats> Vacuum::run_full() {
     for (uint32_t pid = 1; pid < total_pages; ++pid) {
         auto dead = vacuum_page(pid, horizon);
         if (!dead) {
-            GIODB_LOG_WARN("vacuum full: failed to process page {}: {}", pid, dead.error().message);
+            SIXSEVEN_LOG_WARN("vacuum full: failed to process page {}: {}", pid, dead.error().message);
             continue;
         }
         stats.pages_scanned++;
@@ -77,7 +77,7 @@ Result<VacuumStats> Vacuum::run_full() {
         (void)unpin;
     }
 
-    GIODB_LOG_DEBUG("vacuum full: scanned {} pages, removed {} dead tuples, reclaimed {} bytes",
+    SIXSEVEN_LOG_DEBUG("vacuum full: scanned {} pages, removed {} dead tuples, reclaimed {} bytes",
                     stats.pages_scanned,
                     stats.dead_tuples,
                     stats.bytes_reclaimed);
@@ -157,7 +157,7 @@ Result<void> AutoVacuumWorker::start() {
         return make_error(StatusCode::ALREADY_EXISTS, "auto-vacuum worker already running");
     }
     worker_thread_ = std::thread(&AutoVacuumWorker::worker_loop, this);
-    GIODB_LOG_INFO("auto-vacuum worker started");
+    SIXSEVEN_LOG_INFO("auto-vacuum worker started");
     return ok();
 }
 
@@ -173,7 +173,7 @@ void AutoVacuumWorker::stop() {
     if (worker_thread_.joinable()) {
         worker_thread_.join();
     }
-    GIODB_LOG_INFO("auto-vacuum worker stopped");
+    SIXSEVEN_LOG_INFO("auto-vacuum worker stopped");
 }
 
 bool AutoVacuumWorker::running() const {
@@ -245,7 +245,7 @@ Result<std::vector<VacuumStats>> AutoVacuumWorker::check_and_vacuum() {
             auto stats = vac.run();
             if (stats) {
                 results.push_back(*stats);
-                GIODB_LOG_INFO("auto-vacuum: table file_id={} vacuumed, {} dead tuples removed",
+                SIXSEVEN_LOG_INFO("auto-vacuum: table file_id={} vacuumed, {} dead tuples removed",
                                entry.file_id,
                                stats->dead_tuples);
             }
@@ -267,9 +267,9 @@ void AutoVacuumWorker::worker_loop() {
         }
         auto result = check_and_vacuum();
         if (!result) {
-            GIODB_LOG_WARN("auto-vacuum check failed: {}", result.error().message);
+            SIXSEVEN_LOG_WARN("auto-vacuum check failed: {}", result.error().message);
         }
     }
 }
 
-} // namespace giodb
+} // namespace sixseven

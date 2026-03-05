@@ -1,6 +1,6 @@
 ---
 name: git-workflow
-description: Use when you need to create branches, write commit messages, push to remote, or create pull requests for the GioDB project. Provides branching conventions, commit message format, and PR template.
+description: Use when you need to create branches, write commit messages, push to remote, or create pull requests for the SixSevenDB project. Provides branching conventions, commit message format, and PR template.
 user-invocable: false
 ---
 

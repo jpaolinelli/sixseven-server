@@ -1,8 +1,8 @@
-#include "giodb/executor/nested_loop_join.h"
+#include "sixseven/executor/nested_loop_join.h"
 
-#include "giodb/executor/expr_evaluator.h"
+#include "sixseven/executor/expr_evaluator.h"
 
-namespace giodb {
+namespace sixseven {
 
 NestedLoopJoinOperator::NestedLoopJoinOperator(std::unique_ptr<Iterator> left,
                                                std::unique_ptr<Iterator> right,
@@ -300,4 +300,4 @@ Result<bool> NestedLoopJoinOperator::matches(const Tuple& combined) const {
     return evaluate_predicate(*on_expr_, combined, schema_, bound_);
 }
 
-} // namespace giodb
+} // namespace sixseven

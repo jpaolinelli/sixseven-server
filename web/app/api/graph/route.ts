@@ -133,6 +133,6 @@ function parseConnectionParams(
   return {
     host: String(c.host),
     port: Number(c.port) || 6767,
-    user: String(c.user || "giodb"),
+    user: String(c.user || "sixseven"),
   };
 }

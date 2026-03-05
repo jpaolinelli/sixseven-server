@@ -1,12 +1,12 @@
-#include "giodb/executor/traversal.h"
+#include "sixseven/executor/traversal.h"
 
-#include "giodb/common/value_hash.h"
-#include "giodb/executor/expr_evaluator.h"
+#include "sixseven/common/value_hash.h"
+#include "sixseven/executor/expr_evaluator.h"
 
 #include <deque>
 #include <unordered_set>
 
-namespace giodb {
+namespace sixseven {
 
 TraversalOperator::TraversalOperator(GraphEngine& graph_engine,
                                      TraversalConfig config,
@@ -152,4 +152,4 @@ TraversalOperator::get_neighbors(const Value& node_pk) const {
     return ok(std::move(result));
 }
 
-} // namespace giodb
+} // namespace sixseven

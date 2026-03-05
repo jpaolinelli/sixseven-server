@@ -1,12 +1,12 @@
-#include "giodb/executor/nearest_scan.h"
+#include "sixseven/executor/nearest_scan.h"
 
-#include "giodb/executor/expr_evaluator.h"
+#include "sixseven/executor/expr_evaluator.h"
 
 #include <algorithm>
 #include <cstddef>
 #include <span>
 
-namespace giodb {
+namespace sixseven {
 
 NearestScanOperator::NearestScanOperator(TableHeap& heap,
                                          const Schema& storage_schema,
@@ -268,4 +268,4 @@ Result<size_t> NearestScanOperator::filter_and_emit(Tuple& candidate_tuple, floa
     return ok(size_t{1});
 }
 
-} // namespace giodb
+} // namespace sixseven

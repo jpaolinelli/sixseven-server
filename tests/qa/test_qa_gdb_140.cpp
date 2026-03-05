@@ -7,21 +7,21 @@
 /// deduplication, bitmap AND empty intersection, bitmap OR overlapping ranges,
 /// hash index scan, close-then-reopen, plan node names, large composite keys.
 
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/bitmap_scan.h"
-#include "giodb/executor/hash_index_scan.h"
-#include "giodb/executor/index_scan.h"
-#include "giodb/executor/tuple.h"
-#include "giodb/index/btree_index.h"
-#include "giodb/index/hash_index.h"
-#include "giodb/index/rid.h"
-#include "giodb/parser/ast.h"
-#include "giodb/planner/binder.h"
-#include "giodb/storage/buffer_pool.h"
-#include "giodb/storage/disk_manager.h"
-#include "giodb/table/table_heap.h"
-#include "giodb/table/tuple.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/bitmap_scan.h"
+#include "sixseven/executor/hash_index_scan.h"
+#include "sixseven/executor/index_scan.h"
+#include "sixseven/executor/tuple.h"
+#include "sixseven/index/btree_index.h"
+#include "sixseven/index/hash_index.h"
+#include "sixseven/index/rid.h"
+#include "sixseven/parser/ast.h"
+#include "sixseven/planner/binder.h"
+#include "sixseven/storage/buffer_pool.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/table/table_heap.h"
+#include "sixseven/table/tuple.h"
 
 #include <gtest/gtest.h>
 
@@ -34,7 +34,7 @@
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test fixture
@@ -43,7 +43,7 @@ using namespace giodb;
 class QA140IndexScanTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        path_ = std::filesystem::temp_directory_path() / "giodb_qa140_index_scan.db";
+        path_ = std::filesystem::temp_directory_path() / "sixseven_qa140_index_scan.db";
         std::filesystem::remove(path_);
 
         auto fid = dm_.create_file(path_, false, true);

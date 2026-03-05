@@ -1,21 +1,21 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/config.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/catalog_persistence.h"
-#include "giodb/executor/expr_evaluator.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/settings_cache.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/executor/system_bootstrap.h"
-#include "giodb/server/replication_health_monitor.h"
-#include "giodb/server/replication_slot.h"
-#include "giodb/server/wal_receiver.h"
-#include "giodb/server/wal_sender_manager.h"
-#include "giodb/storage/disk_manager.h"
-#include "giodb/storage/wal.h"
-#include "giodb/storage/wal_archive.h"
-#include "giodb/storage/wal_recovery.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/config.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/catalog_persistence.h"
+#include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/settings_cache.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/executor/system_bootstrap.h"
+#include "sixseven/server/replication_health_monitor.h"
+#include "sixseven/server/replication_slot.h"
+#include "sixseven/server/wal_receiver.h"
+#include "sixseven/server/wal_sender_manager.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/storage/wal.h"
+#include "sixseven/storage/wal_archive.h"
+#include "sixseven/storage/wal_recovery.h"
 
 #include <gtest/gtest.h>
 
@@ -27,8 +27,8 @@
 
 #include "test_wal_helpers.h"
 
-using namespace giodb;
-using namespace giodb::test;
+using namespace sixseven;
+using namespace sixseven::test;
 
 // =============================================================================
 // Minimal ReplicationConnection for tests
@@ -81,7 +81,7 @@ public:
 class ReplicationMonitoringTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_repl_monitor";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_repl_monitor";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
         wal_dir_ = data_dir_ / "wal";
@@ -115,7 +115,7 @@ protected:
         engine_->set_wal_writer(writer_.get());
 
         // Switch to user database.
-        use_database("giodb");
+        use_database("sixseven");
     }
 
     void TearDown() override {

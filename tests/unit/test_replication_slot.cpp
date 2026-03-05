@@ -1,4 +1,4 @@
-#include "giodb/server/replication_slot.h"
+#include "sixseven/server/replication_slot.h"
 
 #include <gtest/gtest.h>
 
@@ -7,7 +7,7 @@
 #include <thread>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 namespace {
 

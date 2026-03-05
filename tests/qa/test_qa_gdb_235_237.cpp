@@ -13,11 +13,11 @@
 //          validation that all indices got embeddings.
 // =============================================================================
 
-#include "giodb/vector/embedding_worker.h"
-#include "giodb/vector/hnsw_index.h"
-#include "giodb/vector/hnsw_page.h"
-#include "giodb/vector/http_client.h"
-#include "giodb/vector/openai_provider.h"
+#include "sixseven/vector/embedding_worker.h"
+#include "sixseven/vector/hnsw_index.h"
+#include "sixseven/vector/hnsw_page.h"
+#include "sixseven/vector/http_client.h"
+#include "sixseven/vector/openai_provider.h"
 
 #include <gtest/gtest.h>
 
@@ -32,7 +32,7 @@
 #include <thread>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test Helpers
@@ -43,7 +43,7 @@ namespace {
 class TempDir {
 public:
     TempDir() {
-        path_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb_235_237_XXXXXX";
+        path_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb_235_237_XXXXXX";
         std::string tmpl = path_.string();
         char* result = mkdtemp(tmpl.data());
         EXPECT_NE(result, nullptr);

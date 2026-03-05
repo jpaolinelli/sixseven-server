@@ -7,7 +7,7 @@
 /// join table names, constant-only predicates, clone edge cases, subquery
 /// decorrelation with non-exists NOT operand.
 
-#include "giodb/planner/rewrite_rules.h"
+#include "sixseven/planner/rewrite_rules.h"
 
 #include <gtest/gtest.h>
 
@@ -18,7 +18,7 @@
 #include <unordered_set>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Helpers (matching existing test patterns)

@@ -6,8 +6,8 @@
 /// join ordering (>10 tables), disconnected join graphs, custom parameters,
 /// access path with mismatched table_id, join method tie-breaking.
 
-#include "giodb/planner/cost_model.h"
-#include "giodb/planner/optimizer.h"
+#include "sixseven/planner/cost_model.h"
+#include "sixseven/planner/optimizer.h"
 
 #include <gtest/gtest.h>
 
@@ -15,7 +15,7 @@
 #include <memory>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Helper

@@ -1,7 +1,7 @@
-#include "giodb/common/result.h"
-#include "giodb/common/status.h"
-#include "giodb/vector/tokenizer.h"
-#include "giodb/vector/tokenizer_json_loader.h"
+#include "sixseven/common/result.h"
+#include "sixseven/common/status.h"
+#include "sixseven/vector/tokenizer.h"
+#include "sixseven/vector/tokenizer_json_loader.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -10,7 +10,7 @@
 #include <fstream>
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 /// Return absolute path to the test fixtures directory.
@@ -27,7 +27,7 @@ std::string minilm_fixture() {
 class TempJsonFile {
 public:
     explicit TempJsonFile(const std::string& content)
-        : path_(std::filesystem::temp_directory_path() / "giodb_test_tokenizer.json") {
+        : path_(std::filesystem::temp_directory_path() / "sixseven_test_tokenizer.json") {
         std::ofstream out(path_);
         out << content;
     }
@@ -416,4 +416,4 @@ TEST(TokenizerJsonLoader, NormalizerNoTypeFieldDefaultsToLowercase) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

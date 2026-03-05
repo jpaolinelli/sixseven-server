@@ -2,7 +2,7 @@
 /// Tests split correctness, cascading splits, sibling pointer integrity,
 /// boundary capacities, and various insert orderings.
 
-#include "giodb/storage/wal.h"
+#include "sixseven/storage/wal.h"
 
 #include <gtest/gtest.h>
 
@@ -16,8 +16,8 @@
 
 #include "test_btree_helpers.h"
 
-using namespace giodb;
-using namespace giodb::test;
+using namespace sixseven;
+using namespace sixseven::test;
 
 // =============================================================================
 // Minimal Capacity Splits (max_keys = 1)
@@ -521,7 +521,7 @@ TEST(QA_GDB93_WAL, InsertWithWalDoesNotCrash) {
     auto temp_dir = std::filesystem::temp_directory_path() / "qa_gdb93_wal";
     std::filesystem::create_directories(temp_dir);
 
-    giodb::WalWriter wal(temp_dir / "wal");
+    sixseven::WalWriter wal(temp_dir / "wal");
     auto open_result = wal.open();
     ASSERT_TRUE(open_result.has_value());
 

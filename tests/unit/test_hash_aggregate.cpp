@@ -1,11 +1,11 @@
-#include "giodb/common/coercion.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/expr_evaluator.h"
-#include "giodb/executor/filter.h"
-#include "giodb/executor/hash_aggregate.h"
-#include "giodb/executor/tuple.h"
-#include "giodb/parser/ast.h"
-#include "giodb/planner/binder.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/executor/filter.h"
+#include "sixseven/executor/hash_aggregate.h"
+#include "sixseven/executor/tuple.h"
+#include "sixseven/parser/ast.h"
+#include "sixseven/planner/binder.h"
 
 #include <gtest/gtest.h>
 
@@ -18,7 +18,7 @@
 
 #include "test_helpers.h"
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 // ===========================================================================
@@ -879,4 +879,4 @@ TEST_F(HashAggregateTest, SingleRowPerGroup) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

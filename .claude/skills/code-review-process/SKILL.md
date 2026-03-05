@@ -10,7 +10,7 @@ user-invocable: false
 
 Find and read every file added or modified for the ticket:
 
-- **Headers**: `include/giodb/<module>/*.h`
+- **Headers**: `include/sixseven/<module>/*.h`
 - **Implementations**: `src/<module>/*.cpp`
 - **Tests**: `tests/unit/test_*.cpp`
 - **Build files**: `CMakeLists.txt`

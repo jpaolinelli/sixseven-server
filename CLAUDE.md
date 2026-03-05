@@ -1,6 +1,6 @@
-# GioDB - Project Guide
+# SixSevenDB - Project Guide
 
-GioDB is a C++20 hybrid relational/graph/vector database with PostgreSQL wire protocol compatibility.
+SixSevenDB is a C++20 hybrid relational/graph/vector database with PostgreSQL wire protocol compatibility.
 
 ## Architecture
 
@@ -23,7 +23,7 @@ Storage Engine (Buffer Pool, WAL, B+ Trees)
 
 # Vision Document / Original Plan
 
-./docs/giodb-production-plan.md
+./docs/sixseven-production-plan.md
 
 ## Build Commands
 
@@ -39,15 +39,15 @@ cmake --build build/debug
 cmake --build build/release
 
 # Dev tests only (fast, local development)
-cmake --build build/debug --target giodb_unit_tests
-./build/debug/tests/unit/giodb_unit_tests
+cmake --build build/debug --target sixseven_unit_tests
+./build/debug/tests/unit/sixseven_unit_tests
 
 # QA regression tests
-cmake --build build/debug --target giodb_qa_tests
-./build/debug/tests/qa/giodb_qa_tests
+cmake --build build/debug --target sixseven_qa_tests
+./build/debug/tests/qa/sixseven_qa_tests
 
 # QA tests for a specific ticket
-./build/debug/tests/qa/giodb_qa_tests --gtest_filter="*GDB258*"
+./build/debug/tests/qa/sixseven_qa_tests --gtest_filter="*GDB258*"
 
 # All tests via CTest (CI behavior)
 ctest --test-dir build/debug --output-on-failure
@@ -57,16 +57,16 @@ ctest --test-dir build/debug -L unit --output-on-failure
 ctest --test-dir build/debug -L qa --output-on-failure
 
 # Run server
-./build/debug/src/giodb-server [config.json]
+./build/debug/src/sixseven-server [config.json]
 
 # Run CLI
-./build/debug/src/giodb-cli
+./build/debug/src/sixseven-cli
 ```
 
 ## Directory Layout
 
 ```
-include/giodb/<module>/   — Public headers
+include/sixseven/<module>/   — Public headers
 src/<module>/             — Implementation files
 tests/unit/               — Dev unit tests (Google Test)
 tests/qa/                 — QA regression tests (test_qa_*.cpp)
@@ -85,8 +85,8 @@ Modules: `common`, `storage`, `catalog`, `index`, `table`, `graph`, `vector`, `p
 - **Functions/variables**: `snake_case`
 - **Types/classes**: `PascalCase`
 - **Constants/macros**: `UPPER_CASE`
-- **Macro prefix**: `GIODB_`
-- **Namespaces**: All code in `giodb::` namespace
+- **Macro prefix**: `SIXSEVEN_`
+- **Namespaces**: All code in `sixseven::` namespace
 - **File naming**: `snake_case.h` / `snake_case.cpp`
 - **Include guards**: Use `#pragma once`
 
@@ -94,7 +94,7 @@ Modules: `common`, `storage`, `catalog`, `index`, `table`, `graph`, `vector`, `p
 
 - Always use `Result<T>` (alias for `tl::expected<T, Error>`) — never throw exceptions
 - Use `ok(value)` to return success, `make_error(StatusCode, message)` for errors
-- StatusCode enum in `include/giodb/common/status.h`
+- StatusCode enum in `include/sixseven/common/status.h`
 - Error includes `std::source_location` automatically
 
 ```cpp
@@ -106,26 +106,26 @@ Result<int> parse_number(const std::string& s) {
 
 ## Logging
 
-Use project macros from `include/giodb/common/logging.h`:
+Use project macros from `include/sixseven/common/logging.h`:
 
 ```cpp
-GIODB_LOG_TRACE("detailed trace: {}", value);
-GIODB_LOG_DEBUG("debug info");
-GIODB_LOG_INFO("startup message");
-GIODB_LOG_WARN("warning: {}", reason);
-GIODB_LOG_ERROR("error occurred: {}", err.message);
-GIODB_LOG_FATAL("unrecoverable error");
+SIXSEVEN_LOG_TRACE("detailed trace: {}", value);
+SIXSEVEN_LOG_DEBUG("debug info");
+SIXSEVEN_LOG_INFO("startup message");
+SIXSEVEN_LOG_WARN("warning: {}", reason);
+SIXSEVEN_LOG_ERROR("error occurred: {}", err.message);
+SIXSEVEN_LOG_FATAL("unrecoverable error");
 ```
 
-Initialize at startup: `giodb::init_logging("info");`
+Initialize at startup: `sixseven::init_logging("info");`
 
 ## Testing
 
 - Every new source file needs a corresponding `test_<name>.cpp` in `tests/unit/`
 - QA regression tests go in `tests/qa/` with `test_qa_<ticket>.cpp` naming
 - Use Google Test: `TEST(SuiteName, TestName) { ... }`
-- Dev test target: `giodb_unit_tests` (all `tests/unit/*.cpp`)
-- QA test target: `giodb_qa_tests` (all `tests/qa/*.cpp`)
+- Dev test target: `sixseven_unit_tests` (all `tests/unit/*.cpp`)
+- QA test target: `sixseven_qa_tests` (all `tests/qa/*.cpp`)
 - CTest labels: `unit` for dev tests, `qa` for QA tests, `integration` for integration tests
 
 ## Dependencies (vcpkg)

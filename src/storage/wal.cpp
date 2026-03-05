@@ -1,8 +1,8 @@
-#include "giodb/storage/wal.h"
+#include "sixseven/storage/wal.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/storage/wal_record.h"
-#include "giodb/storage/wal_recovery.h" // serialize_checkpoint_data()
+#include "sixseven/common/logging.h"
+#include "sixseven/storage/wal_record.h"
+#include "sixseven/storage/wal_recovery.h" // serialize_checkpoint_data()
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -14,7 +14,7 @@
 #include <iomanip>
 #include <sstream>
 
-namespace giodb {
+namespace sixseven {
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -84,7 +84,7 @@ WalWriter::~WalWriter() {
         // Best-effort close: ignore errors in the destructor.
         auto result = close();
         if (!result) {
-            GIODB_LOG_ERROR("WalWriter destructor close failed: {}", result.error().message);
+            SIXSEVEN_LOG_ERROR("WalWriter destructor close failed: {}", result.error().message);
         }
     }
 }
@@ -130,7 +130,7 @@ Result<void> WalWriter::open() {
 
     is_open_ = true;
 
-    GIODB_LOG_INFO("WAL writer opened: dir={}, segment={}, next_lsn={}",
+    SIXSEVEN_LOG_INFO("WAL writer opened: dir={}, segment={}, next_lsn={}",
                    wal_dir_.string(),
                    segment_id_,
                    next_lsn_);
@@ -172,7 +172,7 @@ Result<void> WalWriter::close() {
 
     is_open_ = false;
 
-    GIODB_LOG_INFO("WAL writer closed: dir={}", wal_dir_.string());
+    SIXSEVEN_LOG_INFO("WAL writer closed: dir={}", wal_dir_.string());
 
     return ok();
 }
@@ -323,7 +323,7 @@ Result<void> WalWriter::rotate_segment() {
 
     uint64_t next_seg = completed_segment + 1;
 
-    GIODB_LOG_INFO("WAL rotating to segment {}", next_seg);
+    SIXSEVEN_LOG_INFO("WAL rotating to segment {}", next_seg);
 
     // Notify the archive callback (e.g., to enqueue async archival).
     if (on_segment_rotated_) {
@@ -383,7 +383,7 @@ Result<void> WalWriter::scan_segment() {
         size_t total_record_size = static_cast<size_t>(record_length) + sizeof(uint32_t);
         if (offset + total_record_size > file_size) {
             // Incomplete record at end of file — treat as end of valid data.
-            GIODB_LOG_WARN("WAL scan: incomplete record at offset {}, truncating", offset);
+            SIXSEVEN_LOG_WARN("WAL scan: incomplete record at offset {}, truncating", offset);
             break;
         }
 
@@ -392,7 +392,7 @@ Result<void> WalWriter::scan_segment() {
         auto result = deserialize_wal_record(record_span);
         if (!result) {
             // Invalid record — stop scanning here.
-            GIODB_LOG_WARN(
+            SIXSEVEN_LOG_WARN(
                 "WAL scan: invalid record at offset {}: {}", offset, result.error().message);
             break;
         }
@@ -408,7 +408,7 @@ Result<void> WalWriter::scan_segment() {
         flushed_lsn_.store(last_lsn, std::memory_order_release);
     }
 
-    GIODB_LOG_INFO(
+    SIXSEVEN_LOG_INFO(
         "WAL scan complete: segment={}, offset={}, last_lsn={}", segment_id_, offset, last_lsn);
 
     return ok();
@@ -451,7 +451,7 @@ Result<void> WalWriter::truncate_before(uint64_t min_segment_id) {
                               "failed to remove WAL segment: " + segment_path(seg_id).string() +
                                   ": " + remove_ec.message());
         }
-        GIODB_LOG_INFO("WAL truncated segment {}", seg_id);
+        SIXSEVEN_LOG_INFO("WAL truncated segment {}", seg_id);
     }
 
     return ok();
@@ -501,7 +501,7 @@ void WalWriter::flush_loop() {
                 lsn_t latest = next_lsn_ > 0 ? next_lsn_ - 1 : 0;
                 flushed_lsn_.store(latest, std::memory_order_release);
             } else {
-                GIODB_LOG_ERROR("WAL group commit flush failed: {}", result.error().message);
+                SIXSEVEN_LOG_ERROR("WAL group commit flush failed: {}", result.error().message);
             }
         }
     }
@@ -669,4 +669,4 @@ std::filesystem::path WalReader::segment_path(uint64_t seg_id) const {
     return wal_dir_ / oss.str();
 }
 
-} // namespace giodb
+} // namespace sixseven

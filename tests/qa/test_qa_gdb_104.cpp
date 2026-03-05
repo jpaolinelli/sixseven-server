@@ -5,12 +5,12 @@
 /// operator precedence, special expressions (IS NULL, IN, BETWEEN, LIKE,
 /// CASE, CAST), function calls, and error paths.
 
-#include "giodb/parser/lexer.h"
-#include "giodb/parser/parser.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/parser.h"
 
 #include <gtest/gtest.h>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Helpers ------------------------------------------------------------------
 

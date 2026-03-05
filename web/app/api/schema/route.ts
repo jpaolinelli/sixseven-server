@@ -11,7 +11,7 @@ import type {
 import type { ConnectionParams } from "@/lib/connection-types";
 import { buildTableInfo, quoteIdent } from "@/lib/schema-utils";
 
-const SYSTEM_DATABASES = new Set(["giodb_system"]);
+const SYSTEM_DATABASES = new Set(["sixseven_system"]);
 
 export async function GET(request: NextRequest) {
   const database = request.nextUrl.searchParams.get("database");
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     ? {
         host: connHost,
         port: Number(connPort) || 6767,
-        user: connUser || "giodb",
+        user: connUser || "sixseven",
       }
     : undefined;
 

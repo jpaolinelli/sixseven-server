@@ -1,11 +1,11 @@
-#include "giodb/common/coercion.h"
-#include "giodb/common/uuid.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/common/uuid.h"
 
 #include <gtest/gtest.h>
 
 #include <compare>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- can_coerce ---------------------------------------------------------------
 

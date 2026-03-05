@@ -1,26 +1,26 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/config.h"
-#include "giodb/common/result.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/catalog_persistence.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/settings_cache.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/executor/system_bootstrap.h"
-#include "giodb/server/promotion_manager.h"
-#include "giodb/server/replication_connection.h"
-#include "giodb/server/replication_health_monitor.h"
-#include "giodb/server/replication_message.h"
-#include "giodb/server/replication_slot.h"
-#include "giodb/server/sync_replication.h"
-#include "giodb/server/wal_receiver.h"
-#include "giodb/server/wal_sender_manager.h"
-#include "giodb/storage/disk_manager.h"
-#include "giodb/storage/wal.h"
-#include "giodb/storage/wal_archive.h"
-#include "giodb/storage/wal_record.h"
-#include "giodb/storage/wal_recovery.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/config.h"
+#include "sixseven/common/result.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/catalog_persistence.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/settings_cache.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/executor/system_bootstrap.h"
+#include "sixseven/server/promotion_manager.h"
+#include "sixseven/server/replication_connection.h"
+#include "sixseven/server/replication_health_monitor.h"
+#include "sixseven/server/replication_message.h"
+#include "sixseven/server/replication_slot.h"
+#include "sixseven/server/sync_replication.h"
+#include "sixseven/server/wal_receiver.h"
+#include "sixseven/server/wal_sender_manager.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/storage/wal.h"
+#include "sixseven/storage/wal_archive.h"
+#include "sixseven/storage/wal_record.h"
+#include "sixseven/storage/wal_recovery.h"
 
 #include <gtest/gtest.h>
 
@@ -34,7 +34,7 @@
 #include <thread>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 namespace fs = std::filesystem;
 
 // =============================================================================
@@ -165,7 +165,7 @@ void write_txn(WalWriter& writer, txn_id_t txn_id, uint32_t table_id, const std:
 class ReplicationIntegrationTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        base_dir_ = fs::temp_directory_path() / "giodb_test_repl_integration";
+        base_dir_ = fs::temp_directory_path() / "sixseven_test_repl_integration";
         fs::remove_all(base_dir_);
         fs::create_directories(base_dir_);
 
@@ -270,7 +270,7 @@ TEST_F(ReplicationIntegrationTest, WriteRejectionOnStandby) {
     engine.set_settings_cache(&cache);
 
     // Switch to user DB and create a table before enabling standby mode.
-    auto db = catalog.get_database("giodb");
+    auto db = catalog.get_database("sixseven");
     ASSERT_TRUE(db.has_value());
     engine.set_current_database(db->database_id);
     auto create = engine.execute("CREATE TABLE test_tbl (id INT, val VARCHAR, PRIMARY KEY (id))");
@@ -361,7 +361,7 @@ TEST_F(ReplicationIntegrationTest, ReplicationLagMonitoring) {
     engine.set_wal_sender_manager(&sender_mgr);
     engine.set_wal_writer(primary_writer_.get());
 
-    auto db = catalog.get_database("giodb");
+    auto db = catalog.get_database("sixseven");
     ASSERT_TRUE(db.has_value());
     engine.set_current_database(db->database_id);
 
@@ -409,7 +409,7 @@ TEST_F(ReplicationIntegrationTest, FailoverPromotion) {
     engine.set_standby_mode(true);
     engine.set_wal_writer(standby_writer.get());
 
-    auto db = catalog.get_database("giodb");
+    auto db = catalog.get_database("sixseven");
     ASSERT_TRUE(db.has_value());
     engine.set_current_database(db->database_id);
 
