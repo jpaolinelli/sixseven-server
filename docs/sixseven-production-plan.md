@@ -1,13 +1,12 @@
-# HybridDB Production — Complete Build Plan
+# SixSevenDB Production — Complete Build Plan
 
 ## Context
 
-We built a successful proof-of-concept for HybridDB — a C++ database that unifies relational tables, graph edges (network model), and vector search (HNSW). The POC validated the core idea: SQL as the interface language, edge types with properties connecting tables, BFS traversal with enriched FETCH/WHERE, graph-scoped vector search, and a Next.js web admin with graph/tree/table visualization.
+We built a successful proof-of-concept for SixSevenDB — a C++ database that unifies relational tables, graph edges (network model), and vector search (HNSW). The POC validated the core idea: SQL as the interface language, edge types with properties connecting tables, BFS traversal with enriched FETCH/WHERE, and graph-scoped vector search.
 
 Now we rebuild from scratch at production quality. Key learnings from the POC:
 - The hybrid SQL model works — users write familiar SQL plus `CREATE EDGE TYPE`, `LINK`, `TRAVERSE`, `NEAREST`
 - The EMBEDDING type (auto-generated vector column tied to source data) is the killer feature — every row can optionally have a vector representation
-- The web admin with graph visualization is a major differentiator
 - The custom TCP protocol should be replaced with PostgreSQL wire protocol compatibility for ecosystem leverage
 - Storage needs WAL, buffer pool, MVCC for real durability and concurrency
 
@@ -19,9 +18,6 @@ After this plan is approved, we will create tickets for each work item.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Client Libraries                         │
-│  Python · Node.js · Go · Rust · Java · .NET                 │
-├─────────────────────────────────────────────────────────────┤
 │                PostgreSQL Wire Protocol (v3)                 │
 ├─────────────────────────────────────────────────────────────┤
 │                    Server (Event-Driven)                      │
@@ -236,10 +232,10 @@ ANALYZE [table];       -- update statistics
 ## Project Structure
 
 ```
-hybriddb/
+sixseven/
 ├── CMakeLists.txt
 ├── vcpkg.json
-├── include/hybriddb/
+├── include/sixseven/
 │   ├── common/
 │   │   ├── types.h              — Type system (TypeId enum, Value variant, type traits)
 │   │   ├── result.h             — Result<T, Error> monad
@@ -317,16 +313,8 @@ hybriddb/
 │   ├── benchmark/               — Google Benchmark microbenchmarks
 │   └── sql/                     — SQL test scripts (.sql + .expected)
 ├── tools/
-│   ├── hybriddb-cli/            — Interactive CLI (readline)
-│   └── hybriddb-bench/          — Custom benchmark driver
-├── web/                         — Next.js web admin (enhanced from POC)
-├── clients/
-│   ├── python/                  — hybriddb-python
-│   ├── nodejs/                  — hybriddb-js
-│   ├── go/                      — hybriddb-go
-│   ├── rust/                    — hybriddb-rs
-│   ├── java/                    — hybriddb-java
-│   └── dotnet/                  — HybridDB.Client
+│   ├── sixseven-cli/            — Interactive CLI (readline)
+│   └── sixseven-bench/          — Custom benchmark driver
 └── docs/
     ├── sql-reference.md
     ├── embedding-guide.md
@@ -614,18 +602,18 @@ hybriddb/
 ### 5.7 EXPLAIN / EXPLAIN ANALYZE
 - `EXPLAIN` — show logical and physical plan tree with estimated costs
 - `EXPLAIN ANALYZE` — execute and show actual row counts, timing per operator
-- Output format: text tree (default), JSON (for web admin visualization)
+- Output format: text tree (default), JSON
 
 ---
 
-## Phase 6: Server, Protocol & Client Libraries (Weeks 22–36)
+## Phase 6: Server & Protocol (Weeks 22–36)
 
 ### 6.1 Event-Driven TCP Server
 - Single acceptor thread + thread pool for query execution
 - Epoll (Linux) / kqueue (macOS) event loop for connection management
 - Connection states: `INIT → AUTH → READY → QUERY → READY → ... → CLOSED`
 - Graceful shutdown: drain active queries, close connections, flush WAL, checkpoint
-- Configuration: `hybriddb.conf` file — port, data directory, buffer pool size, WAL settings, max connections, embedding provider settings
+- Configuration: `config.json` file — port, data directory, buffer pool size, WAL settings, max connections, embedding provider settings
 
 ### 6.2 PostgreSQL Wire Protocol (v3)
 - Startup: `StartupMessage` → `AuthenticationOk` / `AuthenticationMD5Password`
@@ -649,103 +637,13 @@ hybriddb/
 - Prepared statements: `PREPARE name AS SELECT ...`, `EXECUTE name(params)`
 - Cursors: `DECLARE name CURSOR FOR SELECT ...`, `FETCH n FROM name` (future)
 
-### 6.5 Client Libraries
-
-Each library follows the same pattern:
-1. PG wire protocol implementation (or thin wrapper around existing PG driver)
-2. Connection pooling
-3. Query builder helpers for HybridDB-specific syntax (TRAVERSE, NEAREST, LINK)
-4. Type mapping (EMBEDDING → native vector type, UUID, JSON)
-
-**Python — `hybriddb-python`** (pip install hybriddb)
-- DB-API 2.0 (PEP 249) compliant
-- Async support via asyncio (`AsyncConnection`)
-- NumPy integration for EMBEDDING columns
-- Connection pooling
-- Type mapping: EMBEDDING → `numpy.ndarray`, UUID → `uuid.UUID`, JSON → `dict`
-
-**Node.js — `hybriddb-js`** (npm install hybriddb)
-- API inspired by `pg` (node-postgres)
-- Promise-based with async/await
-- Connection pooling
-- TypeScript types included
-- Type mapping: EMBEDDING → `Float32Array`, UUID → `string`, JSON → `object`
-
-**Go — `hybriddb-go`** (go get github.com/hybriddb/hybriddb-go)
-- `database/sql` driver interface
-- Connection pooling via `sql.DB`
-- Context support for cancellation
-- Type mapping: EMBEDDING → `[]float32`, UUID → `[16]byte`
-
-**Rust — `hybriddb-rs`** (crates.io: hybriddb)
-- Async with Tokio
-- Connection pooling (bb8 or deadpool)
-- Type mapping: EMBEDDING → `Vec<f32>`, UUID → `uuid::Uuid`
-- Derive macros for row mapping
-
-**Java — `hybriddb-java`** (Maven Central)
-- JDBC driver (Type 4, pure Java)
-- Connection pooling (HikariCP compatible)
-- Type mapping: EMBEDDING → `float[]`, UUID → `java.util.UUID`
-
-**.NET — `HybridDB.Client`** (NuGet)
-- ADO.NET provider
-- `DbConnection` / `DbCommand` pattern
-- Async support
-- Type mapping: EMBEDDING → `float[]`, UUID → `System.Guid`
-
----
-
-## Phase 7: Web Admin & Polish (Weeks 30–42)
-
-### 7.1 Web Admin Enhancements (Next.js)
-
-Building on the POC web admin, add:
-
-**Schema Browser (left panel)**
-- Tree view: Tables → Columns, Indexes, Edge Types
-- Click table → shows column details, sample data
-- Click edge type → shows source/target tables, properties
-- EMBEDDING columns show: dimension, provider, source expression, % populated
-
-**Query Editor Enhancements**
-- Multi-tab query editor (existing, keep)
-- Syntax highlighting for HybridDB SQL (TRAVERSE, NEAREST, MATCH, LINK, EMBEDDING keywords)
-- Autocomplete: table names, column names, edge type names
-- Query history (persisted in localStorage)
-- Keyboard shortcuts: Ctrl+Enter to execute, Ctrl+S to save
-
-**Results Panel Enhancements**
-- Existing Graph | Tree | Table toggle for traversal results (keep from POC)
-- Query plan visualization: tree diagram from EXPLAIN JSON output
-- Sort/filter columns in table view
-- Export results: CSV, JSON
-- Pagination for large result sets
-
-**Graph Explorer (new tab)**
-- Interactive graph exploration: click a node → expand neighbors (run TRAVERSE)
-- Right-click context menu: Expand Out, Expand In, Expand Both, Show Details
-- Path highlighting: find and highlight shortest path between selected nodes
-- Graph filtering: by edge type, depth, node properties
-- Layout algorithms: force-directed (default), hierarchical, circular
-
-**Dashboard (new tab)**
-- Server status: uptime, connections, memory usage
-- Buffer pool stats: hit rate, dirty pages, eviction count
-- Embedding pipeline: queue depth, processing rate, failures
-- Slow query log (queries > configurable threshold)
-
-**Connection Management**
-- Server URL configuration (currently hardcoded)
-- Multiple server profiles (save/switch)
-- Connection status indicator
+> **Note:** Client libraries and web admin have been moved to the [client repository](https://github.com/SixSeven/client).
 
 ### 7.2 Documentation
 - SQL Reference: complete syntax for all statements with examples
 - Embedding Guide: setup providers, create EMBEDDING columns, search patterns
 - Graph Queries: traversal, pattern matching, shortest path examples
 - Architecture: storage layout, MVCC, WAL, index structures
-- Client Library Quickstart: one per language
 
 ---
 
@@ -792,8 +690,8 @@ Building on the POC web admin, add:
 | 8–16 | Phase 3 | Joins, aggregation, windows, graph engine (edges, traversal, patterns) |
 | 12–20 | Phase 4 | Vector engine: persistent HNSW, EMBEDDING type, providers |
 | 16–28 | Phase 5 | MVCC, lock manager, optimizer, EXPLAIN, external sort |
-| 22–36 | Phase 6 | PG wire protocol server, auth, 6 client libraries |
-| 30–42 | Phase 7 | Web admin enhancements, graph explorer, dashboard, docs |
+| 22–36 | Phase 6 | PG wire protocol server, auth |
+| 30–42 | Phase 7 | Documentation, polish |
 | 36–48 | Phase 8 | Testing, fuzz, crash recovery, benchmarks, hardening |
 
 Phases overlap intentionally — each phase starts before the previous one ends, but depends on the critical path from the prior phase being complete.
@@ -806,10 +704,10 @@ After all phases, this sequence validates the complete system:
 
 ```bash
 # 1. Start server
-./hybriddb-server --config hybriddb.conf
+./sixseven-server config.json
 
 # 2. Connect with psql (PG protocol compatibility)
-psql -h localhost -p 6767 -U admin hybriddb
+psql -h localhost -p 6767 -U admin sixseven
 ```
 
 ```sql
@@ -868,20 +766,5 @@ EXPLAIN ANALYZE SELECT * FROM users WHERE age > 25;
 ```
 
 ```bash
-# 11. Web admin
-cd web && npm run dev
-# Open http://localhost:3000
-# - Schema browser shows tables, edges, embedding columns
-# - Run traversal query → Graph | Tree | Table views
-# - Graph explorer: click node → expand neighbors
-# - Dashboard: server stats, embedding pipeline status
-
-# 12. Client library
-python3 -c "
-import hybriddb
-conn = hybriddb.connect('localhost', 6767, 'admin', 'pass')
-rows = conn.execute('NEAREST 5 FROM users.bio_vec TO %s', ['ML engineer'])
-for row in rows:
-    print(row['name'], row['distance'])
-"
+# 11. Web admin & client libraries — see client repository
 ```

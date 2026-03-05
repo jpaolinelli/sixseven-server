@@ -44,8 +44,3 @@ data/
 # Coredumps
 core
 core.*
-
-# Web admin (Next.js)
-web/node_modules/
-web/.next/
-web/.env.local

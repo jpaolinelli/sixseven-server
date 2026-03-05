@@ -5,8 +5,6 @@ SixSevenDB is a C++20 hybrid relational/graph/vector database with PostgreSQL wi
 ## Architecture
 
 ```
-Client Libraries (Python, Node.js, Go, Rust, Java, .NET)
-        │
 PostgreSQL Wire Protocol (v3)
         │
 Server (Event-Driven, Connection Pool)
