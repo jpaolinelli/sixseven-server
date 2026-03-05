@@ -1,15 +1,15 @@
 /// QA adversarial tests for GDB-99: sys_edge_types and sys_embedding_columns.
 /// Tests edge type CRUD, embedding column registration, cascade deletes, validation.
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/catalog/schema.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/catalog/schema.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Helpers

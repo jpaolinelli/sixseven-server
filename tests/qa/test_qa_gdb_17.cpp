@@ -16,8 +16,8 @@
 
 #include "test_btree_helpers.h"
 
-using namespace giodb;
-using namespace giodb::test;
+using namespace sixseven;
+using namespace sixseven::test;
 
 // =============================================================================
 // Helper: verify tree integrity by searching all expected keys and doing a

@@ -1,12 +1,12 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/config.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/catalog_persistence.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/executor/system_bootstrap.h"
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/config.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/catalog_persistence.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/executor/system_bootstrap.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
@@ -14,7 +14,7 @@
 #include <memory>
 #include <string>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test fixture for system bootstrap (GDB-188)
@@ -23,7 +23,7 @@ using namespace giodb;
 class SystemBootstrapTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_bootstrap";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_bootstrap";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -79,7 +79,7 @@ protected:
 };
 
 // =============================================================================
-// AC: giodb_system database created automatically on first init
+// AC: sixseven_system database created automatically on first init
 // =============================================================================
 
 TEST_F(SystemBootstrapTest, SystemDatabaseExistsOnInit) {
@@ -98,7 +98,7 @@ TEST_F(SystemBootstrapTest, SystemDatabaseInList) {
             EXPECT_EQ(db.database_id, system_database_id);
         }
     }
-    EXPECT_TRUE(found) << "giodb_system not found in database list";
+    EXPECT_TRUE(found) << "sixseven_system not found in database list";
 }
 
 // =============================================================================
@@ -198,11 +198,11 @@ TEST_F(SystemBootstrapTest, CannotDropSystemDatabaseWithCascade) {
 }
 
 TEST_F(SystemBootstrapTest, CannotDropSystemDatabaseViaSql) {
-    exec_error("DROP DATABASE giodb_system", StatusCode::CONSTRAINT_VIOLATION);
+    exec_error("DROP DATABASE sixseven_system", StatusCode::CONSTRAINT_VIOLATION);
 }
 
 TEST_F(SystemBootstrapTest, CannotDropSystemDatabaseCascadeViaSql) {
-    exec_error("DROP DATABASE giodb_system CASCADE", StatusCode::CONSTRAINT_VIOLATION);
+    exec_error("DROP DATABASE sixseven_system CASCADE", StatusCode::CONSTRAINT_VIOLATION);
 }
 
 // =============================================================================
@@ -242,7 +242,7 @@ TEST_F(SystemBootstrapTest, SecondBootstrapSkipsSeedButCreatesTable) {
     EXPECT_TRUE(SystemBootstrap::is_bootstrapped(data_dir_));
 
     // Simulate "restart" by recreating all components.
-    // (The catalog is in-memory, so it gets a fresh giodb_system DB.)
+    // (The catalog is in-memory, so it gets a fresh sixseven_system DB.)
     engine_.reset();
     storage_.reset();
     catalog_.reset();
@@ -272,7 +272,7 @@ TEST_F(SystemBootstrapTest, LoadSettingsAppliesOverrides) {
     exec_ok("UPDATE sys_settings SET value = '9999' WHERE key = 'server.port'");
 
     // Restore to default database.
-    use_database("giodb");
+    use_database("sixseven");
 
     // Load settings from sys_settings.
     Config config = Config::load_defaults();
@@ -299,7 +299,7 @@ TEST_F(SystemBootstrapTest, ConfigPriorityChain) {
     EXPECT_EQ(qr.rows[0][0].as_string(), "7777");
 
     // Now load settings into a fresh defaults config.
-    use_database("giodb");
+    use_database("sixseven");
     Config fresh = Config::load_defaults();
     EXPECT_EQ(fresh.port, 6767); // Default.
 
@@ -329,8 +329,8 @@ TEST_F(SystemBootstrapTest, ApplySettingMaxConnections) {
 
 TEST_F(SystemBootstrapTest, ApplySettingDataDir) {
     Config config = Config::load_defaults();
-    config.apply_setting("storage.data_dir", "/var/giodb");
-    EXPECT_EQ(config.data_dir, "/var/giodb");
+    config.apply_setting("storage.data_dir", "/var/sixseven");
+    EXPECT_EQ(config.data_dir, "/var/sixseven");
 }
 
 TEST_F(SystemBootstrapTest, ApplySettingBufferPool) {

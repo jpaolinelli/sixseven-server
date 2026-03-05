@@ -1,6 +1,6 @@
-#include "giodb/server/server.h"
+#include "sixseven/server/server.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -11,7 +11,7 @@
 #include <cerrno>
 #include <cstring>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -118,7 +118,7 @@ Result<void> Server::start() {
     start_time_ = std::chrono::steady_clock::now();
     running_.store(true, std::memory_order_release);
 
-    GIODB_LOG_INFO("GioDB server listening on port {}", bound_port_);
+    SIXSEVEN_LOG_INFO("SixSevenDB server listening on port {}", bound_port_);
 
     run_event_loop();
 
@@ -138,28 +138,28 @@ void Server::shutdown() {
 }
 
 void Server::do_shutdown() {
-    GIODB_LOG_INFO("initiating graceful shutdown (timeout={}s)", config_.shutdown_timeout_s);
+    SIXSEVEN_LOG_INFO("initiating graceful shutdown (timeout={}s)", config_.shutdown_timeout_s);
 
     // Step 1: Stop accepting new connections.
     if (listen_fd_ >= 0) {
         (void)event_loop_->remove_fd(listen_fd_);
         ::close(listen_fd_);
         listen_fd_ = -1;
-        GIODB_LOG_INFO("shutdown: stopped accepting new connections");
+        SIXSEVEN_LOG_INFO("shutdown: stopped accepting new connections");
     }
 
     // Step 2: Wait for the thread pool to drain pending work.
     if (thread_pool_) {
-        GIODB_LOG_INFO("shutdown: draining thread pool ({} pending tasks)",
+        SIXSEVEN_LOG_INFO("shutdown: draining thread pool ({} pending tasks)",
                        thread_pool_->pending_tasks());
         thread_pool_->shutdown();
-        GIODB_LOG_INFO("shutdown: thread pool drained");
+        SIXSEVEN_LOG_INFO("shutdown: thread pool drained");
     }
 
     // Step 3: Close all client connections.
     {
         std::lock_guard lock(connections_mutex_);
-        GIODB_LOG_INFO("shutdown: closing {} client connections", connections_.size());
+        SIXSEVEN_LOG_INFO("shutdown: closing {} client connections", connections_.size());
         for (auto& [fd, conn] : connections_) {
             conn.close();
         }
@@ -167,7 +167,7 @@ void Server::do_shutdown() {
         protocol_handlers_.clear();
     }
 
-    GIODB_LOG_INFO("shutdown: complete");
+    SIXSEVEN_LOG_INFO("shutdown: complete");
 }
 
 HealthInfo Server::health() const {
@@ -189,7 +189,7 @@ void Server::run_event_loop() {
     while (running_.load(std::memory_order_acquire)) {
         auto poll_result = event_loop_->poll(100); // 100 ms timeout for shutdown checks.
         if (!poll_result) {
-            GIODB_LOG_ERROR("event loop poll error: {}", poll_result.error().message);
+            SIXSEVEN_LOG_ERROR("event loop poll error: {}", poll_result.error().message);
             break;
         }
 
@@ -217,7 +217,7 @@ void Server::accept_connection() {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             return; // No pending connections.
         }
-        GIODB_LOG_WARN("accept() failed: {}", std::strerror(errno));
+        SIXSEVEN_LOG_WARN("accept() failed: {}", std::strerror(errno));
         return;
     }
 
@@ -225,7 +225,7 @@ void Server::accept_connection() {
     {
         std::lock_guard lock(connections_mutex_);
         if (connections_.size() >= config_.max_connections) {
-            GIODB_LOG_WARN("max connections ({}) reached, rejecting fd={}",
+            SIXSEVEN_LOG_WARN("max connections ({}) reached, rejecting fd={}",
                            config_.max_connections,
                            client_fd);
             ::close(client_fd);
@@ -235,7 +235,7 @@ void Server::accept_connection() {
 
     auto nb_result = set_nonblocking(client_fd);
     if (!nb_result) {
-        GIODB_LOG_WARN(
+        SIXSEVEN_LOG_WARN(
             "failed to set non-blocking on fd={}: {}", client_fd, nb_result.error().message);
         ::close(client_fd);
         return;
@@ -243,7 +243,7 @@ void Server::accept_connection() {
 
     auto add_result = event_loop_->add_fd(client_fd, EventType::READ);
     if (!add_result) {
-        GIODB_LOG_WARN(
+        SIXSEVEN_LOG_WARN(
             "failed to add fd={} to event loop: {}", client_fd, add_result.error().message);
         ::close(client_fd);
         return;
@@ -254,7 +254,7 @@ void Server::accept_connection() {
 
     char addr_str[INET_ADDRSTRLEN];
     ::inet_ntop(AF_INET, &client_addr.sin_addr, addr_str, sizeof(addr_str));
-    GIODB_LOG_INFO(
+    SIXSEVEN_LOG_INFO(
         "accepted connection fd={} from {}:{}", client_fd, addr_str, ntohs(client_addr.sin_port));
 
     // Create a PG protocol handler for this connection.
@@ -283,7 +283,7 @@ void Server::handle_read(int fd) {
     auto& conn = it->second;
     auto read_result = conn.read_from_socket();
     if (!read_result) {
-        GIODB_LOG_WARN("read error on fd={}: {}", fd, read_result.error().message);
+        SIXSEVEN_LOG_WARN("read error on fd={}: {}", fd, read_result.error().message);
         close_connection(fd);
         return;
     }
@@ -295,7 +295,7 @@ void Server::handle_read(int fd) {
 
     if (**read_result == 0) {
         // EOF — peer closed connection.
-        GIODB_LOG_DEBUG("connection fd={} closed by peer", fd);
+        SIXSEVEN_LOG_DEBUG("connection fd={} closed by peer", fd);
         close_connection(fd);
         return;
     }
@@ -303,7 +303,7 @@ void Server::handle_read(int fd) {
     // Process data through the PostgreSQL wire protocol handler.
     auto handler_it = protocol_handlers_.find(fd);
     if (handler_it == protocol_handlers_.end()) {
-        GIODB_LOG_WARN("no protocol handler for fd={}", fd);
+        SIXSEVEN_LOG_WARN("no protocol handler for fd={}", fd);
         close_connection(fd);
         return;
     }
@@ -311,14 +311,14 @@ void Server::handle_read(int fd) {
     auto& handler = handler_it->second;
     auto process_result = handler.process(conn);
     if (!process_result) {
-        GIODB_LOG_WARN("protocol error on fd={}: {}", fd, process_result.error().message);
+        SIXSEVEN_LOG_WARN("protocol error on fd={}: {}", fd, process_result.error().message);
         close_connection(fd);
         return;
     }
 
     // Close connection if the protocol handler says we're done (Terminate message).
     if (handler.state() == ProtocolState::CLOSED) {
-        GIODB_LOG_DEBUG("connection fd={} terminated by protocol", fd);
+        SIXSEVEN_LOG_DEBUG("connection fd={} terminated by protocol", fd);
         close_connection(fd);
         return;
     }
@@ -327,7 +327,7 @@ void Server::handle_read(int fd) {
     if (conn.has_pending_writes()) {
         auto mod_result = event_loop_->modify_fd(fd, EventType::READ_WRITE);
         if (!mod_result) {
-            GIODB_LOG_WARN("failed to modify fd={} for write: {}", fd, mod_result.error().message);
+            SIXSEVEN_LOG_WARN("failed to modify fd={} for write: {}", fd, mod_result.error().message);
         }
     }
 }
@@ -342,7 +342,7 @@ void Server::handle_write(int fd) {
     auto& conn = it->second;
     auto write_result = conn.write_to_socket();
     if (!write_result) {
-        GIODB_LOG_WARN("write error on fd={}: {}", fd, write_result.error().message);
+        SIXSEVEN_LOG_WARN("write error on fd={}: {}", fd, write_result.error().message);
         close_connection(fd);
         return;
     }
@@ -351,7 +351,7 @@ void Server::handle_write(int fd) {
     if (!conn.has_pending_writes()) {
         auto mod_result = event_loop_->modify_fd(fd, EventType::READ);
         if (!mod_result) {
-            GIODB_LOG_WARN(
+            SIXSEVEN_LOG_WARN(
                 "failed to modify fd={} for read-only: {}", fd, mod_result.error().message);
         }
     }
@@ -362,7 +362,7 @@ void Server::close_connection(int fd) {
     (void)event_loop_->remove_fd(fd);
     connections_.erase(fd);
     protocol_handlers_.erase(fd);
-    GIODB_LOG_DEBUG("connection fd={} removed", fd);
+    SIXSEVEN_LOG_DEBUG("connection fd={} removed", fd);
 }
 
-} // namespace giodb
+} // namespace sixseven

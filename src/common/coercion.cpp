@@ -1,12 +1,12 @@
-#include "giodb/common/coercion.h"
+#include "sixseven/common/coercion.h"
 
-#include "giodb/common/uuid.h"
+#include "sixseven/common/uuid.h"
 
 #include <cmath>
 #include <compare>
 #include <cstdint>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -435,4 +435,4 @@ Result<std::strong_ordering> compare(const Value& lhs, const Value& rhs) {
                           std::string(type_name(rt)));
 }
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,11 +1,11 @@
-#include "giodb/table/tuple.h"
+#include "sixseven/table/tuple.h"
 
 #include <gtest/gtest.h>
 
 #include <cmath>
 #include <limits>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Schema tests -------------------------------------------------------------
 

@@ -1,4 +1,4 @@
-#include "giodb/server/thread_pool.h"
+#include "sixseven/server/thread_pool.h"
 
 #include <gtest/gtest.h>
 
@@ -6,7 +6,7 @@
 #include <chrono>
 #include <thread>
 
-namespace giodb {
+namespace sixseven {
 
 TEST(ThreadPool, ConstructAndDestruct) {
     ThreadPool pool(2);
@@ -96,4 +96,4 @@ TEST(ThreadPool, PendingTasksCount) {
     pool.shutdown();
 }
 
-} // namespace giodb
+} // namespace sixseven

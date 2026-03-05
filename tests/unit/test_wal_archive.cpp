@@ -1,6 +1,6 @@
-#include "giodb/storage/wal.h"
-#include "giodb/storage/wal_archive.h"
-#include "giodb/storage/wal_record.h"
+#include "sixseven/storage/wal.h"
+#include "sixseven/storage/wal_archive.h"
+#include "sixseven/storage/wal_record.h"
 
 #include <gtest/gtest.h>
 
@@ -13,7 +13,7 @@
 
 #include "test_wal_helpers.h"
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 using test::TempWalDir;
@@ -698,4 +698,4 @@ TEST(WalArchiveManager, CleanupWithoutProviderRemovesAll) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

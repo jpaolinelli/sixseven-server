@@ -4,19 +4,19 @@
 /// Tests target: HashAggregateOperator (direct), end-to-end SQL aggregation
 /// via QueryEngine, and edge cases in the aggregation pipeline.
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/coercion.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/expr_evaluator.h"
-#include "giodb/executor/filter.h"
-#include "giodb/executor/hash_aggregate.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/executor/tuple.h"
-#include "giodb/parser/ast.h"
-#include "giodb/planner/binder.h"
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/executor/filter.h"
+#include "sixseven/executor/hash_aggregate.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/executor/tuple.h"
+#include "sixseven/parser/ast.h"
+#include "sixseven/planner/binder.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
@@ -32,7 +32,7 @@
 
 #include "test_helpers.h"
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 // ===========================================================================
@@ -161,7 +161,7 @@ protected:
 class QA_AggregateE2E : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb24";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb24";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -1303,4 +1303,4 @@ TEST_F(QA_HashAggregate, SumWithZeros) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

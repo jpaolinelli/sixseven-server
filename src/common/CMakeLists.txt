@@ -1,11 +1,11 @@
-# giodb::common sources
+# sixseven::common sources
 
 find_package(spdlog CONFIG REQUIRED)
 find_package(tl-expected CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 
-add_library(giodb_common STATIC
+add_library(sixseven_common STATIC
     logging.cpp
     config.cpp
     coercion.cpp
@@ -13,6 +13,6 @@ add_library(giodb_common STATIC
     secrets_manager.cpp
 )
 
-target_include_directories(giodb_common PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(sixseven_common PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
-target_link_libraries(giodb_common PUBLIC spdlog::spdlog tl::expected nlohmann_json::nlohmann_json OpenSSL::Crypto)
+target_link_libraries(sixseven_common PUBLIC spdlog::spdlog tl::expected nlohmann_json::nlohmann_json OpenSSL::Crypto)

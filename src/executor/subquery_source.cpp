@@ -1,6 +1,6 @@
-#include "giodb/executor/subquery_source.h"
+#include "sixseven/executor/subquery_source.h"
 
-namespace giodb {
+namespace sixseven {
 
 SubquerySourceOperator::SubquerySourceOperator(std::unique_ptr<Iterator> child, OutputSchema schema)
     : child_(std::move(child)), schema_(std::move(schema)) {}
@@ -63,4 +63,4 @@ std::vector<Iterator*> SubquerySourceOperator::plan_children_mutable() {
     return {child_.get()};
 }
 
-} // namespace giodb
+} // namespace sixseven

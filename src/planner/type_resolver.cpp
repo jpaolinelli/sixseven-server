@@ -1,13 +1,13 @@
-#include "giodb/planner/type_resolver.h"
+#include "sixseven/planner/type_resolver.h"
 
-#include "giodb/common/coercion.h"
+#include "sixseven/common/coercion.h"
 
 #include <algorithm>
 #include <cctype>
 #include <unordered_map>
 #include <unordered_set>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -274,4 +274,4 @@ Result<TypeId> function_return_type(const std::string& name, const std::vector<T
     return make_error(StatusCode::TYPE_ERROR, "unknown function: " + name);
 }
 
-} // namespace giodb
+} // namespace sixseven

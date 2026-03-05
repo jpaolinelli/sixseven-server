@@ -1,6 +1,6 @@
-#include "giodb/storage/buffer_pool.h"
-#include "giodb/storage/disk_manager.h"
-#include "giodb/table/table_heap.h"
+#include "sixseven/storage/buffer_pool.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/table/table_heap.h"
 
 #include <gtest/gtest.h>
 
@@ -8,14 +8,14 @@
 #include <filesystem>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Test fixture -------------------------------------------------------------
 
 class TableHeapTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        path_ = std::filesystem::temp_directory_path() / "giodb_test_table_heap.db";
+        path_ = std::filesystem::temp_directory_path() / "sixseven_test_table_heap.db";
         std::filesystem::remove(path_);
 
         auto fid = dm_.create_file(path_, false, true);

@@ -1,13 +1,13 @@
-#include "giodb/index/btree_index.h"
+#include "sixseven/index/btree_index.h"
 
-#include "giodb/index/btree_iterator.h"
-#include "giodb/storage/wal.h"
-#include "giodb/storage/wal_record.h"
+#include "sixseven/index/btree_iterator.h"
+#include "sixseven/storage/wal.h"
+#include "sixseven/storage/wal_record.h"
 
 #include <cstring>
 #include <shared_mutex>
 
-namespace giodb {
+namespace sixseven {
 
 // -- Default max keys ---------------------------------------------------------
 
@@ -913,4 +913,4 @@ Result<void> BTreeIndex::bulk_load(std::vector<std::pair<KeyType, RID>>& sorted_
     return ok();
 }
 
-} // namespace giodb
+} // namespace sixseven

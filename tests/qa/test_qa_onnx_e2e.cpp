@@ -5,9 +5,9 @@
 /// embeddings, and validates against Python reference vectors.
 /// Skips automatically when the model fixture is not present.
 
-#include "giodb/vector/onnx_provider.h"
-#include "giodb/vector/tokenizer.h"
-#include "giodb/vector/tokenizer_json_loader.h"
+#include "sixseven/vector/onnx_provider.h"
+#include "sixseven/vector/tokenizer.h"
+#include "sixseven/vector/tokenizer_json_loader.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -19,7 +19,7 @@
 #include <string>
 #include <vector>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 namespace fs = std::filesystem;
@@ -203,4 +203,4 @@ TEST_F(OnnxE2E, GDB326_OutputDimension) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

@@ -1,29 +1,29 @@
-#include "giodb/executor/planner.h"
+#include "sixseven/executor/planner.h"
 
-#include "giodb/common/coercion.h"
-#include "giodb/executor/delete.h"
-#include "giodb/executor/edge_traversal.h"
-#include "giodb/executor/enriched_traversal.h"
-#include "giodb/executor/filter.h"
-#include "giodb/executor/hash_aggregate.h"
-#include "giodb/executor/hash_index_scan.h"
-#include "giodb/executor/index_scan.h"
-#include "giodb/executor/insert.h"
-#include "giodb/executor/limit.h"
-#include "giodb/executor/nearest_scan.h"
-#include "giodb/executor/nested_loop_join.h"
-#include "giodb/executor/pattern_match.h"
-#include "giodb/executor/project.h"
-#include "giodb/executor/seq_scan.h"
-#include "giodb/executor/shortest_path.h"
-#include "giodb/executor/sort.h"
-#include "giodb/executor/subquery_source.h"
-#include "giodb/executor/traversal.h"
-#include "giodb/executor/update.h"
-#include "giodb/parser/lexer.h"
-#include "giodb/parser/parser.h"
-#include "giodb/planner/type_resolver.h"
-#include "giodb/vector/embedding_column.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/executor/delete.h"
+#include "sixseven/executor/edge_traversal.h"
+#include "sixseven/executor/enriched_traversal.h"
+#include "sixseven/executor/filter.h"
+#include "sixseven/executor/hash_aggregate.h"
+#include "sixseven/executor/hash_index_scan.h"
+#include "sixseven/executor/index_scan.h"
+#include "sixseven/executor/insert.h"
+#include "sixseven/executor/limit.h"
+#include "sixseven/executor/nearest_scan.h"
+#include "sixseven/executor/nested_loop_join.h"
+#include "sixseven/executor/pattern_match.h"
+#include "sixseven/executor/project.h"
+#include "sixseven/executor/seq_scan.h"
+#include "sixseven/executor/shortest_path.h"
+#include "sixseven/executor/sort.h"
+#include "sixseven/executor/subquery_source.h"
+#include "sixseven/executor/traversal.h"
+#include "sixseven/executor/update.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/parser.h"
+#include "sixseven/planner/type_resolver.h"
+#include "sixseven/vector/embedding_column.h"
 
 #include <algorithm>
 #include <cassert>
@@ -31,7 +31,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -2210,4 +2210,4 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema
     return ok(std::unique_ptr<Iterator>(nullptr));
 }
 
-} // namespace giodb
+} // namespace sixseven

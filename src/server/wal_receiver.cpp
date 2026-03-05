@@ -1,12 +1,12 @@
-#include "giodb/server/wal_receiver.h"
+#include "sixseven/server/wal_receiver.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/storage/wal_record.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/storage/wal_record.h"
 
 #include <algorithm>
 #include <chrono>
 
-namespace giodb {
+namespace sixseven {
 
 WalReceiver::WalReceiver(ConnectionFactory factory,
                          std::filesystem::path wal_dir,
@@ -62,7 +62,7 @@ void WalReceiver::stop() {
     if (local_writer_) {
         auto close_result = local_writer_->close();
         if (!close_result) {
-            GIODB_LOG_WARN("failed to close local WAL writer: {}", close_result.error().message);
+            SIXSEVEN_LOG_WARN("failed to close local WAL writer: {}", close_result.error().message);
         }
         local_writer_.reset();
     }
@@ -96,7 +96,7 @@ void WalReceiver::receiver_loop() {
         // Attempt to connect.
         auto connect_result = connect();
         if (!connect_result) {
-            GIODB_LOG_WARN("WAL receiver: connection to {}:{} failed: {}",
+            SIXSEVEN_LOG_WARN("WAL receiver: connection to {}:{} failed: {}",
                            primary_host_,
                            primary_port_,
                            connect_result.error().message);
@@ -118,7 +118,7 @@ void WalReceiver::receiver_loop() {
         // Reset retry interval on successful connection.
         retry_interval = options_.retry_interval;
         is_streaming_.store(true);
-        GIODB_LOG_INFO("WAL receiver: connected to {}:{}", primary_host_, primary_port_);
+        SIXSEVEN_LOG_INFO("WAL receiver: connected to {}:{}", primary_host_, primary_port_);
 
         // Process messages until connection drops or stop requested.
         auto process_result = process_messages();
@@ -129,7 +129,7 @@ void WalReceiver::receiver_loop() {
         }
 
         if (!process_result) {
-            GIODB_LOG_WARN("WAL receiver: streaming interrupted: {}",
+            SIXSEVEN_LOG_WARN("WAL receiver: streaming interrupted: {}",
                            process_result.error().message);
         }
 
@@ -202,7 +202,7 @@ Result<void> WalReceiver::process_messages() {
         }
 
         case ReplicationMessageType::CATCHUP_COMPLETE: {
-            GIODB_LOG_INFO("WAL receiver: catch-up complete, now streaming in real-time");
+            SIXSEVEN_LOG_INFO("WAL receiver: catch-up complete, now streaming in real-time");
             break;
         }
 
@@ -212,7 +212,7 @@ Result<void> WalReceiver::process_messages() {
         }
 
         default:
-            GIODB_LOG_WARN("WAL receiver: unexpected message type: {}", static_cast<int>(*type));
+            SIXSEVEN_LOG_WARN("WAL receiver: unexpected message type: {}", static_cast<int>(*type));
             break;
         }
     }
@@ -244,7 +244,7 @@ Result<void> WalReceiver::handle_wal_data(const WalDataMessage& msg) {
 
         auto record = deserialize_wal_record(remaining.subspan(0, total_size));
         if (!record) {
-            GIODB_LOG_WARN("WAL receiver: failed to deserialize record at offset {}: {}",
+            SIXSEVEN_LOG_WARN("WAL receiver: failed to deserialize record at offset {}: {}",
                            offset,
                            record.error().message);
             break;
@@ -357,7 +357,7 @@ Result<void> WalReceiver::replay_records(const std::vector<WalRecord>& records) 
         case WalRecordType::DROP_TABLE: {
             auto result = handler_.redo(record);
             if (!result) {
-                GIODB_LOG_WARN("WAL receiver: redo failed for record LSN {}: {}",
+                SIXSEVEN_LOG_WARN("WAL receiver: redo failed for record LSN {}: {}",
                                record.lsn,
                                result.error().message);
                 // Continue replaying — redo must be idempotent.
@@ -380,4 +380,4 @@ Result<void> WalReceiver::replay_records(const std::vector<WalRecord>& records) 
     return ok();
 }
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,16 +1,16 @@
-#include "giodb/executor/system_bootstrap.h"
+#include "sixseven/executor/system_bootstrap.h"
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/catalog/schema.h"
-#include "giodb/common/logging.h"
-#include "giodb/executor/catalog_persistence.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/storage_manager.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/catalog/schema.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/executor/catalog_persistence.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/storage_manager.h"
 
 #include <fstream>
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 
 Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
                                         Catalog& catalog,
@@ -32,7 +32,7 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
         // -----------------------------------------------------------------
         // First run: create all system tables from scratch.
         // -----------------------------------------------------------------
-        GIODB_LOG_INFO("system bootstrap: first run — creating system tables");
+        SIXSEVEN_LOG_INFO("system bootstrap: first run — creating system tables");
 
         // Create sys_settings and sys_providers with reserved IDs.
         auto r1 = persistence.create_sys_table_public(sys_settings_schema());
@@ -73,12 +73,12 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
         engine.set_current_database(prev_db);
 
         mark_bootstrapped(data_dir);
-        GIODB_LOG_INFO("system bootstrap: first run complete");
+        SIXSEVEN_LOG_INFO("system bootstrap: first run complete");
     } else {
         // -----------------------------------------------------------------
         // Subsequent run: load persisted catalog from disk.
         // -----------------------------------------------------------------
-        GIODB_LOG_INFO("system bootstrap: loading persisted catalog");
+        SIXSEVEN_LOG_INFO("system bootstrap: loading persisted catalog");
 
         // Open sys_settings and sys_providers.
         auto r1 = persistence.open_sys_table_public(sys_settings_schema());
@@ -104,7 +104,7 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
             catalog.set_next_table_id(first_user_table_id);
         }
 
-        GIODB_LOG_INFO("system bootstrap: catalog loaded from disk");
+        SIXSEVEN_LOG_INFO("system bootstrap: catalog loaded from disk");
     }
 
     return ok();
@@ -258,4 +258,4 @@ void SystemBootstrap::mark_bootstrapped(const std::filesystem::path& data_dir) {
     flag << "bootstrapped\n";
 }
 
-} // namespace giodb
+} // namespace sixseven

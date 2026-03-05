@@ -1,7 +1,7 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/storage/buffer_pool.h"
-#include "giodb/storage/disk_manager.h"
-#include "giodb/table/table_heap.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/storage/buffer_pool.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/table/table_heap.h"
 
 #include <gtest/gtest.h>
 
@@ -11,7 +11,7 @@
 #include <thread>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // QA Adversarial Tests for GDB-18: Catalog & System Tables
@@ -681,7 +681,7 @@ TEST(QA_Catalog, RecreateAfterDropPreservesIdMonotonicity) {
 class QA_TableHeapTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        path_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb18_heap.db";
+        path_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb18_heap.db";
         std::filesystem::remove(path_);
 
         auto fid = dm_.create_file(path_, false, true);

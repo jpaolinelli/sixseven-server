@@ -1,10 +1,10 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/result.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/traversal.h"
-#include "giodb/graph/graph_engine.h"
-#include "giodb/parser/ast.h"
-#include "giodb/planner/binder.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/result.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/traversal.h"
+#include "sixseven/graph/graph_engine.h"
+#include "sixseven/parser/ast.h"
+#include "sixseven/planner/binder.h"
 
 #include <gtest/gtest.h>
 
@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 /// Test fixture for BFS traversal tests.
@@ -342,4 +342,4 @@ TEST_F(TraversalTest, WhereFilterExcludesNodes) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

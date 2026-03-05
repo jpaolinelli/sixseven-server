@@ -1,13 +1,13 @@
-#include "giodb/vector/pre_tokenizer.h"
+#include "sixseven/vector/pre_tokenizer.h"
 
-#include "giodb/vector/tokenizer.h"
+#include "sixseven/vector/tokenizer.h"
 
 #include <cstddef>
 #include <memory>
 #include <string_view>
 #include <vector>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -111,4 +111,4 @@ std::unique_ptr<PreTokenizer> create_pre_tokenizer(const TokenizerConfig& config
     return std::make_unique<NullPreTokenizer>(); // Unreachable, satisfies compiler.
 }
 
-} // namespace giodb
+} // namespace sixseven

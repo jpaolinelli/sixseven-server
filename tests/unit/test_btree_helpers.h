@@ -3,16 +3,16 @@
 /// Shared test helpers for B+ tree unit tests.
 /// Used by test_btree_node.cpp, test_btree.cpp, and test_btree_concurrency.cpp.
 
-#include "giodb/index/btree_index.h"
-#include "giodb/index/btree_iterator.h"
-#include "giodb/index/btree_key.h"
-#include "giodb/index/btree_node.h"
-#include "giodb/index/rid.h"
+#include "sixseven/index/btree_index.h"
+#include "sixseven/index/btree_iterator.h"
+#include "sixseven/index/btree_key.h"
+#include "sixseven/index/btree_node.h"
+#include "sixseven/index/rid.h"
 
 #include <string>
 #include <vector>
 
-namespace giodb::test {
+namespace sixseven::test {
 
 /// Create a BTreeIndex with small capacity for testing (forces splits early).
 inline BTreeIndex
@@ -62,4 +62,4 @@ inline Result<std::vector<std::pair<KeyType, RID>>> collect_scan(BTreeIterator& 
     return ok(std::move(results));
 }
 
-} // namespace giodb::test
+} // namespace sixseven::test

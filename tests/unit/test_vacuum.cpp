@@ -1,10 +1,10 @@
-#include "giodb/storage/buffer_pool.h"
-#include "giodb/storage/disk_manager.h"
-#include "giodb/storage/page.h"
-#include "giodb/txn/mvcc.h"
-#include "giodb/txn/mvcc_tuple.h"
-#include "giodb/txn/txn_manager.h"
-#include "giodb/txn/vacuum.h"
+#include "sixseven/storage/buffer_pool.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/storage/page.h"
+#include "sixseven/txn/mvcc.h"
+#include "sixseven/txn/mvcc_tuple.h"
+#include "sixseven/txn/txn_manager.h"
+#include "sixseven/txn/vacuum.h"
 
 #include <gtest/gtest.h>
 
@@ -12,7 +12,7 @@
 #include <filesystem>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test fixture with a temp file, buffer pool, and transaction manager
@@ -21,7 +21,7 @@ using namespace giodb;
 class VacuumTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        path_ = std::filesystem::temp_directory_path() / "giodb_test_vacuum.db";
+        path_ = std::filesystem::temp_directory_path() / "sixseven_test_vacuum.db";
         std::filesystem::remove(path_);
 
         auto fid = dm_.create_file(path_, false, true);

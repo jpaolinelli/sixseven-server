@@ -1,38 +1,38 @@
-#include "giodb/executor/query_engine.h"
+#include "sixseven/executor/query_engine.h"
 
-#include "giodb/catalog/schema.h"
-#include "giodb/common/coercion.h"
-#include "giodb/common/logging.h"
-#include "giodb/common/types.h"
-#include "giodb/executor/catalog_persistence.h"
-#include "giodb/executor/explain.h"
-#include "giodb/executor/expr_evaluator.h"
-#include "giodb/executor/planner.h"
-#include "giodb/executor/provider_cache.h"
-#include "giodb/executor/settings_cache.h"
-#include "giodb/index/rid.h"
-#include "giodb/parser/ast.h"
-#include "giodb/parser/lexer.h"
-#include "giodb/parser/parser.h"
-#include "giodb/planner/binder.h"
-#include "giodb/planner/type_resolver.h"
-#include "giodb/server/auth.h"
-#include "giodb/server/replication_slot.h"
-#include "giodb/server/wal_receiver.h"
-#include "giodb/server/wal_sender_manager.h"
-#include "giodb/storage/wal.h"
-#include "giodb/table/tuple.h"
-#include "giodb/vector/embedding_column.h"
-#include "giodb/vector/embedding_worker.h"
-#include "giodb/vector/hnsw_index.h"
-#include "giodb/vector/provider_registry.h"
+#include "sixseven/catalog/schema.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/common/types.h"
+#include "sixseven/executor/catalog_persistence.h"
+#include "sixseven/executor/explain.h"
+#include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/executor/planner.h"
+#include "sixseven/executor/provider_cache.h"
+#include "sixseven/executor/settings_cache.h"
+#include "sixseven/index/rid.h"
+#include "sixseven/parser/ast.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/parser.h"
+#include "sixseven/planner/binder.h"
+#include "sixseven/planner/type_resolver.h"
+#include "sixseven/server/auth.h"
+#include "sixseven/server/replication_slot.h"
+#include "sixseven/server/wal_receiver.h"
+#include "sixseven/server/wal_sender_manager.h"
+#include "sixseven/storage/wal.h"
+#include "sixseven/table/tuple.h"
+#include "sixseven/vector/embedding_column.h"
+#include "sixseven/vector/embedding_worker.h"
+#include "sixseven/vector/hnsw_index.h"
+#include "sixseven/vector/provider_registry.h"
 
 #include <chrono>
 #include <span>
 #include <sstream>
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -711,7 +711,7 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
     if (catalog_persistence_ != nullptr) {
         auto persist = catalog_persistence_->persist_table(current_database_id_, *schema);
         if (!persist) {
-            GIODB_LOG_WARN("failed to persist table '{}': {}", stmt.name, persist.error().message);
+            SIXSEVEN_LOG_WARN("failed to persist table '{}': {}", stmt.name, persist.error().message);
         }
     }
 
@@ -740,7 +740,7 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
             for (const auto& def : emb_defs) {
                 auto p = catalog_persistence_->persist_embedding_column(def);
                 if (!p) {
-                    GIODB_LOG_WARN("failed to persist embedding column: {}", p.error().message);
+                    SIXSEVEN_LOG_WARN("failed to persist embedding column: {}", p.error().message);
                 }
             }
         }
@@ -778,7 +778,7 @@ Result<QueryResult> QueryEngine::execute_drop_table(const DropTableStmt& stmt) {
     if (catalog_persistence_ != nullptr) {
         auto remove = catalog_persistence_->remove_table(table_id);
         if (!remove) {
-            GIODB_LOG_WARN("failed to remove table '{}' from persistence: {}",
+            SIXSEVEN_LOG_WARN("failed to remove table '{}' from persistence: {}",
                            stmt.name,
                            remove.error().message);
         }
@@ -853,7 +853,7 @@ Result<QueryResult> QueryEngine::execute_create_edge_type(const CreateEdgeTypeSt
         if (et) {
             auto persist = catalog_persistence_->persist_edge_type(*et);
             if (!persist) {
-                GIODB_LOG_WARN(
+                SIXSEVEN_LOG_WARN(
                     "failed to persist edge type '{}': {}", stmt.name, persist.error().message);
             }
         }
@@ -895,7 +895,7 @@ Result<QueryResult> QueryEngine::execute_drop_edge_type(const DropEdgeTypeStmt& 
     if (catalog_persistence_ != nullptr && edge_id != 0) {
         auto persist = catalog_persistence_->remove_edge_type(edge_id);
         if (!persist) {
-            GIODB_LOG_WARN("failed to remove persisted edge type '{}': {}",
+            SIXSEVEN_LOG_WARN("failed to remove persisted edge type '{}': {}",
                            stmt.name,
                            persist.error().message);
         }
@@ -1257,7 +1257,7 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
             // Batch embed via the provider.
             auto embeddings = target.provider->embed_batch(source_texts);
             if (!embeddings) {
-                GIODB_LOG_WARN("REEMBED: batch embed failed for provider '{}': {}",
+                SIXSEVEN_LOG_WARN("REEMBED: batch embed failed for provider '{}': {}",
                                target.def.provider,
                                embeddings.error().message);
                 total_skipped += static_cast<int64_t>(batch.size());
@@ -1312,7 +1312,7 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
             batch.clear();
 
             if (total_processed % 1000 == 0) {
-                GIODB_LOG_INFO("REEMBED: processed {} rows", total_processed);
+                SIXSEVEN_LOG_INFO("REEMBED: processed {} rows", total_processed);
             }
         }
     }
@@ -1341,7 +1341,7 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
             // Reset the index so new inserts start from node_id 0.
             auto reset_result = hnsw->reset();
             if (!reset_result) {
-                GIODB_LOG_WARN("REEMBED: failed to reset HNSW index '{}': {}",
+                SIXSEVEN_LOG_WARN("REEMBED: failed to reset HNSW index '{}': {}",
                                index_name,
                                reset_result.error().message);
                 continue;
@@ -1350,7 +1350,7 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
             // Re-scan the table and insert all embeddings in row order.
             auto rebuild_it = table_storage->heap->begin();
             if (!rebuild_it) {
-                GIODB_LOG_WARN("REEMBED: failed to scan table for HNSW rebuild: {}",
+                SIXSEVEN_LOG_WARN("REEMBED: failed to scan table for HNSW rebuild: {}",
                                rebuild_it.error().message);
                 continue;
             }
@@ -1376,7 +1376,7 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
                 }
             }
 
-            GIODB_LOG_INFO(
+            SIXSEVEN_LOG_INFO(
                 "REEMBED: rebuilt HNSW index '{}' with {} vectors", index_name, inserted);
         }
     }
@@ -1384,7 +1384,7 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start_time);
 
-    GIODB_LOG_INFO("REEMBED: completed {} rows in {}ms ({} skipped)",
+    SIXSEVEN_LOG_INFO("REEMBED: completed {} rows in {}ms ({} skipped)",
                    total_processed,
                    elapsed.count(),
                    total_skipped);
@@ -1499,7 +1499,7 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                                              "WHERE is_default = TRUE");
                         set_current_database(prev_db);
                         if (!unset) {
-                            GIODB_LOG_WARN("failed to unset existing default provider: {}",
+                            SIXSEVEN_LOG_WARN("failed to unset existing default provider: {}",
                                            unset.error().message);
                         }
                     }
@@ -1517,7 +1517,7 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                                                      "WHERE is_default = TRUE");
                                 set_current_database(prev_db);
                                 if (!unset) {
-                                    GIODB_LOG_WARN("failed to unset existing default provider: {}",
+                                    SIXSEVEN_LOG_WARN("failed to unset existing default provider: {}",
                                                    unset.error().message);
                                 }
                             }
@@ -1630,14 +1630,14 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                 set_current_database(prev_db);
 
                 if (!re_insert) {
-                    GIODB_LOG_ERROR("failed to restore in-use provider '{}': {}",
+                    SIXSEVEN_LOG_ERROR("failed to restore in-use provider '{}': {}",
                                     pp.name,
                                     re_insert.error().message);
                 }
                 // Reload cache to reflect the restored provider.
                 auto reload = provider_cache_->load(*this);
                 if (!reload) {
-                    GIODB_LOG_WARN("failed to reload provider cache: {}", reload.error().message);
+                    SIXSEVEN_LOG_WARN("failed to reload provider cache: {}", reload.error().message);
                 }
 
                 return make_error(StatusCode::CONSTRAINT_VIOLATION,
@@ -1668,7 +1668,7 @@ void QueryEngine::maybe_invalidate_provider_cache(const BoundStatement& bound) {
     if (target_table == "sys_providers") {
         auto reload = provider_cache_->load(*this);
         if (!reload) {
-            GIODB_LOG_WARN("failed to reload provider cache after DML: {}", reload.error().message);
+            SIXSEVEN_LOG_WARN("failed to reload provider cache after DML: {}", reload.error().message);
         }
     }
 }
@@ -2064,7 +2064,7 @@ Result<QueryResult> QueryEngine::execute_create_user(const CreateUserStmt& stmt)
         return make_error(result.error().code, result.error().message);
     }
 
-    GIODB_LOG_INFO("created user '{}'", stmt.username);
+    SIXSEVEN_LOG_INFO("created user '{}'", stmt.username);
 
     QueryResult qr;
     qr.message = "CREATE USER";
@@ -2085,7 +2085,7 @@ Result<QueryResult> QueryEngine::execute_drop_user(const DropUserStmt& stmt) {
         return make_error(result.error().code, result.error().message);
     }
 
-    GIODB_LOG_INFO("dropped user '{}'", stmt.username);
+    SIXSEVEN_LOG_INFO("dropped user '{}'", stmt.username);
 
     QueryResult qr;
     qr.message = "DROP USER";
@@ -2349,14 +2349,14 @@ Result<QueryResult> QueryEngine::execute_alter_table(const AlterTableStmt& stmt)
         if (updated_schema) {
             auto persist = catalog_persistence_->persist_columns_update(*updated_schema);
             if (!persist) {
-                GIODB_LOG_WARN("failed to persist ALTER TABLE for '{}': {}",
+                SIXSEVEN_LOG_WARN("failed to persist ALTER TABLE for '{}': {}",
                                stmt.table_name,
                                persist.error().message);
             }
         }
     }
 
-    GIODB_LOG_INFO("altered table '{}'", stmt.table_name);
+    SIXSEVEN_LOG_INFO("altered table '{}'", stmt.table_name);
 
     QueryResult qr;
     qr.message = "ALTER TABLE";
@@ -2378,7 +2378,7 @@ Result<QueryResult> QueryEngine::execute_alter_user(const AlterUserStmt& stmt) {
         return make_error(result.error().code, result.error().message);
     }
 
-    GIODB_LOG_INFO("altered user '{}'", stmt.username);
+    SIXSEVEN_LOG_INFO("altered user '{}'", stmt.username);
 
     QueryResult qr;
     qr.message = "ALTER USER";
@@ -2453,13 +2453,13 @@ Result<QueryResult> QueryEngine::execute_create_index(const CreateIndexStmt& stm
         if (created_def) {
             auto persist = catalog_persistence_->persist_index(*created_def);
             if (!persist) {
-                GIODB_LOG_WARN(
+                SIXSEVEN_LOG_WARN(
                     "failed to persist index '{}': {}", stmt.name, persist.error().message);
             }
         }
     }
 
-    GIODB_LOG_INFO("created index '{}' on table '{}'", stmt.name, stmt.table_name);
+    SIXSEVEN_LOG_INFO("created index '{}' on table '{}'", stmt.name, stmt.table_name);
 
     QueryResult qr;
     qr.message = "CREATE INDEX";
@@ -2488,7 +2488,7 @@ Result<QueryResult> QueryEngine::execute_drop_index(const DropIndexStmt& stmt) {
     if (catalog_persistence_ != nullptr) {
         auto remove = catalog_persistence_->remove_index(index_id);
         if (!remove) {
-            GIODB_LOG_WARN("failed to remove index '{}' from persistence: {}",
+            SIXSEVEN_LOG_WARN("failed to remove index '{}' from persistence: {}",
                            stmt.name,
                            remove.error().message);
         }
@@ -2500,11 +2500,11 @@ Result<QueryResult> QueryEngine::execute_drop_index(const DropIndexStmt& stmt) {
         return make_error(drop_result.error().code, drop_result.error().message);
     }
 
-    GIODB_LOG_INFO("dropped index '{}'", stmt.name);
+    SIXSEVEN_LOG_INFO("dropped index '{}'", stmt.name);
 
     QueryResult qr;
     qr.message = "DROP INDEX";
     return ok(std::move(qr));
 }
 
-} // namespace giodb
+} // namespace sixseven

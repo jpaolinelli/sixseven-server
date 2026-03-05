@@ -1,10 +1,10 @@
-# giodb::index sources
-add_library(giodb_index STATIC
+# sixseven::index sources
+add_library(sixseven_index STATIC
     btree_key.cpp
     btree_node.cpp
     btree_index.cpp
     btree_iterator.cpp
     hash_index.cpp
 )
-target_include_directories(giodb_index PUBLIC ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(giodb_index PUBLIC giodb_common giodb_storage)
+target_include_directories(sixseven_index PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(sixseven_index PUBLIC sixseven_common sixseven_storage)

@@ -5,10 +5,10 @@
 /// coercion (BUG), DECIMAL cross-type comparison (BUG), boundary values,
 /// serialization error paths, and stress scenarios.
 
-#include "giodb/common/coercion.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/storage/serialization.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/storage/serialization.h"
 
 #include <gtest/gtest.h>
 
@@ -16,7 +16,7 @@
 #include <compare>
 #include <limits>
 
-using namespace giodb;
+using namespace sixseven;
 
 // ============================================================================
 // QA_TypeId — TypeId enum and helper function edge cases

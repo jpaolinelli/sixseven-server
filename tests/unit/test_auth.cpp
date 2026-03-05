@@ -1,10 +1,10 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/config.h"
-#include "giodb/common/types.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/server/auth.h"
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/config.h"
+#include "sixseven/common/types.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/server/auth.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
@@ -12,7 +12,7 @@
 #include <fstream>
 #include <string>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Auth method parsing
@@ -458,14 +458,14 @@ TEST(UserManager, GetNonexistentUserReturnsNullopt) {
 
 TEST(UserManager, EnsureDefaultAdmin) {
     UserManager mgr;
-    EXPECT_FALSE(mgr.user_exists("giodb"));
+    EXPECT_FALSE(mgr.user_exists("sixseven"));
 
     mgr.ensure_default_admin(AuthMethod::SCRAM_SHA_256);
-    EXPECT_TRUE(mgr.user_exists("giodb"));
+    EXPECT_TRUE(mgr.user_exists("sixseven"));
 
-    auto record = mgr.get_user("giodb");
+    auto record = mgr.get_user("sixseven");
     ASSERT_TRUE(record.has_value());
-    EXPECT_EQ(record->username, "giodb");
+    EXPECT_EQ(record->username, "sixseven");
     // Should be SCRAM-formatted hash.
     EXPECT_TRUE(record->password_hash.substr(0, 14) == "SCRAM-SHA-256$");
 }
@@ -473,11 +473,11 @@ TEST(UserManager, EnsureDefaultAdmin) {
 TEST(UserManager, EnsureDefaultAdminIdempotent) {
     UserManager mgr;
     mgr.ensure_default_admin(AuthMethod::MD5);
-    auto first_hash = mgr.get_user("giodb")->password_hash;
+    auto first_hash = mgr.get_user("sixseven")->password_hash;
 
     // Calling again should not overwrite.
     mgr.ensure_default_admin(AuthMethod::MD5);
-    auto second_hash = mgr.get_user("giodb")->password_hash;
+    auto second_hash = mgr.get_user("sixseven")->password_hash;
     EXPECT_EQ(first_hash, second_hash);
 }
 
@@ -502,7 +502,7 @@ TEST(AuthConfig, DefaultAuthMethodIsTrust) {
 
 TEST(AuthConfig, AuthMethodFromConfigFile) {
     auto tmp_dir = std::filesystem::temp_directory_path();
-    auto config_path = tmp_dir / "giodb_test_auth_config.json";
+    auto config_path = tmp_dir / "sixseven_test_auth_config.json";
 
     // Write config file with auth_method set.
     {
@@ -531,7 +531,7 @@ protected:
     UserManager user_mgr_;
 
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_auth";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_auth";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 

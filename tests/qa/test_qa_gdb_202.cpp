@@ -1,9 +1,9 @@
 /// @file test_qa_gdb_202.cpp
 /// @brief QA adversarial tests for GDB-202: Binary format in DataRow based on Bind result_format_codes.
 
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/server/pg_protocol.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/server/pg_protocol.h"
 
 #include <gtest/gtest.h>
 
@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Helpers

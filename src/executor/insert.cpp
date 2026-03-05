@@ -1,16 +1,16 @@
-#include "giodb/executor/insert.h"
+#include "sixseven/executor/insert.h"
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/coercion.h"
-#include "giodb/common/logging.h"
-#include "giodb/common/types.h"
-#include "giodb/executor/expr_evaluator.h"
-#include "giodb/vector/embedding_worker.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/common/types.h"
+#include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/vector/embedding_worker.h"
 
 #include <algorithm>
 #include <cctype>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -266,9 +266,9 @@ void InsertOperator::enqueue_embedding_jobs(const RID& rid, const std::vector<Va
     if (!jobs.empty()) {
         auto result = embedding_pool_->enqueue_batch(std::move(jobs));
         if (!result) {
-            GIODB_LOG_WARN("failed to enqueue embedding jobs: {}", result.error().message);
+            SIXSEVEN_LOG_WARN("failed to enqueue embedding jobs: {}", result.error().message);
         }
     }
 }
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,8 +1,8 @@
-#include "giodb/storage/page.h"
+#include "sixseven/storage/page.h"
 
 #include <cstring>
 
-namespace giodb {
+namespace sixseven {
 
 // -- Construction -------------------------------------------------------------
 
@@ -294,4 +294,4 @@ void Page::set_data_offset(uint16_t offset) {
     write_u16(off_data_offset, offset);
 }
 
-} // namespace giodb
+} // namespace sixseven

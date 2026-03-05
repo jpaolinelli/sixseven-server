@@ -1,10 +1,10 @@
-#include "giodb/table/table_heap.h"
+#include "sixseven/table/table_heap.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <cstring>
 
-namespace giodb {
+namespace sixseven {
 
 // -- TableHeap ----------------------------------------------------------------
 
@@ -88,7 +88,7 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data) {
         // Tuple too large for an empty page.
         auto unpin = bpm_.unpin_page(new_pid, false);
         if (!unpin) {
-            GIODB_LOG_WARN("unpin failed after insert_tuple error on page {}: {}",
+            SIXSEVEN_LOG_WARN("unpin failed after insert_tuple error on page {}: {}",
                            new_pid,
                            unpin.error().message);
         }
@@ -117,7 +117,7 @@ Result<std::vector<uint8_t>> TableHeap::get_tuple(RID rid) {
     if (!tuple_span) {
         auto unpin = bpm_.unpin_page(rid.page_id, false);
         if (!unpin) {
-            GIODB_LOG_WARN("unpin failed after get_tuple error on page {}: {}",
+            SIXSEVEN_LOG_WARN("unpin failed after get_tuple error on page {}: {}",
                            rid.page_id,
                            unpin.error().message);
         }
@@ -156,7 +156,7 @@ Result<void> TableHeap::update_tuple(RID rid, std::span<const uint8_t> data) {
         if (!result) {
             auto unpin = bpm_.unpin_page(rid.page_id, false);
             if (!unpin) {
-                GIODB_LOG_WARN("unpin failed after update_tuple error on page {}: {}",
+                SIXSEVEN_LOG_WARN("unpin failed after update_tuple error on page {}: {}",
                                rid.page_id,
                                unpin.error().message);
             }
@@ -183,7 +183,7 @@ Result<void> TableHeap::delete_tuple(RID rid) {
     if (!result) {
         auto unpin = bpm_.unpin_page(rid.page_id, false);
         if (!unpin) {
-            GIODB_LOG_WARN("unpin failed after delete_tuple error on page {}: {}",
+            SIXSEVEN_LOG_WARN("unpin failed after delete_tuple error on page {}: {}",
                            rid.page_id,
                            unpin.error().message);
         }
@@ -244,7 +244,7 @@ std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
 
                 auto unpin = bpm_.unpin_page(current_page_, false);
                 if (!unpin) {
-                    GIODB_LOG_WARN("unpin failed during scan on page {}: {}",
+                    SIXSEVEN_LOG_WARN("unpin failed during scan on page {}: {}",
                                    current_page_,
                                    unpin.error().message);
                 }
@@ -257,7 +257,7 @@ std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
         // No more slots on this page — move to next.
         auto unpin = bpm_.unpin_page(current_page_, false);
         if (!unpin) {
-            GIODB_LOG_WARN(
+            SIXSEVEN_LOG_WARN(
                 "unpin failed during scan on page {}: {}", current_page_, unpin.error().message);
         }
         current_page_++;
@@ -268,4 +268,4 @@ std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
     return std::nullopt;
 }
 
-} // namespace giodb
+} // namespace sixseven

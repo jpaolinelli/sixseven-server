@@ -1,8 +1,8 @@
-# giodb::vector sources
+# sixseven::vector sources
 find_package(httplib CONFIG REQUIRED)
 find_package(onnxruntime CONFIG REQUIRED)
 
-add_library(giodb_vector STATIC
+add_library(sixseven_vector STATIC
     bpe_tokenizer.cpp
     distance.cpp
     hnsw_page.cpp
@@ -21,5 +21,5 @@ add_library(giodb_vector STATIC
     onnx_provider.cpp
     provider_registry.cpp
 )
-target_include_directories(giodb_vector PUBLIC ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(giodb_vector PUBLIC giodb_common giodb_storage giodb_catalog httplib::httplib onnxruntime::onnxruntime)
+target_include_directories(sixseven_vector PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(sixseven_vector PUBLIC sixseven_common sixseven_storage sixseven_catalog httplib::httplib onnxruntime::onnxruntime)

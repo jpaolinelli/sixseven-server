@@ -1,9 +1,9 @@
-#include "giodb/executor/seq_scan.h"
+#include "sixseven/executor/seq_scan.h"
 
-#include "giodb/executor/expr_evaluator.h"
-#include "giodb/table/tuple.h"
+#include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/table/tuple.h"
 
-namespace giodb {
+namespace sixseven {
 
 SeqScanOperator::SeqScanOperator(TableHeap& heap,
                                  const Schema& storage_schema,
@@ -78,4 +78,4 @@ std::string SeqScanOperator::plan_node_detail() const {
     return "";
 }
 
-} // namespace giodb
+} // namespace sixseven

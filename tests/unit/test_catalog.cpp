@@ -1,11 +1,11 @@
-#include "giodb/catalog/catalog.h"
+#include "sixseven/catalog/catalog.h"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <string>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Helper: build a simple TableSchema ---------------------------------------
 
@@ -831,10 +831,10 @@ TEST(Catalog, DropTableCascadesToEmbeddingColumns) {
 TEST(Catalog, DefaultDatabaseExistsOnInit) {
     Catalog catalog;
 
-    auto db = catalog.get_database("giodb");
+    auto db = catalog.get_database("sixseven");
     ASSERT_TRUE(db.has_value()) << db.error().message;
     EXPECT_EQ(db->database_id, default_database_id);
-    EXPECT_EQ(db->name, "giodb");
+    EXPECT_EQ(db->name, "sixseven");
 }
 
 TEST(Catalog, ListDatabasesIncludesDefault) {
@@ -843,7 +843,7 @@ TEST(Catalog, ListDatabasesIncludesDefault) {
     auto dbs = catalog.list_databases();
     ASSERT_EQ(dbs.size(), 2u);
     EXPECT_EQ(dbs[0].database_id, default_database_id);
-    EXPECT_EQ(dbs[0].name, "giodb");
+    EXPECT_EQ(dbs[0].name, "sixseven");
     EXPECT_EQ(dbs[1].database_id, system_database_id);
     EXPECT_EQ(dbs[1].name, system_database_name);
 }
@@ -882,7 +882,7 @@ TEST(Catalog, CreateDatabaseDuplicateNameFails) {
 TEST(Catalog, CreateDatabaseNameConflictsWithDefault) {
     Catalog catalog;
 
-    auto id = catalog.create_database("giodb");
+    auto id = catalog.create_database("sixseven");
     EXPECT_FALSE(id.has_value());
     EXPECT_EQ(id.error().code, StatusCode::ALREADY_EXISTS);
 }
@@ -918,8 +918,8 @@ TEST(Catalog, ListDatabasesSortedById) {
     ASSERT_TRUE(catalog.create_database("alpha").has_value());
 
     auto dbs = catalog.list_databases();
-    ASSERT_EQ(dbs.size(), 4u); // giodb + giodb_system + zeta + alpha
-    EXPECT_EQ(dbs[0].name, "giodb");
+    ASSERT_EQ(dbs.size(), 4u); // sixseven + sixseven_system + zeta + alpha
+    EXPECT_EQ(dbs[0].name, "sixseven");
     EXPECT_EQ(dbs[1].name, system_database_name);
     EXPECT_LT(dbs[0].database_id, dbs[1].database_id);
     EXPECT_LT(dbs[1].database_id, dbs[2].database_id);
@@ -1032,8 +1032,8 @@ TEST(Catalog, DropDatabaseRemovesFromList) {
     ASSERT_TRUE(catalog.drop_database(*id, false).has_value());
 
     auto dbs = catalog.list_databases();
-    ASSERT_EQ(dbs.size(), 2u); // giodb + giodb_system remain.
-    EXPECT_EQ(dbs[0].name, "giodb");
+    ASSERT_EQ(dbs.size(), 2u); // sixseven + sixseven_system remain.
+    EXPECT_EQ(dbs[0].name, "sixseven");
     EXPECT_EQ(dbs[1].name, system_database_name);
 }
 

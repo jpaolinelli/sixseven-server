@@ -14,9 +14,9 @@ Think like an adversary. Every function is guilty until proven innocent.
 
 ## What QA Does NOT Do
 
-- **QA does NOT run the full `giodb_qa_tests` suite locally.** Use `--gtest_filter` to run only tests for the ticket under review. The full QA regression suite runs in CI.
-- **QA does NOT modify developer tests in `giodb_unit_tests`.** Dev tests in `tests/unit/` are owned by implementers.
-- **QA does NOT add tests to `giodb_unit_tests`.** All QA tests go in `giodb_qa_tests` (`tests/qa/` directory).
+- **QA does NOT run the full `sixseven_qa_tests` suite locally.** Use `--gtest_filter` to run only tests for the ticket under review. The full QA regression suite runs in CI.
+- **QA does NOT modify developer tests in `sixseven_unit_tests`.** Dev tests in `tests/unit/` are owned by implementers.
+- **QA does NOT add tests to `sixseven_unit_tests`.** All QA tests go in `sixseven_qa_tests` (`tests/qa/` directory).
 - **QA does NOT fix implementation bugs.** QA finds bugs, writes reproducing tests, and files tickets. Fixing is the implementer's job.
 
 ## Step 1: Understand the Ticket
@@ -40,14 +40,14 @@ Record the results.
 Then build the QA test target (needed for Steps 4–5):
 
 ```bash
-cmake --build build/debug --target giodb_qa_tests
+cmake --build build/debug --target sixseven_qa_tests
 ```
 
 ## Step 3: Read the Implementation
 
 Read every file added or modified for the ticket:
 
-- **Headers**: `include/giodb/<module>/*.h`
+- **Headers**: `include/sixseven/<module>/*.h`
 - **Implementations**: `src/<module>/*.cpp`
 - **Dev tests**: `tests/unit/test_*.cpp`
 - **QA tests**: `tests/qa/test_qa_*.cpp`
@@ -116,16 +116,16 @@ This is the core of QA. Write new test cases designed to **break** the implement
 
 ### Test File Location
 
-QA test files go in `tests/qa/` and are auto-detected by the `giodb_qa_tests` CMake target (no manual registration needed). File naming convention: `test_qa_gdb_<ticket_number>.cpp` (e.g., `test_qa_gdb_42.cpp`). For tickets covering multiple related items, use: `test_qa_gdb_<N1>_<N2>.cpp`.
+QA test files go in `tests/qa/` and are auto-detected by the `sixseven_qa_tests` CMake target (no manual registration needed). File naming convention: `test_qa_gdb_<ticket_number>.cpp` (e.g., `test_qa_gdb_42.cpp`). For tickets covering multiple related items, use: `test_qa_gdb_<N1>_<N2>.cpp`.
 
-> **Important**: QA tests go in `giodb_qa_tests` (the `tests/qa/` directory), **NOT** in `giodb_unit_tests` (the `tests/unit/` directory). Never add QA tests to the dev test target.
+> **Important**: QA tests go in `sixseven_qa_tests` (the `tests/qa/` directory), **NOT** in `sixseven_unit_tests` (the `tests/unit/` directory). Never add QA tests to the dev test target.
 
 ## Step 5: Run Ticket-Specific QA Tests
 
 Run only the tests for the ticket under review — **not** the full QA suite:
 
 ```bash
-./build/debug/tests/qa/giodb_qa_tests --gtest_filter="*GDB<N>*"
+./build/debug/tests/qa/sixseven_qa_tests --gtest_filter="*GDB<N>*"
 ```
 
 Replace `<N>` with the ticket number (e.g., `--gtest_filter="*GDB42*"` for GDB-42).
@@ -138,8 +138,8 @@ Build and run **Ticket-Specific QA tests** with ASan to catch memory bugs:
 
 ```bash
 export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset asan
-cmake --build build/asan --target giodb_qa_tests
-ASAN_OPTIONS=detect_leaks=1:halt_on_error=0 ./build/asan/tests/qa/giodb_qa_tests --gtest_filter="*GDB<N>*"
+cmake --build build/asan --target sixseven_qa_tests
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=0 ./build/asan/tests/qa/sixseven_qa_tests --gtest_filter="*GDB<N>*"
 ```
 
 ASan detects: buffer overflows, use-after-free, memory leaks, stack overflows, double-free. Any ASan finding is a QA bug.

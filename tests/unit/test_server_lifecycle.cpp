@@ -1,4 +1,4 @@
-#include "giodb/server/server.h"
+#include "sixseven/server/server.h"
 
 #include <gtest/gtest.h>
 
@@ -12,7 +12,7 @@
 #include <cstring>
 #include <thread>
 
-namespace giodb {
+namespace sixseven {
 
 class ServerLifecycleTest : public ::testing::Test {
 protected:
@@ -163,4 +163,4 @@ TEST_F(ServerLifecycleTest, ShutdownTimeoutConfigRespected) {
     EXPECT_LT(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count(), 5);
 }
 
-} // namespace giodb
+} // namespace sixseven

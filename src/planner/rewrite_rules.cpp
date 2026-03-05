@@ -1,9 +1,9 @@
-#include "giodb/planner/rewrite_rules.h"
+#include "sixseven/planner/rewrite_rules.h"
 
 #include <cmath>
 #include <cstdlib>
 
-namespace giodb {
+namespace sixseven {
 
 // =============================================================================
 // Constant folding
@@ -688,4 +688,4 @@ JoinType subquery_to_join_type(const Expr& expr) {
     return JoinType::INNER;
 }
 
-} // namespace giodb
+} // namespace sixseven

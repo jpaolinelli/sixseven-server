@@ -1,10 +1,10 @@
-#include "giodb/storage/wal_record.h"
+#include "sixseven/storage/wal_record.h"
 
-#include "giodb/storage/disk_manager.h" // crc32c()
+#include "sixseven/storage/disk_manager.h" // crc32c()
 
 #include <cstring>
 
-namespace giodb {
+namespace sixseven {
 
 // -- Serialization helpers ----------------------------------------------------
 
@@ -146,4 +146,4 @@ Result<WalRecord> deserialize_wal_record(std::span<const uint8_t> buf) {
     return ok(std::move(record));
 }
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,11 +1,11 @@
-#include "giodb/executor/hash_join.h"
+#include "sixseven/executor/hash_join.h"
 
-#include "giodb/common/coercion.h"
-#include "giodb/executor/expr_evaluator.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/executor/expr_evaluator.h"
 
 #include <functional>
 
-namespace giodb {
+namespace sixseven {
 
 // ---------------------------------------------------------------------------
 // Construction
@@ -328,4 +328,4 @@ Tuple HashJoinOperator::probe_with_null_build(const Tuple& probe) const {
     return result;
 }
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,11 +1,11 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/explain.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/parser/ast.h"
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/explain.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/parser/ast.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -14,7 +14,7 @@
 #include <memory>
 #include <string>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test fixture
@@ -23,7 +23,7 @@ using namespace giodb;
 class ExplainTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_explain";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_explain";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 

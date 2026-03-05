@@ -5,9 +5,9 @@
 /// base64 padding, corrupted hashes, concurrent user ops, wire-protocol
 /// auth flows for MD5 and SCRAM, invalid SASL mechanisms, wrong password.
 
-#include "giodb/server/auth.h"
-#include "giodb/server/connection.h"
-#include "giodb/server/pg_protocol.h"
+#include "sixseven/server/auth.h"
+#include "sixseven/server/connection.h"
+#include "sixseven/server/pg_protocol.h"
 
 #include <gtest/gtest.h>
 
@@ -21,7 +21,7 @@
 #include <thread>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Crypto edge cases
@@ -297,12 +297,12 @@ TEST(QA148UserMgr, AlterFromMd5ToScram) {
 
 TEST(QA148UserMgr, EnsureDefaultAdminDoesNotOverwrite) {
     UserManager mgr;
-    (void)mgr.create_user("giodb", "custom_pass", AuthMethod::MD5);
-    auto before = mgr.get_user("giodb");
+    (void)mgr.create_user("sixseven", "custom_pass", AuthMethod::MD5);
+    auto before = mgr.get_user("sixseven");
 
     mgr.ensure_default_admin(AuthMethod::SCRAM_SHA_256);
 
-    auto after = mgr.get_user("giodb");
+    auto after = mgr.get_user("sixseven");
     ASSERT_TRUE(after.has_value());
     // Should NOT have been overwritten to SCRAM.
     EXPECT_EQ(before->password_hash, after->password_hash);

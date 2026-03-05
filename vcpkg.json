@@ -1,5 +1,5 @@
 {
-  "name": "giodb",
+  "name": "sixseven",
   "version-string": "0.1.0",
   "description": "A hybrid relational, graph, and vector database",
   "builtin-baseline": "1940ee77e81573713c0d364c42f5990172198be1",

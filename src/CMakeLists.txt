@@ -1,4 +1,4 @@
-# GioDB source library and executables
+# SixSevenDB source library and executables
 
 # Module subdirectories (must come before aggregate library)
 add_subdirectory(common)
@@ -15,13 +15,13 @@ add_subdirectory(txn)
 add_subdirectory(server)
 
 # Aggregate library — links all module libraries
-add_library(giodb INTERFACE)
-target_link_libraries(giodb INTERFACE giodb_common giodb_storage giodb_table giodb_index giodb_catalog giodb_graph giodb_vector giodb_parser giodb_planner giodb_executor giodb_txn giodb_server)
+add_library(sixseven INTERFACE)
+target_link_libraries(sixseven INTERFACE sixseven_common sixseven_storage sixseven_table sixseven_index sixseven_catalog sixseven_graph sixseven_vector sixseven_parser sixseven_planner sixseven_executor sixseven_txn sixseven_server)
 
 # Server executable
-add_executable(giodb-server main.cpp)
-target_link_libraries(giodb-server PRIVATE giodb)
+add_executable(sixseven-server main.cpp)
+target_link_libraries(sixseven-server PRIVATE sixseven)
 
 # CLI executable
-add_executable(giodb-cli cli/main.cpp)
-target_link_libraries(giodb-cli PRIVATE giodb)
+add_executable(sixseven-cli cli/main.cpp)
+target_link_libraries(sixseven-cli PRIVATE sixseven)

@@ -1,14 +1,14 @@
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/filter.h"
-#include "giodb/executor/seq_scan.h"
-#include "giodb/executor/tuple.h"
-#include "giodb/parser/ast.h"
-#include "giodb/planner/binder.h"
-#include "giodb/storage/buffer_pool.h"
-#include "giodb/storage/disk_manager.h"
-#include "giodb/table/table_heap.h"
-#include "giodb/table/tuple.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/filter.h"
+#include "sixseven/executor/seq_scan.h"
+#include "sixseven/executor/tuple.h"
+#include "sixseven/parser/ast.h"
+#include "sixseven/planner/binder.h"
+#include "sixseven/storage/buffer_pool.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/table/table_heap.h"
+#include "sixseven/table/tuple.h"
 
 #include <gtest/gtest.h>
 
@@ -18,14 +18,14 @@
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Test fixture -------------------------------------------------------------
 
 class SeqScanTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        path_ = std::filesystem::temp_directory_path() / "giodb_test_seq_scan.db";
+        path_ = std::filesystem::temp_directory_path() / "sixseven_test_seq_scan.db";
         std::filesystem::remove(path_);
 
         auto fid = dm_.create_file(path_, false, true);

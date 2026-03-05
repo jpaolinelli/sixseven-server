@@ -1,11 +1,11 @@
-#include "giodb/storage/overflow.h"
+#include "sixseven/storage/overflow.h"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <numeric>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Helper: create a vector of bytes with a repeating pattern ----------------
 

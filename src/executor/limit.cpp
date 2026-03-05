@@ -1,6 +1,6 @@
-#include "giodb/executor/limit.h"
+#include "sixseven/executor/limit.h"
 
-namespace giodb {
+namespace sixseven {
 
 LimitOperator::LimitOperator(std::unique_ptr<Iterator> child, int64_t limit, int64_t offset)
     : child_(std::move(child)), limit_(limit), offset_(offset) {}
@@ -69,4 +69,4 @@ std::vector<Iterator*> LimitOperator::plan_children_mutable() {
     return {child_.get()};
 }
 
-} // namespace giodb
+} // namespace sixseven

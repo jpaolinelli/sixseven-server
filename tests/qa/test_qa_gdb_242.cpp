@@ -6,8 +6,8 @@
 /// return PARSE_ERROR via Result<T> instead of throwing exceptions.
 /// Also probes additional edge cases around the fix boundaries.
 
-#include "giodb/vector/http_client.h"
-#include "giodb/vector/openai_provider.h"
+#include "sixseven/vector/http_client.h"
+#include "sixseven/vector/openai_provider.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 namespace {
 

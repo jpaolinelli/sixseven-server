@@ -1,14 +1,14 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/config.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/catalog_persistence.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/settings_cache.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/executor/system_bootstrap.h"
-#include "giodb/server/replication_slot.h"
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/config.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/catalog_persistence.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/settings_cache.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/executor/system_bootstrap.h"
+#include "sixseven/server/replication_slot.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
@@ -16,7 +16,7 @@
 #include <memory>
 #include <string>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test fixture for SET/SHOW execution (GDB-189)
@@ -25,7 +25,7 @@ using namespace giodb;
 class SetShowTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_set_show";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_set_show";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -50,7 +50,7 @@ protected:
         engine_->set_settings_cache(cache_.get());
 
         // Switch to default database for user operations.
-        use_database("giodb");
+        use_database("sixseven");
     }
 
     void TearDown() override {
@@ -339,16 +339,16 @@ TEST_F(SetShowTest, ShowDatabases) {
     ASSERT_EQ(qr.column_names.size(), 1u);
     EXPECT_EQ(qr.column_names[0], "database_name");
 
-    // Default databases: giodb and giodb_system.
-    bool found_giodb = false;
+    // Default databases: sixseven and sixseven_system.
+    bool found_sixseven = false;
     bool found_system = false;
     for (const auto& row : qr.rows) {
-        if (row[0].as_string() == "giodb")
-            found_giodb = true;
-        if (row[0].as_string() == "giodb_system")
+        if (row[0].as_string() == "sixseven")
+            found_sixseven = true;
+        if (row[0].as_string() == "sixseven_system")
             found_system = true;
     }
-    EXPECT_TRUE(found_giodb);
+    EXPECT_TRUE(found_sixseven);
     EXPECT_TRUE(found_system);
 }
 
@@ -500,9 +500,9 @@ TEST_F(SetShowTest, SetWithStringLiteralQuotedValue) {
 
 TEST_F(SetShowTest, ShowReplicationSlotsEmpty) {
     // Wire up a slot manager with no slots.
-    auto tmp = std::filesystem::temp_directory_path() / "giodb_test_show_slots";
+    auto tmp = std::filesystem::temp_directory_path() / "sixseven_test_show_slots";
     std::filesystem::create_directories(tmp);
-    giodb::ReplicationSlotManager slot_mgr(tmp);
+    sixseven::ReplicationSlotManager slot_mgr(tmp);
     engine_->set_slot_manager(&slot_mgr);
 
     auto qr = exec_ok("SHOW REPLICATION SLOTS");
@@ -518,9 +518,9 @@ TEST_F(SetShowTest, ShowReplicationSlotsEmpty) {
 }
 
 TEST_F(SetShowTest, ShowReplicationSlotsWithData) {
-    auto tmp = std::filesystem::temp_directory_path() / "giodb_test_show_slots2";
+    auto tmp = std::filesystem::temp_directory_path() / "sixseven_test_show_slots2";
     std::filesystem::create_directories(tmp);
-    giodb::ReplicationSlotManager slot_mgr(tmp);
+    sixseven::ReplicationSlotManager slot_mgr(tmp);
     engine_->set_slot_manager(&slot_mgr);
 
     ASSERT_TRUE(slot_mgr.create_slot("replica_1").has_value());

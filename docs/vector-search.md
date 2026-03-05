@@ -1,6 +1,6 @@
 # Vector Search Guide
 
-GioDB provides native vector search through `EMBEDDING` columns and the `NEAREST` query. Vectors are indexed automatically using HNSW (Hierarchical Navigable Small World) graphs for fast approximate nearest neighbor lookup.
+SixSevenDB provides native vector search through `EMBEDDING` columns and the `NEAREST` query. Vectors are indexed automatically using HNSW (Hierarchical Navigable Small World) graphs for fast approximate nearest neighbor lookup.
 
 ## EMBEDDING Columns
 
@@ -16,7 +16,7 @@ EMBEDDING(dimension, source='column_name', provider='type/model')
 | `source` | Column(s) to embed (comma-separated for multiple) | `'title'`, `'title,body'` |
 | `provider` | Embedding provider in `type/model` format | `'openai/text-embedding-3-small'` |
 
-When a row is inserted or updated, GioDB automatically generates the embedding from the source column text using the configured provider. Embeddings are produced asynchronously — the column may be `NULL` briefly until the worker pool completes the embedding job.
+When a row is inserted or updated, SixSevenDB automatically generates the embedding from the source column text using the configured provider. Embeddings are produced asynchronously — the column may be `NULL` briefly until the worker pool completes the embedding job.
 
 A companion HNSW index is created automatically for each `EMBEDDING` column (named `hnsw_<table>_<column>`).
 
@@ -101,7 +101,7 @@ The `k` parameter controls how many nearest neighbors are returned. It directly 
 
 ### k with WHERE Filters
 
-When a `WHERE` clause is present, GioDB over-fetches from the HNSW index (retrieving `k * 4` candidates) then post-filters to the requested `k`. This means some queries may return fewer than `k` results if the filter is very selective. If you consistently get fewer results than expected, increase `k` to compensate.
+When a `WHERE` clause is present, SixSevenDB over-fetches from the HNSW index (retrieving `k * 4` candidates) then post-filters to the requested `k`. This means some queries may return fewer than `k` results if the filter is very selective. If you consistently get fewer results than expected, increase `k` to compensate.
 
 ### Edge Cases
 
@@ -156,7 +156,7 @@ NEAREST 5 FROM articles.body_vec TO 'neural networks' USING DOT;
 
 ### HNSW Index (default)
 
-When an HNSW index exists and contains vectors, GioDB uses approximate nearest neighbor search. This is the default path since a companion index is auto-created with every `EMBEDDING` column.
+When an HNSW index exists and contains vectors, SixSevenDB uses approximate nearest neighbor search. This is the default path since a companion index is auto-created with every `EMBEDDING` column.
 
 - **Time complexity:** O(log n) per query
 - **Recall:** >95% at default settings (compared to exact brute-force)
@@ -164,7 +164,7 @@ When an HNSW index exists and contains vectors, GioDB uses approximate nearest n
 
 ### Brute-Force Fallback
 
-If the HNSW index is empty (e.g., embeddings not yet generated), GioDB falls back to sequential scan:
+If the HNSW index is empty (e.g., embeddings not yet generated), SixSevenDB falls back to sequential scan:
 
 - Scans every row in the table
 - Computes distance for each non-NULL embedding
@@ -263,7 +263,7 @@ Higher-dimension embeddings (e.g., 1536 vs 384) require more computation per dis
 
 ### WHERE Filter Interaction
 
-With a `WHERE` clause, GioDB retrieves `k * 4` candidates from the HNSW index, then post-filters. Very selective filters may cause fewer than `k` results. Increase `k` if needed.
+With a `WHERE` clause, SixSevenDB retrieves `k * 4` candidates from the HNSW index, then post-filters. Very selective filters may cause fewer than `k` results. Increase `k` if needed.
 
 ### Re-embedding
 

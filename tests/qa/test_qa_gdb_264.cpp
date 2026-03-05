@@ -5,18 +5,18 @@
 /// Tests the binder's ability to resolve columns, meta-columns, edge properties,
 /// and error paths when TRAVERSE appears as a FROM source in SELECT queries.
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/parser/lexer.h"
-#include "giodb/parser/parser.h"
-#include "giodb/planner/binder.h"
-#include "giodb/planner/type_resolver.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/parser.h"
+#include "sixseven/planner/binder.h"
+#include "sixseven/planner/type_resolver.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 #include <vector>
 
-namespace giodb {
+namespace sixseven {
 
 // =============================================================================
 // Test fixture — catalog with tables and edge types for TRAVERSE binding
@@ -734,4 +734,4 @@ TEST_F(QA_GDB264, StarWithAlias) {
     EXPECT_EQ(bound.output_columns.size(), 9u);
 }
 
-} // namespace giodb
+} // namespace sixseven

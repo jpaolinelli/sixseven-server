@@ -10,10 +10,10 @@
 /// LINK and UNLINK operations when a WalWriter is provided, and that the
 /// engine still functions correctly with a nullptr WAL (backward compat).
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/graph/edge_table.h"
-#include "giodb/graph/graph_engine.h"
-#include "giodb/storage/wal.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/graph/edge_table.h"
+#include "sixseven/graph/graph_engine.h"
+#include "sixseven/storage/wal.h"
 
 #include <gtest/gtest.h>
 
@@ -23,7 +23,7 @@
 #include <set>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -394,7 +394,7 @@ TEST(QA_EdgeTableDeleteRollback, InterleavedInsertDeletePartialSubset) {
 class WalTestDir {
 public:
     WalTestDir() {
-        path_ = std::filesystem::temp_directory_path() / "giodb_qa_gdb_233_234" /
+        path_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb_233_234" /
                 std::to_string(counter_++);
         std::filesystem::remove_all(path_);
         std::filesystem::create_directories(path_);

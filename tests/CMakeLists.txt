@@ -1,4 +1,4 @@
-# GioDB test targets
+# SixSevenDB test targets
 
 find_package(GTest CONFIG REQUIRED)
 

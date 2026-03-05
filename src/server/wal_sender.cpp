@@ -1,10 +1,10 @@
-#include "giodb/server/wal_sender.h"
+#include "sixseven/server/wal_sender.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <chrono>
 
-namespace giodb {
+namespace sixseven {
 
 WalSender::WalSender(std::unique_ptr<ReplicationConnection> connection,
                      std::filesystem::path wal_dir,
@@ -33,7 +33,7 @@ Result<void> WalSender::start_streaming(lsn_t start_lsn) {
 
     stream_thread_ = std::thread([this] { streaming_loop(); });
 
-    GIODB_LOG_INFO("WalSender started streaming to {} from LSN {}",
+    SIXSEVEN_LOG_INFO("WalSender started streaming to {} from LSN {}",
                    connection_->peer_description(),
                    start_lsn);
     return ok();
@@ -131,7 +131,7 @@ void WalSender::streaming_loop() {
     if (slot_mgr_ != nullptr && !slot_name_.empty()) {
         auto activate_result = slot_mgr_->activate_slot(slot_name_, start_lsn);
         if (!activate_result) {
-            GIODB_LOG_WARN("WalSender failed to activate slot '{}': {}",
+            SIXSEVEN_LOG_WARN("WalSender failed to activate slot '{}': {}",
                            slot_name_,
                            activate_result.error().message);
         }
@@ -139,7 +139,7 @@ void WalSender::streaming_loop() {
 
     auto catchup_result = run_catchup(start_lsn);
     if (!catchup_result) {
-        GIODB_LOG_ERROR("WalSender catch-up failed for {}: {}",
+        SIXSEVEN_LOG_ERROR("WalSender catch-up failed for {}: {}",
                         connection_->peer_description(),
                         catchup_result.error().message);
         state_.store(State::STOPPED);
@@ -157,7 +157,7 @@ void WalSender::streaming_loop() {
     cc.current_lsn = writer_.current_lsn();
     auto cc_result = send_message(serialize_catchup_complete(cc));
     if (!cc_result) {
-        GIODB_LOG_ERROR("WalSender failed to send CatchupComplete to {}: {}",
+        SIXSEVEN_LOG_ERROR("WalSender failed to send CatchupComplete to {}: {}",
                         connection_->peer_description(),
                         cc_result.error().message);
         state_.store(State::STOPPED);
@@ -168,12 +168,12 @@ void WalSender::streaming_loop() {
         return;
     }
 
-    GIODB_LOG_INFO("WalSender catch-up complete for {}, switching to real-time streaming",
+    SIXSEVEN_LOG_INFO("WalSender catch-up complete for {}, switching to real-time streaming",
                    connection_->peer_description());
 
     auto stream_result = run_streaming();
     if (!stream_result) {
-        GIODB_LOG_WARN("WalSender streaming ended for {}: {}",
+        SIXSEVEN_LOG_WARN("WalSender streaming ended for {}: {}",
                        connection_->peer_description(),
                        stream_result.error().message);
     }
@@ -465,7 +465,7 @@ Result<void> WalSender::process_replica_messages() {
             break;
         }
         default:
-            GIODB_LOG_WARN("WalSender received unexpected message type {} from {}",
+            SIXSEVEN_LOG_WARN("WalSender received unexpected message type {} from {}",
                            static_cast<int>(*type_result),
                            connection_->peer_description());
             break;
@@ -484,4 +484,4 @@ Result<void> WalSender::send_message(std::span<const uint8_t> data) {
     return connection_->send(data);
 }
 
-} // namespace giodb
+} // namespace sixseven

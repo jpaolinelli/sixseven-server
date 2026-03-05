@@ -1,14 +1,14 @@
-#include "giodb/executor/settings_cache.h"
+#include "sixseven/executor/settings_cache.h"
 
-#include "giodb/catalog/schema.h"
-#include "giodb/common/logging.h"
-#include "giodb/executor/query_engine.h"
+#include "sixseven/catalog/schema.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/executor/query_engine.h"
 
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
 
-namespace giodb {
+namespace sixseven {
 
 Result<void> SettingsCache::load(QueryEngine& engine) {
     // Switch to system database to query sys_settings.
@@ -42,7 +42,7 @@ Result<void> SettingsCache::load(QueryEngine& engine) {
         entries_[entry.key] = std::move(entry);
     }
 
-    GIODB_LOG_INFO("settings cache: loaded {} settings", entries_.size());
+    SIXSEVEN_LOG_INFO("settings cache: loaded {} settings", entries_.size());
     return ok();
 }
 
@@ -88,8 +88,8 @@ void SettingsCache::apply_runtime_change(const std::string& key, const std::stri
     if (key == "logging.level") {
         auto level = spdlog::level::from_str(value);
         spdlog::set_level(level);
-        GIODB_LOG_INFO("runtime: logging.level changed to '{}'", value);
+        SIXSEVEN_LOG_INFO("runtime: logging.level changed to '{}'", value);
     }
 }
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,7 +1,7 @@
-#include "giodb/storage/wal_archive.h"
+#include "sixseven/storage/wal_archive.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/storage/disk_manager.h" // crc32c()
+#include "sixseven/common/logging.h"
+#include "sixseven/storage/disk_manager.h" // crc32c()
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -13,7 +13,7 @@
 #include <iomanip>
 #include <sstream>
 
-namespace giodb {
+namespace sixseven {
 
 // -- Cleanup policy helpers ---------------------------------------------------
 
@@ -91,7 +91,7 @@ WalArchiveManager::~WalArchiveManager() {
     if (running_.load(std::memory_order_acquire)) {
         auto result = stop();
         if (!result) {
-            GIODB_LOG_ERROR("WalArchiveManager destructor stop failed: {}", result.error().message);
+            SIXSEVEN_LOG_ERROR("WalArchiveManager destructor stop failed: {}", result.error().message);
         }
     }
 }
@@ -113,7 +113,7 @@ Result<void> WalArchiveManager::start() {
     running_.store(true, std::memory_order_release);
     archive_thread_ = std::thread([this] { archive_loop(); });
 
-    GIODB_LOG_INFO("WAL archive manager started: wal_dir={}, archive_dir={}",
+    SIXSEVEN_LOG_INFO("WAL archive manager started: wal_dir={}, archive_dir={}",
                    wal_dir_.string(),
                    archive_dir_.string());
 
@@ -136,7 +136,7 @@ Result<void> WalArchiveManager::stop() {
         archive_thread_.join();
     }
 
-    GIODB_LOG_INFO("WAL archive manager stopped");
+    SIXSEVEN_LOG_INFO("WAL archive manager stopped");
     return ok();
 }
 
@@ -170,7 +170,7 @@ Result<void> WalArchiveManager::archive_segment(uint64_t segment_id, lsn_t last_
         }
     }
 
-    GIODB_LOG_INFO("WAL segment {} archived, last_archived_lsn={}", segment_id, last_lsn);
+    SIXSEVEN_LOG_INFO("WAL segment {} archived, last_archived_lsn={}", segment_id, last_lsn);
     return ok();
 }
 
@@ -197,7 +197,7 @@ Result<void> WalArchiveManager::cleanup_before(lsn_t lsn) {
     if (retention_lsn_provider_) {
         lsn_t min_slot_lsn = retention_lsn_provider_();
         if (min_slot_lsn != invalid_lsn && min_slot_lsn < lsn) {
-            GIODB_LOG_INFO("WAL archive cleanup: clamping cleanup LSN from {} to {} "
+            SIXSEVEN_LOG_INFO("WAL archive cleanup: clamping cleanup LSN from {} to {} "
                            "(replication slot retention)",
                            lsn,
                            min_slot_lsn);
@@ -242,7 +242,7 @@ Result<void> WalArchiveManager::cleanup_before(lsn_t lsn) {
             std::filesystem::remove(meta_path, ec);
             // Ignore error on metadata removal — non-critical.
 
-            GIODB_LOG_INFO("WAL archive cleanup: removed segment {} (last_lsn={} < {})",
+            SIXSEVEN_LOG_INFO("WAL archive cleanup: removed segment {} (last_lsn={} < {})",
                            seg_id,
                            seg_last_lsn,
                            lsn);
@@ -276,7 +276,7 @@ Result<void> WalArchiveManager::cleanup_keep_last_n(uint64_t n) {
         meta_path += ".meta";
         std::filesystem::remove(meta_path, ec);
 
-        GIODB_LOG_INFO("WAL archive cleanup: removed segment {} (keep_last_n={})", seg_id, n);
+        SIXSEVEN_LOG_INFO("WAL archive cleanup: removed segment {} (keep_last_n={})", seg_id, n);
     }
 
     return ok();
@@ -313,7 +313,7 @@ void WalArchiveManager::archive_loop() {
         if (has_item) {
             auto result = archive_segment(item.segment_id, item.last_lsn);
             if (!result) {
-                GIODB_LOG_ERROR("WAL archive failed for segment {}: {}",
+                SIXSEVEN_LOG_ERROR("WAL archive failed for segment {}: {}",
                                 item.segment_id,
                                 result.error().message);
             }
@@ -328,7 +328,7 @@ void WalArchiveManager::archive_loop() {
 
         auto result = archive_segment(item.segment_id, item.last_lsn);
         if (!result) {
-            GIODB_LOG_ERROR("WAL archive (shutdown drain) failed for segment {}: {}",
+            SIXSEVEN_LOG_ERROR("WAL archive (shutdown drain) failed for segment {}: {}",
                             item.segment_id,
                             result.error().message);
         }
@@ -434,4 +434,4 @@ Result<uint32_t> WalArchiveManager::file_checksum(const std::filesystem::path& p
     return ok(crc32c(buf.data(), buf.size()));
 }
 
-} // namespace giodb
+} // namespace sixseven

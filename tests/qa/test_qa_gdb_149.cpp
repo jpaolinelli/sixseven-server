@@ -1,16 +1,16 @@
-#include "giodb/common/result.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/server/pg_protocol.h"
-#include "giodb/server/session.h"
+#include "sixseven/common/result.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/server/pg_protocol.h"
+#include "sixseven/server/session.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // QA_GDB_149: Session management — adversarial tests

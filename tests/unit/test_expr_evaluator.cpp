@@ -1,9 +1,9 @@
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/expr_evaluator.h"
-#include "giodb/executor/tuple.h"
-#include "giodb/parser/ast.h"
-#include "giodb/planner/binder.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/executor/tuple.h"
+#include "sixseven/parser/ast.h"
+#include "sixseven/planner/binder.h"
 
 #include <gtest/gtest.h>
 
@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Test helpers -------------------------------------------------------------
 

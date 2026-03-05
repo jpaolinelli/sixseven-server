@@ -1,14 +1,14 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/parser/lexer.h"
-#include "giodb/parser/parser.h"
-#include "giodb/planner/binder.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/parser.h"
+#include "sixseven/planner/binder.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 #include <vector>
 
-namespace giodb {
+namespace sixseven {
 
 // ===========================================================================
 // Helper: tokenize and assert success
@@ -497,4 +497,4 @@ TEST_F(QA_Binder_219_220, DeleteWhereNullComparisonOk) {
     bind_ok("DELETE FROM users WHERE id = NULL");
 }
 
-} // namespace giodb
+} // namespace sixseven

@@ -1,4 +1,4 @@
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <fcntl.h>
 #include <sys/file.h>
@@ -14,7 +14,7 @@
 #include <arm_acle.h>
 #endif
 
-namespace giodb {
+namespace sixseven {
 
 // -- CRC32C implementation ----------------------------------------------------
 // Uses the Castagnoli polynomial (bit-reversed: 0x82F63B78), standard for
@@ -655,4 +655,4 @@ Result<void> DiskManager::ensure_file_size(OpenFile& file, uint32_t needed_pages
     return ok();
 }
 
-} // namespace giodb
+} // namespace sixseven

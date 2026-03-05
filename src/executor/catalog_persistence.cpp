@@ -1,14 +1,14 @@
-#include "giodb/executor/catalog_persistence.h"
+#include "sixseven/executor/catalog_persistence.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/common/value.h"
-#include "giodb/table/tuple.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/common/value.h"
+#include "sixseven/table/tuple.h"
 
 #include <algorithm>
 #include <span>
 #include <unordered_map>
 
-namespace giodb {
+namespace sixseven {
 
 CatalogPersistence::CatalogPersistence(Catalog& catalog, StorageManager& storage)
     : catalog_(catalog), storage_(storage) {}
@@ -39,7 +39,7 @@ Result<void> CatalogPersistence::create_system_catalog_tables() {
         return r5;
     }
 
-    GIODB_LOG_INFO("catalog persistence: created system catalog tables");
+    SIXSEVEN_LOG_INFO("catalog persistence: created system catalog tables");
     return ok();
 }
 
@@ -134,7 +134,7 @@ Result<void> CatalogPersistence::load_catalog() {
         while (auto row = it->next()) {
             auto values = TupleSerializer::deserialize(row->second, storage_schema);
             if (!values) {
-                GIODB_LOG_WARN("catalog persistence: skipping corrupt sys_tables row");
+                SIXSEVEN_LOG_WARN("catalog persistence: skipping corrupt sys_tables row");
                 continue;
             }
             auto& v = *values;
@@ -161,7 +161,7 @@ Result<void> CatalogPersistence::load_catalog() {
         while (auto row = it->next()) {
             auto values = TupleSerializer::deserialize(row->second, storage_schema);
             if (!values) {
-                GIODB_LOG_WARN("catalog persistence: skipping corrupt sys_columns row");
+                SIXSEVEN_LOG_WARN("catalog persistence: skipping corrupt sys_columns row");
                 continue;
             }
             auto& v = *values;
@@ -193,7 +193,7 @@ Result<void> CatalogPersistence::load_catalog() {
         // Ensure the database storage directory exists.
         auto dir_result = storage_.create_database_storage(info.database_id);
         if (!dir_result) {
-            GIODB_LOG_WARN("catalog persistence: failed to create db storage for db {}",
+            SIXSEVEN_LOG_WARN("catalog persistence: failed to create db storage for db {}",
                            info.database_id);
         }
 
@@ -205,7 +205,7 @@ Result<void> CatalogPersistence::load_catalog() {
 
         auto restore = catalog_.restore_table(info.database_id, schema);
         if (!restore) {
-            GIODB_LOG_WARN("catalog persistence: failed to restore table '{}': {}",
+            SIXSEVEN_LOG_WARN("catalog persistence: failed to restore table '{}': {}",
                            info.name,
                            restore.error().message);
             continue;
@@ -214,7 +214,7 @@ Result<void> CatalogPersistence::load_catalog() {
         // Open the table's storage file.
         auto open = storage_.open_table_storage(info.database_id, info.table_id, schema);
         if (!open) {
-            GIODB_LOG_WARN("catalog persistence: failed to open storage for table '{}': {}",
+            SIXSEVEN_LOG_WARN("catalog persistence: failed to open storage for table '{}': {}",
                            info.name,
                            open.error().message);
             continue;
@@ -276,7 +276,7 @@ Result<void> CatalogPersistence::load_catalog() {
                 }
             }
             catalog_.init_autoincrement(info.table_id, max_val + 1);
-            GIODB_LOG_DEBUG("catalog persistence: autoincrement for table '{}' starts at {}",
+            SIXSEVEN_LOG_DEBUG("catalog persistence: autoincrement for table '{}' starts at {}",
                             info.name,
                             max_val + 1);
             break; // Only one autoincrement column per table.
@@ -310,7 +310,7 @@ Result<void> CatalogPersistence::load_catalog() {
 
             auto r = catalog_.restore_index(std::move(def));
             if (!r) {
-                GIODB_LOG_WARN("catalog persistence: failed to restore index: {}",
+                SIXSEVEN_LOG_WARN("catalog persistence: failed to restore index: {}",
                                r.error().message);
             }
         }
@@ -342,7 +342,7 @@ Result<void> CatalogPersistence::load_catalog() {
 
             auto r = catalog_.restore_edge_type(std::move(def));
             if (!r) {
-                GIODB_LOG_WARN("catalog persistence: failed to restore edge type: {}",
+                SIXSEVEN_LOG_WARN("catalog persistence: failed to restore edge type: {}",
                                r.error().message);
             }
         }
@@ -377,7 +377,7 @@ Result<void> CatalogPersistence::load_catalog() {
     }
 
     auto table_count = tables.size();
-    GIODB_LOG_INFO("catalog persistence: loaded {} user tables from disk", table_count);
+    SIXSEVEN_LOG_INFO("catalog persistence: loaded {} user tables from disk", table_count);
     return ok();
 }
 
@@ -613,4 +613,4 @@ Result<void> CatalogPersistence::persist_columns_update(const TableSchema& schem
     return ok();
 }
 
-} // namespace giodb
+} // namespace sixseven

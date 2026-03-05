@@ -1,12 +1,12 @@
-#include "giodb/parser/lexer.h"
-#include "giodb/parser/token.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/token.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Helper: tokenize and assert success --------------------------------------
 
@@ -173,9 +173,9 @@ TEST(Lexer, AggregateKeywords) {
     EXPECT_EQ(tokens[4].type, TokenType::SUM);
 }
 
-// -- GioDB-specific keywords --------------------------------------------------
+// -- SixSevenDB-specific keywords --------------------------------------------------
 
-TEST(Lexer, GioDBKeywords) {
+TEST(Lexer, SixSevenDBKeywords) {
     struct KW {
         const char* text;
         TokenType expected;
@@ -201,8 +201,8 @@ TEST(Lexer, GioDBKeywords) {
 
     for (auto& [text, expected] : keywords) {
         auto tokens = tokenize_ok(text);
-        ASSERT_GE(tokens.size(), 2u) << "GioDB keyword: " << text;
-        EXPECT_EQ(tokens[0].type, expected) << "GioDB keyword: " << text;
+        ASSERT_GE(tokens.size(), 2u) << "SixSevenDB keyword: " << text;
+        EXPECT_EQ(tokens[0].type, expected) << "SixSevenDB keyword: " << text;
     }
 }
 

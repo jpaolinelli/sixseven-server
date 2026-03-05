@@ -1,6 +1,6 @@
-#include "giodb/common/uuid.h"
+#include "sixseven/common/uuid.h"
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -64,4 +64,4 @@ Result<Uuid> parse_uuid(const std::string& s) {
     return ok(uuid);
 }
 
-} // namespace giodb
+} // namespace sixseven

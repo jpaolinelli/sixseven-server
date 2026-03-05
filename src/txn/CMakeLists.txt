@@ -1,6 +1,6 @@
-# giodb::txn sources
+# sixseven::txn sources
 
-add_library(giodb_txn STATIC
+add_library(sixseven_txn STATIC
     txn_manager.cpp
     mvcc.cpp
     vacuum.cpp
@@ -8,5 +8,5 @@ add_library(giodb_txn STATIC
     deadlock_detector.cpp
 )
 
-target_include_directories(giodb_txn PUBLIC ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(giodb_txn PUBLIC giodb_common giodb_storage giodb_catalog)
+target_include_directories(sixseven_txn PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(sixseven_txn PUBLIC sixseven_common sixseven_storage sixseven_catalog)

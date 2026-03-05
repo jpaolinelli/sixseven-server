@@ -1,11 +1,11 @@
-#include "giodb/txn/txn_manager.h"
+#include "sixseven/txn/txn_manager.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <algorithm>
 #include <limits>
 
-namespace giodb {
+namespace sixseven {
 
 Result<Transaction*> TransactionManager::begin(IsolationLevel level) {
     std::lock_guard lock(mu_);
@@ -19,7 +19,7 @@ Result<Transaction*> TransactionManager::begin(IsolationLevel level) {
     auto* ptr = txn.get();
     transactions_[ptr->txn_id] = std::move(txn);
 
-    GIODB_LOG_DEBUG("BEGIN txn_id={} isolation={}", ptr->txn_id, isolation_level_name(level));
+    SIXSEVEN_LOG_DEBUG("BEGIN txn_id={} isolation={}", ptr->txn_id, isolation_level_name(level));
     return ok(ptr);
 }
 
@@ -41,7 +41,7 @@ Result<void> TransactionManager::commit(txn_id_t txn_id) {
         auto result = check_write_conflicts(txn);
         if (!result) {
             txn.status = TransactionStatus::ABORTED;
-            GIODB_LOG_WARN("ABORT txn_id={} due to write-write conflict", txn_id);
+            SIXSEVEN_LOG_WARN("ABORT txn_id={} due to write-write conflict", txn_id);
             return result;
         }
     }
@@ -51,13 +51,13 @@ Result<void> TransactionManager::commit(txn_id_t txn_id) {
         auto result = check_serialization_conflicts(txn);
         if (!result) {
             txn.status = TransactionStatus::ABORTED;
-            GIODB_LOG_WARN("ABORT txn_id={} due to serialization anomaly", txn_id);
+            SIXSEVEN_LOG_WARN("ABORT txn_id={} due to serialization anomaly", txn_id);
             return result;
         }
     }
 
     txn.status = TransactionStatus::COMMITTED;
-    GIODB_LOG_DEBUG("COMMIT txn_id={}", txn_id);
+    SIXSEVEN_LOG_DEBUG("COMMIT txn_id={}", txn_id);
     return ok();
 }
 
@@ -75,7 +75,7 @@ Result<void> TransactionManager::abort(txn_id_t txn_id) {
     }
 
     txn.status = TransactionStatus::ABORTED;
-    GIODB_LOG_DEBUG("ABORT txn_id={}", txn_id);
+    SIXSEVEN_LOG_DEBUG("ABORT txn_id={}", txn_id);
     return ok();
 }
 
@@ -172,7 +172,7 @@ Result<void> TransactionManager::savepoint(txn_id_t txn_id, const std::string& n
     sp.saved_read_set = txn.read_set;
     txn.savepoints.push_back(std::move(sp));
 
-    GIODB_LOG_DEBUG("SAVEPOINT {} in txn_id={}", name, txn_id);
+    SIXSEVEN_LOG_DEBUG("SAVEPOINT {} in txn_id={}", name, txn_id);
     return ok();
 }
 
@@ -206,7 +206,7 @@ Result<void> TransactionManager::rollback_to_savepoint(txn_id_t txn_id, const st
     // sp_it.base() points to the element after sp_it in forward order.
     txn.savepoints.erase(sp_it.base(), txn.savepoints.end());
 
-    GIODB_LOG_DEBUG("ROLLBACK TO SAVEPOINT {} in txn_id={}", name, txn_id);
+    SIXSEVEN_LOG_DEBUG("ROLLBACK TO SAVEPOINT {} in txn_id={}", name, txn_id);
     return ok();
 }
 
@@ -237,7 +237,7 @@ Result<void> TransactionManager::release_savepoint(txn_id_t txn_id, const std::s
     // element.
     txn.savepoints.erase(std::prev(sp_it.base()), txn.savepoints.end());
 
-    GIODB_LOG_DEBUG("RELEASE SAVEPOINT {} in txn_id={}", name, txn_id);
+    SIXSEVEN_LOG_DEBUG("RELEASE SAVEPOINT {} in txn_id={}", name, txn_id);
     return ok();
 }
 
@@ -404,4 +404,4 @@ Result<void> TransactionManager::check_serialization_conflicts(const Transaction
     return ok();
 }
 
-} // namespace giodb
+} // namespace sixseven

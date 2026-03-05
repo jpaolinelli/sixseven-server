@@ -8,13 +8,13 @@
 /// Fix: After decoding, check that cp >= MIN_CP[extra] where MIN_CP is the
 /// minimum codepoint for each byte count. Overlong sequences return U+FFFD.
 
-#include "giodb/vector/text_normalizer.h"
+#include "sixseven/vector/text_normalizer.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 const std::string REPLACEMENT = "\xEF\xBF\xBD"; // U+FFFD in UTF-8
@@ -206,4 +206,4 @@ TEST(QA_GDB355, LowercaseNormalizerRejectsOverlong) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

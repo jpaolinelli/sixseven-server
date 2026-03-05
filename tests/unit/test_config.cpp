@@ -1,4 +1,4 @@
-#include "giodb/common/config.h"
+#include "sixseven/common/config.h"
 
 #include <gtest/gtest.h>
 
@@ -10,7 +10,7 @@
 #include <fstream>
 #include <string>
 
-using namespace giodb;
+using namespace sixseven;
 
 TEST(Config, DefaultValues) {
     auto config = Config::load_defaults();
@@ -34,7 +34,7 @@ protected:
 
     void SetUp() override {
         auto tmp_dir = std::filesystem::temp_directory_path();
-        auto tmpl = (tmp_dir / "giodb_test_XXXXXX").string();
+        auto tmpl = (tmp_dir / "sixseven_test_XXXXXX").string();
         std::vector<char> buf(tmpl.begin(), tmpl.end());
         buf.push_back('\0');
         int fd = mkstemp(buf.data());
@@ -54,7 +54,7 @@ protected:
 
 TEST_F(ConfigFileTest, LoadFromValidJson) {
     write_file(R"({
-        "data_dir": "/var/giodb",
+        "data_dir": "/var/sixseven",
         "port": 9999,
         "log_level": "debug",
         "buffer_pool_size_mb": 512,
@@ -64,7 +64,7 @@ TEST_F(ConfigFileTest, LoadFromValidJson) {
 
     auto result = Config::load_from_file(tmp_path_);
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->data_dir, "/var/giodb");
+    EXPECT_EQ(result->data_dir, "/var/sixseven");
     EXPECT_EQ(result->port, 9999);
     EXPECT_EQ(result->log_level, "debug");
     EXPECT_EQ(result->buffer_pool_size_mb, 512u);

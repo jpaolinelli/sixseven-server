@@ -5,14 +5,14 @@
 /// GDB-245: ThreadPool unhandled task exception calls std::terminate.
 /// GDB-246: OpenAIProvider uncaught nlohmann::json exception on non-numeric embedding values.
 
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/index/btree_key.h"
-#include "giodb/index/hash_index.h"
-#include "giodb/index/rid.h"
-#include "giodb/server/thread_pool.h"
-#include "giodb/vector/http_client.h"
-#include "giodb/vector/openai_provider.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/index/btree_key.h"
+#include "sixseven/index/hash_index.h"
+#include "sixseven/index/rid.h"
+#include "sixseven/server/thread_pool.h"
+#include "sixseven/vector/http_client.h"
+#include "sixseven/vector/openai_provider.h"
 
 #include <gtest/gtest.h>
 
@@ -26,7 +26,7 @@
 #include <thread>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Helpers

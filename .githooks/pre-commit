@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Pre-commit hook for GioDB
+# Pre-commit hook for SixSevenDB
 # Checks clang-format on staged C++ source files.
 #
 # Install: git config core.hooksPath .githooks

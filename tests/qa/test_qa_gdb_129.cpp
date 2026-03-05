@@ -6,12 +6,12 @@
 /// long text, unicode, batch with empty strings, partial batch failure, provider
 /// name parsing, health check edge cases, zero-dimension provider.
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/vector/builtin_provider.h"
-#include "giodb/vector/http_client.h"
-#include "giodb/vector/ollama_provider.h"
-#include "giodb/vector/openai_provider.h"
-#include "giodb/vector/provider_registry.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/vector/builtin_provider.h"
+#include "sixseven/vector/http_client.h"
+#include "sixseven/vector/ollama_provider.h"
+#include "sixseven/vector/openai_provider.h"
+#include "sixseven/vector/provider_registry.h"
 
 #include <gtest/gtest.h>
 
@@ -19,7 +19,7 @@
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 namespace {
 

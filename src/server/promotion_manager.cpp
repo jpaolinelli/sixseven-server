@@ -1,11 +1,11 @@
-#include "giodb/server/promotion_manager.h"
+#include "sixseven/server/promotion_manager.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <cstring>
 #include <fstream>
 
-namespace giodb {
+namespace sixseven {
 
 PromotionManager::PromotionManager(Config& config,
                                    WalReceiver* receiver,
@@ -54,14 +54,14 @@ Result<void> PromotionManager::promote() {
             }
 
             if (lag_bytes > 0) {
-                GIODB_LOG_WARN("promoting with {} bytes of unapplied WAL", lag_bytes);
+                SIXSEVEN_LOG_WARN("promoting with {} bytes of unapplied WAL", lag_bytes);
             }
         }
     }
 
     // --- Step 2: Stop the WAL receiver ---
     if (receiver_ != nullptr) {
-        GIODB_LOG_INFO("promotion: stopping WAL receiver");
+        SIXSEVEN_LOG_INFO("promotion: stopping WAL receiver");
         receiver_->stop();
     }
 
@@ -71,11 +71,11 @@ Result<void> PromotionManager::promote() {
     // that were received but not yet replayed have been handled by the receiver's
     // handle_wal_data which writes and replays synchronously before processing
     // the next message.
-    GIODB_LOG_INFO("promotion: WAL receiver stopped, all received WAL replayed");
+    SIXSEVEN_LOG_INFO("promotion: WAL receiver stopped, all received WAL replayed");
 
     // --- Step 4: Increment timeline ID ---
     ++timeline_id_;
-    GIODB_LOG_INFO("promotion: new timeline ID = {}", timeline_id_);
+    SIXSEVEN_LOG_INFO("promotion: new timeline ID = {}", timeline_id_);
 
     // --- Step 5: Write PROMOTE WAL record ---
     WalRecord promote_record;
@@ -97,24 +97,24 @@ Result<void> PromotionManager::promote() {
                           "failed to flush PROMOTE WAL record: " + flush_result.error().message);
     }
 
-    GIODB_LOG_INFO("promotion: PROMOTE WAL record written at LSN {}", *append_result);
+    SIXSEVEN_LOG_INFO("promotion: PROMOTE WAL record written at LSN {}", *append_result);
 
     // --- Step 6: Persist timeline ID ---
     auto save_result = save_timeline();
     if (!save_result) {
-        GIODB_LOG_WARN("promotion: failed to persist timeline ID: {}", save_result.error().message);
+        SIXSEVEN_LOG_WARN("promotion: failed to persist timeline ID: {}", save_result.error().message);
         // Non-fatal: the PROMOTE record in WAL is the authoritative source.
     }
 
     // --- Step 7: Switch server mode ---
     config_.standby_mode = false;
-    GIODB_LOG_INFO("promotion: server mode switched to primary");
+    SIXSEVEN_LOG_INFO("promotion: server mode switched to primary");
 
     // --- Step 8: Re-open data files in read/write mode ---
     for (FileId fid : readonly_file_ids_) {
         auto reopen_result = disk_mgr_.reopen_file_readwrite(fid);
         if (!reopen_result) {
-            GIODB_LOG_WARN("promotion: failed to reopen file {} in read/write mode: {}",
+            SIXSEVEN_LOG_WARN("promotion: failed to reopen file {} in read/write mode: {}",
                            fid,
                            reopen_result.error().message);
         }
@@ -126,7 +126,7 @@ Result<void> PromotionManager::promote() {
     }
 
     promotion_in_progress_ = false;
-    GIODB_LOG_INFO("promotion: complete — server is now primary with timeline {}", timeline_id_);
+    SIXSEVEN_LOG_INFO("promotion: complete — server is now primary with timeline {}", timeline_id_);
 
     return ok();
 }
@@ -157,7 +157,7 @@ Result<void> PromotionManager::load_timeline() {
     }
 
     timeline_id_ = id;
-    GIODB_LOG_INFO("loaded timeline ID {} from {}", timeline_id_, path.string());
+    SIXSEVEN_LOG_INFO("loaded timeline ID {} from {}", timeline_id_, path.string());
     return ok();
 }
 
@@ -198,4 +198,4 @@ std::filesystem::path PromotionManager::timeline_path() const {
     return wal_dir_ / "timeline_id";
 }
 
-} // namespace giodb
+} // namespace sixseven

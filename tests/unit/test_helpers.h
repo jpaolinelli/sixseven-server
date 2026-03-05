@@ -1,7 +1,7 @@
 #pragma once
 
-#include "giodb/executor/iterator.h"
-#include "giodb/executor/tuple.h"
+#include "sixseven/executor/iterator.h"
+#include "sixseven/executor/tuple.h"
 
 #include <cstddef>
 #include <memory>
@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-namespace giodb {
+namespace sixseven {
 
 /// A simple iterator that returns pre-loaded tuples. Supports close/open
 /// for re-scanning (needed when used as the left child in nested joins).
@@ -61,4 +61,4 @@ inline std::vector<Tuple> collect_all(Iterator& iter) {
     return result;
 }
 
-} // namespace giodb
+} // namespace sixseven

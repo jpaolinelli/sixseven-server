@@ -1,8 +1,8 @@
-#include "giodb/executor/filter.h"
+#include "sixseven/executor/filter.h"
 
-#include "giodb/executor/expr_evaluator.h"
+#include "sixseven/executor/expr_evaluator.h"
 
-namespace giodb {
+namespace sixseven {
 
 FilterOperator::FilterOperator(std::unique_ptr<Iterator> child,
                                const Expr& predicate,
@@ -56,4 +56,4 @@ std::vector<Iterator*> FilterOperator::plan_children_mutable() {
     return {child_.get()};
 }
 
-} // namespace giodb
+} // namespace sixseven

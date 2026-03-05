@@ -1,4 +1,4 @@
-#include "giodb/vector/distance.h"
+#include "sixseven/vector/distance.h"
 
 #include <gtest/gtest.h>
 
@@ -9,7 +9,7 @@
 #include <random>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Helpers

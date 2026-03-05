@@ -1,9 +1,9 @@
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/hash_join.h"
-#include "giodb/executor/tuple.h"
-#include "giodb/parser/ast.h"
-#include "giodb/planner/binder.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/hash_join.h"
+#include "sixseven/executor/tuple.h"
+#include "sixseven/parser/ast.h"
+#include "sixseven/planner/binder.h"
 
 #include <gtest/gtest.h>
 
@@ -14,7 +14,7 @@
 
 #include "test_helpers.h"
 
-using namespace giodb;
+using namespace sixseven;
 
 // ---------------------------------------------------------------------------
 // Test fixture

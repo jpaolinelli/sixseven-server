@@ -1,6 +1,6 @@
 ---
 name: jira-workflow
-description: Use when you need to interact with Jira — fetching tickets, reading acceptance criteria, transitioning issue status, or finding subtasks. Provides the exact procedures for working with the GioDB Jira project.
+description: Use when you need to interact with Jira — fetching tickets, reading acceptance criteria, transitioning issue status, or finding subtasks. Provides the exact procedures for working with the SixSevenDB Jira project.
 user-invocable: false
 ---
 
@@ -8,7 +8,7 @@ user-invocable: false
 
 ## Cloud ID
 
-The Atlassian cloud ID for the GioDB project is: `d1c81655-b174-4ffc-9c84-3c76752eb094`
+The Atlassian cloud ID for the SixSevenDB project is: `d1c81655-b174-4ffc-9c84-3c76752eb094`
 
 Use this for all Jira API calls.
 

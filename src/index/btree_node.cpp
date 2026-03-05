@@ -1,8 +1,8 @@
-#include "giodb/index/btree_node.h"
+#include "sixseven/index/btree_node.h"
 
 #include <algorithm>
 
-namespace giodb {
+namespace sixseven {
 
 // =============================================================================
 // BTreeInternalNode
@@ -296,4 +296,4 @@ std::shared_mutex& BTreeLeafNode::latch() {
     return latch_;
 }
 
-} // namespace giodb
+} // namespace sixseven

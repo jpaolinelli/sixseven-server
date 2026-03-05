@@ -5,17 +5,17 @@
 /// empty string source, re-embed idempotency, skipped-row message,
 /// exact-boundary batches, multiple EMBEDDING columns, large table stress.
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/storage/buffer_pool.h"
-#include "giodb/storage/disk_manager.h"
-#include "giodb/table/tuple.h"
-#include "giodb/vector/builtin_provider.h"
-#include "giodb/vector/embedding_column.h"
-#include "giodb/vector/provider_registry.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/storage/buffer_pool.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/table/tuple.h"
+#include "sixseven/vector/builtin_provider.h"
+#include "sixseven/vector/embedding_column.h"
+#include "sixseven/vector/provider_registry.h"
 
 #include <gtest/gtest.h>
 
@@ -25,7 +25,7 @@
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test fixture
@@ -34,7 +34,7 @@ using namespace giodb;
 class QA132ReembedTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_qa132_reembed";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa132_reembed";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 

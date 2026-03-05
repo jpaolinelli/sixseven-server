@@ -1,14 +1,14 @@
 /// @file test_tokenizer.cpp
 /// @brief Unit tests for Tokenizer base class and TokenizerConfig (GDB-328).
 
-#include "giodb/vector/tokenizer.h"
+#include "sixseven/vector/tokenizer.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 namespace {
 

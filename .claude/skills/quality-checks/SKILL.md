@@ -1,6 +1,6 @@
 ---
 name: quality-checks
-description: Use when you need to run code quality tools — clang-format, clang-tidy, building, running tests, or AddressSanitizer. Provides the exact commands and interpretation of results for the GioDB project.
+description: Use when you need to run code quality tools — clang-format, clang-tidy, building, running tests, or AddressSanitizer. Provides the exact commands and interpretation of results for the SixSevenDB project.
 user-invocable: false
 ---
 
@@ -19,7 +19,7 @@ Must complete with zero errors and zero warnings (`-Werror` is enabled).
 Build and run developer unit tests only:
 
 ```bash
-export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset default && cmake --build build/debug --target giodb_unit_tests && ./build/debug/tests/unit/giodb_unit_tests
+export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset default && cmake --build build/debug --target sixseven_unit_tests && ./build/debug/tests/unit/sixseven_unit_tests
 ```
 
 All dev tests must pass. If any fail, read the failure output and fix before proceeding.
@@ -30,10 +30,10 @@ QA regression tests are a separate target. These are **not** run by implementers
 
 ```bash
 # Build QA tests
-cmake --build build/debug --target giodb_qa_tests
+cmake --build build/debug --target sixseven_qa_tests
 
 # Run tests for a specific ticket only
-./build/debug/tests/qa/giodb_qa_tests --gtest_filter="*GDB<N>*"
+./build/debug/tests/qa/sixseven_qa_tests --gtest_filter="*GDB<N>*"
 ```
 
 ### Finding changed files to format
@@ -53,8 +53,8 @@ For deeper memory safety checks on developer tests:
 
 ```bash
 export VCPKG_ROOT="$HOME/vcpkg" && cmake --preset asan
-cmake --build build/asan --target giodb_unit_tests
-ASAN_OPTIONS=detect_leaks=1:halt_on_error=0 ./build/asan/tests/unit/giodb_unit_tests
+cmake --build build/asan --target sixseven_unit_tests
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=0 ./build/asan/tests/unit/sixseven_unit_tests
 ```
 
 Detects: buffer overflows, use-after-free, memory leaks, stack overflows.
@@ -62,8 +62,8 @@ Detects: buffer overflows, use-after-free, memory leaks, stack overflows.
 For QA tests under ASan (used by the QA process, not implementers):
 
 ```bash
-cmake --build build/asan --target giodb_qa_tests
-ASAN_OPTIONS=detect_leaks=1:halt_on_error=0 ./build/asan/tests/qa/giodb_qa_tests --gtest_filter="*GDB<N>*"
+cmake --build build/asan --target sixseven_qa_tests
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=0 ./build/asan/tests/qa/sixseven_qa_tests --gtest_filter="*GDB<N>*"
 ```
 
 ## Pre-Commit Checklist

@@ -1,12 +1,12 @@
-#include "giodb/vector/tokenizer_json_loader.h"
+#include "sixseven/vector/tokenizer_json_loader.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <nlohmann/json.hpp>
 
 #include <fstream>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -181,11 +181,11 @@ Result<TokenizerConfig> load_tokenizer_config(const std::string& path) {
         }
     }
 
-    GIODB_LOG_DEBUG("loaded tokenizer config: vocab_size={}, model_type={}",
+    SIXSEVEN_LOG_DEBUG("loaded tokenizer config: vocab_size={}, model_type={}",
                     config.vocab.size(),
                     static_cast<int>(config.model_type));
 
     return ok(std::move(config));
 }
 
-} // namespace giodb
+} // namespace sixseven

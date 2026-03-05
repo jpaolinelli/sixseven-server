@@ -1,14 +1,14 @@
-#include "giodb/executor/provider_cache.h"
+#include "sixseven/executor/provider_cache.h"
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/catalog/schema.h"
-#include "giodb/common/logging.h"
-#include "giodb/common/secrets_manager.h"
-#include "giodb/executor/query_engine.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/catalog/schema.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/common/secrets_manager.h"
+#include "sixseven/executor/query_engine.h"
 
 #include <algorithm>
 
-namespace giodb {
+namespace sixseven {
 
 void ProviderCache::set_secrets_manager(const SecretsManager* secrets_manager) {
     secrets_manager_ = secrets_manager;
@@ -76,7 +76,7 @@ Result<void> ProviderCache::load(QueryEngine& engine) {
                 } else {
                     // Decryption failed — treat as plaintext (may be a false positive
                     // from looks_encrypted, or a key rotation scenario).
-                    GIODB_LOG_WARN("provider '{}': failed to decrypt api_key, "
+                    SIXSEVEN_LOG_WARN("provider '{}': failed to decrypt api_key, "
                                    "treating as plaintext: {}",
                                    config.name,
                                    decrypted.error().message);
@@ -93,7 +93,7 @@ Result<void> ProviderCache::load(QueryEngine& engine) {
                 if (enc) {
                     to_encrypt.push_back({config.provider_id, std::move(*enc)});
                 } else {
-                    GIODB_LOG_WARN("provider '{}': failed to encrypt api_key: {}",
+                    SIXSEVEN_LOG_WARN("provider '{}': failed to encrypt api_key: {}",
                                    config.name,
                                    enc.error().message);
                 }
@@ -117,11 +117,11 @@ Result<void> ProviderCache::load(QueryEngine& engine) {
                           "' WHERE provider_id = " + std::to_string(pe.provider_id);
         auto upd = engine.execute(sql);
         if (!upd) {
-            GIODB_LOG_WARN("failed to encrypt api_key for provider_id {}: {}",
+            SIXSEVEN_LOG_WARN("failed to encrypt api_key for provider_id {}: {}",
                            pe.provider_id,
                            upd.error().message);
         } else {
-            GIODB_LOG_INFO("provider cache: encrypted api_key for provider_id {}", pe.provider_id);
+            SIXSEVEN_LOG_INFO("provider cache: encrypted api_key for provider_id {}", pe.provider_id);
         }
     }
 
@@ -135,7 +135,7 @@ Result<void> ProviderCache::load(QueryEngine& engine) {
         next_provider_id_ = new_next_id;
     }
 
-    GIODB_LOG_INFO("provider cache: loaded {} providers", providers_.size());
+    SIXSEVEN_LOG_INFO("provider cache: loaded {} providers", providers_.size());
     loading_ = false;
     return ok();
 }
@@ -201,4 +201,4 @@ size_t ProviderCache::size() const {
     return providers_.size();
 }
 
-} // namespace giodb
+} // namespace sixseven

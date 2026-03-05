@@ -1,8 +1,8 @@
 /// QA adversarial tests for GDB-98: System catalog tables (sys_tables, sys_columns, sys_indexes).
 /// Tests catalog CRUD, schema integrity, cascade deletes, and edge cases.
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/catalog/schema.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/catalog/schema.h"
 
 #include <gtest/gtest.h>
 
@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Helper: make a simple TableSchema

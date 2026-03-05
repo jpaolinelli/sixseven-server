@@ -1,5 +1,5 @@
-# giodb::executor — Volcano iterator model query execution engine
-add_library(giodb_executor STATIC
+# sixseven::executor — Volcano iterator model query execution engine
+add_library(sixseven_executor STATIC
     expr_evaluator.cpp
     seq_scan.cpp
     index_scan.cpp
@@ -35,16 +35,16 @@ add_library(giodb_executor STATIC
     query_engine.cpp
 )
 
-target_include_directories(giodb_executor PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(sixseven_executor PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
-target_link_libraries(giodb_executor
+target_link_libraries(sixseven_executor
     PUBLIC
-        giodb_common
-        giodb_table
-        giodb_index
-        giodb_parser
-        giodb_planner
-        giodb_graph
-        giodb_vector
-        giodb_server
+        sixseven_common
+        sixseven_table
+        sixseven_index
+        sixseven_parser
+        sixseven_planner
+        sixseven_graph
+        sixseven_vector
+        sixseven_server
 )

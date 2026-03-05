@@ -5,10 +5,10 @@
 /// for the OnnxProvider, its tokenizer, attention mask, batch inference,
 /// health check delegation, and provider registry integration.
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/vector/onnx_provider.h"
-#include "giodb/vector/provider_registry.h"
-#include "giodb/vector/tokenizer.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/vector/onnx_provider.h"
+#include "sixseven/vector/provider_registry.h"
+#include "sixseven/vector/tokenizer.h"
 
 #include <gtest/gtest.h>
 
@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 namespace {
 

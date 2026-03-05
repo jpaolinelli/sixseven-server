@@ -12,8 +12,8 @@
 
 #include "test_btree_helpers.h"
 
-using namespace giodb;
-using namespace giodb::test;
+using namespace sixseven;
+using namespace sixseven::test;
 
 // =============================================================================
 // Core Bug Fix: range_scan with begin_key and duplicate keys

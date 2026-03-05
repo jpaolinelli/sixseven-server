@@ -1,21 +1,21 @@
-#include "giodb/catalog/catalog.h"
+#include "sixseven/catalog/catalog.h"
 
-#include "giodb/common/types.h"
+#include "sixseven/common/types.h"
 
 #include <algorithm>
 #include <limits>
 #include <sstream>
 
-namespace giodb {
+namespace sixseven {
 
 // -- Constructor --------------------------------------------------------------
 
 Catalog::Catalog() {
-    // Create the default 'giodb' database.
-    databases_by_id_[default_database_id] = Database{default_database_id, "giodb"};
-    database_name_to_id_["giodb"] = default_database_id;
+    // Create the default 'sixseven' database.
+    databases_by_id_[default_database_id] = Database{default_database_id, "sixseven"};
+    database_name_to_id_["sixseven"] = default_database_id;
 
-    // Create the system 'giodb_system' database.
+    // Create the system 'sixseven_system' database.
     databases_by_id_[system_database_id] = Database{system_database_id, system_database_name};
     database_name_to_id_[system_database_name] = system_database_id;
 }
@@ -41,7 +41,7 @@ Result<void> Catalog::drop_database(database_id_t database_id, bool cascade) {
 
     if (database_id == default_database_id) {
         return make_error(StatusCode::CONSTRAINT_VIOLATION,
-                          "cannot drop the default 'giodb' database");
+                          "cannot drop the default 'sixseven' database");
     }
 
     if (database_id == system_database_id) {
@@ -149,7 +149,7 @@ Result<void> Catalog::drop_table(database_id_t database_id, const std::string& n
 }
 
 Result<void> Catalog::drop_table_locked(database_id_t database_id, const std::string& name) {
-    // Protect system tables in the giodb_system database.
+    // Protect system tables in the sixseven_system database.
     if (database_id == system_database_id) {
         return make_error(StatusCode::CONSTRAINT_VIOLATION,
                           "cannot drop system table '" + name + "'");
@@ -877,4 +877,4 @@ int64_t Catalog::get_autoincrement_counter(table_id_t table_id) const {
     return it->second;
 }
 
-} // namespace giodb
+} // namespace sixseven

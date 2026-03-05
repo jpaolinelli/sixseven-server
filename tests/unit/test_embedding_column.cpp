@@ -1,11 +1,11 @@
-#include "giodb/vector/embedding_column.h"
+#include "sixseven/vector/embedding_column.h"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <string>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Helper: build a table schema with an EMBEDDING column --------------------
 

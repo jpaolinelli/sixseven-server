@@ -5,9 +5,9 @@
 /// and additional semantic validation for the ONNX embedding pipeline.
 /// Skips automatically when the model fixture is not present.
 
-#include "giodb/vector/onnx_provider.h"
-#include "giodb/vector/tokenizer.h"
-#include "giodb/vector/tokenizer_json_loader.h"
+#include "sixseven/vector/onnx_provider.h"
+#include "sixseven/vector/tokenizer.h"
+#include "sixseven/vector/tokenizer_json_loader.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 namespace fs = std::filesystem;
@@ -497,4 +497,4 @@ TEST_F(QA_GDB326, GDB326_WrongDimensionAtCreation) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

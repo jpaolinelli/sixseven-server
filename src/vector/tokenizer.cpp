@@ -1,10 +1,10 @@
-#include "giodb/vector/tokenizer.h"
+#include "sixseven/vector/tokenizer.h"
 
 #include <cctype>
 #include <functional>
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 
 // ---------------------------------------------------------------------------
 // HashTokenizer
@@ -79,4 +79,4 @@ size_t HashTokenizer::max_sequence_length() const {
     return max_seq_length_;
 }
 
-} // namespace giodb
+} // namespace sixseven

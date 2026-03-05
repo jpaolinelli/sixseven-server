@@ -1,8 +1,8 @@
-#include "giodb/storage/serialization.h"
+#include "sixseven/storage/serialization.h"
 
 #include <cstring>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -11,11 +11,11 @@ namespace {
 
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__)
-#define GIODB_BIG_ENDIAN (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#define SIXSEVEN_BIG_ENDIAN (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
 #elif defined(_MSC_VER)
-#define GIODB_BIG_ENDIAN 0
+#define SIXSEVEN_BIG_ENDIAN 0
 #else
-#define GIODB_BIG_ENDIAN 0
+#define SIXSEVEN_BIG_ENDIAN 0
 #endif
 
 // -- Little-endian helpers ----------------------------------------------------
@@ -26,7 +26,7 @@ void write_le(std::vector<uint8_t>& buf, T value) {
     static_assert(std::is_trivially_copyable_v<T>);
     uint8_t bytes[sizeof(T)];
     std::memcpy(bytes, &value, sizeof(T));
-#if GIODB_BIG_ENDIAN
+#if SIXSEVEN_BIG_ENDIAN
     for (size_t i = 0; i < sizeof(T) / 2; ++i) {
         std::swap(bytes[i], bytes[sizeof(T) - 1 - i]);
     }
@@ -40,7 +40,7 @@ T read_le(const uint8_t* src) {
     static_assert(std::is_trivially_copyable_v<T>);
     uint8_t bytes[sizeof(T)];
     std::memcpy(bytes, src, sizeof(T));
-#if GIODB_BIG_ENDIAN
+#if SIXSEVEN_BIG_ENDIAN
     for (size_t i = 0; i < sizeof(T) / 2; ++i) {
         std::swap(bytes[i], bytes[sizeof(T) - 1 - i]);
     }
@@ -389,4 +389,4 @@ size_t serialized_size(const Value& value) {
     return 1 + payload_size(value);
 }
 
-} // namespace giodb
+} // namespace sixseven

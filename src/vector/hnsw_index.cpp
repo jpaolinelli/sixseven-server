@@ -1,14 +1,14 @@
-#include "giodb/vector/hnsw_index.h"
+#include "sixseven/vector/hnsw_index.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/vector/distance.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/vector/distance.h"
 
 #include <algorithm>
 #include <cmath>
 #include <queue>
 #include <unordered_set>
 
-namespace giodb {
+namespace sixseven {
 
 HnswIndex::HnswIndex(BufferPoolManager& buffer_pool, WalWriter* wal)
     : buffer_pool_(buffer_pool), wal_(wal) {}
@@ -55,7 +55,7 @@ Result<void> HnswIndex::create(const HnswIndexConfig& config) {
         return make_error(StatusCode::INTERNAL_ERROR, "Failed to unpin HNSW metadata page");
     }
 
-    GIODB_LOG_INFO("Created HNSW index: dim={}, M={}, ef_c={}, ef_s={}, meta_page={}",
+    SIXSEVEN_LOG_INFO("Created HNSW index: dim={}, M={}, ef_c={}, ef_s={}, meta_page={}",
                    config.dimension,
                    config.m,
                    config.ef_construction,
@@ -126,7 +126,7 @@ Result<void> HnswIndex::load(PageId meta_page_id) {
         (void)buffer_pool_.unpin_page(pid, false);
     }
 
-    GIODB_LOG_INFO("Loaded HNSW index: dim={}, nodes={}, meta_page={}, "
+    SIXSEVEN_LOG_INFO("Loaded HNSW index: dim={}, nodes={}, meta_page={}, "
                    "node_map_size={}",
                    meta_.dimension,
                    meta_.node_count,
@@ -583,7 +583,7 @@ Result<void> HnswIndex::compact() {
         return make_error(flush_result.error().code, flush_result.error().message);
     }
 
-    GIODB_LOG_INFO("HNSW compaction: freed {} tombstoned nodes, "
+    SIXSEVEN_LOG_INFO("HNSW compaction: freed {} tombstoned nodes, "
                    "repaired neighbor connections",
                    tombstoned.size());
 
@@ -1064,10 +1064,10 @@ Result<void> HnswIndex::log_wal(WalRecordType type,
 
     auto result = wal_->append(record);
     if (!result.has_value()) {
-        GIODB_LOG_WARN("Failed to log HNSW WAL record");
+        SIXSEVEN_LOG_WARN("Failed to log HNSW WAL record");
     }
 
     return ok();
 }
 
-} // namespace giodb
+} // namespace sixseven

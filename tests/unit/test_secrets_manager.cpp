@@ -1,5 +1,5 @@
-#include "giodb/common/secrets_manager.h"
-#include "giodb/common/secure_string.h"
+#include "sixseven/common/secrets_manager.h"
+#include "sixseven/common/secure_string.h"
 
 #include <gtest/gtest.h>
 
@@ -7,7 +7,7 @@
 #include <fstream>
 #include <string>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test fixture for SecretsManager (GDB-191)
@@ -16,7 +16,7 @@ using namespace giodb;
 class SecretsManagerTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        test_dir_ = std::filesystem::temp_directory_path() / "giodb_test_secrets";
+        test_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_secrets";
         std::filesystem::remove_all(test_dir_);
         std::filesystem::create_directories(test_dir_);
         key_path_ = (test_dir_ / "master.key").string();

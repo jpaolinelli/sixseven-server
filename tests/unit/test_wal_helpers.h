@@ -1,7 +1,7 @@
 #pragma once
 
-#include "giodb/storage/wal.h"
-#include "giodb/storage/wal_record.h"
+#include "sixseven/storage/wal.h"
+#include "sixseven/storage/wal_record.h"
 
 #include <gtest/gtest.h>
 
@@ -9,7 +9,7 @@
 #include <filesystem>
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 namespace test {
 
 /// Temporary WAL directory with automatic cleanup.
@@ -87,4 +87,4 @@ write_aborted_txn(WalWriter& writer, txn_id_t txn_id, uint32_t table_id, const s
 }
 
 } // namespace test
-} // namespace giodb
+} // namespace sixseven

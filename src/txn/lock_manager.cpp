@@ -1,16 +1,16 @@
-#include "giodb/txn/lock_manager.h"
+#include "sixseven/txn/lock_manager.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/txn/deadlock_detector.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/txn/deadlock_detector.h"
 
 #include <algorithm>
 
-namespace giodb {
+namespace sixseven {
 
 LockManager::LockManager(std::chrono::milliseconds lock_timeout) : lock_timeout_(lock_timeout) {}
 
 Result<void> LockManager::lock_table(txn_id_t txn_id, table_id_t table_id, LockMode mode) {
-    GIODB_LOG_DEBUG(
+    SIXSEVEN_LOG_DEBUG(
         "lock_table txn_id={} table_id={} mode={}", txn_id, table_id, lock_mode_name(mode));
     return acquire(txn_id, LockKey{TableLockKey{table_id}}, mode);
 }
@@ -24,7 +24,7 @@ Result<void> LockManager::lock_row(
         return result;
     }
 
-    GIODB_LOG_DEBUG("lock_row txn_id={} table={} page={} slot={} mode={}",
+    SIXSEVEN_LOG_DEBUG("lock_row txn_id={} table={} page={} slot={} mode={}",
                     txn_id,
                     table_id,
                     page_id,
@@ -36,7 +36,7 @@ Result<void> LockManager::lock_row(
 void LockManager::release_all(txn_id_t txn_id) {
     std::lock_guard lock(mu_);
 
-    GIODB_LOG_DEBUG("release_all txn_id={}", txn_id);
+    SIXSEVEN_LOG_DEBUG("release_all txn_id={}", txn_id);
 
     for (auto it = lock_table_.begin(); it != lock_table_.end();) {
         auto& queue = it->second;
@@ -136,7 +136,7 @@ wait_for_lock: {
         if (victim == txn_id) {
             // We are the victim — remove our request and return error.
             remove_waiting_request_locked(queue, txn_id);
-            GIODB_LOG_WARN("deadlock detected, aborting txn_id={}", txn_id);
+            SIXSEVEN_LOG_WARN("deadlock detected, aborting txn_id={}", txn_id);
             return make_error(StatusCode::DEADLOCK, "deadlock detected, transaction aborted");
         }
         // Victim is another transaction — it will be woken up and see the aborted flag.
@@ -160,7 +160,7 @@ wait_for_lock: {
         // Check if we were aborted by deadlock detection.
         if (req_it->aborted) {
             queue.requests.erase(req_it);
-            GIODB_LOG_WARN("deadlock detected, aborting txn_id={}", txn_id);
+            SIXSEVEN_LOG_WARN("deadlock detected, aborting txn_id={}", txn_id);
             return make_error(StatusCode::DEADLOCK, "deadlock detected, transaction aborted");
         }
 
@@ -181,7 +181,7 @@ wait_for_lock: {
             if (req_it != queue.requests.end()) {
                 if (req_it->aborted) {
                     queue.requests.erase(req_it);
-                    GIODB_LOG_WARN("deadlock detected, aborting txn_id={}", txn_id);
+                    SIXSEVEN_LOG_WARN("deadlock detected, aborting txn_id={}", txn_id);
                     return make_error(StatusCode::DEADLOCK,
                                       "deadlock detected, transaction aborted");
                 }
@@ -191,7 +191,7 @@ wait_for_lock: {
                 // Timed out — remove request.
                 queue.requests.erase(req_it);
             }
-            GIODB_LOG_WARN("lock timeout for txn_id={}", txn_id);
+            SIXSEVEN_LOG_WARN("lock timeout for txn_id={}", txn_id);
             return make_error(StatusCode::LOCK_TIMEOUT, "lock wait timeout exceeded");
         }
     }
@@ -273,4 +273,4 @@ void LockManager::remove_waiting_request_locked(LockQueue& queue, txn_id_t txn_i
     }
 }
 
-} // namespace giodb
+} // namespace sixseven

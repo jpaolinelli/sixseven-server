@@ -1,9 +1,9 @@
-#include "giodb/storage/overflow.h"
+#include "sixseven/storage/overflow.h"
 
 #include <algorithm>
 #include <cstring>
 
-namespace giodb {
+namespace sixseven {
 
 // -- OverflowManager ----------------------------------------------------------
 
@@ -209,4 +209,4 @@ size_t InMemoryPageAllocator::allocated_count() const {
     return count;
 }
 
-} // namespace giodb
+} // namespace sixseven

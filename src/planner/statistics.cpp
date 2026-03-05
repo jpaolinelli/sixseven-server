@@ -1,15 +1,15 @@
-#include "giodb/planner/statistics.h"
+#include "sixseven/planner/statistics.h"
 
-#include "giodb/common/coercion.h"
-#include "giodb/common/logging.h"
-#include "giodb/table/tuple.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/table/tuple.h"
 
 #include <algorithm>
 #include <cmath>
 #include <random>
 #include <unordered_map>
 
-namespace giodb {
+namespace sixseven {
 
 // =============================================================================
 // StatisticsStore
@@ -352,7 +352,7 @@ Result<void> analyze_table(table_id_t table_id,
         store.set_column_stats(table_id, col.ordinal, std::move(col_stats));
     }
 
-    GIODB_LOG_INFO("ANALYZE: table {} ({}) — {} rows, {} pages, {:.1f} avg width",
+    SIXSEVEN_LOG_INFO("ANALYZE: table {} ({}) — {} rows, {} pages, {:.1f} avg width",
                    table_schema.name,
                    table_id,
                    total_row_count,
@@ -526,4 +526,4 @@ double estimate_is_not_null_selectivity(const ColumnStats& stats) {
     return 1.0 - stats.null_fraction;
 }
 
-} // namespace giodb
+} // namespace sixseven

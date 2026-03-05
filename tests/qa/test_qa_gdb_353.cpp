@@ -9,14 +9,14 @@
 /// Fix: Split into five sub-ranges with correct even/odd parity, plus special
 /// cases for U+0138 and U+0178.
 
-#include "giodb/vector/text_normalizer.h"
+#include "sixseven/vector/text_normalizer.h"
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 /// Encode a codepoint as UTF-8.
@@ -349,4 +349,4 @@ TEST(QA_GDB353_Boundary, MultiplicationSignNotLowered) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

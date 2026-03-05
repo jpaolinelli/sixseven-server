@@ -1,16 +1,16 @@
-#include "giodb/executor/expr_evaluator.h"
+#include "sixseven/executor/expr_evaluator.h"
 
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/coercion.h"
-#include "giodb/common/types.h"
-#include "giodb/executor/planner.h"
-#include "giodb/executor/seq_scan.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/parser/lexer.h"
-#include "giodb/parser/parser.h"
-#include "giodb/planner/type_resolver.h"
-#include "giodb/server/wal_receiver.h"
-#include "giodb/storage/wal.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/coercion.h"
+#include "sixseven/common/types.h"
+#include "sixseven/executor/planner.h"
+#include "sixseven/executor/seq_scan.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/parser.h"
+#include "sixseven/planner/type_resolver.h"
+#include "sixseven/server/wal_receiver.h"
+#include "sixseven/storage/wal.h"
 
 #include <algorithm>
 #include <cctype>
@@ -21,7 +21,7 @@
 #include <random>
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 
 // Thread-local system function context for replication functions.
 static thread_local const SystemFunctionContext* tl_sys_fn_ctx = nullptr;
@@ -1215,4 +1215,4 @@ Result<bool> evaluate_predicate(const Expr& expr,
                           std::string(type_name(val->type_id())));
 }
 
-} // namespace giodb
+} // namespace sixseven

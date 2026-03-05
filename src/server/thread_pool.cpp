@@ -1,15 +1,15 @@
-#include "giodb/server/thread_pool.h"
+#include "sixseven/server/thread_pool.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
-namespace giodb {
+namespace sixseven {
 
 ThreadPool::ThreadPool(size_t num_workers) {
     workers_.reserve(num_workers);
     for (size_t i = 0; i < num_workers; ++i) {
         workers_.emplace_back([this] { worker_loop(); });
     }
-    GIODB_LOG_DEBUG("thread pool started with {} workers", num_workers);
+    SIXSEVEN_LOG_DEBUG("thread pool started with {} workers", num_workers);
 }
 
 ThreadPool::~ThreadPool() {
@@ -39,7 +39,7 @@ void ThreadPool::shutdown() {
             w.join();
         }
     }
-    GIODB_LOG_DEBUG("thread pool shut down");
+    SIXSEVEN_LOG_DEBUG("thread pool shut down");
 }
 
 size_t ThreadPool::pending_tasks() const {
@@ -64,11 +64,11 @@ void ThreadPool::worker_loop() {
         try {
             task();
         } catch (const std::exception& e) {
-            GIODB_LOG_ERROR("thread pool task threw exception: {}", e.what());
+            SIXSEVEN_LOG_ERROR("thread pool task threw exception: {}", e.what());
         } catch (...) {
-            GIODB_LOG_ERROR("thread pool task threw unknown exception");
+            SIXSEVEN_LOG_ERROR("thread pool task threw unknown exception");
         }
     }
 }
 
-} // namespace giodb
+} // namespace sixseven

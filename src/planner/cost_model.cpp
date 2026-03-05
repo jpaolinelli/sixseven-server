@@ -1,9 +1,9 @@
-#include "giodb/planner/cost_model.h"
+#include "sixseven/planner/cost_model.h"
 
 #include <algorithm>
 #include <cmath>
 
-namespace giodb {
+namespace sixseven {
 
 CostModel::CostModel(CostModelParams params) : params_(params) {}
 
@@ -120,4 +120,4 @@ PlanCost CostModel::limit_cost(const PlanCost& input, uint64_t limit_rows) const
     return cost;
 }
 
-} // namespace giodb
+} // namespace sixseven

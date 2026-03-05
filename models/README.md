@@ -70,4 +70,4 @@ CREATE TABLE articles (
 );
 ```
 
-GioDB auto-discovers `model.onnx` and `tokenizer.json` in the directory.
+SixSevenDB auto-discovers `model.onnx` and `tokenizer.json` in the directory.

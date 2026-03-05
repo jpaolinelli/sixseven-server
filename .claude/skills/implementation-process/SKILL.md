@@ -18,21 +18,21 @@ For each subtask, follow these steps in order:
 
 ### 2. Implement
 
-- Create headers in `include/giodb/<module>/`.
+- Create headers in `include/sixseven/<module>/`.
 - Create implementations in `src/<module>/`.
 - Add new source files to `src/<module>/CMakeLists.txt`.
-- Follow the coding conventions (see `giodb-conventions` skill).
+- Follow the coding conventions (see `sixseven-conventions` skill).
 - Follow existing codebase patterns — look at neighboring files for guidance.
 
 ### 3. Test
 
-- Create `tests/unit/test_<name>.cpp` for each new component (these go in the `giodb_unit_tests` target).
+- Create `tests/unit/test_<name>.cpp` for each new component (these go in the `sixseven_unit_tests` target).
 - Test files in `tests/unit/` are auto-detected by CMake — no manual registration needed.
-- Follow the testing patterns (see `giodb-testing` skill).
+- Follow the testing patterns (see `sixseven-testing` skill).
 - Cover every acceptance criterion with at least one test.
 - Cover edge cases: empty inputs, NULLs, error conditions, boundaries.
 - Every test must assert something substantive — no empty or trivial tests.
-- **Do NOT add tests to `giodb_qa_tests`** — QA tests are owned by the QA process.
+- **Do NOT add tests to `sixseven_qa_tests`** — QA tests are owned by the QA process.
 
 ### 4. Quality Gate
 
@@ -41,11 +41,11 @@ Before marking a subtask done, run the full pre-commit checklist (see `quality-c
 1. `clang-format -i` on all new/changed files.
 2. `clang-tidy` on all new/changed `.cpp` files.
 3. Build with zero warnings.
-4. Run `giodb_unit_tests` — all dev tests pass.
+4. Run `sixseven_unit_tests` — all dev tests pass.
 
 Fix any issues before proceeding.
 
-> **Note**: Implementers do NOT run or modify QA tests (`giodb_qa_tests`). QA tests are owned by the QA process and run in CI.
+> **Note**: Implementers do NOT run or modify QA tests (`sixseven_qa_tests`). QA tests are owned by the QA process and run in CI.
 
 ### 5. Transition
 

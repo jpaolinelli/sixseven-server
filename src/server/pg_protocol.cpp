@@ -1,9 +1,9 @@
-#include "giodb/server/pg_protocol.h"
+#include "sixseven/server/pg_protocol.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/server/connection.h"
-#include "giodb/server/session.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/server/connection.h"
+#include "sixseven/server/session.h"
 
 #include <algorithm>
 #include <array>
@@ -13,7 +13,7 @@
 #include <random>
 #include <sstream>
 
-namespace giodb {
+namespace sixseven {
 
 // -- PostgreSQL protocol constants --------------------------------------------
 
@@ -61,7 +61,7 @@ constexpr uint32_t PG_OID_POINT = 600;
 constexpr uint32_t PG_OID_JSON = 114;
 constexpr uint32_t PG_OID_UUID = 2950;
 
-// Custom OIDs for GioDB-specific types (above the PostgreSQL reserved range).
+// Custom OIDs for SixSevenDB-specific types (above the PostgreSQL reserved range).
 constexpr uint32_t PG_OID_EMBEDDING = 100000;
 
 /// Read a network-order (big-endian) int32 from a byte pointer.
@@ -1138,7 +1138,7 @@ Result<size_t> PgProtocolHandler::handle_startup_message(Connection& conn) {
     if (version == CANCEL_REQUEST_CODE) {
         // Cancel request: 4-byte PID + 4-byte secret key.
         // Not implemented yet — just consume the message.
-        GIODB_LOG_DEBUG("received cancel request (ignored)");
+        SIXSEVEN_LOG_DEBUG("received cancel request (ignored)");
         return ok(static_cast<size_t>(msg_len));
     }
 
@@ -1161,7 +1161,7 @@ Result<size_t> PgProtocolHandler::handle_startup_message(Connection& conn) {
         startup_params_[std::string(key)] = std::string(val);
     }
 
-    GIODB_LOG_INFO("startup: user={}, database={}",
+    SIXSEVEN_LOG_INFO("startup: user={}, database={}",
                    startup_params_.count("user") > 0 ? startup_params_["user"] : "(none)",
                    startup_params_.count("database") > 0 ? startup_params_["database"] : "(none)");
 
@@ -1217,7 +1217,7 @@ Result<size_t> PgProtocolHandler::handle_startup_message(Connection& conn) {
 }
 
 void PgProtocolHandler::complete_startup(Connection& conn) {
-    send_parameter_status(conn, "server_version", "15.0 (GioDB 0.1.0)");
+    send_parameter_status(conn, "server_version", "15.0 (SixSevenDB 0.1.0)");
     send_parameter_status(conn, "server_encoding", "UTF8");
     send_parameter_status(conn, "client_encoding", "UTF8");
     send_parameter_status(conn, "DateStyle", "ISO, MDY");
@@ -1393,12 +1393,12 @@ Result<size_t> PgProtocolHandler::handle_frontend_message(Connection& conn) {
         if (!sql.empty() && sql.back() == '\0') {
             sql.remove_suffix(1);
         }
-        GIODB_LOG_DEBUG("simple query: {}", sql);
+        SIXSEVEN_LOG_DEBUG("simple query: {}", sql);
         handle_simple_query(conn, sql);
         break;
     }
     case MSG_TERMINATE: {
-        GIODB_LOG_DEBUG("client sent Terminate");
+        SIXSEVEN_LOG_DEBUG("client sent Terminate");
         session_->cleanup();
         state_ = ProtocolState::CLOSED;
         break;
@@ -1443,7 +1443,7 @@ Result<size_t> PgProtocolHandler::handle_frontend_message(Connection& conn) {
         break;
     }
     default: {
-        GIODB_LOG_WARN("unknown frontend message type: 0x{:02x}", msg_type);
+        SIXSEVEN_LOG_WARN("unknown frontend message type: 0x{:02x}", msg_type);
         send_error_response(conn, "ERROR", "08P01", "unrecognized message type");
         send_ready_for_query(conn, session_->ready_for_query_status());
         break;
@@ -1612,7 +1612,7 @@ std::optional<Result<void>> PgProtocolHandler::try_handle_execute(Connection& co
         exec_sql = std::move(*substituted);
     }
 
-    GIODB_LOG_DEBUG("EXECUTE: stmt='{}', sql='{}'", stmt_name, exec_sql);
+    SIXSEVEN_LOG_DEBUG("EXECUTE: stmt='{}', sql='{}'", stmt_name, exec_sql);
 
     auto result = query_executor_(exec_sql);
     if (!result) {
@@ -1640,7 +1640,7 @@ void PgProtocolHandler::handle_parse(Connection& conn, const uint8_t* payload, s
         param_oids.push_back(static_cast<uint32_t>(reader.read_int32()));
     }
 
-    GIODB_LOG_DEBUG("Parse: name='{}', sql='{}', params={}", stmt_name, sql, num_params);
+    SIXSEVEN_LOG_DEBUG("Parse: name='{}', sql='{}', params={}", stmt_name, sql, num_params);
 
     // Store the prepared statement in the session.
     PreparedStatement stmt;
@@ -1702,7 +1702,7 @@ void PgProtocolHandler::handle_bind(Connection& conn, const uint8_t* payload, si
         return;
     }
 
-    GIODB_LOG_DEBUG("Bind: portal='{}', stmt='{}', params={}", portal_name, stmt_name, num_params);
+    SIXSEVEN_LOG_DEBUG("Bind: portal='{}', stmt='{}', params={}", portal_name, stmt_name, num_params);
 
     Portal portal;
     portal.name = portal_name;
@@ -1813,7 +1813,7 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
         return;
     }
 
-    GIODB_LOG_DEBUG("Execute: portal='{}', sql='{}'", portal_name, *substituted);
+    SIXSEVEN_LOG_DEBUG("Execute: portal='{}', sql='{}'", portal_name, *substituted);
 
     auto result = query_executor_(*substituted);
     if (!result) {
@@ -2074,4 +2074,4 @@ void PgProtocolHandler::send_parameter_description(Connection& conn,
     conn.enqueue_write(msg.data(), msg.size());
 }
 
-} // namespace giodb
+} // namespace sixseven

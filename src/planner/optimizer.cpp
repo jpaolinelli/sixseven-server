@@ -1,12 +1,12 @@
-#include "giodb/planner/optimizer.h"
+#include "sixseven/planner/optimizer.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <algorithm>
 #include <limits>
 #include <unordered_map>
 
-namespace giodb {
+namespace sixseven {
 
 // =============================================================================
 // Access path selection
@@ -303,4 +303,4 @@ std::unique_ptr<PhysicalPlanNode> optimize_join_order(std::vector<JoinRelation>&
     return greedy_join_order(base_relations, join_edges, cost_model);
 }
 
-} // namespace giodb
+} // namespace sixseven

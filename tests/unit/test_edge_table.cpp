@@ -1,8 +1,8 @@
-#include "giodb/graph/edge_table.h"
+#include "sixseven/graph/edge_table.h"
 
 #include <gtest/gtest.h>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- Helper: build an EdgeTableConfig -----------------------------------------
 

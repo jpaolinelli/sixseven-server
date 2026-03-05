@@ -6,11 +6,11 @@
 /// histogram interpolation, MCV edge cases, BETWEEN with reversed/equal bounds,
 /// reservoir sampling with extreme configs.
 
-#include "giodb/planner/statistics.h"
-#include "giodb/storage/buffer_pool.h"
-#include "giodb/storage/disk_manager.h"
-#include "giodb/table/table_heap.h"
-#include "giodb/table/tuple.h"
+#include "sixseven/planner/statistics.h"
+#include "sixseven/storage/buffer_pool.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/table/table_heap.h"
+#include "sixseven/table/tuple.h"
 
 #include <gtest/gtest.h>
 
@@ -19,7 +19,7 @@
 #include <memory>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // StatisticsStore adversarial tests
@@ -134,7 +134,7 @@ TEST(QA137_StoreTest, ClearThenReAdd) {
 class QA137AnalyzeTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        path_ = std::filesystem::temp_directory_path() / "giodb_qa137_stats.db";
+        path_ = std::filesystem::temp_directory_path() / "sixseven_qa137_stats.db";
         std::filesystem::remove(path_);
 
         auto fid = dm_.create_file(path_, false, true);

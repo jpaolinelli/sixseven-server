@@ -1,11 +1,11 @@
-#include "giodb/common/value.h"
+#include "sixseven/common/value.h"
 
 #include <gtest/gtest.h>
 
 #include <cmath>
 #include <limits>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- NULL values --------------------------------------------------------------
 

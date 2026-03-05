@@ -1,8 +1,8 @@
-#include "giodb/vector/wordpiece_tokenizer.h"
+#include "sixseven/vector/wordpiece_tokenizer.h"
 
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 
 // ---------------------------------------------------------------------------
 // WordPieceTokenizer
@@ -114,4 +114,4 @@ size_t WordPieceTokenizer::max_sequence_length() const {
     return 512;
 }
 
-} // namespace giodb
+} // namespace sixseven

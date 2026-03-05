@@ -1,15 +1,15 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/result.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/shortest_path.h"
-#include "giodb/graph/graph_engine.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/result.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/shortest_path.h"
+#include "sixseven/graph/graph_engine.h"
 
 #include <gtest/gtest.h>
 
 #include <optional>
 #include <vector>
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 /// Test fixture for shortest path tests.
@@ -148,4 +148,4 @@ TEST_F(ShortestPathTest, NonexistentNodes) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

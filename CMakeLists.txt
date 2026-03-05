@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(giodb VERSION 0.1.0 LANGUAGES CXX)
+project(sixseven VERSION 0.1.0 LANGUAGES CXX)
 
 # C++20 standard
 set(CMAKE_CXX_STANDARD 20)
@@ -23,10 +23,10 @@ add_subdirectory(tests)
 
 # ---------- Code quality targets (format-check, format-fix, tidy) ----------
 
-set(GIODB_LLVM_VERSION 20)
+set(SIXSEVEN_LLVM_VERSION 20)
 
-find_program(CLANG_FORMAT_BIN NAMES clang-format-${GIODB_LLVM_VERSION} clang-format)
-find_program(CLANG_TIDY_BIN NAMES clang-tidy-${GIODB_LLVM_VERSION} clang-tidy)
+find_program(CLANG_FORMAT_BIN NAMES clang-format-${SIXSEVEN_LLVM_VERSION} clang-format)
+find_program(CLANG_TIDY_BIN NAMES clang-tidy-${SIXSEVEN_LLVM_VERSION} clang-tidy)
 
 if(CLANG_FORMAT_BIN)
     add_custom_target(format-check
@@ -50,12 +50,12 @@ if(CLANG_FORMAT_BIN)
     )
 else()
     add_custom_target(format-check
-        COMMAND ${CMAKE_COMMAND} -E echo "ERROR: clang-format-${GIODB_LLVM_VERSION} not found. Install LLVM ${GIODB_LLVM_VERSION}."
+        COMMAND ${CMAKE_COMMAND} -E echo "ERROR: clang-format-${SIXSEVEN_LLVM_VERSION} not found. Install LLVM ${SIXSEVEN_LLVM_VERSION}."
         COMMAND ${CMAKE_COMMAND} -E false
         VERBATIM
     )
     add_custom_target(format-fix
-        COMMAND ${CMAKE_COMMAND} -E echo "ERROR: clang-format-${GIODB_LLVM_VERSION} not found. Install LLVM ${GIODB_LLVM_VERSION}."
+        COMMAND ${CMAKE_COMMAND} -E echo "ERROR: clang-format-${SIXSEVEN_LLVM_VERSION} not found. Install LLVM ${SIXSEVEN_LLVM_VERSION}."
         COMMAND ${CMAKE_COMMAND} -E false
         VERBATIM
     )
@@ -74,7 +74,7 @@ if(CLANG_TIDY_BIN)
     )
 else()
     add_custom_target(tidy
-        COMMAND ${CMAKE_COMMAND} -E echo "ERROR: clang-tidy-${GIODB_LLVM_VERSION} not found. Install LLVM ${GIODB_LLVM_VERSION}."
+        COMMAND ${CMAKE_COMMAND} -E echo "ERROR: clang-tidy-${SIXSEVEN_LLVM_VERSION} not found. Install LLVM ${SIXSEVEN_LLVM_VERSION}."
         COMMAND ${CMAKE_COMMAND} -E false
         VERBATIM
     )

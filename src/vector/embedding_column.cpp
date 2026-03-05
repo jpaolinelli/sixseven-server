@@ -1,11 +1,11 @@
-#include "giodb/vector/embedding_column.h"
+#include "sixseven/vector/embedding_column.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <algorithm>
 #include <sstream>
 
-namespace giodb {
+namespace sixseven {
 
 EmbeddingColumnManager::EmbeddingColumnManager(Catalog& catalog) : catalog_(catalog) {}
 
@@ -63,7 +63,7 @@ Result<void> EmbeddingColumnManager::register_table_embeddings(
                               "failed to create HNSW index: " + idx.error().message);
         }
 
-        GIODB_LOG_INFO("registered EMBEDDING column: table={}, column={}, dim={}, provider={}, "
+        SIXSEVEN_LOG_INFO("registered EMBEDDING column: table={}, column={}, dim={}, provider={}, "
                        "index={}",
                        table_schema.name,
                        column_name,
@@ -222,4 +222,4 @@ bool EmbeddingColumnManager::source_expr_references(
     return false;
 }
 
-} // namespace giodb
+} // namespace sixseven

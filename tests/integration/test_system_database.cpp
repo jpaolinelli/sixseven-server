@@ -1,17 +1,17 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/catalog/schema.h"
-#include "giodb/common/config.h"
-#include "giodb/common/result.h"
-#include "giodb/common/secrets_manager.h"
-#include "giodb/common/types.h"
-#include "giodb/common/value.h"
-#include "giodb/executor/catalog_persistence.h"
-#include "giodb/executor/provider_cache.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/settings_cache.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/executor/system_bootstrap.h"
-#include "giodb/storage/disk_manager.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/catalog/schema.h"
+#include "sixseven/common/config.h"
+#include "sixseven/common/result.h"
+#include "sixseven/common/secrets_manager.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
+#include "sixseven/executor/catalog_persistence.h"
+#include "sixseven/executor/provider_cache.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/settings_cache.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/executor/system_bootstrap.h"
+#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
@@ -20,7 +20,7 @@
 #include <memory>
 #include <string>
 
-using namespace giodb;
+using namespace sixseven;
 namespace fs = std::filesystem;
 
 // =============================================================================
@@ -35,7 +35,7 @@ namespace fs = std::filesystem;
 class SystemDatabaseIntegrationTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = fs::temp_directory_path() / "giodb_test_sysdb_integration";
+        data_dir_ = fs::temp_directory_path() / "sixseven_test_sysdb_integration";
         fs::remove_all(data_dir_);
         fs::create_directories(data_dir_);
 
@@ -72,7 +72,7 @@ protected:
         engine_->set_provider_cache(provider_cache_.get());
 
         // Switch to default database for user operations.
-        use_database("giodb");
+        use_database("sixseven");
     }
 
     void TearDown() override {
@@ -149,7 +149,7 @@ protected:
                           (is_default ? "TRUE" : "FALSE") + ", NULL)";
         exec_ok(sql);
 
-        use_database("giodb");
+        use_database("sixseven");
         return id;
     }
 
@@ -161,7 +161,7 @@ protected:
                           "WHERE provider_id = " +
                           std::to_string(provider_id));
         engine_->pop_skip_masking();
-        use_database("giodb");
+        use_database("sixseven");
 
         if (qr.rows.empty() || qr.rows[0][0].is_null()) {
             return "";
@@ -194,8 +194,8 @@ TEST_F(SystemDatabaseIntegrationTest, SystemDatabaseExistsAfterFreshInit) {
 }
 
 TEST_F(SystemDatabaseIntegrationTest, SystemDatabaseCannotBeDropped) {
-    exec_error("DROP DATABASE giodb_system", StatusCode::CONSTRAINT_VIOLATION);
-    exec_error("DROP DATABASE giodb_system CASCADE", StatusCode::CONSTRAINT_VIOLATION);
+    exec_error("DROP DATABASE sixseven_system", StatusCode::CONSTRAINT_VIOLATION);
+    exec_error("DROP DATABASE sixseven_system CASCADE", StatusCode::CONSTRAINT_VIOLATION);
 
     // Verify it still exists.
     auto db = catalog_->get_database(system_database_name);
@@ -220,7 +220,7 @@ TEST_F(SystemDatabaseIntegrationTest, SystemTablesExistAndCannotBeDropped) {
 }
 
 TEST_F(SystemDatabaseIntegrationTest, ReInitDoesNotDuplicateSystemDatabase) {
-    // Count giodb_system databases.
+    // Count sixseven_system databases.
     auto dbs = catalog_->list_databases();
     size_t count = 0;
     for (const auto& db : dbs) {
@@ -378,7 +378,7 @@ TEST_F(SystemDatabaseIntegrationTest, SetProviderAsDefaultVerifyOnlyOneDefault) 
     // Set ollama-local as default (this auto-unsets old default).
     use_database(system_database_name);
     exec_ok("UPDATE sys_providers SET is_default = TRUE WHERE name = 'ollama-local'");
-    use_database("giodb");
+    use_database("sixseven");
 
     // Verify only one default exists.
     auto def2 = provider_cache_->get_default();
@@ -399,7 +399,7 @@ TEST_F(SystemDatabaseIntegrationTest, UpdateProviderModelPersists) {
     use_database(system_database_name);
     exec_ok("UPDATE sys_providers SET model = 'text-embedding-3-large' "
             "WHERE name = 'openai-prod'");
-    use_database("giodb");
+    use_database("sixseven");
 
     // Verify cache updated.
     auto provider = provider_cache_->get("openai-prod");
@@ -420,7 +420,7 @@ TEST_F(SystemDatabaseIntegrationTest, DeleteUnusedProviderSucceeds) {
 
     use_database(system_database_name);
     exec_ok("DELETE FROM sys_providers WHERE name = 'to-delete'");
-    use_database("giodb");
+    use_database("sixseven");
 
     EXPECT_EQ(provider_cache_->size(), 0u);
     EXPECT_FALSE(provider_cache_->get("to-delete").has_value());
@@ -448,7 +448,7 @@ TEST_F(SystemDatabaseIntegrationTest, DeleteInUseProviderFails) {
     auto result = engine_->execute("DELETE FROM sys_providers WHERE name = 'openai-prod'");
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::CONSTRAINT_VIOLATION);
-    use_database("giodb");
+    use_database("sixseven");
 
     // Provider should still exist.
     EXPECT_TRUE(provider_cache_->get("openai-prod").has_value());
@@ -464,7 +464,7 @@ TEST_F(SystemDatabaseIntegrationTest, SelectFromSysProvidersMasksApiKeys) {
 
     use_database(system_database_name);
     auto qr = exec_ok("SELECT * FROM sys_providers");
-    use_database("giodb");
+    use_database("sixseven");
 
     ASSERT_EQ(qr.rows.size(), 1u);
 
@@ -534,7 +534,7 @@ TEST_F(SystemDatabaseIntegrationTest, CorruptEncryptedValueHandledGracefully) {
     exec_ok("UPDATE sys_providers SET api_key_encrypted = 'CORRUPT_DATA_NOT_BASE64!!!' "
             "WHERE name = 'openai-prod'");
     engine_->pop_skip_masking();
-    use_database("giodb");
+    use_database("sixseven");
 
     // Create a fresh cache and attempt to load — the corrupt value should
     // be handled gracefully (treated as plaintext and re-encrypted).
@@ -559,7 +559,7 @@ TEST_F(SystemDatabaseIntegrationTest, ApiKeyNeverInPlaintextInQueryResults) {
     // SELECT api_key_encrypted should return masked value, not plaintext.
     use_database(system_database_name);
     auto qr = exec_ok("SELECT api_key_encrypted FROM sys_providers");
-    use_database("giodb");
+    use_database("sixseven");
 
     ASSERT_EQ(qr.rows.size(), 1u);
     if (!qr.rows[0][0].is_null()) {
@@ -571,7 +571,7 @@ TEST_F(SystemDatabaseIntegrationTest, ApiKeyNeverInPlaintextInQueryResults) {
     // SELECT name, api_key_encrypted also masks the key column.
     use_database(system_database_name);
     auto qr2 = exec_ok("SELECT name, api_key_encrypted FROM sys_providers");
-    use_database("giodb");
+    use_database("sixseven");
 
     ASSERT_EQ(qr2.rows.size(), 1u);
     EXPECT_EQ(qr2.rows[0][0].as_string(), "openai-prod");
@@ -603,7 +603,7 @@ TEST_F(SystemDatabaseIntegrationTest, DefaultValueForSetting) {
 
 TEST_F(SystemDatabaseIntegrationTest, OverrideViaConfigFile) {
     // Write a JSON config file with an override.
-    auto config_path = data_dir_ / "giodb.json";
+    auto config_path = data_dir_ / "sixseven.json";
     {
         std::ofstream f(config_path);
         f << R"({"port": 9876, "log_level": "warn"})";
@@ -646,7 +646,7 @@ TEST_F(SystemDatabaseIntegrationTest, ConfigPriorityChainDefaultThenFileThenSysS
     EXPECT_EQ(config.port, 6767);
 
     // 2. File override: port = 7777.
-    auto config_path = data_dir_ / "giodb.json";
+    auto config_path = data_dir_ / "sixseven.json";
     {
         std::ofstream f(config_path);
         f << R"({"port": 7777})";
@@ -734,7 +734,7 @@ TEST_F(SystemDatabaseIntegrationTest, FullLifecycleBootstrapSettingsProvidersSec
     EXPECT_EQ(post_reload_oai->api_key, "sk-lifecycle-key");
 
     // Step 6: Verify system protection still in effect.
-    exec_error("DROP DATABASE giodb_system", StatusCode::CONSTRAINT_VIOLATION);
+    exec_error("DROP DATABASE sixseven_system", StatusCode::CONSTRAINT_VIOLATION);
     use_database(system_database_name);
     exec_error("DROP TABLE sys_settings", StatusCode::CONSTRAINT_VIOLATION);
     exec_error("DROP TABLE sys_providers", StatusCode::CONSTRAINT_VIOLATION);

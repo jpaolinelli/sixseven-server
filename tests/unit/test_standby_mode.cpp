@@ -1,10 +1,10 @@
-#include "giodb/catalog/catalog.h"
-#include "giodb/common/config.h"
-#include "giodb/common/types.h"
-#include "giodb/executor/query_engine.h"
-#include "giodb/executor/storage_manager.h"
-#include "giodb/storage/disk_manager.h"
-#include "giodb/storage/page.h"
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/config.h"
+#include "sixseven/common/types.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/storage/page.h"
 
 #include <gtest/gtest.h>
 
@@ -13,7 +13,7 @@
 #include <memory>
 #include <string>
 
-using namespace giodb;
+using namespace sixseven;
 
 // =============================================================================
 // Test fixture
@@ -22,7 +22,7 @@ using namespace giodb;
 class StandbyModeTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "giodb_test_standby";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_standby";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -193,7 +193,7 @@ TEST(StandbyConfigTest, ApplySettingReplicationParams) {
 }
 
 TEST(StandbyConfigTest, LoadFromJsonWithStandbyMode) {
-    auto tmp = std::filesystem::temp_directory_path() / "giodb_test_standby_config.json";
+    auto tmp = std::filesystem::temp_directory_path() / "sixseven_test_standby_config.json";
 
     // Write a standby config file.
     {
@@ -228,7 +228,7 @@ TEST(StandbyConfigTest, LoadFromJsonWithStandbyMode) {
 // =============================================================================
 
 TEST(DiskManagerReadOnlyTest, OpenFileReadonly) {
-    auto tmp_dir = std::filesystem::temp_directory_path() / "giodb_test_dm_ro";
+    auto tmp_dir = std::filesystem::temp_directory_path() / "sixseven_test_dm_ro";
     std::filesystem::create_directories(tmp_dir);
     auto file_path = tmp_dir / "test.db";
 
@@ -281,7 +281,7 @@ TEST(DiskManagerReadOnlyTest, OpenFileReadonly) {
 }
 
 TEST(DiskManagerReadOnlyTest, SharedLockAllowsMultipleReaders) {
-    auto tmp_dir = std::filesystem::temp_directory_path() / "giodb_test_dm_shared";
+    auto tmp_dir = std::filesystem::temp_directory_path() / "sixseven_test_dm_shared";
     std::filesystem::create_directories(tmp_dir);
     auto file_path = tmp_dir / "shared.db";
 

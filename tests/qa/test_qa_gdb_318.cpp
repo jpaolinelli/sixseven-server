@@ -5,8 +5,8 @@
 /// TokenizerConfig struct, SpecialTokenIds defaults, and OnnxProvider
 /// integration with the Tokenizer interface.
 
-#include "giodb/vector/onnx_provider.h"
-#include "giodb/vector/tokenizer.h"
+#include "sixseven/vector/onnx_provider.h"
+#include "sixseven/vector/tokenizer.h"
 
 #include <gtest/gtest.h>
 
@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-using namespace giodb;
+using namespace sixseven;
 
 // ===========================================================================
 // Mock for OnnxProvider integration tests

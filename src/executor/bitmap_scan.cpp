@@ -1,13 +1,13 @@
-#include "giodb/executor/bitmap_scan.h"
+#include "sixseven/executor/bitmap_scan.h"
 
-#include "giodb/executor/expr_evaluator.h"
-#include "giodb/index/btree_iterator.h"
-#include "giodb/table/tuple.h"
+#include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/index/btree_iterator.h"
+#include "sixseven/table/tuple.h"
 
 #include <algorithm>
 #include <unordered_set>
 
-namespace giodb {
+namespace sixseven {
 
 BitmapScanOperator::BitmapScanOperator(std::vector<BitmapIndexScan> scans,
                                        BitmapCombineMode combine_mode,
@@ -187,4 +187,4 @@ std::vector<RID> BitmapScanOperator::bitmap_and(const std::vector<std::vector<RI
     return {current.begin(), current.end()};
 }
 
-} // namespace giodb
+} // namespace sixseven

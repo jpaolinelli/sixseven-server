@@ -1,6 +1,6 @@
-#include "giodb/storage/wal.h"
-#include "giodb/storage/wal_record.h"
-#include "giodb/storage/wal_recovery.h"
+#include "sixseven/storage/wal.h"
+#include "sixseven/storage/wal_record.h"
+#include "sixseven/storage/wal_recovery.h"
 
 #include <gtest/gtest.h>
 
@@ -11,7 +11,7 @@
 
 #include "test_wal_helpers.h"
 
-namespace giodb {
+namespace sixseven {
 namespace {
 
 using test::TempWalDir;
@@ -890,4 +890,4 @@ TEST(WalRecovery, RecoverInterleavedTransactions) {
 }
 
 } // namespace
-} // namespace giodb
+} // namespace sixseven

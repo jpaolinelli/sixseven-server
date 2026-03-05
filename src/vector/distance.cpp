@@ -1,4 +1,4 @@
-#include "giodb/vector/distance.h"
+#include "sixseven/vector/distance.h"
 
 #include <cmath>
 #include <cstddef>
@@ -12,7 +12,7 @@
 #include <arm_neon.h>
 #endif
 
-namespace giodb {
+namespace sixseven {
 
 // =============================================================================
 // Scalar fallback implementations
@@ -463,4 +463,4 @@ const char* active_simd_name() {
     return "unknown";
 }
 
-} // namespace giodb
+} // namespace sixseven

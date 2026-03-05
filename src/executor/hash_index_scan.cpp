@@ -1,9 +1,9 @@
-#include "giodb/executor/hash_index_scan.h"
+#include "sixseven/executor/hash_index_scan.h"
 
-#include "giodb/executor/expr_evaluator.h"
-#include "giodb/table/tuple.h"
+#include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/table/tuple.h"
 
-namespace giodb {
+namespace sixseven {
 
 HashIndexScanOperator::HashIndexScanOperator(const HashIndex& index,
                                              TableHeap& heap,
@@ -114,4 +114,4 @@ Tuple HashIndexScanOperator::build_tuple_from_key(const KeyType& key, const RID&
     return Tuple{std::move(values), rid};
 }
 
-} // namespace giodb
+} // namespace sixseven

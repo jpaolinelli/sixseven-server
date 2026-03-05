@@ -1,5 +1,5 @@
 ---
-# GioDB clang-tidy configuration
+# SixSevenDB clang-tidy configuration
 # Checks appropriate for a C++20 database engine project.
 
 Checks: >
@@ -40,7 +40,7 @@ Checks: >
 #   modernize-use-nodiscard: Too noisy; we add [[nodiscard]] selectively where it matters.
 #   bugprone-easily-swappable-parameters: Too many false positives in constructors/factories.
 #   readability-function-cognitive-complexity: Not useful during early development.
-#   cppcoreguidelines-macro-usage: GIODB_LOG_* macros wrap spdlog and require variadic macros.
+#   cppcoreguidelines-macro-usage: SIXSEVEN_LOG_* macros wrap spdlog and require variadic macros.
 #   cppcoreguidelines-pro-bounds-pointer-arithmetic: argv[i] in main() is standard and safe.
 #   performance-enum-size: We prefer int-sized enums for ABI stability and debuggability.
 #   bugprone-empty-catch: False positives when catch blocks return error values.
@@ -55,7 +55,7 @@ WarningsAsErrors: >
   clang-analyzer-deadcode.*,
   clang-analyzer-cplusplus.*,
 
-HeaderFilterRegex: 'include/giodb/.*\.h$'
+HeaderFilterRegex: 'include/sixseven/.*\.h$'
 
 CheckOptions:
   - key: readability-identifier-naming.ClassCase

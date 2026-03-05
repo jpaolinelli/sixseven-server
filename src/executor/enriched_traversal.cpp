@@ -1,15 +1,15 @@
-#include "giodb/executor/enriched_traversal.h"
+#include "sixseven/executor/enriched_traversal.h"
 
-#include "giodb/common/logging.h"
-#include "giodb/common/value_hash.h"
-#include "giodb/executor/expr_evaluator.h"
+#include "sixseven/common/logging.h"
+#include "sixseven/common/value_hash.h"
+#include "sixseven/executor/expr_evaluator.h"
 
 #include <cassert>
 #include <deque>
 #include <unordered_map>
 #include <unordered_set>
 
-namespace giodb {
+namespace sixseven {
 
 EnrichedTraversalOperator::EnrichedTraversalOperator(GraphEngine& graph_engine,
                                                      TraversalConfig config,
@@ -195,13 +195,13 @@ Result<void> EnrichedTraversalOperator::enrich_results() {
             auto [rid, data] = *row;
             auto deserialized = TupleSerializer::deserialize(data, target_storage_schema_);
             if (!deserialized) {
-                GIODB_LOG_WARN("enriched traversal: skipping row — deserialization failed: {}",
+                SIXSEVEN_LOG_WARN("enriched traversal: skipping row — deserialization failed: {}",
                                deserialized.error().message);
                 continue;
             }
 
             if (target_pk_col_idx_ >= deserialized->size()) {
-                GIODB_LOG_WARN(
+                SIXSEVEN_LOG_WARN(
                     "enriched traversal: skipping row — PK column index {} out of bounds (row has "
                     "{} columns)",
                     target_pk_col_idx_,
@@ -269,4 +269,4 @@ Result<void> EnrichedTraversalOperator::enrich_results() {
     return ok();
 }
 
-} // namespace giodb
+} // namespace sixseven

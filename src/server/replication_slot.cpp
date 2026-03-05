@@ -1,13 +1,13 @@
-#include "giodb/server/replication_slot.h"
+#include "sixseven/server/replication_slot.h"
 
-#include "giodb/common/logging.h"
+#include "sixseven/common/logging.h"
 
 #include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <fstream>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -67,12 +67,12 @@ Result<ReplicationSlot> ReplicationSlotManager::create_slot(const std::string& n
 
     slots_.emplace(name, slot);
 
-    GIODB_LOG_INFO("replication slot created: {}", name);
+    SIXSEVEN_LOG_INFO("replication slot created: {}", name);
 
     // Persist after modification.
     auto save_result = save_impl();
     if (!save_result) {
-        GIODB_LOG_WARN("failed to persist replication slots after create: {}",
+        SIXSEVEN_LOG_WARN("failed to persist replication slots after create: {}",
                        save_result.error().message);
     }
 
@@ -94,12 +94,12 @@ Result<void> ReplicationSlotManager::drop_slot(const std::string& name) {
 
     slots_.erase(it);
 
-    GIODB_LOG_INFO("replication slot dropped: {}", name);
+    SIXSEVEN_LOG_INFO("replication slot dropped: {}", name);
 
     // Persist after modification.
     auto save_result = save_impl();
     if (!save_result) {
-        GIODB_LOG_WARN("failed to persist replication slots after drop: {}",
+        SIXSEVEN_LOG_WARN("failed to persist replication slots after drop: {}",
                        save_result.error().message);
     }
 
@@ -141,7 +141,7 @@ Result<void> ReplicationSlotManager::activate_slot(const std::string& name, lsn_
         it->second.restart_lsn = restart_lsn;
     }
 
-    GIODB_LOG_INFO("replication slot activated: {} (restart_lsn={})", name, restart_lsn);
+    SIXSEVEN_LOG_INFO("replication slot activated: {} (restart_lsn={})", name, restart_lsn);
     return ok();
 }
 
@@ -155,12 +155,12 @@ Result<void> ReplicationSlotManager::deactivate_slot(const std::string& name) {
 
     it->second.active = false;
 
-    GIODB_LOG_INFO("replication slot deactivated: {}", name);
+    SIXSEVEN_LOG_INFO("replication slot deactivated: {}", name);
 
     // Persist after deactivation to save the latest confirmed_flush_lsn.
     auto save_result = save_impl();
     if (!save_result) {
-        GIODB_LOG_WARN("failed to persist replication slots after deactivate: {}",
+        SIXSEVEN_LOG_WARN("failed to persist replication slots after deactivate: {}",
                        save_result.error().message);
     }
 
@@ -299,7 +299,7 @@ Result<void> ReplicationSlotManager::load() {
         }
     }
 
-    GIODB_LOG_INFO("loaded {} replication slot(s) from disk", slots_.size());
+    SIXSEVEN_LOG_INFO("loaded {} replication slot(s) from disk", slots_.size());
     return ok();
 }
 
@@ -315,7 +315,7 @@ void ReplicationSlotManager::check_wal_accumulation(lsn_t current_lsn) const {
         if (current_lsn > slot.restart_lsn) {
             uint64_t retained_bytes = current_lsn - slot.restart_lsn;
             if (retained_bytes > wal_retention_warning_bytes_) {
-                GIODB_LOG_WARN("inactive replication slot '{}' is retaining approximately {} bytes "
+                SIXSEVEN_LOG_WARN("inactive replication slot '{}' is retaining approximately {} bytes "
                                "of WAL (restart_lsn={}, current_lsn={})",
                                name,
                                retained_bytes,
@@ -330,4 +330,4 @@ std::filesystem::path ReplicationSlotManager::persistence_path() const {
     return data_dir_ / "replication_slots.json";
 }
 
-} // namespace giodb
+} // namespace sixseven

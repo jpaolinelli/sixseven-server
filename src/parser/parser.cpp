@@ -1,10 +1,10 @@
-#include "giodb/parser/parser.h"
+#include "sixseven/parser/parser.h"
 
 #include <algorithm>
 #include <stdexcept>
 #include <string>
 
-namespace giodb {
+namespace sixseven {
 
 namespace {
 
@@ -3293,4 +3293,4 @@ Result<ExprPtr> Parser::parse_primary() {
                           std::string(token_type_name(tok.type)) + ")");
 }
 
-} // namespace giodb
+} // namespace sixseven

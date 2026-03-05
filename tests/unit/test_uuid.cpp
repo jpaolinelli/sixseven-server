@@ -1,8 +1,8 @@
-#include "giodb/common/uuid.h"
+#include "sixseven/common/uuid.h"
 
 #include <gtest/gtest.h>
 
-using namespace giodb;
+using namespace sixseven;
 
 // -- parse_uuid ---------------------------------------------------------------
 

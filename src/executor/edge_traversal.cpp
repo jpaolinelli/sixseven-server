@@ -1,14 +1,14 @@
-#include "giodb/executor/edge_traversal.h"
+#include "sixseven/executor/edge_traversal.h"
 
-#include "giodb/common/value_hash.h"
-#include "giodb/executor/expr_evaluator.h"
+#include "sixseven/common/value_hash.h"
+#include "sixseven/executor/expr_evaluator.h"
 
 #include <algorithm>
 #include <deque>
 #include <unordered_map>
 #include <unordered_set>
 
-namespace giodb {
+namespace sixseven {
 
 EdgeTraversalOperator::EdgeTraversalOperator(GraphEngine& graph_engine,
                                              TraversalConfig config,
@@ -256,4 +256,4 @@ Result<void> EdgeTraversalOperator::collect_edges() {
     return ok();
 }
 
-} // namespace giodb
+} // namespace sixseven
