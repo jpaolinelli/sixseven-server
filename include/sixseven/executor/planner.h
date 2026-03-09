@@ -6,6 +6,7 @@
 #include "sixseven/executor/iterator.h"
 #include "sixseven/executor/storage_manager.h"
 #include "sixseven/executor/tuple.h"
+#include "sixseven/graph/algorithm_registry.h"
 #include "sixseven/graph/graph_engine.h"
 #include "sixseven/index/btree_index.h"
 #include "sixseven/index/hash_index.h"
@@ -43,6 +44,7 @@ public:
     /// @param btree_indexes    Optional map of index_id → loaded BTreeIndex.
     /// @param hash_indexes     Optional map of index_id → loaded HashIndex.
     /// @param embedding_pool   Optional EmbeddingWorkerPool for async INSERT embedding.
+    /// @param algorithm_registry Optional AlgorithmRegistry for algorithm TVFs.
     Planner(Catalog& catalog,
             StorageManager& storage,
             database_id_t database_id = default_database_id,
@@ -51,7 +53,8 @@ public:
             std::unordered_map<std::string, HnswIndex*>* hnsw_indexes = nullptr,
             std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes = nullptr,
             std::unordered_map<index_id_t, HashIndex*>* hash_indexes = nullptr,
-            EmbeddingWorkerPool* embedding_pool = nullptr);
+            EmbeddingWorkerPool* embedding_pool = nullptr,
+            AlgorithmRegistry* algorithm_registry = nullptr);
 
     /// Build an iterator tree for a DML/query statement.
     ///
@@ -164,6 +167,7 @@ private:
     std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes_;
     std::unordered_map<index_id_t, HashIndex*>* hash_indexes_;
     EmbeddingWorkerPool* embedding_pool_;
+    AlgorithmRegistry* algorithm_registry_;
     SubqueryContext subquery_ctx_;
 };
 

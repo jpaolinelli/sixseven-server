@@ -16,6 +16,7 @@
 namespace sixseven {
 
 // Forward declarations.
+class AlgorithmRegistry;
 class CatalogPersistence;
 enum class AuthMethod : uint8_t;
 struct AlterTableStmt;
@@ -154,6 +155,9 @@ public:
     /// Also configures the store callback to write embeddings back to tuples.
     void set_embedding_worker_pool(EmbeddingWorkerPool* pool);
 
+    /// Set the algorithm registry for graph algorithm table-valued functions.
+    void set_algorithm_registry(AlgorithmRegistry* registry);
+
 private:
     /// Execute a CREATE USER statement.
     [[nodiscard]] Result<QueryResult> execute_create_user(const CreateUserStmt& stmt);
@@ -238,6 +242,7 @@ private:
     WalWriter* wal_writer_ = nullptr;
     UserManager* user_mgr_ = nullptr;
     EmbeddingWorkerPool* embedding_pool_ = nullptr;
+    AlgorithmRegistry* algorithm_registry_ = nullptr;
     CatalogPersistence* catalog_persistence_ = nullptr;
     AuthMethod auth_method_{};
     database_id_t current_database_id_ = default_database_id;

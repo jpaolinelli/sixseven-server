@@ -158,6 +158,7 @@ enum class TokenType : uint8_t {
     GREATER_EQUAL, // >=
     PIPE_PIPE,     // ||  (string concatenation)
     COLON_COLON,   // ::  (type cast)
+    COLON_EQUAL,   // :=  (named parameter assignment)
 
     // -- Punctuation ----------------------------------------------------------
 
@@ -457,6 +458,8 @@ constexpr std::string_view token_type_name(TokenType type) {
         return "PIPE_PIPE";
     case TokenType::COLON_COLON:
         return "COLON_COLON";
+    case TokenType::COLON_EQUAL:
+        return "COLON_EQUAL";
     case TokenType::COMMA:
         return "COMMA";
     case TokenType::SEMICOLON:

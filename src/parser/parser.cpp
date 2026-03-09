@@ -1894,10 +1894,71 @@ Result<TableRef> Parser::parse_table_ref() {
         return ok(std::move(ref));
     }
 
-    // Regular table name.
+    // Regular table name or algorithm function call.
     auto name = parse_name("table name");
     if (!name)
         return tl::unexpected(name.error());
+
+    // Algorithm function call: name(args..., param := value, ...).
+    if (check(TokenType::LPAREN)) {
+        // Re-parse as a function call expression by rewinding one token.
+        // Build a FunctionCallExpr manually using the already-parsed name.
+        advance(); // consume (
+
+        auto fn = std::make_unique<FunctionCallExpr>();
+        fn->name = *name;
+
+        if (!check(TokenType::RPAREN)) {
+            bool seen_named = false;
+            do {
+                // Check for named parameter: identifier := value.
+                if (!seen_named && is_name_token(peek().type) && current_ + 1 < tokens_.size() &&
+                    tokens_[current_ + 1].type == TokenType::COLON_EQUAL) {
+                    seen_named = true;
+                }
+
+                if (seen_named && is_name_token(peek().type) && current_ + 1 < tokens_.size() &&
+                    tokens_[current_ + 1].type == TokenType::COLON_EQUAL) {
+                    auto param_name = std::string(advance().lexeme);
+                    advance(); // consume :=
+                    auto val = parse_expression();
+                    if (!val)
+                        return tl::unexpected(val.error());
+                    fn->named_args.push_back({std::move(param_name), std::move(*val)});
+                } else if (seen_named) {
+                    return tl::unexpected(
+                        make_error(StatusCode::PARSE_ERROR,
+                                   "positional argument not allowed after named arguments")
+                            .value());
+                } else {
+                    auto arg = parse_expression();
+                    if (!arg)
+                        return tl::unexpected(arg.error());
+                    fn->args.push_back(std::move(*arg));
+                }
+            } while (match(TokenType::COMMA));
+        }
+
+        auto rp = expect(TokenType::RPAREN, "expected ')'");
+        if (!rp)
+            return tl::unexpected(rp.error());
+
+        ref.name = *name;
+        ref.algorithm_call = std::move(fn);
+
+        // Optional alias.
+        if (match(TokenType::AS)) {
+            auto alias = parse_name("function alias");
+            if (!alias)
+                return tl::unexpected(alias.error());
+            ref.alias = std::move(*alias);
+        } else if (is_name_token(peek().type) && !is_clause_keyword(peek().type)) {
+            ref.alias = std::string(advance().lexeme);
+        }
+
+        return ok(std::move(ref));
+    }
+
     ref.name = std::move(*name);
 
     // Optional alias (explicit AS or implicit).
@@ -3251,11 +3312,32 @@ Result<ExprPtr> Parser::parse_primary() {
                 star->column = "*";
                 fn->args.push_back(std::move(star));
             } else if (!check(TokenType::RPAREN)) {
+                bool seen_named = false;
                 do {
-                    auto arg = parse_expression();
-                    if (!arg)
-                        return arg;
-                    fn->args.push_back(std::move(*arg));
+                    // Check for named parameter: identifier := value.
+                    if (!seen_named && is_name_token(peek().type) &&
+                        current_ + 1 < tokens_.size() &&
+                        tokens_[current_ + 1].type == TokenType::COLON_EQUAL) {
+                        seen_named = true;
+                    }
+
+                    if (seen_named && is_name_token(peek().type) && current_ + 1 < tokens_.size() &&
+                        tokens_[current_ + 1].type == TokenType::COLON_EQUAL) {
+                        auto param_name = std::string(advance().lexeme);
+                        advance(); // consume :=
+                        auto val = parse_expression();
+                        if (!val)
+                            return val;
+                        fn->named_args.push_back({std::move(param_name), std::move(*val)});
+                    } else if (seen_named) {
+                        return make_error(StatusCode::PARSE_ERROR,
+                                          "positional argument not allowed after named arguments");
+                    } else {
+                        auto arg = parse_expression();
+                        if (!arg)
+                            return arg;
+                        fn->args.push_back(std::move(*arg));
+                    }
                 } while (match(TokenType::COMMA));
             }
 
