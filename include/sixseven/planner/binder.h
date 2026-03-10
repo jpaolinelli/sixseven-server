@@ -13,6 +13,8 @@
 
 namespace sixseven {
 
+class AlgorithmRegistry;
+
 // ---------------------------------------------------------------------------
 // Resolved metadata types
 // ---------------------------------------------------------------------------
@@ -102,10 +104,14 @@ struct BoundStatement {
 /// ```
 class Binder {
 public:
-    /// @param catalog      System catalog for schema lookups.
-    /// @param database_id  The current database context for name resolution.
-    explicit Binder(const Catalog& catalog, database_id_t database_id = default_database_id)
-        : catalog_(catalog), database_id_(database_id) {}
+    /// @param catalog            System catalog for schema lookups.
+    /// @param database_id        The current database context for name resolution.
+    /// @param algorithm_registry Optional registry for resolving algorithm TVF
+    ///                           output columns during binding.
+    explicit Binder(const Catalog& catalog,
+                    database_id_t database_id = default_database_id,
+                    const AlgorithmRegistry* algorithm_registry = nullptr)
+        : catalog_(catalog), database_id_(database_id), algorithm_registry_(algorithm_registry) {}
 
     /// Bind a parsed statement. Validates names, types, and semantics.
     [[nodiscard]] Result<BoundStatement> bind(const Stmt& stmt);
@@ -120,6 +126,7 @@ public:
 private:
     const Catalog& catalog_;
     database_id_t database_id_;
+    const AlgorithmRegistry* algorithm_registry_ = nullptr;
 
     /// CTE results accumulated during binding. Inner subqueries can reference
     /// CTEs defined by their parent queries.
@@ -204,6 +211,11 @@ private:
     /// Resolve a table in the current database, wrapping NOT_FOUND errors with
     /// the database name for clearer diagnostics.
     Result<TableSchema> resolve_table(const std::string& table_name) const;
+
+    /// Build a ScopeTable for an algorithm TVF call in FROM/JOIN.
+    /// Returns a scope table with output columns from the algorithm definition,
+    /// or a placeholder with no columns if no registry is available.
+    ScopeTable build_algorithm_scope(const TableRef& tref) const;
 
     /// Check whether an expression references an aggregate (by consulting expr_types map).
     bool contains_aggregate(const Expr& expr, const BoundStatement& bound) const;

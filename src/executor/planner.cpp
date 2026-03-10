@@ -331,7 +331,7 @@ Planner::plan_from_source(const TableRef& table_ref,
             return make_error(StatusCode::INTERNAL_ERROR, "FROM subquery is not a SELECT");
         }
 
-        Binder binder(catalog_, database_id_);
+        Binder binder(catalog_, database_id_, algorithm_registry_);
         auto sub_bound = binder.bind(*sub_sel);
         if (!sub_bound) {
             return make_error(sub_bound.error().code, sub_bound.error().message);
@@ -361,7 +361,7 @@ Planner::plan_from_source(const TableRef& table_ref,
         // (e.g. eng_users referencing base_depts) resolve correctly.
         // Exclude the CTE itself to prevent self-shadowing: within its
         // own definition, table names resolve to the real catalog table.
-        Binder binder(catalog_, database_id_);
+        Binder binder(catalog_, database_id_, algorithm_registry_);
         auto siblings = cte_map;
         siblings.erase(to_upper(table_ref.name));
         inject_cte_bindings(binder, siblings);
@@ -776,7 +776,7 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
                 // Plan the entire subquery (not just the FROM table), so that
                 // any filters, aggregations, etc. inside the subquery are
                 // correctly applied.
-                Binder binder(catalog_, database_id_);
+                Binder binder(catalog_, database_id_, algorithm_registry_);
                 // Inject outer CTE bindings so the subquery can reference CTEs.
                 inject_cte_bindings(binder, cte_map);
                 auto sub_bound = binder.bind(*sub_sel);

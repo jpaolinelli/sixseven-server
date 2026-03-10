@@ -377,7 +377,7 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
     }
 
     // 5. Bind.
-    Binder binder(catalog_, current_database_id_);
+    Binder binder(catalog_, current_database_id_, algorithm_registry_);
     auto bound = binder.bind(**stmt_ptr);
     if (!bound) {
         return make_error(bound.error().code, bound.error().message);
@@ -430,7 +430,7 @@ Result<std::vector<ColumnDescription>> QueryEngine::describe(const std::string& 
     }
 
     // 4. Bind to resolve column names and types.
-    Binder binder(catalog_, current_database_id_);
+    Binder binder(catalog_, current_database_id_, algorithm_registry_);
     auto bound = binder.bind(**stmt_ptr);
     if (!bound) {
         return make_error(bound.error().code, bound.error().message);
