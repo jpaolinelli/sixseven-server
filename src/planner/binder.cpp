@@ -1023,9 +1023,21 @@ Binder::build_from_scope(const SelectStmt& stmt, Scope* parent, BoundStatement& 
         cte_results_.emplace(to_upper(cte.name), std::move(*sub));
     }
 
-    // FROM tables — check TRAVERSE source, CTEs, then catalog.
+    // FROM tables — check algorithm call, TRAVERSE source, CTEs, then catalog.
     for (auto& tref : stmt.from) {
-        if (tref.traverse_source) {
+        if (tref.algorithm_call) {
+            // Algorithm function call in FROM — resolve output columns from
+            // the function name.  The actual algorithm lookup happens in the
+            // planner; here we just expose the function name as the alias
+            // so that column references can resolve.  We don't have the
+            // AlgorithmRegistry here, so we simply record a placeholder
+            // scope with no columns.  The planner will validate later.
+            ScopeTable st;
+            st.table_id = 0;
+            st.alias = tref.alias.empty() ? tref.name : tref.alias;
+            // No columns added — the planner builds the real output schema.
+            scope.add_table(std::move(st));
+        } else if (tref.traverse_source) {
             // TRAVERSE source in FROM.
             auto scope_result = build_traverse_scope(tref, bound);
             if (!scope_result) {
@@ -1075,7 +1087,12 @@ Binder::build_from_scope(const SelectStmt& stmt, Scope* parent, BoundStatement& 
     // JOIN tables.
     for (auto& join : stmt.joins) {
         auto& jtref = join.table;
-        if (jtref.traverse_source) {
+        if (jtref.algorithm_call) {
+            ScopeTable st;
+            st.table_id = 0;
+            st.alias = jtref.alias.empty() ? jtref.name : jtref.alias;
+            scope.add_table(std::move(st));
+        } else if (jtref.traverse_source) {
             auto scope_result = build_traverse_scope(jtref, bound);
             if (!scope_result) {
                 return tl::unexpected(scope_result.error());

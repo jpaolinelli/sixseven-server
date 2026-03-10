@@ -172,12 +172,14 @@ struct TableConstraint {
     ReferentialAction on_delete = ReferentialAction::RESTRICT;
 };
 
-/// Table reference in FROM clause (table name, subquery, or TRAVERSE source).
+/// Table reference in FROM clause (table name, subquery, TRAVERSE source,
+/// or algorithm function call).
 struct TableRef {
     std::string name;
     std::string alias;
     StmtPtr subquery;
     StmtPtr traverse_source;
+    ExprPtr algorithm_call; ///< FunctionCallExpr for algorithm TVFs in FROM.
 };
 
 /// JOIN clause.
@@ -289,10 +291,17 @@ struct UnaryExpr : Expr {
     void accept(AstVisitor& visitor) const override;
 };
 
-/// Function call: name(args...) or name(DISTINCT args...).
+/// A single named argument: name := value.
+struct NamedArg {
+    std::string name;
+    ExprPtr value;
+};
+
+/// Function call: name(args..., param := value, ...) or name(DISTINCT args...).
 struct FunctionCallExpr : Expr {
     std::string name;
     std::vector<ExprPtr> args;
+    std::vector<NamedArg> named_args;
     bool distinct = false;
     void accept(AstVisitor& visitor) const override;
 };

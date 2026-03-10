@@ -371,6 +371,10 @@ Result<Token> Lexer::scan_token() {
             advance();
             return make_token(TokenType::COLON_COLON);
         }
+        if (!at_end() && peek() == '=') {
+            advance();
+            return make_token(TokenType::COLON_EQUAL);
+        }
         return make_token(TokenType::COLON);
     }
 

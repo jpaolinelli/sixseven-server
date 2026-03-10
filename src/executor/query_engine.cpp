@@ -177,6 +177,10 @@ void QueryEngine::set_embedding_worker_pool(EmbeddingWorkerPool* pool) {
     }
 }
 
+void QueryEngine::set_algorithm_registry(AlgorithmRegistry* registry) {
+    algorithm_registry_ = registry;
+}
+
 // ---------------------------------------------------------------------------
 // Full pipeline
 // ---------------------------------------------------------------------------
@@ -711,7 +715,8 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
     if (catalog_persistence_ != nullptr) {
         auto persist = catalog_persistence_->persist_table(current_database_id_, *schema);
         if (!persist) {
-            SIXSEVEN_LOG_WARN("failed to persist table '{}': {}", stmt.name, persist.error().message);
+            SIXSEVEN_LOG_WARN(
+                "failed to persist table '{}': {}", stmt.name, persist.error().message);
         }
     }
 
@@ -779,8 +784,8 @@ Result<QueryResult> QueryEngine::execute_drop_table(const DropTableStmt& stmt) {
         auto remove = catalog_persistence_->remove_table(table_id);
         if (!remove) {
             SIXSEVEN_LOG_WARN("failed to remove table '{}' from persistence: {}",
-                           stmt.name,
-                           remove.error().message);
+                              stmt.name,
+                              remove.error().message);
         }
     }
 
@@ -896,8 +901,8 @@ Result<QueryResult> QueryEngine::execute_drop_edge_type(const DropEdgeTypeStmt& 
         auto persist = catalog_persistence_->remove_edge_type(edge_id);
         if (!persist) {
             SIXSEVEN_LOG_WARN("failed to remove persisted edge type '{}': {}",
-                           stmt.name,
-                           persist.error().message);
+                              stmt.name,
+                              persist.error().message);
         }
     }
 
@@ -1258,8 +1263,8 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
             auto embeddings = target.provider->embed_batch(source_texts);
             if (!embeddings) {
                 SIXSEVEN_LOG_WARN("REEMBED: batch embed failed for provider '{}': {}",
-                               target.def.provider,
-                               embeddings.error().message);
+                                  target.def.provider,
+                                  embeddings.error().message);
                 total_skipped += static_cast<int64_t>(batch.size());
                 continue;
             }
@@ -1342,8 +1347,8 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
             auto reset_result = hnsw->reset();
             if (!reset_result) {
                 SIXSEVEN_LOG_WARN("REEMBED: failed to reset HNSW index '{}': {}",
-                               index_name,
-                               reset_result.error().message);
+                                  index_name,
+                                  reset_result.error().message);
                 continue;
             }
 
@@ -1351,7 +1356,7 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
             auto rebuild_it = table_storage->heap->begin();
             if (!rebuild_it) {
                 SIXSEVEN_LOG_WARN("REEMBED: failed to scan table for HNSW rebuild: {}",
-                               rebuild_it.error().message);
+                                  rebuild_it.error().message);
                 continue;
             }
 
@@ -1385,9 +1390,9 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
         std::chrono::steady_clock::now() - start_time);
 
     SIXSEVEN_LOG_INFO("REEMBED: completed {} rows in {}ms ({} skipped)",
-                   total_processed,
-                   elapsed.count(),
-                   total_skipped);
+                      total_processed,
+                      elapsed.count(),
+                      total_skipped);
 
     QueryResult qr;
     qr.affected_rows = total_processed;
@@ -1420,7 +1425,8 @@ Result<QueryResult> QueryEngine::execute_explain(const ExplainStmt& stmt,
                     nullptr,
                     nullptr,
                     nullptr,
-                    embedding_pool_);
+                    embedding_pool_,
+                    algorithm_registry_);
     std::vector<ExprPtr> owned_exprs;
     auto iter = planner.plan(*inner_bound, owned_exprs);
     if (!iter) {
@@ -1500,7 +1506,7 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                         set_current_database(prev_db);
                         if (!unset) {
                             SIXSEVEN_LOG_WARN("failed to unset existing default provider: {}",
-                                           unset.error().message);
+                                              unset.error().message);
                         }
                     }
                 }
@@ -1517,8 +1523,9 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                                                      "WHERE is_default = TRUE");
                                 set_current_database(prev_db);
                                 if (!unset) {
-                                    SIXSEVEN_LOG_WARN("failed to unset existing default provider: {}",
-                                                   unset.error().message);
+                                    SIXSEVEN_LOG_WARN(
+                                        "failed to unset existing default provider: {}",
+                                        unset.error().message);
                                 }
                             }
                         }
@@ -1549,7 +1556,8 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                     nullptr,
                     nullptr,
                     nullptr,
-                    embedding_pool_);
+                    embedding_pool_,
+                    algorithm_registry_);
     std::vector<ExprPtr> owned_exprs;
     auto iter = planner.plan(bound, owned_exprs);
     if (!iter) {
@@ -1631,13 +1639,14 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
 
                 if (!re_insert) {
                     SIXSEVEN_LOG_ERROR("failed to restore in-use provider '{}': {}",
-                                    pp.name,
-                                    re_insert.error().message);
+                                       pp.name,
+                                       re_insert.error().message);
                 }
                 // Reload cache to reflect the restored provider.
                 auto reload = provider_cache_->load(*this);
                 if (!reload) {
-                    SIXSEVEN_LOG_WARN("failed to reload provider cache: {}", reload.error().message);
+                    SIXSEVEN_LOG_WARN("failed to reload provider cache: {}",
+                                      reload.error().message);
                 }
 
                 return make_error(StatusCode::CONSTRAINT_VIOLATION,
@@ -1668,7 +1677,8 @@ void QueryEngine::maybe_invalidate_provider_cache(const BoundStatement& bound) {
     if (target_table == "sys_providers") {
         auto reload = provider_cache_->load(*this);
         if (!reload) {
-            SIXSEVEN_LOG_WARN("failed to reload provider cache after DML: {}", reload.error().message);
+            SIXSEVEN_LOG_WARN("failed to reload provider cache after DML: {}",
+                              reload.error().message);
         }
     }
 }
@@ -2350,8 +2360,8 @@ Result<QueryResult> QueryEngine::execute_alter_table(const AlterTableStmt& stmt)
             auto persist = catalog_persistence_->persist_columns_update(*updated_schema);
             if (!persist) {
                 SIXSEVEN_LOG_WARN("failed to persist ALTER TABLE for '{}': {}",
-                               stmt.table_name,
-                               persist.error().message);
+                                  stmt.table_name,
+                                  persist.error().message);
             }
         }
     }
@@ -2489,8 +2499,8 @@ Result<QueryResult> QueryEngine::execute_drop_index(const DropIndexStmt& stmt) {
         auto remove = catalog_persistence_->remove_index(index_id);
         if (!remove) {
             SIXSEVEN_LOG_WARN("failed to remove index '{}' from persistence: {}",
-                           stmt.name,
-                           remove.error().message);
+                              stmt.name,
+                              remove.error().message);
         }
     }
 

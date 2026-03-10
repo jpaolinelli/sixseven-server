@@ -1,6 +1,7 @@
 #include "sixseven/executor/planner.h"
 
 #include "sixseven/common/coercion.h"
+#include "sixseven/executor/algorithm_scan.h"
 #include "sixseven/executor/delete.h"
 #include "sixseven/executor/edge_traversal.h"
 #include "sixseven/executor/enriched_traversal.h"
@@ -220,11 +221,12 @@ Planner::Planner(Catalog& catalog,
                  std::unordered_map<std::string, HnswIndex*>* hnsw_indexes,
                  std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes,
                  std::unordered_map<index_id_t, HashIndex*>* hash_indexes,
-                 EmbeddingWorkerPool* embedding_pool)
+                 EmbeddingWorkerPool* embedding_pool,
+                 AlgorithmRegistry* algorithm_registry)
     : catalog_(catalog), storage_(storage), database_id_(database_id), graph_engine_(graph_engine),
       provider_registry_(provider_registry), hnsw_indexes_(hnsw_indexes),
       btree_indexes_(btree_indexes), hash_indexes_(hash_indexes), embedding_pool_(embedding_pool),
-      subquery_ctx_{catalog_, storage_} {}
+      algorithm_registry_(algorithm_registry), subquery_ctx_{catalog_, storage_} {}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -383,7 +385,77 @@ Planner::plan_from_source(const TableRef& table_ref,
         return ok(PlannedSource{std::move(source_op), std::move(schema)});
     }
 
-    // Case 3: TRAVERSE source (FROM TRAVERSE ...).
+    // Case 3: Algorithm function call (FROM pagerank('knows', ...)).
+    if (table_ref.algorithm_call) {
+        auto* fn = dynamic_cast<const FunctionCallExpr*>(table_ref.algorithm_call.get());
+        if (!fn) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "expected FunctionCallExpr in algorithm_call");
+        }
+
+        if (!algorithm_registry_) {
+            return make_error(StatusCode::NOT_FOUND, "unknown table '" + fn->name + "'");
+        }
+
+        auto* entry = algorithm_registry_->find(fn->name);
+        if (!entry) {
+            return make_error(StatusCode::NOT_FOUND,
+                              "unknown algorithm function '" + fn->name + "'");
+        }
+
+        // First positional arg must be the edge type name (string literal).
+        if (fn->args.empty()) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "algorithm '" + fn->name +
+                                  "' requires an edge type name as the first argument");
+        }
+
+        auto* edge_arg = dynamic_cast<const LiteralExpr*>(fn->args[0].get());
+        if (!edge_arg || edge_arg->kind != LiteralKind::STRING) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "first argument to algorithm '" + fn->name +
+                                  "' must be a string literal (edge type name)");
+        }
+
+        // Evaluate named parameters.
+        Tuple empty_tuple;
+        OutputSchema empty_schema;
+        std::unordered_map<std::string, Value> named_args;
+        for (const auto& narg : fn->named_args) {
+            auto val = evaluate_expr(*narg.value, empty_tuple, empty_schema, bound);
+            if (!val) {
+                return make_error(val.error().code, val.error().message);
+            }
+            named_args.emplace(narg.name, std::move(*val));
+        }
+
+        // Validate parameters against the algorithm definition.
+        auto resolved = AlgorithmRegistry::resolve_params(entry->def, named_args);
+        if (!resolved) {
+            return make_error(resolved.error().code, resolved.error().message);
+        }
+
+        if (!graph_engine_) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "graph engine not available for algorithm function");
+        }
+
+        AlgorithmContext ctx{*graph_engine_, edge_arg->value, std::move(*resolved)};
+
+        // Build output schema from algorithm definition.
+        const auto& algo_alias = alias.empty() ? fn->name : alias;
+        std::vector<OutputColumn> out_cols;
+        out_cols.reserve(entry->def.output_columns.size());
+        for (const auto& out_col : entry->def.output_columns) {
+            out_cols.push_back({algo_alias, out_col.name, out_col.type_id, out_col.nullable, 0});
+        }
+        auto algo_schema = OutputSchema(std::move(out_cols));
+
+        auto op = std::make_unique<AlgorithmScanOperator>(*entry, std::move(ctx), algo_schema);
+        return ok(PlannedSource{std::move(op), std::move(algo_schema)});
+    }
+
+    // Case 4: TRAVERSE source (FROM TRAVERSE ...).
     if (table_ref.traverse_source) {
         auto* trav = dynamic_cast<const TraverseStmt*>(table_ref.traverse_source.get());
         if (!trav) {

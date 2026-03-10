@@ -1,5 +1,6 @@
 # sixseven::executor — Volcano iterator model query execution engine
 add_library(sixseven_executor STATIC
+    algorithm_scan.cpp
     expr_evaluator.cpp
     seq_scan.cpp
     index_scan.cpp
