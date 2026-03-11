@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <variant>
@@ -292,7 +293,7 @@ Result<std::vector<AlgorithmRow>> community_detect_execute(const AlgorithmContex
 
     // Build undirected weighted graph.
     LouvainGraph graph;
-    std::unordered_set<int64_t> seen_edges;
+    std::set<std::pair<int64_t, int64_t>> seen_edges;
 
     for (const auto& edge : *edges) {
         auto src = value_to_int64(edge.source_pk);
@@ -308,14 +309,11 @@ Result<std::vector<AlgorithmRow>> community_detect_execute(const AlgorithmContex
         graph.add_node(*tgt);
 
         if (*src != *tgt) {
-            // Use a canonical edge key to avoid double-counting directed edges
-            // that represent the same undirected edge.
+            // Use a canonical (lo, hi) pair to avoid double-counting directed
+            // edges that represent the same undirected edge.
             int64_t lo = std::min(*src, *tgt);
             int64_t hi = std::max(*src, *tgt);
-            // Hash-combine for a unique edge key.
-            auto edge_key = static_cast<int64_t>((static_cast<uint64_t>(lo) << 32) |
-                                                 (static_cast<uint64_t>(hi) & 0xFFFFFFFF));
-            if (seen_edges.insert(edge_key).second) {
+            if (seen_edges.emplace(lo, hi).second) {
                 graph.add_edge(*src, *tgt, 1.0);
             }
         }
