@@ -1,6 +1,7 @@
 # sixseven::graph sources
 add_library(sixseven_graph STATIC
     algorithm_registry.cpp
+    betweenness_centrality.cpp
     connected_components.cpp
     louvain.cpp
     pagerank.cpp
