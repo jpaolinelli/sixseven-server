@@ -98,6 +98,9 @@ public:
     /// Return whether the table is empty.
     [[nodiscard]] bool empty() const;
 
+    /// Return all edges in the table (unordered).
+    [[nodiscard]] std::vector<EdgeRow> get_all_edges() const;
+
     /// Access the table configuration.
     [[nodiscard]] const EdgeTableConfig& config() const;
 

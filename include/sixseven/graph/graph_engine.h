@@ -115,6 +115,9 @@ public:
     /// Get the EdgeTable for a given edge type (for advanced queries).
     [[nodiscard]] Result<EdgeTable*> get_edge_table(const std::string& name);
 
+    /// Get all edges for a given edge type.
+    [[nodiscard]] Result<std::vector<EdgeRow>> get_all_edges(const std::string& edge_type) const;
+
     /// List all registered edge type names.
     [[nodiscard]] std::vector<std::string> list_edge_types() const;
 

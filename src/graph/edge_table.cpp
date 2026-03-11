@@ -310,6 +310,16 @@ bool EdgeTable::empty() const {
     return edges_.empty();
 }
 
+std::vector<EdgeRow> EdgeTable::get_all_edges() const {
+    std::shared_lock lock(mu_);
+    std::vector<EdgeRow> result;
+    result.reserve(edges_.size());
+    for (const auto& [id, row] : edges_) {
+        result.push_back(row);
+    }
+    return result;
+}
+
 const EdgeTableConfig& EdgeTable::config() const {
     return config_;
 }

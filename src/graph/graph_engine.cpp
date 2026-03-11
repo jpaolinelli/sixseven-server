@@ -490,6 +490,17 @@ Result<std::vector<EdgeRow>> GraphEngine::get_edges_to(const std::string& edge_t
     return it->second->get_edges_to(target_pk);
 }
 
+Result<std::vector<EdgeRow>> GraphEngine::get_all_edges(const std::string& edge_type) const {
+    std::lock_guard lock(mu_);
+
+    auto it = edge_tables_.find(edge_type);
+    if (it == edge_tables_.end()) {
+        return make_error(StatusCode::NOT_FOUND, "edge type '" + edge_type + "' not found");
+    }
+
+    return ok(it->second->get_all_edges());
+}
+
 Result<EdgeTable*> GraphEngine::get_edge_table(const std::string& name) {
     std::lock_guard lock(mu_);
 
