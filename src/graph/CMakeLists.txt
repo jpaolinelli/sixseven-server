@@ -2,6 +2,7 @@
 add_library(sixseven_graph STATIC
     algorithm_registry.cpp
     connected_components.cpp
+    louvain.cpp
     pagerank.cpp
     edge_table.cpp
     graph_engine.cpp
