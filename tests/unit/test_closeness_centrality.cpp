@@ -31,11 +31,14 @@ static Value pk(int64_t v) {
     return Value(v);
 }
 
-/// Result row: (node_id, closeness, sum_farness, reachable_count).
+/// Result row: (node_id, closeness, sum_farness, reachable_count,
+///              component_size, normalized_closeness).
 struct ClosenessResult {
     double closeness;
     int64_t sum_farness;
     int64_t reachable_count;
+    int64_t component_size;
+    double normalized_closeness;
 };
 
 /// Extract per-node results from algorithm output rows.
@@ -43,12 +46,15 @@ std::unordered_map<int64_t, ClosenessResult>
 to_closeness_map(const std::vector<AlgorithmRow>& rows) {
     std::unordered_map<int64_t, ClosenessResult> result;
     for (const auto& row : rows) {
-        EXPECT_EQ(row.values.size(), 4u);
+        EXPECT_EQ(row.values.size(), 6u);
         auto node_id = std::get<int64_t>(row.values[0].data());
         auto closeness = std::get<double>(row.values[1].data());
         auto sum_farness = std::get<int64_t>(row.values[2].data());
         auto reachable_count = std::get<int64_t>(row.values[3].data());
-        result[node_id] = {closeness, sum_farness, reachable_count};
+        auto component_size = std::get<int64_t>(row.values[4].data());
+        auto normalized_closeness = std::get<double>(row.values[5].data());
+        result[node_id] = {closeness, sum_farness, reachable_count, component_size,
+                           normalized_closeness};
     }
     return result;
 }
@@ -62,7 +68,7 @@ to_closeness_map(const std::vector<AlgorithmRow>& rows) {
 TEST(ClosenessCentralityDef, OutputSchema) {
     auto def = make_closeness_centrality_def();
     EXPECT_EQ(def.name, "closeness");
-    ASSERT_EQ(def.output_columns.size(), 4u);
+    ASSERT_EQ(def.output_columns.size(), 6u);
     EXPECT_EQ(def.output_columns[0].name, "node_id");
     EXPECT_EQ(def.output_columns[0].type_id, TypeId::INT64);
     EXPECT_EQ(def.output_columns[1].name, "closeness");
@@ -71,11 +77,20 @@ TEST(ClosenessCentralityDef, OutputSchema) {
     EXPECT_EQ(def.output_columns[2].type_id, TypeId::INT64);
     EXPECT_EQ(def.output_columns[3].name, "reachable_count");
     EXPECT_EQ(def.output_columns[3].type_id, TypeId::INT64);
+    EXPECT_EQ(def.output_columns[4].name, "component_size");
+    EXPECT_EQ(def.output_columns[4].type_id, TypeId::INT64);
+    EXPECT_EQ(def.output_columns[5].name, "normalized_closeness");
+    EXPECT_EQ(def.output_columns[5].type_id, TypeId::FLOAT64);
 }
 
-TEST(ClosenessCentralityDef, NoParameters) {
+TEST(ClosenessCentralityDef, VariantParameter) {
     auto def = make_closeness_centrality_def();
-    EXPECT_TRUE(def.params.empty());
+    ASSERT_EQ(def.params.size(), 1u);
+    EXPECT_EQ(def.params[0].name, "variant");
+    EXPECT_EQ(def.params[0].type_id, TypeId::STRING);
+    EXPECT_FALSE(def.params[0].required);
+    ASSERT_TRUE(def.params[0].default_value.has_value());
+    EXPECT_EQ(std::get<std::string>(def.params[0].default_value->data()), "standard");
 }
 
 TEST(ClosenessCentralityDef, Registration) {
@@ -114,9 +129,18 @@ protected:
         }
     }
 
-    /// Run closeness centrality.
+    /// Run closeness centrality with default (standard) variant.
     Result<std::vector<AlgorithmRow>> run_closeness(const std::string& edge_type) {
         AlgorithmContext ctx{engine_, edge_type, {}};
+        return closeness_centrality_execute(ctx);
+    }
+
+    /// Run closeness centrality with a specific variant.
+    Result<std::vector<AlgorithmRow>>
+    run_closeness(const std::string& edge_type, const std::string& variant) {
+        std::unordered_map<std::string, Value> args;
+        args["variant"] = Value(variant);
+        AlgorithmContext ctx{engine_, edge_type, args};
         return closeness_centrality_execute(ctx);
     }
 
@@ -151,11 +175,13 @@ TEST_F(ClosenessCentralityTest, SingleEdge) {
     EXPECT_DOUBLE_EQ(scores[1].closeness, 1.0); // (2-1)/1 = 1.0
     EXPECT_EQ(scores[1].sum_farness, 1);
     EXPECT_EQ(scores[1].reachable_count, 2);
+    EXPECT_EQ(scores[1].component_size, 2);
 
     // Node 2 cannot reach anyone.
     EXPECT_DOUBLE_EQ(scores[2].closeness, 0.0);
     EXPECT_EQ(scores[2].sum_farness, 0);
     EXPECT_EQ(scores[2].reachable_count, 1);
+    EXPECT_EQ(scores[2].component_size, 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +223,7 @@ TEST_F(ClosenessCentralityTest, BidirectionalPathCenterHighest) {
     EXPECT_EQ(scores[3].sum_farness, 6);
     EXPECT_EQ(scores[3].reachable_count, 5);
     EXPECT_NEAR(scores[3].closeness, 4.0 / 6.0, 1e-10);
+    EXPECT_EQ(scores[3].component_size, 5);
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +261,7 @@ TEST_F(ClosenessCentralityTest, CompleteGraph) {
             << "node " << node << " in complete graph should have closeness 1.0";
         EXPECT_EQ(scores[node].sum_farness, 3);
         EXPECT_EQ(scores[node].reachable_count, 4);
+        EXPECT_EQ(scores[node].component_size, 4);
     }
 }
 
@@ -255,12 +283,14 @@ TEST_F(ClosenessCentralityTest, StarGraphCentralNode) {
     EXPECT_DOUBLE_EQ(scores[1].closeness, 1.0);
     EXPECT_EQ(scores[1].sum_farness, 4);
     EXPECT_EQ(scores[1].reachable_count, 5);
+    EXPECT_EQ(scores[1].component_size, 5);
 
     // Spokes cannot reach anyone (no outgoing edges).
     for (int64_t node : {2, 3, 4, 5}) {
         EXPECT_DOUBLE_EQ(scores[node].closeness, 0.0)
             << "spoke node " << node << " should have closeness 0";
         EXPECT_EQ(scores[node].reachable_count, 1);
+        EXPECT_EQ(scores[node].component_size, 5);
     }
 }
 
@@ -285,6 +315,12 @@ TEST_F(ClosenessCentralityTest, DisconnectedGraph) {
     // Sink nodes cannot reach anyone.
     EXPECT_DOUBLE_EQ(scores[2].closeness, 0.0);
     EXPECT_DOUBLE_EQ(scores[4].closeness, 0.0);
+
+    // Component sizes.
+    EXPECT_EQ(scores[1].component_size, 2);
+    EXPECT_EQ(scores[2].component_size, 2);
+    EXPECT_EQ(scores[3].component_size, 2);
+    EXPECT_EQ(scores[4].component_size, 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +344,7 @@ TEST_F(ClosenessCentralityTest, DirectedTriangle) {
             << "node " << node << " in directed triangle";
         EXPECT_EQ(scores[node].sum_farness, 3);
         EXPECT_EQ(scores[node].reachable_count, 3);
+        EXPECT_EQ(scores[node].component_size, 3);
     }
 }
 
@@ -344,6 +381,11 @@ TEST_F(ClosenessCentralityTest, FarnessAndReachableCount) {
     EXPECT_EQ(scores[4].sum_farness, 0);
     EXPECT_EQ(scores[4].reachable_count, 1);
     EXPECT_DOUBLE_EQ(scores[4].closeness, 0.0);
+
+    // All in one weakly connected component.
+    for (int64_t node : {1, 2, 3, 4}) {
+        EXPECT_EQ(scores[node].component_size, 4);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -371,6 +413,14 @@ TEST_F(ClosenessCentralityTest, NonexistentEdgeTypeFails) {
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
+TEST_F(ClosenessCentralityTest, InvalidVariantFails) {
+    build_graph("knows", {{1, 2}});
+
+    auto result = run_closeness("knows", "invalid_variant");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
 // ---------------------------------------------------------------------------
 // Closeness values in valid range
 // ---------------------------------------------------------------------------
@@ -386,6 +436,7 @@ TEST_F(ClosenessCentralityTest, ClosenessValuesNonNegative) {
         EXPECT_GE(r.closeness, 0.0) << "node " << node << " should have non-negative closeness";
         EXPECT_GE(r.sum_farness, 0) << "node " << node << " should have non-negative sum_farness";
         EXPECT_GE(r.reachable_count, 1) << "node " << node << " should have reachable_count >= 1";
+        EXPECT_GE(r.component_size, 1) << "node " << node << " should have component_size >= 1";
     }
 }
 
@@ -432,4 +483,26 @@ TEST_F(ClosenessCentralityTest, DiamondGraph) {
 
     // Node 4: can't reach anyone.
     EXPECT_DOUBLE_EQ(scores[4].closeness, 0.0);
+
+    // All in one component.
+    for (int64_t node : {1, 2, 3, 4}) {
+        EXPECT_EQ(scores[node].component_size, 4);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Standard closeness values equal normalized_closeness
+// ---------------------------------------------------------------------------
+
+TEST_F(ClosenessCentralityTest, StandardVariantNormalizedMatchesCloseness) {
+    build_graph("knows", {{1, 2}, {2, 3}, {3, 1}});
+
+    auto result = run_closeness("knows", "standard");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_closeness_map(*result);
+    for (const auto& [node, r] : scores) {
+        EXPECT_DOUBLE_EQ(r.closeness, r.normalized_closeness)
+            << "standard variant: closeness should equal normalized_closeness for node " << node;
+    }
 }
