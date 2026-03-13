@@ -10,6 +10,7 @@ add_library(sixseven_graph STATIC
     harmonic_centrality.cpp
     louvain.cpp
     pagerank.cpp
+    triangle_count.cpp
     edge_table.cpp
     graph_engine.cpp
 )
