@@ -5,6 +5,7 @@ add_library(sixseven_graph STATIC
     closeness_centrality.cpp
     connected_components.cpp
     degree_centrality.cpp
+    eigenvector_centrality.cpp
     louvain.cpp
     pagerank.cpp
     edge_table.cpp
