@@ -3,6 +3,7 @@ add_library(sixseven_graph STATIC
     algorithm_registry.cpp
     betweenness_centrality.cpp
     closeness_centrality.cpp
+    clustering_coefficient.cpp
     connected_components.cpp
     degree_centrality.cpp
     eigenvector_centrality.cpp
