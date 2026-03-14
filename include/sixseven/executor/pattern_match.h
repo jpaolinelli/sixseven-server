@@ -28,8 +28,8 @@ struct MatchEdgeDef {
     std::string variable;
     std::string edge_type;
     TraverseDirection direction = TraverseDirection::OUT;
-    std::optional<int32_t> min_hops; ///< Minimum hops (nullopt = fixed single hop).
-    std::optional<int32_t> max_hops; ///< Maximum hops (nullopt = unbounded).
+    std::optional<int32_t> min_hops;   ///< Minimum hops (nullopt = fixed single hop).
+    std::optional<int32_t> max_hops;   ///< Maximum hops (nullopt = unbounded).
     const Expr* filter_expr = nullptr; ///< Inline WHERE predicate for edge filtering.
 
     /// Default constructor.

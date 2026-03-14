@@ -279,9 +279,8 @@ VariableLengthMatchOperator::binding_to_tuple(const std::unordered_map<std::stri
     return ok(std::move(tuple));
 }
 
-Result<bool>
-VariableLengthMatchOperator::evaluate_node_filter(const MatchNodeDef& node_def,
-                                                   const Value& pk) const {
+Result<bool> VariableLengthMatchOperator::evaluate_node_filter(const MatchNodeDef& node_def,
+                                                               const Value& pk) const {
     if (!node_def.filter_expr) {
         return ok(true);
     }
@@ -319,7 +318,7 @@ VariableLengthMatchOperator::evaluate_node_filter(const MatchNodeDef& node_def,
 
 Result<bool>
 VariableLengthMatchOperator::evaluate_edge_filter(const MatchEdgeDef& edge_def,
-                                                   const std::vector<Value>& properties) const {
+                                                  const std::vector<Value>& properties) const {
     if (!edge_def.filter_expr) {
         return ok(true);
     }
@@ -539,8 +538,8 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                         std::vector<EdgeRow> edge_rows;
                         if (edge_def.direction == TraverseDirection::OUT ||
                             edge_def.direction == TraverseDirection::BOTH) {
-                            auto fwd = graph_engine_.get_edges_from(edge_def.edge_type,
-                                                                     entry.current_pk);
+                            auto fwd =
+                                graph_engine_.get_edges_from(edge_def.edge_type, entry.current_pk);
                             if (fwd) {
                                 for (auto& e : *fwd) {
                                     edge_rows.push_back(std::move(e));
@@ -549,8 +548,8 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                         }
                         if (edge_def.direction == TraverseDirection::IN ||
                             edge_def.direction == TraverseDirection::BOTH) {
-                            auto rev = graph_engine_.get_edges_to(edge_def.edge_type,
-                                                                   entry.current_pk);
+                            auto rev =
+                                graph_engine_.get_edges_to(edge_def.edge_type, entry.current_pk);
                             if (rev) {
                                 for (auto& e : *rev) {
                                     edge_rows.push_back(std::move(e));

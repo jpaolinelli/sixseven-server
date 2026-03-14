@@ -374,9 +374,8 @@ Result<void> PatternMatchOperator::execute_multi_hop() {
             }
 
             for (auto& edge_row : edge_rows) {
-                Value tgt_pk = (edge_def.direction == TraverseDirection::IN)
-                                   ? edge_row.source_pk
-                                   : edge_row.target_pk;
+                Value tgt_pk = (edge_def.direction == TraverseDirection::IN) ? edge_row.source_pk
+                                                                             : edge_row.target_pk;
 
                 // Apply edge inline predicate.
                 if (edge_def.filter_expr) {
@@ -511,8 +510,8 @@ Result<std::vector<Value>> PatternMatchOperator::fetch_node_data(const std::stri
     return make_error(StatusCode::NOT_FOUND, "node with pk not found in table " + table_name);
 }
 
-Result<bool>
-PatternMatchOperator::evaluate_node_filter(const MatchNodeDef& node_def, const Value& pk) const {
+Result<bool> PatternMatchOperator::evaluate_node_filter(const MatchNodeDef& node_def,
+                                                        const Value& pk) const {
     if (!node_def.filter_expr) {
         return ok(true);
     }
@@ -549,7 +548,7 @@ PatternMatchOperator::evaluate_node_filter(const MatchNodeDef& node_def, const V
 
 Result<bool>
 PatternMatchOperator::evaluate_edge_filter(const MatchEdgeDef& edge_def,
-                                            const std::vector<Value>& properties) const {
+                                           const std::vector<Value>& properties) const {
     if (!edge_def.filter_expr) {
         return ok(true);
     }
