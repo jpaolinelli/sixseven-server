@@ -170,6 +170,8 @@ enum class TokenType : uint8_t {
     RPAREN,    // )
     LBRACKET,  // [
     RBRACKET,  // ]
+    LBRACE,    // {
+    RBRACE,    // }
 
     // -- Literals -------------------------------------------------------------
 
@@ -476,6 +478,10 @@ constexpr std::string_view token_type_name(TokenType type) {
         return "LBRACKET";
     case TokenType::RBRACKET:
         return "RBRACKET";
+    case TokenType::LBRACE:
+        return "LBRACE";
+    case TokenType::RBRACE:
+        return "RBRACE";
     case TokenType::INTEGER_LITERAL:
         return "INTEGER_LITERAL";
     case TokenType::FLOAT_LITERAL:

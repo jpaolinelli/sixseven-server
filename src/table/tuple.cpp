@@ -285,6 +285,11 @@ std::span<const uint8_t> var_value_bytes(const Value& value) {
         const auto& e = value.as_embedding();
         return {reinterpret_cast<const uint8_t*>(e.data()), e.size() * sizeof(float)};
     }
+    case TypeId::PATH: {
+        const auto& p = value.as_path();
+        return {reinterpret_cast<const uint8_t*>(p.steps.data()),
+                p.steps.size() * sizeof(PathStep)};
+    }
     default:
         return {};
     }
@@ -304,6 +309,13 @@ Value read_var_value(const uint8_t* src, size_t length, TypeId type) {
         Embedding emb(count);
         std::memcpy(emb.data(), src, length);
         return Value(std::move(emb));
+    }
+    case TypeId::PATH: {
+        size_t count = length / sizeof(PathStep);
+        Path path;
+        path.steps.resize(count);
+        std::memcpy(path.steps.data(), src, length);
+        return Value(std::move(path));
     }
     default:
         return Value::make_null();

@@ -25,6 +25,7 @@ add_library(sixseven_executor STATIC
     edge_traversal.cpp
     shortest_path.cpp
     pattern_match.cpp
+    variable_length_match.cpp
     nearest_scan.cpp
     catalog_persistence.cpp
     storage_manager.cpp

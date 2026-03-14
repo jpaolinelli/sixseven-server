@@ -329,6 +329,10 @@ Result<Token> Lexer::scan_token() {
         return make_token(TokenType::LBRACKET);
     case ']':
         return make_token(TokenType::RBRACKET);
+    case '{':
+        return make_token(TokenType::LBRACE);
+    case '}':
+        return make_token(TokenType::RBRACE);
     case '=':
         return make_token(TokenType::EQUAL);
     default:

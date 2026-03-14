@@ -163,6 +163,9 @@ size_t ExternalSortOperator::estimate_tuple_size(const Tuple& tuple) {
             case TypeId::EMBEDDING:
                 size += v.as_embedding().capacity() * sizeof(float);
                 break;
+            case TypeId::PATH:
+                size += v.as_path().steps.capacity() * sizeof(PathStep);
+                break;
             default:
                 break;
             }
@@ -632,6 +635,16 @@ Result<void> ExternalSortOperator::write_tuple(std::ofstream& out, const Tuple& 
                       static_cast<std::streamsize>(dim * sizeof(float)));
             break;
         }
+        case TypeId::PATH: {
+            const auto& p = v.as_path();
+            auto count = static_cast<uint32_t>(p.steps.size());
+            write_pod(out, count);
+            for (const auto& step : p.steps) {
+                write_pod(out, step.node_pk);
+                write_pod(out, step.edge_id);
+            }
+            break;
+        }
         }
     }
 
@@ -781,6 +794,17 @@ Result<std::optional<Tuple>> ExternalSortOperator::read_tuple(std::ifstream& in)
             in.read(reinterpret_cast<char*>(e.data()),
                     static_cast<std::streamsize>(dim * sizeof(float)));
             tuple.values[i] = Value(std::move(e));
+            break;
+        }
+        case 23: { // PATH
+            auto count = read_pod<uint32_t>(in);
+            Path p;
+            p.steps.resize(count);
+            for (uint32_t s = 0; s < count; ++s) {
+                p.steps[s].node_pk = read_pod<int64_t>(in);
+                p.steps[s].edge_id = read_pod<int64_t>(in);
+            }
+            tuple.values[i] = Value(std::move(p));
             break;
         }
         default:

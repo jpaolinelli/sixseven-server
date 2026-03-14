@@ -223,10 +223,38 @@ struct NodePattern {
 };
 
 /// MATCH pattern edge (relationship in a graph pattern).
+///
+/// Supports variable-length path quantifiers:
+///   {min,max}  — hop range (e.g., {1,6})
+///   {n}        — exact hops (min_hops = max_hops = n)
+///   +          — one or more ({1, nullopt})
+///   *          — zero or more ({0, nullopt})
+/// When both are nullopt, the edge is a fixed single hop.
 struct EdgePatternDef {
     std::string variable;
     std::string edge_type;
     TraverseDirection direction = TraverseDirection::OUT;
+    std::optional<int32_t> min_hops; ///< Minimum hops (nullopt = fixed single hop).
+    std::optional<int32_t> max_hops; ///< Maximum hops (nullopt = unbounded).
+
+    /// Default constructor.
+    EdgePatternDef() = default;
+
+    /// Backward-compatible constructor (fixed single-hop edge).
+    EdgePatternDef(std::string var, std::string etype, TraverseDirection dir)
+        : variable(std::move(var)), edge_type(std::move(etype)), direction(dir) {}
+
+    /// Full constructor with hop quantifiers.
+    EdgePatternDef(std::string var,
+                   std::string etype,
+                   TraverseDirection dir,
+                   std::optional<int32_t> min_h,
+                   std::optional<int32_t> max_h)
+        : variable(std::move(var)), edge_type(std::move(etype)), direction(dir), min_hops(min_h),
+          max_hops(max_h) {}
+
+    /// Return true if this edge has a variable-length quantifier.
+    [[nodiscard]] bool is_variable_length() const { return min_hops.has_value(); }
 };
 
 /// Element in a MATCH path pattern: node [--edge--> node ...].
