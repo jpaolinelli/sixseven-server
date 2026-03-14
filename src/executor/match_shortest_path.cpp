@@ -15,16 +15,19 @@ namespace sixseven {
 
 namespace {
 
-int64_t pk_to_int64(const Value& pk) {
+/// Convert a Value PK to int64_t for PathStep storage.
+/// Returns an error if the PK is not an integer type.
+Result<int64_t> pk_to_int64(const Value& pk) {
     if (!pk.is_null()) {
         if (auto* p = std::get_if<int64_t>(&pk.data())) {
-            return *p;
+            return ok(*p);
         }
         if (auto* p32 = std::get_if<int32_t>(&pk.data())) {
-            return *p32;
+            return ok(static_cast<int64_t>(*p32));
         }
     }
-    return 0;
+    return make_error(StatusCode::INVALID_ARGUMENT,
+                      "shortest path MATCH requires integer primary keys");
 }
 
 } // namespace
@@ -289,10 +292,16 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
 
     std::vector<Path> result_paths;
 
+    // Validate that PKs are integer types (PathStep stores int64_t).
+    auto src_int = pk_to_int64(src_pk);
+    if (!src_int) {
+        return tl::unexpected(src_int.error());
+    }
+
     // Check trivial case: source == target.
     if (ValueEqual{}(src_pk, tgt_pk)) {
         Path p;
-        p.steps.push_back({pk_to_int64(src_pk), -1});
+        p.steps.push_back({*src_int, -1});
         result_paths.push_back(std::move(p));
         return ok(std::move(result_paths));
     }
@@ -305,17 +314,16 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
     };
 
     std::deque<BfsEntry> queue;
-    // For ANY_SHORTEST we only need to track visited nodes (no duplicates).
-    // For ALL_SHORTEST/SHORTEST_K we track visited per-level to allow multiple paths.
-    std::unordered_set<int64_t> globally_visited;
+    // Use Value-based visited set to correctly handle all PK types.
+    std::unordered_set<Value, ValueHash, ValueEqual> globally_visited;
     size_t total_visited = 0;
 
     // Seed BFS from source.
     BfsEntry start;
     start.current_pk = src_pk;
-    start.path_so_far.steps.push_back({pk_to_int64(src_pk), -1});
+    start.path_so_far.steps.push_back({*src_int, -1});
     queue.push_back(std::move(start));
-    globally_visited.insert(pk_to_int64(src_pk));
+    globally_visited.insert(src_pk);
 
     int32_t depth = 0;
     bool found_at_this_depth = false;
@@ -326,7 +334,7 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
 
         // For ALL_SHORTEST: nodes discovered at this level should not block
         // other paths at the same level from reaching the same node.
-        std::unordered_set<int64_t> level_new_nodes;
+        std::vector<Value> level_new_nodes;
 
         for (size_t i = 0; i < level_size; ++i) {
             auto entry = std::move(queue.front());
@@ -343,14 +351,17 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
             }
 
             for (auto& [nbr_pk, edge_id] : *neighbors) {
-                int64_t nbr_int = pk_to_int64(nbr_pk);
+                auto nbr_int = pk_to_int64(nbr_pk);
+                if (!nbr_int) {
+                    return tl::unexpected(nbr_int.error());
+                }
 
                 // Build new path.
                 Path new_path = entry.path_so_far;
                 // Update the last step's edge_id (the edge FROM previous node TO this one).
                 new_path.steps.back().edge_id = edge_id;
                 // Add the new node.
-                new_path.steps.push_back({nbr_int, -1});
+                new_path.steps.push_back({*nbr_int, -1});
 
                 // Check if we've reached the target.
                 if (ValueEqual{}(nbr_pk, tgt_pk)) {
@@ -370,16 +381,16 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
                 // For ALL_SHORTEST/SHORTEST_K: allow multiple paths through same node at same
                 // level.
                 if (path_selector_ == PathSelector::ANY_SHORTEST) {
-                    if (globally_visited.count(nbr_int) > 0) {
+                    if (globally_visited.count(nbr_pk) > 0) {
                         continue;
                     }
-                    globally_visited.insert(nbr_int);
+                    globally_visited.insert(nbr_pk);
                 } else {
                     // Don't revisit nodes from previous levels, but allow same-level visits.
-                    if (globally_visited.count(nbr_int) > 0) {
+                    if (globally_visited.count(nbr_pk) > 0) {
                         continue;
                     }
-                    level_new_nodes.insert(nbr_int);
+                    level_new_nodes.push_back(nbr_pk);
                 }
 
                 BfsEntry next;
@@ -390,8 +401,8 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
         }
 
         // After processing a level, add new nodes to globally visited.
-        for (int64_t nid : level_new_nodes) {
-            globally_visited.insert(nid);
+        for (const auto& node : level_new_nodes) {
+            globally_visited.insert(node);
         }
 
         // If we found paths at this depth and want ALL_SHORTEST, stop expanding.
