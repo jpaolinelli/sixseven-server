@@ -690,9 +690,13 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
                 continue;
             }
 
-            // Only visit if we found a better cost.
+            // Only visit if we found a better (or equal, for ALL_SHORTEST) cost.
             auto cost_it = best_cost.find(nbr_pk);
-            if (cost_it == best_cost.end() || new_cost < cost_it->second) {
+            bool dominated = (cost_it != best_cost.end()) &&
+                             (path_selector_ == PathSelector::ALL_SHORTEST
+                                  ? new_cost > cost_it->second
+                                  : new_cost >= cost_it->second);
+            if (!dominated) {
                 best_cost[nbr_pk] = new_cost;
 
                 DijkstraEntry next;

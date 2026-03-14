@@ -1,6 +1,7 @@
 #include "sixseven/executor/variable_length_match.h"
 
 #include "sixseven/common/coercion.h"
+#include "sixseven/common/value_hash.h"
 #include "sixseven/executor/expr_evaluator.h"
 #include "sixseven/table/tuple.h"
 
@@ -10,23 +11,6 @@
 #include <unordered_set>
 
 namespace sixseven {
-
-namespace {
-
-/// Extract an int64_t from a Value that holds an integer PK.
-int64_t pk_to_int64(const Value& pk) {
-    if (!pk.is_null()) {
-        if (auto* p = std::get_if<int64_t>(&pk.data())) {
-            return *p;
-        }
-        if (auto* p32 = std::get_if<int32_t>(&pk.data())) {
-            return *p32;
-        }
-    }
-    return 0;
-}
-
-} // namespace
 
 VariableLengthMatchOperator::VariableLengthMatchOperator(GraphEngine& graph_engine,
                                                          const Catalog& catalog,
@@ -487,7 +471,7 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
             struct BfsEntry {
                 Value current_pk;
                 int32_t depth;
-                std::unordered_set<int64_t> visited;
+                std::unordered_set<Value, ValueHash, ValueEqual> visited;
             };
 
             for (auto& binding : bindings) {
@@ -502,8 +486,7 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                 BfsEntry start;
                 start.current_pk = start_pk;
                 start.depth = 0;
-                int64_t start_pk_int = pk_to_int64(start_pk);
-                start.visited.insert(start_pk_int);
+                start.visited.insert(start_pk);
                 queue.push(std::move(start));
 
                 while (!queue.empty()) {
@@ -561,8 +544,7 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                             Value nbr_pk = (edge_def.direction == TraverseDirection::IN)
                                                ? edge_row.source_pk
                                                : edge_row.target_pk;
-                            int64_t nbr_pk_int = pk_to_int64(nbr_pk);
-                            if (entry.visited.count(nbr_pk_int) > 0) {
+                            if (entry.visited.count(nbr_pk) > 0) {
                                 continue;
                             }
 
@@ -578,7 +560,7 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                             next.current_pk = std::move(nbr_pk);
                             next.depth = entry.depth + 1;
                             next.visited = entry.visited;
-                            next.visited.insert(nbr_pk_int);
+                            next.visited.insert(nbr_pk);
                             queue.push(std::move(next));
                         }
                     }

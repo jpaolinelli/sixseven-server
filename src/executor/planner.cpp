@@ -668,6 +668,7 @@ Planner::plan_from_source(const TableRef& table_ref,
         }
 
         MatchConfig match_config;
+        bool has_variable_length = false;
         for (const auto& elem : match->pattern) {
             MatchNodeDef node_def;
             node_def.variable = elem.node.variable;
@@ -675,24 +676,34 @@ Planner::plan_from_source(const TableRef& table_ref,
             match_config.nodes.push_back(std::move(node_def));
 
             if (elem.outgoing_edge) {
-                MatchEdgeDef edge_def;
-                edge_def.variable = elem.outgoing_edge->variable;
-                edge_def.edge_type = elem.outgoing_edge->edge_type;
-                edge_def.direction = elem.outgoing_edge->direction;
+                MatchEdgeDef edge_def(elem.outgoing_edge->variable,
+                                      elem.outgoing_edge->edge_type,
+                                      elem.outgoing_edge->direction,
+                                      elem.outgoing_edge->min_hops,
+                                      elem.outgoing_edge->max_hops);
+                if (edge_def.is_variable_length()) {
+                    has_variable_length = true;
+                }
                 match_config.edges.push_back(std::move(edge_def));
             }
         }
 
         auto schema = build_output_schema(bound.output_columns);
 
-        auto iter = std::make_unique<PatternMatchOperator>(*graph_engine_,
-                                                           catalog_,
-                                                           storage_,
-                                                           database_id_,
-                                                           std::move(match_config),
-                                                           std::move(schema),
-                                                           nullptr, // WHERE handled by outer SELECT
-                                                           bound);
+        std::unique_ptr<Iterator> iter;
+        if (has_variable_length) {
+            iter = std::make_unique<VariableLengthMatchOperator>(
+                *graph_engine_, catalog_, storage_, database_id_,
+                std::move(match_config), std::move(schema),
+                nullptr, // WHERE handled by outer SELECT
+                bound);
+        } else {
+            iter = std::make_unique<PatternMatchOperator>(
+                *graph_engine_, catalog_, storage_, database_id_,
+                std::move(match_config), std::move(schema),
+                nullptr, // WHERE handled by outer SELECT
+                bound);
+        }
 
         auto out_schema = build_output_schema(bound.output_columns);
         return ok(PlannedSource{std::move(iter), std::move(out_schema)});
