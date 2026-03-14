@@ -654,7 +654,49 @@ Planner::plan_from_source(const TableRef& table_ref,
         return ok(PlannedSource{std::move(op), std::move(enriched_schema)});
     }
 
-    // Case 4: Physical table.
+    // Case 5: MATCH source (FROM MATCH ...).
+    if (table_ref.match_source) {
+        auto* match = dynamic_cast<const MatchStmt*>(table_ref.match_source.get());
+        if (!match) {
+            return make_error(StatusCode::INTERNAL_ERROR, "expected MatchStmt in match_source");
+        }
+
+        if (!graph_engine_) {
+            return make_error(StatusCode::INTERNAL_ERROR, "graph engine not available for MATCH");
+        }
+
+        MatchConfig match_config;
+        for (const auto& elem : match->pattern) {
+            MatchNodeDef node_def;
+            node_def.variable = elem.node.variable;
+            node_def.label = elem.node.label;
+            match_config.nodes.push_back(std::move(node_def));
+
+            if (elem.outgoing_edge) {
+                MatchEdgeDef edge_def;
+                edge_def.variable = elem.outgoing_edge->variable;
+                edge_def.edge_type = elem.outgoing_edge->edge_type;
+                edge_def.direction = elem.outgoing_edge->direction;
+                match_config.edges.push_back(std::move(edge_def));
+            }
+        }
+
+        auto schema = build_output_schema(bound.output_columns);
+
+        auto iter = std::make_unique<PatternMatchOperator>(*graph_engine_,
+                                                           catalog_,
+                                                           storage_,
+                                                           database_id_,
+                                                           std::move(match_config),
+                                                           std::move(schema),
+                                                           match->where_expr.get(),
+                                                           bound);
+
+        auto out_schema = build_output_schema(bound.output_columns);
+        return ok(PlannedSource{std::move(iter), std::move(out_schema)});
+    }
+
+    // Case 6: Physical table.
     auto table_schema = catalog_.get_table(database_id_, table_ref.name);
     if (!table_schema) {
         return make_error(table_schema.error().code, table_schema.error().message);
@@ -944,7 +986,7 @@ Planner::plan_select(const SelectStmt& stmt,
     // For subquery/CTE sources or when joins are present, don't push WHERE.
     bool pushed_where = false;
     if (!has_joins && stmt.where_expr && !table_ref.subquery && !table_ref.traverse_source &&
-        cte_map.find(to_upper(table_ref.name)) == cte_map.end()) {
+        !table_ref.match_source && cte_map.find(to_upper(table_ref.name)) == cte_map.end()) {
         // Recursively check if WHERE contains any subquery predicates.
         std::function<bool(const Expr*)> contains_subquery = [&](const Expr* e) -> bool {
             if (!e)

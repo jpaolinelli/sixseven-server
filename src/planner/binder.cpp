@@ -1064,6 +1064,31 @@ Binder::build_from_scope(const SelectStmt& stmt, Scope* parent, BoundStatement& 
             // is available).  The planner still validates and builds the
             // physical output schema at plan time.
             scope.add_table(build_algorithm_scope(tref));
+        } else if (tref.match_source) {
+            // MATCH source in FROM — resolve pattern tables into scope.
+            auto* match = dynamic_cast<const MatchStmt*>(tref.match_source.get());
+            if (!match) {
+                return make_error(StatusCode::INTERNAL_ERROR, "expected MatchStmt in match_source");
+            }
+            for (auto& elem : match->pattern) {
+                if (!elem.node.label.empty()) {
+                    auto schema = resolve_table(elem.node.label);
+                    if (!schema) {
+                        return tl::unexpected(schema.error());
+                    }
+                    bound.referenced_tables.push_back(schema->table_id);
+                    if (!elem.node.variable.empty()) {
+                        scope.add_table(make_scope_table(*schema, elem.node.variable));
+                    }
+                }
+                if (elem.outgoing_edge && !elem.outgoing_edge->edge_type.empty()) {
+                    auto edge = catalog_.get_edge_type(elem.outgoing_edge->edge_type);
+                    if (!edge) {
+                        return tl::unexpected(edge.error());
+                    }
+                    bound.referenced_edge_types.push_back(edge->edge_id);
+                }
+            }
         } else if (tref.traverse_source) {
             // TRAVERSE source in FROM.
             auto scope_result = build_traverse_scope(tref, bound);
@@ -1116,6 +1141,30 @@ Binder::build_from_scope(const SelectStmt& stmt, Scope* parent, BoundStatement& 
         auto& jtref = join.table;
         if (jtref.algorithm_call) {
             scope.add_table(build_algorithm_scope(jtref));
+        } else if (jtref.match_source) {
+            auto* match = dynamic_cast<const MatchStmt*>(jtref.match_source.get());
+            if (!match) {
+                return make_error(StatusCode::INTERNAL_ERROR, "expected MatchStmt in match_source");
+            }
+            for (auto& elem : match->pattern) {
+                if (!elem.node.label.empty()) {
+                    auto schema = resolve_table(elem.node.label);
+                    if (!schema) {
+                        return tl::unexpected(schema.error());
+                    }
+                    bound.referenced_tables.push_back(schema->table_id);
+                    if (!elem.node.variable.empty()) {
+                        scope.add_table(make_scope_table(*schema, elem.node.variable));
+                    }
+                }
+                if (elem.outgoing_edge && !elem.outgoing_edge->edge_type.empty()) {
+                    auto edge = catalog_.get_edge_type(elem.outgoing_edge->edge_type);
+                    if (!edge) {
+                        return tl::unexpected(edge.error());
+                    }
+                    bound.referenced_edge_types.push_back(edge->edge_id);
+                }
+            }
         } else if (jtref.traverse_source) {
             auto scope_result = build_traverse_scope(jtref, bound);
             if (!scope_result) {
