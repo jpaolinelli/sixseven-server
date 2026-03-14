@@ -1879,105 +1879,10 @@ Result<TableRef> Parser::parse_table_ref() {
         advance(); // consume MATCH
         auto match_stmt = std::make_unique<MatchStmt>();
 
-        // Parse pattern: (node)[-[edge]->(node)...] — same as parse_match but no RETURN.
-        while (true) {
-            auto lp = expect(TokenType::LPAREN, "expected '(' for node pattern");
-            if (!lp)
-                return tl::unexpected(lp.error());
-
-            NodePattern node;
-
-            if (check(TokenType::COLON)) {
-                advance(); // consume :
-                auto label = parse_name("node label");
-                if (!label)
-                    return tl::unexpected(label.error());
-                node.label = std::move(*label);
-            } else if (!check(TokenType::RPAREN) && is_name_token(peek().type)) {
-                auto name = parse_name("node variable or label");
-                if (!name)
-                    return tl::unexpected(name.error());
-
-                if (match(TokenType::COLON)) {
-                    node.variable = std::move(*name);
-                    auto label = parse_name("node label");
-                    if (!label)
-                        return tl::unexpected(label.error());
-                    node.label = std::move(*label);
-                } else {
-                    node.variable = std::move(*name);
-                }
-            }
-
-            auto rp = expect(TokenType::RPAREN, "expected ')' for node pattern");
-            if (!rp)
-                return tl::unexpected(rp.error());
-
-            PathElement elem;
-            elem.node = std::move(node);
-
-            if (check(TokenType::MINUS) || check(TokenType::LESS)) {
-                EdgePatternDef edge;
-                bool incoming_prefix = false;
-
-                if (match(TokenType::LESS)) {
-                    incoming_prefix = true;
-                    auto dash = expect(TokenType::MINUS, "expected '-' after '<'");
-                    if (!dash)
-                        return tl::unexpected(dash.error());
-                } else {
-                    advance(); // consume -
-                }
-
-                if (match(TokenType::LBRACKET)) {
-                    if (check(TokenType::COLON)) {
-                        advance(); // consume :
-                        auto etype = parse_name("edge type");
-                        if (!etype)
-                            return tl::unexpected(etype.error());
-                        edge.edge_type = std::move(*etype);
-                    } else if (!check(TokenType::RBRACKET) && is_name_token(peek().type)) {
-                        auto name = parse_name("edge variable or type");
-                        if (!name)
-                            return tl::unexpected(name.error());
-
-                        if (match(TokenType::COLON)) {
-                            edge.variable = std::move(*name);
-                            auto etype = parse_name("edge type");
-                            if (!etype)
-                                return tl::unexpected(etype.error());
-                            edge.edge_type = std::move(*etype);
-                        } else {
-                            edge.edge_type = std::move(*name);
-                        }
-                    }
-
-                    auto rb = expect(TokenType::RBRACKET, "expected ']'");
-                    if (!rb)
-                        return tl::unexpected(rb.error());
-                }
-
-                auto dash = expect(TokenType::MINUS, "expected '-' in edge pattern");
-                if (!dash)
-                    return tl::unexpected(dash.error());
-
-                bool outgoing_suffix = match(TokenType::GREATER);
-
-                if (incoming_prefix && !outgoing_suffix) {
-                    edge.direction = TraverseDirection::IN;
-                } else if (!incoming_prefix && outgoing_suffix) {
-                    edge.direction = TraverseDirection::OUT;
-                } else {
-                    edge.direction = TraverseDirection::BOTH;
-                }
-
-                elem.outgoing_edge = std::move(edge);
-                match_stmt->pattern.push_back(std::move(elem));
-            } else {
-                match_stmt->pattern.push_back(std::move(elem));
-                break;
-            }
-        }
+        auto pattern = parse_match_pattern();
+        if (!pattern)
+            return tl::unexpected(pattern.error());
+        match_stmt->pattern = std::move(*pattern);
 
         ref.match_source = std::move(match_stmt);
 
@@ -2315,13 +2220,10 @@ Result<StmtPtr> Parser::parse_nearest() {
 
 // -- Graph: MATCH -------------------------------------------------------------
 
-Result<StmtPtr> Parser::parse_match() {
-    advance(); // consume MATCH
-    auto stmt = std::make_unique<MatchStmt>();
+Result<std::vector<PathElement>> Parser::parse_match_pattern() {
+    std::vector<PathElement> pattern;
 
-    // Parse pattern: (node)[-[edge]->(node)...]
     while (true) {
-        // Parse node pattern: ([variable][:label])
         auto lp = expect(TokenType::LPAREN, "expected '(' for node pattern");
         if (!lp)
             return tl::unexpected(lp.error());
@@ -2329,7 +2231,6 @@ Result<StmtPtr> Parser::parse_match() {
         NodePattern node;
 
         if (check(TokenType::COLON)) {
-            // (:label) — no variable.
             advance(); // consume :
             auto label = parse_name("node label");
             if (!label)
@@ -2341,18 +2242,15 @@ Result<StmtPtr> Parser::parse_match() {
                 return tl::unexpected(name.error());
 
             if (match(TokenType::COLON)) {
-                // variable:label
                 node.variable = std::move(*name);
                 auto label = parse_name("node label");
                 if (!label)
                     return tl::unexpected(label.error());
                 node.label = std::move(*label);
             } else {
-                // Just variable, no label.
                 node.variable = std::move(*name);
             }
         }
-        // else: empty () node pattern.
 
         auto rp = expect(TokenType::RPAREN, "expected ')' for node pattern");
         if (!rp)
@@ -2361,7 +2259,6 @@ Result<StmtPtr> Parser::parse_match() {
         PathElement elem;
         elem.node = std::move(node);
 
-        // Check for edge pattern.
         if (check(TokenType::MINUS) || check(TokenType::LESS)) {
             EdgePatternDef edge;
             bool incoming_prefix = false;
@@ -2375,10 +2272,8 @@ Result<StmtPtr> Parser::parse_match() {
                 advance(); // consume -
             }
 
-            // Optional [variable:edge_type].
             if (match(TokenType::LBRACKET)) {
                 if (check(TokenType::COLON)) {
-                    // [:edge_type]
                     advance(); // consume :
                     auto etype = parse_name("edge type");
                     if (!etype)
@@ -2405,14 +2300,12 @@ Result<StmtPtr> Parser::parse_match() {
                     return tl::unexpected(rb.error());
             }
 
-            // Suffix: -> or -
             auto dash = expect(TokenType::MINUS, "expected '-' in edge pattern");
             if (!dash)
                 return tl::unexpected(dash.error());
 
             bool outgoing_suffix = match(TokenType::GREATER);
 
-            // Determine direction.
             if (incoming_prefix && !outgoing_suffix) {
                 edge.direction = TraverseDirection::IN;
             } else if (!incoming_prefix && outgoing_suffix) {
@@ -2422,13 +2315,24 @@ Result<StmtPtr> Parser::parse_match() {
             }
 
             elem.outgoing_edge = std::move(edge);
-            stmt->pattern.push_back(std::move(elem));
-            // Continue to parse next node.
+            pattern.push_back(std::move(elem));
         } else {
-            stmt->pattern.push_back(std::move(elem));
+            pattern.push_back(std::move(elem));
             break;
         }
     }
+
+    return ok(std::move(pattern));
+}
+
+Result<StmtPtr> Parser::parse_match() {
+    advance(); // consume MATCH
+    auto stmt = std::make_unique<MatchStmt>();
+
+    auto pattern = parse_match_pattern();
+    if (!pattern)
+        return tl::unexpected(pattern.error());
+    stmt->pattern = std::move(*pattern);
 
     // Optional WHERE.
     if (match(TokenType::WHERE)) {

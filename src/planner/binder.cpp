@@ -440,6 +440,30 @@ Result<ScopeTable> Binder::build_traverse_scope(const TableRef& tref, BoundState
     return ok(std::move(st));
 }
 
+Result<void>
+Binder::bind_match_source(const MatchStmt& match, Scope& scope, BoundStatement& bound) {
+    for (auto& elem : match.pattern) {
+        if (!elem.node.label.empty()) {
+            auto schema = resolve_table(elem.node.label);
+            if (!schema) {
+                return tl::unexpected(schema.error());
+            }
+            bound.referenced_tables.push_back(schema->table_id);
+            if (!elem.node.variable.empty()) {
+                scope.add_table(make_scope_table(*schema, elem.node.variable));
+            }
+        }
+        if (elem.outgoing_edge && !elem.outgoing_edge->edge_type.empty()) {
+            auto edge = catalog_.get_edge_type(elem.outgoing_edge->edge_type);
+            if (!edge) {
+                return tl::unexpected(edge.error());
+            }
+            bound.referenced_edge_types.push_back(edge->edge_id);
+        }
+    }
+    return ok();
+}
+
 bool Binder::contains_aggregate(const Expr& expr, const BoundStatement& bound) const {
     auto it = bound.expr_types.find(&expr);
     if (it != bound.expr_types.end()) {
@@ -1070,24 +1094,9 @@ Binder::build_from_scope(const SelectStmt& stmt, Scope* parent, BoundStatement& 
             if (!match) {
                 return make_error(StatusCode::INTERNAL_ERROR, "expected MatchStmt in match_source");
             }
-            for (auto& elem : match->pattern) {
-                if (!elem.node.label.empty()) {
-                    auto schema = resolve_table(elem.node.label);
-                    if (!schema) {
-                        return tl::unexpected(schema.error());
-                    }
-                    bound.referenced_tables.push_back(schema->table_id);
-                    if (!elem.node.variable.empty()) {
-                        scope.add_table(make_scope_table(*schema, elem.node.variable));
-                    }
-                }
-                if (elem.outgoing_edge && !elem.outgoing_edge->edge_type.empty()) {
-                    auto edge = catalog_.get_edge_type(elem.outgoing_edge->edge_type);
-                    if (!edge) {
-                        return tl::unexpected(edge.error());
-                    }
-                    bound.referenced_edge_types.push_back(edge->edge_id);
-                }
+            auto mr = bind_match_source(*match, scope, bound);
+            if (!mr) {
+                return tl::unexpected(mr.error());
             }
         } else if (tref.traverse_source) {
             // TRAVERSE source in FROM.
@@ -1146,24 +1155,9 @@ Binder::build_from_scope(const SelectStmt& stmt, Scope* parent, BoundStatement& 
             if (!match) {
                 return make_error(StatusCode::INTERNAL_ERROR, "expected MatchStmt in match_source");
             }
-            for (auto& elem : match->pattern) {
-                if (!elem.node.label.empty()) {
-                    auto schema = resolve_table(elem.node.label);
-                    if (!schema) {
-                        return tl::unexpected(schema.error());
-                    }
-                    bound.referenced_tables.push_back(schema->table_id);
-                    if (!elem.node.variable.empty()) {
-                        scope.add_table(make_scope_table(*schema, elem.node.variable));
-                    }
-                }
-                if (elem.outgoing_edge && !elem.outgoing_edge->edge_type.empty()) {
-                    auto edge = catalog_.get_edge_type(elem.outgoing_edge->edge_type);
-                    if (!edge) {
-                        return tl::unexpected(edge.error());
-                    }
-                    bound.referenced_edge_types.push_back(edge->edge_id);
-                }
+            auto mr = bind_match_source(*match, scope, bound);
+            if (!mr) {
+                return tl::unexpected(mr.error());
             }
         } else if (jtref.traverse_source) {
             auto scope_result = build_traverse_scope(jtref, bound);
@@ -2185,26 +2179,9 @@ Result<BoundStatement> Binder::bind_match(const MatchStmt& stmt) {
 
     Scope scope;
 
-    // Resolve pattern: each node label → table, each edge → edge type.
-    for (auto& elem : stmt.pattern) {
-        if (!elem.node.label.empty()) {
-            auto schema = resolve_table(elem.node.label);
-            if (!schema) {
-                return tl::unexpected(schema.error());
-            }
-            bound.referenced_tables.push_back(schema->table_id);
-
-            if (!elem.node.variable.empty()) {
-                scope.add_table(make_scope_table(*schema, elem.node.variable));
-            }
-        }
-        if (elem.outgoing_edge && !elem.outgoing_edge->edge_type.empty()) {
-            auto edge = catalog_.get_edge_type(elem.outgoing_edge->edge_type);
-            if (!edge) {
-                return tl::unexpected(edge.error());
-            }
-            bound.referenced_edge_types.push_back(edge->edge_id);
-        }
+    auto mr = bind_match_source(stmt, scope, bound);
+    if (!mr) {
+        return tl::unexpected(mr.error());
     }
 
     // Bind WHERE.

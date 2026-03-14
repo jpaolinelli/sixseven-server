@@ -689,7 +689,7 @@ Planner::plan_from_source(const TableRef& table_ref,
                                                            database_id_,
                                                            std::move(match_config),
                                                            std::move(schema),
-                                                           match->where_expr.get(),
+                                                           nullptr, // WHERE handled by outer SELECT
                                                            bound);
 
         auto out_schema = build_output_schema(bound.output_columns);
