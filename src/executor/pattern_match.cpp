@@ -144,6 +144,14 @@ Result<void> PatternMatchOperator::execute_single_hop() {
 
         Value src_pk = (*deserialized)[static_cast<size_t>(pk_col_idx)];
 
+        // Apply source node inline predicate.
+        if (src_node.filter_expr) {
+            auto pass = evaluate_node_filter(src_node, src_pk);
+            if (!pass || !*pass) {
+                continue;
+            }
+        }
+
         // Get edges from this source node in the appropriate direction.
         // Each entry is (edge, neighbor_pk) — neighbor_pk is already resolved
         // based on which index the edge came from.
@@ -170,6 +178,22 @@ Result<void> PatternMatchOperator::execute_single_hop() {
         }
 
         for (auto& [edge, tgt_pk] : edges_with_neighbor) {
+            // Apply edge inline predicate.
+            if (edge_def.filter_expr) {
+                auto pass = evaluate_edge_filter(edge_def, edge.properties);
+                if (!pass || !*pass) {
+                    continue;
+                }
+            }
+
+            // Apply target node inline predicate.
+            if (tgt_node.filter_expr) {
+                auto pass = evaluate_node_filter(tgt_node, tgt_pk);
+                if (!pass || !*pass) {
+                    continue;
+                }
+            }
+
             // Build output tuple with columns from both nodes.
             // The output schema was built by the binder based on RETURN items.
             // We need to populate values matching the schema columns.
@@ -296,8 +320,18 @@ Result<void> PatternMatchOperator::execute_multi_hop() {
             continue;
         }
 
+        Value first_pk = (*deserialized)[static_cast<size_t>(pk_col_idx)];
+
+        // Apply source node inline predicate.
+        if (first_node.filter_expr) {
+            auto pass = evaluate_node_filter(first_node, first_pk);
+            if (!pass || !*pass) {
+                continue;
+            }
+        }
+
         Binding b;
-        b[first_node.variable] = (*deserialized)[static_cast<size_t>(pk_col_idx)];
+        b[first_node.variable] = std::move(first_pk);
         bindings.push_back(std::move(b));
     }
 
@@ -306,6 +340,7 @@ Result<void> PatternMatchOperator::execute_multi_hop() {
         const auto& edge_def = config_.edges[ei];
         const auto& src_var = config_.nodes[ei].variable;
         const auto& tgt_var = config_.nodes[ei + 1].variable;
+        const auto& tgt_node = config_.nodes[ei + 1];
 
         std::vector<Binding> new_bindings;
 
@@ -317,13 +352,14 @@ Result<void> PatternMatchOperator::execute_multi_hop() {
 
             const Value& src_pk = it->second;
 
-            std::vector<Value> neighbor_pks;
+            // Get full edge rows for edge predicate evaluation.
+            std::vector<EdgeRow> edge_rows;
             if (edge_def.direction == TraverseDirection::OUT ||
                 edge_def.direction == TraverseDirection::BOTH) {
                 auto fwd = graph_engine_.get_edges_from(edge_def.edge_type, src_pk);
                 if (fwd) {
                     for (auto& e : *fwd) {
-                        neighbor_pks.push_back(std::move(e.target_pk));
+                        edge_rows.push_back(std::move(e));
                     }
                 }
             }
@@ -332,12 +368,32 @@ Result<void> PatternMatchOperator::execute_multi_hop() {
                 auto rev = graph_engine_.get_edges_to(edge_def.edge_type, src_pk);
                 if (rev) {
                     for (auto& e : *rev) {
-                        neighbor_pks.push_back(std::move(e.source_pk));
+                        edge_rows.push_back(std::move(e));
                     }
                 }
             }
 
-            for (auto& tgt_pk : neighbor_pks) {
+            for (auto& edge_row : edge_rows) {
+                Value tgt_pk = (edge_def.direction == TraverseDirection::IN)
+                                   ? edge_row.source_pk
+                                   : edge_row.target_pk;
+
+                // Apply edge inline predicate.
+                if (edge_def.filter_expr) {
+                    auto pass = evaluate_edge_filter(edge_def, edge_row.properties);
+                    if (!pass || !*pass) {
+                        continue;
+                    }
+                }
+
+                // Apply target node inline predicate.
+                if (tgt_node.filter_expr) {
+                    auto pass = evaluate_node_filter(tgt_node, tgt_pk);
+                    if (!pass || !*pass) {
+                        continue;
+                    }
+                }
+
                 Binding new_b = binding;
                 new_b[tgt_var] = std::move(tgt_pk);
                 new_bindings.push_back(std::move(new_b));
@@ -453,6 +509,97 @@ Result<std::vector<Value>> PatternMatchOperator::fetch_node_data(const std::stri
     }
 
     return make_error(StatusCode::NOT_FOUND, "node with pk not found in table " + table_name);
+}
+
+Result<bool>
+PatternMatchOperator::evaluate_node_filter(const MatchNodeDef& node_def, const Value& pk) const {
+    if (!node_def.filter_expr) {
+        return ok(true);
+    }
+    if (node_def.label.empty()) {
+        return ok(true);
+    }
+
+    auto tbl_schema = catalog_.get_table(database_id_, node_def.label);
+    if (!tbl_schema) {
+        return tl::unexpected(tbl_schema.error());
+    }
+
+    auto node_data = fetch_node_data(node_def.label, pk);
+    if (!node_data) {
+        return ok(false);
+    }
+
+    std::vector<OutputColumn> cols;
+    for (const auto& col : tbl_schema->columns) {
+        OutputColumn oc;
+        oc.table_name = node_def.variable;
+        oc.name = col.name;
+        oc.type_id = col.type_id;
+        oc.nullable = col.nullable;
+        oc.table_id = tbl_schema->table_id;
+        cols.push_back(std::move(oc));
+    }
+    OutputSchema temp_schema(std::move(cols));
+    Tuple temp_tuple;
+    temp_tuple.values = *node_data;
+
+    return evaluate_predicate(*node_def.filter_expr, temp_tuple, temp_schema, bound_);
+}
+
+Result<bool>
+PatternMatchOperator::evaluate_edge_filter(const MatchEdgeDef& edge_def,
+                                            const std::vector<Value>& properties) const {
+    if (!edge_def.filter_expr) {
+        return ok(true);
+    }
+
+    auto edge_type = catalog_.get_edge_type(edge_def.edge_type);
+    if (!edge_type) {
+        return tl::unexpected(edge_type.error());
+    }
+
+    std::vector<OutputColumn> cols;
+    if (!edge_type->properties.empty()) {
+        std::string_view props(edge_type->properties);
+        while (!props.empty()) {
+            auto comma = props.find(',');
+            auto entry = props.substr(0, comma);
+            props = (comma == std::string_view::npos) ? "" : props.substr(comma + 1);
+            auto colon = entry.find(':');
+            std::string prop_name(entry.substr(0, colon));
+            TypeId prop_type = TypeId::STRING;
+            if (colon != std::string_view::npos) {
+                auto type_str = std::string(entry.substr(colon + 1));
+                if (type_str == "INT32" || type_str == "INT" || type_str == "INTEGER") {
+                    prop_type = TypeId::INT32;
+                } else if (type_str == "INT64" || type_str == "BIGINT") {
+                    prop_type = TypeId::INT64;
+                } else if (type_str == "FLOAT32" || type_str == "FLOAT") {
+                    prop_type = TypeId::FLOAT32;
+                } else if (type_str == "FLOAT64" || type_str == "DOUBLE") {
+                    prop_type = TypeId::FLOAT64;
+                } else if (type_str == "BOOL" || type_str == "BOOLEAN") {
+                    prop_type = TypeId::BOOL;
+                } else if (type_str == "DATE") {
+                    prop_type = TypeId::DATE;
+                } else if (type_str == "TIMESTAMP") {
+                    prop_type = TypeId::TIMESTAMP;
+                }
+            }
+            OutputColumn oc;
+            oc.table_name = edge_def.variable;
+            oc.name = prop_name;
+            oc.type_id = prop_type;
+            oc.nullable = true;
+            cols.push_back(std::move(oc));
+        }
+    }
+    OutputSchema temp_schema(std::move(cols));
+    Tuple temp_tuple;
+    temp_tuple.values = properties;
+
+    return evaluate_predicate(*edge_def.filter_expr, temp_tuple, temp_schema, bound_);
 }
 
 } // namespace sixseven

@@ -279,6 +279,101 @@ VariableLengthMatchOperator::binding_to_tuple(const std::unordered_map<std::stri
     return ok(std::move(tuple));
 }
 
+Result<bool>
+VariableLengthMatchOperator::evaluate_node_filter(const MatchNodeDef& node_def,
+                                                   const Value& pk) const {
+    if (!node_def.filter_expr) {
+        return ok(true);
+    }
+    if (node_def.label.empty()) {
+        return ok(true);
+    }
+
+    auto tbl_schema = catalog_.get_table(database_id_, node_def.label);
+    if (!tbl_schema) {
+        return tl::unexpected(tbl_schema.error());
+    }
+
+    auto node_data = fetch_node_data(node_def.label, pk);
+    if (!node_data) {
+        return ok(false); // Node not found, predicate fails.
+    }
+
+    // Build temporary OutputSchema and Tuple for predicate evaluation.
+    std::vector<OutputColumn> cols;
+    for (const auto& col : tbl_schema->columns) {
+        OutputColumn oc;
+        oc.table_name = node_def.variable;
+        oc.name = col.name;
+        oc.type_id = col.type_id;
+        oc.nullable = col.nullable;
+        oc.table_id = tbl_schema->table_id;
+        cols.push_back(std::move(oc));
+    }
+    OutputSchema temp_schema(std::move(cols));
+    Tuple temp_tuple;
+    temp_tuple.values = *node_data;
+
+    return evaluate_predicate(*node_def.filter_expr, temp_tuple, temp_schema, bound_);
+}
+
+Result<bool>
+VariableLengthMatchOperator::evaluate_edge_filter(const MatchEdgeDef& edge_def,
+                                                   const std::vector<Value>& properties) const {
+    if (!edge_def.filter_expr) {
+        return ok(true);
+    }
+
+    auto edge_type = catalog_.get_edge_type(edge_def.edge_type);
+    if (!edge_type) {
+        return tl::unexpected(edge_type.error());
+    }
+
+    // Build temporary OutputSchema from edge property definitions.
+    std::vector<OutputColumn> cols;
+    if (!edge_type->properties.empty()) {
+        std::string_view props(edge_type->properties);
+        while (!props.empty()) {
+            auto comma = props.find(',');
+            auto entry = props.substr(0, comma);
+            props = (comma == std::string_view::npos) ? "" : props.substr(comma + 1);
+            auto colon = entry.find(':');
+            std::string prop_name(entry.substr(0, colon));
+            TypeId prop_type = TypeId::STRING;
+            if (colon != std::string_view::npos) {
+                auto type_str = std::string(entry.substr(colon + 1));
+                // Map common type names to TypeId.
+                if (type_str == "INT32" || type_str == "INT" || type_str == "INTEGER") {
+                    prop_type = TypeId::INT32;
+                } else if (type_str == "INT64" || type_str == "BIGINT") {
+                    prop_type = TypeId::INT64;
+                } else if (type_str == "FLOAT32" || type_str == "FLOAT") {
+                    prop_type = TypeId::FLOAT32;
+                } else if (type_str == "FLOAT64" || type_str == "DOUBLE") {
+                    prop_type = TypeId::FLOAT64;
+                } else if (type_str == "BOOL" || type_str == "BOOLEAN") {
+                    prop_type = TypeId::BOOL;
+                } else if (type_str == "DATE") {
+                    prop_type = TypeId::DATE;
+                } else if (type_str == "TIMESTAMP") {
+                    prop_type = TypeId::TIMESTAMP;
+                }
+            }
+            OutputColumn oc;
+            oc.table_name = edge_def.variable;
+            oc.name = prop_name;
+            oc.type_id = prop_type;
+            oc.nullable = true;
+            cols.push_back(std::move(oc));
+        }
+    }
+    OutputSchema temp_schema(std::move(cols));
+    Tuple temp_tuple;
+    temp_tuple.values = properties;
+
+    return evaluate_predicate(*edge_def.filter_expr, temp_tuple, temp_schema, bound_);
+}
+
 Result<void> VariableLengthMatchOperator::execute_variable_length() {
     if (config_.nodes.size() < 2 || config_.edges.empty()) {
         return ok();
@@ -306,6 +401,13 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
 
     std::vector<Binding> bindings;
     for (const auto& pk : *src_pks) {
+        // Apply source node inline predicate.
+        if (first_node.filter_expr) {
+            auto pass = evaluate_node_filter(first_node, pk);
+            if (!pass || !*pass) {
+                continue;
+            }
+        }
         Binding b;
         b[first_node.variable] = pk;
         bindings.push_back(std::move(b));
@@ -321,6 +423,8 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
 
         std::vector<Binding> new_bindings;
 
+        const auto& tgt_node = config_.nodes[ei + 1];
+
         if (!edge_def.is_variable_length()) {
             // Fixed-length edge: single-hop expansion.
             for (auto& binding : bindings) {
@@ -329,12 +433,48 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                     continue;
                 }
 
-                auto neighbors = get_neighbors(edge_def.edge_type, it->second, edge_def.direction);
-                if (!neighbors) {
-                    continue;
+                // Use graph engine directly to access edge properties for filtering.
+                std::vector<EdgeRow> edge_rows;
+                if (edge_def.direction == TraverseDirection::OUT ||
+                    edge_def.direction == TraverseDirection::BOTH) {
+                    auto fwd = graph_engine_.get_edges_from(edge_def.edge_type, it->second);
+                    if (fwd) {
+                        for (auto& e : *fwd) {
+                            edge_rows.push_back(std::move(e));
+                        }
+                    }
+                }
+                if (edge_def.direction == TraverseDirection::IN ||
+                    edge_def.direction == TraverseDirection::BOTH) {
+                    auto rev = graph_engine_.get_edges_to(edge_def.edge_type, it->second);
+                    if (rev) {
+                        for (auto& e : *rev) {
+                            edge_rows.push_back(std::move(e));
+                        }
+                    }
                 }
 
-                for (auto& [nbr_pk, edge_id] : *neighbors) {
+                for (auto& edge_row : edge_rows) {
+                    // Determine neighbor PK based on direction.
+                    Value& nbr_pk = (edge_def.direction == TraverseDirection::IN)
+                                        ? edge_row.source_pk
+                                        : edge_row.target_pk;
+
+                    // Apply edge inline predicate.
+                    if (edge_def.filter_expr) {
+                        auto pass = evaluate_edge_filter(edge_def, edge_row.properties);
+                        if (!pass || !*pass) {
+                            continue;
+                        }
+                    }
+
+                    // Apply target node inline predicate.
+                    if (tgt_node.filter_expr) {
+                        auto pass = evaluate_node_filter(tgt_node, nbr_pk);
+                        if (!pass || !*pass) {
+                            continue;
+                        }
+                    }
                     Binding new_b = binding;
                     new_b[tgt_var] = std::move(nbr_pk);
                     new_bindings.push_back(std::move(new_b));
@@ -378,6 +518,14 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                     queue.pop();
                     ++total_visited;
 
+                    // Apply target node predicate (prunes: skip emit AND expansion).
+                    if (entry.depth > 0 && tgt_node.filter_expr) {
+                        auto pass = evaluate_node_filter(tgt_node, entry.current_pk);
+                        if (!pass || !*pass) {
+                            continue;
+                        }
+                    }
+
                     // Emit result at valid depths.
                     if (entry.depth >= min_hops && entry.depth <= max_hops) {
                         Binding new_b = binding;
@@ -387,16 +535,44 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
 
                     // Expand if we haven't reached max depth.
                     if (entry.depth < max_hops) {
-                        auto neighbors = get_neighbors(edge_def.edge_type, entry.current_pk,
-                                                       edge_def.direction);
-                        if (!neighbors) {
-                            continue;
+                        // Get full edge rows for edge predicate evaluation.
+                        std::vector<EdgeRow> edge_rows;
+                        if (edge_def.direction == TraverseDirection::OUT ||
+                            edge_def.direction == TraverseDirection::BOTH) {
+                            auto fwd = graph_engine_.get_edges_from(edge_def.edge_type,
+                                                                     entry.current_pk);
+                            if (fwd) {
+                                for (auto& e : *fwd) {
+                                    edge_rows.push_back(std::move(e));
+                                }
+                            }
+                        }
+                        if (edge_def.direction == TraverseDirection::IN ||
+                            edge_def.direction == TraverseDirection::BOTH) {
+                            auto rev = graph_engine_.get_edges_to(edge_def.edge_type,
+                                                                   entry.current_pk);
+                            if (rev) {
+                                for (auto& e : *rev) {
+                                    edge_rows.push_back(std::move(e));
+                                }
+                            }
                         }
 
-                        for (auto& [nbr_pk, edge_id] : *neighbors) {
+                        for (auto& edge_row : edge_rows) {
+                            Value nbr_pk = (edge_def.direction == TraverseDirection::IN)
+                                               ? edge_row.source_pk
+                                               : edge_row.target_pk;
                             int64_t nbr_pk_int = pk_to_int64(nbr_pk);
                             if (entry.visited.count(nbr_pk_int) > 0) {
                                 continue;
+                            }
+
+                            // Apply edge inline predicate.
+                            if (edge_def.filter_expr) {
+                                auto pass = evaluate_edge_filter(edge_def, edge_row.properties);
+                                if (!pass || !*pass) {
+                                    continue;
+                                }
                             }
 
                             BfsEntry next;
