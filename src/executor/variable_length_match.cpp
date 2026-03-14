@@ -284,125 +284,141 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
         return ok();
     }
 
-    // Find the variable-length edge.
-    size_t vl_edge_idx = 0;
-    for (size_t i = 0; i < config_.edges.size(); ++i) {
-        if (config_.edges[i].is_variable_length()) {
-            vl_edge_idx = i;
-            break;
-        }
-    }
+    // Multi-segment algorithm: process edges sequentially.
+    // For fixed-length edges: single-hop expansion (like PatternMatchOperator).
+    // For variable-length edges: BFS expansion with min/max hop bounds.
+    //
+    // We maintain a set of "bindings" (variable -> PK maps) and expand them
+    // through each edge segment in order.
 
-    const auto& edge_def = config_.edges[vl_edge_idx];
-    const auto& src_node = config_.nodes[vl_edge_idx];
-    const auto& tgt_node = config_.nodes[vl_edge_idx + 1];
+    using Binding = std::unordered_map<std::string, Value>;
 
-    int32_t min_hops = edge_def.min_hops.value_or(1);
-    // Default max: use a reasonable limit to prevent runaway queries.
-    int32_t max_hops = edge_def.max_hops.value_or(20);
-
-    // Get all source node PKs.
-    if (src_node.label.empty()) {
+    // Seed bindings with all PKs from the first node's table.
+    const auto& first_node = config_.nodes[0];
+    if (first_node.label.empty()) {
         return make_error(StatusCode::INVALID_ARGUMENT, "MATCH source node must have a label");
     }
 
-    auto src_pks = get_all_pks(src_node.label);
+    auto src_pks = get_all_pks(first_node.label);
     if (!src_pks) {
         return tl::unexpected(src_pks.error());
     }
 
-    // BFS state per path: (current_pk, depth, path, visited_set).
-    struct BfsEntry {
-        Value current_pk;
-        int32_t depth;
-        Path path;
-        std::unordered_set<int64_t> visited;
-    };
+    std::vector<Binding> bindings;
+    for (const auto& pk : *src_pks) {
+        Binding b;
+        b[first_node.variable] = pk;
+        bindings.push_back(std::move(b));
+    }
 
     size_t total_visited = 0;
 
-    for (const auto& start_pk : *src_pks) {
-        // BFS queue.
-        std::queue<BfsEntry> queue;
+    // Process each edge segment.
+    for (size_t ei = 0; ei < config_.edges.size(); ++ei) {
+        const auto& edge_def = config_.edges[ei];
+        const auto& src_var = config_.nodes[ei].variable;
+        const auto& tgt_var = config_.nodes[ei + 1].variable;
 
-        // Seed with the start node.
-        BfsEntry start;
-        start.current_pk = start_pk;
-        start.depth = 0;
+        std::vector<Binding> new_bindings;
 
-        // Build initial path step.
-        int64_t start_pk_int = pk_to_int64(start_pk);
-
-        PathStep start_step;
-        start_step.node_pk = start_pk_int;
-        start_step.edge_id = -1;
-        start.path.steps.push_back(start_step);
-        start.visited.insert(start_pk_int);
-
-        queue.push(std::move(start));
-
-        while (!queue.empty()) {
-            if (total_visited >= max_visited_) {
-                return make_error(StatusCode::INVALID_ARGUMENT,
-                                  "variable-length MATCH exceeded max_visited limit (" +
-                                      std::to_string(max_visited_) + ")");
-            }
-
-            auto entry = std::move(queue.front());
-            queue.pop();
-            ++total_visited;
-
-            // If we're at a valid depth, emit a result.
-            if (entry.depth >= min_hops && entry.depth <= max_hops) {
-                // Build binding: source variable -> start_pk, target variable -> current_pk.
-                std::unordered_map<std::string, Value> binding;
-                binding[src_node.variable] = start_pk;
-                binding[tgt_node.variable] = entry.current_pk;
-
-                auto tuple_result = binding_to_tuple(binding, &entry.path);
-                if (tuple_result) {
-                    results_.push_back(std::move(*tuple_result));
+        if (!edge_def.is_variable_length()) {
+            // Fixed-length edge: single-hop expansion.
+            for (auto& binding : bindings) {
+                auto it = binding.find(src_var);
+                if (it == binding.end()) {
+                    continue;
                 }
-            }
 
-            // Expand if we haven't reached max depth.
-            if (entry.depth < max_hops) {
-                auto neighbors =
-                    get_neighbors(edge_def.edge_type, entry.current_pk, edge_def.direction);
+                auto neighbors = get_neighbors(edge_def.edge_type, it->second, edge_def.direction);
                 if (!neighbors) {
                     continue;
                 }
 
                 for (auto& [nbr_pk, edge_id] : *neighbors) {
-                    int64_t nbr_pk_int = pk_to_int64(nbr_pk);
-
-                    // Cycle prevention: skip if we've already visited this node
-                    // in the current path.
-                    if (entry.visited.count(nbr_pk_int) > 0) {
-                        continue;
-                    }
-
-                    BfsEntry next;
-                    next.current_pk = std::move(nbr_pk);
-                    next.depth = entry.depth + 1;
-
-                    // Extend the path: update the last step's edge_id and add new node.
-                    next.path = entry.path;
-                    if (!next.path.steps.empty()) {
-                        next.path.steps.back().edge_id = edge_id;
-                    }
-                    PathStep step;
-                    step.node_pk = nbr_pk_int;
-                    step.edge_id = -1;
-                    next.path.steps.push_back(step);
-
-                    // Extend visited set.
-                    next.visited = entry.visited;
-                    next.visited.insert(nbr_pk_int);
-
-                    queue.push(std::move(next));
+                    Binding new_b = binding;
+                    new_b[tgt_var] = std::move(nbr_pk);
+                    new_bindings.push_back(std::move(new_b));
                 }
             }
+        } else {
+            // Variable-length edge: BFS expansion with min/max hops.
+            int32_t min_hops = edge_def.min_hops.value_or(1);
+            int32_t max_hops = edge_def.max_hops.value_or(20);
+
+            struct BfsEntry {
+                Value current_pk;
+                int32_t depth;
+                std::unordered_set<int64_t> visited;
+            };
+
+            for (auto& binding : bindings) {
+                auto it = binding.find(src_var);
+                if (it == binding.end()) {
+                    continue;
+                }
+
+                const Value& start_pk = it->second;
+
+                std::queue<BfsEntry> queue;
+                BfsEntry start;
+                start.current_pk = start_pk;
+                start.depth = 0;
+                int64_t start_pk_int = pk_to_int64(start_pk);
+                start.visited.insert(start_pk_int);
+                queue.push(std::move(start));
+
+                while (!queue.empty()) {
+                    if (total_visited >= max_visited_) {
+                        return make_error(StatusCode::INVALID_ARGUMENT,
+                                          "variable-length MATCH exceeded max_visited limit (" +
+                                              std::to_string(max_visited_) + ")");
+                    }
+
+                    auto entry = std::move(queue.front());
+                    queue.pop();
+                    ++total_visited;
+
+                    // Emit result at valid depths.
+                    if (entry.depth >= min_hops && entry.depth <= max_hops) {
+                        Binding new_b = binding;
+                        new_b[tgt_var] = entry.current_pk;
+                        new_bindings.push_back(std::move(new_b));
+                    }
+
+                    // Expand if we haven't reached max depth.
+                    if (entry.depth < max_hops) {
+                        auto neighbors = get_neighbors(edge_def.edge_type, entry.current_pk,
+                                                       edge_def.direction);
+                        if (!neighbors) {
+                            continue;
+                        }
+
+                        for (auto& [nbr_pk, edge_id] : *neighbors) {
+                            int64_t nbr_pk_int = pk_to_int64(nbr_pk);
+                            if (entry.visited.count(nbr_pk_int) > 0) {
+                                continue;
+                            }
+
+                            BfsEntry next;
+                            next.current_pk = std::move(nbr_pk);
+                            next.depth = entry.depth + 1;
+                            next.visited = entry.visited;
+                            next.visited.insert(nbr_pk_int);
+                            queue.push(std::move(next));
+                        }
+                    }
+                }
+            }
+        }
+
+        bindings = std::move(new_bindings);
+    }
+
+    // Convert final bindings to output tuples.
+    for (auto& binding : bindings) {
+        auto tuple_result = binding_to_tuple(binding, nullptr);
+        if (tuple_result) {
+            results_.push_back(std::move(*tuple_result));
         }
     }
 

@@ -483,6 +483,54 @@ Binder::bind_match_source(const MatchStmt& match, Scope& scope, BoundStatement& 
             }
         }
     }
+
+    // Validate cross-edge-type table compatibility at segment boundaries.
+    // For each consecutive pair of edges, the target table of edge[i] must
+    // match the source table of edge[i+1]. The intermediate node's label
+    // (if present) must also be consistent with the edge endpoint tables.
+    for (size_t i = 0; i + 1 < match.pattern.size(); ++i) {
+        const auto& elem = match.pattern[i];
+        if (!elem.outgoing_edge || elem.outgoing_edge->edge_type.empty()) {
+            continue;
+        }
+
+        auto edge_def = catalog_.get_edge_type(elem.outgoing_edge->edge_type);
+        if (!edge_def) {
+            continue; // Already validated above.
+        }
+
+        // Check that the intermediate node label is compatible with this edge's
+        // target table.
+        const auto& next_node = match.pattern[i + 1].node;
+        if (!next_node.label.empty()) {
+            auto next_schema = resolve_table(next_node.label);
+            if (next_schema && next_schema->table_id != edge_def->target_table_id) {
+                return make_error(
+                    StatusCode::INVALID_ARGUMENT,
+                    "table compatibility error: edge type '" + elem.outgoing_edge->edge_type +
+                        "' targets table id " + std::to_string(edge_def->target_table_id) +
+                        " but node '" + next_node.variable + "' has label '" + next_node.label +
+                        "' (table id " + std::to_string(next_schema->table_id) + ")");
+            }
+        }
+
+        // If there's a next edge, check that the intermediate node's table
+        // is compatible with the next edge's source table.
+        const auto& next_elem = match.pattern[i + 1];
+        if (next_elem.outgoing_edge && !next_elem.outgoing_edge->edge_type.empty()) {
+            auto next_edge = catalog_.get_edge_type(next_elem.outgoing_edge->edge_type);
+            if (next_edge && edge_def->target_table_id != next_edge->source_table_id) {
+                return make_error(
+                    StatusCode::INVALID_ARGUMENT,
+                    "table compatibility error: edge type '" + elem.outgoing_edge->edge_type +
+                        "' targets table id " + std::to_string(edge_def->target_table_id) +
+                        " but next edge type '" + next_elem.outgoing_edge->edge_type +
+                        "' expects source table id " +
+                        std::to_string(next_edge->source_table_id));
+            }
+        }
+    }
+
     return ok();
 }
 
