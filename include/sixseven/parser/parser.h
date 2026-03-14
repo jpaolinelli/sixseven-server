@@ -107,6 +107,7 @@ private:
     [[nodiscard]] Result<StmtPtr> parse_traverse();
     [[nodiscard]] Result<StmtPtr> parse_nearest();
     [[nodiscard]] Result<StmtPtr> parse_match();
+    [[nodiscard]] Result<std::vector<PathElement>> parse_match_pattern();
     [[nodiscard]] Result<StmtPtr> parse_shortest_path();
 
     // -- TCL ----------------------------------------------------------------

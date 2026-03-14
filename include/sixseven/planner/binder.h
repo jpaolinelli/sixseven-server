@@ -208,6 +208,9 @@ private:
     /// Build a ScopeTable for a TRAVERSE source in FROM/JOIN.
     Result<ScopeTable> build_traverse_scope(const TableRef& tref, BoundStatement& bound);
 
+    /// Bind a MATCH source in FROM/JOIN — resolve pattern tables and edges into scope.
+    Result<void> bind_match_source(const MatchStmt& match, Scope& scope, BoundStatement& bound);
+
     /// Resolve a table in the current database, wrapping NOT_FOUND errors with
     /// the database name for clearer diagnostics.
     Result<TableSchema> resolve_table(const std::string& table_name) const;

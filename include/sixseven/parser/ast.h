@@ -179,6 +179,7 @@ struct TableRef {
     std::string alias;
     StmtPtr subquery;
     StmtPtr traverse_source;
+    StmtPtr match_source;   ///< MatchStmt for MATCH in FROM clause.
     ExprPtr algorithm_call; ///< FunctionCallExpr for algorithm TVFs in FROM.
 };
 
