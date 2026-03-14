@@ -87,6 +87,14 @@ enum class NearestMetric : uint8_t {
     DOT,
 };
 
+/// Path selector for shortest-path queries within MATCH.
+enum class PathSelector : uint8_t {
+    NONE,         ///< No path selector (regular MATCH).
+    ANY_SHORTEST, ///< Return one shortest path.
+    ALL_SHORTEST, ///< Return all paths tied for shortest hop count.
+    SHORTEST_K,   ///< Return K shortest distinct paths.
+};
+
 /// ALTER TABLE action types.
 enum class AlterAction : uint8_t {
     ADD_COLUMN,
@@ -639,10 +647,18 @@ struct NearestStmt : Stmt {
 };
 
 /// MATCH pattern WHERE expr RETURN items.
+///
+/// Supports path selectors for shortest-path queries:
+///   p = ANY SHORTEST (a)-[:knows]->{1,10}(b)
+///   p = ALL SHORTEST (a)-[:knows]->{1,10}(b)
+///   p = SHORTEST 3 (a)-[:knows]->{1,10}(b)
 struct MatchStmt : Stmt {
     std::vector<PathElement> pattern;
     ExprPtr where_expr;
     std::vector<SelectItem> return_items;
+    PathSelector path_selector = PathSelector::NONE;
+    std::string path_variable; ///< Path variable name (e.g., "p").
+    int32_t shortest_k = 0;    ///< K for SHORTEST K selector.
     void accept(AstVisitor& visitor) const override;
 };
 
