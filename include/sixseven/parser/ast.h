@@ -661,6 +661,7 @@ struct MatchStmt : Stmt {
     PathSelector path_selector = PathSelector::NONE;
     std::string path_variable; ///< Path variable name (e.g., "p").
     int32_t shortest_k = 0;    ///< K for SHORTEST K selector.
+    ExprPtr weight_expr;       ///< Optional WEIGHT expression for weighted shortest path.
     void accept(AstVisitor& visitor) const override;
 };
 

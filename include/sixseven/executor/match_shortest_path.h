@@ -43,7 +43,8 @@ public:
                               PathSelector path_selector,
                               std::string path_variable,
                               int32_t shortest_k,
-                              size_t max_visited = DEFAULT_MAX_VISITED);
+                              size_t max_visited = DEFAULT_MAX_VISITED,
+                              const Expr* weight_expr = nullptr);
 
     const OutputSchema& output_schema() const override;
 
@@ -66,6 +67,17 @@ private:
                                                   const std::string& edge_type,
                                                   TraverseDirection direction,
                                                   int32_t max_depth);
+
+    /// Dijkstra-based weighted shortest path finding.
+    Result<std::vector<Path>> find_weighted_shortest_paths(const Value& src_pk,
+                                                           const Value& tgt_pk,
+                                                           const std::string& edge_type,
+                                                           TraverseDirection direction,
+                                                           int32_t max_depth);
+
+    /// Get neighbors with edge weight extracted from the weight expression.
+    Result<std::vector<std::tuple<Value, int64_t, double>>> get_neighbors_with_weight(
+        const std::string& edge_type, const Value& pk, TraverseDirection direction);
 
     /// Fetch full row data for a node PK from a table.
     Result<std::vector<Value>> fetch_node_data(const std::string& table_name,
@@ -93,6 +105,7 @@ private:
     PathSelector path_selector_;
     std::string path_variable_;
     int32_t shortest_k_;
+    const Expr* weight_expr_;
     size_t max_visited_;
 
     std::vector<Tuple> results_;
