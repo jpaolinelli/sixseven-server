@@ -78,6 +78,15 @@ private:
     Result<Tuple> binding_to_tuple(const std::unordered_map<std::string, Value>& binding,
                                    const Path* path_value) const;
 
+    /// Evaluate a node's inline predicate against its fetched data.
+    /// Returns true if predicate passes or no predicate is set.
+    Result<bool> evaluate_node_filter(const MatchNodeDef& node_def, const Value& pk) const;
+
+    /// Evaluate an edge's inline predicate against edge properties.
+    /// Returns true if predicate passes or no predicate is set.
+    Result<bool> evaluate_edge_filter(const MatchEdgeDef& edge_def,
+                                      const std::vector<Value>& properties) const;
+
     GraphEngine& graph_engine_;
     const Catalog& catalog_;
     StorageManager& storage_;

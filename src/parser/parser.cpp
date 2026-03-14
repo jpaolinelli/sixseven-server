@@ -2291,6 +2291,14 @@ Result<std::vector<PathElement>> Parser::parse_match_pattern() {
             }
         }
 
+        // Parse optional inline WHERE predicate: (a:label WHERE expr)
+        if (match(TokenType::WHERE)) {
+            auto filter = parse_expression();
+            if (!filter)
+                return tl::unexpected(filter.error());
+            node.filter_expr = std::move(*filter);
+        }
+
         auto rp = expect(TokenType::RPAREN, "expected ')' for node pattern");
         if (!rp)
             return tl::unexpected(rp.error());
@@ -2332,6 +2340,14 @@ Result<std::vector<PathElement>> Parser::parse_match_pattern() {
                     } else {
                         edge.edge_type = std::move(*name);
                     }
+                }
+
+                // Parse optional inline WHERE predicate: [r:type WHERE expr]
+                if (match(TokenType::WHERE)) {
+                    auto filter = parse_expression();
+                    if (!filter)
+                        return tl::unexpected(filter.error());
+                    edge.filter_expr = std::move(*filter);
                 }
 
                 auto rb = expect(TokenType::RBRACKET, "expected ']'");

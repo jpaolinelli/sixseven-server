@@ -453,12 +453,63 @@ Binder::bind_match_source(const MatchStmt& match, Scope& scope, BoundStatement& 
                 scope.add_table(make_scope_table(*schema, elem.node.variable));
             }
         }
+        // Bind inline node predicate using the current scope (node table is in scope).
+        if (elem.node.filter_expr) {
+            auto et = bind_expr(*elem.node.filter_expr, scope, bound);
+            if (!et) {
+                return tl::unexpected(et.error());
+            }
+        }
+
         if (elem.outgoing_edge && !elem.outgoing_edge->edge_type.empty()) {
             auto edge = catalog_.get_edge_type(elem.outgoing_edge->edge_type);
             if (!edge) {
                 return tl::unexpected(edge.error());
             }
             bound.referenced_edge_types.push_back(edge->edge_id);
+
+            // Add edge variable to scope for inline edge predicates.
+            if (!elem.outgoing_edge->variable.empty()) {
+                ScopeTable edge_scope;
+                edge_scope.table_id = 0;
+                edge_scope.alias = elem.outgoing_edge->variable;
+                if (!edge->properties.empty()) {
+                    std::string_view props(edge->properties);
+                    while (!props.empty()) {
+                        auto comma = props.find(',');
+                        auto entry = props.substr(0, comma);
+                        props = (comma == std::string_view::npos) ? "" : props.substr(comma + 1);
+                        auto colon = entry.find(':');
+                        std::string prop_name(entry.substr(0, colon));
+                        TypeId prop_type = TypeId::STRING;
+                        if (colon != std::string_view::npos) {
+                            TypeSpec spec;
+                            spec.name = std::string(entry.substr(colon + 1));
+                            auto tid = resolve_type_spec(spec);
+                            if (tid) {
+                                prop_type = *tid;
+                            }
+                        }
+                        ResolvedColumn rc;
+                        rc.table_id = 0;
+                        rc.ordinal = -1;
+                        rc.table_name = elem.outgoing_edge->variable;
+                        rc.column_name = prop_name;
+                        rc.type_id = prop_type;
+                        rc.nullable = true;
+                        edge_scope.columns.push_back(std::move(rc));
+                    }
+                }
+                scope.add_table(std::move(edge_scope));
+            }
+
+            // Bind inline edge predicate.
+            if (elem.outgoing_edge->filter_expr) {
+                auto et = bind_expr(*elem.outgoing_edge->filter_expr, scope, bound);
+                if (!et) {
+                    return tl::unexpected(et.error());
+                }
+            }
 
             // Validate variable-length quantifiers.
             if (elem.outgoing_edge->is_variable_length()) {

@@ -228,6 +228,7 @@ struct EdgeProperty {
 struct NodePattern {
     std::string variable;
     std::string label;
+    ExprPtr filter_expr; ///< Inline WHERE predicate (e.g., WHERE b.active = TRUE).
 };
 
 /// MATCH pattern edge (relationship in a graph pattern).
@@ -244,6 +245,7 @@ struct EdgePatternDef {
     TraverseDirection direction = TraverseDirection::OUT;
     std::optional<int32_t> min_hops; ///< Minimum hops (nullopt = fixed single hop).
     std::optional<int32_t> max_hops; ///< Maximum hops (nullopt = unbounded).
+    ExprPtr filter_expr;             ///< Inline WHERE predicate (e.g., WHERE r.since > '2020').
 
     /// Default constructor.
     EdgePatternDef() = default;

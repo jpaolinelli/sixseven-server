@@ -1781,6 +1781,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_match(const MatchStmt& stmt,
         MatchNodeDef node_def;
         node_def.variable = elem.node.variable;
         node_def.label = elem.node.label;
+        node_def.filter_expr = elem.node.filter_expr.get();
         match_config.nodes.push_back(std::move(node_def));
 
         if (elem.outgoing_edge) {
@@ -1789,6 +1790,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_match(const MatchStmt& stmt,
                                   elem.outgoing_edge->direction,
                                   elem.outgoing_edge->min_hops,
                                   elem.outgoing_edge->max_hops);
+            edge_def.filter_expr = elem.outgoing_edge->filter_expr.get();
             if (edge_def.is_variable_length()) {
                 has_variable_length = true;
             }

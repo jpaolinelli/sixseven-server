@@ -20,6 +20,7 @@ namespace sixseven {
 struct MatchNodeDef {
     std::string variable;
     std::string label;
+    const Expr* filter_expr = nullptr; ///< Inline WHERE predicate for node filtering.
 };
 
 /// Edge definition within a MATCH pattern.
@@ -27,8 +28,9 @@ struct MatchEdgeDef {
     std::string variable;
     std::string edge_type;
     TraverseDirection direction = TraverseDirection::OUT;
-    std::optional<int32_t> min_hops; ///< Minimum hops (nullopt = fixed single hop).
-    std::optional<int32_t> max_hops; ///< Maximum hops (nullopt = unbounded).
+    std::optional<int32_t> min_hops;   ///< Minimum hops (nullopt = fixed single hop).
+    std::optional<int32_t> max_hops;   ///< Maximum hops (nullopt = unbounded).
+    const Expr* filter_expr = nullptr; ///< Inline WHERE predicate for edge filtering.
 
     /// Default constructor.
     MatchEdgeDef() = default;
@@ -95,6 +97,13 @@ private:
     /// Fetch full row data for a node PK from a table.
     Result<std::vector<Value>> fetch_node_data(const std::string& table_name,
                                                const Value& pk) const;
+
+    /// Evaluate a node's inline predicate against its fetched data.
+    Result<bool> evaluate_node_filter(const MatchNodeDef& node_def, const Value& pk) const;
+
+    /// Evaluate an edge's inline predicate against edge properties.
+    Result<bool> evaluate_edge_filter(const MatchEdgeDef& edge_def,
+                                      const std::vector<Value>& properties) const;
 
     GraphEngine& graph_engine_;
     const Catalog& catalog_;
