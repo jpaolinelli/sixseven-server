@@ -1,6 +1,7 @@
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/result.h"
 #include "sixseven/common/value.h"
+#include "sixseven/executor/expr_evaluator.h"
 #include "sixseven/executor/pattern_match.h"
 #include "sixseven/executor/storage_manager.h"
 #include "sixseven/executor/variable_length_match.h"
@@ -608,6 +609,72 @@ TEST_F(VarLenMatchTest, NoPathsAtDepth) {
     auto results = run_vl_match(std::move(config), std::move(schema));
 
     EXPECT_EQ(results.size(), 0u);
+}
+
+// -- path_length() SQL function evaluation ------------------------------------
+
+TEST(PathLengthSqlFunction, ReturnsCorrectLength) {
+    // Build a tuple with a Path value and a schema to reference it.
+    Path path;
+    path.steps.push_back({1, 10});
+    path.steps.push_back({2, 20});
+    path.steps.push_back({3, -1});
+
+    Tuple tuple;
+    tuple.values.push_back(Value(path));
+
+    std::vector<OutputColumn> cols;
+    cols.push_back({"", "p", TypeId::PATH, true, 0});
+    OutputSchema schema(std::move(cols));
+
+    // Build: path_length(p)
+    auto col_ref = std::make_unique<ColumnRefExpr>();
+    col_ref->column = "p";
+
+    FunctionCallExpr fn_expr;
+    fn_expr.name = "path_length";
+    fn_expr.args.push_back(std::move(col_ref));
+
+    BoundStatement bound;
+    auto result = evaluate_expr(fn_expr, tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_FALSE(result->is_null());
+    EXPECT_EQ(result->as_int64(), 2);
+}
+
+TEST(PathLengthSqlFunction, NullArgReturnsNull) {
+    Tuple tuple;
+    tuple.values.push_back(Value::make_null());
+
+    std::vector<OutputColumn> cols;
+    cols.push_back({"", "p", TypeId::PATH, true, 0});
+    OutputSchema schema(std::move(cols));
+
+    auto col_ref = std::make_unique<ColumnRefExpr>();
+    col_ref->column = "p";
+
+    FunctionCallExpr fn_expr;
+    fn_expr.name = "path_length";
+    fn_expr.args.push_back(std::move(col_ref));
+
+    BoundStatement bound;
+    auto result = evaluate_expr(fn_expr, tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_TRUE(result->is_null());
+}
+
+TEST(PathLengthSqlFunction, WrongArgCountFails) {
+    FunctionCallExpr fn_expr;
+    fn_expr.name = "path_length";
+    // No args — should fail.
+
+    Tuple empty_tuple;
+    std::vector<OutputColumn> no_cols;
+    OutputSchema empty_schema(std::move(no_cols));
+    BoundStatement bound;
+
+    auto result = evaluate_expr(fn_expr, empty_tuple, empty_schema, bound);
+    EXPECT_FALSE(result.has_value());
 }
 
 } // namespace

@@ -11,6 +11,23 @@
 
 namespace sixseven {
 
+namespace {
+
+/// Extract an int64_t from a Value that holds an integer PK.
+int64_t pk_to_int64(const Value& pk) {
+    if (!pk.is_null()) {
+        if (auto* p = std::get_if<int64_t>(&pk.data())) {
+            return *p;
+        }
+        if (auto* p32 = std::get_if<int32_t>(&pk.data())) {
+            return *p32;
+        }
+    }
+    return 0;
+}
+
+} // namespace
+
 VariableLengthMatchOperator::VariableLengthMatchOperator(GraphEngine& graph_engine,
                                                          const Catalog& catalog,
                                                          StorageManager& storage,
@@ -314,14 +331,7 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
         start.depth = 0;
 
         // Build initial path step.
-        int64_t start_pk_int = 0;
-        if (!start_pk.is_null()) {
-            if (auto* p = std::get_if<int64_t>(&start_pk.data())) {
-                start_pk_int = *p;
-            } else if (auto* p32 = std::get_if<int32_t>(&start_pk.data())) {
-                start_pk_int = *p32;
-            }
-        }
+        int64_t start_pk_int = pk_to_int64(start_pk);
 
         PathStep start_step;
         start_step.node_pk = start_pk_int;
@@ -364,15 +374,7 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                 }
 
                 for (auto& [nbr_pk, edge_id] : *neighbors) {
-                    // Extract integer PK for visited set.
-                    int64_t nbr_pk_int = 0;
-                    if (!nbr_pk.is_null()) {
-                        if (auto* p = std::get_if<int64_t>(&nbr_pk.data())) {
-                            nbr_pk_int = *p;
-                        } else if (auto* p32 = std::get_if<int32_t>(&nbr_pk.data())) {
-                            nbr_pk_int = *p32;
-                        }
-                    }
+                    int64_t nbr_pk_int = pk_to_int64(nbr_pk);
 
                     // Cycle prevention: skip if we've already visited this node
                     // in the current path.
