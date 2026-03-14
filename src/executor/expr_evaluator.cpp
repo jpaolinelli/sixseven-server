@@ -916,6 +916,27 @@ Result<Value> eval_function(const FunctionCallExpr& expr,
         return ok(Value((*path_ptr)->length()));
     }
 
+    // path_cost(p) — return the total weight of a weighted shortest path.
+    if (upper == "PATH_COST") {
+        if (expr.args.size() != 1) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "path_cost() requires exactly 1 argument");
+        }
+        auto arg_val = eval(*expr.args[0], tuple, schema, bound, subquery_ctx);
+        if (!arg_val) {
+            return tl::unexpected(arg_val.error());
+        }
+        if (arg_val->is_null()) {
+            return ok(Value::make_null());
+        }
+        auto path_ptr = arg_val->try_as_path();
+        if (!path_ptr) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              "path_cost() argument must be a PATH value");
+        }
+        return ok(Value((*path_ptr)->total_weight));
+    }
+
     // nodes(p) — return a JSON array of node PKs in the path.
     if (upper == "NODES") {
         if (expr.args.size() != 1) {

@@ -73,6 +73,7 @@ bool is_name_token(TokenType type) {
     case TokenType::DATABASE:
     case TokenType::USER:
     case TokenType::PASSWORD:
+    case TokenType::WEIGHT:
         return true;
     default:
         return false;
@@ -1923,6 +1924,18 @@ Result<TableRef> Parser::parse_table_ref() {
             return tl::unexpected(pattern.error());
         match_stmt->pattern = std::move(*pattern);
 
+        // Optional WEIGHT expression (only valid with path selectors).
+        if (match(TokenType::WEIGHT)) {
+            if (match_stmt->path_selector == PathSelector::NONE) {
+                return make_error(StatusCode::PARSE_ERROR,
+                                  "WEIGHT clause requires a path selector");
+            }
+            auto weight = parse_expression();
+            if (!weight)
+                return tl::unexpected(weight.error());
+            match_stmt->weight_expr = std::move(*weight);
+        }
+
         ref.match_source = std::move(match_stmt);
 
         // Optional alias (explicit AS or implicit).
@@ -2465,6 +2478,18 @@ Result<StmtPtr> Parser::parse_match() {
     if (!pattern)
         return tl::unexpected(pattern.error());
     stmt->pattern = std::move(*pattern);
+
+    // Optional WEIGHT expression (only valid with path selectors).
+    if (match(TokenType::WEIGHT)) {
+        if (stmt->path_selector == PathSelector::NONE) {
+            return error("WEIGHT clause requires a path selector (ANY SHORTEST, ALL SHORTEST, or "
+                         "SHORTEST K)");
+        }
+        auto weight = parse_expression();
+        if (!weight)
+            return tl::unexpected(weight.error());
+        stmt->weight_expr = std::move(*weight);
+    }
 
     // Optional WHERE.
     if (match(TokenType::WHERE)) {

@@ -134,6 +134,7 @@ const std::unordered_map<std::string, TokenType>& keyword_map() {
         {"VALUES", TokenType::VALUES},
         {"VARCHAR", TokenType::VARCHAR},
         {"VIA", TokenType::VIA},
+        {"WEIGHT", TokenType::WEIGHT},
         {"WHEN", TokenType::WHEN},
         {"WHERE", TokenType::WHERE},
         {"WITH", TokenType::WITH},

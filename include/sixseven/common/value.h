@@ -85,6 +85,7 @@ struct PathStep {
 /// An ordered graph path: a sequence of (node_pk, edge_id) steps.
 struct Path {
     std::vector<PathStep> steps;
+    double total_weight = 0.0; ///< Total weight for weighted shortest path (0.0 for unweighted).
 
     /// Return the number of edges (hops) in this path.
     [[nodiscard]] int64_t length() const {

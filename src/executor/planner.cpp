@@ -1803,17 +1803,20 @@ Result<std::unique_ptr<Iterator>> Planner::plan_match(const MatchStmt& stmt,
 
     // If a path selector is present, use MatchShortestPathOperator.
     if (stmt.path_selector != PathSelector::NONE) {
-        auto iter = std::make_unique<MatchShortestPathOperator>(*graph_engine_,
-                                                                catalog_,
-                                                                storage_,
-                                                                database_id_,
-                                                                std::move(match_config),
-                                                                std::move(schema),
-                                                                stmt.where_expr.get(),
-                                                                bound,
-                                                                stmt.path_selector,
-                                                                stmt.path_variable,
-                                                                stmt.shortest_k);
+        auto iter = std::make_unique<MatchShortestPathOperator>(
+            *graph_engine_,
+            catalog_,
+            storage_,
+            database_id_,
+            std::move(match_config),
+            std::move(schema),
+            stmt.where_expr.get(),
+            bound,
+            stmt.path_selector,
+            stmt.path_variable,
+            stmt.shortest_k,
+            MatchShortestPathOperator::DEFAULT_MAX_VISITED,
+            stmt.weight_expr.get());
         return ok(std::unique_ptr<Iterator>(std::move(iter)));
     }
 

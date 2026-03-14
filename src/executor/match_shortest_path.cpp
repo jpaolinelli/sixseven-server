@@ -43,22 +43,24 @@ MatchShortestPathOperator::MatchShortestPathOperator(GraphEngine& graph_engine,
                                                      PathSelector path_selector,
                                                      std::string path_variable,
                                                      int32_t shortest_k,
-                                                     size_t max_visited)
+                                                     size_t max_visited,
+                                                     const Expr* weight_expr)
     : graph_engine_(graph_engine), catalog_(catalog), storage_(storage), database_id_(database_id),
       config_(std::move(config)), schema_(std::move(schema)), where_expr_(where_expr),
       bound_(bound), path_selector_(path_selector), path_variable_(std::move(path_variable)),
-      shortest_k_(shortest_k), max_visited_(max_visited) {}
+      shortest_k_(shortest_k), weight_expr_(weight_expr), max_visited_(max_visited) {}
 
 std::string MatchShortestPathOperator::plan_node_name() const {
+    std::string prefix = weight_expr_ ? "Weighted " : "";
     switch (path_selector_) {
     case PathSelector::ANY_SHORTEST:
-        return "Any Shortest Path Match";
+        return prefix + "Any Shortest Path Match";
     case PathSelector::ALL_SHORTEST:
-        return "All Shortest Path Match";
+        return prefix + "All Shortest Path Match";
     case PathSelector::SHORTEST_K:
-        return "Shortest " + std::to_string(shortest_k_) + " Path Match";
+        return prefix + "Shortest " + std::to_string(shortest_k_) + " Path Match";
     default:
-        return "Shortest Path Match";
+        return prefix + "Shortest Path Match";
     }
 }
 
@@ -450,9 +452,18 @@ Result<void> MatchShortestPathOperator::execute_shortest_paths() {
     // For each source-target pair, find shortest path(s).
     for (const auto& src_pk : *src_pks) {
         for (const auto& tgt_pk : *tgt_pks) {
-            auto paths = find_shortest_paths(
-                src_pk, tgt_pk, edge_def.edge_type, edge_def.direction, max_depth);
+            auto paths =
+                weight_expr_
+                    ? find_weighted_shortest_paths(
+                          src_pk, tgt_pk, edge_def.edge_type, edge_def.direction, max_depth)
+                    : find_shortest_paths(
+                          src_pk, tgt_pk, edge_def.edge_type, edge_def.direction, max_depth);
             if (!paths) {
+                // For weighted paths, propagate errors (e.g., negative weight).
+                // For unweighted BFS, continue on failure (legacy behavior).
+                if (weight_expr_) {
+                    return tl::unexpected(paths.error());
+                }
                 continue;
             }
 
@@ -470,6 +481,230 @@ Result<void> MatchShortestPathOperator::execute_shortest_paths() {
     }
 
     return ok();
+}
+
+namespace {
+
+/// Extract a numeric weight from a Value. Returns an error for non-numeric or negative values.
+Result<double> value_to_weight(const Value& v) {
+    if (v.is_null()) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "WEIGHT expression evaluated to NULL");
+    }
+    double w = 0.0;
+    if (auto* p = std::get_if<double>(&v.data())) {
+        w = *p;
+    } else if (auto* p = std::get_if<float>(&v.data())) {
+        w = static_cast<double>(*p);
+    } else if (auto* p = std::get_if<int64_t>(&v.data())) {
+        w = static_cast<double>(*p);
+    } else if (auto* p = std::get_if<int32_t>(&v.data())) {
+        w = static_cast<double>(*p);
+    } else if (auto* p = std::get_if<int16_t>(&v.data())) {
+        w = static_cast<double>(*p);
+    } else if (auto* p = std::get_if<int8_t>(&v.data())) {
+        w = static_cast<double>(*p);
+    } else if (auto* p = std::get_if<uint64_t>(&v.data())) {
+        w = static_cast<double>(*p);
+    } else if (auto* p = std::get_if<uint32_t>(&v.data())) {
+        w = static_cast<double>(*p);
+    } else if (auto* p = std::get_if<uint16_t>(&v.data())) {
+        w = static_cast<double>(*p);
+    } else if (auto* p = std::get_if<uint8_t>(&v.data())) {
+        w = static_cast<double>(*p);
+    } else {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "WEIGHT expression must evaluate to a numeric type");
+    }
+    if (w < 0.0) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "WEIGHT value must be non-negative, got " + std::to_string(w));
+    }
+    return ok(w);
+}
+
+} // namespace
+
+Result<std::vector<std::tuple<Value, int64_t, double>>>
+MatchShortestPathOperator::get_neighbors_with_weight(const std::string& edge_type,
+                                                     const Value& pk,
+                                                     TraverseDirection direction) {
+    // Find the property index for the weight expression.
+    // The weight_expr_ is a ColumnRefExpr like r.distance — we need the column name.
+    const auto* col_ref = dynamic_cast<const ColumnRefExpr*>(weight_expr_);
+    if (!col_ref) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "WEIGHT expression must be a column reference (e.g., r.distance)");
+    }
+    const std::string& prop_name = col_ref->column;
+
+    // Look up property index from EdgeTable config.
+    auto et = graph_engine_.get_edge_table(edge_type);
+    if (!et) {
+        return tl::unexpected(et.error());
+    }
+    const auto& prop_cols = (*et)->config().property_columns;
+    int prop_idx = -1;
+    for (size_t i = 0; i < prop_cols.size(); ++i) {
+        if (prop_cols[i].name == prop_name) {
+            prop_idx = static_cast<int>(i);
+            break;
+        }
+    }
+    if (prop_idx < 0) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "edge type '" + edge_type + "' has no property '" + prop_name + "'");
+    }
+
+    std::vector<std::tuple<Value, int64_t, double>> neighbors;
+
+    if (direction == TraverseDirection::OUT || direction == TraverseDirection::BOTH) {
+        auto fwd = graph_engine_.get_edges_from(edge_type, pk);
+        if (fwd) {
+            for (auto& e : *fwd) {
+                if (static_cast<size_t>(prop_idx) >= e.properties.size()) {
+                    return make_error(StatusCode::INTERNAL_ERROR, "edge missing weight property");
+                }
+                auto w = value_to_weight(e.properties[static_cast<size_t>(prop_idx)]);
+                if (!w) {
+                    return tl::unexpected(w.error());
+                }
+                neighbors.emplace_back(
+                    std::move(e.target_pk), static_cast<int64_t>(e.edge_row_id), *w);
+            }
+        }
+    }
+    if (direction == TraverseDirection::IN || direction == TraverseDirection::BOTH) {
+        auto rev = graph_engine_.get_edges_to(edge_type, pk);
+        if (rev) {
+            for (auto& e : *rev) {
+                if (static_cast<size_t>(prop_idx) >= e.properties.size()) {
+                    return make_error(StatusCode::INTERNAL_ERROR, "edge missing weight property");
+                }
+                auto w = value_to_weight(e.properties[static_cast<size_t>(prop_idx)]);
+                if (!w) {
+                    return tl::unexpected(w.error());
+                }
+                neighbors.emplace_back(
+                    std::move(e.source_pk), static_cast<int64_t>(e.edge_row_id), *w);
+            }
+        }
+    }
+
+    return ok(std::move(neighbors));
+}
+
+Result<std::vector<Path>>
+MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
+                                                        const Value& tgt_pk,
+                                                        const std::string& edge_type,
+                                                        TraverseDirection direction,
+                                                        int32_t max_depth) {
+    std::vector<Path> result_paths;
+
+    auto src_int = pk_to_int64(src_pk);
+    if (!src_int) {
+        return tl::unexpected(src_int.error());
+    }
+
+    // Trivial case: source == target.
+    if (ValueEqual{}(src_pk, tgt_pk)) {
+        Path p;
+        p.steps.push_back({*src_int, -1});
+        p.total_weight = 0.0;
+        result_paths.push_back(std::move(p));
+        return ok(std::move(result_paths));
+    }
+
+    // Dijkstra's algorithm with priority queue.
+    struct DijkstraEntry {
+        double cost;
+        Value current_pk;
+        Path path_so_far;
+
+        bool operator>(const DijkstraEntry& other) const { return cost > other.cost; }
+    };
+
+    std::priority_queue<DijkstraEntry, std::vector<DijkstraEntry>, std::greater<>> pq;
+    std::unordered_map<Value, double, ValueHash, ValueEqual> best_cost;
+    size_t total_visited = 0;
+
+    // Seed from source.
+    DijkstraEntry start;
+    start.cost = 0.0;
+    start.current_pk = src_pk;
+    start.path_so_far.steps.push_back({*src_int, -1});
+    start.path_so_far.total_weight = 0.0;
+    pq.push(std::move(start));
+    best_cost[src_pk] = 0.0;
+
+    while (!pq.empty()) {
+        auto entry = std::move(const_cast<DijkstraEntry&>(pq.top()));
+        pq.pop();
+        ++total_visited;
+
+        if (total_visited > max_visited_) {
+            break;
+        }
+
+        // Skip if we've already found a better path to this node.
+        auto it = best_cost.find(entry.current_pk);
+        if (it != best_cost.end() && entry.cost > it->second) {
+            continue;
+        }
+
+        // Check max depth (path length in hops).
+        if (static_cast<int32_t>(entry.path_so_far.length()) >= max_depth) {
+            continue;
+        }
+
+        auto neighbors = get_neighbors_with_weight(edge_type, entry.current_pk, direction);
+        if (!neighbors) {
+            return tl::unexpected(neighbors.error());
+        }
+
+        for (auto& [nbr_pk, edge_id, weight] : *neighbors) {
+            double new_cost = entry.cost + weight;
+
+            auto nbr_int = pk_to_int64(nbr_pk);
+            if (!nbr_int) {
+                return tl::unexpected(nbr_int.error());
+            }
+
+            // Build new path.
+            Path new_path = entry.path_so_far;
+            new_path.steps.back().edge_id = edge_id;
+            new_path.steps.push_back({*nbr_int, -1});
+            new_path.total_weight = new_cost;
+
+            // Check if we've reached the target.
+            if (ValueEqual{}(nbr_pk, tgt_pk)) {
+                result_paths.push_back(std::move(new_path));
+
+                if (path_selector_ == PathSelector::ANY_SHORTEST) {
+                    return ok(std::move(result_paths));
+                }
+                if (path_selector_ == PathSelector::SHORTEST_K &&
+                    static_cast<int32_t>(result_paths.size()) >= shortest_k_) {
+                    return ok(std::move(result_paths));
+                }
+                continue;
+            }
+
+            // Only visit if we found a better cost.
+            auto cost_it = best_cost.find(nbr_pk);
+            if (cost_it == best_cost.end() || new_cost < cost_it->second) {
+                best_cost[nbr_pk] = new_cost;
+
+                DijkstraEntry next;
+                next.cost = new_cost;
+                next.current_pk = std::move(nbr_pk);
+                next.path_so_far = std::move(new_path);
+                pq.push(std::move(next));
+            }
+        }
+    }
+
+    return ok(std::move(result_paths));
 }
 
 } // namespace sixseven

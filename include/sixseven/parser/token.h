@@ -143,6 +143,7 @@ enum class TokenType : uint8_t {
     UNLINK,
     PASSWORD,
     VIA,
+    WEIGHT,
 
     // -- Operators ------------------------------------------------------------
 
@@ -437,6 +438,8 @@ constexpr std::string_view token_type_name(TokenType type) {
         return "PASSWORD";
     case TokenType::VIA:
         return "VIA";
+    case TokenType::WEIGHT:
+        return "WEIGHT";
     case TokenType::PLUS:
         return "PLUS";
     case TokenType::MINUS:
