@@ -174,6 +174,8 @@ uint32_t type_to_pg_oid(TypeId type) {
         return PG_OID_UUID;
     case TypeId::EMBEDDING:
         return PG_OID_EMBEDDING;
+    case TypeId::PATH:
+        return PG_OID_TEXT; // Paths are serialized as text.
     }
     return PG_OID_TEXT; // Fallback.
 }
@@ -425,6 +427,22 @@ std::string value_to_pg_text(const Value& value) {
             oss << emb[i];
         }
         oss << ']';
+        return oss.str();
+    }
+    case TypeId::PATH: {
+        const auto& path = value.as_path();
+        std::ostringstream oss;
+        oss << "[";
+        for (size_t i = 0; i < path.steps.size(); ++i) {
+            if (i > 0) {
+                oss << ",";
+            }
+            oss << path.steps[i].node_pk;
+            if (path.steps[i].edge_id >= 0) {
+                oss << "-(" << path.steps[i].edge_id << ")->";
+            }
+        }
+        oss << "]";
         return oss.str();
     }
     }
@@ -1162,8 +1180,9 @@ Result<size_t> PgProtocolHandler::handle_startup_message(Connection& conn) {
     }
 
     SIXSEVEN_LOG_INFO("startup: user={}, database={}",
-                   startup_params_.count("user") > 0 ? startup_params_["user"] : "(none)",
-                   startup_params_.count("database") > 0 ? startup_params_["database"] : "(none)");
+                      startup_params_.count("user") > 0 ? startup_params_["user"] : "(none)",
+                      startup_params_.count("database") > 0 ? startup_params_["database"]
+                                                            : "(none)");
 
     // Dispatch based on authentication method.
     switch (auth_method_) {
@@ -1702,7 +1721,8 @@ void PgProtocolHandler::handle_bind(Connection& conn, const uint8_t* payload, si
         return;
     }
 
-    SIXSEVEN_LOG_DEBUG("Bind: portal='{}', stmt='{}', params={}", portal_name, stmt_name, num_params);
+    SIXSEVEN_LOG_DEBUG(
+        "Bind: portal='{}', stmt='{}', params={}", portal_name, stmt_name, num_params);
 
     Portal portal;
     portal.name = portal_name;

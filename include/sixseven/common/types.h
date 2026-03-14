@@ -52,6 +52,9 @@ enum class TypeId : uint8_t {
 
     // Vector
     EMBEDDING,
+
+    // Graph path
+    PATH,
 };
 
 /// Return the human-readable name of a TypeId.
@@ -101,6 +104,8 @@ constexpr std::string_view type_name(TypeId id) {
         return "UUID";
     case TypeId::EMBEDDING:
         return "EMBEDDING";
+    case TypeId::PATH:
+        return "PATH";
     }
     return "UNKNOWN";
 }
@@ -179,6 +184,9 @@ inline std::optional<TypeId> parse_type_id(std::string_view name) {
     if (upper == "EMBEDDING") {
         return TypeId::EMBEDDING;
     }
+    if (upper == "PATH") {
+        return TypeId::PATH;
+    }
     return std::nullopt;
 }
 
@@ -214,6 +222,7 @@ constexpr std::optional<size_t> fixed_size(TypeId id) {
     case TypeId::BLOB:
     case TypeId::JSON:
     case TypeId::EMBEDDING:
+    case TypeId::PATH:
         return std::nullopt;
     }
     return std::nullopt;
@@ -249,6 +258,7 @@ constexpr size_t alignment(TypeId id) {
     case TypeId::BLOB:
     case TypeId::JSON:
     case TypeId::EMBEDDING:
+    case TypeId::PATH:
         return 8; // pointer-aligned for variable-length data
     }
     return 1;
@@ -302,6 +312,7 @@ constexpr bool is_comparable(TypeId id) {
     switch (id) {
     case TypeId::BLOB:
     case TypeId::EMBEDDING:
+    case TypeId::PATH:
         return false;
     default:
         return true;

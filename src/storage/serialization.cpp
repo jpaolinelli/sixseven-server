@@ -91,6 +91,8 @@ size_t payload_size(const Value& value) {
         return 4 + value.as_json().data.size();
     case TypeId::EMBEDDING:
         return 4 + value.as_embedding().size() * sizeof(float);
+    case TypeId::PATH:
+        return 4 + value.as_path().steps.size() * (sizeof(int64_t) * 2);
     }
     return 0;
 }
@@ -190,6 +192,15 @@ std::vector<uint8_t> serialize(const Value& value) {
         write_le<uint32_t>(buf, static_cast<uint32_t>(e.size()));
         for (float f : e) {
             write_le(buf, f);
+        }
+        break;
+    }
+    case TypeId::PATH: {
+        const auto& p = value.as_path();
+        write_le<uint32_t>(buf, static_cast<uint32_t>(p.steps.size()));
+        for (const auto& step : p.steps) {
+            write_le(buf, step.node_pk);
+            write_le(buf, step.edge_id);
         }
         break;
     }
@@ -372,6 +383,24 @@ Result<Value> deserialize(std::span<const uint8_t> data, TypeId type_id) {
             e[i] = read_le<float>(p + 4 + i * sizeof(float));
         }
         return ok(Value(std::move(e)));
+    }
+    case TypeId::PATH: {
+        if (!check_size(4)) {
+            break;
+        }
+        uint32_t count = read_le<uint32_t>(p);
+        constexpr size_t step_size = sizeof(int64_t) * 2;
+        if (!check_size(4 + count * step_size)) {
+            break;
+        }
+        Path path;
+        path.steps.resize(count);
+        for (uint32_t i = 0; i < count; ++i) {
+            size_t off = 4 + i * step_size;
+            path.steps[i].node_pk = read_le<int64_t>(p + off);
+            path.steps[i].edge_id = read_le<int64_t>(p + off + sizeof(int64_t));
+        }
+        return ok(Value(std::move(path)));
     }
     }
 

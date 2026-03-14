@@ -74,6 +74,29 @@ using Blob = std::vector<uint8_t>;
 /// Vector embedding.
 using Embedding = std::vector<float>;
 
+/// A step in a graph path: a node PK followed by an optional edge ID.
+struct PathStep {
+    int64_t node_pk = 0;
+    int64_t edge_id = -1; ///< -1 means no edge (terminal node).
+
+    bool operator==(const PathStep& other) const = default;
+};
+
+/// An ordered graph path: a sequence of (node_pk, edge_id) steps.
+struct Path {
+    std::vector<PathStep> steps;
+
+    /// Return the number of edges (hops) in this path.
+    [[nodiscard]] int64_t length() const {
+        if (steps.empty())
+            return 0;
+        // Length = number of edges = steps - 1 (the last step has no outgoing edge).
+        return static_cast<int64_t>(steps.size()) - 1;
+    }
+
+    bool operator==(const Path& other) const = default;
+};
+
 // -- Value variant type -------------------------------------------------------
 
 /// The internal variant holding all possible value representations.
@@ -100,7 +123,8 @@ using ValueData = std::variant<std::monostate, // NULL
                                Point,          // POINT
                                JsonString,     // JSON
                                Uuid,           // UUID
-                               Embedding       // EMBEDDING
+                               Embedding,      // EMBEDDING
+                               Path            // PATH
                                >;
 
 /// A polymorphic value that can hold any of the 22 SixSevenDB data types, or NULL.
@@ -132,6 +156,7 @@ public:
     explicit Value(JsonString v) : data_(std::move(v)) {}
     explicit Value(Uuid v) : data_(v) {}
     explicit Value(Embedding v) : data_(std::move(v)) {}
+    explicit Value(Path v) : data_(std::move(v)) {}
 
     /// Create a NULL value explicitly.
     static Value make_null() { return Value{}; }
@@ -147,7 +172,7 @@ public:
         // Variant index maps directly to our type order.
         // Index 0 = monostate (NULL) — maps to INT8 as a dummy value.
         // IMPORTANT: Always check is_null() before using this result.
-        static constexpr std::array<TypeId, 23> index_to_type = {{
+        static constexpr std::array<TypeId, 24> index_to_type = {{
             TypeId::INT8,      // 0: monostate (NULL — MUST check is_null() first!)
             TypeId::INT8,      // 1: int8_t
             TypeId::INT16,     // 2: int16_t
@@ -171,6 +196,7 @@ public:
             TypeId::JSON,      // 20: JsonString
             TypeId::UUID,      // 21: Uuid
             TypeId::EMBEDDING, // 22: Embedding
+            TypeId::PATH,      // 23: Path
         }};
         return index_to_type.at(data_.index());
     }
@@ -199,6 +225,7 @@ public:
     [[nodiscard]] const JsonString& as_json() const { return std::get<JsonString>(data_); }
     [[nodiscard]] const Uuid& as_uuid() const { return std::get<Uuid>(data_); }
     [[nodiscard]] const Embedding& as_embedding() const { return std::get<Embedding>(data_); }
+    [[nodiscard]] const Path& as_path() const { return std::get<Path>(data_); }
 
     // -- Mutable accessors ----------------------------------------------------
 
@@ -224,6 +251,7 @@ public:
     [[nodiscard]] JsonString& as_json() { return std::get<JsonString>(data_); }
     [[nodiscard]] Uuid& as_uuid() { return std::get<Uuid>(data_); }
     [[nodiscard]] Embedding& as_embedding() { return std::get<Embedding>(data_); }
+    [[nodiscard]] Path& as_path() { return std::get<Path>(data_); }
 
     // -- Result-based accessors (return Error instead of throwing) -----------
     // Use these in hot paths or when callers prefer Result<T> error handling
@@ -285,6 +313,7 @@ public:
     [[nodiscard]] Result<const Embedding*> try_as_embedding() const {
         return try_get<Embedding>(TypeId::EMBEDDING);
     }
+    [[nodiscard]] Result<const Path*> try_as_path() const { return try_get<Path>(TypeId::PATH); }
 
     /// Access the underlying variant data.
     [[nodiscard]] const ValueData& data() const { return data_; }

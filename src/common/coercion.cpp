@@ -221,6 +221,7 @@ Result<std::strong_ordering> compare_same_type(const Value& lhs, const Value& rh
     }
     case TypeId::BLOB:
     case TypeId::EMBEDDING:
+    case TypeId::PATH:
         return make_error(StatusCode::TYPE_ERROR,
                           "cannot compare values of type " + std::string(type_name(lhs.type_id())));
     }

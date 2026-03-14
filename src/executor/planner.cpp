@@ -21,6 +21,7 @@
 #include "sixseven/executor/subquery_source.h"
 #include "sixseven/executor/traversal.h"
 #include "sixseven/executor/update.h"
+#include "sixseven/executor/variable_length_match.h"
 #include "sixseven/parser/lexer.h"
 #include "sixseven/parser/parser.h"
 #include "sixseven/planner/type_resolver.h"
@@ -1774,6 +1775,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_match(const MatchStmt& stmt,
 
     // Build pattern config from AST pattern elements.
     MatchConfig match_config;
+    bool has_variable_length = false;
     for (const auto& elem : stmt.pattern) {
         MatchNodeDef node_def;
         node_def.variable = elem.node.variable;
@@ -1781,16 +1783,33 @@ Result<std::unique_ptr<Iterator>> Planner::plan_match(const MatchStmt& stmt,
         match_config.nodes.push_back(std::move(node_def));
 
         if (elem.outgoing_edge) {
-            MatchEdgeDef edge_def;
-            edge_def.variable = elem.outgoing_edge->variable;
-            edge_def.edge_type = elem.outgoing_edge->edge_type;
-            edge_def.direction = elem.outgoing_edge->direction;
+            MatchEdgeDef edge_def(elem.outgoing_edge->variable,
+                                  elem.outgoing_edge->edge_type,
+                                  elem.outgoing_edge->direction,
+                                  elem.outgoing_edge->min_hops,
+                                  elem.outgoing_edge->max_hops);
+            if (edge_def.is_variable_length()) {
+                has_variable_length = true;
+            }
             match_config.edges.push_back(std::move(edge_def));
         }
     }
 
     // Build output schema from bound output columns.
     auto schema = build_output_schema(bound.output_columns);
+
+    if (has_variable_length) {
+        // Use VariableLengthMatchOperator for quantified edges.
+        auto iter = std::make_unique<VariableLengthMatchOperator>(*graph_engine_,
+                                                                  catalog_,
+                                                                  storage_,
+                                                                  database_id_,
+                                                                  std::move(match_config),
+                                                                  std::move(schema),
+                                                                  stmt.where_expr.get(),
+                                                                  bound);
+        return ok(std::unique_ptr<Iterator>(std::move(iter)));
+    }
 
     auto iter = std::make_unique<PatternMatchOperator>(*graph_engine_,
                                                        catalog_,

@@ -459,6 +459,28 @@ Binder::bind_match_source(const MatchStmt& match, Scope& scope, BoundStatement& 
                 return tl::unexpected(edge.error());
             }
             bound.referenced_edge_types.push_back(edge->edge_id);
+
+            // Validate variable-length quantifiers.
+            if (elem.outgoing_edge->is_variable_length()) {
+                int32_t min_h = *elem.outgoing_edge->min_hops;
+                if (min_h < 0) {
+                    return make_error(StatusCode::INVALID_ARGUMENT,
+                                      "min_hops must be >= 0, got " + std::to_string(min_h));
+                }
+                if (elem.outgoing_edge->max_hops.has_value()) {
+                    int32_t max_h = *elem.outgoing_edge->max_hops;
+                    if (max_h < min_h) {
+                        return make_error(StatusCode::INVALID_ARGUMENT,
+                                          "max_hops (" + std::to_string(max_h) +
+                                              ") must be >= min_hops (" + std::to_string(min_h) +
+                                              ")");
+                    }
+                    if (max_h == 0 && min_h == 0) {
+                        return make_error(StatusCode::INVALID_ARGUMENT,
+                                          "variable-length pattern {0,0} would match zero hops");
+                    }
+                }
+            }
         }
     }
     return ok();

@@ -2314,6 +2314,46 @@ Result<std::vector<PathElement>> Parser::parse_match_pattern() {
                 edge.direction = TraverseDirection::BOTH;
             }
 
+            // Parse optional hop quantifier: {min,max}, {n}, +, *
+            if (match(TokenType::LBRACE)) {
+                auto min_tok = expect(TokenType::INTEGER_LITERAL, "expected integer in quantifier");
+                if (!min_tok)
+                    return tl::unexpected(min_tok.error());
+
+                int32_t min_val = static_cast<int32_t>(std::stoll(std::string(min_tok->lexeme)));
+                edge.min_hops = min_val;
+
+                if (match(TokenType::COMMA)) {
+                    // {min,max} form.
+                    if (check(TokenType::RBRACE)) {
+                        // {min,} — unbounded max.
+                        edge.max_hops = std::nullopt;
+                    } else {
+                        auto max_tok =
+                            expect(TokenType::INTEGER_LITERAL, "expected integer for max hops");
+                        if (!max_tok)
+                            return tl::unexpected(max_tok.error());
+                        edge.max_hops =
+                            static_cast<int32_t>(std::stoll(std::string(max_tok->lexeme)));
+                    }
+                } else {
+                    // {n} — exact hop count.
+                    edge.max_hops = min_val;
+                }
+
+                auto rb = expect(TokenType::RBRACE, "expected '}' after quantifier");
+                if (!rb)
+                    return tl::unexpected(rb.error());
+            } else if (match(TokenType::PLUS)) {
+                // + shorthand: one or more hops.
+                edge.min_hops = 1;
+                edge.max_hops = std::nullopt;
+            } else if (match(TokenType::STAR)) {
+                // * shorthand: zero or more hops.
+                edge.min_hops = 0;
+                edge.max_hops = std::nullopt;
+            }
+
             elem.outgoing_edge = std::move(edge);
             pattern.push_back(std::move(elem));
         } else {
