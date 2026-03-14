@@ -16,6 +16,7 @@ const std::unordered_map<std::string, TokenType>& keyword_map() {
         {"ALL", TokenType::ALL},
         {"ALTER", TokenType::ALTER},
         {"ANALYZE", TokenType::ANALYZE},
+        {"ANY", TokenType::ANY},
         {"AND", TokenType::AND},
         {"AS", TokenType::AS},
         {"ASC", TokenType::ASC},

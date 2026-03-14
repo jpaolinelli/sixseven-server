@@ -53,6 +53,7 @@ bool is_name_token(TokenType type) {
     case TokenType::CASCADE:
     case TokenType::RESTRICT:
     case TokenType::RECURSIVE:
+    case TokenType::ANY:
     case TokenType::NEAREST:
     case TokenType::SHORTEST:
     case TokenType::TRAVERSE:
@@ -1874,10 +1875,48 @@ Result<TableRef> Parser::parse_table_ref() {
         return ok(std::move(ref));
     }
 
-    // MATCH source: FROM MATCH (pattern) [AS] alias
+    // MATCH source: FROM MATCH [p = ANY/ALL SHORTEST | SHORTEST K] (pattern) [AS] alias
     if (peek().type == TokenType::MATCH) {
         advance(); // consume MATCH
         auto match_stmt = std::make_unique<MatchStmt>();
+
+        // Parse optional path selector.
+        if (is_name_token(peek().type) && current_ + 1 < tokens_.size() &&
+            tokens_[current_ + 1].type == TokenType::EQUAL) {
+            match_stmt->path_variable = std::string(advance().lexeme);
+            advance(); // consume =
+
+            if (check(TokenType::ANY)) {
+                advance();
+                auto s = expect(TokenType::SHORTEST, "expected SHORTEST after ANY");
+                if (!s)
+                    return tl::unexpected(s.error());
+                match_stmt->path_selector = PathSelector::ANY_SHORTEST;
+            } else if (check(TokenType::ALL)) {
+                advance();
+                auto s = expect(TokenType::SHORTEST, "expected SHORTEST after ALL");
+                if (!s)
+                    return tl::unexpected(s.error());
+                match_stmt->path_selector = PathSelector::ALL_SHORTEST;
+            } else if (check(TokenType::SHORTEST)) {
+                advance();
+                auto k = expect(TokenType::INTEGER_LITERAL, "expected integer K after SHORTEST");
+                if (!k)
+                    return tl::unexpected(k.error());
+                auto k_val = safe_stoi(k->lexeme);
+                if (!k_val)
+                    return tl::unexpected(k_val.error());
+                if (*k_val < 1) {
+                    return make_error(StatusCode::PARSE_ERROR, "SHORTEST K requires K >= 1");
+                }
+                match_stmt->path_selector = PathSelector::SHORTEST_K;
+                match_stmt->shortest_k = *k_val;
+            } else {
+                return make_error(
+                    StatusCode::PARSE_ERROR,
+                    "expected ANY SHORTEST, ALL SHORTEST, or SHORTEST K after path variable");
+            }
+        }
 
         auto pattern = parse_match_pattern();
         if (!pattern)
@@ -2368,6 +2407,43 @@ Result<std::vector<PathElement>> Parser::parse_match_pattern() {
 Result<StmtPtr> Parser::parse_match() {
     advance(); // consume MATCH
     auto stmt = std::make_unique<MatchStmt>();
+
+    // Parse optional path selector: p = ANY SHORTEST | p = ALL SHORTEST | p = SHORTEST K
+    if (is_name_token(peek().type) && current_ + 1 < tokens_.size() &&
+        tokens_[current_ + 1].type == TokenType::EQUAL) {
+        // Path variable binding: p = ...
+        stmt->path_variable = std::string(advance().lexeme); // consume variable name
+        advance();                                           // consume =
+
+        if (check(TokenType::ANY)) {
+            advance(); // consume ANY
+            auto s = expect(TokenType::SHORTEST, "expected SHORTEST after ANY");
+            if (!s)
+                return tl::unexpected(s.error());
+            stmt->path_selector = PathSelector::ANY_SHORTEST;
+        } else if (check(TokenType::ALL)) {
+            advance(); // consume ALL
+            auto s = expect(TokenType::SHORTEST, "expected SHORTEST after ALL");
+            if (!s)
+                return tl::unexpected(s.error());
+            stmt->path_selector = PathSelector::ALL_SHORTEST;
+        } else if (check(TokenType::SHORTEST)) {
+            advance(); // consume SHORTEST
+            auto k = expect(TokenType::INTEGER_LITERAL, "expected integer K after SHORTEST");
+            if (!k)
+                return tl::unexpected(k.error());
+            auto k_val = safe_stoi(k->lexeme);
+            if (!k_val)
+                return tl::unexpected(k_val.error());
+            if (*k_val < 1) {
+                return error("SHORTEST K requires K >= 1");
+            }
+            stmt->path_selector = PathSelector::SHORTEST_K;
+            stmt->shortest_k = *k_val;
+        } else {
+            return error("expected ANY SHORTEST, ALL SHORTEST, or SHORTEST K after path variable");
+        }
+    }
 
     auto pattern = parse_match_pattern();
     if (!pattern)

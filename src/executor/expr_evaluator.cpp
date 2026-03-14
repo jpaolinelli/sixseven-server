@@ -916,6 +916,68 @@ Result<Value> eval_function(const FunctionCallExpr& expr,
         return ok(Value((*path_ptr)->length()));
     }
 
+    // nodes(p) — return a JSON array of node PKs in the path.
+    if (upper == "NODES") {
+        if (expr.args.size() != 1) {
+            return make_error(StatusCode::INVALID_ARGUMENT, "nodes() requires exactly 1 argument");
+        }
+        auto arg_val = eval(*expr.args[0], tuple, schema, bound, subquery_ctx);
+        if (!arg_val) {
+            return tl::unexpected(arg_val.error());
+        }
+        if (arg_val->is_null()) {
+            return ok(Value::make_null());
+        }
+        auto path_ptr = arg_val->try_as_path();
+        if (!path_ptr) {
+            return make_error(StatusCode::TYPE_ERROR, "nodes() argument must be a PATH value");
+        }
+        std::string json = "[";
+        for (size_t i = 0; i < (*path_ptr)->steps.size(); ++i) {
+            if (i > 0) {
+                json += ",";
+            }
+            json += std::to_string((*path_ptr)->steps[i].node_pk);
+        }
+        json += "]";
+        return ok(Value(JsonString{std::move(json)}));
+    }
+
+    // edges(p) / relationships(p) — return a JSON array of edge IDs in the path.
+    if (upper == "EDGES" || upper == "RELATIONSHIPS") {
+        if (expr.args.size() != 1) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              std::string(upper == "EDGES" ? "edges" : "relationships") +
+                                  "() requires exactly 1 argument");
+        }
+        auto arg_val = eval(*expr.args[0], tuple, schema, bound, subquery_ctx);
+        if (!arg_val) {
+            return tl::unexpected(arg_val.error());
+        }
+        if (arg_val->is_null()) {
+            return ok(Value::make_null());
+        }
+        auto path_ptr = arg_val->try_as_path();
+        if (!path_ptr) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              std::string(upper == "EDGES" ? "edges" : "relationships") +
+                                  "() argument must be a PATH value");
+        }
+        std::string json = "[";
+        bool first = true;
+        for (const auto& step : (*path_ptr)->steps) {
+            if (step.edge_id >= 0) {
+                if (!first) {
+                    json += ",";
+                }
+                json += std::to_string(step.edge_id);
+                first = false;
+            }
+        }
+        json += "]";
+        return ok(Value(JsonString{std::move(json)}));
+    }
+
     return make_error(StatusCode::NOT_IMPLEMENTED,
                       "function '" + expr.name + "' is not yet implemented");
 }

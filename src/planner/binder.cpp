@@ -505,12 +505,12 @@ Binder::bind_match_source(const MatchStmt& match, Scope& scope, BoundStatement& 
         if (!next_node.label.empty()) {
             auto next_schema = resolve_table(next_node.label);
             if (next_schema && next_schema->table_id != edge_def->target_table_id) {
-                return make_error(
-                    StatusCode::INVALID_ARGUMENT,
-                    "table compatibility error: edge type '" + elem.outgoing_edge->edge_type +
-                        "' targets table id " + std::to_string(edge_def->target_table_id) +
-                        " but node '" + next_node.variable + "' has label '" + next_node.label +
-                        "' (table id " + std::to_string(next_schema->table_id) + ")");
+                return make_error(StatusCode::INVALID_ARGUMENT,
+                                  "table compatibility error: edge type '" +
+                                      elem.outgoing_edge->edge_type + "' targets table id " +
+                                      std::to_string(edge_def->target_table_id) + " but node '" +
+                                      next_node.variable + "' has label '" + next_node.label +
+                                      "' (table id " + std::to_string(next_schema->table_id) + ")");
             }
         }
 
@@ -525,8 +525,7 @@ Binder::bind_match_source(const MatchStmt& match, Scope& scope, BoundStatement& 
                     "table compatibility error: edge type '" + elem.outgoing_edge->edge_type +
                         "' targets table id " + std::to_string(edge_def->target_table_id) +
                         " but next edge type '" + next_elem.outgoing_edge->edge_type +
-                        "' expects source table id " +
-                        std::to_string(next_edge->source_table_id));
+                        "' expects source table id " + std::to_string(next_edge->source_table_id));
             }
         }
     }
@@ -2252,6 +2251,21 @@ Result<BoundStatement> Binder::bind_match(const MatchStmt& stmt) {
     auto mr = bind_match_source(stmt, scope, bound);
     if (!mr) {
         return tl::unexpected(mr.error());
+    }
+
+    // If a path variable is bound, add it to the scope as a virtual table
+    // with a single "path" column of type PATH.
+    if (!stmt.path_variable.empty() && stmt.path_selector != PathSelector::NONE) {
+        ScopeTable path_scope;
+        path_scope.table_id = 0;
+        path_scope.alias = stmt.path_variable;
+        ResolvedColumn path_col;
+        path_col.table_name = stmt.path_variable;
+        path_col.column_name = "path";
+        path_col.type_id = TypeId::PATH;
+        path_col.nullable = false;
+        path_scope.columns.push_back(std::move(path_col));
+        scope.add_table(std::move(path_scope));
     }
 
     // Bind WHERE.

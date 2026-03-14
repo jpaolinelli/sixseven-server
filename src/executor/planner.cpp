@@ -11,6 +11,7 @@
 #include "sixseven/executor/index_scan.h"
 #include "sixseven/executor/insert.h"
 #include "sixseven/executor/limit.h"
+#include "sixseven/executor/match_shortest_path.h"
 #include "sixseven/executor/nearest_scan.h"
 #include "sixseven/executor/nested_loop_join.h"
 #include "sixseven/executor/pattern_match.h"
@@ -1797,6 +1798,22 @@ Result<std::unique_ptr<Iterator>> Planner::plan_match(const MatchStmt& stmt,
 
     // Build output schema from bound output columns.
     auto schema = build_output_schema(bound.output_columns);
+
+    // If a path selector is present, use MatchShortestPathOperator.
+    if (stmt.path_selector != PathSelector::NONE) {
+        auto iter = std::make_unique<MatchShortestPathOperator>(*graph_engine_,
+                                                                catalog_,
+                                                                storage_,
+                                                                database_id_,
+                                                                std::move(match_config),
+                                                                std::move(schema),
+                                                                stmt.where_expr.get(),
+                                                                bound,
+                                                                stmt.path_selector,
+                                                                stmt.path_variable,
+                                                                stmt.shortest_k);
+        return ok(std::unique_ptr<Iterator>(std::move(iter)));
+    }
 
     if (has_variable_length) {
         // Use VariableLengthMatchOperator for quantified edges.

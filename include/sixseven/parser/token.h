@@ -15,6 +15,7 @@ enum class TokenType : uint8_t {
 
     ALL,
     ALTER,
+    ANY,
     ANALYZE,
     AND,
     AS,
@@ -192,6 +193,8 @@ constexpr std::string_view token_type_name(TokenType type) {
         return "ALL";
     case TokenType::ALTER:
         return "ALTER";
+    case TokenType::ANY:
+        return "ANY";
     case TokenType::ANALYZE:
         return "ANALYZE";
     case TokenType::AND:
