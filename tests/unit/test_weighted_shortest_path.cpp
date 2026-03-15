@@ -580,6 +580,42 @@ TEST_F(LateCheeperArrivalTest, AllShortestPurgesExpensivePathOnCheaperArrival) {
     EXPECT_EQ(path.steps[2].node_pk, 4);
 }
 
+TEST_F(LateCheeperArrivalTest, AnyShortestReturnsCheapestNotFirstArrival) {
+    // GDB-560: ANY_SHORTEST must return the cheapest path, not the first
+    // to arrive. The cost-101 path via node 2 arrives first but is not shortest.
+    auto results = run_match(PathSelector::ANY_SHORTEST);
+
+    std::vector<Tuple> from_1_to_4;
+    for (auto& t : results) {
+        if (t.values[0].as_int64() == 1 && t.values[1].as_int64() == 4) {
+            from_1_to_4.push_back(std::move(t));
+        }
+    }
+
+    ASSERT_EQ(from_1_to_4.size(), 1u) << "ANY_SHORTEST should return exactly one path";
+    const auto& path = from_1_to_4[0].values[2].as_path();
+    EXPECT_DOUBLE_EQ(path.total_weight, 51.0)
+        << "ANY_SHORTEST should return the cheapest path (51), not the first arrival (101)";
+}
+
+TEST_F(LateCheeperArrivalTest, ShortestKDoesNotEarlyReturnWithExpensivePaths) {
+    // GDB-561: SHORTEST 1 must not early-return with the first (expensive)
+    // arrival before discovering cheaper paths.
+    auto results = run_match(PathSelector::SHORTEST_K, /*k=*/1);
+
+    std::vector<Tuple> from_1_to_4;
+    for (auto& t : results) {
+        if (t.values[0].as_int64() == 1 && t.values[1].as_int64() == 4) {
+            from_1_to_4.push_back(std::move(t));
+        }
+    }
+
+    ASSERT_EQ(from_1_to_4.size(), 1u) << "SHORTEST 1 should return exactly one path";
+    const auto& path = from_1_to_4[0].values[2].as_path();
+    EXPECT_DOUBLE_EQ(path.total_weight, 51.0)
+        << "SHORTEST 1 should return the cheapest path (51), not the first arrival (101)";
+}
+
 // ===========================================================================
 // Negative weight rejection
 // ===========================================================================

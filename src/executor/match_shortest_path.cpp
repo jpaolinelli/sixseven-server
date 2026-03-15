@@ -648,6 +648,19 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
             break;
         }
 
+        // If we've already found a path to the destination and the current
+        // entry's cost >= best_dest_cost, no future path can be cheaper
+        // (non-negative weights). Safe to return results now.
+        if (entry.cost >= best_dest_cost && !result_paths.empty()) {
+            if (path_selector_ == PathSelector::ANY_SHORTEST) {
+                result_paths.resize(1);
+            } else if (path_selector_ == PathSelector::SHORTEST_K &&
+                       static_cast<int32_t>(result_paths.size()) > shortest_k_) {
+                result_paths.resize(shortest_k_);
+            }
+            return ok(std::move(result_paths));
+        }
+
         // Skip if we've already found a better path to this node.
         auto it = best_cost.find(entry.current_pk);
         if (it != best_cost.end() && entry.cost > it->second) {
@@ -690,14 +703,6 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
                 }
 
                 result_paths.push_back(std::move(new_path));
-
-                if (path_selector_ == PathSelector::ANY_SHORTEST) {
-                    return ok(std::move(result_paths));
-                }
-                if (path_selector_ == PathSelector::SHORTEST_K &&
-                    static_cast<int32_t>(result_paths.size()) >= shortest_k_) {
-                    return ok(std::move(result_paths));
-                }
                 continue;
             }
 
@@ -719,6 +724,12 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
         }
     }
 
+    if (path_selector_ == PathSelector::ANY_SHORTEST && result_paths.size() > 1) {
+        result_paths.resize(1);
+    } else if (path_selector_ == PathSelector::SHORTEST_K &&
+               static_cast<int32_t>(result_paths.size()) > shortest_k_) {
+        result_paths.resize(shortest_k_);
+    }
     return ok(std::move(result_paths));
 }
 
