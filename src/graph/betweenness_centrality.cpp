@@ -91,8 +91,8 @@ Result<std::vector<AlgorithmRow>> betweenness_centrality_execute(const Algorithm
         return tl::unexpected(edges.error());
     }
 
-    // Build adjacency list and collect all nodes.
-    std::unordered_map<int64_t, std::vector<int64_t>> adj;
+    // Build adjacency list and collect all nodes (deduplicate edges).
+    std::unordered_map<int64_t, std::unordered_set<int64_t>> adj_set;
     std::unordered_set<int64_t> all_nodes;
 
     for (const auto& edge : *edges) {
@@ -104,9 +104,15 @@ Result<std::vector<AlgorithmRow>> betweenness_centrality_execute(const Algorithm
         if (!tgt.has_value()) {
             return tl::unexpected(tgt.error());
         }
-        adj[*src].push_back(*tgt);
+        adj_set[*src].insert(*tgt);
         all_nodes.insert(*src);
         all_nodes.insert(*tgt);
+    }
+
+    // Convert to vector-based adjacency list for BFS iteration.
+    std::unordered_map<int64_t, std::vector<int64_t>> adj;
+    for (auto& [node, neighbors] : adj_set) {
+        adj[node].assign(neighbors.begin(), neighbors.end());
     }
 
     if (all_nodes.empty()) {

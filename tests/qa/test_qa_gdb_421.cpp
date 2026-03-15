@@ -444,18 +444,12 @@ TEST(GDB421, ErrorPath_StandaloneMatchMissingReturn) {
     parse_fail("MATCH (a:users)-[e:follows]->(b:users)");
 }
 
-TEST(GDB421, EdgeCase_DoubleDashStartsComment) {
-    // `--` is a SQL line comment, so `(a:users)-->...` treats `-->...` as
-    // a comment. The parser sees a single-node pattern.
-    auto stmt = parse_one("SELECT a.name FROM MATCH (a:users)-->[e:follows]->(b:users)");
-    auto* sel = as_select(stmt);
-    ASSERT_NE(sel, nullptr);
-    auto* m = match_from_select(sel);
-    ASSERT_NE(m, nullptr);
-    // Only one node because -- started a comment.
-    EXPECT_EQ(m->pattern.size(), 1u);
-    EXPECT_EQ(m->pattern[0].node.variable, "a");
-    EXPECT_FALSE(m->pattern[0].outgoing_edge.has_value());
+TEST(GDB421, EdgeCase_DoubleDashBeforeArrowIsNotComment) {
+    // GDB-552 fix: `--` followed by `>`, `[`, or `(` is no longer consumed
+    // as a line comment. The bracket-less `-->` shorthand is not valid
+    // syntax, so this should produce a parse error instead of silently
+    // truncating the pattern.
+    parse_fail("SELECT a.name FROM MATCH (a:users)-->[e:follows]->(b:users)");
 }
 
 // ============================================================================

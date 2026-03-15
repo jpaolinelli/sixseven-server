@@ -235,13 +235,17 @@ Result<void> Lexer::skip_whitespace_and_comments() {
         }
 
         // Line comment: -- ...
+        // But NOT a MATCH edge pattern like --> or --[ or --(.
         if (c == '-' && peek_next() == '-') {
-            advance(); // skip first -
-            advance(); // skip second -
-            while (!at_end() && peek() != '\n') {
-                advance();
+            char after = (current_ + 2 < source_.size()) ? source_[current_ + 2] : '\0';
+            if (after != '>' && after != '[' && after != '(') {
+                advance(); // skip first -
+                advance(); // skip second -
+                while (!at_end() && peek() != '\n') {
+                    advance();
+                }
+                continue;
             }
-            continue;
         }
 
         // Block comment: /* ... */

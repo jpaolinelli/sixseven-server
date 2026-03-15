@@ -668,50 +668,33 @@ protected:
 };
 
 // =========================================================================
-// BUG VERIFICATION: SELECT * from algorithm TVF returns 0 columns because
-// the binder creates a placeholder scope with no columns. The planner
-// builds the correct output schema on the AlgorithmScanOperator, but the
-// ProjectOperator wrapping it uses the binder's empty output_columns.
+// FIXED (GDB-548): SELECT * from algorithm TVF now correctly returns
+// columns because the binder exposes algorithm TVF output columns to scope.
 // =========================================================================
 
-TEST_F(QA_GDB478_E2E, Bug_SelectStarReturnsZeroColumns) {
-    // BUG: SELECT * should return 2 columns (node_id, rank) but returns 0
-    // because the binder can't expand * for algorithm TVFs.
+TEST_F(QA_GDB478_E2E, SelectStarReturnsColumns) {
     auto result = exec_ok("SELECT * FROM pagerank('knows')");
-    // This documents the bug: column_names is empty.
-    EXPECT_EQ(result.column_names.size(), 0)
-        << "BUG: SELECT * from algorithm TVF should return columns but doesn't";
+    EXPECT_EQ(result.column_names.size(), 2);
 }
 
-TEST_F(QA_GDB478_E2E, Bug_SelectNamedColumnFails) {
-    // BUG: Referencing algorithm output columns by name fails at bind time
-    // because the binder scope has no columns for algorithm tables.
-    auto result = engine_->execute("SELECT node_id FROM pagerank('knows')");
-    EXPECT_FALSE(result.has_value())
-        << "BUG: column reference on algorithm TVF should work but fails at bind";
+TEST_F(QA_GDB478_E2E, SelectNamedColumnSucceeds) {
+    auto result = exec_ok("SELECT node_id FROM pagerank('knows')");
+    EXPECT_EQ(result.column_names.size(), 1);
 }
 
-TEST_F(QA_GDB478_E2E, Bug_SelectQualifiedColumnFails) {
-    // BUG: Qualified column references also fail.
-    auto result = engine_->execute("SELECT pagerank.node_id FROM pagerank('knows')");
-    EXPECT_FALSE(result.has_value())
-        << "BUG: qualified column reference on algorithm TVF should work but fails";
+TEST_F(QA_GDB478_E2E, SelectQualifiedColumnSucceeds) {
+    auto result = exec_ok("SELECT pagerank.node_id FROM pagerank('knows')");
+    EXPECT_EQ(result.column_names.size(), 1);
 }
 
-TEST_F(QA_GDB478_E2E, Bug_WhereOnAlgorithmColumnFails) {
-    // BUG: WHERE clause referencing algorithm output columns fails at bind.
-    auto result = engine_->execute(
-        "SELECT * FROM pagerank('knows') WHERE node_id = 1");
-    EXPECT_FALSE(result.has_value())
-        << "BUG: WHERE on algorithm column should work but fails at bind";
+TEST_F(QA_GDB478_E2E, WhereOnAlgorithmColumnSucceeds) {
+    auto result = exec_ok("SELECT * FROM pagerank('knows') WHERE node_id = 1");
+    EXPECT_EQ(result.column_names.size(), 2);
 }
 
-TEST_F(QA_GDB478_E2E, Bug_OrderByOnAlgorithmColumnFails) {
-    // BUG: ORDER BY on algorithm output columns fails at bind.
-    auto result = engine_->execute(
-        "SELECT * FROM pagerank('knows') ORDER BY rank DESC");
-    EXPECT_FALSE(result.has_value())
-        << "BUG: ORDER BY on algorithm column should work but fails at bind";
+TEST_F(QA_GDB478_E2E, OrderByOnAlgorithmColumnSucceeds) {
+    auto result = exec_ok("SELECT * FROM pagerank('knows') ORDER BY rank DESC");
+    EXPECT_EQ(result.column_names.size(), 2);
 }
 
 // =========================================================================
@@ -745,63 +728,53 @@ TEST_F(QA_GDB478_E2E, OnlyNamedParamsNoPositional) {
 }
 
 // =========================================================================
-// WORKING: Algorithm call parses and executes (even though SELECT * gives
-// 0 output columns, the scan operator still runs).
+// WORKING: Algorithm call parses, executes, and returns correct columns.
 // =========================================================================
 
 TEST_F(QA_GDB478_E2E, AlgorithmCallExecutes) {
-    // SELECT * returns empty column_names due to binder bug, but rows
-    // are still populated (with empty value vectors) since the scan runs.
     auto result = exec_ok("SELECT * FROM pagerank('knows')");
-    // The query succeeds (no error), even though output is empty.
-    EXPECT_EQ(result.column_names.size(), 0);
+    EXPECT_EQ(result.column_names.size(), 2);
 }
 
 TEST_F(QA_GDB478_E2E, AlgorithmFunctionCaseInsensitive) {
-    // All case variants should be accepted (parser+planner handle case).
     auto r1 = exec_ok("SELECT * FROM pagerank('knows')");
     auto r2 = exec_ok("SELECT * FROM PAGERANK('knows')");
     auto r3 = exec_ok("SELECT * FROM PageRank('knows')");
-    // All return same empty columns (due to binder bug) but don't error.
-    EXPECT_EQ(r1.column_names.size(), r2.column_names.size());
-    EXPECT_EQ(r2.column_names.size(), r3.column_names.size());
+    EXPECT_EQ(r1.column_names.size(), 2);
+    EXPECT_EQ(r2.column_names.size(), 2);
+    EXPECT_EQ(r3.column_names.size(), 2);
 }
 
 TEST_F(QA_GDB478_E2E, NamedParamsAccepted) {
-    // Named params are parsed and resolved, even though output is empty.
     auto result = exec_ok("SELECT * FROM pagerank('knows', damping := 0.5)");
-    EXPECT_EQ(result.column_names.size(), 0);
+    EXPECT_EQ(result.column_names.size(), 2);
 }
 
 TEST_F(QA_GDB478_E2E, NamedParamsMultipleAccepted) {
     auto result =
         exec_ok("SELECT * FROM pagerank('knows', damping := 0.9, iterations := 10)");
-    EXPECT_EQ(result.column_names.size(), 0);
+    EXPECT_EQ(result.column_names.size(), 2);
 }
 
 TEST_F(QA_GDB478_E2E, NamedParamsCaseInsensitive) {
-    // Case-insensitive param names are accepted.
     auto result = exec_ok("SELECT * FROM pagerank('knows', DAMPING := 0.3)");
-    EXPECT_EQ(result.column_names.size(), 0);
+    EXPECT_EQ(result.column_names.size(), 2);
 }
 
 TEST_F(QA_GDB478_E2E, NamedParamWithExpression) {
-    // Named param value is an expression.
     auto result =
         exec_ok("SELECT * FROM pagerank('knows', damping := 1.0 - 0.15)");
-    EXPECT_EQ(result.column_names.size(), 0);
+    EXPECT_EQ(result.column_names.size(), 2);
 }
 
 TEST_F(QA_GDB478_E2E, NonexistentEdgeTypeAccepted) {
-    // The framework doesn't validate edge existence — that's the algorithm's job.
     auto result = exec_ok("SELECT * FROM pagerank('nonexistent_edge')");
-    EXPECT_EQ(result.column_names.size(), 0);
+    EXPECT_EQ(result.column_names.size(), 2);
 }
 
 TEST_F(QA_GDB478_E2E, ConnectedComponentsNoParams) {
-    // Algorithm with no params defined should work.
     auto result = exec_ok("SELECT * FROM connected_components('knows')");
-    EXPECT_EQ(result.column_names.size(), 0);
+    EXPECT_EQ(result.column_names.size(), 2);
 }
 
 } // namespace
