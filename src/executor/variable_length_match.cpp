@@ -557,10 +557,10 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                             }
 
                             BfsEntry next;
-                            next.current_pk = std::move(nbr_pk);
                             next.depth = entry.depth + 1;
                             next.visited = entry.visited;
                             next.visited.insert(nbr_pk);
+                            next.current_pk = std::move(nbr_pk);
                             queue.push(std::move(next));
                         }
                     }
