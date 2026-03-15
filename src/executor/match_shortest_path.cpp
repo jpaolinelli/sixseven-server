@@ -648,10 +648,14 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
             break;
         }
 
-        // If we've already found a path to the destination and the current
-        // entry's cost >= best_dest_cost, no future path can be cheaper
-        // (non-negative weights). Safe to return results now.
-        if (entry.cost >= best_dest_cost && !result_paths.empty()) {
+        // If we've already found a path to the destination, check whether
+        // further exploration can yield new shortest paths. For ALL_SHORTEST,
+        // entries at exactly best_dest_cost may still discover equal-cost
+        // paths (e.g. via zero-weight final edges), so use strict >.
+        bool can_terminate = (path_selector_ == PathSelector::ALL_SHORTEST)
+                                 ? entry.cost > best_dest_cost
+                                 : entry.cost >= best_dest_cost;
+        if (can_terminate && !result_paths.empty()) {
             if (path_selector_ == PathSelector::ANY_SHORTEST) {
                 result_paths.resize(1);
             } else if (path_selector_ == PathSelector::SHORTEST_K &&
