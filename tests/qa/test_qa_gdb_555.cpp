@@ -120,14 +120,25 @@ protected:
         return OutputSchema(std::move(cols));
     }
 
-    std::vector<Tuple> run(PathSelector sel, const Expr* weight,
+    std::vector<Tuple> run(PathSelector sel,
+                           const Expr* weight,
                            const std::string& edge = "road",
-                           int32_t k = 0, int32_t max_hops = 100) {
+                           int32_t k = 0,
+                           int32_t max_hops = 100) {
         BoundStatement bound;
-        MatchShortestPathOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                                     make_config(edge, max_hops), make_schema(), nullptr,
-                                     bound, sel, "p", k,
-                                     MatchShortestPathOperator::DEFAULT_MAX_VISITED, weight);
+        MatchShortestPathOperator op(*graph_,
+                                     *catalog_,
+                                     *storage_,
+                                     default_database_id,
+                                     make_config(edge, max_hops),
+                                     make_schema(),
+                                     nullptr,
+                                     bound,
+                                     sel,
+                                     "p",
+                                     k,
+                                     MatchShortestPathOperator::DEFAULT_MAX_VISITED,
+                                     weight);
         auto open_result = op.open();
         EXPECT_TRUE(open_result.has_value()) << open_result.error().message;
         if (!open_result.has_value())
@@ -145,8 +156,8 @@ protected:
         return results;
     }
 
-    static std::vector<const Tuple*> filter_pair(const std::vector<Tuple>& results,
-                                                  int64_t src, int64_t tgt) {
+    static std::vector<const Tuple*>
+    filter_pair(const std::vector<Tuple>& results, int64_t src, int64_t tgt) {
         std::vector<const Tuple*> filtered;
         for (const auto& t : results) {
             if (t.values.size() >= 2 && !t.values[0].is_null() && !t.values[1].is_null() &&
@@ -241,8 +252,7 @@ TEST_F(QA_GDB555, AnyShortest_StillReturnsSinglePath) {
     auto w = make_weight_expr();
     auto results = run(PathSelector::ANY_SHORTEST, w.get());
     auto from_1_to_4 = filter_pair(results, 1, 4);
-    EXPECT_EQ(from_1_to_4.size(), 1u)
-        << "ANY_SHORTEST should still return exactly one path";
+    EXPECT_EQ(from_1_to_4.size(), 1u) << "ANY_SHORTEST should still return exactly one path";
 }
 
 // ============================================================================
@@ -273,8 +283,7 @@ TEST_F(QA_GDB555, AllShortest_TwoSharedIntermediates) {
 
     // Should find at least 2 equal-cost paths (through 2->3->4 and 6->3->4),
     // and possibly the 1->2->7->5 path too (also cost 4).
-    EXPECT_GE(from_1_to_5.size(), 2u)
-        << "ALL_SHORTEST should find multiple equal-cost paths";
+    EXPECT_GE(from_1_to_5.size(), 2u) << "ALL_SHORTEST should find multiple equal-cost paths";
 
     // All returned paths should have the same cost.
     double expected_cost = from_1_to_5[0]->values[2].as_path().total_weight;
@@ -309,10 +318,9 @@ TEST_F(QA_GDB555, AllShortest_Diamond_EqualWeights) {
 // Edge case: unequal weights, only one shortest path
 // ============================================================================
 
-TEST_F(QA_GDB555, Bug_AllShortest_UnequalWeights_ReturnsNonShortestPaths) {
-    // BUG (pre-existing): ALL_SHORTEST with weighted paths does not filter
-    // destination arrivals by cost. Non-shortest paths reaching the destination
-    // are also returned.
+TEST_F(QA_GDB555, AllShortest_UnequalWeights_OnlyReturnsShortestPaths) {
+    // Fixed by GDB-559: ALL_SHORTEST with weighted paths now correctly filters
+    // destination arrivals by cost. Only shortest paths are returned.
     //
     // 1--(1)-->2--(1)-->4 (cost 2, shortest)
     // 1--(5)-->3--(5)-->4 (cost 10, NOT shortest)
@@ -328,11 +336,9 @@ TEST_F(QA_GDB555, Bug_AllShortest_UnequalWeights_ReturnsNonShortestPaths) {
     auto results = run(PathSelector::ALL_SHORTEST, w.get());
     auto from_1_to_4 = filter_pair(results, 1, 4);
 
-    // BUG: Returns 2 paths instead of 1. The non-shortest path (cost 10)
-    // is included because the destination check doesn't filter by cost.
-    // When this bug is fixed, change to EXPECT_EQ(from_1_to_4.size(), 1u).
-    EXPECT_EQ(from_1_to_4.size(), 2u)
-        << "BUG: ALL_SHORTEST returns non-shortest paths to destination";
+    EXPECT_EQ(from_1_to_4.size(), 1u)
+        << "ALL_SHORTEST should only return the shortest path (cost 2)";
+    EXPECT_DOUBLE_EQ(from_1_to_4[0]->values[2].as_path().total_weight, 2.0);
 }
 
 // ============================================================================
