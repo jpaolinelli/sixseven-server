@@ -363,6 +363,57 @@ TEST_F(WeightedShortestPathTest, SameNodeReturnsZeroCostPath) {
 }
 
 // ===========================================================================
+// GDB-559: ALL_SHORTEST filters non-shortest paths at destination
+// ===========================================================================
+
+TEST_F(WeightedShortestPathTest, AllShortestOnlyReturnsCheapestPaths) {
+    // Graph has two paths from 1 to 5:
+    //   1→2→5 costs 30
+    //   1→3→4→5 costs 10
+    // ALL_SHORTEST should only return the cost-10 path.
+    auto weight = make_weight_expr();
+    auto results =
+        run_weighted_match(make_config(), make_schema(), PathSelector::ALL_SHORTEST, weight.get());
+
+    std::vector<Tuple> from_1_to_5;
+    for (auto& t : results) {
+        if (t.values[0].as_int64() == 1 && t.values[1].as_int64() == 5) {
+            from_1_to_5.push_back(std::move(t));
+        }
+    }
+
+    ASSERT_EQ(from_1_to_5.size(), 1u)
+        << "ALL_SHORTEST should only return paths with the minimum cost";
+    const auto& path = from_1_to_5[0].values[2].as_path();
+    EXPECT_DOUBLE_EQ(path.total_weight, 10.0);
+    ASSERT_EQ(path.steps.size(), 4u);
+    EXPECT_EQ(path.steps[0].node_pk, 1);
+    EXPECT_EQ(path.steps[1].node_pk, 3);
+    EXPECT_EQ(path.steps[2].node_pk, 4);
+    EXPECT_EQ(path.steps[3].node_pk, 5);
+}
+
+TEST_F(WeightedShortestPathTest, ShortestKOnlyReturnsCheapestPaths) {
+    // Same graph: SHORTEST 5 from 1 to 5 should not include cost-30 path
+    // if cost-10 is the true shortest.
+    auto weight = make_weight_expr();
+    auto results = run_weighted_match(
+        make_config(), make_schema(), PathSelector::SHORTEST_K, weight.get(), "p", 5);
+
+    std::vector<Tuple> from_1_to_5;
+    for (auto& t : results) {
+        if (t.values[0].as_int64() == 1 && t.values[1].as_int64() == 5) {
+            from_1_to_5.push_back(std::move(t));
+        }
+    }
+
+    // All returned paths to node 5 should have cost 10 (the minimum).
+    for (const auto& t : from_1_to_5) {
+        EXPECT_DOUBLE_EQ(t.values[2].as_path().total_weight, 10.0);
+    }
+}
+
+// ===========================================================================
 // Negative weight rejection
 // ===========================================================================
 

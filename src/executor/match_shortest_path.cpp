@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <deque>
+#include <limits>
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
@@ -626,6 +627,7 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
 
     std::priority_queue<DijkstraEntry, std::vector<DijkstraEntry>, std::greater<>> pq;
     std::unordered_map<Value, double, ValueHash, ValueEqual> best_cost;
+    double best_dest_cost = std::numeric_limits<double>::infinity();
     size_t total_visited = 0;
 
     // Seed from source.
@@ -678,6 +680,14 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
 
             // Check if we've reached the target.
             if (ValueEqual{}(nbr_pk, tgt_pk)) {
+                // Skip paths that exceed the best known destination cost.
+                if (new_cost > best_dest_cost) {
+                    continue;
+                }
+                if (new_cost < best_dest_cost) {
+                    best_dest_cost = new_cost;
+                }
+
                 result_paths.push_back(std::move(new_path));
 
                 if (path_selector_ == PathSelector::ANY_SHORTEST) {
@@ -692,10 +702,10 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
 
             // Only visit if we found a better (or equal, for ALL_SHORTEST) cost.
             auto cost_it = best_cost.find(nbr_pk);
-            bool dominated = (cost_it != best_cost.end()) &&
-                             (path_selector_ == PathSelector::ALL_SHORTEST
-                                  ? new_cost > cost_it->second
-                                  : new_cost >= cost_it->second);
+            bool dominated =
+                (cost_it != best_cost.end()) &&
+                (path_selector_ == PathSelector::ALL_SHORTEST ? new_cost > cost_it->second
+                                                              : new_cost >= cost_it->second);
             if (!dominated) {
                 best_cost[nbr_pk] = new_cost;
 
