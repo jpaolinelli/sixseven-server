@@ -686,6 +686,7 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
                 }
                 if (new_cost < best_dest_cost) {
                     best_dest_cost = new_cost;
+                    result_paths.clear();
                 }
 
                 result_paths.push_back(std::move(new_path));

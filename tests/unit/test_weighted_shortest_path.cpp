@@ -414,6 +414,173 @@ TEST_F(WeightedShortestPathTest, ShortestKOnlyReturnsCheapestPaths) {
 }
 
 // ===========================================================================
+// GDB-559: Late cheaper arrival purges previously-added expensive paths
+// ===========================================================================
+
+/// Fixture where expensive path reaches destination before cheap path.
+///
+/// Graph topology:
+///   1 --(1)--> 2 --(100)--> 4   (cost 101, expensive but 2 is popped early)
+///   1 --(50)--> 3 --(1)--> 4    (cost 51, cheaper but 3 is popped later)
+///
+/// Dijkstra pops node 2 (entry cost 1) before node 3 (entry cost 50),
+/// so the cost-101 path reaches node 4 first.
+class LateCheeperArrivalTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_late_cheaper";
+        std::filesystem::remove_all(data_dir_);
+        std::filesystem::create_directories(data_dir_);
+
+        catalog_ = std::make_unique<Catalog>();
+        storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
+        graph_ = std::make_unique<GraphEngine>(*catalog_);
+
+        auto db_storage = storage_->create_database_storage(default_database_id);
+        ASSERT_TRUE(db_storage.has_value()) << db_storage.error().message;
+
+        {
+            TableSchema ts;
+            ts.name = "nodes";
+            CatalogColumnDef pk_col;
+            pk_col.ordinal = 0;
+            pk_col.name = "id";
+            pk_col.type_id = TypeId::INT64;
+            pk_col.nullable = false;
+            ts.columns.push_back(pk_col);
+            ts.pk_columns = "id";
+            auto tid = catalog_->create_table(default_database_id, std::move(ts));
+            ASSERT_TRUE(tid.has_value()) << tid.error().message;
+            nodes_id_ = *tid;
+
+            auto schema = catalog_->get_table(default_database_id, "nodes");
+            ASSERT_TRUE(schema.has_value());
+            auto sr = storage_->create_table_storage(default_database_id, nodes_id_, *schema);
+            ASSERT_TRUE(sr.has_value()) << sr.error().message;
+        }
+
+        for (int64_t id : {1, 2, 3, 4}) {
+            insert_node(id);
+        }
+
+        ColumnDef dist_col{"distance", TypeId::FLOAT64};
+        auto eid = graph_->create_edge_type(
+            "road", nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {dist_col});
+        ASSERT_TRUE(eid.has_value()) << eid.error().message;
+
+        // Expensive path reaches destination first (node 2 popped at cost 1).
+        link(1, 2, 1.0);
+        link(2, 4, 100.0); // total: 101
+
+        // Cheaper path reaches destination later (node 3 popped at cost 50).
+        link(1, 3, 50.0);
+        link(3, 4, 1.0); // total: 51
+    }
+
+    void TearDown() override {
+        storage_.reset();
+        std::filesystem::remove_all(data_dir_);
+    }
+
+    void link(int64_t from, int64_t to, double distance) {
+        auto r = graph_->link("road", Value(from), Value(to), {Value(distance)});
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+    }
+
+    void insert_node(int64_t id) {
+        auto ts = storage_->get_table_storage(nodes_id_);
+        ASSERT_TRUE(ts.has_value()) << ts.error().message;
+        auto schema = catalog_->get_table(default_database_id, "nodes");
+        ASSERT_TRUE(schema.has_value());
+        std::vector<Value> vals = {Value(id)};
+        auto data = TupleSerializer::serialize(vals, (*ts)->storage_schema);
+        ASSERT_TRUE(data.has_value()) << data.error().message;
+        auto rid = (*ts)->heap->insert_tuple(*data);
+        ASSERT_TRUE(rid.has_value()) << rid.error().message;
+    }
+
+    std::unique_ptr<ColumnRefExpr> make_weight_expr() {
+        auto expr = std::make_unique<ColumnRefExpr>();
+        expr->table = "r";
+        expr->column = "distance";
+        return expr;
+    }
+
+    std::vector<Tuple> run_match(PathSelector selector, int32_t k = 0) {
+        MatchConfig config;
+        config.nodes.push_back({"a", "nodes"});
+        config.nodes.push_back({"b", "nodes"});
+        config.edges.push_back(MatchEdgeDef("r", "road", TraverseDirection::OUT, 1, 20));
+
+        std::vector<OutputColumn> cols;
+        cols.push_back({"a", "id", TypeId::INT64, false, nodes_id_});
+        cols.push_back({"b", "id", TypeId::INT64, false, nodes_id_});
+        cols.push_back({"p", "path", TypeId::PATH, false, 0});
+        OutputSchema schema(std::move(cols));
+
+        auto weight = make_weight_expr();
+        BoundStatement bound;
+        MatchShortestPathOperator op(*graph_,
+                                     *catalog_,
+                                     *storage_,
+                                     default_database_id,
+                                     std::move(config),
+                                     std::move(schema),
+                                     nullptr,
+                                     bound,
+                                     selector,
+                                     "p",
+                                     k,
+                                     MatchShortestPathOperator::DEFAULT_MAX_VISITED,
+                                     weight.get());
+        auto open_result = op.open();
+        EXPECT_TRUE(open_result.has_value()) << open_result.error().message;
+
+        std::vector<Tuple> results;
+        while (true) {
+            auto row = op.next();
+            EXPECT_TRUE(row.has_value()) << row.error().message;
+            if (!row->has_value())
+                break;
+            results.push_back(std::move(**row));
+        }
+        op.close();
+        return results;
+    }
+
+    static constexpr database_id_t default_database_id = 1;
+    DiskManager dm_;
+    std::filesystem::path data_dir_;
+    std::unique_ptr<Catalog> catalog_;
+    std::unique_ptr<StorageManager> storage_;
+    std::unique_ptr<GraphEngine> graph_;
+    table_id_t nodes_id_ = 0;
+};
+
+TEST_F(LateCheeperArrivalTest, AllShortestPurgesExpensivePathOnCheaperArrival) {
+    // The expensive path (cost 101 via node 2) reaches node 4 first,
+    // then the cheaper path (cost 51 via node 3) arrives later.
+    // Only the cost-51 path should be returned.
+    auto results = run_match(PathSelector::ALL_SHORTEST);
+
+    std::vector<Tuple> from_1_to_4;
+    for (auto& t : results) {
+        if (t.values[0].as_int64() == 1 && t.values[1].as_int64() == 4) {
+            from_1_to_4.push_back(std::move(t));
+        }
+    }
+
+    ASSERT_EQ(from_1_to_4.size(), 1u)
+        << "Should purge the cost-101 path when the cost-51 path arrives";
+    const auto& path = from_1_to_4[0].values[2].as_path();
+    EXPECT_DOUBLE_EQ(path.total_weight, 51.0);
+    ASSERT_EQ(path.steps.size(), 3u);
+    EXPECT_EQ(path.steps[0].node_pk, 1);
+    EXPECT_EQ(path.steps[1].node_pk, 3);
+    EXPECT_EQ(path.steps[2].node_pk, 4);
+}
+
+// ===========================================================================
 // Negative weight rejection
 // ===========================================================================
 
