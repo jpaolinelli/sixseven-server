@@ -223,6 +223,10 @@ std::vector<Iterator*> InsertOperator::plan_children_mutable() {
 
 void InsertOperator::enqueue_embedding_jobs(const RID& rid, const std::vector<Value>& values) {
     if (embedding_pool_ == nullptr || embedding_cols_.empty()) {
+        if (embedding_pool_ == nullptr && !embedding_cols_.empty()) {
+            SIXSEVEN_LOG_WARN("embedding pool is null but table has {} embedding columns",
+                             embedding_cols_.size());
+        }
         return;
     }
 

@@ -558,7 +558,7 @@ def generate(scale_name: str):
     # -----------------------------------------------------------------------
     emit_comment("DATABASE")
     # -----------------------------------------------------------------------
-    emit("DROP DATABASE IF EXISTS seed_db CASCADE;")
+    emit("DROP DATABASE IF EXISTS seed_db;")
     emit("CREATE DATABASE seed_db;")
     emit("\\c seed_db")
     emit("")

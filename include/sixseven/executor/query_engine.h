@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -228,7 +229,14 @@ private:
     coerce_link_keys(const std::string& edge_type, const Value& src_key, const Value& tgt_key);
 
     /// Verify that a row with the given PK value exists in the specified table.
+    /// Uses a per-table PK hash set cache for O(1) lookups after first scan.
     [[nodiscard]] Result<bool> verify_pk_exists(table_id_t table_id, const Value& pk_value);
+
+    /// Populate the PK cache for a table (one-time full scan).
+    [[nodiscard]] Result<void> ensure_pk_cache(table_id_t table_id);
+
+    /// Invalidate the PK cache for a table (after INSERT/DELETE).
+    void invalidate_pk_cache(table_id_t table_id);
 
     /// Execute a DML/query via the Planner + Iterator pipeline.
     /// After successful DML on sys_providers, automatically reloads the provider cache.
@@ -256,6 +264,10 @@ private:
     database_id_t current_database_id_ = default_database_id;
     int skip_masking_depth_ = 0;
     bool standby_mode_ = false;
+
+    /// Per-table PK value cache for fast LINK existence checks.
+    /// Maps table_id -> set of serialized PK values.
+    std::unordered_map<table_id_t, std::unordered_set<std::string>> pk_cache_;
 };
 
 } // namespace sixseven

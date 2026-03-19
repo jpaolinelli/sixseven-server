@@ -19,6 +19,9 @@
 
 namespace sixseven {
 
+// Forward declaration for lazy provider resolution.
+class ProviderRegistry;
+
 /// Abstract interface for embedding generation providers.
 ///
 /// Implementations call external APIs (OpenAI, Ollama, local models, etc.)
@@ -108,6 +111,11 @@ public:
     /// Register an embedding provider by name.
     void register_provider(const std::string& name, std::shared_ptr<EmbeddingProvider> provider);
 
+    /// Set a provider registry for lazy resolution of unknown providers.
+    /// When a job references an unregistered provider, the pool will attempt
+    /// to resolve it via the registry before failing.
+    void set_provider_registry(ProviderRegistry* registry);
+
     /// Set the callback for storing generated embeddings.
     void set_store_callback(EmbeddingStoreCallback callback);
 
@@ -168,6 +176,7 @@ private:
     // Provider registry.
     mutable std::mutex provider_mu_;
     std::unordered_map<std::string, std::shared_ptr<EmbeddingProvider>> providers_;
+    ProviderRegistry* provider_registry_ = nullptr;
 
     // Store callback.
     EmbeddingStoreCallback store_callback_;

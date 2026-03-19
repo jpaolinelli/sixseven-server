@@ -241,6 +241,12 @@ Result<TableSchema> Catalog::get_table_by_id(table_id_t id) const {
     return ok(it->second);
 }
 
+database_id_t Catalog::get_table_database_id(table_id_t id) const {
+    std::lock_guard lock(mu_);
+    auto it = table_to_database_.find(id);
+    return it != table_to_database_.end() ? it->second : 0;
+}
+
 std::vector<TableSchema> Catalog::list_tables(database_id_t database_id) const {
     std::lock_guard lock(mu_);
 

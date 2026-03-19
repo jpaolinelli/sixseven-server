@@ -94,6 +94,7 @@ int main(int argc, char* argv[]) {
     sixseven::ProviderRegistry provider_registry(catalog);
     sixseven::EmbeddingWorkerPool embedding_pool;
     embedding_pool.register_provider("builtin/384", std::make_shared<sixseven::BuiltinProvider>(384));
+    embedding_pool.set_provider_registry(&provider_registry);
 
     sixseven::QueryEngine engine(catalog, storage, &graph_engine);
     engine.set_provider_registry(&provider_registry);

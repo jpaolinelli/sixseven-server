@@ -1,6 +1,7 @@
 #include "sixseven/vector/embedding_worker.h"
 
 #include "sixseven/common/logging.h"
+#include "sixseven/vector/provider_registry.h"
 
 #include <algorithm>
 #include <cctype>
@@ -24,6 +25,10 @@ void EmbeddingWorkerPool::register_provider(const std::string& name,
                                             std::shared_ptr<EmbeddingProvider> provider) {
     std::lock_guard lock(provider_mu_);
     providers_[name] = std::move(provider);
+}
+
+void EmbeddingWorkerPool::set_provider_registry(ProviderRegistry* registry) {
+    provider_registry_ = registry;
 }
 
 void EmbeddingWorkerPool::set_store_callback(EmbeddingStoreCallback callback) {
@@ -245,11 +250,27 @@ void EmbeddingWorkerPool::process_batch(std::vector<EmbeddingJob>& batch) {
             std::lock_guard lock(provider_mu_);
             auto it = providers_.find(provider_name);
             if (it == providers_.end()) {
-                SIXSEVEN_LOG_ERROR("no provider registered for: {}", provider_name);
-                jobs_failed_.fetch_add(indices.size());
-                continue;
+                // Try lazy resolution via ProviderRegistry.
+                if (provider_registry_) {
+                    auto resolved = provider_registry_->resolve(provider_name);
+                    if (resolved) {
+                        providers_[provider_name] = *resolved;
+                        provider = *resolved;
+                        SIXSEVEN_LOG_INFO("lazily resolved embedding provider: {}", provider_name);
+                    } else {
+                        SIXSEVEN_LOG_ERROR("provider resolution failed for '{}': {}",
+                                          provider_name, resolved.error().message);
+                    }
+                }
+                if (!provider) {
+                    SIXSEVEN_LOG_ERROR("no provider registered for: {} ({} jobs failed)",
+                                      provider_name, indices.size());
+                    jobs_failed_.fetch_add(indices.size());
+                    continue;
+                }
+            } else {
+                provider = it->second;
             }
-            provider = it->second;
         }
 
         // Partition indices: skip jobs with empty/blank source_text (defensive guard).

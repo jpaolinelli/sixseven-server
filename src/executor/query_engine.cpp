@@ -169,7 +169,17 @@ void QueryEngine::set_embedding_worker_pool(EmbeddingWorkerPool* pool) {
 
             auto update = table_storage->heap->update_tuple(rid, *serialized);
             if (!update) {
-                return make_error(update.error().code, update.error().message);
+                // If update fails due to space, delete and reinsert on a new page.
+                auto del = table_storage->heap->delete_tuple(rid);
+                if (!del) {
+                    return make_error(del.error().code,
+                                     "embedding store: delete failed: " + del.error().message);
+                }
+                auto new_rid = table_storage->heap->insert_tuple(*serialized);
+                if (!new_rid) {
+                    return make_error(new_rid.error().code,
+                                     "embedding store: reinsert failed: " + new_rid.error().message);
+                }
             }
 
             return ok();
@@ -988,10 +998,49 @@ Result<std::pair<Value, Value>> QueryEngine::coerce_link_keys(const std::string&
 }
 
 // ---------------------------------------------------------------------------
-// LINK / UNLINK PK existence check
+// LINK / UNLINK PK existence check (with hash set cache)
 // ---------------------------------------------------------------------------
 
-Result<bool> QueryEngine::verify_pk_exists(table_id_t table_id, const Value& pk_value) {
+namespace {
+
+/// Serialize a PK Value to a deterministic string for hash set lookup.
+/// Handles the common PK types: integers, strings, and UUIDs.
+std::string pk_value_to_string(const Value& v) {
+    switch (v.type_id()) {
+    case TypeId::INT8: return std::to_string(v.as_int8());
+    case TypeId::INT16: return std::to_string(v.as_int16());
+    case TypeId::INT32: return std::to_string(v.as_int32());
+    case TypeId::INT64: return std::to_string(v.as_int64());
+    case TypeId::UINT8: return std::to_string(v.as_uint8());
+    case TypeId::UINT16: return std::to_string(v.as_uint16());
+    case TypeId::UINT32: return std::to_string(v.as_uint32());
+    case TypeId::UINT64: return std::to_string(v.as_uint64());
+    case TypeId::STRING: return v.as_string();
+    case TypeId::UUID: {
+        // Serialize UUID bytes as hex string for deterministic hashing.
+        const auto& uuid = v.as_uuid();
+        std::string s;
+        s.reserve(32);
+        static const char hex[] = "0123456789abcdef";
+        for (auto b : uuid) {
+            s += hex[(b >> 4) & 0xF];
+            s += hex[b & 0xF];
+        }
+        return s;
+    }
+    default:
+        // Fallback: use type prefix + raw representation.
+        return std::string("?") + std::to_string(static_cast<int>(v.type_id()));
+    }
+}
+
+} // namespace
+
+Result<void> QueryEngine::ensure_pk_cache(table_id_t table_id) {
+    if (pk_cache_.contains(table_id)) {
+        return ok();
+    }
+
     auto ts = storage_.get_table_storage(table_id);
     if (!ts) {
         return tl::unexpected(ts.error());
@@ -1016,9 +1065,10 @@ Result<bool> QueryEngine::verify_pk_exists(table_id_t table_id, const Value& pk_
     if (!pk_found) {
         return make_error(StatusCode::INTERNAL_ERROR,
                           "PK column '" + schema->pk_columns +
-                              "' not found in table schema for PK existence check");
+                              "' not found in table schema for PK cache");
     }
 
+    std::unordered_set<std::string> pk_set;
     auto iter = table_storage->heap->begin();
     if (!iter) {
         return tl::unexpected(iter.error());
@@ -1034,12 +1084,29 @@ Result<bool> QueryEngine::verify_pk_exists(table_id_t table_id, const Value& pk_
         if (!values || pk_col_idx >= values->size()) {
             continue;
         }
-        auto cmp = compare((*values)[pk_col_idx], pk_value);
-        if (cmp && *cmp == std::strong_ordering::equal) {
-            return ok(true);
-        }
+        pk_set.insert(pk_value_to_string((*values)[pk_col_idx]));
     }
-    return ok(false);
+
+    pk_cache_[table_id] = std::move(pk_set);
+    return ok();
+}
+
+void QueryEngine::invalidate_pk_cache(table_id_t table_id) {
+    pk_cache_.erase(table_id);
+}
+
+Result<bool> QueryEngine::verify_pk_exists(table_id_t table_id, const Value& pk_value) {
+    auto cache_result = ensure_pk_cache(table_id);
+    if (!cache_result) {
+        return tl::unexpected(cache_result.error());
+    }
+
+    auto it = pk_cache_.find(table_id);
+    if (it == pk_cache_.end()) {
+        return ok(false);
+    }
+
+    return ok(it->second.contains(pk_value_to_string(pk_value)));
 }
 
 // ---------------------------------------------------------------------------
@@ -1622,6 +1689,19 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
         qr.rows.clear();
         qr.column_names.clear();
         qr.column_types.clear();
+
+        // Invalidate PK cache for the affected table after INSERT/DELETE/UPDATE.
+        if (auto* ins = dynamic_cast<const InsertStmt*>(bound.stmt)) {
+            auto schema = catalog_.get_table(current_database_id_, ins->table_name);
+            if (schema) {
+                invalidate_pk_cache(schema->table_id);
+            }
+        } else if (auto* del = dynamic_cast<const DeleteStmt*>(bound.stmt)) {
+            auto schema = catalog_.get_table(current_database_id_, del->table_name);
+            if (schema) {
+                invalidate_pk_cache(schema->table_id);
+            }
+        }
     }
 
     // Mask api_key_encrypted in SELECT results from sys_providers.
@@ -1895,7 +1975,13 @@ Result<QueryResult> QueryEngine::execute_show(const ShowStmt& stmt) {
             }
             embeddings = catalog_.list_embedding_columns(schema->table_id);
         } else {
-            embeddings = catalog_.list_all_embedding_columns();
+            // Filter to only embeddings for tables in the current database.
+            auto all = catalog_.list_all_embedding_columns();
+            for (const auto& emb : all) {
+                if (catalog_.get_table_database_id(emb.table_id) == current_database_id_) {
+                    embeddings.push_back(emb);
+                }
+            }
         }
 
         QueryResult qr;

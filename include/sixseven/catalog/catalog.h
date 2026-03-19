@@ -76,6 +76,9 @@ public:
     /// Fails with NOT_FOUND if the table does not exist.
     [[nodiscard]] Result<TableSchema> get_table_by_id(table_id_t id) const;
 
+    /// Get the database_id that owns a table. Returns 0 if not found.
+    [[nodiscard]] database_id_t get_table_database_id(table_id_t id) const;
+
     /// List all table schemas in the given database.
     [[nodiscard]] std::vector<TableSchema> list_tables(database_id_t database_id) const;
 
