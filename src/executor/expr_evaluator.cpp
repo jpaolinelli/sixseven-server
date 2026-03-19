@@ -536,7 +536,7 @@ Result<Value> eval_cast(const CastExpr& expr,
     if (!target) {
         return make_error(target.error().code, target.error().message);
     }
-    return coerce(*val, *target);
+    return explicit_cast(*val, *target);
 }
 
 // ---------------------------------------------------------------------------
@@ -931,8 +931,7 @@ Result<Value> eval_function(const FunctionCallExpr& expr,
         }
         auto path_ptr = arg_val->try_as_path();
         if (!path_ptr) {
-            return make_error(StatusCode::TYPE_ERROR,
-                              "path_cost() argument must be a PATH value");
+            return make_error(StatusCode::TYPE_ERROR, "path_cost() argument must be a PATH value");
         }
         return ok(Value((*path_ptr)->total_weight));
     }

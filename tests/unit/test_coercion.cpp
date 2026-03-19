@@ -362,3 +362,86 @@ TEST(Compare, FloatNaN) {
     r = compare(Value(nan), Value(nan));
     EXPECT_EQ(*r, std::strong_ordering::equal);
 }
+
+// -- explicit_cast ------------------------------------------------------------
+
+TEST(ExplicitCast, Float64ToInt32Truncates) {
+    auto r = explicit_cast(Value(9.99), TypeId::INT32);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_EQ(r->type_id(), TypeId::INT32);
+    EXPECT_EQ(r->as_int32(), 9);
+}
+
+TEST(ExplicitCast, Float64NegativeToInt32Truncates) {
+    auto r = explicit_cast(Value(-3.7), TypeId::INT32);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_EQ(r->as_int32(), -3);
+}
+
+TEST(ExplicitCast, Float64ZeroToInt32) {
+    auto r = explicit_cast(Value(0.0), TypeId::INT32);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_EQ(r->as_int32(), 0);
+}
+
+TEST(ExplicitCast, Float64ToInt64) {
+    auto r = explicit_cast(Value(1000000.9), TypeId::INT64);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_EQ(r->as_int64(), 1000000);
+}
+
+TEST(ExplicitCast, Float32ToInt32) {
+    auto r = explicit_cast(Value(42.7f), TypeId::INT32);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_EQ(r->as_int32(), 42);
+}
+
+TEST(ExplicitCast, Float64ToInt16) {
+    auto r = explicit_cast(Value(127.9), TypeId::INT16);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_EQ(r->as_int16(), 127);
+}
+
+TEST(ExplicitCast, Float64NaNReturnsError) {
+    auto nan = std::numeric_limits<double>::quiet_NaN();
+    auto r = explicit_cast(Value(nan), TypeId::INT32);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(ExplicitCast, Float64InfinityReturnsError) {
+    auto inf = std::numeric_limits<double>::infinity();
+    auto r = explicit_cast(Value(inf), TypeId::INT32);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(ExplicitCast, NullPreservesNull) {
+    auto r = explicit_cast(Value::make_null(), TypeId::INT32);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_TRUE(r->is_null());
+}
+
+TEST(ExplicitCast, IdentityReturnsCopy) {
+    auto r = explicit_cast(Value(42.0), TypeId::FLOAT64);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_DOUBLE_EQ(r->as_float64(), 42.0);
+}
+
+TEST(ExplicitCast, WideningStillWorks) {
+    auto r = explicit_cast(Value(int32_t{42}), TypeId::INT64);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->as_int64(), 42);
+}
+
+TEST(ExplicitCast, IntegerNarrowing) {
+    auto r = explicit_cast(Value(int64_t{100}), TypeId::INT32);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->as_int32(), 100);
+}
+
+TEST(ExplicitCast, IncompatibleReturnsError) {
+    auto r = explicit_cast(Value(std::string{"hello"}), TypeId::INT32);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}

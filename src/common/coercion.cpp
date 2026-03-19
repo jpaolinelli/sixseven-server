@@ -329,6 +329,58 @@ Result<Value> coerce(const Value& value, TypeId target) {
                           std::string(type_name(target)));
 }
 
+// -- explicit_cast ------------------------------------------------------------
+
+Result<Value> explicit_cast(const Value& value, TypeId target) {
+    if (value.is_null()) {
+        return ok(Value::make_null());
+    }
+
+    TypeId from = value.type_id();
+    if (from == target) {
+        return ok(value);
+    }
+
+    // Try implicit coercion first (widening).
+    if (can_coerce(from, target)) {
+        return coerce(value, target);
+    }
+
+    // Float → integer: truncate toward zero (like C++ static_cast).
+    if (is_floating(from) && is_integer(target)) {
+        double d = to_double(value);
+        if (std::isnan(d) || std::isinf(d)) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              "cannot cast " +
+                                  std::string(d > 0           ? "infinity"
+                                              : std::isnan(d) ? "NaN"
+                                                              : "-infinity") +
+                                  " to " + std::string(type_name(target)));
+        }
+        auto truncated = static_cast<int64_t>(d);
+        return ok(int64_to_value(truncated, target));
+    }
+
+    // Integer → integer narrowing (e.g. INT64 → INT32).
+    if (is_integer(from) && is_integer(target)) {
+        int64_t v = to_int64(value);
+        return ok(int64_to_value(v, target));
+    }
+
+    // Float → float narrowing (FLOAT64 → FLOAT32).
+    if (is_floating(from) && is_floating(target)) {
+        double d = to_double(value);
+        if (target == TypeId::FLOAT32) {
+            return ok(Value(static_cast<float>(d)));
+        }
+        return ok(Value(d));
+    }
+
+    return make_error(StatusCode::TYPE_ERROR,
+                      "cannot cast " + std::string(type_name(from)) + " to " +
+                          std::string(type_name(target)));
+}
+
 // -- fit_to_storage -----------------------------------------------------------
 
 Result<Value> fit_to_storage(const Value& val, TypeId target) {
