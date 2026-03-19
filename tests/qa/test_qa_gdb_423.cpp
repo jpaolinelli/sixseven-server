@@ -85,16 +85,31 @@ protected:
         insert_row("projects", projects_id_, 200, "Beta");
 
         // Create edge types.
-        auto eid_knows = graph_->create_edge_type(default_database_id, 
-            "knows", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
+        auto eid_knows = graph_->create_edge_type(default_database_id,
+                                                  "knows",
+                                                  persons_id_,
+                                                  persons_id_,
+                                                  TypeId::INT64,
+                                                  TypeId::INT64,
+                                                  {});
         ASSERT_TRUE(eid_knows.has_value()) << eid_knows.error().message;
 
-        auto eid_works = graph_->create_edge_type(default_database_id, 
-            "works_at", persons_id_, companies_id_, TypeId::INT64, TypeId::INT64, {});
+        auto eid_works = graph_->create_edge_type(default_database_id,
+                                                  "works_at",
+                                                  persons_id_,
+                                                  companies_id_,
+                                                  TypeId::INT64,
+                                                  TypeId::INT64,
+                                                  {});
         ASSERT_TRUE(eid_works.has_value()) << eid_works.error().message;
 
-        auto eid_owns = graph_->create_edge_type(default_database_id, 
-            "owns", companies_id_, projects_id_, TypeId::INT64, TypeId::INT64, {});
+        auto eid_owns = graph_->create_edge_type(default_database_id,
+                                                 "owns",
+                                                 companies_id_,
+                                                 projects_id_,
+                                                 TypeId::INT64,
+                                                 TypeId::INT64,
+                                                 {});
         ASSERT_TRUE(eid_owns.has_value()) << eid_owns.error().message;
 
         // Populate edges.
@@ -146,8 +161,8 @@ protected:
         return *tid;
     }
 
-    void insert_row(const std::string& table_name, table_id_t tid, int64_t id,
-                    const std::string& name) {
+    void
+    insert_row(const std::string& table_name, table_id_t tid, int64_t id, const std::string& name) {
         auto ts = storage_->get_table_storage(tid);
         ASSERT_TRUE(ts.has_value()) << ts.error().message;
         auto schema = catalog_->get_table(default_database_id, table_name);
@@ -160,16 +175,23 @@ protected:
     }
 
     void link(const std::string& edge_type, int64_t from, int64_t to) {
-        auto r = graph_->link(edge_type, Value(from), Value(to));
+        auto r = graph_->link(default_database_id, edge_type, Value(from), Value(to));
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 
-    std::vector<Tuple> run_vl_match(MatchConfig config, OutputSchema schema,
-                                    size_t max_visited =
-                                        VariableLengthMatchOperator::DEFAULT_MAX_VISITED) {
+    std::vector<Tuple>
+    run_vl_match(MatchConfig config,
+                 OutputSchema schema,
+                 size_t max_visited = VariableLengthMatchOperator::DEFAULT_MAX_VISITED) {
         BoundStatement bound;
-        VariableLengthMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                                       std::move(config), std::move(schema), nullptr, bound,
+        VariableLengthMatchOperator op(*graph_,
+                                       *catalog_,
+                                       *storage_,
+                                       default_database_id,
+                                       std::move(config),
+                                       std::move(schema),
+                                       nullptr,
+                                       bound,
                                        max_visited);
         auto open_result = op.open();
         EXPECT_TRUE(open_result.has_value()) << open_result.error().message;
@@ -187,11 +209,17 @@ protected:
     }
 
     /// Run and expect an error from open().
-    Result<void> run_vl_match_expect_error(MatchConfig config, OutputSchema schema,
-                                           size_t max_visited) {
+    Result<void>
+    run_vl_match_expect_error(MatchConfig config, OutputSchema schema, size_t max_visited) {
         BoundStatement bound;
-        VariableLengthMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                                       std::move(config), std::move(schema), nullptr, bound,
+        VariableLengthMatchOperator op(*graph_,
+                                       *catalog_,
+                                       *storage_,
+                                       default_database_id,
+                                       std::move(config),
+                                       std::move(schema),
+                                       nullptr,
+                                       bound,
                                        max_visited);
         return op.open();
     }
@@ -203,8 +231,8 @@ protected:
         for (const auto& t : results) {
             EXPECT_GE(t.values.size(), 3u);
             if (t.values.size() >= 3) {
-                named.emplace_back(t.values[0].as_string(), t.values[1].as_string(),
-                                   t.values[2].as_string());
+                named.emplace_back(
+                    t.values[0].as_string(), t.values[1].as_string(), t.values[2].as_string());
             }
         }
         std::sort(named.begin(), named.end());
@@ -281,17 +309,19 @@ TEST_F(QA_GDB423, AC1_VariablePlusFixed_SpecificResults) {
     auto named = extract_3col_names(results);
 
     // Alice->Eve via 4-hop knows, Eve works at Acme
-    EXPECT_NE(std::find(named.begin(), named.end(),
-                        std::make_tuple(std::string("Alice"), std::string("Eve"),
-                                        std::string("Acme"))),
-              named.end())
+    EXPECT_NE(
+        std::find(named.begin(),
+                  named.end(),
+                  std::make_tuple(std::string("Alice"), std::string("Eve"), std::string("Acme"))),
+        named.end())
         << "Expected Alice->Eve(4-hop)->Acme";
 
     // Bob->Diana via 2-hop knows, Diana works at Globex
-    EXPECT_NE(std::find(named.begin(), named.end(),
-                        std::make_tuple(std::string("Bob"), std::string("Diana"),
-                                        std::string("Globex"))),
-              named.end())
+    EXPECT_NE(
+        std::find(named.begin(),
+                  named.end(),
+                  std::make_tuple(std::string("Bob"), std::string("Diana"), std::string("Globex"))),
+        named.end())
         << "Expected Bob->Diana(2-hop)->Globex";
 }
 
@@ -372,8 +402,7 @@ TEST_F(QA_GDB423, AC4_BinderRejectsReversedEdgeChain) {
     auto result = bind_sql("SELECT a.name, c.name "
                            "FROM MATCH (a:companies)-[r1:works_at]->(b:persons)"
                            "-[r2:knows]->(c:persons)");
-    EXPECT_FALSE(result.has_value())
-        << "Should reject works_at with source=companies";
+    EXPECT_FALSE(result.has_value()) << "Should reject works_at with source=companies";
 }
 
 TEST_F(QA_GDB423, AC4_BinderAcceptsValidChain) {
@@ -525,8 +554,8 @@ TEST_F(QA_GDB423, MaxVisitedLimitTriggersError) {
 
 TEST_F(QA_GDB423, EmptyIntermediateSegment) {
     // Create edge type with no edges.
-    auto eid = graph_->create_edge_type(default_database_id, "mentors", persons_id_, persons_id_, TypeId::INT64,
-                                        TypeId::INT64, {});
+    auto eid = graph_->create_edge_type(
+        default_database_id, "mentors", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(eid.has_value());
 
     // (a:persons)-[:knows]->{1,2}(b:persons)-[:mentors]->(c:persons)
@@ -549,8 +578,8 @@ TEST_F(QA_GDB423, EmptyIntermediateSegment) {
 
 TEST_F(QA_GDB423, EmptyFirstSegmentKillsPipeline) {
     // Create edge type with no edges.
-    auto eid = graph_->create_edge_type(default_database_id, "mentors", persons_id_, persons_id_, TypeId::INT64,
-                                        TypeId::INT64, {});
+    auto eid = graph_->create_edge_type(
+        default_database_id, "mentors", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(eid.has_value());
 
     // (a:persons)-[:mentors]->{1,3}(b:persons)-[:works_at]->(c:companies)
@@ -601,10 +630,11 @@ TEST_F(QA_GDB423, ZeroHopMinIncludesStartNode) {
 
     // Verify a zero-hop result: Alice->Alice->Acme
     auto named = extract_3col_names(results);
-    EXPECT_NE(std::find(named.begin(), named.end(),
-                        std::make_tuple(std::string("Alice"), std::string("Alice"),
-                                        std::string("Acme"))),
-              named.end())
+    EXPECT_NE(
+        std::find(named.begin(),
+                  named.end(),
+                  std::make_tuple(std::string("Alice"), std::string("Alice"), std::string("Acme"))),
+        named.end())
         << "Zero-hop should produce Alice->Alice->Acme";
 }
 
@@ -634,15 +664,17 @@ TEST_F(QA_GDB423, ExactHopCount_CrossEdge) {
 
     auto named = extract_3col_names(results);
     // Alice->Diana (3 hops), Diana works at Globex
-    EXPECT_NE(std::find(named.begin(), named.end(),
-                        std::make_tuple(std::string("Alice"), std::string("Diana"),
-                                        std::string("Globex"))),
+    EXPECT_NE(std::find(named.begin(),
+                        named.end(),
+                        std::make_tuple(
+                            std::string("Alice"), std::string("Diana"), std::string("Globex"))),
               named.end());
     // Bob->Eve (3 hops), Eve works at Acme
-    EXPECT_NE(std::find(named.begin(), named.end(),
-                        std::make_tuple(std::string("Bob"), std::string("Eve"),
-                                        std::string("Acme"))),
-              named.end());
+    EXPECT_NE(
+        std::find(named.begin(),
+                  named.end(),
+                  std::make_tuple(std::string("Bob"), std::string("Eve"), std::string("Acme"))),
+        named.end());
 }
 
 // ============================================================================
@@ -696,8 +728,7 @@ TEST_F(QA_GDB423, BinderAcceptsValidThreeEdgeChain) {
                            "FROM MATCH (a:persons)-[r1:knows]->(b:persons)"
                            "-[r2:works_at]->(c:companies)"
                            "-[r3:owns]->(d:projects)");
-    EXPECT_TRUE(result.has_value())
-        << "Valid 3-edge chain should bind: " << result.error().message;
+    EXPECT_TRUE(result.has_value()) << "Valid 3-edge chain should bind: " << result.error().message;
 }
 
 // ============================================================================
@@ -706,8 +737,8 @@ TEST_F(QA_GDB423, BinderAcceptsValidThreeEdgeChain) {
 
 TEST_F(QA_GDB423, VariablePlusVariable_DifferentEdgeTypes) {
     // Create a second person-to-person edge type.
-    auto eid = graph_->create_edge_type(default_database_id, "trusts", persons_id_, persons_id_, TypeId::INT64,
-                                        TypeId::INT64, {});
+    auto eid = graph_->create_edge_type(
+        default_database_id, "trusts", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(eid.has_value());
 
     // trusts: 1->3, 3->5
@@ -765,8 +796,14 @@ TEST_F(QA_GDB423, OperatorReopenProducesSameResults) {
     OutputSchema schema(std::move(out_cols));
 
     BoundStatement bound;
-    VariableLengthMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                                   std::move(config), std::move(schema), nullptr, bound);
+    VariableLengthMatchOperator op(*graph_,
+                                   *catalog_,
+                                   *storage_,
+                                   default_database_id,
+                                   std::move(config),
+                                   std::move(schema),
+                                   nullptr,
+                                   bound);
 
     // First open/drain/close.
     auto r1 = op.open();

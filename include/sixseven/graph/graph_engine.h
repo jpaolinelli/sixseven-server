@@ -40,6 +40,9 @@ struct EdgeStorage {
 /// On startup, load_edges() scans these files and repopulates in-memory
 /// EdgeTables and adjacency indexes.
 ///
+/// Edge types are scoped per database. Two databases can each have an edge
+/// type named "follows" without conflict.
+///
 /// Thread safety: All public methods are protected by a mutex.
 class WalWriter;
 
@@ -83,11 +86,17 @@ public:
     /// If persistence is enabled, also removes the storage file.
     [[nodiscard]] Result<void> drop_edge_type(database_id_t database_id, const std::string& name);
 
+    /// Drop all edge types that reference a given table (source or target).
+    /// Called during DROP TABLE CASCADE to clean up the graph engine state.
+    [[nodiscard]] Result<void> drop_edge_types_for_table(database_id_t database_id,
+                                                         table_id_t table_id);
+
     /// LINK: create an edge between two nodes.
     /// Inserts a row into the edge table and updates both adjacency indexes.
     /// If persistence is enabled, also writes the edge to the heap file.
     /// Returns the edge_row_id of the newly created edge.
-    [[nodiscard]] Result<uint64_t> link(const std::string& edge_type,
+    [[nodiscard]] Result<uint64_t> link(database_id_t database_id,
+                                        const std::string& edge_type,
                                         const Value& source_pk,
                                         const Value& target_pk,
                                         const std::vector<Value>& properties = {});
@@ -95,32 +104,39 @@ public:
     /// UNLINK: delete the edge between two specific nodes.
     /// Removes the first matching edge from the edge table and both indexes.
     /// If persistence is enabled, also deletes the edge from the heap file.
-    [[nodiscard]] Result<void>
-    unlink(const std::string& edge_type, const Value& source_pk, const Value& target_pk);
+    [[nodiscard]] Result<void> unlink(database_id_t database_id,
+                                      const std::string& edge_type,
+                                      const Value& source_pk,
+                                      const Value& target_pk);
 
     /// UNLINK with WHERE: delete edges matching a predicate.
     /// Returns the number of edges deleted.
-    [[nodiscard]] Result<uint64_t> unlink_where(const std::string& edge_type,
+    [[nodiscard]] Result<uint64_t> unlink_where(database_id_t database_id,
+                                                const std::string& edge_type,
                                                 const Value& source_pk,
                                                 const Value& target_pk,
                                                 std::function<bool(const EdgeRow&)> predicate);
 
     /// Get all outgoing edges from a node.
-    [[nodiscard]] Result<std::vector<EdgeRow>> get_edges_from(const std::string& edge_type,
+    [[nodiscard]] Result<std::vector<EdgeRow>> get_edges_from(database_id_t database_id,
+                                                              const std::string& edge_type,
                                                               const Value& source_pk) const;
 
     /// Get all incoming edges to a node.
-    [[nodiscard]] Result<std::vector<EdgeRow>> get_edges_to(const std::string& edge_type,
+    [[nodiscard]] Result<std::vector<EdgeRow>> get_edges_to(database_id_t database_id,
+                                                            const std::string& edge_type,
                                                             const Value& target_pk) const;
 
     /// Get the EdgeTable for a given edge type (for advanced queries).
-    [[nodiscard]] Result<EdgeTable*> get_edge_table(const std::string& name);
+    [[nodiscard]] Result<EdgeTable*> get_edge_table(database_id_t database_id,
+                                                    const std::string& name);
 
     /// Get all edges for a given edge type.
-    [[nodiscard]] Result<std::vector<EdgeRow>> get_all_edges(const std::string& edge_type) const;
+    [[nodiscard]] Result<std::vector<EdgeRow>> get_all_edges(database_id_t database_id,
+                                                             const std::string& edge_type) const;
 
-    /// List all registered edge type names.
-    [[nodiscard]] std::vector<std::string> list_edge_types() const;
+    /// List all registered edge type names for a database.
+    [[nodiscard]] std::vector<std::string> list_edge_types(database_id_t database_id) const;
 
     /// Load all edge data from disk files on startup.
     /// For each edge type in the catalog, opens the storage file and
@@ -129,6 +145,10 @@ public:
     [[nodiscard]] Result<void> load_edges();
 
 private:
+    /// Build a compound map key from database_id and edge type name.
+    [[nodiscard]] static std::string make_edge_key(database_id_t database_id,
+                                                   const std::string& name);
+
     /// Log a LINK or UNLINK operation to the WAL.
     void log_edge_wal(WalRecordType type,
                       edge_id_t edge_id,
@@ -143,29 +163,32 @@ private:
                               const std::vector<ColumnDef>& property_columns);
 
     /// Build the file path for an edge type storage file.
-    [[nodiscard]] std::filesystem::path edge_file_path(edge_id_t edge_id) const;
+    [[nodiscard]] std::filesystem::path edge_file_path(database_id_t database_id,
+                                                       edge_id_t edge_id) const;
 
     /// Create persistent storage for an edge type.
-    [[nodiscard]] Result<void> create_edge_storage(edge_id_t edge_id,
+    [[nodiscard]] Result<void> create_edge_storage(database_id_t database_id,
+                                                   edge_id_t edge_id,
                                                    TypeId source_pk_type,
                                                    TypeId target_pk_type,
                                                    const std::vector<ColumnDef>& property_columns);
 
     /// Open existing persistent storage for an edge type.
-    [[nodiscard]] Result<void> open_edge_storage(edge_id_t edge_id,
+    [[nodiscard]] Result<void> open_edge_storage(database_id_t database_id,
+                                                 edge_id_t edge_id,
                                                  TypeId source_pk_type,
                                                  TypeId target_pk_type,
                                                  const std::vector<ColumnDef>& property_columns);
 
     /// Persist a single edge row to the heap file.
-    [[nodiscard]] Result<void> persist_edge(const std::string& edge_type,
+    [[nodiscard]] Result<void> persist_edge(const std::string& edge_key,
                                             uint64_t edge_row_id,
                                             const Value& source_pk,
                                             const Value& target_pk,
                                             const std::vector<Value>& properties);
 
     /// Delete a single edge row from the heap file.
-    [[nodiscard]] Result<void> delete_persisted_edge(const std::string& edge_type,
+    [[nodiscard]] Result<void> delete_persisted_edge(const std::string& edge_key,
                                                      uint64_t edge_row_id);
 
     /// Parse property columns from the catalog's comma-separated format.
@@ -175,12 +198,22 @@ private:
     /// Returns true if persistence is enabled (DiskManager is available).
     [[nodiscard]] bool has_persistence() const;
 
+    /// Drop a single edge type by its compound key (must hold mu_).
+    /// Removes from catalog, cleans up storage files, and erases from maps.
+    void drop_edge_type_locked(const std::string& edge_key,
+                               database_id_t database_id,
+                               const std::string& name);
+
     Catalog& catalog_;
     DiskManager* dm_ = nullptr;
     std::filesystem::path data_dir_;
     WalWriter* wal_ = nullptr;
     mutable std::mutex mu_;
+
+    /// Edge tables keyed by compound key: "database_id:edge_type_name".
     std::unordered_map<std::string, std::unique_ptr<EdgeTable>> edge_tables_;
+
+    /// Edge storage keyed by compound key: "database_id:edge_type_name".
     std::unordered_map<std::string, std::unique_ptr<EdgeStorage>> edge_storage_;
 };
 

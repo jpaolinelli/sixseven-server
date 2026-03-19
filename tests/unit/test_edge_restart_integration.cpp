@@ -93,7 +93,7 @@ TEST(EdgeRestartIntegrationTest, EdgesAndTablesRecoveredAfterFullRestart) {
         ASSERT_TRUE(edge_load.has_value()) << edge_load.error().message;
 
         // Edge table should exist in the graph engine.
-        auto listed = graph_engine.list_edge_types();
+        auto listed = graph_engine.list_edge_types(default_database_id);
         EXPECT_EQ(listed.size(), 1) << "Expected 1 edge table after load_edges";
 
         engine.set_current_database(default_database_id);
@@ -159,7 +159,7 @@ TEST(EdgeRestartIntegrationTest, DroppedEdgeTypeNotRecoveredAfterRestart) {
         auto edge_types = catalog.list_edge_types(default_database_id);
         EXPECT_EQ(edge_types.size(), 0) << "Dropped edge type should not be in catalog";
 
-        auto listed = graph_engine.list_edge_types();
+        auto listed = graph_engine.list_edge_types(default_database_id);
         EXPECT_EQ(listed.size(), 0) << "Dropped edge type should not be in graph engine";
     }
 

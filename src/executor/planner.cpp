@@ -443,7 +443,7 @@ Planner::plan_from_source(const TableRef& table_ref,
                               "graph engine not available for algorithm function");
         }
 
-        AlgorithmContext ctx{*graph_engine_, edge_arg->value, std::move(*resolved)};
+        AlgorithmContext ctx{*graph_engine_, database_id_, edge_arg->value, std::move(*resolved)};
 
         // Build output schema from algorithm definition.
         const auto& algo_alias = alias.empty() ? fn->name : alias;
@@ -481,6 +481,7 @@ Planner::plan_from_source(const TableRef& table_ref,
 
         // Build TraversalConfig.
         TraversalConfig config;
+        config.database_id = database_id_;
         config.edge_type = trav->edge_type;
         config.start_key = std::move(*key_val);
         config.direction = trav->direction;
@@ -607,7 +608,7 @@ Planner::plan_from_source(const TableRef& table_ref,
             out_cols.push_back({trav_alias, "__depth", TypeId::INT64, false, 0});
 
             // Append edge property columns.
-            auto edge_table = graph_engine_->get_edge_table(trav->edge_type);
+            auto edge_table = graph_engine_->get_edge_table(database_id_, trav->edge_type);
             if (edge_table) {
                 for (const auto& prop_col : (*edge_table)->config().property_columns) {
                     out_cols.push_back(
@@ -633,7 +634,7 @@ Planner::plan_from_source(const TableRef& table_ref,
         out_cols.push_back({trav_alias, "__source", pk_type, true, 0});
 
         // Append edge property columns (nullable — start node has no incoming edge).
-        auto edge_table = graph_engine_->get_edge_table(trav->edge_type);
+        auto edge_table = graph_engine_->get_edge_table(database_id_, trav->edge_type);
         if (edge_table) {
             for (const auto& prop_col : (*edge_table)->config().property_columns) {
                 out_cols.push_back(
@@ -1693,6 +1694,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_traverse(const TraverseStmt& stm
     }
 
     TraversalConfig config;
+    config.database_id = database_id_;
     config.edge_type = stmt.edge_type;
     config.start_key = std::move(*coerced_key);
     config.direction = stmt.direction;
@@ -1766,6 +1768,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_shortest_path(const ShortestPath
     }
 
     ShortestPathConfig sp_config;
+    sp_config.database_id = database_id_;
     sp_config.edge_type = stmt.edge_type;
     sp_config.from_key = std::move(*coerced_from);
     sp_config.to_key = std::move(*coerced_to);

@@ -53,8 +53,8 @@ to_closeness_map(const std::vector<AlgorithmRow>& rows) {
         auto reachable_count = std::get<int64_t>(row.values[3].data());
         auto component_size = std::get<int64_t>(row.values[4].data());
         auto normalized_closeness = std::get<double>(row.values[5].data());
-        result[node_id] = {closeness, sum_farness, reachable_count, component_size,
-                           normalized_closeness};
+        result[node_id] = {
+            closeness, sum_farness, reachable_count, component_size, normalized_closeness};
     }
     return result;
 }
@@ -119,28 +119,28 @@ protected:
     /// Create an edge type and link a list of (src, tgt) pairs.
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
 
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     /// Run closeness centrality with default (standard) variant.
     Result<std::vector<AlgorithmRow>> run_closeness(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {}};
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, {}};
         return closeness_centrality_execute(ctx);
     }
 
     /// Run closeness centrality with a specific variant.
-    Result<std::vector<AlgorithmRow>>
-    run_closeness(const std::string& edge_type, const std::string& variant) {
+    Result<std::vector<AlgorithmRow>> run_closeness(const std::string& edge_type,
+                                                    const std::string& variant) {
         std::unordered_map<std::string, Value> args;
         args["variant"] = Value(variant);
-        AlgorithmContext ctx{engine_, edge_type, args};
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, args};
         return closeness_centrality_execute(ctx);
     }
 

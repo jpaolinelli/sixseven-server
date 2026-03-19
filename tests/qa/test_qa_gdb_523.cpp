@@ -50,8 +50,7 @@ static Value pk(int64_t v) {
 }
 
 /// Extract per-node triangle counts from algorithm output rows.
-std::unordered_map<int64_t, int64_t>
-to_map(const std::vector<AlgorithmRow>& rows) {
+std::unordered_map<int64_t, int64_t> to_map(const std::vector<AlgorithmRow>& rows) {
     std::unordered_map<int64_t, int64_t> result;
     for (const auto& row : rows) {
         EXPECT_EQ(row.values.size(), 2u);
@@ -85,17 +84,17 @@ protected:
 
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     Result<std::vector<AlgorithmRow>> run(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {}};
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, {}};
         return triangle_count_execute(ctx);
     }
 
@@ -110,8 +109,7 @@ protected:
 
 TEST_F(GDB523_TriangleCountQA, AC1_RegistrationAndLookup) {
     AlgorithmRegistry registry;
-    auto result =
-        registry.register_algorithm(make_triangle_count_def(), triangle_count_execute);
+    auto result = registry.register_algorithm(make_triangle_count_def(), triangle_count_execute);
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     EXPECT_TRUE(registry.has("triangle_count"));
@@ -122,8 +120,7 @@ TEST_F(GDB523_TriangleCountQA, AC1_RegistrationAndLookup) {
 
 TEST_F(GDB523_TriangleCountQA, AC1_CaseInsensitiveLookup) {
     AlgorithmRegistry registry;
-    auto result =
-        registry.register_algorithm(make_triangle_count_def(), triangle_count_execute);
+    auto result = registry.register_algorithm(make_triangle_count_def(), triangle_count_execute);
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     EXPECT_TRUE(registry.has("TRIANGLE_COUNT"));
@@ -133,12 +130,10 @@ TEST_F(GDB523_TriangleCountQA, AC1_CaseInsensitiveLookup) {
 
 TEST_F(GDB523_TriangleCountQA, AC1_DuplicateRegistrationFails) {
     AlgorithmRegistry registry;
-    auto r1 =
-        registry.register_algorithm(make_triangle_count_def(), triangle_count_execute);
+    auto r1 = registry.register_algorithm(make_triangle_count_def(), triangle_count_execute);
     ASSERT_TRUE(r1.has_value()) << r1.error().message;
 
-    auto r2 =
-        registry.register_algorithm(make_triangle_count_def(), triangle_count_execute);
+    auto r2 = registry.register_algorithm(make_triangle_count_def(), triangle_count_execute);
     EXPECT_FALSE(r2.has_value());
 }
 
@@ -182,12 +177,21 @@ TEST_F(GDB523_TriangleCountQA, AC2_SingleTriangleAllNodesCountOne) {
 }
 
 TEST_F(GDB523_TriangleCountQA, AC2_CompleteK4) {
-    build_graph("knows", {
-        {1, 2}, {1, 3}, {1, 4},
-        {2, 1}, {2, 3}, {2, 4},
-        {3, 1}, {3, 2}, {3, 4},
-        {4, 1}, {4, 2}, {4, 3},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 3},
+                    {1, 4},
+                    {2, 1},
+                    {2, 3},
+                    {2, 4},
+                    {3, 1},
+                    {3, 2},
+                    {3, 4},
+                    {4, 1},
+                    {4, 2},
+                    {4, 3},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -203,7 +207,8 @@ TEST_F(GDB523_TriangleCountQA, AC2_CompleteK5) {
     std::vector<std::pair<int64_t, int64_t>> edges;
     for (int64_t i = 1; i <= 5; ++i) {
         for (int64_t j = 1; j <= 5; ++j) {
-            if (i != j) edges.push_back({i, j});
+            if (i != j)
+                edges.push_back({i, j});
         }
     }
     build_graph("knows", edges);
@@ -219,10 +224,17 @@ TEST_F(GDB523_TriangleCountQA, AC2_CompleteK5) {
 }
 
 TEST_F(GDB523_TriangleCountQA, AC2_StarGraphZeroTriangles) {
-    build_graph("knows", {
-        {1, 2}, {1, 3}, {1, 4}, {1, 5},
-        {2, 1}, {3, 1}, {4, 1}, {5, 1},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 3},
+                    {1, 4},
+                    {1, 5},
+                    {2, 1},
+                    {3, 1},
+                    {4, 1},
+                    {5, 1},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -235,9 +247,15 @@ TEST_F(GDB523_TriangleCountQA, AC2_StarGraphZeroTriangles) {
 }
 
 TEST_F(GDB523_TriangleCountQA, AC2_PathGraphZeroTriangles) {
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 4}, {4, 3},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 4},
+                    {4, 3},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -250,10 +268,19 @@ TEST_F(GDB523_TriangleCountQA, AC2_PathGraphZeroTriangles) {
 
 TEST_F(GDB523_TriangleCountQA, AC2_TwoTrianglesSharingEdge) {
     // Triangles: {1,2,3} and {2,3,4}. Shared edge: 2-3.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3},
-        {2, 4}, {4, 2}, {3, 4}, {4, 3},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                    {2, 4},
+                    {4, 2},
+                    {3, 4},
+                    {4, 3},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -268,10 +295,21 @@ TEST_F(GDB523_TriangleCountQA, AC2_TwoTrianglesSharingEdge) {
 
 TEST_F(GDB523_TriangleCountQA, AC2_BowtieGraphSharedNode) {
     // Two triangles sharing node 3: {1,2,3} and {3,4,5}.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3},
-        {3, 4}, {4, 3}, {4, 5}, {5, 4}, {5, 3}, {3, 5},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                    {3, 4},
+                    {4, 3},
+                    {4, 5},
+                    {5, 4},
+                    {5, 3},
+                    {3, 5},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -291,11 +329,19 @@ TEST_F(GDB523_TriangleCountQA, AC2_BowtieGraphSharedNode) {
 
 TEST_F(GDB523_TriangleCountQA, AC3_DegreeOrderingSameResultsRegardlessOfEdgeOrder) {
     // Same graph as TwoTrianglesSharingEdge but reversed edge insertion order.
-    build_graph("knows", {
-        {4, 3}, {3, 4}, {4, 2}, {2, 4},
-        {3, 2}, {2, 3}, {3, 1}, {1, 3},
-        {1, 2}, {2, 1},
-    });
+    build_graph("knows",
+                {
+                    {4, 3},
+                    {3, 4},
+                    {4, 2},
+                    {2, 4},
+                    {3, 2},
+                    {2, 3},
+                    {3, 1},
+                    {1, 3},
+                    {1, 2},
+                    {2, 1},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -311,29 +357,46 @@ TEST_F(GDB523_TriangleCountQA, AC3_DegreeOrderingSameResultsRegardlessOfEdgeOrde
 TEST_F(GDB523_TriangleCountQA, AC3_DegreeOrderingWithVaryingDegrees) {
     // Node 1 has degree 4 (hub), nodes 2-5 have degree 2 or 1.
     // Triangles: {1,2,3}, {1,3,4}.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {1, 3}, {3, 1}, {1, 4}, {4, 1}, {1, 5}, {5, 1},
-        {2, 3}, {3, 2}, {3, 4}, {4, 3},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {1, 3},
+                    {3, 1},
+                    {1, 4},
+                    {4, 1},
+                    {1, 5},
+                    {5, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 4},
+                    {4, 3},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     auto m = to_map(*result);
-    EXPECT_EQ(m[1], 2);  // Part of {1,2,3} and {1,3,4}
-    EXPECT_EQ(m[2], 1);  // Part of {1,2,3}
-    EXPECT_EQ(m[3], 2);  // Part of {1,2,3} and {1,3,4}
-    EXPECT_EQ(m[4], 1);  // Part of {1,3,4}
-    EXPECT_EQ(m[5], 0);  // Pendant, no triangles
+    EXPECT_EQ(m[1], 2); // Part of {1,2,3} and {1,3,4}
+    EXPECT_EQ(m[2], 1); // Part of {1,2,3}
+    EXPECT_EQ(m[3], 2); // Part of {1,2,3} and {1,3,4}
+    EXPECT_EQ(m[4], 1); // Part of {1,3,4}
+    EXPECT_EQ(m[5], 0); // Pendant, no triangles
     EXPECT_EQ(total_triangles(m), 2);
 }
 
 TEST_F(GDB523_TriangleCountQA, AC3_AllNodesSameDegree) {
     // Cycle of length 3 (triangle) — all nodes have degree 2.
     // Degree ordering falls through to node ID tiebreaker.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -395,9 +458,15 @@ TEST_F(GDB523_TriangleCountQA, AC4_MixedDirectedAndBidirectional) {
 TEST_F(GDB523_TriangleCountQA, AC4_DirectedK4OnlyOneDirection) {
     // All edges in one direction: 1->2, 1->3, 1->4, 2->3, 2->4, 3->4.
     // Undirected view: K4. 4 triangles total.
-    build_graph("knows", {
-        {1, 2}, {1, 3}, {1, 4}, {2, 3}, {2, 4}, {3, 4},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 3},
+                    {1, 4},
+                    {2, 3},
+                    {2, 4},
+                    {3, 4},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -439,10 +508,18 @@ TEST_F(GDB523_TriangleCountQA, SelfLoop_DoesNotInflateCount) {
 }
 
 TEST_F(GDB523_TriangleCountQA, SelfLoop_MultipleSelfLoopsIgnored) {
-    build_graph("knows", {
-        {1, 1}, {2, 2}, {3, 3},
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3},
-    });
+    build_graph("knows",
+                {
+                    {1, 1},
+                    {2, 2},
+                    {3, 3},
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -455,9 +532,13 @@ TEST_F(GDB523_TriangleCountQA, SelfLoop_MultipleSelfLoopsIgnored) {
 
 TEST_F(GDB523_TriangleCountQA, SelfLoop_OnlyNodeWithSelfLoopAmidTriangle) {
     // Triangle {1,2,3}, node 4 only has a self-loop.
-    build_graph("knows", {
-        {1, 2}, {2, 3}, {3, 1}, {4, 4},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {3, 1},
+                    {4, 4},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -476,11 +557,15 @@ TEST_F(GDB523_TriangleCountQA, SelfLoop_OnlyNodeWithSelfLoopAmidTriangle) {
 
 TEST_F(GDB523_TriangleCountQA, DuplicateEdges_NoInflation) {
     // Multiple edges between same pair should not inflate triangle counts.
-    build_graph("knows", {
-        {1, 2}, {1, 2}, {1, 2},
-        {2, 3}, {2, 3},
-        {3, 1},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 2},
+                    {1, 2},
+                    {2, 3},
+                    {2, 3},
+                    {3, 1},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -546,9 +631,12 @@ TEST_F(GDB523_TriangleCountQA, Boundary_ThreeNodesAlmostTriangleMissingOneEdge) 
 // ============================================================================
 
 TEST_F(GDB523_TriangleCountQA, LargeNodeIds) {
-    build_graph("knows", {
-        {1000000, 2000000}, {2000000, 3000000}, {3000000, 1000000},
-    });
+    build_graph("knows",
+                {
+                    {1000000, 2000000},
+                    {2000000, 3000000},
+                    {3000000, 1000000},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -627,10 +715,11 @@ TEST_F(GDB523_TriangleCountQA, Topology_BipartiteK33NoTriangles) {
 
 TEST_F(GDB523_TriangleCountQA, Topology_WheelGraph) {
     // Wheel W5: hub=1, rim 2-3-4-5-6-2, all bidirectional + hub to all.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {1, 3}, {3, 1}, {1, 4}, {4, 1}, {1, 5}, {5, 1}, {1, 6}, {6, 1},
-        {2, 3}, {3, 2}, {3, 4}, {4, 3}, {4, 5}, {5, 4}, {5, 6}, {6, 5}, {6, 2}, {2, 6},
-    });
+    build_graph("knows",
+                {
+                    {1, 2}, {2, 1}, {1, 3}, {3, 1}, {1, 4}, {4, 1}, {1, 5}, {5, 1}, {1, 6}, {6, 1},
+                    {2, 3}, {3, 2}, {3, 4}, {4, 3}, {4, 5}, {5, 4}, {5, 6}, {6, 5}, {6, 2}, {2, 6},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -651,10 +740,19 @@ TEST_F(GDB523_TriangleCountQA, Topology_WheelGraph) {
 
 TEST_F(GDB523_TriangleCountQA, Topology_CycleLength5NoTriangles) {
     // Simple cycle: 1-2-3-4-5-1. Odd cycle, no triangles.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 4}, {4, 3},
-        {4, 5}, {5, 4}, {5, 1}, {1, 5},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 4},
+                    {4, 3},
+                    {4, 5},
+                    {5, 4},
+                    {5, 1},
+                    {1, 5},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -667,14 +765,42 @@ TEST_F(GDB523_TriangleCountQA, Topology_CycleLength5NoTriangles) {
 
 TEST_F(GDB523_TriangleCountQA, Topology_PetersenGraphTriangleFree) {
     // Petersen graph: 10 nodes, 3-regular, no triangles.
-    build_graph("knows", {
-        // Outer cycle
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 4}, {4, 3}, {4, 5}, {5, 4}, {5, 1}, {1, 5},
-        // Spokes
-        {1, 6}, {6, 1}, {2, 7}, {7, 2}, {3, 8}, {8, 3}, {4, 9}, {9, 4}, {5, 10}, {10, 5},
-        // Inner pentagram
-        {6, 8}, {8, 6}, {8, 10}, {10, 8}, {10, 7}, {7, 10}, {7, 9}, {9, 7}, {9, 6}, {6, 9},
-    });
+    build_graph("knows",
+                {
+                    // Outer cycle
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 4},
+                    {4, 3},
+                    {4, 5},
+                    {5, 4},
+                    {5, 1},
+                    {1, 5},
+                    // Spokes
+                    {1, 6},
+                    {6, 1},
+                    {2, 7},
+                    {7, 2},
+                    {3, 8},
+                    {8, 3},
+                    {4, 9},
+                    {9, 4},
+                    {5, 10},
+                    {10, 5},
+                    // Inner pentagram
+                    {6, 8},
+                    {8, 6},
+                    {8, 10},
+                    {10, 8},
+                    {10, 7},
+                    {7, 10},
+                    {7, 9},
+                    {9, 7},
+                    {9, 6},
+                    {6, 9},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -688,10 +814,21 @@ TEST_F(GDB523_TriangleCountQA, Topology_PetersenGraphTriangleFree) {
 
 TEST_F(GDB523_TriangleCountQA, Topology_DisconnectedComponents) {
     // Two separate triangles: {1,2,3} and {4,5,6}.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3},
-        {4, 5}, {5, 4}, {5, 6}, {6, 5}, {6, 4}, {4, 6},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                    {4, 5},
+                    {5, 4},
+                    {5, 6},
+                    {6, 5},
+                    {6, 4},
+                    {4, 6},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -706,11 +843,21 @@ TEST_F(GDB523_TriangleCountQA, Topology_DisconnectedComponents) {
 
 TEST_F(GDB523_TriangleCountQA, Topology_TreeGraphAlwaysZero) {
     // Binary tree: 1->{2,3}, 2->{4,5}, 3->{6,7} (bidirectional).
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {1, 3}, {3, 1},
-        {2, 4}, {4, 2}, {2, 5}, {5, 2},
-        {3, 6}, {6, 3}, {3, 7}, {7, 3},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {1, 3},
+                    {3, 1},
+                    {2, 4},
+                    {4, 2},
+                    {2, 5},
+                    {5, 2},
+                    {3, 6},
+                    {6, 3},
+                    {3, 7},
+                    {7, 3},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -723,10 +870,17 @@ TEST_F(GDB523_TriangleCountQA, Topology_TreeGraphAlwaysZero) {
 
 TEST_F(GDB523_TriangleCountQA, Topology_CompleteK3PlusPendantNode) {
     // Triangle {1,2,3} + pendant node 4 off node 1.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3},
-        {1, 4}, {4, 1},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                    {1, 4},
+                    {4, 1},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -745,11 +899,23 @@ TEST_F(GDB523_TriangleCountQA, Topology_CompleteK3PlusPendantNode) {
 TEST_F(GDB523_TriangleCountQA, Invariant_SumDivisibleByThree) {
     // The sum of all per-node triangle counts must always be divisible by 3,
     // since each triangle is counted once per participating node.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3},
-        {3, 4}, {4, 3}, {4, 5}, {5, 4}, {5, 3}, {3, 5},
-        {1, 6}, {6, 1},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                    {3, 4},
+                    {4, 3},
+                    {4, 5},
+                    {5, 4},
+                    {5, 3},
+                    {3, 5},
+                    {1, 6},
+                    {6, 1},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -769,7 +935,8 @@ TEST_F(GDB523_TriangleCountQA, Invariant_CompleteGraphFormula) {
     std::vector<std::pair<int64_t, int64_t>> edges;
     for (int64_t i = 1; i <= 6; ++i) {
         for (int64_t j = 1; j <= 6; ++j) {
-            if (i != j) edges.push_back({i, j});
+            if (i != j)
+                edges.push_back({i, j});
         }
     }
     build_graph("knows", edges);
@@ -787,9 +954,15 @@ TEST_F(GDB523_TriangleCountQA, Invariant_CompleteGraphFormula) {
 }
 
 TEST_F(GDB523_TriangleCountQA, Invariant_CountsNonNegative) {
-    build_graph("knows", {
-        {1, 2}, {2, 3}, {3, 1}, {1, 1}, {4, 5}, {6, 6},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {3, 1},
+                    {1, 1},
+                    {4, 5},
+                    {6, 6},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -845,9 +1018,15 @@ TEST_F(GDB523_TriangleCountQA, Output_AllNodesPresent) {
 // ============================================================================
 
 TEST_F(GDB523_TriangleCountQA, Deterministic_SameResultsOnRepeatedRuns) {
-    build_graph("knows", {
-        {1, 2}, {2, 3}, {3, 4}, {4, 1}, {1, 3}, {2, 4},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {3, 4},
+                    {4, 1},
+                    {1, 3},
+                    {2, 4},
+                });
 
     auto r1 = run("knows");
     ASSERT_TRUE(r1.has_value()) << r1.error().message;
@@ -892,7 +1071,8 @@ TEST_F(GDB523_TriangleCountQA, Stress_CompleteK20) {
     std::vector<std::pair<int64_t, int64_t>> edges;
     for (int64_t i = 1; i <= 20; ++i) {
         for (int64_t j = 1; j <= 20; ++j) {
-            if (i != j) edges.push_back({i, j});
+            if (i != j)
+                edges.push_back({i, j});
         }
     }
     build_graph("knows", edges);

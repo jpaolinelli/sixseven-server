@@ -131,19 +131,19 @@ protected:
     /// Create an edge type and link a list of (src, tgt) pairs.
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
 
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     /// Run connected_components and return the result.
     Result<std::vector<AlgorithmRow>> run_cc(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {}};
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, {}};
         return connected_components_execute(ctx);
     }
 

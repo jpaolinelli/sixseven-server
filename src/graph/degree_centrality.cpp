@@ -90,7 +90,7 @@ Result<std::vector<AlgorithmRow>> degree_centrality_execute(const AlgorithmConte
     }
 
     // Get all edges for the specified edge type.
-    auto edges = ctx.graph_engine.get_all_edges(ctx.edge_type);
+    auto edges = ctx.graph_engine.get_all_edges(ctx.database_id, ctx.edge_type);
     if (!edges.has_value()) {
         return tl::unexpected(edges.error());
     }

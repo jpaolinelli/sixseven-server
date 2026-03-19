@@ -18,7 +18,7 @@ GraphEngine::GraphEngine(Catalog& catalog,
 
 GraphEngine::~GraphEngine() {
     // Flush and close all edge storage files.
-    for (auto& [name, storage] : edge_storage_) {
+    for (auto& [key, storage] : edge_storage_) {
         if (storage && storage->bpm) {
             (void)storage->bpm->flush_all();
         }
@@ -30,12 +30,17 @@ GraphEngine::~GraphEngine() {
     edge_tables_.clear();
 }
 
+std::string GraphEngine::make_edge_key(database_id_t database_id, const std::string& name) {
+    return std::to_string(database_id) + ":" + name;
+}
+
 bool GraphEngine::has_persistence() const {
     return dm_ != nullptr;
 }
 
-std::filesystem::path GraphEngine::edge_file_path(edge_id_t edge_id) const {
-    return data_dir_ / "databases" / std::to_string(default_database_id) / "edges" /
+std::filesystem::path GraphEngine::edge_file_path(database_id_t database_id,
+                                                  edge_id_t edge_id) const {
+    return data_dir_ / "databases" / std::to_string(database_id) / "edges" /
            ("edge_" + std::to_string(edge_id) + ".db");
 }
 
@@ -85,11 +90,12 @@ std::vector<ColumnDef> GraphEngine::parse_property_columns(const std::string& pr
     return cols;
 }
 
-Result<void> GraphEngine::create_edge_storage(edge_id_t edge_id,
+Result<void> GraphEngine::create_edge_storage(database_id_t database_id,
+                                              edge_id_t edge_id,
                                               TypeId source_pk_type,
                                               TypeId target_pk_type,
                                               const std::vector<ColumnDef>& property_columns) {
-    auto path = edge_file_path(edge_id);
+    auto path = edge_file_path(database_id, edge_id);
     std::filesystem::create_directories(path.parent_path());
 
     auto fid = dm_->create_file(path, /*direct_io=*/false, /*overwrite=*/true);
@@ -108,9 +114,11 @@ Result<void> GraphEngine::create_edge_storage(edge_id_t edge_id,
     // At this point the edge type is already registered.
     auto edge_types = catalog_.list_all_edge_types();
     std::string edge_name;
+    database_id_t edge_db_id = database_id;
     for (const auto& et : edge_types) {
         if (et.edge_id == edge_id) {
             edge_name = et.name;
+            edge_db_id = et.database_id;
             break;
         }
     }
@@ -119,19 +127,21 @@ Result<void> GraphEngine::create_edge_storage(edge_id_t edge_id,
                           "edge type not found in catalog for id " + std::to_string(edge_id));
     }
 
-    edge_storage_[edge_name] = std::move(storage);
+    edge_storage_[make_edge_key(edge_db_id, edge_name)] = std::move(storage);
     return ok();
 }
 
-Result<void> GraphEngine::open_edge_storage(edge_id_t edge_id,
+Result<void> GraphEngine::open_edge_storage(database_id_t database_id,
+                                            edge_id_t edge_id,
                                             TypeId source_pk_type,
                                             TypeId target_pk_type,
                                             const std::vector<ColumnDef>& property_columns) {
-    auto path = edge_file_path(edge_id);
+    auto path = edge_file_path(database_id, edge_id);
     if (!std::filesystem::exists(path)) {
         // No storage file yet — edge type was created but no edges persisted.
         // Create a new storage file.
-        return create_edge_storage(edge_id, source_pk_type, target_pk_type, property_columns);
+        return create_edge_storage(
+            database_id, edge_id, source_pk_type, target_pk_type, property_columns);
     }
 
     auto fid = dm_->open_file(path);
@@ -149,9 +159,11 @@ Result<void> GraphEngine::open_edge_storage(edge_id_t edge_id,
     // Find the edge type name.
     auto edge_types = catalog_.list_all_edge_types();
     std::string edge_name;
+    database_id_t edge_db_id = database_id;
     for (const auto& et : edge_types) {
         if (et.edge_id == edge_id) {
             edge_name = et.name;
+            edge_db_id = et.database_id;
             break;
         }
     }
@@ -160,16 +172,16 @@ Result<void> GraphEngine::open_edge_storage(edge_id_t edge_id,
                           "edge type not found in catalog for id " + std::to_string(edge_id));
     }
 
-    edge_storage_[edge_name] = std::move(storage);
+    edge_storage_[make_edge_key(edge_db_id, edge_name)] = std::move(storage);
     return ok();
 }
 
-Result<void> GraphEngine::persist_edge(const std::string& edge_type,
+Result<void> GraphEngine::persist_edge(const std::string& edge_key,
                                        uint64_t edge_row_id,
                                        const Value& source_pk,
                                        const Value& target_pk,
                                        const std::vector<Value>& properties) {
-    auto sit = edge_storage_.find(edge_type);
+    auto sit = edge_storage_.find(edge_key);
     if (sit == edge_storage_.end()) {
         return ok(); // No persistence for this edge type.
     }
@@ -200,15 +212,14 @@ Result<void> GraphEngine::persist_edge(const std::string& edge_type,
 
     auto flush = storage.bpm->flush_all();
     if (!flush) {
-        SIXSEVEN_LOG_WARN("edge flush failed for '{}': {}", edge_type, flush.error().message);
+        SIXSEVEN_LOG_WARN("edge flush failed for '{}': {}", edge_key, flush.error().message);
     }
 
     return ok();
 }
 
-Result<void> GraphEngine::delete_persisted_edge(const std::string& edge_type,
-                                                uint64_t edge_row_id) {
-    auto sit = edge_storage_.find(edge_type);
+Result<void> GraphEngine::delete_persisted_edge(const std::string& edge_key, uint64_t edge_row_id) {
+    auto sit = edge_storage_.find(edge_key);
     if (sit == edge_storage_.end()) {
         return ok(); // No persistence for this edge type.
     }
@@ -229,7 +240,7 @@ Result<void> GraphEngine::delete_persisted_edge(const std::string& edge_type,
 
     auto flush = storage.bpm->flush_all();
     if (!flush) {
-        SIXSEVEN_LOG_WARN("edge flush failed for '{}': {}", edge_type, flush.error().message);
+        SIXSEVEN_LOG_WARN("edge flush failed for '{}': {}", edge_key, flush.error().message);
     }
 
     return ok();
@@ -245,8 +256,10 @@ Result<edge_id_t> GraphEngine::create_edge_type(database_id_t database_id,
                                                 bool prevent_duplicates) {
     std::lock_guard lock(mu_);
 
+    auto key = make_edge_key(database_id, name);
+
     // Check if edge table already exists locally.
-    if (edge_tables_.count(name) > 0) {
+    if (edge_tables_.count(key) > 0) {
         return make_error(StatusCode::ALREADY_EXISTS,
                           "edge type '" + name + "' already exists in graph engine");
     }
@@ -285,26 +298,63 @@ Result<edge_id_t> GraphEngine::create_edge_type(database_id_t database_id,
     config.property_columns = property_columns;
     config.prevent_duplicates = prevent_duplicates;
 
-    edge_tables_.emplace(name, std::make_unique<EdgeTable>(std::move(config)));
+    edge_tables_.emplace(key, std::make_unique<EdgeTable>(std::move(config)));
 
     // Create persistent storage if available.
     if (has_persistence()) {
-        auto storage_result =
-            create_edge_storage(*edge_id_result, source_pk_type, target_pk_type, property_columns);
+        auto storage_result = create_edge_storage(
+            database_id, *edge_id_result, source_pk_type, target_pk_type, property_columns);
         if (!storage_result) {
             SIXSEVEN_LOG_WARN(
                 "failed to create edge storage for '{}': {}", name, storage_result.error().message);
         }
     }
 
-    SIXSEVEN_LOG_INFO("created edge type '{}' (id={})", name, *edge_id_result);
+    SIXSEVEN_LOG_INFO(
+        "created edge type '{}' (id={}, database={})", name, *edge_id_result, database_id);
     return ok(*edge_id_result);
+}
+
+void GraphEngine::drop_edge_type_locked(const std::string& edge_key,
+                                        database_id_t database_id,
+                                        const std::string& name) {
+    auto it = edge_tables_.find(edge_key);
+    if (it == edge_tables_.end()) {
+        return;
+    }
+
+    auto edge_id = it->second->config().edge_id;
+
+    // Remove from catalog (ignore errors — may already be removed by CASCADE).
+    (void)catalog_.drop_edge_type(database_id, name);
+
+    // Remove persistent storage if present.
+    auto sit = edge_storage_.find(edge_key);
+    if (sit != edge_storage_.end()) {
+        auto& storage = *sit->second;
+        (void)storage.bpm->flush_all();
+        if (dm_ != nullptr) {
+            (void)dm_->close_file(storage.file_id);
+        }
+
+        auto path = edge_file_path(database_id, edge_id);
+        std::filesystem::remove(path);
+
+        edge_storage_.erase(sit);
+    }
+
+    // Remove the backing EdgeTable.
+    edge_tables_.erase(it);
+
+    SIXSEVEN_LOG_INFO("dropped edge type '{}' (database={})", name, database_id);
 }
 
 Result<void> GraphEngine::drop_edge_type(database_id_t database_id, const std::string& name) {
     std::lock_guard lock(mu_);
 
-    auto it = edge_tables_.find(name);
+    auto key = make_edge_key(database_id, name);
+
+    auto it = edge_tables_.find(key);
     if (it == edge_tables_.end()) {
         return make_error(StatusCode::NOT_FOUND,
                           "edge type '" + name + "' not found in graph engine");
@@ -319,13 +369,13 @@ Result<void> GraphEngine::drop_edge_type(database_id_t database_id, const std::s
     }
 
     // Remove persistent storage if present.
-    auto sit = edge_storage_.find(name);
+    auto sit = edge_storage_.find(key);
     if (sit != edge_storage_.end()) {
         auto& storage = *sit->second;
         (void)storage.bpm->flush_all();
         (void)dm_->close_file(storage.file_id);
 
-        auto path = edge_file_path(edge_id);
+        auto path = edge_file_path(database_id, edge_id);
         std::filesystem::remove(path);
 
         edge_storage_.erase(sit);
@@ -334,17 +384,40 @@ Result<void> GraphEngine::drop_edge_type(database_id_t database_id, const std::s
     // Remove the backing EdgeTable.
     edge_tables_.erase(it);
 
-    SIXSEVEN_LOG_INFO("dropped edge type '{}'", name);
+    SIXSEVEN_LOG_INFO("dropped edge type '{}' (database={})", name, database_id);
     return ok();
 }
 
-Result<uint64_t> GraphEngine::link(const std::string& edge_type,
+Result<void> GraphEngine::drop_edge_types_for_table(database_id_t database_id,
+                                                    table_id_t table_id) {
+    std::lock_guard lock(mu_);
+
+    // Collect edge keys to drop (can't modify map while iterating).
+    std::vector<std::pair<std::string, std::string>> keys_and_names; // (key, name)
+    for (const auto& [key, table] : edge_tables_) {
+        const auto& cfg = table->config();
+        if ((cfg.source_table_id == table_id || cfg.target_table_id == table_id)) {
+            keys_and_names.emplace_back(key, cfg.name);
+        }
+    }
+
+    for (const auto& [key, name] : keys_and_names) {
+        drop_edge_type_locked(key, database_id, name);
+    }
+
+    return ok();
+}
+
+Result<uint64_t> GraphEngine::link(database_id_t database_id,
+                                   const std::string& edge_type,
                                    const Value& source_pk,
                                    const Value& target_pk,
                                    const std::vector<Value>& properties) {
     std::lock_guard lock(mu_);
 
-    auto it = edge_tables_.find(edge_type);
+    auto key = make_edge_key(database_id, edge_type);
+
+    auto it = edge_tables_.find(key);
     if (it == edge_tables_.end()) {
         return make_error(StatusCode::NOT_FOUND, "edge type '" + edge_type + "' not found");
     }
@@ -356,9 +429,10 @@ Result<uint64_t> GraphEngine::link(const std::string& edge_type,
 
     // Persist to disk.
     if (has_persistence()) {
-        auto persist = persist_edge(edge_type, *result, source_pk, target_pk, properties);
+        auto persist = persist_edge(key, *result, source_pk, target_pk, properties);
         if (!persist) {
-            SIXSEVEN_LOG_WARN("edge persist failed for '{}': {}", edge_type, persist.error().message);
+            SIXSEVEN_LOG_WARN(
+                "edge persist failed for '{}': {}", edge_type, persist.error().message);
         }
     }
 
@@ -369,11 +443,15 @@ Result<uint64_t> GraphEngine::link(const std::string& edge_type,
     return ok(*result);
 }
 
-Result<void>
-GraphEngine::unlink(const std::string& edge_type, const Value& source_pk, const Value& target_pk) {
+Result<void> GraphEngine::unlink(database_id_t database_id,
+                                 const std::string& edge_type,
+                                 const Value& source_pk,
+                                 const Value& target_pk) {
     std::lock_guard lock(mu_);
 
-    auto it = edge_tables_.find(edge_type);
+    auto key = make_edge_key(database_id, edge_type);
+
+    auto it = edge_tables_.find(key);
     if (it == edge_tables_.end()) {
         return make_error(StatusCode::NOT_FOUND, "edge type '" + edge_type + "' not found");
     }
@@ -396,7 +474,7 @@ GraphEngine::unlink(const std::string& edge_type, const Value& source_pk, const 
 
     // Delete from persistent storage.
     if (has_persistence()) {
-        auto persist_del = delete_persisted_edge(edge_type, edge_row_id);
+        auto persist_del = delete_persisted_edge(key, edge_row_id);
         if (!persist_del) {
             SIXSEVEN_LOG_WARN(
                 "edge persist delete failed for '{}': {}", edge_type, persist_del.error().message);
@@ -410,13 +488,16 @@ GraphEngine::unlink(const std::string& edge_type, const Value& source_pk, const 
     return ok();
 }
 
-Result<uint64_t> GraphEngine::unlink_where(const std::string& edge_type,
+Result<uint64_t> GraphEngine::unlink_where(database_id_t database_id,
+                                           const std::string& edge_type,
                                            const Value& source_pk,
                                            const Value& target_pk,
                                            std::function<bool(const EdgeRow&)> predicate) {
     std::lock_guard lock(mu_);
 
-    auto it = edge_tables_.find(edge_type);
+    auto key = make_edge_key(database_id, edge_type);
+
+    auto it = edge_tables_.find(key);
     if (it == edge_tables_.end()) {
         return make_error(StatusCode::NOT_FOUND, "edge type '" + edge_type + "' not found");
     }
@@ -454,11 +535,11 @@ Result<uint64_t> GraphEngine::unlink_where(const std::string& edge_type,
 
         // Delete from persistent storage.
         if (has_persistence()) {
-            auto persist_del = delete_persisted_edge(edge_type, row_id);
+            auto persist_del = delete_persisted_edge(key, row_id);
             if (!persist_del) {
                 SIXSEVEN_LOG_WARN("edge persist delete failed for '{}': {}",
-                               edge_type,
-                               persist_del.error().message);
+                                  edge_type,
+                                  persist_del.error().message);
             }
         }
     }
@@ -467,11 +548,14 @@ Result<uint64_t> GraphEngine::unlink_where(const std::string& edge_type,
     return ok(static_cast<uint64_t>(to_delete.size()));
 }
 
-Result<std::vector<EdgeRow>> GraphEngine::get_edges_from(const std::string& edge_type,
+Result<std::vector<EdgeRow>> GraphEngine::get_edges_from(database_id_t database_id,
+                                                         const std::string& edge_type,
                                                          const Value& source_pk) const {
     std::lock_guard lock(mu_);
 
-    auto it = edge_tables_.find(edge_type);
+    auto key = make_edge_key(database_id, edge_type);
+
+    auto it = edge_tables_.find(key);
     if (it == edge_tables_.end()) {
         return make_error(StatusCode::NOT_FOUND, "edge type '" + edge_type + "' not found");
     }
@@ -479,11 +563,14 @@ Result<std::vector<EdgeRow>> GraphEngine::get_edges_from(const std::string& edge
     return it->second->get_edges_from(source_pk);
 }
 
-Result<std::vector<EdgeRow>> GraphEngine::get_edges_to(const std::string& edge_type,
+Result<std::vector<EdgeRow>> GraphEngine::get_edges_to(database_id_t database_id,
+                                                       const std::string& edge_type,
                                                        const Value& target_pk) const {
     std::lock_guard lock(mu_);
 
-    auto it = edge_tables_.find(edge_type);
+    auto key = make_edge_key(database_id, edge_type);
+
+    auto it = edge_tables_.find(key);
     if (it == edge_tables_.end()) {
         return make_error(StatusCode::NOT_FOUND, "edge type '" + edge_type + "' not found");
     }
@@ -491,10 +578,13 @@ Result<std::vector<EdgeRow>> GraphEngine::get_edges_to(const std::string& edge_t
     return it->second->get_edges_to(target_pk);
 }
 
-Result<std::vector<EdgeRow>> GraphEngine::get_all_edges(const std::string& edge_type) const {
+Result<std::vector<EdgeRow>> GraphEngine::get_all_edges(database_id_t database_id,
+                                                        const std::string& edge_type) const {
     std::lock_guard lock(mu_);
 
-    auto it = edge_tables_.find(edge_type);
+    auto key = make_edge_key(database_id, edge_type);
+
+    auto it = edge_tables_.find(key);
     if (it == edge_tables_.end()) {
         return make_error(StatusCode::NOT_FOUND, "edge type '" + edge_type + "' not found");
     }
@@ -502,23 +592,27 @@ Result<std::vector<EdgeRow>> GraphEngine::get_all_edges(const std::string& edge_
     return ok(it->second->get_all_edges());
 }
 
-Result<EdgeTable*> GraphEngine::get_edge_table(const std::string& name) {
+Result<EdgeTable*> GraphEngine::get_edge_table(database_id_t database_id, const std::string& name) {
     std::lock_guard lock(mu_);
 
-    auto it = edge_tables_.find(name);
+    auto key = make_edge_key(database_id, name);
+
+    auto it = edge_tables_.find(key);
     if (it == edge_tables_.end()) {
         return make_error(StatusCode::NOT_FOUND, "edge type '" + name + "' not found");
     }
     return ok(it->second.get());
 }
 
-std::vector<std::string> GraphEngine::list_edge_types() const {
+std::vector<std::string> GraphEngine::list_edge_types(database_id_t database_id) const {
     std::lock_guard lock(mu_);
 
+    auto prefix = std::to_string(database_id) + ":";
     std::vector<std::string> names;
-    names.reserve(edge_tables_.size());
-    for (const auto& [name, _] : edge_tables_) {
-        names.push_back(name);
+    for (const auto& [key, _] : edge_tables_) {
+        if (key.substr(0, prefix.size()) == prefix) {
+            names.push_back(key.substr(prefix.size()));
+        }
     }
     return names;
 }
@@ -538,8 +632,10 @@ Result<void> GraphEngine::load_edges() {
     uint64_t total_edges = 0;
 
     for (const auto& et : edge_types) {
+        auto key = make_edge_key(et.database_id, et.name);
+
         // Skip if edge table already exists (shouldn't happen, but be safe).
-        if (edge_tables_.count(et.name) > 0) {
+        if (edge_tables_.count(key) > 0) {
             continue;
         }
 
@@ -581,10 +677,10 @@ Result<void> GraphEngine::load_edges() {
         config.property_columns = prop_cols;
         config.prevent_duplicates = false; // Not persisted; default to false.
 
-        edge_tables_.emplace(et.name, std::make_unique<EdgeTable>(config));
+        edge_tables_.emplace(key, std::make_unique<EdgeTable>(config));
 
         // Open persistent storage and load edge data.
-        auto path = edge_file_path(et.edge_id);
+        auto path = edge_file_path(et.database_id, et.edge_id);
         if (!std::filesystem::exists(path)) {
             // No storage file — edge type has no persisted edges.
             SIXSEVEN_LOG_DEBUG("no edge storage file for '{}', skipping load", et.name);
@@ -606,12 +702,12 @@ Result<void> GraphEngine::load_edges() {
             build_edge_storage_schema(source_pk_type, target_pk_type, prop_cols);
 
         // Scan heap and restore edges.
-        auto& edge_table = *edge_tables_[et.name];
+        auto& edge_table = *edge_tables_[key];
         auto iter = storage->heap->begin();
         if (!iter) {
             SIXSEVEN_LOG_WARN(
                 "failed to iterate edge storage for '{}': {}", et.name, iter.error().message);
-            edge_storage_[et.name] = std::move(storage);
+            edge_storage_[key] = std::move(storage);
             continue;
         }
 
@@ -641,9 +737,9 @@ Result<void> GraphEngine::load_edges() {
             auto restore = edge_table.restore_edge(edge_row_id, src_pk, tgt_pk, props);
             if (!restore) {
                 SIXSEVEN_LOG_WARN("failed to restore edge {} in '{}': {}",
-                               edge_row_id,
-                               et.name,
-                               restore.error().message);
+                                  edge_row_id,
+                                  et.name,
+                                  restore.error().message);
                 continue;
             }
 
@@ -652,7 +748,7 @@ Result<void> GraphEngine::load_edges() {
             ++total_edges;
         }
 
-        edge_storage_[et.name] = std::move(storage);
+        edge_storage_[key] = std::move(storage);
     }
 
     if (total_edges > 0) {

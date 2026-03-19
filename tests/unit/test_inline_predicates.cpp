@@ -64,9 +64,8 @@ TEST(InlinePredicateParse, NodeFilterExpr) {
 }
 
 TEST(InlinePredicateParse, EdgeFilterExpr) {
-    auto stmt = parse_one(
-        "SELECT a.name FROM MATCH "
-        "(a:persons)-[r:knows WHERE r.since > '2020-01-01']->(b:persons)");
+    auto stmt = parse_one("SELECT a.name FROM MATCH "
+                          "(a:persons)-[r:knows WHERE r.since > '2020-01-01']->(b:persons)");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* m = dynamic_cast<MatchStmt*>(sel->from[0].match_source.get());
@@ -80,10 +79,9 @@ TEST(InlinePredicateParse, EdgeFilterExpr) {
 }
 
 TEST(InlinePredicateParse, CombinedNodeAndEdgeFilter) {
-    auto stmt = parse_one(
-        "SELECT a.name, b.name FROM MATCH "
-        "(a:persons)-[r:knows WHERE r.since > '2020']->{1,6}"
-        "(b:persons WHERE b.active = TRUE)");
+    auto stmt = parse_one("SELECT a.name, b.name FROM MATCH "
+                          "(a:persons)-[r:knows WHERE r.since > '2020']->{1,6}"
+                          "(b:persons WHERE b.active = TRUE)");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* m = dynamic_cast<MatchStmt*>(sel->from[0].match_source.get());
@@ -98,8 +96,7 @@ TEST(InlinePredicateParse, CombinedNodeAndEdgeFilter) {
 }
 
 TEST(InlinePredicateParse, NoFilterStillWorks) {
-    auto stmt =
-        parse_one("SELECT a.name FROM MATCH (a:persons)-[r:knows]->(b:persons)");
+    auto stmt = parse_one("SELECT a.name FROM MATCH (a:persons)-[r:knows]->(b:persons)");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* m = dynamic_cast<MatchStmt*>(sel->from[0].match_source.get());
@@ -112,8 +109,8 @@ TEST(InlinePredicateParse, NoFilterStillWorks) {
 }
 
 TEST(InlinePredicateParse, SourceNodeFilter) {
-    auto stmt = parse_one(
-        "SELECT a.name FROM MATCH (a:persons WHERE a.id = 1)-[r:knows]->(b:persons)");
+    auto stmt =
+        parse_one("SELECT a.name FROM MATCH (a:persons WHERE a.id = 1)-[r:knows]->(b:persons)");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* m = dynamic_cast<MatchStmt*>(sel->from[0].match_source.get());
@@ -195,8 +192,13 @@ protected:
 
         // Create 'knows' edge type with a 'weight' property.
         ColumnDef weight_col{"weight", TypeId::INT64};
-        auto eid = graph_->create_edge_type(default_database_id, 
-            "knows", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {weight_col});
+        auto eid = graph_->create_edge_type(default_database_id,
+                                            "knows",
+                                            persons_id_,
+                                            persons_id_,
+                                            TypeId::INT64,
+                                            TypeId::INT64,
+                                            {weight_col});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         // Create linear chain: 1->2->3->4->5 with weights.
@@ -211,8 +213,8 @@ protected:
         std::filesystem::remove_all(data_dir_);
     }
 
-    void insert_person(int64_t id, const std::string& name, bool active,
-                       const std::string& company) {
+    void
+    insert_person(int64_t id, const std::string& name, bool active, const std::string& company) {
         auto ts = storage_->get_table_storage(persons_id_);
         ASSERT_TRUE(ts.has_value()) << ts.error().message;
         auto schema = catalog_->get_table(default_database_id, "persons");
@@ -225,9 +227,11 @@ protected:
         ASSERT_TRUE(rid.has_value()) << rid.error().message;
     }
 
-    void link(const std::string& edge_type, int64_t from, int64_t to,
+    void link(const std::string& edge_type,
+              int64_t from,
+              int64_t to,
               const std::vector<Value>& props = {}) {
-        auto r = graph_->link(edge_type, Value(from), Value(to), props);
+        auto r = graph_->link(default_database_id, edge_type, Value(from), Value(to), props);
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 
@@ -237,12 +241,15 @@ protected:
         std::string sql = "SELECT 1 WHERE " + std::string(expr_str);
         Lexer lexer(sql);
         auto tokens = lexer.tokenize();
-        if (!tokens) return nullptr;
+        if (!tokens)
+            return nullptr;
         Parser parser(std::move(*tokens));
         auto stmts = parser.parse_all();
-        if (!stmts || stmts->empty()) return nullptr;
+        if (!stmts || stmts->empty())
+            return nullptr;
         auto* sel = dynamic_cast<SelectStmt*>((*stmts)[0].get());
-        if (!sel || !sel->where_expr) return nullptr;
+        if (!sel || !sel->where_expr)
+            return nullptr;
         return std::move(sel->where_expr);
     }
 
@@ -285,10 +292,14 @@ TEST_F(InlinePredicateTest, NodeFilterActiveOnly) {
     out_cols.push_back({"b", "name", TypeId::STRING, false, persons_id_});
     OutputSchema schema(std::move(out_cols));
 
-    VariableLengthMatchOperator op(*graph_, *catalog_, *storage_,
-                                    default_database_id,
-                                    std::move(config), std::move(schema),
-                                    nullptr, bound);
+    VariableLengthMatchOperator op(*graph_,
+                                   *catalog_,
+                                   *storage_,
+                                   default_database_id,
+                                   std::move(config),
+                                   std::move(schema),
+                                   nullptr,
+                                   bound);
     auto open_result = op.open();
     ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
 
@@ -296,7 +307,8 @@ TEST_F(InlinePredicateTest, NodeFilterActiveOnly) {
     while (true) {
         auto row = op.next();
         ASSERT_TRUE(row.has_value()) << row.error().message;
-        if (!row->has_value()) break;
+        if (!row->has_value())
+            break;
         results.push_back(std::move(**row));
     }
     op.close();
@@ -349,10 +361,14 @@ TEST_F(InlinePredicateTest, EdgeFilterByWeight) {
     out_cols.push_back({"b", "name", TypeId::STRING, false, persons_id_});
     OutputSchema schema(std::move(out_cols));
 
-    VariableLengthMatchOperator op(*graph_, *catalog_, *storage_,
-                                    default_database_id,
-                                    std::move(config), std::move(schema),
-                                    nullptr, bound);
+    VariableLengthMatchOperator op(*graph_,
+                                   *catalog_,
+                                   *storage_,
+                                   default_database_id,
+                                   std::move(config),
+                                   std::move(schema),
+                                   nullptr,
+                                   bound);
     auto open_result = op.open();
     ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
 
@@ -360,7 +376,8 @@ TEST_F(InlinePredicateTest, EdgeFilterByWeight) {
     while (true) {
         auto row = op.next();
         ASSERT_TRUE(row.has_value()) << row.error().message;
-        if (!row->has_value()) break;
+        if (!row->has_value())
+            break;
         results.push_back(std::move(**row));
     }
     op.close();
@@ -409,10 +426,14 @@ TEST_F(InlinePredicateTest, CombinedEdgeAndNodeFilter) {
     out_cols.push_back({"b", "name", TypeId::STRING, false, persons_id_});
     OutputSchema schema(std::move(out_cols));
 
-    VariableLengthMatchOperator op(*graph_, *catalog_, *storage_,
-                                    default_database_id,
-                                    std::move(config), std::move(schema),
-                                    nullptr, bound);
+    VariableLengthMatchOperator op(*graph_,
+                                   *catalog_,
+                                   *storage_,
+                                   default_database_id,
+                                   std::move(config),
+                                   std::move(schema),
+                                   nullptr,
+                                   bound);
     auto open_result = op.open();
     ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
 
@@ -420,7 +441,8 @@ TEST_F(InlinePredicateTest, CombinedEdgeAndNodeFilter) {
     while (true) {
         auto row = op.next();
         ASSERT_TRUE(row.has_value()) << row.error().message;
-        if (!row->has_value()) break;
+        if (!row->has_value())
+            break;
         results.push_back(std::move(**row));
     }
     op.close();
@@ -477,10 +499,14 @@ TEST_F(InlinePredicateTest, FixedHopNodeFilter) {
     out_cols.push_back({"b", "name", TypeId::STRING, false, persons_id_});
     OutputSchema schema(std::move(out_cols));
 
-    PatternMatchOperator op(*graph_, *catalog_, *storage_,
-                             default_database_id,
-                             std::move(config), std::move(schema),
-                             nullptr, bound);
+    PatternMatchOperator op(*graph_,
+                            *catalog_,
+                            *storage_,
+                            default_database_id,
+                            std::move(config),
+                            std::move(schema),
+                            nullptr,
+                            bound);
     auto open_result = op.open();
     ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
 
@@ -488,7 +514,8 @@ TEST_F(InlinePredicateTest, FixedHopNodeFilter) {
     while (true) {
         auto row = op.next();
         ASSERT_TRUE(row.has_value()) << row.error().message;
-        if (!row->has_value()) break;
+        if (!row->has_value())
+            break;
         results.push_back(std::move(**row));
     }
     op.close();
@@ -518,10 +545,14 @@ TEST_F(InlinePredicateTest, NoFilterReturnsAll) {
     OutputSchema schema(std::move(out_cols));
 
     BoundStatement bound;
-    VariableLengthMatchOperator op(*graph_, *catalog_, *storage_,
-                                    default_database_id,
-                                    std::move(config), std::move(schema),
-                                    nullptr, bound);
+    VariableLengthMatchOperator op(*graph_,
+                                   *catalog_,
+                                   *storage_,
+                                   default_database_id,
+                                   std::move(config),
+                                   std::move(schema),
+                                   nullptr,
+                                   bound);
     auto open_result = op.open();
     ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
 
@@ -529,7 +560,8 @@ TEST_F(InlinePredicateTest, NoFilterReturnsAll) {
     while (true) {
         auto row = op.next();
         ASSERT_TRUE(row.has_value()) << row.error().message;
-        if (!row->has_value()) break;
+        if (!row->has_value())
+            break;
         results.push_back(std::move(**row));
     }
     op.close();

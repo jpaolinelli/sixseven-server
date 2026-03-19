@@ -104,8 +104,7 @@ TEST(QA_GDB478_Registry, RegisterVeryLongName) {
 
 TEST(QA_GDB478_Registry, RegisterNameWithSpecialChars) {
     AlgorithmRegistry registry;
-    auto result =
-        registry.register_algorithm(make_simple_algo("my-algo_v2.0!@#$"), noop_execute);
+    auto result = registry.register_algorithm(make_simple_algo("my-algo_v2.0!@#$"), noop_execute);
     EXPECT_TRUE(result.has_value());
     EXPECT_NE(registry.find("my-algo_v2.0!@#$"), nullptr);
 }
@@ -393,7 +392,7 @@ TEST_F(QA_GDB478_ScanOperator, OpenNextCloseNormalLifecycle) {
     // doesn't use it, we construct a minimal one.
     Catalog catalog;
     GraphEngine ge(catalog);
-    AlgorithmContext ctx{ge, "test_edge", {}};
+    AlgorithmContext ctx{ge, default_database_id, "test_edge", {}};
     OutputSchema schema({
         {"test_algo", "node_id", TypeId::INT64, false, 0},
         {"test_algo", "score", TypeId::FLOAT64, false, 0},
@@ -425,7 +424,7 @@ TEST_F(QA_GDB478_ScanOperator, NextAfterExhausted) {
 
     Catalog catalog;
     GraphEngine ge(catalog);
-    AlgorithmContext ctx{ge, "edge", {}};
+    AlgorithmContext ctx{ge, default_database_id, "edge", {}};
     OutputSchema schema({
         {"", "node_id", TypeId::INT64, false, 0},
         {"", "score", TypeId::FLOAT64, false, 0},
@@ -455,7 +454,7 @@ TEST_F(QA_GDB478_ScanOperator, EmptyResultSet) {
 
     Catalog catalog;
     GraphEngine ge(catalog);
-    AlgorithmContext ctx{ge, "edge", {}};
+    AlgorithmContext ctx{ge, default_database_id, "edge", {}};
     OutputSchema schema({
         {"", "node_id", TypeId::INT64, false, 0},
         {"", "score", TypeId::FLOAT64, false, 0},
@@ -477,7 +476,7 @@ TEST_F(QA_GDB478_ScanOperator, ExecuteErrorPropagated) {
 
     Catalog catalog;
     GraphEngine ge(catalog);
-    AlgorithmContext ctx{ge, "edge", {}};
+    AlgorithmContext ctx{ge, default_database_id, "edge", {}};
     OutputSchema schema({{"", "node_id", TypeId::INT64, false, 0}});
 
     AlgorithmScanOperator op(*entry, std::move(ctx), std::move(schema));
@@ -494,7 +493,7 @@ TEST_F(QA_GDB478_ScanOperator, ReOpen) {
 
     Catalog catalog;
     GraphEngine ge(catalog);
-    AlgorithmContext ctx{ge, "edge", {}};
+    AlgorithmContext ctx{ge, default_database_id, "edge", {}};
     OutputSchema schema({
         {"", "node_id", TypeId::INT64, false, 0},
         {"", "score", TypeId::FLOAT64, false, 0},
@@ -535,7 +534,7 @@ TEST_F(QA_GDB478_ScanOperator, CloseWithoutNext) {
 
     Catalog catalog;
     GraphEngine ge(catalog);
-    AlgorithmContext ctx{ge, "edge", {}};
+    AlgorithmContext ctx{ge, default_database_id, "edge", {}};
     OutputSchema schema({
         {"", "node_id", TypeId::INT64, false, 0},
         {"", "score", TypeId::FLOAT64, false, 0},
@@ -553,7 +552,7 @@ TEST_F(QA_GDB478_ScanOperator, PlanNodeDetail) {
 
     Catalog catalog;
     GraphEngine ge(catalog);
-    AlgorithmContext ctx{ge, "knows", {}};
+    AlgorithmContext ctx{ge, default_database_id, "knows", {}};
     OutputSchema schema;
 
     AlgorithmScanOperator op(*entry, std::move(ctx), std::move(schema));
@@ -751,8 +750,7 @@ TEST_F(QA_GDB478_E2E, NamedParamsAccepted) {
 }
 
 TEST_F(QA_GDB478_E2E, NamedParamsMultipleAccepted) {
-    auto result =
-        exec_ok("SELECT * FROM pagerank('knows', damping := 0.9, iterations := 10)");
+    auto result = exec_ok("SELECT * FROM pagerank('knows', damping := 0.9, iterations := 10)");
     EXPECT_EQ(result.column_names.size(), 2);
 }
 
@@ -762,8 +760,7 @@ TEST_F(QA_GDB478_E2E, NamedParamsCaseInsensitive) {
 }
 
 TEST_F(QA_GDB478_E2E, NamedParamWithExpression) {
-    auto result =
-        exec_ok("SELECT * FROM pagerank('knows', damping := 1.0 - 0.15)");
+    auto result = exec_ok("SELECT * FROM pagerank('knows', damping := 1.0 - 0.15)");
     EXPECT_EQ(result.column_names.size(), 2);
 }
 

@@ -65,23 +65,25 @@ protected:
 
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
 
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     Result<std::vector<AlgorithmRow>> run_unnormalized(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {{"normalized", Value(false)}}};
+        AlgorithmContext ctx{
+            engine_, default_database_id, edge_type, {{"normalized", Value(false)}}};
         return betweenness_centrality_execute(ctx);
     }
 
     Result<std::vector<AlgorithmRow>> run_normalized(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {{"normalized", Value(true)}}};
+        AlgorithmContext ctx{
+            engine_, default_database_id, edge_type, {{"normalized", Value(true)}}};
         return betweenness_centrality_execute(ctx);
     }
 
@@ -150,8 +152,7 @@ TEST_F(QA_GDB551_Betweenness, MassiveDuplication_StillCorrect) {
     auto scores = to_centrality_map(*result);
     // In a star, center has all betweenness. Leaf nodes have 0.
     for (int64_t leaf = 2; leaf <= 5; ++leaf) {
-        EXPECT_DOUBLE_EQ(scores[leaf], 0.0)
-            << "Leaf node " << leaf << " should have 0 betweenness";
+        EXPECT_DOUBLE_EQ(scores[leaf], 0.0) << "Leaf node " << leaf << " should have 0 betweenness";
     }
 }
 
@@ -163,8 +164,7 @@ TEST_F(QA_GDB551_Betweenness, SelfLoopDuplicates_Ignored) {
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     auto scores = to_centrality_map(*result);
-    EXPECT_NEAR(scores[2], 1.0, 1e-10)
-        << "Node 2 on path 1->2->3 should have betweenness 1.0";
+    EXPECT_NEAR(scores[2], 1.0, 1e-10) << "Node 2 on path 1->2->3 should have betweenness 1.0";
 }
 
 TEST_F(QA_GDB551_Betweenness, NoDuplicates_Unaffected) {
@@ -182,11 +182,11 @@ TEST_F(QA_GDB551_Betweenness, NoDuplicates_Unaffected) {
 }
 
 TEST_F(QA_GDB551_Betweenness, EmptyGraph_NoCrash) {
-    auto et = engine_.create_edge_type(default_database_id, 
-        "empty", table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+    auto et = engine_.create_edge_type(
+        default_database_id, "empty", table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(et.has_value());
 
-    AlgorithmContext ctx{engine_, "empty", {{"normalized", Value(false)}}};
+    AlgorithmContext ctx{engine_, default_database_id, "empty", {{"normalized", Value(false)}}};
     auto result = betweenness_centrality_execute(ctx);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->size(), 0u);

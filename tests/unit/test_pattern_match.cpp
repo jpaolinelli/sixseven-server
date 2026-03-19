@@ -100,13 +100,18 @@ protected:
         insert_company(20, "Globex");
 
         // Create edge type: people -[works_at]-> companies.
-        auto eid = graph_->create_edge_type(default_database_id, 
-            "works_at", people_id_, companies_id_, TypeId::INT64, TypeId::INT64, {});
+        auto eid = graph_->create_edge_type(default_database_id,
+                                            "works_at",
+                                            people_id_,
+                                            companies_id_,
+                                            TypeId::INT64,
+                                            TypeId::INT64,
+                                            {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         // Create edge type: people -[knows]-> people.
-        auto eid2 = graph_->create_edge_type(default_database_id, 
-            "knows", people_id_, people_id_, TypeId::INT64, TypeId::INT64, {});
+        auto eid2 = graph_->create_edge_type(
+            default_database_id, "knows", people_id_, people_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid2.has_value()) << eid2.error().message;
 
         // Link people to companies.
@@ -125,7 +130,7 @@ protected:
     }
 
     void link(const std::string& edge_type, int64_t from, int64_t to) {
-        auto r = graph_->link(edge_type, Value(from), Value(to));
+        auto r = graph_->link(default_database_id, edge_type, Value(from), Value(to));
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 
@@ -270,8 +275,13 @@ TEST_F(PatternMatchTest, MultiHopPattern) {
 
 TEST_F(PatternMatchTest, EmptyEdgeTable) {
     // Create a new edge type with no edges.
-    auto eid = graph_->create_edge_type(default_database_id, 
-        "empty_edge", people_id_, companies_id_, TypeId::INT64, TypeId::INT64, {});
+    auto eid = graph_->create_edge_type(default_database_id,
+                                        "empty_edge",
+                                        people_id_,
+                                        companies_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {});
     ASSERT_TRUE(eid.has_value());
 
     MatchConfig config;

@@ -16,6 +16,7 @@ namespace sixseven {
 
 /// Configuration for a shortest path query.
 struct ShortestPathConfig {
+    database_id_t database_id = default_database_id;
     std::string edge_type;
     Value from_key;
     Value to_key;

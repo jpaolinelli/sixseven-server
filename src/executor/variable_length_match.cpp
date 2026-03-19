@@ -133,7 +133,7 @@ Result<std::vector<std::pair<Value, int64_t>>> VariableLengthMatchOperator::get_
     std::vector<std::pair<Value, int64_t>> neighbors;
 
     if (direction == TraverseDirection::OUT || direction == TraverseDirection::BOTH) {
-        auto fwd = graph_engine_.get_edges_from(edge_type, pk);
+        auto fwd = graph_engine_.get_edges_from(database_id_, edge_type, pk);
         if (fwd) {
             for (auto& e : *fwd) {
                 neighbors.emplace_back(std::move(e.target_pk), static_cast<int64_t>(e.edge_row_id));
@@ -141,7 +141,7 @@ Result<std::vector<std::pair<Value, int64_t>>> VariableLengthMatchOperator::get_
         }
     }
     if (direction == TraverseDirection::IN || direction == TraverseDirection::BOTH) {
-        auto rev = graph_engine_.get_edges_to(edge_type, pk);
+        auto rev = graph_engine_.get_edges_to(database_id_, edge_type, pk);
         if (rev) {
             for (auto& e : *rev) {
                 neighbors.emplace_back(std::move(e.source_pk), static_cast<int64_t>(e.edge_row_id));
@@ -307,7 +307,7 @@ VariableLengthMatchOperator::evaluate_edge_filter(const MatchEdgeDef& edge_def,
         return ok(true);
     }
 
-    auto edge_type = catalog_.get_edge_type(database_id_,edge_def.edge_type);
+    auto edge_type = catalog_.get_edge_type(database_id_, edge_def.edge_type);
     if (!edge_type) {
         return tl::unexpected(edge_type.error());
     }
@@ -420,7 +420,8 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                 std::vector<EdgeRow> edge_rows;
                 if (edge_def.direction == TraverseDirection::OUT ||
                     edge_def.direction == TraverseDirection::BOTH) {
-                    auto fwd = graph_engine_.get_edges_from(edge_def.edge_type, it->second);
+                    auto fwd =
+                        graph_engine_.get_edges_from(database_id_, edge_def.edge_type, it->second);
                     if (fwd) {
                         for (auto& e : *fwd) {
                             edge_rows.push_back(std::move(e));
@@ -429,7 +430,8 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                 }
                 if (edge_def.direction == TraverseDirection::IN ||
                     edge_def.direction == TraverseDirection::BOTH) {
-                    auto rev = graph_engine_.get_edges_to(edge_def.edge_type, it->second);
+                    auto rev =
+                        graph_engine_.get_edges_to(database_id_, edge_def.edge_type, it->second);
                     if (rev) {
                         for (auto& e : *rev) {
                             edge_rows.push_back(std::move(e));
@@ -521,8 +523,8 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                         std::vector<EdgeRow> edge_rows;
                         if (edge_def.direction == TraverseDirection::OUT ||
                             edge_def.direction == TraverseDirection::BOTH) {
-                            auto fwd =
-                                graph_engine_.get_edges_from(edge_def.edge_type, entry.current_pk);
+                            auto fwd = graph_engine_.get_edges_from(
+                                database_id_, edge_def.edge_type, entry.current_pk);
                             if (fwd) {
                                 for (auto& e : *fwd) {
                                     edge_rows.push_back(std::move(e));
@@ -531,8 +533,8 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                         }
                         if (edge_def.direction == TraverseDirection::IN ||
                             edge_def.direction == TraverseDirection::BOTH) {
-                            auto rev =
-                                graph_engine_.get_edges_to(edge_def.edge_type, entry.current_pk);
+                            auto rev = graph_engine_.get_edges_to(
+                                database_id_, edge_def.edge_type, entry.current_pk);
                             if (rev) {
                                 for (auto& e : *rev) {
                                     edge_rows.push_back(std::move(e));

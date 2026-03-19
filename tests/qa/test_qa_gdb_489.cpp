@@ -97,33 +97,34 @@ protected:
 
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
 
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     /// Run betweenness centrality with normalized=true (default).
     Result<std::vector<AlgorithmRow>> run_betweenness(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {{"normalized", Value(true)}}};
+        AlgorithmContext ctx{
+            engine_, default_database_id, edge_type, {{"normalized", Value(true)}}};
         return betweenness_centrality_execute(ctx);
     }
 
     /// Run betweenness centrality with normalized=false.
     Result<std::vector<AlgorithmRow>> run_betweenness_unnormalized(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {{"normalized", Value(false)}}};
+        AlgorithmContext ctx{
+            engine_, default_database_id, edge_type, {{"normalized", Value(false)}}};
         return betweenness_centrality_execute(ctx);
     }
 
     /// Run betweenness centrality with raw named_args (for type edge cases).
     Result<std::vector<AlgorithmRow>>
-    run_betweenness_raw(const std::string& edge_type,
-                        std::unordered_map<std::string, Value> args) {
-        AlgorithmContext ctx{engine_, edge_type, std::move(args)};
+    run_betweenness_raw(const std::string& edge_type, std::unordered_map<std::string, Value> args) {
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, std::move(args)};
         return betweenness_centrality_execute(ctx);
     }
 
@@ -397,8 +398,18 @@ TEST_F(QA_GDB489_Betweenness, AC3_CompleteFourNodeGraph) {
     // Every node pair has a direct edge, so no intermediary.
     // All betweenness should be zero.
     build_graph("knows",
-                {{1, 2}, {1, 3}, {1, 4}, {2, 1}, {2, 3}, {2, 4},
-                 {3, 1}, {3, 2}, {3, 4}, {4, 1}, {4, 2}, {4, 3}});
+                {{1, 2},
+                 {1, 3},
+                 {1, 4},
+                 {2, 1},
+                 {2, 3},
+                 {2, 4},
+                 {3, 1},
+                 {3, 2},
+                 {3, 4},
+                 {4, 1},
+                 {4, 2},
+                 {4, 3}});
 
     auto result = run_betweenness_unnormalized("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -623,10 +634,8 @@ TEST_F(QA_GDB489_Betweenness, NonexistentEdgeType) {
 TEST_F(QA_GDB489_Betweenness, StringNormalizedValueFails) {
     build_graph("knows", {{1, 2}});
 
-    auto result = run_betweenness_raw("knows",
-                                      {{"normalized", Value(std::string("true"))}});
-    ASSERT_FALSE(result.has_value())
-        << "string value for 'normalized' should fail with type error";
+    auto result = run_betweenness_raw("knows", {{"normalized", Value(std::string("true"))}});
+    ASSERT_FALSE(result.has_value()) << "string value for 'normalized' should fail with type error";
     EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
 }
 
@@ -656,8 +665,7 @@ TEST_F(QA_GDB489_Betweenness, IntegerNormalizedCoercion) {
     // Pass integer 1 for normalized (should coerce to true).
     build_graph("knows", {{1, 2}, {2, 3}});
 
-    auto result = run_betweenness_raw("knows",
-                                      {{"normalized", Value(static_cast<int64_t>(1))}});
+    auto result = run_betweenness_raw("knows", {{"normalized", Value(static_cast<int64_t>(1))}});
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     auto scores = to_centrality_map(*result);
@@ -669,8 +677,7 @@ TEST_F(QA_GDB489_Betweenness, IntegerZeroNormalizedCoercion) {
     // Pass integer 0 for normalized (should coerce to false).
     build_graph("knows", {{1, 2}, {2, 3}});
 
-    auto result = run_betweenness_raw("knows",
-                                      {{"normalized", Value(static_cast<int64_t>(0))}});
+    auto result = run_betweenness_raw("knows", {{"normalized", Value(static_cast<int64_t>(0))}});
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     auto scores = to_centrality_map(*result);
@@ -777,8 +784,7 @@ TEST_F(QA_GDB489_Betweenness, StressRingGraph) {
     // All nodes in a directed ring should have the same betweenness.
     double first_score = scores[0];
     for (const auto& [node, score] : scores) {
-        EXPECT_NEAR(score, first_score, 1e-10)
-            << "node " << node << " in ring should match node 0";
+        EXPECT_NEAR(score, first_score, 1e-10) << "node " << node << " in ring should match node 0";
     }
 }
 

@@ -173,12 +173,13 @@ void QueryEngine::set_embedding_worker_pool(EmbeddingWorkerPool* pool) {
                 auto del = table_storage->heap->delete_tuple(rid);
                 if (!del) {
                     return make_error(del.error().code,
-                                     "embedding store: delete failed: " + del.error().message);
+                                      "embedding store: delete failed: " + del.error().message);
                 }
                 auto new_rid = table_storage->heap->insert_tuple(*serialized);
                 if (!new_rid) {
                     return make_error(new_rid.error().code,
-                                     "embedding store: reinsert failed: " + new_rid.error().message);
+                                      "embedding store: reinsert failed: " +
+                                          new_rid.error().message);
                 }
             }
 
@@ -519,10 +520,18 @@ Result<QueryResult> QueryEngine::execute_drop_database(const DropDatabaseStmt& s
 
     auto db_id = db->database_id;
 
-    // If cascade, drop storage for every table in this database first.
+    // If cascade, clean up graph engine edge types and drop table storage.
     if (stmt.cascade) {
         auto tables = catalog_.list_tables(db_id);
         for (const auto& table : tables) {
+            if (graph_engine_) {
+                auto drop_edges = graph_engine_->drop_edge_types_for_table(db_id, table.table_id);
+                if (!drop_edges) {
+                    SIXSEVEN_LOG_WARN("failed to clean up edge types for table {}: {}",
+                                      table.table_id,
+                                      drop_edges.error().message);
+                }
+            }
             auto drop_storage = storage_.drop_table_storage(db_id, table.table_id);
             if (!drop_storage) {
                 return make_error(drop_storage.error().code, drop_storage.error().message);
@@ -804,6 +813,16 @@ Result<QueryResult> QueryEngine::execute_drop_table(const DropTableStmt& stmt) {
 
     auto table_id = schema->table_id;
 
+    // Clean up graph engine edge types that reference this table (CASCADE).
+    if (graph_engine_) {
+        auto drop_edges = graph_engine_->drop_edge_types_for_table(current_database_id_, table_id);
+        if (!drop_edges) {
+            SIXSEVEN_LOG_WARN("failed to clean up edge types for table '{}': {}",
+                              stmt.name,
+                              drop_edges.error().message);
+        }
+    }
+
     // Drop storage first (flush + close + delete file).
     auto drop_storage = storage_.drop_table_storage(current_database_id_, table_id);
     if (!drop_storage) {
@@ -877,9 +896,13 @@ Result<QueryResult> QueryEngine::execute_create_edge_type(const CreateEdgeTypeSt
         prop_cols.push_back({prop.name, *type_result});
     }
 
-    auto result = graph_engine_->create_edge_type(
-        current_database_id_, stmt.name, from_schema->table_id, to_schema->table_id, from_pk_type,
-        to_pk_type, prop_cols);
+    auto result = graph_engine_->create_edge_type(current_database_id_,
+                                                  stmt.name,
+                                                  from_schema->table_id,
+                                                  to_schema->table_id,
+                                                  from_pk_type,
+                                                  to_pk_type,
+                                                  prop_cols);
     if (!result) {
         return make_error(result.error().code, result.error().message);
     }
@@ -1007,15 +1030,24 @@ namespace {
 /// Handles the common PK types: integers, strings, and UUIDs.
 std::string pk_value_to_string(const Value& v) {
     switch (v.type_id()) {
-    case TypeId::INT8: return std::to_string(v.as_int8());
-    case TypeId::INT16: return std::to_string(v.as_int16());
-    case TypeId::INT32: return std::to_string(v.as_int32());
-    case TypeId::INT64: return std::to_string(v.as_int64());
-    case TypeId::UINT8: return std::to_string(v.as_uint8());
-    case TypeId::UINT16: return std::to_string(v.as_uint16());
-    case TypeId::UINT32: return std::to_string(v.as_uint32());
-    case TypeId::UINT64: return std::to_string(v.as_uint64());
-    case TypeId::STRING: return v.as_string();
+    case TypeId::INT8:
+        return std::to_string(v.as_int8());
+    case TypeId::INT16:
+        return std::to_string(v.as_int16());
+    case TypeId::INT32:
+        return std::to_string(v.as_int32());
+    case TypeId::INT64:
+        return std::to_string(v.as_int64());
+    case TypeId::UINT8:
+        return std::to_string(v.as_uint8());
+    case TypeId::UINT16:
+        return std::to_string(v.as_uint16());
+    case TypeId::UINT32:
+        return std::to_string(v.as_uint32());
+    case TypeId::UINT64:
+        return std::to_string(v.as_uint64());
+    case TypeId::STRING:
+        return v.as_string();
     case TypeId::UUID: {
         // Serialize UUID bytes as hex string for deterministic hashing.
         const auto& uuid = v.as_uuid();
@@ -1172,7 +1204,8 @@ Result<QueryResult> QueryEngine::execute_link(const LinkStmt& stmt, const BoundS
         props.push_back(std::move(*val));
     }
 
-    auto result = graph_engine_->link(stmt.edge_type, coerced_src, coerced_tgt, props);
+    auto result =
+        graph_engine_->link(current_database_id_, stmt.edge_type, coerced_src, coerced_tgt, props);
     if (!result) {
         return make_error(result.error().code, result.error().message);
     }
@@ -1237,7 +1270,8 @@ Result<QueryResult> QueryEngine::execute_unlink(const UnlinkStmt& stmt,
                           "UNLINK target row not found in '" + stmt.target_table + "'");
     }
 
-    auto result = graph_engine_->unlink(stmt.edge_type, coerced_src, coerced_tgt);
+    auto result =
+        graph_engine_->unlink(current_database_id_, stmt.edge_type, coerced_src, coerced_tgt);
     if (!result) {
         return make_error(result.error().code, result.error().message);
     }

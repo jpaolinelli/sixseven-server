@@ -40,8 +40,8 @@ protected:
         table_id_ = *tid;
 
         // Create edge type.
-        auto eid = graph_->create_edge_type(default_database_id, 
-            "follows", table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto eid = graph_->create_edge_type(
+            default_database_id, "follows", table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         // Build graph: 1→2, 1→3, 2→4, 3→4, 4→5
@@ -53,7 +53,7 @@ protected:
     }
 
     void link(int64_t from, int64_t to) {
-        auto r = graph_->link("follows", Value(from), Value(to));
+        auto r = graph_->link(default_database_id, "follows", Value(from), Value(to));
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 

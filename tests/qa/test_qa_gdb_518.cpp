@@ -56,8 +56,7 @@ struct ClosenessInfo {
 };
 
 /// Extract (node_id, ClosenessInfo) from algorithm result rows.
-std::unordered_map<int64_t, ClosenessInfo>
-to_closeness_map(const std::vector<AlgorithmRow>& rows) {
+std::unordered_map<int64_t, ClosenessInfo> to_closeness_map(const std::vector<AlgorithmRow>& rows) {
     std::unordered_map<int64_t, ClosenessInfo> result;
     for (const auto& row : rows) {
         EXPECT_EQ(row.values.size(), 4u);
@@ -82,10 +81,8 @@ void verify_sorted_by_node_id(const std::vector<AlgorithmRow>& rows) {
 /// Verify all closeness values are finite (not NaN or Inf).
 void verify_closeness_finite(const std::unordered_map<int64_t, ClosenessInfo>& scores) {
     for (const auto& [node, info] : scores) {
-        EXPECT_FALSE(std::isnan(info.closeness))
-            << "node " << node << " has NaN closeness";
-        EXPECT_FALSE(std::isinf(info.closeness))
-            << "node " << node << " has Inf closeness";
+        EXPECT_FALSE(std::isnan(info.closeness)) << "node " << node << " has NaN closeness";
+        EXPECT_FALSE(std::isinf(info.closeness)) << "node " << node << " has Inf closeness";
     }
 }
 
@@ -111,8 +108,7 @@ void verify_closeness_formula(const std::unordered_map<int64_t, ClosenessInfo>& 
 void verify_closeness_bounds(const std::unordered_map<int64_t, ClosenessInfo>& scores) {
     for (const auto& [node, info] : scores) {
         EXPECT_GE(info.closeness, 0.0) << "node " << node << " closeness < 0";
-        EXPECT_LE(info.closeness, 1.0 + 1e-10)
-            << "node " << node << " closeness exceeds 1.0";
+        EXPECT_LE(info.closeness, 1.0 + 1e-10) << "node " << node << " closeness exceeds 1.0";
     }
 }
 
@@ -139,18 +135,18 @@ protected:
 
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
 
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     Result<std::vector<AlgorithmRow>> run(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {}};
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, {}};
         return closeness_centrality_execute(ctx);
     }
 
@@ -176,7 +172,8 @@ TEST(QA_GDB518_Def, AC1_Registration) {
 
 TEST(QA_GDB518_Def, AC1_CaseInsensitiveLookup) {
     AlgorithmRegistry registry;
-    (void)registry.register_algorithm(make_closeness_centrality_def(), closeness_centrality_execute);
+    (void)registry.register_algorithm(make_closeness_centrality_def(),
+                                      closeness_centrality_execute);
 
     EXPECT_NE(registry.find("CLOSENESS"), nullptr);
     EXPECT_NE(registry.find("Closeness"), nullptr);
@@ -287,8 +284,7 @@ TEST_F(QA_GDB518_ClosenessCentrality, AC2_DirectedChainExactValues) {
 
 TEST_F(QA_GDB518_ClosenessCentrality, AC2_BidirectionalPathCenterHighest) {
     // Bidirectional path: 1<->2<->3<->4<->5
-    build_graph("knows",
-                {{1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 4}, {4, 3}, {4, 5}, {5, 4}});
+    build_graph("knows", {{1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 4}, {4, 3}, {4, 5}, {5, 4}});
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -317,8 +313,18 @@ TEST_F(QA_GDB518_ClosenessCentrality, AC2_BidirectionalPathCenterHighest) {
 TEST_F(QA_GDB518_ClosenessCentrality, AC2_CompleteGraphAllEqual) {
     // Complete K4 (bidirectional): all closeness = 1.0
     build_graph("knows",
-                {{1, 2}, {1, 3}, {1, 4}, {2, 1}, {2, 3}, {2, 4},
-                 {3, 1}, {3, 2}, {3, 4}, {4, 1}, {4, 2}, {4, 3}});
+                {{1, 2},
+                 {1, 3},
+                 {1, 4},
+                 {2, 1},
+                 {2, 3},
+                 {2, 4},
+                 {3, 1},
+                 {3, 2},
+                 {3, 4},
+                 {4, 1},
+                 {4, 2},
+                 {4, 3}});
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -377,8 +383,7 @@ TEST_F(QA_GDB518_ClosenessCentrality, AC2_BidirectionalStarGraph) {
     for (int64_t node : {2, 3, 4, 5}) {
         EXPECT_EQ(scores[node].sum_farness, 7);
         EXPECT_EQ(scores[node].reachable_count, 5);
-        EXPECT_NEAR(scores[node].closeness, 4.0 / 7.0, 1e-10)
-            << "spoke node " << node;
+        EXPECT_NEAR(scores[node].closeness, 4.0 / 7.0, 1e-10) << "spoke node " << node;
     }
 
     // Hub has strictly higher closeness than any spoke
@@ -436,8 +441,7 @@ TEST_F(QA_GDB518_ClosenessCentrality, AC2_DiamondGraphExactValues) {
 
 TEST_F(QA_GDB518_ClosenessCentrality, AC2_FormulaInvariantComplexGraph) {
     // Complex graph: verify formula holds for every node.
-    build_graph("knows",
-                {{1, 2}, {1, 3}, {2, 3}, {3, 4}, {4, 1}, {4, 5}, {5, 2}});
+    build_graph("knows", {{1, 2}, {1, 3}, {2, 3}, {3, 4}, {4, 1}, {4, 5}, {5, 2}});
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -682,8 +686,7 @@ TEST_F(QA_GDB518_ClosenessCentrality, Topology_DirectedCycle5) {
     for (int64_t node : {1, 2, 3, 4, 5}) {
         EXPECT_EQ(scores[node].sum_farness, 10);
         EXPECT_EQ(scores[node].reachable_count, 5);
-        EXPECT_NEAR(scores[node].closeness, 4.0 / 10.0, 1e-10)
-            << "node " << node << " in 5-cycle";
+        EXPECT_NEAR(scores[node].closeness, 4.0 / 10.0, 1e-10) << "node " << node << " in 5-cycle";
     }
 }
 
@@ -737,8 +740,7 @@ TEST_F(QA_GDB518_ClosenessCentrality, Topology_NegativeNodeIds) {
 
     // Directed cycle: all equal closeness = 2/3
     for (int64_t node : {-10, -5, 0}) {
-        EXPECT_NEAR(scores[node].closeness, 2.0 / 3.0, 1e-10)
-            << "node " << node;
+        EXPECT_NEAR(scores[node].closeness, 2.0 / 3.0, 1e-10) << "node " << node;
     }
 }
 
@@ -903,8 +905,7 @@ TEST_F(QA_GDB518_ClosenessCentrality, NumericalStability_ClosenessAtMostOne) {
     // In any graph, closeness = (reachable-1)/sum_farness.
     // Since sum_farness >= reachable-1 (minimum distance is 1 for each reachable node),
     // closeness <= 1.0 always.
-    build_graph("knows",
-                {{1, 2}, {2, 3}, {3, 1}, {1, 4}, {4, 5}, {5, 1}, {2, 4}});
+    build_graph("knows", {{1, 2}, {2, 3}, {3, 1}, {1, 4}, {4, 5}, {5, 1}, {2, 4}});
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value());
@@ -1063,10 +1064,8 @@ TEST_F(QA_GDB518_ClosenessCentrality, Stress_ManyDisconnectedPairs) {
 
     // Source nodes: closeness=1.0, sink nodes: closeness=0.0
     for (int64_t i = 0; i < 200; i += 2) {
-        EXPECT_DOUBLE_EQ(scores[i].closeness, 1.0)
-            << "source node " << i;
-        EXPECT_DOUBLE_EQ(scores[i + 1].closeness, 0.0)
-            << "sink node " << (i + 1);
+        EXPECT_DOUBLE_EQ(scores[i].closeness, 1.0) << "source node " << i;
+        EXPECT_DOUBLE_EQ(scores[i + 1].closeness, 0.0) << "sink node " << (i + 1);
     }
 }
 
@@ -1158,8 +1157,7 @@ TEST_F(QA_GDB518_ClosenessCentrality, Invariant_ReachableCountBound) {
 
 TEST_F(QA_GDB518_ClosenessCentrality, Invariant_SumFarnessLowerBound) {
     // sum_farness >= reachable_count - 1 (minimum distance is 1 per reachable node).
-    build_graph("knows",
-                {{1, 2}, {1, 3}, {2, 3}, {3, 4}, {4, 1}});
+    build_graph("knows", {{1, 2}, {1, 3}, {2, 3}, {3, 4}, {4, 1}});
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value());
@@ -1168,17 +1166,16 @@ TEST_F(QA_GDB518_ClosenessCentrality, Invariant_SumFarnessLowerBound) {
     for (const auto& [node, info] : scores) {
         if (info.reachable_count > 1) {
             EXPECT_GE(info.sum_farness, info.reachable_count - 1)
-                << "node " << node
-                << " sum_farness should be >= reachable_count-1";
+                << "node " << node << " sum_farness should be >= reachable_count-1";
         }
     }
 }
 
 TEST_F(QA_GDB518_ClosenessCentrality, Invariant_ClosenessFormulaHoldsEverywhere) {
     // Random-ish complex graph: verify formula for every node.
-    build_graph("knows",
-                {{1, 2}, {2, 3}, {3, 1}, {1, 4}, {4, 5}, {5, 6},
-                 {6, 4}, {7, 8}, {8, 7}, {9, 1}, {3, 7}});
+    build_graph(
+        "knows",
+        {{1, 2}, {2, 3}, {3, 1}, {1, 4}, {4, 5}, {5, 6}, {6, 4}, {7, 8}, {8, 7}, {9, 1}, {3, 7}});
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value());
