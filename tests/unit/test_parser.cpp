@@ -488,6 +488,24 @@ TEST(Parser, DropDatabaseRestrict) {
     EXPECT_FALSE(dd->cascade);
 }
 
+TEST(Parser, DropDatabaseIfExistsAfterName) {
+    auto stmt = parse_one("DROP DATABASE mydb IF EXISTS");
+    auto* dd = dynamic_cast<DropDatabaseStmt*>(stmt.get());
+    ASSERT_NE(dd, nullptr);
+    EXPECT_EQ(dd->database_name, "mydb");
+    EXPECT_TRUE(dd->if_exists);
+    EXPECT_FALSE(dd->cascade);
+}
+
+TEST(Parser, DropDatabaseIfExistsAfterNameCascade) {
+    auto stmt = parse_one("DROP DATABASE mydb IF EXISTS CASCADE");
+    auto* dd = dynamic_cast<DropDatabaseStmt*>(stmt.get());
+    ASSERT_NE(dd, nullptr);
+    EXPECT_EQ(dd->database_name, "mydb");
+    EXPECT_TRUE(dd->if_exists);
+    EXPECT_TRUE(dd->cascade);
+}
+
 TEST(Parser, DropDatabaseMissingName) {
     expect_parse_error("DROP DATABASE");
 }
