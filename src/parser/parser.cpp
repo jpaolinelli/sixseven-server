@@ -74,6 +74,14 @@ bool is_name_token(TokenType type) {
     case TokenType::USER:
     case TokenType::PASSWORD:
     case TokenType::WEIGHT:
+    case TokenType::OVER:
+    case TokenType::PARTITION:
+    case TokenType::ROWS:
+    case TokenType::RANGE:
+    case TokenType::UNBOUNDED:
+    case TokenType::PRECEDING:
+    case TokenType::FOLLOWING:
+    case TokenType::CURRENT:
         return true;
     default:
         return false;
@@ -163,6 +171,7 @@ bool is_clause_keyword(TokenType type) {
     case TokenType::OR:
     case TokenType::NOT:
     case TokenType::AS:
+    case TokenType::OVER:
     case TokenType::BEGIN:
     case TokenType::COMMIT:
     case TokenType::ROLLBACK:
@@ -3525,6 +3534,119 @@ Result<ExprPtr> Parser::parse_primary() {
             auto rp = expect(TokenType::RPAREN, "expected ')'");
             if (!rp)
                 return tl::unexpected(rp.error());
+
+            // Window function: func(...) OVER (...)
+            if (match(TokenType::OVER)) {
+                auto win = std::make_unique<WindowFunctionExpr>();
+                win->name = std::move(fn->name);
+                win->args = std::move(fn->args);
+                win->distinct = fn->distinct;
+                win->line = line;
+                win->col = col;
+
+                auto lp = expect(TokenType::LPAREN, "expected '(' after OVER");
+                if (!lp)
+                    return tl::unexpected(lp.error());
+
+                // PARTITION BY clause (optional).
+                if (match(TokenType::PARTITION)) {
+                    auto by_tok = expect(TokenType::BY, "expected BY after PARTITION");
+                    if (!by_tok)
+                        return tl::unexpected(by_tok.error());
+                    do {
+                        auto pb_expr = parse_expression();
+                        if (!pb_expr)
+                            return pb_expr;
+                        win->partition_by.push_back(std::move(*pb_expr));
+                    } while (match(TokenType::COMMA));
+                }
+
+                // ORDER BY clause (optional).
+                if (match(TokenType::ORDER)) {
+                    auto by_tok = expect(TokenType::BY, "expected BY after ORDER");
+                    if (!by_tok)
+                        return tl::unexpected(by_tok.error());
+                    do {
+                        auto ob_expr = parse_expression();
+                        if (!ob_expr)
+                            return ob_expr;
+                        SortDirection dir = SortDirection::ASC;
+                        if (match(TokenType::DESC)) {
+                            dir = SortDirection::DESC;
+                        } else {
+                            match(TokenType::ASC); // consume optional ASC
+                        }
+                        win->order_by.push_back({std::move(*ob_expr), dir});
+                    } while (match(TokenType::COMMA));
+                }
+
+                // Frame specification (optional): ROWS/RANGE BETWEEN ... AND ...
+                if (check(TokenType::ROWS) || check(TokenType::RANGE)) {
+                    AstWindowFrame frame;
+                    frame.type = (advance().type == TokenType::ROWS) ? AstFrameType::ROWS
+                                                                     : AstFrameType::RANGE;
+
+                    // Parse frame bounds.
+                    auto parse_bound = [&](AstFrameBound& bound, int64_t& offset) -> Result<void> {
+                        if (match(TokenType::CURRENT)) {
+                            auto row_tok = parse_name("ROW");
+                            if (!row_tok)
+                                return tl::unexpected(row_tok.error());
+                            bound = AstFrameBound::CURRENT_ROW;
+                        } else if (match(TokenType::UNBOUNDED)) {
+                            if (match(TokenType::PRECEDING)) {
+                                bound = AstFrameBound::UNBOUNDED_PRECEDING;
+                            } else if (match(TokenType::FOLLOWING)) {
+                                bound = AstFrameBound::UNBOUNDED_FOLLOWING;
+                            } else {
+                                return make_error(
+                                    StatusCode::PARSE_ERROR,
+                                    "expected PRECEDING or FOLLOWING after UNBOUNDED");
+                            }
+                        } else if (check(TokenType::INTEGER_LITERAL)) {
+                            offset = std::stoll(std::string(advance().lexeme));
+                            if (match(TokenType::PRECEDING)) {
+                                bound = AstFrameBound::N_PRECEDING;
+                            } else if (match(TokenType::FOLLOWING)) {
+                                bound = AstFrameBound::N_FOLLOWING;
+                            } else {
+                                return make_error(StatusCode::PARSE_ERROR,
+                                                  "expected PRECEDING or FOLLOWING after offset");
+                            }
+                        } else {
+                            return make_error(StatusCode::PARSE_ERROR,
+                                              "expected frame bound specification");
+                        }
+                        return ok();
+                    };
+
+                    if (match(TokenType::BETWEEN)) {
+                        auto start_res = parse_bound(frame.start_bound, frame.start_offset);
+                        if (!start_res)
+                            return tl::unexpected(start_res.error());
+                        auto and_tok = expect(TokenType::AND, "expected AND in frame clause");
+                        if (!and_tok)
+                            return tl::unexpected(and_tok.error());
+                        auto end_res = parse_bound(frame.end_bound, frame.end_offset);
+                        if (!end_res)
+                            return tl::unexpected(end_res.error());
+                    } else {
+                        // Shorthand: ROWS/RANGE <bound> (end is CURRENT ROW).
+                        auto start_res = parse_bound(frame.start_bound, frame.start_offset);
+                        if (!start_res)
+                            return tl::unexpected(start_res.error());
+                        frame.end_bound = AstFrameBound::CURRENT_ROW;
+                    }
+
+                    win->frame = frame;
+                }
+
+                auto rp2 = expect(TokenType::RPAREN, "expected ')' after OVER clause");
+                if (!rp2)
+                    return tl::unexpected(rp2.error());
+                return ok(ExprPtr(std::move(win)));
+            }
+
             return ok(ExprPtr(std::move(fn)));
         }
 

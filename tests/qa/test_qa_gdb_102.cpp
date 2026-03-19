@@ -103,6 +103,10 @@ public:
         last_type = "ArrayExpr";
         ++total;
     }
+    void visit(const WindowFunctionExpr&) override {
+        last_type = "WindowFunctionExpr";
+        ++total;
+    }
 
     // -- DDL --
     void visit(const CreateTableStmt&) override {

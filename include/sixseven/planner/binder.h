@@ -34,6 +34,7 @@ struct ExprType {
     TypeId type_id = TypeId::INT32;
     bool nullable = true;
     bool is_aggregate = false; ///< True if this expression contains an aggregate call.
+    bool is_window = false;    ///< True if this expression is a window function call.
 };
 
 // ---------------------------------------------------------------------------
@@ -183,6 +184,8 @@ private:
     Result<ExprType> bind_exists(const ExistsExpr& expr, Scope& scope, BoundStatement& bound);
     Result<ExprType> bind_subquery(const SubqueryExpr& expr, Scope& scope, BoundStatement& bound);
     Result<ExprType> bind_array(const ArrayExpr& expr, Scope& scope, BoundStatement& bound);
+    Result<ExprType>
+    bind_window_function(const WindowFunctionExpr& expr, Scope& scope, BoundStatement& bound);
 
     // -- Helpers --------------------------------------------------------------
 

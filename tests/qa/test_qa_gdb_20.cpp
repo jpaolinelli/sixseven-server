@@ -1387,6 +1387,7 @@ public:
     void visit(const ExistsExpr&) override { count++; }
     void visit(const SubqueryExpr&) override { count++; }
     void visit(const ArrayExpr&) override { count++; }
+    void visit(const WindowFunctionExpr&) override { count++; }
     void visit(const CreateTableStmt&) override { count++; }
     void visit(const DropTableStmt&) override { count++; }
     void visit(const AlterTableStmt&) override { count++; }

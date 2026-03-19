@@ -35,9 +35,9 @@ bool same_column_ref(const Expr& a, const Expr& b) {
 void collect_ungrouped_columns(const Expr& expr,
                                const BoundStatement& bound,
                                std::vector<const ColumnRefExpr*>& out) {
-    // If this expression is an aggregate, don't recurse into it.
+    // If this expression is an aggregate or window function, don't recurse into it.
     auto it = bound.expr_types.find(&expr);
-    if (it != bound.expr_types.end() && it->second.is_aggregate) {
+    if (it != bound.expr_types.end() && (it->second.is_aggregate || it->second.is_window)) {
         return;
     }
 
@@ -274,7 +274,7 @@ Result<ScopeTable> Binder::build_traverse_scope(const TableRef& tref, BoundState
     }
 
     // 1. Resolve edge type.
-    auto edge = catalog_.get_edge_type(database_id_,trav->edge_type);
+    auto edge = catalog_.get_edge_type(database_id_, trav->edge_type);
     if (!edge) {
         return tl::unexpected(edge.error());
     }
@@ -462,7 +462,7 @@ Binder::bind_match_source(const MatchStmt& match, Scope& scope, BoundStatement& 
         }
 
         if (elem.outgoing_edge && !elem.outgoing_edge->edge_type.empty()) {
-            auto edge = catalog_.get_edge_type(database_id_,elem.outgoing_edge->edge_type);
+            auto edge = catalog_.get_edge_type(database_id_, elem.outgoing_edge->edge_type);
             if (!edge) {
                 return tl::unexpected(edge.error());
             }
@@ -545,7 +545,7 @@ Binder::bind_match_source(const MatchStmt& match, Scope& scope, BoundStatement& 
             continue;
         }
 
-        auto edge_def = catalog_.get_edge_type(database_id_,elem.outgoing_edge->edge_type);
+        auto edge_def = catalog_.get_edge_type(database_id_, elem.outgoing_edge->edge_type);
         if (!edge_def) {
             continue; // Already validated above.
         }
@@ -569,7 +569,8 @@ Binder::bind_match_source(const MatchStmt& match, Scope& scope, BoundStatement& 
         // is compatible with the next edge's source table.
         const auto& next_elem = match.pattern[i + 1];
         if (next_elem.outgoing_edge && !next_elem.outgoing_edge->edge_type.empty()) {
-            auto next_edge = catalog_.get_edge_type(database_id_,next_elem.outgoing_edge->edge_type);
+            auto next_edge =
+                catalog_.get_edge_type(database_id_, next_elem.outgoing_edge->edge_type);
             if (next_edge && edge_def->target_table_id != next_edge->source_table_id) {
                 return make_error(
                     StatusCode::INVALID_ARGUMENT,
@@ -727,6 +728,8 @@ Result<ExprType> Binder::bind_expr(const Expr& expr, Scope& scope, BoundStatemen
         result = bind_subquery(*e, scope, bound);
     } else if (auto* e = dynamic_cast<const ArrayExpr*>(&expr)) {
         result = bind_array(*e, scope, bound);
+    } else if (auto* e = dynamic_cast<const WindowFunctionExpr*>(&expr)) {
+        result = bind_window_function(*e, scope, bound);
     }
 
     if (result) {
@@ -936,6 +939,76 @@ Binder::bind_function_call(const FunctionCallExpr& expr, Scope& scope, BoundStat
         }
         et.type_id = *ret;
         et.is_aggregate = any_agg;
+    }
+
+    return ok(et);
+}
+
+Result<ExprType>
+Binder::bind_window_function(const WindowFunctionExpr& expr, Scope& scope, BoundStatement& bound) {
+    // Bind arguments.
+    std::vector<TypeId> arg_types;
+    bool any_nullable = false;
+
+    for (auto& arg : expr.args) {
+        if (auto* cref = dynamic_cast<const ColumnRefExpr*>(arg.get())) {
+            if (cref->column == "*") {
+                arg_types.push_back(TypeId::INT64);
+                continue;
+            }
+        }
+        auto t = bind_expr(*arg, scope, bound);
+        if (!t) {
+            return t;
+        }
+        arg_types.push_back(t->type_id);
+        any_nullable = any_nullable || t->nullable;
+    }
+
+    // Bind PARTITION BY expressions.
+    for (auto& pb : expr.partition_by) {
+        auto t = bind_expr(*pb, scope, bound);
+        if (!t) {
+            return t;
+        }
+    }
+
+    // Bind ORDER BY expressions.
+    for (auto& ob : expr.order_by) {
+        auto t = bind_expr(*ob.expr, scope, bound);
+        if (!t) {
+            return t;
+        }
+    }
+
+    // Determine the return type based on function name.
+    ExprType et;
+    et.nullable = true;
+    et.is_window = true;
+
+    std::string upper = to_upper(expr.name);
+
+    // Ranking functions always return INT64.
+    if (upper == "ROW_NUMBER" || upper == "RANK" || upper == "DENSE_RANK" || upper == "NTILE") {
+        et.type_id = TypeId::INT64;
+        et.nullable = false;
+    } else if (upper == "LAG" || upper == "LEAD" || upper == "FIRST_VALUE" ||
+               upper == "LAST_VALUE") {
+        // Return same type as argument.
+        et.type_id = arg_types.empty() ? TypeId::INT64 : arg_types[0];
+    } else if (upper == "COUNT") {
+        et.type_id = TypeId::INT64;
+        et.nullable = false;
+    } else if (is_aggregate_function(upper)) {
+        // Aggregate used as window function (SUM, AVG, MIN, MAX).
+        TypeId input = arg_types.empty() ? TypeId::INT64 : arg_types[0];
+        auto ret = aggregate_return_type(upper, input);
+        if (!ret) {
+            return tl::unexpected(ret.error());
+        }
+        et.type_id = *ret;
+    } else {
+        return make_error(StatusCode::TYPE_ERROR, "unknown window function: " + expr.name);
     }
 
     return ok(et);
@@ -1416,9 +1489,15 @@ Result<void> Binder::validate_aggregates(const SelectStmt& stmt,
             continue;
         }
 
-        // If the whole expression is an aggregate, it's fine.
+        // If the whole expression is an aggregate or window function, it's fine.
         if (contains_aggregate(*item.expr, bound)) {
             continue;
+        }
+        {
+            auto wit = bound.expr_types.find(item.expr.get());
+            if (wit != bound.expr_types.end() && wit->second.is_window) {
+                continue;
+            }
         }
 
         // Recursively collect all column refs in this expression,
@@ -2044,7 +2123,7 @@ Result<BoundStatement> Binder::bind_create_edge_type(const CreateEdgeTypeStmt& s
     }
 
     // Check for duplicate edge type.
-    auto existing = catalog_.get_edge_type(database_id_,stmt.name);
+    auto existing = catalog_.get_edge_type(database_id_, stmt.name);
     if (existing) {
         return make_error(StatusCode::ALREADY_EXISTS, "edge type " + stmt.name + " already exists");
     }
@@ -2057,7 +2136,7 @@ Result<BoundStatement> Binder::bind_drop_edge_type(const DropEdgeTypeStmt& stmt)
     bound.stmt = &stmt;
 
     if (!stmt.if_exists) {
-        auto edge = catalog_.get_edge_type(database_id_,stmt.name);
+        auto edge = catalog_.get_edge_type(database_id_, stmt.name);
         if (!edge) {
             return tl::unexpected(edge.error());
         }
@@ -2075,7 +2154,7 @@ Result<BoundStatement> Binder::bind_link(const LinkStmt& stmt) {
     bound.stmt = &stmt;
 
     // Resolve edge type.
-    auto edge = catalog_.get_edge_type(database_id_,stmt.edge_type);
+    auto edge = catalog_.get_edge_type(database_id_, stmt.edge_type);
     if (!edge) {
         return tl::unexpected(edge.error());
     }
@@ -2127,7 +2206,7 @@ Result<BoundStatement> Binder::bind_unlink(const UnlinkStmt& stmt) {
     BoundStatement bound;
     bound.stmt = &stmt;
 
-    auto edge = catalog_.get_edge_type(database_id_,stmt.edge_type);
+    auto edge = catalog_.get_edge_type(database_id_, stmt.edge_type);
     if (!edge) {
         return tl::unexpected(edge.error());
     }
@@ -2182,7 +2261,7 @@ Result<BoundStatement> Binder::bind_traverse(const TraverseStmt& stmt) {
     BoundStatement bound;
     bound.stmt = &stmt;
 
-    auto edge = catalog_.get_edge_type(database_id_,stmt.edge_type);
+    auto edge = catalog_.get_edge_type(database_id_, stmt.edge_type);
     if (!edge) {
         return tl::unexpected(edge.error());
     }
@@ -2343,7 +2422,7 @@ Result<BoundStatement> Binder::bind_shortest_path(const ShortestPathStmt& stmt) 
     BoundStatement bound;
     bound.stmt = &stmt;
 
-    auto edge = catalog_.get_edge_type(database_id_,stmt.edge_type);
+    auto edge = catalog_.get_edge_type(database_id_, stmt.edge_type);
     if (!edge) {
         return tl::unexpected(edge.error());
     }

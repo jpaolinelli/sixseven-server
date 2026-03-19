@@ -145,6 +145,17 @@ enum class TokenType : uint8_t {
     VIA,
     WEIGHT,
 
+    // -- Window function keywords ---------------------------------------------
+
+    OVER,
+    PARTITION,
+    ROWS,
+    RANGE,
+    UNBOUNDED,
+    PRECEDING,
+    FOLLOWING,
+    CURRENT,
+
     // -- Operators ------------------------------------------------------------
 
     PLUS,          // +
@@ -440,6 +451,22 @@ constexpr std::string_view token_type_name(TokenType type) {
         return "VIA";
     case TokenType::WEIGHT:
         return "WEIGHT";
+    case TokenType::OVER:
+        return "OVER";
+    case TokenType::PARTITION:
+        return "PARTITION";
+    case TokenType::ROWS:
+        return "ROWS";
+    case TokenType::RANGE:
+        return "RANGE";
+    case TokenType::UNBOUNDED:
+        return "UNBOUNDED";
+    case TokenType::PRECEDING:
+        return "PRECEDING";
+    case TokenType::FOLLOWING:
+        return "FOLLOWING";
+    case TokenType::CURRENT:
+        return "CURRENT";
     case TokenType::PLUS:
         return "PLUS";
     case TokenType::MINUS:
