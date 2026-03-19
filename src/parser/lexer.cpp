@@ -26,6 +26,7 @@ const std::unordered_map<std::string, TokenType>& keyword_map() {
         {"BETWEEN", TokenType::BETWEEN},
         {"BIGINT", TokenType::BIGINT},
         {"BLOB", TokenType::BLOB_KW},
+        {"BOOL", TokenType::BOOLEAN},
         {"BOOLEAN", TokenType::BOOLEAN},
         {"BY", TokenType::BY},
         {"CASCADE", TokenType::CASCADE},

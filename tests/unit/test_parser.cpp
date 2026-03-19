@@ -554,6 +554,14 @@ TEST(Parser, ExprBoolean) {
     EXPECT_EQ(lit->value, "true");
 }
 
+TEST(Parser, BoolTypeAlias) {
+    auto stmt = parse_one("CREATE TABLE t (flag BOOL)");
+    auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
+    ASSERT_NE(ct, nullptr);
+    ASSERT_EQ(ct->columns.size(), 1u);
+    EXPECT_EQ(ct->columns[0].type.name, "BOOL");
+}
+
 TEST(Parser, ExprCheckComparison) {
     auto stmt = parse_one("CREATE TABLE t (x INT, CHECK(x >= 0))");
     auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
