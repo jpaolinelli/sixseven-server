@@ -1,0 +1,23 @@
+# Admin Commands
+
+```sql
+SHOW DATABASES;
+SHOW TABLES;
+SHOW COLUMNS FROM users;
+SHOW EDGE TYPES;
+SHOW INDEXES;
+SHOW EMBEDDINGS;
+SHOW PROVIDERS;
+
+DESCRIBE users;
+
+EXPLAIN SELECT * FROM users WHERE age > 25;
+EXPLAIN ANALYZE SELECT * FROM users WHERE age > 25;
+
+SET max_connections = 200;
+SET log_level = 'debug';
+SHOW PARAMETER max_connections;
+
+VACUUM;
+ANALYZE;
+```
