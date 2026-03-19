@@ -144,7 +144,8 @@ TEST(Lexer, TypeKeywords) {
     };
     KW keywords[] = {
         {"BIGINT", TokenType::BIGINT},     {"BLOB", TokenType::BLOB_KW},
-        {"BOOLEAN", TokenType::BOOLEAN},   {"CHAR", TokenType::CHAR},
+        {"BOOL", TokenType::BOOLEAN},      {"BOOLEAN", TokenType::BOOLEAN},
+        {"CHAR", TokenType::CHAR},
         {"DATE", TokenType::DATE},         {"DECIMAL", TokenType::DECIMAL},
         {"DOUBLE", TokenType::DOUBLE},     {"FLOAT", TokenType::FLOAT},
         {"INT", TokenType::INT},           {"INTEGER", TokenType::INTEGER},
