@@ -335,12 +335,13 @@ Result<void> CatalogPersistence::load_catalog() {
             auto& v = *values;
             EdgeTypeDef def;
             def.edge_id = v[0].as_int32();
-            def.name = v[1].as_string();
-            def.source_table_id = v[2].as_int32();
-            def.target_table_id = v[3].as_int32();
-            def.properties = v[4].is_null() ? "" : v[4].as_string();
+            auto db_id = static_cast<database_id_t>(v[1].as_int32());
+            def.name = v[2].as_string();
+            def.source_table_id = v[3].as_int32();
+            def.target_table_id = v[4].as_int32();
+            def.properties = v[5].is_null() ? "" : v[5].as_string();
 
-            auto r = catalog_.restore_edge_type(std::move(def));
+            auto r = catalog_.restore_edge_type(db_id, std::move(def));
             if (!r) {
                 SIXSEVEN_LOG_WARN("catalog persistence: failed to restore edge type: {}",
                                r.error().message);
@@ -528,7 +529,7 @@ Result<void> CatalogPersistence::remove_table(table_id_t table_id) {
 
     // Remove edge types referencing this table.
     auto r4 = delete_rows(sys_edge_types_table_id, [table_id](const std::vector<Value>& v) {
-        return v[2].as_int32() == table_id || v[3].as_int32() == table_id;
+        return v[3].as_int32() == table_id || v[4].as_int32() == table_id;
     });
     if (!r4) {
         return r4;
@@ -564,6 +565,7 @@ Result<void> CatalogPersistence::remove_index(index_id_t index_id) {
 Result<void> CatalogPersistence::persist_edge_type(const EdgeTypeDef& def) {
     return insert_row(sys_edge_types_table_id,
                       {Value(def.edge_id),
+                       Value(def.database_id),
                        Value(def.name),
                        Value(def.source_table_id),
                        Value(def.target_table_id),

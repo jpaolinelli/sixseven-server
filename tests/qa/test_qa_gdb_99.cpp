@@ -40,10 +40,10 @@ TEST(QA_GDB99_Edge, CreateEdgeType) {
     def.target_table_id = *tgt;
     def.properties = "since INT32, role STRING";
 
-    auto r = catalog.create_edge_type(def);
+    auto r = catalog.create_edge_type(default_database_id, def);
     ASSERT_TRUE(r.has_value());
 
-    auto e = catalog.get_edge_type("works_at");
+    auto e = catalog.get_edge_type(default_database_id, "works_at");
     ASSERT_TRUE(e.has_value());
     EXPECT_EQ(e->source_table_id, *src);
     EXPECT_EQ(e->target_table_id, *tgt);
@@ -55,11 +55,11 @@ TEST(QA_GDB99_Edge, SelfReferenceEdge) {
     auto t = catalog.create_table(default_database_id, make_table("person"));
     ASSERT_TRUE(t.has_value());
 
-    EdgeTypeDef def{0, "follows", *t, *t, ""};
-    auto r = catalog.create_edge_type(def);
+    EdgeTypeDef def{0, 0, "follows", *t, *t, ""};
+    auto r = catalog.create_edge_type(default_database_id, def);
     ASSERT_TRUE(r.has_value());
 
-    auto e = catalog.get_edge_type("follows");
+    auto e = catalog.get_edge_type(default_database_id, "follows");
     ASSERT_TRUE(e.has_value());
     EXPECT_EQ(e->source_table_id, e->target_table_id);
 }
@@ -69,13 +69,13 @@ TEST(QA_GDB99_Edge, DuplicateEdgeTypeName) {
     auto t = catalog.create_table(default_database_id, make_table("t"));
     ASSERT_TRUE(t.has_value());
 
-    EdgeTypeDef d1{0, "relates", *t, *t, ""};
-    EdgeTypeDef d2{0, "relates", *t, *t, ""};
+    EdgeTypeDef d1{0, 0, "relates", *t, *t, ""};
+    EdgeTypeDef d2{0, 0, "relates", *t, *t, ""};
 
-    auto r1 = catalog.create_edge_type(d1);
+    auto r1 = catalog.create_edge_type(default_database_id, d1);
     ASSERT_TRUE(r1.has_value());
 
-    auto r2 = catalog.create_edge_type(d2);
+    auto r2 = catalog.create_edge_type(default_database_id, d2);
     ASSERT_FALSE(r2.has_value());
     EXPECT_EQ(r2.error().code, StatusCode::ALREADY_EXISTS);
 }
@@ -85,8 +85,8 @@ TEST(QA_GDB99_Edge, MissingSourceTable) {
     auto t = catalog.create_table(default_database_id, make_table("t"));
     ASSERT_TRUE(t.has_value());
 
-    EdgeTypeDef def{0, "bad_edge", 9999, *t, ""};
-    auto r = catalog.create_edge_type(def);
+    EdgeTypeDef def{0, 0, "bad_edge", 9999, *t, ""};
+    auto r = catalog.create_edge_type(default_database_id, def);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::NOT_FOUND);
 }
@@ -96,8 +96,8 @@ TEST(QA_GDB99_Edge, MissingTargetTable) {
     auto t = catalog.create_table(default_database_id, make_table("t"));
     ASSERT_TRUE(t.has_value());
 
-    EdgeTypeDef def{0, "bad_edge", *t, 9999, ""};
-    auto r = catalog.create_edge_type(def);
+    EdgeTypeDef def{0, 0, "bad_edge", *t, 9999, ""};
+    auto r = catalog.create_edge_type(default_database_id, def);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::NOT_FOUND);
 }
@@ -111,18 +111,18 @@ TEST(QA_GDB99_Edge, DropEdgeType) {
     auto t = catalog.create_table(default_database_id, make_table("t"));
     ASSERT_TRUE(t.has_value());
 
-    (void)catalog.create_edge_type({0, "e", *t, *t, ""});
+    (void)catalog.create_edge_type(default_database_id, {0, 0, "e", *t, *t, ""});
 
-    auto dr = catalog.drop_edge_type("e");
+    auto dr = catalog.drop_edge_type(default_database_id, "e");
     ASSERT_TRUE(dr.has_value());
 
-    auto e = catalog.get_edge_type("e");
+    auto e = catalog.get_edge_type(default_database_id, "e");
     ASSERT_FALSE(e.has_value());
 }
 
 TEST(QA_GDB99_Edge, DropNonexistentEdgeType) {
     Catalog catalog;
-    auto r = catalog.drop_edge_type("nonexistent");
+    auto r = catalog.drop_edge_type(default_database_id, "nonexistent");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::NOT_FOUND);
 }
@@ -134,14 +134,14 @@ TEST(QA_GDB99_Edge, CascadeDropSourceTable) {
     ASSERT_TRUE(src.has_value());
     ASSERT_TRUE(tgt.has_value());
 
-    (void)catalog.create_edge_type({0, "link", *src, *tgt, ""});
+    (void)catalog.create_edge_type(default_database_id, {0, 0, "link", *src, *tgt, ""});
 
     // Drop source table
     auto dr = catalog.drop_table(default_database_id, "src");
     ASSERT_TRUE(dr.has_value());
 
     // Edge type should be cascaded away
-    auto e = catalog.get_edge_type("link");
+    auto e = catalog.get_edge_type(default_database_id, "link");
     ASSERT_FALSE(e.has_value());
 }
 
@@ -152,13 +152,13 @@ TEST(QA_GDB99_Edge, CascadeDropTargetTable) {
     ASSERT_TRUE(src.has_value());
     ASSERT_TRUE(tgt.has_value());
 
-    (void)catalog.create_edge_type({0, "link", *src, *tgt, ""});
+    (void)catalog.create_edge_type(default_database_id, {0, 0, "link", *src, *tgt, ""});
 
     // Drop target table
     auto dr = catalog.drop_table(default_database_id, "tgt");
     ASSERT_TRUE(dr.has_value());
 
-    auto e = catalog.get_edge_type("link");
+    auto e = catalog.get_edge_type(default_database_id, "link");
     ASSERT_FALSE(e.has_value());
 }
 
@@ -167,12 +167,12 @@ TEST(QA_GDB99_Edge, CascadeSelfRefOnDrop) {
     auto t = catalog.create_table(default_database_id, make_table("t"));
     ASSERT_TRUE(t.has_value());
 
-    (void)catalog.create_edge_type({0, "self_edge", *t, *t, ""});
+    (void)catalog.create_edge_type(default_database_id, {0, 0, "self_edge", *t, *t, ""});
 
     auto dr = catalog.drop_table(default_database_id, "t");
     ASSERT_TRUE(dr.has_value());
 
-    auto e = catalog.get_edge_type("self_edge");
+    auto e = catalog.get_edge_type(default_database_id, "self_edge");
     ASSERT_FALSE(e.has_value());
 }
 
@@ -187,11 +187,11 @@ TEST(QA_GDB99_Edge, ListEdgeTypes) {
     ASSERT_TRUE(t1.has_value());
     ASSERT_TRUE(t2.has_value());
 
-    (void)catalog.create_edge_type({0, "e1", *t1, *t2, ""});
-    (void)catalog.create_edge_type({0, "e2", *t2, *t1, ""});
-    (void)catalog.create_edge_type({0, "e3", *t1, *t1, ""});
+    (void)catalog.create_edge_type(default_database_id, {0, 0, "e1", *t1, *t2, ""});
+    (void)catalog.create_edge_type(default_database_id, {0, 0, "e2", *t2, *t1, ""});
+    (void)catalog.create_edge_type(default_database_id, {0, 0, "e3", *t1, *t1, ""});
 
-    auto edges = catalog.list_edge_types();
+    auto edges = catalog.list_edge_types(default_database_id);
     EXPECT_EQ(edges.size(), 3u);
 
     // Should be sorted by edge_id
@@ -202,7 +202,7 @@ TEST(QA_GDB99_Edge, ListEdgeTypes) {
 
 TEST(QA_GDB99_Edge, ListEdgeTypesEmpty) {
     Catalog catalog;
-    auto edges = catalog.list_edge_types();
+    auto edges = catalog.list_edge_types(default_database_id);
     EXPECT_TRUE(edges.empty());
 }
 
@@ -434,12 +434,12 @@ TEST(QA_GDB99_Stress, ManyEdgeTypesAndEmbeddings) {
 
     // Create edge types between all adjacent pairs
     for (int i = 0; i < 9; ++i) {
-        EdgeTypeDef def{0, "e_" + std::to_string(i), table_ids[i], table_ids[i + 1], ""};
-        auto r = catalog.create_edge_type(def);
+        EdgeTypeDef def{0, 0, "e_" + std::to_string(i), table_ids[i], table_ids[i + 1], ""};
+        auto r = catalog.create_edge_type(default_database_id, def);
         ASSERT_TRUE(r.has_value());
     }
 
-    EXPECT_EQ(catalog.list_edge_types().size(), 9u);
+    EXPECT_EQ(catalog.list_edge_types(default_database_id).size(), 9u);
 
     // Register embedding column on each table
     for (int i = 0; i < 10; ++i) {
@@ -454,14 +454,14 @@ TEST(QA_GDB99_Stress, ManyEdgeTypesAndEmbeddings) {
     ASSERT_TRUE(dr.has_value());
 
     // Edge types referencing t5 should be gone (e_4 links t4→t5, e_5 links t5→t6)
-    EXPECT_FALSE(catalog.get_edge_type("e_4").has_value());
-    EXPECT_FALSE(catalog.get_edge_type("e_5").has_value());
+    EXPECT_FALSE(catalog.get_edge_type(default_database_id, "e_4").has_value());
+    EXPECT_FALSE(catalog.get_edge_type(default_database_id, "e_5").has_value());
 
     // Others should remain
-    EXPECT_TRUE(catalog.get_edge_type("e_0").has_value());
-    EXPECT_TRUE(catalog.get_edge_type("e_8").has_value());
+    EXPECT_TRUE(catalog.get_edge_type(default_database_id, "e_0").has_value());
+    EXPECT_TRUE(catalog.get_edge_type(default_database_id, "e_8").has_value());
 
-    auto remaining_edges = catalog.list_edge_types();
+    auto remaining_edges = catalog.list_edge_types(default_database_id);
     EXPECT_EQ(remaining_edges.size(), 7u);
 
     auto remaining_emb = catalog.list_all_embedding_columns();

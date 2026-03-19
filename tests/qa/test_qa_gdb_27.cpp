@@ -688,7 +688,7 @@ protected:
 TEST_F(QA_GraphEngine, CreateEdgeTypeEmptyName) {
     // Empty name might be unusual but shouldn't crash.
     auto result =
-        engine_.create_edge_type("", users_id_, posts_id_, TypeId::INT64, TypeId::INT64, {});
+        engine_.create_edge_type(default_database_id, "", users_id_, posts_id_, TypeId::INT64, TypeId::INT64, {});
     // Whether it succeeds or fails, it should not crash.
     if (result.has_value()) {
         // If it succeeds, we should be able to link via empty name.
@@ -701,13 +701,13 @@ TEST_F(QA_GraphEngine, CreateEdgeTypeEmptyName) {
 
 TEST_F(QA_GraphEngine, DropEdgeTypeRemovesEdges) {
     ASSERT_TRUE(
-        engine_.create_edge_type("follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
+        engine_.create_edge_type(default_database_id, "follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
     ASSERT_TRUE(engine_.link("follows", pk(1), pk(2)).has_value());
     ASSERT_TRUE(engine_.link("follows", pk(3), pk(4)).has_value());
 
-    ASSERT_TRUE(engine_.drop_edge_type("follows").has_value());
+    ASSERT_TRUE(engine_.drop_edge_type(default_database_id, "follows").has_value());
 
     // Trying to query the dropped type should fail.
     auto from = engine_.get_edges_from("follows", pk(1));
@@ -719,14 +719,14 @@ TEST_F(QA_GraphEngine, DropEdgeTypeRemovesEdges) {
 
 TEST_F(QA_GraphEngine, RecreateDroppedEdgeType) {
     ASSERT_TRUE(
-        engine_.create_edge_type("follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
+        engine_.create_edge_type(default_database_id, "follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
     ASSERT_TRUE(engine_.link("follows", pk(1), pk(2)).has_value());
-    ASSERT_TRUE(engine_.drop_edge_type("follows").has_value());
+    ASSERT_TRUE(engine_.drop_edge_type(default_database_id, "follows").has_value());
 
     // Recreate.
     ASSERT_TRUE(
-        engine_.create_edge_type("follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
+        engine_.create_edge_type(default_database_id, "follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
     // New type should be empty (no carry-over from dropped type).
@@ -743,9 +743,9 @@ TEST_F(QA_GraphEngine, RecreateDroppedEdgeType) {
 
 TEST_F(QA_GraphEngine, LinkAfterDropFails) {
     ASSERT_TRUE(
-        engine_.create_edge_type("follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
+        engine_.create_edge_type(default_database_id, "follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
-    ASSERT_TRUE(engine_.drop_edge_type("follows").has_value());
+    ASSERT_TRUE(engine_.drop_edge_type(default_database_id, "follows").has_value());
 
     auto link = engine_.link("follows", pk(1), pk(2));
     EXPECT_FALSE(link.has_value());
@@ -756,7 +756,7 @@ TEST_F(QA_GraphEngine, LinkAfterDropFails) {
 
 TEST_F(QA_GraphEngine, UnlinkWhereOnlyDeletesMatchingTarget) {
     ASSERT_TRUE(
-        engine_.create_edge_type("follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
+        engine_.create_edge_type(default_database_id, "follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
     // User 1 follows users 2, 3, 4.
@@ -791,7 +791,7 @@ TEST_F(QA_GraphEngine, UnlinkWhereOnlyDeletesMatchingTarget) {
 
 TEST_F(QA_GraphEngine, UnlinkWhereEmptySourceReturnsZero) {
     ASSERT_TRUE(
-        engine_.create_edge_type("follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
+        engine_.create_edge_type(default_database_id, "follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
     auto result =
@@ -806,14 +806,14 @@ TEST_F(QA_GraphEngine, ListEdgeTypesAfterCreateAndDrop) {
     EXPECT_EQ(engine_.list_edge_types().size(), 0u);
 
     ASSERT_TRUE(
-        engine_.create_edge_type("follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
+        engine_.create_edge_type(default_database_id, "follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
     ASSERT_TRUE(
-        engine_.create_edge_type("authored", users_id_, posts_id_, TypeId::INT64, TypeId::INT64, {})
+        engine_.create_edge_type(default_database_id, "authored", users_id_, posts_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
     EXPECT_EQ(engine_.list_edge_types().size(), 2u);
 
-    ASSERT_TRUE(engine_.drop_edge_type("follows").has_value());
+    ASSERT_TRUE(engine_.drop_edge_type(default_database_id, "follows").has_value());
     auto types = engine_.list_edge_types();
     ASSERT_EQ(types.size(), 1u);
     EXPECT_EQ(types[0], "authored");
@@ -831,10 +831,10 @@ TEST_F(QA_GraphEngine, GetEdgeTableNonexistent) {
 
 TEST_F(QA_GraphEngine, MultipleTypesFullyIndependent) {
     ASSERT_TRUE(
-        engine_.create_edge_type("follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
+        engine_.create_edge_type(default_database_id, "follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
     ASSERT_TRUE(
-        engine_.create_edge_type("authored", users_id_, posts_id_, TypeId::INT64, TypeId::INT64, {})
+        engine_.create_edge_type(default_database_id, "authored", users_id_, posts_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
     // Link in both.
@@ -859,7 +859,7 @@ TEST_F(QA_GraphEngine, MultipleTypesFullyIndependent) {
 
 TEST_F(QA_GraphEngine, LargeLinkUnlinkCycle) {
     ASSERT_TRUE(
-        engine_.create_edge_type("follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
+        engine_.create_edge_type(default_database_id, "follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
     constexpr int count = 200;
@@ -888,7 +888,7 @@ TEST_F(QA_GraphEngine, LargeLinkUnlinkCycle) {
 TEST_F(QA_GraphEngine, UnlinkWherePredicateFiltersCorrectly) {
     std::vector<ColumnDef> props = {{"score", TypeId::INT64}};
     ASSERT_TRUE(
-        engine_.create_edge_type("rated", users_id_, posts_id_, TypeId::INT64, TypeId::INT64, props)
+        engine_.create_edge_type(default_database_id, "rated", users_id_, posts_id_, TypeId::INT64, TypeId::INT64, props)
             .has_value());
 
     // Insert edges with different scores.
@@ -920,7 +920,7 @@ TEST_F(QA_GraphEngine, UnlinkWherePredicateFiltersCorrectly) {
 
 TEST_F(QA_GraphEngine, UnlinkWhereFalsePredicateDeletesNothing) {
     ASSERT_TRUE(
-        engine_.create_edge_type("follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
+        engine_.create_edge_type(default_database_id, "follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
     ASSERT_TRUE(engine_.link("follows", pk(1), pk(2)).has_value());
@@ -941,7 +941,7 @@ TEST_F(QA_GraphEngine, UnlinkWhereFalsePredicateDeletesNothing) {
 
 TEST_F(QA_GraphEngine, UnlinkNonexistentEdgeFromExistingType) {
     ASSERT_TRUE(
-        engine_.create_edge_type("follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
+        engine_.create_edge_type(default_database_id, "follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
     // Edge type exists but no edges yet.
@@ -953,7 +953,7 @@ TEST_F(QA_GraphEngine, UnlinkNonexistentEdgeFromExistingType) {
 // -- Drop nonexistent edge type -----------------------------------------------
 
 TEST_F(QA_GraphEngine, DropNonexistentEdgeType) {
-    auto result = engine_.drop_edge_type("imaginary");
+    auto result = engine_.drop_edge_type(default_database_id, "imaginary");
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
@@ -962,7 +962,7 @@ TEST_F(QA_GraphEngine, DropNonexistentEdgeType) {
 
 TEST_F(QA_GraphEngine, LinkWithUnexpectedPropertiesFails) {
     ASSERT_TRUE(
-        engine_.create_edge_type("follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
+        engine_.create_edge_type(default_database_id, "follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
     auto result = engine_.link("follows", pk(1), pk(2), {Value(int64_t(42))});
@@ -974,7 +974,7 @@ TEST_F(QA_GraphEngine, LinkWithUnexpectedPropertiesFails) {
 
 TEST_F(QA_GraphEngine, ReverseIndexCleanAfterUnlink) {
     ASSERT_TRUE(
-        engine_.create_edge_type("follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
+        engine_.create_edge_type(default_database_id, "follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
     // Multiple users follow user 5.
@@ -1003,7 +1003,7 @@ TEST_F(QA_GraphEngine, ReverseIndexCleanAfterUnlink) {
 
 TEST_F(QA_GraphEngine, SelfEdgeViaGraphEngine) {
     ASSERT_TRUE(engine_
-                    .create_edge_type(
+                    .create_edge_type(default_database_id, 
                         "follows", users_id_, users_id_, TypeId::INT64, TypeId::INT64, {}, true)
                     .has_value());
 

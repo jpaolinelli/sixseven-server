@@ -459,7 +459,7 @@ TEST(Catalog, CreateEdgeType) {
     def.target_table_id = *t2;
     def.properties = "created_at";
 
-    auto eid = catalog.create_edge_type(def);
+    auto eid = catalog.create_edge_type(default_database_id, def);
     ASSERT_TRUE(eid.has_value()) << eid.error().message;
     EXPECT_GE(*eid, 1);
 }
@@ -476,9 +476,9 @@ TEST(Catalog, CreateEdgeTypeDuplicateNameFails) {
     def.name = "follows";
     def.source_table_id = *t1;
     def.target_table_id = *t2;
-    ASSERT_TRUE(catalog.create_edge_type(def).has_value());
+    ASSERT_TRUE(catalog.create_edge_type(default_database_id, def).has_value());
 
-    auto dup = catalog.create_edge_type(def);
+    auto dup = catalog.create_edge_type(default_database_id, def);
     EXPECT_FALSE(dup.has_value());
     EXPECT_EQ(dup.error().code, StatusCode::ALREADY_EXISTS);
 }
@@ -494,7 +494,7 @@ TEST(Catalog, CreateEdgeTypeSourceTableNotFoundFails) {
     def.source_table_id = 999;
     def.target_table_id = *t1;
 
-    auto result = catalog.create_edge_type(def);
+    auto result = catalog.create_edge_type(default_database_id, def);
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
@@ -510,7 +510,7 @@ TEST(Catalog, CreateEdgeTypeTargetTableNotFoundFails) {
     def.source_table_id = *t1;
     def.target_table_id = 999;
 
-    auto result = catalog.create_edge_type(def);
+    auto result = catalog.create_edge_type(default_database_id, def);
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
@@ -529,10 +529,10 @@ TEST(Catalog, GetEdgeType) {
     def.target_table_id = *t2;
     def.properties = "weight";
 
-    auto eid = catalog.create_edge_type(def);
+    auto eid = catalog.create_edge_type(default_database_id, def);
     ASSERT_TRUE(eid.has_value());
 
-    auto retrieved = catalog.get_edge_type("authored");
+    auto retrieved = catalog.get_edge_type(default_database_id, "authored");
     ASSERT_TRUE(retrieved.has_value()) << retrieved.error().message;
     EXPECT_EQ(retrieved->name, "authored");
     EXPECT_EQ(retrieved->source_table_id, *t1);
@@ -543,7 +543,7 @@ TEST(Catalog, GetEdgeType) {
 
 TEST(Catalog, GetEdgeTypeNotFound) {
     Catalog catalog;
-    auto result = catalog.get_edge_type("nonexistent");
+    auto result = catalog.get_edge_type(default_database_id, "nonexistent");
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
@@ -560,17 +560,17 @@ TEST(Catalog, DropEdgeType) {
     def.name = "follows";
     def.source_table_id = *t1;
     def.target_table_id = *t2;
-    ASSERT_TRUE(catalog.create_edge_type(def).has_value());
+    ASSERT_TRUE(catalog.create_edge_type(default_database_id, def).has_value());
 
-    auto drop = catalog.drop_edge_type("follows");
+    auto drop = catalog.drop_edge_type(default_database_id, "follows");
     ASSERT_TRUE(drop.has_value()) << drop.error().message;
 
-    EXPECT_FALSE(catalog.get_edge_type("follows").has_value());
+    EXPECT_FALSE(catalog.get_edge_type(default_database_id, "follows").has_value());
 }
 
 TEST(Catalog, DropEdgeTypeNotFound) {
     Catalog catalog;
-    auto drop = catalog.drop_edge_type("nonexistent");
+    auto drop = catalog.drop_edge_type(default_database_id, "nonexistent");
     EXPECT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::NOT_FOUND);
 }
@@ -587,15 +587,15 @@ TEST(Catalog, ListEdgeTypes) {
     d1.name = "follows";
     d1.source_table_id = *t1;
     d1.target_table_id = *t2;
-    ASSERT_TRUE(catalog.create_edge_type(d1).has_value());
+    ASSERT_TRUE(catalog.create_edge_type(default_database_id, d1).has_value());
 
     EdgeTypeDef d2;
     d2.name = "likes";
     d2.source_table_id = *t1;
     d2.target_table_id = *t2;
-    ASSERT_TRUE(catalog.create_edge_type(d2).has_value());
+    ASSERT_TRUE(catalog.create_edge_type(default_database_id, d2).has_value());
 
-    auto edges = catalog.list_edge_types();
+    auto edges = catalog.list_edge_types(default_database_id);
     EXPECT_EQ(edges.size(), 2u);
     EXPECT_EQ(edges[0].name, "follows");
     EXPECT_EQ(edges[1].name, "likes");
@@ -603,7 +603,7 @@ TEST(Catalog, ListEdgeTypes) {
 
 TEST(Catalog, ListEdgeTypesEmpty) {
     Catalog catalog;
-    auto edges = catalog.list_edge_types();
+    auto edges = catalog.list_edge_types(default_database_id);
     EXPECT_TRUE(edges.empty());
 }
 
@@ -618,7 +618,7 @@ TEST(Catalog, CreateEdgeTypeSelfReference) {
     def.source_table_id = *t1;
     def.target_table_id = *t1; // Self-reference is valid.
 
-    auto eid = catalog.create_edge_type(def);
+    auto eid = catalog.create_edge_type(default_database_id, def);
     ASSERT_TRUE(eid.has_value()) << eid.error().message;
 }
 
@@ -757,17 +757,17 @@ TEST(Catalog, DropTableCascadesToEdgeTypes) {
     edge.name = "follows";
     edge.source_table_id = *src_id;
     edge.target_table_id = *tgt_id;
-    auto eid = catalog.create_edge_type(edge);
+    auto eid = catalog.create_edge_type(default_database_id, edge);
     ASSERT_TRUE(eid.has_value());
 
     // Drop the source table — edge type should be removed.
     auto drop = catalog.drop_table(default_database_id, "src");
     ASSERT_TRUE(drop.has_value()) << drop.error().message;
 
-    auto edges = catalog.list_edge_types();
+    auto edges = catalog.list_edge_types(default_database_id);
     EXPECT_TRUE(edges.empty());
 
-    auto get_edge = catalog.get_edge_type("follows");
+    auto get_edge = catalog.get_edge_type(default_database_id, "follows");
     EXPECT_FALSE(get_edge.has_value());
     EXPECT_EQ(get_edge.error().code, StatusCode::NOT_FOUND);
 }
@@ -784,14 +784,14 @@ TEST(Catalog, DropTableCascadesToEdgeTypesAsTarget) {
     edge.name = "likes";
     edge.source_table_id = *src_id;
     edge.target_table_id = *tgt_id;
-    auto eid = catalog.create_edge_type(edge);
+    auto eid = catalog.create_edge_type(default_database_id, edge);
     ASSERT_TRUE(eid.has_value());
 
     // Drop the target table — edge type should be removed.
     auto drop = catalog.drop_table(default_database_id, "tgt");
     ASSERT_TRUE(drop.has_value()) << drop.error().message;
 
-    auto edges = catalog.list_edge_types();
+    auto edges = catalog.list_edge_types(default_database_id);
     EXPECT_TRUE(edges.empty());
 }
 

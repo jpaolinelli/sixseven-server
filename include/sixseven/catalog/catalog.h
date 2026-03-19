@@ -118,19 +118,23 @@ public:
 
     /// Create a new edge type. Assigns a sequential edge_id.
     /// Validates that source and target tables exist.
-    /// Fails with ALREADY_EXISTS if an edge type with the same name exists.
+    /// Fails with ALREADY_EXISTS if an edge type with the same name exists in the database.
     /// Fails with NOT_FOUND if source or target table does not exist.
-    [[nodiscard]] Result<edge_id_t> create_edge_type(EdgeTypeDef def);
+    [[nodiscard]] Result<edge_id_t> create_edge_type(database_id_t database_id, EdgeTypeDef def);
 
-    /// Drop an edge type by name.
+    /// Drop an edge type by name within a database.
     /// Fails with NOT_FOUND if the edge type does not exist.
-    [[nodiscard]] Result<void> drop_edge_type(const std::string& name);
+    [[nodiscard]] Result<void> drop_edge_type(database_id_t database_id, const std::string& name);
 
-    /// Retrieve an edge type by name.
-    [[nodiscard]] Result<EdgeTypeDef> get_edge_type(const std::string& name) const;
+    /// Retrieve an edge type by name within a database.
+    [[nodiscard]] Result<EdgeTypeDef> get_edge_type(database_id_t database_id,
+                                                    const std::string& name) const;
 
-    /// List all edge types.
-    [[nodiscard]] std::vector<EdgeTypeDef> list_edge_types() const;
+    /// List all edge types in the given database.
+    [[nodiscard]] std::vector<EdgeTypeDef> list_edge_types(database_id_t database_id) const;
+
+    /// List all edge types across all databases.
+    [[nodiscard]] std::vector<EdgeTypeDef> list_all_edge_types() const;
 
     // -- Embedding column operations ------------------------------------------
 
@@ -192,7 +196,7 @@ public:
     [[nodiscard]] Result<void> restore_index(IndexDef def);
 
     /// Restore an edge type with a pre-assigned edge_id (for catalog persistence).
-    [[nodiscard]] Result<void> restore_edge_type(EdgeTypeDef def);
+    [[nodiscard]] Result<void> restore_edge_type(database_id_t database_id, EdgeTypeDef def);
 
     /// Restore an embedding column (for catalog persistence).
     /// Skips table existence validation since tables may not be fully loaded yet.
@@ -248,8 +252,9 @@ private:
     /// Primary storage: edge_id -> EdgeTypeDef.
     std::unordered_map<edge_id_t, EdgeTypeDef> edge_types_by_id_;
 
-    /// Name lookup: edge type name -> edge_id.
-    std::unordered_map<std::string, edge_id_t> edge_name_to_id_;
+    /// Name lookup scoped per database: database_id -> (edge type name -> edge_id).
+    std::unordered_map<database_id_t, std::unordered_map<std::string, edge_id_t>>
+        edge_name_to_id_;
 
     /// Embedding column definitions keyed by (table_id, column_id).
     /// We use a vector and linear scan since the number of embedding

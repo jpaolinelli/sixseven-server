@@ -5,7 +5,7 @@ A hybrid relational, graph, and vector database built in C++20 with PostgreSQL w
 ## Features
 
 - **Relational** — Full SQL support with ACID transactions, B+ tree and hash indexes, joins, CTEs, window functions, and subqueries
-- **Graph** — Native edge types, BFS traversal, Cypher-style pattern matching, and shortest path queries
+- **Graph** — Native edge types, BFS traversal, Cypher-style pattern matching with variable-length paths, inline predicates, weighted shortest path, and path selectors
 - **Vector** — HNSW indexes with pluggable embedding providers (OpenAI, Ollama, ONNX, builtin) and automatic embedding generation
 - **PostgreSQL Compatible** — Wire protocol v3 lets you connect with `psql`, DBeaver, DataGrip, or any PostgreSQL client library
 
@@ -397,28 +397,140 @@ SELECT name FROM TRAVERSE authored FROM posts(10) DIRECTION IN FETCH;
 
 ### Match (Pattern Matching)
 
-Cypher-style pattern matching over graph edges:
+Cypher-style pattern matching over graph edges. Use `SELECT ... FROM MATCH` to compose with standard SQL clauses (WHERE, ORDER BY, LIMIT, OFFSET, DISTINCT):
 
 ```sql
 -- Direct follow relationships
-MATCH (a:users)-[r:follows]->(b:users)
-RETURN a.name, b.name;
+SELECT a.name, b.name
+FROM MATCH (a:users)-[e:follows]->(b:users);
 
--- Incoming edges
-MATCH (a:users)<-[r:follows]-(b:users)
-RETURN a.name, b.name;
+-- Incoming edges (who follows user a?)
+SELECT a.name
+FROM MATCH (a:users)<-[e:follows]-(b:users);
 
 -- Multi-hop: users who follow someone who authored a post
-MATCH (a:users)-[f:follows]->(b:users)-[w:authored]->(p:posts)
-WHERE a.name = 'Alice'
-RETURN b.name, p.title;
+SELECT b.name, p.title
+FROM MATCH (a:users)-[f:follows]->(b:users)-[w:authored]->(p:posts)
+WHERE a.name = 'Alice';
 
 -- Undirected edges
-MATCH (a:users)-[r:follows]-(b:users)
+SELECT a.name, b.name
+FROM MATCH (a:users)-[e:follows]-(b:users);
+
+-- Full SQL composability
+SELECT DISTINCT a.name, b.name
+FROM MATCH (a:users)-[e:follows]->(b:users)
+WHERE a.id > 0
+ORDER BY a.name DESC
+LIMIT 5 OFFSET 2;
+```
+
+**Backward compatibility:** The original `MATCH ... RETURN` syntax still works:
+
+```sql
+MATCH (a:users)-[r:follows]->(b:users)
 RETURN a.name, b.name;
 ```
 
-### Shortest Path
+#### Variable-Length Path Patterns
+
+Add quantifiers to edges to match paths of variable length:
+
+```sql
+-- Range: 1 to 6 hops
+SELECT a.name, b.name
+FROM MATCH (a:users)-[r:knows]->{1,6}(b:users);
+
+-- Exact: exactly 3 hops
+SELECT a.name
+FROM MATCH (a:users)-[r:knows]->{3}(b:users);
+
+-- One or more hops (+)
+SELECT a.name
+FROM MATCH (a:users)-[r:knows]->+(b:users);
+
+-- Zero or more hops (*)
+SELECT a.name
+FROM MATCH (a:users)-[r:knows]->*(b:users);
+
+-- Incoming direction with quantifier
+SELECT a.name
+FROM MATCH (a:users)<-[r:knows]-{1,3}(b:users);
+```
+
+| Quantifier | Meaning |
+|------------|---------|
+| `{min,max}` | Between min and max hops |
+| `{n}` | Exactly n hops |
+| `+` | One or more hops (shorthand for `{1,}`) |
+| `*` | Zero or more hops (shorthand for `{0,}`) |
+
+#### Inline Predicate Filtering
+
+Filter nodes and edges directly inside the pattern, without a separate WHERE clause:
+
+```sql
+-- Filter target nodes inline
+SELECT a.name
+FROM MATCH (a:users)-[r:knows]->(b:users WHERE b.active = TRUE);
+
+-- Filter edges inline
+SELECT a.name
+FROM MATCH (a:users)-[r:knows WHERE r.since > '2020-01-01']->(b:users);
+
+-- Combine edge and node filters with variable-length paths
+SELECT a.name, b.name
+FROM MATCH (a:users)-[r:knows WHERE r.since > '2020']->{1,6}(b:users WHERE b.active = TRUE);
+```
+
+Inline predicates are applied during traversal, pruning branches early for better performance on large graphs.
+
+#### Path Selectors (Shortest Path in MATCH)
+
+Find shortest paths using path selectors in MATCH patterns. Requires a variable-length edge:
+
+```sql
+-- Any single shortest path
+SELECT a.name, b.name
+FROM MATCH p = ANY SHORTEST (a:users)-[r:knows]->{1,10}(b:users)
+WHERE a.id = 1;
+
+-- All shortest paths (same minimum length)
+MATCH p = ALL SHORTEST (a:users)-[r:knows]->{1,10}(b:users)
+RETURN a.name, b.name;
+
+-- K shortest paths
+MATCH p = SHORTEST 3 (a:users)-[r:knows]->{1,10}(b:users)
+RETURN a.name, b.name;
+```
+
+| Selector | Returns |
+|----------|---------|
+| `ANY SHORTEST` | One arbitrary shortest path |
+| `ALL SHORTEST` | All paths tied for minimum length |
+| `SHORTEST K` | The K shortest paths |
+
+#### Weighted Shortest Path
+
+Add a `WEIGHT` clause to use edge properties as costs (Dijkstra's algorithm):
+
+```sql
+-- Shortest path by distance (weighted)
+SELECT a.name, b.name
+FROM MATCH p = ANY SHORTEST (a:cities)-[r:road]->{1,20}(b:cities)
+WEIGHT r.distance;
+
+-- All shortest weighted paths
+MATCH p = ALL SHORTEST (a:cities)-[r:road]->{1,20}(b:cities)
+WEIGHT r.distance
+RETURN a.name, b.name;
+```
+
+The `WEIGHT` clause is only valid with a path selector. Without `WEIGHT`, shortest path uses hop count (BFS).
+
+### Shortest Path (Legacy Syntax)
+
+The standalone `SHORTEST PATH` syntax is still supported for simple shortest-path queries:
 
 ```sql
 SHORTEST PATH FROM users(1) TO users(100) VIA follows;
@@ -428,6 +540,8 @@ SHORTEST PATH FROM users(1) TO users(100)
     DIRECTION OUT
     MAX_DEPTH 10;
 ```
+
+For more advanced use cases (weighted paths, all shortest paths, K shortest), use path selectors in MATCH (see above).
 
 ---
 
@@ -589,13 +703,15 @@ Any ONNX-exported transformer embedding model that accepts `input_ids` and `atte
 # Install the Hugging Face CLI
 pip install huggingface-hub
 
-# all-MiniLM-L6-v2 (384 dimensions, ~80 MB) — best balance of size and quality
-huggingface-cli download onnx-community/all-MiniLM-L6-v2-ONNX \
+# all-MiniLM-L6-v2 (384 dimensions, ~180 MB) — best balance of size and quality
+hf download onnx-community/all-MiniLM-L6-v2-ONNX \
     --local-dir models/all-MiniLM-L6-v2
+rm -rf models/all-MiniLM-L6-v2/.cache
 
 # bge-small-en-v1.5 (384 dimensions, ~130 MB)
-huggingface-cli download onnx-community/bge-small-en-v1.5-ONNX \
+hf download onnx-community/bge-small-en-v1.5-ONNX \
     --local-dir models/bge-small-en-v1.5
+rm -rf models/bge-small-en-v1.5/.cache
 ```
 
 **Option 2 — Export any Hugging Face model to ONNX yourself:**
@@ -790,6 +906,32 @@ ctest --test-dir build/debug -L integration --output-on-failure
 New test files are auto-detected by CMake — just add them to the correct directory:
 - `tests/unit/test_<name>.cpp` for dev tests
 - `tests/qa/test_qa_<ticket>.cpp` for QA regression tests
+
+### Seed Data
+
+Generate realistic seed data that exercises every feature (relational, graph, vector, transactions, admin). Three scales are available:
+
+| Scale | Data Rows | Edge Links | SQL Lines | File Size |
+|-------|-----------|------------|-----------|-----------|
+| `small` | ~7K | ~7.5K | ~15K | ~3 MB |
+| `medium` | ~73K | ~75K | ~149K | ~26 MB |
+| `large` | ~725K | ~750K | ~1.5M | ~272 MB |
+
+```bash
+# Generate seed SQL (requires Python 3, no external dependencies)
+python3 tools/generate_seed_data.py --scale small  > tools/seed_small.sql
+python3 tools/generate_seed_data.py --scale medium > tools/seed_medium.sql
+python3 tools/generate_seed_data.py --scale large  > tools/seed_large.sql
+
+# Load into a running server
+psql -h localhost -p 6767 -f tools/seed_small.sql
+```
+
+Pre-generated files are checked in at `tools/seed_small.sql`, `tools/seed_medium.sql`, and `tools/seed_large.sql`.
+
+The seed data creates 8 tables, 4 edge types, 9 indexes, and 2 EMBEDDING columns (using the ONNX provider). It includes verification queries for JOINs, CTEs, window functions, subqueries, set operations, graph traversal, pattern matching (variable-length paths, inline predicates, path selectors, weighted shortest path), vector search, graph algorithms, and admin commands.
+
+**Note:** Embedding columns use the ONNX provider (`onnx/models/all-MiniLM-L6-v2`). Install the model first — see [models/README.md](models/README.md).
 
 ### Pre-commit hooks
 

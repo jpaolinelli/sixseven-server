@@ -446,6 +446,27 @@ Result<std::vector<ColumnDescription>> QueryEngine::describe(const std::string& 
 }
 
 // ---------------------------------------------------------------------------
+// Database-scoped overloads (thread-safe)
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute(const std::string& sql, database_id_t database_id) {
+    auto saved = current_database_id_;
+    current_database_id_ = database_id;
+    auto result = execute(sql);
+    current_database_id_ = saved;
+    return result;
+}
+
+Result<std::vector<ColumnDescription>> QueryEngine::describe(const std::string& sql,
+                                                             database_id_t database_id) {
+    auto saved = current_database_id_;
+    current_database_id_ = database_id;
+    auto result = describe(sql);
+    current_database_id_ = saved;
+    return result;
+}
+
+// ---------------------------------------------------------------------------
 // DDL: CREATE DATABASE
 // ---------------------------------------------------------------------------
 
@@ -847,14 +868,15 @@ Result<QueryResult> QueryEngine::execute_create_edge_type(const CreateEdgeTypeSt
     }
 
     auto result = graph_engine_->create_edge_type(
-        stmt.name, from_schema->table_id, to_schema->table_id, from_pk_type, to_pk_type, prop_cols);
+        current_database_id_, stmt.name, from_schema->table_id, to_schema->table_id, from_pk_type,
+        to_pk_type, prop_cols);
     if (!result) {
         return make_error(result.error().code, result.error().message);
     }
 
     // Persist edge type metadata to sys_edge_types.
     if (catalog_persistence_ != nullptr) {
-        auto et = catalog_.get_edge_type(stmt.name);
+        auto et = catalog_.get_edge_type(current_database_id_, stmt.name);
         if (et) {
             auto persist = catalog_persistence_->persist_edge_type(*et);
             if (!persist) {
@@ -881,12 +903,12 @@ Result<QueryResult> QueryEngine::execute_drop_edge_type(const DropEdgeTypeStmt& 
 
     // Look up edge_id before dropping (needed for persistence removal).
     edge_id_t edge_id = 0;
-    auto et = catalog_.get_edge_type(stmt.name);
+    auto et = catalog_.get_edge_type(current_database_id_, stmt.name);
     if (et) {
         edge_id = et->edge_id;
     }
 
-    auto result = graph_engine_->drop_edge_type(stmt.name);
+    auto result = graph_engine_->drop_edge_type(current_database_id_, stmt.name);
     if (!result) {
         if (stmt.if_exists && result.error().code == StatusCode::NOT_FOUND) {
             QueryResult qr;
@@ -918,7 +940,7 @@ Result<QueryResult> QueryEngine::execute_drop_edge_type(const DropEdgeTypeStmt& 
 Result<std::pair<Value, Value>> QueryEngine::coerce_link_keys(const std::string& edge_type,
                                                               const Value& src_key,
                                                               const Value& tgt_key) {
-    auto edge = catalog_.get_edge_type(edge_type);
+    auto edge = catalog_.get_edge_type(current_database_id_, edge_type);
     if (!edge) {
         return tl::unexpected(edge.error());
     }
@@ -1050,7 +1072,7 @@ Result<QueryResult> QueryEngine::execute_link(const LinkStmt& stmt, const BoundS
     auto& [coerced_src, coerced_tgt] = *coerced;
 
     // Verify source and target rows exist.
-    auto edge = catalog_.get_edge_type(stmt.edge_type);
+    auto edge = catalog_.get_edge_type(current_database_id_, stmt.edge_type);
     if (!edge) {
         return tl::unexpected(edge.error());
     }
@@ -1125,7 +1147,7 @@ Result<QueryResult> QueryEngine::execute_unlink(const UnlinkStmt& stmt,
     auto& [coerced_src, coerced_tgt] = *coerced;
 
     // Verify source and target rows exist.
-    auto edge = catalog_.get_edge_type(stmt.edge_type);
+    auto edge = catalog_.get_edge_type(current_database_id_, stmt.edge_type);
     if (!edge) {
         return tl::unexpected(edge.error());
     }
@@ -1848,7 +1870,7 @@ Result<QueryResult> QueryEngine::execute_show(const ShowStmt& stmt) {
     }
 
     case ShowTarget::EDGE_TYPES: {
-        auto edge_types = catalog_.list_edge_types();
+        auto edge_types = catalog_.list_edge_types(current_database_id_);
 
         QueryResult qr;
         qr.column_names = {"edge_type", "source_table", "target_table"};

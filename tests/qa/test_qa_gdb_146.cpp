@@ -482,7 +482,7 @@ TEST_F(QA146ProtocolTest, SimpleQueryReturnsReadyForQuery) {
     Connection conn(server_fd_);
     server_fd_ = -1;
     PgProtocolHandler handler(1);
-    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         QueryResult qr;
         qr.message = "SELECT";
         qr.column_names = {"x"};
@@ -518,7 +518,7 @@ TEST_F(QA146ProtocolTest, ErrorResponseOnBadQuery) {
     Connection conn(server_fd_);
     server_fd_ = -1;
     PgProtocolHandler handler(1);
-    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         return make_error(StatusCode::PARSE_ERROR, "syntax error at end of input");
     });
 
@@ -568,7 +568,7 @@ TEST_F(QA146ProtocolTest, EmptyQueryResponse) {
     Connection conn(server_fd_);
     server_fd_ = -1;
     PgProtocolHandler handler(1);
-    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         QueryResult qr;
         return ok(std::move(qr));
     });

@@ -553,7 +553,7 @@ PatternMatchOperator::evaluate_edge_filter(const MatchEdgeDef& edge_def,
         return ok(true);
     }
 
-    auto edge_type = catalog_.get_edge_type(edge_def.edge_type);
+    auto edge_type = catalog_.get_edge_type(database_id_,edge_def.edge_type);
     if (!edge_type) {
         return tl::unexpected(edge_type.error());
     }

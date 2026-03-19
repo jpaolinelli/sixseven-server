@@ -52,7 +52,7 @@ protected:
         ASSERT_TRUE(tid.has_value()) << tid.error().message;
         table_id_ = *tid;
 
-        auto eid = graph_->create_edge_type(
+        auto eid = graph_->create_edge_type(default_database_id, 
             "follows", table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
     }
@@ -407,7 +407,7 @@ protected:
         auto tid = catalog_->create_table(default_database_id, std::move(ts));
         ASSERT_TRUE(tid.has_value()) << tid.error().message;
 
-        auto eid = graph_->create_edge_type("edge", *tid, *tid, TypeId::INT64, TypeId::INT64, {});
+        auto eid = graph_->create_edge_type(default_database_id, "edge", *tid, *tid, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
     }
 
@@ -737,7 +737,7 @@ protected:
         }
 
         // Create edge type: people -[knows]-> people.
-        auto eid = graph_->create_edge_type(
+        auto eid = graph_->create_edge_type(default_database_id, 
             "knows", people_id_, people_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
     }

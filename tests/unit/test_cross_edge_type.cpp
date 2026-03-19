@@ -111,11 +111,11 @@ protected:
         insert_company(20, "Globex");
 
         // Create edge types.
-        auto eid_knows = graph_->create_edge_type(
+        auto eid_knows = graph_->create_edge_type(default_database_id, 
             "knows", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid_knows.has_value()) << eid_knows.error().message;
 
-        auto eid_works = graph_->create_edge_type(
+        auto eid_works = graph_->create_edge_type(default_database_id, 
             "works_at", persons_id_, companies_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid_works.has_value()) << eid_works.error().message;
 
@@ -461,7 +461,7 @@ TEST_F(CrossEdgeTypeTest, VariablePlusFixedCrossType) {
 
 TEST_F(CrossEdgeTypeTest, EmptyResultNoConnection) {
     // Create a new edge type with no edges to test empty chaining.
-    auto eid = graph_->create_edge_type(
+    auto eid = graph_->create_edge_type(default_database_id, 
         "mentors", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(eid.has_value());
 

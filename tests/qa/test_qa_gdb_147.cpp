@@ -296,7 +296,7 @@ protected:
         handler_ = std::make_unique<PgProtocolHandler>(42);
 
         call_count_ = 0;
-        handler_->set_query_executor([this](const std::string& sql) -> Result<QueryResult> {
+        handler_->set_query_executor([this](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
             ++call_count_;
             last_sql_ = sql;
             QueryResult qr;
@@ -847,7 +847,7 @@ TEST_F(QA147ExtendedTest, MultipleNamedStatementsCoexist) {
 // =============================================================================
 
 TEST_F(QA147ExtendedTest, ExecuteWithFailingQueryExecutor) {
-    handler_->set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler_->set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         return Result<QueryResult>(make_error(StatusCode::PARSE_ERROR, "syntax error near X"));
     });
 

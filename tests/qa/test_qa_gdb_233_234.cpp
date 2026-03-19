@@ -421,7 +421,7 @@ TEST(QA_GraphEngineWAL, NullptrWalBackwardCompat) {
     ASSERT_TRUE(t2.has_value());
 
     ASSERT_TRUE(
-        engine.create_edge_type("follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {}).has_value());
+        engine.create_edge_type(default_database_id, "follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {}).has_value());
 
     // LINK with nullptr WAL.
     auto link = engine.link("follows", pk(1), pk(2));
@@ -458,7 +458,7 @@ TEST(QA_GraphEngineWAL, LinkWritesWalRecord) {
     auto t1 = catalog.create_table(default_database_id, make_table_schema("nodes"));
     ASSERT_TRUE(t1.has_value());
 
-    ASSERT_TRUE(engine.create_edge_type("connects", *t1, *t1, TypeId::INT64, TypeId::INT64, {})
+    ASSERT_TRUE(engine.create_edge_type(default_database_id, "connects", *t1, *t1, TypeId::INT64, TypeId::INT64, {})
                     .has_value());
 
     auto link = engine.link("connects", pk(10), pk(20));
@@ -506,7 +506,7 @@ TEST(QA_GraphEngineWAL, UnlinkWritesWalRecord) {
     auto t1 = catalog.create_table(default_database_id, make_table_schema("nodes"));
     ASSERT_TRUE(t1.has_value());
 
-    ASSERT_TRUE(engine.create_edge_type("connects", *t1, *t1, TypeId::INT64, TypeId::INT64, {})
+    ASSERT_TRUE(engine.create_edge_type(default_database_id, "connects", *t1, *t1, TypeId::INT64, TypeId::INT64, {})
                     .has_value());
 
     // LINK first.
@@ -560,7 +560,7 @@ TEST(QA_GraphEngineWAL, MultipleLinkUnlinkAccumulateWalRecords) {
     ASSERT_TRUE(t1.has_value());
 
     ASSERT_TRUE(
-        engine.create_edge_type("follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {}).has_value());
+        engine.create_edge_type(default_database_id, "follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {}).has_value());
 
     constexpr int link_count = 5;
 
@@ -620,7 +620,7 @@ TEST(QA_GraphEngineWAL, FailedLinkDoesNotWriteWalRecord) {
     ASSERT_TRUE(t1.has_value());
 
     // Create with duplicate prevention enabled.
-    ASSERT_TRUE(engine.create_edge_type("follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {}, true)
+    ASSERT_TRUE(engine.create_edge_type(default_database_id, "follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {}, true)
                     .has_value());
 
     // First LINK succeeds.

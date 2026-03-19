@@ -104,7 +104,7 @@ protected:
     /// Create an edge type and link a list of (src, tgt) pairs.
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(
+        auto et = engine_.create_edge_type(default_database_id, 
             edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
 

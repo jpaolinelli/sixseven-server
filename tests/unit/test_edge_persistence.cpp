@@ -71,7 +71,7 @@ protected:
 
 TEST_F(EdgePersistenceTest, EdgesRecoveredAfterRestart) {
     // Create edge type and edges.
-    auto et = engine_->create_edge_type(
+    auto et = engine_->create_edge_type(default_database_id, 
         "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
@@ -94,7 +94,7 @@ TEST_F(EdgePersistenceTest, EdgesRecoveredAfterRestart) {
 }
 
 TEST_F(EdgePersistenceTest, ReverseIndexRecoveredAfterRestart) {
-    auto et = engine_->create_edge_type(
+    auto et = engine_->create_edge_type(default_database_id, 
         "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
@@ -111,7 +111,7 @@ TEST_F(EdgePersistenceTest, ReverseIndexRecoveredAfterRestart) {
 
 TEST_F(EdgePersistenceTest, EdgePropertiesPersisted) {
     std::vector<ColumnDef> props = {{"weight", TypeId::FLOAT64}, {"label", TypeId::STRING}};
-    auto et = engine_->create_edge_type(
+    auto et = engine_->create_edge_type(default_database_id, 
         "rated", users_table_id_, posts_table_id_, TypeId::INT64, TypeId::INT64, props);
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
@@ -131,7 +131,7 @@ TEST_F(EdgePersistenceTest, EdgePropertiesPersisted) {
 // == UNLINK persistence =======================================================
 
 TEST_F(EdgePersistenceTest, UnlinkedEdgesNotRecovered) {
-    auto et = engine_->create_edge_type(
+    auto et = engine_->create_edge_type(default_database_id, 
         "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
@@ -152,7 +152,7 @@ TEST_F(EdgePersistenceTest, UnlinkedEdgesNotRecovered) {
 
 TEST_F(EdgePersistenceTest, UnlinkWherePersistedCorrectly) {
     std::vector<ColumnDef> props = {{"weight", TypeId::FLOAT64}};
-    auto et = engine_->create_edge_type(
+    auto et = engine_->create_edge_type(default_database_id, 
         "rated", users_table_id_, posts_table_id_, TypeId::INT64, TypeId::INT64, props);
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
@@ -178,11 +178,11 @@ TEST_F(EdgePersistenceTest, UnlinkWherePersistedCorrectly) {
 // == Multiple edge types ======================================================
 
 TEST_F(EdgePersistenceTest, MultipleEdgeTypesPersisted) {
-    auto et1 = engine_->create_edge_type(
+    auto et1 = engine_->create_edge_type(default_database_id, 
         "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(et1.has_value()) << et1.error().message;
 
-    auto et2 = engine_->create_edge_type(
+    auto et2 = engine_->create_edge_type(default_database_id, 
         "authored", users_table_id_, posts_table_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(et2.has_value()) << et2.error().message;
 
@@ -205,7 +205,7 @@ TEST_F(EdgePersistenceTest, MultipleEdgeTypesPersisted) {
 // == Row ID continuity ========================================================
 
 TEST_F(EdgePersistenceTest, NewEdgesAfterRestartGetUniqueRowIds) {
-    auto et = engine_->create_edge_type(
+    auto et = engine_->create_edge_type(default_database_id, 
         "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
@@ -233,7 +233,7 @@ TEST_F(EdgePersistenceTest, NewEdgesAfterRestartGetUniqueRowIds) {
 // == Empty edge type ==========================================================
 
 TEST_F(EdgePersistenceTest, EmptyEdgeTypeRecoveredCorrectly) {
-    auto et = engine_->create_edge_type(
+    auto et = engine_->create_edge_type(default_database_id, 
         "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
@@ -249,7 +249,7 @@ TEST_F(EdgePersistenceTest, EmptyEdgeTypeRecoveredCorrectly) {
 // == Drop edge type persistence ===============================================
 
 TEST_F(EdgePersistenceTest, DroppedEdgeTypeFileRemoved) {
-    auto et = engine_->create_edge_type(
+    auto et = engine_->create_edge_type(default_database_id, 
         "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
@@ -261,7 +261,7 @@ TEST_F(EdgePersistenceTest, DroppedEdgeTypeFileRemoved) {
     EXPECT_TRUE(std::filesystem::exists(edge_path));
 
     // Drop the edge type.
-    ASSERT_TRUE(engine_->drop_edge_type("follows").has_value());
+    ASSERT_TRUE(engine_->drop_edge_type(default_database_id, "follows").has_value());
 
     // File should be removed.
     EXPECT_FALSE(std::filesystem::exists(edge_path));
@@ -270,7 +270,7 @@ TEST_F(EdgePersistenceTest, DroppedEdgeTypeFileRemoved) {
 // == Self-referencing persistence =============================================
 
 TEST_F(EdgePersistenceTest, SelfReferenceEdgesPersisted) {
-    auto et = engine_->create_edge_type(
+    auto et = engine_->create_edge_type(default_database_id, 
         "self_link", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
@@ -288,7 +288,7 @@ TEST_F(EdgePersistenceTest, SelfReferenceEdgesPersisted) {
 // == Multiple restarts ========================================================
 
 TEST_F(EdgePersistenceTest, DataSurvivesMultipleRestarts) {
-    auto et = engine_->create_edge_type(
+    auto et = engine_->create_edge_type(default_database_id, 
         "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 

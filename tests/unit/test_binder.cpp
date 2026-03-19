@@ -91,7 +91,7 @@ protected:
             e.name = "purchased";
             e.source_table_id = 1; // users
             e.target_table_id = 3; // products
-            auto r = catalog.create_edge_type(std::move(e));
+            auto r = catalog.create_edge_type(default_database_id, std::move(e));
             ASSERT_TRUE(r.has_value());
         }
 
@@ -102,7 +102,7 @@ protected:
             e.source_table_id = 1; // users
             e.target_table_id = 1; // users (self-referential)
             e.properties = "weight:FLOAT64";
-            auto r = catalog.create_edge_type(std::move(e));
+            auto r = catalog.create_edge_type(default_database_id, std::move(e));
             ASSERT_TRUE(r.has_value());
         }
 
@@ -112,7 +112,7 @@ protected:
             e.name = "authored";
             e.source_table_id = 1; // users
             e.target_table_id = 4; // posts
-            auto r = catalog.create_edge_type(std::move(e));
+            auto r = catalog.create_edge_type(default_database_id, std::move(e));
             ASSERT_TRUE(r.has_value());
         }
 

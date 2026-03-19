@@ -128,7 +128,7 @@ protected:
             insert_person(id);
         }
 
-        auto eid = graph_->create_edge_type(
+        auto eid = graph_->create_edge_type(default_database_id, 
             "knows", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 

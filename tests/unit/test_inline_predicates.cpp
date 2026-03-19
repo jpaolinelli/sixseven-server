@@ -195,7 +195,7 @@ protected:
 
         // Create 'knows' edge type with a 'weight' property.
         ColumnDef weight_col{"weight", TypeId::INT64};
-        auto eid = graph_->create_edge_type(
+        auto eid = graph_->create_edge_type(default_database_id, 
             "knows", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {weight_col});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 

@@ -502,7 +502,7 @@ TEST(PgProtocol, SimpleQuerySelect) {
     PgProtocolHandler handler(3);
 
     // Set up a mock query executor that returns a simple result.
-    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         QueryResult qr;
         qr.column_names = {"id", "name"};
         qr.column_types = {TypeId::INT32, TypeId::STRING};
@@ -573,7 +573,7 @@ TEST(PgProtocol, SimpleQueryError) {
     Connection conn(server_fd);
     PgProtocolHandler handler(4);
 
-    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         return make_error(StatusCode::PARSE_ERROR, "syntax error at position 1");
     });
 
@@ -653,7 +653,7 @@ TEST(PgProtocol, EmptyQuery) {
     PgProtocolHandler handler(5);
 
     handler.set_query_executor(
-        [](const std::string& /*sql*/) -> Result<QueryResult> { return ok(QueryResult{}); });
+        [](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> { return ok(QueryResult{}); });
 
     // Startup handshake.
     auto startup = build_startup_message({{"user", "test"}});
@@ -724,7 +724,7 @@ TEST(PgProtocol, DmlQueryInsert) {
     Connection conn(server_fd);
     PgProtocolHandler handler(7);
 
-    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         QueryResult qr;
         qr.affected_rows = 3;
         qr.message = "INSERT";
@@ -773,7 +773,7 @@ TEST(PgProtocol, DdlQuery) {
     Connection conn(server_fd);
     PgProtocolHandler handler(8);
 
-    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         QueryResult qr;
         qr.message = "CREATE TABLE";
         return ok(std::move(qr));
@@ -849,7 +849,7 @@ TEST(PgProtocol, DataRowNullValues) {
     Connection conn(server_fd);
     PgProtocolHandler handler(10);
 
-    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         QueryResult qr;
         qr.column_names = {"val"};
         qr.column_types = {TypeId::STRING};
@@ -1039,7 +1039,7 @@ TEST(PgProtocol, ParseBindExecuteSync) {
     Connection conn(server_fd);
     PgProtocolHandler handler(11);
 
-    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         QueryResult qr;
         qr.column_names = {"id"};
         qr.column_types = {TypeId::INT32};
@@ -1098,7 +1098,7 @@ TEST(PgProtocol, NamedPreparedStatementPersists) {
     PgProtocolHandler handler(12);
 
     int call_count = 0;
-    handler.set_query_executor([&call_count](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([&call_count](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         ++call_count;
         QueryResult qr;
         qr.message = "OK";
@@ -1256,7 +1256,7 @@ TEST(PgProtocol, DescribeStatementRowDescription) {
 
     // Set a describer that returns columns for SELECT statements.
     handler.set_query_describer(
-        [](const std::string& sql) -> Result<std::vector<ColumnDescription>> {
+        [](const std::string& sql, const std::string& /*database*/) -> Result<std::vector<ColumnDescription>> {
             if (sql.find("SELECT") != std::string::npos ||
                 sql.find("select") != std::string::npos) {
                 return ok(std::vector<ColumnDescription>{
@@ -1338,7 +1338,7 @@ TEST(PgProtocol, DescribeStatementNoDataForDML) {
 
     // Describer returns empty for non-SELECT.
     handler.set_query_describer(
-        [](const std::string& /*sql*/) -> Result<std::vector<ColumnDescription>> {
+        [](const std::string& /*sql*/, const std::string& /*database*/) -> Result<std::vector<ColumnDescription>> {
             return ok(std::vector<ColumnDescription>{});
         });
 
@@ -1384,7 +1384,7 @@ TEST(PgProtocol, DescribePortalRowDescription) {
     Connection conn(server_fd);
     PgProtocolHandler handler(32);
 
-    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         QueryResult qr;
         qr.column_names = {"id", "name"};
         qr.column_types = {TypeId::INT32, TypeId::STRING};
@@ -1393,7 +1393,7 @@ TEST(PgProtocol, DescribePortalRowDescription) {
     });
 
     handler.set_query_describer(
-        [](const std::string& sql) -> Result<std::vector<ColumnDescription>> {
+        [](const std::string& sql, const std::string& /*database*/) -> Result<std::vector<ColumnDescription>> {
             if (sql.find("SELECT") != std::string::npos ||
                 sql.find("select") != std::string::npos) {
                 return ok(std::vector<ColumnDescription>{
@@ -1472,10 +1472,10 @@ TEST(PgProtocol, DescribePortalNoDataForDML) {
     PgProtocolHandler handler(33);
 
     handler.set_query_executor(
-        [](const std::string& /*sql*/) -> Result<QueryResult> { return ok(QueryResult{}); });
+        [](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> { return ok(QueryResult{}); });
 
     handler.set_query_describer(
-        [](const std::string& /*sql*/) -> Result<std::vector<ColumnDescription>> {
+        [](const std::string& /*sql*/, const std::string& /*database*/) -> Result<std::vector<ColumnDescription>> {
             return ok(std::vector<ColumnDescription>{});
         });
 
@@ -1525,7 +1525,7 @@ TEST(PgProtocol, DescribeStatementDescriberError) {
 
     // Describer that always returns an error (e.g., table not found during bind).
     handler.set_query_describer(
-        [](const std::string& /*sql*/) -> Result<std::vector<ColumnDescription>> {
+        [](const std::string& /*sql*/, const std::string& /*database*/) -> Result<std::vector<ColumnDescription>> {
             return make_error(StatusCode::NOT_FOUND, "table \"nonexistent\" does not exist");
         });
 
@@ -1571,10 +1571,10 @@ TEST(PgProtocol, DescribePortalDescriberError) {
     PgProtocolHandler handler(35);
 
     handler.set_query_executor(
-        [](const std::string& /*sql*/) -> Result<QueryResult> { return ok(QueryResult{}); });
+        [](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> { return ok(QueryResult{}); });
 
     handler.set_query_describer(
-        [](const std::string& /*sql*/) -> Result<std::vector<ColumnDescription>> {
+        [](const std::string& /*sql*/, const std::string& /*database*/) -> Result<std::vector<ColumnDescription>> {
             return make_error(StatusCode::NOT_FOUND, "table \"nonexistent\" does not exist");
         });
 
@@ -1622,7 +1622,7 @@ TEST(PgProtocol, ErrorInBatchSkipsUntilSync) {
     PgProtocolHandler handler(15);
 
     int call_count = 0;
-    handler.set_query_executor([&call_count](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([&call_count](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         ++call_count;
         return ok(QueryResult{});
     });
@@ -1732,7 +1732,7 @@ TEST(PgProtocol, MultiStatementSimpleQuery) {
     PgProtocolHandler handler(20);
 
     int call_count = 0;
-    handler.set_query_executor([&call_count](const std::string& sql) -> Result<QueryResult> {
+    handler.set_query_executor([&call_count](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
         ++call_count;
         if (sql == "CREATE TABLE t (id INT)") {
             QueryResult qr;
@@ -1809,7 +1809,7 @@ TEST(PgProtocol, MultiStatementErrorStopsExecution) {
     PgProtocolHandler handler(21);
 
     int call_count = 0;
-    handler.set_query_executor([&call_count](const std::string& sql) -> Result<QueryResult> {
+    handler.set_query_executor([&call_count](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
         ++call_count;
         if (sql == "SELECT 1") {
             QueryResult qr;

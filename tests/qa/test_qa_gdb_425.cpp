@@ -237,7 +237,7 @@ protected:
 
         // Create 'knows' edge type with 'weight' (INT64) property.
         ColumnDef weight_col{"weight", TypeId::INT64};
-        auto eid = graph_->create_edge_type(
+        auto eid = graph_->create_edge_type(default_database_id, 
             "knows", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {weight_col});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
@@ -744,7 +744,7 @@ TEST_F(QA_GDB425, TripleFilter_SingleHop) {
 TEST_F(QA_GDB425, EdgeFilterOnZeroEdges) {
     // Create a new edge type with no edges and test filtering.
     ColumnDef score_col{"score", TypeId::INT64};
-    auto eid = graph_->create_edge_type(
+    auto eid = graph_->create_edge_type(default_database_id, 
         "likes", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {score_col});
     ASSERT_TRUE(eid.has_value()) << eid.error().message;
 

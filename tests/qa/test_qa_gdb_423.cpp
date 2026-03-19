@@ -85,15 +85,15 @@ protected:
         insert_row("projects", projects_id_, 200, "Beta");
 
         // Create edge types.
-        auto eid_knows = graph_->create_edge_type(
+        auto eid_knows = graph_->create_edge_type(default_database_id, 
             "knows", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid_knows.has_value()) << eid_knows.error().message;
 
-        auto eid_works = graph_->create_edge_type(
+        auto eid_works = graph_->create_edge_type(default_database_id, 
             "works_at", persons_id_, companies_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid_works.has_value()) << eid_works.error().message;
 
-        auto eid_owns = graph_->create_edge_type(
+        auto eid_owns = graph_->create_edge_type(default_database_id, 
             "owns", companies_id_, projects_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid_owns.has_value()) << eid_owns.error().message;
 
@@ -525,7 +525,7 @@ TEST_F(QA_GDB423, MaxVisitedLimitTriggersError) {
 
 TEST_F(QA_GDB423, EmptyIntermediateSegment) {
     // Create edge type with no edges.
-    auto eid = graph_->create_edge_type("mentors", persons_id_, persons_id_, TypeId::INT64,
+    auto eid = graph_->create_edge_type(default_database_id, "mentors", persons_id_, persons_id_, TypeId::INT64,
                                         TypeId::INT64, {});
     ASSERT_TRUE(eid.has_value());
 
@@ -549,7 +549,7 @@ TEST_F(QA_GDB423, EmptyIntermediateSegment) {
 
 TEST_F(QA_GDB423, EmptyFirstSegmentKillsPipeline) {
     // Create edge type with no edges.
-    auto eid = graph_->create_edge_type("mentors", persons_id_, persons_id_, TypeId::INT64,
+    auto eid = graph_->create_edge_type(default_database_id, "mentors", persons_id_, persons_id_, TypeId::INT64,
                                         TypeId::INT64, {});
     ASSERT_TRUE(eid.has_value());
 
@@ -706,7 +706,7 @@ TEST_F(QA_GDB423, BinderAcceptsValidThreeEdgeChain) {
 
 TEST_F(QA_GDB423, VariablePlusVariable_DifferentEdgeTypes) {
     // Create a second person-to-person edge type.
-    auto eid = graph_->create_edge_type("trusts", persons_id_, persons_id_, TypeId::INT64,
+    auto eid = graph_->create_edge_type(default_database_id, "trusts", persons_id_, persons_id_, TypeId::INT64,
                                         TypeId::INT64, {});
     ASSERT_TRUE(eid.has_value());
 

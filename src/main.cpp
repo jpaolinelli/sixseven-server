@@ -139,14 +139,31 @@ int main(int argc, char* argv[]) {
     g_server = &server;
 
     // Wire query executor: route SQL to the shared QueryEngine.
+    // Resolves the client's startup database name to a database_id.
     server.set_query_executor(
-        [&engine](const std::string& sql) -> sixseven::Result<sixseven::QueryResult> {
+        [&engine, &catalog](const std::string& sql,
+                            const std::string& database) -> sixseven::Result<sixseven::QueryResult> {
+            if (!database.empty()) {
+                auto db = catalog.get_database(database);
+                if (db) {
+                    return engine.execute(sql, db->database_id);
+                }
+                // Unknown database name — fall through to default.
+            }
             return engine.execute(sql);
         });
 
     // Wire query describer: route Describe to the shared QueryEngine.
     server.set_query_describer(
-        [&engine](const std::string& sql) -> sixseven::Result<std::vector<sixseven::ColumnDescription>> {
+        [&engine, &catalog](
+            const std::string& sql,
+            const std::string& database) -> sixseven::Result<std::vector<sixseven::ColumnDescription>> {
+            if (!database.empty()) {
+                auto db = catalog.get_database(database);
+                if (db) {
+                    return engine.describe(sql, db->database_id);
+                }
+            }
             return engine.describe(sql);
         });
 

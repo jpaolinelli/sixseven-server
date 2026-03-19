@@ -379,7 +379,7 @@ protected:
         insert_person(6, "Frank");
 
         // Create 'knows' edge type.
-        auto eid = graph_->create_edge_type(
+        auto eid = graph_->create_edge_type(default_database_id, 
             "knows", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
@@ -391,7 +391,7 @@ protected:
         link("knows", 5, 6);
 
         // Create 'cycle' edge type.
-        auto cid = graph_->create_edge_type(
+        auto cid = graph_->create_edge_type(default_database_id, 
             "cycle", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(cid.has_value()) << cid.error().message;
 
@@ -684,7 +684,7 @@ TEST_F(QA_GDB422_Executor, AC7_MemoryBound_ExactlyEnough) {
 
 TEST_F(QA_GDB422_Executor, EmptyEdgeType) {
     // Create a new edge type with no edges.
-    auto eid = graph_->create_edge_type(
+    auto eid = graph_->create_edge_type(default_database_id, 
         "empty", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(eid.has_value());
 

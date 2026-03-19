@@ -92,7 +92,7 @@ protected:
             e.source_table_id = 1; // users
             e.target_table_id = 1; // users (self-referential)
             e.properties = "weight:FLOAT64";
-            auto r = catalog.create_edge_type(std::move(e));
+            auto r = catalog.create_edge_type(default_database_id, std::move(e));
             ASSERT_TRUE(r.has_value()) << r.error().message;
         }
 
@@ -102,7 +102,7 @@ protected:
             e.name = "authored";
             e.source_table_id = 1; // users
             e.target_table_id = 2; // posts
-            auto r = catalog.create_edge_type(std::move(e));
+            auto r = catalog.create_edge_type(default_database_id, std::move(e));
             ASSERT_TRUE(r.has_value()) << r.error().message;
         }
 
@@ -113,7 +113,7 @@ protected:
             e.source_table_id = 1; // users
             e.target_table_id = 4; // items
             e.properties = "quantity:INT32,note:STRING";
-            auto r = catalog.create_edge_type(std::move(e));
+            auto r = catalog.create_edge_type(default_database_id, std::move(e));
             ASSERT_TRUE(r.has_value()) << r.error().message;
         }
 
@@ -123,7 +123,7 @@ protected:
             e.name = "links_to";
             e.source_table_id = 4; // items
             e.target_table_id = 4; // items
-            auto r = catalog.create_edge_type(std::move(e));
+            auto r = catalog.create_edge_type(default_database_id, std::move(e));
             ASSERT_TRUE(r.has_value()) << r.error().message;
         }
 

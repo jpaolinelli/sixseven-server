@@ -717,7 +717,7 @@ TEST(Session, ProtocolPrepareAndExecute) {
     PgProtocolHandler handler(3);
 
     int exec_count = 0;
-    handler.set_query_executor([&exec_count](const std::string& sql) -> Result<QueryResult> {
+    handler.set_query_executor([&exec_count](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
         ++exec_count;
         if (sql == "SELECT 42") {
             QueryResult qr;
@@ -796,7 +796,7 @@ TEST(Session, ProtocolTransactionStateTracking) {
     Connection conn(server_fd);
     PgProtocolHandler handler(5);
 
-    handler.set_query_executor([](const std::string& sql) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
         if (sql == "BEGIN" || sql == "COMMIT" || sql == "ROLLBACK") {
             QueryResult qr;
             qr.message = sql;
@@ -904,7 +904,7 @@ TEST(Session, ProtocolNonSessionSetPassesThrough) {
 
     bool query_executor_called = false;
     handler.set_query_executor(
-        [&query_executor_called](const std::string& /*sql*/) -> Result<QueryResult> {
+        [&query_executor_called](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
             query_executor_called = true;
             QueryResult qr;
             qr.message = "SET";
@@ -930,7 +930,7 @@ TEST(Session, ProtocolShowTablesPassesThrough) {
 
     bool query_executor_called = false;
     handler.set_query_executor(
-        [&query_executor_called](const std::string& /*sql*/) -> Result<QueryResult> {
+        [&query_executor_called](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
             query_executor_called = true;
             QueryResult qr;
             qr.column_names = {"table_name"};

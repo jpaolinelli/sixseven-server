@@ -100,12 +100,12 @@ protected:
         insert_company(20, "Globex");
 
         // Create edge type: people -[works_at]-> companies.
-        auto eid = graph_->create_edge_type(
+        auto eid = graph_->create_edge_type(default_database_id, 
             "works_at", people_id_, companies_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         // Create edge type: people -[knows]-> people.
-        auto eid2 = graph_->create_edge_type(
+        auto eid2 = graph_->create_edge_type(default_database_id, 
             "knows", people_id_, people_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid2.has_value()) << eid2.error().message;
 
@@ -270,7 +270,7 @@ TEST_F(PatternMatchTest, MultiHopPattern) {
 
 TEST_F(PatternMatchTest, EmptyEdgeTable) {
     // Create a new edge type with no edges.
-    auto eid = graph_->create_edge_type(
+    auto eid = graph_->create_edge_type(default_database_id, 
         "empty_edge", people_id_, companies_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(eid.has_value());
 

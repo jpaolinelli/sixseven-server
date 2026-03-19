@@ -44,7 +44,7 @@ protected:
 // == Create / Drop edge type ==================================================
 
 TEST_F(GraphEngineTest, CreateEdgeType) {
-    auto result = engine_.create_edge_type(
+    auto result = engine_.create_edge_type(default_database_id, 
         "authored", users_table_id_, posts_table_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_GE(*result, 1);
@@ -53,11 +53,11 @@ TEST_F(GraphEngineTest, CreateEdgeType) {
 TEST_F(GraphEngineTest, CreateEdgeTypeDuplicateFails) {
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
-    auto dup = engine_.create_edge_type(
+    auto dup = engine_.create_edge_type(default_database_id, 
         "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
     EXPECT_FALSE(dup.has_value());
     EXPECT_EQ(dup.error().code, StatusCode::ALREADY_EXISTS);
@@ -66,11 +66,11 @@ TEST_F(GraphEngineTest, CreateEdgeTypeDuplicateFails) {
 TEST_F(GraphEngineTest, DropEdgeType) {
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
-    auto drop = engine_.drop_edge_type("follows");
+    auto drop = engine_.drop_edge_type(default_database_id, "follows");
     ASSERT_TRUE(drop.has_value()) << drop.error().message;
 
     // Edge type no longer available.
@@ -80,7 +80,7 @@ TEST_F(GraphEngineTest, DropEdgeType) {
 }
 
 TEST_F(GraphEngineTest, DropEdgeTypeNotFoundFails) {
-    auto drop = engine_.drop_edge_type("nonexistent");
+    auto drop = engine_.drop_edge_type(default_database_id, "nonexistent");
     EXPECT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::NOT_FOUND);
 }
@@ -88,12 +88,12 @@ TEST_F(GraphEngineTest, DropEdgeTypeNotFoundFails) {
 TEST_F(GraphEngineTest, ListEdgeTypes) {
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "authored", users_table_id_, posts_table_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
@@ -106,7 +106,7 @@ TEST_F(GraphEngineTest, ListEdgeTypes) {
 TEST_F(GraphEngineTest, LinkCreatesEdge) {
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
@@ -119,7 +119,7 @@ TEST_F(GraphEngineTest, LinkWithProperties) {
     std::vector<ColumnDef> props = {{"weight", TypeId::FLOAT64}};
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "rated", users_table_id_, posts_table_id_, TypeId::INT64, TypeId::INT64, props)
             .has_value());
 
@@ -142,7 +142,7 @@ TEST_F(GraphEngineTest, LinkToNonexistentEdgeTypeFails) {
 TEST_F(GraphEngineTest, LinkDuplicatePreventionBlocks) {
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {}, true)
             .has_value());
 
@@ -156,7 +156,7 @@ TEST_F(GraphEngineTest, LinkDuplicatePreventionBlocks) {
 TEST_F(GraphEngineTest, LinkUpdatesForwardAndReverseIndexes) {
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
@@ -180,7 +180,7 @@ TEST_F(GraphEngineTest, LinkUpdatesForwardAndReverseIndexes) {
 TEST_F(GraphEngineTest, UnlinkRemovesEdge) {
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
@@ -197,7 +197,7 @@ TEST_F(GraphEngineTest, UnlinkRemovesEdge) {
 TEST_F(GraphEngineTest, UnlinkUpdatesIndexes) {
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
@@ -221,7 +221,7 @@ TEST_F(GraphEngineTest, UnlinkUpdatesIndexes) {
 TEST_F(GraphEngineTest, UnlinkNonexistentEdgeFails) {
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
@@ -239,7 +239,7 @@ TEST_F(GraphEngineTest, UnlinkNonexistentEdgeTypeFails) {
 TEST_F(GraphEngineTest, UnlinkAllowsRelinkWithDuplicatePrevention) {
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {}, true)
             .has_value());
 
@@ -257,7 +257,7 @@ TEST_F(GraphEngineTest, UnlinkWhereDeletesMatchingEdges) {
     std::vector<ColumnDef> props = {{"weight", TypeId::FLOAT64}};
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "rated", users_table_id_, posts_table_id_, TypeId::INT64, TypeId::INT64, props)
             .has_value());
 
@@ -280,7 +280,7 @@ TEST_F(GraphEngineTest, UnlinkWhereDeletesMatchingEdges) {
 TEST_F(GraphEngineTest, UnlinkWhereDeletesAllMatching) {
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
@@ -300,7 +300,7 @@ TEST_F(GraphEngineTest, UnlinkWhereDeletesAllMatching) {
 TEST_F(GraphEngineTest, UnlinkWhereNoMatches) {
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
@@ -341,7 +341,7 @@ TEST_F(GraphEngineTest, GetEdgesToNonexistentTypeFails) {
 TEST_F(GraphEngineTest, GetEdgeTableReturnsPointer) {
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
@@ -356,7 +356,7 @@ TEST_F(GraphEngineTest, GetEdgeTableReturnsPointer) {
 TEST_F(GraphEngineTest, SelfReferenceLinkUnlink) {
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 
@@ -378,12 +378,12 @@ TEST_F(GraphEngineTest, SelfReferenceLinkUnlink) {
 TEST_F(GraphEngineTest, MultipleEdgeTypesAreIndependent) {
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
     ASSERT_TRUE(
         engine_
-            .create_edge_type(
+            .create_edge_type(default_database_id, 
                 "authored", users_table_id_, posts_table_id_, TypeId::INT64, TypeId::INT64, {})
             .has_value());
 

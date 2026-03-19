@@ -231,7 +231,8 @@ void do_startup(int client_fd, Connection& conn, PgProtocolHandler& handler) {
 }
 
 /// Mock describer: returns columns for SELECT, empty for non-SELECT.
-Result<std::vector<ColumnDescription>> mock_describer(const std::string& sql) {
+Result<std::vector<ColumnDescription>> mock_describer(const std::string& sql,
+                                                      const std::string& /*database*/) {
     // Case-insensitive check for SELECT.
     std::string upper;
     for (char c : sql) {
@@ -468,7 +469,7 @@ TEST(QA_GDB201_Protocol, DescribeUnnamedPortalRowDescription) {
     Connection conn(server_fd);
     PgProtocolHandler handler(206);
 
-    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         return ok(QueryResult{});
     });
     handler.set_query_describer(mock_describer);
@@ -634,7 +635,7 @@ TEST(QA_GDB201_Protocol, DescribeAllSupportedColumnTypes) {
 
     // Return columns of every supported type.
     handler.set_query_describer(
-        [](const std::string& sql) -> Result<std::vector<ColumnDescription>> {
+        [](const std::string& sql, const std::string& /*database*/) -> Result<std::vector<ColumnDescription>> {
             std::string upper;
             for (char c : sql) {
                 upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
@@ -739,7 +740,7 @@ TEST(QA_GDB201_Protocol, DescribeThenExecuteBothWork) {
     Connection conn(server_fd);
     PgProtocolHandler handler(210);
 
-    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         QueryResult qr;
         qr.column_names = {"id", "val"};
         qr.column_types = {TypeId::INT32, TypeId::STRING};
@@ -747,7 +748,7 @@ TEST(QA_GDB201_Protocol, DescribeThenExecuteBothWork) {
         return ok(std::move(qr));
     });
     handler.set_query_describer(
-        [](const std::string& sql) -> Result<std::vector<ColumnDescription>> {
+        [](const std::string& sql, const std::string& /*database*/) -> Result<std::vector<ColumnDescription>> {
             std::string upper;
             for (char c : sql) {
                 upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
@@ -823,7 +824,7 @@ TEST(QA_GDB201_Protocol, DescribeSkippedAfterErrorInBatch) {
     Connection conn(server_fd);
     PgProtocolHandler handler(211);
 
-    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         return ok(QueryResult{});
     });
     handler.set_query_describer(mock_describer);
@@ -910,7 +911,7 @@ TEST(QA_GDB201_Protocol, DescribePortalWithNoDescriberFallsBackToNoData) {
     Connection conn(server_fd);
     PgProtocolHandler handler(213);
 
-    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         return ok(QueryResult{});
     });
     // Do NOT set query_describer.
@@ -1012,7 +1013,7 @@ TEST(QA_GDB201_Protocol, RowDescriptionColumnOIDsAreCorrect) {
 
     // Single INT64 column.
     handler.set_query_describer(
-        [](const std::string& /*sql*/) -> Result<std::vector<ColumnDescription>> {
+        [](const std::string& /*sql*/, const std::string& /*database*/) -> Result<std::vector<ColumnDescription>> {
             return ok(std::vector<ColumnDescription>{{"big_id", TypeId::INT64}});
         });
 
@@ -1070,7 +1071,7 @@ TEST(QA_GDB201_Protocol, DescribeZeroColumnsReturnsNoData) {
 
     // Describer returns empty columns for this SELECT (edge case).
     handler.set_query_describer(
-        [](const std::string& /*sql*/) -> Result<std::vector<ColumnDescription>> {
+        [](const std::string& /*sql*/, const std::string& /*database*/) -> Result<std::vector<ColumnDescription>> {
             return ok(std::vector<ColumnDescription>{}); // 0 columns
         });
 
@@ -1114,7 +1115,7 @@ TEST(QA_GDB201_Protocol, DescribePortalDMLReturnsNoData) {
     Connection conn(server_fd);
     PgProtocolHandler handler(217);
 
-    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         return ok(QueryResult{});
     });
     handler.set_query_describer(mock_describer);
@@ -1210,7 +1211,7 @@ TEST(QA_GDB201_Protocol, PortalDescribeDoesNotIncludeParameterDescription) {
     Connection conn(server_fd);
     PgProtocolHandler handler(219);
 
-    handler.set_query_executor([](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         return ok(QueryResult{});
     });
     handler.set_query_describer(mock_describer);

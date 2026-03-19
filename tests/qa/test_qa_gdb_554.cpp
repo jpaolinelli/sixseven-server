@@ -92,7 +92,7 @@ protected:
         // Create edge type if not already created.
         auto existing = graph_->get_edge_table(edge_name);
         if (!existing.has_value()) {
-            auto eid = graph_->create_edge_type(
+            auto eid = graph_->create_edge_type(default_database_id, 
                 edge_name, tid, tid, pk_type, pk_type, {});
             ASSERT_TRUE(eid.has_value()) << eid.error().message;
         }

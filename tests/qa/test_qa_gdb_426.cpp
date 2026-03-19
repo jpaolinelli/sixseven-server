@@ -123,7 +123,7 @@ protected:
 
     void create_edge_type(const std::string& name, const std::string& prop_name = "weight") {
         ColumnDef w_col{prop_name, TypeId::FLOAT64};
-        auto eid = graph_->create_edge_type(
+        auto eid = graph_->create_edge_type(default_database_id, 
             name, nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {w_col});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
     }
@@ -572,7 +572,7 @@ TEST_F(GDB426_WeightedSP, StringWeightPropertyError) {
 
     // Create edge type with string property.
     ColumnDef str_col{"label", TypeId::STRING};
-    auto eid = graph_->create_edge_type(
+    auto eid = graph_->create_edge_type(default_database_id, 
         "labeled", nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {str_col});
     ASSERT_TRUE(eid.has_value());
 
@@ -632,7 +632,7 @@ TEST_F(GDB426_WeightedSP, IntegerWeightProperty) {
         insert_node(id);
 
     ColumnDef int_col{"dist", TypeId::INT64};
-    auto eid = graph_->create_edge_type(
+    auto eid = graph_->create_edge_type(default_database_id, 
         "iroad", nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {int_col});
     ASSERT_TRUE(eid.has_value());
 

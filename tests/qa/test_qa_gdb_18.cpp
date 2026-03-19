@@ -84,9 +84,9 @@ TEST(QA_Catalog, CreateEdgeTypeEmptyName) {
     def.source_table_id = *t1;
     def.target_table_id = *t2;
 
-    auto result = catalog.create_edge_type(def);
+    auto result = catalog.create_edge_type(default_database_id, def);
     if (result.has_value()) {
-        auto get = catalog.get_edge_type("");
+        auto get = catalog.get_edge_type(default_database_id, "");
         EXPECT_TRUE(get.has_value());
     }
 }
@@ -268,12 +268,12 @@ TEST(QA_Catalog, DropEdgeTypeTwiceFails) {
     def.name = "edge";
     def.source_table_id = *t1;
     def.target_table_id = *t2;
-    ASSERT_TRUE(catalog.create_edge_type(def).has_value());
+    ASSERT_TRUE(catalog.create_edge_type(default_database_id, def).has_value());
 
-    auto drop1 = catalog.drop_edge_type("edge");
+    auto drop1 = catalog.drop_edge_type(default_database_id, "edge");
     ASSERT_TRUE(drop1.has_value());
 
-    auto drop2 = catalog.drop_edge_type("edge");
+    auto drop2 = catalog.drop_edge_type(default_database_id, "edge");
     EXPECT_FALSE(drop2.has_value());
     EXPECT_EQ(drop2.error().code, StatusCode::NOT_FOUND);
 }
@@ -338,7 +338,7 @@ TEST(QA_Catalog, CreateEdgeTypeBothTablesNonexistent) {
     def.source_table_id = 888;
     def.target_table_id = 999;
 
-    auto result = catalog.create_edge_type(def);
+    auto result = catalog.create_edge_type(default_database_id, def);
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
@@ -358,7 +358,7 @@ TEST(QA_Catalog, CreateEdgeTypeAfterSourceDropped) {
     def.source_table_id = *t1;
     def.target_table_id = *t2;
 
-    auto result = catalog.create_edge_type(def);
+    auto result = catalog.create_edge_type(default_database_id, def);
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
@@ -627,7 +627,7 @@ TEST(QA_Catalog, DropDatabaseCascadeRemovesEdgeTypesAndEmbeddings) {
     edge.name = "cascade_edge";
     edge.source_table_id = *t1;
     edge.target_table_id = *t2;
-    ASSERT_TRUE(catalog.create_edge_type(edge).has_value());
+    ASSERT_TRUE(catalog.create_edge_type(*db_id, edge).has_value());
 
     // Register embedding column.
     EmbeddingColumnDef emb;
@@ -641,8 +641,8 @@ TEST(QA_Catalog, DropDatabaseCascadeRemovesEdgeTypesAndEmbeddings) {
     ASSERT_TRUE(drop.has_value()) << drop.error().message;
 
     // Edge type should be gone.
-    EXPECT_TRUE(catalog.list_edge_types().empty());
-    EXPECT_FALSE(catalog.get_edge_type("cascade_edge").has_value());
+    EXPECT_TRUE(catalog.list_edge_types(*db_id).empty());
+    EXPECT_FALSE(catalog.get_edge_type(*db_id, "cascade_edge").has_value());
 
     // Embedding columns should be gone.
     EXPECT_TRUE(catalog.list_all_embedding_columns().empty());

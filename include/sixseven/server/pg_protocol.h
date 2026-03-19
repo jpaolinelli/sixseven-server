@@ -128,13 +128,16 @@ private:
 // -- Protocol handler ---------------------------------------------------------
 
 /// Callback type for executing SQL. Provided by the server.
-using QueryExecutor = std::function<Result<QueryResult>(const std::string& sql)>;
+/// The second parameter is the database name from the client's startup message.
+using QueryExecutor =
+    std::function<Result<QueryResult>(const std::string& sql, const std::string& database)>;
 
 /// Callback type for describing SQL result columns without executing.
 /// Returns column metadata (names + types) for SELECT statements,
 /// or an empty vector for non-SELECT statements.
 using QueryDescriber =
-    std::function<Result<std::vector<ColumnDescription>>(const std::string& sql)>;
+    std::function<Result<std::vector<ColumnDescription>>(const std::string& sql,
+                                                         const std::string& database)>;
 
 /// Protocol state machine phases.
 enum class ProtocolState : uint8_t {
@@ -272,6 +275,9 @@ private:
     void send_auth_sasl(Connection& conn);
     void send_auth_sasl_continue(Connection& conn, const std::string& data);
     void send_auth_sasl_final(Connection& conn, const std::string& data);
+
+    /// Return the database name from the client's startup message (empty if none).
+    [[nodiscard]] std::string startup_database() const;
 
     /// Complete the post-auth handshake (parameter status, backend key, ready).
     void complete_startup(Connection& conn);

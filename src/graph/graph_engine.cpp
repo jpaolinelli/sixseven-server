@@ -106,7 +106,7 @@ Result<void> GraphEngine::create_edge_storage(edge_id_t edge_id,
 
     // Look up the edge type name from the catalog to use as map key.
     // At this point the edge type is already registered.
-    auto edge_types = catalog_.list_edge_types();
+    auto edge_types = catalog_.list_all_edge_types();
     std::string edge_name;
     for (const auto& et : edge_types) {
         if (et.edge_id == edge_id) {
@@ -147,7 +147,7 @@ Result<void> GraphEngine::open_edge_storage(edge_id_t edge_id,
         build_edge_storage_schema(source_pk_type, target_pk_type, property_columns);
 
     // Find the edge type name.
-    auto edge_types = catalog_.list_edge_types();
+    auto edge_types = catalog_.list_all_edge_types();
     std::string edge_name;
     for (const auto& et : edge_types) {
         if (et.edge_id == edge_id) {
@@ -235,7 +235,8 @@ Result<void> GraphEngine::delete_persisted_edge(const std::string& edge_type,
     return ok();
 }
 
-Result<edge_id_t> GraphEngine::create_edge_type(const std::string& name,
+Result<edge_id_t> GraphEngine::create_edge_type(database_id_t database_id,
+                                                const std::string& name,
                                                 table_id_t source_table_id,
                                                 table_id_t target_table_id,
                                                 TypeId source_pk_type,
@@ -268,7 +269,7 @@ Result<edge_id_t> GraphEngine::create_edge_type(const std::string& name,
     def.target_table_id = target_table_id;
     def.properties = props_str;
 
-    auto edge_id_result = catalog_.create_edge_type(def);
+    auto edge_id_result = catalog_.create_edge_type(database_id, def);
     if (!edge_id_result.has_value()) {
         return tl::unexpected(edge_id_result.error());
     }
@@ -300,7 +301,7 @@ Result<edge_id_t> GraphEngine::create_edge_type(const std::string& name,
     return ok(*edge_id_result);
 }
 
-Result<void> GraphEngine::drop_edge_type(const std::string& name) {
+Result<void> GraphEngine::drop_edge_type(database_id_t database_id, const std::string& name) {
     std::lock_guard lock(mu_);
 
     auto it = edge_tables_.find(name);
@@ -312,7 +313,7 @@ Result<void> GraphEngine::drop_edge_type(const std::string& name) {
     auto edge_id = it->second->config().edge_id;
 
     // Remove from catalog.
-    auto drop_result = catalog_.drop_edge_type(name);
+    auto drop_result = catalog_.drop_edge_type(database_id, name);
     if (!drop_result.has_value()) {
         return tl::unexpected(drop_result.error());
     }
@@ -529,7 +530,7 @@ Result<void> GraphEngine::load_edges() {
         return ok(); // No persistence — nothing to load.
     }
 
-    auto edge_types = catalog_.list_edge_types();
+    auto edge_types = catalog_.list_all_edge_types();
     if (edge_types.empty()) {
         return ok();
     }

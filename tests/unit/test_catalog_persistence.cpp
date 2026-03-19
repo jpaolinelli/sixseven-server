@@ -420,12 +420,13 @@ TEST_F(CatalogPersistenceTest, PersistAndRemoveEdgeType) {
 
     EdgeTypeDef edge;
     edge.edge_id = 1;
+    edge.database_id = default_database_id;
     edge.name = "follows";
     edge.source_table_id = first_user_table_id;
     edge.target_table_id = first_user_table_id;
     edge.properties = "weight:FLOAT64";
 
-    auto restore = catalog_->restore_edge_type(edge);
+    auto restore = catalog_->restore_edge_type(default_database_id, edge);
     ASSERT_TRUE(restore.has_value()) << restore.error().message;
 
     auto persist = persistence_->persist_edge_type(edge);
@@ -435,7 +436,7 @@ TEST_F(CatalogPersistenceTest, PersistAndRemoveEdgeType) {
     restart();
     run_bootstrap();
 
-    auto restored = catalog_->get_edge_type("follows");
+    auto restored = catalog_->get_edge_type(default_database_id, "follows");
     ASSERT_TRUE(restored.has_value()) << restored.error().message;
     EXPECT_EQ(restored->name, "follows");
     EXPECT_EQ(restored->source_table_id, first_user_table_id);
@@ -449,7 +450,7 @@ TEST_F(CatalogPersistenceTest, PersistAndRemoveEdgeType) {
     restart();
     run_bootstrap();
 
-    auto gone = catalog_->get_edge_type("follows");
+    auto gone = catalog_->get_edge_type(default_database_id, "follows");
     EXPECT_FALSE(gone.has_value());
 }
 

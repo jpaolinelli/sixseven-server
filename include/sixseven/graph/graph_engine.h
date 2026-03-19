@@ -70,7 +70,8 @@ public:
     /// Create an edge type and its backing EdgeTable.
     /// Registers the edge type in the catalog and creates the in-memory EdgeTable.
     /// If persistence is enabled, also creates the backing storage file.
-    [[nodiscard]] Result<edge_id_t> create_edge_type(const std::string& name,
+    [[nodiscard]] Result<edge_id_t> create_edge_type(database_id_t database_id,
+                                                     const std::string& name,
                                                      table_id_t source_table_id,
                                                      table_id_t target_table_id,
                                                      TypeId source_pk_type,
@@ -80,7 +81,7 @@ public:
 
     /// Drop an edge type and its backing EdgeTable.
     /// If persistence is enabled, also removes the storage file.
-    [[nodiscard]] Result<void> drop_edge_type(const std::string& name);
+    [[nodiscard]] Result<void> drop_edge_type(database_id_t database_id, const std::string& name);
 
     /// LINK: create an edge between two nodes.
     /// Inserts a row into the edge table and updates both adjacency indexes.

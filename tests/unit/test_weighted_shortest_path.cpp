@@ -174,7 +174,7 @@ protected:
 
         // Create 'road' edge type with a 'distance' property.
         ColumnDef dist_col{"distance", TypeId::FLOAT64};
-        auto eid = graph_->create_edge_type(
+        auto eid = graph_->create_edge_type(default_database_id, 
             "road", cities_id_, cities_id_, TypeId::INT64, TypeId::INT64, {dist_col});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
@@ -464,7 +464,7 @@ protected:
         }
 
         ColumnDef dist_col{"distance", TypeId::FLOAT64};
-        auto eid = graph_->create_edge_type(
+        auto eid = graph_->create_edge_type(default_database_id, 
             "road", nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {dist_col});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
@@ -667,7 +667,7 @@ protected:
         }
 
         ColumnDef weight_col{"cost", TypeId::FLOAT64};
-        auto eid = graph_->create_edge_type(
+        auto eid = graph_->create_edge_type(default_database_id, 
             "edge", nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {weight_col});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 

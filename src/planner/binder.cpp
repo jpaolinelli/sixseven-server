@@ -274,7 +274,7 @@ Result<ScopeTable> Binder::build_traverse_scope(const TableRef& tref, BoundState
     }
 
     // 1. Resolve edge type.
-    auto edge = catalog_.get_edge_type(trav->edge_type);
+    auto edge = catalog_.get_edge_type(database_id_,trav->edge_type);
     if (!edge) {
         return tl::unexpected(edge.error());
     }
@@ -462,7 +462,7 @@ Binder::bind_match_source(const MatchStmt& match, Scope& scope, BoundStatement& 
         }
 
         if (elem.outgoing_edge && !elem.outgoing_edge->edge_type.empty()) {
-            auto edge = catalog_.get_edge_type(elem.outgoing_edge->edge_type);
+            auto edge = catalog_.get_edge_type(database_id_,elem.outgoing_edge->edge_type);
             if (!edge) {
                 return tl::unexpected(edge.error());
             }
@@ -545,7 +545,7 @@ Binder::bind_match_source(const MatchStmt& match, Scope& scope, BoundStatement& 
             continue;
         }
 
-        auto edge_def = catalog_.get_edge_type(elem.outgoing_edge->edge_type);
+        auto edge_def = catalog_.get_edge_type(database_id_,elem.outgoing_edge->edge_type);
         if (!edge_def) {
             continue; // Already validated above.
         }
@@ -569,7 +569,7 @@ Binder::bind_match_source(const MatchStmt& match, Scope& scope, BoundStatement& 
         // is compatible with the next edge's source table.
         const auto& next_elem = match.pattern[i + 1];
         if (next_elem.outgoing_edge && !next_elem.outgoing_edge->edge_type.empty()) {
-            auto next_edge = catalog_.get_edge_type(next_elem.outgoing_edge->edge_type);
+            auto next_edge = catalog_.get_edge_type(database_id_,next_elem.outgoing_edge->edge_type);
             if (next_edge && edge_def->target_table_id != next_edge->source_table_id) {
                 return make_error(
                     StatusCode::INVALID_ARGUMENT,
@@ -2044,7 +2044,7 @@ Result<BoundStatement> Binder::bind_create_edge_type(const CreateEdgeTypeStmt& s
     }
 
     // Check for duplicate edge type.
-    auto existing = catalog_.get_edge_type(stmt.name);
+    auto existing = catalog_.get_edge_type(database_id_,stmt.name);
     if (existing) {
         return make_error(StatusCode::ALREADY_EXISTS, "edge type " + stmt.name + " already exists");
     }
@@ -2057,7 +2057,7 @@ Result<BoundStatement> Binder::bind_drop_edge_type(const DropEdgeTypeStmt& stmt)
     bound.stmt = &stmt;
 
     if (!stmt.if_exists) {
-        auto edge = catalog_.get_edge_type(stmt.name);
+        auto edge = catalog_.get_edge_type(database_id_,stmt.name);
         if (!edge) {
             return tl::unexpected(edge.error());
         }
@@ -2075,7 +2075,7 @@ Result<BoundStatement> Binder::bind_link(const LinkStmt& stmt) {
     bound.stmt = &stmt;
 
     // Resolve edge type.
-    auto edge = catalog_.get_edge_type(stmt.edge_type);
+    auto edge = catalog_.get_edge_type(database_id_,stmt.edge_type);
     if (!edge) {
         return tl::unexpected(edge.error());
     }
@@ -2127,7 +2127,7 @@ Result<BoundStatement> Binder::bind_unlink(const UnlinkStmt& stmt) {
     BoundStatement bound;
     bound.stmt = &stmt;
 
-    auto edge = catalog_.get_edge_type(stmt.edge_type);
+    auto edge = catalog_.get_edge_type(database_id_,stmt.edge_type);
     if (!edge) {
         return tl::unexpected(edge.error());
     }
@@ -2182,7 +2182,7 @@ Result<BoundStatement> Binder::bind_traverse(const TraverseStmt& stmt) {
     BoundStatement bound;
     bound.stmt = &stmt;
 
-    auto edge = catalog_.get_edge_type(stmt.edge_type);
+    auto edge = catalog_.get_edge_type(database_id_,stmt.edge_type);
     if (!edge) {
         return tl::unexpected(edge.error());
     }
@@ -2343,7 +2343,7 @@ Result<BoundStatement> Binder::bind_shortest_path(const ShortestPathStmt& stmt) 
     BoundStatement bound;
     bound.stmt = &stmt;
 
-    auto edge = catalog_.get_edge_type(stmt.edge_type);
+    auto edge = catalog_.get_edge_type(database_id_,stmt.edge_type);
     if (!edge) {
         return tl::unexpected(edge.error());
     }

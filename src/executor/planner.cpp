@@ -487,7 +487,7 @@ Planner::plan_from_source(const TableRef& table_ref,
         config.fetch = true; // Always fetch for enrichment.
 
         // Resolve edge type.
-        auto edge_def = catalog_.get_edge_type(trav->edge_type);
+        auto edge_def = catalog_.get_edge_type(database_id_,trav->edge_type);
         if (!edge_def) {
             return make_error(edge_def.error().code, edge_def.error().message);
         }
@@ -1655,7 +1655,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_traverse(const TraverseStmt& stm
 
     // Build output schema.
     // Determine PK type from the edge type definition.
-    auto edge_def = catalog_.get_edge_type(stmt.edge_type);
+    auto edge_def = catalog_.get_edge_type(database_id_,stmt.edge_type);
     if (!edge_def) {
         return make_error(edge_def.error().code, edge_def.error().message);
     }

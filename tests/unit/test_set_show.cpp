@@ -316,7 +316,7 @@ TEST_F(SetShowTest, ShowEdgeTypesResolvesTableNames) {
     et.name = "follows";
     et.source_table_id = src->table_id;
     et.target_table_id = tgt->table_id;
-    ASSERT_TRUE(catalog_->create_edge_type(et).has_value());
+    ASSERT_TRUE(catalog_->create_edge_type(default_database_id, et).has_value());
 
     auto qr = exec_ok("SHOW EDGE TYPES");
     bool found = false;

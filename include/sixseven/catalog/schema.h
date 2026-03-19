@@ -68,6 +68,7 @@ struct IndexDef {
 /// Metadata for a graph edge type in the system catalog.
 struct EdgeTypeDef {
     edge_id_t edge_id = 0;
+    database_id_t database_id = 0;
     std::string name;
     table_id_t source_table_id = 0;
     table_id_t target_table_id = 0;
@@ -251,10 +252,11 @@ inline TableSchema sys_edge_types_schema() {
     schema.name = "sys_edge_types";
     schema.columns = {
         {0, "edge_id", TypeId::INT32, false, ""},
-        {1, "name", TypeId::STRING, false, ""},
-        {2, "source_table_id", TypeId::INT32, false, ""},
-        {3, "target_table_id", TypeId::INT32, false, ""},
-        {4, "properties", TypeId::STRING, true, ""},
+        {1, "database_id", TypeId::INT32, false, ""},
+        {2, "name", TypeId::STRING, false, ""},
+        {3, "source_table_id", TypeId::INT32, false, ""},
+        {4, "target_table_id", TypeId::INT32, false, ""},
+        {5, "properties", TypeId::STRING, true, ""},
     };
     schema.pk_columns = "edge_id";
     return schema;

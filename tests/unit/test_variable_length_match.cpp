@@ -307,7 +307,7 @@ protected:
         insert_person(5, "Eve", "Acme");
 
         // Create 'knows' edge type: persons -> persons.
-        auto eid = graph_->create_edge_type(
+        auto eid = graph_->create_edge_type(default_database_id, 
             "knows", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
@@ -318,7 +318,7 @@ protected:
         link("knows", 4, 5);
 
         // Create 'cycle' edge type.
-        auto cid = graph_->create_edge_type(
+        auto cid = graph_->create_edge_type(default_database_id, 
             "cycle", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(cid.has_value()) << cid.error().message;
 

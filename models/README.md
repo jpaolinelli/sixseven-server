@@ -2,44 +2,58 @@
 
 This directory holds ONNX embedding models for local inference. Models are not checked into version control (see `.gitignore`).
 
+## Quick Start
+
+```bash
+pip install huggingface-hub
+
+# Download the recommended model (~180 MB total)
+hf download onnx-community/all-MiniLM-L6-v2-ONNX \
+    --local-dir models/all-MiniLM-L6-v2
+
+# Clean up the download cache
+rm -rf models/all-MiniLM-L6-v2/.cache
+```
+
 ## Directory Layout
 
-Each model is a directory containing the ONNX model file and a Hugging Face tokenizer config:
+The Hugging Face download creates a directory with the model files in an `onnx/` subdirectory and the tokenizer at the root:
 
 ```
 models/
     all-MiniLM-L6-v2/
-        model.onnx          # or onnx/model.onnx
-        tokenizer.json       # Hugging Face tokenizer config
-    bge-small-en-v1.5/
-        model.onnx
-        tokenizer.json
+        onnx/
+            model.onnx          # Full-precision model
+            model.onnx_data     # Model weights (external data)
+            model_fp16.onnx     # Half-precision variant
+            model_q4.onnx       # 4-bit quantized variant
+        tokenizer.json          # Hugging Face tokenizer config
+        config.json             # Model config
+        vocab.txt               # Vocabulary
 ```
+
+SixSevenDB auto-discovers `model.onnx` (or `model.ort`) inside the `onnx/` subdirectory and `tokenizer.json` at the directory root.
 
 ## Downloading Models
 
-Install the Hugging Face CLI:
-
-```bash
-pip install huggingface-hub
-```
-
 ### all-MiniLM-L6-v2 (384 dimensions, WordPiece tokenizer)
 
-Best balance of size (~80 MB) and quality for general-purpose semantic search.
+Best balance of size and quality for general-purpose semantic search.
 
 ```bash
-huggingface-cli download onnx-community/all-MiniLM-L6-v2-ONNX \
+hf download onnx-community/all-MiniLM-L6-v2-ONNX \
     --local-dir models/all-MiniLM-L6-v2
+rm -rf models/all-MiniLM-L6-v2/.cache
 ```
 
 ### bge-small-en-v1.5 (384 dimensions, WordPiece tokenizer)
 
-Strong retrieval performance (~130 MB).
+Strong retrieval performance.
 
 ```bash
-huggingface-cli download onnx-community/bge-small-en-v1.5-ONNX \
+hf download onnx-community/bge-small-en-v1.5-ONNX \
     --local-dir models/bge-small-en-v1.5
+rm -rf models/bge-small-en-v1.5/.cache
 ```
 
 ### Export Your Own Model
@@ -69,5 +83,3 @@ CREATE TABLE articles (
     title_vec EMBEDDING(384, source='title', provider='onnx/models/all-MiniLM-L6-v2')
 );
 ```
-
-SixSevenDB auto-discovers `model.onnx` and `tokenizer.json` in the directory.

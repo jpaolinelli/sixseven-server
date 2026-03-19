@@ -92,10 +92,18 @@ public:
     /// Uses the current database context for name resolution.
     [[nodiscard]] Result<QueryResult> execute(const std::string& sql);
 
+    /// Execute a SQL statement in a specific database context.
+    /// Thread-safe: temporarily overrides the database for this call only.
+    [[nodiscard]] Result<QueryResult> execute(const std::string& sql, database_id_t database_id);
+
     /// Describe the result columns of a SQL statement without executing it.
     /// Returns column metadata for SELECT statements (parse + bind only).
     /// Returns an empty vector for non-SELECT statements (INSERT/UPDATE/DELETE/DDL).
     [[nodiscard]] Result<std::vector<ColumnDescription>> describe(const std::string& sql);
+
+    /// Describe result columns in a specific database context.
+    [[nodiscard]] Result<std::vector<ColumnDescription>> describe(const std::string& sql,
+                                                                  database_id_t database_id);
 
     /// Set the current database context by ID.
     void set_current_database(database_id_t database_id);

@@ -35,8 +35,15 @@ desktop.ini
 # Cache
 .cache/
 
+# ONNX model files (downloaded on demand, keep README.md)
+models/*
+!models/README.md
+
 # Test model fixtures (downloaded on demand)
 tests/fixtures/models/
+
+# Generated seed SQL files (regenerate via: python3 tools/generate_seed_data.py)
+tools/seed_*.sql
 
 # Data directory (runtime)
 data/

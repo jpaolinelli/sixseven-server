@@ -522,7 +522,7 @@ TEST(ParamSubstitutionWire, ParameterSubstitutionPassesSqlToExecutor) {
     PgProtocolHandler handler(100);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql) -> Result<QueryResult> {
+    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
         received_sql = sql;
         QueryResult qr;
         qr.column_names = {"id"};
@@ -565,7 +565,7 @@ TEST(ParamSubstitutionWire, NullParameterSubstitution) {
     PgProtocolHandler handler(101);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql) -> Result<QueryResult> {
+    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
         received_sql = sql;
         QueryResult qr;
         qr.affected_rows = 1;
@@ -605,7 +605,7 @@ TEST(ParamSubstitutionWire, StringParameterWithEscaping) {
     PgProtocolHandler handler(102);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql) -> Result<QueryResult> {
+    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
         received_sql = sql;
         QueryResult qr;
         qr.affected_rows = 1;
@@ -645,7 +645,7 @@ TEST(ParamSubstitutionWire, DeleteWithParameter) {
     PgProtocolHandler handler(103);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql) -> Result<QueryResult> {
+    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
         received_sql = sql;
         QueryResult qr;
         qr.affected_rows = 3;
@@ -685,7 +685,7 @@ TEST(ParamSubstitutionWire, NoParamsPassthroughUnchanged) {
     PgProtocolHandler handler(104);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql) -> Result<QueryResult> {
+    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
         received_sql = sql;
         QueryResult qr;
         qr.column_names = {"x"};
@@ -731,7 +731,7 @@ TEST(ParamSubstitutionWire, SqlLevelExecuteWithParams) {
 
     std::string received_sql;
     int call_count = 0;
-    handler.set_query_executor([&](const std::string& sql) -> Result<QueryResult> {
+    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
         ++call_count;
         received_sql = sql;
         QueryResult qr;

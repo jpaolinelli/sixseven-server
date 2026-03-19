@@ -300,7 +300,7 @@ TEST(QA_GDB383_WireExecute, OverflowParamInSqlExecuteDoesNotCrash) {
     PgProtocolHandler handler(383);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql) -> Result<QueryResult> {
+    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
         received_sql = sql;
         QueryResult qr;
         qr.column_names = {"id"};
@@ -343,7 +343,7 @@ TEST(QA_GDB383_WireExecute, IntMaxPlusOneParamInSqlExecuteDoesNotCrash) {
     Connection conn(server_fd);
     PgProtocolHandler handler(384);
 
-    handler.set_query_executor([&](const std::string& sql) -> Result<QueryResult> {
+    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
         (void)sql;
         QueryResult qr;
         qr.column_names = {"id"};

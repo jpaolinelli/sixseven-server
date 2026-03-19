@@ -599,19 +599,20 @@ TEST_F(QA_CatalogPersistence, EdgeTypeEmptyPropertiesSurvivesRestart) {
 
     EdgeTypeDef edge;
     edge.edge_id = 1;
+    edge.database_id = default_database_id;
     edge.name = "knows";
     edge.source_table_id = tid;
     edge.target_table_id = tid;
     edge.properties = ""; // Empty properties.
 
-    ASSERT_TRUE(catalog_->restore_edge_type(edge).has_value());
+    ASSERT_TRUE(catalog_->restore_edge_type(default_database_id, edge).has_value());
     ASSERT_TRUE(persistence_->persist_edge_type(edge).has_value());
 
     // Restart.
     restart();
     run_bootstrap();
 
-    auto restored = catalog_->get_edge_type("knows");
+    auto restored = catalog_->get_edge_type(default_database_id, "knows");
     ASSERT_TRUE(restored.has_value());
     EXPECT_EQ(restored->name, "knows");
     EXPECT_EQ(restored->properties, "");
@@ -869,12 +870,13 @@ TEST_F(QA_CatalogPersistence, EdgeIdCounterAdvancesAfterRestart) {
 
     EdgeTypeDef edge;
     edge.edge_id = 10;
+    edge.database_id = default_database_id;
     edge.name = "edge_high_id";
     edge.source_table_id = tid;
     edge.target_table_id = tid;
     edge.properties = "";
 
-    ASSERT_TRUE(catalog_->restore_edge_type(edge).has_value());
+    ASSERT_TRUE(catalog_->restore_edge_type(default_database_id, edge).has_value());
     ASSERT_TRUE(persistence_->persist_edge_type(edge).has_value());
 
     restart();
@@ -887,7 +889,7 @@ TEST_F(QA_CatalogPersistence, EdgeIdCounterAdvancesAfterRestart) {
     new_edge.target_table_id = tid;
     new_edge.properties = "";
 
-    auto new_id = catalog_->create_edge_type(std::move(new_edge));
+    auto new_id = catalog_->create_edge_type(default_database_id, std::move(new_edge));
     ASSERT_TRUE(new_id.has_value()) << new_id.error().message;
     EXPECT_GT(*new_id, 10) << "new edge ID should be > highest restored edge ID";
 }
@@ -946,12 +948,13 @@ TEST_F(QA_CatalogPersistence, DropTableRemovesEdgeTypesFromPersistence) {
 
     EdgeTypeDef edge;
     edge.edge_id = 1;
+    edge.database_id = default_database_id;
     edge.name = "links_to";
     edge.source_table_id = src->table_id;
     edge.target_table_id = tgt->table_id;
     edge.properties = "";
 
-    ASSERT_TRUE(catalog_->restore_edge_type(edge).has_value());
+    ASSERT_TRUE(catalog_->restore_edge_type(default_database_id, edge).has_value());
     ASSERT_TRUE(persistence_->persist_edge_type(edge).has_value());
 
     // Drop the source table — edge type should be cascaded.
@@ -960,7 +963,7 @@ TEST_F(QA_CatalogPersistence, DropTableRemovesEdgeTypesFromPersistence) {
     restart();
     run_bootstrap();
 
-    auto restored_edge = catalog_->get_edge_type("links_to");
+    auto restored_edge = catalog_->get_edge_type(default_database_id, "links_to");
     EXPECT_FALSE(restored_edge.has_value())
         << "edge type should be removed when source table is dropped";
 }

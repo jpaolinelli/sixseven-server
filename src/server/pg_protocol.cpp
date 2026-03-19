@@ -1080,6 +1080,11 @@ const std::unordered_map<std::string, Portal>& PgProtocolHandler::portals() cons
     return session_->portals();
 }
 
+std::string PgProtocolHandler::startup_database() const {
+    auto it = startup_params_.find("database");
+    return it != startup_params_.end() ? it->second : std::string{};
+}
+
 void PgProtocolHandler::set_query_executor(QueryExecutor executor) {
     query_executor_ = std::move(executor);
 }
@@ -1541,7 +1546,7 @@ void PgProtocolHandler::handle_simple_query(Connection& conn, std::string_view s
             return;
         }
 
-        auto result = query_executor_(stmt);
+        auto result = query_executor_(stmt, startup_database());
         if (!result) {
             // On error, send ErrorResponse and stop processing remaining statements.
             const auto& err = result.error();
@@ -1633,7 +1638,7 @@ std::optional<Result<void>> PgProtocolHandler::try_handle_execute(Connection& co
 
     SIXSEVEN_LOG_DEBUG("EXECUTE: stmt='{}', sql='{}'", stmt_name, exec_sql);
 
-    auto result = query_executor_(exec_sql);
+    auto result = query_executor_(exec_sql, startup_database());
     if (!result) {
         const auto& err = result.error();
         send_error_response(conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
@@ -1754,7 +1759,7 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
 
         // Describe result columns: parse + bind (no execution).
         if (query_describer_) {
-            auto columns = query_describer_(stmt->sql);
+            auto columns = query_describer_(stmt->sql, startup_database());
             if (!columns) {
                 const auto& err = columns.error();
                 send_error_response(
@@ -1779,7 +1784,7 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
         }
         // Describe result columns for the portal's SQL.
         if (query_describer_) {
-            auto columns = query_describer_(portal->sql);
+            auto columns = query_describer_(portal->sql, startup_database());
             if (!columns) {
                 const auto& err = columns.error();
                 send_error_response(
@@ -1835,7 +1840,7 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
 
     SIXSEVEN_LOG_DEBUG("Execute: portal='{}', sql='{}'", portal_name, *substituted);
 
-    auto result = query_executor_(*substituted);
+    auto result = query_executor_(*substituted, startup_database());
     if (!result) {
         const auto& err = result.error();
         send_error_response(conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);

@@ -880,7 +880,7 @@ TEST(QA_GDB200_Wire, InjectionViaWireProtocolTextParam) {
     PgProtocolHandler handler(200);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql) -> Result<QueryResult> {
+    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
         received_sql = sql;
         QueryResult qr;
         qr.column_names = {"name"};
@@ -928,7 +928,7 @@ TEST(QA_GDB200_Wire, AllNullParamsViaWire) {
     PgProtocolHandler handler(201);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql) -> Result<QueryResult> {
+    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
         received_sql = sql;
         QueryResult qr;
         qr.affected_rows = 1;
@@ -969,7 +969,7 @@ TEST(QA_GDB200_Wire, MixedTypeParamsViaWire) {
     PgProtocolHandler handler(202);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql) -> Result<QueryResult> {
+    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
         received_sql = sql;
         QueryResult qr;
         qr.affected_rows = 1;
@@ -1015,7 +1015,7 @@ TEST(QA_GDB200_Wire, InvalidNumericParamViaWireReturnsError) {
     PgProtocolHandler handler(203);
 
     bool executor_called = false;
-    handler.set_query_executor([&](const std::string& /*sql*/) -> Result<QueryResult> {
+    handler.set_query_executor([&](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
         executor_called = true;
         QueryResult qr;
         return ok(std::move(qr));
@@ -1055,7 +1055,7 @@ TEST(QA_GDB200_Wire, NoParamsNoSubstitution) {
     PgProtocolHandler handler(204);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql) -> Result<QueryResult> {
+    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
         received_sql = sql;
         QueryResult qr;
         qr.column_names = {"x"};

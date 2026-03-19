@@ -81,6 +81,7 @@ Result<void> Catalog::drop_database(database_id_t database_id, bool cascade) {
     database_name_to_id_.erase(db_it->second.name);
     databases_by_id_.erase(db_it);
     table_name_to_id_.erase(database_id);
+    edge_name_to_id_.erase(database_id);
 
     return ok();
 }
@@ -183,18 +184,20 @@ Result<void> Catalog::drop_table_locked(database_id_t database_id, const std::st
         }
     }
 
-    // Remove all edge types referencing this table (source or target).
+    // Remove all edge types in this database referencing this table (source or target).
     std::vector<std::string> edge_names_to_remove;
     for (auto& [eid, edef] : edge_types_by_id_) {
-        if (edef.source_table_id == tid || edef.target_table_id == tid) {
+        if (edef.database_id == database_id &&
+            (edef.source_table_id == tid || edef.target_table_id == tid)) {
             edge_names_to_remove.push_back(edef.name);
         }
     }
+    auto& edge_name_map = edge_name_to_id_[database_id];
     for (auto& ename : edge_names_to_remove) {
-        auto ename_it = edge_name_to_id_.find(ename);
-        if (ename_it != edge_name_to_id_.end()) {
+        auto ename_it = edge_name_map.find(ename);
+        if (ename_it != edge_name_map.end()) {
             edge_types_by_id_.erase(ename_it->second);
-            edge_name_to_id_.erase(ename_it);
+            edge_name_map.erase(ename_it);
         }
     }
 
@@ -506,10 +509,11 @@ std::vector<IndexDef> Catalog::list_all_indexes() const {
 
 // -- Edge type operations -----------------------------------------------------
 
-Result<edge_id_t> Catalog::create_edge_type(EdgeTypeDef def) {
+Result<edge_id_t> Catalog::create_edge_type(database_id_t database_id, EdgeTypeDef def) {
     std::lock_guard lock(mu_);
 
-    if (edge_name_to_id_.contains(def.name)) {
+    auto& name_map = edge_name_to_id_[database_id];
+    if (name_map.contains(def.name)) {
         return make_error(StatusCode::ALREADY_EXISTS,
                           "edge type '" + def.name + "' already exists");
     }
@@ -530,39 +534,76 @@ Result<edge_id_t> Catalog::create_edge_type(EdgeTypeDef def) {
 
     edge_id_t id = next_edge_id_++;
     def.edge_id = id;
+    def.database_id = database_id;
 
-    edge_name_to_id_[def.name] = id;
+    name_map[def.name] = id;
     edge_types_by_id_[id] = std::move(def);
 
     return ok(id);
 }
 
-Result<void> Catalog::drop_edge_type(const std::string& name) {
+Result<void> Catalog::drop_edge_type(database_id_t database_id, const std::string& name) {
     std::lock_guard lock(mu_);
 
-    auto name_it = edge_name_to_id_.find(name);
-    if (name_it == edge_name_to_id_.end()) {
+    auto db_map_it = edge_name_to_id_.find(database_id);
+    if (db_map_it == edge_name_to_id_.end()) {
+        return make_error(StatusCode::NOT_FOUND, "edge type '" + name + "' not found");
+    }
+
+    auto& name_map = db_map_it->second;
+    auto name_it = name_map.find(name);
+    if (name_it == name_map.end()) {
         return make_error(StatusCode::NOT_FOUND, "edge type '" + name + "' not found");
     }
 
     edge_types_by_id_.erase(name_it->second);
-    edge_name_to_id_.erase(name_it);
+    name_map.erase(name_it);
 
     return ok();
 }
 
-Result<EdgeTypeDef> Catalog::get_edge_type(const std::string& name) const {
+Result<EdgeTypeDef> Catalog::get_edge_type(database_id_t database_id,
+                                           const std::string& name) const {
     std::lock_guard lock(mu_);
 
-    auto name_it = edge_name_to_id_.find(name);
-    if (name_it == edge_name_to_id_.end()) {
+    auto db_map_it = edge_name_to_id_.find(database_id);
+    if (db_map_it == edge_name_to_id_.end()) {
+        return make_error(StatusCode::NOT_FOUND, "edge type '" + name + "' not found");
+    }
+
+    auto& name_map = db_map_it->second;
+    auto name_it = name_map.find(name);
+    if (name_it == name_map.end()) {
         return make_error(StatusCode::NOT_FOUND, "edge type '" + name + "' not found");
     }
 
     return ok(edge_types_by_id_.at(name_it->second));
 }
 
-std::vector<EdgeTypeDef> Catalog::list_edge_types() const {
+std::vector<EdgeTypeDef> Catalog::list_edge_types(database_id_t database_id) const {
+    std::lock_guard lock(mu_);
+
+    std::vector<EdgeTypeDef> result;
+
+    auto db_map_it = edge_name_to_id_.find(database_id);
+    if (db_map_it == edge_name_to_id_.end()) {
+        return result;
+    }
+
+    auto& name_map = db_map_it->second;
+    result.reserve(name_map.size());
+    for (auto& [ename, eid] : name_map) {
+        result.push_back(edge_types_by_id_.at(eid));
+    }
+
+    std::sort(result.begin(), result.end(), [](const EdgeTypeDef& a, const EdgeTypeDef& b) {
+        return a.edge_id < b.edge_id;
+    });
+
+    return result;
+}
+
+std::vector<EdgeTypeDef> Catalog::list_all_edge_types() const {
     std::lock_guard lock(mu_);
 
     std::vector<EdgeTypeDef> result;
@@ -723,16 +764,18 @@ Result<void> Catalog::restore_index(IndexDef def) {
     return ok();
 }
 
-Result<void> Catalog::restore_edge_type(EdgeTypeDef def) {
+Result<void> Catalog::restore_edge_type(database_id_t database_id, EdgeTypeDef def) {
     std::lock_guard lock(mu_);
 
-    if (edge_name_to_id_.contains(def.name)) {
+    auto& name_map = edge_name_to_id_[database_id];
+    if (name_map.contains(def.name)) {
         return make_error(StatusCode::ALREADY_EXISTS,
                           "edge type '" + def.name + "' already exists");
     }
 
     edge_id_t id = def.edge_id;
-    edge_name_to_id_[def.name] = id;
+    def.database_id = database_id;
+    name_map[def.name] = id;
     edge_types_by_id_[id] = std::move(def);
 
     if (id >= next_edge_id_) {

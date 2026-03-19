@@ -75,7 +75,7 @@ protected:
 
     void create_edge_type(const std::string& name) {
         ColumnDef w_col{"weight", TypeId::FLOAT64};
-        auto eid = graph_->create_edge_type(
+        auto eid = graph_->create_edge_type(default_database_id, 
             name, nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {w_col});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
     }

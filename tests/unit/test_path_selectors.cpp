@@ -155,7 +155,7 @@ protected:
             insert_person(id);
         }
 
-        auto eid = graph_->create_edge_type(
+        auto eid = graph_->create_edge_type(default_database_id, 
             "knows", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
@@ -464,7 +464,7 @@ protected:
         auto tid = catalog_->create_table(1, std::move(ts));
         ASSERT_TRUE(tid.has_value()) << tid.error().message;
 
-        auto eid = graph_->create_edge_type("knows", *tid, *tid, TypeId::INT64, TypeId::INT64, {});
+        auto eid = graph_->create_edge_type(default_database_id, "knows", *tid, *tid, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         auto r1 = graph_->link("knows", Value(int64_t{1}), Value(int64_t{2}));

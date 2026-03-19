@@ -86,7 +86,7 @@ TEST(EdgeRestartIntegrationTest, EdgesAndTablesRecoveredAfterFullRestart) {
         ASSERT_TRUE(boot.has_value()) << boot.error().message;
 
         // Edge type metadata should be in the catalog after load_catalog.
-        auto edge_types = catalog.list_edge_types();
+        auto edge_types = catalog.list_edge_types(default_database_id);
         EXPECT_EQ(edge_types.size(), 1) << "Expected 1 edge type in catalog after restart";
 
         auto edge_load = graph_engine.load_edges();
@@ -156,7 +156,7 @@ TEST(EdgeRestartIntegrationTest, DroppedEdgeTypeNotRecoveredAfterRestart) {
         auto edge_load = graph_engine.load_edges();
         ASSERT_TRUE(edge_load.has_value()) << edge_load.error().message;
 
-        auto edge_types = catalog.list_edge_types();
+        auto edge_types = catalog.list_edge_types(default_database_id);
         EXPECT_EQ(edge_types.size(), 0) << "Dropped edge type should not be in catalog";
 
         auto listed = graph_engine.list_edge_types();
