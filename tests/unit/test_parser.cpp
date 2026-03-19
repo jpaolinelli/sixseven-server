@@ -1848,6 +1848,7 @@ public:
     void visit(const ExistsExpr&) override { visited_type = "ExistsExpr"; }
     void visit(const SubqueryExpr&) override { visited_type = "SubqueryExpr"; }
     void visit(const ArrayExpr&) override { visited_type = "ArrayExpr"; }
+    void visit(const WindowFunctionExpr&) override { visited_type = "WindowFunctionExpr"; }
 
     // -- DDL --
     void visit(const CreateTableStmt&) override { visited_type = "CreateTableStmt"; }

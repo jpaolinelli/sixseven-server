@@ -24,6 +24,7 @@
 #include "sixseven/executor/traversal.h"
 #include "sixseven/executor/update.h"
 #include "sixseven/executor/variable_length_match.h"
+#include "sixseven/executor/window_function.h"
 #include "sixseven/parser/lexer.h"
 #include "sixseven/parser/parser.h"
 #include "sixseven/planner/type_resolver.h"
@@ -81,6 +82,61 @@ void collect_aggregate_exprs(const Expr& expr,
             collect_aggregate_exprs(*cast->expr, bound, out);
         }
     }
+}
+
+/// Check if an expression is a window function.
+bool is_window_expr(const Expr& expr, const BoundStatement& bound) {
+    auto it = bound.expr_types.find(&expr);
+    return it != bound.expr_types.end() && it->second.is_window;
+}
+
+/// Resolve a window function name to the WindowFunc enum.
+WindowFunc resolve_window_func(const std::string& name) {
+    std::string upper = to_upper(name);
+    if (upper == "ROW_NUMBER")
+        return WindowFunc::ROW_NUMBER;
+    if (upper == "RANK")
+        return WindowFunc::RANK;
+    if (upper == "DENSE_RANK")
+        return WindowFunc::DENSE_RANK;
+    if (upper == "NTILE")
+        return WindowFunc::NTILE;
+    if (upper == "LAG")
+        return WindowFunc::LAG;
+    if (upper == "LEAD")
+        return WindowFunc::LEAD;
+    if (upper == "FIRST_VALUE")
+        return WindowFunc::FIRST_VALUE;
+    if (upper == "LAST_VALUE")
+        return WindowFunc::LAST_VALUE;
+    if (upper == "SUM")
+        return WindowFunc::WIN_SUM;
+    if (upper == "AVG")
+        return WindowFunc::WIN_AVG;
+    if (upper == "COUNT")
+        return WindowFunc::WIN_COUNT;
+    if (upper == "MIN")
+        return WindowFunc::WIN_MIN;
+    if (upper == "MAX")
+        return WindowFunc::WIN_MAX;
+    return WindowFunc::ROW_NUMBER; // fallback
+}
+
+/// Convert AST frame bound to executor frame bound.
+FrameBound convert_frame_bound(AstFrameBound b) {
+    switch (b) {
+    case AstFrameBound::UNBOUNDED_PRECEDING:
+        return FrameBound::UNBOUNDED_PRECEDING;
+    case AstFrameBound::N_PRECEDING:
+        return FrameBound::N_PRECEDING;
+    case AstFrameBound::CURRENT_ROW:
+        return FrameBound::CURRENT_ROW;
+    case AstFrameBound::N_FOLLOWING:
+        return FrameBound::N_FOLLOWING;
+    case AstFrameBound::UNBOUNDED_FOLLOWING:
+        return FrameBound::UNBOUNDED_FOLLOWING;
+    }
+    return FrameBound::UNBOUNDED_PRECEDING;
 }
 
 /// Check if an expression tree contains any aggregate function call.
@@ -1117,6 +1173,119 @@ Planner::plan_select(const SelectStmt& stmt,
             std::move(child), *remaining_where, bound, &subquery_ctx_);
     }
 
+    // -- 2e. Window functions -------------------------------------------------
+    // Detect window function expressions in SELECT items and build a
+    // WindowOperator to evaluate them. Window functions see all input rows
+    // (after filtering) and append result columns to the child schema.
+    std::vector<const WindowFunctionExpr*> win_exprs;
+    for (auto& item : stmt.items) {
+        if (item.expr && is_window_expr(*item.expr, bound)) {
+            win_exprs.push_back(dynamic_cast<const WindowFunctionExpr*>(item.expr.get()));
+        }
+    }
+
+    // Map from WindowFunctionExpr* → synthesised column name in WindowOperator output.
+    std::unordered_map<const Expr*, std::string> win_map;
+
+    if (!win_exprs.empty()) {
+        // All window functions in this query share the same WindowOperator.
+        // Use PARTITION BY / ORDER BY from the first window function that has them.
+        // (Full SQL allows per-function OVER specs; we support one spec per query
+        // here, which covers the common case.)
+        std::vector<const Expr*> partition_by_ptrs;
+        std::vector<SortKey> order_by_keys;
+
+        for (auto* wexpr : win_exprs) {
+            if (!wexpr->partition_by.empty() && partition_by_ptrs.empty()) {
+                for (auto& pb : wexpr->partition_by) {
+                    partition_by_ptrs.push_back(pb.get());
+                }
+            }
+            if (!wexpr->order_by.empty() && order_by_keys.empty()) {
+                for (auto& ob : wexpr->order_by) {
+                    order_by_keys.push_back({ob.expr.get(), ob.direction});
+                }
+            }
+        }
+
+        // Build WindowFunctionDescriptors.
+        std::vector<WindowFunctionDescriptor> win_descs;
+        for (size_t i = 0; i < win_exprs.size(); ++i) {
+            auto* wexpr = win_exprs[i];
+            WindowFunctionDescriptor desc;
+            desc.func = resolve_window_func(wexpr->name);
+
+            // Set argument expression (for LAG, LEAD, SUM, AVG, etc.).
+            if (!wexpr->args.empty()) {
+                auto* first_arg = wexpr->args[0].get();
+                // Skip COUNT(*) star argument.
+                if (auto* cref = dynamic_cast<const ColumnRefExpr*>(first_arg)) {
+                    if (cref->column != "*") {
+                        desc.arg = first_arg;
+                    }
+                } else {
+                    desc.arg = first_arg;
+                }
+            }
+
+            // LAG/LEAD offset (second argument).
+            if ((desc.func == WindowFunc::LAG || desc.func == WindowFunc::LEAD) &&
+                wexpr->args.size() >= 2) {
+                if (auto* lit = dynamic_cast<const LiteralExpr*>(wexpr->args[1].get())) {
+                    desc.offset = std::stoll(lit->value);
+                }
+            }
+
+            // NTILE bucket count (first argument).
+            if (desc.func == WindowFunc::NTILE && !wexpr->args.empty()) {
+                if (auto* lit = dynamic_cast<const LiteralExpr*>(wexpr->args[0].get())) {
+                    desc.ntile_buckets = std::stoll(lit->value);
+                }
+            }
+
+            // Frame specification.
+            if (wexpr->frame.has_value()) {
+                auto& af = *wexpr->frame;
+                desc.frame.type =
+                    (af.type == AstFrameType::ROWS) ? FrameType::ROWS : FrameType::RANGE;
+                desc.frame.start_bound = convert_frame_bound(af.start_bound);
+                desc.frame.start_offset = af.start_offset;
+                desc.frame.end_bound = convert_frame_bound(af.end_bound);
+                desc.frame.end_offset = af.end_offset;
+            }
+
+            std::string col_name = "__win_" + std::to_string(i);
+            win_map[wexpr] = col_name;
+            win_descs.push_back(std::move(desc));
+        }
+
+        // Build output schema: child columns + window result columns.
+        const auto& child_schema = child->output_schema();
+        std::vector<OutputColumn> win_out_cols;
+        for (size_t i = 0; i < child_schema.column_count(); ++i) {
+            win_out_cols.push_back(child_schema.column(i));
+        }
+        for (size_t i = 0; i < win_exprs.size(); ++i) {
+            std::string col_name = "__win_" + std::to_string(i);
+            auto it = bound.expr_types.find(win_exprs[i]);
+            TypeId type = TypeId::INT64;
+            bool nullable = true;
+            if (it != bound.expr_types.end()) {
+                type = it->second.type_id;
+                nullable = it->second.nullable;
+            }
+            win_out_cols.push_back({"", col_name, type, nullable, 0});
+        }
+        auto win_schema = OutputSchema(std::move(win_out_cols));
+
+        child = std::make_unique<WindowOperator>(std::move(child),
+                                                 std::move(partition_by_ptrs),
+                                                 std::move(order_by_keys),
+                                                 std::move(win_descs),
+                                                 bound,
+                                                 std::move(win_schema));
+    }
+
     // -- 3. Detect GROUP BY / aggregation ------------------------------------
     bool has_group_by = !stmt.group_by.empty();
     bool has_aggregates = false;
@@ -1324,8 +1493,14 @@ Planner::plan_select(const SelectStmt& stmt,
             if (item.is_star || !item.table_star.empty()) {
                 // Expand * or table.* using bound output columns (which the binder
                 // already resolved for all tables including joins).
+                // Only include actual table columns (table_id != 0), not computed
+                // columns like window function results.
                 for (const auto& rc : bound.output_columns) {
                     if (!item.table_star.empty() && rc.table_name != item.table_star) {
+                        continue;
+                    }
+                    // Skip computed columns (window functions, expressions).
+                    if (rc.table_id == 0 && rc.ordinal == -1) {
                         continue;
                     }
                     auto cr = std::make_unique<ColumnRefExpr>();
@@ -1341,11 +1516,24 @@ Planner::plan_select(const SelectStmt& stmt,
                     // Try to derive a name from a column reference.
                     if (auto* cr = dynamic_cast<const ColumnRefExpr*>(item.expr.get())) {
                         col_alias = cr->column;
+                    } else if (auto* wf =
+                                   dynamic_cast<const WindowFunctionExpr*>(item.expr.get())) {
+                        col_alias = wf->name;
                     } else {
                         col_alias = "?column?";
                     }
                 }
-                projections.push_back({item.expr.get(), col_alias});
+
+                // If this is a window function, rewrite to reference its output column.
+                auto wit = win_map.find(item.expr.get());
+                if (wit != win_map.end()) {
+                    auto cr = std::make_unique<ColumnRefExpr>();
+                    cr->column = wit->second;
+                    projections.push_back({cr.get(), col_alias});
+                    owned_exprs.push_back(std::move(cr));
+                } else {
+                    projections.push_back({item.expr.get(), col_alias});
+                }
             }
         }
 

@@ -412,6 +412,41 @@ struct ArrayExpr : Expr {
     void accept(AstVisitor& visitor) const override;
 };
 
+/// Window frame bound type for OVER clause frame specification.
+enum class AstFrameBound : uint8_t {
+    UNBOUNDED_PRECEDING,
+    N_PRECEDING,
+    CURRENT_ROW,
+    N_FOLLOWING,
+    UNBOUNDED_FOLLOWING,
+};
+
+/// Window frame type for OVER clause frame specification.
+enum class AstFrameType : uint8_t {
+    ROWS,
+    RANGE,
+};
+
+/// Window frame specification in OVER clause.
+struct AstWindowFrame {
+    AstFrameType type = AstFrameType::ROWS;
+    AstFrameBound start_bound = AstFrameBound::UNBOUNDED_PRECEDING;
+    int64_t start_offset = 0;
+    AstFrameBound end_bound = AstFrameBound::CURRENT_ROW;
+    int64_t end_offset = 0;
+};
+
+/// Window function call: func(args) OVER (PARTITION BY ... ORDER BY ... frame).
+struct WindowFunctionExpr : Expr {
+    std::string name;
+    std::vector<ExprPtr> args;
+    bool distinct = false;
+    std::vector<ExprPtr> partition_by;
+    std::vector<OrderByItem> order_by;
+    std::optional<AstWindowFrame> frame;
+    void accept(AstVisitor& visitor) const override;
+};
+
 // ---------------------------------------------------------------------------
 // Statement AST base class
 // ---------------------------------------------------------------------------
@@ -798,6 +833,7 @@ public:
     virtual void visit(const ExistsExpr& node) = 0;
     virtual void visit(const SubqueryExpr& node) = 0;
     virtual void visit(const ArrayExpr& node) = 0;
+    virtual void visit(const WindowFunctionExpr& node) = 0;
 
     // -- DDL statements -------------------------------------------------------
 
@@ -894,6 +930,9 @@ inline void SubqueryExpr::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void ArrayExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void WindowFunctionExpr::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 
