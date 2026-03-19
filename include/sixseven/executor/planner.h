@@ -23,6 +23,7 @@
 namespace sixseven {
 
 class EmbeddingWorkerPool;
+struct MatchConfig;
 
 /// Translates a BoundStatement into a physical operator (Iterator) tree.
 ///
@@ -142,6 +143,11 @@ private:
                         const Expr* where_expr,
                         const BoundStatement& bound);
 
+    /// Build a full-scope OutputSchema from all node tables in a MATCH pattern.
+    /// Includes all columns from every node variable's label table so that
+    /// WHERE clauses can reference columns not in the SELECT list.
+    [[nodiscard]] OutputSchema build_match_scope_schema(const MatchConfig& config) const;
+
     // -- Graph query planning -------------------------------------------------
 
     [[nodiscard]] Result<std::unique_ptr<Iterator>> plan_traverse(const TraverseStmt& stmt,
@@ -151,7 +157,8 @@ private:
                                                                        const BoundStatement& bound);
 
     [[nodiscard]] Result<std::unique_ptr<Iterator>> plan_match(const MatchStmt& stmt,
-                                                               const BoundStatement& bound);
+                                                               const BoundStatement& bound,
+                                                               std::vector<ExprPtr>& owned_exprs);
 
     // -- Vector query planning ------------------------------------------------
 
