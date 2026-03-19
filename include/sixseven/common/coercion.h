@@ -14,6 +14,13 @@ bool can_coerce(TypeId from, TypeId to);
 /// Coerce a value to the target type. Returns an error if the coercion is not supported.
 Result<Value> coerce(const Value& value, TypeId target);
 
+/// Perform an explicit cast (SQL CAST / :: operator). Supports all implicit
+/// coercions plus narrowing conversions that require an explicit request:
+///   - Float → integer (truncates toward zero, like C++ static_cast)
+///   - Integer narrowing (e.g. INT64 → INT32)
+/// Returns an error for non-numeric cross-category casts (e.g. STRING → INT32).
+Result<Value> explicit_cast(const Value& value, TypeId target);
+
 /// Fit a value to a storage type, allowing both widening and narrowing numeric
 /// conversions. Unlike coerce(), which only allows implicit widening, this is
 /// intended for DML contexts where the expression evaluator may produce a wider
