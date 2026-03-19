@@ -312,7 +312,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan(const BoundStatement& bound,
         return plan_shortest_path(*sp, bound);
     }
     if (auto* match = dynamic_cast<const MatchStmt*>(bound.stmt)) {
-        return plan_match(*match, bound);
+        return plan_match(*match, bound, owned_exprs);
     }
     if (auto* nearest = dynamic_cast<const NearestStmt*>(bound.stmt)) {
         return plan_nearest(*nearest, bound);
@@ -340,6 +340,35 @@ OutputSchema Planner::build_table_output_schema(const TableSchema& ts,
     const auto& tname = table_alias.empty() ? ts.name : table_alias;
     for (const auto& col : ts.columns) {
         out.push_back({tname, col.name, col.type_id, col.nullable, ts.table_id});
+    }
+    return OutputSchema(std::move(out));
+}
+
+OutputSchema Planner::build_match_scope_schema(const MatchConfig& config) const {
+    std::vector<OutputColumn> out;
+    for (const auto& node : config.nodes) {
+        if (node.label.empty()) {
+            continue;
+        }
+        auto ts = catalog_.get_table(database_id_, node.label);
+        if (!ts) {
+            continue;
+        }
+        const auto& alias = node.variable.empty() ? ts->name : node.variable;
+        for (const auto& col : ts->columns) {
+            // Avoid duplicate columns when the same variable appears multiple
+            // times (e.g. self-join patterns like (a:users)-[r]->(a:users)).
+            bool dup = false;
+            for (const auto& existing : out) {
+                if (existing.table_name == alias && existing.name == col.name) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (!dup) {
+                out.push_back({alias, col.name, col.type_id, col.nullable, ts->table_id});
+            }
+        }
     }
     return OutputSchema(std::move(out));
 }
@@ -746,7 +775,10 @@ Planner::plan_from_source(const TableRef& table_ref,
             }
         }
 
-        auto schema = build_output_schema(bound.output_columns);
+        // Use full-scope schema (all columns from all node tables) so that
+        // the outer SELECT's WHERE clause can reference columns not in the
+        // SELECT list.  The outer ProjectOperator narrows to SELECT columns.
+        auto scope_schema = build_match_scope_schema(match_config);
 
         std::unique_ptr<Iterator> iter;
         if (has_variable_length) {
@@ -756,7 +788,7 @@ Planner::plan_from_source(const TableRef& table_ref,
                 storage_,
                 database_id_,
                 std::move(match_config),
-                std::move(schema),
+                std::move(scope_schema),
                 nullptr, // WHERE handled by outer SELECT
                 bound);
         } else {
@@ -765,12 +797,12 @@ Planner::plan_from_source(const TableRef& table_ref,
                                                           storage_,
                                                           database_id_,
                                                           std::move(match_config),
-                                                          std::move(schema),
+                                                          std::move(scope_schema),
                                                           nullptr, // WHERE handled by outer SELECT
                                                           bound);
         }
 
-        auto out_schema = build_output_schema(bound.output_columns);
+        auto out_schema = iter->output_schema();
         return ok(PlannedSource{std::move(iter), std::move(out_schema)});
     }
 
@@ -1979,7 +2011,8 @@ Result<std::unique_ptr<Iterator>> Planner::plan_shortest_path(const ShortestPath
 // ---------------------------------------------------------------------------
 
 Result<std::unique_ptr<Iterator>> Planner::plan_match(const MatchStmt& stmt,
-                                                      const BoundStatement& bound) {
+                                                      const BoundStatement& bound,
+                                                      std::vector<ExprPtr>& owned_exprs) {
     if (!graph_engine_) {
         return make_error(StatusCode::INTERNAL_ERROR, "graph engine not available for MATCH");
     }
@@ -2008,51 +2041,71 @@ Result<std::unique_ptr<Iterator>> Planner::plan_match(const MatchStmt& stmt,
         }
     }
 
-    // Build output schema from bound output columns.
-    auto schema = build_output_schema(bound.output_columns);
+    // Build a full-scope schema that includes ALL columns from every node
+    // table in the pattern.  This allows the WHERE clause to reference
+    // columns that are not in the SELECT / RETURN list.
+    auto scope_schema = build_match_scope_schema(match_config);
 
-    // If a path selector is present, use MatchShortestPathOperator.
+    // Create the MATCH operator with the full scope schema and NO WHERE
+    // (WHERE is applied as a separate FilterOperator below so that it
+    // evaluates against the full scope, not just the projected output).
+    std::unique_ptr<Iterator> child;
     if (stmt.path_selector != PathSelector::NONE) {
-        auto iter = std::make_unique<MatchShortestPathOperator>(
+        child = std::make_unique<MatchShortestPathOperator>(
             *graph_engine_,
             catalog_,
             storage_,
             database_id_,
             std::move(match_config),
-            std::move(schema),
-            stmt.where_expr.get(),
+            std::move(scope_schema),
+            nullptr, // WHERE handled below
             bound,
             stmt.path_selector,
             stmt.path_variable,
             stmt.shortest_k,
             MatchShortestPathOperator::DEFAULT_MAX_VISITED,
             stmt.weight_expr.get());
-        return ok(std::unique_ptr<Iterator>(std::move(iter)));
-    }
-
-    if (has_variable_length) {
-        // Use VariableLengthMatchOperator for quantified edges.
-        auto iter = std::make_unique<VariableLengthMatchOperator>(*graph_engine_,
-                                                                  catalog_,
-                                                                  storage_,
-                                                                  database_id_,
-                                                                  std::move(match_config),
-                                                                  std::move(schema),
-                                                                  stmt.where_expr.get(),
-                                                                  bound);
-        return ok(std::unique_ptr<Iterator>(std::move(iter)));
-    }
-
-    auto iter = std::make_unique<PatternMatchOperator>(*graph_engine_,
+    } else if (has_variable_length) {
+        child = std::make_unique<VariableLengthMatchOperator>(*graph_engine_,
+                                                              catalog_,
+                                                              storage_,
+                                                              database_id_,
+                                                              std::move(match_config),
+                                                              std::move(scope_schema),
+                                                              nullptr, // WHERE handled below
+                                                              bound);
+    } else {
+        child = std::make_unique<PatternMatchOperator>(*graph_engine_,
                                                        catalog_,
                                                        storage_,
                                                        database_id_,
                                                        std::move(match_config),
-                                                       std::move(schema),
-                                                       stmt.where_expr.get(),
+                                                       std::move(scope_schema),
+                                                       nullptr, // WHERE handled below
                                                        bound);
+    }
 
-    return ok(std::unique_ptr<Iterator>(std::move(iter)));
+    // Apply WHERE as a FilterOperator over the full-scope output.
+    if (stmt.where_expr) {
+        child =
+            std::make_unique<FilterOperator>(std::move(child), *stmt.where_expr, bound, nullptr);
+    }
+
+    // Project down to the RETURN / SELECT columns requested by the user.
+    std::vector<ProjectionExpr> projections;
+    projections.reserve(bound.output_columns.size());
+    for (const auto& rc : bound.output_columns) {
+        auto cr = std::make_unique<ColumnRefExpr>();
+        cr->table = rc.table_name;
+        cr->column = rc.column_name;
+        projections.push_back({cr.get(), rc.column_name});
+        owned_exprs.push_back(std::move(cr));
+    }
+    auto output_schema = build_output_schema(bound.output_columns);
+    child = std::make_unique<ProjectOperator>(
+        std::move(child), std::move(projections), std::move(output_schema), bound);
+
+    return ok(std::move(child));
 }
 
 // ---------------------------------------------------------------------------

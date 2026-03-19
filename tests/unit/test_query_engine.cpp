@@ -1089,3 +1089,101 @@ TEST_F(QueryEngineTest, DescribeInvalidSqlReturnsError) {
     auto result = engine_->describe("NOT VALID SQL AT ALL");
     EXPECT_FALSE(result.has_value());
 }
+
+// =============================================================================
+// GDB-601: MATCH WHERE clause cannot resolve columns not in SELECT list
+// =============================================================================
+
+TEST_F(QueryEngineGraphTest, MatchWhereColumnNotInSelect) {
+    // Setup: users table with id, name, age.
+    exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR, age INT)");
+    exec_ok("INSERT INTO users VALUES (1, 'Alice', 50)");
+    exec_ok("INSERT INTO users VALUES (2, 'Bob', 30)");
+    exec_ok("INSERT INTO users VALUES (3, 'Charlie', 60)");
+    exec_ok("CREATE EDGE TYPE follows FROM users TO users");
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(2) TO users(3) VIA follows");
+    exec_ok("LINK users(3) TO users(1) VIA follows");
+
+    // Bug: WHERE references a.age but SELECT only has a.name.
+    // This used to fail with "column not found: a.age".
+    auto qr = exec_ok("SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.age > 40");
+    ASSERT_EQ(qr.column_names.size(), 1u);
+    EXPECT_EQ(qr.column_names[0], "name");
+
+    // Alice (50) and Charlie (60) match; Bob (30) does not.
+    std::vector<std::string> names;
+    for (const auto& row : qr.rows) {
+        ASSERT_EQ(row.size(), 1u);
+        names.push_back(row[0].as_string());
+    }
+    std::sort(names.begin(), names.end());
+    ASSERT_EQ(names.size(), 2u);
+    EXPECT_EQ(names[0], "Alice");
+    EXPECT_EQ(names[1], "Charlie");
+}
+
+TEST_F(QueryEngineGraphTest, MatchWhereOnTargetColumnNotInSelect) {
+    // WHERE references b.name but SELECT only has a.name.
+    exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR, age INT)");
+    exec_ok("INSERT INTO users VALUES (1, 'Alice', 50)");
+    exec_ok("INSERT INTO users VALUES (2, 'Bob', 30)");
+    exec_ok("CREATE EDGE TYPE follows FROM users TO users");
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(2) TO users(1) VIA follows");
+
+    auto qr =
+        exec_ok("SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) WHERE b.name = 'Bob'");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "Alice");
+}
+
+TEST_F(QueryEngineGraphTest, MatchWhereColumnInSelectStillWorks) {
+    // Regression: ensure the fix doesn't break the case where WHERE column IS in SELECT.
+    exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR, age INT)");
+    exec_ok("INSERT INTO users VALUES (1, 'Alice', 50)");
+    exec_ok("INSERT INTO users VALUES (2, 'Bob', 30)");
+    exec_ok("CREATE EDGE TYPE follows FROM users TO users");
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(2) TO users(1) VIA follows");
+
+    auto qr = exec_ok(
+        "SELECT a.name, a.age FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.age > 40");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "Alice");
+    EXPECT_EQ(qr.rows[0][1].as_int32(), 50);
+}
+
+TEST_F(QueryEngineGraphTest, StandaloneMatchWhereColumnNotInReturn) {
+    // Standalone MATCH ... WHERE ... RETURN (not SELECT ... FROM MATCH).
+    exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR, age INT)");
+    exec_ok("INSERT INTO users VALUES (1, 'Alice', 50)");
+    exec_ok("INSERT INTO users VALUES (2, 'Bob', 30)");
+    exec_ok("CREATE EDGE TYPE follows FROM users TO users");
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(2) TO users(1) VIA follows");
+
+    auto qr = exec_ok("MATCH (a:users)-[e:follows]->(b:users) WHERE a.age > 40 RETURN a.name");
+    ASSERT_EQ(qr.column_names.size(), 1u);
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "Alice");
+}
+
+TEST_F(QueryEngineGraphTest, MatchWhereNameInWhereAgeInSelect) {
+    // Exact repro case #4 from the ticket:
+    // SELECT a.age FROM MATCH ... WHERE a.name = 'Alice'
+    // (name only in WHERE, age only in SELECT)
+    exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR, age INT)");
+    exec_ok("INSERT INTO users VALUES (1, 'Alice', 50)");
+    exec_ok("INSERT INTO users VALUES (2, 'Bob', 30)");
+    exec_ok("CREATE EDGE TYPE follows FROM users TO users");
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(2) TO users(1) VIA follows");
+
+    auto qr = exec_ok(
+        "SELECT a.age FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.name = 'Alice'");
+    ASSERT_EQ(qr.column_names.size(), 1u);
+    EXPECT_EQ(qr.column_names[0], "age");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 50);
+}
