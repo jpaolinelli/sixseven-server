@@ -1107,8 +1107,7 @@ TEST_F(QueryEngineGraphTest, MatchWhereColumnNotInSelect) {
 
     // Bug: WHERE references a.age but SELECT only has a.name.
     // This used to fail with "column not found: a.age".
-    auto qr = exec_ok(
-        "SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.age > 40");
+    auto qr = exec_ok("SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.age > 40");
     ASSERT_EQ(qr.column_names.size(), 1u);
     EXPECT_EQ(qr.column_names[0], "name");
 
@@ -1133,8 +1132,8 @@ TEST_F(QueryEngineGraphTest, MatchWhereOnTargetColumnNotInSelect) {
     exec_ok("LINK users(1) TO users(2) VIA follows");
     exec_ok("LINK users(2) TO users(1) VIA follows");
 
-    auto qr = exec_ok(
-        "SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) WHERE b.name = 'Bob'");
+    auto qr =
+        exec_ok("SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) WHERE b.name = 'Bob'");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Alice");
 }
@@ -1164,9 +1163,27 @@ TEST_F(QueryEngineGraphTest, StandaloneMatchWhereColumnNotInReturn) {
     exec_ok("LINK users(1) TO users(2) VIA follows");
     exec_ok("LINK users(2) TO users(1) VIA follows");
 
-    auto qr = exec_ok(
-        "MATCH (a:users)-[e:follows]->(b:users) WHERE a.age > 40 RETURN a.name");
+    auto qr = exec_ok("MATCH (a:users)-[e:follows]->(b:users) WHERE a.age > 40 RETURN a.name");
     ASSERT_EQ(qr.column_names.size(), 1u);
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Alice");
+}
+
+TEST_F(QueryEngineGraphTest, MatchWhereNameInWhereAgeInSelect) {
+    // Exact repro case #4 from the ticket:
+    // SELECT a.age FROM MATCH ... WHERE a.name = 'Alice'
+    // (name only in WHERE, age only in SELECT)
+    exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR, age INT)");
+    exec_ok("INSERT INTO users VALUES (1, 'Alice', 50)");
+    exec_ok("INSERT INTO users VALUES (2, 'Bob', 30)");
+    exec_ok("CREATE EDGE TYPE follows FROM users TO users");
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(2) TO users(1) VIA follows");
+
+    auto qr = exec_ok(
+        "SELECT a.age FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.name = 'Alice'");
+    ASSERT_EQ(qr.column_names.size(), 1u);
+    EXPECT_EQ(qr.column_names[0], "age");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 50);
 }
