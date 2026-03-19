@@ -650,6 +650,26 @@ TEST_F(BinderTest, SelectOrderBy) {
     EXPECT_EQ(bound.output_columns.size(), 2u);
 }
 
+TEST_F(BinderTest, SelectOrderByAlias) {
+    auto bound = bind_ok("SELECT name AS n FROM users ORDER BY n ASC");
+    EXPECT_EQ(bound.output_columns.size(), 1u);
+}
+
+TEST_F(BinderTest, SelectOrderByAggregateAlias) {
+    auto bound = bind_ok("SELECT age, COUNT(*) AS cnt FROM users GROUP BY age ORDER BY cnt DESC");
+    EXPECT_EQ(bound.output_columns.size(), 2u);
+}
+
+TEST_F(BinderTest, SelectOrderByAliasWithHaving) {
+    auto bound = bind_ok("SELECT age, COUNT(*) AS cnt, AVG(age) AS avg_age FROM users "
+                         "GROUP BY age HAVING COUNT(*) > 1 ORDER BY avg_age DESC");
+    EXPECT_EQ(bound.output_columns.size(), 3u);
+}
+
+TEST_F(BinderTest, SelectOrderByUnknownAlias) {
+    bind_error("SELECT name FROM users ORDER BY nonexistent", StatusCode::NOT_FOUND);
+}
+
 TEST_F(BinderTest, SelectLimitOffset) {
     auto bound = bind_ok("SELECT id FROM users LIMIT 10 OFFSET 5");
     EXPECT_EQ(bound.output_columns.size(), 1u);

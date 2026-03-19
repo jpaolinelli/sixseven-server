@@ -1597,11 +1597,33 @@ Result<BoundStatement> Binder::bind_select(const SelectStmt& stmt, Scope* parent
     }
 
     // 7. Bind ORDER BY.
+    //    If an unqualified column reference fails to resolve in the FROM scope,
+    //    fall back to matching against SELECT-list aliases (PostgreSQL semantics).
     for (auto& ob : stmt.order_by) {
         if (ob.expr) {
             auto et = bind_expr(*ob.expr, scope, bound);
             if (!et) {
-                return tl::unexpected(et.error());
+                // Check if this is an unqualified column ref matching a SELECT alias.
+                auto* cref = dynamic_cast<const ColumnRefExpr*>(ob.expr.get());
+                if (cref && cref->table.empty() && et.error().code == StatusCode::NOT_FOUND) {
+                    std::string upper_name = to_upper(cref->column);
+                    bool resolved = false;
+                    for (const auto& oc : bound.output_columns) {
+                        if (to_upper(oc.column_name) == upper_name) {
+                            ExprType alias_et;
+                            alias_et.type_id = oc.type_id;
+                            alias_et.nullable = oc.nullable;
+                            bound.expr_types[ob.expr.get()] = alias_et;
+                            resolved = true;
+                            break;
+                        }
+                    }
+                    if (!resolved) {
+                        return tl::unexpected(et.error());
+                    }
+                } else {
+                    return tl::unexpected(et.error());
+                }
             }
         }
     }
