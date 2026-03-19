@@ -637,6 +637,84 @@ TEST_F(QueryEngineTest, GlobalAggregationNoGroupBy) {
 }
 
 // =============================================================================
+// ORDER BY alias with HAVING (GDB-603)
+// =============================================================================
+
+TEST_F(QueryEngineTest, OrderByAliasWithHaving) {
+    exec_ok("CREATE TABLE employees (id INT, department VARCHAR, salary INT)");
+    exec_ok("INSERT INTO employees VALUES (1, 'eng', 100)");
+    exec_ok("INSERT INTO employees VALUES (2, 'eng', 120)");
+    exec_ok("INSERT INTO employees VALUES (3, 'eng', 130)");
+    exec_ok("INSERT INTO employees VALUES (4, 'sales', 80)");
+    exec_ok("INSERT INTO employees VALUES (5, 'sales', 90)");
+    exec_ok("INSERT INTO employees VALUES (6, 'sales', 100)");
+    exec_ok("INSERT INTO employees VALUES (7, 'hr', 70)");
+
+    // Without HAVING — alias in ORDER BY should work.
+    auto qr1 = exec_ok("SELECT department, COUNT(*) AS cnt, AVG(salary) AS avg_sal "
+                       "FROM employees GROUP BY department ORDER BY avg_sal DESC");
+    ASSERT_EQ(qr1.rows.size(), 3u);
+    // eng avg=116.67, sales avg=90, hr avg=70
+    EXPECT_EQ(qr1.rows[0][0].as_string(), "eng");
+    EXPECT_EQ(qr1.rows[2][0].as_string(), "hr");
+
+    // With HAVING — alias in ORDER BY should still work (GDB-603 bug).
+    auto qr2 =
+        exec_ok("SELECT department, COUNT(*) AS cnt, AVG(salary) AS avg_sal "
+                "FROM employees GROUP BY department HAVING COUNT(*) > 2 ORDER BY avg_sal DESC");
+    ASSERT_EQ(qr2.rows.size(), 2u); // eng (3) and sales (3) pass; hr (1) doesn't.
+    EXPECT_EQ(qr2.rows[0][0].as_string(), "eng");
+    EXPECT_EQ(qr2.rows[1][0].as_string(), "sales");
+}
+
+TEST_F(QueryEngineTest, OrderByCountAliasWithHaving) {
+    exec_ok("CREATE TABLE employees2 (id INT, department VARCHAR, salary INT)");
+    exec_ok("INSERT INTO employees2 VALUES (1, 'eng', 100)");
+    exec_ok("INSERT INTO employees2 VALUES (2, 'eng', 120)");
+    exec_ok("INSERT INTO employees2 VALUES (3, 'eng', 130)");
+    exec_ok("INSERT INTO employees2 VALUES (4, 'sales', 80)");
+    exec_ok("INSERT INTO employees2 VALUES (5, 'sales', 90)");
+    exec_ok("INSERT INTO employees2 VALUES (6, 'hr', 70)");
+
+    // ORDER BY COUNT alias with HAVING.
+    auto qr = exec_ok("SELECT department, COUNT(*) AS cnt "
+                      "FROM employees2 GROUP BY department HAVING COUNT(*) > 1 ORDER BY cnt DESC");
+    ASSERT_EQ(qr.rows.size(), 2u); // eng(3) and sales(2) pass; hr(1) doesn't.
+    EXPECT_EQ(qr.rows[0][0].as_string(), "eng");
+    EXPECT_EQ(qr.rows[0][1].as_int64(), 3);
+    EXPECT_EQ(qr.rows[1][0].as_string(), "sales");
+    EXPECT_EQ(qr.rows[1][1].as_int64(), 2);
+}
+
+TEST_F(QueryEngineTest, OrderByAliasWithoutAggregate) {
+    exec_ok("CREATE TABLE items (id INT, name VARCHAR, price INT)");
+    exec_ok("INSERT INTO items VALUES (1, 'apple', 3)");
+    exec_ok("INSERT INTO items VALUES (2, 'banana', 1)");
+    exec_ok("INSERT INTO items VALUES (3, 'cherry', 5)");
+
+    // Non-aggregate alias in ORDER BY.
+    auto qr = exec_ok("SELECT name AS item_name, price AS cost FROM items ORDER BY cost ASC");
+    ASSERT_EQ(qr.rows.size(), 3u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "banana");
+    EXPECT_EQ(qr.rows[1][0].as_string(), "apple");
+    EXPECT_EQ(qr.rows[2][0].as_string(), "cherry");
+}
+
+TEST_F(QueryEngineTest, OrderByAliasCaseInsensitive) {
+    exec_ok("CREATE TABLE vals (id INT, v INT)");
+    exec_ok("INSERT INTO vals VALUES (1, 30)");
+    exec_ok("INSERT INTO vals VALUES (2, 10)");
+    exec_ok("INSERT INTO vals VALUES (3, 20)");
+
+    // Alias case should be insensitive.
+    auto qr = exec_ok("SELECT v AS MyVal FROM vals ORDER BY myval ASC");
+    ASSERT_EQ(qr.rows.size(), 3u);
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 10);
+    EXPECT_EQ(qr.rows[1][0].as_int32(), 20);
+    EXPECT_EQ(qr.rows[2][0].as_int32(), 30);
+}
+
+// =============================================================================
 // INSERT with DEFAULT expressions (GDB-250)
 // =============================================================================
 
@@ -1180,8 +1258,8 @@ TEST_F(QueryEngineGraphTest, MatchWhereNameInWhereAgeInSelect) {
     exec_ok("LINK users(1) TO users(2) VIA follows");
     exec_ok("LINK users(2) TO users(1) VIA follows");
 
-    auto qr = exec_ok(
-        "SELECT a.age FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.name = 'Alice'");
+    auto qr =
+        exec_ok("SELECT a.age FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.name = 'Alice'");
     ASSERT_EQ(qr.column_names.size(), 1u);
     EXPECT_EQ(qr.column_names[0], "age");
     ASSERT_EQ(qr.rows.size(), 1u);

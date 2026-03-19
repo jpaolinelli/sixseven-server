@@ -1452,13 +1452,28 @@ Planner::plan_select(const SelectStmt& stmt,
             std::vector<SortKey> keys;
             keys.reserve(stmt.order_by.size());
             for (const auto& ob : stmt.order_by) {
-                if (contains_any_aggregate(*ob.expr, bound)) {
-                    auto rewritten = rewrite_expr(*ob.expr, agg_map);
+                // Resolve SELECT-list aliases: if the ORDER BY expression is an
+                // unqualified column ref matching a SELECT alias, use the
+                // original SELECT expression so aggregate rewriting applies.
+                const Expr* effective_expr = ob.expr.get();
+                if (auto* cref = dynamic_cast<const ColumnRefExpr*>(ob.expr.get());
+                    cref && cref->table.empty()) {
+                    std::string upper = to_upper(cref->column);
+                    for (const auto& item : stmt.items) {
+                        if (!item.alias.empty() && to_upper(item.alias) == upper && item.expr) {
+                            effective_expr = item.expr.get();
+                            break;
+                        }
+                    }
+                }
+
+                if (contains_any_aggregate(*effective_expr, bound)) {
+                    auto rewritten = rewrite_expr(*effective_expr, agg_map);
                     auto* ptr = rewritten.get();
                     owned_exprs.push_back(std::move(rewritten));
                     keys.push_back({ptr, ob.direction});
                 } else {
-                    keys.push_back({ob.expr.get(), ob.direction});
+                    keys.push_back({effective_expr, ob.direction});
                 }
             }
             child = std::make_unique<SortOperator>(std::move(child), std::move(keys), bound);
@@ -1513,7 +1528,19 @@ Planner::plan_select(const SelectStmt& stmt,
             std::vector<SortKey> keys;
             keys.reserve(stmt.order_by.size());
             for (const auto& ob : stmt.order_by) {
-                keys.push_back({ob.expr.get(), ob.direction});
+                // Resolve SELECT-list aliases to the underlying expression.
+                const Expr* effective_expr = ob.expr.get();
+                if (auto* cref = dynamic_cast<const ColumnRefExpr*>(ob.expr.get());
+                    cref && cref->table.empty()) {
+                    std::string upper = to_upper(cref->column);
+                    for (const auto& item : stmt.items) {
+                        if (!item.alias.empty() && to_upper(item.alias) == upper && item.expr) {
+                            effective_expr = item.expr.get();
+                            break;
+                        }
+                    }
+                }
+                keys.push_back({effective_expr, ob.direction});
             }
             child = std::make_unique<SortOperator>(std::move(child), std::move(keys), bound);
         }
