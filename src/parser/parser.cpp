@@ -967,6 +967,14 @@ Result<StmtPtr> Parser::parse_drop_database() {
         return tl::unexpected(name.error());
     stmt->database_name = std::move(*name);
 
+    // Also accept IF EXISTS after the name (alternative syntax).
+    if (!stmt->if_exists && match(TokenType::IF)) {
+        auto exists = expect(TokenType::EXISTS, "expected EXISTS after IF");
+        if (!exists)
+            return tl::unexpected(exists.error());
+        stmt->if_exists = true;
+    }
+
     if (match(TokenType::CASCADE)) {
         stmt->cascade = true;
     } else {
