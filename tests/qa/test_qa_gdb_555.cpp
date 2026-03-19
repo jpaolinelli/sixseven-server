@@ -75,8 +75,8 @@ protected:
 
     void create_edge_type(const std::string& name) {
         ColumnDef w_col{"weight", TypeId::FLOAT64};
-        auto eid = graph_->create_edge_type(default_database_id, 
-            name, nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {w_col});
+        auto eid = graph_->create_edge_type(
+            default_database_id, name, nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {w_col});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
     }
 
@@ -93,7 +93,7 @@ protected:
     }
 
     void link(int64_t from, int64_t to, double w, const std::string& edge = "road") {
-        auto r = graph_->link(edge, Value(from), Value(to), {Value(w)});
+        auto r = graph_->link(default_database_id, edge, Value(from), Value(to), {Value(w)});
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 

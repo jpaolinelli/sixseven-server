@@ -58,8 +58,7 @@ struct EigenvectorInfo {
 };
 
 /// Extract per-node results from algorithm output rows.
-std::unordered_map<int64_t, EigenvectorInfo>
-to_map(const std::vector<AlgorithmRow>& rows) {
+std::unordered_map<int64_t, EigenvectorInfo> to_map(const std::vector<AlgorithmRow>& rows) {
     std::unordered_map<int64_t, EigenvectorInfo> result;
     for (const auto& row : rows) {
         EXPECT_EQ(row.values.size(), 3u);
@@ -85,23 +84,23 @@ protected:
 
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     Result<std::vector<AlgorithmRow>> run(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {}};
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, {}};
         return eigenvector_centrality_execute(ctx);
     }
 
-    Result<std::vector<AlgorithmRow>>
-    run(const std::string& edge_type, std::unordered_map<std::string, Value> args) {
-        AlgorithmContext ctx{engine_, edge_type, std::move(args)};
+    Result<std::vector<AlgorithmRow>> run(const std::string& edge_type,
+                                          std::unordered_map<std::string, Value> args) {
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, std::move(args)};
         return eigenvector_centrality_execute(ctx);
     }
 
@@ -204,8 +203,7 @@ TEST_F(GDB520_EigenvectorCentralityQA, AC2_StarGraphConverges) {
     auto m = to_map(*result);
     EXPECT_EQ(m.size(), 11u);
     for (const auto& [node, info] : m) {
-        EXPECT_LT(info.iterations_used, 100)
-            << "Star graph should converge before max iterations";
+        EXPECT_LT(info.iterations_used, 100) << "Star graph should converge before max iterations";
     }
 }
 
@@ -228,13 +226,11 @@ TEST_F(GDB520_EigenvectorCentralityQA, AC2_BipartiteGraphConverges) {
 
     // K3,3 is vertex-transitive: all nodes should have equal scores.
     for (const auto& [node, info] : m) {
-        EXPECT_NEAR(info.score, 1.0, 1e-4)
-            << "All nodes in K3,3 should have equal score ~1.0";
+        EXPECT_NEAR(info.score, 1.0, 1e-4) << "All nodes in K3,3 should have equal score ~1.0";
     }
     // Must have converged, not hit max iterations.
     for (const auto& [node, info] : m) {
-        EXPECT_LT(info.iterations_used, 100)
-            << "K3,3 should converge with (A+I) trick";
+        EXPECT_LT(info.iterations_used, 100) << "K3,3 should converge with (A+I) trick";
     }
 }
 
@@ -250,10 +246,8 @@ TEST_F(GDB520_EigenvectorCentralityQA, AC2_CycleGraphConverges) {
 
     // All nodes in a cycle have equal eigenvector centrality.
     for (const auto& [node, info] : m) {
-        EXPECT_NEAR(info.score, 1.0, 1e-4)
-            << "node " << node << " in C6 should have score ~1.0";
-        EXPECT_LT(info.iterations_used, 100)
-            << "C6 should converge";
+        EXPECT_NEAR(info.score, 1.0, 1e-4) << "node " << node << " in C6 should have score ~1.0";
+        EXPECT_LT(info.iterations_used, 100) << "C6 should converge";
     }
 }
 
@@ -322,19 +316,23 @@ TEST_F(GDB520_EigenvectorCentralityQA, AC3_CompleteGraphAllEqual) {
 
     auto m = to_map(*result);
     for (const auto& [node, info] : m) {
-        EXPECT_NEAR(info.score, 1.0, 1e-4)
-            << "node " << node << " in K5 should have score ~1.0";
+        EXPECT_NEAR(info.score, 1.0, 1e-4) << "node " << node << " in K5 should have score ~1.0";
     }
 }
 
 TEST_F(GDB520_EigenvectorCentralityQA, AC3_BarabollDumbbell) {
     // Dumbbell graph: two K3 connected by a bridge.
     // {1,2,3} fully connected, {4,5,6} fully connected, bridge 3-4.
-    build_graph("knows", {
-        {1, 2}, {2, 3}, {1, 3},      // K3 left
-        {4, 5}, {5, 6}, {4, 6},      // K3 right
-        {3, 4},                        // bridge
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {1, 3}, // K3 left
+                    {4, 5},
+                    {5, 6},
+                    {4, 6}, // K3 right
+                    {3, 4}, // bridge
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -666,11 +664,12 @@ TEST_F(GDB520_EigenvectorCentralityQA, Adversarial_DuplicateEdges) {
 
 TEST_F(GDB520_EigenvectorCentralityQA, Adversarial_LargeNodeIds) {
     // Test with very large node IDs.
-    build_graph("knows", {
-        {1000000, 2000000},
-        {2000000, 3000000},
-        {3000000, 1000000},
-    });
+    build_graph("knows",
+                {
+                    {1000000, 2000000},
+                    {2000000, 3000000},
+                    {3000000, 1000000},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -716,10 +715,19 @@ TEST_F(GDB520_EigenvectorCentralityQA, Adversarial_PathGraphP5Symmetry) {
 
 TEST_F(GDB520_EigenvectorCentralityQA, Adversarial_WheelGraph) {
     // Wheel W5: hub=1, rim 2-3-4-5-6-2, hub connects to all.
-    build_graph("knows", {
-        {1, 2}, {1, 3}, {1, 4}, {1, 5}, {1, 6},  // hub to rim
-        {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 2},   // rim cycle
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 3},
+                    {1, 4},
+                    {1, 5},
+                    {1, 6}, // hub to rim
+                    {2, 3},
+                    {3, 4},
+                    {4, 5},
+                    {5, 6},
+                    {6, 2}, // rim cycle
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -727,13 +735,13 @@ TEST_F(GDB520_EigenvectorCentralityQA, Adversarial_WheelGraph) {
     auto m = to_map(*result);
     EXPECT_EQ(m.size(), 6u);
 
-    // Hub should have highest score (connected to all, rim nodes connected to hub + 2 rim neighbors).
+    // Hub should have highest score (connected to all, rim nodes connected to hub + 2 rim
+    // neighbors).
     EXPECT_NEAR(m[1].score, 1.0, 1e-6);
 
     // All rim nodes should be equal.
     for (int64_t i = 3; i <= 6; ++i) {
-        EXPECT_NEAR(m[2].score, m[i].score, 1e-4)
-            << "rim nodes should have equal scores";
+        EXPECT_NEAR(m[2].score, m[i].score, 1e-4) << "rim nodes should have equal scores";
     }
 
     EXPECT_GT(m[1].score, m[2].score);
@@ -859,8 +867,7 @@ TEST_F(GDB520_EigenvectorCentralityQA, Stress_DenseGraph50Nodes) {
 
     // Complete graph: all nodes should have equal score ~1.0.
     for (const auto& [node, info] : m) {
-        EXPECT_NEAR(info.score, 1.0, 1e-3)
-            << "node " << node << " in K50 should have score ~1.0";
+        EXPECT_NEAR(info.score, 1.0, 1e-3) << "node " << node << " in K50 should have score ~1.0";
     }
 }
 
@@ -896,8 +903,7 @@ TEST_F(GDB520_EigenvectorCentralityQA, OutputRowAlways3Columns) {
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     for (const auto& row : *result) {
-        EXPECT_EQ(row.values.size(), 3u)
-            << "every output row must have exactly 3 values";
+        EXPECT_EQ(row.values.size(), 3u) << "every output row must have exactly 3 values";
     }
 }
 

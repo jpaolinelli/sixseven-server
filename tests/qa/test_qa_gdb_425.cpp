@@ -83,9 +83,9 @@ void parse_fails(std::string_view sql) {
 TEST(QA_GDB425_Parse, DoubleWhereInNodePattern) {
     // WHERE inside node + WHERE clause should both work (inner filters pattern,
     // outer filters results).
-    auto stmt = parse_one(
-        "SELECT a.name FROM MATCH (a:persons WHERE a.id > 1)-[r:knows]->(b:persons) "
-        "WHERE a.name = 'Alice'");
+    auto stmt =
+        parse_one("SELECT a.name FROM MATCH (a:persons WHERE a.id > 1)-[r:knows]->(b:persons) "
+                  "WHERE a.name = 'Alice'");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* m = dynamic_cast<MatchStmt*>(sel->from[0].match_source.get());
@@ -98,10 +98,9 @@ TEST(QA_GDB425_Parse, DoubleWhereInNodePattern) {
 
 TEST(QA_GDB425_Parse, DoubleWhereInEdgePattern) {
     // WHERE inside edge + outer WHERE.
-    auto stmt = parse_one(
-        "SELECT a.name FROM MATCH "
-        "(a:persons)-[r:knows WHERE r.weight > 5]->(b:persons) "
-        "WHERE b.name = 'Bob'");
+    auto stmt = parse_one("SELECT a.name FROM MATCH "
+                          "(a:persons)-[r:knows WHERE r.weight > 5]->(b:persons) "
+                          "WHERE b.name = 'Bob'");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* m = dynamic_cast<MatchStmt*>(sel->from[0].match_source.get());
@@ -128,9 +127,8 @@ TEST(QA_GDB425_Parse, InlineWhereWithVariableLength) {
 
 TEST(QA_GDB425_Parse, InlineWhereWithAndExpr) {
     // Compound expression in inline WHERE.
-    auto stmt = parse_one(
-        "SELECT a.name FROM MATCH "
-        "(a:persons WHERE a.id > 1 AND a.active = TRUE)-[r:knows]->(b:persons)");
+    auto stmt = parse_one("SELECT a.name FROM MATCH "
+                          "(a:persons WHERE a.id > 1 AND a.active = TRUE)-[r:knows]->(b:persons)");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* m = dynamic_cast<MatchStmt*>(sel->from[0].match_source.get());
@@ -144,16 +142,14 @@ TEST(QA_GDB425_Parse, EmptyWhereInNodeShouldFail) {
 }
 
 TEST(QA_GDB425_Parse, EmptyWhereInEdgeShouldFail) {
-    parse_fails(
-        "SELECT a.name FROM MATCH (a:persons)-[r:knows WHERE]->(b:persons)");
+    parse_fails("SELECT a.name FROM MATCH (a:persons)-[r:knows WHERE]->(b:persons)");
 }
 
 TEST(QA_GDB425_Parse, InlineWhereOnBothNodeAndEdge) {
     // All three positions: source, edge, target.
-    auto stmt = parse_one(
-        "SELECT a.name FROM MATCH "
-        "(a:persons WHERE a.id = 1)-[r:knows WHERE r.weight > 5]->"
-        "(b:persons WHERE b.active = TRUE)");
+    auto stmt = parse_one("SELECT a.name FROM MATCH "
+                          "(a:persons WHERE a.id = 1)-[r:knows WHERE r.weight > 5]->"
+                          "(b:persons WHERE b.active = TRUE)");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* m = dynamic_cast<MatchStmt*>(sel->from[0].match_source.get());
@@ -237,8 +233,13 @@ protected:
 
         // Create 'knows' edge type with 'weight' (INT64) property.
         ColumnDef weight_col{"weight", TypeId::INT64};
-        auto eid = graph_->create_edge_type(default_database_id, 
-            "knows", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {weight_col});
+        auto eid = graph_->create_edge_type(default_database_id,
+                                            "knows",
+                                            persons_id_,
+                                            persons_id_,
+                                            TypeId::INT64,
+                                            TypeId::INT64,
+                                            {weight_col});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         // Graph topology:
@@ -257,8 +258,8 @@ protected:
         std::filesystem::remove_all(data_dir_);
     }
 
-    void insert_person(int64_t id, const std::string& name, bool active,
-                       const std::string& company) {
+    void
+    insert_person(int64_t id, const std::string& name, bool active, const std::string& company) {
         auto ts = storage_->get_table_storage(persons_id_);
         ASSERT_TRUE(ts.has_value()) << ts.error().message;
         auto schema = catalog_->get_table(default_database_id, "persons");
@@ -270,9 +271,11 @@ protected:
         ASSERT_TRUE(rid.has_value()) << rid.error().message;
     }
 
-    void link(const std::string& edge_type, int64_t from, int64_t to,
+    void link(const std::string& edge_type,
+              int64_t from,
+              int64_t to,
               const std::vector<Value>& props = {}) {
-        auto r = graph_->link(edge_type, Value(from), Value(to), props);
+        auto r = graph_->link(default_database_id, edge_type, Value(from), Value(to), props);
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 
@@ -280,30 +283,41 @@ protected:
         std::string sql = "SELECT 1 WHERE " + std::string(expr_str);
         Lexer lexer(sql);
         auto tokens = lexer.tokenize();
-        if (!tokens) return nullptr;
+        if (!tokens)
+            return nullptr;
         Parser parser(std::move(*tokens));
         auto stmts = parser.parse_all();
-        if (!stmts || stmts->empty()) return nullptr;
+        if (!stmts || stmts->empty())
+            return nullptr;
         auto* sel = dynamic_cast<SelectStmt*>((*stmts)[0].get());
-        if (!sel || !sel->where_expr) return nullptr;
+        if (!sel || !sel->where_expr)
+            return nullptr;
         return std::move(sel->where_expr);
     }
 
     /// Run a single-hop PatternMatchOperator and collect results.
-    std::vector<Tuple> run_single_hop(MatchConfig config, OutputSchema schema,
-                                       const Expr* where_expr = nullptr) {
+    std::vector<Tuple>
+    run_single_hop(MatchConfig config, OutputSchema schema, const Expr* where_expr = nullptr) {
         BoundStatement bound;
-        PatternMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                                 std::move(config), std::move(schema), where_expr, bound);
+        PatternMatchOperator op(*graph_,
+                                *catalog_,
+                                *storage_,
+                                default_database_id,
+                                std::move(config),
+                                std::move(schema),
+                                where_expr,
+                                bound);
         auto r = op.open();
         EXPECT_TRUE(r.has_value()) << r.error().message;
-        if (!r) return {};
+        if (!r)
+            return {};
 
         std::vector<Tuple> results;
         while (true) {
             auto row = op.next();
             EXPECT_TRUE(row.has_value()) << row.error().message;
-            if (!row || !row->has_value()) break;
+            if (!row || !row->has_value())
+                break;
             results.push_back(std::move(**row));
         }
         op.close();
@@ -311,22 +325,31 @@ protected:
     }
 
     /// Run a variable-length VariableLengthMatchOperator and collect results.
-    std::vector<Tuple> run_var_length(MatchConfig config, OutputSchema schema,
-                                       const Expr* where_expr = nullptr,
-                                       size_t max_visited = 100'000) {
+    std::vector<Tuple> run_var_length(MatchConfig config,
+                                      OutputSchema schema,
+                                      const Expr* where_expr = nullptr,
+                                      size_t max_visited = 100'000) {
         BoundStatement bound;
-        VariableLengthMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                                        std::move(config), std::move(schema), where_expr,
-                                        bound, max_visited);
+        VariableLengthMatchOperator op(*graph_,
+                                       *catalog_,
+                                       *storage_,
+                                       default_database_id,
+                                       std::move(config),
+                                       std::move(schema),
+                                       where_expr,
+                                       bound,
+                                       max_visited);
         auto r = op.open();
         EXPECT_TRUE(r.has_value()) << r.error().message;
-        if (!r) return {};
+        if (!r)
+            return {};
 
         std::vector<Tuple> results;
         while (true) {
             auto row = op.next();
             EXPECT_TRUE(row.has_value()) << row.error().message;
-            if (!row || !row->has_value()) break;
+            if (!row || !row->has_value())
+                break;
             results.push_back(std::move(**row));
         }
         op.close();
@@ -406,9 +429,9 @@ TEST_F(QA_GDB425, EdgeFilterPrunesHighWeight) {
 
     // Verify that low-weight edges were pruned: no path should reach 2 or 5 or 6.
     auto tgts = target_names(results);
-    EXPECT_EQ(tgts.count("Bob"), 0u);    // Only reachable via weight=10 edge
-    EXPECT_EQ(tgts.count("Eve"), 0u);    // Only reachable via weight=5 edge
-    EXPECT_EQ(tgts.count("Frank"), 0u);  // Only reachable via weight=15 edge
+    EXPECT_EQ(tgts.count("Bob"), 0u);   // Only reachable via weight=10 edge
+    EXPECT_EQ(tgts.count("Eve"), 0u);   // Only reachable via weight=5 edge
+    EXPECT_EQ(tgts.count("Frank"), 0u); // Only reachable via weight=15 edge
 }
 
 TEST_F(QA_GDB425, EdgeFilterAllEdgesFiltered) {
@@ -744,8 +767,13 @@ TEST_F(QA_GDB425, TripleFilter_SingleHop) {
 TEST_F(QA_GDB425, EdgeFilterOnZeroEdges) {
     // Create a new edge type with no edges and test filtering.
     ColumnDef score_col{"score", TypeId::INT64};
-    auto eid = graph_->create_edge_type(default_database_id, 
-        "likes", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {score_col});
+    auto eid = graph_->create_edge_type(default_database_id,
+                                        "likes",
+                                        persons_id_,
+                                        persons_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {score_col});
     ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
     auto filter = parse_expr("r.score > 0");
@@ -822,8 +850,14 @@ TEST_F(QA_GDB425, MultiHopFixedLengthWithEdgeFilter) {
 
     // Use PatternMatch (multi-hop fixed).
     BoundStatement bound;
-    PatternMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                             std::move(config), std::move(schema), nullptr, bound);
+    PatternMatchOperator op(*graph_,
+                            *catalog_,
+                            *storage_,
+                            default_database_id,
+                            std::move(config),
+                            std::move(schema),
+                            nullptr,
+                            bound);
     auto r = op.open();
     ASSERT_TRUE(r.has_value()) << r.error().message;
 
@@ -831,7 +865,8 @@ TEST_F(QA_GDB425, MultiHopFixedLengthWithEdgeFilter) {
     while (true) {
         auto row = op.next();
         ASSERT_TRUE(row.has_value()) << row.error().message;
-        if (!row->has_value()) break;
+        if (!row->has_value())
+            break;
         results.push_back(std::move(**row));
     }
     op.close();
@@ -894,8 +929,14 @@ TEST_F(QA_GDB425, ReopenWithFilters) {
     config.edges.push_back(MatchEdgeDef("r", "knows", TraverseDirection::OUT));
 
     BoundStatement bound;
-    PatternMatchOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                             std::move(config), two_col_schema(), nullptr, bound);
+    PatternMatchOperator op(*graph_,
+                            *catalog_,
+                            *storage_,
+                            default_database_id,
+                            std::move(config),
+                            two_col_schema(),
+                            nullptr,
+                            bound);
 
     // First open/close cycle.
     auto r1 = op.open();
@@ -904,7 +945,8 @@ TEST_F(QA_GDB425, ReopenWithFilters) {
     while (true) {
         auto row = op.next();
         ASSERT_TRUE(row.has_value());
-        if (!row->has_value()) break;
+        if (!row->has_value())
+            break;
         ++count1;
     }
     op.close();
@@ -916,7 +958,8 @@ TEST_F(QA_GDB425, ReopenWithFilters) {
     while (true) {
         auto row = op.next();
         ASSERT_TRUE(row.has_value());
-        if (!row->has_value()) break;
+        if (!row->has_value())
+            break;
         ++count2;
     }
     op.close();

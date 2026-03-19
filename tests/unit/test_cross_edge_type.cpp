@@ -111,12 +111,22 @@ protected:
         insert_company(20, "Globex");
 
         // Create edge types.
-        auto eid_knows = graph_->create_edge_type(default_database_id, 
-            "knows", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
+        auto eid_knows = graph_->create_edge_type(default_database_id,
+                                                  "knows",
+                                                  persons_id_,
+                                                  persons_id_,
+                                                  TypeId::INT64,
+                                                  TypeId::INT64,
+                                                  {});
         ASSERT_TRUE(eid_knows.has_value()) << eid_knows.error().message;
 
-        auto eid_works = graph_->create_edge_type(default_database_id, 
-            "works_at", persons_id_, companies_id_, TypeId::INT64, TypeId::INT64, {});
+        auto eid_works = graph_->create_edge_type(default_database_id,
+                                                  "works_at",
+                                                  persons_id_,
+                                                  companies_id_,
+                                                  TypeId::INT64,
+                                                  TypeId::INT64,
+                                                  {});
         ASSERT_TRUE(eid_works.has_value()) << eid_works.error().message;
 
         // Populate edges.
@@ -140,7 +150,7 @@ protected:
     }
 
     void link(const std::string& edge_type, int64_t from, int64_t to) {
-        auto r = graph_->link(edge_type, Value(from), Value(to));
+        auto r = graph_->link(default_database_id, edge_type, Value(from), Value(to));
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 
@@ -243,27 +253,30 @@ TEST_F(CrossEdgeTypeTest, VariablePlusFixed) {
     std::vector<std::tuple<std::string, std::string, std::string>> named;
     for (const auto& t : results) {
         ASSERT_GE(t.values.size(), 3u);
-        named.emplace_back(t.values[0].as_string(), t.values[1].as_string(),
-                           t.values[2].as_string());
+        named.emplace_back(
+            t.values[0].as_string(), t.values[1].as_string(), t.values[2].as_string());
     }
     std::sort(named.begin(), named.end());
 
     // Alice->Bob->Acme (1 hop)
-    EXPECT_NE(std::find(named.begin(), named.end(),
-                        std::make_tuple(std::string("Alice"), std::string("Bob"),
-                                        std::string("Acme"))),
-              named.end());
+    EXPECT_NE(
+        std::find(named.begin(),
+                  named.end(),
+                  std::make_tuple(std::string("Alice"), std::string("Bob"), std::string("Acme"))),
+        named.end());
 
     // Alice->Charlie->Globex (2 hops)
-    EXPECT_NE(std::find(named.begin(), named.end(),
-                        std::make_tuple(std::string("Alice"), std::string("Charlie"),
-                                        std::string("Globex"))),
+    EXPECT_NE(std::find(named.begin(),
+                        named.end(),
+                        std::make_tuple(
+                            std::string("Alice"), std::string("Charlie"), std::string("Globex"))),
               named.end());
 
     // Alice->Diana->Globex (3 hops)
-    EXPECT_NE(std::find(named.begin(), named.end(),
-                        std::make_tuple(std::string("Alice"), std::string("Diana"),
-                                        std::string("Globex"))),
+    EXPECT_NE(std::find(named.begin(),
+                        named.end(),
+                        std::make_tuple(
+                            std::string("Alice"), std::string("Diana"), std::string("Globex"))),
               named.end());
 }
 
@@ -302,27 +315,30 @@ TEST_F(CrossEdgeTypeTest, FixedPlusVariable) {
     std::vector<std::tuple<std::string, std::string, std::string>> named;
     for (const auto& t : results) {
         ASSERT_GE(t.values.size(), 3u);
-        named.emplace_back(t.values[0].as_string(), t.values[1].as_string(),
-                           t.values[2].as_string());
+        named.emplace_back(
+            t.values[0].as_string(), t.values[1].as_string(), t.values[2].as_string());
     }
     std::sort(named.begin(), named.end());
 
     // Alice->Bob->Charlie (fixed+1hop)
-    EXPECT_NE(std::find(named.begin(), named.end(),
-                        std::make_tuple(std::string("Alice"), std::string("Bob"),
-                                        std::string("Charlie"))),
+    EXPECT_NE(std::find(named.begin(),
+                        named.end(),
+                        std::make_tuple(
+                            std::string("Alice"), std::string("Bob"), std::string("Charlie"))),
               named.end());
 
     // Alice->Bob->Eve (fixed+3hops)
-    EXPECT_NE(std::find(named.begin(), named.end(),
-                        std::make_tuple(std::string("Alice"), std::string("Bob"),
-                                        std::string("Eve"))),
-              named.end());
+    EXPECT_NE(
+        std::find(named.begin(),
+                  named.end(),
+                  std::make_tuple(std::string("Alice"), std::string("Bob"), std::string("Eve"))),
+        named.end());
 
     // Charlie->Diana->Eve (fixed+1hop)
-    EXPECT_NE(std::find(named.begin(), named.end(),
-                        std::make_tuple(std::string("Charlie"), std::string("Diana"),
-                                        std::string("Eve"))),
+    EXPECT_NE(std::find(named.begin(),
+                        named.end(),
+                        std::make_tuple(
+                            std::string("Charlie"), std::string("Diana"), std::string("Eve"))),
               named.end());
 }
 
@@ -366,20 +382,22 @@ TEST_F(CrossEdgeTypeTest, VariablePlusVariable) {
     std::vector<std::tuple<std::string, std::string, std::string>> named;
     for (const auto& t : results) {
         ASSERT_GE(t.values.size(), 3u);
-        named.emplace_back(t.values[0].as_string(), t.values[1].as_string(),
-                           t.values[2].as_string());
+        named.emplace_back(
+            t.values[0].as_string(), t.values[1].as_string(), t.values[2].as_string());
     }
 
     // Spot-check: (Alice, Bob, Charlie) — both 1-hop
-    EXPECT_NE(std::find(named.begin(), named.end(),
-                        std::make_tuple(std::string("Alice"), std::string("Bob"),
-                                        std::string("Charlie"))),
+    EXPECT_NE(std::find(named.begin(),
+                        named.end(),
+                        std::make_tuple(
+                            std::string("Alice"), std::string("Bob"), std::string("Charlie"))),
               named.end());
 
     // (Alice, Charlie, Diana) — 2-hop + 1-hop
-    EXPECT_NE(std::find(named.begin(), named.end(),
-                        std::make_tuple(std::string("Alice"), std::string("Charlie"),
-                                        std::string("Diana"))),
+    EXPECT_NE(std::find(named.begin(),
+                        named.end(),
+                        std::make_tuple(
+                            std::string("Alice"), std::string("Charlie"), std::string("Diana"))),
               named.end());
 }
 
@@ -461,8 +479,8 @@ TEST_F(CrossEdgeTypeTest, VariablePlusFixedCrossType) {
 
 TEST_F(CrossEdgeTypeTest, EmptyResultNoConnection) {
     // Create a new edge type with no edges to test empty chaining.
-    auto eid = graph_->create_edge_type(default_database_id, 
-        "mentors", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
+    auto eid = graph_->create_edge_type(
+        default_database_id, "mentors", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(eid.has_value());
 
     // (a:persons)-[:mentors]->{1,3}(b:persons)-[:works_at]->(c:companies)

@@ -129,7 +129,7 @@ TraversalOperator::get_neighbors(const Value& node_pk) const {
 
     if (config_.direction == TraverseDirection::OUT ||
         config_.direction == TraverseDirection::BOTH) {
-        auto edges = graph_engine_.get_edges_from(config_.edge_type, node_pk);
+        auto edges = graph_engine_.get_edges_from(config_.database_id, config_.edge_type, node_pk);
         if (!edges) {
             return tl::unexpected(edges.error());
         }
@@ -140,7 +140,7 @@ TraversalOperator::get_neighbors(const Value& node_pk) const {
 
     if (config_.direction == TraverseDirection::IN ||
         config_.direction == TraverseDirection::BOTH) {
-        auto edges = graph_engine_.get_edges_to(config_.edge_type, node_pk);
+        auto edges = graph_engine_.get_edges_to(config_.database_id, config_.edge_type, node_pk);
         if (!edges) {
             return tl::unexpected(edges.error());
         }

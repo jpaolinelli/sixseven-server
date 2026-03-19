@@ -99,33 +99,34 @@ protected:
 
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
 
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     /// Run betweenness centrality with normalized=true (default).
     Result<std::vector<AlgorithmRow>> run_betweenness(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {{"normalized", Value(true)}}};
+        AlgorithmContext ctx{
+            engine_, default_database_id, edge_type, {{"normalized", Value(true)}}};
         return betweenness_centrality_execute(ctx);
     }
 
     /// Run betweenness centrality with normalized=false.
     Result<std::vector<AlgorithmRow>> run_betweenness_unnormalized(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {{"normalized", Value(false)}}};
+        AlgorithmContext ctx{
+            engine_, default_database_id, edge_type, {{"normalized", Value(false)}}};
         return betweenness_centrality_execute(ctx);
     }
 
     /// Run betweenness centrality with raw named_args.
     Result<std::vector<AlgorithmRow>>
-    run_betweenness_raw(const std::string& edge_type,
-                        std::unordered_map<std::string, Value> args) {
-        AlgorithmContext ctx{engine_, edge_type, std::move(args)};
+    run_betweenness_raw(const std::string& edge_type, std::unordered_map<std::string, Value> args) {
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, std::move(args)};
         return betweenness_centrality_execute(ctx);
     }
 
@@ -316,7 +317,8 @@ TEST_F(QA_GDB495_Betweenness, AC3_CompleteGraphK5AllZero) {
     std::vector<std::pair<int64_t, int64_t>> edges;
     for (int64_t i = 1; i <= 5; ++i) {
         for (int64_t j = 1; j <= 5; ++j) {
-            if (i != j) edges.push_back({i, j});
+            if (i != j)
+                edges.push_back({i, j});
         }
     }
     build_graph("knows", edges);
@@ -366,10 +368,7 @@ TEST_F(QA_GDB495_Betweenness, AC3_ThreeDisconnectedTriangles) {
     // Three disconnected directed triangles.
     // No node is between nodes in different components.
     // Within each triangle (directed cycle), all nodes are symmetric.
-    build_graph("knows",
-                {{1, 2}, {2, 3}, {3, 1},
-                 {4, 5}, {5, 6}, {6, 4},
-                 {7, 8}, {8, 9}, {9, 7}});
+    build_graph("knows", {{1, 2}, {2, 3}, {3, 1}, {4, 5}, {5, 6}, {6, 4}, {7, 8}, {8, 9}, {9, 7}});
 
     auto result = run_betweenness_unnormalized("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -433,8 +432,7 @@ TEST_F(QA_GDB495_Betweenness, SourceOnlyNodes) {
 TEST_F(QA_GDB495_Betweenness, LadderGraph) {
     // Ladder: 1->2->3 and 4->5->6, with rungs 1->4, 2->5, 3->6.
     // Multiple shortest paths exist between some pairs.
-    build_graph("knows",
-                {{1, 2}, {2, 3}, {4, 5}, {5, 6}, {1, 4}, {2, 5}, {3, 6}});
+    build_graph("knows", {{1, 2}, {2, 3}, {4, 5}, {5, 6}, {1, 4}, {2, 5}, {3, 6}});
 
     auto result = run_betweenness_unnormalized("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -448,9 +446,7 @@ TEST_F(QA_GDB495_Betweenness, LadderGraph) {
 TEST_F(QA_GDB495_Betweenness, LongDiamondChain) {
     // Chain of diamonds: 1->{2,3}->4->{5,6}->7.
     // At each diamond, the two parallel paths split betweenness.
-    build_graph("knows",
-                {{1, 2}, {1, 3}, {2, 4}, {3, 4},
-                 {4, 5}, {4, 6}, {5, 7}, {6, 7}});
+    build_graph("knows", {{1, 2}, {1, 3}, {2, 4}, {3, 4}, {4, 5}, {4, 6}, {5, 7}, {6, 7}});
 
     auto result = run_betweenness_unnormalized("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -510,8 +506,7 @@ TEST_F(QA_GDB495_Betweenness, NormalizationExactlyThreeNodes) {
 TEST_F(QA_GDB495_Betweenness, NormalizedScoresInZeroOneRange) {
     // For any directed graph with n >= 3, normalized betweenness
     // should be in [0, 1] range.
-    build_graph("knows", {{1, 2}, {2, 3}, {3, 4}, {4, 5},
-                           {1, 3}, {2, 4}, {3, 5}});
+    build_graph("knows", {{1, 2}, {2, 3}, {3, 4}, {4, 5}, {1, 3}, {2, 4}, {3, 5}});
 
     auto result = run_betweenness("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -539,8 +534,7 @@ TEST_F(QA_GDB495_Betweenness, FloatNormalizedValueFails) {
     build_graph("knows", {{1, 2}});
 
     auto result = run_betweenness_raw("knows", {{"normalized", Value(1.5)}});
-    ASSERT_FALSE(result.has_value())
-        << "float value for 'normalized' should fail with type error";
+    ASSERT_FALSE(result.has_value()) << "float value for 'normalized' should fail with type error";
     EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
 }
 
@@ -566,10 +560,10 @@ TEST_F(QA_GDB495_Betweenness, OnlyUsesSpecifiedEdgeType) {
     // "follows": 1->3 (direct edge, no intermediate)
     build_graph("knows", {{1, 2}, {2, 3}});
 
-    auto et2 = engine_.create_edge_type(default_database_id, 
-        "follows", table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+    auto et2 = engine_.create_edge_type(
+        default_database_id, "follows", table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(et2.has_value()) << et2.error().message;
-    auto link = engine_.link("follows", pk(1), pk(3));
+    auto link = engine_.link(default_database_id, "follows", pk(1), pk(3));
     ASSERT_TRUE(link.has_value()) << link.error().message;
 
     // Run betweenness on "knows" — should only see the knows graph.
@@ -660,8 +654,7 @@ TEST_F(QA_GDB495_Betweenness, PathGraphFormulaVerification) {
 
     for (int64_t i = 0; i < N; ++i) {
         double expected = static_cast<double>(i) * static_cast<double>(N - 1 - i);
-        EXPECT_DOUBLE_EQ(scores[i], expected)
-            << "node " << i << " in path graph P_" << N;
+        EXPECT_DOUBLE_EQ(scores[i], expected) << "node " << i << " in path graph P_" << N;
     }
 }
 
@@ -675,7 +668,8 @@ TEST_F(QA_GDB495_Betweenness, StressCompleteK30) {
     std::vector<std::pair<int64_t, int64_t>> edges;
     for (int64_t i = 0; i < N; ++i) {
         for (int64_t j = 0; j < N; ++j) {
-            if (i != j) edges.push_back({i, j});
+            if (i != j)
+                edges.push_back({i, j});
         }
     }
     build_graph("knows", edges);
@@ -738,14 +732,12 @@ TEST_F(QA_GDB495_Betweenness, StressStarWithBackEdges) {
     // Hub node 0 should have the highest betweenness.
     // It's on the shortest path between any pair of leaf nodes (i -> 0 -> j).
     for (int64_t i = 1; i <= N; ++i) {
-        EXPECT_GT(scores[0], scores[i])
-            << "hub node 0 should outrank leaf " << i;
+        EXPECT_GT(scores[0], scores[i]) << "hub node 0 should outrank leaf " << i;
     }
 
     // All leaf nodes should have equal betweenness (symmetric).
     for (int64_t i = 2; i <= N; ++i) {
-        EXPECT_NEAR(scores[1], scores[i], 1e-10)
-            << "leaf " << i << " should match leaf 1";
+        EXPECT_NEAR(scores[1], scores[i], 1e-10) << "leaf " << i << " should match leaf 1";
     }
 }
 

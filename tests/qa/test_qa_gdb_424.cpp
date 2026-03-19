@@ -128,8 +128,13 @@ protected:
             insert_person(id);
         }
 
-        auto eid = graph_->create_edge_type(default_database_id, 
-            "knows", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
+        auto eid = graph_->create_edge_type(default_database_id,
+                                            "knows",
+                                            persons_id_,
+                                            persons_id_,
+                                            TypeId::INT64,
+                                            TypeId::INT64,
+                                            {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         // Diamond: 1→2→4, 1→3→4
@@ -157,7 +162,7 @@ protected:
     }
 
     void link(int64_t from, int64_t to) {
-        auto r = graph_->link("knows", Value(from), Value(to));
+        auto r = graph_->link(default_database_id, "knows", Value(from), Value(to));
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 
@@ -174,13 +179,13 @@ protected:
     }
 
     /// Run a shortest-path MATCH operator and collect output tuples.
-    std::vector<Tuple> run_shortest_match(MatchConfig config,
-                                          OutputSchema schema,
-                                          PathSelector selector,
-                                          const std::string& path_var = "p",
-                                          int32_t k = 0,
-                                          size_t max_visited =
-                                              MatchShortestPathOperator::DEFAULT_MAX_VISITED) {
+    std::vector<Tuple>
+    run_shortest_match(MatchConfig config,
+                       OutputSchema schema,
+                       PathSelector selector,
+                       const std::string& path_var = "p",
+                       int32_t k = 0,
+                       size_t max_visited = MatchShortestPathOperator::DEFAULT_MAX_VISITED) {
         BoundStatement bound;
         MatchShortestPathOperator op(*graph_,
                                      *catalog_,
@@ -334,8 +339,8 @@ TEST_F(QA_GDB424, AC2_AllShortestDoesNotReturnLongerPaths) {
 TEST_F(QA_GDB424, AC3_ShortestK_ReturnsExactlyK) {
     // 1→4: 2 paths of length 2.
     // SHORTEST 1 should return exactly 1.
-    auto results = run_shortest_match(
-        make_config(), make_schema(), PathSelector::SHORTEST_K, "p", 1);
+    auto results =
+        run_shortest_match(make_config(), make_schema(), PathSelector::SHORTEST_K, "p", 1);
     auto filtered = filter_pair(results, 1, 4);
     ASSERT_EQ(filtered.size(), 1u);
     EXPECT_EQ(filtered[0].values[2].as_path().length(), 2);
@@ -344,8 +349,8 @@ TEST_F(QA_GDB424, AC3_ShortestK_ReturnsExactlyK) {
 TEST_F(QA_GDB424, AC3_ShortestK_ReturnsLessThanKWhenNotEnoughPaths) {
     // 1→2: only 1 path of length 1 (direct edge).
     // SHORTEST 5 should return only the 1 available path, not error.
-    auto results = run_shortest_match(
-        make_config(), make_schema(), PathSelector::SHORTEST_K, "p", 5);
+    auto results =
+        run_shortest_match(make_config(), make_schema(), PathSelector::SHORTEST_K, "p", 5);
     auto filtered = filter_pair(results, 1, 2);
     ASSERT_GE(filtered.size(), 1u);
     // There should be at most 1 shortest path from 1→2.
@@ -355,8 +360,8 @@ TEST_F(QA_GDB424, AC3_ShortestK_ReturnsLessThanKWhenNotEnoughPaths) {
 TEST_F(QA_GDB424, AC3_ShortestK_K2ReturnsBothDiamondPaths) {
     // 1→4: 2 paths of length 2.
     // SHORTEST 2 should return both.
-    auto results = run_shortest_match(
-        make_config(), make_schema(), PathSelector::SHORTEST_K, "p", 2);
+    auto results =
+        run_shortest_match(make_config(), make_schema(), PathSelector::SHORTEST_K, "p", 2);
     auto filtered = filter_pair(results, 1, 4);
     ASSERT_EQ(filtered.size(), 2u);
 }
@@ -511,20 +516,20 @@ TEST_F(QA_GDB424, AC7_OldOperatorStillFindsPaths) {
 
 TEST_F(QA_GDB424, Parser_ShortestK_ZeroIsRejected) {
     // SHORTEST 0 should be rejected (K >= 1 required).
-    EXPECT_TRUE(parse_fails(
-        "MATCH p = SHORTEST 0 (a:persons)-[:knows]->{1,10}(b:persons) RETURN a, b"));
+    EXPECT_TRUE(
+        parse_fails("MATCH p = SHORTEST 0 (a:persons)-[:knows]->{1,10}(b:persons) RETURN a, b"));
 }
 
 TEST_F(QA_GDB424, Parser_ShortestK_NegativeIsRejected) {
     // Negative K should be rejected.
-    EXPECT_TRUE(parse_fails(
-        "MATCH p = SHORTEST -1 (a:persons)-[:knows]->{1,10}(b:persons) RETURN a, b"));
+    EXPECT_TRUE(
+        parse_fails("MATCH p = SHORTEST -1 (a:persons)-[:knows]->{1,10}(b:persons) RETURN a, b"));
 }
 
 TEST_F(QA_GDB424, Parser_ShortestK_LargeK) {
     // Very large K should parse successfully.
-    auto stmt = parse_one(
-        "MATCH p = SHORTEST 1000 (a:persons)-[:knows]->{1,10}(b:persons) RETURN a, b");
+    auto stmt =
+        parse_one("MATCH p = SHORTEST 1000 (a:persons)-[:knows]->{1,10}(b:persons) RETURN a, b");
     auto* m = dynamic_cast<MatchStmt*>(stmt.get());
     ASSERT_NE(m, nullptr);
     EXPECT_EQ(m->path_selector, PathSelector::SHORTEST_K);
@@ -542,15 +547,14 @@ TEST_F(QA_GDB424, Parser_PathVariablePreserved) {
 
 TEST_F(QA_GDB424, Parser_MissingPathSelectorKeyword) {
     // "p = FOOBAR" should fail — invalid selector keyword.
-    EXPECT_TRUE(parse_fails(
-        "MATCH p = FOOBAR (a:persons)-[:knows]->{1,10}(b:persons) RETURN a, b"));
+    EXPECT_TRUE(
+        parse_fails("MATCH p = FOOBAR (a:persons)-[:knows]->{1,10}(b:persons) RETURN a, b"));
 }
 
 TEST_F(QA_GDB424, Parser_SelectFromMatchAllShortest) {
-    auto stmt = parse_one(
-        "SELECT a.id, b.id "
-        "FROM MATCH p = ALL SHORTEST (a:persons)-[:knows]->{1,10}(b:persons) "
-        "WHERE a.id = 1");
+    auto stmt = parse_one("SELECT a.id, b.id "
+                          "FROM MATCH p = ALL SHORTEST (a:persons)-[:knows]->{1,10}(b:persons) "
+                          "WHERE a.id = 1");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->from.size(), 1u);
@@ -561,10 +565,9 @@ TEST_F(QA_GDB424, Parser_SelectFromMatchAllShortest) {
 }
 
 TEST_F(QA_GDB424, Parser_SelectFromMatchShortestK) {
-    auto stmt = parse_one(
-        "SELECT a.id, b.id, path_length(p) AS hops "
-        "FROM MATCH p = SHORTEST 5 (a:persons)-[:knows]->{1,10}(b:persons) "
-        "WHERE a.id = 1");
+    auto stmt = parse_one("SELECT a.id, b.id, path_length(p) AS hops "
+                          "FROM MATCH p = SHORTEST 5 (a:persons)-[:knows]->{1,10}(b:persons) "
+                          "WHERE a.id = 1");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_NE(sel->from[0].match_source, nullptr);
@@ -610,8 +613,8 @@ TEST_F(QA_GDB424, DisconnectedNodeReturnsEmptyResult_AllShort) {
 }
 
 TEST_F(QA_GDB424, DisconnectedNodeReturnsEmptyResult_ShortestK) {
-    auto results = run_shortest_match(
-        make_config(), make_schema(), PathSelector::SHORTEST_K, "p", 3);
+    auto results =
+        run_shortest_match(make_config(), make_schema(), PathSelector::SHORTEST_K, "p", 3);
     auto filtered = filter_pair(results, 9, 1);
     EXPECT_EQ(filtered.size(), 0u);
 }
@@ -676,8 +679,8 @@ TEST_F(QA_GDB424, ReverseDirectionNoPathForward) {
 
 TEST_F(QA_GDB424, MaxVisitedLimitTruncatesResults) {
     // With very small max_visited, results are truncated (not error).
-    auto results = run_shortest_match(
-        make_config(), make_schema(), PathSelector::ANY_SHORTEST, "p", 0, 2);
+    auto results =
+        run_shortest_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST, "p", 0, 2);
     // Should not crash, may return fewer results.
     // Just verify it terminates and produces valid tuples.
     for (const auto& t : results) {
@@ -800,8 +803,8 @@ TEST_F(QA_GDB424, AllShortestUniqueShortestReturnsOnePath) {
 
 TEST_F(QA_GDB424, ShortestK_KExceedsTotalPaths) {
     // 1→2: only 1 path. SHORTEST 100 should return just that 1 path.
-    auto results = run_shortest_match(
-        make_config(), make_schema(), PathSelector::SHORTEST_K, "p", 100);
+    auto results =
+        run_shortest_match(make_config(), make_schema(), PathSelector::SHORTEST_K, "p", 100);
     auto filtered = filter_pair(results, 1, 2);
     ASSERT_GE(filtered.size(), 1u);
     EXPECT_LE(filtered.size(), 1u);
@@ -832,10 +835,8 @@ TEST_F(QA_GDB424, PathNodesAreInOrder) {
 TEST_F(QA_GDB424, AnyShortestPathLengthMatchesAllShortestPathLength) {
     // For any source-target pair, the path length from ANY SHORTEST should
     // match the path length from ALL SHORTEST.
-    auto any_results = run_shortest_match(
-        make_config(), make_schema(), PathSelector::ANY_SHORTEST);
-    auto all_results = run_shortest_match(
-        make_config(), make_schema(), PathSelector::ALL_SHORTEST);
+    auto any_results = run_shortest_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST);
+    auto all_results = run_shortest_match(make_config(), make_schema(), PathSelector::ALL_SHORTEST);
 
     // Check 1→4 specifically.
     auto any_1_4 = filter_pair(any_results, 1, 4);
@@ -843,8 +844,7 @@ TEST_F(QA_GDB424, AnyShortestPathLengthMatchesAllShortestPathLength) {
 
     ASSERT_EQ(any_1_4.size(), 1u);
     ASSERT_GE(all_1_4.size(), 1u);
-    EXPECT_EQ(any_1_4[0].values[2].as_path().length(),
-              all_1_4[0].values[2].as_path().length());
+    EXPECT_EQ(any_1_4[0].values[2].as_path().length(), all_1_4[0].values[2].as_path().length());
 }
 
 // ============================================================================
@@ -862,8 +862,7 @@ TEST_F(QA_GDB424, StressTest_LinearChain20Nodes) {
     }
 
     // ANY SHORTEST from 10 to 20 should find the 10-hop chain.
-    auto results = run_shortest_match(
-        make_config(), make_schema(), PathSelector::ANY_SHORTEST);
+    auto results = run_shortest_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST);
     auto filtered = filter_pair(results, 10, 20);
     ASSERT_EQ(filtered.size(), 1u);
     EXPECT_EQ(filtered[0].values[2].as_path().length(), 10);

@@ -1,7 +1,7 @@
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/graph/algorithm_registry.h"
-#include "sixseven/graph/triangle_count.h"
 #include "sixseven/graph/graph_engine.h"
+#include "sixseven/graph/triangle_count.h"
 
 #include <gtest/gtest.h>
 
@@ -32,8 +32,7 @@ static Value pk(int64_t v) {
 }
 
 /// Extract per-node triangle counts from algorithm output rows.
-std::unordered_map<int64_t, int64_t>
-to_triangle_map(const std::vector<AlgorithmRow>& rows) {
+std::unordered_map<int64_t, int64_t> to_triangle_map(const std::vector<AlgorithmRow>& rows) {
     std::unordered_map<int64_t, int64_t> result;
     for (const auto& row : rows) {
         EXPECT_EQ(row.values.size(), 2u);
@@ -77,8 +76,7 @@ TEST(TriangleCountDef, NoParameters) {
 
 TEST(TriangleCountDef, Registration) {
     AlgorithmRegistry registry;
-    auto result =
-        registry.register_algorithm(make_triangle_count_def(), triangle_count_execute);
+    auto result = registry.register_algorithm(make_triangle_count_def(), triangle_count_execute);
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     auto* entry = registry.find("triangle_count");
@@ -101,19 +99,19 @@ protected:
     /// Create an edge type and link a list of (src, tgt) pairs.
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
 
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     /// Run triangle count.
     Result<std::vector<AlgorithmRow>> run(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {}};
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, {}};
         return triangle_count_execute(ctx);
     }
 
@@ -162,10 +160,18 @@ TEST_F(TriangleCountTest, CompleteGraphK4) {
     // K4 bidirectional: all pairs connected.
     build_graph("knows",
                 {
-                    {1, 2}, {1, 3}, {1, 4},
-                    {2, 1}, {2, 3}, {2, 4},
-                    {3, 1}, {3, 2}, {3, 4},
-                    {4, 1}, {4, 2}, {4, 3},
+                    {1, 2},
+                    {1, 3},
+                    {1, 4},
+                    {2, 1},
+                    {2, 3},
+                    {2, 4},
+                    {3, 1},
+                    {3, 2},
+                    {3, 4},
+                    {4, 1},
+                    {4, 2},
+                    {4, 3},
                 });
 
     auto result = run("knows");
@@ -189,11 +195,8 @@ TEST_F(TriangleCountTest, CompleteGraphK4) {
 TEST_F(TriangleCountTest, CompleteGraphK5) {
     build_graph("knows",
                 {
-                    {1, 2}, {1, 3}, {1, 4}, {1, 5},
-                    {2, 1}, {2, 3}, {2, 4}, {2, 5},
-                    {3, 1}, {3, 2}, {3, 4}, {3, 5},
-                    {4, 1}, {4, 2}, {4, 3}, {4, 5},
-                    {5, 1}, {5, 2}, {5, 3}, {5, 4},
+                    {1, 2}, {1, 3}, {1, 4}, {1, 5}, {2, 1}, {2, 3}, {2, 4}, {2, 5}, {3, 1}, {3, 2},
+                    {3, 4}, {3, 5}, {4, 1}, {4, 2}, {4, 3}, {4, 5}, {5, 1}, {5, 2}, {5, 3}, {5, 4},
                 });
 
     auto result = run("knows");
@@ -218,8 +221,14 @@ TEST_F(TriangleCountTest, StarGraph) {
     // Hub = 1, spokes = 2,3,4,5 (bidirectional)
     build_graph("knows",
                 {
-                    {1, 2}, {1, 3}, {1, 4}, {1, 5},
-                    {2, 1}, {3, 1}, {4, 1}, {5, 1},
+                    {1, 2},
+                    {1, 3},
+                    {1, 4},
+                    {1, 5},
+                    {2, 1},
+                    {3, 1},
+                    {4, 1},
+                    {5, 1},
                 });
 
     auto result = run("knows");
@@ -242,9 +251,12 @@ TEST_F(TriangleCountTest, PathGraph) {
     // 1 <-> 2 <-> 3 <-> 4
     build_graph("knows",
                 {
-                    {1, 2}, {2, 1},
-                    {2, 3}, {3, 2},
-                    {3, 4}, {4, 3},
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 4},
+                    {4, 3},
                 });
 
     auto result = run("knows");
@@ -268,11 +280,16 @@ TEST_F(TriangleCountTest, TwoTrianglesSharingEdge) {
     // Shared edge: 2-3
     build_graph("knows",
                 {
-                    {1, 2}, {2, 1},
-                    {2, 3}, {3, 2},
-                    {3, 1}, {1, 3},
-                    {2, 4}, {4, 2},
-                    {3, 4}, {4, 3},
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                    {2, 4},
+                    {4, 2},
+                    {3, 4},
+                    {4, 3},
                 });
 
     auto result = run("knows");
@@ -323,11 +340,16 @@ TEST_F(TriangleCountTest, DegreeOrderingCorrectness) {
     // Diamond graph: same as TwoTrianglesSharingEdge but different edge order
     build_graph("knows",
                 {
-                    {4, 3}, {3, 4},
-                    {3, 2}, {2, 3},
-                    {4, 2}, {2, 4},
-                    {1, 3}, {3, 1},
-                    {1, 2}, {2, 1},
+                    {4, 3},
+                    {3, 4},
+                    {3, 2},
+                    {2, 3},
+                    {4, 2},
+                    {2, 4},
+                    {1, 3},
+                    {3, 1},
+                    {1, 2},
+                    {2, 1},
                 });
 
     auto result = run("knows");
@@ -415,12 +437,18 @@ TEST_F(TriangleCountTest, BowTieGraph) {
     // Triangle {1,2,3} and {3,4,5}, sharing node 3
     build_graph("knows",
                 {
-                    {1, 2}, {2, 1},
-                    {2, 3}, {3, 2},
-                    {3, 1}, {1, 3},
-                    {3, 4}, {4, 3},
-                    {4, 5}, {5, 4},
-                    {5, 3}, {3, 5},
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                    {3, 4},
+                    {4, 3},
+                    {4, 5},
+                    {5, 4},
+                    {5, 3},
+                    {3, 5},
                 });
 
     auto result = run("knows");
@@ -448,10 +476,14 @@ TEST_F(TriangleCountTest, BowTieGraph) {
 TEST_F(TriangleCountTest, CountsAreNonNegative) {
     build_graph("knows",
                 {
-                    {1, 2}, {2, 1},
-                    {2, 3}, {3, 2},
-                    {3, 1}, {1, 3},
-                    {1, 4}, {4, 5},
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                    {1, 4},
+                    {4, 5},
                 });
 
     auto result = run("knows");

@@ -112,26 +112,26 @@ protected:
     /// Create an edge type and link a list of (src, tgt) pairs.
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
 
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     /// Run eigenvector centrality with default parameters.
     Result<std::vector<AlgorithmRow>> run(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {}};
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, {}};
         return eigenvector_centrality_execute(ctx);
     }
 
     /// Run eigenvector centrality with named args.
-    Result<std::vector<AlgorithmRow>>
-    run(const std::string& edge_type, std::unordered_map<std::string, Value> args) {
-        AlgorithmContext ctx{engine_, edge_type, std::move(args)};
+    Result<std::vector<AlgorithmRow>> run(const std::string& edge_type,
+                                          std::unordered_map<std::string, Value> args) {
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, std::move(args)};
         return eigenvector_centrality_execute(ctx);
     }
 
@@ -223,8 +223,18 @@ TEST_F(EigenvectorCentralityTest, CompleteGraph) {
     // K4 bidirectional.
     build_graph("knows",
                 {
-                    {1, 2}, {2, 1}, {1, 3}, {3, 1}, {1, 4}, {4, 1},
-                    {2, 3}, {3, 2}, {2, 4}, {4, 2}, {3, 4}, {4, 3},
+                    {1, 2},
+                    {2, 1},
+                    {1, 3},
+                    {3, 1},
+                    {1, 4},
+                    {4, 1},
+                    {2, 3},
+                    {3, 2},
+                    {2, 4},
+                    {4, 2},
+                    {3, 4},
+                    {4, 3},
                 });
 
     auto result = run("knows");
@@ -248,10 +258,14 @@ TEST_F(EigenvectorCentralityTest, PathGraphCenterHigher) {
     // Bidirectional path: 1 <-> 2 <-> 3 <-> 4 <-> 5
     build_graph("knows",
                 {
-                    {1, 2}, {2, 1},
-                    {2, 3}, {3, 2},
-                    {3, 4}, {4, 3},
-                    {4, 5}, {5, 4},
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 4},
+                    {4, 3},
+                    {4, 5},
+                    {5, 4},
                 });
 
     auto result = run("knows");
@@ -302,8 +316,18 @@ TEST_F(EigenvectorCentralityTest, ConvergenceWithinTolerance) {
     // K4 should converge quickly.
     build_graph("knows",
                 {
-                    {1, 2}, {2, 1}, {1, 3}, {3, 1}, {1, 4}, {4, 1},
-                    {2, 3}, {3, 2}, {2, 4}, {4, 2}, {3, 4}, {4, 3},
+                    {1, 2},
+                    {2, 1},
+                    {1, 3},
+                    {3, 1},
+                    {1, 4},
+                    {4, 1},
+                    {2, 3},
+                    {3, 2},
+                    {2, 4},
+                    {4, 2},
+                    {3, 4},
+                    {4, 3},
                 });
 
     auto result = run("knows");
@@ -326,10 +350,14 @@ TEST_F(EigenvectorCentralityTest, MaxIterationsCutoff) {
     // Use a large path graph with only 1 iteration allowed.
     build_graph("knows",
                 {
-                    {1, 2}, {2, 1},
-                    {2, 3}, {3, 2},
-                    {3, 4}, {4, 3},
-                    {4, 5}, {5, 4},
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 4},
+                    {4, 3},
+                    {4, 5},
+                    {5, 4},
                 });
 
     std::unordered_map<std::string, Value> args;
@@ -342,8 +370,7 @@ TEST_F(EigenvectorCentralityTest, MaxIterationsCutoff) {
 
     // With only 1 iteration, it should not have converged (iterations_used == 1).
     for (const auto& [node, r] : scores) {
-        EXPECT_EQ(r.iterations_used, 1)
-            << "node " << node << " should use exactly 1 iteration";
+        EXPECT_EQ(r.iterations_used, 1) << "node " << node << " should use exactly 1 iteration";
     }
 
     // Scores should still be valid (non-negative, normalised).
@@ -362,9 +389,12 @@ TEST_F(EigenvectorCentralityTest, DisconnectedComponents) {
     // Component B: 4 <-> 5 (pair)
     build_graph("knows",
                 {
-                    {1, 2}, {2, 1},
-                    {2, 3}, {3, 2},
-                    {4, 5}, {5, 4},
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {4, 5},
+                    {5, 4},
                 });
 
     auto result = run("knows");

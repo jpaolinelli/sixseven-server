@@ -47,7 +47,9 @@ static TableSchema make_table_schema(const std::string& name) {
     return schema;
 }
 
-static Value pk(int64_t v) { return Value(v); }
+static Value pk(int64_t v) {
+    return Value(v);
+}
 
 /// Extract (node_id, community_id) pairs from algorithm result rows.
 std::unordered_map<int64_t, int64_t> to_community_map(const std::vector<AlgorithmRow>& rows) {
@@ -63,7 +65,8 @@ std::unordered_map<int64_t, int64_t> to_community_map(const std::vector<Algorith
 
 /// Verify that community IDs are contiguous starting from 0.
 void verify_contiguous_ids(const std::unordered_map<int64_t, int64_t>& communities) {
-    if (communities.empty()) return;
+    if (communities.empty())
+        return;
     std::unordered_set<int64_t> unique_ids;
     for (const auto& [_, comm] : communities) {
         unique_ids.insert(comm);
@@ -82,7 +85,8 @@ void verify_contiguous_ids(const std::unordered_map<int64_t, int64_t>& communiti
 void verify_communities(const std::unordered_map<int64_t, int64_t>& communities,
                         const std::vector<std::vector<int64_t>>& expected_groups) {
     for (const auto& group : expected_groups) {
-        if (group.empty()) continue;
+        if (group.empty())
+            continue;
         auto it = communities.find(group[0]);
         ASSERT_NE(it, communities.end()) << "node " << group[0] << " not found";
         int64_t expected_comm = it->second;
@@ -95,7 +99,8 @@ void verify_communities(const std::unordered_map<int64_t, int64_t>& communities,
     }
     for (size_t i = 0; i < expected_groups.size(); ++i) {
         for (size_t j = i + 1; j < expected_groups.size(); ++j) {
-            if (expected_groups[i].empty() || expected_groups[j].empty()) continue;
+            if (expected_groups[i].empty() || expected_groups[j].empty())
+                continue;
             auto ci = communities.at(expected_groups[i][0]);
             auto cj = communities.at(expected_groups[j][0]);
             EXPECT_NE(ci, cj) << "groups " << i << " and " << j << " should differ";
@@ -119,27 +124,31 @@ protected:
 
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     Result<std::vector<AlgorithmRow>> run_cd(const std::string& edge_type) {
         AlgorithmContext ctx{
-            engine_, edge_type,
+            engine_,
+            default_database_id,
+            edge_type,
             {{"resolution", Value(1.0)}, {"max_iterations", Value(static_cast<int64_t>(10))}}};
         return community_detect_execute(ctx);
     }
 
     Result<std::vector<AlgorithmRow>>
     run_cd(const std::string& edge_type, double resolution, int64_t max_iterations) {
-        AlgorithmContext ctx{engine_, edge_type,
-                            {{"resolution", Value(resolution)},
-                             {"max_iterations", Value(max_iterations)}}};
+        AlgorithmContext ctx{
+            engine_,
+            default_database_id,
+            edge_type,
+            {{"resolution", Value(resolution)}, {"max_iterations", Value(max_iterations)}}};
         return community_detect_execute(ctx);
     }
 
@@ -180,10 +189,10 @@ TEST_F(QA_GDB494, Collision_MultipleHiValuesWithSameLower32) {
     // Multiple distinct nodes that share the same lower 32 bits.
     // All connected to hub node 0.
     int64_t base = 42;
-    int64_t id_a = base;                   // lower 32 bits = 42
-    int64_t id_b = (1LL << 32) + base;     // lower 32 bits = 42
-    int64_t id_c = (2LL << 32) + base;     // lower 32 bits = 42
-    int64_t id_d = (3LL << 32) + base;     // lower 32 bits = 42
+    int64_t id_a = base;               // lower 32 bits = 42
+    int64_t id_b = (1LL << 32) + base; // lower 32 bits = 42
+    int64_t id_c = (2LL << 32) + base; // lower 32 bits = 42
+    int64_t id_d = (3LL << 32) + base; // lower 32 bits = 42
 
     build_graph("knows", {{0, id_a}, {0, id_b}, {0, id_c}, {0, id_d}});
 
@@ -328,10 +337,15 @@ TEST_F(QA_GDB494, Mixed_CollidingAndNormalEdgesInSameGraph) {
 
     // Clique A: 1-2-3 (normal IDs)
     // Clique B: id_collide-100-101 (one colliding ID)
-    build_graph("knows", {
-        {1, 2}, {2, 3}, {3, 1},
-        {id_collide, 100}, {100, 101}, {101, id_collide},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {3, 1},
+                    {id_collide, 100},
+                    {100, 101},
+                    {101, id_collide},
+                });
 
     auto result = run_cd("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -353,12 +367,17 @@ TEST_F(QA_GDB494, Mixed_TwoCliquesOneWithCollision) {
     int64_t b2 = (1LL << 32) + 100; // collides with b1 in lower 32
     int64_t b3 = (2LL << 32) + 100; // collides with b1 in lower 32
 
-    build_graph("knows", {
-        // Clique A
-        {1, 2}, {2, 3}, {3, 1},
-        // Clique B (all three pairs)
-        {b1, b2}, {b2, b3}, {b3, b1},
-    });
+    build_graph("knows",
+                {
+                    // Clique A
+                    {1, 2},
+                    {2, 3},
+                    {3, 1},
+                    // Clique B (all three pairs)
+                    {b1, b2},
+                    {b2, b3},
+                    {b3, b1},
+                });
 
     auto result = run_cd("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -530,8 +549,7 @@ TEST_F(QA_GDB494, Stress_TwoCliquesWithCollidingInterCluster) {
     }
     // Clique B internal consistency.
     for (int64_t i = offset + 2; i <= offset + 5; ++i) {
-        EXPECT_EQ(communities[offset + 1], communities[i])
-            << "node " << i << " in clique B";
+        EXPECT_EQ(communities[offset + 1], communities[i]) << "node " << i << " in clique B";
     }
     // Two cliques are separate.
     EXPECT_NE(communities[1], communities[offset + 1]);
@@ -607,7 +625,7 @@ TEST_F(QA_GDB494, Determinism_RepeatedRunsWithCollidingIds) {
     for (size_t i = 0; i < r1->size(); ++i) {
         for (size_t j = 0; j < (*r1)[i].values.size(); ++j) {
             EXPECT_EQ(std::get<int64_t>((*r1)[i].values[j].data()),
-                       std::get<int64_t>((*r2)[i].values[j].data()))
+                      std::get<int64_t>((*r2)[i].values[j].data()))
                 << "row " << i << " col " << j << " differs between runs";
         }
     }

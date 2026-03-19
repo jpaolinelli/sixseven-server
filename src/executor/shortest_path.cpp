@@ -190,7 +190,7 @@ Result<std::vector<Value>> ShortestPathOperator::get_neighbors(const Value& node
     std::vector<Value> result;
 
     if (dir == TraverseDirection::OUT || dir == TraverseDirection::BOTH) {
-        auto edges = graph_engine_.get_edges_from(config_.edge_type, node_pk);
+        auto edges = graph_engine_.get_edges_from(config_.database_id, config_.edge_type, node_pk);
         if (!edges) {
             return tl::unexpected(edges.error());
         }
@@ -200,7 +200,7 @@ Result<std::vector<Value>> ShortestPathOperator::get_neighbors(const Value& node
     }
 
     if (dir == TraverseDirection::IN || dir == TraverseDirection::BOTH) {
-        auto edges = graph_engine_.get_edges_to(config_.edge_type, node_pk);
+        auto edges = graph_engine_.get_edges_to(config_.database_id, config_.edge_type, node_pk);
         if (!edges) {
             return tl::unexpected(edges.error());
         }

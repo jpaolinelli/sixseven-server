@@ -123,8 +123,8 @@ protected:
 
     void create_edge_type(const std::string& name, const std::string& prop_name = "weight") {
         ColumnDef w_col{prop_name, TypeId::FLOAT64};
-        auto eid = graph_->create_edge_type(default_database_id, 
-            name, nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {w_col});
+        auto eid = graph_->create_edge_type(
+            default_database_id, name, nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {w_col});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
     }
 
@@ -141,12 +141,12 @@ protected:
     }
 
     void link(int64_t from, int64_t to, double w, const std::string& edge = "road") {
-        auto r = graph_->link(edge, Value(from), Value(to), {Value(w)});
+        auto r = graph_->link(default_database_id, edge, Value(from), Value(to), {Value(w)});
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 
     std::unique_ptr<ColumnRefExpr> make_weight_expr(const std::string& table = "r",
-                                                     const std::string& col = "weight") {
+                                                    const std::string& col = "weight") {
         auto expr = std::make_unique<ColumnRefExpr>();
         expr->table = table;
         expr->column = col;
@@ -170,12 +170,25 @@ protected:
     }
 
     /// Run weighted shortest path and return result tuples.
-    std::vector<Tuple> run(PathSelector sel, const Expr* weight, const std::string& edge = "road",
-                           int32_t k = 0, int32_t max_hops = 100) {
+    std::vector<Tuple> run(PathSelector sel,
+                           const Expr* weight,
+                           const std::string& edge = "road",
+                           int32_t k = 0,
+                           int32_t max_hops = 100) {
         BoundStatement bound;
-        MatchShortestPathOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                                     make_config(edge, max_hops), make_schema(), nullptr, bound, sel,
-                                     "p", k, MatchShortestPathOperator::DEFAULT_MAX_VISITED, weight);
+        MatchShortestPathOperator op(*graph_,
+                                     *catalog_,
+                                     *storage_,
+                                     default_database_id,
+                                     make_config(edge, max_hops),
+                                     make_schema(),
+                                     nullptr,
+                                     bound,
+                                     sel,
+                                     "p",
+                                     k,
+                                     MatchShortestPathOperator::DEFAULT_MAX_VISITED,
+                                     weight);
         auto open_result = op.open();
         EXPECT_TRUE(open_result.has_value()) << open_result.error().message;
         if (!open_result.has_value())
@@ -194,20 +207,29 @@ protected:
     }
 
     /// Run and expect open() to fail, returning the error.
-    Error run_expect_error(PathSelector sel, const Expr* weight,
-                           const std::string& edge = "road") {
+    Error run_expect_error(PathSelector sel, const Expr* weight, const std::string& edge = "road") {
         BoundStatement bound;
-        MatchShortestPathOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                                     make_config(edge), make_schema(), nullptr, bound, sel, "p", 0,
-                                     MatchShortestPathOperator::DEFAULT_MAX_VISITED, weight);
+        MatchShortestPathOperator op(*graph_,
+                                     *catalog_,
+                                     *storage_,
+                                     default_database_id,
+                                     make_config(edge),
+                                     make_schema(),
+                                     nullptr,
+                                     bound,
+                                     sel,
+                                     "p",
+                                     0,
+                                     MatchShortestPathOperator::DEFAULT_MAX_VISITED,
+                                     weight);
         auto result = op.open();
         EXPECT_FALSE(result.has_value());
         return result.error();
     }
 
     /// Filter results by source and target PK (copies, does not move).
-    static std::vector<const Tuple*> filter_pair(const std::vector<Tuple>& results,
-                                                  int64_t src, int64_t tgt) {
+    static std::vector<const Tuple*>
+    filter_pair(const std::vector<Tuple>& results, int64_t src, int64_t tgt) {
         std::vector<const Tuple*> filtered;
         for (const auto& t : results) {
             if (t.values.size() >= 2 && !t.values[0].is_null() && !t.values[1].is_null() &&
@@ -533,8 +555,7 @@ TEST_F(GDB426_WeightedSP, ShortestKFindsKPaths) {
     auto from_1_to_4 = filter_pair(results, 1, 4);
 
     // SHORTEST 2 should find 2 paths to node 4.
-    ASSERT_GE(from_1_to_4.size(), 2u)
-        << "SHORTEST 2 should find at least 2 paths";
+    ASSERT_GE(from_1_to_4.size(), 2u) << "SHORTEST 2 should find at least 2 paths";
 
     // Sort by cost to verify ordering.
     std::sort(from_1_to_4.begin(), from_1_to_4.end(), [](const Tuple* a, const Tuple* b) {
@@ -572,11 +593,19 @@ TEST_F(GDB426_WeightedSP, StringWeightPropertyError) {
 
     // Create edge type with string property.
     ColumnDef str_col{"label", TypeId::STRING};
-    auto eid = graph_->create_edge_type(default_database_id, 
-        "labeled", nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {str_col});
+    auto eid = graph_->create_edge_type(default_database_id,
+                                        "labeled",
+                                        nodes_id_,
+                                        nodes_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {str_col});
     ASSERT_TRUE(eid.has_value());
 
-    auto r = graph_->link("labeled", Value(int64_t{1}), Value(int64_t{2}),
+    auto r = graph_->link(default_database_id,
+                          "labeled",
+                          Value(int64_t{1}),
+                          Value(int64_t{2}),
                           {Value(std::string("hello"))});
     ASSERT_TRUE(r.has_value());
 
@@ -632,15 +661,20 @@ TEST_F(GDB426_WeightedSP, IntegerWeightProperty) {
         insert_node(id);
 
     ColumnDef int_col{"dist", TypeId::INT64};
-    auto eid = graph_->create_edge_type(default_database_id, 
-        "iroad", nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {int_col});
+    auto eid = graph_->create_edge_type(default_database_id,
+                                        "iroad",
+                                        nodes_id_,
+                                        nodes_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {int_col});
     ASSERT_TRUE(eid.has_value());
 
-    auto r1 = graph_->link("iroad", Value(int64_t{1}), Value(int64_t{2}),
-                           {Value(int64_t{10})});
+    auto r1 = graph_->link(
+        default_database_id, "iroad", Value(int64_t{1}), Value(int64_t{2}), {Value(int64_t{10})});
     ASSERT_TRUE(r1.has_value());
-    auto r2 = graph_->link("iroad", Value(int64_t{2}), Value(int64_t{3}),
-                           {Value(int64_t{20})});
+    auto r2 = graph_->link(
+        default_database_id, "iroad", Value(int64_t{2}), Value(int64_t{3}), {Value(int64_t{20})});
     ASSERT_TRUE(r2.has_value());
 
     auto w = make_weight_expr("r", "dist");
@@ -663,10 +697,19 @@ TEST_F(GDB426_WeightedSP, OperatorReopen) {
 
     auto w = make_weight_expr();
     BoundStatement bound;
-    MatchShortestPathOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                                 make_config(), make_schema(), nullptr, bound,
-                                 PathSelector::ANY_SHORTEST, "p", 0,
-                                 MatchShortestPathOperator::DEFAULT_MAX_VISITED, w.get());
+    MatchShortestPathOperator op(*graph_,
+                                 *catalog_,
+                                 *storage_,
+                                 default_database_id,
+                                 make_config(),
+                                 make_schema(),
+                                 nullptr,
+                                 bound,
+                                 PathSelector::ANY_SHORTEST,
+                                 "p",
+                                 0,
+                                 MatchShortestPathOperator::DEFAULT_MAX_VISITED,
+                                 w.get());
 
     // First run.
     auto r1 = op.open();
@@ -709,7 +752,8 @@ TEST_F(GDB426_WeightedSP, NullWeightError) {
     create_edge_type("road");
 
     // Link with NULL weight.
-    auto r = graph_->link("road", Value(int64_t{1}), Value(int64_t{2}), {Value()});
+    auto r =
+        graph_->link(default_database_id, "road", Value(int64_t{1}), Value(int64_t{2}), {Value()});
     ASSERT_TRUE(r.has_value());
 
     auto w = make_weight_expr();
@@ -724,15 +768,14 @@ TEST_F(GDB426_WeightedSP, NullWeightError) {
 
 /// WEIGHT clause without path selector should fail.
 TEST(GDB426_Parser, WeightWithoutSelectorFails) {
-    EXPECT_TRUE(parse_fails(
-        "MATCH (a:cities)-[r:road]->(b:cities) WEIGHT r.distance RETURN a, b"));
+    EXPECT_TRUE(parse_fails("MATCH (a:cities)-[r:road]->(b:cities) WEIGHT r.distance RETURN a, b"));
 }
 
 /// WEIGHT with a complex expression (not column ref) — should parse but
 /// executor requires column ref.
 TEST(GDB426_Parser, WeightComplexExprParsesOk) {
-    auto stmt = parse_one(
-        "MATCH p = ANY SHORTEST (a:c)-[r:e]->{1,10}(b:c) WEIGHT r.x + r.y RETURN a");
+    auto stmt =
+        parse_one("MATCH p = ANY SHORTEST (a:c)-[r:e]->{1,10}(b:c) WEIGHT r.x + r.y RETURN a");
     auto* m = dynamic_cast<MatchStmt*>(stmt.get());
     ASSERT_NE(m, nullptr);
     // weight_expr should be a BinaryExpr, not a ColumnRefExpr.
@@ -743,9 +786,8 @@ TEST(GDB426_Parser, WeightComplexExprParsesOk) {
 
 /// WEIGHT in SELECT ... FROM MATCH syntax.
 TEST(GDB426_Parser, WeightInSelectFromMatch) {
-    auto stmt = parse_one(
-        "SELECT path_cost(p) FROM MATCH p = ANY SHORTEST (a:n)-[r:e]->{1,5}(b:n) "
-        "WEIGHT r.w WHERE a.id = 1");
+    auto stmt = parse_one("SELECT path_cost(p) FROM MATCH p = ANY SHORTEST (a:n)-[r:e]->{1,5}(b:n) "
+                          "WEIGHT r.w WHERE a.id = 1");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     ASSERT_EQ(sel->from.size(), 1u);
@@ -764,9 +806,8 @@ TEST(GDB426_Parser, WeightAsIdentifier) {
 TEST(GDB426_Parser, DoubleWeightClauseFails) {
     // Second WEIGHT should cause parse error (WEIGHT is consumed, next token
     // is unexpected).
-    EXPECT_TRUE(parse_fails(
-        "MATCH p = ANY SHORTEST (a:c)-[r:e]->{1,5}(b:c) "
-        "WEIGHT r.x WEIGHT r.y RETURN a"));
+    EXPECT_TRUE(parse_fails("MATCH p = ANY SHORTEST (a:c)-[r:e]->{1,5}(b:c) "
+                            "WEIGHT r.x WEIGHT r.y RETURN a"));
 }
 
 // ============================================================================
@@ -786,8 +827,7 @@ TEST_F(GDB426_WeightedSP, StressLinearChain50) {
     auto results = run(PathSelector::ANY_SHORTEST, w.get());
     auto from_1_to_50 = filter_pair(results, 1, N);
     ASSERT_EQ(from_1_to_50.size(), 1u);
-    EXPECT_DOUBLE_EQ(from_1_to_50[0]->values[2].as_path().total_weight,
-                     static_cast<double>(N - 1));
+    EXPECT_DOUBLE_EQ(from_1_to_50[0]->values[2].as_path().total_weight, static_cast<double>(N - 1));
     EXPECT_EQ(from_1_to_50[0]->values[2].as_path().length(), N - 1);
 }
 

@@ -101,7 +101,7 @@ AlgorithmDef make_connected_components_def() {
 
 Result<std::vector<AlgorithmRow>> connected_components_execute(const AlgorithmContext& ctx) {
     // Get all edges for the specified edge type.
-    auto edges = ctx.graph_engine.get_all_edges(ctx.edge_type);
+    auto edges = ctx.graph_engine.get_all_edges(ctx.database_id, ctx.edge_type);
     if (!edges.has_value()) {
         return tl::unexpected(edges.error());
     }

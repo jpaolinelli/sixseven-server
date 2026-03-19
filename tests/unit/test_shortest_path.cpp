@@ -36,7 +36,8 @@ protected:
         auto tid = catalog_->create_table(default_database_id, std::move(ts));
         ASSERT_TRUE(tid.has_value()) << tid.error().message;
 
-        auto eid = graph_->create_edge_type(default_database_id, "knows", *tid, *tid, TypeId::INT64, TypeId::INT64, {});
+        auto eid = graph_->create_edge_type(
+            default_database_id, "knows", *tid, *tid, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         link(1, 2);
@@ -48,7 +49,7 @@ protected:
     }
 
     void link(int64_t from, int64_t to) {
-        auto r = graph_->link("knows", Value(from), Value(to));
+        auto r = graph_->link(default_database_id, "knows", Value(from), Value(to));
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 

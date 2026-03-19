@@ -76,8 +76,8 @@ protected:
 
     void create_edge_type(const std::string& name) {
         ColumnDef w_col{"weight", TypeId::FLOAT64};
-        auto eid = graph_->create_edge_type(default_database_id, 
-            name, nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {w_col});
+        auto eid = graph_->create_edge_type(
+            default_database_id, name, nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {w_col});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
     }
 
@@ -94,7 +94,7 @@ protected:
     }
 
     void link(int64_t from, int64_t to, double w, const std::string& edge = "road") {
-        auto r = graph_->link(edge, Value(from), Value(to), {Value(w)});
+        auto r = graph_->link(default_database_id, edge, Value(from), Value(to), {Value(w)});
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 
@@ -121,14 +121,25 @@ protected:
         return OutputSchema(std::move(cols));
     }
 
-    std::vector<Tuple> run(PathSelector sel, const Expr* weight,
+    std::vector<Tuple> run(PathSelector sel,
+                           const Expr* weight,
                            const std::string& edge = "road",
-                           int32_t k = 0, int32_t max_hops = 100) {
+                           int32_t k = 0,
+                           int32_t max_hops = 100) {
         BoundStatement bound;
-        MatchShortestPathOperator op(*graph_, *catalog_, *storage_, default_database_id,
-                                     make_config(edge, max_hops), make_schema(), nullptr,
-                                     bound, sel, "p", k,
-                                     MatchShortestPathOperator::DEFAULT_MAX_VISITED, weight);
+        MatchShortestPathOperator op(*graph_,
+                                     *catalog_,
+                                     *storage_,
+                                     default_database_id,
+                                     make_config(edge, max_hops),
+                                     make_schema(),
+                                     nullptr,
+                                     bound,
+                                     sel,
+                                     "p",
+                                     k,
+                                     MatchShortestPathOperator::DEFAULT_MAX_VISITED,
+                                     weight);
         auto open_result = op.open();
         EXPECT_TRUE(open_result.has_value()) << open_result.error().message;
         if (!open_result.has_value())
@@ -146,8 +157,8 @@ protected:
         return results;
     }
 
-    static std::vector<const Tuple*> filter_pair(const std::vector<Tuple>& results,
-                                                  int64_t src, int64_t tgt) {
+    static std::vector<const Tuple*>
+    filter_pair(const std::vector<Tuple>& results, int64_t src, int64_t tgt) {
         std::vector<const Tuple*> filtered;
         for (const auto& t : results) {
             if (t.values.size() >= 2 && !t.values[0].is_null() && !t.values[1].is_null() &&
@@ -232,8 +243,7 @@ TEST_F(QA_GDB559, AllShortest_EqualCostPathsAllReturned) {
     auto results = run(PathSelector::ALL_SHORTEST, w.get());
     auto from_1_to_4 = filter_pair(results, 1, 4);
 
-    ASSERT_EQ(from_1_to_4.size(), 2u)
-        << "ALL_SHORTEST should return both equal-cost paths";
+    ASSERT_EQ(from_1_to_4.size(), 2u) << "ALL_SHORTEST should return both equal-cost paths";
     for (const auto* t : from_1_to_4) {
         EXPECT_DOUBLE_EQ(t->values[2].as_path().total_weight, 3.0);
     }
@@ -367,8 +377,7 @@ TEST_F(QA_GDB559, AllShortest_ZeroWeightPath_FiltersNonZero) {
     auto results = run(PathSelector::ALL_SHORTEST, w.get());
     auto from_1_to_3 = filter_pair(results, 1, 3);
 
-    ASSERT_EQ(from_1_to_3.size(), 1u)
-        << "Zero-cost path should be the only shortest";
+    ASSERT_EQ(from_1_to_3.size(), 1u) << "Zero-cost path should be the only shortest";
     EXPECT_DOUBLE_EQ(from_1_to_3[0]->values[2].as_path().total_weight, 0.0);
 }
 

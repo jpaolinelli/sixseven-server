@@ -58,8 +58,7 @@ struct ClusteringInfo {
 };
 
 /// Extract per-node results from algorithm output rows.
-std::unordered_map<int64_t, ClusteringInfo>
-to_map(const std::vector<AlgorithmRow>& rows) {
+std::unordered_map<int64_t, ClusteringInfo> to_map(const std::vector<AlgorithmRow>& rows) {
     std::unordered_map<int64_t, ClusteringInfo> result;
     for (const auto& row : rows) {
         EXPECT_EQ(row.values.size(), 4u);
@@ -86,17 +85,17 @@ protected:
 
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     Result<std::vector<AlgorithmRow>> run(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {}};
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, {}};
         return clustering_coefficient_execute(ctx);
     }
 
@@ -191,12 +190,21 @@ TEST_F(GDB522_ClusteringCoefficientQA, AC2_TriangleAllCoefficientsOne) {
 
 TEST_F(GDB522_ClusteringCoefficientQA, AC2_CompleteK4AllCoefficientsOne) {
     // K4 bidirectional: all nodes fully connected, coefficient = 1.0.
-    build_graph("knows", {
-        {1, 2}, {1, 3}, {1, 4},
-        {2, 1}, {2, 3}, {2, 4},
-        {3, 1}, {3, 2}, {3, 4},
-        {4, 1}, {4, 2}, {4, 3},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 3},
+                    {1, 4},
+                    {2, 1},
+                    {2, 3},
+                    {2, 4},
+                    {3, 1},
+                    {3, 2},
+                    {3, 4},
+                    {4, 1},
+                    {4, 2},
+                    {4, 3},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -212,10 +220,17 @@ TEST_F(GDB522_ClusteringCoefficientQA, AC2_CompleteK4AllCoefficientsOne) {
 TEST_F(GDB522_ClusteringCoefficientQA, AC2_StarGraphCentralNodeZero) {
     // Hub = 1, spokes = 2..5, bidirectional.
     // Hub has degree 4, but no neighbors are connected. C = 0.
-    build_graph("knows", {
-        {1, 2}, {1, 3}, {1, 4}, {1, 5},
-        {2, 1}, {3, 1}, {4, 1}, {5, 1},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 3},
+                    {1, 4},
+                    {1, 5},
+                    {2, 1},
+                    {3, 1},
+                    {4, 1},
+                    {5, 1},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -233,10 +248,21 @@ TEST_F(GDB522_ClusteringCoefficientQA, AC2_StarGraphCentralNodeZero) {
 
 TEST_F(GDB522_ClusteringCoefficientQA, AC2_BowtieGraphMixedCoefficients) {
     // Two triangles sharing node 3: {1,2,3} and {3,4,5}.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3},
-        {3, 4}, {4, 3}, {4, 5}, {5, 4}, {5, 3}, {3, 5},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                    {3, 4},
+                    {4, 3},
+                    {4, 5},
+                    {5, 4},
+                    {5, 3},
+                    {3, 5},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -261,10 +287,19 @@ TEST_F(GDB522_ClusteringCoefficientQA, AC2_BowtieGraphMixedCoefficients) {
 TEST_F(GDB522_ClusteringCoefficientQA, AC2_DiamondGraphKnownValues) {
     // Diamond: 1-2, 1-3, 2-3, 2-4, 3-4 (bidirectional).
     // Triangles: {1,2,3} and {2,3,4}.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {1, 3}, {3, 1}, {2, 3}, {3, 2},
-        {2, 4}, {4, 2}, {3, 4}, {4, 3},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {1, 3},
+                    {3, 1},
+                    {2, 3},
+                    {3, 2},
+                    {2, 4},
+                    {4, 2},
+                    {3, 4},
+                    {4, 3},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -291,9 +326,15 @@ TEST_F(GDB522_ClusteringCoefficientQA, AC2_DiamondGraphKnownValues) {
 
 TEST_F(GDB522_ClusteringCoefficientQA, AC2_PathGraphAllZero) {
     // 1<->2<->3<->4: no triangles exist. All coefficients = 0.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 4}, {4, 3},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 4},
+                    {4, 3},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -338,9 +379,17 @@ TEST_F(GDB522_ClusteringCoefficientQA, AC3_IsolatedNodeFromSelfLoop) {
 
 TEST_F(GDB522_ClusteringCoefficientQA, AC3_MixedDegreesLessThanTwo) {
     // Node 4 has degree 1 (only connected to 1). Nodes 1,2,3 form a triangle.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3}, {1, 4}, {4, 1},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                    {1, 4},
+                    {4, 1},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -360,9 +409,13 @@ TEST_F(GDB522_ClusteringCoefficientQA, AC3_MixedDegreesLessThanTwo) {
 
 TEST_F(GDB522_ClusteringCoefficientQA, AC3_DegreeZeroNodeAmidOthers) {
     // Node 5 only has a self-loop. Nodes 1-2-3 form a triangle.
-    build_graph("knows", {
-        {1, 2}, {2, 3}, {3, 1}, {5, 5},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {3, 1},
+                    {5, 5},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -381,7 +434,8 @@ TEST_F(GDB522_ClusteringCoefficientQA, AC4_K5ExactTriangleCounts) {
     std::vector<std::pair<int64_t, int64_t>> edges;
     for (int64_t i = 1; i <= 5; ++i) {
         for (int64_t j = 1; j <= 5; ++j) {
-            if (i != j) edges.push_back({i, j});
+            if (i != j)
+                edges.push_back({i, j});
         }
     }
     build_graph("knows", edges);
@@ -399,17 +453,27 @@ TEST_F(GDB522_ClusteringCoefficientQA, AC4_K5ExactTriangleCounts) {
 
 TEST_F(GDB522_ClusteringCoefficientQA, AC4_TwoOverlappingTriangles) {
     // Two triangles sharing edge 2-3: {1,2,3} and {2,3,4}.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3},
-        {2, 4}, {4, 2}, {3, 4}, {4, 3},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                    {2, 4},
+                    {4, 2},
+                    {3, 4},
+                    {4, 3},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     auto m = to_map(*result);
 
-    // Node 2: degree 3, neighbors {1,3,4}. Connected pairs: 1-3(yes), 3-4(yes), 1-4(no). 2 triangles.
+    // Node 2: degree 3, neighbors {1,3,4}. Connected pairs: 1-3(yes), 3-4(yes), 1-4(no). 2
+    // triangles.
     EXPECT_EQ(m[2].triangles, 2);
     // Node 3: same by symmetry.
     EXPECT_EQ(m[3].triangles, 2);
@@ -446,10 +510,17 @@ TEST_F(GDB522_ClusteringCoefficientQA, AC4_NoTrianglesInBipartiteGraph) {
 TEST_F(GDB522_ClusteringCoefficientQA, AC4_TriangleCountWithPendantNodes) {
     // Triangle {1,2,3} plus pendant node 4 off node 1.
     // Node 1 degree 3 (2,3,4). Only 2-3 connected = 1 triangle.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3},
-        {1, 4}, {4, 1},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                    {1, 4},
+                    {4, 1},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -486,10 +557,18 @@ TEST_F(GDB522_ClusteringCoefficientQA, SelfLoop_DoesNotInflateDegreeOrTriangles)
 
 TEST_F(GDB522_ClusteringCoefficientQA, SelfLoop_MultipleSelfLoopsIgnored) {
     // Multiple self-loops on different nodes mixed with real edges.
-    build_graph("knows", {
-        {1, 1}, {2, 2}, {3, 3},
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3},
-    });
+    build_graph("knows",
+                {
+                    {1, 1},
+                    {2, 2},
+                    {3, 3},
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -508,11 +587,15 @@ TEST_F(GDB522_ClusteringCoefficientQA, SelfLoop_MultipleSelfLoopsIgnored) {
 
 TEST_F(GDB522_ClusteringCoefficientQA, DuplicateEdges_NoInflation) {
     // Multiple edges between same pair should not inflate degree or triangles.
-    build_graph("knows", {
-        {1, 2}, {1, 2}, {1, 2},
-        {2, 3}, {2, 3},
-        {3, 1},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 2},
+                    {1, 2},
+                    {2, 3},
+                    {2, 3},
+                    {3, 1},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -610,9 +693,12 @@ TEST_F(GDB522_ClusteringCoefficientQA, Boundary_AllSelfLoopsOnly) {
 // ============================================================================
 
 TEST_F(GDB522_ClusteringCoefficientQA, LargeNodeIds) {
-    build_graph("knows", {
-        {1000000, 2000000}, {2000000, 3000000}, {3000000, 1000000},
-    });
+    build_graph("knows",
+                {
+                    {1000000, 2000000},
+                    {2000000, 3000000},
+                    {3000000, 1000000},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -655,9 +741,15 @@ TEST_F(GDB522_ClusteringCoefficientQA, MixedPositiveNegativeNodeIds) {
 // ============================================================================
 
 TEST_F(GDB522_ClusteringCoefficientQA, Numerical_NoNaNOrInf) {
-    build_graph("knows", {
-        {1, 2}, {2, 3}, {3, 1}, {1, 1}, {4, 5}, {6, 6},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {3, 1},
+                    {1, 1},
+                    {4, 5},
+                    {6, 6},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -671,10 +763,17 @@ TEST_F(GDB522_ClusteringCoefficientQA, Numerical_NoNaNOrInf) {
 
 TEST_F(GDB522_ClusteringCoefficientQA, Numerical_CoefficientsInUnitRange) {
     // Test across several topologies.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3},
-        {1, 4}, {4, 5},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                    {1, 4},
+                    {4, 5},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -687,9 +786,15 @@ TEST_F(GDB522_ClusteringCoefficientQA, Numerical_CoefficientsInUnitRange) {
 }
 
 TEST_F(GDB522_ClusteringCoefficientQA, Numerical_Deterministic) {
-    build_graph("knows", {
-        {1, 2}, {2, 3}, {3, 4}, {4, 1}, {1, 3}, {2, 4},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {3, 4},
+                    {4, 1},
+                    {1, 3},
+                    {2, 4},
+                });
 
     auto r1 = run("knows");
     ASSERT_TRUE(r1.has_value()) << r1.error().message;
@@ -714,11 +819,23 @@ TEST_F(GDB522_ClusteringCoefficientQA, Numerical_Deterministic) {
 
 TEST_F(GDB522_ClusteringCoefficientQA, Invariant_FormulaVerification) {
     // For every node, verify C = 2T / (k*(k-1)) when degree >= 2.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3},
-        {3, 4}, {4, 3}, {4, 5}, {5, 4}, {5, 3}, {3, 5},
-        {1, 6}, {6, 1},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                    {3, 4},
+                    {4, 3},
+                    {4, 5},
+                    {5, 4},
+                    {5, 3},
+                    {3, 5},
+                    {1, 6},
+                    {6, 1},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -726,9 +843,9 @@ TEST_F(GDB522_ClusteringCoefficientQA, Invariant_FormulaVerification) {
     auto m = to_map(*result);
     for (const auto& [node, info] : m) {
         if (info.degree >= 2) {
-            double expected = (2.0 * static_cast<double>(info.triangles)) /
-                              (static_cast<double>(info.degree) *
-                               static_cast<double>(info.degree - 1));
+            double expected =
+                (2.0 * static_cast<double>(info.triangles)) /
+                (static_cast<double>(info.degree) * static_cast<double>(info.degree - 1));
             EXPECT_NEAR(info.local_coefficient, expected, 1e-10)
                 << "node " << node << ": C should match 2T/(k*(k-1))";
         } else {
@@ -744,7 +861,8 @@ TEST_F(GDB522_ClusteringCoefficientQA, Invariant_CompleteGraphAlwaysOne) {
     std::vector<std::pair<int64_t, int64_t>> edges;
     for (int64_t i = 1; i <= 6; ++i) {
         for (int64_t j = 1; j <= 6; ++j) {
-            if (i != j) edges.push_back({i, j});
+            if (i != j)
+                edges.push_back({i, j});
         }
     }
     build_graph("knows", edges);
@@ -764,11 +882,21 @@ TEST_F(GDB522_ClusteringCoefficientQA, Invariant_CompleteGraphAlwaysOne) {
 TEST_F(GDB522_ClusteringCoefficientQA, Invariant_TreeGraphAlwaysZero) {
     // Trees have no cycles, so no triangles. All coefficients = 0.
     // Binary tree: 1->{2,3}, 2->{4,5}, 3->{6,7} (bidirectional).
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {1, 3}, {3, 1},
-        {2, 4}, {4, 2}, {2, 5}, {5, 2},
-        {3, 6}, {6, 3}, {3, 7}, {7, 3},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {1, 3},
+                    {3, 1},
+                    {2, 4},
+                    {4, 2},
+                    {2, 5},
+                    {5, 2},
+                    {3, 6},
+                    {6, 3},
+                    {3, 7},
+                    {7, 3},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -839,10 +967,11 @@ TEST_F(GDB522_ClusteringCoefficientQA, Error_NonexistentEdgeType) {
 
 TEST_F(GDB522_ClusteringCoefficientQA, Topology_WheelGraph) {
     // Wheel W5: hub=1, rim 2-3-4-5-6-2, all bidirectional + hub to all.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {1, 3}, {3, 1}, {1, 4}, {4, 1}, {1, 5}, {5, 1}, {1, 6}, {6, 1},
-        {2, 3}, {3, 2}, {3, 4}, {4, 3}, {4, 5}, {5, 4}, {5, 6}, {6, 5}, {6, 2}, {2, 6},
-    });
+    build_graph("knows",
+                {
+                    {1, 2}, {2, 1}, {1, 3}, {3, 1}, {1, 4}, {4, 1}, {1, 5}, {5, 1}, {1, 6}, {6, 1},
+                    {2, 3}, {3, 2}, {3, 4}, {4, 3}, {4, 5}, {5, 4}, {5, 6}, {6, 5}, {6, 2}, {2, 6},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -863,17 +992,25 @@ TEST_F(GDB522_ClusteringCoefficientQA, Topology_WheelGraph) {
     for (int64_t node : {2, 3, 4, 5, 6}) {
         EXPECT_EQ(m[node].degree, 3) << "rim node " << node;
         EXPECT_EQ(m[node].triangles, 2) << "rim node " << node;
-        EXPECT_NEAR(m[node].local_coefficient, 2.0 / 3.0, 1e-10)
-            << "rim node " << node;
+        EXPECT_NEAR(m[node].local_coefficient, 2.0 / 3.0, 1e-10) << "rim node " << node;
     }
 }
 
 TEST_F(GDB522_ClusteringCoefficientQA, Topology_CycleGraphNoTriangles) {
     // Simple cycle: 1-2-3-4-5-1. No triangles (cycle length 5).
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 4}, {4, 3},
-        {4, 5}, {5, 4}, {5, 1}, {1, 5},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 4},
+                    {4, 3},
+                    {4, 5},
+                    {5, 4},
+                    {5, 1},
+                    {1, 5},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -890,14 +1027,42 @@ TEST_F(GDB522_ClusteringCoefficientQA, Topology_PetersenGraph) {
     // Petersen graph: 10 nodes, 3-regular, no triangles.
     // Outer cycle: 1-2-3-4-5-1, inner pentagram: 6-8-10-7-9-6.
     // Spokes: 1-6, 2-7, 3-8, 4-9, 5-10.
-    build_graph("knows", {
-        // Outer cycle
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 4}, {4, 3}, {4, 5}, {5, 4}, {5, 1}, {1, 5},
-        // Spokes
-        {1, 6}, {6, 1}, {2, 7}, {7, 2}, {3, 8}, {8, 3}, {4, 9}, {9, 4}, {5, 10}, {10, 5},
-        // Inner pentagram
-        {6, 8}, {8, 6}, {8, 10}, {10, 8}, {10, 7}, {7, 10}, {7, 9}, {9, 7}, {9, 6}, {6, 9},
-    });
+    build_graph("knows",
+                {
+                    // Outer cycle
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 4},
+                    {4, 3},
+                    {4, 5},
+                    {5, 4},
+                    {5, 1},
+                    {1, 5},
+                    // Spokes
+                    {1, 6},
+                    {6, 1},
+                    {2, 7},
+                    {7, 2},
+                    {3, 8},
+                    {8, 3},
+                    {4, 9},
+                    {9, 4},
+                    {5, 10},
+                    {10, 5},
+                    // Inner pentagram
+                    {6, 8},
+                    {8, 6},
+                    {8, 10},
+                    {10, 8},
+                    {10, 7},
+                    {7, 10},
+                    {7, 9},
+                    {9, 7},
+                    {9, 6},
+                    {6, 9},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -916,10 +1081,21 @@ TEST_F(GDB522_ClusteringCoefficientQA, Topology_PetersenGraph) {
 
 TEST_F(GDB522_ClusteringCoefficientQA, Topology_DisconnectedComponents) {
     // Two separate triangles: {1,2,3} and {4,5,6}. All coefficients = 1.0.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3},
-        {4, 5}, {5, 4}, {5, 6}, {6, 5}, {6, 4}, {4, 6},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                    {4, 5},
+                    {5, 4},
+                    {5, 6},
+                    {6, 5},
+                    {6, 4},
+                    {4, 6},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -963,7 +1139,8 @@ TEST_F(GDB522_ClusteringCoefficientQA, Stress_CompleteK20) {
     std::vector<std::pair<int64_t, int64_t>> edges;
     for (int64_t i = 1; i <= 20; ++i) {
         for (int64_t j = 1; j <= 20; ++j) {
-            if (i != j) edges.push_back({i, j});
+            if (i != j)
+                edges.push_back({i, j});
         }
     }
     build_graph("knows", edges);

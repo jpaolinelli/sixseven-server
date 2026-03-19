@@ -17,6 +17,7 @@ namespace sixseven {
 
 /// Configuration for a BFS traversal operation.
 struct TraversalConfig {
+    database_id_t database_id = default_database_id;
     std::string edge_type;
     Value start_key;
     TraverseDirection direction = TraverseDirection::OUT;

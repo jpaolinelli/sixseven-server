@@ -111,26 +111,28 @@ protected:
 
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
 
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     Result<std::vector<AlgorithmRow>> run(const std::string& edge_type,
                                           const std::string& direction = "all") {
-        AlgorithmContext ctx{engine_, edge_type, {{"direction", Value(std::string(direction))}}};
+        AlgorithmContext ctx{engine_,
+                             default_database_id,
+                             edge_type,
+                             {{"direction", Value(std::string(direction))}}};
         return degree_centrality_execute(ctx);
     }
 
-    Result<std::vector<AlgorithmRow>>
-    run_raw(const std::string& edge_type,
-            std::unordered_map<std::string, Value> args) {
-        AlgorithmContext ctx{engine_, edge_type, std::move(args)};
+    Result<std::vector<AlgorithmRow>> run_raw(const std::string& edge_type,
+                                              std::unordered_map<std::string, Value> args) {
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, std::move(args)};
         return degree_centrality_execute(ctx);
     }
 
@@ -419,8 +421,18 @@ TEST_F(QA_GDB517_DegreeCentrality, AC3_NormalizedDegreeCanExceedOne) {
     // Complete K4: each node has degree = 6 (in=3, out=3), divisor=3.
     // Normalized = 6/3 = 2.0 — exceeding 1.0 is valid for directed "all".
     build_graph("knows",
-                {{1, 2}, {1, 3}, {1, 4}, {2, 1}, {2, 3}, {2, 4},
-                 {3, 1}, {3, 2}, {3, 4}, {4, 1}, {4, 2}, {4, 3}});
+                {{1, 2},
+                 {1, 3},
+                 {1, 4},
+                 {2, 1},
+                 {2, 3},
+                 {2, 4},
+                 {3, 1},
+                 {3, 2},
+                 {3, 4},
+                 {4, 1},
+                 {4, 2},
+                 {4, 3}});
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -613,8 +625,7 @@ TEST_F(QA_GDB517_DegreeCentrality, Error_NonStringDirectionValue) {
 
     // Pass an integer for direction — should fail with TYPE_ERROR.
     auto result = run_raw("knows", {{"direction", Value(static_cast<int64_t>(42))}});
-    ASSERT_FALSE(result.has_value())
-        << "integer direction value should fail with type error";
+    ASSERT_FALSE(result.has_value()) << "integer direction value should fail with type error";
     EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
 }
 
@@ -822,8 +833,7 @@ TEST_F(QA_GDB517_DegreeCentrality, NumericalStability_NormalizedNonNegative) {
 
         auto degrees = to_degree_map(*result);
         for (const auto& [node, info] : degrees) {
-            EXPECT_GE(info.normalized_degree, 0.0)
-                << "node " << node << " direction=" << dir;
+            EXPECT_GE(info.normalized_degree, 0.0) << "node " << node << " direction=" << dir;
         }
     }
 }

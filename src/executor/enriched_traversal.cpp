@@ -142,7 +142,7 @@ EnrichedTraversalOperator::get_neighbors(const Value& node_pk) const {
 
     if (config_.direction == TraverseDirection::OUT ||
         config_.direction == TraverseDirection::BOTH) {
-        auto edges = graph_engine_.get_edges_from(config_.edge_type, node_pk);
+        auto edges = graph_engine_.get_edges_from(config_.database_id, config_.edge_type, node_pk);
         if (!edges) {
             return tl::unexpected(edges.error());
         }
@@ -153,7 +153,7 @@ EnrichedTraversalOperator::get_neighbors(const Value& node_pk) const {
 
     if (config_.direction == TraverseDirection::IN ||
         config_.direction == TraverseDirection::BOTH) {
-        auto edges = graph_engine_.get_edges_to(config_.edge_type, node_pk);
+        auto edges = graph_engine_.get_edges_to(config_.database_id, config_.edge_type, node_pk);
         if (!edges) {
             return tl::unexpected(edges.error());
         }
@@ -196,7 +196,7 @@ Result<void> EnrichedTraversalOperator::enrich_results() {
             auto deserialized = TupleSerializer::deserialize(data, target_storage_schema_);
             if (!deserialized) {
                 SIXSEVEN_LOG_WARN("enriched traversal: skipping row — deserialization failed: {}",
-                               deserialized.error().message);
+                                  deserialized.error().message);
                 continue;
             }
 

@@ -307,8 +307,13 @@ protected:
         insert_person(5, "Eve", "Acme");
 
         // Create 'knows' edge type: persons -> persons.
-        auto eid = graph_->create_edge_type(default_database_id, 
-            "knows", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
+        auto eid = graph_->create_edge_type(default_database_id,
+                                            "knows",
+                                            persons_id_,
+                                            persons_id_,
+                                            TypeId::INT64,
+                                            TypeId::INT64,
+                                            {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         // Create linear chain: 1->2->3->4->5
@@ -318,8 +323,13 @@ protected:
         link("knows", 4, 5);
 
         // Create 'cycle' edge type.
-        auto cid = graph_->create_edge_type(default_database_id, 
-            "cycle", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
+        auto cid = graph_->create_edge_type(default_database_id,
+                                            "cycle",
+                                            persons_id_,
+                                            persons_id_,
+                                            TypeId::INT64,
+                                            TypeId::INT64,
+                                            {});
         ASSERT_TRUE(cid.has_value()) << cid.error().message;
 
         // Create a cycle: 1->2->3->1
@@ -334,7 +344,7 @@ protected:
     }
 
     void link(const std::string& edge_type, int64_t from, int64_t to) {
-        auto r = graph_->link(edge_type, Value(from), Value(to));
+        auto r = graph_->link(default_database_id, edge_type, Value(from), Value(to));
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 

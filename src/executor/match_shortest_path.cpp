@@ -161,7 +161,7 @@ Result<std::vector<std::pair<Value, int64_t>>> MatchShortestPathOperator::get_ne
     std::vector<std::pair<Value, int64_t>> neighbors;
 
     if (direction == TraverseDirection::OUT || direction == TraverseDirection::BOTH) {
-        auto fwd = graph_engine_.get_edges_from(edge_type, pk);
+        auto fwd = graph_engine_.get_edges_from(database_id_, edge_type, pk);
         if (fwd) {
             for (auto& e : *fwd) {
                 neighbors.emplace_back(std::move(e.target_pk), static_cast<int64_t>(e.edge_row_id));
@@ -169,7 +169,7 @@ Result<std::vector<std::pair<Value, int64_t>>> MatchShortestPathOperator::get_ne
         }
     }
     if (direction == TraverseDirection::IN || direction == TraverseDirection::BOTH) {
-        auto rev = graph_engine_.get_edges_to(edge_type, pk);
+        auto rev = graph_engine_.get_edges_to(database_id_, edge_type, pk);
         if (rev) {
             for (auto& e : *rev) {
                 neighbors.emplace_back(std::move(e.source_pk), static_cast<int64_t>(e.edge_row_id));
@@ -539,7 +539,7 @@ MatchShortestPathOperator::get_neighbors_with_weight(const std::string& edge_typ
     const std::string& prop_name = col_ref->column;
 
     // Look up property index from EdgeTable config.
-    auto et = graph_engine_.get_edge_table(edge_type);
+    auto et = graph_engine_.get_edge_table(database_id_, edge_type);
     if (!et) {
         return tl::unexpected(et.error());
     }
@@ -559,7 +559,7 @@ MatchShortestPathOperator::get_neighbors_with_weight(const std::string& edge_typ
     std::vector<std::tuple<Value, int64_t, double>> neighbors;
 
     if (direction == TraverseDirection::OUT || direction == TraverseDirection::BOTH) {
-        auto fwd = graph_engine_.get_edges_from(edge_type, pk);
+        auto fwd = graph_engine_.get_edges_from(database_id_, edge_type, pk);
         if (fwd) {
             for (auto& e : *fwd) {
                 if (static_cast<size_t>(prop_idx) >= e.properties.size()) {
@@ -575,7 +575,7 @@ MatchShortestPathOperator::get_neighbors_with_weight(const std::string& edge_typ
         }
     }
     if (direction == TraverseDirection::IN || direction == TraverseDirection::BOTH) {
-        auto rev = graph_engine_.get_edges_to(edge_type, pk);
+        auto rev = graph_engine_.get_edges_to(database_id_, edge_type, pk);
         if (rev) {
             for (auto& e : *rev) {
                 if (static_cast<size_t>(prop_idx) >= e.properties.size()) {

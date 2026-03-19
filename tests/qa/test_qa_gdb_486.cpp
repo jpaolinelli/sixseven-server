@@ -42,7 +42,9 @@ static TableSchema make_table_schema(const std::string& name) {
     return schema;
 }
 
-static Value pk(int64_t v) { return Value(v); }
+static Value pk(int64_t v) {
+    return Value(v);
+}
 
 /// Extract (node_id, community_id) pairs from algorithm result rows.
 std::unordered_map<int64_t, int64_t> to_community_map(const std::vector<AlgorithmRow>& rows) {
@@ -58,7 +60,8 @@ std::unordered_map<int64_t, int64_t> to_community_map(const std::vector<Algorith
 
 /// Verify that community IDs are contiguous starting from 0.
 void verify_contiguous_ids(const std::unordered_map<int64_t, int64_t>& communities) {
-    if (communities.empty()) return;
+    if (communities.empty())
+        return;
     std::unordered_set<int64_t> unique_ids;
     for (const auto& [_, comm] : communities) {
         unique_ids.insert(comm);
@@ -77,7 +80,8 @@ void verify_contiguous_ids(const std::unordered_map<int64_t, int64_t>& communiti
 void verify_communities(const std::unordered_map<int64_t, int64_t>& communities,
                         const std::vector<std::vector<int64_t>>& expected_groups) {
     for (const auto& group : expected_groups) {
-        if (group.empty()) continue;
+        if (group.empty())
+            continue;
         auto it = communities.find(group[0]);
         ASSERT_NE(it, communities.end()) << "node " << group[0] << " not found";
         int64_t expected_comm = it->second;
@@ -90,7 +94,8 @@ void verify_communities(const std::unordered_map<int64_t, int64_t>& communities,
     }
     for (size_t i = 0; i < expected_groups.size(); ++i) {
         for (size_t j = i + 1; j < expected_groups.size(); ++j) {
-            if (expected_groups[i].empty() || expected_groups[j].empty()) continue;
+            if (expected_groups[i].empty() || expected_groups[j].empty())
+                continue;
             auto ci = communities.at(expected_groups[i][0]);
             auto cj = communities.at(expected_groups[j][0]);
             EXPECT_NE(ci, cj) << "groups " << i << " and " << j << " should differ";
@@ -114,33 +119,36 @@ protected:
 
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     Result<std::vector<AlgorithmRow>> run_cd(const std::string& edge_type) {
         AlgorithmContext ctx{
-            engine_, edge_type,
+            engine_,
+            default_database_id,
+            edge_type,
             {{"resolution", Value(1.0)}, {"max_iterations", Value(static_cast<int64_t>(10))}}};
         return community_detect_execute(ctx);
     }
 
     Result<std::vector<AlgorithmRow>>
     run_cd(const std::string& edge_type, double resolution, int64_t max_iterations) {
-        AlgorithmContext ctx{engine_, edge_type,
-                            {{"resolution", Value(resolution)},
-                             {"max_iterations", Value(max_iterations)}}};
+        AlgorithmContext ctx{
+            engine_,
+            default_database_id,
+            edge_type,
+            {{"resolution", Value(resolution)}, {"max_iterations", Value(max_iterations)}}};
         return community_detect_execute(ctx);
     }
 
-    Result<std::vector<AlgorithmRow>>
-    run_cd_no_params(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {}};
+    Result<std::vector<AlgorithmRow>> run_cd_no_params(const std::string& edge_type) {
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, {}};
         return community_detect_execute(ctx);
     }
 
@@ -156,14 +164,25 @@ protected:
 TEST_F(QA_GDB486, AC1_BarbelGraph) {
     // Two complete K4 cliques connected by a single bridge edge.
     // Barbell graph: clear community structure.
-    build_graph("knows", {
-        // Clique A: 1-2-3-4
-        {1, 2}, {1, 3}, {1, 4}, {2, 3}, {2, 4}, {3, 4},
-        // Clique B: 5-6-7-8
-        {5, 6}, {5, 7}, {5, 8}, {6, 7}, {6, 8}, {7, 8},
-        // Bridge
-        {4, 5},
-    });
+    build_graph("knows",
+                {
+                    // Clique A: 1-2-3-4
+                    {1, 2},
+                    {1, 3},
+                    {1, 4},
+                    {2, 3},
+                    {2, 4},
+                    {3, 4},
+                    // Clique B: 5-6-7-8
+                    {5, 6},
+                    {5, 7},
+                    {5, 8},
+                    {6, 7},
+                    {6, 8},
+                    {7, 8},
+                    // Bridge
+                    {4, 5},
+                });
 
     auto result = run_cd("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -175,12 +194,20 @@ TEST_F(QA_GDB486, AC1_BarbelGraph) {
 
 TEST_F(QA_GDB486, AC1_ThreeCliquesWithBridges) {
     // Three K3 cliques connected by bridges: 3-4 and 6-7.
-    build_graph("knows", {
-        {1, 2}, {2, 3}, {3, 1},
-        {4, 5}, {5, 6}, {6, 4},
-        {7, 8}, {8, 9}, {9, 7},
-        {3, 4}, {6, 7},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {3, 1},
+                    {4, 5},
+                    {5, 6},
+                    {6, 4},
+                    {7, 8},
+                    {8, 9},
+                    {9, 7},
+                    {3, 4},
+                    {6, 7},
+                });
 
     auto result = run_cd("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -199,12 +226,19 @@ TEST_F(QA_GDB486, AC1_ThreeCliquesWithBridges) {
 
 TEST_F(QA_GDB486, AC1_CompleteGraph_K5) {
     // A complete graph K5 — should be a single community.
-    build_graph("knows", {
-        {1, 2}, {1, 3}, {1, 4}, {1, 5},
-        {2, 3}, {2, 4}, {2, 5},
-        {3, 4}, {3, 5},
-        {4, 5},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 3},
+                    {1, 4},
+                    {1, 5},
+                    {2, 3},
+                    {2, 4},
+                    {2, 5},
+                    {3, 4},
+                    {3, 5},
+                    {4, 5},
+                });
 
     auto result = run_cd("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -215,9 +249,15 @@ TEST_F(QA_GDB486, AC1_CompleteGraph_K5) {
 
 TEST_F(QA_GDB486, AC1_CycleGraph) {
     // A ring of 6 nodes — no clear community structure.
-    build_graph("knows", {
-        {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 1},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {3, 4},
+                    {4, 5},
+                    {5, 6},
+                    {6, 1},
+                });
 
     auto result = run_cd("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -294,18 +334,28 @@ TEST_F(QA_GDB486, AC3_DisconnectedPairsAreSeparateCommunities) {
 
 TEST_F(QA_GDB486, AC3_FiveDisconnectedCliques) {
     // Five separate K3 triangles — should find 5 communities.
-    build_graph("knows", {
-        {1, 2}, {2, 3}, {3, 1},
-        {4, 5}, {5, 6}, {6, 4},
-        {7, 8}, {8, 9}, {9, 7},
-        {10, 11}, {11, 12}, {12, 10},
-        {13, 14}, {14, 15}, {15, 13},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {3, 1},
+                    {4, 5},
+                    {5, 6},
+                    {6, 4},
+                    {7, 8},
+                    {8, 9},
+                    {9, 7},
+                    {10, 11},
+                    {11, 12},
+                    {12, 10},
+                    {13, 14},
+                    {14, 15},
+                    {15, 13},
+                });
     auto result = run_cd("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
     auto communities = to_community_map(*result);
-    verify_communities(communities,
-                       {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}, {10, 11, 12}, {13, 14, 15}});
+    verify_communities(communities, {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}, {10, 11, 12}, {13, 14, 15}});
     verify_contiguous_ids(communities);
 }
 
@@ -375,11 +425,15 @@ TEST_F(QA_GDB486, Bidirectional_BothDirectionsPresent) {
 
 TEST_F(QA_GDB486, Bidirectional_CliqueWithReverseEdges) {
     // K3 with all 6 directed edges — should still be one community.
-    build_graph("knows", {
-        {1, 2}, {2, 1},
-        {2, 3}, {3, 2},
-        {1, 3}, {3, 1},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {1, 3},
+                    {3, 1},
+                });
     auto result = run_cd("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
     auto communities = to_community_map(*result);
@@ -427,10 +481,15 @@ TEST_F(QA_GDB486, Param_NegativeMaxIterations) {
 
 TEST_F(QA_GDB486, Param_SingleIteration) {
     // max_iterations=1 — limited optimization, but on a clear graph should still work.
-    build_graph("knows", {
-        {1, 2}, {1, 3}, {2, 3},
-        {4, 5}, {4, 6}, {5, 6},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 3},
+                    {2, 3},
+                    {4, 5},
+                    {4, 6},
+                    {5, 6},
+                });
     auto result = run_cd("knows", 1.0, 1);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     auto communities = to_community_map(*result);
@@ -456,11 +515,16 @@ TEST_F(QA_GDB486, Param_LargeMaxIterations) {
 TEST_F(QA_GDB486, Param_ZeroResolution) {
     // Resolution=0 — modularity gain = ki_in (all positive if there are edges).
     // This means every node prefers to join its neighbor's community.
-    build_graph("knows", {
-        {1, 2}, {1, 3}, {2, 3},
-        {4, 5}, {4, 6}, {5, 6},
-        {3, 4},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 3},
+                    {2, 3},
+                    {4, 5},
+                    {4, 6},
+                    {5, 6},
+                    {3, 4},
+                });
     auto result = run_cd("knows", 0.0, 10);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     auto communities = to_community_map(*result);
@@ -701,9 +765,16 @@ TEST_F(QA_GDB486, Topology_DuplicateEdgesInInput) {
 
 TEST_F(QA_GDB486, Topology_PathGraph) {
     // Long path: 1-2-3-4-5-6-7-8
-    build_graph("knows", {
-        {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {3, 4},
+                    {4, 5},
+                    {5, 6},
+                    {6, 7},
+                    {7, 8},
+                });
     auto result = run_cd("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
     auto communities = to_community_map(*result);
@@ -713,10 +784,19 @@ TEST_F(QA_GDB486, Topology_PathGraph) {
 
 TEST_F(QA_GDB486, Topology_WheelGraph) {
     // Hub node 1 connected to all outer nodes 2-6, outer ring connected.
-    build_graph("knows", {
-        {1, 2}, {1, 3}, {1, 4}, {1, 5}, {1, 6},
-        {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 2},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 3},
+                    {1, 4},
+                    {1, 5},
+                    {1, 6},
+                    {2, 3},
+                    {3, 4},
+                    {4, 5},
+                    {5, 6},
+                    {6, 2},
+                });
     auto result = run_cd("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
     auto communities = to_community_map(*result);
@@ -726,11 +806,18 @@ TEST_F(QA_GDB486, Topology_WheelGraph) {
 
 TEST_F(QA_GDB486, Topology_BipartiteGraph) {
     // Complete bipartite K3,3: nodes {1,2,3} each connected to {4,5,6}.
-    build_graph("knows", {
-        {1, 4}, {1, 5}, {1, 6},
-        {2, 4}, {2, 5}, {2, 6},
-        {3, 4}, {3, 5}, {3, 6},
-    });
+    build_graph("knows",
+                {
+                    {1, 4},
+                    {1, 5},
+                    {1, 6},
+                    {2, 4},
+                    {2, 5},
+                    {2, 6},
+                    {3, 4},
+                    {3, 5},
+                    {3, 6},
+                });
     auto result = run_cd("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
     auto communities = to_community_map(*result);
@@ -740,9 +827,15 @@ TEST_F(QA_GDB486, Topology_BipartiteGraph) {
 
 TEST_F(QA_GDB486, Topology_TreeGraph) {
     // Binary tree of depth 3: root=1, children=2,3, grandchildren=4,5,6,7.
-    build_graph("knows", {
-        {1, 2}, {1, 3}, {2, 4}, {2, 5}, {3, 6}, {3, 7},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 3},
+                    {2, 4},
+                    {2, 5},
+                    {3, 6},
+                    {3, 7},
+                });
     auto result = run_cd("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
     auto communities = to_community_map(*result);
@@ -755,11 +848,16 @@ TEST_F(QA_GDB486, Topology_TreeGraph) {
 // ===========================================================================
 
 TEST_F(QA_GDB486, Determinism_SameResultOnRerun) {
-    build_graph("knows", {
-        {1, 2}, {1, 3}, {2, 3},
-        {4, 5}, {4, 6}, {5, 6},
-        {3, 4},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 3},
+                    {2, 3},
+                    {4, 5},
+                    {4, 6},
+                    {5, 6},
+                    {3, 4},
+                });
 
     auto result1 = run_cd("knows");
     ASSERT_TRUE(result1.has_value()) << result1.error().message;
@@ -771,7 +869,7 @@ TEST_F(QA_GDB486, Determinism_SameResultOnRerun) {
         ASSERT_EQ((*result1)[i].values.size(), (*result2)[i].values.size());
         for (size_t j = 0; j < (*result1)[i].values.size(); ++j) {
             EXPECT_EQ(std::get<int64_t>((*result1)[i].values[j].data()),
-                       std::get<int64_t>((*result2)[i].values[j].data()))
+                      std::get<int64_t>((*result2)[i].values[j].data()))
                 << "row " << i << " col " << j << " differs between runs";
         }
     }

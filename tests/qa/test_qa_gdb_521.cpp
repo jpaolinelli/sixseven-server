@@ -57,8 +57,7 @@ struct HarmonicInfo {
 };
 
 /// Extract per-node results from algorithm output rows.
-std::unordered_map<int64_t, HarmonicInfo>
-to_map(const std::vector<AlgorithmRow>& rows) {
+std::unordered_map<int64_t, HarmonicInfo> to_map(const std::vector<AlgorithmRow>& rows) {
     std::unordered_map<int64_t, HarmonicInfo> result;
     for (const auto& row : rows) {
         EXPECT_EQ(row.values.size(), 3u);
@@ -84,17 +83,17 @@ protected:
 
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     Result<std::vector<AlgorithmRow>> run(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {}};
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, {}};
         return harmonic_centrality_execute(ctx);
     }
 
@@ -109,8 +108,8 @@ protected:
 
 TEST_F(GDB521_HarmonicCentralityQA, AC1_RegistrationAndLookup) {
     AlgorithmRegistry registry;
-    auto result = registry.register_algorithm(make_harmonic_centrality_def(),
-                                              harmonic_centrality_execute);
+    auto result =
+        registry.register_algorithm(make_harmonic_centrality_def(), harmonic_centrality_execute);
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     EXPECT_TRUE(registry.has("harmonic"));
@@ -121,8 +120,8 @@ TEST_F(GDB521_HarmonicCentralityQA, AC1_RegistrationAndLookup) {
 
 TEST_F(GDB521_HarmonicCentralityQA, AC1_CaseInsensitiveLookup) {
     AlgorithmRegistry registry;
-    auto result = registry.register_algorithm(make_harmonic_centrality_def(),
-                                              harmonic_centrality_execute);
+    auto result =
+        registry.register_algorithm(make_harmonic_centrality_def(), harmonic_centrality_execute);
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     EXPECT_TRUE(registry.has("HARMONIC"));
@@ -132,12 +131,12 @@ TEST_F(GDB521_HarmonicCentralityQA, AC1_CaseInsensitiveLookup) {
 
 TEST_F(GDB521_HarmonicCentralityQA, AC1_DuplicateRegistrationFails) {
     AlgorithmRegistry registry;
-    auto r1 = registry.register_algorithm(make_harmonic_centrality_def(),
-                                          harmonic_centrality_execute);
+    auto r1 =
+        registry.register_algorithm(make_harmonic_centrality_def(), harmonic_centrality_execute);
     ASSERT_TRUE(r1.has_value()) << r1.error().message;
 
-    auto r2 = registry.register_algorithm(make_harmonic_centrality_def(),
-                                          harmonic_centrality_execute);
+    auto r2 =
+        registry.register_algorithm(make_harmonic_centrality_def(), harmonic_centrality_execute);
     EXPECT_FALSE(r2.has_value());
 }
 
@@ -230,9 +229,17 @@ TEST_F(GDB521_HarmonicCentralityQA, AC2_DiamondGraphKnownValues) {
 
 TEST_F(GDB521_HarmonicCentralityQA, AC2_BidirectionalPathKnownValues) {
     // Bidirectional path: 1<->2<->3<->4<->5
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 4}, {4, 3}, {4, 5}, {5, 4},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 4},
+                    {4, 3},
+                    {4, 5},
+                    {5, 4},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -256,12 +263,21 @@ TEST_F(GDB521_HarmonicCentralityQA, AC2_BidirectionalPathKnownValues) {
 
 TEST_F(GDB521_HarmonicCentralityQA, AC2_CompleteGraphK4) {
     // K4 directed: all pairs connected.
-    build_graph("knows", {
-        {1, 2}, {1, 3}, {1, 4},
-        {2, 1}, {2, 3}, {2, 4},
-        {3, 1}, {3, 2}, {3, 4},
-        {4, 1}, {4, 2}, {4, 3},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 3},
+                    {1, 4},
+                    {2, 1},
+                    {2, 3},
+                    {2, 4},
+                    {3, 1},
+                    {3, 2},
+                    {3, 4},
+                    {4, 1},
+                    {4, 2},
+                    {4, 3},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -275,10 +291,17 @@ TEST_F(GDB521_HarmonicCentralityQA, AC2_CompleteGraphK4) {
 
 TEST_F(GDB521_HarmonicCentralityQA, AC2_StarGraphBidirectional) {
     // Hub = 1, spokes = 2..5, bidirectional.
-    build_graph("knows", {
-        {1, 2}, {1, 3}, {1, 4}, {1, 5},
-        {2, 1}, {3, 1}, {4, 1}, {5, 1},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 3},
+                    {1, 4},
+                    {1, 5},
+                    {2, 1},
+                    {3, 1},
+                    {4, 1},
+                    {5, 1},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -321,11 +344,16 @@ TEST_F(GDB521_HarmonicCentralityQA, AC3_TwoDisconnectedPairs) {
 
 TEST_F(GDB521_HarmonicCentralityQA, AC3_ThreeDisconnectedComponents) {
     // {1<->2}, {3<->4<->5}, {6} (isolated via self-loop)
-    build_graph("knows", {
-        {1, 2}, {2, 1},
-        {3, 4}, {4, 3}, {4, 5}, {5, 4},
-        {6, 6},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {3, 4},
+                    {4, 3},
+                    {4, 5},
+                    {5, 4},
+                    {6, 6},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -366,7 +394,7 @@ TEST_F(GDB521_HarmonicCentralityQA, AC3_NoSpecialParametersNeeded) {
     // Verify no parameters are needed — empty params map works.
     build_graph("knows", {{1, 2}, {3, 4}});
 
-    AlgorithmContext ctx{engine_, "knows", {}};
+    AlgorithmContext ctx{engine_, default_database_id, "knows", {}};
     auto result = harmonic_centrality_execute(ctx);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->size(), 4u);
@@ -378,17 +406,23 @@ TEST_F(GDB521_HarmonicCentralityQA, AC3_NoSpecialParametersNeeded) {
 
 TEST_F(GDB521_HarmonicCentralityQA, AC4_NormalizedInUnitRangeForVariousGraphs) {
     // Test across several topologies.
-    build_graph("knows", {
-        {1, 2}, {2, 3}, {3, 1}, {1, 4}, {4, 5}, {5, 6}, {6, 4},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {3, 1},
+                    {1, 4},
+                    {4, 5},
+                    {5, 6},
+                    {6, 4},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     auto m = to_map(*result);
     for (const auto& [node, info] : m) {
-        EXPECT_GE(info.normalized_harmonic, 0.0)
-            << "node " << node << " normalized should be >= 0";
+        EXPECT_GE(info.normalized_harmonic, 0.0) << "node " << node << " normalized should be >= 0";
         EXPECT_LE(info.normalized_harmonic, 1.0 + 1e-10)
             << "node " << node << " normalized should be <= 1";
     }
@@ -416,7 +450,8 @@ TEST_F(GDB521_HarmonicCentralityQA, AC4_NormalizedMaxIsOneForCompleteGraph) {
     std::vector<std::pair<int64_t, int64_t>> edges;
     for (int64_t i = 1; i <= 5; ++i) {
         for (int64_t j = 1; j <= 5; ++j) {
-            if (i != j) edges.push_back({i, j});
+            if (i != j)
+                edges.push_back({i, j});
         }
     }
     build_graph("knows", edges);
@@ -562,11 +597,12 @@ TEST_F(GDB521_HarmonicCentralityQA, DuplicateEdges_SameResult) {
 // ============================================================================
 
 TEST_F(GDB521_HarmonicCentralityQA, LargeNodeIds) {
-    build_graph("knows", {
-        {1000000, 2000000},
-        {2000000, 3000000},
-        {3000000, 1000000},
-    });
+    build_graph("knows",
+                {
+                    {1000000, 2000000},
+                    {2000000, 3000000},
+                    {3000000, 1000000},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -693,10 +729,11 @@ TEST_F(GDB521_HarmonicCentralityQA, Error_NonexistentEdgeType) {
 
 TEST_F(GDB521_HarmonicCentralityQA, Topology_WheelGraph) {
     // Wheel W5: hub=1, rim 2-3-4-5-6-2, all bidirectional + hub to all.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {1, 3}, {3, 1}, {1, 4}, {4, 1}, {1, 5}, {5, 1}, {1, 6}, {6, 1},
-        {2, 3}, {3, 2}, {3, 4}, {4, 3}, {4, 5}, {5, 4}, {5, 6}, {6, 5}, {6, 2}, {2, 6},
-    });
+    build_graph("knows",
+                {
+                    {1, 2}, {2, 1}, {1, 3}, {3, 1}, {1, 4}, {4, 1}, {1, 5}, {5, 1}, {1, 6}, {6, 1},
+                    {2, 3}, {3, 2}, {3, 4}, {4, 3}, {4, 5}, {5, 4}, {5, 6}, {6, 5}, {6, 2}, {2, 6},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -733,9 +770,15 @@ TEST_F(GDB521_HarmonicCentralityQA, Topology_SelfLoopPlusRealEdges) {
 
 TEST_F(GDB521_HarmonicCentralityQA, Topology_TreeGraph) {
     // Binary tree: 1->{2,3}, 2->{4,5}, 3->{6,7} (directed).
-    build_graph("knows", {
-        {1, 2}, {1, 3}, {2, 4}, {2, 5}, {3, 6}, {3, 7},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 3},
+                    {2, 4},
+                    {2, 5},
+                    {3, 6},
+                    {3, 7},
+                });
 
     auto result = run("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -885,7 +928,8 @@ TEST_F(GDB521_HarmonicCentralityQA, Stress_DenseGraph50Nodes) {
     std::vector<std::pair<int64_t, int64_t>> edges;
     for (int64_t i = 1; i <= 50; ++i) {
         for (int64_t j = 1; j <= 50; ++j) {
-            if (i != j) edges.push_back({i, j});
+            if (i != j)
+                edges.push_back({i, j});
         }
     }
     build_graph("knows", edges);
@@ -898,8 +942,7 @@ TEST_F(GDB521_HarmonicCentralityQA, Stress_DenseGraph50Nodes) {
 
     // Complete graph: all nodes at d=1 to all others. H = 49.0. Normalized = 1.0.
     for (const auto& [node, info] : m) {
-        EXPECT_DOUBLE_EQ(info.harmonic, 49.0)
-            << "node " << node << " in K50 should have H=49.0";
+        EXPECT_DOUBLE_EQ(info.harmonic, 49.0) << "node " << node << " in K50 should have H=49.0";
         EXPECT_DOUBLE_EQ(info.normalized_harmonic, 1.0)
             << "node " << node << " in K50 should have normalized=1.0";
     }

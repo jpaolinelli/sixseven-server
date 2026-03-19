@@ -126,7 +126,7 @@ Result<std::vector<AlgorithmRow>> closeness_centrality_execute(const AlgorithmCo
     }
 
     // Get all edges for the specified edge type.
-    auto edges = ctx.graph_engine.get_all_edges(ctx.edge_type);
+    auto edges = ctx.graph_engine.get_all_edges(ctx.database_id, ctx.edge_type);
     if (!edges.has_value()) {
         return tl::unexpected(edges.error());
     }
@@ -219,8 +219,7 @@ Result<std::vector<AlgorithmRow>> closeness_centrality_execute(const AlgorithmCo
             double wf_normalized = 0.0;
 
             if (nc > 1 && sum_dist > 0) {
-                wf_normalized =
-                    static_cast<double>(nc - 1) / static_cast<double>(sum_dist);
+                wf_normalized = static_cast<double>(nc - 1) / static_cast<double>(sum_dist);
                 double scaling = static_cast<double>(nc - 1) / static_cast<double>(total_nodes - 1);
                 wf_closeness = scaling * wf_normalized;
             }

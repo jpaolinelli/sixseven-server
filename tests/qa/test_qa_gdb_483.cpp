@@ -100,31 +100,29 @@ protected:
 
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
 
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
-    Result<std::vector<AlgorithmRow>> run_pagerank(const std::string& edge_type,
-                                                   double damping = 0.85,
-                                                   int64_t iterations = 20) {
-        AlgorithmContext ctx{
-            engine_,
-            edge_type,
-            {{"damping", Value(damping)}, {"iterations", Value(iterations)}}};
+    Result<std::vector<AlgorithmRow>>
+    run_pagerank(const std::string& edge_type, double damping = 0.85, int64_t iterations = 20) {
+        AlgorithmContext ctx{engine_,
+                             default_database_id,
+                             edge_type,
+                             {{"damping", Value(damping)}, {"iterations", Value(iterations)}}};
         return pagerank_execute(ctx);
     }
 
     /// Run pagerank with raw named_args (for testing type edge cases).
     Result<std::vector<AlgorithmRow>>
-    run_pagerank_raw(const std::string& edge_type,
-                     std::unordered_map<std::string, Value> args) {
-        AlgorithmContext ctx{engine_, edge_type, std::move(args)};
+    run_pagerank_raw(const std::string& edge_type, std::unordered_map<std::string, Value> args) {
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, std::move(args)};
         return pagerank_execute(ctx);
     }
 
@@ -230,8 +228,7 @@ TEST_F(QA_GDB483_PageRank, AC2_DampingHighVsLow) {
     // With higher damping, hub node 1 should have relatively higher score.
     double ratio_low = scores_low[1] / scores_low[2];
     double ratio_high = scores_high[1] / scores_high[2];
-    EXPECT_GT(ratio_high, ratio_low)
-        << "higher damping should amplify hub advantage";
+    EXPECT_GT(ratio_high, ratio_low) << "higher damping should amplify hub advantage";
 }
 
 TEST_F(QA_GDB483_PageRank, AC2_IterationsOne) {
@@ -359,8 +356,18 @@ TEST_F(QA_GDB483_PageRank, AC4_ScoresSumToOne_AllDangling) {
 TEST_F(QA_GDB483_PageRank, AC4_ScoresSumToOne_CompleteGraph) {
     // K4: every node links to every other node.
     build_graph("knows",
-                {{1, 2}, {1, 3}, {1, 4}, {2, 1}, {2, 3}, {2, 4}, {3, 1}, {3, 2}, {3, 4},
-                 {4, 1}, {4, 2}, {4, 3}});
+                {{1, 2},
+                 {1, 3},
+                 {1, 4},
+                 {2, 1},
+                 {2, 3},
+                 {2, 4},
+                 {3, 1},
+                 {3, 2},
+                 {3, 4},
+                 {4, 1},
+                 {4, 2},
+                 {4, 3}});
     auto result = run_pagerank("knows");
     ASSERT_TRUE(result.has_value());
     auto scores = to_score_map(*result);
@@ -545,27 +552,23 @@ TEST_F(QA_GDB483_PageRank, StringDampingValueFails) {
 TEST_F(QA_GDB483_PageRank, StringIterationsValueFails) {
     build_graph("knows", {{1, 2}});
     // Pass a string value for iterations (should fail with type error).
-    auto result = run_pagerank_raw("knows",
-                                   {{"damping", Value(0.85)},
-                                    {"iterations", Value(std::string("ten"))}});
+    auto result = run_pagerank_raw(
+        "knows", {{"damping", Value(0.85)}, {"iterations", Value(std::string("ten"))}});
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
 }
 
 TEST_F(QA_GDB483_PageRank, NullDampingValueFails) {
     build_graph("knows", {{1, 2}});
-    auto result = run_pagerank_raw("knows",
-                                   {{"damping", Value()},
-                                    {"iterations", Value(static_cast<int64_t>(20))}});
+    auto result = run_pagerank_raw(
+        "knows", {{"damping", Value()}, {"iterations", Value(static_cast<int64_t>(20))}});
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
 TEST_F(QA_GDB483_PageRank, NullIterationsValueFails) {
     build_graph("knows", {{1, 2}});
-    auto result = run_pagerank_raw("knows",
-                                   {{"damping", Value(0.85)},
-                                    {"iterations", Value()}});
+    auto result = run_pagerank_raw("knows", {{"damping", Value(0.85)}, {"iterations", Value()}});
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
@@ -588,11 +591,9 @@ TEST_F(QA_GDB483_PageRank, DampingAsInteger) {
 TEST_F(QA_GDB483_PageRank, IterationsAsFloat) {
     // Pass iterations as double — should fail since iterations expects integer.
     build_graph("knows", {{1, 2}});
-    auto result = run_pagerank_raw("knows",
-                                   {{"damping", Value(0.85)},
-                                    {"iterations", Value(10.0)}});
-    ASSERT_FALSE(result.has_value())
-        << "iterations parameter should reject floating-point values";
+    auto result =
+        run_pagerank_raw("knows", {{"damping", Value(0.85)}, {"iterations", Value(10.0)}});
+    ASSERT_FALSE(result.has_value()) << "iterations parameter should reject floating-point values";
     EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
 }
 

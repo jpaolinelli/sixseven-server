@@ -131,17 +131,17 @@ protected:
 
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     Result<std::vector<AlgorithmRow>> run(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {}};
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, {}};
         return strongly_connected_components_execute(ctx);
     }
 
@@ -156,9 +156,8 @@ protected:
 
 TEST_F(GDB524_SCCQA, AC1_RegistrationAndLookup) {
     AlgorithmRegistry registry;
-    auto result = registry.register_algorithm(
-        make_strongly_connected_components_def(),
-        strongly_connected_components_execute);
+    auto result = registry.register_algorithm(make_strongly_connected_components_def(),
+                                              strongly_connected_components_execute);
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     EXPECT_TRUE(registry.has("strongly_connected_components"));
@@ -169,9 +168,8 @@ TEST_F(GDB524_SCCQA, AC1_RegistrationAndLookup) {
 
 TEST_F(GDB524_SCCQA, AC1_CaseInsensitiveLookup) {
     AlgorithmRegistry registry;
-    auto result = registry.register_algorithm(
-        make_strongly_connected_components_def(),
-        strongly_connected_components_execute);
+    auto result = registry.register_algorithm(make_strongly_connected_components_def(),
+                                              strongly_connected_components_execute);
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     EXPECT_TRUE(registry.has("STRONGLY_CONNECTED_COMPONENTS"));
@@ -181,14 +179,12 @@ TEST_F(GDB524_SCCQA, AC1_CaseInsensitiveLookup) {
 
 TEST_F(GDB524_SCCQA, AC1_DuplicateRegistrationFails) {
     AlgorithmRegistry registry;
-    auto r1 = registry.register_algorithm(
-        make_strongly_connected_components_def(),
-        strongly_connected_components_execute);
+    auto r1 = registry.register_algorithm(make_strongly_connected_components_def(),
+                                          strongly_connected_components_execute);
     ASSERT_TRUE(r1.has_value()) << r1.error().message;
 
-    auto r2 = registry.register_algorithm(
-        make_strongly_connected_components_def(),
-        strongly_connected_components_execute);
+    auto r2 = registry.register_algorithm(make_strongly_connected_components_def(),
+                                          strongly_connected_components_execute);
     EXPECT_FALSE(r2.has_value());
 }
 
@@ -236,8 +232,7 @@ TEST_F(GDB524_SCCQA, AC2_SimpleCycle) {
 
 TEST_F(GDB524_SCCQA, AC2_ClassicTarjan) {
     // SCC1: {1,2,3}, SCC2: {4,5,6}, singleton {7}
-    build_graph("follows",
-                {{1, 2}, {2, 3}, {3, 1}, {3, 4}, {4, 5}, {5, 6}, {6, 4}, {6, 7}});
+    build_graph("follows", {{1, 2}, {2, 3}, {3, 1}, {3, 4}, {4, 5}, {5, 6}, {6, 4}, {6, 7}});
 
     auto result = run("follows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -285,8 +280,7 @@ TEST_F(GDB524_SCCQA, AC2_NestedSCCStructure) {
     // Graph with cross edges that could confuse Tarjan's:
     // SCC1: {1,2,3}, SCC2: {4,5}, SCC3: {6}
     // Cross edges: 1->4, 4->6, 3->6
-    build_graph("follows",
-                {{1, 2}, {2, 3}, {3, 1}, {4, 5}, {5, 4}, {1, 4}, {4, 6}, {3, 6}});
+    build_graph("follows", {{1, 2}, {2, 3}, {3, 1}, {4, 5}, {5, 4}, {1, 4}, {4, 6}, {3, 6}});
 
     auto result = run("follows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -513,8 +507,18 @@ TEST_F(GDB524_SCCQA, AC4_WideDAG) {
 
 TEST_F(GDB524_SCCQA, AC5_FullyConnected4) {
     build_graph("follows",
-                {{1, 2}, {1, 3}, {1, 4}, {2, 1}, {2, 3}, {2, 4},
-                 {3, 1}, {3, 2}, {3, 4}, {4, 1}, {4, 2}, {4, 3}});
+                {{1, 2},
+                 {1, 3},
+                 {1, 4},
+                 {2, 1},
+                 {2, 3},
+                 {2, 4},
+                 {3, 1},
+                 {3, 2},
+                 {3, 4},
+                 {4, 1},
+                 {4, 2},
+                 {4, 3}});
 
     auto result = run("follows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -532,7 +536,8 @@ TEST_F(GDB524_SCCQA, AC5_FullyConnectedK6) {
     std::vector<std::pair<int64_t, int64_t>> edges;
     for (int64_t i = 1; i <= 6; ++i) {
         for (int64_t j = 1; j <= 6; ++j) {
-            if (i != j) edges.push_back({i, j});
+            if (i != j)
+                edges.push_back({i, j});
         }
     }
     build_graph("follows", edges);
@@ -667,8 +672,7 @@ TEST_F(GDB524_SCCQA, Boundary_TwoNodesCycle) {
 TEST_F(GDB524_SCCQA, Undirected_ConnectedChain) {
     // Bidirectional chain: 1<->2<->3<->4
     // All nodes mutually reachable => single SCC.
-    build_graph("follows",
-                {{1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 4}, {4, 3}});
+    build_graph("follows", {{1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 4}, {4, 3}});
 
     auto result = run("follows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -683,9 +687,7 @@ TEST_F(GDB524_SCCQA, Undirected_ConnectedChain) {
 
 TEST_F(GDB524_SCCQA, Undirected_TwoDisconnectedComponents) {
     // {1,2,3} bidirectional and {4,5} bidirectional, no connection.
-    build_graph("follows",
-                {{1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3},
-                 {4, 5}, {5, 4}});
+    build_graph("follows", {{1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3}, {4, 5}, {5, 4}});
 
     auto result = run("follows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -705,8 +707,7 @@ TEST_F(GDB524_SCCQA, Undirected_TwoDisconnectedComponents) {
 // ============================================================================
 
 TEST_F(GDB524_SCCQA, LargeNodeIds) {
-    build_graph("follows",
-                {{1000000, 2000000}, {2000000, 3000000}, {3000000, 1000000}});
+    build_graph("follows", {{1000000, 2000000}, {2000000, 3000000}, {3000000, 1000000}});
 
     auto result = run("follows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -781,8 +782,7 @@ TEST_F(GDB524_SCCQA, Error_NonexistentEdgeType) {
 TEST_F(GDB524_SCCQA, Topology_ManySmallSCCsConnectedByBridges) {
     // Chain of 2-node SCCs connected by one-way bridges:
     // {1,2} -> {3,4} -> {5,6}
-    build_graph("follows",
-                {{1, 2}, {2, 1}, {2, 3}, {3, 4}, {4, 3}, {4, 5}, {5, 6}, {6, 5}});
+    build_graph("follows", {{1, 2}, {2, 1}, {2, 3}, {3, 4}, {4, 3}, {4, 5}, {5, 6}, {6, 5}});
 
     auto result = run("follows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -810,9 +810,14 @@ TEST_F(GDB524_SCCQA, Topology_CrossEdgeBetweenSCCsDoesNotMerge) {
     // between different pairs: 3->4 and 6->1. This creates a cycle
     // between the two SCCs, merging them into one!
     build_graph("follows",
-                {{1, 2}, {2, 3}, {3, 1},   // SCC candidate 1
-                 {4, 5}, {5, 6}, {6, 4},   // SCC candidate 2
-                 {3, 4}, {6, 1}});          // Cross edges forming super-cycle
+                {{1, 2},
+                 {2, 3},
+                 {3, 1}, // SCC candidate 1
+                 {4, 5},
+                 {5, 6},
+                 {6, 4}, // SCC candidate 2
+                 {3, 4},
+                 {6, 1}}); // Cross edges forming super-cycle
 
     auto result = run("follows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -851,8 +856,11 @@ TEST_F(GDB524_SCCQA, Topology_SourceAndSinkNodes) {
 TEST_F(GDB524_SCCQA, Topology_DisconnectedGraphMultipleSCCs) {
     // Two completely separate cycles with no edges between them.
     build_graph("follows",
-                {{1, 2}, {2, 3}, {3, 1},   // SCC: {1,2,3}
-                 {10, 11}, {11, 10}});       // SCC: {10,11}
+                {{1, 2},
+                 {2, 3},
+                 {3, 1}, // SCC: {1,2,3}
+                 {10, 11},
+                 {11, 10}}); // SCC: {10,11}
 
     auto result = run("follows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -904,8 +912,7 @@ TEST_F(GDB524_SCCQA, Topology_SingletonWithIncomingAndOutgoing) {
 // ============================================================================
 
 TEST_F(GDB524_SCCQA, Invariant_SumOfComponentSizesEqualsNodeCount) {
-    build_graph("follows",
-                {{1, 2}, {2, 3}, {3, 1}, {4, 5}, {5, 4}, {6, 7}});
+    build_graph("follows", {{1, 2}, {2, 3}, {3, 1}, {4, 5}, {5, 4}, {6, 7}});
 
     auto result = run("follows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -925,8 +932,7 @@ TEST_F(GDB524_SCCQA, Invariant_SumOfComponentSizesEqualsNodeCount) {
 }
 
 TEST_F(GDB524_SCCQA, Invariant_ComponentSizeMatchesActualCount) {
-    build_graph("follows",
-                {{1, 2}, {2, 3}, {3, 1}, {3, 4}, {4, 5}, {5, 6}, {6, 4}, {6, 7}});
+    build_graph("follows", {{1, 2}, {2, 3}, {3, 1}, {3, 4}, {4, 5}, {5, 6}, {6, 4}, {6, 7}});
 
     auto result = run("follows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -938,8 +944,7 @@ TEST_F(GDB524_SCCQA, Invariant_ComponentSizeMatchesActualCount) {
 }
 
 TEST_F(GDB524_SCCQA, Invariant_EveryNodeAppears) {
-    build_graph("follows",
-                {{1, 2}, {2, 3}, {3, 1}, {4, 4}, {5, 6}});
+    build_graph("follows", {{1, 2}, {2, 3}, {3, 1}, {4, 4}, {5, 6}});
 
     auto result = run("follows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -1060,7 +1065,8 @@ TEST_F(GDB524_SCCQA, Stress_CompleteK20SingleSCC) {
     std::vector<std::pair<int64_t, int64_t>> edges;
     for (int64_t i = 1; i <= 20; ++i) {
         for (int64_t j = 1; j <= 20; ++j) {
-            if (i != j) edges.push_back({i, j});
+            if (i != j)
+                edges.push_back({i, j});
         }
     }
     build_graph("follows", edges);
@@ -1080,10 +1086,16 @@ TEST_F(GDB524_SCCQA, Stress_CompleteK20SingleSCC) {
 TEST_F(GDB524_SCCQA, Stress_MixedSCCsAndSingletons) {
     // 3-cycle, 2-cycle, 5 singletons via DAG edges.
     std::vector<std::pair<int64_t, int64_t>> edges = {
-        {1, 2}, {2, 3}, {3, 1},       // SCC: {1,2,3}
-        {4, 5}, {5, 4},               // SCC: {4,5}
-        {3, 6}, {6, 7}, {7, 8},       // DAG singletons: 6, 7, 8
-        {5, 9}, {9, 10},              // DAG singletons: 9, 10
+        {1, 2},
+        {2, 3},
+        {3, 1}, // SCC: {1,2,3}
+        {4, 5},
+        {5, 4}, // SCC: {4,5}
+        {3, 6},
+        {6, 7},
+        {7, 8}, // DAG singletons: 6, 7, 8
+        {5, 9},
+        {9, 10}, // DAG singletons: 9, 10
     };
     build_graph("follows", edges);
 
@@ -1137,8 +1149,7 @@ TEST_F(GDB524_SCCQA, Stress_DeepNestedSCCChain) {
         for (int64_t offset = 0; offset < 3; ++offset) {
             EXPECT_EQ(m[base + offset].component_id, expected_comp_id)
                 << "node " << (base + offset);
-            EXPECT_EQ(m[base + offset].component_size, 3)
-                << "node " << (base + offset);
+            EXPECT_EQ(m[base + offset].component_size, 3) << "node " << (base + offset);
         }
     }
     verify_size_matches_count(m);

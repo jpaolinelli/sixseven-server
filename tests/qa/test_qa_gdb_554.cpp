@@ -87,29 +87,32 @@ protected:
         ASSERT_TRUE(rid.has_value()) << rid.error().message;
     }
 
-    void create_edge_and_link(const std::string& edge_name, table_id_t tid,
-                               TypeId pk_type, const Value& from, const Value& to) {
+    void create_edge_and_link(const std::string& edge_name,
+                              table_id_t tid,
+                              TypeId pk_type,
+                              const Value& from,
+                              const Value& to) {
         // Create edge type if not already created.
-        auto existing = graph_->get_edge_table(edge_name);
+        auto existing = graph_->get_edge_table(default_database_id, edge_name);
         if (!existing.has_value()) {
-            auto eid = graph_->create_edge_type(default_database_id, 
-                edge_name, tid, tid, pk_type, pk_type, {});
+            auto eid = graph_->create_edge_type(
+                default_database_id, edge_name, tid, tid, pk_type, pk_type, {});
             ASSERT_TRUE(eid.has_value()) << eid.error().message;
         }
-        auto r = graph_->link(edge_name, from, to);
+        auto r = graph_->link(default_database_id, edge_name, from, to);
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 
     std::vector<Tuple> run_vl_match(const std::string& node_label,
-                                     const std::string& edge_type,
-                                     table_id_t tid, TypeId pk_type,
-                                     std::optional<int32_t> min_h,
-                                     std::optional<int32_t> max_h) {
+                                    const std::string& edge_type,
+                                    table_id_t tid,
+                                    TypeId pk_type,
+                                    std::optional<int32_t> min_h,
+                                    std::optional<int32_t> max_h) {
         MatchConfig config;
         config.nodes.push_back({"a", node_label});
         config.nodes.push_back({"b", node_label});
-        config.edges.push_back(
-            MatchEdgeDef("r", edge_type, TraverseDirection::OUT, min_h, max_h));
+        config.edges.push_back(MatchEdgeDef("r", edge_type, TraverseDirection::OUT, min_h, max_h));
 
         std::vector<OutputColumn> out_cols;
         out_cols.push_back({"a", "id", pk_type, false, tid});
@@ -117,10 +120,15 @@ protected:
         OutputSchema schema(std::move(out_cols));
 
         BoundStatement bound;
-        VariableLengthMatchOperator op(*graph_, *catalog_, *storage_,
+        VariableLengthMatchOperator op(*graph_,
+                                       *catalog_,
+                                       *storage_,
                                        default_database_id,
-                                       std::move(config), std::move(schema),
-                                       nullptr, bound, 100'000);
+                                       std::move(config),
+                                       std::move(schema),
+                                       nullptr,
+                                       bound,
+                                       100'000);
         auto open_result = op.open();
         EXPECT_TRUE(open_result.has_value()) << open_result.error().message;
         if (!open_result.has_value())
@@ -156,10 +164,8 @@ TEST_F(QA_GDB554, Int64PK_Works) {
     insert_row(tid, "int64_nodes", Value(int64_t{2}));
     insert_row(tid, "int64_nodes", Value(int64_t{3}));
 
-    create_edge_and_link("knows64", tid, TypeId::INT64,
-                          Value(int64_t{1}), Value(int64_t{2}));
-    create_edge_and_link("knows64", tid, TypeId::INT64,
-                          Value(int64_t{2}), Value(int64_t{3}));
+    create_edge_and_link("knows64", tid, TypeId::INT64, Value(int64_t{1}), Value(int64_t{2}));
+    create_edge_and_link("knows64", tid, TypeId::INT64, Value(int64_t{2}), Value(int64_t{3}));
 
     auto results = run_vl_match("int64_nodes", "knows64", tid, TypeId::INT64, 1, 3);
     // From 1: reach 2 (1 hop), 3 (2 hops). From 2: reach 3 (1 hop).
@@ -176,10 +182,8 @@ TEST_F(QA_GDB554, Int32PK_Works) {
     insert_row(tid, "int32_nodes", Value(int32_t{20}));
     insert_row(tid, "int32_nodes", Value(int32_t{30}));
 
-    create_edge_and_link("knows32", tid, TypeId::INT32,
-                          Value(int32_t{10}), Value(int32_t{20}));
-    create_edge_and_link("knows32", tid, TypeId::INT32,
-                          Value(int32_t{20}), Value(int32_t{30}));
+    create_edge_and_link("knows32", tid, TypeId::INT32, Value(int32_t{10}), Value(int32_t{20}));
+    create_edge_and_link("knows32", tid, TypeId::INT32, Value(int32_t{20}), Value(int32_t{30}));
 
     auto results = run_vl_match("int32_nodes", "knows32", tid, TypeId::INT32, 1, 3);
     EXPECT_GE(results.size(), 3u);
@@ -195,17 +199,16 @@ TEST_F(QA_GDB554, StringPK_VisitedSetWorks) {
     insert_row(tid, "str_nodes", Value(std::string("bob")));
     insert_row(tid, "str_nodes", Value(std::string("charlie")));
 
-    create_edge_and_link("knows_str", tid, TypeId::STRING,
-                          Value(std::string("alice")), Value(std::string("bob")));
-    create_edge_and_link("knows_str", tid, TypeId::STRING,
-                          Value(std::string("bob")), Value(std::string("charlie")));
+    create_edge_and_link(
+        "knows_str", tid, TypeId::STRING, Value(std::string("alice")), Value(std::string("bob")));
+    create_edge_and_link(
+        "knows_str", tid, TypeId::STRING, Value(std::string("bob")), Value(std::string("charlie")));
 
     auto results = run_vl_match("str_nodes", "knows_str", tid, TypeId::STRING, 1, 3);
     // From alice: bob (1 hop), charlie (2 hops).
     // From bob: charlie (1 hop).
     // Total: at least 3 results — previously all PKs collapsed to 0.
-    EXPECT_GE(results.size(), 3u)
-        << "STRING PKs should work correctly in visited set";
+    EXPECT_GE(results.size(), 3u) << "STRING PKs should work correctly in visited set";
 }
 
 TEST_F(QA_GDB554, Int16PK_Works) {
@@ -214,14 +217,11 @@ TEST_F(QA_GDB554, Int16PK_Works) {
     insert_row(tid, "int16_nodes", Value(int16_t{2}));
     insert_row(tid, "int16_nodes", Value(int16_t{3}));
 
-    create_edge_and_link("knows16", tid, TypeId::INT16,
-                          Value(int16_t{1}), Value(int16_t{2}));
-    create_edge_and_link("knows16", tid, TypeId::INT16,
-                          Value(int16_t{2}), Value(int16_t{3}));
+    create_edge_and_link("knows16", tid, TypeId::INT16, Value(int16_t{1}), Value(int16_t{2}));
+    create_edge_and_link("knows16", tid, TypeId::INT16, Value(int16_t{2}), Value(int16_t{3}));
 
     auto results = run_vl_match("int16_nodes", "knows16", tid, TypeId::INT16, 1, 3);
-    EXPECT_GE(results.size(), 3u)
-        << "INT16 PKs should work correctly in visited set";
+    EXPECT_GE(results.size(), 3u) << "INT16 PKs should work correctly in visited set";
 }
 
 TEST_F(QA_GDB554, Int8PK_Works) {
@@ -230,14 +230,11 @@ TEST_F(QA_GDB554, Int8PK_Works) {
     insert_row(tid, "int8_nodes", Value(int8_t{2}));
     insert_row(tid, "int8_nodes", Value(int8_t{3}));
 
-    create_edge_and_link("knows8", tid, TypeId::INT8,
-                          Value(int8_t{1}), Value(int8_t{2}));
-    create_edge_and_link("knows8", tid, TypeId::INT8,
-                          Value(int8_t{2}), Value(int8_t{3}));
+    create_edge_and_link("knows8", tid, TypeId::INT8, Value(int8_t{1}), Value(int8_t{2}));
+    create_edge_and_link("knows8", tid, TypeId::INT8, Value(int8_t{2}), Value(int8_t{3}));
 
     auto results = run_vl_match("int8_nodes", "knows8", tid, TypeId::INT8, 1, 3);
-    EXPECT_GE(results.size(), 3u)
-        << "INT8 PKs should work correctly in visited set";
+    EXPECT_GE(results.size(), 3u) << "INT8 PKs should work correctly in visited set";
 }
 
 // ============================================================================
@@ -251,20 +248,18 @@ TEST_F(QA_GDB554, StringPK_CyclePreventionWorks) {
     insert_row(tid, "cyc_nodes", Value(std::string("c")));
 
     // Triangle cycle: a->b->c->a
-    create_edge_and_link("cyc_edge", tid, TypeId::STRING,
-                          Value(std::string("a")), Value(std::string("b")));
-    create_edge_and_link("cyc_edge", tid, TypeId::STRING,
-                          Value(std::string("b")), Value(std::string("c")));
-    create_edge_and_link("cyc_edge", tid, TypeId::STRING,
-                          Value(std::string("c")), Value(std::string("a")));
+    create_edge_and_link(
+        "cyc_edge", tid, TypeId::STRING, Value(std::string("a")), Value(std::string("b")));
+    create_edge_and_link(
+        "cyc_edge", tid, TypeId::STRING, Value(std::string("b")), Value(std::string("c")));
+    create_edge_and_link(
+        "cyc_edge", tid, TypeId::STRING, Value(std::string("c")), Value(std::string("a")));
 
     auto results = run_vl_match("cyc_nodes", "cyc_edge", tid, TypeId::STRING, 1, 10);
     // With cycle prevention, BFS should not loop forever.
     // From each node, can reach 2 others. 3 nodes * 2 = 6 max results.
-    EXPECT_LE(results.size(), 6u)
-        << "Cycle prevention should bound results with STRING PKs";
-    EXPECT_GE(results.size(), 6u)
-        << "Should reach all nodes in the cycle";
+    EXPECT_LE(results.size(), 6u) << "Cycle prevention should bound results with STRING PKs";
+    EXPECT_GE(results.size(), 6u) << "Should reach all nodes in the cycle";
 }
 
 // ============================================================================
@@ -280,15 +275,14 @@ TEST_F(QA_GDB554, StringPK_DistinctNodes_AllReachable) {
     }
 
     for (size_t i = 0; i + 1 < names.size(); ++i) {
-        create_edge_and_link("chain_str", tid, TypeId::STRING,
-                              Value(names[i]), Value(names[i + 1]));
+        create_edge_and_link(
+            "chain_str", tid, TypeId::STRING, Value(names[i]), Value(names[i + 1]));
     }
 
     auto results = run_vl_match("long_nodes", "chain_str", tid, TypeId::STRING, 1, 10);
     // From node_a: can reach 4 nodes. From node_b: 3. From node_c: 2. From node_d: 1.
     // Total: 4+3+2+1 = 10.
-    EXPECT_EQ(results.size(), 10u)
-        << "All nodes in chain should be reachable with STRING PKs";
+    EXPECT_EQ(results.size(), 10u) << "All nodes in chain should be reachable with STRING PKs";
 }
 
 } // namespace

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "sixseven/catalog/schema.h"
 #include "sixseven/common/result.h"
 #include "sixseven/common/types.h"
 #include "sixseven/common/value.h"
@@ -74,6 +75,7 @@ struct AlgorithmDef {
 /// Context passed to an algorithm's execute function.
 struct AlgorithmContext {
     GraphEngine& graph_engine;
+    database_id_t database_id = default_database_id;
     std::string edge_type;
     std::unordered_map<std::string, Value> named_args;
 };

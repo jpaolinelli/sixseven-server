@@ -57,8 +57,7 @@ struct WFInfo {
     double normalized_closeness;
 };
 
-std::unordered_map<int64_t, WFInfo>
-to_wf_map(const std::vector<AlgorithmRow>& rows) {
+std::unordered_map<int64_t, WFInfo> to_wf_map(const std::vector<AlgorithmRow>& rows) {
     std::unordered_map<int64_t, WFInfo> result;
     for (const auto& row : rows) {
         EXPECT_EQ(row.values.size(), 6u);
@@ -68,8 +67,8 @@ to_wf_map(const std::vector<AlgorithmRow>& rows) {
         auto reachable_count = std::get<int64_t>(row.values[3].data());
         auto component_size = std::get<int64_t>(row.values[4].data());
         auto normalized_closeness = std::get<double>(row.values[5].data());
-        result[node_id] = {closeness, sum_farness, reachable_count, component_size,
-                           normalized_closeness};
+        result[node_id] = {
+            closeness, sum_farness, reachable_count, component_size, normalized_closeness};
     }
     return result;
 }
@@ -88,12 +87,12 @@ protected:
 
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
 
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
@@ -101,14 +100,14 @@ protected:
     Result<std::vector<AlgorithmRow>> run_wf(const std::string& edge_type) {
         std::unordered_map<std::string, Value> args;
         args["variant"] = Value(std::string("wasserman_faust"));
-        AlgorithmContext ctx{engine_, edge_type, args};
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, args};
         return closeness_centrality_execute(ctx);
     }
 
     Result<std::vector<AlgorithmRow>> run_standard(const std::string& edge_type) {
         std::unordered_map<std::string, Value> args;
         args["variant"] = Value(std::string("standard"));
-        AlgorithmContext ctx{engine_, edge_type, args};
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, args};
         return closeness_centrality_execute(ctx);
     }
 
@@ -128,15 +127,32 @@ TEST_F(GDB519_WassermanFaust, AC1_FormulaVerification_ThreeComponents) {
     // Component B: bidirectional K4 (nodes 10,11,12,13) — n_c = 4
     // Component C: bidirectional pair (nodes 20,21) — n_c = 2
     // N = 9
-    build_graph("knows", {
-        // K3
-        {1, 2}, {2, 1}, {1, 3}, {3, 1}, {2, 3}, {3, 2},
-        // K4
-        {10, 11}, {11, 10}, {10, 12}, {12, 10}, {10, 13}, {13, 10},
-        {11, 12}, {12, 11}, {11, 13}, {13, 11}, {12, 13}, {13, 12},
-        // K2
-        {20, 21}, {21, 20},
-    });
+    build_graph("knows",
+                {
+                    // K3
+                    {1, 2},
+                    {2, 1},
+                    {1, 3},
+                    {3, 1},
+                    {2, 3},
+                    {3, 2},
+                    // K4
+                    {10, 11},
+                    {11, 10},
+                    {10, 12},
+                    {12, 10},
+                    {10, 13},
+                    {13, 10},
+                    {11, 12},
+                    {12, 11},
+                    {11, 13},
+                    {13, 11},
+                    {12, 13},
+                    {13, 12},
+                    // K2
+                    {20, 21},
+                    {21, 20},
+                });
 
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -152,8 +168,7 @@ TEST_F(GDB519_WassermanFaust, AC1_FormulaVerification_ThreeComponents) {
         EXPECT_EQ(scores[node].component_size, 3);
         EXPECT_NEAR(scores[node].normalized_closeness, 1.0, 1e-10);
         double scaling = static_cast<double>(3 - 1) / static_cast<double>(N - 1);
-        EXPECT_NEAR(scores[node].closeness, scaling * 1.0, 1e-10)
-            << "K3 node " << node;
+        EXPECT_NEAR(scores[node].closeness, scaling * 1.0, 1e-10) << "K3 node " << node;
     }
 
     // K4: each node reaches 3 others at d=1. sum_farness=3, nc=4.
@@ -163,8 +178,7 @@ TEST_F(GDB519_WassermanFaust, AC1_FormulaVerification_ThreeComponents) {
         EXPECT_EQ(scores[node].component_size, 4);
         EXPECT_NEAR(scores[node].normalized_closeness, 1.0, 1e-10);
         double scaling = static_cast<double>(4 - 1) / static_cast<double>(N - 1);
-        EXPECT_NEAR(scores[node].closeness, scaling * 1.0, 1e-10)
-            << "K4 node " << node;
+        EXPECT_NEAR(scores[node].closeness, scaling * 1.0, 1e-10) << "K4 node " << node;
     }
 
     // K2: each node reaches 1 other at d=1. sum_farness=1, nc=2.
@@ -174,8 +188,7 @@ TEST_F(GDB519_WassermanFaust, AC1_FormulaVerification_ThreeComponents) {
         EXPECT_EQ(scores[node].component_size, 2);
         EXPECT_NEAR(scores[node].normalized_closeness, 1.0, 1e-10);
         double scaling = static_cast<double>(2 - 1) / static_cast<double>(N - 1);
-        EXPECT_NEAR(scores[node].closeness, scaling * 1.0, 1e-10)
-            << "K2 node " << node;
+        EXPECT_NEAR(scores[node].closeness, scaling * 1.0, 1e-10) << "K2 node " << node;
     }
 
     // Verify ordering: K4 nodes > K3 nodes > K2 nodes.
@@ -189,10 +202,13 @@ TEST_F(GDB519_WassermanFaust, AC1_ScalingFactorAlgebraicCheck) {
     // Comp A: path 1->2->3->4 (nc=4)
     // Comp B: path 10->11 (nc=2)
     // N=6
-    build_graph("knows", {
-        {1, 2}, {2, 3}, {3, 4},
-        {10, 11},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {3, 4},
+                    {10, 11},
+                });
 
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -211,8 +227,7 @@ TEST_F(GDB519_WassermanFaust, AC1_ScalingFactorAlgebraicCheck) {
 
             EXPECT_NEAR(r.normalized_closeness, expected_norm, 1e-10)
                 << "node " << node << " normalized_closeness formula check";
-            EXPECT_NEAR(r.closeness, expected_wf, 1e-10)
-                << "node " << node << " WF formula check";
+            EXPECT_NEAR(r.closeness, expected_wf, 1e-10) << "node " << node << " WF formula check";
         }
     }
 }
@@ -224,13 +239,19 @@ TEST_F(GDB519_WassermanFaust, AC1_ScalingFactorAlgebraicCheck) {
 /// Every non-sink node in a disconnected graph must have closeness > 0.
 TEST_F(GDB519_WassermanFaust, AC2_DisconnectedNodesNonZero) {
     // 5 disconnected bidirectional pairs: all nodes should have WF > 0.
-    build_graph("knows", {
-        {1, 2}, {2, 1},
-        {3, 4}, {4, 3},
-        {5, 6}, {6, 5},
-        {7, 8}, {8, 7},
-        {9, 10}, {10, 9},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {3, 4},
+                    {4, 3},
+                    {5, 6},
+                    {6, 5},
+                    {7, 8},
+                    {8, 7},
+                    {9, 10},
+                    {10, 9},
+                });
 
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -272,9 +293,12 @@ TEST_F(GDB519_WassermanFaust, AC2_ManySmallComponents) {
         int64_t a = i * 10 + 1;
         int64_t b = i * 10 + 2;
         int64_t c = i * 10 + 3;
-        edges.push_back({a, b}); edges.push_back({b, a});
-        edges.push_back({b, c}); edges.push_back({c, b});
-        edges.push_back({a, c}); edges.push_back({c, a});
+        edges.push_back({a, b});
+        edges.push_back({b, a});
+        edges.push_back({b, c});
+        edges.push_back({c, b});
+        edges.push_back({a, c});
+        edges.push_back({c, a});
     }
     build_graph("knows", edges);
 
@@ -305,10 +329,19 @@ TEST_F(GDB519_WassermanFaust, AC2_ManySmallComponents) {
 /// since (n_c-1)/(N-1) = 1.0 when n_c = N.
 TEST_F(GDB519_WassermanFaust, AC3_SingleComponentWFEqualsStandard) {
     // Bidirectional star: hub=1, spokes=2..6. Single component, N=nc=6.
-    build_graph("star", {
-        {1, 2}, {2, 1}, {1, 3}, {3, 1}, {1, 4}, {4, 1},
-        {1, 5}, {5, 1}, {1, 6}, {6, 1},
-    });
+    build_graph("star",
+                {
+                    {1, 2},
+                    {2, 1},
+                    {1, 3},
+                    {3, 1},
+                    {1, 4},
+                    {4, 1},
+                    {1, 5},
+                    {5, 1},
+                    {1, 6},
+                    {6, 1},
+                });
 
     auto wf_result = run_wf("star");
     ASSERT_TRUE(wf_result.has_value()) << wf_result.error().message;
@@ -370,8 +403,7 @@ TEST_F(GDB519_WassermanFaust, AC3_ConnectedPathWFEqualsStandard) {
     auto std_scores = to_wf_map(*std_result);
 
     for (const auto& [node, wf] : wf_scores) {
-        EXPECT_NEAR(wf.closeness, std_scores[node].closeness, 1e-10)
-            << "node " << node;
+        EXPECT_NEAR(wf.closeness, std_scores[node].closeness, 1e-10) << "node " << node;
     }
 }
 
@@ -387,7 +419,8 @@ TEST_F(GDB519_WassermanFaust, AC4_LargeVsTinyComponent) {
     std::vector<std::pair<int64_t, int64_t>> edges;
     for (int64_t i = 1; i <= 5; ++i) {
         for (int64_t j = 1; j <= 5; ++j) {
-            if (i != j) edges.push_back({i, j});
+            if (i != j)
+                edges.push_back({i, j});
         }
     }
     edges.push_back({100, 101});
@@ -413,10 +446,15 @@ TEST_F(GDB519_WassermanFaust, AC4_DifferentDirectedTopologies) {
     // Comp A: 1->2->3 (chain, nc=3). Node 1 reaches 2,3. Node 2 reaches 3. Node 3 reaches none.
     // Comp B: 10<->11<->12 (bidir path, nc=3). All reach all.
     // N = 6.
-    build_graph("knows", {
-        {1, 2}, {2, 3},
-        {10, 11}, {11, 10}, {11, 12}, {12, 11},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {10, 11},
+                    {11, 10},
+                    {11, 12},
+                    {12, 11},
+                });
 
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -512,7 +550,7 @@ TEST_F(GDB519_WassermanFaust, Error_InvalidVariant) {
 
     std::unordered_map<std::string, Value> args;
     args["variant"] = Value(std::string("bogus"));
-    AlgorithmContext ctx{engine_, "knows", args};
+    AlgorithmContext ctx{engine_, default_database_id, "knows", args};
     auto result = closeness_centrality_execute(ctx);
 
     ASSERT_FALSE(result.has_value());
@@ -534,7 +572,7 @@ TEST_F(GDB519_WassermanFaust, Error_NullVariantParam) {
 
     std::unordered_map<std::string, Value> args;
     args["variant"] = Value(); // null
-    AlgorithmContext ctx{engine_, "knows", args};
+    AlgorithmContext ctx{engine_, default_database_id, "knows", args};
     auto result = closeness_centrality_execute(ctx);
 
     ASSERT_FALSE(result.has_value());
@@ -547,7 +585,7 @@ TEST_F(GDB519_WassermanFaust, Error_IntegerVariantParam) {
 
     std::unordered_map<std::string, Value> args;
     args["variant"] = Value(int64_t{42});
-    AlgorithmContext ctx{engine_, "knows", args};
+    AlgorithmContext ctx{engine_, default_database_id, "knows", args};
     auto result = closeness_centrality_execute(ctx);
 
     ASSERT_FALSE(result.has_value());
@@ -602,13 +640,13 @@ TEST_F(GDB519_WassermanFaust, Numerical_LongChain) {
 /// Verify that all WF values are <= 1.0 for undirected (bidirectional) graphs.
 TEST_F(GDB519_WassermanFaust, Numerical_WFBoundedByOneForUndirected) {
     // Bidirectional K5 + bidirectional K3. All undirected, all reach all in component.
-    build_graph("knows", {
-        {1, 2}, {2, 1}, {1, 3}, {3, 1}, {1, 4}, {4, 1}, {1, 5}, {5, 1},
-        {2, 3}, {3, 2}, {2, 4}, {4, 2}, {2, 5}, {5, 2},
-        {3, 4}, {4, 3}, {3, 5}, {5, 3},
-        {4, 5}, {5, 4},
-        {10, 11}, {11, 10}, {10, 12}, {12, 10}, {11, 12}, {12, 11},
-    });
+    build_graph("knows",
+                {
+                    {1, 2},   {2, 1},   {1, 3},   {3, 1},   {1, 4},   {4, 1}, {1, 5},
+                    {5, 1},   {2, 3},   {3, 2},   {2, 4},   {4, 2},   {2, 5}, {5, 2},
+                    {3, 4},   {4, 3},   {3, 5},   {5, 3},   {4, 5},   {5, 4}, {10, 11},
+                    {11, 10}, {10, 12}, {12, 10}, {11, 12}, {12, 11},
+                });
 
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -627,12 +665,18 @@ TEST_F(GDB519_WassermanFaust, Numerical_WFBoundedByOneForUndirected) {
 /// WF closeness of a node must equal scaling * normalized_closeness.
 TEST_F(GDB519_WassermanFaust, Invariant_WFEqualsScalingTimesNormalized) {
     // Complex multi-component directed graph.
-    build_graph("knows", {
-        {1, 2}, {2, 3}, {3, 1},       // directed cycle, nc=3
-        {10, 11}, {11, 12}, {12, 10},  // another directed cycle, nc=3
-        {20, 21},                       // pair, nc=2
-        {30, 31}, {31, 30},            // bidirectional pair, nc=2
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {3, 1}, // directed cycle, nc=3
+                    {10, 11},
+                    {11, 12},
+                    {12, 10}, // another directed cycle, nc=3
+                    {20, 21}, // pair, nc=2
+                    {30, 31},
+                    {31, 30}, // bidirectional pair, nc=2
+                });
 
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -643,8 +687,7 @@ TEST_F(GDB519_WassermanFaust, Invariant_WFEqualsScalingTimesNormalized) {
 
     for (const auto& [node, r] : scores) {
         if (r.normalized_closeness > 0.0 && r.component_size > 1) {
-            double scaling =
-                static_cast<double>(r.component_size - 1) / static_cast<double>(N - 1);
+            double scaling = static_cast<double>(r.component_size - 1) / static_cast<double>(N - 1);
             double expected_wf = scaling * r.normalized_closeness;
             EXPECT_NEAR(r.closeness, expected_wf, 1e-10)
                 << "node " << node << " invariant: WF = scaling * normalized";
@@ -659,12 +702,16 @@ TEST_F(GDB519_WassermanFaust, Invariant_WFEqualsScalingTimesNormalized) {
 /// component_size root. In other words: summing unique component_sizes should
 /// equal the total number of nodes.
 TEST_F(GDB519_WassermanFaust, Invariant_ComponentSizesSumToN) {
-    build_graph("knows", {
-        {1, 2}, {2, 3},        // nc=3
-        {10, 11},              // nc=2
-        {20, 21}, {21, 22},    // nc=3
-        {30, 31}, {31, 30},    // nc=2
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3},   // nc=3
+                    {10, 11}, // nc=2
+                    {20, 21},
+                    {21, 22}, // nc=3
+                    {30, 31},
+                    {31, 30}, // nc=2
+                });
 
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -685,8 +732,7 @@ TEST_F(GDB519_WassermanFaust, Invariant_ComponentSizesSumToN) {
     // Simpler check: each node's component_size >= 1 and <= N.
     for (const auto& [node, r] : scores) {
         EXPECT_GE(r.component_size, 1) << "node " << node;
-        EXPECT_LE(r.component_size, static_cast<int64_t>(scores.size()))
-            << "node " << node;
+        EXPECT_LE(r.component_size, static_cast<int64_t>(scores.size())) << "node " << node;
     }
 }
 
@@ -694,10 +740,13 @@ TEST_F(GDB519_WassermanFaust, Invariant_ComponentSizesSumToN) {
 /// reach all nodes in your weakly connected component).
 TEST_F(GDB519_WassermanFaust, Invariant_ReachableLeqComponentSize) {
     // Directed graph: not all nodes in a component are reachable from each other.
-    build_graph("knows", {
-        {1, 2}, {2, 3},        // 1 reaches 2,3. 2 reaches 3. 3 reaches none. nc=3.
-        {10, 11}, {11, 10},    // Bidirectional pair. nc=2.
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {2, 3}, // 1 reaches 2,3. 2 reaches 3. 3 reaches none. nc=3.
+                    {10, 11},
+                    {11, 10}, // Bidirectional pair. nc=2.
+                });
 
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -711,10 +760,17 @@ TEST_F(GDB519_WassermanFaust, Invariant_ReachableLeqComponentSize) {
 
 /// Sum farness must be >= reachable_count - 1 (minimum when all at distance 1).
 TEST_F(GDB519_WassermanFaust, Invariant_FarnessLowerBound) {
-    build_graph("knows", {
-        {1, 2}, {1, 3}, {1, 4}, {2, 1}, {3, 1}, {4, 1},  // star
-        {10, 11}, {11, 12},  // chain
-    });
+    build_graph("knows",
+                {
+                    {1, 2},
+                    {1, 3},
+                    {1, 4},
+                    {2, 1},
+                    {3, 1},
+                    {4, 1}, // star
+                    {10, 11},
+                    {11, 12}, // chain
+                });
 
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -835,10 +891,14 @@ TEST_F(GDB519_WassermanFaust, Schema_SixColumnsCorrectTypes) {
 
 /// Results should be sorted by node_id.
 TEST_F(GDB519_WassermanFaust, Schema_ResultsSortedByNodeId) {
-    build_graph("knows", {
-        {50, 10}, {10, 30}, {30, 50},
-        {5, 90}, {90, 5},
-    });
+    build_graph("knows",
+                {
+                    {50, 10},
+                    {10, 30},
+                    {30, 50},
+                    {5, 90},
+                    {90, 5},
+                });
 
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -878,7 +938,7 @@ TEST_F(GDB519_WassermanFaust, Regression_DefaultIsStandard) {
     build_graph("knows", {{1, 2}, {2, 3}, {3, 1}});
 
     // No variant arg at all.
-    AlgorithmContext ctx{engine_, "knows", {}};
+    AlgorithmContext ctx{engine_, default_database_id, "knows", {}};
     auto result = closeness_centrality_execute(ctx);
     ASSERT_TRUE(result.has_value()) << result.error().message;
 

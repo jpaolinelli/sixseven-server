@@ -174,8 +174,13 @@ protected:
 
         // Create 'road' edge type with a 'distance' property.
         ColumnDef dist_col{"distance", TypeId::FLOAT64};
-        auto eid = graph_->create_edge_type(default_database_id, 
-            "road", cities_id_, cities_id_, TypeId::INT64, TypeId::INT64, {dist_col});
+        auto eid = graph_->create_edge_type(default_database_id,
+                                            "road",
+                                            cities_id_,
+                                            cities_id_,
+                                            TypeId::INT64,
+                                            TypeId::INT64,
+                                            {dist_col});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         // Build weighted graph:
@@ -194,7 +199,8 @@ protected:
     }
 
     void link(int64_t from, int64_t to, double distance) {
-        auto r = graph_->link("road", Value(from), Value(to), {Value(distance)});
+        auto r =
+            graph_->link(default_database_id, "road", Value(from), Value(to), {Value(distance)});
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 
@@ -464,8 +470,13 @@ protected:
         }
 
         ColumnDef dist_col{"distance", TypeId::FLOAT64};
-        auto eid = graph_->create_edge_type(default_database_id, 
-            "road", nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {dist_col});
+        auto eid = graph_->create_edge_type(default_database_id,
+                                            "road",
+                                            nodes_id_,
+                                            nodes_id_,
+                                            TypeId::INT64,
+                                            TypeId::INT64,
+                                            {dist_col});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         // Expensive path reaches destination first (node 2 popped at cost 1).
@@ -483,7 +494,8 @@ protected:
     }
 
     void link(int64_t from, int64_t to, double distance) {
-        auto r = graph_->link("road", Value(from), Value(to), {Value(distance)});
+        auto r =
+            graph_->link(default_database_id, "road", Value(from), Value(to), {Value(distance)});
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 
@@ -667,12 +679,18 @@ protected:
         }
 
         ColumnDef weight_col{"cost", TypeId::FLOAT64};
-        auto eid = graph_->create_edge_type(default_database_id, 
-            "edge", nodes_id_, nodes_id_, TypeId::INT64, TypeId::INT64, {weight_col});
+        auto eid = graph_->create_edge_type(default_database_id,
+                                            "edge",
+                                            nodes_id_,
+                                            nodes_id_,
+                                            TypeId::INT64,
+                                            TypeId::INT64,
+                                            {weight_col});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         // Link with negative weight.
-        auto r = graph_->link("edge", Value(int64_t{1}), Value(int64_t{2}), {Value(-5.0)});
+        auto r = graph_->link(
+            default_database_id, "edge", Value(int64_t{1}), Value(int64_t{2}), {Value(-5.0)});
         ASSERT_TRUE(r.has_value());
     }
 

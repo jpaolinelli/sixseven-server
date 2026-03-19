@@ -117,18 +117,18 @@ protected:
 
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
 
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
 
     Result<std::vector<AlgorithmRow>> run_cc(const std::string& edge_type) {
-        AlgorithmContext ctx{engine_, edge_type, {}};
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, {}};
         return connected_components_execute(ctx);
     }
 
@@ -472,7 +472,8 @@ TEST(QA_GDB480_Registration, RegistrationAndLookup) {
 
 TEST(QA_GDB480_Registration, CaseInsensitiveLookup) {
     AlgorithmRegistry registry;
-    (void)registry.register_algorithm(make_connected_components_def(), connected_components_execute);
+    (void)registry.register_algorithm(make_connected_components_def(),
+                                      connected_components_execute);
 
     EXPECT_NE(registry.find("CONNECTED_COMPONENTS"), nullptr);
     EXPECT_NE(registry.find("Connected_Components"), nullptr);
@@ -481,10 +482,11 @@ TEST(QA_GDB480_Registration, CaseInsensitiveLookup) {
 
 TEST(QA_GDB480_Registration, DuplicateRegistrationFails) {
     AlgorithmRegistry registry;
-    (void)registry.register_algorithm(make_connected_components_def(), connected_components_execute);
+    (void)registry.register_algorithm(make_connected_components_def(),
+                                      connected_components_execute);
 
-    auto dup = registry.register_algorithm(make_connected_components_def(),
-                                           connected_components_execute);
+    auto dup =
+        registry.register_algorithm(make_connected_components_def(), connected_components_execute);
     EXPECT_FALSE(dup.has_value());
     EXPECT_EQ(dup.error().code, StatusCode::ALREADY_EXISTS);
 }
@@ -602,16 +604,15 @@ TEST_F(QA_GDB480_E2E, WhereOnNodeId) {
 }
 
 TEST_F(QA_GDB480_E2E, WhereNoMatch) {
-    auto result = exec_ok(
-        "SELECT * FROM connected_components('knows') WHERE node_id = 999");
+    auto result = exec_ok("SELECT * FROM connected_components('knows') WHERE node_id = 999");
     EXPECT_EQ(result.rows.size(), 0u);
 }
 
 // --- AC3: Composable with ORDER BY ---
 
 TEST_F(QA_GDB480_E2E, OrderByNodeIdDesc) {
-    auto result = exec_ok(
-        "SELECT node_id FROM connected_components('knows') ORDER BY node_id DESC");
+    auto result =
+        exec_ok("SELECT node_id FROM connected_components('knows') ORDER BY node_id DESC");
     ASSERT_GE(result.rows.size(), 2u);
 
     // Verify descending order.
@@ -625,10 +626,9 @@ TEST_F(QA_GDB480_E2E, OrderByNodeIdDesc) {
 // --- AC3: Composable with JOIN ---
 
 TEST_F(QA_GDB480_E2E, JoinWithTable) {
-    auto result = exec_ok(
-        "SELECT u.name, cc.component_id "
-        "FROM connected_components('knows') AS cc "
-        "JOIN users AS u ON cc.node_id = u.id");
+    auto result = exec_ok("SELECT u.name, cc.component_id "
+                          "FROM connected_components('knows') AS cc "
+                          "JOIN users AS u ON cc.node_id = u.id");
 
     // Should return one row per user that appears in the graph.
     EXPECT_EQ(result.rows.size(), 5u);
@@ -638,11 +638,10 @@ TEST_F(QA_GDB480_E2E, JoinWithTable) {
 }
 
 TEST_F(QA_GDB480_E2E, JoinWithTableAndWhere) {
-    auto result = exec_ok(
-        "SELECT u.name, cc.component_id "
-        "FROM connected_components('knows') AS cc "
-        "JOIN users AS u ON cc.node_id = u.id "
-        "WHERE u.name = 'Alice'");
+    auto result = exec_ok("SELECT u.name, cc.component_id "
+                          "FROM connected_components('knows') AS cc "
+                          "JOIN users AS u ON cc.node_id = u.id "
+                          "WHERE u.name = 'Alice'");
 
     EXPECT_EQ(result.rows.size(), 1u);
 }

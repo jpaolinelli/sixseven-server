@@ -155,8 +155,13 @@ protected:
             insert_person(id);
         }
 
-        auto eid = graph_->create_edge_type(default_database_id, 
-            "knows", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
+        auto eid = graph_->create_edge_type(default_database_id,
+                                            "knows",
+                                            persons_id_,
+                                            persons_id_,
+                                            TypeId::INT64,
+                                            TypeId::INT64,
+                                            {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         // Two equal-length paths: 1→2→3→6 and 1→4→5→6.
@@ -174,7 +179,7 @@ protected:
     }
 
     void link(int64_t from, int64_t to) {
-        auto r = graph_->link("knows", Value(from), Value(to));
+        auto r = graph_->link(default_database_id, "knows", Value(from), Value(to));
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 
@@ -464,12 +469,13 @@ protected:
         auto tid = catalog_->create_table(1, std::move(ts));
         ASSERT_TRUE(tid.has_value()) << tid.error().message;
 
-        auto eid = graph_->create_edge_type(default_database_id, "knows", *tid, *tid, TypeId::INT64, TypeId::INT64, {});
+        auto eid = graph_->create_edge_type(
+            default_database_id, "knows", *tid, *tid, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
-        auto r1 = graph_->link("knows", Value(int64_t{1}), Value(int64_t{2}));
+        auto r1 = graph_->link(default_database_id, "knows", Value(int64_t{1}), Value(int64_t{2}));
         ASSERT_TRUE(r1.has_value());
-        auto r2 = graph_->link("knows", Value(int64_t{2}), Value(int64_t{3}));
+        auto r2 = graph_->link(default_database_id, "knows", Value(int64_t{2}), Value(int64_t{3}));
         ASSERT_TRUE(r2.has_value());
     }
 

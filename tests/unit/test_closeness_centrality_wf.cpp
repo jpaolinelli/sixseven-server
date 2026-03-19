@@ -39,8 +39,7 @@ struct WFResult {
     double normalized_closeness;
 };
 
-std::unordered_map<int64_t, WFResult>
-to_wf_map(const std::vector<AlgorithmRow>& rows) {
+std::unordered_map<int64_t, WFResult> to_wf_map(const std::vector<AlgorithmRow>& rows) {
     std::unordered_map<int64_t, WFResult> result;
     for (const auto& row : rows) {
         EXPECT_EQ(row.values.size(), 6u);
@@ -50,8 +49,8 @@ to_wf_map(const std::vector<AlgorithmRow>& rows) {
         auto reachable_count = std::get<int64_t>(row.values[3].data());
         auto component_size = std::get<int64_t>(row.values[4].data());
         auto normalized_closeness = std::get<double>(row.values[5].data());
-        result[node_id] = {closeness, sum_farness, reachable_count, component_size,
-                           normalized_closeness};
+        result[node_id] = {
+            closeness, sum_farness, reachable_count, component_size, normalized_closeness};
     }
     return result;
 }
@@ -72,12 +71,12 @@ protected:
 
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(default_database_id, 
-            edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
+        auto et = engine_.create_edge_type(
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
 
         for (auto [src, tgt] : edges) {
-            auto link = engine_.link(edge_type, pk(src), pk(tgt));
+            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
             ASSERT_TRUE(link.has_value()) << link.error().message;
         }
     }
@@ -85,14 +84,14 @@ protected:
     Result<std::vector<AlgorithmRow>> run_wf(const std::string& edge_type) {
         std::unordered_map<std::string, Value> args;
         args["variant"] = Value(std::string("wasserman_faust"));
-        AlgorithmContext ctx{engine_, edge_type, args};
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, args};
         return closeness_centrality_execute(ctx);
     }
 
     Result<std::vector<AlgorithmRow>> run_standard(const std::string& edge_type) {
         std::unordered_map<std::string, Value> args;
         args["variant"] = Value(std::string("standard"));
-        AlgorithmContext ctx{engine_, edge_type, args};
+        AlgorithmContext ctx{engine_, default_database_id, edge_type, args};
         return closeness_centrality_execute(ctx);
     }
 
@@ -110,8 +109,14 @@ TEST_F(WassermanFaustTest, TwoDisconnectedComponents) {
     // Component B: 10 <-> 11
     build_graph("knows",
                 {
-                    {1, 2}, {2, 1}, {2, 3}, {3, 2}, {1, 3}, {3, 1},
-                    {10, 11}, {11, 10},
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {1, 3},
+                    {3, 1},
+                    {10, 11},
+                    {11, 10},
                 });
 
     auto result = run_wf("knows");
@@ -147,9 +152,20 @@ TEST_F(WassermanFaustTest, LargerComponentScoresHigher) {
     // WF for B: [(2-1)/(6-1)] * 1.0 = 1/5 = 0.2
     build_graph("knows",
                 {
-                    {1, 2}, {2, 1}, {1, 3}, {3, 1}, {1, 4}, {4, 1},
-                    {2, 3}, {3, 2}, {2, 4}, {4, 2}, {3, 4}, {4, 3},
-                    {10, 11}, {11, 10},
+                    {1, 2},
+                    {2, 1},
+                    {1, 3},
+                    {3, 1},
+                    {1, 4},
+                    {4, 1},
+                    {2, 3},
+                    {3, 2},
+                    {2, 4},
+                    {4, 2},
+                    {3, 4},
+                    {4, 3},
+                    {10, 11},
+                    {11, 10},
                 });
 
     auto result = run_wf("knows");
@@ -161,8 +177,8 @@ TEST_F(WassermanFaustTest, LargerComponentScoresHigher) {
     for (int64_t big : {1, 2, 3, 4}) {
         for (int64_t small : {10, 11}) {
             EXPECT_GT(scores[big].closeness, scores[small].closeness)
-                << "node " << big << " (large component) should score higher than node "
-                << small << " (small component)";
+                << "node " << big << " (large component) should score higher than node " << small
+                << " (small component)";
         }
     }
 
@@ -171,8 +187,7 @@ TEST_F(WassermanFaustTest, LargerComponentScoresHigher) {
     // normalized_closeness = (4-1)/3 = 1.0
     // WF = (4-1)/(6-1) * 1.0 = 3/5 = 0.6
     for (int64_t node : {1, 2, 3, 4}) {
-        EXPECT_NEAR(scores[node].closeness, 3.0 / 5.0, 1e-10)
-            << "node " << node << " WF closeness";
+        EXPECT_NEAR(scores[node].closeness, 3.0 / 5.0, 1e-10) << "node " << node << " WF closeness";
         EXPECT_NEAR(scores[node].normalized_closeness, 1.0, 1e-10)
             << "node " << node << " normalized closeness";
     }
@@ -181,8 +196,7 @@ TEST_F(WassermanFaustTest, LargerComponentScoresHigher) {
     // normalized_closeness = (2-1)/1 = 1.0
     // WF = (2-1)/(6-1) * 1.0 = 1/5 = 0.2
     for (int64_t node : {10, 11}) {
-        EXPECT_NEAR(scores[node].closeness, 1.0 / 5.0, 1e-10)
-            << "node " << node << " WF closeness";
+        EXPECT_NEAR(scores[node].closeness, 1.0 / 5.0, 1e-10) << "node " << node << " WF closeness";
         EXPECT_NEAR(scores[node].normalized_closeness, 1.0, 1e-10)
             << "node " << node << " normalized closeness";
     }
@@ -197,8 +211,18 @@ TEST_F(WassermanFaustTest, FullyConnectedMatchesStandard) {
     // Scaling factor = (4-1)/(4-1) = 1.0, so WF = standard.
     build_graph("knows",
                 {
-                    {1, 2}, {2, 1}, {1, 3}, {3, 1}, {1, 4}, {4, 1},
-                    {2, 3}, {3, 2}, {2, 4}, {4, 2}, {3, 4}, {4, 3},
+                    {1, 2},
+                    {2, 1},
+                    {1, 3},
+                    {3, 1},
+                    {1, 4},
+                    {4, 1},
+                    {2, 3},
+                    {3, 2},
+                    {2, 4},
+                    {4, 2},
+                    {3, 4},
+                    {4, 3},
                 });
 
     auto wf_result = run_wf("knows");
@@ -272,8 +296,14 @@ TEST_F(WassermanFaustTest, ComponentSizesThreeComponents) {
     // Total N = 9.
     build_graph("knows",
                 {
-                    {1, 2}, {2, 3},
-                    {10, 11}, {11, 10}, {11, 12}, {12, 11}, {12, 13}, {13, 12},
+                    {1, 2},
+                    {2, 3},
+                    {10, 11},
+                    {11, 10},
+                    {11, 12},
+                    {12, 11},
+                    {12, 13},
+                    {13, 12},
                     {20, 21},
                 });
 
@@ -308,8 +338,14 @@ TEST_F(WassermanFaustTest, KnownAnalyticalValues) {
     // N = 5.
     build_graph("knows",
                 {
-                    {1, 2}, {2, 1}, {2, 3}, {3, 2}, {3, 1}, {1, 3},
-                    {10, 11}, {11, 10},
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
+                    {3, 1},
+                    {1, 3},
+                    {10, 11},
+                    {11, 10},
                 });
 
     auto result = run_wf("knows");
@@ -348,8 +384,10 @@ TEST_F(WassermanFaustTest, AnalyticalValuesWithVaryingCentrality) {
     // N = 5.
     build_graph("knows",
                 {
-                    {1, 2}, {2, 3},
-                    {10, 11}, {11, 10},
+                    {1, 2},
+                    {2, 3},
+                    {10, 11},
+                    {11, 10},
                 });
 
     auto result = run_wf("knows");
@@ -389,7 +427,10 @@ TEST_F(WassermanFaustTest, NormalizedClosenessIsWithinComponent) {
     // Component B: single directed edge 10->11
     build_graph("knows",
                 {
-                    {1, 2}, {2, 1}, {2, 3}, {3, 2},
+                    {1, 2},
+                    {2, 1},
+                    {2, 3},
+                    {3, 2},
                     {10, 11},
                 });
 
@@ -433,8 +474,11 @@ TEST_F(WassermanFaustTest, NormalizedClosenessIsWithinComponent) {
 TEST_F(WassermanFaustTest, ValuesNonNegativeAndFinite) {
     build_graph("knows",
                 {
-                    {1, 2}, {2, 3}, {3, 1},
-                    {10, 11}, {11, 12},
+                    {1, 2},
+                    {2, 3},
+                    {3, 1},
+                    {10, 11},
+                    {11, 12},
                     {20, 21},
                 });
 

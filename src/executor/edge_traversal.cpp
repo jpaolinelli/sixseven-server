@@ -130,7 +130,7 @@ EdgeTraversalOperator::get_neighbors(const Value& node_pk) const {
 
     if (config_.direction == TraverseDirection::OUT ||
         config_.direction == TraverseDirection::BOTH) {
-        auto edges = graph_engine_.get_edges_from(config_.edge_type, node_pk);
+        auto edges = graph_engine_.get_edges_from(config_.database_id, config_.edge_type, node_pk);
         if (!edges) {
             return tl::unexpected(edges.error());
         }
@@ -141,7 +141,7 @@ EdgeTraversalOperator::get_neighbors(const Value& node_pk) const {
 
     if (config_.direction == TraverseDirection::IN ||
         config_.direction == TraverseDirection::BOTH) {
-        auto edges = graph_engine_.get_edges_to(config_.edge_type, node_pk);
+        auto edges = graph_engine_.get_edges_to(config_.database_id, config_.edge_type, node_pk);
         if (!edges) {
             return tl::unexpected(edges.error());
         }
@@ -195,7 +195,8 @@ Result<void> EdgeTraversalOperator::collect_edges() {
 
         // Scan outgoing edges from every discovered node.
         for (const auto& [node_pk, node_depth] : depths) {
-            auto edges = graph_engine_.get_edges_from(config_.edge_type, node_pk);
+            auto edges =
+                graph_engine_.get_edges_from(config_.database_id, config_.edge_type, node_pk);
             if (!edges) {
                 return tl::unexpected(edges.error());
             }
@@ -220,7 +221,8 @@ Result<void> EdgeTraversalOperator::collect_edges() {
             }
 
             // Only scan from source table nodes (start node).
-            auto edges = graph_engine_.get_edges_from(config_.edge_type, config_.start_key);
+            auto edges = graph_engine_.get_edges_from(
+                config_.database_id, config_.edge_type, config_.start_key);
             if (!edges) {
                 return tl::unexpected(edges.error());
             }
@@ -239,7 +241,8 @@ Result<void> EdgeTraversalOperator::collect_edges() {
 
             // Scan from each discovered source table node.
             for (const auto& [src_pk, src_depth] : source_depths) {
-                auto edges = graph_engine_.get_edges_from(config_.edge_type, src_pk);
+                auto edges =
+                    graph_engine_.get_edges_from(config_.database_id, config_.edge_type, src_pk);
                 if (!edges) {
                     return tl::unexpected(edges.error());
                 }

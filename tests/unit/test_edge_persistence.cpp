@@ -71,56 +71,76 @@ protected:
 
 TEST_F(EdgePersistenceTest, EdgesRecoveredAfterRestart) {
     // Create edge type and edges.
-    auto et = engine_->create_edge_type(default_database_id, 
-        "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
+    auto et = engine_->create_edge_type(default_database_id,
+                                        "follows",
+                                        users_table_id_,
+                                        users_table_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
-    ASSERT_TRUE(engine_->link("follows", pk(1), pk(2)).has_value());
-    ASSERT_TRUE(engine_->link("follows", pk(1), pk(3)).has_value());
-    ASSERT_TRUE(engine_->link("follows", pk(2), pk(3)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(1), pk(2)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(1), pk(3)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(2), pk(3)).has_value());
 
     // Simulate restart.
     engine_ = restart_engine();
 
     // Verify edges are still there.
-    auto from_1 = engine_->get_edges_from("follows", pk(1));
+    auto from_1 = engine_->get_edges_from(default_database_id, "follows", pk(1));
     ASSERT_TRUE(from_1.has_value()) << from_1.error().message;
     EXPECT_EQ(from_1->size(), 2u);
 
-    auto from_2 = engine_->get_edges_from("follows", pk(2));
+    auto from_2 = engine_->get_edges_from(default_database_id, "follows", pk(2));
     ASSERT_TRUE(from_2.has_value()) << from_2.error().message;
     EXPECT_EQ(from_2->size(), 1u);
     EXPECT_EQ((*from_2)[0].target_pk.as_int64(), 3);
 }
 
 TEST_F(EdgePersistenceTest, ReverseIndexRecoveredAfterRestart) {
-    auto et = engine_->create_edge_type(default_database_id, 
-        "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
+    auto et = engine_->create_edge_type(default_database_id,
+                                        "follows",
+                                        users_table_id_,
+                                        users_table_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
-    ASSERT_TRUE(engine_->link("follows", pk(1), pk(3)).has_value());
-    ASSERT_TRUE(engine_->link("follows", pk(2), pk(3)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(1), pk(3)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(2), pk(3)).has_value());
 
     engine_ = restart_engine();
 
     // Reverse lookup: node 3 has incoming edges from 1 and 2.
-    auto to_3 = engine_->get_edges_to("follows", pk(3));
+    auto to_3 = engine_->get_edges_to(default_database_id, "follows", pk(3));
     ASSERT_TRUE(to_3.has_value()) << to_3.error().message;
     EXPECT_EQ(to_3->size(), 2u);
 }
 
 TEST_F(EdgePersistenceTest, EdgePropertiesPersisted) {
     std::vector<ColumnDef> props = {{"weight", TypeId::FLOAT64}, {"label", TypeId::STRING}};
-    auto et = engine_->create_edge_type(default_database_id, 
-        "rated", users_table_id_, posts_table_id_, TypeId::INT64, TypeId::INT64, props);
+    auto et = engine_->create_edge_type(default_database_id,
+                                        "rated",
+                                        users_table_id_,
+                                        posts_table_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        props);
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
-    ASSERT_TRUE(engine_->link("rated", pk(1), pk(10), {Value(4.5), Value(std::string("great"))})
+    ASSERT_TRUE(engine_
+                    ->link(default_database_id,
+                           "rated",
+                           pk(1),
+                           pk(10),
+                           {Value(4.5), Value(std::string("great"))})
                     .has_value());
 
     engine_ = restart_engine();
 
-    auto edges = engine_->get_edges_from("rated", pk(1));
+    auto edges = engine_->get_edges_from(default_database_id, "rated", pk(1));
     ASSERT_TRUE(edges.has_value()) << edges.error().message;
     ASSERT_EQ(edges->size(), 1u);
     ASSERT_EQ((*edges)[0].properties.size(), 2u);
@@ -131,20 +151,25 @@ TEST_F(EdgePersistenceTest, EdgePropertiesPersisted) {
 // == UNLINK persistence =======================================================
 
 TEST_F(EdgePersistenceTest, UnlinkedEdgesNotRecovered) {
-    auto et = engine_->create_edge_type(default_database_id, 
-        "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
+    auto et = engine_->create_edge_type(default_database_id,
+                                        "follows",
+                                        users_table_id_,
+                                        users_table_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
-    ASSERT_TRUE(engine_->link("follows", pk(1), pk(2)).has_value());
-    ASSERT_TRUE(engine_->link("follows", pk(1), pk(3)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(1), pk(2)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(1), pk(3)).has_value());
 
     // Unlink one edge.
-    ASSERT_TRUE(engine_->unlink("follows", pk(1), pk(2)).has_value());
+    ASSERT_TRUE(engine_->unlink(default_database_id, "follows", pk(1), pk(2)).has_value());
 
     engine_ = restart_engine();
 
     // Only pk(3) edge should remain.
-    auto edges = engine_->get_edges_from("follows", pk(1));
+    auto edges = engine_->get_edges_from(default_database_id, "follows", pk(1));
     ASSERT_TRUE(edges.has_value()) << edges.error().message;
     ASSERT_EQ(edges->size(), 1u);
     EXPECT_EQ((*edges)[0].target_pk.as_int64(), 3);
@@ -152,25 +177,34 @@ TEST_F(EdgePersistenceTest, UnlinkedEdgesNotRecovered) {
 
 TEST_F(EdgePersistenceTest, UnlinkWherePersistedCorrectly) {
     std::vector<ColumnDef> props = {{"weight", TypeId::FLOAT64}};
-    auto et = engine_->create_edge_type(default_database_id, 
-        "rated", users_table_id_, posts_table_id_, TypeId::INT64, TypeId::INT64, props);
+    auto et = engine_->create_edge_type(default_database_id,
+                                        "rated",
+                                        users_table_id_,
+                                        posts_table_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        props);
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
-    ASSERT_TRUE(engine_->link("rated", pk(1), pk(10), {Value(2.0)}).has_value());
-    ASSERT_TRUE(engine_->link("rated", pk(1), pk(10), {Value(4.5)}).has_value());
-    ASSERT_TRUE(engine_->link("rated", pk(1), pk(10), {Value(5.0)}).has_value());
+    ASSERT_TRUE(
+        engine_->link(default_database_id, "rated", pk(1), pk(10), {Value(2.0)}).has_value());
+    ASSERT_TRUE(
+        engine_->link(default_database_id, "rated", pk(1), pk(10), {Value(4.5)}).has_value());
+    ASSERT_TRUE(
+        engine_->link(default_database_id, "rated", pk(1), pk(10), {Value(5.0)}).has_value());
 
     // Delete edges where weight < 3.0.
-    auto result = engine_->unlink_where("rated", pk(1), pk(10), [](const EdgeRow& e) {
-        return e.properties[0].as_float64() < 3.0;
-    });
+    auto result =
+        engine_->unlink_where(default_database_id, "rated", pk(1), pk(10), [](const EdgeRow& e) {
+            return e.properties[0].as_float64() < 3.0;
+        });
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(*result, 1u);
 
     engine_ = restart_engine();
 
     // Two edges should remain (4.5 and 5.0).
-    auto edges = engine_->get_edges_from("rated", pk(1));
+    auto edges = engine_->get_edges_from(default_database_id, "rated", pk(1));
     ASSERT_TRUE(edges.has_value()) << edges.error().message;
     EXPECT_EQ(edges->size(), 2u);
 }
@@ -178,25 +212,35 @@ TEST_F(EdgePersistenceTest, UnlinkWherePersistedCorrectly) {
 // == Multiple edge types ======================================================
 
 TEST_F(EdgePersistenceTest, MultipleEdgeTypesPersisted) {
-    auto et1 = engine_->create_edge_type(default_database_id, 
-        "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
+    auto et1 = engine_->create_edge_type(default_database_id,
+                                         "follows",
+                                         users_table_id_,
+                                         users_table_id_,
+                                         TypeId::INT64,
+                                         TypeId::INT64,
+                                         {});
     ASSERT_TRUE(et1.has_value()) << et1.error().message;
 
-    auto et2 = engine_->create_edge_type(default_database_id, 
-        "authored", users_table_id_, posts_table_id_, TypeId::INT64, TypeId::INT64, {});
+    auto et2 = engine_->create_edge_type(default_database_id,
+                                         "authored",
+                                         users_table_id_,
+                                         posts_table_id_,
+                                         TypeId::INT64,
+                                         TypeId::INT64,
+                                         {});
     ASSERT_TRUE(et2.has_value()) << et2.error().message;
 
-    ASSERT_TRUE(engine_->link("follows", pk(1), pk(2)).has_value());
-    ASSERT_TRUE(engine_->link("authored", pk(1), pk(100)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(1), pk(2)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "authored", pk(1), pk(100)).has_value());
 
     engine_ = restart_engine();
 
-    auto follows = engine_->get_edges_from("follows", pk(1));
+    auto follows = engine_->get_edges_from(default_database_id, "follows", pk(1));
     ASSERT_TRUE(follows.has_value()) << follows.error().message;
     EXPECT_EQ(follows->size(), 1u);
     EXPECT_EQ((*follows)[0].target_pk.as_int64(), 2);
 
-    auto authored = engine_->get_edges_from("authored", pk(1));
+    auto authored = engine_->get_edges_from(default_database_id, "authored", pk(1));
     ASSERT_TRUE(authored.has_value()) << authored.error().message;
     EXPECT_EQ(authored->size(), 1u);
     EXPECT_EQ((*authored)[0].target_pk.as_int64(), 100);
@@ -205,27 +249,32 @@ TEST_F(EdgePersistenceTest, MultipleEdgeTypesPersisted) {
 // == Row ID continuity ========================================================
 
 TEST_F(EdgePersistenceTest, NewEdgesAfterRestartGetUniqueRowIds) {
-    auto et = engine_->create_edge_type(default_database_id, 
-        "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
+    auto et = engine_->create_edge_type(default_database_id,
+                                        "follows",
+                                        users_table_id_,
+                                        users_table_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
-    auto id1 = engine_->link("follows", pk(1), pk(2));
+    auto id1 = engine_->link(default_database_id, "follows", pk(1), pk(2));
     ASSERT_TRUE(id1.has_value()) << id1.error().message;
 
-    auto id2 = engine_->link("follows", pk(1), pk(3));
+    auto id2 = engine_->link(default_database_id, "follows", pk(1), pk(3));
     ASSERT_TRUE(id2.has_value()) << id2.error().message;
 
     engine_ = restart_engine();
 
     // Insert a new edge after restart.
-    auto id3 = engine_->link("follows", pk(1), pk(4));
+    auto id3 = engine_->link(default_database_id, "follows", pk(1), pk(4));
     ASSERT_TRUE(id3.has_value()) << id3.error().message;
 
     // New row ID should be greater than any restored row ID.
     EXPECT_GT(*id3, *id2);
 
     // All three edges should be present.
-    auto edges = engine_->get_edges_from("follows", pk(1));
+    auto edges = engine_->get_edges_from(default_database_id, "follows", pk(1));
     ASSERT_TRUE(edges.has_value()) << edges.error().message;
     EXPECT_EQ(edges->size(), 3u);
 }
@@ -233,15 +282,20 @@ TEST_F(EdgePersistenceTest, NewEdgesAfterRestartGetUniqueRowIds) {
 // == Empty edge type ==========================================================
 
 TEST_F(EdgePersistenceTest, EmptyEdgeTypeRecoveredCorrectly) {
-    auto et = engine_->create_edge_type(default_database_id, 
-        "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
+    auto et = engine_->create_edge_type(default_database_id,
+                                        "follows",
+                                        users_table_id_,
+                                        users_table_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
     // No edges inserted.
     engine_ = restart_engine();
 
     // Edge type should exist but be empty.
-    auto edges = engine_->get_edges_from("follows", pk(1));
+    auto edges = engine_->get_edges_from(default_database_id, "follows", pk(1));
     ASSERT_TRUE(edges.has_value()) << edges.error().message;
     EXPECT_TRUE(edges->empty());
 }
@@ -249,11 +303,16 @@ TEST_F(EdgePersistenceTest, EmptyEdgeTypeRecoveredCorrectly) {
 // == Drop edge type persistence ===============================================
 
 TEST_F(EdgePersistenceTest, DroppedEdgeTypeFileRemoved) {
-    auto et = engine_->create_edge_type(default_database_id, 
-        "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
+    auto et = engine_->create_edge_type(default_database_id,
+                                        "follows",
+                                        users_table_id_,
+                                        users_table_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
-    ASSERT_TRUE(engine_->link("follows", pk(1), pk(2)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(1), pk(2)).has_value());
 
     // Check that edge file exists.
     auto edge_path = data_dir_ / "databases" / std::to_string(default_database_id) / "edges" /
@@ -270,15 +329,20 @@ TEST_F(EdgePersistenceTest, DroppedEdgeTypeFileRemoved) {
 // == Self-referencing persistence =============================================
 
 TEST_F(EdgePersistenceTest, SelfReferenceEdgesPersisted) {
-    auto et = engine_->create_edge_type(default_database_id, 
-        "self_link", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
+    auto et = engine_->create_edge_type(default_database_id,
+                                        "self_link",
+                                        users_table_id_,
+                                        users_table_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
-    ASSERT_TRUE(engine_->link("self_link", pk(1), pk(1)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "self_link", pk(1), pk(1)).has_value());
 
     engine_ = restart_engine();
 
-    auto from = engine_->get_edges_from("self_link", pk(1));
+    auto from = engine_->get_edges_from(default_database_id, "self_link", pk(1));
     ASSERT_TRUE(from.has_value()) << from.error().message;
     EXPECT_EQ(from->size(), 1u);
     EXPECT_EQ((*from)[0].source_pk.as_int64(), 1);
@@ -288,26 +352,31 @@ TEST_F(EdgePersistenceTest, SelfReferenceEdgesPersisted) {
 // == Multiple restarts ========================================================
 
 TEST_F(EdgePersistenceTest, DataSurvivesMultipleRestarts) {
-    auto et = engine_->create_edge_type(default_database_id, 
-        "follows", users_table_id_, users_table_id_, TypeId::INT64, TypeId::INT64, {});
+    auto et = engine_->create_edge_type(default_database_id,
+                                        "follows",
+                                        users_table_id_,
+                                        users_table_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
-    ASSERT_TRUE(engine_->link("follows", pk(1), pk(2)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(1), pk(2)).has_value());
 
     // First restart.
     engine_ = restart_engine();
 
     // Add more edges after first restart.
-    ASSERT_TRUE(engine_->link("follows", pk(2), pk(3)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(2), pk(3)).has_value());
 
     // Second restart.
     engine_ = restart_engine();
 
-    auto from_1 = engine_->get_edges_from("follows", pk(1));
+    auto from_1 = engine_->get_edges_from(default_database_id, "follows", pk(1));
     ASSERT_TRUE(from_1.has_value()) << from_1.error().message;
     EXPECT_EQ(from_1->size(), 1u);
 
-    auto from_2 = engine_->get_edges_from("follows", pk(2));
+    auto from_2 = engine_->get_edges_from(default_database_id, "follows", pk(2));
     ASSERT_TRUE(from_2.has_value()) << from_2.error().message;
     EXPECT_EQ(from_2->size(), 1u);
 }

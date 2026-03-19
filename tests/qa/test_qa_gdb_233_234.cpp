@@ -420,23 +420,25 @@ TEST(QA_GraphEngineWAL, NullptrWalBackwardCompat) {
     auto t2 = catalog.create_table(default_database_id, make_table_schema("posts"));
     ASSERT_TRUE(t2.has_value());
 
-    ASSERT_TRUE(
-        engine.create_edge_type(default_database_id, "follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {}).has_value());
+    ASSERT_TRUE(engine
+                    .create_edge_type(
+                        default_database_id, "follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {})
+                    .has_value());
 
     // LINK with nullptr WAL.
-    auto link = engine.link("follows", pk(1), pk(2));
+    auto link = engine.link(default_database_id, "follows", pk(1), pk(2));
     ASSERT_TRUE(link.has_value()) << "LINK failed with nullptr WAL: " << link.error().message;
 
     // Verify the edge exists.
-    auto from = engine.get_edges_from("follows", pk(1));
+    auto from = engine.get_edges_from(default_database_id, "follows", pk(1));
     ASSERT_TRUE(from.has_value());
     EXPECT_EQ(from->size(), 1u);
 
     // UNLINK with nullptr WAL.
-    auto unlink = engine.unlink("follows", pk(1), pk(2));
+    auto unlink = engine.unlink(default_database_id, "follows", pk(1), pk(2));
     ASSERT_TRUE(unlink.has_value()) << "UNLINK failed with nullptr WAL: " << unlink.error().message;
 
-    from = engine.get_edges_from("follows", pk(1));
+    from = engine.get_edges_from(default_database_id, "follows", pk(1));
     ASSERT_TRUE(from.has_value());
     EXPECT_TRUE(from->empty());
 }
@@ -458,10 +460,12 @@ TEST(QA_GraphEngineWAL, LinkWritesWalRecord) {
     auto t1 = catalog.create_table(default_database_id, make_table_schema("nodes"));
     ASSERT_TRUE(t1.has_value());
 
-    ASSERT_TRUE(engine.create_edge_type(default_database_id, "connects", *t1, *t1, TypeId::INT64, TypeId::INT64, {})
+    ASSERT_TRUE(engine
+                    .create_edge_type(
+                        default_database_id, "connects", *t1, *t1, TypeId::INT64, TypeId::INT64, {})
                     .has_value());
 
-    auto link = engine.link("connects", pk(10), pk(20));
+    auto link = engine.link(default_database_id, "connects", pk(10), pk(20));
     ASSERT_TRUE(link.has_value()) << link.error().message;
 
     // WAL should have advanced (a record was written).
@@ -506,17 +510,19 @@ TEST(QA_GraphEngineWAL, UnlinkWritesWalRecord) {
     auto t1 = catalog.create_table(default_database_id, make_table_schema("nodes"));
     ASSERT_TRUE(t1.has_value());
 
-    ASSERT_TRUE(engine.create_edge_type(default_database_id, "connects", *t1, *t1, TypeId::INT64, TypeId::INT64, {})
+    ASSERT_TRUE(engine
+                    .create_edge_type(
+                        default_database_id, "connects", *t1, *t1, TypeId::INT64, TypeId::INT64, {})
                     .has_value());
 
     // LINK first.
-    auto link = engine.link("connects", pk(10), pk(20));
+    auto link = engine.link(default_database_id, "connects", pk(10), pk(20));
     ASSERT_TRUE(link.has_value());
 
     lsn_t lsn_before_unlink = wal_writer->current_lsn();
 
     // UNLINK.
-    auto unlink = engine.unlink("connects", pk(10), pk(20));
+    auto unlink = engine.unlink(default_database_id, "connects", pk(10), pk(20));
     ASSERT_TRUE(unlink.has_value()) << unlink.error().message;
 
     lsn_t lsn_after_unlink = wal_writer->current_lsn();
@@ -559,20 +565,22 @@ TEST(QA_GraphEngineWAL, MultipleLinkUnlinkAccumulateWalRecords) {
     auto t1 = catalog.create_table(default_database_id, make_table_schema("nodes"));
     ASSERT_TRUE(t1.has_value());
 
-    ASSERT_TRUE(
-        engine.create_edge_type(default_database_id, "follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {}).has_value());
+    ASSERT_TRUE(engine
+                    .create_edge_type(
+                        default_database_id, "follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {})
+                    .has_value());
 
     constexpr int link_count = 5;
 
     // Perform several LINKs.
     for (int i = 0; i < link_count; ++i) {
-        auto link = engine.link("follows", pk(1), pk(i + 100));
+        auto link = engine.link(default_database_id, "follows", pk(1), pk(i + 100));
         ASSERT_TRUE(link.has_value()) << link.error().message;
     }
 
     // Then UNLINK all of them.
     for (int i = 0; i < link_count; ++i) {
-        auto unlink = engine.unlink("follows", pk(1), pk(i + 100));
+        auto unlink = engine.unlink(default_database_id, "follows", pk(1), pk(i + 100));
         ASSERT_TRUE(unlink.has_value()) << unlink.error().message;
     }
 
@@ -620,17 +628,20 @@ TEST(QA_GraphEngineWAL, FailedLinkDoesNotWriteWalRecord) {
     ASSERT_TRUE(t1.has_value());
 
     // Create with duplicate prevention enabled.
-    ASSERT_TRUE(engine.create_edge_type(default_database_id, "follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {}, true)
-                    .has_value());
+    ASSERT_TRUE(
+        engine
+            .create_edge_type(
+                default_database_id, "follows", *t1, *t1, TypeId::INT64, TypeId::INT64, {}, true)
+            .has_value());
 
     // First LINK succeeds.
-    auto link1 = engine.link("follows", pk(1), pk(2));
+    auto link1 = engine.link(default_database_id, "follows", pk(1), pk(2));
     ASSERT_TRUE(link1.has_value());
 
     lsn_t lsn_after_first = wal_writer->current_lsn();
 
     // Duplicate LINK should fail (constraint violation).
-    auto link2 = engine.link("follows", pk(1), pk(2));
+    auto link2 = engine.link(default_database_id, "follows", pk(1), pk(2));
     EXPECT_FALSE(link2.has_value());
     EXPECT_EQ(link2.error().code, StatusCode::CONSTRAINT_VIOLATION);
 

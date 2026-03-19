@@ -96,8 +96,7 @@ static MatchStmt* match_from_select(const StmtPtr& stmt) {
 
 TEST(QA_GDB422_Parse, RangeQuantifier_LargeBounds) {
     // Large but valid int32_t values.
-    auto stmt =
-        parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->{1,1000}(b:p)");
+    auto stmt = parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->{1,1000}(b:p)");
     auto* m = match_from_select(stmt);
     ASSERT_NE(m, nullptr);
     const auto& edge = m->pattern[0].outgoing_edge;
@@ -108,8 +107,7 @@ TEST(QA_GDB422_Parse, RangeQuantifier_LargeBounds) {
 }
 
 TEST(QA_GDB422_Parse, RangeQuantifier_ZeroMin) {
-    auto stmt =
-        parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->{0,5}(b:p)");
+    auto stmt = parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->{0,5}(b:p)");
     auto* m = match_from_select(stmt);
     ASSERT_NE(m, nullptr);
     const auto& edge = m->pattern[0].outgoing_edge;
@@ -120,8 +118,7 @@ TEST(QA_GDB422_Parse, RangeQuantifier_ZeroMin) {
 
 TEST(QA_GDB422_Parse, RangeQuantifier_SameMinMax) {
     // {5,5} should be treated like {5}.
-    auto stmt =
-        parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->{5,5}(b:p)");
+    auto stmt = parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->{5,5}(b:p)");
     auto* m = match_from_select(stmt);
     ASSERT_NE(m, nullptr);
     const auto& edge = m->pattern[0].outgoing_edge;
@@ -133,8 +130,7 @@ TEST(QA_GDB422_Parse, RangeQuantifier_SameMinMax) {
 // -- AC2: {n} exact quantifier parsing ---------------------------------------
 
 TEST(QA_GDB422_Parse, ExactQuantifier_One) {
-    auto stmt =
-        parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->{1}(b:p)");
+    auto stmt = parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->{1}(b:p)");
     auto* m = match_from_select(stmt);
     ASSERT_NE(m, nullptr);
     const auto& edge = m->pattern[0].outgoing_edge;
@@ -145,8 +141,7 @@ TEST(QA_GDB422_Parse, ExactQuantifier_One) {
 
 TEST(QA_GDB422_Parse, ExactQuantifier_Zero) {
     // {0} should parse even if binder rejects it.
-    auto stmt =
-        parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->{0}(b:p)");
+    auto stmt = parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->{0}(b:p)");
     auto* m = match_from_select(stmt);
     ASSERT_NE(m, nullptr);
     const auto& edge = m->pattern[0].outgoing_edge;
@@ -158,8 +153,7 @@ TEST(QA_GDB422_Parse, ExactQuantifier_Zero) {
 // -- AC3: + shorthand --------------------------------------------------------
 
 TEST(QA_GDB422_Parse, PlusShorthand_HasNoMaxHops) {
-    auto stmt =
-        parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->+(b:p)");
+    auto stmt = parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->+(b:p)");
     auto* m = match_from_select(stmt);
     ASSERT_NE(m, nullptr);
     const auto& edge = m->pattern[0].outgoing_edge;
@@ -171,8 +165,7 @@ TEST(QA_GDB422_Parse, PlusShorthand_HasNoMaxHops) {
 // -- AC4: * shorthand --------------------------------------------------------
 
 TEST(QA_GDB422_Parse, StarShorthand_HasNoMaxHops) {
-    auto stmt =
-        parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->*(b:p)");
+    auto stmt = parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->*(b:p)");
     auto* m = match_from_select(stmt);
     ASSERT_NE(m, nullptr);
     const auto& edge = m->pattern[0].outgoing_edge;
@@ -185,8 +178,7 @@ TEST(QA_GDB422_Parse, StarShorthand_HasNoMaxHops) {
 
 TEST(QA_GDB422_Parse, UnboundedMax) {
     // {3,} — min=3, no max bound.
-    auto stmt =
-        parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->{3,}(b:p)");
+    auto stmt = parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->{3,}(b:p)");
     auto* m = match_from_select(stmt);
     ASSERT_NE(m, nullptr);
     const auto& edge = m->pattern[0].outgoing_edge;
@@ -213,8 +205,7 @@ TEST(QA_GDB422_Parse, MalformedQuantifier_NegativeMin) {
 // -- Quantifiers with different directions -----------------------------------
 
 TEST(QA_GDB422_Parse, IncomingWithQuantifier) {
-    auto stmt =
-        parse_one("SELECT a.name FROM MATCH (a:p)<-[r:e]-{2,4}(b:p)");
+    auto stmt = parse_one("SELECT a.name FROM MATCH (a:p)<-[r:e]-{2,4}(b:p)");
     auto* m = match_from_select(stmt);
     ASSERT_NE(m, nullptr);
     const auto& edge = m->pattern[0].outgoing_edge;
@@ -225,8 +216,7 @@ TEST(QA_GDB422_Parse, IncomingWithQuantifier) {
 }
 
 TEST(QA_GDB422_Parse, UndirectedWithPlus) {
-    auto stmt =
-        parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]-+(b:p)");
+    auto stmt = parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]-+(b:p)");
     auto* m = match_from_select(stmt);
     ASSERT_NE(m, nullptr);
     const auto& edge = m->pattern[0].outgoing_edge;
@@ -238,8 +228,7 @@ TEST(QA_GDB422_Parse, UndirectedWithPlus) {
 // -- No quantifier (regression: still works as single hop) -------------------
 
 TEST(QA_GDB422_Parse, NoQuantifierRegression) {
-    auto stmt =
-        parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->(b:p)");
+    auto stmt = parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->(b:p)");
     auto* m = match_from_select(stmt);
     ASSERT_NE(m, nullptr);
     const auto& edge = m->pattern[0].outgoing_edge;
@@ -379,8 +368,13 @@ protected:
         insert_person(6, "Frank");
 
         // Create 'knows' edge type.
-        auto eid = graph_->create_edge_type(default_database_id, 
-            "knows", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
+        auto eid = graph_->create_edge_type(default_database_id,
+                                            "knows",
+                                            persons_id_,
+                                            persons_id_,
+                                            TypeId::INT64,
+                                            TypeId::INT64,
+                                            {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         // Linear chain: 1->2->3->4->5->6
@@ -391,8 +385,13 @@ protected:
         link("knows", 5, 6);
 
         // Create 'cycle' edge type.
-        auto cid = graph_->create_edge_type(default_database_id, 
-            "cycle", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
+        auto cid = graph_->create_edge_type(default_database_id,
+                                            "cycle",
+                                            persons_id_,
+                                            persons_id_,
+                                            TypeId::INT64,
+                                            TypeId::INT64,
+                                            {});
         ASSERT_TRUE(cid.has_value()) << cid.error().message;
 
         // Triangle cycle: 1->2->3->1
@@ -407,7 +406,7 @@ protected:
     }
 
     void link(const std::string& edge_type, int64_t from, int64_t to) {
-        auto r = graph_->link(edge_type, Value(from), Value(to));
+        auto r = graph_->link(default_database_id, edge_type, Value(from), Value(to));
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 
@@ -424,8 +423,8 @@ protected:
         ASSERT_TRUE(rid.has_value()) << rid.error().message;
     }
 
-    std::vector<Tuple> run_vl_match(MatchConfig config, OutputSchema schema,
-                                     size_t max_visited = 100'000) {
+    std::vector<Tuple>
+    run_vl_match(MatchConfig config, OutputSchema schema, size_t max_visited = 100'000) {
         BoundStatement bound;
         VariableLengthMatchOperator op(*graph_,
                                        *catalog_,
@@ -555,8 +554,7 @@ TEST_F(QA_GDB422_Executor, AC4_ZeroHopSelfMatch) {
     // Verify at least one self-match: source == target.
     bool found_self = false;
     for (const auto& t : results) {
-        if (t.values.size() >= 2 &&
-            t.values[0].as_string() == t.values[1].as_string()) {
+        if (t.values.size() >= 2 && t.values[0].as_string() == t.values[1].as_string()) {
             found_self = true;
             break;
         }
@@ -630,8 +628,7 @@ TEST(QA_GDB422_PathLength, ExprEvaluator_WrongType) {
 
     BoundStatement bound;
     auto result = evaluate_expr(fn_expr, tuple, schema, bound);
-    EXPECT_FALSE(result.has_value())
-        << "path_length on INT64 should return an error";
+    EXPECT_FALSE(result.has_value()) << "path_length on INT64 should return an error";
 }
 
 TEST(QA_GDB422_PathLength, ExprEvaluator_TwoArgs) {
@@ -684,8 +681,8 @@ TEST_F(QA_GDB422_Executor, AC7_MemoryBound_ExactlyEnough) {
 
 TEST_F(QA_GDB422_Executor, EmptyEdgeType) {
     // Create a new edge type with no edges.
-    auto eid = graph_->create_edge_type(default_database_id, 
-        "empty", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
+    auto eid = graph_->create_edge_type(
+        default_database_id, "empty", persons_id_, persons_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(eid.has_value());
 
     auto config = make_config("empty", 1, 5);
