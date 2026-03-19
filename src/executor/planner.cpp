@@ -1,6 +1,7 @@
 #include "sixseven/executor/planner.h"
 
 #include "sixseven/common/coercion.h"
+#include "sixseven/common/value_hash.h"
 #include "sixseven/executor/algorithm_scan.h"
 #include "sixseven/executor/delete.h"
 #include "sixseven/executor/edge_traversal.h"
@@ -487,7 +488,7 @@ Planner::plan_from_source(const TableRef& table_ref,
         config.fetch = true; // Always fetch for enrichment.
 
         // Resolve edge type.
-        auto edge_def = catalog_.get_edge_type(database_id_,trav->edge_type);
+        auto edge_def = catalog_.get_edge_type(database_id_, trav->edge_type);
         if (!edge_def) {
             return make_error(edge_def.error().code, edge_def.error().message);
         }
@@ -693,16 +694,23 @@ Planner::plan_from_source(const TableRef& table_ref,
         std::unique_ptr<Iterator> iter;
         if (has_variable_length) {
             iter = std::make_unique<VariableLengthMatchOperator>(
-                *graph_engine_, catalog_, storage_, database_id_,
-                std::move(match_config), std::move(schema),
+                *graph_engine_,
+                catalog_,
+                storage_,
+                database_id_,
+                std::move(match_config),
+                std::move(schema),
                 nullptr, // WHERE handled by outer SELECT
                 bound);
         } else {
-            iter = std::make_unique<PatternMatchOperator>(
-                *graph_engine_, catalog_, storage_, database_id_,
-                std::move(match_config), std::move(schema),
-                nullptr, // WHERE handled by outer SELECT
-                bound);
+            iter = std::make_unique<PatternMatchOperator>(*graph_engine_,
+                                                          catalog_,
+                                                          storage_,
+                                                          database_id_,
+                                                          std::move(match_config),
+                                                          std::move(schema),
+                                                          nullptr, // WHERE handled by outer SELECT
+                                                          bound);
         }
 
         auto out_schema = build_output_schema(bound.output_columns);
@@ -1655,7 +1663,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_traverse(const TraverseStmt& stm
 
     // Build output schema.
     // Determine PK type from the edge type definition.
-    auto edge_def = catalog_.get_edge_type(database_id_,stmt.edge_type);
+    auto edge_def = catalog_.get_edge_type(database_id_, stmt.edge_type);
     if (!edge_def) {
         return make_error(edge_def.error().code, edge_def.error().message);
     }
@@ -1985,16 +1993,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
             return make_error(start_key.error().code, start_key.error().message);
         }
 
-        // Save start PK before moving the value into the config.
-        int64_t start_pk = start_key->as_int64();
-
-        TraversalConfig trav_config;
-        trav_config.edge_type = trav_stmt->edge_type;
-        trav_config.start_key = std::move(*start_key);
-        trav_config.direction = trav_stmt->direction;
-        trav_config.max_depth = trav_stmt->max_depth.value_or(100);
-
-        // Build a minimal output schema for traversal.
+        // Determine the PK type for the target table.
         TypeId pk_type = TypeId::INT64;
         if (!table_schema->pk_columns.empty()) {
             for (const auto& col : table_schema->columns) {
@@ -2004,6 +2003,25 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
                 }
             }
         }
+
+        // Coerce the start key to match the table's PK type (e.g. STRING → UUID,
+        // INT64 literal → INT32 column).
+        if (start_key->type_id() != pk_type) {
+            auto coerced = fit_to_storage(*start_key, pk_type);
+            if (!coerced) {
+                return make_error(coerced.error().code, coerced.error().message);
+            }
+            *start_key = std::move(*coerced);
+        }
+
+        // Save start PK before moving the value into the config.
+        Value start_pk = *start_key;
+
+        TraversalConfig trav_config;
+        trav_config.edge_type = trav_stmt->edge_type;
+        trav_config.start_key = std::move(*start_key);
+        trav_config.direction = trav_stmt->direction;
+        trav_config.max_depth = trav_stmt->max_depth.value_or(100);
         std::vector<OutputColumn> trav_cols;
         trav_cols.push_back({"", "node", pk_type, false, 0});
         trav_cols.push_back({"", "depth", TypeId::INT64, false, 0});
@@ -2019,7 +2037,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
         }
 
         // Collect reachable node PKs.
-        std::unordered_set<int64_t> reachable_pks;
+        std::unordered_set<Value, ValueHash, ValueEqual> reachable_pks;
         while (true) {
             auto row = trav_op.next();
             if (!row) {
@@ -2028,7 +2046,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
             if (!row->has_value()) {
                 break;
             }
-            reachable_pks.insert(row->value().values[0].as_int64());
+            reachable_pks.insert(row->value().values[0]);
         }
         trav_op.close();
 
@@ -2063,7 +2081,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
                 return make_error(values.error().code, values.error().message);
             }
             if (pk_col_idx >= 0 &&
-                reachable_pks.count((*values)[static_cast<size_t>(pk_col_idx)].as_int64()) > 0) {
+                reachable_pks.count((*values)[static_cast<size_t>(pk_col_idx)]) > 0) {
                 config.allowed_node_ids.insert(ordinal);
             }
             ++ordinal;
