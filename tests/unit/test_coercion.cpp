@@ -445,3 +445,98 @@ TEST(ExplicitCast, IncompatibleReturnsError) {
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
 }
+
+// -- explicit_cast overflow/range validation ----------------------------------
+
+TEST(ExplicitCast, Float64ToInt32OverflowAboveMax) {
+    auto r = explicit_cast(Value(3000000000.0), TypeId::INT32);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(ExplicitCast, Float64ToInt32OverflowBelowMin) {
+    auto r = explicit_cast(Value(-3000000000.0), TypeId::INT32);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(ExplicitCast, Float64ToInt8Overflow) {
+    auto r = explicit_cast(Value(200.0), TypeId::INT8);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(ExplicitCast, Float64ToInt16Overflow) {
+    auto r = explicit_cast(Value(40000.0), TypeId::INT16);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(ExplicitCast, Float64ToInt64VeryLarge) {
+    auto r = explicit_cast(Value(1e20), TypeId::INT64);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(ExplicitCast, Float64ToUint32Negative) {
+    auto r = explicit_cast(Value(-1.5), TypeId::UINT32);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(ExplicitCast, Float64ToUint8Overflow) {
+    auto r = explicit_cast(Value(300.0), TypeId::UINT8);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(ExplicitCast, Int64ToInt32Overflow) {
+    auto r = explicit_cast(Value(int64_t{3000000000}), TypeId::INT32);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(ExplicitCast, Int64ToInt8Overflow) {
+    auto r = explicit_cast(Value(int64_t{256}), TypeId::INT8);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(ExplicitCast, Float64FitsInt64ButNotInt32) {
+    auto r = explicit_cast(Value(5000000000.0), TypeId::INT32);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(ExplicitCast, Float64AtInt32MaxBoundary) {
+    // INT32_MAX = 2147483647, so 2147483647.0 should succeed (truncates to 2147483647)
+    auto r = explicit_cast(Value(2147483647.0), TypeId::INT32);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_EQ(r->as_int32(), 2147483647);
+}
+
+TEST(ExplicitCast, Float64AtInt32MinBoundary) {
+    auto r = explicit_cast(Value(-2147483648.0), TypeId::INT32);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_EQ(r->as_int32(), -2147483648);
+}
+
+TEST(ExplicitCast, Uint8MaxBoundary) {
+    auto r = explicit_cast(Value(255.9), TypeId::UINT8);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_EQ(r->as_uint8(), 255);
+}
+
+TEST(ExplicitCast, NegativeFloatToUint64) {
+    auto r = explicit_cast(Value(-0.5), TypeId::UINT64);
+    // -0.5 truncates to 0, which fits in UINT64.
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_EQ(r->as_uint64(), 0u);
+}
+
+TEST(ExplicitCast, NegativeOneToUint64) {
+    auto r = explicit_cast(Value(-1.0), TypeId::UINT64);
+    // -1.0 truncates to -1, which does NOT fit in UINT64.
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}

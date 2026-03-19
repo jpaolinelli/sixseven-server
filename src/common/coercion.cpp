@@ -5,6 +5,7 @@
 #include <cmath>
 #include <compare>
 #include <cstdint>
+#include <limits>
 
 namespace sixseven {
 
@@ -122,6 +123,30 @@ Value int64_to_value(int64_t v, TypeId target) {
         return Value(static_cast<uint64_t>(v));
     default:
         return Value(v);
+    }
+}
+
+// Check whether an int64_t value fits within the target integer type's range.
+bool fits_in_integer(int64_t v, TypeId target) {
+    switch (target) {
+    case TypeId::INT8:
+        return v >= std::numeric_limits<int8_t>::min() && v <= std::numeric_limits<int8_t>::max();
+    case TypeId::INT16:
+        return v >= std::numeric_limits<int16_t>::min() && v <= std::numeric_limits<int16_t>::max();
+    case TypeId::INT32:
+        return v >= std::numeric_limits<int32_t>::min() && v <= std::numeric_limits<int32_t>::max();
+    case TypeId::INT64:
+        return true;
+    case TypeId::UINT8:
+        return v >= 0 && v <= std::numeric_limits<uint8_t>::max();
+    case TypeId::UINT16:
+        return v >= 0 && v <= std::numeric_limits<uint16_t>::max();
+    case TypeId::UINT32:
+        return v >= 0 && v <= std::numeric_limits<uint32_t>::max();
+    case TypeId::UINT64:
+        return v >= 0;
+    default:
+        return false;
     }
 }
 
@@ -357,13 +382,28 @@ Result<Value> explicit_cast(const Value& value, TypeId target) {
                                                               : "-infinity") +
                                   " to " + std::string(type_name(target)));
         }
+        // Validate that the double fits in int64_t before truncation.
+        // INT64_MIN (-2^63) is exactly representable as a double.
+        // INT64_MAX (2^63-1) rounds up to 2^63 as a double, so any double
+        // >= 2^63 is out of range.
+        constexpr double kMaxInt64 = 9223372036854775808.0;  // 2^63
+        constexpr double kMinInt64 = -9223372036854775808.0; // -2^63
+        if (d >= kMaxInt64 || d < kMinInt64) {
+            return make_error(StatusCode::TYPE_ERROR, "integer out of range");
+        }
         auto truncated = static_cast<int64_t>(d);
+        if (!fits_in_integer(truncated, target)) {
+            return make_error(StatusCode::TYPE_ERROR, "integer out of range");
+        }
         return ok(int64_to_value(truncated, target));
     }
 
     // Integer → integer narrowing (e.g. INT64 → INT32).
     if (is_integer(from) && is_integer(target)) {
         int64_t v = to_int64(value);
+        if (!fits_in_integer(v, target)) {
+            return make_error(StatusCode::TYPE_ERROR, "integer out of range");
+        }
         return ok(int64_to_value(v, target));
     }
 
