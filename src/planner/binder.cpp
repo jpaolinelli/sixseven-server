@@ -115,6 +115,46 @@ void collect_ungrouped_columns(const Expr& expr,
     // Literals, subqueries, etc. have no column refs to collect.
 }
 
+/// Parse edge property columns from a catalog "name:TYPE,name:TYPE,..." string
+/// into ResolvedColumn entries. Used by both build_traverse_scope and bind_unlink.
+std::vector<ResolvedColumn> parse_edge_property_columns(const std::string& properties,
+                                                        const std::string& table_name) {
+    std::vector<ResolvedColumn> result;
+    if (properties.empty()) {
+        return result;
+    }
+
+    std::string_view props(properties);
+    while (!props.empty()) {
+        auto comma = props.find(',');
+        auto entry = props.substr(0, comma);
+        props = (comma == std::string_view::npos) ? "" : props.substr(comma + 1);
+
+        auto colon = entry.find(':');
+        std::string prop_name(entry.substr(0, colon));
+        TypeId prop_type = TypeId::STRING; // default if no type specified
+        if (colon != std::string_view::npos) {
+            TypeSpec spec;
+            spec.name = std::string(entry.substr(colon + 1));
+            auto tid = resolve_type_spec(spec);
+            if (tid) {
+                prop_type = *tid;
+            }
+        }
+
+        ResolvedColumn rc;
+        rc.table_id = 0;
+        rc.ordinal = -1;
+        rc.table_name = table_name;
+        rc.column_name = prop_name;
+        rc.type_id = prop_type;
+        rc.nullable = true;
+        result.push_back(std::move(rc));
+    }
+
+    return result;
+}
+
 } // namespace
 
 // ===========================================================================
@@ -168,6 +208,25 @@ Result<ResolvedColumn> Scope::resolve_column(const std::string& table,
             return make_error(StatusCode::NOT_FOUND,
                               "column " + column + " not found in table " + table);
         }
+    }
+
+    // Fallback: match columns whose table_name differs from their scope table
+    // alias. This supports edge_type.property syntax in TRAVERSE queries where
+    // an explicit alias (e.g., AS t) differs from the edge type name.
+    const ResolvedColumn* found = nullptr;
+    for (auto& tbl : tables_) {
+        for (auto& col : tbl.columns) {
+            if (to_upper(col.table_name) == upper_table && to_upper(col.column_name) == upper_col) {
+                if (found) {
+                    return make_error(StatusCode::INVALID_ARGUMENT,
+                                      "ambiguous column reference: " + table + "." + column);
+                }
+                found = &col;
+            }
+        }
+    }
+    if (found) {
+        return ok(*found);
     }
 
     // Walk to parent scope.
@@ -385,36 +444,12 @@ Result<ScopeTable> Binder::build_traverse_scope(const TableRef& tref, BoundState
         st.columns.push_back({0, -1, alias, "__source", target_pk_type, true});
     }
 
-    // Edge property columns (parsed from catalog's "name:TYPE,..." format).
-    if (!edge->properties.empty()) {
-        std::string_view props(edge->properties);
-        while (!props.empty()) {
-            auto comma = props.find(',');
-            auto entry = props.substr(0, comma);
-            props = (comma == std::string_view::npos) ? "" : props.substr(comma + 1);
-
-            auto colon = entry.find(':');
-            std::string prop_name(entry.substr(0, colon));
-            TypeId prop_type = TypeId::STRING; // default if no type specified
-            if (colon != std::string_view::npos) {
-                TypeSpec spec;
-                spec.name = std::string(entry.substr(colon + 1));
-                auto tid = resolve_type_spec(spec);
-                if (tid) {
-                    prop_type = *tid;
-                }
-            }
-
-            ResolvedColumn rc;
-            rc.table_id = 0;
-            rc.ordinal = -1;
-            rc.table_name = alias; // use alias (matches table/meta columns)
-            rc.column_name = prop_name;
-            rc.type_id = prop_type;
-            rc.nullable = true;
-            st.columns.push_back(std::move(rc));
-        }
-    }
+    // Edge property columns — qualified by edge type name for
+    // edge_type.property access syntax.
+    auto edge_props = parse_edge_property_columns(edge->properties, trav->edge_type);
+    st.columns.insert(st.columns.end(),
+                      std::make_move_iterator(edge_props.begin()),
+                      std::make_move_iterator(edge_props.end()));
 
     // 7. Bind internal from_key expression.
     Scope empty_scope;
@@ -2270,7 +2305,19 @@ Result<BoundStatement> Binder::bind_unlink(const UnlinkStmt& stmt) {
         }
     }
     if (stmt.where_expr) {
-        auto et = bind_expr(*stmt.where_expr, empty_scope, bound);
+        // Build a scope with edge property columns so the WHERE clause can
+        // reference edge properties as bare column names (e.g., WHERE score < 2).
+        Scope where_scope;
+        auto prop_cols = parse_edge_property_columns(edge->properties, stmt.edge_type);
+        if (!prop_cols.empty()) {
+            ScopeTable edge_st;
+            edge_st.table_id = 0;
+            edge_st.alias = stmt.edge_type;
+            edge_st.columns = std::move(prop_cols);
+            where_scope.add_table(std::move(edge_st));
+        }
+
+        auto et = bind_expr(*stmt.where_expr, where_scope, bound);
         if (!et) {
             return tl::unexpected(et.error());
         }

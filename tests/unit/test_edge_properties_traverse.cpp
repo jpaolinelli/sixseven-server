@@ -219,5 +219,80 @@ TEST_F(EdgePropsTraverseTest, MultiplePropertiesSelectStar) {
     EXPECT_EQ(qr.rows[0][6].as_string(), "great");
 }
 
+// ============================================================================
+// 7. Edge property access with explicit alias — edge_type.property syntax
+//    GDB-606: rated.score must work even when the TRAVERSE has AS alias.
+// ============================================================================
+
+TEST_F(EdgePropsTraverseTest, EdgePropertyWithExplicitAlias) {
+    auto qr = exec_ok("SELECT follows.weight, __depth "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t");
+
+    ASSERT_EQ(qr.column_names.size(), 2u);
+    EXPECT_EQ(qr.column_names[0], "weight");
+    EXPECT_EQ(qr.column_names[1], "__depth");
+
+    // BFS from 1: 2 and 3 at depth 1.
+    std::vector<double> depth1_weights;
+    for (const auto& row : qr.rows) {
+        if (row[1].as_int64() == 1) {
+            depth1_weights.push_back(row[0].as_float64());
+        }
+    }
+    std::sort(depth1_weights.begin(), depth1_weights.end());
+
+    ASSERT_EQ(depth1_weights.size(), 2u);
+    EXPECT_DOUBLE_EQ(depth1_weights[0], 1.5);
+    EXPECT_DOUBLE_EQ(depth1_weights[1], 2.5);
+}
+
+// ============================================================================
+// 8. Edge property + table column with explicit alias
+// ============================================================================
+
+TEST_F(EdgePropsTraverseTest, EdgePropertyAndTableColumnWithAlias) {
+    auto qr = exec_ok("SELECT name, follows.weight "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t");
+
+    ASSERT_EQ(qr.column_names.size(), 2u);
+    EXPECT_EQ(qr.column_names[0], "name");
+    EXPECT_EQ(qr.column_names[1], "weight");
+
+    ASSERT_GE(qr.rows.size(), 2u);
+
+    // Verify weight values are populated for depth-1 nodes.
+    for (const auto& row : qr.rows) {
+        EXPECT_FALSE(row[1].is_null()) << "weight should be populated";
+    }
+}
+
+// ============================================================================
+// 9. Edge property access with explicit alias — multiple properties
+// ============================================================================
+
+TEST_F(EdgePropsTraverseTest, MultiplePropertiesWithExplicitAlias) {
+    exec_ok("CREATE EDGE TYPE rates (score INT, comment VARCHAR) FROM users TO users");
+    exec_ok("LINK users(1) TO users(2) VIA rates (score = 5, comment = 'great')");
+    exec_ok("LINK users(1) TO users(3) VIA rates (score = 3, comment = 'ok')");
+
+    auto qr = exec_ok("SELECT rates.score, rates.comment "
+                      "FROM TRAVERSE rates FROM users(1) DIRECTION OUT AS r");
+
+    ASSERT_EQ(qr.column_names.size(), 2u);
+    EXPECT_EQ(qr.column_names[0], "score");
+    EXPECT_EQ(qr.column_names[1], "comment");
+
+    ASSERT_EQ(qr.rows.size(), 2u);
+
+    std::vector<int64_t> scores;
+    for (const auto& row : qr.rows) {
+        scores.push_back(row[0].as_int64());
+    }
+    std::sort(scores.begin(), scores.end());
+
+    EXPECT_EQ(scores[0], 3);
+    EXPECT_EQ(scores[1], 5);
+}
+
 } // namespace
 } // namespace sixseven

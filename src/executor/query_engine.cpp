@@ -1270,6 +1270,56 @@ Result<QueryResult> QueryEngine::execute_unlink(const UnlinkStmt& stmt,
                           "UNLINK target row not found in '" + stmt.target_table + "'");
     }
 
+    if (stmt.where_expr) {
+        // Build an OutputSchema from edge property columns so evaluate_predicate
+        // can resolve bare column names in the WHERE clause.
+        auto edge_table = graph_engine_->get_edge_table(current_database_id_, stmt.edge_type);
+        if (!edge_table) {
+            return make_error(edge_table.error().code, edge_table.error().message);
+        }
+        std::vector<OutputColumn> out_cols;
+        for (const auto& pc : (*edge_table)->config().property_columns) {
+            out_cols.push_back({stmt.edge_type, pc.name, pc.type, true, 0});
+        }
+        OutputSchema edge_schema(std::move(out_cols));
+
+        // Capture first predicate error so we can propagate it after unlink_where
+        // returns (the predicate lambda can only return bool).
+        Error predicate_error{StatusCode::OK, ""};
+        bool has_predicate_error = false;
+
+        auto result = graph_engine_->unlink_where(
+            current_database_id_,
+            stmt.edge_type,
+            coerced_src,
+            coerced_tgt,
+            [&](const EdgeRow& row) -> bool {
+                if (has_predicate_error) {
+                    return false; // skip remaining edges after first error
+                }
+                Tuple edge_tuple;
+                edge_tuple.values = row.properties;
+                auto pred = evaluate_predicate(*stmt.where_expr, edge_tuple, edge_schema, bound);
+                if (!pred) {
+                    predicate_error = pred.error();
+                    has_predicate_error = true;
+                    return false;
+                }
+                return *pred;
+            });
+        if (has_predicate_error) {
+            return make_error(predicate_error.code, predicate_error.message);
+        }
+        if (!result) {
+            return make_error(result.error().code, result.error().message);
+        }
+
+        QueryResult qr;
+        qr.affected_rows = static_cast<int64_t>(*result);
+        qr.message = "UNLINK";
+        return ok(std::move(qr));
+    }
+
     auto result =
         graph_engine_->unlink(current_database_id_, stmt.edge_type, coerced_src, coerced_tgt);
     if (!result) {

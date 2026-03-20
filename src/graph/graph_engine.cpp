@@ -542,6 +542,9 @@ Result<uint64_t> GraphEngine::unlink_where(database_id_t database_id,
                                   persist_del.error().message);
             }
         }
+
+        // Log to WAL for durability.
+        log_edge_wal(WalRecordType::DELETE, table.config().edge_id, row_id, edge_type);
     }
 
     SIXSEVEN_LOG_DEBUG("UNLINK WHERE via '{}': removed {} edges", edge_type, to_delete.size());
