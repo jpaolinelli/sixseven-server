@@ -637,8 +637,17 @@ Planner::plan_from_source(const TableRef& table_ref,
                                   "' not found in target table for enriched traversal");
         }
 
-        // Coerce the start key to the PK type (e.g., STRING → UUID).
-        auto coerced_key = fit_to_storage(config.start_key, pk_type);
+        // Coerce the start key to the FROM table's PK type (not the target's).
+        // For heterogeneous edges the source and target tables may have
+        // different key types; the start key must match the FROM table.
+        TypeId from_pk_type = TypeId::INT64;
+        for (const auto& col : from_schema->columns) {
+            if (col.name == from_schema->pk_columns) {
+                from_pk_type = col.type_id;
+                break;
+            }
+        }
+        auto coerced_key = fit_to_storage(config.start_key, from_pk_type);
         if (!coerced_key) {
             return make_error(coerced_key.error().code,
                               "TRAVERSE start key: " + coerced_key.error().message);
@@ -651,6 +660,15 @@ Planner::plan_from_source(const TableRef& table_ref,
 
         const bool heterogeneous = edge_def->source_table_id != edge_def->target_table_id;
         const Expr* trav_where = trav->where_expr ? trav->where_expr.get() : nullptr;
+
+        // For heterogeneous edges (different source/target tables), depth > 1 is
+        // impossible: target nodes live in a different table and have no further
+        // edges of the same type.  Cap max_depth to avoid a type mismatch when
+        // the BFS tries to look up edges from the target table's PK in an index
+        // keyed by the source table's PK type.
+        if (heterogeneous && config.max_depth > 1) {
+            config.max_depth = 1;
+        }
 
         // Branch on mode: edge-centric vs node-centric.
         if (trav->mode == TraverseMode::EDGES) {
@@ -1916,12 +1934,12 @@ Result<std::unique_ptr<Iterator>> Planner::plan_traverse(const TraverseStmt& stm
         return make_error(edge_def.error().code, edge_def.error().message);
     }
 
-    // Look up the target table schema for PK type info.
+    // Look up the FROM table schema for PK type info (referenced_tables[0]
+    // is the FROM table, populated by the binder).
     TypeId pk_type = TypeId::INT64;
     if (!bound.referenced_tables.empty()) {
         auto ts = catalog_.get_table_by_id(bound.referenced_tables[0]);
         if (ts) {
-            // Find PK column type.
             if (!ts->pk_columns.empty()) {
                 for (const auto& col : ts->columns) {
                     if (col.name == ts->pk_columns) {
@@ -1933,7 +1951,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_traverse(const TraverseStmt& stm
         }
     }
 
-    // Coerce the start key to the PK type (e.g., STRING → UUID).
+    // Coerce the start key to the FROM table's PK type.
     auto coerced_key = fit_to_storage(*key_val, pk_type);
     if (!coerced_key) {
         return make_error(coerced_key.error().code,
@@ -1948,6 +1966,12 @@ Result<std::unique_ptr<Iterator>> Planner::plan_traverse(const TraverseStmt& stm
     config.max_depth = stmt.max_depth.value_or(100);
     config.fetch = stmt.fetch;
     config.collect_edges = true;
+
+    // For heterogeneous edges, cap depth to 1 (target nodes live in a
+    // different table and cannot have further edges of the same type).
+    if (edge_def->source_table_id != edge_def->target_table_id && config.max_depth > 1) {
+        config.max_depth = 1;
+    }
 
     std::vector<OutputColumn> out_cols;
     out_cols.push_back({"", "node", pk_type, false, 0});
@@ -1986,29 +2010,38 @@ Result<std::unique_ptr<Iterator>> Planner::plan_shortest_path(const ShortestPath
         return make_error(to_val.error().code, to_val.error().message);
     }
 
-    // Determine PK type.
-    TypeId pk_type = TypeId::INT64;
-    if (!bound.referenced_tables.empty()) {
-        auto ts = catalog_.get_table_by_id(bound.referenced_tables[0]);
-        if (ts) {
-            if (!ts->pk_columns.empty()) {
-                for (const auto& col : ts->columns) {
-                    if (col.name == ts->pk_columns) {
-                        pk_type = col.type_id;
-                        break;
-                    }
+    // Determine PK types for from and to tables.
+    // referenced_tables[0] = FROM table, referenced_tables[1] = TO table.
+    // For heterogeneous edges, these may have different key types.
+    auto get_pk_type = [&](table_id_t tid) -> TypeId {
+        auto ts = catalog_.get_table_by_id(tid);
+        if (ts && !ts->pk_columns.empty()) {
+            for (const auto& col : ts->columns) {
+                if (col.name == ts->pk_columns) {
+                    return col.type_id;
                 }
             }
         }
+        return TypeId::INT64;
+    };
+
+    TypeId from_pk_type = TypeId::INT64;
+    TypeId to_pk_type = TypeId::INT64;
+    if (bound.referenced_tables.size() >= 2) {
+        from_pk_type = get_pk_type(bound.referenced_tables[0]);
+        to_pk_type = get_pk_type(bound.referenced_tables[1]);
+    } else if (!bound.referenced_tables.empty()) {
+        from_pk_type = get_pk_type(bound.referenced_tables[0]);
+        to_pk_type = from_pk_type;
     }
 
-    // Coerce the from/to keys to the PK type (e.g., STRING → UUID).
-    auto coerced_from = fit_to_storage(*from_val, pk_type);
+    // Coerce the from/to keys to their respective table PK types.
+    auto coerced_from = fit_to_storage(*from_val, from_pk_type);
     if (!coerced_from) {
         return make_error(coerced_from.error().code,
                           "SHORTEST PATH from key: " + coerced_from.error().message);
     }
-    auto coerced_to = fit_to_storage(*to_val, pk_type);
+    auto coerced_to = fit_to_storage(*to_val, to_pk_type);
     if (!coerced_to) {
         return make_error(coerced_to.error().code,
                           "SHORTEST PATH to key: " + coerced_to.error().message);
@@ -2023,7 +2056,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_shortest_path(const ShortestPath
     sp_config.max_depth = stmt.max_depth.value_or(100);
 
     std::vector<OutputColumn> out_cols;
-    out_cols.push_back({"", "node", pk_type, false, 0});
+    out_cols.push_back({"", "node", from_pk_type, false, 0});
     out_cols.push_back({"", "hop", TypeId::INT64, false, 0});
     auto schema = OutputSchema(std::move(out_cols));
 

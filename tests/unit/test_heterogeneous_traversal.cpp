@@ -247,5 +247,137 @@ TEST_F(HeterogeneousTraversalTest, PKCollisionInDirection) {
     EXPECT_EQ(qr.rows[0][0].as_string(), "Alice");
 }
 
+// ============================================================================
+// GDB-605: Heterogeneous edges with DIFFERENT PK types (UUID vs INT).
+//
+// The bug: TRAVERSE start key was validated against the wrong table's PK type
+// when source and target tables have different key types.
+// ============================================================================
+
+/// Fixture with UUID source table and INT32 target table.
+///
+/// Schema:
+///   authors: (id UUID PK, name VARCHAR) — different PK type than articles
+///   articles: (id INT PK, title VARCHAR)
+///   edge type "wrote" FROM authors TO articles
+class HeterogeneousPKTypeTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_hetero_pk";
+        std::filesystem::remove_all(data_dir_);
+        std::filesystem::create_directories(data_dir_);
+
+        storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
+        graph_engine_ = std::make_unique<GraphEngine>(catalog_);
+        engine_ = std::make_unique<QueryEngine>(catalog_, *storage_, graph_engine_.get());
+
+        exec_ok("CREATE TABLE authors (id UUID PRIMARY KEY, name VARCHAR)");
+        exec_ok("INSERT INTO authors VALUES ('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 'Alice')");
+        exec_ok("INSERT INTO authors VALUES ('11111111-2222-3333-4444-555555555555', 'Bob')");
+
+        exec_ok("CREATE TABLE articles (id INT PRIMARY KEY, title VARCHAR)");
+        exec_ok("INSERT INTO articles VALUES (10, 'Hello')");
+        exec_ok("INSERT INTO articles VALUES (20, 'World')");
+        exec_ok("INSERT INTO articles VALUES (30, 'Draft')");
+
+        exec_ok("CREATE EDGE TYPE wrote FROM authors TO articles");
+        exec_ok("LINK authors('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') TO articles(10) VIA wrote");
+        exec_ok("LINK authors('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') TO articles(20) VIA wrote");
+        exec_ok("LINK authors('11111111-2222-3333-4444-555555555555') TO articles(30) VIA wrote");
+    }
+
+    void TearDown() override {
+        engine_.reset();
+        graph_engine_.reset();
+        storage_.reset();
+        std::filesystem::remove_all(data_dir_);
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        return std::move(*result);
+    }
+
+    void exec_error(const std::string& sql, StatusCode expected) {
+        auto result = engine_->execute(sql);
+        EXPECT_FALSE(result.has_value()) << sql << " should have failed";
+        if (!result.has_value()) {
+            EXPECT_EQ(result.error().code, expected);
+        }
+    }
+
+    DiskManager dm_;
+    Catalog catalog_;
+    std::filesystem::path data_dir_;
+    std::unique_ptr<StorageManager> storage_;
+    std::unique_ptr<GraphEngine> graph_engine_;
+    std::unique_ptr<QueryEngine> engine_;
+};
+
+// GDB-605: OUT from UUID source — start key must validate against UUID, not INT.
+TEST_F(HeterogeneousPKTypeTest, OutFromUUIDSource) {
+    auto qr = exec_ok("SELECT title, __depth FROM TRAVERSE wrote "
+                      "FROM authors('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') DIRECTION OUT");
+
+    ASSERT_EQ(qr.rows.size(), 2u);
+    std::vector<std::string> titles;
+    for (const auto& row : qr.rows) {
+        titles.push_back(row[0].as_string());
+    }
+    std::sort(titles.begin(), titles.end());
+    EXPECT_EQ(titles[0], "Hello");
+    EXPECT_EQ(titles[1], "World");
+}
+
+// GDB-605: IN from INT target — start key must validate against INT, not UUID.
+TEST_F(HeterogeneousPKTypeTest, InFromINTTarget) {
+    auto qr = exec_ok("SELECT name, __depth FROM TRAVERSE wrote "
+                      "FROM articles(10) DIRECTION IN");
+
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "Alice");
+}
+
+// GDB-605: Standalone TRAVERSE (no SELECT FROM) with UUID source.
+TEST_F(HeterogeneousPKTypeTest, StandaloneTraverseOutUUID) {
+    auto qr = exec_ok("TRAVERSE wrote FROM authors('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') "
+                      "DIRECTION OUT FETCH");
+
+    // Should return nodes without error.
+    EXPECT_GE(qr.rows.size(), 2u);
+}
+
+// GDB-605: Standalone TRAVERSE (no SELECT FROM) with INT target going IN.
+TEST_F(HeterogeneousPKTypeTest, StandaloneTraverseInINT) {
+    auto qr = exec_ok("TRAVERSE wrote FROM articles(10) DIRECTION IN FETCH");
+
+    EXPECT_GE(qr.rows.size(), 1u);
+}
+
+// GDB-605: SELECT * enriched traversal with UUID → INT.
+TEST_F(HeterogeneousPKTypeTest, SelectStarOutUUIDSource) {
+    auto qr = exec_ok("SELECT * FROM TRAVERSE wrote "
+                      "FROM authors('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') DIRECTION OUT");
+
+    // articles columns (id, title) + meta-columns.
+    ASSERT_GE(qr.column_names.size(), 5u);
+    EXPECT_EQ(qr.column_names[0], "id");
+    EXPECT_EQ(qr.column_names[1], "title");
+    ASSERT_EQ(qr.rows.size(), 2u);
+}
+
+// GDB-605: SELECT * enriched traversal with INT → UUID (IN direction).
+TEST_F(HeterogeneousPKTypeTest, SelectStarInINTTarget) {
+    auto qr = exec_ok("SELECT * FROM TRAVERSE wrote FROM articles(10) DIRECTION IN");
+
+    // authors columns (id, name) + meta-columns.
+    ASSERT_GE(qr.column_names.size(), 5u);
+    EXPECT_EQ(qr.column_names[0], "id");
+    EXPECT_EQ(qr.column_names[1], "name");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][1].as_string(), "Alice");
+}
+
 } // namespace
 } // namespace sixseven
