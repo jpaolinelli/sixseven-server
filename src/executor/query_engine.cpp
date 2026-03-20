@@ -1283,22 +1283,33 @@ Result<QueryResult> QueryEngine::execute_unlink(const UnlinkStmt& stmt,
         }
         OutputSchema edge_schema(std::move(out_cols));
 
+        // Capture first predicate error so we can propagate it after unlink_where
+        // returns (the predicate lambda can only return bool).
+        Error predicate_error{StatusCode::OK, ""};
+        bool has_predicate_error = false;
+
         auto result = graph_engine_->unlink_where(
             current_database_id_,
             stmt.edge_type,
             coerced_src,
             coerced_tgt,
             [&](const EdgeRow& row) -> bool {
-                // Build a tuple from edge properties.
+                if (has_predicate_error) {
+                    return false; // skip remaining edges after first error
+                }
                 Tuple edge_tuple;
                 edge_tuple.values = row.properties;
                 auto pred = evaluate_predicate(*stmt.where_expr, edge_tuple, edge_schema, bound);
                 if (!pred) {
-                    SIXSEVEN_LOG_WARN("UNLINK WHERE predicate error: {}", pred.error().message);
+                    predicate_error = pred.error();
+                    has_predicate_error = true;
                     return false;
                 }
                 return *pred;
             });
+        if (has_predicate_error) {
+            return make_error(predicate_error.code, predicate_error.message);
+        }
         if (!result) {
             return make_error(result.error().code, result.error().message);
         }

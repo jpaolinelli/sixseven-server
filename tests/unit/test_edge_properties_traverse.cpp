@@ -251,9 +251,8 @@ TEST_F(EdgePropsTraverseTest, EdgePropertyWithExplicitAlias) {
 // ============================================================================
 
 TEST_F(EdgePropsTraverseTest, EdgePropertyAndTableColumnWithAlias) {
-    auto qr = exec_ok(
-        "SELECT name, follows.weight "
-        "FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t");
+    auto qr = exec_ok("SELECT name, follows.weight "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT AS t");
 
     ASSERT_EQ(qr.column_names.size(), 2u);
     EXPECT_EQ(qr.column_names[0], "name");
