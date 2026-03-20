@@ -170,6 +170,25 @@ Result<ResolvedColumn> Scope::resolve_column(const std::string& table,
         }
     }
 
+    // Fallback: match columns whose table_name differs from their scope table
+    // alias. This supports edge_type.property syntax in TRAVERSE queries where
+    // an explicit alias (e.g., AS t) differs from the edge type name.
+    const ResolvedColumn* found = nullptr;
+    for (auto& tbl : tables_) {
+        for (auto& col : tbl.columns) {
+            if (to_upper(col.table_name) == upper_table && to_upper(col.column_name) == upper_col) {
+                if (found) {
+                    return make_error(StatusCode::INVALID_ARGUMENT,
+                                      "ambiguous column reference: " + table + "." + column);
+                }
+                found = &col;
+            }
+        }
+    }
+    if (found) {
+        return ok(*found);
+    }
+
     // Walk to parent scope.
     if (parent_) {
         return parent_->resolve_column(table, column);
@@ -408,7 +427,7 @@ Result<ScopeTable> Binder::build_traverse_scope(const TableRef& tref, BoundState
             ResolvedColumn rc;
             rc.table_id = 0;
             rc.ordinal = -1;
-            rc.table_name = alias; // use alias (matches table/meta columns)
+            rc.table_name = trav->edge_type; // edge_type.property syntax
             rc.column_name = prop_name;
             rc.type_id = prop_type;
             rc.nullable = true;
@@ -2270,7 +2289,46 @@ Result<BoundStatement> Binder::bind_unlink(const UnlinkStmt& stmt) {
         }
     }
     if (stmt.where_expr) {
-        auto et = bind_expr(*stmt.where_expr, empty_scope, bound);
+        // Build a scope with edge property columns so the WHERE clause can
+        // reference edge properties as bare column names (e.g., WHERE score < 2).
+        Scope where_scope;
+        if (!edge->properties.empty()) {
+            ScopeTable edge_st;
+            edge_st.table_id = 0;
+            edge_st.alias = stmt.edge_type;
+
+            std::string_view props(edge->properties);
+            while (!props.empty()) {
+                auto comma = props.find(',');
+                auto entry = props.substr(0, comma);
+                props = (comma == std::string_view::npos) ? "" : props.substr(comma + 1);
+
+                auto colon = entry.find(':');
+                std::string prop_name(entry.substr(0, colon));
+                TypeId prop_type = TypeId::STRING;
+                if (colon != std::string_view::npos) {
+                    TypeSpec spec;
+                    spec.name = std::string(entry.substr(colon + 1));
+                    auto tid = resolve_type_spec(spec);
+                    if (tid) {
+                        prop_type = *tid;
+                    }
+                }
+
+                ResolvedColumn rc;
+                rc.table_id = 0;
+                rc.ordinal = -1;
+                rc.table_name = stmt.edge_type;
+                rc.column_name = prop_name;
+                rc.type_id = prop_type;
+                rc.nullable = true;
+                edge_st.columns.push_back(std::move(rc));
+            }
+
+            where_scope.add_table(std::move(edge_st));
+        }
+
+        auto et = bind_expr(*stmt.where_expr, where_scope, bound);
         if (!et) {
             return tl::unexpected(et.error());
         }

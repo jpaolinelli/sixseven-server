@@ -710,12 +710,13 @@ Planner::plan_from_source(const TableRef& table_ref,
             out_cols.push_back({trav_alias, "__to", edge_target_pk_type, false, 0});
             out_cols.push_back({trav_alias, "__depth", TypeId::INT64, false, 0});
 
-            // Append edge property columns.
+            // Append edge property columns (qualified by edge type name, not alias,
+            // to support the edge_type.property access syntax).
             auto edge_table = graph_engine_->get_edge_table(database_id_, trav->edge_type);
             if (edge_table) {
                 for (const auto& prop_col : (*edge_table)->config().property_columns) {
                     out_cols.push_back(
-                        {trav_alias, prop_col.name, prop_col.type, true /*nullable*/, 0});
+                        {trav->edge_type, prop_col.name, prop_col.type, true /*nullable*/, 0});
                 }
             }
 
@@ -737,11 +738,13 @@ Planner::plan_from_source(const TableRef& table_ref,
         out_cols.push_back({trav_alias, "__source", pk_type, true, 0});
 
         // Append edge property columns (nullable — start node has no incoming edge).
+        // Qualified by edge type name (not alias) to support edge_type.property
+        // access syntax.
         auto edge_table = graph_engine_->get_edge_table(database_id_, trav->edge_type);
         if (edge_table) {
             for (const auto& prop_col : (*edge_table)->config().property_columns) {
                 out_cols.push_back(
-                    {trav_alias, prop_col.name, prop_col.type, true /*nullable*/, 0});
+                    {trav->edge_type, prop_col.name, prop_col.type, true /*nullable*/, 0});
             }
         }
 
