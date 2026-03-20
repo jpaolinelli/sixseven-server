@@ -155,9 +155,12 @@ FROM users;
 
 **Aggregate:** `SUM`, `AVG`, `COUNT`, `MIN`, `MAX` with `OVER (PARTITION BY ... ORDER BY ... ROWS/RANGE BETWEEN ...)`
 
-## Transactions
+## Transactions (Not Yet Implemented)
+
+Transaction support (`BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `ROLLBACK TO`) is planned but not yet functional.
 
 ```sql
+-- Planned syntax (not yet available):
 BEGIN;
 SAVEPOINT sp1;
 -- ... queries ...

@@ -4,7 +4,7 @@ A hybrid relational, graph, and vector database built in C++20 with PostgreSQL w
 
 ## Features
 
-- **Relational** — Full SQL support with ACID transactions, B+ tree and hash indexes, joins, CTEs, window functions, and subqueries
+- **Relational** — Full SQL support with B+ tree and hash indexes, joins, CTEs, window functions, and subqueries
 - **Graph** — Native edge types, BFS traversal, Cypher-style pattern matching with variable-length paths, inline predicates, weighted shortest path, and path selectors
 - **Vector** — HNSW indexes with pluggable embedding providers (OpenAI, Ollama, ONNX, builtin) and automatic embedding generation
 - **PostgreSQL Compatible** — Wire protocol v3 lets you connect with `psql`, DBeaver, DataGrip, or any PostgreSQL client library
@@ -45,11 +45,11 @@ psql -h localhost -p 6767
 ## Documentation
 
 - [Server Configuration](docs/configuration.md) — config.json options, replication setup
-- [SQL Reference](docs/sql-reference.md) — data types, DDL, DML, queries, aggregates, window functions, transactions
+- [SQL Reference](docs/sql-reference.md) — data types, DDL, DML, queries, aggregates, window functions
 - [Graph Queries](docs/graph-queries.md) — edge types, traverse, pattern matching, shortest path
 - [Vector Search](docs/vector-search.md) — EMBEDDING columns, NEAREST queries, k-tuning, performance tips
 - [Embedding Providers](docs/embedding-providers.md) — OpenAI, Ollama, ONNX, builtin providers
-- [Admin Commands](docs/admin-commands.md) — SHOW, DESCRIBE, EXPLAIN, SET, VACUUM
+- [Admin Commands](docs/admin-commands.md) — SHOW, EXPLAIN
 - [Development](docs/development.md) — build, testing, seed data, formatting, CI pipeline
 
 ## Contributing
