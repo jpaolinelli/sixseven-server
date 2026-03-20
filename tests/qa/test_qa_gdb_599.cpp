@@ -251,7 +251,7 @@ TEST_F(GDB599WindowFunctionQA, NullPartitionBy_GroupsNullsTogether) {
     exec_ok("INSERT INTO nullpart VALUES (4, NULL, 40)");
 
     auto qr = exec_ok("SELECT id, grp, ROW_NUMBER() OVER (PARTITION BY grp ORDER BY id) AS rn "
-                       "FROM nullpart");
+                      "FROM nullpart");
     ASSERT_EQ(qr.rows.size(), 4);
 
     // Build map of id -> rn for verification
@@ -274,11 +274,10 @@ TEST_F(GDB599WindowFunctionQA, NullPartitionBy_GroupsNullsTogether) {
 
 TEST_F(GDB599WindowFunctionQA, MultipleWindowFunctions_SameSelect) {
     setup_employees();
-    auto qr = exec_ok(
-        "SELECT id, name, "
-        "ROW_NUMBER() OVER (ORDER BY id) AS rn, "
-        "RANK() OVER (ORDER BY id) AS rnk "
-        "FROM employees");
+    auto qr = exec_ok("SELECT id, name, "
+                      "ROW_NUMBER() OVER (ORDER BY id) AS rn, "
+                      "RANK() OVER (ORDER BY id) AS rnk "
+                      "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5);
     ASSERT_GE(qr.column_names.size(), 4);
 
@@ -296,7 +295,7 @@ TEST_F(GDB599WindowFunctionQA, MultipleWindowFunctions_SameSelect) {
 TEST_F(GDB599WindowFunctionQA, WindowFunctionWithWhere) {
     setup_employees();
     auto qr = exec_ok("SELECT id, name, ROW_NUMBER() OVER (ORDER BY id) AS rn "
-                       "FROM employees WHERE department = 'Engineering'");
+                      "FROM employees WHERE department = 'Engineering'");
     ASSERT_EQ(qr.rows.size(), 3);
     // Row numbers should be 1, 2, 3 for the filtered set
     for (size_t i = 0; i < 3; ++i) {
@@ -311,7 +310,7 @@ TEST_F(GDB599WindowFunctionQA, WindowFunctionWithWhere) {
 TEST_F(GDB599WindowFunctionQA, WindowFunctionWithLimit) {
     setup_employees();
     auto qr = exec_ok("SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn "
-                       "FROM employees LIMIT 3");
+                      "FROM employees LIMIT 3");
     ASSERT_EQ(qr.rows.size(), 3);
 }
 
@@ -413,8 +412,8 @@ TEST_F(GDB599WindowFunctionQA, NtileSingleBucket) {
 TEST_F(GDB599WindowFunctionQA, LeadWithOffset2) {
     exec_ok("CREATE TABLE lead_t (id INT PRIMARY KEY, val INT)");
     for (int i = 1; i <= 5; ++i) {
-        exec_ok("INSERT INTO lead_t VALUES (" + std::to_string(i) + ", " +
-                std::to_string(i * 10) + ")");
+        exec_ok("INSERT INTO lead_t VALUES (" + std::to_string(i) + ", " + std::to_string(i * 10) +
+                ")");
     }
 
     auto qr = exec_ok("SELECT id, LEAD(val, 2) OVER (ORDER BY id) AS nxt2 FROM lead_t");
@@ -467,16 +466,12 @@ TEST_F(GDB599WindowFunctionQA, EmptyOver_CountStar) {
     setup_employees();
     auto qr = exec_ok("SELECT id, COUNT(*) OVER () AS total FROM employees");
     ASSERT_EQ(qr.rows.size(), 5);
-    // BUG: COUNT(*) OVER () without ORDER BY should use full-partition frame
-    // (UNBOUNDED PRECEDING to UNBOUNDED FOLLOWING per SQL standard) and return 5
-    // for every row. However, the implementation uses default frame
-    // (UNBOUNDED PRECEDING to CURRENT ROW), producing a running count 1,2,3,4,5.
-    // This test documents the current (buggy) behavior.
-    // Expected per SQL standard: all rows should be 5.
-    // Actual: running count due to incorrect default frame.
-    for (size_t i = 0; i < qr.rows.size(); ++i) {
-        EXPECT_EQ(get_int(qr.rows[i][1]), static_cast<int64_t>(i + 1))
-            << "BUG: COUNT(*) OVER () produces running count instead of total";
+    // Fixed by GDB-607: COUNT(*) OVER () without ORDER BY uses full-partition frame
+    // (UNBOUNDED PRECEDING to UNBOUNDED FOLLOWING per SQL standard) and returns 5
+    // for every row.
+    for (auto& row : qr.rows) {
+        EXPECT_EQ(get_int(row[1]), 5)
+            << "COUNT(*) OVER () should return total row count for every row";
     }
 }
 
@@ -487,12 +482,12 @@ TEST_F(GDB599WindowFunctionQA, EmptyOver_CountStar) {
 TEST_F(GDB599WindowFunctionQA, FrameSpec_SlidingWindow) {
     exec_ok("CREATE TABLE frame_t (id INT PRIMARY KEY, val INT)");
     for (int i = 1; i <= 5; ++i) {
-        exec_ok("INSERT INTO frame_t VALUES (" + std::to_string(i) + ", " +
-                std::to_string(i * 10) + ")");
+        exec_ok("INSERT INTO frame_t VALUES (" + std::to_string(i) + ", " + std::to_string(i * 10) +
+                ")");
     }
 
     auto qr = exec_ok("SELECT id, SUM(val) OVER (ORDER BY id "
-                       "ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS sliding_sum FROM frame_t");
+                      "ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS sliding_sum FROM frame_t");
     ASSERT_EQ(qr.rows.size(), 5);
 
     std::unordered_map<int64_t, int64_t> id_to_sum;
@@ -522,8 +517,7 @@ TEST_F(GDB599WindowFunctionQA, FirstValue_Basic) {
     exec_ok("INSERT INTO fv_t VALUES (2, 'beta')");
     exec_ok("INSERT INTO fv_t VALUES (3, 'gamma')");
 
-    auto qr =
-        exec_ok("SELECT id, FIRST_VALUE(val) OVER (ORDER BY id) AS first_v FROM fv_t");
+    auto qr = exec_ok("SELECT id, FIRST_VALUE(val) OVER (ORDER BY id) AS first_v FROM fv_t");
     ASSERT_EQ(qr.rows.size(), 3);
     // FIRST_VALUE should always be 'alpha' (first in order)
     for (auto& row : qr.rows) {
@@ -537,9 +531,9 @@ TEST_F(GDB599WindowFunctionQA, LastValue_WithFullFrame) {
     exec_ok("INSERT INTO lv_t VALUES (2, 'beta')");
     exec_ok("INSERT INTO lv_t VALUES (3, 'gamma')");
 
-    auto qr = exec_ok(
-        "SELECT id, LAST_VALUE(val) OVER (ORDER BY id "
-        "ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_v FROM lv_t");
+    auto qr =
+        exec_ok("SELECT id, LAST_VALUE(val) OVER (ORDER BY id "
+                "ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_v FROM lv_t");
     ASSERT_EQ(qr.rows.size(), 3);
     // LAST_VALUE with full frame should be 'gamma' for all rows
     for (auto& row : qr.rows) {
@@ -617,7 +611,7 @@ TEST_F(GDB599WindowFunctionQA, PartitionByMultipleColumns) {
     exec_ok("INSERT INTO multi_part VALUES (4, 'B', 'X', 40)");
 
     auto qr = exec_ok("SELECT id, ROW_NUMBER() OVER (PARTITION BY grp1, grp2 ORDER BY id) AS rn "
-                       "FROM multi_part");
+                      "FROM multi_part");
     ASSERT_EQ(qr.rows.size(), 4);
 
     std::unordered_map<int64_t, int64_t> id_to_rn;
@@ -697,12 +691,12 @@ TEST_F(GDB599WindowFunctionQA, Stress_100Rows) {
 TEST_F(GDB599WindowFunctionQA, Stress_100Rows_PartitionedRank) {
     exec_ok("CREATE TABLE stress2 (id INT PRIMARY KEY, grp INT, val INT)");
     for (int i = 1; i <= 100; ++i) {
-        exec_ok("INSERT INTO stress2 VALUES (" + std::to_string(i) + ", " +
-                std::to_string(i % 5) + ", " + std::to_string(i) + ")");
+        exec_ok("INSERT INTO stress2 VALUES (" + std::to_string(i) + ", " + std::to_string(i % 5) +
+                ", " + std::to_string(i) + ")");
     }
 
     auto qr = exec_ok("SELECT id, grp, RANK() OVER (PARTITION BY grp ORDER BY val) AS rnk "
-                       "FROM stress2");
+                      "FROM stress2");
     ASSERT_EQ(qr.rows.size(), 100);
     // Each partition should have 20 rows, ranks 1-20
     for (auto& row : qr.rows) {
@@ -718,7 +712,7 @@ TEST_F(GDB599WindowFunctionQA, Stress_100Rows_PartitionedRank) {
 TEST_F(GDB599WindowFunctionQA, TableAlias_WindowFunction) {
     setup_employees();
     auto qr = exec_ok("SELECT e.id, e.name, ROW_NUMBER() OVER (ORDER BY e.id) AS rn "
-                       "FROM employees e");
+                      "FROM employees e");
     ASSERT_EQ(qr.rows.size(), 5);
     for (size_t i = 0; i < 5; ++i) {
         EXPECT_EQ(qr.rows[i][2].as_int64(), static_cast<int64_t>(i + 1));
@@ -732,22 +726,19 @@ TEST_F(GDB599WindowFunctionQA, TableAlias_WindowFunction) {
 TEST_F(GDB599WindowFunctionQA, CountStarPartitioned) {
     setup_employees();
     auto qr = exec_ok("SELECT id, department, COUNT(*) OVER (PARTITION BY department) AS dept_cnt "
-                       "FROM employees");
+                      "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5);
 
-    std::unordered_map<int64_t, int64_t> id_to_cnt;
+    // Fixed by GDB-607: Without ORDER BY, SQL standard says frame is entire
+    // partition. Engineering has 3 employees, Sales has 2.
     for (auto& row : qr.rows) {
-        id_to_cnt[get_int(row[0])] = get_int(row[2]);
-    }
-
-    // BUG: Same default-frame issue as EmptyOver_CountStar. Without ORDER BY,
-    // SQL standard says frame is entire partition, so each row in Engineering
-    // should be 3, each in Sales should be 2. However, the implementation uses
-    // UNBOUNDED PRECEDING to CURRENT ROW as the default frame, so the count
-    // is a running count within insertion order.
-    // This test documents actual (buggy) behavior — counts are running, not total.
-    for (auto& [id, cnt] : id_to_cnt) {
-        EXPECT_GE(cnt, 1) << "id=" << id << " has count " << cnt;
+        auto dept = row[1].as_string();
+        auto cnt = get_int(row[2]);
+        if (dept == "Engineering") {
+            EXPECT_EQ(cnt, 3) << "Engineering partition should have count=3";
+        } else {
+            EXPECT_EQ(cnt, 2) << "Sales partition should have count=2";
+        }
     }
 }
 
@@ -780,7 +771,7 @@ TEST_F(GDB599WindowFunctionQA, FrameCurrentRowOnly) {
     exec_ok("INSERT INTO curr_t VALUES (3, 30)");
 
     auto qr = exec_ok("SELECT id, SUM(val) OVER (ORDER BY id "
-                       "ROWS BETWEEN CURRENT ROW AND CURRENT ROW) AS self_sum FROM curr_t");
+                      "ROWS BETWEEN CURRENT ROW AND CURRENT ROW) AS self_sum FROM curr_t");
     ASSERT_EQ(qr.rows.size(), 3);
     // Each row's SUM should be just its own value
     EXPECT_EQ(get_int(qr.rows[0][1]), 10);
