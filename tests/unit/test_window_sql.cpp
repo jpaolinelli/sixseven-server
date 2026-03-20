@@ -189,3 +189,73 @@ TEST_F(WindowFunctionSQLTest, WindowFunctionEmptyOver) {
     auto qr = exec_ok("SELECT name, ROW_NUMBER() OVER () AS rn FROM employees");
     ASSERT_EQ(qr.rows.size(), 5);
 }
+
+// =============================================================================
+// Default frame without ORDER BY (GDB-607)
+// =============================================================================
+
+TEST_F(WindowFunctionSQLTest, CountOverEmptyClauseReturnsTotal) {
+    // COUNT(*) OVER () should return total row count for every row (full partition).
+    auto qr = exec_ok("SELECT id, COUNT(*) OVER () AS total FROM employees");
+    ASSERT_EQ(qr.rows.size(), 5);
+    for (auto& row : qr.rows) {
+        EXPECT_EQ(row[1].as_int64(), 5) << "COUNT(*) OVER () should be 5 for all rows";
+    }
+}
+
+TEST_F(WindowFunctionSQLTest, CountOverPartitionByWithoutOrderBy) {
+    // COUNT(*) OVER (PARTITION BY department) should return partition totals, not running counts.
+    // Engineering has 3 employees (Alice, Bob, Eve), Sales has 2 (Charlie, Dave).
+    auto qr = exec_ok("SELECT id, department, COUNT(*) OVER (PARTITION BY department) AS total "
+                      "FROM employees");
+    ASSERT_EQ(qr.rows.size(), 5);
+    for (auto& row : qr.rows) {
+        auto dept = row[1].as_string();
+        auto total = row[2].as_int64();
+        if (dept == "Engineering") {
+            EXPECT_EQ(total, 3) << "Engineering partition should have total=3";
+        } else {
+            EXPECT_EQ(total, 2) << "Sales partition should have total=2";
+        }
+    }
+}
+
+TEST_F(WindowFunctionSQLTest, SumOverPartitionByWithoutOrderBy) {
+    // SUM(salary) OVER (PARTITION BY department) should give partition totals.
+    // Engineering: 80000 + 90000 + 95000 = 265000
+    // Sales: 70000 + 85000 = 155000
+    auto qr = exec_ok("SELECT id, department, "
+                      "SUM(salary) OVER (PARTITION BY department) AS dept_total "
+                      "FROM employees");
+    ASSERT_EQ(qr.rows.size(), 5);
+    for (auto& row : qr.rows) {
+        auto dept = row[1].as_string();
+        auto total = row[2].as_float64();
+        if (dept == "Engineering") {
+            EXPECT_DOUBLE_EQ(total, 265000.0);
+        } else {
+            EXPECT_DOUBLE_EQ(total, 155000.0);
+        }
+    }
+}
+
+TEST_F(WindowFunctionSQLTest, CountWithOrderByStillGivesRunningCount) {
+    // COUNT(*) OVER (ORDER BY id) should still give running counts (default frame
+    // with ORDER BY is UNBOUNDED PRECEDING to CURRENT ROW).
+    auto qr = exec_ok("SELECT id, COUNT(*) OVER (ORDER BY id) AS running FROM employees");
+    ASSERT_EQ(qr.rows.size(), 5);
+    for (size_t i = 0; i < 5; ++i) {
+        EXPECT_EQ(qr.rows[i][1].as_int64(), static_cast<int64_t>(i + 1));
+    }
+}
+
+TEST_F(WindowFunctionSQLTest, ExplicitFrameOverridesDefault) {
+    // An explicit frame should still be respected even without ORDER BY.
+    auto qr = exec_ok("SELECT id, COUNT(*) OVER (ROWS BETWEEN UNBOUNDED PRECEDING "
+                      "AND CURRENT ROW) AS running FROM employees");
+    ASSERT_EQ(qr.rows.size(), 5);
+    // With explicit CURRENT ROW bound, should get running counts.
+    for (size_t i = 0; i < 5; ++i) {
+        EXPECT_EQ(qr.rows[i][1].as_int64(), static_cast<int64_t>(i + 1));
+    }
+}

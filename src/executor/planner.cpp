@@ -1305,6 +1305,11 @@ Planner::plan_select(const SelectStmt& stmt,
                 desc.frame.start_offset = af.start_offset;
                 desc.frame.end_bound = convert_frame_bound(af.end_bound);
                 desc.frame.end_offset = af.end_offset;
+            } else if (wexpr->order_by.empty()) {
+                // SQL standard: when no ORDER BY and no explicit frame, the
+                // default frame is the entire partition (UNBOUNDED PRECEDING
+                // to UNBOUNDED FOLLOWING), not UNBOUNDED PRECEDING to CURRENT ROW.
+                desc.frame.end_bound = FrameBound::UNBOUNDED_FOLLOWING;
             }
 
             std::string col_name = "__win_" + std::to_string(i);
