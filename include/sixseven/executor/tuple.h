@@ -5,6 +5,8 @@
 #include "sixseven/common/value.h"
 #include "sixseven/index/rid.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -40,6 +42,13 @@ struct OutputColumn {
 /// Unlike the byte-level `Schema` (used by TupleSerializer), this carries
 /// column names and table provenance for expression evaluation.
 class OutputSchema {
+    static bool iequals(const std::string& a, const std::string& b) {
+        return a.size() == b.size() &&
+               std::equal(a.begin(), a.end(), b.begin(), [](unsigned char ac, unsigned char bc) {
+                   return std::toupper(ac) == std::toupper(bc);
+               });
+    }
+
 public:
     OutputSchema() = default;
     explicit OutputSchema(std::vector<OutputColumn> columns) : columns_(std::move(columns)) {}
@@ -58,7 +67,7 @@ public:
     [[nodiscard]] std::optional<size_t> find_column(const std::string& name) const {
         std::optional<size_t> found;
         for (size_t i = 0; i < columns_.size(); ++i) {
-            if (columns_[i].name == name) {
+            if (iequals(columns_[i].name, name)) {
                 if (found.has_value()) {
                     return std::nullopt; // ambiguous
                 }
@@ -72,7 +81,7 @@ public:
     [[nodiscard]] std::optional<size_t> find_column(const std::string& table,
                                                     const std::string& col) const {
         for (size_t i = 0; i < columns_.size(); ++i) {
-            if (columns_[i].table_name == table && columns_[i].name == col) {
+            if (iequals(columns_[i].table_name, table) && iequals(columns_[i].name, col)) {
                 return i;
             }
         }
