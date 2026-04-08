@@ -738,8 +738,7 @@ Planner::plan_from_source(const TableRef& table_ref,
         out_cols.push_back({trav_alias, "__source", pk_type, true, 0});
 
         // Append edge property columns (nullable — start node has no incoming edge).
-        // Qualified by edge type name (not alias) to support edge_type.property
-        // access syntax.
+        // Qualified by edge type name for edge_type.property access syntax.
         auto edge_table = graph_engine_->get_edge_table(database_id_, trav->edge_type);
         if (edge_table) {
             for (const auto& prop_col : (*edge_table)->config().property_columns) {
@@ -1585,7 +1584,9 @@ Planner::plan_select(const SelectStmt& stmt,
                         continue;
                     }
                     // Skip computed columns (window functions, expressions).
-                    if (rc.table_id == 0 && rc.ordinal == -1) {
+                    // Edge property and meta-columns also have table_id=0,
+                    // ordinal=-1 but carry a non-empty table_name.
+                    if (rc.table_id == 0 && rc.ordinal == -1 && rc.table_name.empty()) {
                         continue;
                     }
                     auto cr = std::make_unique<ColumnRefExpr>();

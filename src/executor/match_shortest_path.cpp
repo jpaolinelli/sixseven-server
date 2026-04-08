@@ -652,9 +652,28 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
         // further exploration can yield new shortest paths. For ALL_SHORTEST,
         // entries at exactly best_dest_cost may still discover equal-cost
         // paths (e.g. via zero-weight final edges), so use strict >.
-        bool can_terminate = (path_selector_ == PathSelector::ALL_SHORTEST)
-                                 ? entry.cost > best_dest_cost
-                                 : entry.cost >= best_dest_cost;
+        // For SHORTEST_K, terminate only when we have K paths AND the current
+        // entry cost exceeds the K-th best — since Dijkstra processes by cost
+        // order, no cheaper destination paths can be discovered after this.
+        bool can_terminate = false;
+        if (path_selector_ == PathSelector::ALL_SHORTEST) {
+            can_terminate = entry.cost > best_dest_cost;
+        } else if (path_selector_ == PathSelector::SHORTEST_K) {
+            if (static_cast<int32_t>(result_paths.size()) >= shortest_k_) {
+                // Find the K-th cheapest path cost.
+                double kth_cost = 0.0;
+                std::vector<double> costs;
+                costs.reserve(result_paths.size());
+                for (const auto& p : result_paths) {
+                    costs.push_back(p.total_weight);
+                }
+                std::sort(costs.begin(), costs.end());
+                kth_cost = costs[static_cast<size_t>(shortest_k_) - 1];
+                can_terminate = entry.cost > kth_cost;
+            }
+        } else {
+            can_terminate = entry.cost >= best_dest_cost;
+        }
         if (can_terminate && !result_paths.empty()) {
             if (path_selector_ == PathSelector::ANY_SHORTEST) {
                 result_paths.resize(1);
@@ -697,27 +716,44 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
 
             // Check if we've reached the target.
             if (ValueEqual{}(nbr_pk, tgt_pk)) {
-                // Skip paths that exceed the best known destination cost.
-                if (new_cost > best_dest_cost) {
-                    continue;
+                if (path_selector_ == PathSelector::SHORTEST_K) {
+                    // For SHORTEST_K, accept all paths — we sort and trim later.
+                    if (new_cost < best_dest_cost) {
+                        best_dest_cost = new_cost;
+                    }
+                    result_paths.push_back(std::move(new_path));
+                } else {
+                    // Skip paths that exceed the best known destination cost.
+                    if (new_cost > best_dest_cost) {
+                        continue;
+                    }
+                    if (new_cost < best_dest_cost) {
+                        best_dest_cost = new_cost;
+                        result_paths.clear();
+                    }
+                    result_paths.push_back(std::move(new_path));
                 }
-                if (new_cost < best_dest_cost) {
-                    best_dest_cost = new_cost;
-                    result_paths.clear();
-                }
-
-                result_paths.push_back(std::move(new_path));
                 continue;
             }
 
             // Only visit if we found a better (or equal, for ALL_SHORTEST) cost.
+            // For SHORTEST_K, allow revisits at higher costs to find K paths.
             auto cost_it = best_cost.find(nbr_pk);
-            bool dominated =
-                (cost_it != best_cost.end()) &&
-                (path_selector_ == PathSelector::ALL_SHORTEST ? new_cost > cost_it->second
-                                                              : new_cost >= cost_it->second);
+            bool dominated = false;
+            if (cost_it != best_cost.end()) {
+                if (path_selector_ == PathSelector::ALL_SHORTEST) {
+                    dominated = new_cost > cost_it->second;
+                } else if (path_selector_ == PathSelector::SHORTEST_K) {
+                    // Never dominate for SHORTEST_K — we need alternative paths.
+                    dominated = false;
+                } else {
+                    dominated = new_cost >= cost_it->second;
+                }
+            }
             if (!dominated) {
-                best_cost[nbr_pk] = new_cost;
+                if (cost_it == best_cost.end() || new_cost < cost_it->second) {
+                    best_cost[nbr_pk] = new_cost;
+                }
 
                 DijkstraEntry next;
                 next.cost = new_cost;
@@ -732,6 +768,9 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
         result_paths.resize(1);
     } else if (path_selector_ == PathSelector::SHORTEST_K &&
                static_cast<int32_t>(result_paths.size()) > shortest_k_) {
+        // Sort by total weight so we keep the K cheapest paths.
+        std::sort(result_paths.begin(), result_paths.end(),
+                  [](const Path& a, const Path& b) { return a.total_weight < b.total_weight; });
         result_paths.resize(shortest_k_);
     }
     return ok(std::move(result_paths));

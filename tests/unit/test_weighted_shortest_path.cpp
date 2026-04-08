@@ -400,8 +400,8 @@ TEST_F(WeightedShortestPathTest, AllShortestOnlyReturnsCheapestPaths) {
 }
 
 TEST_F(WeightedShortestPathTest, ShortestKOnlyReturnsCheapestPaths) {
-    // Same graph: SHORTEST 5 from 1 to 5 should not include cost-30 path
-    // if cost-10 is the true shortest.
+    // Graph has 2 paths from 1→5: cost 10 (via 3→4) and cost 30 (via 2).
+    // SHORTEST 5 should return both, sorted by cost.
     auto weight = make_weight_expr();
     auto results = run_weighted_match(
         make_config(), make_schema(), PathSelector::SHORTEST_K, weight.get(), "p", 5);
@@ -413,10 +413,13 @@ TEST_F(WeightedShortestPathTest, ShortestKOnlyReturnsCheapestPaths) {
         }
     }
 
-    // All returned paths to node 5 should have cost 10 (the minimum).
-    for (const auto& t : from_1_to_5) {
-        EXPECT_DOUBLE_EQ(t.values[2].as_path().total_weight, 10.0);
-    }
+    // SHORTEST K returns up to K cheapest paths (at different costs).
+    ASSERT_EQ(from_1_to_5.size(), 2u);
+    std::sort(from_1_to_5.begin(), from_1_to_5.end(), [](const Tuple& a, const Tuple& b) {
+        return a.values[2].as_path().total_weight < b.values[2].as_path().total_weight;
+    });
+    EXPECT_DOUBLE_EQ(from_1_to_5[0].values[2].as_path().total_weight, 10.0);
+    EXPECT_DOUBLE_EQ(from_1_to_5[1].values[2].as_path().total_weight, 30.0);
 }
 
 // ===========================================================================

@@ -53,18 +53,23 @@ struct ClosenessInfo {
     double closeness;
     int64_t sum_farness;
     int64_t reachable_count;
+    int64_t component_size;
+    double normalized_closeness;
 };
 
 /// Extract (node_id, ClosenessInfo) from algorithm result rows.
 std::unordered_map<int64_t, ClosenessInfo> to_closeness_map(const std::vector<AlgorithmRow>& rows) {
     std::unordered_map<int64_t, ClosenessInfo> result;
     for (const auto& row : rows) {
-        EXPECT_EQ(row.values.size(), 4u);
+        EXPECT_EQ(row.values.size(), 6u);
         auto node_id = std::get<int64_t>(row.values[0].data());
         auto closeness = std::get<double>(row.values[1].data());
         auto sum_farness = std::get<int64_t>(row.values[2].data());
         auto reachable_count = std::get<int64_t>(row.values[3].data());
-        result[node_id] = {closeness, sum_farness, reachable_count};
+        auto component_size = std::get<int64_t>(row.values[4].data());
+        auto normalized_closeness = std::get<double>(row.values[5].data());
+        result[node_id] = {closeness, sum_farness, reachable_count,
+                           component_size, normalized_closeness};
     }
     return result;
 }
@@ -182,7 +187,7 @@ TEST(QA_GDB518_Def, AC1_CaseInsensitiveLookup) {
 
 TEST(QA_GDB518_Def, AC1_OutputSchemaColumns) {
     auto def = make_closeness_centrality_def();
-    ASSERT_EQ(def.output_columns.size(), 4u);
+    ASSERT_EQ(def.output_columns.size(), 6u);
 
     EXPECT_EQ(def.output_columns[0].name, "node_id");
     EXPECT_EQ(def.output_columns[0].type_id, TypeId::INT64);
@@ -199,11 +204,21 @@ TEST(QA_GDB518_Def, AC1_OutputSchemaColumns) {
     EXPECT_EQ(def.output_columns[3].name, "reachable_count");
     EXPECT_EQ(def.output_columns[3].type_id, TypeId::INT64);
     EXPECT_FALSE(def.output_columns[3].nullable);
+
+    EXPECT_EQ(def.output_columns[4].name, "component_size");
+    EXPECT_EQ(def.output_columns[4].type_id, TypeId::INT64);
+    EXPECT_FALSE(def.output_columns[4].nullable);
+
+    EXPECT_EQ(def.output_columns[5].name, "normalized_closeness");
+    EXPECT_EQ(def.output_columns[5].type_id, TypeId::FLOAT64);
+    EXPECT_FALSE(def.output_columns[5].nullable);
 }
 
 TEST(QA_GDB518_Def, AC1_NoParameters) {
     auto def = make_closeness_centrality_def();
-    EXPECT_TRUE(def.params.empty());
+    ASSERT_EQ(def.params.size(), 1u);
+    EXPECT_EQ(def.params[0].name, "variant");
+    EXPECT_EQ(def.params[0].type_id, TypeId::STRING);
 }
 
 TEST_F(QA_GDB518_ClosenessCentrality, AC1_OutputRowStructure) {
@@ -213,11 +228,13 @@ TEST_F(QA_GDB518_ClosenessCentrality, AC1_OutputRowStructure) {
     ASSERT_TRUE(result.has_value());
 
     for (const auto& row : *result) {
-        ASSERT_EQ(row.values.size(), 4u) << "each row must have exactly 4 columns";
+        ASSERT_EQ(row.values.size(), 6u) << "each row must have exactly 6 columns";
         EXPECT_TRUE(std::holds_alternative<int64_t>(row.values[0].data()));
         EXPECT_TRUE(std::holds_alternative<double>(row.values[1].data()));
         EXPECT_TRUE(std::holds_alternative<int64_t>(row.values[2].data()));
         EXPECT_TRUE(std::holds_alternative<int64_t>(row.values[3].data()));
+        EXPECT_TRUE(std::holds_alternative<int64_t>(row.values[4].data()));
+        EXPECT_TRUE(std::holds_alternative<double>(row.values[5].data()));
     }
 }
 
@@ -845,7 +862,7 @@ TEST_F(QA_GDB518_ClosenessCentrality, DeterministicOutput) {
 
     ASSERT_EQ(result1->size(), result2->size());
     for (size_t i = 0; i < result1->size(); ++i) {
-        ASSERT_EQ((*result1)[i].values.size(), 4u);
+        ASSERT_EQ((*result1)[i].values.size(), 6u);
         // node_id
         EXPECT_EQ(std::get<int64_t>((*result1)[i].values[0].data()),
                   std::get<int64_t>((*result2)[i].values[0].data()));
@@ -858,6 +875,12 @@ TEST_F(QA_GDB518_ClosenessCentrality, DeterministicOutput) {
         // reachable_count
         EXPECT_EQ(std::get<int64_t>((*result1)[i].values[3].data()),
                   std::get<int64_t>((*result2)[i].values[3].data()));
+        // component_size
+        EXPECT_EQ(std::get<int64_t>((*result1)[i].values[4].data()),
+                  std::get<int64_t>((*result2)[i].values[4].data()));
+        // normalized_closeness
+        EXPECT_DOUBLE_EQ(std::get<double>((*result1)[i].values[5].data()),
+                         std::get<double>((*result2)[i].values[5].data()));
     }
 }
 

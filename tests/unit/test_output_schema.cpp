@@ -94,5 +94,8 @@ TEST(OutputSchema, FindColumnQualified_NotFound) {
         {"users", "name", TypeId::STRING, false, 1},
     });
     EXPECT_FALSE(schema.find_column("users", "missing").has_value());
-    EXPECT_FALSE(schema.find_column("missing", "name").has_value());
+    // When the table doesn't match but the column name is unique,
+    // find_column falls back to column-name-only match (supports
+    // alias.property for edge properties qualified by edge type name).
+    EXPECT_TRUE(schema.find_column("missing", "name").has_value());
 }

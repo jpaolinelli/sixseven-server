@@ -12,6 +12,24 @@
 
 namespace sixseven {
 
+namespace {
+
+/// Convert a Value PK to int64_t for PathStep storage.
+Result<int64_t> pk_to_int64(const Value& pk) {
+    if (!pk.is_null()) {
+        if (auto* p = std::get_if<int64_t>(&pk.data())) {
+            return ok(*p);
+        }
+        if (auto* p32 = std::get_if<int32_t>(&pk.data())) {
+            return ok(static_cast<int64_t>(*p32));
+        }
+    }
+    return make_error(StatusCode::INVALID_ARGUMENT,
+                      "variable-length MATCH requires integer primary keys for path tracking");
+}
+
+} // namespace
+
 VariableLengthMatchOperator::VariableLengthMatchOperator(GraphEngine& graph_engine,
                                                          const Catalog& catalog,
                                                          StorageManager& storage,
@@ -383,6 +401,7 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
     }
 
     std::vector<Binding> bindings;
+    std::vector<Path> binding_paths; // Parallel to bindings: path per binding.
     for (const auto& pk : *src_pks) {
         // Apply source node inline predicate.
         if (first_node.filter_expr) {
@@ -394,6 +413,7 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
         Binding b;
         b[first_node.variable] = pk;
         bindings.push_back(std::move(b));
+        binding_paths.emplace_back();
     }
 
     size_t total_visited = 0;
@@ -405,12 +425,14 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
         const auto& tgt_var = config_.nodes[ei + 1].variable;
 
         std::vector<Binding> new_bindings;
+        std::vector<Path> new_paths;
 
         const auto& tgt_node = config_.nodes[ei + 1];
 
         if (!edge_def.is_variable_length()) {
             // Fixed-length edge: single-hop expansion.
-            for (auto& binding : bindings) {
+            for (size_t bi = 0; bi < bindings.size(); ++bi) {
+                auto& binding = bindings[bi];
                 auto it = binding.find(src_var);
                 if (it == binding.end()) {
                     continue;
@@ -461,8 +483,21 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                         }
                     }
                     Binding new_b = binding;
+                    // Build single-hop path.
+                    Path hop_path = binding_paths[bi];
+                    if (auto src_int = pk_to_int64(it->second)) {
+                        if (hop_path.steps.empty()) {
+                            hop_path.steps.push_back({*src_int, -1});
+                        }
+                        hop_path.steps.back().edge_id =
+                            static_cast<int64_t>(edge_row.edge_row_id);
+                    }
+                    if (auto nbr_int = pk_to_int64(nbr_pk)) {
+                        hop_path.steps.push_back({*nbr_int, -1});
+                    }
                     new_b[tgt_var] = std::move(nbr_pk);
                     new_bindings.push_back(std::move(new_b));
+                    new_paths.push_back(std::move(hop_path));
                 }
             }
         } else {
@@ -474,6 +509,7 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                 Value current_pk;
                 int32_t depth;
                 std::unordered_set<Value, ValueHash, ValueEqual> visited;
+                Path path;
             };
 
             for (auto& binding : bindings) {
@@ -489,6 +525,10 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                 start.current_pk = start_pk;
                 start.depth = 0;
                 start.visited.insert(start_pk);
+                // Initialize path with starting node.
+                if (auto pk_int = pk_to_int64(start_pk)) {
+                    start.path.steps.push_back({*pk_int, -1});
+                }
                 queue.push(std::move(start));
 
                 while (!queue.empty()) {
@@ -515,6 +555,7 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                         Binding new_b = binding;
                         new_b[tgt_var] = entry.current_pk;
                         new_bindings.push_back(std::move(new_b));
+                        new_paths.push_back(entry.path);
                     }
 
                     // Expand if we haven't reached max depth.
@@ -562,6 +603,15 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                             next.depth = entry.depth + 1;
                             next.visited = entry.visited;
                             next.visited.insert(nbr_pk);
+                            // Extend path with the edge and neighbor node.
+                            next.path = entry.path;
+                            if (!next.path.steps.empty()) {
+                                next.path.steps.back().edge_id =
+                                    static_cast<int64_t>(edge_row.edge_row_id);
+                            }
+                            if (auto nbr_int = pk_to_int64(nbr_pk)) {
+                                next.path.steps.push_back({*nbr_int, -1});
+                            }
                             next.current_pk = std::move(nbr_pk);
                             queue.push(std::move(next));
                         }
@@ -571,11 +621,15 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
         }
 
         bindings = std::move(new_bindings);
+        binding_paths = std::move(new_paths);
     }
 
     // Convert final bindings to output tuples.
-    for (auto& binding : bindings) {
-        auto tuple_result = binding_to_tuple(binding, nullptr);
+    for (size_t bi = 0; bi < bindings.size(); ++bi) {
+        const Path* path_ptr = (bi < binding_paths.size() && !binding_paths[bi].steps.empty())
+                                   ? &binding_paths[bi]
+                                   : nullptr;
+        auto tuple_result = binding_to_tuple(bindings[bi], path_ptr);
         if (tuple_result) {
             results_.push_back(std::move(*tuple_result));
         }

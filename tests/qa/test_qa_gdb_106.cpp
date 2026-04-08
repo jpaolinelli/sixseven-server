@@ -443,9 +443,14 @@ TEST(QA_GDB_106_Match, EmptyEdgeBrackets) {
 }
 
 TEST(QA_GDB_106_Match, BareEdgeNoBrackets) {
-    // --> can't work because -- is a SQL line comment, so the rest of the
-    // line is consumed by the lexer. This is expected behavior.
-    expect_parse_error("MATCH (a)-->(b) RETURN a");
+    // Since GDB-552, --> is a valid edge pattern (-- is not treated as a
+    // line comment when followed by >).
+    auto stmt = parse_one("MATCH (a)-->(b) RETURN a");
+    auto* m = dynamic_cast<MatchStmt*>(stmt.get());
+    ASSERT_NE(m, nullptr);
+    ASSERT_TRUE(m->pattern[0].outgoing_edge.has_value());
+    EXPECT_EQ(m->pattern[0].outgoing_edge->direction, TraverseDirection::OUT);
+    EXPECT_TRUE(m->pattern[0].outgoing_edge->edge_type.empty());
 }
 
 TEST(QA_GDB_106_Match, BareEdgeWithBracketsNonDirectional) {

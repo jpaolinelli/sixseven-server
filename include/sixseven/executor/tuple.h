@@ -78,14 +78,28 @@ public:
     }
 
     /// Find a column index by qualified name (table.column).
+    /// Falls back to column-name-only match when the qualified lookup fails,
+    /// supporting alias.property access for edge properties qualified by edge
+    /// type name (and vice versa).
     [[nodiscard]] std::optional<size_t> find_column(const std::string& table,
                                                     const std::string& col) const {
+        // Exact qualified match.
         for (size_t i = 0; i < columns_.size(); ++i) {
             if (iequals(columns_[i].table_name, table) && iequals(columns_[i].name, col)) {
                 return i;
             }
         }
-        return std::nullopt;
+        // Fallback: match by column name only (must be unambiguous).
+        std::optional<size_t> found;
+        for (size_t i = 0; i < columns_.size(); ++i) {
+            if (iequals(columns_[i].name, col)) {
+                if (found.has_value()) {
+                    return std::nullopt; // ambiguous
+                }
+                found = i;
+            }
+        }
+        return found;
     }
 
 private:

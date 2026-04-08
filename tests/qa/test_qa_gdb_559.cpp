@@ -470,7 +470,7 @@ TEST_F(QA_GDB559, AnyShortest_LateCheaperArrival_ReturnsCorrectCost) {
 // ============================================================================
 
 TEST_F(QA_GDB559, ShortestK_FiltersNonShortestAtDestination) {
-    // SHORTEST_K should also not return non-shortest paths.
+    // SHORTEST_K returns up to K cheapest paths (at potentially different costs).
     //   1--(1)-->2--(1)-->4  (cost 2)
     //   1--(5)-->3--(5)-->4  (cost 10)
     for (int64_t id : {1, 2, 3, 4})
@@ -485,14 +485,17 @@ TEST_F(QA_GDB559, ShortestK_FiltersNonShortestAtDestination) {
     auto results = run(PathSelector::SHORTEST_K, w.get(), "road", 5);
     auto from_1_to_4 = filter_pair(results, 1, 4);
 
-    for (const auto* t : from_1_to_4) {
-        EXPECT_DOUBLE_EQ(t->values[2].as_path().total_weight, 2.0)
-            << "SHORTEST_K should only return cheapest paths, not cost-10";
-    }
+    // K=5 with 2 distinct paths: should return both.
+    ASSERT_EQ(from_1_to_4.size(), 2u);
+    std::sort(from_1_to_4.begin(), from_1_to_4.end(), [](const Tuple* a, const Tuple* b) {
+        return a->values[2].as_path().total_weight < b->values[2].as_path().total_weight;
+    });
+    EXPECT_DOUBLE_EQ(from_1_to_4[0]->values[2].as_path().total_weight, 2.0);
+    EXPECT_DOUBLE_EQ(from_1_to_4[1]->values[2].as_path().total_weight, 10.0);
 }
 
 TEST_F(QA_GDB559, ShortestK_LateCheaperArrival_PurgesExpensive) {
-    // SHORTEST_K with late cheaper arrival.
+    // SHORTEST_K returns up to K cheapest paths.
     //   1--(1)-->2--(100)-->4  (cost 101)
     //   1--(50)-->3--(1)-->4   (cost 51)
     for (int64_t id : {1, 2, 3, 4})
@@ -507,11 +510,13 @@ TEST_F(QA_GDB559, ShortestK_LateCheaperArrival_PurgesExpensive) {
     auto results = run(PathSelector::SHORTEST_K, w.get(), "road", 5);
     auto from_1_to_4 = filter_pair(results, 1, 4);
 
-    // The cost-101 path should be purged when cost-51 arrives.
-    for (const auto* t : from_1_to_4) {
-        EXPECT_DOUBLE_EQ(t->values[2].as_path().total_weight, 51.0)
-            << "SHORTEST_K should purge expensive path when cheaper arrival found";
-    }
+    // K=5 with 2 distinct paths: should return both, cheapest first.
+    ASSERT_EQ(from_1_to_4.size(), 2u);
+    std::sort(from_1_to_4.begin(), from_1_to_4.end(), [](const Tuple* a, const Tuple* b) {
+        return a->values[2].as_path().total_weight < b->values[2].as_path().total_weight;
+    });
+    EXPECT_DOUBLE_EQ(from_1_to_4[0]->values[2].as_path().total_weight, 51.0);
+    EXPECT_DOUBLE_EQ(from_1_to_4[1]->values[2].as_path().total_weight, 101.0);
 }
 
 TEST_F(QA_GDB559, ShortestK_EarlyReturn_MissesCheaperPath) {
