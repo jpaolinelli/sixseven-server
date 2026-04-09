@@ -73,7 +73,7 @@ protected:
     }
 
     int64_t run_count_scan(TableHeap& heap) {
-        CountScanOperator scan(heap, *bpm_, count_output_schema());
+        CountScanOperator scan(heap, count_output_schema());
         auto open = scan.open();
         EXPECT_TRUE(open.has_value()) << open.error().message;
 
@@ -317,7 +317,7 @@ TEST_F(GDB615_CountScan, OutputTupleHasExactlyOneInt64Value) {
     insert_row(heap, 1, "a");
     insert_row(heap, 2, "b");
 
-    CountScanOperator scan(heap, *bpm_, count_output_schema());
+    CountScanOperator scan(heap, count_output_schema());
     auto open = scan.open();
     ASSERT_TRUE(open.has_value());
 
@@ -337,13 +337,13 @@ TEST_F(GDB615_CountScan, PlanNodeDetailIncludesTableName) {
     TableHeap heap(*bpm_, dm_, file_id_);
     // Schema with table_name set.
     auto schema = OutputSchema({{"my_table", "__agg_0", TypeId::INT64, false, 0}});
-    CountScanOperator scan(heap, *bpm_, std::move(schema));
+    CountScanOperator scan(heap, std::move(schema));
     EXPECT_EQ(scan.plan_node_detail(), "on my_table");
 }
 
 TEST_F(GDB615_CountScan, PlanNodeDetailEmptyWhenNoTableName) {
     TableHeap heap(*bpm_, dm_, file_id_);
-    CountScanOperator scan(heap, *bpm_, count_output_schema());
+    CountScanOperator scan(heap, count_output_schema());
     // Default count_output_schema has empty table_name.
     EXPECT_EQ(scan.plan_node_detail(), "");
 }

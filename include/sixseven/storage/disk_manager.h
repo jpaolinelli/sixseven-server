@@ -128,8 +128,7 @@ public:
 
     /// Write a uint64_t to the file header extension area and update the checksum.
     /// @param offset Byte offset relative to fh_ext_offset.
-    [[nodiscard]] Result<void>
-    write_header_ext_u64(FileId file_id, size_t offset, uint64_t value);
+    [[nodiscard]] Result<void> write_header_ext_u64(FileId file_id, size_t offset, uint64_t value);
 
     // -- Crash safety ---------------------------------------------------------
 

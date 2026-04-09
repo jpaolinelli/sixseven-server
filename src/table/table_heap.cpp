@@ -67,6 +67,7 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data) {
                 auto slot = page->insert_tuple(data);
                 if (slot) {
                     ++row_count_;
+                    persist_row_count();
                     last_insert_page_ = next_pid;
                     RID rid{next_pid, *slot};
                     auto unpin = bpm_.unpin_page(next_pid, true);

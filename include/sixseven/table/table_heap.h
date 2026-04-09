@@ -81,6 +81,8 @@ private:
     PageId last_insert_page_ = 0;
 
     /// Live row count, incremented on insert, decremented on delete.
+    /// TODO(GDB-616): When txn integration is done, rollback must compensate
+    /// the counter (decrement on aborted insert, increment on aborted delete).
     std::atomic<uint64_t> row_count_{0};
 
     /// Read row count from header page (page 0) on table open.
