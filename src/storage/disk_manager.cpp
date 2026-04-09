@@ -549,6 +549,75 @@ Result<void> DiskManager::sync_data(FileId file_id) {
     return ok();
 }
 
+// -- Header extension ---------------------------------------------------------
+
+Result<uint64_t> DiskManager::read_header_ext_u64(FileId file_id, size_t offset) {
+    auto file_result = get_open_file(file_id);
+    if (!file_result) {
+        return tl::unexpected(file_result.error());
+    }
+    OpenFile* file = *file_result;
+
+    size_t abs_offset = fh_ext_offset + offset;
+    if (abs_offset + sizeof(uint64_t) > page_size) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "header extension offset out of range");
+    }
+
+    std::array<uint8_t, page_size> header{};
+    ssize_t bytes_read = ::pread(file->fd, header.data(), page_size, 0);
+    if (bytes_read < 0 || static_cast<size_t>(bytes_read) != page_size) {
+        return make_error(StatusCode::IO_ERROR,
+                          "failed to read file header: " + std::string(std::strerror(errno)));
+    }
+
+    uint64_t value = 0;
+    std::memcpy(&value, &header[abs_offset], sizeof(uint64_t));
+    return ok(value);
+}
+
+Result<void> DiskManager::write_header_ext_u64(FileId file_id, size_t offset, uint64_t value) {
+    auto file_result = get_open_file(file_id);
+    if (!file_result) {
+        return tl::unexpected(file_result.error());
+    }
+    OpenFile* file = *file_result;
+
+    if (file->read_only) {
+        return make_error(StatusCode::READ_ONLY,
+                          "cannot write to read-only file: " + file->path.string());
+    }
+
+    size_t abs_offset = fh_ext_offset + offset;
+    if (abs_offset + sizeof(uint64_t) > page_size) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "header extension offset out of range");
+    }
+
+    // Read existing header.
+    std::array<uint8_t, page_size> header{};
+    ssize_t bytes_read = ::pread(file->fd, header.data(), page_size, 0);
+    if (bytes_read < 0 || static_cast<size_t>(bytes_read) != page_size) {
+        return make_error(StatusCode::IO_ERROR,
+                          "failed to read file header: " + std::string(std::strerror(errno)));
+    }
+
+    // Write the value.
+    std::memcpy(&header[abs_offset], &value, sizeof(uint64_t));
+
+    // Recompute header checksum.
+    uint32_t cksum =
+        crc32c_skip_region(header.data(), page_size, fh_checksum_offset, sizeof(uint32_t));
+    std::memcpy(&header[fh_checksum_offset], &cksum, sizeof(uint32_t));
+
+    // Write header back.
+    ssize_t written = ::pwrite(file->fd, header.data(), page_size, 0);
+    if (written < 0 || static_cast<size_t>(written) != page_size) {
+        return make_error(StatusCode::IO_ERROR,
+                          "failed to write file header: " + std::string(std::strerror(errno)));
+    }
+
+    return ok();
+}
+
 // -- Private helpers ----------------------------------------------------------
 
 Result<DiskManager::OpenFile*> DiskManager::get_open_file(FileId file_id) {

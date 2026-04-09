@@ -495,3 +495,102 @@ TEST_F(TableHeapTest, BeginReturnsResult) {
     auto next = it.next();
     EXPECT_FALSE(next.has_value());
 }
+
+// -- Row count (GDB-616) -----------------------------------------------------
+
+TEST_F(TableHeapTest, RowCountEmptyTable) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+    EXPECT_EQ(heap.row_count(), 0u);
+}
+
+TEST_F(TableHeapTest, RowCountAfterInserts) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    for (int i = 0; i < 25; ++i) {
+        auto r = heap.insert_tuple(make_tuple(100, static_cast<uint8_t>(i)));
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+        EXPECT_EQ(heap.row_count(), static_cast<uint64_t>(i + 1));
+    }
+}
+
+TEST_F(TableHeapTest, RowCountAfterDeletes) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    std::vector<RID> rids;
+    for (int i = 0; i < 10; ++i) {
+        auto r = heap.insert_tuple(make_tuple(100, static_cast<uint8_t>(i)));
+        ASSERT_TRUE(r.has_value());
+        rids.push_back(*r);
+    }
+    EXPECT_EQ(heap.row_count(), 10u);
+
+    // Delete 3 tuples.
+    ASSERT_TRUE(heap.delete_tuple(rids[1]).has_value());
+    EXPECT_EQ(heap.row_count(), 9u);
+    ASSERT_TRUE(heap.delete_tuple(rids[4]).has_value());
+    EXPECT_EQ(heap.row_count(), 8u);
+    ASSERT_TRUE(heap.delete_tuple(rids[7]).has_value());
+    EXPECT_EQ(heap.row_count(), 7u);
+}
+
+TEST_F(TableHeapTest, RowCountAfterInsertAndDelete) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    auto r1 = heap.insert_tuple(make_tuple(50, 0x11));
+    auto r2 = heap.insert_tuple(make_tuple(50, 0x22));
+    auto r3 = heap.insert_tuple(make_tuple(50, 0x33));
+    ASSERT_TRUE(r1.has_value());
+    ASSERT_TRUE(r2.has_value());
+    ASSERT_TRUE(r3.has_value());
+    EXPECT_EQ(heap.row_count(), 3u);
+
+    ASSERT_TRUE(heap.delete_tuple(*r2).has_value());
+    EXPECT_EQ(heap.row_count(), 2u);
+
+    // Insert again after delete.
+    auto r4 = heap.insert_tuple(make_tuple(50, 0x44));
+    ASSERT_TRUE(r4.has_value());
+    EXPECT_EQ(heap.row_count(), 3u);
+}
+
+TEST_F(TableHeapTest, RowCountPersistsAcrossReopen) {
+    // Insert tuples with first heap instance.
+    {
+        TableHeap heap(*bpm_, dm_, file_id_);
+        for (int i = 0; i < 15; ++i) {
+            auto r = heap.insert_tuple(make_tuple(100, static_cast<uint8_t>(i)));
+            ASSERT_TRUE(r.has_value()) << r.error().message;
+        }
+        EXPECT_EQ(heap.row_count(), 15u);
+    }
+
+    // Flush buffer pool so all dirty pages are written.
+    bpm_.reset();
+
+    // Reopen with a fresh buffer pool — row count should be recovered from header.
+    bpm_ = std::make_unique<BufferPoolManager>(dm_, file_id_, 64);
+    TableHeap heap2(*bpm_, dm_, file_id_);
+    EXPECT_EQ(heap2.row_count(), 15u);
+}
+
+TEST_F(TableHeapTest, RowCountPersistsAfterDeletes) {
+    {
+        TableHeap heap(*bpm_, dm_, file_id_);
+        std::vector<RID> rids;
+        for (int i = 0; i < 10; ++i) {
+            auto r = heap.insert_tuple(make_tuple(100, static_cast<uint8_t>(i)));
+            ASSERT_TRUE(r.has_value());
+            rids.push_back(*r);
+        }
+        // Delete 3 tuples.
+        ASSERT_TRUE(heap.delete_tuple(rids[0]).has_value());
+        ASSERT_TRUE(heap.delete_tuple(rids[3]).has_value());
+        ASSERT_TRUE(heap.delete_tuple(rids[6]).has_value());
+        EXPECT_EQ(heap.row_count(), 7u);
+    }
+
+    bpm_.reset();
+    bpm_ = std::make_unique<BufferPoolManager>(dm_, file_id_, 64);
+    TableHeap heap2(*bpm_, dm_, file_id_);
+    EXPECT_EQ(heap2.row_count(), 7u);
+}

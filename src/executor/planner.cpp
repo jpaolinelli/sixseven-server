@@ -1438,7 +1438,7 @@ Planner::plan_select(const SelectStmt& stmt,
                     }
                     auto count_schema = OutputSchema({{"", col_name, type, nullable, 0}});
                     child = std::make_unique<CountScanOperator>(
-                        *storage->heap, *storage->bpm, std::move(count_schema));
+                        *storage->heap, std::move(count_schema));
                     used_count_fast_path = true;
                 }
             }

@@ -2,7 +2,6 @@
 
 #include "sixseven/executor/iterator.h"
 #include "sixseven/executor/tuple.h"
-#include "sixseven/storage/buffer_pool.h"
 #include "sixseven/table/table_heap.h"
 
 #include <string>
@@ -11,15 +10,13 @@ namespace sixseven {
 
 /// Fast-path operator for bare `SELECT COUNT(*) FROM table` queries.
 ///
-/// Instead of deserializing every tuple through SeqScan + HashAggregate,
-/// this operator iterates heap pages and counts live tuple slots directly
-/// from page metadata. Returns a single tuple containing the count as INT64.
+/// Uses the live row count maintained by TableHeap for O(1) COUNT(*).
+/// Returns a single tuple containing the count as INT64.
 class CountScanOperator : public Iterator {
 public:
-    /// @param heap   The heap file to count tuples in.
-    /// @param bpm    Buffer pool manager for direct page access.
+    /// @param heap   The heap file providing the live row count.
     /// @param schema Output schema (single INT64 column for the count).
-    CountScanOperator(TableHeap& heap, BufferPoolManager& bpm, OutputSchema schema);
+    CountScanOperator(TableHeap& heap, OutputSchema schema);
 
     const OutputSchema& output_schema() const override;
 
@@ -34,7 +31,6 @@ protected:
 
 private:
     TableHeap& heap_;
-    BufferPoolManager& bpm_;
     OutputSchema schema_;
     bool emitted_ = false;
 };

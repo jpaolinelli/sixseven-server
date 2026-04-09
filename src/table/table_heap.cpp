@@ -6,10 +6,16 @@
 
 namespace sixseven {
 
+// Row count is stored in the file header extension area (page 0, bytes 16+).
+// Extension offset 0 = row_count (uint64_t).
+static constexpr size_t kRowCountExtOffset = 0;
+
 // -- TableHeap ----------------------------------------------------------------
 
 TableHeap::TableHeap(BufferPoolManager& bpm, DiskManager& dm, FileId file_id)
-    : bpm_(bpm), dm_(dm), file_id_(file_id) {}
+    : bpm_(bpm), dm_(dm), file_id_(file_id) {
+    load_row_count_from_header();
+}
 
 Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data) {
     if (data.empty()) {
@@ -29,6 +35,8 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data) {
             Page* page = *page_result;
             auto slot = page->insert_tuple(data);
             if (slot) {
+                ++row_count_;
+                persist_row_count();
                 RID rid{last_insert_page_, *slot};
                 auto unpin = bpm_.unpin_page(last_insert_page_, true);
                 if (!unpin) {
@@ -58,6 +66,7 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data) {
                 Page* page = *page_result;
                 auto slot = page->insert_tuple(data);
                 if (slot) {
+                    ++row_count_;
                     last_insert_page_ = next_pid;
                     RID rid{next_pid, *slot};
                     auto unpin = bpm_.unpin_page(next_pid, true);
@@ -95,6 +104,8 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data) {
         return tl::unexpected(slot.error());
     }
 
+    ++row_count_;
+    persist_row_count();
     last_insert_page_ = new_pid;
     RID rid{new_pid, *slot};
 
@@ -190,6 +201,9 @@ Result<void> TableHeap::delete_tuple(RID rid) {
         return tl::unexpected(result.error());
     }
 
+    --row_count_;
+    persist_row_count();
+
     auto unpin = bpm_.unpin_page(rid.page_id, true);
     if (!unpin) {
         return tl::unexpected(unpin.error());
@@ -213,6 +227,25 @@ Result<uint32_t> TableHeap::page_count() const {
     }
     // Subtract 1 for the header page (page 0).
     return ok(*pc > 0 ? *pc - 1 : 0u);
+}
+
+uint64_t TableHeap::row_count() const {
+    return row_count_.load(std::memory_order_relaxed);
+}
+
+void TableHeap::load_row_count_from_header() {
+    auto result = dm_.read_header_ext_u64(file_id_, kRowCountExtOffset);
+    if (result) {
+        row_count_.store(*result, std::memory_order_relaxed);
+    }
+}
+
+void TableHeap::persist_row_count() {
+    uint64_t count = row_count_.load(std::memory_order_relaxed);
+    auto result = dm_.write_header_ext_u64(file_id_, kRowCountExtOffset, count);
+    if (!result) {
+        SIXSEVEN_LOG_WARN("failed to persist row count: {}", result.error().message);
+    }
 }
 
 // -- TableIterator ------------------------------------------------------------

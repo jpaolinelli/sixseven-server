@@ -6,6 +6,7 @@
 #include "sixseven/storage/disk_manager.h"
 #include "sixseven/storage/page.h"
 
+#include <atomic>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -67,6 +68,9 @@ public:
     /// Data pages start at page ID 1 (page 0 is the file header).
     [[nodiscard]] Result<uint32_t> page_count() const;
 
+    /// Return the live row count (O(1) via atomic counter).
+    [[nodiscard]] uint64_t row_count() const;
+
 private:
     BufferPoolManager& bpm_;
     DiskManager& dm_;
@@ -75,6 +79,15 @@ private:
     /// Hint: last page we successfully inserted into.
     /// Speeds up sequential inserts by avoiding full scans.
     PageId last_insert_page_ = 0;
+
+    /// Live row count, incremented on insert, decremented on delete.
+    std::atomic<uint64_t> row_count_{0};
+
+    /// Read row count from header page (page 0) on table open.
+    void load_row_count_from_header();
+
+    /// Write row count to header page (page 0) for persistence.
+    void persist_row_count();
 };
 
 /// Sequential scan iterator over all live tuples in a TableHeap.
