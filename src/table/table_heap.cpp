@@ -44,33 +44,33 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data) {
         }
     }
 
-    // First-fit scan: try each existing data page (pages 1 through total_pages-1).
-    for (uint32_t pid = 1; pid < total_pages; ++pid) {
-        if (pid == last_insert_page_) {
-            continue; // Already tried.
-        }
-
-        auto page_result = bpm_.fetch_page(pid);
-        if (!page_result) {
-            continue; // Skip pages that can't be fetched.
-        }
-
-        Page* page = *page_result;
-        auto slot = page->insert_tuple(data);
-        if (slot) {
-            last_insert_page_ = pid;
-            RID rid{pid, *slot};
-            auto unpin = bpm_.unpin_page(pid, true);
-            if (!unpin) {
-                return tl::unexpected(unpin.error());
+    // Sequential fallback: try the next page after the hint before allocating.
+    // This avoids an O(pages) first-fit scan that causes eviction storms on
+    // large tables with small buffer pools. For append-heavy workloads, old
+    // pages are always full so scanning them is pure waste.
+    // TODO(GDB-626): For mixed insert/delete workloads, a free-space map (FSM)
+    // would allow efficient reuse of space on fragmented pages without scanning.
+    if (last_insert_page_ >= 1) {
+        PageId next_pid = last_insert_page_ + 1;
+        if (next_pid < total_pages) {
+            auto page_result = bpm_.fetch_page(next_pid);
+            if (page_result) {
+                Page* page = *page_result;
+                auto slot = page->insert_tuple(data);
+                if (slot) {
+                    last_insert_page_ = next_pid;
+                    RID rid{next_pid, *slot};
+                    auto unpin = bpm_.unpin_page(next_pid, true);
+                    if (!unpin) {
+                        return tl::unexpected(unpin.error());
+                    }
+                    return ok(rid);
+                }
+                auto unpin = bpm_.unpin_page(next_pid, false);
+                if (!unpin) {
+                    return tl::unexpected(unpin.error());
+                }
             }
-            return ok(rid);
-        }
-
-        // Page full, unpin and continue.
-        auto unpin = bpm_.unpin_page(pid, false);
-        if (!unpin) {
-            return tl::unexpected(unpin.error());
         }
     }
 
@@ -89,8 +89,8 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data) {
         auto unpin = bpm_.unpin_page(new_pid, false);
         if (!unpin) {
             SIXSEVEN_LOG_WARN("unpin failed after insert_tuple error on page {}: {}",
-                           new_pid,
-                           unpin.error().message);
+                              new_pid,
+                              unpin.error().message);
         }
         return tl::unexpected(slot.error());
     }
@@ -118,8 +118,8 @@ Result<std::vector<uint8_t>> TableHeap::get_tuple(RID rid) {
         auto unpin = bpm_.unpin_page(rid.page_id, false);
         if (!unpin) {
             SIXSEVEN_LOG_WARN("unpin failed after get_tuple error on page {}: {}",
-                           rid.page_id,
-                           unpin.error().message);
+                              rid.page_id,
+                              unpin.error().message);
         }
         return tl::unexpected(tuple_span.error());
     }
@@ -157,8 +157,8 @@ Result<void> TableHeap::update_tuple(RID rid, std::span<const uint8_t> data) {
             auto unpin = bpm_.unpin_page(rid.page_id, false);
             if (!unpin) {
                 SIXSEVEN_LOG_WARN("unpin failed after update_tuple error on page {}: {}",
-                               rid.page_id,
-                               unpin.error().message);
+                                  rid.page_id,
+                                  unpin.error().message);
             }
             return tl::unexpected(result.error());
         }
@@ -184,8 +184,8 @@ Result<void> TableHeap::delete_tuple(RID rid) {
         auto unpin = bpm_.unpin_page(rid.page_id, false);
         if (!unpin) {
             SIXSEVEN_LOG_WARN("unpin failed after delete_tuple error on page {}: {}",
-                           rid.page_id,
-                           unpin.error().message);
+                              rid.page_id,
+                              unpin.error().message);
         }
         return tl::unexpected(result.error());
     }
@@ -245,8 +245,8 @@ std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
                 auto unpin = bpm_.unpin_page(current_page_, false);
                 if (!unpin) {
                     SIXSEVEN_LOG_WARN("unpin failed during scan on page {}: {}",
-                                   current_page_,
-                                   unpin.error().message);
+                                      current_page_,
+                                      unpin.error().message);
                 }
                 return std::make_pair(rid, std::move(data));
             }
