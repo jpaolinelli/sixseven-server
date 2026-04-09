@@ -3,6 +3,7 @@
 #include "sixseven/common/coercion.h"
 #include "sixseven/common/value_hash.h"
 #include "sixseven/executor/algorithm_scan.h"
+#include "sixseven/executor/count_scan.h"
 #include "sixseven/executor/delete.h"
 #include "sixseven/executor/edge_traversal.h"
 #include "sixseven/executor/enriched_traversal.h"
@@ -1410,140 +1411,205 @@ Planner::plan_select(const SelectStmt& stmt,
             agg_descs.push_back(std::move(desc));
         }
 
-        // -- 3c. Build aggregate output schema --------------------------------
-        const auto& child_schema = child->output_schema();
-        std::vector<OutputColumn> agg_out_cols;
-
-        // GROUP BY columns first (preserve original names from child schema).
-        std::vector<const Expr*> group_by_ptrs;
-        for (auto& gb : stmt.group_by) {
-            if (gb) {
-                group_by_ptrs.push_back(gb.get());
-
-                // Find the column info from the child schema.
-                if (auto* cref = dynamic_cast<const ColumnRefExpr*>(gb.get())) {
-                    std::optional<size_t> idx;
-                    if (!cref->table.empty()) {
-                        idx = child_schema.find_column(cref->table, cref->column);
-                    } else {
-                        idx = child_schema.find_column(cref->column);
+        // -- 3c. COUNT(*) fast path -----------------------------------------------
+        // Detect bare COUNT(*): single COUNT_STAR aggregate, no GROUP BY,
+        // no WHERE, no JOINs, single physical table source. When matched,
+        // use CountScanOperator to skip tuple deserialization entirely.
+        bool used_count_fast_path = false;
+        if (!has_group_by && agg_descs.size() == 1 && agg_descs[0].func == AggFunc::COUNT_STAR &&
+            !stmt.where_expr && !stmt.having_expr && stmt.joins.empty() && stmt.from.size() == 1 &&
+            !stmt.from[0].subquery && !stmt.from[0].traverse_source && !stmt.from[0].match_source &&
+            cte_map.find(to_upper(stmt.from[0].name)) == cte_map.end()) {
+            const auto& tref = stmt.from[0];
+            auto table_schema = catalog_.get_table(database_id_, tref.name);
+            if (table_schema) {
+                auto ts = storage_.get_table_storage(table_schema->table_id);
+                if (ts) {
+                    auto* storage = *ts;
+                    // Build output schema matching what HashAggregate would produce:
+                    // a single __agg_0 column of type INT64.
+                    std::string col_name = "__agg_0";
+                    auto it = bound.expr_types.find(unique_aggs[0]);
+                    TypeId type = TypeId::INT64;
+                    bool nullable = true;
+                    if (it != bound.expr_types.end()) {
+                        type = it->second.type_id;
+                        nullable = it->second.nullable;
                     }
-                    if (idx) {
-                        agg_out_cols.push_back(child_schema.column(*idx));
-                    } else {
-                        // Fallback for expressions.
-                        agg_out_cols.push_back({"", cref->column, TypeId::STRING, true, 0});
-                    }
-                } else {
-                    // Non-column GROUP BY expression.
-                    agg_out_cols.push_back({"", "?group?", TypeId::STRING, true, 0});
+                    auto count_schema = OutputSchema({{"", col_name, type, nullable, 0}});
+                    child = std::make_unique<CountScanOperator>(
+                        *storage->heap, *storage->bpm, std::move(count_schema));
+                    used_count_fast_path = true;
                 }
             }
         }
 
-        // Aggregate result columns.
-        for (size_t i = 0; i < unique_aggs.size(); ++i) {
-            std::string col_name = "__agg_" + std::to_string(i);
-            auto it = bound.expr_types.find(unique_aggs[i]);
-            TypeId type = TypeId::INT64;
-            bool nullable = true;
-            if (it != bound.expr_types.end()) {
-                type = it->second.type_id;
-                nullable = it->second.nullable;
+        if (!used_count_fast_path) {
+            // -- 3c-normal. Build aggregate output schema -------------------------
+            const auto& child_schema = child->output_schema();
+            std::vector<OutputColumn> agg_out_cols;
+
+            // GROUP BY columns first (preserve original names from child schema).
+            std::vector<const Expr*> group_by_ptrs;
+            for (auto& gb : stmt.group_by) {
+                if (gb) {
+                    group_by_ptrs.push_back(gb.get());
+
+                    // Find the column info from the child schema.
+                    if (auto* cref = dynamic_cast<const ColumnRefExpr*>(gb.get())) {
+                        std::optional<size_t> idx;
+                        if (!cref->table.empty()) {
+                            idx = child_schema.find_column(cref->table, cref->column);
+                        } else {
+                            idx = child_schema.find_column(cref->column);
+                        }
+                        if (idx) {
+                            agg_out_cols.push_back(child_schema.column(*idx));
+                        } else {
+                            // Fallback for expressions.
+                            agg_out_cols.push_back({"", cref->column, TypeId::STRING, true, 0});
+                        }
+                    } else {
+                        // Non-column GROUP BY expression.
+                        agg_out_cols.push_back({"", "?group?", TypeId::STRING, true, 0});
+                    }
+                }
             }
-            agg_out_cols.push_back({"", col_name, type, nullable, 0});
-        }
 
-        auto agg_schema = OutputSchema(std::move(agg_out_cols));
+            // Aggregate result columns.
+            for (size_t i = 0; i < unique_aggs.size(); ++i) {
+                std::string col_name = "__agg_" + std::to_string(i);
+                auto it = bound.expr_types.find(unique_aggs[i]);
+                TypeId type = TypeId::INT64;
+                bool nullable = true;
+                if (it != bound.expr_types.end()) {
+                    type = it->second.type_id;
+                    nullable = it->second.nullable;
+                }
+                agg_out_cols.push_back({"", col_name, type, nullable, 0});
+            }
 
-        // -- 3d. Create HashAggregateOperator ---------------------------------
-        child = std::make_unique<HashAggregateOperator>(std::move(child),
-                                                        std::move(group_by_ptrs),
-                                                        std::move(agg_descs),
-                                                        bound,
-                                                        std::move(agg_schema));
+            auto agg_schema = OutputSchema(std::move(agg_out_cols));
 
-        // -- 3e. Apply HAVING filter ------------------------------------------
-        if (stmt.having_expr) {
-            auto having_rewritten = rewrite_expr(*stmt.having_expr, agg_map);
-            auto* having_ptr = having_rewritten.get();
-            owned_exprs.push_back(std::move(having_rewritten));
-            child = std::make_unique<FilterOperator>(
-                std::move(child), *having_ptr, bound, &subquery_ctx_);
-        }
+            // -- 3d. Create HashAggregateOperator ---------------------------------
+            child = std::make_unique<HashAggregateOperator>(std::move(child),
+                                                            std::move(group_by_ptrs),
+                                                            std::move(agg_descs),
+                                                            bound,
+                                                            std::move(agg_schema));
 
-        // -- 3f. ORDER BY (before projection, with aggregate rewriting) --------
-        if (!stmt.order_by.empty()) {
-            std::vector<SortKey> keys;
-            keys.reserve(stmt.order_by.size());
-            for (const auto& ob : stmt.order_by) {
-                // Resolve SELECT-list aliases: if the ORDER BY expression is an
-                // unqualified column ref matching a SELECT alias, use the
-                // original SELECT expression so aggregate rewriting applies.
-                const Expr* effective_expr = ob.expr.get();
-                if (auto* cref = dynamic_cast<const ColumnRefExpr*>(ob.expr.get());
-                    cref && cref->table.empty()) {
-                    std::string upper = to_upper(cref->column);
-                    for (const auto& item : stmt.items) {
-                        if (!item.alias.empty() && to_upper(item.alias) == upper && item.expr) {
-                            effective_expr = item.expr.get();
-                            break;
+            // -- 3e. Apply HAVING filter ------------------------------------------
+            if (stmt.having_expr) {
+                auto having_rewritten = rewrite_expr(*stmt.having_expr, agg_map);
+                auto* having_ptr = having_rewritten.get();
+                owned_exprs.push_back(std::move(having_rewritten));
+                child = std::make_unique<FilterOperator>(
+                    std::move(child), *having_ptr, bound, &subquery_ctx_);
+            }
+
+            // -- 3f. ORDER BY (before projection, with aggregate rewriting) --------
+            if (!stmt.order_by.empty()) {
+                std::vector<SortKey> keys;
+                keys.reserve(stmt.order_by.size());
+                for (const auto& ob : stmt.order_by) {
+                    // Resolve SELECT-list aliases: if the ORDER BY expression is an
+                    // unqualified column ref matching a SELECT alias, use the
+                    // original SELECT expression so aggregate rewriting applies.
+                    const Expr* effective_expr = ob.expr.get();
+                    if (auto* cref = dynamic_cast<const ColumnRefExpr*>(ob.expr.get());
+                        cref && cref->table.empty()) {
+                        std::string upper = to_upper(cref->column);
+                        for (const auto& item : stmt.items) {
+                            if (!item.alias.empty() && to_upper(item.alias) == upper && item.expr) {
+                                effective_expr = item.expr.get();
+                                break;
+                            }
                         }
                     }
+
+                    if (contains_any_aggregate(*effective_expr, bound)) {
+                        auto rewritten = rewrite_expr(*effective_expr, agg_map);
+                        auto* ptr = rewritten.get();
+                        owned_exprs.push_back(std::move(rewritten));
+                        keys.push_back({ptr, ob.direction});
+                    } else {
+                        keys.push_back({effective_expr, ob.direction});
+                    }
+                }
+                child = std::make_unique<SortOperator>(std::move(child), std::move(keys), bound);
+            }
+
+            // -- 3g. Build rewritten projections ----------------------------------
+            std::vector<ProjectionExpr> projections;
+            for (const auto& item : stmt.items) {
+                if (item.is_star || !item.table_star.empty()) {
+                    // SELECT * with GROUP BY — handled by binder validation (error).
+                    continue;
+                }
+                if (!item.expr) {
+                    continue;
                 }
 
-                if (contains_any_aggregate(*effective_expr, bound)) {
-                    auto rewritten = rewrite_expr(*effective_expr, agg_map);
+                std::string col_alias = item.alias;
+                if (col_alias.empty()) {
+                    if (auto* cr = dynamic_cast<const ColumnRefExpr*>(item.expr.get())) {
+                        col_alias = cr->column;
+                    } else if (auto* fn = dynamic_cast<const FunctionCallExpr*>(item.expr.get())) {
+                        col_alias = fn->name;
+                    } else {
+                        col_alias = "?column?";
+                    }
+                }
+
+                // Check if this SELECT item needs aggregate rewriting.
+                if (contains_any_aggregate(*item.expr, bound)) {
+                    auto rewritten = rewrite_expr(*item.expr, agg_map);
                     auto* ptr = rewritten.get();
                     owned_exprs.push_back(std::move(rewritten));
-                    keys.push_back({ptr, ob.direction});
+                    projections.push_back({ptr, col_alias});
                 } else {
-                    keys.push_back({effective_expr, ob.direction});
-                }
-            }
-            child = std::make_unique<SortOperator>(std::move(child), std::move(keys), bound);
-        }
-
-        // -- 3g. Build rewritten projections ----------------------------------
-        std::vector<ProjectionExpr> projections;
-        for (const auto& item : stmt.items) {
-            if (item.is_star || !item.table_star.empty()) {
-                // SELECT * with GROUP BY — handled by binder validation (error).
-                continue;
-            }
-            if (!item.expr) {
-                continue;
-            }
-
-            std::string col_alias = item.alias;
-            if (col_alias.empty()) {
-                if (auto* cr = dynamic_cast<const ColumnRefExpr*>(item.expr.get())) {
-                    col_alias = cr->column;
-                } else if (auto* fn = dynamic_cast<const FunctionCallExpr*>(item.expr.get())) {
-                    col_alias = fn->name;
-                } else {
-                    col_alias = "?column?";
+                    // Pure column reference or literal — use as-is.
+                    projections.push_back({item.expr.get(), col_alias});
                 }
             }
 
-            // Check if this SELECT item needs aggregate rewriting.
-            if (contains_any_aggregate(*item.expr, bound)) {
+            auto output_schema = build_output_schema(bound.output_columns);
+            child = std::make_unique<ProjectOperator>(std::move(child),
+                                                      std::move(projections),
+                                                      std::move(output_schema),
+                                                      bound,
+                                                      &subquery_ctx_);
+        } // end if (!used_count_fast_path)
+
+        // For the fast path, we still need projection to produce the final
+        // output schema (e.g. renaming __agg_0 → count).
+        if (used_count_fast_path) {
+            std::vector<ProjectionExpr> projections;
+            for (const auto& item : stmt.items) {
+                if (!item.expr) {
+                    continue;
+                }
+                std::string col_alias = item.alias;
+                if (col_alias.empty()) {
+                    if (auto* fn = dynamic_cast<const FunctionCallExpr*>(item.expr.get())) {
+                        col_alias = fn->name;
+                    } else {
+                        col_alias = "?column?";
+                    }
+                }
+                // Rewrite the aggregate expression to reference __agg_0.
                 auto rewritten = rewrite_expr(*item.expr, agg_map);
                 auto* ptr = rewritten.get();
                 owned_exprs.push_back(std::move(rewritten));
                 projections.push_back({ptr, col_alias});
-            } else {
-                // Pure column reference or literal — use as-is.
-                projections.push_back({item.expr.get(), col_alias});
             }
+            auto output_schema = build_output_schema(bound.output_columns);
+            child = std::make_unique<ProjectOperator>(std::move(child),
+                                                      std::move(projections),
+                                                      std::move(output_schema),
+                                                      bound,
+                                                      &subquery_ctx_);
         }
-
-        auto output_schema = build_output_schema(bound.output_columns);
-        child = std::make_unique<ProjectOperator>(std::move(child),
-                                                  std::move(projections),
-                                                  std::move(output_schema),
-                                                  bound,
-                                                  &subquery_ctx_);
     } else {
         // -- 3 (no aggregation). Sort then Projection -------------------------
 
