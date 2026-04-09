@@ -137,6 +137,12 @@ public:
     /// Return the current number of pages in the buffer pool.
     [[nodiscard]] uint32_t pool_page_count() const;
 
+    /// Return the number of buffer pool hits (page already in pool).
+    [[nodiscard]] uint64_t hit_count() const { return hits_.load(std::memory_order_relaxed); }
+
+    /// Return the number of buffer pool misses (page read from disk).
+    [[nodiscard]] uint64_t miss_count() const { return misses_.load(std::memory_order_relaxed); }
+
     // -- Thread safety & background flusher ----------------------------------
 
     /// Enable the double-write buffer for torn page protection.
@@ -196,6 +202,10 @@ private:
     std::condition_variable flusher_cv_;       ///< Wakes/stops the flusher.
     std::atomic<bool> flusher_running_{false}; ///< Flusher shutdown flag.
     int dwb_fd_ = -1;                          ///< Double-write buffer fd (-1 = disabled).
+
+    // -- Observability counters --------------------------------------------------
+    std::atomic<uint64_t> hits_{0};   ///< Pages found already in the pool.
+    std::atomic<uint64_t> misses_{0}; ///< Pages read from disk.
 };
 
 } // namespace sixseven
