@@ -2,6 +2,7 @@
 add_library(sixseven_executor STATIC
     algorithm_scan.cpp
     expr_evaluator.cpp
+    count_scan.cpp
     seq_scan.cpp
     index_scan.cpp
     hash_index_scan.cpp
