@@ -369,6 +369,77 @@ TEST_F(TableHeapTest, PageCountGrowsWithInserts) {
     EXPECT_GE(*pc_after, *pc_before);
 }
 
+// -- Insert fallback when hint page is full (GDB-625) -------------------------
+
+TEST_F(TableHeapTest, InsertFallsBackToNewPageWhenHintFull) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    // Page usable space = page_size (8192) - page_header_size (24) = 8168 bytes.
+    // Each tuple consumes: slot_entry_size (4) + tuple_data bytes.
+    // Use 2000-byte tuples: 2000 + 4 = 2004 per tuple.
+    // Floor(8168 / 2004) = 4 tuples per page.
+    constexpr size_t tuple_size = 2000;
+
+    // Insert 4 tuples to fill the first data page.
+    std::vector<RID> rids;
+    for (int i = 0; i < 4; ++i) {
+        auto r = heap.insert_tuple(make_tuple(tuple_size, static_cast<uint8_t>(i)));
+        ASSERT_TRUE(r.has_value()) << "Fill insert " << i << " failed: " << r.error().message;
+        rids.push_back(*r);
+    }
+
+    // All 4 should be on the same page.
+    PageId first_page = rids[0].page_id;
+    for (size_t i = 1; i < rids.size(); ++i) {
+        EXPECT_EQ(rids[i].page_id, first_page) << "Tuple " << i << " not on first page";
+    }
+
+    // Insert one more — hint page is full, should go to a new page.
+    auto overflow = heap.insert_tuple(make_tuple(tuple_size, 0xFF));
+    ASSERT_TRUE(overflow.has_value()) << "Overflow insert failed: " << overflow.error().message;
+    EXPECT_NE(overflow->page_id, first_page) << "Overflow tuple should be on a different page";
+
+    // Verify all 5 tuples are retrievable.
+    for (size_t i = 0; i < rids.size(); ++i) {
+        auto get = heap.get_tuple(rids[i]);
+        ASSERT_TRUE(get.has_value()) << "Get tuple " << i << " failed";
+        EXPECT_EQ(get->size(), tuple_size);
+        EXPECT_EQ((*get)[0], static_cast<uint8_t>(i));
+    }
+    auto get_overflow = heap.get_tuple(*overflow);
+    ASSERT_TRUE(get_overflow.has_value()) << "Get overflow tuple failed";
+    EXPECT_EQ(get_overflow->size(), tuple_size);
+    EXPECT_EQ((*get_overflow)[0], 0xFF);
+}
+
+TEST_F(TableHeapTest, InsertContinuesOnNewPageAfterFull) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    // Fill multiple pages and verify inserts keep going to new pages.
+    constexpr size_t tuple_size = 2000;
+    constexpr int tuples_per_page = 4;
+    constexpr int total_tuples = tuples_per_page * 3; // 3 pages worth
+
+    std::vector<RID> rids;
+    for (int i = 0; i < total_tuples; ++i) {
+        auto r = heap.insert_tuple(make_tuple(tuple_size, static_cast<uint8_t>(i)));
+        ASSERT_TRUE(r.has_value()) << "Insert " << i << " failed: " << r.error().message;
+        rids.push_back(*r);
+    }
+
+    // Should span at least 3 pages.
+    auto pc = heap.page_count();
+    ASSERT_TRUE(pc.has_value());
+    EXPECT_GE(*pc, 3u);
+
+    // Verify all tuples are readable.
+    for (int i = 0; i < total_tuples; ++i) {
+        auto get = heap.get_tuple(rids[static_cast<size_t>(i)]);
+        ASSERT_TRUE(get.has_value()) << "Get " << i << " failed";
+        EXPECT_EQ((*get)[0], static_cast<uint8_t>(i));
+    }
+}
+
 // -- Insert after delete reuses space -----------------------------------------
 
 TEST_F(TableHeapTest, InsertReusesFreeSpace) {
