@@ -100,6 +100,9 @@ Generate realistic seed data that exercises every feature (relational, graph, ve
 python3 tools/generate_seed_data.py --scale small  > tools/seed_small.sql
 python3 tools/generate_seed_data.py --scale medium > tools/seed_medium.sql
 python3 tools/generate_seed_data.py --scale large  > tools/seed_large.sql
+python3 tools/generate_loadtest_data.py --scale stress > tools/seed_stress.sql
+python3 tools/generate_loadtest_data.py --scale massive > tools/seed_massive.sql
+python3 tools/generate_loadtest_data.py --scale extreme > tools/seed_extreme.sql
 
 # Load into a running server
 psql -h localhost -p 6767 -f tools/seed_small.sql
