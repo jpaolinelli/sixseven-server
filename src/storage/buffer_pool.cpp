@@ -146,6 +146,7 @@ Result<Page*> BufferPoolManager::fetch_page(PageId page_id) {
         ++frame.pin_count;
         replacer_.record_access(frame_id);
         replacer_.set_evictable(frame_id, false);
+        hits_.fetch_add(1, std::memory_order_relaxed);
         return ok(&frame.page);
     }
 
@@ -174,6 +175,7 @@ Result<Page*> BufferPoolManager::fetch_page(PageId page_id) {
     page_table_[page_id] = frame_id;
     replacer_.record_access(frame_id);
     replacer_.set_evictable(frame_id, false);
+    misses_.fetch_add(1, std::memory_order_relaxed);
 
     return ok(&frame.page);
 }

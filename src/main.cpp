@@ -88,7 +88,8 @@ int main(int argc, char* argv[]) {
 
     sixseven::DiskManager disk_manager;
     sixseven::Catalog catalog;
-    sixseven::StorageManager storage(disk_manager, data_dir);
+    sixseven::StorageManager storage(disk_manager, data_dir,
+                                     static_cast<uint32_t>(config.buffer_pool_size_mb * 128));
     sixseven::CatalogPersistence persistence(catalog, storage);
     sixseven::GraphEngine graph_engine(catalog, disk_manager, data_dir);
     sixseven::ProviderRegistry provider_registry(catalog);

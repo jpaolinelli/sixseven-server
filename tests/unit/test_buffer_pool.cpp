@@ -1055,3 +1055,59 @@ TEST_F(BufferPoolTest, FlusherWithDoubleWriteBuffer) {
     Page dwb_page(dwb_data);
     EXPECT_EQ(dwb_page.checksum(), compute_page_checksum(dwb_page));
 }
+
+// =============================================================================
+// Hit/Miss Counter Tests
+// =============================================================================
+
+TEST_F(BufferPoolTest, HitMissCountersStartAtZero) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+    EXPECT_EQ(bpm.hit_count(), 0u);
+    EXPECT_EQ(bpm.miss_count(), 0u);
+}
+
+TEST_F(BufferPoolTest, FetchMissIncrementsMissCounter) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+
+    // new_page doesn't go through fetch_page, so no hit/miss.
+    auto p = bpm.new_page();
+    ASSERT_TRUE(p.has_value());
+    PageId pid = (*p)->page_id();
+    auto tuple = std::vector<uint8_t>(50, 0xAB);
+    ASSERT_TRUE((*p)->insert_tuple(tuple).has_value());
+    ASSERT_TRUE(bpm.unpin_page(pid, /*is_dirty=*/true).has_value());
+    ASSERT_TRUE(bpm.flush_page(pid).has_value());
+
+    // Delete from pool so next fetch must read from disk.
+    ASSERT_TRUE(bpm.delete_page(pid).has_value());
+
+    // Fetch from disk -> miss.
+    auto f = bpm.fetch_page(pid);
+    ASSERT_TRUE(f.has_value());
+    EXPECT_EQ(bpm.miss_count(), 1u);
+    EXPECT_EQ(bpm.hit_count(), 0u);
+    ASSERT_TRUE(bpm.unpin_page(pid, false).has_value());
+}
+
+TEST_F(BufferPoolTest, FetchHitIncrementsHitCounter) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+
+    auto p = bpm.new_page();
+    ASSERT_TRUE(p.has_value());
+    PageId pid = (*p)->page_id();
+    ASSERT_TRUE(bpm.unpin_page(pid, false).has_value());
+
+    // Page is still in pool -> hit.
+    auto f = bpm.fetch_page(pid);
+    ASSERT_TRUE(f.has_value());
+    EXPECT_EQ(bpm.hit_count(), 1u);
+    EXPECT_EQ(bpm.miss_count(), 0u);
+    ASSERT_TRUE(bpm.unpin_page(pid, false).has_value());
+
+    // Fetch again -> another hit.
+    auto f2 = bpm.fetch_page(pid);
+    ASSERT_TRUE(f2.has_value());
+    EXPECT_EQ(bpm.hit_count(), 2u);
+    EXPECT_EQ(bpm.miss_count(), 0u);
+    ASSERT_TRUE(bpm.unpin_page(pid, false).has_value());
+}
