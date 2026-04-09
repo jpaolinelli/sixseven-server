@@ -108,8 +108,6 @@ python3 tools/generate_loadtest_data.py --scale extreme > tools/seed_extreme.sql
 psql -h localhost -p 6767 -f tools/seed_small.sql
 ```
 
-Pre-generated files are checked in at `tools/seed_small.sql`, `tools/seed_medium.sql`, and `tools/seed_large.sql`.
-
 The seed data creates 8 tables, 4 edge types, 9 indexes, and 2 EMBEDDING columns (using the ONNX provider). It includes verification queries for JOINs, CTEs, window functions, subqueries, set operations, graph traversal, pattern matching (variable-length paths, inline predicates, path selectors, weighted shortest path), vector search, graph algorithms, and admin commands.
 
 **Note:** Embedding columns use the ONNX provider (`onnx/models/all-MiniLM-L6-v2`). Install the model first — see [models/README.md](../models/README.md).
