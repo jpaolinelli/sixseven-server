@@ -51,7 +51,7 @@ by the implementation. Record any failures.
 8. **File bug tickets** → Create Jira `Bug` tickets in the same epic as the ticket under review for Critical and High findings. Mention the reviewed ticket in the description.
 9. **Produce QA report** → Structured report with verdict.
 10. **Transition ticket** → Transition the Jira ticket to "Done" regardless of verdict. Bug tickets filed in step 9 track any remaining work.
-11. **Commit QA Tests** → Commit the QA Tests to the PR Branch being tested.
+11. **Commit QA Tests** → Commit AND push the QA Tests to the PR Branch being tested.
 
 ## Skills You Should Use
 
