@@ -65,7 +65,7 @@ Read with a tester's eye — look for:
 
 ## Step 4: Write Adversarial Tests
 
-This is the core of QA. Write new test cases designed to **break** the implementation. Create a test file `tests/qa/test_qa_<ticket_key>.cpp` (lowercase ticket key, e.g., `test_qa_gdb_42.cpp`).
+This is the core of QA. Write new test cases designed to **break** the implementation. Create a test file `tests/qa/test_qa_<ticket_key>.cpp` (lowercase ticket key, e.g., `test_qa_gdb_42.cpp`). You will commit changes to this file on the branch being tested.
 
 ### Categories of Adversarial Tests
 
@@ -203,7 +203,7 @@ Description:
 
 For Medium findings, include them in the QA report and let the user decide whether to file tickets.
 
-## Step 11: Run all QA tests and Commit tests
+## Step 11: Run all QA tests and Commit tests to the current PR Branch
 
 1) Run all QA tests
 2) Check for regressions
