@@ -9,6 +9,9 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <limits>
+#include <optional>
+#include <random>
 #include <set>
 #include <thread>
 #include <vector>
@@ -1360,6 +1363,295 @@ TEST_F(BufferPoolTest, DirtyCountDecrementedOnEviction) {
     // One dirty frame was evicted (flushed then replaced with clean new page).
     EXPECT_EQ(bpm.dirty_count(), 1u);
     ASSERT_TRUE(bpm.unpin_page((*p3)->page_id(), false).has_value());
+}
+
+// =============================================================================
+// LRU-K Priority Queue Tests (GDB-620)
+//
+// These tests verify that the indexed-priority-queue implementation of the
+// LRU-K replacer evicts in the same order as a reference linear-scan
+// implementation. They cover the three eviction regimes called out in the
+// AC: all frames have < K accesses (FIFO), all have >= K accesses (oldest
+// Kth wins), and mixed access counts.
+// =============================================================================
+
+namespace {
+
+/// Reference implementation of the LRU-K eviction policy. Mirrors the
+/// linear-scan algorithm that used to live in `LRUKReplacer::evict()` and is
+/// used by the differential tests below to oracle the new heap-based code.
+struct RefFrameInfo {
+    std::vector<uint64_t> history;
+    bool evictable = false;
+};
+
+struct RefReplacer {
+    uint32_t k;
+    uint64_t current_timestamp = 0;
+    std::vector<RefFrameInfo> frames;
+
+    RefReplacer(uint32_t num_frames, uint32_t k_in) : k(k_in), frames(num_frames) {}
+
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    void record_access(FrameId frame_id) {
+        auto& info = frames[frame_id];
+        info.history.push_back(++current_timestamp);
+        if (info.history.size() > k) {
+            info.history.erase(info.history.begin());
+        }
+    }
+
+    void set_evictable(FrameId frame_id, bool evictable) {
+        frames[frame_id].evictable = evictable;
+    }
+
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    std::optional<FrameId> evict() {
+        FrameId victim = 0;
+        bool found = false;
+        bool victim_is_inf = false;
+        uint64_t victim_oldest_access = std::numeric_limits<uint64_t>::max();
+        uint64_t victim_k_distance = 0;
+
+        for (FrameId i = 0; i < static_cast<FrameId>(frames.size()); ++i) {
+            const auto& info = frames[i];
+            if (!info.evictable || info.history.empty()) {
+                continue;
+            }
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+            const bool is_inf = info.history.size() < k;
+            if (is_inf) {
+                if (!found || !victim_is_inf || info.history.front() < victim_oldest_access) {
+                    victim = i;
+                    found = true;
+                    victim_is_inf = true;
+                    victim_oldest_access = info.history.front();
+                }
+            } else if (!victim_is_inf) {
+                const uint64_t k_distance = current_timestamp - info.history.front();
+                if (!found || k_distance > victim_k_distance) {
+                    victim = i;
+                    found = true;
+                    victim_k_distance = k_distance;
+                }
+            }
+        }
+
+        if (!found) {
+            return std::nullopt;
+        }
+        frames[victim].history.clear();
+        frames[victim].evictable = false;
+        return victim;
+    }
+};
+
+/// Apply the same access pattern to both replacers and assert their eviction
+/// sequences match. The pattern is a mixed sequence of `record_access`,
+/// `set_evictable(true)` and `evict()` calls.
+struct TraceOp {
+    enum class Kind { ACCESS, EVICTABLE, EVICT };
+    Kind kind;
+    FrameId frame_id; ///< Used by ACCESS and EVICTABLE.
+};
+
+void run_trace_and_compare(uint32_t num_frames, uint32_t k, const std::vector<TraceOp>& trace) {
+    LRUKReplacer pq(num_frames, k);
+    RefReplacer ref(num_frames, k);
+
+    int evict_index = 0;
+    for (const auto& op : trace) {
+        switch (op.kind) {
+        case TraceOp::Kind::ACCESS:
+            pq.record_access(op.frame_id);
+            ref.record_access(op.frame_id);
+            break;
+        case TraceOp::Kind::EVICTABLE:
+            pq.set_evictable(op.frame_id, true);
+            ref.set_evictable(op.frame_id, true);
+            break;
+        case TraceOp::Kind::EVICT: {
+            auto pq_result = pq.evict();
+            auto ref_result = ref.evict();
+            ASSERT_EQ(pq_result.has_value(), ref_result.has_value())
+                << "Eviction " << evict_index << " disagreement on success/failure";
+            if (pq_result.has_value()) {
+                EXPECT_EQ(*pq_result, *ref_result)
+                    << "Eviction " << evict_index << " picked different victim";
+            }
+            ++evict_index;
+            break;
+        }
+        }
+    }
+}
+
+} // namespace
+
+/// All frames have a single access (< K with K=2): FIFO eviction by first
+/// access timestamp.
+TEST(LRUKReplacerPQ, AllInfiniteKDistanceFIFO) {
+    constexpr uint32_t num_frames = 16;
+    std::vector<TraceOp> trace;
+    for (FrameId i = 0; i < num_frames; ++i) {
+        trace.push_back({TraceOp::Kind::ACCESS, i});
+        trace.push_back({TraceOp::Kind::EVICTABLE, i});
+    }
+    for (uint32_t i = 0; i < num_frames; ++i) {
+        trace.push_back({TraceOp::Kind::EVICT, 0});
+    }
+    run_trace_and_compare(num_frames, /*k=*/2, trace);
+}
+
+/// All frames have >= K accesses: the frame with the oldest Kth-most-recent
+/// access is evicted first.
+TEST(LRUKReplacerPQ, AllFiniteKDistanceOldestKthFirst) {
+    constexpr uint32_t num_frames = 12;
+    std::vector<TraceOp> trace;
+    // Two passes of accesses give every frame >= K=2 accesses.
+    for (uint32_t pass = 0; pass < 2; ++pass) {
+        for (FrameId i = 0; i < num_frames; ++i) {
+            trace.push_back({TraceOp::Kind::ACCESS, i});
+        }
+    }
+    for (FrameId i = 0; i < num_frames; ++i) {
+        trace.push_back({TraceOp::Kind::EVICTABLE, i});
+    }
+    for (uint32_t i = 0; i < num_frames; ++i) {
+        trace.push_back({TraceOp::Kind::EVICT, 0});
+    }
+    run_trace_and_compare(num_frames, /*k=*/2, trace);
+}
+
+/// Mixed: half the frames have a single access (infinite distance), half
+/// have two accesses (finite distance). Infinite frames must be evicted
+/// first, then finite frames in oldest-Kth order.
+TEST(LRUKReplacerPQ, MixedInfiniteAndFiniteDistance) {
+    constexpr uint32_t num_frames = 16;
+    std::vector<TraceOp> trace;
+    // Frames 0..7: two accesses (finite).
+    // Frames 8..15: one access (infinite).
+    for (FrameId i = 0; i < 8; ++i) {
+        trace.push_back({TraceOp::Kind::ACCESS, i});
+        trace.push_back({TraceOp::Kind::ACCESS, i});
+    }
+    for (FrameId i = 8; i < num_frames; ++i) {
+        trace.push_back({TraceOp::Kind::ACCESS, i});
+    }
+    for (FrameId i = 0; i < num_frames; ++i) {
+        trace.push_back({TraceOp::Kind::EVICTABLE, i});
+    }
+    for (uint32_t i = 0; i < num_frames; ++i) {
+        trace.push_back({TraceOp::Kind::EVICT, 0});
+    }
+    run_trace_and_compare(num_frames, /*k=*/2, trace);
+}
+
+/// `record_access` on an already-evictable frame must update its priority in
+/// the heap. Sequence: A, A, B, B, evictable(A), evictable(B), access(A) x2,
+/// evict — without the heap update, frame A would still appear at the head.
+TEST(LRUKReplacerPQ, RecordAccessUpdatesPriorityWhileEvictable) {
+    LRUKReplacer pq(2, 2);
+    pq.record_access(0);
+    pq.record_access(0);
+    pq.record_access(1);
+    pq.record_access(1);
+    pq.set_evictable(0, true);
+    pq.set_evictable(1, true);
+    // Frame 0 originally has the largest K-distance. Two more accesses on
+    // frame 0 push frame 1 to the head.
+    pq.record_access(0);
+    pq.record_access(0);
+    auto result = pq.evict();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, 1u);
+}
+
+/// Toggling set_evictable while access history changes must keep the heap
+/// consistent. Verified by comparing against the reference for a long
+/// pseudo-random trace.
+TEST(LRUKReplacerPQ, RandomTraceMatchesReference) {
+    constexpr uint32_t num_frames = 64;
+    constexpr uint32_t k = 2;
+    constexpr int num_ops = 4000;
+
+    std::mt19937 rng(0xC0FFEE);
+    std::uniform_int_distribution<int> action_dist(0, 9);
+    std::uniform_int_distribution<FrameId> frame_dist(0, num_frames - 1);
+
+    LRUKReplacer pq(num_frames, k);
+    RefReplacer ref(num_frames, k);
+
+    // Track which frames are evictable so toggling stays consistent across
+    // both implementations.
+    std::vector<bool> is_evictable(num_frames, false);
+
+    for (int i = 0; i < num_ops; ++i) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+        const int action = action_dist(rng);
+        if (action < 5) {
+            // 50% access.
+            const FrameId fid = frame_dist(rng);
+            pq.record_access(fid);
+            ref.record_access(fid);
+        } else if (action < 8) {
+            // 30% toggle evictable.
+            const FrameId fid = frame_dist(rng);
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+            const bool flag = !is_evictable[fid];
+            is_evictable[fid] = flag;
+            pq.set_evictable(fid, flag);
+            ref.set_evictable(fid, flag);
+        } else {
+            // 20% evict.
+            auto pq_result = pq.evict();
+            auto ref_result = ref.evict();
+            // NOLINTBEGIN(readability-implicit-bool-conversion)
+            ASSERT_EQ(pq_result.has_value(), ref_result.has_value())
+                << "op " << i << " disagreement on success";
+            if (pq_result.has_value()) {
+                ASSERT_EQ(*pq_result, *ref_result) << "op " << i << " picked different victim";
+                is_evictable[*pq_result] = false;
+            }
+            // NOLINTEND(readability-implicit-bool-conversion)
+        }
+    }
+}
+
+/// K=1 should degrade to plain LRU. Differential test against the reference.
+TEST(LRUKReplacerPQ, K1MatchesPlainLRU) {
+    constexpr uint32_t num_frames = 8;
+    std::vector<TraceOp> trace;
+    // Re-access frames in a specific order so each has a unique last-access
+    // timestamp.
+    for (FrameId i = 0; i < num_frames; ++i) {
+        trace.push_back({TraceOp::Kind::ACCESS, i});
+        trace.push_back({TraceOp::Kind::EVICTABLE, i});
+    }
+    // Touch a few frames again to update their priority.
+    trace.push_back({TraceOp::Kind::ACCESS, 2});
+    trace.push_back({TraceOp::Kind::ACCESS, 5});
+    trace.push_back({TraceOp::Kind::ACCESS, 0});
+    for (uint32_t i = 0; i < num_frames; ++i) {
+        trace.push_back({TraceOp::Kind::EVICT, 0});
+    }
+    run_trace_and_compare(num_frames, /*k=*/1, trace);
+}
+
+/// `set_evictable(false)` on a frame at the head of the heap must remove it
+/// so the next eviction picks a different victim. Verified directly because
+/// this is the heap-specific invariant.
+TEST(LRUKReplacerPQ, SetEvictableFalseRemovesFromHeap) {
+    LRUKReplacer pq(4, 2);
+    for (FrameId i = 0; i < 4; ++i) {
+        pq.record_access(i);
+        pq.set_evictable(i, true);
+    }
+    // Frame 0 is at the head (oldest). Pin it.
+    pq.set_evictable(0, false);
+    auto result = pq.evict();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, 1u);
 }
 
 // =============================================================================

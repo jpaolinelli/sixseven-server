@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
-#include <limits>
 
 namespace sixseven {
 
@@ -16,21 +15,45 @@ LRUKReplacer::LRUKReplacer(uint32_t num_frames, uint32_t k) : k_(k), frames_(num
 
 void LRUKReplacer::record_access(FrameId frame_id) {
     auto& info = frames_[frame_id];
+
+    // If this frame is currently in the heap, its priority key is about to
+    // change. Remove the old entry before mutating history.
+    if (info.evictable && !info.history.empty()) {
+        heap_.erase(make_entry(info, frame_id));
+    }
+
     info.history.push_back(++current_timestamp_);
     // Keep only the last K access timestamps.
     if (info.history.size() > k_) {
         info.history.erase(info.history.begin());
     }
+
+    // Re-insert under the new priority key (or insert for the first time if
+    // the frame is evictable but had no history before).
+    if (info.evictable) {
+        heap_.insert(make_entry(info, frame_id));
+    }
 }
 
 void LRUKReplacer::set_evictable(FrameId frame_id, bool evictable) {
     auto& info = frames_[frame_id];
-    if (info.evictable && !evictable) {
-        --evictable_count_;
-    } else if (!info.evictable && evictable) {
-        ++evictable_count_;
+    if (info.evictable == evictable) {
+        return;
     }
-    info.evictable = evictable;
+
+    if (evictable) {
+        info.evictable = true;
+        ++evictable_count_;
+        if (!info.history.empty()) {
+            heap_.insert(make_entry(info, frame_id));
+        }
+    } else {
+        if (!info.history.empty()) {
+            heap_.erase(make_entry(info, frame_id));
+        }
+        info.evictable = false;
+        --evictable_count_;
+    }
 }
 
 Result<FrameId> LRUKReplacer::evict() {
@@ -38,80 +61,47 @@ Result<FrameId> LRUKReplacer::evict() {
 }
 
 Result<FrameId> LRUKReplacer::evict(const std::function<bool(FrameId)>& skip) {
-    if (evictable_count_ == 0) {
+    if (heap_.empty()) {
         return make_error(StatusCode::NOT_FOUND, "no evictable frames");
     }
 
-    // Scan evictable frames and find the one with the maximum backward K-distance.
-    // If a skip predicate is provided, do two passes:
-    //   Pass 1: only consider frames where skip(id) is false (preferred).
-    //   Pass 2: fall back to frames where skip(id) is true.
-    auto find_best = [&](bool want_skipped) -> std::pair<FrameId, bool> {
-        FrameId victim = 0;
-        bool found = false;
-        bool victim_is_inf = false;
-        uint64_t victim_oldest_access = std::numeric_limits<uint64_t>::max();
-        uint64_t victim_k_distance = 0;
-
-        for (FrameId i = 0; i < static_cast<FrameId>(frames_.size()); ++i) {
-            const auto& info = frames_[i];
-            if (!info.evictable || info.history.empty()) {
-                continue;
-            }
-
-            // Filter based on the skip predicate.
-            if (skip) {
-                bool is_skipped = skip(i);
-                if (is_skipped != want_skipped) {
-                    continue;
-                }
-            }
-
-            bool is_inf = info.history.size() < k_;
-
-            if (is_inf) {
-                if (!found || !victim_is_inf || info.history.front() < victim_oldest_access) {
-                    victim = i;
-                    found = true;
-                    victim_is_inf = true;
-                    victim_oldest_access = info.history.front();
-                }
-            } else if (!victim_is_inf) {
-                uint64_t k_distance = current_timestamp_ - info.history.front();
-                if (!found || k_distance > victim_k_distance) {
-                    victim = i;
-                    found = true;
-                    victim_k_distance = k_distance;
-                }
-            }
-        }
-
-        return {victim, found};
+    auto pop_victim = [&](std::set<HeapEntry>::iterator it) -> FrameId {
+        FrameId victim = it->frame_id;
+        heap_.erase(it);
+        FrameInfo& info = frames_[victim];
+        info.history.clear();
+        info.evictable = false;
+        --evictable_count_;
+        return victim;
     };
 
-    // Pass 1: prefer non-skipped (clean) frames.
-    auto [victim, found] = find_best(false);
-
-    // Pass 2: fall back to skipped (dirty) frames.
-    if (!found && skip) {
-        std::tie(victim, found) = find_best(true);
+    // Fast path: no skip predicate. The smallest entry (set begin) is the
+    // highest-priority victim by construction.
+    if (!skip) {
+        return ok(pop_victim(heap_.begin()));
     }
 
-    if (!found) {
-        return make_error(StatusCode::NOT_FOUND, "no evictable frames");
+    // Pass 1: walk the heap in priority order and pick the first frame for
+    // which `skip` is false. Iterating an std::set is O(1) per step, so this
+    // is O(log n) when the head is non-skipped (the common case) and at worst
+    // O(skipped + log n) when several head entries must be passed over.
+    for (auto it = heap_.begin(); it != heap_.end(); ++it) {
+        if (!skip(it->frame_id)) {
+            return ok(pop_victim(it));
+        }
     }
 
-    // Remove the victim from the replacer.
-    frames_[victim].history.clear();
-    frames_[victim].evictable = false;
-    --evictable_count_;
-
-    return ok(victim);
+    // Pass 2: every evictable frame is skipped — fall back to the
+    // highest-priority skipped frame.
+    return ok(pop_victim(heap_.begin()));
 }
 
 void LRUKReplacer::remove(FrameId frame_id) {
     auto& info = frames_[frame_id];
     if (info.evictable) {
+        if (!info.history.empty()) {
+            heap_.erase(make_entry(info, frame_id));
+        }
         --evictable_count_;
     }
     info.history.clear();
