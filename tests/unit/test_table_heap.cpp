@@ -573,6 +573,162 @@ TEST_F(TableHeapTest, RowCountPersistsAcrossReopen) {
     EXPECT_EQ(heap2.row_count(), 15u);
 }
 
+// -- Batch insert (GDB-617) ---------------------------------------------------
+
+TEST_F(TableHeapTest, BatchInsertReturnsCorrectRIDCount) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    std::vector<std::vector<uint8_t>> owned;
+    std::vector<std::span<const uint8_t>> tuples;
+    for (int i = 0; i < 20; ++i) {
+        owned.push_back(make_tuple(100, static_cast<uint8_t>(i)));
+        tuples.emplace_back(owned.back());
+    }
+
+    auto result = heap.insert_batch(tuples);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->size(), 20u);
+}
+
+TEST_F(TableHeapTest, BatchInsertAllTuplesRetrievable) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    std::vector<std::vector<uint8_t>> owned;
+    std::vector<std::span<const uint8_t>> tuples;
+    for (int i = 0; i < 15; ++i) {
+        owned.push_back(make_tuple(100, static_cast<uint8_t>(i)));
+        tuples.emplace_back(owned.back());
+    }
+
+    auto result = heap.insert_batch(tuples);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    for (size_t i = 0; i < result->size(); ++i) {
+        auto get = heap.get_tuple((*result)[i]);
+        ASSERT_TRUE(get.has_value()) << "Get " << i << " failed";
+        EXPECT_EQ(get->size(), 100u);
+        EXPECT_EQ((*get)[0], static_cast<uint8_t>(i));
+    }
+}
+
+TEST_F(TableHeapTest, BatchInsertSpansMultiplePages) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    // 2000-byte tuples: ~4 per page. 20 tuples = ~5 pages.
+    std::vector<std::vector<uint8_t>> owned;
+    std::vector<std::span<const uint8_t>> tuples;
+    for (int i = 0; i < 20; ++i) {
+        owned.push_back(make_tuple(2000, static_cast<uint8_t>(i)));
+        tuples.emplace_back(owned.back());
+    }
+
+    auto result = heap.insert_batch(tuples);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->size(), 20u);
+
+    // Verify multiple pages were used.
+    auto pc = heap.page_count();
+    ASSERT_TRUE(pc.has_value());
+    EXPECT_GT(*pc, 1u);
+
+    // Verify all tuples are correct.
+    for (size_t i = 0; i < result->size(); ++i) {
+        auto get = heap.get_tuple((*result)[i]);
+        ASSERT_TRUE(get.has_value()) << "Get " << i << " failed";
+        EXPECT_EQ(get->size(), 2000u);
+        EXPECT_EQ((*get)[0], static_cast<uint8_t>(i));
+    }
+}
+
+TEST_F(TableHeapTest, BatchInsertEmptyBatch) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    std::vector<std::span<const uint8_t>> tuples;
+    auto result = heap.insert_batch(tuples);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_TRUE(result->empty());
+    EXPECT_EQ(heap.row_count(), 0u);
+}
+
+TEST_F(TableHeapTest, BatchInsertSingleTuple) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    auto data = make_tuple(100, 0x42);
+    std::vector<std::span<const uint8_t>> tuples{std::span<const uint8_t>(data)};
+
+    auto result = heap.insert_batch(tuples);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->size(), 1u);
+
+    auto get = heap.get_tuple((*result)[0]);
+    ASSERT_TRUE(get.has_value());
+    EXPECT_EQ(get->size(), 100u);
+    EXPECT_EQ((*get)[0], 0x42);
+    EXPECT_EQ(heap.row_count(), 1u);
+}
+
+TEST_F(TableHeapTest, BatchInsertUpdatesRowCount) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    std::vector<std::vector<uint8_t>> owned;
+    std::vector<std::span<const uint8_t>> tuples;
+    for (int i = 0; i < 25; ++i) {
+        owned.push_back(make_tuple(100, static_cast<uint8_t>(i)));
+        tuples.emplace_back(owned.back());
+    }
+
+    auto result = heap.insert_batch(tuples);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(heap.row_count(), 25u);
+}
+
+TEST_F(TableHeapTest, BatchInsertRejectsEmptyTuple) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    auto good = make_tuple(100, 0x42);
+    std::vector<uint8_t> empty;
+    std::vector<std::span<const uint8_t>> tuples{
+        std::span<const uint8_t>(good),
+        std::span<const uint8_t>(empty),
+    };
+
+    auto result = heap.insert_batch(tuples);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST_F(TableHeapTest, BatchInsertAtPageBoundary) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    // Fill a page with per-row inserts first (4 x 2000-byte tuples).
+    for (int i = 0; i < 4; ++i) {
+        auto r = heap.insert_tuple(make_tuple(2000, static_cast<uint8_t>(i)));
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+    }
+    EXPECT_EQ(heap.row_count(), 4u);
+
+    // Batch insert should start on a new page since the hint page is full.
+    std::vector<std::vector<uint8_t>> owned;
+    std::vector<std::span<const uint8_t>> tuples;
+    for (int i = 0; i < 8; ++i) {
+        owned.push_back(make_tuple(2000, static_cast<uint8_t>(0x80 + i)));
+        tuples.emplace_back(owned.back());
+    }
+
+    auto result = heap.insert_batch(tuples);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->size(), 8u);
+    EXPECT_EQ(heap.row_count(), 12u);
+
+    // All batch-inserted tuples retrievable.
+    for (size_t i = 0; i < result->size(); ++i) {
+        auto get = heap.get_tuple((*result)[i]);
+        ASSERT_TRUE(get.has_value()) << "Get batch " << i << " failed";
+        EXPECT_EQ(get->size(), 2000u);
+        EXPECT_EQ((*get)[0], static_cast<uint8_t>(0x80 + i));
+    }
+}
+
 TEST_F(TableHeapTest, RowCountPersistsAfterDeletes) {
     {
         TableHeap heap(*bpm_, dm_, file_id_);

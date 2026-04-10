@@ -45,6 +45,14 @@ public:
     /// @return The RID (page_id, slot_id) of the inserted tuple.
     [[nodiscard]] Result<RID> insert_tuple(std::span<const uint8_t> data);
 
+    /// Insert multiple tuples in batch, reducing buffer pool latch acquisitions
+    /// from O(rows) to O(pages). Each page is pinned once and filled with as
+    /// many tuples as fit before unpinning and moving to the next page.
+    /// @param tuples Vector of tuple byte spans (empty tuples are rejected).
+    /// @return A vector of RIDs, one per inserted tuple, in the same order.
+    [[nodiscard]] Result<std::vector<RID>>
+    insert_batch(const std::vector<std::span<const uint8_t>>& tuples);
+
     /// Read a tuple by RID. Returns a copy of the tuple data.
     /// The page is unpinned before returning, so the data is a snapshot.
     /// @return A vector containing the tuple bytes.
