@@ -228,10 +228,11 @@ private:
     // -- Sharded page table (GDB-643) ----------------------------------------
     //
     // Lock hierarchy (acquire in this order, release in reverse):
-    //   pool_mutex_ > shard.mutex > frame.latch > replacer_mutex_
+    //   pool_mutex_ > shard.mutex > frame.latch
+    //   replacer_mutex_ is acquired independently (never nested with shard/frame)
     //
-    // Hot path (cache hit): shard → frame → replacer (sequential, not nested)
-    // Miss path: pool_mutex_ → { shard, frame, replacer } (nested under pool_mutex_)
+    // Hot path (cache hit): shard → frame (release both) → replacer
+    // Miss path: pool_mutex_ → { shard, frame } → replacer
 
     static constexpr uint32_t kNumShards = 64;
 
@@ -253,7 +254,8 @@ private:
 
     // -- Fine-grained locks (GDB-644/645/646) ---------------------------------
 
-    mutable std::mutex pool_mutex_;                   ///< Serializes structural changes (miss path, eviction, free list).
+    mutable std::mutex
+        pool_mutex_; ///< Serializes structural changes (miss path, eviction, free list).
     mutable std::mutex replacer_mutex_;               ///< Protects LRU-K replacer.
     std::mutex dwb_mutex_;                            ///< Protects double-write buffer writes.
     std::thread flusher_thread_;                      ///< Background flusher thread.

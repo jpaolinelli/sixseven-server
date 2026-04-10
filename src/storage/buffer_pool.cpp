@@ -346,7 +346,7 @@ Result<void> BufferPoolManager::unpin_page(PageId page_id, bool is_dirty) {
 
     // Wake the background flusher if dirty ratio crossed the threshold.
     if (newly_dirty && flusher_running_.load(std::memory_order_relaxed) &&
-        dirty_ratio() >= dirty_flush_threshold_) {
+        dirty_ratio() >= dirty_flush_threshold_.load(std::memory_order_relaxed)) {
         std::lock_guard<std::mutex> flock(flusher_mutex_);
         flusher_cv_.notify_one();
     }
@@ -645,7 +645,8 @@ void BufferPoolManager::flusher_loop(std::chrono::milliseconds interval) {
         {
             std::unique_lock<std::mutex> lock(flusher_mutex_);
             flusher_cv_.wait_for(lock, interval, [this] {
-                return !flusher_running_.load() || dirty_ratio() >= dirty_flush_threshold_;
+                return !flusher_running_.load() ||
+                       dirty_ratio() >= dirty_flush_threshold_.load(std::memory_order_relaxed);
             });
         }
 

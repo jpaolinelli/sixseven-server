@@ -84,8 +84,8 @@ static void BM_BufferPoolConcurrentFetchUnpin(benchmark::State& state) {
         state.SetItemsProcessed(total_ops.load(std::memory_order_relaxed));
     }
 
-    state.counters["threads"] = benchmark::Counter(
-        static_cast<double>(num_threads), benchmark::Counter::kDefaults);
+    state.counters["threads"] =
+        benchmark::Counter(static_cast<double>(num_threads), benchmark::Counter::kDefaults);
 }
 
 BENCHMARK(BM_BufferPoolConcurrentFetchUnpin)
@@ -184,8 +184,8 @@ static void BM_BufferPoolConcurrentMixed(benchmark::State& state) {
         state.SetItemsProcessed(total_ops.load(std::memory_order_relaxed));
     }
 
-    state.counters["threads"] = benchmark::Counter(
-        static_cast<double>(num_threads), benchmark::Counter::kDefaults);
+    state.counters["threads"] =
+        benchmark::Counter(static_cast<double>(num_threads), benchmark::Counter::kDefaults);
 }
 
 BENCHMARK(BM_BufferPoolConcurrentMixed)
