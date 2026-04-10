@@ -69,7 +69,7 @@ protected:
 
     /// Run CountScanOperator and return the count.
     int64_t run_count_scan(TableHeap& heap) {
-        CountScanOperator scan(heap, *bpm_, count_output_schema());
+        CountScanOperator scan(heap, count_output_schema());
         auto open = scan.open();
         EXPECT_TRUE(open.has_value()) << open.error().message;
 
@@ -173,13 +173,13 @@ TEST_F(CountScanTest, CountAfterDeleteReturnsUpdatedCount) {
 
 TEST_F(CountScanTest, PlanNodeNameIsCountScan) {
     TableHeap heap(*bpm_, dm_, file_id_);
-    CountScanOperator scan(heap, *bpm_, count_output_schema());
+    CountScanOperator scan(heap, count_output_schema());
     EXPECT_EQ(scan.plan_node_name(), "Count Scan");
 }
 
 TEST_F(CountScanTest, OutputSchemaHasSingleInt64Column) {
     TableHeap heap(*bpm_, dm_, file_id_);
-    CountScanOperator scan(heap, *bpm_, count_output_schema());
+    CountScanOperator scan(heap, count_output_schema());
     EXPECT_EQ(scan.output_schema().column_count(), 1u);
     EXPECT_EQ(scan.output_schema().column(0).type_id, TypeId::INT64);
 }

@@ -40,6 +40,7 @@ static constexpr size_t fh_magic_offset = 0;      // uint32_t
 static constexpr size_t fh_version_offset = 4;    // uint32_t
 static constexpr size_t fh_page_count_offset = 8; // uint32_t
 static constexpr size_t fh_checksum_offset = 12;  // uint32_t
+static constexpr size_t fh_ext_offset = 16;       // start of extension area
 
 // -- DiskManager -------------------------------------------------------------
 
@@ -120,6 +121,14 @@ public:
 
     /// Return total allocated page count (including header page 0).
     [[nodiscard]] Result<uint32_t> file_page_count(FileId file_id) const;
+
+    /// Read a uint64_t from the file header extension area (bytes 16+ of page 0).
+    /// @param offset Byte offset relative to fh_ext_offset.
+    [[nodiscard]] Result<uint64_t> read_header_ext_u64(FileId file_id, size_t offset);
+
+    /// Write a uint64_t to the file header extension area and update the checksum.
+    /// @param offset Byte offset relative to fh_ext_offset.
+    [[nodiscard]] Result<void> write_header_ext_u64(FileId file_id, size_t offset, uint64_t value);
 
     // -- Crash safety ---------------------------------------------------------
 
