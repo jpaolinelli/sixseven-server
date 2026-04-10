@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <set>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -38,6 +39,11 @@ static constexpr uint32_t default_pool_size = 32768;
 /// This approach is superior to plain LRU because it can distinguish between
 /// frequently-accessed pages and pages that were only accessed once (e.g.,
 /// during a sequential scan), preventing scan-resistant cache pollution.
+///
+/// Internally, evictable frames are tracked in an ordered set keyed by their
+/// eviction priority. This makes `evict()` O(log n) in the no-skip case (and
+/// in the typical skip case where few frames at the head are filtered out),
+/// versus O(n) for a linear scan over all frames.
 class LRUKReplacer {
 public:
     /// @param num_frames Total number of frames in the buffer pool.
@@ -74,10 +80,49 @@ private:
         bool evictable = false;
     };
 
+    /// Heap entry encoding eviction priority for a single evictable frame.
+    ///
+    /// Sort order (smallest = next victim):
+    ///   1. `is_finite=false` (infinite K-distance) sorts before `is_finite=true`
+    ///      so frames with fewer than K accesses are always evicted first.
+    ///   2. Within the same class, smaller `key` (the oldest kept timestamp)
+    ///      sorts first — for infinite frames this is the oldest first access;
+    ///      for finite frames this is the Kth most recent access (the one that
+    ///      maximizes backward K-distance).
+    ///   3. `frame_id` is a final tiebreaker for strict weak ordering. In
+    ///      practice, timestamps are unique so this rarely matters.
+    struct HeapEntry {
+        bool is_finite;
+        uint64_t key;
+        FrameId frame_id;
+
+        bool operator<(const HeapEntry& other) const noexcept {
+            // Infinite K-distance (is_finite=false) sorts before finite.
+            if (is_finite != other.is_finite) {
+                return !is_finite;
+            }
+            if (key != other.key) {
+                return key < other.key;
+            }
+            return frame_id < other.frame_id;
+        }
+    };
+
+    [[nodiscard]] HeapEntry make_entry(const FrameInfo& info, FrameId fid) const noexcept {
+        return HeapEntry{
+            /*is_finite=*/info.history.size() >= k_,
+            /*key=*/info.history.front(),
+            /*frame_id=*/fid,
+        };
+    }
+
     uint32_t k_;
     uint64_t current_timestamp_ = 0;
     std::vector<FrameInfo> frames_;
     uint32_t evictable_count_ = 0;
+    /// Indexed priority queue of frames eligible for eviction. Contains an
+    /// entry for every frame where `evictable == true && !history.empty()`.
+    std::set<HeapEntry> heap_;
 };
 
 // -- Buffer Pool Manager -----------------------------------------------------
