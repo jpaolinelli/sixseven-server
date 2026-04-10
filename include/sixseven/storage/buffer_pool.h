@@ -8,6 +8,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -52,6 +53,13 @@ public:
     /// Find and remove the frame with the maximum backward K-distance.
     /// Returns an error if no evictable frame exists.
     [[nodiscard]] Result<FrameId> evict();
+
+    /// Find and remove the frame with the maximum backward K-distance,
+    /// preferring frames for which @p skip returns false (clean frames).
+    /// First pass: only consider frames where skip(frame_id) is false.
+    /// Second pass: fall back to frames where skip(frame_id) is true.
+    /// @param skip Predicate returning true for frames to deprioritize.
+    [[nodiscard]] Result<FrameId> evict(const std::function<bool(FrameId)>& skip);
 
     /// Remove all tracking for a frame (e.g., when the page is deleted).
     void remove(FrameId frame_id);
@@ -143,6 +151,15 @@ public:
     /// Return the number of buffer pool misses (page read from disk).
     [[nodiscard]] uint64_t miss_count() const { return misses_.load(std::memory_order_relaxed); }
 
+    /// Return the current number of dirty frames in the pool.
+    [[nodiscard]] uint32_t dirty_count() const { return dirty_count_.load(std::memory_order_relaxed); }
+
+    /// Return the fraction of frames that are dirty (0.0 to 1.0).
+    [[nodiscard]] double dirty_ratio() const {
+        return static_cast<double>(dirty_count_.load(std::memory_order_relaxed)) /
+               static_cast<double>(frames_.size());
+    }
+
     // -- Thread safety & background flusher ----------------------------------
 
     /// Enable the double-write buffer for torn page protection.
@@ -151,8 +168,18 @@ public:
     /// restore the page from the DWB.
     [[nodiscard]] Result<void> enable_double_write(const std::filesystem::path& dwb_path);
 
+    /// Set the dirty ratio threshold that triggers the background flusher.
+    /// When the fraction of dirty frames exceeds this threshold, the flusher
+    /// is woken immediately rather than waiting for the timer.
+    /// @param threshold Dirty ratio threshold (0.0 to 1.0, default 0.75).
+    void set_dirty_flush_threshold(double threshold) { dirty_flush_threshold_ = threshold; }
+
+    /// Return the current dirty flush threshold.
+    [[nodiscard]] double dirty_flush_threshold() const { return dirty_flush_threshold_; }
+
     /// Start the background flusher thread. The flusher periodically scans for
-    /// dirty unpinned pages and writes them to disk.
+    /// dirty unpinned pages and writes them to disk. It also wakes immediately
+    /// when the dirty page ratio exceeds the configured threshold.
     /// @param interval Time between flush cycles (default: 1 second).
     [[nodiscard]] Result<void>
     start_flusher(std::chrono::milliseconds interval = std::chrono::seconds(1));
@@ -201,11 +228,13 @@ private:
     std::mutex flusher_mutex_;                 ///< Protects flusher condition variable.
     std::condition_variable flusher_cv_;       ///< Wakes/stops the flusher.
     std::atomic<bool> flusher_running_{false}; ///< Flusher shutdown flag.
+    double dirty_flush_threshold_ = 0.75;       ///< Dirty ratio threshold for flusher wake.
     int dwb_fd_ = -1;                          ///< Double-write buffer fd (-1 = disabled).
 
     // -- Observability counters --------------------------------------------------
-    std::atomic<uint64_t> hits_{0};   ///< Pages found already in the pool.
-    std::atomic<uint64_t> misses_{0}; ///< Pages read from disk.
+    std::atomic<uint64_t> hits_{0};       ///< Pages found already in the pool.
+    std::atomic<uint64_t> misses_{0};     ///< Pages read from disk.
+    std::atomic<uint32_t> dirty_count_{0}; ///< Number of dirty frames.
 };
 
 } // namespace sixseven

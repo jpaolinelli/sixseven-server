@@ -361,11 +361,11 @@ TEST_F(BufferPoolTest, DirtyPageFlushedOnEviction) {
     ASSERT_TRUE((*p1)->insert_tuple(tuple1).has_value());
     ASSERT_TRUE(bpm.unpin_page(pid1, /*is_dirty=*/true).has_value());
 
-    // Page 2.
+    // Page 2: also dirty so eviction uses LRU-K order (both dirty).
     auto p2 = bpm.new_page();
     ASSERT_TRUE(p2.has_value());
     PageId pid2 = (*p2)->page_id();
-    ASSERT_TRUE(bpm.unpin_page(pid2, false).has_value());
+    ASSERT_TRUE(bpm.unpin_page(pid2, /*is_dirty=*/true).has_value());
 
     // Page 3: this should evict page 1 (LRU-K: page 1 was accessed first).
     auto p3 = bpm.new_page();
@@ -999,9 +999,10 @@ TEST_F(BufferPoolTest, DoubleWriteBufferWithEviction) {
     ASSERT_TRUE((*p1)->insert_tuple(tuple1).has_value());
     ASSERT_TRUE(bpm.unpin_page(pid1, /*is_dirty=*/true).has_value());
 
+    // Page 2: also dirty so eviction uses LRU-K order (both dirty).
     auto p2 = bpm.new_page();
     ASSERT_TRUE(p2.has_value());
-    ASSERT_TRUE(bpm.unpin_page((*p2)->page_id(), false).has_value());
+    ASSERT_TRUE(bpm.unpin_page((*p2)->page_id(), /*is_dirty=*/true).has_value());
 
     // Adding a 3rd page forces eviction of page 1 through DWB.
     auto p3 = bpm.new_page();
@@ -1110,4 +1111,253 @@ TEST_F(BufferPoolTest, FetchHitIncrementsHitCounter) {
     EXPECT_EQ(bpm.hit_count(), 2u);
     EXPECT_EQ(bpm.miss_count(), 0u);
     ASSERT_TRUE(bpm.unpin_page(pid, false).has_value());
+}
+
+// -- Dirty page ratio tracking tests (GDB-639) --
+
+TEST_F(BufferPoolTest, DirtyCountStartsAtZero) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+    EXPECT_EQ(bpm.dirty_count(), 0u);
+    EXPECT_DOUBLE_EQ(bpm.dirty_ratio(), 0.0);
+}
+
+TEST_F(BufferPoolTest, DirtyCountIncrementedOnUnpin) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+
+    auto p = bpm.new_page();
+    ASSERT_TRUE(p.has_value());
+    PageId pid = (*p)->page_id();
+
+    // Unpin as clean — no change.
+    ASSERT_TRUE(bpm.unpin_page(pid, false).has_value());
+    EXPECT_EQ(bpm.dirty_count(), 0u);
+
+    // Fetch again and unpin as dirty.
+    auto f = bpm.fetch_page(pid);
+    ASSERT_TRUE(f.has_value());
+    ASSERT_TRUE(bpm.unpin_page(pid, true).has_value());
+    EXPECT_EQ(bpm.dirty_count(), 1u);
+    EXPECT_DOUBLE_EQ(bpm.dirty_ratio(), 1.0 / 4.0);
+}
+
+TEST_F(BufferPoolTest, DirtyCountNotDoubleIncremented) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+
+    auto p = bpm.new_page();
+    ASSERT_TRUE(p.has_value());
+    PageId pid = (*p)->page_id();
+
+    // Mark dirty.
+    ASSERT_TRUE(bpm.unpin_page(pid, true).has_value());
+    EXPECT_EQ(bpm.dirty_count(), 1u);
+
+    // Fetch and unpin as dirty again — already dirty, count should not change.
+    auto f = bpm.fetch_page(pid);
+    ASSERT_TRUE(f.has_value());
+    ASSERT_TRUE(bpm.unpin_page(pid, true).has_value());
+    EXPECT_EQ(bpm.dirty_count(), 1u);
+}
+
+TEST_F(BufferPoolTest, DirtyCountDecrementedOnFlush) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+
+    auto p = bpm.new_page();
+    ASSERT_TRUE(p.has_value());
+    PageId pid = (*p)->page_id();
+    ASSERT_TRUE(bpm.unpin_page(pid, true).has_value());
+    EXPECT_EQ(bpm.dirty_count(), 1u);
+
+    // Flush the page.
+    ASSERT_TRUE(bpm.flush_page(pid).has_value());
+    EXPECT_EQ(bpm.dirty_count(), 0u);
+}
+
+TEST_F(BufferPoolTest, DirtyCountDecrementedOnFlushAll) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+
+    // Create 3 dirty pages.
+    for (int i = 0; i < 3; ++i) {
+        auto p = bpm.new_page();
+        ASSERT_TRUE(p.has_value());
+        ASSERT_TRUE(bpm.unpin_page((*p)->page_id(), true).has_value());
+    }
+    EXPECT_EQ(bpm.dirty_count(), 3u);
+
+    ASSERT_TRUE(bpm.flush_all().has_value());
+    EXPECT_EQ(bpm.dirty_count(), 0u);
+}
+
+TEST_F(BufferPoolTest, DirtyCountDecrementedOnDeleteDirtyPage) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+
+    auto p = bpm.new_page();
+    ASSERT_TRUE(p.has_value());
+    PageId pid = (*p)->page_id();
+    ASSERT_TRUE(bpm.unpin_page(pid, true).has_value());
+    EXPECT_EQ(bpm.dirty_count(), 1u);
+
+    ASSERT_TRUE(bpm.delete_page(pid).has_value());
+    EXPECT_EQ(bpm.dirty_count(), 0u);
+}
+
+// -- Threshold-based flusher tests (GDB-640) --
+
+TEST_F(BufferPoolTest, DirtyFlushThresholdDefault) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+    EXPECT_DOUBLE_EQ(bpm.dirty_flush_threshold(), 0.75);
+}
+
+TEST_F(BufferPoolTest, DirtyFlushThresholdConfigurable) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+    bpm.set_dirty_flush_threshold(0.5);
+    EXPECT_DOUBLE_EQ(bpm.dirty_flush_threshold(), 0.5);
+}
+
+TEST_F(BufferPoolTest, FlusherWakesOnThresholdCrossed) {
+    // Pool of 4. Threshold at 0.5 means flusher wakes at 2 dirty pages.
+    BufferPoolManager bpm(dm_, file_id_, 4);
+    bpm.set_dirty_flush_threshold(0.5);
+
+    auto flusher_result = bpm.start_flusher(std::chrono::seconds(60));
+    ASSERT_TRUE(flusher_result.has_value());
+
+    // Create 2 dirty pages (50% = threshold).
+    for (int i = 0; i < 2; ++i) {
+        auto p = bpm.new_page();
+        ASSERT_TRUE(p.has_value());
+        ASSERT_TRUE(bpm.unpin_page((*p)->page_id(), true).has_value());
+    }
+
+    // Wait briefly for the flusher to react to the threshold signal.
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // The flusher should have flushed the dirty pages.
+    EXPECT_EQ(bpm.dirty_count(), 0u);
+
+    bpm.stop_flusher();
+}
+
+TEST_F(BufferPoolTest, FlusherStillWorksOnTimerFallback) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+    // Set threshold very high so it never triggers.
+    bpm.set_dirty_flush_threshold(1.1);
+
+    auto flusher_result = bpm.start_flusher(std::chrono::milliseconds(50));
+    ASSERT_TRUE(flusher_result.has_value());
+
+    auto p = bpm.new_page();
+    ASSERT_TRUE(p.has_value());
+    ASSERT_TRUE(bpm.unpin_page((*p)->page_id(), true).has_value());
+    EXPECT_EQ(bpm.dirty_count(), 1u);
+
+    // Wait for timer-based flush.
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_EQ(bpm.dirty_count(), 0u);
+
+    bpm.stop_flusher();
+}
+
+// -- Clean-frame eviction preference tests (GDB-641) --
+
+TEST(LRUKReplacer, EvictPrefersNonSkippedFrames) {
+    LRUKReplacer replacer(5, 2);
+
+    // Frame 0: accessed first (oldest, highest K-distance) — but "dirty".
+    replacer.record_access(0);
+    replacer.set_evictable(0, true);
+
+    // Frame 1: accessed second — "clean".
+    replacer.record_access(1);
+    replacer.set_evictable(1, true);
+
+    // Without skip predicate, frame 0 evicted first (oldest access).
+    // With skip predicate marking frame 0 as dirty, frame 1 should be preferred.
+    auto result = replacer.evict([](FrameId fid) { return fid == 0; });
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, 1u); // Clean frame preferred.
+}
+
+TEST(LRUKReplacer, EvictFallsBackToSkippedFrames) {
+    LRUKReplacer replacer(5, 2);
+
+    // Only frame 0, which is "dirty".
+    replacer.record_access(0);
+    replacer.set_evictable(0, true);
+
+    auto result = replacer.evict([](FrameId fid) { return fid == 0; });
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, 0u); // Falls back to dirty frame.
+}
+
+TEST(LRUKReplacer, EvictKDistanceWithinCleanGroup) {
+    LRUKReplacer replacer(5, 2);
+
+    // Three clean frames. Should evict by K-distance within the clean group.
+    replacer.record_access(0); // oldest
+    replacer.record_access(1);
+    replacer.record_access(2); // newest
+
+    replacer.set_evictable(0, true);
+    replacer.set_evictable(1, true);
+    replacer.set_evictable(2, true);
+
+    // Frame 3 is dirty.
+    replacer.record_access(3);
+    replacer.set_evictable(3, true);
+
+    // Skip frame 3 (dirty). Among clean frames, frame 0 has oldest access.
+    auto result = replacer.evict([](FrameId fid) { return fid == 3; });
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, 0u);
+}
+
+TEST_F(BufferPoolTest, EvictionPrefersCleanOverDirty) {
+    // Pool of 2. Page 1 dirty, page 2 clean. Eviction should pick clean page.
+    BufferPoolManager bpm(dm_, file_id_, 2);
+
+    auto p1 = bpm.new_page();
+    ASSERT_TRUE(p1.has_value());
+    PageId pid1 = (*p1)->page_id();
+    auto tuple = std::vector<uint8_t>(80, 0xAA);
+    ASSERT_TRUE((*p1)->insert_tuple(tuple).has_value());
+    ASSERT_TRUE(bpm.unpin_page(pid1, /*is_dirty=*/true).has_value());
+
+    auto p2 = bpm.new_page();
+    ASSERT_TRUE(p2.has_value());
+    PageId pid2 = (*p2)->page_id();
+    ASSERT_TRUE(bpm.unpin_page(pid2, /*is_dirty=*/false).has_value());
+
+    // Allocate 3rd page -> should evict clean page 2, not dirty page 1.
+    auto p3 = bpm.new_page();
+    ASSERT_TRUE(p3.has_value());
+    ASSERT_TRUE(bpm.unpin_page((*p3)->page_id(), false).has_value());
+
+    // Page 1 should still be in the pool (not evicted).
+    auto f1 = bpm.fetch_page(pid1);
+    ASSERT_TRUE(f1.has_value());
+    auto get_result = (*f1)->get_tuple(0);
+    ASSERT_TRUE(get_result.has_value());
+    EXPECT_EQ((*get_result)[0], 0xAA);
+    ASSERT_TRUE(bpm.unpin_page(pid1, false).has_value());
+}
+
+TEST_F(BufferPoolTest, DirtyCountDecrementedOnEviction) {
+    // Pool of 2 frames. Fill both dirty, then force eviction.
+    BufferPoolManager bpm(dm_, file_id_, 2);
+
+    auto p1 = bpm.new_page();
+    ASSERT_TRUE(p1.has_value());
+    ASSERT_TRUE(bpm.unpin_page((*p1)->page_id(), true).has_value());
+
+    auto p2 = bpm.new_page();
+    ASSERT_TRUE(p2.has_value());
+    ASSERT_TRUE(bpm.unpin_page((*p2)->page_id(), true).has_value());
+    EXPECT_EQ(bpm.dirty_count(), 2u);
+
+    // Force eviction by allocating a 3rd page.
+    auto p3 = bpm.new_page();
+    ASSERT_TRUE(p3.has_value());
+    // One dirty frame was evicted (flushed then replaced with clean new page).
+    EXPECT_EQ(bpm.dirty_count(), 1u);
+    ASSERT_TRUE(bpm.unpin_page((*p3)->page_id(), false).has_value());
 }

@@ -34,51 +34,67 @@ void LRUKReplacer::set_evictable(FrameId frame_id, bool evictable) {
 }
 
 Result<FrameId> LRUKReplacer::evict() {
+    return evict(nullptr);
+}
+
+Result<FrameId> LRUKReplacer::evict(const std::function<bool(FrameId)>& skip) {
     if (evictable_count_ == 0) {
         return make_error(StatusCode::NOT_FOUND, "no evictable frames");
     }
 
-    // Find the frame with the maximum backward K-distance.
-    //
-    // Phase 1: Prefer frames with < K accesses (infinite backward K-distance).
-    //          Among these, pick the one with the oldest first access (LRU/FIFO).
-    // Phase 2: If all evictable frames have >= K accesses, pick the one whose
-    //          Kth most recent access is the oldest (largest backward K-distance).
+    // Scan evictable frames and find the one with the maximum backward K-distance.
+    // If a skip predicate is provided, do two passes:
+    //   Pass 1: only consider frames where skip(id) is false (preferred).
+    //   Pass 2: fall back to frames where skip(id) is true.
+    auto find_best = [&](bool want_skipped) -> std::pair<FrameId, bool> {
+        FrameId victim = 0;
+        bool found = false;
+        bool victim_is_inf = false;
+        uint64_t victim_oldest_access = std::numeric_limits<uint64_t>::max();
+        uint64_t victim_k_distance = 0;
 
-    FrameId victim = 0;
-    bool found = false;
-    bool victim_is_inf = false;
-    uint64_t victim_oldest_access = std::numeric_limits<uint64_t>::max();
-    uint64_t victim_k_distance = 0;
+        for (FrameId i = 0; i < static_cast<FrameId>(frames_.size()); ++i) {
+            const auto& info = frames_[i];
+            if (!info.evictable || info.history.empty()) {
+                continue;
+            }
 
-    for (FrameId i = 0; i < static_cast<FrameId>(frames_.size()); ++i) {
-        const auto& info = frames_[i];
-        if (!info.evictable || info.history.empty()) {
-            continue;
+            // Filter based on the skip predicate.
+            if (skip) {
+                bool is_skipped = skip(i);
+                if (is_skipped != want_skipped) {
+                    continue;
+                }
+            }
+
+            bool is_inf = info.history.size() < k_;
+
+            if (is_inf) {
+                if (!found || !victim_is_inf || info.history.front() < victim_oldest_access) {
+                    victim = i;
+                    found = true;
+                    victim_is_inf = true;
+                    victim_oldest_access = info.history.front();
+                }
+            } else if (!victim_is_inf) {
+                uint64_t k_distance = current_timestamp_ - info.history.front();
+                if (!found || k_distance > victim_k_distance) {
+                    victim = i;
+                    found = true;
+                    victim_k_distance = k_distance;
+                }
+            }
         }
 
-        bool is_inf = info.history.size() < k_;
+        return {victim, found};
+    };
 
-        if (is_inf) {
-            // Infinite backward K-distance: candidate for eviction.
-            // Among these, prefer the one with the oldest first access.
-            if (!found || !victim_is_inf || info.history.front() < victim_oldest_access) {
-                victim = i;
-                found = true;
-                victim_is_inf = true;
-                victim_oldest_access = info.history.front();
-            }
-        } else if (!victim_is_inf) {
-            // Finite backward K-distance: current_timestamp - Kth oldest access.
-            // The Kth oldest is history.front() since we keep only K entries.
-            uint64_t k_distance = current_timestamp_ - info.history.front();
-            if (!found || k_distance > victim_k_distance) {
-                victim = i;
-                found = true;
-                victim_k_distance = k_distance;
-            }
-        }
-        // If victim_is_inf is true and current frame has finite distance, skip it.
+    // Pass 1: prefer non-skipped (clean) frames.
+    auto [victim, found] = find_best(false);
+
+    // Pass 2: fall back to skipped (dirty) frames.
+    if (!found && skip) {
+        std::tie(victim, found) = find_best(true);
     }
 
     if (!found) {
@@ -232,13 +248,23 @@ Result<void> BufferPoolManager::unpin_page(PageId page_id, bool is_dirty) {
     }
 
     // Sticky dirty flag: once dirty, stays dirty until flushed.
-    if (is_dirty) {
+    bool newly_dirty = false;
+    if (is_dirty && !frame.is_dirty) {
         frame.is_dirty = true;
+        dirty_count_.fetch_add(1, std::memory_order_relaxed);
+        newly_dirty = true;
     }
 
     --frame.pin_count;
     if (frame.pin_count == 0) {
         replacer_.set_evictable(frame_id, true);
+    }
+
+    // Wake the background flusher if dirty ratio crossed the threshold.
+    if (newly_dirty && flusher_running_.load(std::memory_order_relaxed) &&
+        dirty_ratio() >= dirty_flush_threshold_) {
+        std::lock_guard<std::mutex> flock(flusher_mutex_);
+        flusher_cv_.notify_one();
     }
 
     return ok();
@@ -266,6 +292,7 @@ Result<void> BufferPoolManager::flush_page(PageId page_id) {
     }
 
     frame.is_dirty = false;
+    dirty_count_.fetch_sub(1, std::memory_order_relaxed);
     return ok();
 }
 
@@ -280,6 +307,7 @@ Result<void> BufferPoolManager::flush_all() {
                 return tl::unexpected(write_result.error());
             }
             frame.is_dirty = false;
+            dirty_count_.fetch_sub(1, std::memory_order_relaxed);
         }
     }
     return ok();
@@ -309,7 +337,10 @@ Result<void> BufferPoolManager::delete_page(PageId page_id) {
     // Reset frame and return to free list.
     frame.page_id = 0;
     frame.pin_count = 0;
-    frame.is_dirty = false;
+    if (frame.is_dirty) {
+        frame.is_dirty = false;
+        dirty_count_.fetch_sub(1, std::memory_order_relaxed);
+    }
     free_list_.push_back(frame_id);
 
     return ok();
@@ -382,8 +413,8 @@ Result<FrameId> BufferPoolManager::find_victim_frame() {
         return ok(frame_id);
     }
 
-    // No free frames -- evict using LRU-K.
-    auto evict_result = replacer_.evict();
+    // No free frames -- evict using LRU-K, preferring clean frames.
+    auto evict_result = replacer_.evict([this](FrameId fid) { return frames_[fid].is_dirty; });
     if (!evict_result) {
         return make_error(StatusCode::INTERNAL_ERROR, "buffer pool is full: all frames are pinned");
     }
@@ -398,6 +429,7 @@ Result<FrameId> BufferPoolManager::find_victim_frame() {
             return tl::unexpected(write_result.error());
         }
         victim.is_dirty = false;
+        dirty_count_.fetch_sub(1, std::memory_order_relaxed);
     }
 
     // Remove evicted page from page table.
@@ -443,6 +475,7 @@ void BufferPoolManager::flush_dirty_pages_locked(bool include_pinned) {
             auto result = write_page_impl(frame.page_id, frame.page);
             if (result) {
                 frame.is_dirty = false;
+                dirty_count_.fetch_sub(1, std::memory_order_relaxed);
             }
             // Silently skip failures -- background flushing is best-effort.
         }
@@ -453,7 +486,10 @@ void BufferPoolManager::flusher_loop(std::chrono::milliseconds interval) {
     while (true) {
         {
             std::unique_lock<std::mutex> lock(flusher_mutex_);
-            flusher_cv_.wait_for(lock, interval, [this] { return !flusher_running_.load(); });
+            flusher_cv_.wait_for(lock, interval, [this] {
+                // Wake on shutdown OR when dirty ratio exceeds threshold.
+                return !flusher_running_.load() || dirty_ratio() >= dirty_flush_threshold_;
+            });
         }
 
         bool stopping = !flusher_running_.load();
