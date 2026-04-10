@@ -168,6 +168,7 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
                         continue;
                     }
                     if (ai.is_placeholder || values[ai.col_idx].is_null()) {
+                        // Column was omitted — assign next auto-increment value.
                         auto next = catalog_->next_autoincrement(ai.table_id, ai.type_id);
                         if (!next) {
                             return make_error(next.error().code, next.error().message);
@@ -178,6 +179,7 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
                         }
                         values[ai.col_idx] = std::move(*ai_val);
                     } else {
+                        // Explicit value provided — advance counter past it.
                         int64_t explicit_val = value_to_int64(values[ai.col_idx]);
                         catalog_->advance_autoincrement(ai.table_id, explicit_val);
                     }

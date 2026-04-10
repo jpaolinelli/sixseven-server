@@ -124,10 +124,17 @@ TableHeap::insert_batch(const std::vector<std::span<const uint8_t>>& tuples) {
         return ok(std::vector<RID>{});
     }
 
+    // Pre-validate all tuples so we never partially insert and then fail.
+    static constexpr size_t kMaxTupleSize = page_size - page_header_size - slot_entry_size;
     for (size_t i = 0; i < tuples.size(); ++i) {
         if (tuples[i].empty()) {
             return make_error(StatusCode::INVALID_ARGUMENT,
                               "cannot insert empty tuple at index " + std::to_string(i));
+        }
+        if (tuples[i].size() > kMaxTupleSize) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "tuple at index " + std::to_string(i) +
+                                  " too large for a single page");
         }
     }
 
@@ -197,23 +204,8 @@ TableHeap::insert_batch(const std::vector<std::span<const uint8_t>>& tuples) {
 
         Page* new_page = *new_page_result;
         PageId new_pid = new_page->page_id();
-        size_t before = idx;
 
         fill_page(new_page, new_pid);
-
-        if (idx == before) {
-            // First tuple doesn't fit on an empty page — tuple too large.
-            auto unpin = bpm_.unpin_page(new_pid, false);
-            if (!unpin) {
-                SIXSEVEN_LOG_WARN("unpin failed after batch insert error on page {}: {}",
-                                  new_pid,
-                                  unpin.error().message);
-            }
-            return make_error(StatusCode::INVALID_ARGUMENT,
-                              "tuple at index " + std::to_string(idx) +
-                                  " too large for a single page");
-        }
-
         last_insert_page_ = new_pid;
         auto unpin = bpm_.unpin_page(new_pid, true);
         if (!unpin) {
@@ -221,8 +213,8 @@ TableHeap::insert_batch(const std::vector<std::span<const uint8_t>>& tuples) {
         }
     }
 
-    // Update row count in bulk.
-    row_count_.fetch_add(rids.size(), std::memory_order_relaxed);
+    // Update row count in bulk (seq_cst to match insert_tuple's ++row_count_).
+    row_count_.fetch_add(rids.size());
     persist_row_count();
 
     return ok(std::move(rids));
