@@ -1361,3 +1361,136 @@ TEST_F(BufferPoolTest, DirtyCountDecrementedOnEviction) {
     EXPECT_EQ(bpm.dirty_count(), 1u);
     ASSERT_TRUE(bpm.unpin_page((*p3)->page_id(), false).has_value());
 }
+
+// =============================================================================
+// Concurrent Stress Tests (GDB-647)
+// =============================================================================
+
+TEST_F(BufferPoolTest, ConcurrentStressTest) {
+    // Stress test: multiple threads doing concurrent fetch/unpin/new_page/eviction.
+    // Pool is intentionally small to force frequent eviction.
+    constexpr uint32_t pool_size = 16;
+    constexpr int num_threads = 8;
+    constexpr int ops_per_thread = 500;
+
+    BufferPoolManager bpm(dm_, file_id_, pool_size);
+
+    // Pre-create some pages so threads can fetch existing ones.
+    std::vector<PageId> page_ids;
+    for (int i = 0; i < 32; ++i) {
+        auto result = bpm.new_page();
+        ASSERT_TRUE(result.has_value());
+        PageId pid = (*result)->page_id();
+        page_ids.push_back(pid);
+        auto data = std::vector<uint8_t>(64, static_cast<uint8_t>(i));
+        ASSERT_TRUE((*result)->insert_tuple(data).has_value());
+        ASSERT_TRUE(bpm.unpin_page(pid, true).has_value());
+    }
+
+    std::atomic<bool> failed{false};
+    std::atomic<int> completed{0};
+
+    auto worker = [&](int thread_id) {
+        for (int op = 0; op < ops_per_thread && !failed.load(); ++op) {
+            int action = (thread_id * 1000 + op) % 4;
+            if (action < 2) {
+                // Fetch an existing page.
+                PageId pid = page_ids[(thread_id + op) % page_ids.size()];
+                auto result = bpm.fetch_page(pid);
+                if (result.has_value()) {
+                    Page* page = *result;
+                    if (page->page_id() != pid) {
+                        failed.store(true);
+                        return;
+                    }
+                    bool dirty = (op % 3 == 0);
+                    auto unpin = bpm.unpin_page(pid, dirty);
+                    if (!unpin.has_value()) {
+                        failed.store(true);
+                        return;
+                    }
+                }
+                // Miss failures (eviction) are expected when pool is full.
+            } else if (action == 2) {
+                // Allocate a new page.
+                auto result = bpm.new_page();
+                if (result.has_value()) {
+                    PageId pid = (*result)->page_id();
+                    auto unpin = bpm.unpin_page(pid, true);
+                    if (!unpin.has_value()) {
+                        failed.store(true);
+                        return;
+                    }
+                }
+            } else {
+                // Flush a page.
+                PageId pid = page_ids[(thread_id + op) % page_ids.size()];
+                (void)bpm.flush_page(pid);
+            }
+        }
+        completed.fetch_add(1);
+    };
+
+    std::vector<std::thread> threads;
+    threads.reserve(num_threads);
+    for (int i = 0; i < num_threads; ++i) {
+        threads.emplace_back(worker, i);
+    }
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    EXPECT_FALSE(failed.load()) << "Data corruption detected in concurrent stress test";
+    EXPECT_EQ(completed.load(), num_threads);
+}
+
+TEST_F(BufferPoolTest, ConcurrentStressWithFlusher) {
+    // Same stress test but with the background flusher running.
+    constexpr uint32_t pool_size = 16;
+    constexpr int num_threads = 8;
+    constexpr int ops_per_thread = 500;
+
+    BufferPoolManager bpm(dm_, file_id_, pool_size);
+    ASSERT_TRUE(bpm.start_flusher(std::chrono::milliseconds(50)).has_value());
+
+    // Pre-create pages.
+    std::vector<PageId> page_ids;
+    for (int i = 0; i < 32; ++i) {
+        auto result = bpm.new_page();
+        ASSERT_TRUE(result.has_value());
+        page_ids.push_back((*result)->page_id());
+        ASSERT_TRUE(bpm.unpin_page((*result)->page_id(), true).has_value());
+    }
+
+    std::atomic<bool> failed{false};
+    std::atomic<int> completed{0};
+
+    auto worker = [&](int thread_id) {
+        for (int op = 0; op < ops_per_thread && !failed.load(); ++op) {
+            PageId pid = page_ids[(thread_id * 7 + op) % page_ids.size()];
+            auto result = bpm.fetch_page(pid);
+            if (result.has_value()) {
+                auto unpin = bpm.unpin_page(pid, op % 2 == 0);
+                if (!unpin.has_value()) {
+                    failed.store(true);
+                    return;
+                }
+            }
+        }
+        completed.fetch_add(1);
+    };
+
+    std::vector<std::thread> threads;
+    threads.reserve(num_threads);
+    for (int i = 0; i < num_threads; ++i) {
+        threads.emplace_back(worker, i);
+    }
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    bpm.stop_flusher();
+
+    EXPECT_FALSE(failed.load());
+    EXPECT_EQ(completed.load(), num_threads);
+}

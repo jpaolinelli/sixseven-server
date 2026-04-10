@@ -4,6 +4,7 @@
 #include "sixseven/storage/disk_manager.h"
 #include "sixseven/storage/page.h"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -94,9 +95,9 @@ private:
 ///   bpm.unpin_page(page_id, /*is_dirty=*/true);
 /// ```
 ///
-/// Thread safety: This class is NOT thread-safe in this initial
-/// implementation. Thread safety (mutex + background flusher) will be
-/// added in GDB-88.
+/// Thread safety: This class uses fine-grained locking — sharded page
+/// table, per-frame mutexes, and separate replacer/pool locks — so that
+/// concurrent access to different pages does not serialize.
 class BufferPoolManager {
 public:
     /// Construct a buffer pool managing pages for a single file.
@@ -199,22 +200,21 @@ private:
         Page page{0, PageType::DATA};
         PageId page_id = 0;
         uint32_t pin_count = 0;
-        bool is_dirty = false;
+        std::atomic<bool> is_dirty{false}; ///< Atomic for lock-free reads in evict skip predicate.
+        mutable std::mutex latch;          ///< Per-frame mutex for pin_count and page data.
     };
 
     /// Find an available frame: takes from free list, or evicts a victim.
     /// On eviction, flushes the dirty page and removes it from the page table.
-    /// Must be called while holding latch_.
+    /// Must be called while holding pool_mutex_.
     [[nodiscard]] Result<FrameId> find_victim_frame();
 
     /// Write a page through the double-write buffer (if enabled) then to disk.
-    /// Must be called while holding latch_.
     [[nodiscard]] Result<void> write_page_impl(PageId page_id, Page& page);
 
     /// Flush dirty pages. If include_pinned is true, flushes all dirty pages;
     /// otherwise only flushes dirty pages with pin_count == 0.
-    /// Must be called while holding latch_.
-    void flush_dirty_pages_locked(bool include_pinned = false);
+    void flush_dirty_pages(bool include_pinned = false);
 
     /// Background flusher thread entry point.
     void flusher_loop(std::chrono::milliseconds interval);
@@ -223,13 +223,39 @@ private:
     FileId file_id_;
 
     std::vector<Frame> frames_;
-    std::unordered_map<PageId, FrameId> page_table_;
-    std::vector<FrameId> free_list_;
     LRUKReplacer replacer_;
 
-    // -- Thread safety --------------------------------------------------------
+    // -- Sharded page table (GDB-643) ----------------------------------------
+    //
+    // Lock hierarchy (acquire in this order, release in reverse):
+    //   pool_mutex_ > shard.mutex > frame.latch > replacer_mutex_
+    //
+    // Hot path (cache hit): shard → frame → replacer (sequential, not nested)
+    // Miss path: pool_mutex_ → { shard, frame, replacer } (nested under pool_mutex_)
 
-    mutable std::mutex latch_;                        ///< Protects all buffer pool state.
+    static constexpr uint32_t kNumShards = 64;
+
+    struct PageTableShard {
+        mutable std::mutex mutex;
+        std::unordered_map<PageId, FrameId> map;
+    };
+
+    std::array<PageTableShard, kNumShards> page_table_shards_;
+    std::vector<FrameId> free_list_;
+
+    [[nodiscard]] PageTableShard& get_shard(PageId page_id) {
+        return page_table_shards_[page_id % kNumShards];
+    }
+
+    [[nodiscard]] const PageTableShard& get_shard(PageId page_id) const {
+        return page_table_shards_[page_id % kNumShards];
+    }
+
+    // -- Fine-grained locks (GDB-644/645/646) ---------------------------------
+
+    mutable std::mutex pool_mutex_;                   ///< Serializes structural changes (miss path, eviction, free list).
+    mutable std::mutex replacer_mutex_;               ///< Protects LRU-K replacer.
+    std::mutex dwb_mutex_;                            ///< Protects double-write buffer writes.
     std::thread flusher_thread_;                      ///< Background flusher thread.
     std::mutex flusher_mutex_;                        ///< Protects flusher condition variable.
     std::condition_variable flusher_cv_;              ///< Wakes/stops the flusher.
