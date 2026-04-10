@@ -118,6 +118,108 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data) {
     return ok(rid);
 }
 
+Result<std::vector<RID>>
+TableHeap::insert_batch(const std::vector<std::span<const uint8_t>>& tuples) {
+    if (tuples.empty()) {
+        return ok(std::vector<RID>{});
+    }
+
+    // Pre-validate all tuples so we never partially insert and then fail.
+    static constexpr size_t kMaxTupleSize = page_size - page_header_size - slot_entry_size;
+    for (size_t i = 0; i < tuples.size(); ++i) {
+        if (tuples[i].empty()) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "cannot insert empty tuple at index " + std::to_string(i));
+        }
+        if (tuples[i].size() > kMaxTupleSize) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "tuple at index " + std::to_string(i) +
+                                  " too large for a single page");
+        }
+    }
+
+    auto pc = dm_.file_page_count(file_id_);
+    if (!pc) {
+        return tl::unexpected(pc.error());
+    }
+    uint32_t total_pages = *pc;
+
+    std::vector<RID> rids;
+    rids.reserve(tuples.size());
+    size_t idx = 0;
+
+    // Helper: try to insert as many tuples as possible into a pinned page.
+    auto fill_page = [&](Page* page, PageId pid) {
+        while (idx < tuples.size()) {
+            auto slot = page->insert_tuple(tuples[idx]);
+            if (!slot) {
+                break; // Page full.
+            }
+            rids.push_back(RID{pid, *slot});
+            ++idx;
+        }
+    };
+
+    // Try the hint page first.
+    if (last_insert_page_ >= 1 && last_insert_page_ < total_pages) {
+        auto page_result = bpm_.fetch_page(last_insert_page_);
+        if (page_result) {
+            Page* page = *page_result;
+            fill_page(page, last_insert_page_);
+            bool dirty = (idx > 0);
+            auto unpin = bpm_.unpin_page(last_insert_page_, dirty);
+            if (!unpin) {
+                return tl::unexpected(unpin.error());
+            }
+        }
+    }
+
+    // Try the next page after the hint.
+    if (idx < tuples.size() && last_insert_page_ >= 1) {
+        PageId next_pid = last_insert_page_ + 1;
+        if (next_pid < total_pages) {
+            auto page_result = bpm_.fetch_page(next_pid);
+            if (page_result) {
+                size_t before = idx;
+                Page* page = *page_result;
+                fill_page(page, next_pid);
+                bool dirty = (idx > before);
+                if (dirty) {
+                    last_insert_page_ = next_pid;
+                }
+                auto unpin = bpm_.unpin_page(next_pid, dirty);
+                if (!unpin) {
+                    return tl::unexpected(unpin.error());
+                }
+            }
+        }
+    }
+
+    // Allocate new pages as needed for remaining tuples.
+    while (idx < tuples.size()) {
+        auto new_page_result = bpm_.new_page();
+        if (!new_page_result) {
+            return tl::unexpected(new_page_result.error());
+        }
+
+        Page* new_page = *new_page_result;
+        PageId new_pid = new_page->page_id();
+
+        fill_page(new_page, new_pid);
+        last_insert_page_ = new_pid;
+        auto unpin = bpm_.unpin_page(new_pid, true);
+        if (!unpin) {
+            return tl::unexpected(unpin.error());
+        }
+    }
+
+    // Update row count in bulk (seq_cst to match insert_tuple's ++row_count_).
+    row_count_.fetch_add(rids.size());
+    persist_row_count();
+
+    return ok(std::move(rids));
+}
+
 Result<std::vector<uint8_t>> TableHeap::get_tuple(RID rid) {
     auto page_result = bpm_.fetch_page(rid.page_id);
     if (!page_result) {

@@ -127,9 +127,14 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
             ++count;
         }
     } else {
-        // INSERT ... VALUES — evaluate expression rows.
+        // INSERT ... VALUES — evaluate and serialize all rows, then batch insert.
         Tuple dummy{{}, std::nullopt};
         OutputSchema empty_schema;
+
+        std::vector<std::vector<uint8_t>> serialized_rows;
+        std::vector<std::vector<Value>> all_values;
+        serialized_rows.reserve(value_rows_.size());
+        all_values.reserve(value_rows_.size());
 
         for (const auto& row_exprs : value_rows_) {
             std::vector<Value> values;
@@ -185,13 +190,27 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
             if (!bytes) {
                 return make_error(bytes.error().code, bytes.error().message);
             }
-            auto rid = heap_.insert_tuple(*bytes);
-            if (!rid) {
-                return make_error(rid.error().code, rid.error().message);
-            }
-            enqueue_embedding_jobs(*rid, values);
-            ++count;
+            serialized_rows.push_back(std::move(*bytes));
+            all_values.push_back(std::move(values));
         }
+
+        // Build span vector and batch insert.
+        std::vector<std::span<const uint8_t>> tuple_spans;
+        tuple_spans.reserve(serialized_rows.size());
+        for (const auto& row : serialized_rows) {
+            tuple_spans.emplace_back(row);
+        }
+
+        auto rids = heap_.insert_batch(tuple_spans);
+        if (!rids) {
+            return make_error(rids.error().code, rids.error().message);
+        }
+
+        // Enqueue embedding jobs for each inserted row.
+        for (size_t i = 0; i < rids->size(); ++i) {
+            enqueue_embedding_jobs((*rids)[i], all_values[i]);
+        }
+        count = static_cast<int64_t>(rids->size());
     }
 
     Tuple result;
