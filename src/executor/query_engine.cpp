@@ -7,6 +7,7 @@
 #include "sixseven/executor/catalog_persistence.h"
 #include "sixseven/executor/explain.h"
 #include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/executor/pk_value_string.h"
 #include "sixseven/executor/planner.h"
 #include "sixseven/executor/provider_cache.h"
 #include "sixseven/executor/settings_cache.h"
@@ -1024,50 +1025,6 @@ Result<std::pair<Value, Value>> QueryEngine::coerce_link_keys(const std::string&
 // LINK / UNLINK PK existence check (with hash set cache)
 // ---------------------------------------------------------------------------
 
-namespace {
-
-/// Serialize a PK Value to a deterministic string for hash set lookup.
-/// Handles the common PK types: integers, strings, and UUIDs.
-std::string pk_value_to_string(const Value& v) {
-    switch (v.type_id()) {
-    case TypeId::INT8:
-        return std::to_string(v.as_int8());
-    case TypeId::INT16:
-        return std::to_string(v.as_int16());
-    case TypeId::INT32:
-        return std::to_string(v.as_int32());
-    case TypeId::INT64:
-        return std::to_string(v.as_int64());
-    case TypeId::UINT8:
-        return std::to_string(v.as_uint8());
-    case TypeId::UINT16:
-        return std::to_string(v.as_uint16());
-    case TypeId::UINT32:
-        return std::to_string(v.as_uint32());
-    case TypeId::UINT64:
-        return std::to_string(v.as_uint64());
-    case TypeId::STRING:
-        return v.as_string();
-    case TypeId::UUID: {
-        // Serialize UUID bytes as hex string for deterministic hashing.
-        const auto& uuid = v.as_uuid();
-        std::string s;
-        s.reserve(32);
-        static const char hex[] = "0123456789abcdef";
-        for (auto b : uuid) {
-            s += hex[(b >> 4) & 0xF];
-            s += hex[b & 0xF];
-        }
-        return s;
-    }
-    default:
-        // Fallback: use type prefix + raw representation.
-        return std::string("?") + std::to_string(static_cast<int>(v.type_id()));
-    }
-}
-
-} // namespace
-
 Result<void> QueryEngine::ensure_pk_cache(table_id_t table_id) {
     if (pk_cache_.contains(table_id)) {
         return ok();
@@ -1116,7 +1073,19 @@ Result<void> QueryEngine::ensure_pk_cache(table_id_t table_id) {
         if (!values || pk_col_idx >= values->size()) {
             continue;
         }
-        pk_set.insert(pk_value_to_string((*values)[pk_col_idx]));
+        const auto& pk_val = (*values)[pk_col_idx];
+        // Defensive: skip rows whose deserialized PK is NULL. This should never
+        // happen for a healthy PK column, but a corrupt/half-written tail in the
+        // table heap can produce NULLs after a crash recovery. Skipping is safer
+        // than indexing them — a NULL PK in the cache would either crash older
+        // callers or produce false-positive existence checks.
+        if (pk_val.is_null()) {
+            SIXSEVEN_LOG_WARN(
+                "skipping row with NULL PK while building pk_cache for table {} (rid={}:{})",
+                table_id, rid.page_id, rid.slot_id);
+            continue;
+        }
+        pk_set.insert(pk_value_to_string(pk_val));
     }
 
     pk_cache_[table_id] = std::move(pk_set);

@@ -9,6 +9,7 @@ add_library(sixseven_common STATIC
     logging.cpp
     config.cpp
     coercion.cpp
+    crash_handler.cpp
     uuid.cpp
     secrets_manager.cpp
 )

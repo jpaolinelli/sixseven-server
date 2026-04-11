@@ -36,6 +36,7 @@ add_library(sixseven_executor STATIC
     provider_cache.cpp
     explain.cpp
     planner.cpp
+    pk_value_string.cpp
     query_engine.cpp
 )
 

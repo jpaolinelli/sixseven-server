@@ -1,5 +1,6 @@
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/config.h"
+#include "sixseven/common/crash_handler.h"
 #include "sixseven/common/logging.h"
 #include "sixseven/executor/catalog_persistence.h"
 #include "sixseven/executor/query_engine.h"
@@ -41,6 +42,11 @@ void install_signal_handlers() {
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char* argv[]) {
+    // Install fatal-signal + std::terminate handlers as early as possible
+    // so any subsequent crash dumps a backtrace to stderr instead of dying
+    // silently with `zsh: trace trap`.
+    sixseven::install_crash_handlers();
+
     // Parse command-line arguments.
     std::string config_path = "sixseven.json";
     bool standby_flag = false;
