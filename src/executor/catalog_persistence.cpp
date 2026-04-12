@@ -5,6 +5,7 @@
 #include "sixseven/table/tuple.h"
 
 #include <algorithm>
+#include <set>
 #include <span>
 #include <unordered_map>
 
@@ -115,12 +116,49 @@ Result<void> CatalogPersistence::load_catalog() {
     if (!r5) {
         return r5;
     }
-    auto r6 = open_sys_table(sys_databases_schema());
-    if (!r6) {
-        return r6;
+    // Note: sys_databases is opened by SystemBootstrap before load_catalog().
+
+    // 2. Read sys_databases: restore all databases before loading tables.
+    {
+        auto ts = storage_.get_table_storage(sys_databases_table_id);
+        if (!ts) {
+            return make_error(ts.error().code, ts.error().message);
+        }
+        auto storage_schema = StorageManager::build_storage_schema(sys_databases_schema());
+        auto it = (*ts)->heap->begin();
+        if (!it) {
+            return make_error(it.error().code, it.error().message);
+        }
+        while (auto row = it->next()) {
+            auto values = TupleSerializer::deserialize(row->second, storage_schema);
+            if (!values) {
+                SIXSEVEN_LOG_WARN("catalog persistence: skipping corrupt sys_databases row");
+                continue;
+            }
+            auto& v = *values;
+            auto db_id = static_cast<database_id_t>(v[0].as_int32());
+            auto db_name = v[1].as_string();
+
+            // Skip system database (already exists from Catalog constructor).
+            if (db_id == system_database_id) {
+                continue;
+            }
+
+            // Skip if already restored (e.g., by test fixtures).
+            auto existing = catalog_.get_database(db_name);
+            if (existing) {
+                continue;
+            }
+
+            auto r = catalog_.restore_database(db_id, db_name);
+            if (!r) {
+                SIXSEVEN_LOG_WARN("catalog persistence: failed to restore database '{}': {}",
+                               db_name, r.error().message);
+            }
+        }
     }
 
-    // 2. Read sys_tables: collect table metadata (without columns yet).
+    // 3. Read sys_tables: collect table metadata (without columns yet).
     struct TableInfo {
         table_id_t table_id = 0;
         database_id_t database_id = 0;
@@ -155,7 +193,7 @@ Result<void> CatalogPersistence::load_catalog() {
         }
     }
 
-    // 3. Read sys_columns: add columns to the collected tables.
+    // 4. Read sys_columns: add columns to the collected tables.
     {
         auto ts = storage_.get_table_storage(sys_columns_table_id);
         if (!ts) {
@@ -189,7 +227,7 @@ Result<void> CatalogPersistence::load_catalog() {
         }
     }
 
-    // 4. Restore tables into the Catalog and open their storage files.
+    // 5. Restore tables into the Catalog and open their storage files.
     for (auto& [tid, info] : tables) {
         // Sort columns by ordinal.
         std::sort(info.columns.begin(),
@@ -291,7 +329,7 @@ Result<void> CatalogPersistence::load_catalog() {
         }
     }
 
-    // 5. Read sys_indexes: restore index metadata.
+    // 6. Read sys_indexes: restore index metadata.
     {
         auto ts = storage_.get_table_storage(sys_indexes_table_id);
         if (!ts) {
@@ -324,7 +362,7 @@ Result<void> CatalogPersistence::load_catalog() {
         }
     }
 
-    // 6. Read sys_edge_types: restore edge type metadata.
+    // 7. Read sys_edge_types: restore edge type metadata.
     {
         auto ts = storage_.get_table_storage(sys_edge_types_table_id);
         if (!ts) {
@@ -357,7 +395,7 @@ Result<void> CatalogPersistence::load_catalog() {
         }
     }
 
-    // 7. Read sys_embedding_columns: restore embedding column metadata.
+    // 8. Read sys_embedding_columns: restore embedding column metadata.
     {
         auto ts = storage_.get_table_storage(sys_embedding_columns_table_id);
         if (!ts) {
@@ -643,6 +681,59 @@ Result<void> CatalogPersistence::create_embedding_jobs_table() {
 
 Result<void> CatalogPersistence::open_embedding_jobs_table() {
     return open_sys_table(sys_embedding_jobs_schema());
+}
+
+Result<void> CatalogPersistence::migrate_databases_from_sys_tables() {
+    // Open sys_tables to scan for distinct database_id values.
+    auto ts = storage_.get_table_storage(sys_tables_table_id);
+    if (!ts) {
+        // sys_tables not open yet — need to open it first.
+        auto open_r = open_sys_table(sys_tables_schema());
+        if (!open_r) {
+            return make_error(open_r.error().code,
+                              "migration: failed to open sys_tables: " + open_r.error().message);
+        }
+        ts = storage_.get_table_storage(sys_tables_table_id);
+        if (!ts) {
+            return make_error(ts.error().code, ts.error().message);
+        }
+    }
+
+    auto storage_schema = StorageManager::build_storage_schema(sys_tables_schema());
+    auto it = (*ts)->heap->begin();
+    if (!it) {
+        return make_error(it.error().code, it.error().message);
+    }
+
+    // Collect distinct database IDs.
+    std::set<database_id_t> db_ids;
+    while (auto row = it->next()) {
+        auto values = TupleSerializer::deserialize(row->second, storage_schema);
+        if (!values) {
+            continue;
+        }
+        auto db_id = static_cast<database_id_t>((*values)[1].as_int32());
+        if (db_id != system_database_id) {
+            db_ids.insert(db_id);
+        }
+    }
+
+    // Always ensure the default sixseven database is included.
+    db_ids.insert(default_database_id);
+
+    // Insert each database into sys_databases.
+    for (auto db_id : db_ids) {
+        std::string name = (db_id == default_database_id) ? "sixseven"
+                                                          : "database_" + std::to_string(db_id);
+        auto r = insert_row(sys_databases_table_id, {Value(db_id), Value(name)});
+        if (!r) {
+            SIXSEVEN_LOG_WARN("migration: failed to insert database {}: {}", db_id,
+                           r.error().message);
+        }
+    }
+
+    SIXSEVEN_LOG_INFO("catalog persistence: migrated {} databases to sys_databases", db_ids.size());
+    return ok();
 }
 
 Result<void> CatalogPersistence::persist_embedding_job(const EmbeddingJob& job) {
