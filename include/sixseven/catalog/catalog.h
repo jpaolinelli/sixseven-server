@@ -16,8 +16,8 @@ namespace sixseven {
 /// Supports multiple databases. Tables are scoped per database so that
 /// the same table name may exist in different databases.
 ///
-/// A default database named "sixseven" (id = default_database_id) is created
-/// on construction.
+/// Only the system database "sixseven_system" is created on construction.
+/// The default "sixseven" database is created during bootstrap and persisted.
 ///
 /// Thread safety: All public methods are protected by a mutex.
 ///
@@ -45,7 +45,7 @@ public:
     /// Drop a database by id.
     /// If cascade is false, fails with CONSTRAINT_VIOLATION if the database
     /// contains tables. If cascade is true, drops all tables first.
-    /// Cannot drop the default 'sixseven' database or the 'sixseven_system' database.
+    /// Cannot drop the 'sixseven_system' database.
     [[nodiscard]] Result<void> drop_database(database_id_t database_id, bool cascade);
 
     /// Retrieve a database by name.
@@ -191,6 +191,11 @@ public:
 
     // -- Persistence restore operations ----------------------------------------
 
+    /// Restore a database with a pre-assigned database_id (for catalog persistence).
+    /// Unlike create_database(), does NOT auto-assign a database_id.
+    /// Advances next_database_id_ past the restored ID.
+    [[nodiscard]] Result<void> restore_database(database_id_t id, const std::string& name);
+
     /// Restore a table with a pre-assigned table_id (for catalog persistence).
     /// Unlike create_table(), does NOT auto-assign a table_id.
     [[nodiscard]] Result<void> restore_table(database_id_t database_id, TableSchema schema);
@@ -256,8 +261,7 @@ private:
     std::unordered_map<edge_id_t, EdgeTypeDef> edge_types_by_id_;
 
     /// Name lookup scoped per database: database_id -> (edge type name -> edge_id).
-    std::unordered_map<database_id_t, std::unordered_map<std::string, edge_id_t>>
-        edge_name_to_id_;
+    std::unordered_map<database_id_t, std::unordered_map<std::string, edge_id_t>> edge_name_to_id_;
 
     /// Embedding column definitions keyed by (table_id, column_id).
     /// We use a vector and linear scan since the number of embedding

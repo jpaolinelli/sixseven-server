@@ -18,6 +18,8 @@
 #include <optional>
 #include <vector>
 
+#include "test_catalog_helpers.h"
+
 using namespace sixseven;
 
 // ===========================================================================
@@ -123,6 +125,7 @@ protected:
         std::filesystem::create_directories(data_dir_);
 
         catalog_ = std::make_unique<Catalog>();
+        init_test_catalog(*catalog_);
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         graph_ = std::make_unique<GraphEngine>(*catalog_);
 
@@ -455,6 +458,7 @@ class ShortestPathBackwardCompat : public ::testing::Test {
 protected:
     void SetUp() override {
         catalog_ = std::make_unique<Catalog>();
+        init_test_catalog(*catalog_);
         graph_ = std::make_unique<GraphEngine>(*catalog_);
 
         TableSchema ts;

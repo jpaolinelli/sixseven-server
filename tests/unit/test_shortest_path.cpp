@@ -9,6 +9,8 @@
 #include <optional>
 #include <vector>
 
+#include "test_catalog_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -22,6 +24,7 @@ class ShortestPathTest : public ::testing::Test {
 protected:
     void SetUp() override {
         catalog_ = std::make_unique<Catalog>();
+        init_test_catalog(*catalog_);
         graph_ = std::make_unique<GraphEngine>(*catalog_);
 
         TableSchema ts;

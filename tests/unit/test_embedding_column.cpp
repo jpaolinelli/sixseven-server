@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <string>
 
+#include "test_catalog_helpers.h"
+
 using namespace sixseven;
 
 // -- Helper: build a table schema with an EMBEDDING column --------------------
@@ -40,6 +42,7 @@ static TableSchema make_schema_multi_embedding(const std::string& name) {
 
 TEST(EmbeddingColumn, RegisterSingleEmbedding) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema_with_embedding("docs"));
@@ -73,6 +76,7 @@ TEST(EmbeddingColumn, RegisterSingleEmbedding) {
 
 TEST(EmbeddingColumn, RegisterMultipleEmbeddings) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema_multi_embedding("articles"));
@@ -111,6 +115,7 @@ TEST(EmbeddingColumn, RegisterMultipleEmbeddings) {
 
 TEST(EmbeddingColumn, RegisterInvalidDimensionFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema_with_embedding("docs"));
@@ -129,6 +134,7 @@ TEST(EmbeddingColumn, RegisterInvalidDimensionFails) {
 
 TEST(EmbeddingColumn, RegisterEmptySourceExprFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema_with_embedding("docs"));
@@ -147,6 +153,7 @@ TEST(EmbeddingColumn, RegisterEmptySourceExprFails) {
 
 TEST(EmbeddingColumn, RegisterEmptyProviderFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema_with_embedding("docs"));
@@ -165,6 +172,7 @@ TEST(EmbeddingColumn, RegisterEmptyProviderFails) {
 
 TEST(EmbeddingColumn, RegisterNonexistentTableFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     EmbeddingColumnDef def;
@@ -180,6 +188,7 @@ TEST(EmbeddingColumn, RegisterNonexistentTableFails) {
 
 TEST(EmbeddingColumn, RegisterDuplicateColumnFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema_with_embedding("docs"));
@@ -203,6 +212,7 @@ TEST(EmbeddingColumn, RegisterDuplicateColumnFails) {
 
 TEST(EmbeddingColumn, CreateInsertJobsSingleColumn) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema_with_embedding("docs"));
@@ -231,6 +241,7 @@ TEST(EmbeddingColumn, CreateInsertJobsSingleColumn) {
 
 TEST(EmbeddingColumn, CreateInsertJobsMultipleColumns) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema_multi_embedding("articles"));
@@ -262,6 +273,7 @@ TEST(EmbeddingColumn, CreateInsertJobsMultipleColumns) {
 
 TEST(EmbeddingColumn, CreateInsertJobsNoEmbeddingColumns) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     TableSchema schema;
@@ -279,6 +291,7 @@ TEST(EmbeddingColumn, CreateInsertJobsNoEmbeddingColumns) {
 
 TEST(EmbeddingColumn, CreateUpdateJobsSourceColumnChanged) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema_with_embedding("docs"));
@@ -301,6 +314,7 @@ TEST(EmbeddingColumn, CreateUpdateJobsSourceColumnChanged) {
 
 TEST(EmbeddingColumn, CreateUpdateJobsUnrelatedColumnChanged) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema_with_embedding("docs"));
@@ -322,6 +336,7 @@ TEST(EmbeddingColumn, CreateUpdateJobsUnrelatedColumnChanged) {
 
 TEST(EmbeddingColumn, CreateUpdateJobsMultiSourceExpr) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema_with_embedding("docs"));
@@ -343,6 +358,7 @@ TEST(EmbeddingColumn, CreateUpdateJobsMultiSourceExpr) {
 
 TEST(EmbeddingColumn, CreateUpdateJobsNoEmbeddingColumns) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     TableSchema schema;
@@ -360,6 +376,7 @@ TEST(EmbeddingColumn, CreateUpdateJobsNoEmbeddingColumns) {
 
 TEST(EmbeddingColumn, DescribeEmbeddingColumns) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema_with_embedding("docs"));
@@ -383,6 +400,7 @@ TEST(EmbeddingColumn, DescribeEmbeddingColumns) {
 
 TEST(EmbeddingColumn, DescribeEmbeddingColumnsEmpty) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     TableSchema schema;
@@ -397,6 +415,7 @@ TEST(EmbeddingColumn, DescribeEmbeddingColumnsEmpty) {
 
 TEST(EmbeddingColumn, DescribeMultipleEmbeddingColumns) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema_multi_embedding("articles"));
@@ -438,6 +457,7 @@ TEST(EmbeddingColumn, MakeIndexName) {
 
 TEST(EmbeddingColumn, DropTableCascadesToEmbeddingIndexes) {
     Catalog catalog;
+    init_test_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema_with_embedding("docs"));

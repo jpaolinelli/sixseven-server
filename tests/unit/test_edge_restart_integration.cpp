@@ -12,6 +12,8 @@
 
 #include <filesystem>
 
+#include "test_catalog_helpers.h"
+
 using namespace sixseven;
 namespace fs = std::filesystem;
 
@@ -29,6 +31,7 @@ TEST(EdgeRestartIntegrationTest, EdgesAndTablesRecoveredAfterFullRestart) {
     {
         DiskManager dm;
         Catalog catalog;
+        init_test_catalog(catalog);
         StorageManager storage(dm, data_dir);
         CatalogPersistence persistence(catalog, storage);
         GraphEngine graph_engine(catalog, dm, data_dir);
@@ -75,6 +78,7 @@ TEST(EdgeRestartIntegrationTest, EdgesAndTablesRecoveredAfterFullRestart) {
     {
         DiskManager dm;
         Catalog catalog;
+        init_test_catalog(catalog);
         StorageManager storage(dm, data_dir);
         CatalogPersistence persistence(catalog, storage);
         GraphEngine graph_engine(catalog, dm, data_dir);
@@ -123,6 +127,7 @@ TEST(EdgeRestartIntegrationTest, DroppedEdgeTypeNotRecoveredAfterRestart) {
     {
         DiskManager dm;
         Catalog catalog;
+        init_test_catalog(catalog);
         StorageManager storage(dm, data_dir);
         CatalogPersistence persistence(catalog, storage);
         GraphEngine graph_engine(catalog, dm, data_dir);
@@ -143,6 +148,7 @@ TEST(EdgeRestartIntegrationTest, DroppedEdgeTypeNotRecoveredAfterRestart) {
     {
         DiskManager dm;
         Catalog catalog;
+        init_test_catalog(catalog);
         StorageManager storage(dm, data_dir);
         CatalogPersistence persistence(catalog, storage);
         GraphEngine graph_engine(catalog, dm, data_dir);

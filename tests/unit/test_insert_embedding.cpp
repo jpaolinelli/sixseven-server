@@ -18,6 +18,8 @@
 #include <thread>
 #include <vector>
 
+#include "test_catalog_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -27,6 +29,7 @@ using namespace sixseven;
 class InsertEmbeddingTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        init_test_catalog(catalog_);
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_insert_emb";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);

@@ -16,6 +16,8 @@
 #include <memory>
 #include <string>
 
+#include "test_catalog_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -31,6 +33,7 @@ protected:
 
         dm_ = std::make_unique<DiskManager>();
         catalog_ = std::make_unique<Catalog>();
+        init_test_catalog(*catalog_);
         storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
         persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
         engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
@@ -723,12 +726,14 @@ TEST_F(ProviderCacheTest, CannotDropSysProvidersViaSql) {
 class EncryptedProviderCacheTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_encrypted_provider_cache";
+        data_dir_ =
+            std::filesystem::temp_directory_path() / "sixseven_test_encrypted_provider_cache";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
         dm_ = std::make_unique<DiskManager>();
         catalog_ = std::make_unique<Catalog>();
+        init_test_catalog(*catalog_);
         storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
         persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
         engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);

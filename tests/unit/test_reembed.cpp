@@ -21,6 +21,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "test_catalog_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -34,6 +36,7 @@ protected:
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
+        init_test_catalog(catalog_);
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
         provider_registry_ = std::make_unique<ProviderRegistry>(catalog_);

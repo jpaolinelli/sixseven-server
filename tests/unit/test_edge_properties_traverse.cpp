@@ -16,6 +16,8 @@
 #include <string>
 #include <vector>
 
+#include "test_catalog_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -28,6 +30,7 @@ namespace {
 class EdgePropsTraverseTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        init_test_catalog(catalog_);
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_edge_props_trav";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);

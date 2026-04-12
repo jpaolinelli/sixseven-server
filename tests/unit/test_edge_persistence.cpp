@@ -6,6 +6,8 @@
 
 #include <filesystem>
 
+#include "test_catalog_helpers.h"
+
 using namespace sixseven;
 
 // -- Helpers ------------------------------------------------------------------
@@ -32,6 +34,8 @@ protected:
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_edge_persist";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
+
+        init_test_catalog(catalog_);
 
         auto t1 = catalog_.create_table(default_database_id, make_table_schema("users"));
         ASSERT_TRUE(t1.has_value()) << t1.error().message;
@@ -385,6 +389,7 @@ TEST_F(EdgePersistenceTest, DataSurvivesMultipleRestarts) {
 
 TEST(EdgeTableRestore, RestoreEdgeSetsCorrectRowId) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto t1 = catalog.create_table(default_database_id, make_table_schema("users"));
     ASSERT_TRUE(t1.has_value());
 
@@ -412,6 +417,7 @@ TEST(EdgeTableRestore, RestoreEdgeSetsCorrectRowId) {
 
 TEST(EdgeTableRestore, RestoreDuplicateRowIdFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto t1 = catalog.create_table(default_database_id, make_table_schema("users"));
     ASSERT_TRUE(t1.has_value());
 

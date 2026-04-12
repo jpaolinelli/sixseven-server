@@ -7,11 +7,7 @@
 namespace sixseven {
 
 StorageManager::StorageManager(DiskManager& dm, std::filesystem::path data_dir, uint32_t pool_size)
-    : dm_(dm), data_dir_(std::move(data_dir)), pool_size_(pool_size) {
-    // Create the default database directory on initialization.
-    auto db_dir = database_path(default_database_id) / "tables";
-    std::filesystem::create_directories(db_dir);
-}
+    : dm_(dm), data_dir_(std::move(data_dir)), pool_size_(pool_size) {}
 
 std::filesystem::path StorageManager::database_path(database_id_t db_id) const {
     return data_dir_ / "databases" / std::to_string(db_id);

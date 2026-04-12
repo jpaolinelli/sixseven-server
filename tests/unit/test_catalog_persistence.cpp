@@ -16,6 +16,8 @@
 #include <memory>
 #include <string>
 
+#include "test_catalog_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -31,6 +33,7 @@ protected:
 
         dm_ = std::make_unique<DiskManager>();
         catalog_ = std::make_unique<Catalog>();
+        init_test_catalog(*catalog_);
         storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
         persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
         engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
@@ -64,6 +67,7 @@ protected:
 
         dm_ = std::make_unique<DiskManager>();
         catalog_ = std::make_unique<Catalog>();
+        init_test_catalog(*catalog_);
         storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
         persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
         engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
@@ -686,8 +690,9 @@ TEST_F(CatalogPersistenceTest, PersistAndLoadEmbeddingJobs) {
 
     // Sort by row_id for deterministic comparison.
     auto& jobs = *loaded;
-    std::sort(jobs.begin(), jobs.end(),
-              [](const EmbeddingJob& a, const EmbeddingJob& b) { return a.row_id < b.row_id; });
+    std::sort(jobs.begin(), jobs.end(), [](const EmbeddingJob& a, const EmbeddingJob& b) {
+        return a.row_id < b.row_id;
+    });
 
     EXPECT_EQ(jobs[0].table_id, 100);
     EXPECT_EQ(jobs[0].row_id, 1);

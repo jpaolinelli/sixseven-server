@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "test_catalog_helpers.h"
+
 namespace sixseven {
 
 // ===========================================================================
@@ -21,6 +23,7 @@ protected:
     std::unique_ptr<Binder> binder;
 
     void SetUp() override {
+        init_test_catalog(catalog);
         // Table: users(id INT32, name STRING, email STRING, age INT32, active BOOL)
         {
             TableSchema s;

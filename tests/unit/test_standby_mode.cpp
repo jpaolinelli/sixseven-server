@@ -13,6 +13,8 @@
 #include <memory>
 #include <string>
 
+#include "test_catalog_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -22,6 +24,7 @@ using namespace sixseven;
 class StandbyModeTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        init_test_catalog(catalog_);
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_standby";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);

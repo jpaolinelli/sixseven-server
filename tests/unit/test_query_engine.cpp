@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include "test_catalog_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -24,6 +26,7 @@ using namespace sixseven;
 class QueryEngineTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        init_test_catalog(catalog_);
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_qe";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
@@ -147,8 +150,9 @@ TEST_F(QueryEngineTest, DropDatabaseNotFound) {
     exec_error("DROP DATABASE nonexistent", StatusCode::NOT_FOUND);
 }
 
-TEST_F(QueryEngineTest, DropDefaultDatabaseFails) {
-    exec_error("DROP DATABASE sixseven", StatusCode::CONSTRAINT_VIOLATION);
+TEST_F(QueryEngineTest, DropDefaultDatabaseSucceeds) {
+    auto qr = exec_ok("DROP DATABASE sixseven");
+    EXPECT_EQ(qr.message, "DROP DATABASE");
 }
 
 TEST_F(QueryEngineTest, DropDatabaseNotEmptyWithoutCascade) {
@@ -883,6 +887,7 @@ TEST_F(QueryEngineTest, UnlinkFailsWithoutGraphEngine) {
 class QueryEngineGraphTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        init_test_catalog(catalog_);
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_qe_graph";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
