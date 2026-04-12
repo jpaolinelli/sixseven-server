@@ -650,6 +650,15 @@ Result<QueryResult> QueryEngine::execute_create_database(const CreateDatabaseStm
         return make_error(storage_result.error().code, storage_result.error().message);
     }
 
+    // Persist to system catalog tables.
+    if (catalog_persistence_ != nullptr) {
+        auto persist = catalog_persistence_->persist_database(*db_id, stmt.database_name);
+        if (!persist) {
+            SIXSEVEN_LOG_WARN(
+                "failed to persist database '{}': {}", stmt.database_name, persist.error().message);
+        }
+    }
+
     QueryResult qr;
     qr.message = "CREATE DATABASE";
     return ok(std::move(qr));
@@ -694,6 +703,16 @@ Result<QueryResult> QueryEngine::execute_drop_database(const DropDatabaseStmt& s
     auto result = catalog_.drop_database(db_id, stmt.cascade);
     if (!result) {
         return make_error(result.error().code, result.error().message);
+    }
+
+    // Remove from persistence.
+    if (catalog_persistence_ != nullptr) {
+        auto remove = catalog_persistence_->remove_database(db_id);
+        if (!remove) {
+            SIXSEVEN_LOG_WARN("failed to remove database '{}' from persistence: {}",
+                              stmt.database_name,
+                              remove.error().message);
+        }
     }
 
     // Remove the database directory.
