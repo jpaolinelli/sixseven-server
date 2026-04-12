@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <string>
 
+#include "test_catalog_helpers.h"
+
 using namespace sixseven;
 
 // -- Helper: build a simple TableSchema ---------------------------------------
@@ -25,6 +27,7 @@ static TableSchema make_schema(const std::string& name) {
 
 TEST(Catalog, CreateTableAssignsId) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto id = catalog.create_table(default_database_id, make_schema("users"));
     ASSERT_TRUE(id.has_value()) << id.error().message;
@@ -33,6 +36,7 @@ TEST(Catalog, CreateTableAssignsId) {
 
 TEST(Catalog, CreateTableSequentialIds) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto id1 = catalog.create_table(default_database_id, make_schema("t1"));
     auto id2 = catalog.create_table(default_database_id, make_schema("t2"));
@@ -47,6 +51,7 @@ TEST(Catalog, CreateTableSequentialIds) {
 
 TEST(Catalog, CreateTableDuplicateNameFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto id1 = catalog.create_table(default_database_id, make_schema("users"));
     ASSERT_TRUE(id1.has_value());
@@ -58,6 +63,7 @@ TEST(Catalog, CreateTableDuplicateNameFails) {
 
 TEST(Catalog, CreateTableAssignsOrdinals) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     TableSchema schema;
     schema.name = "test";
@@ -79,6 +85,7 @@ TEST(Catalog, CreateTableAssignsOrdinals) {
 
 TEST(Catalog, GetTableByName) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto id = catalog.create_table(default_database_id, make_schema("users"));
     ASSERT_TRUE(id.has_value());
@@ -98,6 +105,7 @@ TEST(Catalog, GetTableByName) {
 
 TEST(Catalog, GetTableByIdWorks) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto id = catalog.create_table(default_database_id, make_schema("users"));
     ASSERT_TRUE(id.has_value());
@@ -109,6 +117,7 @@ TEST(Catalog, GetTableByIdWorks) {
 
 TEST(Catalog, GetTableNotFoundByName) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto result = catalog.get_table(default_database_id, "nonexistent");
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
@@ -116,6 +125,7 @@ TEST(Catalog, GetTableNotFoundByName) {
 
 TEST(Catalog, GetTableNotFoundById) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto result = catalog.get_table_by_id(999);
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
@@ -125,12 +135,14 @@ TEST(Catalog, GetTableNotFoundById) {
 
 TEST(Catalog, ListTablesEmpty) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto tables = catalog.list_tables(default_database_id);
     EXPECT_TRUE(tables.empty());
 }
 
 TEST(Catalog, ListTablesMultiple) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     ASSERT_TRUE(catalog.create_table(default_database_id, make_schema("alpha")).has_value());
     ASSERT_TRUE(catalog.create_table(default_database_id, make_schema("beta")).has_value());
@@ -149,6 +161,7 @@ TEST(Catalog, ListTablesMultiple) {
 
 TEST(Catalog, DropTable) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto id = catalog.create_table(default_database_id, make_schema("users"));
     ASSERT_TRUE(id.has_value());
@@ -163,6 +176,7 @@ TEST(Catalog, DropTable) {
 
 TEST(Catalog, DropTableNotFound) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto drop = catalog.drop_table(default_database_id, "nonexistent");
     EXPECT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::NOT_FOUND);
@@ -170,6 +184,7 @@ TEST(Catalog, DropTableNotFound) {
 
 TEST(Catalog, DropTableRemovesFromList) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     ASSERT_TRUE(catalog.create_table(default_database_id, make_schema("t1")).has_value());
     ASSERT_TRUE(catalog.create_table(default_database_id, make_schema("t2")).has_value());
@@ -185,6 +200,7 @@ TEST(Catalog, DropTableRemovesFromList) {
 
 TEST(Catalog, DropTableAllowsRecreateWithSameName) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto id1 = catalog.create_table(default_database_id, make_schema("users"));
     ASSERT_TRUE(id1.has_value());
@@ -200,6 +216,7 @@ TEST(Catalog, DropTableAllowsRecreateWithSameName) {
 
 TEST(Catalog, CreateIndex) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema("users"));
     ASSERT_TRUE(tid.has_value());
@@ -218,6 +235,7 @@ TEST(Catalog, CreateIndex) {
 
 TEST(Catalog, CreateIndexDuplicateNameFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema("users"));
     ASSERT_TRUE(tid.has_value());
@@ -237,6 +255,7 @@ TEST(Catalog, CreateIndexDuplicateNameFails) {
 
 TEST(Catalog, CreateIndexNonexistentTableFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     IndexDef def;
     def.table_id = 999;
@@ -253,6 +272,7 @@ TEST(Catalog, CreateIndexNonexistentTableFails) {
 
 TEST(Catalog, GetIndex) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema("users"));
     ASSERT_TRUE(tid.has_value());
@@ -279,6 +299,7 @@ TEST(Catalog, GetIndex) {
 
 TEST(Catalog, GetIndexNotFound) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto result = catalog.get_index("nonexistent");
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
@@ -288,6 +309,7 @@ TEST(Catalog, GetIndexNotFound) {
 
 TEST(Catalog, ListIndexesForTable) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto t1 = catalog.create_table(default_database_id, make_schema("t1"));
     auto t2 = catalog.create_table(default_database_id, make_schema("t2"));
@@ -324,6 +346,7 @@ TEST(Catalog, ListIndexesForTable) {
 
 TEST(Catalog, ListAllIndexes) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema("users"));
     ASSERT_TRUE(tid.has_value());
@@ -345,6 +368,7 @@ TEST(Catalog, ListAllIndexes) {
 
 TEST(Catalog, DropIndex) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema("users"));
     ASSERT_TRUE(tid.has_value());
@@ -365,6 +389,7 @@ TEST(Catalog, DropIndex) {
 
 TEST(Catalog, DropIndexNotFound) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto drop = catalog.drop_index("nonexistent");
     EXPECT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::NOT_FOUND);
@@ -374,6 +399,7 @@ TEST(Catalog, DropIndexNotFound) {
 
 TEST(Catalog, DropTableCascadesToIndexes) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema("users"));
     ASSERT_TRUE(tid.has_value());
@@ -404,6 +430,7 @@ TEST(Catalog, DropTableCascadesToIndexes) {
 
 TEST(Catalog, CacheInvalidationOnDrop) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto id = catalog.create_table(default_database_id, make_schema("users"));
     ASSERT_TRUE(id.has_value());
@@ -422,6 +449,7 @@ TEST(Catalog, CacheInvalidationOnDrop) {
 
 TEST(Catalog, CacheInvalidationOnRecreate) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto id1 = catalog.create_table(default_database_id, make_schema("users"));
     ASSERT_TRUE(id1.has_value());
@@ -447,6 +475,7 @@ TEST(Catalog, CacheInvalidationOnRecreate) {
 
 TEST(Catalog, CreateEdgeType) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto t1 = catalog.create_table(default_database_id, make_schema("users"));
     auto t2 = catalog.create_table(default_database_id, make_schema("posts"));
@@ -466,6 +495,7 @@ TEST(Catalog, CreateEdgeType) {
 
 TEST(Catalog, CreateEdgeTypeDuplicateNameFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto t1 = catalog.create_table(default_database_id, make_schema("a"));
     auto t2 = catalog.create_table(default_database_id, make_schema("b"));
@@ -485,6 +515,7 @@ TEST(Catalog, CreateEdgeTypeDuplicateNameFails) {
 
 TEST(Catalog, CreateEdgeTypeSourceTableNotFoundFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto t1 = catalog.create_table(default_database_id, make_schema("a"));
     ASSERT_TRUE(t1.has_value());
@@ -501,6 +532,7 @@ TEST(Catalog, CreateEdgeTypeSourceTableNotFoundFails) {
 
 TEST(Catalog, CreateEdgeTypeTargetTableNotFoundFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto t1 = catalog.create_table(default_database_id, make_schema("a"));
     ASSERT_TRUE(t1.has_value());
@@ -517,6 +549,7 @@ TEST(Catalog, CreateEdgeTypeTargetTableNotFoundFails) {
 
 TEST(Catalog, GetEdgeType) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto t1 = catalog.create_table(default_database_id, make_schema("users"));
     auto t2 = catalog.create_table(default_database_id, make_schema("posts"));
@@ -543,6 +576,7 @@ TEST(Catalog, GetEdgeType) {
 
 TEST(Catalog, GetEdgeTypeNotFound) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto result = catalog.get_edge_type(default_database_id, "nonexistent");
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
@@ -550,6 +584,7 @@ TEST(Catalog, GetEdgeTypeNotFound) {
 
 TEST(Catalog, DropEdgeType) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto t1 = catalog.create_table(default_database_id, make_schema("a"));
     auto t2 = catalog.create_table(default_database_id, make_schema("b"));
@@ -570,6 +605,7 @@ TEST(Catalog, DropEdgeType) {
 
 TEST(Catalog, DropEdgeTypeNotFound) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto drop = catalog.drop_edge_type(default_database_id, "nonexistent");
     EXPECT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::NOT_FOUND);
@@ -577,6 +613,7 @@ TEST(Catalog, DropEdgeTypeNotFound) {
 
 TEST(Catalog, ListEdgeTypes) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto t1 = catalog.create_table(default_database_id, make_schema("a"));
     auto t2 = catalog.create_table(default_database_id, make_schema("b"));
@@ -603,12 +640,14 @@ TEST(Catalog, ListEdgeTypes) {
 
 TEST(Catalog, ListEdgeTypesEmpty) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto edges = catalog.list_edge_types(default_database_id);
     EXPECT_TRUE(edges.empty());
 }
 
 TEST(Catalog, CreateEdgeTypeSelfReference) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto t1 = catalog.create_table(default_database_id, make_schema("users"));
     ASSERT_TRUE(t1.has_value());
@@ -626,6 +665,7 @@ TEST(Catalog, CreateEdgeTypeSelfReference) {
 
 TEST(Catalog, RegisterEmbeddingColumn) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema("documents"));
     ASSERT_TRUE(tid.has_value());
@@ -643,6 +683,7 @@ TEST(Catalog, RegisterEmbeddingColumn) {
 
 TEST(Catalog, RegisterEmbeddingColumnDuplicateFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema("documents"));
     ASSERT_TRUE(tid.has_value());
@@ -663,6 +704,7 @@ TEST(Catalog, RegisterEmbeddingColumnDuplicateFails) {
 
 TEST(Catalog, RegisterEmbeddingColumnNonexistentTableFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     EmbeddingColumnDef def;
     def.table_id = 999;
@@ -676,6 +718,7 @@ TEST(Catalog, RegisterEmbeddingColumnNonexistentTableFails) {
 
 TEST(Catalog, ListEmbeddingColumnsForTable) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto t1 = catalog.create_table(default_database_id, make_schema("t1"));
     auto t2 = catalog.create_table(default_database_id, make_schema("t2"));
@@ -717,6 +760,7 @@ TEST(Catalog, ListEmbeddingColumnsForTable) {
 
 TEST(Catalog, ListAllEmbeddingColumns) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema("t1"));
     ASSERT_TRUE(tid.has_value());
@@ -739,6 +783,7 @@ TEST(Catalog, ListAllEmbeddingColumns) {
 
 TEST(Catalog, ListEmbeddingColumnsEmpty) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto result = catalog.list_all_embedding_columns();
     EXPECT_TRUE(result.empty());
 }
@@ -747,6 +792,7 @@ TEST(Catalog, ListEmbeddingColumnsEmpty) {
 
 TEST(Catalog, DropTableCascadesToEdgeTypes) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto src_id = catalog.create_table(default_database_id, make_schema("src"));
     auto tgt_id = catalog.create_table(default_database_id, make_schema("tgt"));
@@ -774,6 +820,7 @@ TEST(Catalog, DropTableCascadesToEdgeTypes) {
 
 TEST(Catalog, DropTableCascadesToEdgeTypesAsTarget) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto src_id = catalog.create_table(default_database_id, make_schema("src"));
     auto tgt_id = catalog.create_table(default_database_id, make_schema("tgt"));
@@ -799,6 +846,7 @@ TEST(Catalog, DropTableCascadesToEdgeTypesAsTarget) {
 
 TEST(Catalog, DropTableCascadesToEmbeddingColumns) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_schema("docs"));
     ASSERT_TRUE(tid.has_value());
@@ -828,30 +876,31 @@ TEST(Catalog, DropTableCascadesToEmbeddingColumns) {
 
 // -- Default database ---------------------------------------------------------
 
-TEST(Catalog, DefaultDatabaseExistsOnInit) {
+TEST(Catalog, OnlySystemDatabaseExistsOnInit) {
     Catalog catalog;
 
-    auto db = catalog.get_database("sixseven");
+    auto db = catalog.get_database(system_database_name);
     ASSERT_TRUE(db.has_value()) << db.error().message;
-    EXPECT_EQ(db->database_id, default_database_id);
-    EXPECT_EQ(db->name, "sixseven");
+    EXPECT_EQ(db->database_id, system_database_id);
+
+    auto no_default = catalog.get_database("sixseven");
+    EXPECT_FALSE(no_default.has_value());
 }
 
-TEST(Catalog, ListDatabasesIncludesDefault) {
+TEST(Catalog, ListDatabasesOnlySystemOnInit) {
     Catalog catalog;
 
     auto dbs = catalog.list_databases();
-    ASSERT_EQ(dbs.size(), 2u);
-    EXPECT_EQ(dbs[0].database_id, default_database_id);
-    EXPECT_EQ(dbs[0].name, "sixseven");
-    EXPECT_EQ(dbs[1].database_id, system_database_id);
-    EXPECT_EQ(dbs[1].name, system_database_name);
+    ASSERT_EQ(dbs.size(), 1u);
+    EXPECT_EQ(dbs[0].database_id, system_database_id);
+    EXPECT_EQ(dbs[0].name, system_database_name);
 }
 
 // -- Create database ----------------------------------------------------------
 
 TEST(Catalog, CreateDatabaseAssignsId) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto id = catalog.create_database("test_db");
     ASSERT_TRUE(id.has_value()) << id.error().message;
@@ -860,6 +909,7 @@ TEST(Catalog, CreateDatabaseAssignsId) {
 
 TEST(Catalog, CreateDatabaseSequentialIds) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto id1 = catalog.create_database("db1");
     auto id2 = catalog.create_database("db2");
@@ -870,6 +920,7 @@ TEST(Catalog, CreateDatabaseSequentialIds) {
 
 TEST(Catalog, CreateDatabaseDuplicateNameFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto id1 = catalog.create_database("mydb");
     ASSERT_TRUE(id1.has_value());
@@ -879,18 +930,19 @@ TEST(Catalog, CreateDatabaseDuplicateNameFails) {
     EXPECT_EQ(id2.error().code, StatusCode::ALREADY_EXISTS);
 }
 
-TEST(Catalog, CreateDatabaseNameConflictsWithDefault) {
+TEST(Catalog, CreateDatabaseSixsevenSucceeds) {
     Catalog catalog;
 
     auto id = catalog.create_database("sixseven");
-    EXPECT_FALSE(id.has_value());
-    EXPECT_EQ(id.error().code, StatusCode::ALREADY_EXISTS);
+    ASSERT_TRUE(id.has_value()) << id.error().message;
+    EXPECT_GT(*id, system_database_id);
 }
 
 // -- Get database -------------------------------------------------------------
 
 TEST(Catalog, GetDatabaseByName) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto id = catalog.create_database("analytics");
     ASSERT_TRUE(id.has_value());
@@ -903,6 +955,7 @@ TEST(Catalog, GetDatabaseByName) {
 
 TEST(Catalog, GetDatabaseNotFound) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto db = catalog.get_database("nonexistent");
     EXPECT_FALSE(db.has_value());
@@ -913,12 +966,13 @@ TEST(Catalog, GetDatabaseNotFound) {
 
 TEST(Catalog, ListDatabasesSortedById) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     ASSERT_TRUE(catalog.create_database("zeta").has_value());
     ASSERT_TRUE(catalog.create_database("alpha").has_value());
 
     auto dbs = catalog.list_databases();
-    ASSERT_EQ(dbs.size(), 4u); // sixseven + sixseven_system + zeta + alpha
+    ASSERT_EQ(dbs.size(), 4u); // sixseven (restored) + sixseven_system + zeta + alpha
     EXPECT_EQ(dbs[0].name, "sixseven");
     EXPECT_EQ(dbs[1].name, system_database_name);
     EXPECT_LT(dbs[0].database_id, dbs[1].database_id);
@@ -930,6 +984,7 @@ TEST(Catalog, ListDatabasesSortedById) {
 
 TEST(Catalog, DropEmptyDatabase) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto id = catalog.create_database("temp_db");
     ASSERT_TRUE(id.has_value());
@@ -944,30 +999,27 @@ TEST(Catalog, DropEmptyDatabase) {
 
 TEST(Catalog, DropDatabaseNotFound) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto drop = catalog.drop_database(999, false);
     EXPECT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::NOT_FOUND);
 }
 
-TEST(Catalog, CannotDropDefaultDatabase) {
+TEST(Catalog, DefaultDatabaseIsDroppable) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto drop = catalog.drop_database(default_database_id, false);
-    EXPECT_FALSE(drop.has_value());
-    EXPECT_EQ(drop.error().code, StatusCode::CONSTRAINT_VIOLATION);
-}
+    ASSERT_TRUE(drop.has_value()) << drop.error().message;
 
-TEST(Catalog, CannotDropDefaultDatabaseWithCascade) {
-    Catalog catalog;
-
-    auto drop = catalog.drop_database(default_database_id, true);
-    EXPECT_FALSE(drop.has_value());
-    EXPECT_EQ(drop.error().code, StatusCode::CONSTRAINT_VIOLATION);
+    auto get = catalog.get_database("sixseven");
+    EXPECT_FALSE(get.has_value());
 }
 
 TEST(Catalog, DropDatabaseWithTablesFailsWithoutCascade) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto db_id = catalog.create_database("has_tables");
     ASSERT_TRUE(db_id.has_value());
@@ -981,6 +1033,7 @@ TEST(Catalog, DropDatabaseWithTablesFailsWithoutCascade) {
 
 TEST(Catalog, DropDatabaseCascadeRemovesTables) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto db_id = catalog.create_database("cascade_db");
     ASSERT_TRUE(db_id.has_value());
@@ -1003,6 +1056,7 @@ TEST(Catalog, DropDatabaseCascadeRemovesTables) {
 
 TEST(Catalog, DropDatabaseCascadeRemovesIndexes) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto db_id = catalog.create_database("idx_db");
     ASSERT_TRUE(db_id.has_value());
@@ -1025,6 +1079,7 @@ TEST(Catalog, DropDatabaseCascadeRemovesIndexes) {
 
 TEST(Catalog, DropDatabaseRemovesFromList) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto id = catalog.create_database("to_remove");
     ASSERT_TRUE(id.has_value());
@@ -1032,7 +1087,7 @@ TEST(Catalog, DropDatabaseRemovesFromList) {
     ASSERT_TRUE(catalog.drop_database(*id, false).has_value());
 
     auto dbs = catalog.list_databases();
-    ASSERT_EQ(dbs.size(), 2u); // sixseven + sixseven_system remain.
+    ASSERT_EQ(dbs.size(), 2u); // sixseven (restored) + sixseven_system remain.
     EXPECT_EQ(dbs[0].name, "sixseven");
     EXPECT_EQ(dbs[1].name, system_database_name);
 }
@@ -1041,6 +1096,7 @@ TEST(Catalog, DropDatabaseRemovesFromList) {
 
 TEST(Catalog, SameTableNameInDifferentDatabases) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto db1 = catalog.create_database("db1");
     auto db2 = catalog.create_database("db2");
@@ -1066,6 +1122,7 @@ TEST(Catalog, SameTableNameInDifferentDatabases) {
 
 TEST(Catalog, ListTablesOnlyShowsDatabaseTables) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto db1 = catalog.create_database("db1");
     auto db2 = catalog.create_database("db2");
@@ -1086,6 +1143,7 @@ TEST(Catalog, ListTablesOnlyShowsDatabaseTables) {
 
 TEST(Catalog, DropTableInOneDatabaseDoesNotAffectOther) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto db1 = catalog.create_database("db1");
     auto db2 = catalog.create_database("db2");
@@ -1106,10 +1164,50 @@ TEST(Catalog, DropTableInOneDatabaseDoesNotAffectOther) {
 
 TEST(Catalog, CreateTableInNonexistentDatabaseFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto result = catalog.create_table(999, make_schema("orphan"));
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
+}
+
+// -- restore_database ---------------------------------------------------------
+
+TEST(Catalog, RestoreDatabaseInsertsAndAdvancesId) {
+    Catalog catalog;
+
+    auto r = catalog.restore_database(10, "restored_db");
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+
+    auto db = catalog.get_database("restored_db");
+    ASSERT_TRUE(db.has_value()) << db.error().message;
+    EXPECT_EQ(db->database_id, 10u);
+    EXPECT_EQ(db->name, "restored_db");
+
+    // Next auto-assigned ID should be past the restored ID.
+    auto new_id = catalog.create_database("after_restore");
+    ASSERT_TRUE(new_id.has_value()) << new_id.error().message;
+    EXPECT_GT(*new_id, 10u);
+}
+
+TEST(Catalog, RestoreDatabaseDuplicateIdFails) {
+    Catalog catalog;
+
+    ASSERT_TRUE(catalog.restore_database(5, "first").has_value());
+
+    auto r = catalog.restore_database(5, "second");
+    EXPECT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::ALREADY_EXISTS);
+}
+
+TEST(Catalog, RestoreDatabaseDuplicateNameFails) {
+    Catalog catalog;
+
+    ASSERT_TRUE(catalog.restore_database(5, "mydb").has_value());
+
+    auto r = catalog.restore_database(6, "mydb");
+    EXPECT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::ALREADY_EXISTS);
 }
 
 // -- sys_databases schema -----------------------------------------------------

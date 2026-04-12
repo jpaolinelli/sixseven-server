@@ -25,6 +25,7 @@
 #include <string>
 #include <thread>
 
+#include "test_catalog_helpers.h"
 #include "test_wal_helpers.h"
 
 using namespace sixseven;
@@ -89,6 +90,7 @@ protected:
 
         dm_ = std::make_unique<DiskManager>();
         catalog_ = std::make_unique<Catalog>();
+        init_test_catalog(*catalog_);
         storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
         persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
         engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);

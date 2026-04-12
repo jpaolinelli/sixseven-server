@@ -9,6 +9,8 @@
 #include <memory>
 #include <string>
 
+#include "test_catalog_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -46,10 +48,13 @@ protected:
 // Default database directory
 // =============================================================================
 
-TEST_F(StorageManagerTest, ConstructorCreatesDefaultDatabaseDir) {
+TEST_F(StorageManagerTest, CreateDatabaseStorageCreatesDefaultDatabaseDir) {
     StorageManager sm(dm_, data_dir_);
 
-    // The constructor should create the default database directory.
+    // Explicitly create the default database storage directory.
+    auto result = sm.create_database_storage(default_database_id);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
     auto default_db_dir = data_dir_ / "databases" / "1" / "tables";
     EXPECT_TRUE(std::filesystem::exists(default_db_dir));
     EXPECT_TRUE(std::filesystem::is_directory(default_db_dir));

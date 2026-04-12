@@ -11,10 +11,6 @@ namespace sixseven {
 // -- Constructor --------------------------------------------------------------
 
 Catalog::Catalog() {
-    // Create the default 'sixseven' database.
-    databases_by_id_[default_database_id] = Database{default_database_id, "sixseven"};
-    database_name_to_id_["sixseven"] = default_database_id;
-
     // Create the system 'sixseven_system' database.
     databases_by_id_[system_database_id] = Database{system_database_id, system_database_name};
     database_name_to_id_[system_database_name] = system_database_id;
@@ -38,11 +34,6 @@ Result<database_id_t> Catalog::create_database(const std::string& name) {
 
 Result<void> Catalog::drop_database(database_id_t database_id, bool cascade) {
     std::lock_guard lock(mu_);
-
-    if (database_id == default_database_id) {
-        return make_error(StatusCode::CONSTRAINT_VIOLATION,
-                          "cannot drop the default 'sixseven' database");
-    }
 
     if (database_id == system_database_id) {
         return make_error(StatusCode::CONSTRAINT_VIOLATION, "cannot drop the system database");
@@ -725,6 +716,29 @@ Result<void> Catalog::remove_embedding_provider(const std::string& name) {
 }
 
 // -- Persistence restore operations -------------------------------------------
+
+Result<void> Catalog::restore_database(database_id_t id, const std::string& name) {
+    std::lock_guard lock(mu_);
+
+    if (databases_by_id_.contains(id)) {
+        return make_error(StatusCode::ALREADY_EXISTS,
+                          "database with id " + std::to_string(id) + " already exists");
+    }
+
+    if (database_name_to_id_.contains(name)) {
+        return make_error(StatusCode::ALREADY_EXISTS, "database '" + name + "' already exists");
+    }
+
+    databases_by_id_[id] = Database{id, name};
+    database_name_to_id_[name] = id;
+
+    // Advance auto-increment counter past this ID.
+    if (id >= next_database_id_) {
+        next_database_id_ = id + 1;
+    }
+
+    return ok();
+}
 
 Result<void> Catalog::restore_table(database_id_t database_id, TableSchema schema) {
     std::lock_guard lock(mu_);

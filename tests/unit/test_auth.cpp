@@ -12,6 +12,8 @@
 #include <fstream>
 #include <string>
 
+#include "test_catalog_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -531,6 +533,7 @@ protected:
     UserManager user_mgr_;
 
     void SetUp() override {
+        init_test_catalog(catalog_);
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_auth";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);

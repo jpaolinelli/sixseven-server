@@ -9,6 +9,8 @@
 #include <cmath>
 #include <unordered_map>
 
+#include "test_catalog_helpers.h"
+
 using namespace sixseven;
 
 // ---------------------------------------------------------------------------
@@ -96,6 +98,7 @@ TEST(ClusteringCoefficientDef, Registration) {
 class ClusteringCoefficientTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        init_test_catalog(catalog_);
         auto t = catalog_.create_table(default_database_id, make_table_schema("nodes"));
         ASSERT_TRUE(t.has_value()) << t.error().message;
         table_id_ = *t;

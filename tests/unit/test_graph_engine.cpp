@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 
+#include "test_catalog_helpers.h"
+
 using namespace sixseven;
 
 // -- Helpers ------------------------------------------------------------------
@@ -26,6 +28,8 @@ static Value pk(int64_t v) {
 class GraphEngineTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        init_test_catalog(catalog_);
+
         auto t1 = catalog_.create_table(default_database_id, make_table_schema("users"));
         ASSERT_TRUE(t1.has_value()) << t1.error().message;
         users_table_id_ = *t1;

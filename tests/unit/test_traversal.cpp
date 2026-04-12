@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include "test_catalog_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -23,6 +25,7 @@ class TraversalTest : public ::testing::Test {
 protected:
     void SetUp() override {
         catalog_ = std::make_unique<Catalog>();
+        init_test_catalog(*catalog_);
         graph_ = std::make_unique<GraphEngine>(*catalog_);
 
         // Create a dummy table so catalog has a table_id.

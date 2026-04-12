@@ -14,6 +14,8 @@
 #include <memory>
 #include <string>
 
+#include "test_catalog_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -30,6 +32,7 @@ namespace {
 class UnlinkWhereTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        init_test_catalog(catalog_);
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_unlink_where";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
