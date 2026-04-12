@@ -75,6 +75,23 @@ protected:
         engine_->set_catalog_persistence(persistence_.get());
     }
 
+    /// Simulate a server restart without pre-seeding the default database.
+    /// Use this to verify that databases are loaded purely from sys_databases.
+    void restart_without_default_db() {
+        engine_.reset();
+        persistence_.reset();
+        storage_.reset();
+        catalog_.reset();
+        dm_.reset();
+
+        dm_ = std::make_unique<DiskManager>();
+        catalog_ = std::make_unique<Catalog>();
+        storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
+        persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
+        engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
+        engine_->set_catalog_persistence(persistence_.get());
+    }
+
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << result.error().message;
@@ -955,4 +972,201 @@ TEST_F(CatalogPersistenceTest, RemoveDatabase) {
         << "other_db should still be persisted";
     EXPECT_TRUE(std::find(db_ids.begin(), db_ids.end(), 42) == db_ids.end())
         << "test_db should have been removed";
+}
+
+// =============================================================================
+// GDB-658: Database persistence across server restart
+// =============================================================================
+
+TEST_F(CatalogPersistenceTest, CreatedDatabaseSurvivesRestart) {
+    run_bootstrap();
+
+    exec_ok("CREATE DATABASE foo");
+
+    auto db = catalog_->get_database("foo");
+    ASSERT_TRUE(db.has_value()) << db.error().message;
+    auto foo_id = db->database_id;
+
+    restart();
+    run_bootstrap();
+
+    auto restored = catalog_->get_database("foo");
+    ASSERT_TRUE(restored.has_value()) << restored.error().message;
+    EXPECT_EQ(restored->database_id, foo_id);
+    EXPECT_EQ(restored->name, "foo");
+}
+
+TEST_F(CatalogPersistenceTest, DatabaseWithTablesSurvivesRestart) {
+    run_bootstrap();
+
+    exec_ok("CREATE DATABASE foo");
+
+    auto db = catalog_->get_database("foo");
+    ASSERT_TRUE(db.has_value());
+    auto foo_id = db->database_id;
+
+    engine_->set_current_database(foo_id);
+    exec_ok("CREATE TABLE bar (id INT, name VARCHAR)");
+
+    auto tbl = catalog_->get_table(foo_id, "bar");
+    ASSERT_TRUE(tbl.has_value());
+    auto bar_id = tbl->table_id;
+
+    restart();
+    run_bootstrap();
+
+    auto restored_db = catalog_->get_database("foo");
+    ASSERT_TRUE(restored_db.has_value()) << restored_db.error().message;
+    EXPECT_EQ(restored_db->database_id, foo_id);
+
+    auto restored_tbl = catalog_->get_table(foo_id, "bar");
+    ASSERT_TRUE(restored_tbl.has_value()) << restored_tbl.error().message;
+    EXPECT_EQ(restored_tbl->table_id, bar_id);
+    EXPECT_EQ(restored_tbl->name, "bar");
+    ASSERT_EQ(restored_tbl->columns.size(), 2u);
+    EXPECT_EQ(restored_tbl->columns[0].name, "id");
+    EXPECT_EQ(restored_tbl->columns[1].name, "name");
+}
+
+TEST_F(CatalogPersistenceTest, DroppedDatabaseDoesNotReappearAfterRestart) {
+    run_bootstrap();
+
+    exec_ok("CREATE DATABASE foo");
+
+    auto db = catalog_->get_database("foo");
+    ASSERT_TRUE(db.has_value());
+
+    exec_ok("DROP DATABASE foo");
+
+    auto gone = catalog_->get_database("foo");
+    EXPECT_FALSE(gone.has_value());
+
+    restart();
+    run_bootstrap();
+
+    auto after_restart = catalog_->get_database("foo");
+    EXPECT_FALSE(after_restart.has_value());
+}
+
+TEST_F(CatalogPersistenceTest, MultipleDatabasesSurviveRestartWithCorrectIds) {
+    run_bootstrap();
+
+    exec_ok("CREATE DATABASE alpha");
+    exec_ok("CREATE DATABASE beta");
+    exec_ok("CREATE DATABASE gamma");
+
+    auto alpha = catalog_->get_database("alpha");
+    auto beta = catalog_->get_database("beta");
+    auto gamma = catalog_->get_database("gamma");
+    ASSERT_TRUE(alpha.has_value());
+    ASSERT_TRUE(beta.has_value());
+    ASSERT_TRUE(gamma.has_value());
+
+    auto alpha_id = alpha->database_id;
+    auto beta_id = beta->database_id;
+    auto gamma_id = gamma->database_id;
+
+    // IDs should be distinct.
+    EXPECT_NE(alpha_id, beta_id);
+    EXPECT_NE(beta_id, gamma_id);
+    EXPECT_NE(alpha_id, gamma_id);
+
+    restart();
+    run_bootstrap();
+
+    auto r_alpha = catalog_->get_database("alpha");
+    auto r_beta = catalog_->get_database("beta");
+    auto r_gamma = catalog_->get_database("gamma");
+    ASSERT_TRUE(r_alpha.has_value()) << r_alpha.error().message;
+    ASSERT_TRUE(r_beta.has_value()) << r_beta.error().message;
+    ASSERT_TRUE(r_gamma.has_value()) << r_gamma.error().message;
+
+    EXPECT_EQ(r_alpha->database_id, alpha_id);
+    EXPECT_EQ(r_beta->database_id, beta_id);
+    EXPECT_EQ(r_gamma->database_id, gamma_id);
+    EXPECT_EQ(r_alpha->name, "alpha");
+    EXPECT_EQ(r_beta->name, "beta");
+    EXPECT_EQ(r_gamma->name, "gamma");
+}
+
+TEST_F(CatalogPersistenceTest, SixsevenLoadedFromSysDatabasesNotHardcoded) {
+    run_bootstrap();
+
+    // sixseven should exist after first bootstrap.
+    auto db = catalog_->get_database("sixseven");
+    ASSERT_TRUE(db.has_value());
+    EXPECT_EQ(db->database_id, default_database_id);
+
+    // Restart without pre-seeding sixseven — it must be loaded from sys_databases.
+    restart_without_default_db();
+    run_bootstrap();
+
+    auto restored = catalog_->get_database("sixseven");
+    ASSERT_TRUE(restored.has_value()) << restored.error().message;
+    EXPECT_EQ(restored->database_id, default_database_id);
+    EXPECT_EQ(restored->name, "sixseven");
+
+    // Verify it appears in the databases list (loaded from persistence).
+    auto all_dbs = catalog_->list_databases();
+    bool found = false;
+    for (const auto& d : all_dbs) {
+        if (d.name == "sixseven") {
+            found = true;
+            EXPECT_EQ(d.database_id, default_database_id);
+        }
+    }
+    EXPECT_TRUE(found) << "sixseven should be in list_databases after restart";
+}
+
+TEST_F(CatalogPersistenceTest, SixsevenIsDroppableAndDoesNotReappear) {
+    run_bootstrap();
+
+    auto db = catalog_->get_database("sixseven");
+    ASSERT_TRUE(db.has_value());
+
+    exec_ok("DROP DATABASE sixseven");
+
+    auto gone = catalog_->get_database("sixseven");
+    EXPECT_FALSE(gone.has_value());
+
+    // Restart without pre-seeding sixseven — it was dropped and should not reappear.
+    restart_without_default_db();
+    run_bootstrap();
+
+    // sixseven should NOT reappear — it was dropped and removed from sys_databases.
+    auto after_restart = catalog_->get_database("sixseven");
+    EXPECT_FALSE(after_restart.has_value());
+
+    // Verify it's not in the databases list either.
+    auto all_dbs = catalog_->list_databases();
+    for (const auto& d : all_dbs) {
+        EXPECT_NE(d.name, "sixseven") << "sixseven should not reappear after being dropped";
+    }
+}
+
+TEST_F(CatalogPersistenceTest, NextDatabaseIdRestoredNoCollisions) {
+    run_bootstrap();
+
+    exec_ok("CREATE DATABASE db_before");
+
+    auto before = catalog_->get_database("db_before");
+    ASSERT_TRUE(before.has_value());
+    auto before_id = before->database_id;
+
+    restart();
+    run_bootstrap();
+
+    // Create a new database after restart — its ID must not collide.
+    exec_ok("CREATE DATABASE db_after");
+
+    auto after = catalog_->get_database("db_after");
+    ASSERT_TRUE(after.has_value());
+
+    EXPECT_GT(after->database_id, before_id)
+        << "new database ID after restart should be greater than pre-restart IDs";
+
+    // Also verify the pre-restart database still exists.
+    auto restored = catalog_->get_database("db_before");
+    ASSERT_TRUE(restored.has_value());
+    EXPECT_EQ(restored->database_id, before_id);
 }
