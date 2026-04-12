@@ -122,14 +122,15 @@ inline constexpr table_id_t sys_indexes_table_id = 5;
 inline constexpr table_id_t sys_edge_types_table_id = 6;
 inline constexpr table_id_t sys_embedding_columns_table_id = 7;
 inline constexpr table_id_t sys_embedding_jobs_table_id = 8;
+inline constexpr table_id_t sys_databases_table_id = 9;
 
 /// First table ID available for user tables (after all system tables).
-inline constexpr table_id_t first_user_table_id = 9;
+inline constexpr table_id_t first_user_table_id = 10;
 
 /// Returns the system table schema for sys_databases(database_id INT32, name STRING).
 inline TableSchema sys_databases_schema() {
     TableSchema schema;
-    schema.table_id = 0; // System tables use reserved IDs.
+    schema.table_id = sys_databases_table_id;
     schema.name = "sys_databases";
     schema.columns = {
         {0, "database_id", TypeId::INT32, false, ""},
