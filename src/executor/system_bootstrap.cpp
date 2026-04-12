@@ -54,6 +54,13 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
                               "failed to create system catalog tables: " + r3.error().message);
         }
 
+        // Create sys_embedding_jobs for durable embedding job queue.
+        auto r_ej = persistence.create_embedding_jobs_table();
+        if (!r_ej) {
+            return make_error(r_ej.error().code,
+                              "failed to create sys_embedding_jobs: " + r_ej.error().message);
+        }
+
         // Ensure user table IDs start after all system tables.
         if (catalog.next_table_id() < first_user_table_id) {
             catalog.set_next_table_id(first_user_table_id);
@@ -97,6 +104,13 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
         auto load = persistence.load_catalog();
         if (!load) {
             return make_error(load.error().code, "failed to load catalog: " + load.error().message);
+        }
+
+        // Open sys_embedding_jobs for durable embedding job queue.
+        auto r_ej = persistence.open_embedding_jobs_table();
+        if (!r_ej) {
+            return make_error(r_ej.error().code,
+                              "failed to open sys_embedding_jobs: " + r_ej.error().message);
         }
 
         // Ensure user table IDs start after all system tables.

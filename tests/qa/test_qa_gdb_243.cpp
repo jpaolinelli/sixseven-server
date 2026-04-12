@@ -412,13 +412,10 @@ TEST(QA_GDB_243_Batch, LargeBatch) {
 }
 
 TEST(QA_GDB_243_Batch, ErrorInMiddleOfBatch) {
-    // First two texts succeed, third fails. Verify early termination.
+    // An empty text in the batch triggers INVALID_ARGUMENT during the
+    // up-front tokenization phase, before any model inference runs.
     auto mock = std::make_unique<MockOnnxSession>();
     auto* mock_ptr = mock.get();
-
-    // The mock doesn't support per-call configuration, but
-    // embed_batch calls embed() which calls tokenize() + session.run().
-    // We can make the second text empty to trigger INVALID_ARGUMENT.
     mock_ptr->set_embedding({1.0F});
 
     OnnxProvider provider("model.onnx", 1, std::move(mock));
@@ -426,8 +423,10 @@ TEST(QA_GDB_243_Batch, ErrorInMiddleOfBatch) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
-    // Should have processed "good" and "also good" before hitting "".
-    EXPECT_EQ(mock_ptr->run_call_count_, 2);
+    // After the Round-1 refactor, embed_batch tokenizes all texts up-front
+    // before calling run_batch, so the empty-text check fires before any
+    // inference runs — run_call_count stays 0.
+    EXPECT_EQ(mock_ptr->run_call_count_, 0);
 }
 
 TEST(QA_GDB_243_Batch, AllEmptyTexts) {

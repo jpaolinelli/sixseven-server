@@ -34,6 +34,7 @@ struct DropIndexStmt;
 struct DropTableStmt;
 struct DropUserStmt;
 struct ExplainStmt;
+struct BulkLinkStmt;
 struct LinkStmt;
 struct ReembedStmt;
 struct SetStmt;
@@ -212,6 +213,10 @@ private:
     /// Execute a LINK statement (create edge).
     [[nodiscard]] Result<QueryResult> execute_link(const LinkStmt& stmt,
                                                    const BoundStatement& bound);
+
+    /// Execute a bulk LINK statement (batch edge creation).
+    [[nodiscard]] Result<QueryResult> execute_bulk_link(const BulkLinkStmt& stmt,
+                                                        const BoundStatement& bound);
 
     /// Execute an UNLINK statement (delete edge).
     [[nodiscard]] Result<QueryResult> execute_unlink(const UnlinkStmt& stmt,

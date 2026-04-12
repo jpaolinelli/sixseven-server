@@ -5,7 +5,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <shared_mutex>
 #include <span>
+#include <vector>
 
 namespace sixseven {
 
@@ -59,6 +61,21 @@ static constexpr size_t min_tuple_size = 1;
 /// - Tuple data grows from the end of the page toward the middle.
 /// - free_space_offset tracks where the next slot entry would go (end of slot directory).
 /// - data_offset_ tracks where the next tuple would be written (lowest occupied tuple byte).
+///
+/// Thread-safety:
+/// ``Page`` carries an internal ``std::shared_mutex`` (``latch_``). All public
+/// tuple operations (``insert_tuple``, ``get_tuple``, ``update_tuple``,
+/// ``delete_tuple``, ``compact``) acquire this latch — shared for reads,
+/// exclusive for writes. This prevents torn reads when one thread is
+/// deserializing a tuple while another is updating the same page (e.g. the
+/// async embedding store callback rewriting a row during a concurrent
+/// heap scan). ``get_tuple`` returns an owned ``std::vector<uint8_t>`` so
+/// the caller's view is stable even after the latch releases.
+///
+/// Low-level byte accessors (``raw()``, ``checksum``, ``lsn``) are *not*
+/// latched internally. They are expected to be used only by the buffer
+/// pool / disk manager during setup / flush paths, where the caller
+/// already holds the buffer-pool frame latch exclusively.
 class Page {
 public:
     /// Byte offset of the checksum field within the page header.
@@ -71,6 +88,23 @@ public:
 
     /// Construct from raw bytes (e.g., read from disk). Header is parsed from data.
     explicit Page(const std::array<uint8_t, page_size>& raw);
+
+    // Page owns a shared_mutex and is therefore non-copyable and non-movable.
+    // The buffer pool stores Page by value inside each Frame; to recycle a
+    // frame without tearing down and reconstructing the latch, use reset().
+    Page(const Page&) = delete;
+    Page& operator=(const Page&) = delete;
+    Page(Page&&) = delete;
+    Page& operator=(Page&&) = delete;
+
+    /// Re-initialize this page in place as a new empty page with the given
+    /// id and type. Used by BufferPoolManager::new_page() to recycle a frame
+    /// without destroying / reconstructing the latch.
+    ///
+    /// The caller must hold exclusive access to the frame (the buffer pool's
+    /// ``frame.latch`` serves this purpose today). Takes the page latch
+    /// exclusively while clearing the buffer.
+    void reset(uint32_t page_id, PageType page_type);
 
     // -- Header accessors -----------------------------------------------------
 
@@ -91,9 +125,13 @@ public:
     /// Fails if there is not enough free space for the tuple + slot entry.
     [[nodiscard]] Result<SlotId> insert_tuple(std::span<const uint8_t> data);
 
-    /// Read a tuple by slot ID. Returns a span pointing into the page's data.
+    /// Read a tuple by slot ID. Returns an owned copy of the tuple bytes.
     /// Fails if the slot ID is invalid or the slot is deleted.
-    [[nodiscard]] Result<std::span<const uint8_t>> get_tuple(SlotId slot_id) const;
+    ///
+    /// Takes the page latch in shared mode while copying so the returned
+    /// vector is a stable snapshot even under concurrent mutation of the
+    /// same page.
+    [[nodiscard]] Result<std::vector<uint8_t>> get_tuple(SlotId slot_id) const;
 
     /// Delete a tuple by marking its slot as deleted (offset = 0).
     /// The space is not immediately reclaimed — call compact() for that.
@@ -122,10 +160,20 @@ public:
     void compact();
 
     /// Access the raw page data (e.g., for writing to disk).
+    ///
+    /// Not latched internally. The caller must hold exclusive access via the
+    /// buffer-pool frame latch for the entire duration of read/write through
+    /// this pointer.
     [[nodiscard]] const std::array<uint8_t, page_size>& raw() const { return data_; }
     [[nodiscard]] std::array<uint8_t, page_size>& raw() { return data_; }
 
 private:
+    /// Latch protecting the page bytes (``data_``).
+    ///
+    /// Shared mode: ``get_tuple``. Exclusive mode: ``insert_tuple``,
+    /// ``update_tuple``, ``delete_tuple``, ``compact``, ``reset``. The
+    /// latch is ``mutable`` because ``get_tuple`` is ``const``.
+    mutable std::shared_mutex latch_;
     // -- Header read/write helpers (native endianness) ------------------------
     // Note: uses native endianness via memcpy. All platforms SixSevenDB currently
     // targets are little-endian (x86-64, ARM LE). If big-endian support is

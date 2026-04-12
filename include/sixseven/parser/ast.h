@@ -606,6 +606,17 @@ struct LinkStmt : Stmt {
     void accept(AstVisitor& visitor) const override;
 };
 
+/// LINK src_table TO tgt_table VIA edge_type VALUES (sk, tk, p...), ...
+/// Bulk form: creates multiple edges of the same type in a single statement.
+/// Each row is positional: (source_key, target_key, prop0, prop1, ...).
+struct BulkLinkStmt : Stmt {
+    std::string source_table;
+    std::string target_table;
+    std::string edge_type;
+    std::vector<std::vector<ExprPtr>> rows;
+    void accept(AstVisitor& visitor) const override;
+};
+
 /// UNLINK table(pk) FROM table(pk) VIA edge_type [WHERE expr].
 struct UnlinkStmt : Stmt {
     std::string source_table;
@@ -856,6 +867,7 @@ public:
     virtual void visit(const UpdateStmt& node) = 0;
     virtual void visit(const DeleteStmt& node) = 0;
     virtual void visit(const LinkStmt& node) = 0;
+    virtual void visit(const BulkLinkStmt& node) = 0;
     virtual void visit(const UnlinkStmt& node) = 0;
 
     // -- Query statements -----------------------------------------------------
@@ -984,6 +996,9 @@ inline void DeleteStmt::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void LinkStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void BulkLinkStmt::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void UnlinkStmt::accept(AstVisitor& v) const {

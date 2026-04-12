@@ -1436,12 +1436,21 @@ Result<StmtPtr> Parser::parse_delete() {
 
 Result<StmtPtr> Parser::parse_link() {
     advance(); // consume LINK
-    auto stmt = std::make_unique<LinkStmt>();
 
-    // source_table(source_key)
+    // Parse the source table name. Then disambiguate:
+    //   LINK table(key) TO ...  → single LinkStmt (existing)
+    //   LINK table TO ...       → BulkLinkStmt (new bulk form)
     auto src_tbl = parse_name("source table");
     if (!src_tbl)
         return tl::unexpected(src_tbl.error());
+
+    // Bulk form: next token is TO (identifier), not '('.
+    if (match_ident_ci(peek(), "TO") && !check(TokenType::LPAREN)) {
+        return parse_bulk_link(std::move(*src_tbl));
+    }
+
+    // Single-edge form: LINK table(key) TO table(key) VIA edge (props).
+    auto stmt = std::make_unique<LinkStmt>();
     stmt->source_table = std::move(*src_tbl);
 
     auto lp1 = expect(TokenType::LPAREN, "expected '('");
@@ -1511,6 +1520,68 @@ Result<StmtPtr> Parser::parse_link() {
         auto rp = expect(TokenType::RPAREN, "expected ')'");
         if (!rp)
             return tl::unexpected(rp.error());
+    }
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- DML: BULK LINK -----------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_bulk_link(std::string source_table) {
+    auto stmt = std::make_unique<BulkLinkStmt>();
+    stmt->source_table = std::move(source_table);
+
+    // Consume TO (already verified by caller).
+    advance();
+
+    // target_table
+    auto tgt_tbl = parse_name("target table");
+    if (!tgt_tbl)
+        return tl::unexpected(tgt_tbl.error());
+    stmt->target_table = std::move(*tgt_tbl);
+
+    // VIA edge_type
+    auto via = expect(TokenType::VIA, "expected VIA after target table");
+    if (!via)
+        return tl::unexpected(via.error());
+    auto edge = parse_name("edge type name");
+    if (!edge)
+        return tl::unexpected(edge.error());
+    stmt->edge_type = std::move(*edge);
+
+    // VALUES (row), (row), ...
+    auto values_kw = expect(TokenType::VALUES, "expected VALUES after edge type");
+    if (!values_kw)
+        return tl::unexpected(values_kw.error());
+
+    // Parse row tuples — same pattern as parse_insert() VALUES loop.
+    do {
+        auto lp = expect(TokenType::LPAREN, "expected '(' for value row");
+        if (!lp)
+            return tl::unexpected(lp.error());
+
+        std::vector<ExprPtr> row;
+        do {
+            auto val = parse_expression();
+            if (!val)
+                return tl::unexpected(val.error());
+            row.push_back(std::move(*val));
+        } while (match(TokenType::COMMA));
+
+        if (row.size() < 2) {
+            return error("each bulk LINK row must have at least 2 values "
+                         "(source_key, target_key)");
+        }
+
+        auto rp = expect(TokenType::RPAREN, "expected ')'");
+        if (!rp)
+            return tl::unexpected(rp.error());
+
+        stmt->rows.push_back(std::move(row));
+    } while (match(TokenType::COMMA));
+
+    if (stmt->rows.empty()) {
+        return error("LINK ... VALUES requires at least one row");
     }
 
     return ok(StmtPtr(std::move(stmt)));

@@ -4,6 +4,7 @@
 
 #include <cerrno>
 #include <cstring>
+#include <fcntl.h>
 
 #ifdef __APPLE__
 #include <sys/event.h>
@@ -13,6 +14,35 @@
 #include <sys/epoll.h>
 #include <unistd.h>
 #endif
+
+namespace {
+
+/// Create a non-blocking pipe. Returns true on success.
+bool make_wakeup_pipe(int pipe_fds[2]) {
+    if (::pipe(pipe_fds) < 0) {
+        return false;
+    }
+    // Set both ends non-blocking.
+    for (int i = 0; i < 2; ++i) {
+        int flags = ::fcntl(pipe_fds[i], F_GETFL, 0);
+        if (flags < 0 || ::fcntl(pipe_fds[i], F_SETFL, flags | O_NONBLOCK) < 0) {
+            ::close(pipe_fds[0]);
+            ::close(pipe_fds[1]);
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Drain all bytes from the read-end of a wakeup pipe.
+void drain_wakeup_pipe(int read_fd) {
+    char buf[64];
+    while (::read(read_fd, buf, sizeof(buf)) > 0) {
+        // Discard.
+    }
+}
+
+} // anonymous namespace
 
 namespace sixseven {
 
@@ -28,6 +58,8 @@ public:
         if (kq_fd_ >= 0) {
             ::close(kq_fd_);
         }
+        if (wakeup_pipe_[0] >= 0) ::close(wakeup_pipe_[0]);
+        if (wakeup_pipe_[1] >= 0) ::close(wakeup_pipe_[1]);
     }
 
     KqueueEventLoop(const KqueueEventLoop&) = delete;
@@ -39,7 +71,24 @@ public:
             return make_error(StatusCode::IO_ERROR,
                               std::string("kqueue(): ") + std::strerror(errno));
         }
+        // Create wakeup pipe so other threads can interrupt poll().
+        if (!make_wakeup_pipe(wakeup_pipe_)) {
+            return make_error(StatusCode::IO_ERROR,
+                              std::string("pipe(): ") + std::strerror(errno));
+        }
+        // Register read-end with kqueue.
+        struct kevent ev;
+        EV_SET(&ev, wakeup_pipe_[0], EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, nullptr);
+        if (::kevent(kq_fd_, &ev, 1, nullptr, 0, nullptr) < 0) {
+            return make_error(StatusCode::IO_ERROR,
+                              std::string("kevent(wakeup): ") + std::strerror(errno));
+        }
         return ok();
+    }
+
+    void wakeup() override {
+        char byte = 1;
+        (void)::write(wakeup_pipe_[1], &byte, 1);
     }
 
     Result<void> add_fd(int fd, EventType type) override { return add_filters(fd, type); }
@@ -78,6 +127,12 @@ public:
         std::vector<IoEvent> result;
         result.reserve(static_cast<size_t>(n));
         for (int i = 0; i < n; ++i) {
+            int fd = static_cast<int>(events[i].ident);
+            // Drain the wakeup pipe but don't expose it as a client event.
+            if (fd == wakeup_pipe_[0]) {
+                drain_wakeup_pipe(wakeup_pipe_[0]);
+                continue;
+            }
             EventType type{};
             if (events[i].filter == EVFILT_READ) {
                 type = EventType::READ;
@@ -86,7 +141,7 @@ public:
             } else {
                 continue;
             }
-            result.push_back({static_cast<int>(events[i].ident), type});
+            result.push_back({fd, type});
         }
         return ok(std::move(result));
     }
@@ -141,6 +196,7 @@ private:
     }
 
     int kq_fd_ = -1;
+    int wakeup_pipe_[2] = {-1, -1};
 };
 
 std::unique_ptr<EventLoop> EventLoop::create() {
@@ -159,6 +215,8 @@ public:
         if (epoll_fd_ >= 0) {
             ::close(epoll_fd_);
         }
+        if (wakeup_pipe_[0] >= 0) ::close(wakeup_pipe_[0]);
+        if (wakeup_pipe_[1] >= 0) ::close(wakeup_pipe_[1]);
     }
 
     EpollEventLoop(const EpollEventLoop&) = delete;
@@ -170,7 +228,25 @@ public:
             return make_error(StatusCode::IO_ERROR,
                               std::string("epoll_create1(): ") + std::strerror(errno));
         }
+        // Create wakeup pipe so other threads can interrupt poll().
+        if (!make_wakeup_pipe(wakeup_pipe_)) {
+            return make_error(StatusCode::IO_ERROR,
+                              std::string("pipe(): ") + std::strerror(errno));
+        }
+        // Register read-end with epoll.
+        struct epoll_event ev{};
+        ev.events = EPOLLIN;
+        ev.data.fd = wakeup_pipe_[0];
+        if (::epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, wakeup_pipe_[0], &ev) < 0) {
+            return make_error(StatusCode::IO_ERROR,
+                              std::string("epoll_ctl(wakeup): ") + std::strerror(errno));
+        }
         return ok();
+    }
+
+    void wakeup() override {
+        char byte = 1;
+        (void)::write(wakeup_pipe_[1], &byte, 1);
     }
 
     Result<void> add_fd(int fd, EventType type) override {
@@ -217,6 +293,12 @@ public:
         std::vector<IoEvent> result;
         result.reserve(static_cast<size_t>(n));
         for (int i = 0; i < n; ++i) {
+            int fd = events[i].data.fd;
+            // Drain the wakeup pipe but don't expose it as a client event.
+            if (fd == wakeup_pipe_[0]) {
+                drain_wakeup_pipe(wakeup_pipe_[0]);
+                continue;
+            }
             EventType type{};
             bool has_read = (events[i].events & EPOLLIN) != 0;
             bool has_write = (events[i].events & EPOLLOUT) != 0;
@@ -230,7 +312,7 @@ public:
                 // Error / hangup — treat as readable so the read path detects EOF.
                 type = EventType::READ;
             }
-            result.push_back({events[i].data.fd, type});
+            result.push_back({fd, type});
         }
         return ok(std::move(result));
     }
@@ -250,6 +332,7 @@ private:
     }
 
     int epoll_fd_ = -1;
+    int wakeup_pipe_[2] = {-1, -1};
 };
 
 std::unique_ptr<EventLoop> EventLoop::create() {

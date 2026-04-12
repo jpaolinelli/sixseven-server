@@ -41,6 +41,38 @@ public:
                                                          const std::vector<int64_t>& attention_mask,
                                                          size_t expected_dim) = 0;
 
+    /// Run batched inference with N tokenized inputs and return N embedding vectors.
+    ///
+    /// Rows may have different lengths; implementations are responsible for padding
+    /// them into a single [N, max_len] tensor (if needed) and masking padding positions
+    /// during pooling. Returns one embedding of size expected_dim per input row.
+    ///
+    /// The default implementation falls back to N sequential calls to run() — this keeps
+    /// existing mocks compiling without modification and provides a correct baseline.
+    /// Real implementations (e.g. RealOnnxSession) override this with a single Ort::Session::Run
+    /// call over a batched tensor, which amortizes per-invocation ORT overhead across the batch.
+    ///
+    /// @param input_ids       Per-row token IDs. input_ids.size() == N.
+    /// @param attention_mask  Per-row attention masks. attention_mask.size() == N and
+    ///                        attention_mask[i].size() == input_ids[i].size() for all i.
+    /// @param expected_dim    Expected output embedding dimension (per row).
+    /// @return One embedding vector of size expected_dim per input row.
+    [[nodiscard]] virtual Result<std::vector<std::vector<float>>>
+    run_batch(const std::vector<std::vector<int64_t>>& input_ids,
+              const std::vector<std::vector<int64_t>>& attention_mask,
+              size_t expected_dim) {
+        std::vector<std::vector<float>> out;
+        out.reserve(input_ids.size());
+        for (size_t i = 0; i < input_ids.size(); ++i) {
+            auto r = run(input_ids[i], attention_mask[i], expected_dim);
+            if (!r) {
+                return tl::unexpected(r.error());
+            }
+            out.push_back(std::move(*r));
+        }
+        return ok(std::move(out));
+    }
+
     /// Validate that the model is loaded and functional.
     [[nodiscard]] virtual Result<void> health_check() = 0;
 };
@@ -48,7 +80,8 @@ public:
 /// Create a real ONNX Runtime session from a model file.
 ///
 /// Loads the ONNX model, configures session options (single thread,
-/// extended graph optimization), and inspects input/output metadata.
+/// basic graph optimization — avoids contrib-op fusion diagnostic spam
+/// on stderr), and inspects input/output metadata.
 ///
 /// @param model_path Path to the .onnx model file.
 /// @return Initialized session, or IO_ERROR if the file cannot be loaded.

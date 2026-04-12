@@ -54,10 +54,27 @@ public:
 using EmbeddingStoreCallback =
     std::function<Result<void>(table_id_t, int64_t, int32_t, std::span<const float>)>;
 
+/// A single embedding store request within a batch write-back.
+struct EmbeddingStoreRequest {
+    table_id_t table_id = 0;
+    int64_t row_id = 0;       // Packed RID (page_id << 32 | slot_id).
+    int32_t column_id = 0;
+    std::vector<float> embedding;
+};
+
+/// Batch callback invoked with all embeddings from a single process_batch run.
+/// Returns a vector of row_ids that failed (for retry). Empty = all succeeded.
+/// Preferred over the per-embedding EmbeddingStoreCallback to reduce page latch
+/// contention by grouping writes per page.
+using EmbeddingBatchStoreCallback =
+    std::function<Result<std::vector<int64_t>>(std::vector<EmbeddingStoreRequest>)>;
+
 /// Persistence interface for embedding job queue survival across restarts.
 struct EmbeddingJobPersistence {
     /// Persist a job to durable storage (e.g., sys_embedding_jobs table).
     std::function<Result<void>(const EmbeddingJob&)> persist;
+    /// Persist a batch of jobs in a single heap operation (preferred over per-job persist).
+    std::function<Result<void>(const std::vector<EmbeddingJob>&)> persist_batch;
     /// Remove a completed job from durable storage.
     std::function<Result<void>(table_id_t, int64_t, int32_t)> remove;
     /// Load all pending jobs from durable storage on startup.
@@ -66,12 +83,27 @@ struct EmbeddingJobPersistence {
 
 /// Configuration for the embedding worker pool.
 struct EmbeddingWorkerConfig {
-    uint32_t num_workers = 2;
+    // Default worker count. Production deployments should override this from
+    // the server config — e.g. `std::max(4u, std::thread::hardware_concurrency() / 2)`.
+    // Raised from 2 in Round 2 because at >10M rows a 2-worker pool cannot
+    // keep up with ingest rate and the queue grows unboundedly.
+    uint32_t num_workers = 4;
     uint32_t max_batch_size = 32;
     uint32_t max_retries = 5;
     std::chrono::milliseconds base_backoff{1000};
     std::chrono::milliseconds max_backoff{60000};
     uint32_t queue_warning_threshold = 1000;
+
+    // Maximum number of pending jobs in the in-memory queue. When the queue
+    // is at capacity, enqueue() and enqueue_batch() block the producer until
+    // workers drain enough jobs to make room. This converts the embedding
+    // backlog from an unbounded-memory failure into back-pressure that
+    // propagates up to the INSERT path — at steady state, ingest runs at
+    // the embedder's throughput, not ahead of it.
+    //
+    // Set to 0 to disable back-pressure (unbounded queue, pre-Round-2
+    // behavior). Not recommended except for tests.
+    uint32_t queue_max_size = 100000;
 };
 
 /// Runtime metrics for the embedding worker pool.
@@ -119,6 +151,10 @@ public:
     /// Set the callback for storing generated embeddings.
     void set_store_callback(EmbeddingStoreCallback callback);
 
+    /// Set the batch store callback. When set, this is preferred over the
+    /// per-embedding store_callback_ for reduced page latch contention.
+    void set_batch_store_callback(EmbeddingBatchStoreCallback callback);
+
     /// Set the persistence interface for job queue durability.
     /// When set, jobs are persisted on enqueue and removed on completion.
     void set_persistence(EmbeddingJobPersistence persistence);
@@ -136,6 +172,14 @@ public:
 
     /// Enqueue multiple embedding jobs.
     [[nodiscard]] Result<void> enqueue_batch(std::vector<EmbeddingJob> jobs);
+
+    /// Try to enqueue multiple embedding jobs with a timeout. Returns an error
+    /// if the queue remains full after the deadline expires, rather than
+    /// blocking indefinitely. Use this from query execution paths to avoid
+    /// starving the thread pool.
+    [[nodiscard]] Result<void> try_enqueue_batch(
+        std::vector<EmbeddingJob> jobs,
+        std::chrono::milliseconds timeout);
 
     /// Get current worker pool statistics.
     [[nodiscard]] EmbeddingWorkerStats stats() const;
@@ -165,11 +209,19 @@ private:
     /// Compute the backoff delay for a given retry count.
     [[nodiscard]] std::chrono::milliseconds backoff_delay(int32_t retry_count) const;
 
+    /// Background recovery loop that re-enqueues persisted jobs when the
+    /// in-memory queue is empty. Runs in recovery_thread_.
+    void recovery_loop();
+
     EmbeddingWorkerConfig config_;
 
     // Job queue (INSERTs at front, UPDATEs at back).
     mutable std::mutex queue_mu_;
+    // Signaled when new jobs arrive; workers wait on this in dequeue_batch.
     std::condition_variable queue_cv_;
+    // Signaled when workers drain jobs. Producers blocked on back-pressure
+    // in enqueue() / enqueue_batch() wait on this for room to open up.
+    std::condition_variable space_cv_;
     std::deque<EmbeddingJob> insert_queue_;
     std::deque<EmbeddingJob> update_queue_;
 
@@ -178,14 +230,16 @@ private:
     std::unordered_map<std::string, std::shared_ptr<EmbeddingProvider>> providers_;
     ProviderRegistry* provider_registry_ = nullptr;
 
-    // Store callback.
+    // Store callbacks.
     EmbeddingStoreCallback store_callback_;
+    EmbeddingBatchStoreCallback batch_store_callback_;
 
     // Optional persistence for job queue durability across restarts.
     std::optional<EmbeddingJobPersistence> persistence_;
 
     // Worker threads.
     std::vector<std::thread> workers_;
+    std::thread recovery_thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> stopping_{false};
 

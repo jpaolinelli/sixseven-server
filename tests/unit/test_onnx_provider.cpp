@@ -218,6 +218,133 @@ TEST(OnnxProvider, EmbedBatchFailsOnEmptyText) {
 }
 
 // ---------------------------------------------------------------------------
+// Batched dispatch — verifies OnnxProvider::embed_batch fans all N texts into
+// a single OnnxSession::run_batch call rather than looping per-text. Prior to
+// the real batching fix, embed_batch called OnnxSession::run N times; now it
+// tokenizes all N texts and invokes run_batch exactly once, and the
+// RealOnnxSession override turns that into a single Ort::Session::Run over a
+// [N, max_len] tensor. Tests here use a mock that overrides run_batch so we
+// can assert the dispatch happens through that code path.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Mock session that overrides run_batch directly so tests can distinguish
+/// between "embed_batch called run N times" (default fallback) and
+/// "embed_batch called run_batch once with all N rows" (real batched dispatch).
+class BatchCountingMockSession : public OnnxSession {
+public:
+    BatchCountingMockSession() = default;
+
+    Result<std::vector<float>> run(const std::vector<int64_t>& /*input_ids*/,
+                                   const std::vector<int64_t>& /*attention_mask*/,
+                                   size_t /*expected_dim*/) override {
+        run_call_count_++;
+        return make_error(StatusCode::INTERNAL_ERROR,
+                          "BatchCountingMockSession::run should never be called; "
+                          "embed_batch must dispatch via run_batch");
+    }
+
+    Result<std::vector<std::vector<float>>>
+    run_batch(const std::vector<std::vector<int64_t>>& input_ids,
+              const std::vector<std::vector<int64_t>>& attention_mask,
+              size_t expected_dim) override {
+        batch_call_count_++;
+        last_batch_size_ = input_ids.size();
+        last_attention_mask_ = attention_mask;
+        last_expected_dim_ = expected_dim;
+
+        // Return one deterministic per-row embedding: row i's vector is all (i+1)*0.1F.
+        std::vector<std::vector<float>> out;
+        out.reserve(input_ids.size());
+        for (size_t i = 0; i < input_ids.size(); ++i) {
+            out.emplace_back(expected_dim, static_cast<float>(i + 1) * 0.1F);
+        }
+        return ok(std::move(out));
+    }
+
+    Result<void> health_check() override { return ok(); }
+
+    int run_call_count_ = 0;
+    int batch_call_count_ = 0;
+    size_t last_batch_size_ = 0;
+    size_t last_expected_dim_ = 0;
+    std::vector<std::vector<int64_t>> last_attention_mask_;
+};
+
+} // namespace
+
+TEST(OnnxProvider, EmbedBatchDispatchesViaRunBatch) {
+    auto mock = std::make_unique<BatchCountingMockSession>();
+    auto* mock_ptr = mock.get();
+
+    OnnxProvider provider("model.onnx", 4, std::move(mock));
+    auto result = provider.embed_batch({"first", "second", "third"});
+
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->size(), 3u);
+
+    // The whole point of this test: exactly one run_batch call and zero run() calls.
+    EXPECT_EQ(mock_ptr->batch_call_count_, 1);
+    EXPECT_EQ(mock_ptr->run_call_count_, 0);
+    EXPECT_EQ(mock_ptr->last_batch_size_, 3u);
+    EXPECT_EQ(mock_ptr->last_expected_dim_, 4u);
+
+    // Per-row outputs should come back in order.
+    for (size_t i = 0; i < 3; ++i) {
+        ASSERT_EQ((*result)[i].size(), 4u);
+        for (float v : (*result)[i]) {
+            EXPECT_FLOAT_EQ(v, static_cast<float>(i + 1) * 0.1F);
+        }
+    }
+}
+
+TEST(OnnxProvider, EmbedBatchPassesPerRowTokenizedInputs) {
+    auto mock = std::make_unique<BatchCountingMockSession>();
+    auto* mock_ptr = mock.get();
+
+    OnnxProvider provider("model.onnx", 2, std::move(mock));
+    auto result = provider.embed_batch({"short text", "a longer piece of text"});
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    // Each row must have its own attention mask (default HashTokenizer produces a
+    // mask matching the tokenized length). We cannot assert exact lengths without
+    // coupling to HashTokenizer internals, but we can assert that the mock received
+    // two rows with independent, non-empty masks.
+    ASSERT_EQ(mock_ptr->last_attention_mask_.size(), 2u);
+    EXPECT_FALSE(mock_ptr->last_attention_mask_[0].empty());
+    EXPECT_FALSE(mock_ptr->last_attention_mask_[1].empty());
+}
+
+TEST(OnnxProvider, EmbedBatchEmptyShortCircuitsRunBatch) {
+    auto mock = std::make_unique<BatchCountingMockSession>();
+    auto* mock_ptr = mock.get();
+
+    OnnxProvider provider("model.onnx", 3, std::move(mock));
+    auto result = provider.embed_batch({});
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_TRUE(result->empty());
+
+    // Empty batch should not reach the session at all.
+    EXPECT_EQ(mock_ptr->batch_call_count_, 0);
+    EXPECT_EQ(mock_ptr->run_call_count_, 0);
+}
+
+TEST(OnnxProvider, EmbedBatchFailsFastOnEmptyTextBeforeDispatch) {
+    auto mock = std::make_unique<BatchCountingMockSession>();
+    auto* mock_ptr = mock.get();
+
+    OnnxProvider provider("model.onnx", 3, std::move(mock));
+    // Second text is empty — should fail before ever reaching run_batch.
+    auto result = provider.embed_batch({"hello", "", "world"});
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_EQ(mock_ptr->batch_call_count_, 0);
+    EXPECT_EQ(mock_ptr->run_call_count_, 0);
+}
+
+// ---------------------------------------------------------------------------
 // Health check
 // ---------------------------------------------------------------------------
 

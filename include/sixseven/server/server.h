@@ -14,6 +14,8 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace sixseven {
 
@@ -32,7 +34,7 @@ struct HealthInfo {
 class Server {
 public:
     static constexpr const char* VERSION = "0.1.0";
-    static constexpr size_t DEFAULT_THREAD_POOL_SIZE = 4;
+    static constexpr size_t DEFAULT_THREAD_POOL_SIZE = 8;
 
     explicit Server(Config config);
     ~Server();
@@ -75,6 +77,7 @@ private:
     void handle_read(int fd);
     void handle_write(int fd);
     void close_connection(int fd);
+    void process_completed_queries();
 
     Config config_;
     std::unique_ptr<EventLoop> event_loop_;
@@ -91,6 +94,18 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<int32_t> next_backend_pid_{1};
     std::chrono::steady_clock::time_point start_time_;
+
+    // -- Thread pool query offload state --
+    // Connections whose queries are currently executing on the thread pool.
+    // Guarded by connections_mutex_.
+    std::unordered_set<int> inflight_fds_;
+
+    // Completed queries reported by thread pool workers. Guarded by
+    // completed_mutex_ (separate from connections_mutex_ to avoid blocking
+    // workers on event-loop lock contention).
+    std::mutex completed_mutex_;
+    std::vector<int> completed_fds_;
+    std::unordered_set<int> close_pending_fds_;
 };
 
 } // namespace sixseven

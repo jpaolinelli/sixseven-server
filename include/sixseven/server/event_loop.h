@@ -41,6 +41,12 @@ public:
     /// Wait for events. Returns ready events. timeout_ms=-1 blocks indefinitely.
     [[nodiscard]] virtual Result<std::vector<IoEvent>> poll(int timeout_ms) = 0;
 
+    /// Wake the event loop from another thread. Thread-safe.
+    /// Used by thread pool workers to signal query completion so the event
+    /// loop can re-enable the connection's fd without waiting for the next
+    /// poll timeout.
+    virtual void wakeup() = 0;
+
     /// Create the platform-appropriate EventLoop implementation.
     static std::unique_ptr<EventLoop> create();
 };

@@ -210,11 +210,12 @@ Result<void> GraphEngine::persist_edge(const std::string& edge_key,
 
     storage.rid_map[edge_row_id] = *rid;
 
-    auto flush = storage.bpm->flush_all();
-    if (!flush) {
-        SIXSEVEN_LOG_WARN("edge flush failed for '{}': {}", edge_key, flush.error().message);
-    }
-
+    // NOTE: intentionally NOT calling bpm->flush_all() here. Durability of edge inserts comes
+    // from log_edge_wal() in GraphEngine::link() (see call site at ~line 440), which records
+    // WalRecordType::INSERT right after this persist_edge returns. The edge heap is a normal
+    // TableHeap; its dirty pages are flushed on eviction, checkpoint, and clean shutdown —
+    // symmetric with regular row INSERTs. A per-edge flush_all walks all 64 buffer pool shards
+    // and was the primary LINK throughput bottleneck (capped us at ~1-10 edges/sec).
     return ok();
 }
 
@@ -238,11 +239,9 @@ Result<void> GraphEngine::delete_persisted_edge(const std::string& edge_key, uin
 
     storage.rid_map.erase(rid_it);
 
-    auto flush = storage.bpm->flush_all();
-    if (!flush) {
-        SIXSEVEN_LOG_WARN("edge flush failed for '{}': {}", edge_key, flush.error().message);
-    }
-
+    // NOTE: intentionally NOT calling bpm->flush_all() here (see persist_edge for rationale).
+    // Durability comes from log_edge_wal() in GraphEngine::unlink(); the dirty heap page is
+    // flushed on eviction/checkpoint/shutdown like any other table row.
     return ok();
 }
 
@@ -441,6 +440,48 @@ Result<uint64_t> GraphEngine::link(database_id_t database_id,
 
     SIXSEVEN_LOG_DEBUG("LINK via '{}': edge_row_id={}", edge_type, *result);
     return ok(*result);
+}
+
+Result<uint64_t> GraphEngine::link_batch(database_id_t database_id,
+                                        const std::string& edge_type,
+                                        const std::vector<EdgeInsertRequest>& edges) {
+    if (edges.empty()) {
+        return ok(static_cast<uint64_t>(0));
+    }
+
+    std::lock_guard lock(mu_);
+
+    auto key = make_edge_key(database_id, edge_type);
+
+    auto it = edge_tables_.find(key);
+    if (it == edge_tables_.end()) {
+        return make_error(StatusCode::NOT_FOUND, "edge type '" + edge_type + "' not found");
+    }
+
+    // Single-lock batch insert into the edge table.
+    auto row_ids = it->second->insert_edges_batch(edges);
+    if (!row_ids.has_value()) {
+        return tl::unexpected(row_ids.error());
+    }
+
+    // Persist and WAL-log each edge.
+    for (size_t i = 0; i < row_ids->size(); ++i) {
+        uint64_t row_id = (*row_ids)[i];
+        const auto& e = edges[i];
+
+        if (has_persistence()) {
+            auto persist = persist_edge(key, row_id, e.source_pk, e.target_pk, e.properties);
+            if (!persist) {
+                SIXSEVEN_LOG_WARN(
+                    "edge persist failed for '{}': {}", edge_type, persist.error().message);
+            }
+        }
+
+        log_edge_wal(WalRecordType::INSERT, it->second->config().edge_id, row_id, edge_type);
+    }
+
+    SIXSEVEN_LOG_DEBUG("LINK BATCH via '{}': {} edges", edge_type, row_ids->size());
+    return ok(static_cast<uint64_t>(row_ids->size()));
 }
 
 Result<void> GraphEngine::unlink(database_id_t database_id,

@@ -175,6 +175,10 @@ public:
         last_type = "LinkStmt";
         ++total;
     }
+    void visit(const BulkLinkStmt&) override {
+        last_type = "BulkLinkStmt";
+        ++total;
+    }
     void visit(const UnlinkStmt&) override {
         last_type = "UnlinkStmt";
         ++total;

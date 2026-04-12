@@ -101,6 +101,14 @@ public:
                                         const Value& target_pk,
                                         const std::vector<Value>& properties = {});
 
+    /// Bulk LINK: create multiple edges of the same type in a single lock
+    /// acquisition. Significantly faster than calling link() in a loop because
+    /// both GraphEngine::mu_ and EdgeTable::mu_ are acquired only once.
+    /// Returns the count of edges successfully inserted.
+    [[nodiscard]] Result<uint64_t> link_batch(database_id_t database_id,
+                                              const std::string& edge_type,
+                                              const std::vector<EdgeInsertRequest>& edges);
+
     /// UNLINK: delete the edge between two specific nodes.
     /// Removes the first matching edge from the edge table and both indexes.
     /// If persistence is enabled, also deletes the edge from the heap file.

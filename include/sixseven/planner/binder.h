@@ -156,6 +156,7 @@ private:
     Result<BoundStatement> bind_create_edge_type(const CreateEdgeTypeStmt& stmt);
     Result<BoundStatement> bind_drop_edge_type(const DropEdgeTypeStmt& stmt);
     Result<BoundStatement> bind_link(const LinkStmt& stmt);
+    Result<BoundStatement> bind_bulk_link(const BulkLinkStmt& stmt);
     Result<BoundStatement> bind_unlink(const UnlinkStmt& stmt);
     Result<BoundStatement> bind_traverse(const TraverseStmt& stmt);
     Result<BoundStatement> bind_nearest(const NearestStmt& stmt);

@@ -691,6 +691,9 @@ Result<BoundStatement> Binder::bind(const Stmt& stmt) {
     if (auto* s = dynamic_cast<const LinkStmt*>(&stmt)) {
         return bind_link(*s);
     }
+    if (auto* s = dynamic_cast<const BulkLinkStmt*>(&stmt)) {
+        return bind_bulk_link(*s);
+    }
     if (auto* s = dynamic_cast<const UnlinkStmt*>(&stmt)) {
         return bind_unlink(*s);
     }
@@ -2253,6 +2256,70 @@ Result<BoundStatement> Binder::bind_link(const LinkStmt& stmt) {
         auto et = bind_expr(*stmt.target_key, empty_scope, bound);
         if (!et) {
             return tl::unexpected(et.error());
+        }
+    }
+
+    return ok(std::move(bound));
+}
+
+Result<BoundStatement> Binder::bind_bulk_link(const BulkLinkStmt& stmt) {
+    BoundStatement bound;
+    bound.stmt = &stmt;
+
+    // Resolve edge type.
+    auto edge = catalog_.get_edge_type(database_id_, stmt.edge_type);
+    if (!edge) {
+        return tl::unexpected(edge.error());
+    }
+    bound.referenced_edge_types.push_back(edge->edge_id);
+
+    // Verify source table matches edge definition.
+    auto src = resolve_table(stmt.source_table);
+    if (!src) {
+        return tl::unexpected(src.error());
+    }
+    bound.referenced_tables.push_back(src->table_id);
+    if (src->table_id != edge->source_table_id) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "LINK source table " + stmt.source_table +
+                              " does not match edge type source");
+    }
+
+    // Verify target table matches edge definition.
+    auto tgt = resolve_table(stmt.target_table);
+    if (!tgt) {
+        return tl::unexpected(tgt.error());
+    }
+    bound.referenced_tables.push_back(tgt->table_id);
+    if (tgt->table_id != edge->target_table_id) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "LINK target table " + stmt.target_table +
+                              " does not match edge type target");
+    }
+
+    // Validate row widths: each row must have at least 2 values (source_key,
+    // target_key). All rows must have the same width. The EdgeTable layer
+    // will reject if the property count doesn't match the edge type schema.
+    if (!stmt.rows.empty()) {
+        size_t expected_width = stmt.rows[0].size();
+        for (size_t i = 1; i < stmt.rows.size(); ++i) {
+            if (stmt.rows[i].size() != expected_width) {
+                return make_error(StatusCode::INVALID_ARGUMENT,
+                                  "LINK VALUES row " + std::to_string(i + 1) + " has " +
+                                      std::to_string(stmt.rows[i].size()) +
+                                      " values, expected " + std::to_string(expected_width));
+            }
+        }
+    }
+
+    // Bind all expressions.
+    Scope empty_scope;
+    for (const auto& row : stmt.rows) {
+        for (const auto& expr : row) {
+            auto et = bind_expr(*expr, empty_scope, bound);
+            if (!et) {
+                return tl::unexpected(et.error());
+            }
         }
     }
 

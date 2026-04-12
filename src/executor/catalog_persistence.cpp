@@ -615,4 +615,134 @@ Result<void> CatalogPersistence::persist_columns_update(const TableSchema& schem
     return ok();
 }
 
+// ---------------------------------------------------------------------------
+// Embedding job persistence (sys_embedding_jobs)
+// ---------------------------------------------------------------------------
+
+Result<void> CatalogPersistence::create_embedding_jobs_table() {
+    return create_sys_table(sys_embedding_jobs_schema());
+}
+
+Result<void> CatalogPersistence::open_embedding_jobs_table() {
+    return open_sys_table(sys_embedding_jobs_schema());
+}
+
+Result<void> CatalogPersistence::persist_embedding_job(const EmbeddingJob& job) {
+    return insert_row(sys_embedding_jobs_table_id,
+                      {Value(job.table_id),
+                       Value(job.row_id),
+                       Value(job.column_id),
+                       Value(job.source_text),
+                       Value(job.provider),
+                       Value(job.dimension),
+                       Value(static_cast<int32_t>(job.type)),
+                       Value(job.retry_count)});
+}
+
+Result<void> CatalogPersistence::persist_embedding_jobs_batch(
+    const std::vector<EmbeddingJob>& jobs) {
+    if (jobs.empty()) {
+        return ok();
+    }
+
+    auto ts = storage_.get_table_storage(sys_embedding_jobs_table_id);
+    if (!ts) {
+        return make_error(ts.error().code, ts.error().message);
+    }
+
+    auto table_schema = catalog_.get_table_by_id(sys_embedding_jobs_table_id);
+    if (!table_schema) {
+        return make_error(table_schema.error().code, table_schema.error().message);
+    }
+
+    auto storage_schema = StorageManager::build_storage_schema(*table_schema);
+
+    // Serialize all jobs into byte spans for insert_batch.
+    std::vector<std::vector<uint8_t>> serialized;
+    serialized.reserve(jobs.size());
+    for (const auto& job : jobs) {
+        std::vector<Value> values = {
+            Value(job.table_id),
+            Value(job.row_id),
+            Value(job.column_id),
+            Value(job.source_text),
+            Value(job.provider),
+            Value(job.dimension),
+            Value(static_cast<int32_t>(job.type)),
+            Value(job.retry_count)};
+        auto data = TupleSerializer::serialize(values, storage_schema);
+        if (!data) {
+            return make_error(data.error().code, data.error().message);
+        }
+        serialized.push_back(std::move(*data));
+    }
+
+    // Build spans from the serialized data.
+    std::vector<std::span<const uint8_t>> spans;
+    spans.reserve(serialized.size());
+    for (const auto& s : serialized) {
+        spans.emplace_back(s);
+    }
+
+    auto rids = (*ts)->heap->insert_batch(spans);
+    if (!rids) {
+        return make_error(rids.error().code, rids.error().message);
+    }
+
+    // Single flush for the entire batch.
+    auto flush = (*ts)->bpm->flush_all();
+    if (!flush) {
+        return make_error(flush.error().code, flush.error().message);
+    }
+
+    return ok();
+}
+
+Result<void> CatalogPersistence::remove_embedding_job(table_id_t table_id,
+                                                       int64_t row_id,
+                                                       int32_t column_id) {
+    return delete_rows(sys_embedding_jobs_table_id,
+                       [table_id, row_id, column_id](const std::vector<Value>& v) {
+                           return v[0].as_int32() == table_id &&
+                                  v[1].as_int64() == row_id &&
+                                  v[2].as_int32() == column_id;
+                       });
+}
+
+Result<std::vector<EmbeddingJob>> CatalogPersistence::load_embedding_jobs() {
+    auto ts = storage_.get_table_storage(sys_embedding_jobs_table_id);
+    if (!ts) {
+        return make_error(ts.error().code, ts.error().message);
+    }
+
+    auto storage_schema = StorageManager::build_storage_schema(sys_embedding_jobs_schema());
+    auto it = (*ts)->heap->begin();
+    if (!it) {
+        return make_error(it.error().code, it.error().message);
+    }
+
+    std::vector<EmbeddingJob> jobs;
+    while (auto row = it->next()) {
+        auto values = TupleSerializer::deserialize(row->second, storage_schema);
+        if (!values) {
+            SIXSEVEN_LOG_WARN("embedding job persistence: skipping corrupt row");
+            continue;
+        }
+        auto& v = *values;
+        EmbeddingJob job;
+        job.table_id = v[0].as_int32();
+        job.row_id = v[1].as_int64();
+        job.column_id = v[2].as_int32();
+        job.source_text = v[3].as_string();
+        job.provider = v[4].as_string();
+        job.dimension = v[5].as_int32();
+        job.type = static_cast<EmbeddingJob::Type>(v[6].as_int32());
+        job.retry_count = v[7].as_int32();
+        jobs.push_back(std::move(job));
+    }
+
+    SIXSEVEN_LOG_INFO("embedding job persistence: loaded {} pending jobs", jobs.size());
+    return ok(std::move(jobs));
+}
+
 } // namespace sixseven

@@ -3,6 +3,7 @@
 #include "sixseven/common/logging.h"
 
 #include <cstring>
+#include <unordered_map>
 
 namespace sixseven {
 
@@ -227,26 +228,26 @@ Result<std::vector<uint8_t>> TableHeap::get_tuple(RID rid) {
     }
 
     Page* page = *page_result;
-    auto tuple_span = page->get_tuple(rid.slot_id);
-    if (!tuple_span) {
+    // Page::get_tuple now returns an owned std::vector<uint8_t>. The copy
+    // happens under the page's shared latch, so the returned bytes are a
+    // stable snapshot safe to use after the page is unpinned.
+    auto tuple = page->get_tuple(rid.slot_id);
+    if (!tuple) {
         auto unpin = bpm_.unpin_page(rid.page_id, false);
         if (!unpin) {
             SIXSEVEN_LOG_WARN("unpin failed after get_tuple error on page {}: {}",
                               rid.page_id,
                               unpin.error().message);
         }
-        return tl::unexpected(tuple_span.error());
+        return tl::unexpected(tuple.error());
     }
-
-    // Copy the data before unpinning.
-    std::vector<uint8_t> data(tuple_span->begin(), tuple_span->end());
 
     auto unpin = bpm_.unpin_page(rid.page_id, false);
     if (!unpin) {
         return tl::unexpected(unpin.error());
     }
 
-    return ok(std::move(data));
+    return ok(std::move(*tuple));
 }
 
 Result<void> TableHeap::update_tuple(RID rid, std::span<const uint8_t> data) {
@@ -284,6 +285,67 @@ Result<void> TableHeap::update_tuple(RID rid, std::span<const uint8_t> data) {
     }
 
     return ok();
+}
+
+Result<std::vector<RID>> TableHeap::update_tuples_batch(
+    const std::vector<TupleUpdate>& updates) {
+    if (updates.empty()) {
+        return ok(std::vector<RID>{});
+    }
+
+    // Group by page_id so we fetch/unpin each page exactly once.
+    std::unordered_map<PageId, std::vector<size_t>> page_groups;
+    for (size_t i = 0; i < updates.size(); ++i) {
+        page_groups[updates[i].rid.page_id].push_back(i);
+    }
+
+    std::vector<RID> failed_rids;
+
+    for (auto& [page_id, indices] : page_groups) {
+        auto page_result = bpm_.fetch_page(page_id);
+        if (!page_result) {
+            // All updates on this page fail.
+            for (auto idx : indices) {
+                failed_rids.push_back(updates[idx].rid);
+            }
+            continue;
+        }
+
+        Page* page = *page_result;
+        bool any_dirty = false;
+        bool compacted = false;
+
+        for (auto idx : indices) {
+            auto& upd = updates[idx];
+            if (upd.data.empty()) {
+                failed_rids.push_back(upd.rid);
+                continue;
+            }
+
+            auto result = page->update_tuple(upd.rid.slot_id, upd.data);
+            if (!result) {
+                // Compact once per page if update fails due to fragmentation.
+                if (!compacted && result.error().code == StatusCode::INVALID_ARGUMENT) {
+                    page->compact();
+                    compacted = true;
+                    result = page->update_tuple(upd.rid.slot_id, upd.data);
+                }
+                if (!result) {
+                    failed_rids.push_back(upd.rid);
+                    continue;
+                }
+            }
+            any_dirty = true;
+        }
+
+        auto unpin = bpm_.unpin_page(page_id, any_dirty);
+        if (!unpin) {
+            SIXSEVEN_LOG_WARN("unpin failed after batch update on page {}: {}",
+                              page_id, unpin.error().message);
+        }
+    }
+
+    return ok(std::move(failed_rids));
 }
 
 Result<void> TableHeap::delete_tuple(RID rid) {
@@ -371,11 +433,13 @@ std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
 
         // Scan slots on the current page.
         while (current_slot_ < slot_count) {
-            auto tuple_span = page->get_tuple(current_slot_);
-            if (tuple_span) {
-                // Found a live tuple — copy it and advance.
+            // page->get_tuple returns an owned vector, copied under the page's
+            // shared latch. That copy is the linearization point protecting
+            // this scan from concurrent writers (e.g. the embedding store
+            // callback rewriting the same slot in place).
+            auto tuple = page->get_tuple(current_slot_);
+            if (tuple) {
                 RID rid{current_page_, current_slot_};
-                std::vector<uint8_t> data(tuple_span->begin(), tuple_span->end());
                 current_slot_++;
 
                 auto unpin = bpm_.unpin_page(current_page_, false);
@@ -384,7 +448,7 @@ std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
                                       current_page_,
                                       unpin.error().message);
                 }
-                return std::make_pair(rid, std::move(data));
+                return std::make_pair(rid, std::move(*tuple));
             }
             // Deleted slot — skip.
             current_slot_++;

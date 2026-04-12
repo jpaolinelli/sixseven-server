@@ -265,10 +265,13 @@ Result<Page*> BufferPoolManager::new_page() {
     PageId page_id = *alloc_result;
     Frame& frame = frames_[frame_id];
 
-    // Initialize the page in-memory under frame latch.
+    // Initialize the page in-memory under frame latch. Use reset() instead of
+    // move-assigning a new Page because Page owns a std::shared_mutex and is
+    // therefore non-movable. reset() takes the page's own latch exclusively
+    // while clearing the buffer.
     {
         std::lock_guard<std::mutex> frame_lock(frame.latch);
-        frame.page = Page(page_id, PageType::DATA);
+        frame.page.reset(page_id, PageType::DATA);
         frame.page_id = page_id;
         frame.pin_count = 1;
         frame.is_dirty.store(false, std::memory_order_relaxed);

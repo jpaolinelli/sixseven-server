@@ -750,3 +750,80 @@ TEST_F(TableHeapTest, RowCountPersistsAfterDeletes) {
     TableHeap heap2(*bpm_, dm_, file_id_);
     EXPECT_EQ(heap2.row_count(), 7u);
 }
+
+// -- update_tuples_batch ------------------------------------------------------
+
+TEST_F(TableHeapTest, UpdateTuplesBatchMultiPage) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    // Insert enough tuples to span multiple pages (~4000 bytes each → 1 per page
+    // on a 4096-byte page after header overhead).
+    std::vector<RID> rids;
+    for (int i = 0; i < 8; ++i) {
+        auto tuple = make_tuple(200, static_cast<uint8_t>(i));
+        auto rid = heap.insert_tuple(tuple);
+        ASSERT_TRUE(rid.has_value()) << rid.error().message;
+        rids.push_back(*rid);
+    }
+
+    // Batch update all tuples with new content.
+    std::vector<std::vector<uint8_t>> new_data;
+    std::vector<TableHeap::TupleUpdate> updates;
+    new_data.reserve(rids.size());
+    updates.reserve(rids.size());
+
+    for (size_t i = 0; i < rids.size(); ++i) {
+        new_data.push_back(make_tuple(200, static_cast<uint8_t>(0xF0 + i)));
+        updates.push_back(TableHeap::TupleUpdate{
+            rids[i], std::span<const uint8_t>(new_data.back())});
+    }
+
+    auto result = heap.update_tuples_batch(updates);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_TRUE(result->empty()) << "no failures expected";
+
+    // Verify all updates took effect.
+    for (size_t i = 0; i < rids.size(); ++i) {
+        auto data = heap.get_tuple(rids[i]);
+        ASSERT_TRUE(data.has_value()) << data.error().message;
+        ASSERT_EQ(data->size(), 200u);
+        EXPECT_EQ((*data)[0], static_cast<uint8_t>(0xF0 + i));
+    }
+}
+
+TEST_F(TableHeapTest, UpdateTuplesBatchEmptyIsNoOp) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+    std::vector<TableHeap::TupleUpdate> empty;
+    auto result = heap.update_tuples_batch(empty);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result->empty());
+}
+
+TEST_F(TableHeapTest, UpdateTuplesBatchInvalidRidReportedAsFailed) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    // Insert one real tuple.
+    auto tuple = make_tuple(100, 0xAA);
+    auto rid = heap.insert_tuple(tuple);
+    ASSERT_TRUE(rid.has_value());
+
+    // Build a batch with a valid update and an invalid one (bad page).
+    auto new_data = make_tuple(100, 0xBB);
+    RID bad_rid{9999, 0}; // Nonexistent page.
+    auto bad_data = make_tuple(100, 0xCC);
+
+    std::vector<TableHeap::TupleUpdate> updates;
+    updates.push_back(TableHeap::TupleUpdate{*rid, std::span<const uint8_t>(new_data)});
+    updates.push_back(TableHeap::TupleUpdate{bad_rid, std::span<const uint8_t>(bad_data)});
+
+    auto result = heap.update_tuples_batch(updates);
+    ASSERT_TRUE(result.has_value());
+    // The bad RID should be reported as failed.
+    ASSERT_EQ(result->size(), 1u);
+    EXPECT_EQ((*result)[0].page_id, bad_rid.page_id);
+
+    // The valid update should have succeeded.
+    auto data = heap.get_tuple(*rid);
+    ASSERT_TRUE(data.has_value());
+    EXPECT_EQ((*data)[0], 0xBB);
+}

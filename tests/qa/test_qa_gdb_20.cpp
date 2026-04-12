@@ -1404,6 +1404,7 @@ public:
     void visit(const UpdateStmt&) override { count++; }
     void visit(const DeleteStmt&) override { count++; }
     void visit(const LinkStmt&) override { count++; }
+    void visit(const BulkLinkStmt&) override { count++; }
     void visit(const UnlinkStmt&) override { count++; }
     void visit(const SelectStmt&) override { count++; }
     void visit(const TraverseStmt&) override { count++; }

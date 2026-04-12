@@ -32,6 +32,7 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 
 namespace sixseven {
 
@@ -186,6 +187,153 @@ void QueryEngine::set_embedding_worker_pool(EmbeddingWorkerPool* pool) {
 
             return ok();
         });
+
+        // -- Batch store callback: groups writes by page to cut latch contention --
+        pool->set_batch_store_callback(
+            [this](std::vector<EmbeddingStoreRequest> requests)
+                -> Result<std::vector<int64_t>> {
+                // Group requests by table_id to minimise get_table_storage calls.
+                std::unordered_map<table_id_t, std::vector<size_t>> table_groups;
+                for (size_t i = 0; i < requests.size(); ++i) {
+                    table_groups[requests[i].table_id].push_back(i);
+                }
+
+                std::vector<int64_t> failed_row_ids;
+
+                for (auto& [table_id, indices] : table_groups) {
+                    auto ts = storage_.get_table_storage(table_id);
+                    if (!ts) {
+                        SIXSEVEN_LOG_WARN("batch store: get_table_storage({}) failed: {}",
+                                          table_id, ts.error().message);
+                        for (auto idx : indices) {
+                            failed_row_ids.push_back(requests[idx].row_id);
+                        }
+                        continue;
+                    }
+                    auto* table_storage = *ts;
+
+                    auto table_schema = catalog_.get_table_by_id(table_id);
+                    if (!table_schema) {
+                        SIXSEVEN_LOG_WARN("batch store: get_table_by_id({}) failed: {}",
+                                          table_id, table_schema.error().message);
+                        for (auto idx : indices) {
+                            failed_row_ids.push_back(requests[idx].row_id);
+                        }
+                        continue;
+                    }
+
+                    // Pre-compute serialized bytes for all embeddings OUTSIDE
+                    // any exclusive page lock. get_tuple uses a shared latch.
+                    std::vector<TableHeap::TupleUpdate> updates;
+                    std::vector<std::vector<uint8_t>> serialized_bufs;
+                    updates.reserve(indices.size());
+                    serialized_bufs.reserve(indices.size());
+
+                    for (auto idx : indices) {
+                        auto& req = requests[idx];
+                        RID rid{static_cast<PageId>(
+                                    static_cast<uint64_t>(req.row_id) >> 32),
+                                static_cast<SlotId>(req.row_id & 0xFFFF)};
+
+                        auto data = table_storage->heap->get_tuple(rid);
+                        if (!data) {
+                            failed_row_ids.push_back(req.row_id);
+                            continue;
+                        }
+
+                        auto values = TupleSerializer::deserialize(
+                            *data, table_storage->storage_schema);
+                        if (!values) {
+                            failed_row_ids.push_back(req.row_id);
+                            continue;
+                        }
+
+                        // Patch the embedding column.
+                        for (size_t c = 0; c < table_schema->columns.size(); ++c) {
+                            if (table_schema->columns[c].ordinal == req.column_id) {
+                                (*values)[c] = Value(Embedding(
+                                    std::move(req.embedding)));
+                                break;
+                            }
+                        }
+
+                        auto serialized = TupleSerializer::serialize(
+                            *values, table_storage->storage_schema);
+                        if (!serialized) {
+                            failed_row_ids.push_back(req.row_id);
+                            continue;
+                        }
+
+                        serialized_bufs.push_back(std::move(*serialized));
+                        updates.push_back(TableHeap::TupleUpdate{
+                            rid,
+                            std::span<const uint8_t>(serialized_bufs.back())});
+                    }
+
+                    // Batch update: one page pin per page instead of per tuple.
+                    auto batch_result =
+                        table_storage->heap->update_tuples_batch(updates);
+                    if (!batch_result) {
+                        SIXSEVEN_LOG_WARN("batch store: update_tuples_batch failed: {}",
+                                          batch_result.error().message);
+                        for (auto idx : indices) {
+                            failed_row_ids.push_back(requests[idx].row_id);
+                        }
+                        continue;
+                    }
+
+                    // Handle per-tuple failures: delete + reinsert on a
+                    // new page (tuple grew due to embedding and no longer
+                    // fits on the original page).
+                    for (auto& failed_rid : *batch_result) {
+                        // Find the serialized buffer for this RID.
+                        std::span<const uint8_t> new_data;
+                        for (size_t u = 0; u < updates.size(); ++u) {
+                            if (updates[u].rid.page_id == failed_rid.page_id &&
+                                updates[u].rid.slot_id == failed_rid.slot_id) {
+                                new_data = updates[u].data;
+                                break;
+                            }
+                        }
+                        if (new_data.empty()) {
+                            int64_t packed =
+                                (static_cast<int64_t>(
+                                     static_cast<uint64_t>(failed_rid.page_id)
+                                     << 32) |
+                                 failed_rid.slot_id);
+                            failed_row_ids.push_back(packed);
+                            continue;
+                        }
+
+                        // Delete old tuple and reinsert on a page with room.
+                        auto del =
+                            table_storage->heap->delete_tuple(failed_rid);
+                        if (!del) {
+                            int64_t packed =
+                                (static_cast<int64_t>(
+                                     static_cast<uint64_t>(failed_rid.page_id)
+                                     << 32) |
+                                 failed_rid.slot_id);
+                            failed_row_ids.push_back(packed);
+                            continue;
+                        }
+                        auto new_rid =
+                            table_storage->heap->insert_tuple(new_data);
+                        if (!new_rid) {
+                            int64_t packed =
+                                (static_cast<int64_t>(
+                                     static_cast<uint64_t>(failed_rid.page_id)
+                                     << 32) |
+                                 failed_rid.slot_id);
+                            failed_row_ids.push_back(packed);
+                            continue;
+                        }
+                        // Successfully moved to a new page — not a failure.
+                    }
+                }
+
+                return ok(std::move(failed_row_ids));
+            });
     }
 }
 
@@ -403,6 +551,9 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
     // 6b. Dispatch graph DML after binding.
     if (auto* link = dynamic_cast<const LinkStmt*>(bound->stmt)) {
         return execute_link(*link, *bound);
+    }
+    if (auto* bulk_link = dynamic_cast<const BulkLinkStmt*>(bound->stmt)) {
+        return execute_bulk_link(*bulk_link, *bound);
     }
     if (auto* unlink = dynamic_cast<const UnlinkStmt*>(bound->stmt)) {
         return execute_unlink(*unlink, *bound);
@@ -1181,6 +1332,130 @@ Result<QueryResult> QueryEngine::execute_link(const LinkStmt& stmt, const BoundS
 
     QueryResult qr;
     qr.affected_rows = 1;
+    qr.message = "LINK";
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// BULK LINK
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_bulk_link(const BulkLinkStmt& stmt,
+                                                    const BoundStatement& bound) {
+    if (!graph_engine_) {
+        return make_error(StatusCode::INTERNAL_ERROR, "graph engine not available for LINK");
+    }
+    if (stmt.rows.empty()) {
+        QueryResult qr;
+        qr.affected_rows = 0;
+        qr.message = "LINK";
+        return ok(std::move(qr));
+    }
+
+    // Resolve edge type for PK coercion and verification.
+    auto edge = catalog_.get_edge_type(current_database_id_, stmt.edge_type);
+    if (!edge) {
+        return tl::unexpected(edge.error());
+    }
+
+    Tuple empty_tuple;
+    OutputSchema empty_schema;
+
+    // Evaluate all row expressions and build EdgeInsertRequests.
+    std::vector<EdgeInsertRequest> requests;
+    requests.reserve(stmt.rows.size());
+
+    // Track unique PKs for batch verification (avoid redundant lookups
+    // when the same user links to many targets, for example).
+    std::unordered_set<std::string> seen_src_pks;
+    std::unordered_set<std::string> seen_tgt_pks;
+
+    for (size_t i = 0; i < stmt.rows.size(); ++i) {
+        const auto& row = stmt.rows[i];
+
+        // First two values: source_key, target_key.
+        auto src_val = evaluate_expr(*row[0], empty_tuple, empty_schema, bound);
+        if (!src_val) {
+            return make_error(src_val.error().code,
+                              "row " + std::to_string(i + 1) + " source_key: " +
+                                  src_val.error().message);
+        }
+        auto tgt_val = evaluate_expr(*row[1], empty_tuple, empty_schema, bound);
+        if (!tgt_val) {
+            return make_error(tgt_val.error().code,
+                              "row " + std::to_string(i + 1) + " target_key: " +
+                                  tgt_val.error().message);
+        }
+
+        // Coerce keys.
+        auto coerced = coerce_link_keys(stmt.edge_type, *src_val, *tgt_val);
+        if (!coerced) {
+            return make_error(coerced.error().code,
+                              "row " + std::to_string(i + 1) + ": " + coerced.error().message);
+        }
+        auto& [coerced_src, coerced_tgt] = *coerced;
+
+        // Track for dedup'd PK verification.
+        seen_src_pks.insert(pk_value_to_string(coerced_src));
+        seen_tgt_pks.insert(pk_value_to_string(coerced_tgt));
+
+        // Remaining values are properties (positional order).
+        std::vector<Value> props;
+        props.reserve(row.size() - 2);
+        for (size_t j = 2; j < row.size(); ++j) {
+            auto pval = evaluate_expr(*row[j], empty_tuple, empty_schema, bound);
+            if (!pval) {
+                return make_error(pval.error().code,
+                                  "row " + std::to_string(i + 1) + " property " +
+                                      std::to_string(j - 1) + ": " + pval.error().message);
+            }
+            props.push_back(std::move(*pval));
+        }
+
+        requests.push_back(
+            EdgeInsertRequest{std::move(coerced_src), std::move(coerced_tgt), std::move(props)});
+    }
+
+    // Batch PK verification (outside graph lock). For each unique source/
+    // target PK, verify the row exists. This is a read-only table lookup.
+    for (const auto& req : requests) {
+        // Only verify if we haven't verified this exact PK yet.
+        auto src_str = pk_value_to_string(req.source_pk);
+        if (seen_src_pks.count(src_str)) {
+            auto src_exists = verify_pk_exists(edge->source_table_id, req.source_pk);
+            if (!src_exists) {
+                return make_error(src_exists.error().code, src_exists.error().message);
+            }
+            if (!*src_exists) {
+                return make_error(StatusCode::NOT_FOUND,
+                                  "LINK source row not found in '" + stmt.source_table +
+                                      "' for key " + src_str);
+            }
+            seen_src_pks.erase(src_str);
+        }
+        auto tgt_str = pk_value_to_string(req.target_pk);
+        if (seen_tgt_pks.count(tgt_str)) {
+            auto tgt_exists = verify_pk_exists(edge->target_table_id, req.target_pk);
+            if (!tgt_exists) {
+                return make_error(tgt_exists.error().code, tgt_exists.error().message);
+            }
+            if (!*tgt_exists) {
+                return make_error(StatusCode::NOT_FOUND,
+                                  "LINK target row not found in '" + stmt.target_table +
+                                      "' for key " + tgt_str);
+            }
+            seen_tgt_pks.erase(tgt_str);
+        }
+    }
+
+    // Single-lock batch insert.
+    auto result = graph_engine_->link_batch(current_database_id_, stmt.edge_type, requests);
+    if (!result) {
+        return make_error(result.error().code, result.error().message);
+    }
+
+    QueryResult qr;
+    qr.affected_rows = *result;
     qr.message = "LINK";
     return ok(std::move(qr));
 }

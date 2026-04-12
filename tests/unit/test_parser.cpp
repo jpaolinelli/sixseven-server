@@ -848,6 +848,57 @@ TEST(Parser, LinkWithProperties) {
     EXPECT_EQ(lnk->properties[1].column, "weight");
 }
 
+// -- BULK LINK tests ----------------------------------------------------------
+
+TEST(Parser, BulkLinkBasic) {
+    auto stmt = parse_one(
+        "LINK users TO users VIA follows VALUES ('alice', 'bob'), ('carol', 'dave')");
+    auto* blk = dynamic_cast<BulkLinkStmt*>(stmt.get());
+    ASSERT_NE(blk, nullptr);
+    EXPECT_EQ(blk->source_table, "users");
+    EXPECT_EQ(blk->target_table, "users");
+    EXPECT_EQ(blk->edge_type, "follows");
+    ASSERT_EQ(blk->rows.size(), 2u);
+    ASSERT_EQ(blk->rows[0].size(), 2u);
+    ASSERT_EQ(blk->rows[1].size(), 2u);
+    auto* r0c0 = dynamic_cast<LiteralExpr*>(blk->rows[0][0].get());
+    ASSERT_NE(r0c0, nullptr);
+    EXPECT_EQ(r0c0->value, "alice");
+    auto* r0c1 = dynamic_cast<LiteralExpr*>(blk->rows[0][1].get());
+    ASSERT_NE(r0c1, nullptr);
+    EXPECT_EQ(r0c1->value, "bob");
+}
+
+TEST(Parser, BulkLinkWithProperties) {
+    auto stmt = parse_one(
+        "LINK users TO products VIA rated VALUES "
+        "('alice', 42, 4.5, 'great'), "
+        "('bob', 17, 3.0, 'meh')");
+    auto* blk = dynamic_cast<BulkLinkStmt*>(stmt.get());
+    ASSERT_NE(blk, nullptr);
+    ASSERT_EQ(blk->rows.size(), 2u);
+    ASSERT_EQ(blk->rows[0].size(), 4u); // src_key, tgt_key, score, review
+    ASSERT_EQ(blk->rows[1].size(), 4u);
+}
+
+TEST(Parser, BulkLinkSingleRow) {
+    auto stmt = parse_one("LINK users TO posts VIA authored VALUES ('alice', 1)");
+    auto* blk = dynamic_cast<BulkLinkStmt*>(stmt.get());
+    ASSERT_NE(blk, nullptr);
+    ASSERT_EQ(blk->rows.size(), 1u);
+    ASSERT_EQ(blk->rows[0].size(), 2u);
+}
+
+TEST(Parser, SingleLinkStillWorks) {
+    // Ensure the existing single-LINK syntax still produces LinkStmt.
+    auto stmt = parse_one("LINK users('alice') TO users('bob') VIA follows");
+    auto* lnk = dynamic_cast<LinkStmt*>(stmt.get());
+    ASSERT_NE(lnk, nullptr) << "single LINK should parse as LinkStmt, not BulkLinkStmt";
+    EXPECT_EQ(lnk->source_table, "users");
+    EXPECT_EQ(lnk->target_table, "users");
+    EXPECT_EQ(lnk->edge_type, "follows");
+}
+
 // -- UNLINK tests -------------------------------------------------------------
 
 TEST(Parser, UnlinkBasic) {
@@ -1895,6 +1946,7 @@ public:
     void visit(const UpdateStmt&) override { visited_type = "UpdateStmt"; }
     void visit(const DeleteStmt&) override { visited_type = "DeleteStmt"; }
     void visit(const LinkStmt&) override { visited_type = "LinkStmt"; }
+    void visit(const BulkLinkStmt&) override { visited_type = "BulkLinkStmt"; }
     void visit(const UnlinkStmt&) override { visited_type = "UnlinkStmt"; }
 
     // -- Query --

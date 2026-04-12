@@ -4,6 +4,7 @@
 #include "sixseven/catalog/schema.h"
 #include "sixseven/common/result.h"
 #include "sixseven/executor/storage_manager.h"
+#include "sixseven/vector/embedding_column.h"
 
 namespace sixseven {
 
@@ -59,6 +60,27 @@ public:
     /// Re-persist all columns for a table after ALTER TABLE.
     /// Deletes all existing sys_columns rows for the table and re-inserts from the schema.
     [[nodiscard]] Result<void> persist_columns_update(const TableSchema& schema);
+
+    // -- Embedding job persistence (sys_embedding_jobs) -------------------------
+
+    /// Create the sys_embedding_jobs table (first run only).
+    [[nodiscard]] Result<void> create_embedding_jobs_table();
+
+    /// Open the existing sys_embedding_jobs table (subsequent runs).
+    [[nodiscard]] Result<void> open_embedding_jobs_table();
+
+    /// Persist a single embedding job to sys_embedding_jobs.
+    [[nodiscard]] Result<void> persist_embedding_job(const EmbeddingJob& job);
+
+    /// Persist a batch of embedding jobs in a single heap insert_batch call.
+    [[nodiscard]] Result<void> persist_embedding_jobs_batch(const std::vector<EmbeddingJob>& jobs);
+
+    /// Remove a completed embedding job by (table_id, row_id, column_id).
+    [[nodiscard]] Result<void> remove_embedding_job(table_id_t table_id, int64_t row_id,
+                                                     int32_t column_id);
+
+    /// Load all pending embedding jobs from sys_embedding_jobs.
+    [[nodiscard]] Result<std::vector<EmbeddingJob>> load_embedding_jobs();
 
     /// Register a system table schema in the catalog and create its physical storage.
     /// Used by SystemBootstrap for sys_settings/sys_providers in addition to catalog tables.

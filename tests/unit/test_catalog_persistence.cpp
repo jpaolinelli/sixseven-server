@@ -629,3 +629,136 @@ TEST_F(CatalogPersistenceTest, NullableColumnsPreserved) {
     EXPECT_FALSE(restored->columns[0].nullable); // PK is not nullable.
     EXPECT_TRUE(restored->columns[1].nullable);  // Default is nullable.
 }
+
+// =============================================================================
+// Embedding job persistence (sys_embedding_jobs)
+// =============================================================================
+
+TEST_F(CatalogPersistenceTest, PersistAndLoadEmbeddingJobs) {
+    run_bootstrap();
+
+    // Persist 3 jobs.
+    EmbeddingJob job1;
+    job1.table_id = 100;
+    job1.row_id = 1;
+    job1.column_id = 2;
+    job1.source_text = "hello world";
+    job1.provider = "test/128";
+    job1.dimension = 128;
+    job1.type = EmbeddingJob::Type::INSERT;
+    job1.retry_count = 0;
+
+    EmbeddingJob job2;
+    job2.table_id = 100;
+    job2.row_id = 2;
+    job2.column_id = 2;
+    job2.source_text = "second text";
+    job2.provider = "test/128";
+    job2.dimension = 128;
+    job2.type = EmbeddingJob::Type::UPDATE;
+    job2.retry_count = 3;
+
+    EmbeddingJob job3;
+    job3.table_id = 200;
+    job3.row_id = 5;
+    job3.column_id = 0;
+    job3.source_text = "different table";
+    job3.provider = "openai/1536";
+    job3.dimension = 1536;
+    job3.type = EmbeddingJob::Type::INSERT;
+    job3.retry_count = 1;
+
+    ASSERT_TRUE(persistence_->persist_embedding_job(job1).has_value());
+    ASSERT_TRUE(persistence_->persist_embedding_job(job2).has_value());
+    ASSERT_TRUE(persistence_->persist_embedding_job(job3).has_value());
+
+    // Load them back.
+    auto loaded = persistence_->load_embedding_jobs();
+    ASSERT_TRUE(loaded.has_value()) << loaded.error().message;
+    ASSERT_EQ(loaded->size(), 3u);
+
+    // Sort by row_id for deterministic comparison.
+    auto& jobs = *loaded;
+    std::sort(jobs.begin(), jobs.end(),
+              [](const EmbeddingJob& a, const EmbeddingJob& b) { return a.row_id < b.row_id; });
+
+    EXPECT_EQ(jobs[0].table_id, 100);
+    EXPECT_EQ(jobs[0].row_id, 1);
+    EXPECT_EQ(jobs[0].column_id, 2);
+    EXPECT_EQ(jobs[0].source_text, "hello world");
+    EXPECT_EQ(jobs[0].provider, "test/128");
+    EXPECT_EQ(jobs[0].dimension, 128);
+    EXPECT_EQ(jobs[0].type, EmbeddingJob::Type::INSERT);
+    EXPECT_EQ(jobs[0].retry_count, 0);
+
+    EXPECT_EQ(jobs[1].table_id, 100);
+    EXPECT_EQ(jobs[1].row_id, 2);
+    EXPECT_EQ(jobs[1].type, EmbeddingJob::Type::UPDATE);
+    EXPECT_EQ(jobs[1].retry_count, 3);
+
+    EXPECT_EQ(jobs[2].table_id, 200);
+    EXPECT_EQ(jobs[2].row_id, 5);
+    EXPECT_EQ(jobs[2].provider, "openai/1536");
+    EXPECT_EQ(jobs[2].dimension, 1536);
+}
+
+TEST_F(CatalogPersistenceTest, RemoveEmbeddingJob) {
+    run_bootstrap();
+
+    EmbeddingJob job1;
+    job1.table_id = 100;
+    job1.row_id = 1;
+    job1.column_id = 2;
+    job1.source_text = "keep me";
+    job1.provider = "test/128";
+    job1.dimension = 128;
+    job1.type = EmbeddingJob::Type::INSERT;
+    job1.retry_count = 0;
+
+    EmbeddingJob job2;
+    job2.table_id = 100;
+    job2.row_id = 2;
+    job2.column_id = 2;
+    job2.source_text = "remove me";
+    job2.provider = "test/128";
+    job2.dimension = 128;
+    job2.type = EmbeddingJob::Type::INSERT;
+    job2.retry_count = 0;
+
+    ASSERT_TRUE(persistence_->persist_embedding_job(job1).has_value());
+    ASSERT_TRUE(persistence_->persist_embedding_job(job2).has_value());
+
+    // Remove job2.
+    ASSERT_TRUE(persistence_->remove_embedding_job(100, 2, 2).has_value());
+
+    // Load — only job1 should remain.
+    auto loaded = persistence_->load_embedding_jobs();
+    ASSERT_TRUE(loaded.has_value());
+    ASSERT_EQ(loaded->size(), 1u);
+    EXPECT_EQ((*loaded)[0].row_id, 1);
+    EXPECT_EQ((*loaded)[0].source_text, "keep me");
+}
+
+TEST_F(CatalogPersistenceTest, PersistEmbeddingJobsBatch) {
+    run_bootstrap();
+
+    std::vector<EmbeddingJob> jobs;
+    for (int i = 0; i < 5; ++i) {
+        EmbeddingJob job;
+        job.table_id = 100;
+        job.row_id = i;
+        job.column_id = 0;
+        job.source_text = "text " + std::to_string(i);
+        job.provider = "test/128";
+        job.dimension = 128;
+        job.type = EmbeddingJob::Type::INSERT;
+        job.retry_count = 0;
+        jobs.push_back(std::move(job));
+    }
+
+    ASSERT_TRUE(persistence_->persist_embedding_jobs_batch(jobs).has_value());
+
+    auto loaded = persistence_->load_embedding_jobs();
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(loaded->size(), 5u);
+}

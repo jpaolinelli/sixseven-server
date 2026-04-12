@@ -68,6 +68,20 @@ public:
     /// Delete a tuple by marking its slot as deleted.
     [[nodiscard]] Result<void> delete_tuple(RID rid);
 
+    /// A single in-page tuple update request for batch processing.
+    struct TupleUpdate {
+        RID rid;
+        std::span<const uint8_t> data;
+    };
+
+    /// Update multiple tuples in batch, grouping by page_id internally.
+    /// For each page: pin once, apply all updates, unpin once. This reduces
+    /// buffer pool round-trips from O(tuples) to O(pages), cutting page latch
+    /// contention with concurrent INSERT operations.
+    /// @return A vector of RIDs that failed (caller can retry or escalate).
+    [[nodiscard]] Result<std::vector<RID>>
+    update_tuples_batch(const std::vector<TupleUpdate>& updates);
+
     /// Return a sequential-scan iterator starting from the first tuple.
     /// Fails if the file page count cannot be read.
     [[nodiscard]] Result<TableIterator> begin();

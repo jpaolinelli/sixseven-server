@@ -369,6 +369,22 @@ def emit_comment(text: str):
     emit(f"-- {'=' * 70}\n")
 
 
+def emit_batch_link(src_table: str, tgt_table: str, edge_type: str,
+                    rows: list[tuple], batch_size: int = BATCH_SIZE):
+    """Emit bulk LINK statements in batches.
+
+    Each row is a tuple of SQL literals: (source_key, target_key, prop0, ...).
+    """
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i:i + batch_size]
+        emit(f"LINK {src_table} TO {tgt_table} VIA {edge_type} VALUES")
+        for j, row in enumerate(batch):
+            vals = ", ".join(str(v) for v in row)
+            sep = "," if j < len(batch) - 1 else ";"
+            emit(f"  ({vals}){sep}")
+        emit("")
+
+
 def emit_batch_insert(table: str, columns: list[str], rows: list[list[str]]):
     """Emit INSERT statements in batches."""
     col_list = ", ".join(columns)
@@ -771,8 +787,8 @@ CREATE EDGE TYPE reports_to (since TEXT) FROM users TO users;
     # follows — social graph with community clustering
     emit(f"-- follows edges ({cfg['follows']:,})")
     follows_set = set()
-    follows_count = 0
-    while follows_count < cfg["follows"]:
+    follows_rows = []
+    while len(follows_rows) < cfg["follows"]:
         # bias toward nearby IDs for community structure
         idx_a = random.randint(0, len(user_ids) - 1)
         spread = min(len(user_ids) - 1, max(50, len(user_ids) // 10))
@@ -783,22 +799,22 @@ CREATE EDGE TYPE reports_to (since TEXT) FROM users TO users;
         if pair in follows_set:
             continue
         follows_set.add(pair)
-        emit(f"LINK users('{user_ids[idx_a]}') TO users('{user_ids[idx_b]}') VIA follows;")
-        follows_count += 1
-    emit("")
+        follows_rows.append((f"'{user_ids[idx_a]}'", f"'{user_ids[idx_b]}'"))
+    emit_batch_link("users", "users", "follows", follows_rows)
 
     # authored — each post linked to its author
     emit(f"-- authored edges ({cfg['authored']:,})")
+    authored_rows = []
     for i in range(1, min(cfg["authored"], cfg["posts"]) + 1):
         author_id = post_rows[i-1][0].strip("'")
-        emit(f"LINK users('{author_id}') TO posts({i}) VIA authored;")
-    emit("")
+        authored_rows.append((f"'{author_id}'", str(i)))
+    emit_batch_link("users", "posts", "authored", authored_rows)
 
     # rated — users rate products with score and review
     emit(f"-- rated edges ({cfg['rated']:,})")
     rated_set = set()
-    rated_count = 0
-    while rated_count < cfg["rated"]:
+    rated_rows = []
+    while len(rated_rows) < cfg["rated"]:
         uid = random.choice(user_ids)
         pid = random.randint(1, cfg["products"])
         pair = (uid, pid)
@@ -808,14 +824,13 @@ CREATE EDGE TYPE reports_to (since TEXT) FROM users TO users;
         score = round(random.uniform(1.0, 5.0), 1)
         use = random.choice(USE_CASES)
         review = sql_escape(random.choice(REVIEW_TEMPLATES).format(use=use))
-        emit(f"LINK users('{uid}') TO products({pid}) VIA rated (score={score}, review='{review}');")
-        rated_count += 1
-    emit("")
+        rated_rows.append((f"'{uid}'", str(pid), str(score), f"'{review}'"))
+    emit_batch_link("users", "products", "rated", rated_rows)
 
     # reports_to — org chart (tree-ish structure)
     emit(f"-- reports_to edges ({cfg['reports_to']:,})")
-    reports_count = 0
     reports_set = set()
+    reports_rows = []
     for i in range(1, min(cfg["reports_to"], len(user_ids)) + 1):
         manager_idx = max(0, i // random.randint(3, 8))
         if manager_idx == i or manager_idx >= len(user_ids):
@@ -825,9 +840,8 @@ CREATE EDGE TYPE reports_to (since TEXT) FROM users TO users;
             continue
         reports_set.add(pair)
         since = rand_date(2020, 2025)
-        emit(f"LINK users('{user_ids[i]}') TO users('{user_ids[manager_idx]}') VIA reports_to (since='{since}');")
-        reports_count += 1
-    emit("")
+        reports_rows.append((f"'{user_ids[i]}'", f"'{user_ids[manager_idx]}'", f"'{since}'"))
+    emit_batch_link("users", "users", "reports_to", reports_rows)
 
     # -----------------------------------------------------------------------
     emit_comment("TRANSACTIONS: BEGIN / SAVEPOINT / ROLLBACK TO / COMMIT")

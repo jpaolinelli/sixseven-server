@@ -43,6 +43,13 @@ struct EdgeTableConfig {
     bool prevent_duplicates = false;
 };
 
+/// A request to insert one edge in a batch operation.
+struct EdgeInsertRequest {
+    Value source_pk;
+    Value target_pk;
+    std::vector<Value> properties;
+};
+
 /// Stores edges for a single edge type with dual B+ tree adjacency indexes.
 ///
 /// Each edge type gets its own EdgeTable that stores:
@@ -66,6 +73,13 @@ public:
     [[nodiscard]] Result<uint64_t> insert_edge(const Value& source_pk,
                                                const Value& target_pk,
                                                const std::vector<Value>& properties);
+
+    /// Batch-insert multiple edges under a single lock acquisition.
+    /// Returns a vector of row IDs (one per successfully inserted edge).
+    /// On any failure mid-batch, all edges inserted so far in this batch
+    /// are rolled back and the error is returned.
+    [[nodiscard]] Result<std::vector<uint64_t>> insert_edges_batch(
+        const std::vector<EdgeInsertRequest>& edges);
 
     /// Delete an edge by row ID. Removes from both adjacency indexes.
     [[nodiscard]] Result<void> delete_edge(uint64_t edge_row_id);

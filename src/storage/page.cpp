@@ -1,6 +1,8 @@
 #include "sixseven/storage/page.h"
 
 #include <cstring>
+#include <mutex>
+#include <shared_mutex>
 
 namespace sixseven {
 
@@ -17,6 +19,17 @@ Page::Page(uint32_t page_id, PageType page_type) {
 }
 
 Page::Page(const std::array<uint8_t, page_size>& raw) : data_(raw) {}
+
+void Page::reset(uint32_t page_id, PageType page_type) {
+    std::unique_lock lock(latch_);
+    data_.fill(0);
+    write_u32(off_page_id, page_id);
+    data_[off_page_type] = static_cast<uint8_t>(page_type);
+    set_slot_count(0);
+    set_data_offset(static_cast<uint16_t>(page_size));
+    write_u64(off_lsn, 0);
+    write_u32(off_checksum, 0);
+}
 
 // -- Header accessors ---------------------------------------------------------
 
@@ -63,6 +76,8 @@ Result<SlotId> Page::insert_tuple(std::span<const uint8_t> data) {
         return make_error(StatusCode::INVALID_ARGUMENT, "cannot insert empty tuple");
     }
 
+    std::unique_lock lock(latch_);
+
     auto tuple_len = static_cast<uint16_t>(data.size());
     size_t needed = tuple_len + slot_entry_size;
 
@@ -105,7 +120,14 @@ Result<SlotId> Page::insert_tuple(std::span<const uint8_t> data) {
     return ok(reuse_slot);
 }
 
-Result<std::span<const uint8_t>> Page::get_tuple(SlotId slot_id) const {
+Result<std::vector<uint8_t>> Page::get_tuple(SlotId slot_id) const {
+    // Take the latch in shared mode across the entire slot-directory read +
+    // tuple-byte copy. This is what prevents torn reads against a concurrent
+    // writer that is shifting the slot directory or rewriting tuple bytes in
+    // place. The returned vector is an owned snapshot — callers can use it
+    // safely after the latch releases and even after the page is evicted.
+    std::shared_lock lock(latch_);
+
     if (slot_id >= slot_count()) {
         return make_error(StatusCode::INVALID_ARGUMENT, "slot ID out of range");
     }
@@ -115,10 +137,12 @@ Result<std::span<const uint8_t>> Page::get_tuple(SlotId slot_id) const {
         return make_error(StatusCode::NOT_FOUND, "slot is deleted");
     }
 
-    return ok(std::span<const uint8_t>(&data_[entry.offset], entry.length));
+    return ok(std::vector<uint8_t>(&data_[entry.offset], &data_[entry.offset] + entry.length));
 }
 
 Result<void> Page::delete_tuple(SlotId slot_id) {
+    std::unique_lock lock(latch_);
+
     if (slot_id >= slot_count()) {
         return make_error(StatusCode::INVALID_ARGUMENT, "slot ID out of range");
     }
@@ -137,12 +161,14 @@ Result<void> Page::delete_tuple(SlotId slot_id) {
 }
 
 Result<void> Page::update_tuple(SlotId slot_id, std::span<const uint8_t> data) {
-    if (slot_id >= slot_count()) {
-        return make_error(StatusCode::INVALID_ARGUMENT, "slot ID out of range");
-    }
-
     if (data.empty()) {
         return make_error(StatusCode::INVALID_ARGUMENT, "cannot update with empty tuple");
+    }
+
+    std::unique_lock lock(latch_);
+
+    if (slot_id >= slot_count()) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "slot ID out of range");
     }
 
     SlotEntry entry = read_slot(slot_id);
@@ -199,6 +225,8 @@ size_t Page::free_space() const {
 }
 
 void Page::compact() {
+    std::unique_lock lock(latch_);
+
     uint16_t sc = slot_count();
     if (sc == 0) {
         set_data_offset(static_cast<uint16_t>(page_size));

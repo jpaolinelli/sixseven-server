@@ -287,9 +287,19 @@ void InsertOperator::enqueue_embedding_jobs(const RID& rid, const std::vector<Va
     }
 
     if (!jobs.empty()) {
-        auto result = embedding_pool_->enqueue_batch(std::move(jobs));
+        // Non-blocking enqueue: 0ms timeout means we never stall the INSERT
+        // thread.  With persistence wired, jobs are durably saved *before*
+        // the in-memory enqueue attempt, so even if the queue is full the
+        // jobs survive on disk and the background recovery sweep will
+        // re-enqueue them once workers drain the queue.
+        auto result = embedding_pool_->try_enqueue_batch(
+            std::move(jobs), std::chrono::milliseconds(0));
         if (!result) {
-            SIXSEVEN_LOG_WARN("failed to enqueue embedding jobs: {}", result.error().message);
+            // Queue full is expected under load — jobs are persisted to disk
+            // and will be recovered by the background sweep.  Use DEBUG to
+            // avoid log spam during bulk inserts.
+            SIXSEVEN_LOG_DEBUG("embedding enqueue deferred (persisted to disk): {}",
+                               result.error().message);
         }
     }
 }

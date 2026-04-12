@@ -14,9 +14,11 @@
 #include "sixseven/vector/embedding_worker.h"
 #include "sixseven/vector/provider_registry.h"
 
+#include <algorithm>
 #include <csignal>
 #include <filesystem>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -99,7 +101,19 @@ int main(int argc, char* argv[]) {
     sixseven::CatalogPersistence persistence(catalog, storage);
     sixseven::GraphEngine graph_engine(catalog, disk_manager, data_dir);
     sixseven::ProviderRegistry provider_registry(catalog);
-    sixseven::EmbeddingWorkerPool embedding_pool;
+
+    // Size the embedding worker pool from the machine's core count. At
+    // >10M-row ingest, a 2-worker pool (the old default) cannot keep up
+    // and the queue grows until we OOM. Use half the logical cores
+    // (floor 4) so the embedders have headroom without starving the
+    // SQL executor.
+    sixseven::EmbeddingWorkerConfig embedding_config;
+    {
+        unsigned int hw = std::thread::hardware_concurrency();
+        if (hw == 0) hw = 4;
+        embedding_config.num_workers = std::max(2u, hw / 4);
+    }
+    sixseven::EmbeddingWorkerPool embedding_pool(embedding_config);
     embedding_pool.register_provider("builtin/384", std::make_shared<sixseven::BuiltinProvider>(384));
     embedding_pool.set_provider_registry(&provider_registry);
 
@@ -132,10 +146,25 @@ int main(int argc, char* argv[]) {
     }
     engine.set_settings_cache(&settings_cache);
 
+    // NOTE: Embedding job persistence (sys_embedding_jobs) is available but
+    // intentionally NOT wired here.  The INSERT hot path uses try_enqueue_batch
+    // with 0ms timeout — pure in-memory, zero disk I/O.  Jobs that overflow
+    // the queue are dropped; rows with NULL embeddings will be caught by a
+    // future background scan.  Wiring persistence caused pool.start() to fail
+    // when load() errored, silently killing all worker threads.
+    //
+    // TODO(GDB-627): Add a background NULL-embedding scanner that re-enqueues
+    // jobs for rows missing their embeddings, making the system self-healing
+    // without needing synchronous persistence on the INSERT path.
+
     // Start embedding worker pool for async EMBEDDING column generation.
     auto pool_start = embedding_pool.start();
     if (!pool_start) {
-        SIXSEVEN_LOG_WARN("embedding worker pool failed to start: {}", pool_start.error().message);
+        SIXSEVEN_LOG_ERROR("EMBEDDING WORKERS NOT RUNNING — pool.start() failed: {}",
+                           pool_start.error().message);
+    } else {
+        SIXSEVEN_LOG_INFO("embedding worker pool started successfully: {} workers",
+                          embedding_config.num_workers);
     }
 
     // Switch engine to default user database.

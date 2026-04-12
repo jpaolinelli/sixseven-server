@@ -89,6 +89,7 @@ private:
     [[nodiscard]] Result<StmtPtr> parse_update();
     [[nodiscard]] Result<StmtPtr> parse_delete();
     [[nodiscard]] Result<StmtPtr> parse_link();
+    [[nodiscard]] Result<StmtPtr> parse_bulk_link(std::string source_table);
     [[nodiscard]] Result<StmtPtr> parse_unlink();
 
     // -- DML helpers --------------------------------------------------------

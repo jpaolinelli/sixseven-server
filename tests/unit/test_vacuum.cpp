@@ -115,12 +115,12 @@ TEST_F(VacuumTest, VacuumRemovesDeadTuples) {
         Page* page = *page_result;
         auto tuple = page->get_tuple(slot);
         ASSERT_TRUE(tuple.has_value());
-        // Write xmax in-place.
-        // We need the mutable data pointer — get it via raw().
-        auto slot_data = *tuple;
-        // The tuple data is inside page raw — compute offset.
-        uint8_t* mutable_ptr = page->raw().data() + (slot_data.data() - page->raw().data());
-        write_mvcc_xmax(mutable_ptr, t2->txn_id);
+        // page->get_tuple now returns an owned copy. Mutate the local
+        // copy and persist it back via update_tuple instead of aliasing
+        // into page->raw() (which no longer holds for the returned vector).
+        auto slot_data = std::move(*tuple);
+        write_mvcc_xmax(slot_data.data(), t2->txn_id);
+        ASSERT_TRUE(page->update_tuple(slot, slot_data).has_value());
         auto unpin = bpm_->unpin_page(pid, true);
         (void)unpin;
     }
@@ -174,9 +174,9 @@ TEST_F(VacuumTest, VacuumDoesNotRemoveTuplesVisibleToActiveTransaction) {
         Page* page = *page_result;
         auto tuple = page->get_tuple(slot);
         ASSERT_TRUE(tuple.has_value());
-        auto slot_data = *tuple;
-        uint8_t* mutable_ptr = page->raw().data() + (slot_data.data() - page->raw().data());
-        write_mvcc_xmax(mutable_ptr, t3->txn_id);
+        auto slot_data = std::move(*tuple);
+        write_mvcc_xmax(slot_data.data(), t3->txn_id);
+        ASSERT_TRUE(page->update_tuple(slot, slot_data).has_value());
         auto unpin = bpm_->unpin_page(pid, true);
         (void)unpin;
     }
@@ -252,9 +252,9 @@ TEST_F(VacuumTest, AutoVacuumTriggersOnThreshold) {
         Page* page = *page_result;
         auto tuple = page->get_tuple(slot);
         ASSERT_TRUE(tuple.has_value());
-        auto slot_data = *tuple;
-        uint8_t* mutable_ptr = page->raw().data() + (slot_data.data() - page->raw().data());
-        write_mvcc_xmax(mutable_ptr, t2->txn_id);
+        auto slot_data = std::move(*tuple);
+        write_mvcc_xmax(slot_data.data(), t2->txn_id);
+        ASSERT_TRUE(page->update_tuple(slot, slot_data).has_value());
         auto unpin = bpm_->unpin_page(pid, true);
         (void)unpin;
     }
@@ -291,9 +291,9 @@ TEST_F(VacuumTest, AutoVacuumDoesNotTriggerBelowThreshold) {
         Page* page = *page_result;
         auto tuple = page->get_tuple(slot);
         ASSERT_TRUE(tuple.has_value());
-        auto slot_data = *tuple;
-        uint8_t* mutable_ptr = page->raw().data() + (slot_data.data() - page->raw().data());
-        write_mvcc_xmax(mutable_ptr, t2->txn_id);
+        auto slot_data = std::move(*tuple);
+        write_mvcc_xmax(slot_data.data(), t2->txn_id);
+        ASSERT_TRUE(page->update_tuple(slot, slot_data).has_value());
         auto unpin = bpm_->unpin_page(pid, true);
         (void)unpin;
     }
@@ -381,9 +381,9 @@ TEST_F(VacuumTest, XminHorizonTrackedCorrectly) {
         Page* page = *page_result;
         auto tuple = page->get_tuple(slot);
         ASSERT_TRUE(tuple.has_value());
-        auto slot_data = *tuple;
-        uint8_t* mutable_ptr = page->raw().data() + (slot_data.data() - page->raw().data());
-        write_mvcc_xmax(mutable_ptr, t2->txn_id);
+        auto slot_data = std::move(*tuple);
+        write_mvcc_xmax(slot_data.data(), t2->txn_id);
+        ASSERT_TRUE(page->update_tuple(slot, slot_data).has_value());
         auto unpin = bpm_->unpin_page(pid, true);
         (void)unpin;
     }

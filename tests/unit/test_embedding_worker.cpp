@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
+#include <span>
 #include <thread>
 #include <vector>
 
@@ -598,4 +599,279 @@ TEST(EmbeddingWorker, StoreCallbackFailureRetriesJob) {
 
     auto s = pool.stats();
     EXPECT_GE(s.jobs_failed, 1u);
+}
+
+// -- Batch store callback -----------------------------------------------------
+
+TEST(EmbeddingWorker, BatchStoreCallbackInvoked) {
+    // Verify that when batch_store_callback is set, it receives all embeddings
+    // in a single call instead of per-embedding store_callback.
+    EmbeddingWorkerConfig cfg;
+    cfg.num_workers = 1;
+    cfg.max_batch_size = 32;
+    EmbeddingWorkerPool pool(cfg);
+
+    auto provider = std::make_shared<TestProvider>(4);
+    pool.register_provider("test", provider);
+
+    std::atomic<int> batch_calls{0};
+    std::atomic<int> total_requests{0};
+    std::atomic<int> single_calls{0};
+
+    pool.set_store_callback([&](table_id_t, int64_t, int32_t,
+                                std::span<const float>) -> Result<void> {
+        single_calls.fetch_add(1);
+        return ok();
+    });
+
+    pool.set_batch_store_callback(
+        [&](std::vector<EmbeddingStoreRequest> requests) -> Result<std::vector<int64_t>> {
+            batch_calls.fetch_add(1);
+            total_requests.fetch_add(static_cast<int>(requests.size()));
+            return ok(std::vector<int64_t>{}); // All succeeded.
+        });
+
+    ASSERT_TRUE(pool.start().has_value());
+
+    // Enqueue 5 jobs.
+    for (int i = 0; i < 5; ++i) {
+        ASSERT_TRUE(pool.enqueue(make_insert_job(1, i, 0, "text" + std::to_string(i)))
+                        .has_value());
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    ASSERT_TRUE(pool.stop().has_value());
+
+    // Batch callback should have been preferred — single callback never called.
+    EXPECT_EQ(single_calls.load(), 0);
+    EXPECT_GE(batch_calls.load(), 1);
+    EXPECT_EQ(total_requests.load(), 5);
+
+    auto s = pool.stats();
+    EXPECT_EQ(s.jobs_processed, 5u);
+}
+
+TEST(EmbeddingWorker, BatchStoreCallbackPartialFailure) {
+    // Return some row_ids as failed; verify they are retried.
+    EmbeddingWorkerConfig cfg;
+    cfg.num_workers = 1;
+    cfg.max_batch_size = 32;
+    cfg.max_retries = 0; // Fail immediately on retry so we can count failures.
+    EmbeddingWorkerPool pool(cfg);
+
+    auto provider = std::make_shared<TestProvider>(4);
+    pool.register_provider("test", provider);
+
+    std::atomic<int> batch_calls{0};
+
+    pool.set_batch_store_callback(
+        [&](std::vector<EmbeddingStoreRequest> requests) -> Result<std::vector<int64_t>> {
+            int call_num = batch_calls.fetch_add(1);
+            if (call_num == 0) {
+                // First call: fail row_id=2.
+                std::vector<int64_t> failed;
+                for (auto& req : requests) {
+                    if (req.row_id == 2) {
+                        failed.push_back(req.row_id);
+                    }
+                }
+                return ok(std::move(failed));
+            }
+            // Subsequent calls (retries): all succeed.
+            return ok(std::vector<int64_t>{});
+        });
+
+    ASSERT_TRUE(pool.start().has_value());
+
+    for (int i = 0; i < 4; ++i) {
+        ASSERT_TRUE(pool.enqueue(make_insert_job(1, i, 0, "text" + std::to_string(i)))
+                        .has_value());
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    ASSERT_TRUE(pool.stop().has_value());
+
+    // 3 jobs succeed on first call + row_id=2 is retried but max_retries=0
+    // so it gets dropped as failed.
+    auto s = pool.stats();
+    EXPECT_EQ(s.jobs_processed, 3u);
+    EXPECT_EQ(s.jobs_failed, 1u);
+}
+
+// -- Recovery loop ------------------------------------------------------------
+
+TEST(EmbeddingWorkerPool, RecoveryLoopReenqueuesPersistedJobs) {
+    // Verify that the recovery loop loads persisted jobs when the queue is
+    // empty and processes them.
+    EmbeddingWorkerConfig config;
+    config.num_workers = 1;
+    config.max_batch_size = 4;
+    EmbeddingWorkerPool pool(config);
+
+    auto provider = std::make_shared<TestProvider>(128);
+    pool.register_provider("test", provider);
+
+    std::atomic<int> store_count{0};
+    pool.set_store_callback(
+        [&](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> {
+            store_count.fetch_add(1);
+            return ok();
+        });
+
+    // Simulate persisted jobs: load() returns 3 jobs on first call, empty after.
+    std::atomic<int> load_calls{0};
+    std::mutex remove_mu;
+    std::vector<std::tuple<table_id_t, int64_t, int32_t>> removed;
+
+    EmbeddingJobPersistence persistence;
+    persistence.persist = [](const EmbeddingJob&) -> Result<void> { return ok(); };
+    persistence.persist_batch = [](const std::vector<EmbeddingJob>&) -> Result<void> {
+        return ok();
+    };
+    persistence.remove = [&](table_id_t t, int64_t r, int32_t c) -> Result<void> {
+        std::lock_guard lock(remove_mu);
+        removed.emplace_back(t, r, c);
+        return ok();
+    };
+    persistence.load = [&]() -> Result<std::vector<EmbeddingJob>> {
+        int call = load_calls.fetch_add(1);
+        if (call == 0) {
+            // First call (startup) — return nothing so queue starts empty.
+            return ok(std::vector<EmbeddingJob>{});
+        }
+        if (call == 1) {
+            // Second call (first recovery sweep) — return persisted jobs.
+            std::vector<EmbeddingJob> jobs;
+            jobs.push_back(make_insert_job(10, 100, 1, "recovered_a"));
+            jobs.push_back(make_insert_job(10, 101, 1, "recovered_b"));
+            jobs.push_back(make_insert_job(10, 102, 1, "recovered_c"));
+            return ok(std::move(jobs));
+        }
+        // Subsequent calls — no more jobs.
+        return ok(std::vector<EmbeddingJob>{});
+    };
+    pool.set_persistence(std::move(persistence));
+
+    ASSERT_TRUE(pool.start().has_value());
+
+    // Wait long enough for the recovery sweep (10s interval) plus processing.
+    // Use a shorter polling loop to avoid excessive test time.
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+    while (store_count.load() < 3 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+
+    ASSERT_TRUE(pool.stop().has_value());
+
+    EXPECT_EQ(store_count.load(), 3);
+    auto stats = pool.stats();
+    EXPECT_EQ(stats.jobs_processed, 3u);
+}
+
+TEST(EmbeddingWorkerPool, PersistBatchPreferredOverPerJob) {
+    // Verify that enqueue_batch uses persist_batch when available.
+    // NOTE: try_enqueue_batch intentionally skips persistence (INSERT hot path).
+    EmbeddingWorkerConfig config;
+    config.num_workers = 1;
+    config.max_batch_size = 4;
+    config.queue_max_size = 0; // Unbounded for this test.
+    EmbeddingWorkerPool pool(config);
+
+    auto provider = std::make_shared<TestProvider>(128);
+    pool.register_provider("test", provider);
+
+    pool.set_store_callback(
+        [](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> {
+            return ok();
+        });
+
+    std::atomic<int> per_job_persist_count{0};
+    std::atomic<int> batch_persist_count{0};
+    std::atomic<int> batch_persist_job_count{0};
+
+    EmbeddingJobPersistence persistence;
+    persistence.persist = [&](const EmbeddingJob&) -> Result<void> {
+        per_job_persist_count.fetch_add(1);
+        return ok();
+    };
+    persistence.persist_batch = [&](const std::vector<EmbeddingJob>& jobs) -> Result<void> {
+        batch_persist_count.fetch_add(1);
+        batch_persist_job_count.fetch_add(static_cast<int>(jobs.size()));
+        return ok();
+    };
+    persistence.remove = [](table_id_t, int64_t, int32_t) -> Result<void> { return ok(); };
+    persistence.load = []() -> Result<std::vector<EmbeddingJob>> {
+        return ok(std::vector<EmbeddingJob>{});
+    };
+    pool.set_persistence(std::move(persistence));
+
+    ASSERT_TRUE(pool.start().has_value());
+
+    std::vector<EmbeddingJob> jobs;
+    jobs.push_back(make_insert_job(1, 1, 0, "hello"));
+    jobs.push_back(make_insert_job(1, 2, 0, "world"));
+    jobs.push_back(make_insert_job(1, 3, 0, "test"));
+
+    // Use enqueue_batch (not try_enqueue_batch) — persistence is only on
+    // the blocking enqueue path, not the INSERT hot path.
+    auto result = pool.enqueue_batch(std::move(jobs));
+    ASSERT_TRUE(result.has_value());
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    ASSERT_TRUE(pool.stop().has_value());
+
+    // persist_batch should have been called, NOT per-job persist.
+    EXPECT_EQ(batch_persist_count.load(), 1);
+    EXPECT_EQ(batch_persist_job_count.load(), 3);
+    EXPECT_EQ(per_job_persist_count.load(), 0);
+}
+
+TEST(EmbeddingWorkerPool, TryEnqueueSkipsPersistence) {
+    // Verify that try_enqueue_batch does NOT call persistence callbacks.
+    // The INSERT hot path must be zero disk I/O.
+    EmbeddingWorkerConfig config;
+    config.num_workers = 1;
+    config.max_batch_size = 4;
+    config.queue_max_size = 0;
+    EmbeddingWorkerPool pool(config);
+
+    auto provider = std::make_shared<TestProvider>(128);
+    pool.register_provider("test", provider);
+
+    pool.set_store_callback(
+        [](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> {
+            return ok();
+        });
+
+    std::atomic<int> persist_count{0};
+
+    EmbeddingJobPersistence persistence;
+    persistence.persist = [&](const EmbeddingJob&) -> Result<void> {
+        persist_count.fetch_add(1);
+        return ok();
+    };
+    persistence.persist_batch = [&](const std::vector<EmbeddingJob>&) -> Result<void> {
+        persist_count.fetch_add(1);
+        return ok();
+    };
+    persistence.remove = [](table_id_t, int64_t, int32_t) -> Result<void> { return ok(); };
+    persistence.load = []() -> Result<std::vector<EmbeddingJob>> {
+        return ok(std::vector<EmbeddingJob>{});
+    };
+    pool.set_persistence(std::move(persistence));
+
+    ASSERT_TRUE(pool.start().has_value());
+
+    std::vector<EmbeddingJob> jobs;
+    jobs.push_back(make_insert_job(1, 1, 0, "hello"));
+    jobs.push_back(make_insert_job(1, 2, 0, "world"));
+
+    auto result = pool.try_enqueue_batch(std::move(jobs), std::chrono::milliseconds(0));
+    ASSERT_TRUE(result.has_value());
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    ASSERT_TRUE(pool.stop().has_value());
+
+    // persist should NOT have been called from try_enqueue_batch.
+    EXPECT_EQ(persist_count.load(), 0);
 }

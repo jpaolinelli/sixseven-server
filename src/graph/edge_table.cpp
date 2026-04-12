@@ -102,6 +102,127 @@ Result<uint64_t> EdgeTable::insert_edge(const Value& source_pk,
     return ok(row_id);
 }
 
+Result<std::vector<uint64_t>> EdgeTable::insert_edges_batch(
+    const std::vector<EdgeInsertRequest>& edges) {
+    if (edges.empty()) {
+        return ok(std::vector<uint64_t>{});
+    }
+
+    std::unique_lock lock(mu_);
+
+    // Track what we've inserted so we can roll back on partial failure.
+    struct Inserted {
+        uint64_t row_id;
+        KeyType fwd_key;
+        KeyType rev_key;
+        bool has_unique = false;
+        KeyType unique_key;
+    };
+    std::vector<Inserted> inserted;
+    inserted.reserve(edges.size());
+
+    auto rollback = [&]() {
+        // Undo in reverse order.
+        for (auto it = inserted.rbegin(); it != inserted.rend(); ++it) {
+            if (it->has_unique) {
+                (void)unique_index_->remove(it->unique_key);
+            }
+            (void)reverse_index_->remove(it->rev_key);
+            (void)forward_index_->remove(it->fwd_key);
+            edges_.erase(it->row_id);
+        }
+        // Roll back the row ID counter.
+        next_row_id_ -= inserted.size();
+    };
+
+    std::vector<uint64_t> row_ids;
+    row_ids.reserve(edges.size());
+
+    for (const auto& e : edges) {
+        // Validate property count.
+        if (e.properties.size() != config_.property_columns.size()) {
+            rollback();
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "expected " + std::to_string(config_.property_columns.size()) +
+                                  " properties, got " + std::to_string(e.properties.size()));
+        }
+
+        // Duplicate check.
+        if (unique_index_) {
+            KeyType unique_key = {e.source_pk, e.target_pk};
+            auto existing = unique_index_->search(unique_key);
+            if (!existing.has_value()) {
+                rollback();
+                return tl::unexpected(existing.error());
+            }
+            if (existing->has_value()) {
+                rollback();
+                return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                                  "duplicate edge: (" + config_.name + ") already exists");
+            }
+        }
+
+        // Assign row ID.
+        uint64_t row_id = next_row_id_++;
+        if (row_id > kMaxEncodableRowId) {
+            --next_row_id_;
+            rollback();
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "edge row ID overflow: exceeded 48-bit RID encoding capacity");
+        }
+        Value row_id_val(static_cast<int64_t>(row_id));
+
+        // Forward index insert.
+        KeyType fwd_key = {e.source_pk, row_id_val};
+        auto fwd = forward_index_->insert(fwd_key, encode_rid(row_id));
+        if (!fwd.has_value()) {
+            --next_row_id_;
+            rollback();
+            return tl::unexpected(fwd.error());
+        }
+
+        // Reverse index insert.
+        KeyType rev_key = {e.target_pk, row_id_val};
+        auto rev = reverse_index_->insert(rev_key, encode_rid(row_id));
+        if (!rev.has_value()) {
+            (void)forward_index_->remove(fwd_key);
+            --next_row_id_;
+            rollback();
+            return tl::unexpected(rev.error());
+        }
+
+        // Unique index insert.
+        Inserted ins{row_id, fwd_key, rev_key, false, {}};
+        if (unique_index_) {
+            KeyType unique_key = {e.source_pk, e.target_pk};
+            auto uniq = unique_index_->insert(unique_key, encode_rid(row_id));
+            if (!uniq.has_value()) {
+                (void)forward_index_->remove(fwd_key);
+                (void)reverse_index_->remove(rev_key);
+                --next_row_id_;
+                rollback();
+                return tl::unexpected(uniq.error());
+            }
+            ins.has_unique = true;
+            ins.unique_key = unique_key;
+        }
+
+        // Store edge row.
+        EdgeRow row;
+        row.edge_row_id = row_id;
+        row.source_pk = e.source_pk;
+        row.target_pk = e.target_pk;
+        row.properties = e.properties;
+        edges_.emplace(row_id, std::move(row));
+
+        inserted.push_back(std::move(ins));
+        row_ids.push_back(row_id);
+    }
+
+    SIXSEVEN_LOG_DEBUG("batch inserted {} edges in edge type '{}'", row_ids.size(), config_.name);
+    return ok(std::move(row_ids));
+}
+
 Result<void> EdgeTable::restore_edge(uint64_t edge_row_id,
                                      const Value& source_pk,
                                      const Value& target_pk,

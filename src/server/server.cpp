@@ -159,6 +159,7 @@ void Server::do_shutdown() {
     // Step 3: Close all client connections.
     {
         std::lock_guard lock(connections_mutex_);
+        inflight_fds_.clear();
         SIXSEVEN_LOG_INFO("shutdown: closing {} client connections", connections_.size());
         for (auto& [fd, conn] : connections_) {
             conn.close();
@@ -205,6 +206,9 @@ void Server::run_event_loop() {
                 }
             }
         }
+
+        // Re-enable connections whose queries finished on the thread pool.
+        process_completed_queries();
     }
 }
 
@@ -275,6 +279,12 @@ void Server::accept_connection() {
 
 void Server::handle_read(int fd) {
     std::lock_guard lock(connections_mutex_);
+
+    // Skip if this connection's query is already executing on the thread pool.
+    if (inflight_fds_.count(fd)) {
+        return;
+    }
+
     auto it = connections_.find(fd);
     if (it == connections_.end()) {
         return;
@@ -300,7 +310,7 @@ void Server::handle_read(int fd) {
         return;
     }
 
-    // Process data through the PostgreSQL wire protocol handler.
+    // Check that we have a protocol handler.
     auto handler_it = protocol_handlers_.find(fd);
     if (handler_it == protocol_handlers_.end()) {
         SIXSEVEN_LOG_WARN("no protocol handler for fd={}", fd);
@@ -308,32 +318,52 @@ void Server::handle_read(int fd) {
         return;
     }
 
-    auto& handler = handler_it->second;
-    auto process_result = handler.process(conn);
-    if (!process_result) {
-        SIXSEVEN_LOG_WARN("protocol error on fd={}: {}", fd, process_result.error().message);
-        close_connection(fd);
-        return;
-    }
+    // Mark this connection as in-flight: the event loop will not touch
+    // the Connection or PgProtocolHandler while the flag is set.
+    inflight_fds_.insert(fd);
 
-    // Close connection if the protocol handler says we're done (Terminate message).
-    if (handler.state() == ProtocolState::CLOSED) {
-        SIXSEVEN_LOG_DEBUG("connection fd={} terminated by protocol", fd);
-        close_connection(fd);
-        return;
-    }
+    // Disable READ monitoring while the thread pool processes the query.
+    // The fd stays registered so we don't lose EOF detection on write side.
+    (void)event_loop_->modify_fd(fd, EventType::WRITE);
 
-    // Enable write monitoring so the response gets flushed.
-    if (conn.has_pending_writes()) {
-        auto mod_result = event_loop_->modify_fd(fd, EventType::READ_WRITE);
-        if (!mod_result) {
-            SIXSEVEN_LOG_WARN("failed to modify fd={} for write: {}", fd, mod_result.error().message);
+    // Submit protocol processing to the thread pool. Pointers into the
+    // unordered_maps are stable because we never erase/insert while the
+    // fd is in inflight_fds_.
+    Connection* conn_ptr = &it->second;
+    PgProtocolHandler* handler_ptr = &handler_it->second;
+
+    thread_pool_->submit([this, fd, conn_ptr, handler_ptr]() {
+        auto process_result = handler_ptr->process(*conn_ptr);
+
+        bool should_close = false;
+        if (!process_result) {
+            SIXSEVEN_LOG_WARN("protocol error on fd={}: {}", fd, process_result.error().message);
+            should_close = true;
+        } else if (handler_ptr->state() == ProtocolState::CLOSED) {
+            SIXSEVEN_LOG_DEBUG("connection fd={} terminated by protocol", fd);
+            should_close = true;
         }
-    }
+
+        // Report completion back to the event loop thread.
+        {
+            std::lock_guard clock(completed_mutex_);
+            completed_fds_.push_back(fd);
+            if (should_close) {
+                close_pending_fds_.insert(fd);
+            }
+        }
+        event_loop_->wakeup();
+    });
 }
 
 void Server::handle_write(int fd) {
     std::lock_guard lock(connections_mutex_);
+
+    // Skip if the thread pool is currently processing this connection.
+    if (inflight_fds_.count(fd)) {
+        return;
+    }
+
     auto it = connections_.find(fd);
     if (it == connections_.end()) {
         return;
@@ -357,8 +387,48 @@ void Server::handle_write(int fd) {
     }
 }
 
+void Server::process_completed_queries() {
+    // Swap completion lists under the lightweight completed_mutex_ to
+    // minimise time thread-pool workers spend blocked.
+    std::vector<int> completed;
+    std::unordered_set<int> to_close;
+    {
+        std::lock_guard clock(completed_mutex_);
+        completed.swap(completed_fds_);
+        to_close.swap(close_pending_fds_);
+    }
+
+    if (completed.empty()) {
+        return;
+    }
+
+    std::lock_guard lock(connections_mutex_);
+    for (int fd : completed) {
+        inflight_fds_.erase(fd);
+
+        if (to_close.count(fd)) {
+            close_connection(fd);
+            continue;
+        }
+
+        auto it = connections_.find(fd);
+        if (it == connections_.end()) {
+            continue;
+        }
+
+        // Re-enable READ monitoring (and WRITE if there is response data to flush).
+        auto& conn = it->second;
+        EventType type = conn.has_pending_writes() ? EventType::READ_WRITE : EventType::READ;
+        auto mod_result = event_loop_->modify_fd(fd, type);
+        if (!mod_result) {
+            SIXSEVEN_LOG_WARN("failed to re-enable fd={}: {}", fd, mod_result.error().message);
+        }
+    }
+}
+
 void Server::close_connection(int fd) {
     // Note: caller must hold connections_mutex_.
+    inflight_fds_.erase(fd); // Clean up in case of shutdown while in-flight.
     (void)event_loop_->remove_fd(fd);
     connections_.erase(fd);
     protocol_handlers_.erase(fd);
