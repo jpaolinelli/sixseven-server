@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -808,6 +809,116 @@ TEST_F(CatalogPersistenceTest, PersistDatabase) {
     EXPECT_TRUE(found) << "database row not found in sys_databases after restart";
 }
 
+// =============================================================================
+// GDB-656: sixseven database created and persisted during first bootstrap
+// =============================================================================
+
+TEST_F(CatalogPersistenceTest, SixsevenDatabaseCreatedDuringFirstBootstrap) {
+    run_bootstrap();
+
+    // The sixseven database should exist in the catalog.
+    auto db = catalog_->get_database("sixseven");
+    ASSERT_TRUE(db.has_value()) << db.error().message;
+    EXPECT_EQ(db->database_id, default_database_id);
+    EXPECT_EQ(db->name, "sixseven");
+
+    // It should be persisted in sys_databases.
+    auto ts = storage_->get_table_storage(sys_databases_table_id);
+    ASSERT_TRUE(ts.has_value()) << ts.error().message;
+
+    auto storage_schema = StorageManager::build_storage_schema(sys_databases_schema());
+    auto it = (*ts)->heap->begin();
+    ASSERT_TRUE(it.has_value()) << it.error().message;
+
+    bool found = false;
+    while (auto row = it->next()) {
+        auto values = TupleSerializer::deserialize(row->second, storage_schema);
+        ASSERT_TRUE(values.has_value());
+        if ((*values)[0].as_int32() == default_database_id) {
+            EXPECT_EQ((*values)[1].as_string(), "sixseven");
+            found = true;
+        }
+    }
+    EXPECT_TRUE(found) << "sixseven not found in sys_databases after first bootstrap";
+}
+
+// =============================================================================
+// GDB-656: All databases survive server restart
+// =============================================================================
+
+TEST_F(CatalogPersistenceTest, DatabasesSurviveRestart) {
+    run_bootstrap();
+
+    // sixseven exists after first bootstrap.
+    auto db = catalog_->get_database("sixseven");
+    ASSERT_TRUE(db.has_value());
+
+    // Restart and verify.
+    restart();
+    run_bootstrap();
+
+    auto restored = catalog_->get_database("sixseven");
+    ASSERT_TRUE(restored.has_value()) << restored.error().message;
+    EXPECT_EQ(restored->database_id, default_database_id);
+    EXPECT_EQ(restored->name, "sixseven");
+}
+
+TEST_F(CatalogPersistenceTest, MultipleRestartsDatabasesPersist) {
+    run_bootstrap();
+
+    // Create a user table in sixseven database.
+    engine_->set_current_database(default_database_id);
+    exec_ok("CREATE TABLE restart_test (id INT, val VARCHAR)");
+
+    // First restart.
+    restart();
+    run_bootstrap();
+
+    auto db = catalog_->get_database("sixseven");
+    ASSERT_TRUE(db.has_value());
+
+    auto tbl = catalog_->get_table(default_database_id, "restart_test");
+    ASSERT_TRUE(tbl.has_value());
+
+    // Second restart.
+    restart();
+    run_bootstrap();
+
+    db = catalog_->get_database("sixseven");
+    ASSERT_TRUE(db.has_value());
+
+    tbl = catalog_->get_table(default_database_id, "restart_test");
+    ASSERT_TRUE(tbl.has_value());
+}
+
+// =============================================================================
+// GDB-656: load_catalog loads databases before tables
+// =============================================================================
+
+TEST_F(CatalogPersistenceTest, DatabasesLoadedBeforeTables) {
+    run_bootstrap();
+    engine_->set_current_database(default_database_id);
+
+    // Create a table to ensure there are entries in sys_tables.
+    exec_ok("CREATE TABLE db_order_test (id INT)");
+
+    // Restart — databases must be loaded before tables so restore_table
+    // can find the database.
+    restart();
+    run_bootstrap();
+
+    // Both database and table should be restored.
+    auto db = catalog_->get_database("sixseven");
+    ASSERT_TRUE(db.has_value());
+
+    auto tbl = catalog_->get_table(default_database_id, "db_order_test");
+    ASSERT_TRUE(tbl.has_value()) << "table should be restored (databases loaded first)";
+}
+
+// =============================================================================
+// GDB-654: persist_database / remove_database (existing tests below)
+// =============================================================================
+
 TEST_F(CatalogPersistenceTest, RemoveDatabase) {
     run_bootstrap();
 
@@ -836,6 +947,12 @@ TEST_F(CatalogPersistenceTest, RemoveDatabase) {
         db_ids.push_back((*values)[0].as_int32());
     }
 
-    EXPECT_EQ(db_ids.size(), 1u);
-    EXPECT_EQ(db_ids[0], 43);
+    // Should contain sixseven (1) and other_db (43), but not test_db (42).
+    EXPECT_EQ(db_ids.size(), 2u);
+    EXPECT_TRUE(std::find(db_ids.begin(), db_ids.end(), default_database_id) != db_ids.end())
+        << "sixseven database should still be persisted";
+    EXPECT_TRUE(std::find(db_ids.begin(), db_ids.end(), 43) != db_ids.end())
+        << "other_db should still be persisted";
+    EXPECT_TRUE(std::find(db_ids.begin(), db_ids.end(), 42) == db_ids.end())
+        << "test_db should have been removed";
 }

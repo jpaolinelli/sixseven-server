@@ -88,6 +88,10 @@ public:
     /// Load all pending embedding jobs from sys_embedding_jobs.
     [[nodiscard]] Result<std::vector<EmbeddingJob>> load_embedding_jobs();
 
+    /// Migrate databases from sys_tables for old deployments lacking sys_databases.
+    /// Scans sys_tables for distinct database_id values and inserts them into sys_databases.
+    [[nodiscard]] Result<void> migrate_databases_from_sys_tables();
+
     /// Register a system table schema in the catalog and create its physical storage.
     /// Used by SystemBootstrap for sys_settings/sys_providers in addition to catalog tables.
     [[nodiscard]] Result<void> create_sys_table_public(const TableSchema& schema);

@@ -61,6 +61,29 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
                               "failed to create sys_embedding_jobs: " + r_ej.error().message);
         }
 
+        // Create the default 'sixseven' database and persist it.
+        auto existing_db = catalog.get_database("sixseven");
+        if (!existing_db) {
+            auto r_db = catalog.restore_database(default_database_id, "sixseven");
+            if (!r_db) {
+                return make_error(r_db.error().code,
+                                  "failed to create sixseven database: " +
+                                      r_db.error().message);
+            }
+        }
+        auto dir_db = storage.create_database_storage(default_database_id);
+        if (!dir_db) {
+            return make_error(dir_db.error().code,
+                              "failed to create sixseven database storage: " +
+                                  dir_db.error().message);
+        }
+        auto p_db = persistence.persist_database(default_database_id, "sixseven");
+        if (!p_db) {
+            return make_error(p_db.error().code,
+                              "failed to persist sixseven database: " +
+                                  p_db.error().message);
+        }
+
         // Ensure user table IDs start after all system tables.
         if (catalog.next_table_id() < first_user_table_id) {
             catalog.set_next_table_id(first_user_table_id);
@@ -98,6 +121,27 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
         if (!r2) {
             return make_error(r2.error().code,
                               "failed to open sys_providers: " + r2.error().message);
+        }
+
+        // Open sys_databases before load_catalog so databases are available.
+        // Migration: if the file doesn't exist (old deployment), create and
+        // back-fill from sys_tables.
+        auto r_sdb = persistence.open_sys_table_public(sys_databases_schema());
+        if (!r_sdb) {
+            // Old deployment without sys_databases — migrate.
+            SIXSEVEN_LOG_INFO("system bootstrap: migrating — creating sys_databases");
+            auto create_sdb = persistence.create_sys_table_public(sys_databases_schema());
+            if (!create_sdb) {
+                return make_error(create_sdb.error().code,
+                                  "failed to create sys_databases during migration: " +
+                                      create_sdb.error().message);
+            }
+            auto migrate = persistence.migrate_databases_from_sys_tables();
+            if (!migrate) {
+                return make_error(migrate.error().code,
+                                  "failed to migrate databases: " +
+                                      migrate.error().message);
+            }
         }
 
         // Load the full catalog (sys_tables, sys_columns, etc.).
