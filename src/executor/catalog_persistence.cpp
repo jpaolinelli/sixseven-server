@@ -38,6 +38,10 @@ Result<void> CatalogPersistence::create_system_catalog_tables() {
     if (!r5) {
         return r5;
     }
+    auto r6 = create_sys_table(sys_databases_schema());
+    if (!r6) {
+        return r6;
+    }
 
     SIXSEVEN_LOG_INFO("catalog persistence: created system catalog tables");
     return ok();
@@ -110,6 +114,10 @@ Result<void> CatalogPersistence::load_catalog() {
     auto r5 = open_sys_table(sys_embedding_columns_schema());
     if (!r5) {
         return r5;
+    }
+    auto r6 = open_sys_table(sys_databases_schema());
+    if (!r6) {
+        return r6;
     }
 
     // 2. Read sys_tables: collect table metadata (without columns yet).
@@ -472,6 +480,16 @@ Result<void> CatalogPersistence::delete_rows(table_id_t sys_table_id, Pred predi
 // ---------------------------------------------------------------------------
 // Persist operations (after DDL)
 // ---------------------------------------------------------------------------
+
+Result<void> CatalogPersistence::persist_database(database_id_t db_id, const std::string& name) {
+    return insert_row(sys_databases_table_id, {Value(db_id), Value(name)});
+}
+
+Result<void> CatalogPersistence::remove_database(database_id_t db_id) {
+    return delete_rows(sys_databases_table_id, [db_id](const std::vector<Value>& v) {
+        return v[0].as_int32() == db_id;
+    });
+}
 
 Result<void> CatalogPersistence::persist_table(database_id_t db_id, const TableSchema& schema) {
     // Insert into sys_tables.

@@ -8,6 +8,7 @@
 #include "sixseven/executor/storage_manager.h"
 #include "sixseven/executor/system_bootstrap.h"
 #include "sixseven/storage/disk_manager.h"
+#include "sixseven/table/tuple.h"
 
 #include <gtest/gtest.h>
 
@@ -117,6 +118,10 @@ TEST_F(CatalogPersistenceTest, CreateSystemCatalogTables) {
     auto sys_emb = catalog_->get_table(system_database_id, "sys_embedding_columns");
     ASSERT_TRUE(sys_emb.has_value()) << sys_emb.error().message;
     EXPECT_EQ(sys_emb->table_id, sys_embedding_columns_table_id);
+
+    auto sys_dbs = catalog_->get_table(system_database_id, "sys_databases");
+    ASSERT_TRUE(sys_dbs.has_value()) << sys_dbs.error().message;
+    EXPECT_EQ(sys_dbs->table_id, sys_databases_table_id);
 }
 
 TEST_F(CatalogPersistenceTest, SystemCatalogTablesHaveCorrectSchemas) {
@@ -576,7 +581,8 @@ TEST_F(CatalogPersistenceTest, SystemTableIdsAreStable) {
     EXPECT_EQ(sys_edge_types_table_id, 6);
     EXPECT_EQ(sys_embedding_columns_table_id, 7);
     EXPECT_EQ(sys_embedding_jobs_table_id, 8);
-    EXPECT_EQ(first_user_table_id, 9);
+    EXPECT_EQ(sys_databases_table_id, 9);
+    EXPECT_EQ(first_user_table_id, 10);
 }
 
 TEST_F(CatalogPersistenceTest, SystemTableSchemaIdsMatch) {
@@ -588,6 +594,7 @@ TEST_F(CatalogPersistenceTest, SystemTableSchemaIdsMatch) {
     EXPECT_EQ(sys_edge_types_schema().table_id, sys_edge_types_table_id);
     EXPECT_EQ(sys_embedding_columns_schema().table_id, sys_embedding_columns_table_id);
     EXPECT_EQ(sys_embedding_jobs_schema().table_id, sys_embedding_jobs_table_id);
+    EXPECT_EQ(sys_databases_schema().table_id, sys_databases_table_id);
 }
 
 // =============================================================================
@@ -761,4 +768,69 @@ TEST_F(CatalogPersistenceTest, PersistEmbeddingJobsBatch) {
     auto loaded = persistence_->load_embedding_jobs();
     ASSERT_TRUE(loaded.has_value());
     EXPECT_EQ(loaded->size(), 5u);
+}
+
+// =============================================================================
+// AC: persist_database / remove_database work correctly (GDB-654)
+// =============================================================================
+
+TEST_F(CatalogPersistenceTest, PersistDatabase) {
+    run_bootstrap();
+
+    auto result = persistence_->persist_database(42, "test_db");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    // Restart and verify the row survives in sys_databases storage.
+    restart();
+    run_bootstrap();
+
+    auto ts = storage_->get_table_storage(sys_databases_table_id);
+    ASSERT_TRUE(ts.has_value()) << ts.error().message;
+
+    auto storage_schema = StorageManager::build_storage_schema(sys_databases_schema());
+    auto it = (*ts)->heap->begin();
+    ASSERT_TRUE(it.has_value()) << it.error().message;
+
+    bool found = false;
+    while (auto row = it->next()) {
+        auto values = TupleSerializer::deserialize(row->second, storage_schema);
+        ASSERT_TRUE(values.has_value());
+        if ((*values)[0].as_int32() == 42) {
+            EXPECT_EQ((*values)[1].as_string(), "test_db");
+            found = true;
+        }
+    }
+    EXPECT_TRUE(found) << "database row not found in sys_databases after restart";
+}
+
+TEST_F(CatalogPersistenceTest, RemoveDatabase) {
+    run_bootstrap();
+
+    ASSERT_TRUE(persistence_->persist_database(42, "test_db").has_value());
+    ASSERT_TRUE(persistence_->persist_database(43, "other_db").has_value());
+
+    // Remove one.
+    auto result = persistence_->remove_database(42);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    // Restart and verify only the other remains.
+    restart();
+    run_bootstrap();
+
+    auto ts = storage_->get_table_storage(sys_databases_table_id);
+    ASSERT_TRUE(ts.has_value()) << ts.error().message;
+
+    auto storage_schema = StorageManager::build_storage_schema(sys_databases_schema());
+    auto it = (*ts)->heap->begin();
+    ASSERT_TRUE(it.has_value()) << it.error().message;
+
+    std::vector<int32_t> db_ids;
+    while (auto row = it->next()) {
+        auto values = TupleSerializer::deserialize(row->second, storage_schema);
+        ASSERT_TRUE(values.has_value());
+        db_ids.push_back((*values)[0].as_int32());
+    }
+
+    EXPECT_EQ(db_ids.size(), 1u);
+    EXPECT_EQ(db_ids[0], 43);
 }

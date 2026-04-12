@@ -36,6 +36,12 @@ public:
     /// Also opens user table storage files discovered in sys_tables.
     [[nodiscard]] Result<void> load_catalog();
 
+    /// Persist a newly created database (insert into sys_databases).
+    [[nodiscard]] Result<void> persist_database(database_id_t db_id, const std::string& name);
+
+    /// Remove a database from persistence (delete from sys_databases).
+    [[nodiscard]] Result<void> remove_database(database_id_t db_id);
+
     /// Persist a newly created table (insert into sys_tables + sys_columns).
     [[nodiscard]] Result<void> persist_table(database_id_t db_id, const TableSchema& schema);
 
