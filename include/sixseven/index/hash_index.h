@@ -115,6 +115,8 @@ private:
     /// Log a directory growth WAL record if a WAL writer is configured.
     void log_directory_growth(uint32_t old_depth, uint32_t new_depth);
 
+    friend class HashPersistence;
+
     // -- State ---
     HashIndexConfig config_;
     WalWriter* wal_;

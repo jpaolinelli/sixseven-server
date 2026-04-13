@@ -27,6 +27,14 @@ public:
 
     const OutputSchema& output_schema() const override;
 
+    /// Set an OFFSET to apply at the iterator level (skip rows without
+    /// deserializing).  Must be called before open().  When set, the
+    /// LimitOperator's own offset should be reduced to 0.
+    void set_skip_rows(size_t count) { skip_rows_ = count; }
+
+    /// True if this scan has a WHERE predicate (offset pushdown is unsafe).
+    [[nodiscard]] bool has_predicate() const { return predicate_ != nullptr; }
+
     // Plan inspection
     std::string plan_node_name() const override;
     std::string plan_node_detail() const override;
@@ -43,6 +51,7 @@ private:
     const Expr* predicate_;
     const BoundStatement* bound_;
     std::optional<TableIterator> iter_;
+    size_t skip_rows_ = 0;
 };
 
 } // namespace sixseven

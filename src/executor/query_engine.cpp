@@ -6,6 +6,7 @@
 #include "sixseven/common/types.h"
 #include "sixseven/executor/catalog_persistence.h"
 #include "sixseven/executor/explain.h"
+#include "sixseven/executor/index_manager.h"
 #include "sixseven/executor/expr_evaluator.h"
 #include "sixseven/executor/pk_value_string.h"
 #include "sixseven/executor/planner.h"
@@ -339,6 +340,10 @@ void QueryEngine::set_embedding_worker_pool(EmbeddingWorkerPool* pool) {
 
 void QueryEngine::set_algorithm_registry(AlgorithmRegistry* registry) {
     algorithm_registry_ = registry;
+}
+
+void QueryEngine::set_index_manager(IndexManager* mgr) {
+    index_manager_ = mgr;
 }
 
 // ---------------------------------------------------------------------------
@@ -1859,8 +1864,8 @@ Result<QueryResult> QueryEngine::execute_explain(const ExplainStmt& stmt,
                     graph_engine_,
                     provider_registry_,
                     nullptr,
-                    nullptr,
-                    nullptr,
+                    index_manager_ ? index_manager_->btree_map() : nullptr,
+                    index_manager_ ? index_manager_->hash_map() : nullptr,
                     embedding_pool_,
                     algorithm_registry_);
     std::vector<ExprPtr> owned_exprs;
@@ -1990,8 +1995,8 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                     graph_engine_,
                     provider_registry_,
                     nullptr,
-                    nullptr,
-                    nullptr,
+                    index_manager_ ? index_manager_->btree_map() : nullptr,
+                    index_manager_ ? index_manager_->hash_map() : nullptr,
                     embedding_pool_,
                     algorithm_registry_);
     std::vector<ExprPtr> owned_exprs;
@@ -2924,6 +2929,18 @@ Result<QueryResult> QueryEngine::execute_create_index(const CreateIndexStmt& stm
         }
     }
 
+    // Build and populate the in-memory index structure.
+    if (index_manager_ != nullptr) {
+        auto created_def2 = catalog_.get_index(stmt.name);
+        if (created_def2) {
+            auto populate = index_manager_->create_and_populate_index(*created_def2, *schema);
+            if (!populate) {
+                SIXSEVEN_LOG_WARN("failed to populate index '{}': {}",
+                                  stmt.name, populate.error().message);
+            }
+        }
+    }
+
     SIXSEVEN_LOG_INFO("created index '{}' on table '{}'", stmt.name, stmt.table_name);
 
     QueryResult qr;
@@ -2957,6 +2974,11 @@ Result<QueryResult> QueryEngine::execute_drop_index(const DropIndexStmt& stmt) {
                               stmt.name,
                               remove.error().message);
         }
+    }
+
+    // Remove from in-memory index structures.
+    if (index_manager_ != nullptr) {
+        index_manager_->drop_index(index_id, idx->table_id);
     }
 
     // Remove from catalog.

@@ -19,6 +19,11 @@ Result<void> SeqScanOperator::do_open() {
         return make_error(it.error().code, it.error().message);
     }
     iter_.emplace(std::move(*it));
+
+    // Apply skip at the iterator level — no deserialization.
+    if (skip_rows_ > 0) {
+        iter_->skip(skip_rows_);
+    }
     return ok();
 }
 

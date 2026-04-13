@@ -22,6 +22,12 @@ struct TableStorage {
     Schema storage_schema; ///< Byte-level schema for TupleSerializer.
 };
 
+/// Physical storage state for a single index (one file per index).
+struct IndexStorage {
+    FileId file_id = 0;
+    std::unique_ptr<BufferPoolManager> bpm;
+};
+
 /// Manages the physical storage backing for catalog tables.
 ///
 /// Bridges the gap between the Catalog (metadata-only) and the executor
@@ -69,6 +75,39 @@ public:
     /// Build a byte-level Schema from a TableSchema (CatalogColumnDef -> ColumnDef).
     [[nodiscard]] static Schema build_storage_schema(const TableSchema& ts);
 
+    /// Read the persisted autoincrement counter from a table file's header extension.
+    /// Returns 0 if no counter was previously written.
+    [[nodiscard]] Result<int64_t> read_autoincrement(table_id_t table_id);
+
+    /// Write the autoincrement counter to a table file's header extension.
+    [[nodiscard]] Result<void> write_autoincrement(table_id_t table_id, int64_t value);
+
+    // -- Index file management ---------------------------------------------------
+
+    /// Create physical storage for a new index file.
+    [[nodiscard]] Result<IndexStorage*>
+    create_index_storage(database_id_t db_id, index_id_t index_id);
+
+    /// Open physical storage for an existing index file.
+    [[nodiscard]] Result<IndexStorage*>
+    open_index_storage(database_id_t db_id, index_id_t index_id);
+
+    /// Get the storage for an already-opened index.
+    [[nodiscard]] Result<IndexStorage*> get_index_storage(index_id_t index_id);
+
+    /// Drop storage for an index. Flushes, closes the file, and removes it.
+    [[nodiscard]] Result<void> drop_index_storage(database_id_t db_id, index_id_t index_id);
+
+    /// Check whether an index storage file exists on disk.
+    [[nodiscard]] bool index_file_exists(database_id_t db_id, index_id_t index_id) const;
+
+    /// Read the meta page ID stored in an index file's header extension.
+    /// Returns 0 if not yet written.
+    [[nodiscard]] Result<PageId> read_index_meta_page_id(index_id_t index_id);
+
+    /// Write the meta page ID to an index file's header extension.
+    [[nodiscard]] Result<void> write_index_meta_page_id(index_id_t index_id, PageId meta_page_id);
+
 private:
     /// Build the directory path for a database: {data_dir}/databases/{db_id}/
     [[nodiscard]] std::filesystem::path database_path(database_id_t db_id) const;
@@ -76,12 +115,18 @@ private:
     /// Build the file path for a table: {data_dir}/databases/{db_id}/tables/table_{id}.db
     [[nodiscard]] std::filesystem::path table_path(database_id_t db_id, table_id_t id) const;
 
+    /// Build the file path for an index: {data_dir}/databases/{db_id}/indexes/index_{id}.db
+    [[nodiscard]] std::filesystem::path index_path(database_id_t db_id, index_id_t id) const;
+
     DiskManager& dm_;
     std::filesystem::path data_dir_;
     uint32_t pool_size_;
 
+    static constexpr uint32_t index_pool_size_ = 64;
+
     mutable std::mutex mu_;
     std::unordered_map<table_id_t, std::unique_ptr<TableStorage>> tables_;
+    std::unordered_map<index_id_t, std::unique_ptr<IndexStorage>> indexes_;
 };
 
 } // namespace sixseven

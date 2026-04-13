@@ -141,6 +141,8 @@ private:
     [[nodiscard]] uint16_t effective_internal_max_keys() const;
     [[nodiscard]] uint16_t effective_leaf_max_keys() const;
 
+    friend class BTreePersistence;
+
     // -- State ---
     BTreeConfig config_;
     WalWriter* wal_;

@@ -1714,6 +1714,28 @@ Planner::plan_select(const SelectStmt& stmt,
             }
         }
 
+        // Optimization: push OFFSET into SeqScan to skip rows at the iterator
+        // level (slot directory check only, no tuple deserialization).
+        // Safe when the scan has no WHERE predicate and there is at most a
+        // pass-through Project between Limit and SeqScan.
+        if (offset_val > 0) {
+            auto* seq_scan = dynamic_cast<SeqScanOperator*>(child.get());
+            if (!seq_scan) {
+                // Check for Project → SeqScan (the common SELECT * case).
+                auto children = child->plan_children();
+                if (children.size() == 1) {
+                    // Safe: we own the full operator tree, so the const_cast
+                    // just recovers the mutability we already have.
+                    seq_scan = const_cast<SeqScanOperator*>(
+                        dynamic_cast<const SeqScanOperator*>(children[0]));
+                }
+            }
+            if (seq_scan != nullptr && !seq_scan->has_predicate()) {
+                seq_scan->set_skip_rows(static_cast<size_t>(offset_val));
+                offset_val = 0;
+            }
+        }
+
         child = std::make_unique<LimitOperator>(std::move(child), limit_val, offset_val);
     }
 

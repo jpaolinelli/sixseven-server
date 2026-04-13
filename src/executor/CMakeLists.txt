@@ -30,6 +30,7 @@ add_library(sixseven_executor STATIC
     match_shortest_path.cpp
     nearest_scan.cpp
     catalog_persistence.cpp
+    index_manager.cpp
     storage_manager.cpp
     system_bootstrap.cpp
     settings_cache.cpp

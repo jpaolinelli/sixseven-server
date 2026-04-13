@@ -42,6 +42,7 @@ struct ShowStmt;
 struct UnlinkStmt;
 class EmbeddingWorkerPool;
 class HnswIndex;
+class IndexManager;
 class UserManager;
 class ProviderCache;
 class ProviderRegistry;
@@ -168,6 +169,9 @@ public:
     /// Set the algorithm registry for graph algorithm table-valued functions.
     void set_algorithm_registry(AlgorithmRegistry* registry);
 
+    /// Set the index manager for B+ tree and hash index lifecycle.
+    void set_index_manager(IndexManager* mgr);
+
 private:
     /// Execute a CREATE USER statement.
     [[nodiscard]] Result<QueryResult> execute_create_user(const CreateUserStmt& stmt);
@@ -264,6 +268,7 @@ private:
     UserManager* user_mgr_ = nullptr;
     EmbeddingWorkerPool* embedding_pool_ = nullptr;
     AlgorithmRegistry* algorithm_registry_ = nullptr;
+    IndexManager* index_manager_ = nullptr;
     CatalogPersistence* catalog_persistence_ = nullptr;
     AuthMethod auth_method_{};
     database_id_t current_database_id_ = default_database_id;
