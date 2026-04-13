@@ -299,6 +299,21 @@ TEST_F(QueryEngineTest, SelectWithLimitOffset) {
     EXPECT_EQ(qr.rows[1][0].as_int32(), 3);
 }
 
+TEST_F(QueryEngineTest, SelectWithLargeOffsetNoOrderBy) {
+    // Tests the OFFSET pushdown into SeqScan (skip rows without deserializing).
+    create_test_table();
+    insert_test_data(); // inserts 3 rows: id 1, 2, 3
+
+    // OFFSET without ORDER BY — uses the SeqScan skip optimization.
+    auto qr = exec_ok("SELECT * FROM users LIMIT 1 OFFSET 2");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    // Exactly 1 row returned after skipping 2.
+
+    // OFFSET past all rows → empty result.
+    auto qr2 = exec_ok("SELECT * FROM users LIMIT 5 OFFSET 10");
+    EXPECT_EQ(qr2.rows.size(), 0u);
+}
+
 TEST_F(QueryEngineTest, SelectOrderByAndLimit) {
     create_test_table();
     insert_test_data();

@@ -24,6 +24,9 @@ enum class PageType : uint8_t {
     HNSW_NODE,
     HNSW_META,
     HNSW_VECTOR_DATA,
+    BTREE_META,
+    HASH_META,
+    HASH_BUCKET,
 };
 
 /// Slot identifier within a page (0-based index into the slot directory).
@@ -124,6 +127,10 @@ public:
     /// Insert a tuple into the page. Returns the assigned slot ID.
     /// Fails if there is not enough free space for the tuple + slot entry.
     [[nodiscard]] Result<SlotId> insert_tuple(std::span<const uint8_t> data);
+
+    /// Check whether a slot is live (non-deleted) without copying tuple data.
+    /// Returns false for deleted slots or out-of-range slot IDs.
+    [[nodiscard]] bool is_slot_live(SlotId slot_id) const;
 
     /// Read a tuple by slot ID. Returns an owned copy of the tuple bytes.
     /// Fails if the slot ID is invalid or the slot is deleted.

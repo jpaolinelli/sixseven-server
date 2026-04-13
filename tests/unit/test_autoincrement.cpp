@@ -3,6 +3,7 @@
 #include "sixseven/common/types.h"
 #include "sixseven/common/value.h"
 #include "sixseven/executor/catalog_persistence.h"
+#include "sixseven/executor/index_manager.h"
 #include "sixseven/executor/query_engine.h"
 #include "sixseven/executor/storage_manager.h"
 #include "sixseven/executor/system_bootstrap.h"
@@ -42,6 +43,7 @@ protected:
     }
 
     void TearDown() override {
+        index_manager_.reset();
         engine_.reset();
         persistence_.reset();
         storage_.reset();
@@ -58,6 +60,7 @@ protected:
 
     /// Simulate a server restart: destroy all in-memory state and recreate.
     void restart() {
+        index_manager_.reset();
         engine_.reset();
         persistence_.reset();
         storage_.reset();
@@ -74,6 +77,13 @@ protected:
 
         // Re-run bootstrap to load catalog from disk.
         run_bootstrap();
+
+        // Rebuild indexes and initialize autoincrement counters.
+        index_manager_ = std::make_unique<IndexManager>(*catalog_, *storage_);
+        index_manager_->set_catalog_persistence(persistence_.get());
+        auto rebuild = index_manager_->rebuild_all_indexes();
+        ASSERT_TRUE(rebuild.has_value()) << rebuild.error().message;
+        engine_->set_index_manager(index_manager_.get());
     }
 
     QueryResult exec_ok(const std::string& sql) {
@@ -102,6 +112,7 @@ protected:
     std::unique_ptr<StorageManager> storage_;
     std::unique_ptr<CatalogPersistence> persistence_;
     std::unique_ptr<QueryEngine> engine_;
+    std::unique_ptr<IndexManager> index_manager_;
     Config config_;
 };
 

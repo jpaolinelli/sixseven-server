@@ -132,6 +132,12 @@ public:
     /// @return A pair of (RID, tuple data copy), or nullopt if scan is exhausted.
     [[nodiscard]] std::optional<std::pair<RID, std::vector<uint8_t>>> next();
 
+    /// Skip @p count live tuples without deserializing or copying their data.
+    /// Much faster than calling next() and discarding the result, because it
+    /// only checks the slot directory (4 bytes per slot) instead of copying
+    /// full tuple payloads.
+    void skip(size_t count);
+
 private:
     BufferPoolManager& bpm_;
     PageId current_page_;

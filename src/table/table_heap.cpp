@@ -468,4 +468,39 @@ std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
     return std::nullopt;
 }
 
+void TableIterator::skip(size_t count) {
+    size_t skipped = 0;
+
+    while (skipped < count && !exhausted_ && current_page_ < total_pages_) {
+        auto page_result = bpm_.fetch_page(current_page_);
+        if (!page_result) {
+            current_page_++;
+            current_slot_ = 0;
+            continue;
+        }
+
+        Page* page = *page_result;
+        uint16_t slot_count = page->slot_count();
+
+        // Count live slots on this page without copying tuple data.
+        while (current_slot_ < slot_count && skipped < count) {
+            if (page->is_slot_live(current_slot_)) {
+                ++skipped;
+            }
+            ++current_slot_;
+        }
+
+        (void)bpm_.unpin_page(current_page_, false);
+
+        if (current_slot_ >= slot_count) {
+            current_page_++;
+            current_slot_ = 0;
+        }
+    }
+
+    if (current_page_ >= total_pages_) {
+        exhausted_ = true;
+    }
+}
+
 } // namespace sixseven

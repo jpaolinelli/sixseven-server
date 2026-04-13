@@ -3,6 +3,7 @@
 #include "sixseven/common/crash_handler.h"
 #include "sixseven/common/logging.h"
 #include "sixseven/executor/catalog_persistence.h"
+#include "sixseven/executor/index_manager.h"
 #include "sixseven/executor/query_engine.h"
 #include "sixseven/executor/settings_cache.h"
 #include "sixseven/executor/storage_manager.h"
@@ -130,12 +131,31 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Load persisted edge data from disk.
-    auto edge_load = graph_engine.load_edges();
-    if (!edge_load) {
-        SIXSEVEN_LOG_ERROR("edge data load failed: {}", edge_load.error().message);
+    // Load B+ tree and hash indexes asynchronously from persisted disk files.
+    // Indexes are loaded in background threads; queries fall back to sequential
+    // scan until ready. On first run (no index files), rebuilds from table data
+    // and persists to disk for next startup.
+    sixseven::IndexManager index_manager(catalog, storage);
+    index_manager.set_catalog_persistence(&persistence);
+    engine.set_index_manager(&index_manager);
+    auto async_load = index_manager.start_async_load();
+    if (!async_load) {
+        SIXSEVEN_LOG_ERROR("index async load failed: {}", async_load.error().message);
         return 1;
     }
+
+    // Load persisted edge data in a background thread so the server can
+    // start accepting connections immediately.  GraphEngine::load_edges()
+    // holds its internal mutex, so edge queries arriving before loading
+    // finishes simply block until the data is ready — they won't crash.
+    std::atomic<bool> edge_load_ok{true};
+    std::jthread edge_load_thread([&graph_engine, &edge_load_ok]() {
+        auto edge_load = graph_engine.load_edges();
+        if (!edge_load) {
+            SIXSEVEN_LOG_ERROR("edge data load failed: {}", edge_load.error().message);
+            edge_load_ok.store(false);
+        }
+    });
 
     // Load settings cache and wire it to the engine.
     sixseven::SettingsCache settings_cache;
@@ -206,6 +226,20 @@ int main(int argc, char* argv[]) {
 
     auto result = server.start();
     g_server = nullptr;
+
+    // Wait for background edge loading to finish before teardown.
+    if (edge_load_thread.joinable()) {
+        edge_load_thread.join();
+    }
+
+    // Wait for any pending async index loading to complete.
+    index_manager.wait_for_load_complete();
+
+    // Persist all in-memory indexes to disk for fast startup next time.
+    auto flush_indexes = index_manager.flush_all_indexes();
+    if (!flush_indexes) {
+        SIXSEVEN_LOG_WARN("index flush failed: {}", flush_indexes.error().message);
+    }
 
     // Stop embedding worker pool before teardown.
     if (embedding_pool.is_running()) {

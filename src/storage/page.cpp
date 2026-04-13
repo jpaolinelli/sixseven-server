@@ -120,6 +120,14 @@ Result<SlotId> Page::insert_tuple(std::span<const uint8_t> data) {
     return ok(reuse_slot);
 }
 
+bool Page::is_slot_live(SlotId slot_id) const {
+    std::shared_lock lock(latch_);
+    if (slot_id >= slot_count()) {
+        return false;
+    }
+    return read_slot(slot_id).offset != 0;
+}
+
 Result<std::vector<uint8_t>> Page::get_tuple(SlotId slot_id) const {
     // Take the latch in shared mode across the entire slot-directory read +
     // tuple-byte copy. This is what prevents torn reads against a concurrent
