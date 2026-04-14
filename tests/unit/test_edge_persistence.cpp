@@ -458,3 +458,177 @@ TEST(ParseTypeId, UnknownReturnsNullopt) {
     EXPECT_FALSE(parse_type_id("UNKNOWN").has_value());
     EXPECT_FALSE(parse_type_id("").has_value());
 }
+
+// == Edge index persistence ===================================================
+
+TEST_F(EdgePersistenceTest, EdgeIndexPersistAndLoad) {
+    // Create edge type and insert edges.
+    auto et = engine_->create_edge_type(default_database_id,
+                                        "follows",
+                                        users_table_id_,
+                                        users_table_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {});
+    ASSERT_TRUE(et.has_value()) << et.error().message;
+
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(1), pk(2)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(1), pk(3)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(2), pk(3)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(3), pk(1)).has_value());
+
+    // Flush edge indexes to disk (simulates clean shutdown).
+    auto flush = engine_->flush_edge_indexes();
+    ASSERT_TRUE(flush.has_value()) << flush.error().message;
+
+    // Verify index files exist.
+    auto fwd_path = data_dir_ / "databases" / std::to_string(default_database_id) / "edges" /
+                    ("edge_" + std::to_string(*et) + "_fwd.db");
+    auto rev_path = data_dir_ / "databases" / std::to_string(default_database_id) / "edges" /
+                    ("edge_" + std::to_string(*et) + "_rev.db");
+    EXPECT_TRUE(std::filesystem::exists(fwd_path));
+    EXPECT_TRUE(std::filesystem::exists(rev_path));
+
+    // Restart — should use fast path (persisted indexes).
+    engine_ = restart_engine();
+
+    // Verify all forward edges.
+    auto from_1 = engine_->get_edges_from(default_database_id, "follows", pk(1));
+    ASSERT_TRUE(from_1.has_value()) << from_1.error().message;
+    EXPECT_EQ(from_1->size(), 2u);
+
+    auto from_2 = engine_->get_edges_from(default_database_id, "follows", pk(2));
+    ASSERT_TRUE(from_2.has_value()) << from_2.error().message;
+    EXPECT_EQ(from_2->size(), 1u);
+
+    auto from_3 = engine_->get_edges_from(default_database_id, "follows", pk(3));
+    ASSERT_TRUE(from_3.has_value()) << from_3.error().message;
+    EXPECT_EQ(from_3->size(), 1u);
+
+    // Verify reverse edges.
+    auto to_1 = engine_->get_edges_to(default_database_id, "follows", pk(1));
+    ASSERT_TRUE(to_1.has_value()) << to_1.error().message;
+    EXPECT_EQ(to_1->size(), 1u);
+
+    auto to_3 = engine_->get_edges_to(default_database_id, "follows", pk(3));
+    ASSERT_TRUE(to_3.has_value()) << to_3.error().message;
+    EXPECT_EQ(to_3->size(), 2u);
+
+    // New edges should still work after loading persisted indexes.
+    auto new_link = engine_->link(default_database_id, "follows", pk(4), pk(5));
+    ASSERT_TRUE(new_link.has_value()) << new_link.error().message;
+
+    auto from_4 = engine_->get_edges_from(default_database_id, "follows", pk(4));
+    ASSERT_TRUE(from_4.has_value()) << from_4.error().message;
+    EXPECT_EQ(from_4->size(), 1u);
+}
+
+TEST_F(EdgePersistenceTest, EdgeIndexStalenessDetection) {
+    // Create edge type and insert edges.
+    auto et = engine_->create_edge_type(default_database_id,
+                                        "follows",
+                                        users_table_id_,
+                                        users_table_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {});
+    ASSERT_TRUE(et.has_value()) << et.error().message;
+
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(1), pk(2)).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(1), pk(3)).has_value());
+
+    // Flush indexes (count=2 stored in heap header).
+    auto flush = engine_->flush_edge_indexes();
+    ASSERT_TRUE(flush.has_value()) << flush.error().message;
+
+    // Add more edges WITHOUT flushing indexes (simulates crash before clean shutdown).
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(2), pk(3)).has_value());
+
+    // Restart — should detect staleness (index has 2 entries, heap has 3 rows)
+    // and fall back to full rebuild.
+    engine_ = restart_engine();
+
+    // Despite staleness, all 3 edges should be available (rebuilt from heap).
+    auto all = engine_->get_all_edges(default_database_id, "follows");
+    ASSERT_TRUE(all.has_value()) << all.error().message;
+    EXPECT_EQ(all->size(), 3u);
+
+    // Forward index should work correctly after rebuild.
+    auto from_1 = engine_->get_edges_from(default_database_id, "follows", pk(1));
+    ASSERT_TRUE(from_1.has_value()) << from_1.error().message;
+    EXPECT_EQ(from_1->size(), 2u);
+
+    auto from_2 = engine_->get_edges_from(default_database_id, "follows", pk(2));
+    ASSERT_TRUE(from_2.has_value()) << from_2.error().message;
+    EXPECT_EQ(from_2->size(), 1u);
+}
+
+TEST_F(EdgePersistenceTest, DropEdgeTypeRemovesIndexFiles) {
+    auto et = engine_->create_edge_type(default_database_id,
+                                        "follows",
+                                        users_table_id_,
+                                        users_table_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {});
+    ASSERT_TRUE(et.has_value()) << et.error().message;
+
+    ASSERT_TRUE(engine_->link(default_database_id, "follows", pk(1), pk(2)).has_value());
+
+    // Flush indexes.
+    auto flush = engine_->flush_edge_indexes();
+    ASSERT_TRUE(flush.has_value()) << flush.error().message;
+
+    auto base = data_dir_ / "databases" / std::to_string(default_database_id) / "edges";
+    auto heap_path = base / ("edge_" + std::to_string(*et) + ".db");
+    auto fwd_path = base / ("edge_" + std::to_string(*et) + "_fwd.db");
+    auto rev_path = base / ("edge_" + std::to_string(*et) + "_rev.db");
+
+    EXPECT_TRUE(std::filesystem::exists(heap_path));
+    EXPECT_TRUE(std::filesystem::exists(fwd_path));
+    EXPECT_TRUE(std::filesystem::exists(rev_path));
+
+    // Drop edge type.
+    ASSERT_TRUE(engine_->drop_edge_type(default_database_id, "follows").has_value());
+
+    // All files should be removed.
+    EXPECT_FALSE(std::filesystem::exists(heap_path));
+    EXPECT_FALSE(std::filesystem::exists(fwd_path));
+    EXPECT_FALSE(std::filesystem::exists(rev_path));
+}
+
+TEST_F(EdgePersistenceTest, EdgeIndexWithProperties) {
+    // Create edge type with properties.
+    std::vector<ColumnDef> props = {{"weight", TypeId::FLOAT64}, {"label", TypeId::STRING}};
+    auto et = engine_->create_edge_type(default_database_id,
+                                        "rated",
+                                        users_table_id_,
+                                        posts_table_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        props);
+    ASSERT_TRUE(et.has_value()) << et.error().message;
+
+    ASSERT_TRUE(engine_->link(default_database_id, "rated", pk(1), pk(100),
+                              {Value(4.5), Value(std::string("good"))}).has_value());
+    ASSERT_TRUE(engine_->link(default_database_id, "rated", pk(2), pk(100),
+                              {Value(3.0), Value(std::string("ok"))}).has_value());
+
+    // Flush indexes.
+    auto flush = engine_->flush_edge_indexes();
+    ASSERT_TRUE(flush.has_value()) << flush.error().message;
+
+    // Restart with persisted indexes.
+    engine_ = restart_engine();
+
+    // Verify edges and properties survived.
+    auto from_1 = engine_->get_edges_from(default_database_id, "rated", pk(1));
+    ASSERT_TRUE(from_1.has_value()) << from_1.error().message;
+    ASSERT_EQ(from_1->size(), 1u);
+    EXPECT_DOUBLE_EQ((*from_1)[0].properties[0].as_float64(), 4.5);
+    EXPECT_EQ((*from_1)[0].properties[1].as_string(), "good");
+
+    auto to_100 = engine_->get_edges_to(default_database_id, "rated", pk(100));
+    ASSERT_TRUE(to_100.has_value()) << to_100.error().message;
+    EXPECT_EQ(to_100->size(), 2u);
+}

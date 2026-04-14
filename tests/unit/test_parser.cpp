@@ -1968,6 +1968,7 @@ public:
     void visit(const ExplainStmt&) override { visited_type = "ExplainStmt"; }
     void visit(const DescribeStmt&) override { visited_type = "DescribeStmt"; }
     void visit(const ReembedStmt&) override { visited_type = "ReembedStmt"; }
+    void visit(const ReindexStmt&) override { visited_type = "ReindexStmt"; }
     void visit(const VacuumStmt&) override { visited_type = "VacuumStmt"; }
     void visit(const AnalyzeStmt&) override { visited_type = "AnalyzeStmt"; }
 };

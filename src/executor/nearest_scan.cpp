@@ -1,5 +1,6 @@
 #include "sixseven/executor/nearest_scan.h"
 
+#include "sixseven/common/logging.h"
 #include "sixseven/executor/expr_evaluator.h"
 
 #include <algorithm>
@@ -14,9 +15,11 @@ NearestScanOperator::NearestScanOperator(TableHeap& heap,
                                          OutputSchema schema,
                                          const Expr* where_expr,
                                          const BoundStatement& bound,
-                                         HnswIndex* hnsw_index)
+                                         HnswIndex* hnsw_index,
+                                         std::vector<RID>* hnsw_rid_map)
     : heap_(heap), storage_schema_(storage_schema), config_(std::move(config)),
-      schema_(std::move(schema)), where_expr_(where_expr), bound_(bound), hnsw_index_(hnsw_index) {}
+      schema_(std::move(schema)), where_expr_(where_expr), bound_(bound),
+      hnsw_index_(hnsw_index), hnsw_rid_map_(hnsw_rid_map) {}
 
 std::string NearestScanOperator::plan_node_name() const {
     return "Nearest Scan";
@@ -35,8 +38,13 @@ Result<void> NearestScanOperator::do_open() {
     }
 
     if (hnsw_index_ != nullptr && hnsw_index_->node_count() > 0) {
+        SIXSEVEN_LOG_DEBUG("NEAREST: using HNSW index (node_count={}, rid_map={})",
+                            hnsw_index_->node_count(),
+                            hnsw_rid_map_ ? hnsw_rid_map_->size() : 0);
         return execute_hnsw_search();
     }
+    SIXSEVEN_LOG_DEBUG("NEAREST: using brute-force scan (hnsw={})",
+                        hnsw_index_ != nullptr ? "empty" : "null");
     return execute_brute_force();
 }
 
@@ -169,46 +177,77 @@ Result<void> NearestScanOperator::execute_hnsw_search() {
         return make_error(search_results.error().code, search_results.error().message);
     }
 
-    // Build node_id → distance mapping for the search results.
-    std::unordered_map<uint32_t, float> result_distances;
-    for (const auto& sr : *search_results) {
-        result_distances[sr.node_id] = sr.distance;
-    }
-
-    // Scan table to collect matching rows.
-    auto it = heap_.begin();
-    if (!it) {
-        return make_error(it.error().code, it.error().message);
-    }
-
     struct MatchedRow {
         float distance;
         Tuple tuple;
     };
     std::vector<MatchedRow> matched;
 
-    uint32_t node_ordinal = 0;
-    while (true) {
-        auto row = it->next();
-        if (!row) {
-            break;
+    SIXSEVEN_LOG_DEBUG("NEAREST: HNSW returned {} candidates", search_results->size());
+
+    // Fast path: use node_id → RID map for direct tuple lookups (O(k)).
+    if (hnsw_rid_map_ != nullptr && !hnsw_rid_map_->empty()) {
+        SIXSEVEN_LOG_DEBUG("NEAREST: using RID map (size={})", hnsw_rid_map_->size());
+        for (const auto& sr : *search_results) {
+            if (sr.node_id >= hnsw_rid_map_->size()) {
+                SIXSEVEN_LOG_DEBUG("NEAREST: node_id {} out of range (map_size={})",
+                                   sr.node_id, hnsw_rid_map_->size());
+                continue; // Out of range — skip.
+            }
+            auto rid = (*hnsw_rid_map_)[sr.node_id];
+            auto data = heap_.get_tuple(rid);
+            if (!data) {
+                SIXSEVEN_LOG_DEBUG("NEAREST: get_tuple failed for node_id={} rid=({},{}): {}",
+                                   sr.node_id, rid.page_id, rid.slot_id, data.error().message);
+                continue; // Deleted row — skip.
+            }
+            auto values = TupleSerializer::deserialize(*data, storage_schema_);
+            if (!values) {
+                return make_error(values.error().code, values.error().message);
+            }
+            Tuple tuple{std::move(*values), rid};
+            matched.push_back({sr.distance, std::move(tuple)});
+        }
+    } else {
+        // Slow fallback: full table scan to map node_id → row.
+        // node_ordinal only increments for rows with non-null embeddings,
+        // matching the insertion order during rebuild_hnsw_from_table.
+        std::unordered_map<uint32_t, float> result_distances;
+        for (const auto& sr : *search_results) {
+            result_distances[sr.node_id] = sr.distance;
         }
 
-        auto dist_it = result_distances.find(node_ordinal);
-        if (dist_it == result_distances.end()) {
+        auto it = heap_.begin();
+        if (!it) {
+            return make_error(it.error().code, it.error().message);
+        }
+
+        auto emb_idx = static_cast<size_t>(config_.embedding_column_index);
+        uint32_t node_ordinal = 0;
+        while (true) {
+            auto row = it->next();
+            if (!row) {
+                break;
+            }
+
+            auto& [rid, data] = *row;
+            auto values = TupleSerializer::deserialize(data, storage_schema_);
+            if (!values) {
+                return make_error(values.error().code, values.error().message);
+            }
+
+            // Only count rows with non-null embeddings as HNSW nodes.
+            if (emb_idx >= values->size() || (*values)[emb_idx].is_null()) {
+                continue;
+            }
+
+            auto dist_it = result_distances.find(node_ordinal);
+            if (dist_it != result_distances.end()) {
+                Tuple tuple{std::move(*values), rid};
+                matched.push_back({dist_it->second, std::move(tuple)});
+            }
             ++node_ordinal;
-            continue;
         }
-
-        auto& [rid, data] = *row;
-        auto values = TupleSerializer::deserialize(data, storage_schema_);
-        if (!values) {
-            return make_error(values.error().code, values.error().message);
-        }
-
-        Tuple tuple{std::move(*values), rid};
-        matched.push_back({dist_it->second, std::move(tuple)});
-        ++node_ordinal;
     }
 
     // Sort by distance ASC.

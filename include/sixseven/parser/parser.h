@@ -125,6 +125,7 @@ private:
     [[nodiscard]] Result<StmtPtr> parse_explain();
     [[nodiscard]] Result<StmtPtr> parse_describe();
     [[nodiscard]] Result<StmtPtr> parse_reembed();
+    [[nodiscard]] Result<StmtPtr> parse_reindex();
     [[nodiscard]] Result<StmtPtr> parse_vacuum();
     [[nodiscard]] Result<StmtPtr> parse_analyze_stmt();
 

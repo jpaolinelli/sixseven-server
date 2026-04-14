@@ -196,51 +196,123 @@ Result<PageId> BTreePersistence::persist(BufferPoolManager& bpm,
         (void)bpm.unpin_page(page->page_id(), /*is_dirty=*/true);
     }
 
-    // Build meta page data.
-    std::vector<uint8_t> meta_buf;
-    write_u32(meta_buf, index.root_page_id_);
-    write_u64(meta_buf, index.size_);
-    write_u32(meta_buf, index.next_page_id_);
-    write_u16(meta_buf, index.config_.internal_max_keys);
-    write_u16(meta_buf, index.config_.leaf_max_keys);
-    write_u8(meta_buf, index.config_.is_unique ? 1 : 0);
-
-    // Key types
-    write_u8(meta_buf, static_cast<uint8_t>(index.config_.key_types.size()));
-    for (auto t : index.config_.key_types) {
-        write_u8(meta_buf, static_cast<uint8_t>(t));
-    }
-
-    // Leaf page directory: count + (mem_page_id, disk_page_id) pairs
-    write_u32(meta_buf, static_cast<uint32_t>(leaf_records.size()));
+    // Build the page directory bytes: leaf mappings followed by internal mappings.
+    std::vector<uint8_t> dir_buf;
+    dir_buf.reserve((leaf_records.size() + internal_records.size()) * 8 + 8);
+    write_u32(dir_buf, static_cast<uint32_t>(leaf_records.size()));
     for (size_t i = 0; i < leaf_records.size(); ++i) {
-        write_u32(meta_buf, leaf_records[i].mem_page_id);
-        write_u32(meta_buf, leaf_disk_pages[i]);
+        write_u32(dir_buf, leaf_records[i].mem_page_id);
+        write_u32(dir_buf, leaf_disk_pages[i]);
     }
-
-    // Internal page directory
-    write_u32(meta_buf, static_cast<uint32_t>(internal_records.size()));
+    write_u32(dir_buf, static_cast<uint32_t>(internal_records.size()));
     for (size_t i = 0; i < internal_records.size(); ++i) {
-        write_u32(meta_buf, internal_records[i].mem_page_id);
-        write_u32(meta_buf, internal_disk_pages[i]);
+        write_u32(dir_buf, internal_records[i].mem_page_id);
+        write_u32(dir_buf, internal_disk_pages[i]);
     }
 
-    // Write meta page.
-    auto meta_page_r = bpm.new_page();
-    if (!meta_page_r) {
-        return make_error(meta_page_r.error().code,
-                          "btree persist: failed to allocate meta page: " +
-                              meta_page_r.error().message);
+    // Build meta page header (fixed-size portion that always fits in one page).
+    // Format version 0 = legacy inline, version 2 = overflow pages.
+    // We try inline first; if it doesn't fit, use overflow.
+    std::vector<uint8_t> header_buf;
+    auto build_header = [&](bool include_directory) {
+        header_buf.clear();
+        if (!include_directory) {
+            // Version 2 sentinel: first byte 0 signals multi-page format.
+            write_u8(header_buf, 0);    // sentinel
+            write_u8(header_buf, 2);    // version
+        }
+        write_u32(header_buf, index.root_page_id_);
+        write_u64(header_buf, index.size_);
+        write_u32(header_buf, index.next_page_id_);
+        write_u16(header_buf, index.config_.internal_max_keys);
+        write_u16(header_buf, index.config_.leaf_max_keys);
+        write_u8(header_buf, index.config_.is_unique ? 1 : 0);
+        write_u8(header_buf, static_cast<uint8_t>(index.config_.key_types.size()));
+        for (auto t : index.config_.key_types) {
+            write_u8(header_buf, static_cast<uint8_t>(t));
+        }
+    };
+
+    // Try inline format first (original single-page meta).
+    build_header(/*include_directory=*/true);
+    std::vector<uint8_t> inline_buf;
+    inline_buf.reserve(header_buf.size() + dir_buf.size());
+    inline_buf.insert(inline_buf.end(), header_buf.begin(), header_buf.end());
+    inline_buf.insert(inline_buf.end(), dir_buf.begin(), dir_buf.end());
+
+    // Approximate check: page_size - header(24) - slot_entry(4) ≈ 8164 usable bytes.
+    constexpr size_t MAX_INLINE_SIZE = 8100;
+
+    PageId meta_page_id = 0;
+
+    if (inline_buf.size() <= MAX_INLINE_SIZE) {
+        // Small tree — write everything inline (backward-compatible).
+        auto meta_page_r = bpm.new_page();
+        if (!meta_page_r) {
+            return make_error(meta_page_r.error().code,
+                              "btree persist: failed to allocate meta page: " +
+                                  meta_page_r.error().message);
+        }
+        auto* meta_page = *meta_page_r;
+        meta_page_id = meta_page->page_id();
+        meta_page->reset(meta_page_id, PageType::BTREE_META);
+        auto slot = meta_page->insert_tuple(std::span<const uint8_t>(inline_buf));
+        if (!slot) {
+            return make_error(slot.error().code,
+                              "btree persist: meta data too large for page: " +
+                                  slot.error().message);
+        }
+        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/true);
+    } else {
+        // Large tree — write directory to overflow pages, meta page gets compact header.
+        // Chunk directory into pages (~8100 bytes per page).
+        std::vector<PageId> overflow_page_ids;
+        size_t offset = 0;
+        while (offset < dir_buf.size()) {
+            size_t chunk_size = std::min(MAX_INLINE_SIZE, dir_buf.size() - offset);
+            auto ovf_page_r = bpm.new_page();
+            if (!ovf_page_r) {
+                return make_error(ovf_page_r.error().code,
+                                  "btree persist: failed to allocate overflow page: " +
+                                      ovf_page_r.error().message);
+            }
+            auto* ovf_page = *ovf_page_r;
+            ovf_page->reset(ovf_page->page_id(), PageType::BTREE_META);
+            auto ovf_slot = ovf_page->insert_tuple(
+                std::span<const uint8_t>(dir_buf.data() + offset, chunk_size));
+            if (!ovf_slot) {
+                return make_error(ovf_slot.error().code,
+                                  "btree persist: overflow chunk too large: " +
+                                      ovf_slot.error().message);
+            }
+            overflow_page_ids.push_back(ovf_page->page_id());
+            (void)bpm.unpin_page(ovf_page->page_id(), /*is_dirty=*/true);
+            offset += chunk_size;
+        }
+
+        // Build version-2 meta header + overflow page references.
+        build_header(/*include_directory=*/false);
+        write_u32(header_buf, static_cast<uint32_t>(overflow_page_ids.size()));
+        for (auto ovf_id : overflow_page_ids) {
+            write_u32(header_buf, ovf_id);
+        }
+
+        auto meta_page_r = bpm.new_page();
+        if (!meta_page_r) {
+            return make_error(meta_page_r.error().code,
+                              "btree persist: failed to allocate meta page: " +
+                                  meta_page_r.error().message);
+        }
+        auto* meta_page = *meta_page_r;
+        meta_page_id = meta_page->page_id();
+        meta_page->reset(meta_page_id, PageType::BTREE_META);
+        auto slot = meta_page->insert_tuple(std::span<const uint8_t>(header_buf));
+        if (!slot) {
+            return make_error(slot.error().code,
+                              "btree persist: v2 meta header too large: " + slot.error().message);
+        }
+        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/true);
     }
-    auto* meta_page = *meta_page_r;
-    PageId meta_page_id = meta_page->page_id();
-    meta_page->reset(meta_page_id, PageType::BTREE_META);
-    auto slot = meta_page->insert_tuple(std::span<const uint8_t>(meta_buf));
-    if (!slot) {
-        return make_error(slot.error().code,
-                          "btree persist: meta data too large for page: " + slot.error().message);
-    }
-    (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/true);
 
     // Flush all pages to disk.
     auto flush = bpm.flush_all();
@@ -283,6 +355,15 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
 
     const uint8_t* p = meta_data->data();
 
+    // Detect format version. Version 2 starts with sentinel byte 0 + version byte 2.
+    // Legacy format starts with root_page_id (u32 LE). When root_page_id is 0 (empty tree),
+    // the first two bytes are [0x00, 0x00], which differs from v2's [0x00, 0x02].
+    bool is_v2 = (meta_data->size() >= 2 && p[0] == 0 && p[1] == 2);
+    if (is_v2) {
+        p += 1; // skip sentinel
+        p += 1; // skip version byte
+    }
+
     PageId root_page_id = read_u32(p);
     uint64_t tree_size = read_u64(p);
     PageId next_page_id = read_u32(p);
@@ -297,24 +378,72 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
         key_types.push_back(static_cast<TypeId>(read_u8(p)));
     }
 
-    // Read leaf page directory.
-    uint32_t leaf_count = read_u32(p);
+    // Read page directory — either inline (legacy) or from overflow pages (v2).
     struct PageMapping {
         PageId mem_page_id;
         PageId disk_page_id;
     };
-    std::vector<PageMapping> leaf_mappings(leaf_count);
-    for (uint32_t i = 0; i < leaf_count; ++i) {
-        leaf_mappings[i].mem_page_id = read_u32(p);
-        leaf_mappings[i].disk_page_id = read_u32(p);
-    }
+    std::vector<PageMapping> leaf_mappings;
+    std::vector<PageMapping> internal_mappings;
 
-    // Read internal page directory.
-    uint32_t internal_count = read_u32(p);
-    std::vector<PageMapping> internal_mappings(internal_count);
-    for (uint32_t i = 0; i < internal_count; ++i) {
-        internal_mappings[i].mem_page_id = read_u32(p);
-        internal_mappings[i].disk_page_id = read_u32(p);
+    if (!is_v2) {
+        // Legacy inline directory.
+        uint32_t leaf_count = read_u32(p);
+        leaf_mappings.resize(leaf_count);
+        for (uint32_t i = 0; i < leaf_count; ++i) {
+            leaf_mappings[i].mem_page_id = read_u32(p);
+            leaf_mappings[i].disk_page_id = read_u32(p);
+        }
+        uint32_t internal_count = read_u32(p);
+        internal_mappings.resize(internal_count);
+        for (uint32_t i = 0; i < internal_count; ++i) {
+            internal_mappings[i].mem_page_id = read_u32(p);
+            internal_mappings[i].disk_page_id = read_u32(p);
+        }
+    } else {
+        // Version 2: read overflow page IDs, then reassemble directory from those pages.
+        uint32_t overflow_count = read_u32(p);
+        std::vector<PageId> overflow_ids(overflow_count);
+        for (uint32_t i = 0; i < overflow_count; ++i) {
+            overflow_ids[i] = read_u32(p);
+        }
+
+        // Concatenate all overflow page tuples into one directory buffer.
+        std::vector<uint8_t> dir_buf;
+        for (auto ovf_id : overflow_ids) {
+            auto ovf_page_r = bpm.fetch_page(ovf_id);
+            if (!ovf_page_r) {
+                (void)bpm.unpin_page(meta_page_id, false);
+                return make_error(ovf_page_r.error().code,
+                                  "btree load: failed to fetch overflow page: " +
+                                      ovf_page_r.error().message);
+            }
+            auto ovf_tuple = (*ovf_page_r)->get_tuple(0);
+            if (!ovf_tuple) {
+                (void)bpm.unpin_page(ovf_id, false);
+                (void)bpm.unpin_page(meta_page_id, false);
+                return make_error(ovf_tuple.error().code,
+                                  "btree load: failed to read overflow tuple: " +
+                                      ovf_tuple.error().message);
+            }
+            dir_buf.insert(dir_buf.end(), ovf_tuple->begin(), ovf_tuple->end());
+            (void)bpm.unpin_page(ovf_id, false);
+        }
+
+        // Parse directory from concatenated buffer.
+        const uint8_t* dp = dir_buf.data();
+        uint32_t leaf_count = read_u32(dp);
+        leaf_mappings.resize(leaf_count);
+        for (uint32_t i = 0; i < leaf_count; ++i) {
+            leaf_mappings[i].mem_page_id = read_u32(dp);
+            leaf_mappings[i].disk_page_id = read_u32(dp);
+        }
+        uint32_t internal_count = read_u32(dp);
+        internal_mappings.resize(internal_count);
+        for (uint32_t i = 0; i < internal_count; ++i) {
+            internal_mappings[i].mem_page_id = read_u32(dp);
+            internal_mappings[i].disk_page_id = read_u32(dp);
+        }
     }
 
     (void)bpm.unpin_page(meta_page_id, false);

@@ -136,6 +136,7 @@ enum class TokenType : uint8_t {
     PATH,
     RECURSIVE,
     REEMBED,
+    REINDEX,
     RETURN,
     SHORTEST,
     TRAVERSE,
@@ -435,6 +436,8 @@ constexpr std::string_view token_type_name(TokenType type) {
         return "RECURSIVE";
     case TokenType::REEMBED:
         return "REEMBED";
+    case TokenType::REINDEX:
+        return "REINDEX";
     case TokenType::RETURN:
         return "RETURN";
     case TokenType::SHORTEST:

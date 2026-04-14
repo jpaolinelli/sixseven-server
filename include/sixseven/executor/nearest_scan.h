@@ -5,6 +5,7 @@
 #include "sixseven/executor/tuple.h"
 #include "sixseven/parser/ast.h"
 #include "sixseven/planner/binder.h"
+#include "sixseven/index/rid.h"
 #include "sixseven/table/table_heap.h"
 #include "sixseven/table/tuple.h"
 #include "sixseven/vector/distance.h"
@@ -63,13 +64,15 @@ public:
     /// @param where_expr      Optional WHERE predicate (applied post-search).
     /// @param bound           BoundStatement for expression evaluation.
     /// @param hnsw_index      Optional HNSW index for accelerated search.
+    /// @param hnsw_rid_map    Optional node_id → RID map for direct tuple lookups.
     NearestScanOperator(TableHeap& heap,
                         const Schema& storage_schema,
                         NearestScanConfig config,
                         OutputSchema schema,
                         const Expr* where_expr,
                         const BoundStatement& bound,
-                        HnswIndex* hnsw_index = nullptr);
+                        HnswIndex* hnsw_index = nullptr,
+                        std::vector<RID>* hnsw_rid_map = nullptr);
 
     const OutputSchema& output_schema() const override;
 
@@ -105,6 +108,7 @@ private:
     const Expr* where_expr_;
     const BoundStatement& bound_;
     HnswIndex* hnsw_index_;
+    std::vector<RID>* hnsw_rid_map_;
 
     /// Output schema for WHERE predicate evaluation (excludes _distance).
     /// Built once in open() to avoid per-row allocation.

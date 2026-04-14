@@ -11,12 +11,19 @@
 #include "sixseven/index/btree_index.h"
 #include "sixseven/index/hash_index.h"
 #include "sixseven/storage/disk_manager.h"
+#include "sixseven/vector/builtin_provider.h"
+#include "sixseven/vector/embedding_column.h"
+#include "sixseven/vector/embedding_worker.h"
+#include "sixseven/vector/hnsw_index.h"
+#include "sixseven/vector/provider_registry.h"
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <thread>
 
 #include "test_catalog_helpers.h"
 
@@ -490,4 +497,300 @@ TEST_F(IndexManagerTest, FlushPersistsLatestState) {
     // updates the index, or 1 if not). Actual count depends on whether
     // INSERT goes through the index manager.
     EXPECT_GE(it->second->size(), 1u);
+}
+
+// =============================================================================
+// HNSW index tests — requires embedding infrastructure
+// =============================================================================
+
+class HnswIndexManagerTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_hnsw_idx_mgr";
+        std::filesystem::remove_all(data_dir_);
+        std::filesystem::create_directories(data_dir_);
+
+        dm_ = std::make_unique<DiskManager>();
+        catalog_ = std::make_unique<Catalog>();
+        init_test_catalog(*catalog_);
+        storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
+        persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
+        provider_registry_ = std::make_unique<ProviderRegistry>(*catalog_);
+        pool_ = std::make_unique<EmbeddingWorkerPool>(
+            EmbeddingWorkerConfig{.num_workers = 1, .max_batch_size = 32});
+        pool_->register_provider("builtin/4", std::make_shared<BuiltinProvider>(4));
+        pool_->set_provider_registry(provider_registry_.get());
+        engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
+        engine_->set_catalog_persistence(persistence_.get());
+        engine_->set_provider_registry(provider_registry_.get());
+        engine_->set_embedding_worker_pool(pool_.get());
+
+        auto start = pool_->start();
+        ASSERT_TRUE(start.has_value()) << start.error().message;
+
+        config_ = Config::load_defaults();
+    }
+
+    void TearDown() override {
+        index_manager_.reset();
+        if (pool_ && pool_->is_running()) {
+            (void)pool_->stop();
+        }
+        engine_.reset();
+        pool_.reset();
+        provider_registry_.reset();
+        persistence_.reset();
+        storage_.reset();
+        catalog_.reset();
+        dm_.reset();
+        std::filesystem::remove_all(data_dir_);
+    }
+
+    void run_bootstrap() {
+        auto result = SystemBootstrap::bootstrap(
+            *engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
+        ASSERT_TRUE(result.has_value()) << result.error().message;
+    }
+
+    void rebuild_indexes() {
+        index_manager_ = std::make_unique<IndexManager>(*catalog_, *storage_);
+        index_manager_->set_catalog_persistence(persistence_.get());
+        engine_->set_index_manager(index_manager_.get());
+        engine_->set_hnsw_indexes(index_manager_->hnsw_map());
+        auto r = index_manager_->rebuild_all_indexes();
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+    }
+
+    /// Look up HNSW index_id by index name from the catalog.
+    index_id_t hnsw_index_id(const std::string& index_name) {
+        auto idx = catalog_->get_index(index_name);
+        EXPECT_TRUE(idx.has_value()) << "index '" << index_name << "' not found";
+        return idx ? idx->index_id : 0;
+    }
+
+    void restart() {
+        index_manager_.reset();
+        if (pool_ && pool_->is_running()) {
+            (void)pool_->stop();
+        }
+        engine_.reset();
+        pool_.reset();
+        provider_registry_.reset();
+        persistence_.reset();
+        storage_.reset();
+        catalog_.reset();
+        dm_.reset();
+
+        dm_ = std::make_unique<DiskManager>();
+        catalog_ = std::make_unique<Catalog>();
+        init_test_catalog(*catalog_);
+        storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
+        persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
+        provider_registry_ = std::make_unique<ProviderRegistry>(*catalog_);
+        pool_ = std::make_unique<EmbeddingWorkerPool>(
+            EmbeddingWorkerConfig{.num_workers = 1, .max_batch_size = 32});
+        pool_->register_provider("builtin/4", std::make_shared<BuiltinProvider>(4));
+        pool_->set_provider_registry(provider_registry_.get());
+        engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
+        engine_->set_catalog_persistence(persistence_.get());
+        engine_->set_provider_registry(provider_registry_.get());
+        engine_->set_embedding_worker_pool(pool_.get());
+
+        auto start = pool_->start();
+        ASSERT_TRUE(start.has_value()) << start.error().message;
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << result.error().message;
+        return std::move(*result);
+    }
+
+    bool wait_for_pool(std::chrono::milliseconds timeout = std::chrono::milliseconds{2000}) {
+        auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (pool_->pending_count() == 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds{50});
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+        }
+        return false;
+    }
+
+    std::filesystem::path data_dir_;
+    std::unique_ptr<DiskManager> dm_;
+    std::unique_ptr<Catalog> catalog_;
+    std::unique_ptr<StorageManager> storage_;
+    std::unique_ptr<CatalogPersistence> persistence_;
+    std::unique_ptr<ProviderRegistry> provider_registry_;
+    std::unique_ptr<EmbeddingWorkerPool> pool_;
+    std::unique_ptr<QueryEngine> engine_;
+    std::unique_ptr<IndexManager> index_manager_;
+    Config config_;
+};
+
+// =============================================================================
+// AC: HNSW index is created during CREATE TABLE with EMBEDDING
+// =============================================================================
+
+TEST_F(HnswIndexManagerTest, HnswCreatedOnCreateTable) {
+    run_bootstrap();
+    rebuild_indexes();
+
+    exec_ok("CREATE TABLE docs (id INT, body VARCHAR, body_vec EMBEDDING(4, body, 'builtin/4'))");
+
+    // The HNSW map should now contain the companion index.
+    auto* hnsw_map = index_manager_->hnsw_map();
+    auto index_name = EmbeddingColumnManager::make_index_name("docs", "body_vec");
+    auto it = hnsw_map->find(hnsw_index_id(index_name));
+    ASSERT_NE(it, hnsw_map->end());
+    EXPECT_EQ(it->second->node_count(), 0u);
+    EXPECT_EQ(it->second->dimension(), 4u);
+}
+
+// =============================================================================
+// AC: HNSW index rebuilt from table data on startup
+// =============================================================================
+
+TEST_F(HnswIndexManagerTest, HnswRebuiltFromTableData) {
+    run_bootstrap();
+    rebuild_indexes();
+
+    exec_ok("CREATE TABLE docs (id INT, body VARCHAR, body_vec EMBEDDING(4, body, 'builtin/4'))");
+    exec_ok("INSERT INTO docs (id, body) VALUES (1, 'hello world')");
+    exec_ok("INSERT INTO docs (id, body) VALUES (2, 'foo bar')");
+    exec_ok("INSERT INTO docs (id, body) VALUES (3, 'test data')");
+
+    // Wait for embedding workers to finish.
+    ASSERT_TRUE(wait_for_pool());
+
+    auto index_name = EmbeddingColumnManager::make_index_name("docs", "body_vec");
+
+    // Flush indexes to disk.
+    auto flush = index_manager_->flush_all_indexes();
+    ASSERT_TRUE(flush.has_value()) << flush.error().message;
+
+    // Restart — indexes should load from disk or rebuild from table data.
+    restart();
+    run_bootstrap();
+    rebuild_indexes();
+
+    auto* hnsw_map = index_manager_->hnsw_map();
+    auto it = hnsw_map->find(hnsw_index_id(index_name));
+    ASSERT_NE(it, hnsw_map->end());
+    EXPECT_EQ(it->second->node_count(), 3u);
+}
+
+// =============================================================================
+// AC: REINDEX rebuilds HNSW index
+// =============================================================================
+
+TEST_F(HnswIndexManagerTest, ReindexRebuildsHnsw) {
+    run_bootstrap();
+    rebuild_indexes();
+
+    exec_ok("CREATE TABLE docs (id INT, body VARCHAR, body_vec EMBEDDING(4, body, 'builtin/4'))");
+    exec_ok("INSERT INTO docs (id, body) VALUES (1, 'hello world')");
+    exec_ok("INSERT INTO docs (id, body) VALUES (2, 'foo bar')");
+
+    ASSERT_TRUE(wait_for_pool());
+
+    auto index_name = EmbeddingColumnManager::make_index_name("docs", "body_vec");
+    auto key = hnsw_index_id(index_name);
+    auto* hnsw_map = index_manager_->hnsw_map();
+
+    // Verify index has 2 nodes.
+    auto it = hnsw_map->find(key);
+    ASSERT_NE(it, hnsw_map->end());
+    EXPECT_EQ(it->second->node_count(), 2u);
+
+    // REINDEX should rebuild the index from table data.
+    exec_ok("REINDEX docs");
+
+    // After REINDEX, the map should have a (potentially new) index with 2 nodes.
+    it = hnsw_map->find(key);
+    ASSERT_NE(it, hnsw_map->end());
+    EXPECT_EQ(it->second->node_count(), 2u);
+}
+
+// =============================================================================
+// AC: REINDEX by index name
+// =============================================================================
+
+TEST_F(HnswIndexManagerTest, ReindexByIndexName) {
+    run_bootstrap();
+    rebuild_indexes();
+
+    exec_ok("CREATE TABLE items (id INT, description VARCHAR, desc_vec EMBEDDING(4, description, 'builtin/4'))");
+    exec_ok("INSERT INTO items (id, description) VALUES (1, 'red widget')");
+
+    ASSERT_TRUE(wait_for_pool());
+
+    auto index_name = EmbeddingColumnManager::make_index_name("items", "desc_vec");
+
+    exec_ok("REINDEX " + index_name);
+
+    auto* hnsw_map = index_manager_->hnsw_map();
+    auto it = hnsw_map->find(hnsw_index_id(index_name));
+    ASSERT_NE(it, hnsw_map->end());
+    EXPECT_EQ(it->second->node_count(), 1u);
+}
+
+// =============================================================================
+// AC: Parser accepts REINDEX syntax variations
+// =============================================================================
+
+TEST_F(HnswIndexManagerTest, ReindexParserSyntax) {
+    run_bootstrap();
+    rebuild_indexes();
+
+    exec_ok("CREATE TABLE syn (id INT, name VARCHAR, emb EMBEDDING(4, name, 'builtin/4'))");
+
+    // All syntax forms should succeed.
+    exec_ok("REINDEX syn");
+    exec_ok("REINDEX TABLE syn");
+    exec_ok("REINDEX INDEX " + EmbeddingColumnManager::make_index_name("syn", "emb"));
+}
+
+// =============================================================================
+// AC: Bootstrap migrates missing HNSW IndexDef for old deployments
+// =============================================================================
+
+TEST_F(HnswIndexManagerTest, BootstrapMigratesMissingHnswIndex) {
+    run_bootstrap();
+    rebuild_indexes();
+
+    exec_ok("CREATE TABLE docs (id INT, body VARCHAR, body_vec EMBEDDING(4, body, 'builtin/4'))");
+
+    auto index_name = EmbeddingColumnManager::make_index_name("docs", "body_vec");
+
+    // Verify index exists in catalog.
+    auto idx = catalog_->get_index(index_name);
+    ASSERT_TRUE(idx.has_value());
+
+    // Simulate an old deployment: remove the HNSW IndexDef from sys_indexes
+    // but leave the embedding column metadata intact.
+    auto remove_r = persistence_->remove_index(idx->index_id);
+    ASSERT_TRUE(remove_r.has_value()) << remove_r.error().message;
+    (void)catalog_->drop_index(idx->name);
+
+    // Confirm it's gone.
+    EXPECT_FALSE(catalog_->get_index(index_name).has_value());
+
+    // Restart — bootstrap should detect the missing HNSW entry and recreate it.
+    restart();
+    run_bootstrap();
+
+    // The migration should have created the IndexDef.
+    auto migrated_idx = catalog_->get_index(index_name);
+    ASSERT_TRUE(migrated_idx.has_value()) << "bootstrap did not migrate missing HNSW index";
+    EXPECT_EQ(migrated_idx->index_type, "hnsw");
+    EXPECT_EQ(migrated_idx->columns, "body_vec");
+
+    // IndexManager should be able to rebuild it.
+    rebuild_indexes();
+    auto* hnsw_map = index_manager_->hnsw_map();
+    auto it = hnsw_map->find(hnsw_index_id(index_name));
+    ASSERT_NE(it, hnsw_map->end());
 }

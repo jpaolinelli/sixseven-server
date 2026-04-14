@@ -245,6 +245,10 @@ public:
         last_type = "ReembedStmt";
         ++total;
     }
+    void visit(const ReindexStmt&) override {
+        last_type = "ReindexStmt";
+        ++total;
+    }
     void visit(const VacuumStmt&) override {
         last_type = "VacuumStmt";
         ++total;

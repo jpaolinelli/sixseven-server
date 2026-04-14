@@ -61,6 +61,7 @@ bool is_name_token(TokenType type) {
     case TokenType::LINK:
     case TokenType::UNLINK:
     case TokenType::REEMBED:
+    case TokenType::REINDEX:
     case TokenType::RETURN:
     case TokenType::VIA:
     case TokenType::ANALYZE:
@@ -390,6 +391,8 @@ Result<StmtPtr> Parser::parse_statement() {
         return parse_describe();
     case TokenType::REEMBED:
         return parse_reembed();
+    case TokenType::REINDEX:
+        return parse_reindex();
     case TokenType::VACUUM:
         return parse_vacuum();
     case TokenType::ANALYZE:
@@ -2948,6 +2951,24 @@ Result<StmtPtr> Parser::parse_reembed() {
     if (!name)
         return tl::unexpected(name.error());
     stmt->table_name = std::move(*name);
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- Admin: REINDEX -----------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_reindex() {
+    advance(); // consume REINDEX
+    // Optional INDEX or TABLE keyword.
+    if (!match(TokenType::INDEX)) {
+        match(TokenType::TABLE);
+    }
+    auto stmt = std::make_unique<ReindexStmt>();
+
+    auto name = parse_name("index or table name");
+    if (!name)
+        return tl::unexpected(name.error());
+    stmt->name = std::move(*name);
 
     return ok(StmtPtr(std::move(stmt)));
 }

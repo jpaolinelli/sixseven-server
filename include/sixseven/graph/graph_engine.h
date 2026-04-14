@@ -20,6 +20,12 @@
 
 namespace sixseven {
 
+/// Storage for a single persisted edge B+ tree index file.
+struct EdgeIndexStorage {
+    FileId file_id = 0;
+    std::unique_ptr<BufferPoolManager> bpm;
+};
+
 /// Per-edge-type persistent storage state.
 struct EdgeStorage {
     FileId file_id = 0;
@@ -29,6 +35,11 @@ struct EdgeStorage {
 
     /// Maps edge_row_id -> heap RID for O(1) delete lookups.
     std::unordered_map<uint64_t, RID> rid_map;
+
+    /// Persisted B+ tree index storage (one file each).
+    std::unique_ptr<EdgeIndexStorage> fwd_idx;
+    std::unique_ptr<EdgeIndexStorage> rev_idx;
+    std::unique_ptr<EdgeIndexStorage> uniq_idx; ///< nullptr if no unique constraint.
 };
 
 /// Manages graph edge types and provides LINK / UNLINK operations.
@@ -152,6 +163,11 @@ public:
     /// Must be called after catalog loading is complete.
     [[nodiscard]] Result<void> load_edges();
 
+    /// Persist all in-memory edge B+ tree indexes to disk.
+    /// Called at shutdown so indexes can be loaded directly on next startup
+    /// instead of being rebuilt from the edge heap.
+    [[nodiscard]] Result<void> flush_edge_indexes();
+
 private:
     /// Build a compound map key from database_id and edge type name.
     [[nodiscard]] static std::string make_edge_key(database_id_t database_id,
@@ -173,6 +189,23 @@ private:
     /// Build the file path for an edge type storage file.
     [[nodiscard]] std::filesystem::path edge_file_path(database_id_t database_id,
                                                        edge_id_t edge_id) const;
+
+    /// Build the file path for an edge index file (fwd, rev, or uniq).
+    [[nodiscard]] std::filesystem::path edge_index_path(database_id_t database_id,
+                                                        edge_id_t edge_id,
+                                                        const std::string& suffix) const;
+
+    /// Persist the B+ tree indexes for a single edge type to disk.
+    [[nodiscard]] Result<void> persist_edge_indexes(const std::string& edge_key,
+                                                     database_id_t database_id,
+                                                     edge_id_t edge_id);
+
+    /// Load B+ tree indexes for a single edge type from disk.
+    /// Returns true if indexes were loaded, false if fallback rebuild is needed.
+    [[nodiscard]] Result<bool> load_edge_indexes(const std::string& edge_key,
+                                                  database_id_t database_id,
+                                                  edge_id_t edge_id,
+                                                  EdgeTable& edge_table);
 
     /// Create persistent storage for an edge type.
     [[nodiscard]] Result<void> create_edge_storage(database_id_t database_id,

@@ -10,6 +10,7 @@
 #include "sixseven/graph/graph_engine.h"
 #include "sixseven/index/btree_index.h"
 #include "sixseven/index/hash_index.h"
+#include "sixseven/index/rid.h"
 #include "sixseven/parser/ast.h"
 #include "sixseven/planner/binder.h"
 #include "sixseven/vector/hnsw_index.h"
@@ -41,21 +42,23 @@ public:
     /// @param database_id      Current database context for table resolution.
     /// @param graph_engine     Optional GraphEngine for graph query planning.
     /// @param provider_registry Optional ProviderRegistry for text auto-embedding.
-    /// @param hnsw_indexes     Optional map of index name → loaded HnswIndex.
+    /// @param hnsw_indexes     Optional map of index_id → loaded HnswIndex.
     /// @param btree_indexes    Optional map of index_id → loaded BTreeIndex.
     /// @param hash_indexes     Optional map of index_id → loaded HashIndex.
     /// @param embedding_pool   Optional EmbeddingWorkerPool for async INSERT embedding.
     /// @param algorithm_registry Optional AlgorithmRegistry for algorithm TVFs.
+    /// @param hnsw_rid_maps    Optional HNSW node_id → RID maps for direct lookups.
     Planner(Catalog& catalog,
             StorageManager& storage,
             database_id_t database_id = default_database_id,
             GraphEngine* graph_engine = nullptr,
             ProviderRegistry* provider_registry = nullptr,
-            std::unordered_map<std::string, HnswIndex*>* hnsw_indexes = nullptr,
+            std::unordered_map<index_id_t, HnswIndex*>* hnsw_indexes = nullptr,
             std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes = nullptr,
             std::unordered_map<index_id_t, HashIndex*>* hash_indexes = nullptr,
             EmbeddingWorkerPool* embedding_pool = nullptr,
-            AlgorithmRegistry* algorithm_registry = nullptr);
+            AlgorithmRegistry* algorithm_registry = nullptr,
+            std::unordered_map<index_id_t, std::vector<RID>>* hnsw_rid_maps = nullptr);
 
     /// Build an iterator tree for a DML/query statement.
     ///
@@ -170,9 +173,10 @@ private:
     database_id_t database_id_;
     GraphEngine* graph_engine_;
     ProviderRegistry* provider_registry_;
-    std::unordered_map<std::string, HnswIndex*>* hnsw_indexes_;
+    std::unordered_map<index_id_t, HnswIndex*>* hnsw_indexes_;
     std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes_;
     std::unordered_map<index_id_t, HashIndex*>* hash_indexes_;
+    std::unordered_map<index_id_t, std::vector<RID>>* hnsw_rid_maps_;
     EmbeddingWorkerPool* embedding_pool_;
     AlgorithmRegistry* algorithm_registry_;
     SubqueryContext subquery_ctx_;

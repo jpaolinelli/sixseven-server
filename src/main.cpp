@@ -138,6 +138,7 @@ int main(int argc, char* argv[]) {
     sixseven::IndexManager index_manager(catalog, storage);
     index_manager.set_catalog_persistence(&persistence);
     engine.set_index_manager(&index_manager);
+    engine.set_hnsw_indexes(index_manager.hnsw_map());
     auto async_load = index_manager.start_async_load();
     if (!async_load) {
         SIXSEVEN_LOG_ERROR("index async load failed: {}", async_load.error().message);
@@ -239,6 +240,12 @@ int main(int argc, char* argv[]) {
     auto flush_indexes = index_manager.flush_all_indexes();
     if (!flush_indexes) {
         SIXSEVEN_LOG_WARN("index flush failed: {}", flush_indexes.error().message);
+    }
+
+    // Persist edge B+ tree indexes so they load directly on next startup.
+    auto flush_edges = graph_engine.flush_edge_indexes();
+    if (!flush_edges) {
+        SIXSEVEN_LOG_WARN("edge index flush failed: {}", flush_edges.error().message);
     }
 
     // Stop embedding worker pool before teardown.

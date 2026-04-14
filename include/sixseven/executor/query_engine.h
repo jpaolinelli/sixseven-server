@@ -37,6 +37,7 @@ struct ExplainStmt;
 struct BulkLinkStmt;
 struct LinkStmt;
 struct ReembedStmt;
+struct ReindexStmt;
 struct SetStmt;
 struct ShowStmt;
 struct UnlinkStmt;
@@ -118,7 +119,7 @@ public:
     void set_provider_registry(ProviderRegistry* registry);
 
     /// Set the HNSW index map for vector operations (REEMBED, NEAREST).
-    void set_hnsw_indexes(std::unordered_map<std::string, HnswIndex*>* indexes);
+    void set_hnsw_indexes(std::unordered_map<index_id_t, HnswIndex*>* indexes);
 
     /// Set the settings cache for SET/SHOW commands.
     void set_settings_cache(SettingsCache* cache);
@@ -229,6 +230,9 @@ private:
     /// Execute a REEMBED TABLE statement (bulk embedding regeneration).
     [[nodiscard]] Result<QueryResult> execute_reembed(const ReembedStmt& stmt);
 
+    /// Execute a REINDEX statement (rebuild one or all indexes).
+    [[nodiscard]] Result<QueryResult> execute_reindex(const ReindexStmt& stmt);
+
     /// Execute an EXPLAIN or EXPLAIN ANALYZE statement.
     [[nodiscard]] Result<QueryResult> execute_explain(const ExplainStmt& stmt,
                                                       const BoundStatement& bound);
@@ -258,7 +262,7 @@ private:
     StorageManager& storage_;
     GraphEngine* graph_engine_;
     ProviderRegistry* provider_registry_ = nullptr;
-    std::unordered_map<std::string, HnswIndex*>* hnsw_indexes_ = nullptr;
+    std::unordered_map<index_id_t, HnswIndex*>* hnsw_indexes_ = nullptr;
     SettingsCache* settings_cache_ = nullptr;
     ProviderCache* provider_cache_ = nullptr;
     ReplicationSlotManager* slot_mgr_ = nullptr;

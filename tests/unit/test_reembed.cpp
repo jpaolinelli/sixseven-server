@@ -1,6 +1,7 @@
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/types.h"
 #include "sixseven/common/value.h"
+#include "sixseven/executor/index_manager.h"
 #include "sixseven/executor/query_engine.h"
 #include "sixseven/executor/storage_manager.h"
 #include "sixseven/storage/buffer_pool.h"
@@ -346,10 +347,21 @@ TEST_F(ReembedTest, HnswIndexIsRebuiltAfterReembed) {
     }
     EXPECT_EQ(hnsw->node_count(), 3u);
 
-    // Wire the HNSW index into the engine.
-    auto index_name = EmbeddingColumnManager::make_index_name("products", "emb");
-    std::unordered_map<std::string, HnswIndex*> hnsw_map;
-    hnsw_map[index_name] = hnsw.get();
+    // Create the HNSW IndexDef in the catalog so lookup by index_id works.
+    auto table_schema = catalog_.get_table(default_database_id, "products");
+    ASSERT_TRUE(table_schema.has_value());
+    IndexDef hnsw_def;
+    hnsw_def.table_id = table_schema->table_id;
+    hnsw_def.name = "hnsw_products_emb";
+    hnsw_def.index_type = "hnsw";
+    hnsw_def.columns = "emb";
+    hnsw_def.is_unique = false;
+    auto idx_id = catalog_.create_index(hnsw_def);
+    ASSERT_TRUE(idx_id.has_value()) << idx_id.error().message;
+
+    // Wire the HNSW index into the engine keyed by index_id.
+    std::unordered_map<index_id_t, HnswIndex*> hnsw_map;
+    hnsw_map[*idx_id] = hnsw.get();
     engine_->set_hnsw_indexes(&hnsw_map);
 
     // Run REEMBED.

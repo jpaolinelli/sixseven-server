@@ -254,8 +254,8 @@ private:
     /// Primary storage: index_id -> IndexDef.
     std::unordered_map<index_id_t, IndexDef> indexes_by_id_;
 
-    /// Name lookup: index name -> index_id.
-    std::unordered_map<std::string, index_id_t> index_name_to_id_;
+    /// Name lookup scoped per database: database_id -> (index name -> index_id).
+    std::unordered_map<database_id_t, std::unordered_map<std::string, index_id_t>> index_name_to_id_;
 
     /// Primary storage: edge_id -> EdgeTypeDef.
     std::unordered_map<edge_id_t, EdgeTypeDef> edge_types_by_id_;

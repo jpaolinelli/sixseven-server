@@ -8,6 +8,7 @@
 #include "sixseven/index/btree_persistence.h"
 #include "sixseven/index/hash_persistence.h"
 #include "sixseven/table/tuple.h"
+#include "sixseven/vector/embedding_column.h"
 
 #include <algorithm>
 #include <chrono>
@@ -202,6 +203,174 @@ Result<void> IndexManager::persist_hash(const IndexDef& def, database_id_t db_id
 }
 
 // ---------------------------------------------------------------------------
+// HNSW disk helpers
+// ---------------------------------------------------------------------------
+
+Result<void> IndexManager::load_hnsw_from_disk(const IndexDef& def, database_id_t db_id) {
+    auto storage = storage_.open_index_storage(db_id, def.index_id);
+    if (!storage) {
+        return make_error(storage.error().code, storage.error().message);
+    }
+
+    auto meta_page_id = storage_.read_index_meta_page_id(def.index_id);
+    if (!meta_page_id || *meta_page_id == 0) {
+        return make_error(StatusCode::NOT_FOUND, "no meta page ID stored in index file header");
+    }
+
+    auto hnsw = std::make_unique<HnswIndex>(*(*storage)->bpm, nullptr);
+    auto load = hnsw->load(*meta_page_id);
+    if (!load) {
+        return make_error(load.error().code, load.error().message);
+    }
+
+    // NOTE: We do NOT build the node_id → RID map here. The HNSW index was
+    // built during a prior rebuild_hnsw_from_table call, but rows may have been
+    // moved (deleted + reinserted) since then, so the heap scan order may not
+    // match the original node_id assignment order. Instead, the NearestScan
+    // operator falls back to a full table scan (slow path) for loaded indexes.
+    // After a REINDEX, the RID map is rebuilt consistently.
+
+    auto* ptr = hnsw.get();
+    std::unique_lock lk(maps_latch_);
+    owned_hnsw_.push_back(std::move(hnsw));
+    hnsw_indexes_[def.index_id] = ptr;
+    // Leave hnsw_rid_maps_ empty for this index — slow path will be used.
+    return ok();
+}
+
+Result<void> IndexManager::rebuild_hnsw_from_table(const IndexDef& def, database_id_t db_id) {
+    // Look up the embedding column definition to get the dimension.
+    auto emb_cols = catalog_.list_embedding_columns(def.table_id);
+    auto col_names = parse_columns(def.columns);
+    if (col_names.empty()) {
+        return make_error(StatusCode::NOT_FOUND, "could not parse index columns");
+    }
+
+    auto table_schema = catalog_.get_table_by_id(def.table_id);
+    if (!table_schema) {
+        return make_error(table_schema.error().code, table_schema.error().message);
+    }
+
+    // Find the embedding column ordinal and dimension.
+    int32_t emb_ordinal = -1;
+    uint32_t dimension = 0;
+    for (const auto& col : table_schema->columns) {
+        if (col.name == col_names[0]) {
+            emb_ordinal = col.ordinal;
+            break;
+        }
+    }
+    for (const auto& ec : emb_cols) {
+        if (ec.column_id == emb_ordinal) {
+            dimension = static_cast<uint32_t>(ec.dimension);
+            break;
+        }
+    }
+    if (dimension == 0 || emb_ordinal < 0) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "could not find embedding column dimension for index '" + def.name + "'");
+    }
+
+    // Drop existing index file if present.
+    if (storage_.index_file_exists(db_id, def.index_id)) {
+        (void)storage_.drop_index_storage(db_id, def.index_id);
+    }
+
+    auto storage = storage_.create_index_storage(db_id, def.index_id);
+    if (!storage) {
+        return make_error(storage.error().code,
+                          "failed to create HNSW index storage: " + storage.error().message);
+    }
+
+    auto hnsw = std::make_unique<HnswIndex>(*(*storage)->bpm, nullptr);
+    HnswIndexConfig config;
+    config.dimension = dimension;
+    auto create = hnsw->create(config);
+    if (!create) {
+        return make_error(create.error().code,
+                          "failed to create HNSW index: " + create.error().message);
+    }
+
+    // Scan table data and insert all non-null embedding values.
+    // Also build the node_id → RID mapping for direct tuple lookups.
+    std::vector<RID> rid_map;
+    auto ts = storage_.get_table_storage(def.table_id);
+    if (ts) {
+        auto storage_schema = StorageManager::build_storage_schema(*table_schema);
+        auto it = (*ts)->heap->begin();
+        if (it) {
+            uint32_t inserted = 0;
+            while (auto row = it->next()) {
+                auto& [rid, data] = *row;
+                auto vals = TupleSerializer::deserialize(data, storage_schema);
+                if (!vals) continue;
+
+                auto& emb_val = (*vals)[static_cast<size_t>(emb_ordinal)];
+                if (!emb_val.is_null() && emb_val.type_id() == TypeId::EMBEDDING) {
+                    const auto& vec = emb_val.as_embedding();
+                    (void)hnsw->insert(std::span<const float>(vec));
+                    rid_map.push_back(rid);
+                    ++inserted;
+                }
+            }
+            SIXSEVEN_LOG_INFO("index manager: rebuilt HNSW '{}' with {} vectors", def.name, inserted);
+        }
+    }
+
+    // Flush metadata and store meta page ID.
+    auto flush = hnsw->flush_meta();
+    if (!flush) {
+        SIXSEVEN_LOG_WARN("index manager: failed to flush HNSW meta for '{}': {}",
+                          def.name, flush.error().message);
+    }
+    auto wr = storage_.write_index_meta_page_id(def.index_id, hnsw->meta_page_id());
+    if (!wr) {
+        SIXSEVEN_LOG_WARN("index manager: failed to write meta page ID for '{}': {}",
+                          def.name, wr.error().message);
+    }
+
+    auto* ptr = hnsw.get();
+    auto rid_count = rid_map.size();
+    std::unique_lock lk(maps_latch_);
+    owned_hnsw_.push_back(std::move(hnsw));
+    hnsw_indexes_[def.index_id] = ptr;
+    hnsw_rid_maps_[def.index_id] = std::move(rid_map);
+    SIXSEVEN_LOG_INFO("index manager: HNSW '{}' (id={}) rid_map has {} entries",
+                      def.name, def.index_id, rid_count);
+    return ok();
+}
+
+Result<void> IndexManager::flush_hnsw(const IndexDef& def, database_id_t /*db_id*/,
+                                       HnswIndex& index) {
+    auto flush = index.flush_meta();
+    if (!flush) {
+        return make_error(flush.error().code,
+                          "failed to flush HNSW meta for '" + def.name + "': " +
+                              flush.error().message);
+    }
+
+    // Store the meta page ID so load can find it after restart.
+    auto wr = storage_.write_index_meta_page_id(def.index_id, index.meta_page_id());
+    if (!wr) {
+        SIXSEVEN_LOG_WARN("index manager: failed to write meta page ID for HNSW '{}': {}",
+                          def.name, wr.error().message);
+    }
+
+    // Ensure the BPM writes dirty pages to disk.
+    auto storage = storage_.get_index_storage(def.index_id);
+    if (storage) {
+        auto bpm_flush = (*storage)->bpm->flush_all();
+        if (!bpm_flush) {
+            return make_error(bpm_flush.error().code,
+                              "failed to flush BPM for HNSW '" + def.name + "': " +
+                                  bpm_flush.error().message);
+        }
+    }
+
+    return ok();
+}
+
+// ---------------------------------------------------------------------------
 // rebuild_all_indexes — startup index rebuild + autoincrement init
 // ---------------------------------------------------------------------------
 
@@ -210,19 +379,41 @@ Result<void> IndexManager::rebuild_all_indexes() {
 
     auto all_indexes = catalog_.list_all_indexes();
 
-    // Group non-HNSW indexes by table_id.
+    // Separate HNSW indexes (handled independently) from BTree/Hash.
+    std::vector<IndexDef> hnsw_indexes;
     std::unordered_map<table_id_t, std::vector<IndexDef>> indexes_by_table;
     for (auto& idx : all_indexes) {
         if (idx.index_type == "hnsw") {
-            continue;
+            hnsw_indexes.push_back(std::move(idx));
+        } else {
+            indexes_by_table[idx.table_id].push_back(std::move(idx));
         }
-        indexes_by_table[idx.table_id].push_back(idx);
     }
 
-    // Try to load each index from disk (fast path).
+    // Load HNSW indexes: from disk (fast) or rebuild from table data (slow).
+    size_t loaded_from_disk = 0;
+    for (auto& idx : hnsw_indexes) {
+        auto db_id = find_database_for_table(idx.table_id);
+        if (storage_.index_file_exists(db_id, idx.index_id)) {
+            auto r = load_hnsw_from_disk(idx, db_id);
+            if (r) {
+                ++loaded_from_disk;
+                SIXSEVEN_LOG_INFO("index manager: loaded hnsw '{}' from disk", idx.name);
+                continue;
+            }
+            SIXSEVEN_LOG_WARN("index manager: failed to load HNSW '{}' from disk ({}), will rebuild",
+                              idx.name, r.error().message);
+        }
+        auto r = rebuild_hnsw_from_table(idx, db_id);
+        if (!r) {
+            SIXSEVEN_LOG_WARN("index manager: failed to rebuild HNSW '{}': {}",
+                              idx.name, r.error().message);
+        }
+    }
+
+    // Try to load each BTree/Hash index from disk (fast path).
     // Track which indexes we successfully loaded and which need rebuild.
     std::unordered_map<table_id_t, std::vector<IndexDef>> need_rebuild;
-    size_t loaded_from_disk = 0;
 
     for (auto& [table_id, idxs] : indexes_by_table) {
         auto db_id = find_database_for_table(table_id);
@@ -532,14 +723,16 @@ Result<void> IndexManager::start_async_load() {
         bool has_disk_file = false;
     };
     std::vector<AsyncWork> work;
+    std::vector<AsyncWork> hnsw_work;
 
     for (auto& idx : all_indexes) {
-        if (idx.index_type == "hnsw") {
-            continue;
-        }
         auto db_id = find_database_for_table(idx.table_id);
         bool has_file = storage_.index_file_exists(db_id, idx.index_id);
-        work.push_back({std::move(idx), db_id, has_file});
+        if (idx.index_type == "hnsw") {
+            hnsw_work.push_back({std::move(idx), db_id, has_file});
+        } else {
+            work.push_back({std::move(idx), db_id, has_file});
+        }
     }
 
     // Initialize autoincrement counters (must happen before queries).
@@ -587,7 +780,7 @@ Result<void> IndexManager::start_async_load() {
         }
     }
 
-    if (work.empty()) {
+    if (work.empty() && hnsw_work.empty()) {
         async_load_done_.store(true);
         SIXSEVEN_LOG_INFO("index manager: no indexes to load");
         return ok();
@@ -604,7 +797,7 @@ Result<void> IndexManager::start_async_load() {
         }
     }
 
-    size_t total_work = disk_work.size() + rebuild_work.size();
+    size_t total_work = disk_work.size() + rebuild_work.size() + (hnsw_work.empty() ? 0 : 1);
     load_latch_ = std::make_unique<std::latch>(static_cast<ptrdiff_t>(total_work));
 
     // Load from disk in a background thread.
@@ -716,6 +909,34 @@ Result<void> IndexManager::start_async_load() {
         });
     }
 
+    // Load HNSW indexes in a background thread.
+    if (!hnsw_work.empty()) {
+        load_threads_.emplace_back([this, items = std::move(hnsw_work)]() {
+            for (const auto& item : items) {
+                Result<void> r;
+                if (item.has_disk_file) {
+                    r = load_hnsw_from_disk(item.def, item.db_id);
+                    if (r) {
+                        SIXSEVEN_LOG_INFO("index manager [async]: loaded hnsw '{}' from disk",
+                                          item.def.name);
+                        continue;
+                    }
+                    SIXSEVEN_LOG_WARN(
+                        "index manager [async]: failed to load HNSW '{}' from disk ({}), will rebuild",
+                        item.def.name, r.error().message);
+                }
+                r = rebuild_hnsw_from_table(item.def, item.db_id);
+                if (r) {
+                    SIXSEVEN_LOG_INFO("index manager [async]: rebuilt hnsw '{}'", item.def.name);
+                } else {
+                    SIXSEVEN_LOG_WARN("index manager [async]: failed to rebuild HNSW '{}': {}",
+                                      item.def.name, r.error().message);
+                }
+            }
+            load_latch_->count_down();
+        });
+    }
+
     return ok();
 }
 
@@ -742,8 +963,6 @@ Result<void> IndexManager::flush_all_indexes() {
 
     auto all_indexes = catalog_.list_all_indexes();
     for (const auto& idx : all_indexes) {
-        if (idx.index_type == "hnsw") continue;
-
         auto db_id = find_database_for_table(idx.table_id);
 
         if (idx.index_type == "btree") {
@@ -759,6 +978,13 @@ Result<void> IndexManager::flush_all_indexes() {
                 auto r = persist_hash(idx, db_id, *it->second);
                 if (r) ++flushed;
                 else SIXSEVEN_LOG_WARN("index manager: flush hash '{}' failed: {}", idx.name, r.error().message);
+            }
+        } else if (idx.index_type == "hnsw") {
+            auto it = hnsw_indexes_.find(idx.index_id);
+            if (it != hnsw_indexes_.end()) {
+                auto r = flush_hnsw(idx, db_id, *it->second);
+                if (r) ++flushed;
+                else SIXSEVEN_LOG_WARN("index manager: flush hnsw '{}' failed: {}", idx.name, r.error().message);
             }
         }
     }
@@ -793,6 +1019,13 @@ Result<void> IndexManager::flush_all_indexes() {
 
 Result<void> IndexManager::create_and_populate_index(const IndexDef& def,
                                                       const TableSchema& schema) {
+    // HNSW indexes use a separate path: they manage their own pages in a
+    // dedicated BPM and don't need key extraction like BTree/Hash.
+    if (def.index_type == "hnsw") {
+        auto db_id = find_database_for_table(def.table_id);
+        return rebuild_hnsw_from_table(def, db_id);
+    }
+
     auto col_info = resolve_index_columns(def.columns, schema);
     if (col_info.empty()) {
         return make_error(StatusCode::NOT_FOUND, "could not resolve index columns");
@@ -898,6 +1131,13 @@ void IndexManager::drop_index(index_id_t id, table_id_t table_id) {
     btree_indexes_.erase(id);
     hash_indexes_.erase(id);
 
+    // For HNSW, erase by index_id.
+    if (!hnsw_indexes_.empty()) {
+        std::unique_lock lk(maps_latch_);
+        hnsw_indexes_.erase(id);
+        hnsw_rid_maps_.erase(id);
+    }
+
     // Remove the index file from disk.
     if (table_id > 0) {
         auto db_id = find_database_for_table(table_id);
@@ -913,6 +1153,111 @@ void IndexManager::drop_index(index_id_t id, table_id_t table_id) {
 }
 
 // ---------------------------------------------------------------------------
+// reindex — manual rebuild of indexes
+// ---------------------------------------------------------------------------
+
+Result<void> IndexManager::reindex(const std::string& name, database_id_t db_id) {
+    // Wait for any in-progress async loading to finish before rebuilding.
+    wait_for_load_complete();
+
+    // Try to find by index name first.
+    // get_index() is globally ambiguous when multiple databases have
+    // the same index name, so verify the result belongs to the caller's database.
+    auto idx = catalog_.get_index(name);
+    if (idx) {
+        auto idx_db_id = find_database_for_table(idx->table_id);
+        // If the found index belongs to a different database, check if the
+        // caller's database also has an index with this name on a local table.
+        if (idx_db_id != db_id) {
+            // Search for the index by name within the caller's database.
+            bool found_local = false;
+            auto tables = catalog_.list_tables(db_id);
+            for (const auto& tbl : tables) {
+                auto indexes = catalog_.list_indexes(tbl.table_id);
+                for (const auto& local_idx : indexes) {
+                    if (local_idx.name == name) {
+                        idx = local_idx;
+                        idx_db_id = db_id;
+                        found_local = true;
+                        break;
+                    }
+                }
+                if (found_local) break;
+            }
+        }
+        SIXSEVEN_LOG_INFO("reindex '{}': found index (type={}, table_id={}, db_id={})",
+                          name, idx->index_type, idx->table_id, idx_db_id);
+        if (idx->index_type == "hnsw") {
+            {
+                std::unique_lock lk(maps_latch_);
+                hnsw_indexes_.erase(idx->index_id);
+                hnsw_rid_maps_.erase(idx->index_id);
+            }
+            return rebuild_hnsw_from_table(*idx, idx_db_id);
+        }
+
+        auto schema = catalog_.get_table_by_id(idx->table_id);
+        if (!schema) {
+            return make_error(schema.error().code, schema.error().message);
+        }
+
+        // Drop in-memory index and rebuild.
+        btree_indexes_.erase(idx->index_id);
+        hash_indexes_.erase(idx->index_id);
+        if (storage_.index_file_exists(idx_db_id, idx->index_id)) {
+            (void)storage_.drop_index_storage(idx_db_id, idx->index_id);
+        }
+
+        // Reuse the normal create-and-populate path for btree/hash.
+        return create_and_populate_index(*idx, *schema);
+    }
+
+    // Not an index name — try as a table name.
+    auto table = catalog_.get_table(db_id, name);
+    if (!table) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "no index or table named '" + name + "'");
+    }
+
+    auto indexes = catalog_.list_indexes(table->table_id);
+    SIXSEVEN_LOG_INFO("reindex '{}': found {} indexes on table_id={}", name, indexes.size(), table->table_id);
+    for (const auto& index_def : indexes) {
+        SIXSEVEN_LOG_INFO("reindex '{}': rebuilding index '{}' (type={}, table_id={})",
+                          name, index_def.name, index_def.index_type, index_def.table_id);
+
+        // Rebuild directly using the IndexDef from list_indexes rather than
+        // recursing through get_index(name), which is globally ambiguous when
+        // multiple databases have indexes with the same name.
+        Result<void> r;
+        if (index_def.index_type == "hnsw") {
+            {
+                std::unique_lock lk(maps_latch_);
+                hnsw_indexes_.erase(index_def.index_id);
+                hnsw_rid_maps_.erase(index_def.index_id);
+            }
+            r = rebuild_hnsw_from_table(index_def, db_id);
+        } else {
+            btree_indexes_.erase(index_def.index_id);
+            hash_indexes_.erase(index_def.index_id);
+            if (storage_.index_file_exists(db_id, index_def.index_id)) {
+                (void)storage_.drop_index_storage(db_id, index_def.index_id);
+            }
+            auto schema = catalog_.get_table_by_id(index_def.table_id);
+            if (!schema) {
+                return make_error(schema.error().code, schema.error().message);
+            }
+            r = create_and_populate_index(index_def, *schema);
+        }
+        if (!r) {
+            SIXSEVEN_LOG_WARN("reindex '{}': failed on '{}': {}", name, index_def.name, r.error().message);
+            return r;
+        }
+    }
+
+    return ok();
+}
+
+// ---------------------------------------------------------------------------
 // Accessor maps
 // ---------------------------------------------------------------------------
 
@@ -922,6 +1267,19 @@ std::unordered_map<index_id_t, BTreeIndex*>* IndexManager::btree_map() {
 
 std::unordered_map<index_id_t, HashIndex*>* IndexManager::hash_map() {
     return &hash_indexes_;
+}
+
+std::unordered_map<index_id_t, HnswIndex*>* IndexManager::hnsw_map() {
+    return &hnsw_indexes_;
+}
+
+std::unordered_map<index_id_t, std::vector<RID>>* IndexManager::hnsw_rid_maps() {
+    return &hnsw_rid_maps_;
+}
+
+void IndexManager::append_hnsw_rid(index_id_t index_id, RID rid) {
+    std::unique_lock lk(maps_latch_);
+    hnsw_rid_maps_[index_id].push_back(rid);
 }
 
 } // namespace sixseven

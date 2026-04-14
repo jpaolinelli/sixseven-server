@@ -64,7 +64,7 @@ void QueryEngine::set_provider_registry(ProviderRegistry* registry) {
     provider_registry_ = registry;
 }
 
-void QueryEngine::set_hnsw_indexes(std::unordered_map<std::string, HnswIndex*>* indexes) {
+void QueryEngine::set_hnsw_indexes(std::unordered_map<index_id_t, HnswIndex*>* indexes) {
     hnsw_indexes_ = indexes;
 }
 
@@ -170,6 +170,7 @@ void QueryEngine::set_embedding_worker_pool(EmbeddingWorkerPool* pool) {
                 return make_error(serialized.error().code, serialized.error().message);
             }
 
+            RID effective_rid = rid;
             auto update = table_storage->heap->update_tuple(rid, *serialized);
             if (!update) {
                 // If update fails due to space, delete and reinsert on a new page.
@@ -183,6 +184,37 @@ void QueryEngine::set_embedding_worker_pool(EmbeddingWorkerPool* pool) {
                     return make_error(new_rid.error().code,
                                       "embedding store: reinsert failed: " +
                                           new_rid.error().message);
+                }
+                effective_rid = *new_rid;
+            }
+
+            // Insert the new embedding into the HNSW index.
+            if (hnsw_indexes_ != nullptr) {
+                std::string col_name;
+                for (const auto& col : table_schema->columns) {
+                    if (col.ordinal == column_id) {
+                        col_name = col.name;
+                        break;
+                    }
+                }
+                if (!col_name.empty()) {
+                    // Find the HNSW index for this table/column by index_id.
+                    auto indexes = catalog_.list_indexes(table_id);
+                    for (const auto& idx : indexes) {
+                        if (idx.index_type == "hnsw" && idx.columns == col_name) {
+                            auto it = hnsw_indexes_->find(idx.index_id);
+                            if (it != hnsw_indexes_->end()) {
+                                auto ins = it->second->insert(embedding);
+                                if (!ins) {
+                                    SIXSEVEN_LOG_WARN("embedding store: HNSW insert failed for '{}': {}",
+                                                      idx.name, ins.error().message);
+                                } else if (index_manager_) {
+                                    index_manager_->append_hnsw_rid(idx.index_id, effective_rid);
+                                }
+                            }
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -331,6 +363,53 @@ void QueryEngine::set_embedding_worker_pool(EmbeddingWorkerPool* pool) {
                         }
                         // Successfully moved to a new page — not a failure.
                     }
+
+                    // Insert embeddings into HNSW indexes.
+                    if (hnsw_indexes_ != nullptr) {
+                        for (auto idx : indices) {
+                            auto& req = requests[idx];
+                            std::string col_name;
+                            for (const auto& col : table_schema->columns) {
+                                if (col.ordinal == req.column_id) {
+                                    col_name = col.name;
+                                    break;
+                                }
+                            }
+                            if (col_name.empty()) continue;
+                            // Find HNSW index by table_id + column name.
+                            auto batch_indexes = catalog_.list_indexes(table_id);
+                            for (const auto& bidx : batch_indexes) {
+                                if (bidx.index_type != "hnsw" || bidx.columns != col_name) continue;
+                                auto hit = hnsw_indexes_->find(bidx.index_id);
+                                if (hit == hnsw_indexes_->end()) break;
+                                // req.embedding was moved into the Value earlier;
+                                // re-read from the tuple on disk.
+                                RID rid{static_cast<PageId>(
+                                            static_cast<uint64_t>(req.row_id) >> 32),
+                                        static_cast<SlotId>(req.row_id & 0xFFFF)};
+                                auto data = table_storage->heap->get_tuple(rid);
+                                if (!data) break;
+                                auto values = TupleSerializer::deserialize(
+                                    *data, table_storage->storage_schema);
+                                if (!values) break;
+                                for (size_t c = 0; c < table_schema->columns.size(); ++c) {
+                                    if (table_schema->columns[c].ordinal == req.column_id &&
+                                        !(*values)[c].is_null() &&
+                                        (*values)[c].type_id() == TypeId::EMBEDDING) {
+                                        const auto& vec = (*values)[c].as_embedding();
+                                        auto ins = hit->second->insert(
+                                            std::span<const float>(vec));
+                                        if (ins && index_manager_) {
+                                            index_manager_->append_hnsw_rid(
+                                                bidx.index_id, rid);
+                                        }
+                                        break;
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
                 }
 
                 return ok(std::move(failed_row_ids));
@@ -397,6 +476,7 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
                         dynamic_cast<const LinkStmt*>(raw) != nullptr ||
                         dynamic_cast<const UnlinkStmt*>(raw) != nullptr ||
                         dynamic_cast<const ReembedStmt*>(raw) != nullptr ||
+                        dynamic_cast<const ReindexStmt*>(raw) != nullptr ||
                         dynamic_cast<const CreateUserStmt*>(raw) != nullptr ||
                         dynamic_cast<const DropUserStmt*>(raw) != nullptr ||
                         dynamic_cast<const AlterUserStmt*>(raw) != nullptr ||
@@ -567,6 +647,9 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
     // 6c. Dispatch admin commands after binding.
     if (auto* reembed = dynamic_cast<const ReembedStmt*>(bound->stmt)) {
         return execute_reembed(*reembed);
+    }
+    if (auto* reindex = dynamic_cast<const ReindexStmt*>(bound->stmt)) {
+        return execute_reindex(*reindex);
     }
 
     // 7. Plan + Execute.
@@ -962,6 +1045,32 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
                 auto p = catalog_persistence_->persist_embedding_column(def);
                 if (!p) {
                     SIXSEVEN_LOG_WARN("failed to persist embedding column: {}", p.error().message);
+                }
+            }
+        }
+
+        // Persist HNSW indexes to sys_indexes and instantiate them.
+        {
+            auto table_schema = catalog_.get_table_by_id(*table_id);
+            if (table_schema) {
+                auto hnsw_defs = catalog_.list_indexes(*table_id);
+                for (const auto& idx : hnsw_defs) {
+                    if (idx.index_type == "hnsw") {
+                        if (catalog_persistence_ != nullptr) {
+                            auto p = catalog_persistence_->persist_index(idx);
+                            if (!p) {
+                                SIXSEVEN_LOG_WARN("failed to persist HNSW index '{}': {}",
+                                                  idx.name, p.error().message);
+                            }
+                        }
+                        if (index_manager_ != nullptr) {
+                            auto r = index_manager_->create_and_populate_index(idx, *table_schema);
+                            if (!r) {
+                                SIXSEVEN_LOG_WARN("failed to create HNSW index '{}': {}",
+                                                  idx.name, r.error().message);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1601,6 +1710,27 @@ Result<QueryResult> QueryEngine::execute_unlink(const UnlinkStmt& stmt,
 }
 
 // ---------------------------------------------------------------------------
+// REINDEX
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_reindex(const ReindexStmt& stmt) {
+    if (index_manager_ == nullptr) {
+        return make_error(StatusCode::INTERNAL_ERROR, "no index manager available");
+    }
+
+    auto r = index_manager_->reindex(stmt.name, current_database_id_);
+    if (!r) {
+        return make_error(r.error().code, r.error().message);
+    }
+
+    SIXSEVEN_LOG_INFO("reindexed '{}'", stmt.name);
+
+    QueryResult qr;
+    qr.message = "REINDEX";
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
 // REEMBED TABLE
 // ---------------------------------------------------------------------------
 
@@ -1776,9 +1906,18 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
     // 7. Rebuild HNSW indexes with the new embeddings.
     if (hnsw_indexes_ != nullptr) {
         for (const auto& target : targets) {
-            auto index_name = EmbeddingColumnManager::make_index_name(
-                stmt.table_name, table_schema->columns[target.column_index].name);
-            auto idx_it = hnsw_indexes_->find(index_name);
+            // Find HNSW index for this column by index_id.
+            auto reembed_col_name = table_schema->columns[target.column_index].name;
+            auto reembed_indexes = catalog_.list_indexes(table_schema->table_id);
+            index_id_t reembed_idx_id = 0;
+            for (const auto& ridx : reembed_indexes) {
+                if (ridx.index_type == "hnsw" && ridx.columns == reembed_col_name) {
+                    reembed_idx_id = ridx.index_id;
+                    break;
+                }
+            }
+            if (reembed_idx_id == 0) continue;
+            auto idx_it = hnsw_indexes_->find(reembed_idx_id);
             if (idx_it == hnsw_indexes_->end()) {
                 continue;
             }
@@ -1787,13 +1926,14 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
             // Reset the index so new inserts start from node_id 0.
             auto reset_result = hnsw->reset();
             if (!reset_result) {
-                SIXSEVEN_LOG_WARN("REEMBED: failed to reset HNSW index '{}': {}",
-                                  index_name,
+                SIXSEVEN_LOG_WARN("REEMBED: failed to reset HNSW index (id={}): {}",
+                                  reembed_idx_id,
                                   reset_result.error().message);
                 continue;
             }
 
             // Re-scan the table and insert all embeddings in row order.
+            // Also rebuild the node_id → RID map.
             auto rebuild_it = table_storage->heap->begin();
             if (!rebuild_it) {
                 SIXSEVEN_LOG_WARN("REEMBED: failed to scan table for HNSW rebuild: {}",
@@ -1801,6 +1941,7 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
                 continue;
             }
 
+            std::vector<RID> rid_map;
             uint32_t inserted = 0;
             while (true) {
                 auto row = rebuild_it->next();
@@ -1817,13 +1958,21 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
                     const auto& vec = emb_val.as_embedding();
                     auto ins = hnsw->insert(std::span<const float>(vec));
                     if (ins) {
+                        rid_map.push_back(rid);
                         ++inserted;
                     }
                 }
             }
 
+            if (index_manager_) {
+                auto* maps = index_manager_->hnsw_rid_maps();
+                if (maps) {
+                    (*maps)[reembed_idx_id] = std::move(rid_map);
+                }
+            }
+
             SIXSEVEN_LOG_INFO(
-                "REEMBED: rebuilt HNSW index '{}' with {} vectors", index_name, inserted);
+                "REEMBED: rebuilt HNSW index (id={}) with {} vectors", reembed_idx_id, inserted);
         }
     }
 
@@ -1863,11 +2012,12 @@ Result<QueryResult> QueryEngine::execute_explain(const ExplainStmt& stmt,
                     current_database_id_,
                     graph_engine_,
                     provider_registry_,
-                    nullptr,
+                    hnsw_indexes_,
                     index_manager_ ? index_manager_->btree_map() : nullptr,
                     index_manager_ ? index_manager_->hash_map() : nullptr,
                     embedding_pool_,
-                    algorithm_registry_);
+                    algorithm_registry_,
+                    index_manager_ ? index_manager_->hnsw_rid_maps() : nullptr);
     std::vector<ExprPtr> owned_exprs;
     auto iter = planner.plan(*inner_bound, owned_exprs);
     if (!iter) {
@@ -1994,11 +2144,12 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                     current_database_id_,
                     graph_engine_,
                     provider_registry_,
-                    nullptr,
+                    hnsw_indexes_,
                     index_manager_ ? index_manager_->btree_map() : nullptr,
                     index_manager_ ? index_manager_->hash_map() : nullptr,
                     embedding_pool_,
-                    algorithm_registry_);
+                    algorithm_registry_,
+                    index_manager_ ? index_manager_->hnsw_rid_maps() : nullptr);
     std::vector<ExprPtr> owned_exprs;
     auto iter = planner.plan(bound, owned_exprs);
     if (!iter) {

@@ -4,6 +4,8 @@
 #include "sixseven/common/result.h"
 #include "sixseven/index/btree_index.h"
 #include "sixseven/index/hash_index.h"
+#include "sixseven/index/rid.h"
+#include "sixseven/vector/hnsw_index.h"
 
 #include <atomic>
 #include <latch>
@@ -68,9 +70,22 @@ public:
     /// @param table_id The table the index belongs to (for finding the database directory).
     void drop_index(index_id_t id, table_id_t table_id = 0);
 
+    /// Rebuild one or more indexes by name. If `name` matches an index,
+    /// rebuilds that single index. If it matches a table, rebuilds all
+    /// indexes on that table. Used by the REINDEX SQL command.
+    [[nodiscard]] Result<void> reindex(const std::string& name, database_id_t db_id);
+
     /// Accessor maps for Planner construction.
     [[nodiscard]] std::unordered_map<index_id_t, BTreeIndex*>* btree_map();
     [[nodiscard]] std::unordered_map<index_id_t, HashIndex*>* hash_map();
+    [[nodiscard]] std::unordered_map<index_id_t, HnswIndex*>* hnsw_map();
+
+    /// HNSW node_id → RID maps for direct tuple lookup (avoids full table scan).
+    [[nodiscard]] std::unordered_map<index_id_t, std::vector<RID>>* hnsw_rid_maps();
+
+    /// Append a RID to an HNSW index's node→RID mapping.
+    /// Called from the embedding store callback after a new vector is inserted.
+    void append_hnsw_rid(index_id_t index_id, RID rid);
 
 private:
     /// Resolve index column names to column ordinals and type IDs from the schema.
@@ -86,6 +101,12 @@ private:
     /// Load a single hash index from its persisted file.
     [[nodiscard]] Result<void> load_hash_from_disk(const IndexDef& def, database_id_t db_id);
 
+    /// Load a single HNSW index from its persisted file.
+    [[nodiscard]] Result<void> load_hnsw_from_disk(const IndexDef& def, database_id_t db_id);
+
+    /// Rebuild an HNSW index from table data (slow path).
+    [[nodiscard]] Result<void> rebuild_hnsw_from_table(const IndexDef& def, database_id_t db_id);
+
     /// Persist a single btree index to disk.
     [[nodiscard]] Result<void> persist_btree(const IndexDef& def, database_id_t db_id,
                                              const BTreeIndex& index);
@@ -93,6 +114,10 @@ private:
     /// Persist a single hash index to disk.
     [[nodiscard]] Result<void> persist_hash(const IndexDef& def, database_id_t db_id,
                                             const HashIndex& index);
+
+    /// Flush an HNSW index's metadata and BPM to disk.
+    [[nodiscard]] Result<void> flush_hnsw(const IndexDef& def, database_id_t db_id,
+                                          HnswIndex& index);
 
     /// Find the database_id that owns a given table_id.
     [[nodiscard]] database_id_t find_database_for_table(table_id_t table_id) const;
@@ -104,10 +129,18 @@ private:
     /// Owning storage for index objects.
     std::vector<std::unique_ptr<BTreeIndex>> owned_btrees_;
     std::vector<std::unique_ptr<HashIndex>> owned_hashes_;
+    std::vector<std::unique_ptr<HnswIndex>> owned_hnsw_;
 
     /// Non-owning pointer maps keyed by index_id (for Planner).
     std::unordered_map<index_id_t, BTreeIndex*> btree_indexes_;
     std::unordered_map<index_id_t, HashIndex*> hash_indexes_;
+
+    /// HNSW pointer map keyed by index_id (globally unique, no naming collisions).
+    std::unordered_map<index_id_t, HnswIndex*> hnsw_indexes_;
+
+    /// HNSW node_id → heap RID mapping. node_id N maps to hnsw_rid_maps_[id][N].
+    /// Built during rebuild/load, extended during INSERT via append_hnsw_rid().
+    std::unordered_map<index_id_t, std::vector<RID>> hnsw_rid_maps_;
 
     /// Thread safety for async loading.
     mutable std::shared_mutex maps_latch_;

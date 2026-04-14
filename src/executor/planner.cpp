@@ -1,6 +1,7 @@
 #include "sixseven/executor/planner.h"
 
 #include "sixseven/common/coercion.h"
+#include "sixseven/common/logging.h"
 #include "sixseven/common/value_hash.h"
 #include "sixseven/executor/algorithm_scan.h"
 #include "sixseven/executor/count_scan.h"
@@ -10,6 +11,7 @@
 #include "sixseven/executor/filter.h"
 #include "sixseven/executor/hash_aggregate.h"
 #include "sixseven/executor/hash_index_scan.h"
+#include "sixseven/executor/index_manager.h"
 #include "sixseven/executor/index_scan.h"
 #include "sixseven/executor/insert.h"
 #include "sixseven/executor/limit.h"
@@ -278,14 +280,16 @@ Planner::Planner(Catalog& catalog,
                  database_id_t database_id,
                  GraphEngine* graph_engine,
                  ProviderRegistry* provider_registry,
-                 std::unordered_map<std::string, HnswIndex*>* hnsw_indexes,
+                 std::unordered_map<index_id_t, HnswIndex*>* hnsw_indexes,
                  std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes,
                  std::unordered_map<index_id_t, HashIndex*>* hash_indexes,
                  EmbeddingWorkerPool* embedding_pool,
-                 AlgorithmRegistry* algorithm_registry)
+                 AlgorithmRegistry* algorithm_registry,
+                 std::unordered_map<index_id_t, std::vector<RID>>* hnsw_rid_maps)
     : catalog_(catalog), storage_(storage), database_id_(database_id), graph_engine_(graph_engine),
       provider_registry_(provider_registry), hnsw_indexes_(hnsw_indexes),
-      btree_indexes_(btree_indexes), hash_indexes_(hash_indexes), embedding_pool_(embedding_pool),
+      btree_indexes_(btree_indexes), hash_indexes_(hash_indexes), hnsw_rid_maps_(hnsw_rid_maps),
+      embedding_pool_(embedding_pool),
       algorithm_registry_(algorithm_registry), subquery_ctx_{catalog_, storage_} {}
 
 // ---------------------------------------------------------------------------
@@ -2489,15 +2493,35 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
         }
     }
 
-    // Look up the companion HNSW index.
+    // Look up the companion HNSW index by index_id (globally unique).
     HnswIndex* hnsw_index = nullptr;
+    std::vector<RID>* rid_map = nullptr;
     if (hnsw_indexes_ != nullptr) {
-        auto index_name =
-            EmbeddingColumnManager::make_index_name(stmt.table_name, stmt.column_name);
-        auto it = hnsw_indexes_->find(index_name);
-        if (it != hnsw_indexes_->end()) {
-            hnsw_index = it->second;
+        // Find the HNSW IndexDef for this table's embedding column.
+        auto indexes = catalog_.list_indexes(table_schema->table_id);
+        index_id_t hnsw_idx_id = 0;
+        for (const auto& idx : indexes) {
+            if (idx.index_type == "hnsw" && idx.columns == stmt.column_name) {
+                hnsw_idx_id = idx.index_id;
+                break;
+            }
         }
+        if (hnsw_idx_id > 0) {
+            auto it = hnsw_indexes_->find(hnsw_idx_id);
+            if (it != hnsw_indexes_->end()) {
+                hnsw_index = it->second;
+            }
+            if (hnsw_rid_maps_ != nullptr) {
+                auto rm = hnsw_rid_maps_->find(hnsw_idx_id);
+                if (rm != hnsw_rid_maps_->end()) {
+                    rid_map = &rm->second;
+                }
+            }
+        }
+        SIXSEVEN_LOG_DEBUG("plan_nearest: table_id={} col={} idx_id={} hnsw={} rid_map={}",
+                           table_schema->table_id, stmt.column_name, hnsw_idx_id,
+                           hnsw_index != nullptr ? "found" : "miss",
+                           rid_map != nullptr ? "found" : "miss");
     }
 
     // Build output schema: all table columns + _distance.
@@ -2513,7 +2537,8 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
                                                       std::move(schema),
                                                       stmt.where_expr.get(),
                                                       bound,
-                                                      hnsw_index);
+                                                      hnsw_index,
+                                                      rid_map);
 
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
 }

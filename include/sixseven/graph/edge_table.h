@@ -106,6 +106,13 @@ public:
                                             const Value& target_pk,
                                             const std::vector<Value>& properties);
 
+    /// Restore edge data only (edges_ map + next_row_id_) without B+ tree inserts.
+    /// Used when the B+ tree indexes are loaded from persisted disk files.
+    [[nodiscard]] Result<void> restore_edge_data_only(uint64_t edge_row_id,
+                                                      const Value& source_pk,
+                                                      const Value& target_pk,
+                                                      const std::vector<Value>& properties);
+
     /// Return the total number of edges in the table.
     [[nodiscard]] uint64_t size() const;
 
@@ -117,6 +124,20 @@ public:
 
     /// Access the table configuration.
     [[nodiscard]] const EdgeTableConfig& config() const;
+
+    // -- Index persistence support ---------------------------------------------
+
+    /// Const accessors for reading indexes during persistence.
+    [[nodiscard]] const BTreeIndex* forward_index() const { return forward_index_.get(); }
+    [[nodiscard]] const BTreeIndex* reverse_index() const { return reverse_index_.get(); }
+    [[nodiscard]] const BTreeIndex* unique_index() const { return unique_index_.get(); }
+    [[nodiscard]] uint64_t next_row_id() const { return next_row_id_; }
+
+    /// Replace in-memory indexes with pre-loaded ones from disk.
+    /// Must be called before the table is live (during startup loading).
+    void set_indexes(std::unique_ptr<BTreeIndex> fwd,
+                     std::unique_ptr<BTreeIndex> rev,
+                     std::unique_ptr<BTreeIndex> uniq);
 
 private:
     /// Look up all edge_row_ids from an adjacency index for a given key.

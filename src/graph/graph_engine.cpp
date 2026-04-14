@@ -2,8 +2,10 @@
 
 #include "sixseven/common/logging.h"
 #include "sixseven/common/types.h"
+#include "sixseven/index/btree_persistence.h"
 #include "sixseven/storage/wal.h"
 
+#include <chrono>
 #include <cstring>
 
 namespace sixseven {
@@ -17,12 +19,28 @@ GraphEngine::GraphEngine(Catalog& catalog,
     : catalog_(catalog), dm_(&dm), data_dir_(std::move(data_dir)), wal_(wal) {}
 
 GraphEngine::~GraphEngine() {
-    // Flush and close all edge storage files.
+    // Flush and close all edge storage files (heap + index files).
     for (auto& [key, storage] : edge_storage_) {
-        if (storage && storage->bpm) {
+        if (!storage) continue;
+
+        // Close edge index BPMs.
+        auto close_idx = [&](std::unique_ptr<EdgeIndexStorage>& idx) {
+            if (!idx) return;
+            (void)idx->bpm->flush_all();
+            if (dm_ != nullptr) {
+                (void)dm_->close_file(idx->file_id);
+            }
+            idx.reset();
+        };
+        close_idx(storage->fwd_idx);
+        close_idx(storage->rev_idx);
+        close_idx(storage->uniq_idx);
+
+        // Close heap BPM.
+        if (storage->bpm) {
             (void)storage->bpm->flush_all();
         }
-        if (storage && dm_ != nullptr) {
+        if (dm_ != nullptr) {
             (void)dm_->close_file(storage->file_id);
         }
     }
@@ -42,6 +60,13 @@ std::filesystem::path GraphEngine::edge_file_path(database_id_t database_id,
                                                   edge_id_t edge_id) const {
     return data_dir_ / "databases" / std::to_string(database_id) / "edges" /
            ("edge_" + std::to_string(edge_id) + ".db");
+}
+
+std::filesystem::path GraphEngine::edge_index_path(database_id_t database_id,
+                                                   edge_id_t edge_id,
+                                                   const std::string& suffix) const {
+    return data_dir_ / "databases" / std::to_string(database_id) / "edges" /
+           ("edge_" + std::to_string(edge_id) + "_" + suffix + ".db");
 }
 
 Schema GraphEngine::build_edge_storage_schema(TypeId source_pk_type,
@@ -331,6 +356,24 @@ void GraphEngine::drop_edge_type_locked(const std::string& edge_key,
     auto sit = edge_storage_.find(edge_key);
     if (sit != edge_storage_.end()) {
         auto& storage = *sit->second;
+
+        // Close and remove edge index files.
+        auto close_and_remove_idx = [&](std::unique_ptr<EdgeIndexStorage>& idx,
+                                        const std::string& suffix) {
+            if (idx) {
+                (void)idx->bpm->flush_all();
+                if (dm_ != nullptr) {
+                    (void)dm_->close_file(idx->file_id);
+                }
+                idx.reset();
+            }
+            std::filesystem::remove(edge_index_path(database_id, edge_id, suffix));
+        };
+        close_and_remove_idx(storage.fwd_idx, "fwd");
+        close_and_remove_idx(storage.rev_idx, "rev");
+        close_and_remove_idx(storage.uniq_idx, "uniq");
+
+        // Close and remove heap file.
         (void)storage.bpm->flush_all();
         if (dm_ != nullptr) {
             (void)dm_->close_file(storage.file_id);
@@ -371,6 +414,22 @@ Result<void> GraphEngine::drop_edge_type(database_id_t database_id, const std::s
     auto sit = edge_storage_.find(key);
     if (sit != edge_storage_.end()) {
         auto& storage = *sit->second;
+
+        // Close and remove edge index files.
+        auto close_and_remove_idx = [&](std::unique_ptr<EdgeIndexStorage>& idx,
+                                        const std::string& suffix) {
+            if (idx) {
+                (void)idx->bpm->flush_all();
+                (void)dm_->close_file(idx->file_id);
+                idx.reset();
+            }
+            std::filesystem::remove(edge_index_path(database_id, edge_id, suffix));
+        };
+        close_and_remove_idx(storage.fwd_idx, "fwd");
+        close_and_remove_idx(storage.rev_idx, "rev");
+        close_and_remove_idx(storage.uniq_idx, "uniq");
+
+        // Close and remove heap file.
         (void)storage.bpm->flush_all();
         (void)dm_->close_file(storage.file_id);
 
@@ -661,6 +720,265 @@ std::vector<std::string> GraphEngine::list_edge_types(database_id_t database_id)
     return names;
 }
 
+// -- Edge index persistence ---------------------------------------------------
+
+Result<void> GraphEngine::persist_edge_indexes(const std::string& edge_key,
+                                                database_id_t database_id,
+                                                edge_id_t edge_id) {
+    auto tit = edge_tables_.find(edge_key);
+    if (tit == edge_tables_.end()) {
+        return ok(); // Edge table no longer exists.
+    }
+
+    auto& edge_table = *tit->second;
+    auto sit = edge_storage_.find(edge_key);
+
+    // Helper lambda to persist one index to a file.
+    auto persist_one = [&](const BTreeIndex* index,
+                           const std::string& suffix,
+                           std::unique_ptr<EdgeIndexStorage>& idx_storage) -> Result<void> {
+        if (index == nullptr) {
+            return ok();
+        }
+
+        auto path = edge_index_path(database_id, edge_id, suffix);
+
+        // Close existing index storage if open.
+        if (idx_storage) {
+            (void)idx_storage->bpm->flush_all();
+            (void)dm_->close_file(idx_storage->file_id);
+            idx_storage.reset();
+        }
+
+        // Remove existing file.
+        std::filesystem::remove(path);
+
+        auto fid = dm_->create_file(path, /*direct_io=*/false, /*overwrite=*/true);
+        if (!fid) {
+            return make_error(fid.error().code,
+                              "failed to create edge index file: " + fid.error().message);
+        }
+
+        auto bpm = std::make_unique<BufferPoolManager>(*dm_, *fid, 64);
+
+        auto meta = BTreePersistence::persist(*bpm, *index);
+        if (!meta) {
+            (void)dm_->close_file(*fid);
+            std::filesystem::remove(path);
+            return make_error(meta.error().code,
+                              "failed to persist edge index: " + meta.error().message);
+        }
+
+        // Store meta page ID in header extension.
+        auto wr = dm_->write_header_ext_u64(*fid, 0, static_cast<uint64_t>(*meta));
+        if (!wr) {
+            (void)dm_->close_file(*fid);
+            return make_error(wr.error().code,
+                              "failed to write edge index meta page ID: " + wr.error().message);
+        }
+
+        (void)bpm->flush_all();
+        (void)dm_->close_file(*fid);
+        return ok();
+    };
+
+    // Dummy storage refs for persist_one when EdgeStorage doesn't exist yet.
+    std::unique_ptr<EdgeIndexStorage> dummy_fwd, dummy_rev, dummy_uniq;
+    auto& fwd_ref = sit != edge_storage_.end() ? sit->second->fwd_idx : dummy_fwd;
+    auto& rev_ref = sit != edge_storage_.end() ? sit->second->rev_idx : dummy_rev;
+    auto& uniq_ref = sit != edge_storage_.end() ? sit->second->uniq_idx : dummy_uniq;
+
+    auto r1 = persist_one(edge_table.forward_index(), "fwd", fwd_ref);
+    if (!r1) return r1;
+
+    auto r2 = persist_one(edge_table.reverse_index(), "rev", rev_ref);
+    if (!r2) return r2;
+
+    auto r3 = persist_one(edge_table.unique_index(), "uniq", uniq_ref);
+    if (!r3) return r3;
+
+    // Store edge count and next_row_id in the heap file header extension for staleness detection.
+    if (sit != edge_storage_.end()) {
+        auto& storage = *sit->second;
+        (void)dm_->write_header_ext_u64(storage.file_id, 0, edge_table.size());
+        (void)dm_->write_header_ext_u64(storage.file_id, 8, edge_table.next_row_id());
+    }
+
+    return ok();
+}
+
+Result<bool> GraphEngine::load_edge_indexes(const std::string& edge_key,
+                                             database_id_t database_id,
+                                             edge_id_t edge_id,
+                                             EdgeTable& edge_table) {
+    // Check that all expected index files exist.
+    auto fwd_path = edge_index_path(database_id, edge_id, "fwd");
+    auto rev_path = edge_index_path(database_id, edge_id, "rev");
+
+    if (!std::filesystem::exists(fwd_path) || !std::filesystem::exists(rev_path)) {
+        return ok(false);
+    }
+
+    bool has_uniq = edge_table.config().prevent_duplicates;
+    if (has_uniq) {
+        auto uniq_path = edge_index_path(database_id, edge_id, "uniq");
+        if (!std::filesystem::exists(uniq_path)) {
+            return ok(false);
+        }
+    }
+
+    // Read persisted edge count from heap header extension for staleness check.
+    auto sit = edge_storage_.find(edge_key);
+    if (sit == edge_storage_.end()) {
+        return ok(false); // No heap storage — can't validate.
+    }
+    auto& heap_storage = *sit->second;
+
+    auto persisted_count = dm_->read_header_ext_u64(heap_storage.file_id, 0);
+    // If no count stored, indexes may be stale — fall back.
+    if (!persisted_count) {
+        return ok(false);
+    }
+
+    // Helper to load one index from disk.
+    auto load_one = [&](const std::filesystem::path& path,
+                        std::unique_ptr<EdgeIndexStorage>& out_storage)
+        -> Result<std::unique_ptr<BTreeIndex>> {
+        auto fid = dm_->open_file(path);
+        if (!fid) {
+            return make_error(fid.error().code, fid.error().message);
+        }
+
+        auto bpm = std::make_unique<BufferPoolManager>(*dm_, *fid, 64);
+
+        auto meta_val = dm_->read_header_ext_u64(*fid, 0);
+        if (!meta_val || *meta_val == 0) {
+            (void)dm_->close_file(*fid);
+            return make_error(StatusCode::NOT_FOUND, "no meta page ID in edge index file");
+        }
+
+        auto index = BTreePersistence::load(*bpm, static_cast<PageId>(*meta_val));
+        if (!index) {
+            (void)dm_->close_file(*fid);
+            return make_error(index.error().code,
+                              "failed to load edge index: " + index.error().message);
+        }
+
+        // Keep the BPM alive for the lifetime of the index.
+        out_storage = std::make_unique<EdgeIndexStorage>();
+        out_storage->file_id = *fid;
+        out_storage->bpm = std::move(bpm);
+
+        return ok(std::move(*index));
+    };
+
+    // Load forward index.
+    auto fwd_idx = load_one(fwd_path, heap_storage.fwd_idx);
+    if (!fwd_idx) {
+        SIXSEVEN_LOG_DEBUG("failed to load forward edge index: {}", fwd_idx.error().message);
+        return ok(false);
+    }
+
+    // Load reverse index.
+    auto rev_idx = load_one(rev_path, heap_storage.rev_idx);
+    if (!rev_idx) {
+        // Clean up forward.
+        if (heap_storage.fwd_idx) {
+            (void)dm_->close_file(heap_storage.fwd_idx->file_id);
+            heap_storage.fwd_idx.reset();
+        }
+        SIXSEVEN_LOG_DEBUG("failed to load reverse edge index: {}", rev_idx.error().message);
+        return ok(false);
+    }
+
+    // Load unique index if needed.
+    std::unique_ptr<BTreeIndex> uniq_loaded;
+    if (has_uniq) {
+        auto uniq_path = edge_index_path(database_id, edge_id, "uniq");
+        auto uniq_idx = load_one(uniq_path, heap_storage.uniq_idx);
+        if (!uniq_idx) {
+            // Clean up forward and reverse.
+            if (heap_storage.fwd_idx) {
+                (void)dm_->close_file(heap_storage.fwd_idx->file_id);
+                heap_storage.fwd_idx.reset();
+            }
+            if (heap_storage.rev_idx) {
+                (void)dm_->close_file(heap_storage.rev_idx->file_id);
+                heap_storage.rev_idx.reset();
+            }
+            SIXSEVEN_LOG_DEBUG("failed to load unique edge index: {}", uniq_idx.error().message);
+            return ok(false);
+        }
+        uniq_loaded = std::move(*uniq_idx);
+    }
+
+    // Staleness check: compare loaded index size vs persisted edge count.
+    uint64_t fwd_size = (*fwd_idx)->size();
+    if (fwd_size != *persisted_count) {
+        SIXSEVEN_LOG_WARN("edge index staleness detected for '{}': index size {} != persisted count {}",
+                          edge_key, fwd_size, *persisted_count);
+        // Clean up loaded indexes.
+        if (heap_storage.fwd_idx) {
+            (void)dm_->close_file(heap_storage.fwd_idx->file_id);
+            heap_storage.fwd_idx.reset();
+        }
+        if (heap_storage.rev_idx) {
+            (void)dm_->close_file(heap_storage.rev_idx->file_id);
+            heap_storage.rev_idx.reset();
+        }
+        if (heap_storage.uniq_idx) {
+            (void)dm_->close_file(heap_storage.uniq_idx->file_id);
+            heap_storage.uniq_idx.reset();
+        }
+        // Remove stale index files.
+        std::filesystem::remove(fwd_path);
+        std::filesystem::remove(rev_path);
+        if (has_uniq) {
+            std::filesystem::remove(edge_index_path(database_id, edge_id, "uniq"));
+        }
+        return ok(false);
+    }
+
+    // Install the loaded indexes into the EdgeTable.
+    edge_table.set_indexes(std::move(*fwd_idx), std::move(*rev_idx), std::move(uniq_loaded));
+
+    return ok(true);
+}
+
+Result<void> GraphEngine::flush_edge_indexes() {
+    std::lock_guard lock(mu_);
+
+    if (!has_persistence()) {
+        return ok();
+    }
+
+    auto t_start = std::chrono::steady_clock::now();
+    size_t flushed = 0;
+
+    for (auto& [key, table] : edge_tables_) {
+        auto& cfg = table->config();
+
+        // Extract database_id from the key (format: "database_id:name").
+        auto colon = key.find(':');
+        if (colon == std::string::npos) continue;
+        auto db_id = static_cast<database_id_t>(std::stoul(key.substr(0, colon)));
+
+        auto r = persist_edge_indexes(key, db_id, cfg.edge_id);
+        if (r) {
+            ++flushed;
+        } else {
+            SIXSEVEN_LOG_WARN("failed to persist edge indexes for '{}': {}",
+                              cfg.name, r.error().message);
+        }
+    }
+
+    auto elapsed = std::chrono::steady_clock::now() - t_start;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    SIXSEVEN_LOG_INFO("graph engine: flushed {} edge index set(s) to disk in {}ms", flushed, ms);
+
+    return ok();
+}
+
 Result<void> GraphEngine::load_edges() {
     std::lock_guard lock(mu_);
 
@@ -745,18 +1063,33 @@ Result<void> GraphEngine::load_edges() {
         storage->storage_schema =
             build_edge_storage_schema(source_pk_type, target_pk_type, prop_cols);
 
-        // Scan heap and restore edges.
+        edge_storage_[key] = std::move(storage);
+
+        // Try to load persisted B+ tree indexes (fast path).
         auto& edge_table = *edge_tables_[key];
-        auto iter = storage->heap->begin();
+        bool indexes_loaded = false;
+        {
+            auto idx_result = load_edge_indexes(key, et.database_id, et.edge_id, edge_table);
+            if (idx_result && *idx_result) {
+                indexes_loaded = true;
+                SIXSEVEN_LOG_INFO("loaded persisted indexes for edge type '{}'", et.name);
+            }
+        }
+        if (!indexes_loaded) {
+            SIXSEVEN_LOG_INFO("rebuilding indexes for edge type '{}' from heap", et.name);
+        }
+
+        // Scan heap and restore edge data.
+        auto& edge_store = *edge_storage_[key];
+        auto iter = edge_store.heap->begin();
         if (!iter) {
             SIXSEVEN_LOG_WARN(
                 "failed to iterate edge storage for '{}': {}", et.name, iter.error().message);
-            edge_storage_[key] = std::move(storage);
             continue;
         }
 
         while (auto row = iter->next()) {
-            auto values = TupleSerializer::deserialize(row->second, storage->storage_schema);
+            auto values = TupleSerializer::deserialize(row->second, edge_store.storage_schema);
             if (!values) {
                 SIXSEVEN_LOG_WARN("skipping corrupt edge row in '{}'", et.name);
                 continue;
@@ -778,7 +1111,14 @@ Result<void> GraphEngine::load_edges() {
                 props.push_back(v[i]);
             }
 
-            auto restore = edge_table.restore_edge(edge_row_id, src_pk, tgt_pk, props);
+            Result<void> restore;
+            if (indexes_loaded) {
+                // Fast path: populate edges_ map only, skip B+ tree inserts.
+                restore = edge_table.restore_edge_data_only(edge_row_id, src_pk, tgt_pk, props);
+            } else {
+                // Slow path: full rebuild including B+ tree insertions.
+                restore = edge_table.restore_edge(edge_row_id, src_pk, tgt_pk, props);
+            }
             if (!restore) {
                 SIXSEVEN_LOG_WARN("failed to restore edge {} in '{}': {}",
                                   edge_row_id,
@@ -788,11 +1128,9 @@ Result<void> GraphEngine::load_edges() {
             }
 
             // Store RID mapping for future deletes.
-            storage->rid_map[edge_row_id] = row->first;
+            edge_store.rid_map[edge_row_id] = row->first;
             ++total_edges;
         }
-
-        edge_storage_[key] = std::move(storage);
     }
 
     if (total_edges > 0) {

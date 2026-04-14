@@ -168,10 +168,13 @@ Result<void> Catalog::drop_table_locked(database_id_t database_id, const std::st
         }
     }
     for (auto& idx_name : idx_names_to_remove) {
-        auto idx_name_it = index_name_to_id_.find(idx_name);
-        if (idx_name_it != index_name_to_id_.end()) {
-            indexes_by_id_.erase(idx_name_it->second);
-            index_name_to_id_.erase(idx_name_it);
+        auto db_idx_it = index_name_to_id_.find(database_id);
+        if (db_idx_it != index_name_to_id_.end()) {
+            auto idx_name_it = db_idx_it->second.find(idx_name);
+            if (idx_name_it != db_idx_it->second.end()) {
+                indexes_by_id_.erase(idx_name_it->second);
+                db_idx_it->second.erase(idx_name_it);
+            }
         }
     }
 
@@ -427,20 +430,25 @@ Result<void> Catalog::rename_column(table_id_t table_id,
 Result<index_id_t> Catalog::create_index(IndexDef def) {
     std::lock_guard lock(mu_);
 
-    if (index_name_to_id_.contains(def.name)) {
-        return make_error(StatusCode::ALREADY_EXISTS, "index '" + def.name + "' already exists");
-    }
-
     // Validate that the referenced table exists.
     if (!tables_by_id_.contains(def.table_id)) {
         return make_error(StatusCode::NOT_FOUND,
                           "table with id " + std::to_string(def.table_id) + " not found");
     }
 
+    // Index names are unique within a database (not globally).
+    auto db_id = table_to_database_.contains(def.table_id)
+                     ? table_to_database_[def.table_id]
+                     : default_database_id;
+    auto& db_index_names = index_name_to_id_[db_id];
+    if (db_index_names.contains(def.name)) {
+        return make_error(StatusCode::ALREADY_EXISTS, "index '" + def.name + "' already exists");
+    }
+
     index_id_t id = next_index_id_++;
     def.index_id = id;
 
-    index_name_to_id_[def.name] = id;
+    db_index_names[def.name] = id;
     indexes_by_id_[id] = std::move(def);
 
     return ok(id);
@@ -449,26 +457,31 @@ Result<index_id_t> Catalog::create_index(IndexDef def) {
 Result<void> Catalog::drop_index(const std::string& name) {
     std::lock_guard lock(mu_);
 
-    auto name_it = index_name_to_id_.find(name);
-    if (name_it == index_name_to_id_.end()) {
-        return make_error(StatusCode::NOT_FOUND, "index '" + name + "' not found");
+    // Search across all databases for the index name.
+    for (auto& [db_id, db_names] : index_name_to_id_) {
+        auto name_it = db_names.find(name);
+        if (name_it != db_names.end()) {
+            indexes_by_id_.erase(name_it->second);
+            db_names.erase(name_it);
+            return ok();
+        }
     }
 
-    indexes_by_id_.erase(name_it->second);
-    index_name_to_id_.erase(name_it);
-
-    return ok();
+    return make_error(StatusCode::NOT_FOUND, "index '" + name + "' not found");
 }
 
 Result<IndexDef> Catalog::get_index(const std::string& name) const {
     std::lock_guard lock(mu_);
 
-    auto name_it = index_name_to_id_.find(name);
-    if (name_it == index_name_to_id_.end()) {
-        return make_error(StatusCode::NOT_FOUND, "index '" + name + "' not found");
+    // Search across all databases for the index name.
+    for (const auto& [db_id, db_names] : index_name_to_id_) {
+        auto name_it = db_names.find(name);
+        if (name_it != db_names.end()) {
+            return ok(indexes_by_id_.at(name_it->second));
+        }
     }
 
-    return ok(indexes_by_id_.at(name_it->second));
+    return make_error(StatusCode::NOT_FOUND, "index '" + name + "' not found");
 }
 
 std::vector<IndexDef> Catalog::list_indexes(table_id_t table_id) const {
@@ -769,12 +782,16 @@ Result<void> Catalog::restore_table(database_id_t database_id, TableSchema schem
 Result<void> Catalog::restore_index(IndexDef def) {
     std::lock_guard lock(mu_);
 
-    if (index_name_to_id_.contains(def.name)) {
+    auto db_id = table_to_database_.contains(def.table_id)
+                     ? table_to_database_[def.table_id]
+                     : default_database_id;
+    auto& db_names = index_name_to_id_[db_id];
+    if (db_names.contains(def.name)) {
         return make_error(StatusCode::ALREADY_EXISTS, "index '" + def.name + "' already exists");
     }
 
     index_id_t id = def.index_id;
-    index_name_to_id_[def.name] = id;
+    db_names[def.name] = id;
     indexes_by_id_[id] = std::move(def);
 
     if (id >= next_index_id_) {

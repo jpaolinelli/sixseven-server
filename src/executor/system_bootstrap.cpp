@@ -162,6 +162,77 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
             catalog.set_next_table_id(first_user_table_id);
         }
 
+        // Migration: ensure every EMBEDDING column has a corresponding HNSW
+        // IndexDef in sys_indexes.  Old deployments created the embedding
+        // metadata but never persisted the companion index entry.
+        {
+            auto all_emb = catalog.list_all_embedding_columns();
+            int migrated = 0;
+            for (const auto& emb : all_emb) {
+                auto table = catalog.get_table_by_id(emb.table_id);
+                if (!table) {
+                    continue;
+                }
+
+                // Find the column name from the ordinal.
+                std::string col_name;
+                for (const auto& col : table->columns) {
+                    if (col.ordinal == emb.column_id) {
+                        col_name = col.name;
+                        break;
+                    }
+                }
+                if (col_name.empty()) {
+                    continue;
+                }
+
+                std::string index_name = "hnsw_" + table->name + "_" + col_name;
+
+                // Check if this table already has an HNSW index for this column.
+                auto table_indexes = catalog.list_indexes(emb.table_id);
+                bool already_has_hnsw = false;
+                for (const auto& idx : table_indexes) {
+                    if (idx.index_type == "hnsw" && idx.columns == col_name) {
+                        already_has_hnsw = true;
+                        break;
+                    }
+                }
+                if (already_has_hnsw) {
+                    continue; // Already present for this table, nothing to do.
+                }
+
+                // Create the missing HNSW IndexDef.
+                IndexDef def;
+                def.table_id = emb.table_id;
+                def.name = index_name;
+                def.index_type = "hnsw";
+                def.columns = col_name;
+                def.is_unique = false;
+
+                auto idx_id = catalog.create_index(def);
+                if (!idx_id) {
+                    SIXSEVEN_LOG_WARN("system bootstrap: failed to create missing HNSW index '{}': {}",
+                                      index_name, idx_id.error().message);
+                    continue;
+                }
+
+                // Persist to sys_indexes so it survives the next restart.
+                def.index_id = *idx_id;
+                auto pr = persistence.persist_index(def);
+                if (!pr) {
+                    SIXSEVEN_LOG_WARN("system bootstrap: failed to persist HNSW index '{}': {}",
+                                      index_name, pr.error().message);
+                    continue;
+                }
+
+                ++migrated;
+                SIXSEVEN_LOG_INFO("system bootstrap: created missing HNSW index '{}'", index_name);
+            }
+            if (migrated > 0) {
+                SIXSEVEN_LOG_INFO("system bootstrap: migrated {} HNSW index entries", migrated);
+            }
+        }
+
         SIXSEVEN_LOG_INFO("system bootstrap: catalog loaded from disk");
     }
 

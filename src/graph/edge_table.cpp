@@ -283,6 +283,42 @@ Result<void> EdgeTable::restore_edge(uint64_t edge_row_id,
     return ok();
 }
 
+Result<void> EdgeTable::restore_edge_data_only(uint64_t edge_row_id,
+                                                const Value& source_pk,
+                                                const Value& target_pk,
+                                                const std::vector<Value>& properties) {
+    std::unique_lock lock(mu_);
+
+    if (edges_.count(edge_row_id) > 0) {
+        return make_error(StatusCode::ALREADY_EXISTS,
+                          "duplicate edge row ID during restore: " + std::to_string(edge_row_id));
+    }
+
+    // Store the edge row (skip B+ tree inserts — indexes loaded from disk).
+    EdgeRow row;
+    row.edge_row_id = edge_row_id;
+    row.source_pk = source_pk;
+    row.target_pk = target_pk;
+    row.properties = properties;
+    edges_.emplace(edge_row_id, std::move(row));
+
+    if (edge_row_id >= next_row_id_) {
+        next_row_id_ = edge_row_id + 1;
+    }
+
+    return ok();
+}
+
+void EdgeTable::set_indexes(std::unique_ptr<BTreeIndex> fwd,
+                             std::unique_ptr<BTreeIndex> rev,
+                             std::unique_ptr<BTreeIndex> uniq) {
+    forward_index_ = std::move(fwd);
+    reverse_index_ = std::move(rev);
+    if (uniq) {
+        unique_index_ = std::move(uniq);
+    }
+}
+
 Result<void> EdgeTable::delete_edge(uint64_t edge_row_id) {
     std::unique_lock lock(mu_);
 

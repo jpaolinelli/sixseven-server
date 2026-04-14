@@ -794,6 +794,12 @@ struct ReembedStmt : Stmt {
     void accept(AstVisitor& visitor) const override;
 };
 
+/// REINDEX [INDEX|TABLE] name.
+struct ReindexStmt : Stmt {
+    std::string name;
+    void accept(AstVisitor& visitor) const override;
+};
+
 /// VACUUM [table].
 struct VacuumStmt : Stmt {
     std::string table_name;
@@ -892,6 +898,7 @@ public:
     virtual void visit(const ExplainStmt& node) = 0;
     virtual void visit(const DescribeStmt& node) = 0;
     virtual void visit(const ReembedStmt& node) = 0;
+    virtual void visit(const ReindexStmt& node) = 0;
     virtual void visit(const VacuumStmt& node) = 0;
     virtual void visit(const AnalyzeStmt& node) = 0;
 };
@@ -1044,6 +1051,9 @@ inline void DescribeStmt::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void ReembedStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void ReindexStmt::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void VacuumStmt::accept(AstVisitor& v) const {

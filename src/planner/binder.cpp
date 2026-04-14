@@ -2675,6 +2675,7 @@ Result<BoundStatement> Binder::bind_passthrough(const Stmt& stmt) {
             bound.referenced_tables.push_back(schema->table_id);
         }
     }
+    // ReindexStmt: no validation needed here — executor resolves name.
 
     return ok(std::move(bound));
 }
