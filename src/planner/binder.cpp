@@ -2649,8 +2649,16 @@ Result<BoundStatement> Binder::bind_passthrough(const Stmt& stmt) {
     BoundStatement bound;
     bound.stmt = &stmt;
 
-    // Validate REEMBED, VACUUM, ANALYZE table references.
-    if (auto* s = dynamic_cast<const ReembedStmt*>(&stmt)) {
+    // Validate BACKFILL, REEMBED, VACUUM, ANALYZE table references.
+    if (auto* s = dynamic_cast<const BackfillStmt*>(&stmt)) {
+        if (!s->table_name.empty()) {
+            auto schema = resolve_table(s->table_name);
+            if (!schema) {
+                return tl::unexpected(schema.error());
+            }
+            bound.referenced_tables.push_back(schema->table_id);
+        }
+    } else if (auto* s = dynamic_cast<const ReembedStmt*>(&stmt)) {
         if (!s->table_name.empty()) {
             auto schema = resolve_table(s->table_name);
             if (!schema) {

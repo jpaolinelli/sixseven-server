@@ -24,6 +24,7 @@
 #include "sixseven/server/wal_sender_manager.h"
 #include "sixseven/storage/wal.h"
 #include "sixseven/table/tuple.h"
+#include "sixseven/vector/backfill_manager.h"
 #include "sixseven/vector/embedding_column.h"
 #include "sixseven/vector/embedding_worker.h"
 #include "sixseven/vector/hnsw_index.h"
@@ -425,6 +426,10 @@ void QueryEngine::set_index_manager(IndexManager* mgr) {
     index_manager_ = mgr;
 }
 
+void QueryEngine::set_backfill_manager(BackfillManager* mgr) {
+    backfill_manager_ = mgr;
+}
+
 // ---------------------------------------------------------------------------
 // Full pipeline
 // ---------------------------------------------------------------------------
@@ -475,6 +480,7 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
                         dynamic_cast<const DropEdgeTypeStmt*>(raw) != nullptr ||
                         dynamic_cast<const LinkStmt*>(raw) != nullptr ||
                         dynamic_cast<const UnlinkStmt*>(raw) != nullptr ||
+                        dynamic_cast<const BackfillStmt*>(raw) != nullptr ||
                         dynamic_cast<const ReembedStmt*>(raw) != nullptr ||
                         dynamic_cast<const ReindexStmt*>(raw) != nullptr ||
                         dynamic_cast<const CreateUserStmt*>(raw) != nullptr ||
@@ -645,6 +651,9 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
     }
 
     // 6c. Dispatch admin commands after binding.
+    if (auto* backfill = dynamic_cast<const BackfillStmt*>(bound->stmt)) {
+        return execute_backfill(*backfill);
+    }
     if (auto* reembed = dynamic_cast<const ReembedStmt*>(bound->stmt)) {
         return execute_reembed(*reembed);
     }
@@ -1731,6 +1740,26 @@ Result<QueryResult> QueryEngine::execute_reindex(const ReindexStmt& stmt) {
 }
 
 // ---------------------------------------------------------------------------
+// BACKFILL EMBEDDINGS
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_backfill(const BackfillStmt& stmt) {
+    if (!backfill_manager_) {
+        return make_error(StatusCode::INTERNAL_ERROR,
+                          "backfill manager not initialized");
+    }
+
+    auto result = backfill_manager_->start(stmt, current_database_id_);
+    if (!result) {
+        return make_error(result.error().code, result.error().message);
+    }
+
+    QueryResult qr;
+    qr.message = "BACKFILL started for table " + stmt.table_name;
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
 // REEMBED TABLE
 // ---------------------------------------------------------------------------
 
@@ -2662,6 +2691,32 @@ Result<QueryResult> QueryEngine::execute_show(const ShowStmt& stmt) {
                                               : Value(),
              Value(static_cast<int64_t>(state.replication_lag.count())),
              Value(state.is_streaming)});
+        return ok(std::move(qr));
+    }
+
+    case ShowTarget::BACKFILL: {
+        if (!backfill_manager_) {
+            QueryResult qr;
+            qr.column_names = {"table_name", "status", "processed", "generated",
+                                "skipped", "rows_per_sec"};
+            qr.column_types = {TypeId::STRING,  TypeId::STRING,  TypeId::INT64,
+                                TypeId::INT64,   TypeId::INT64,   TypeId::FLOAT64};
+            return ok(std::move(qr));
+        }
+        auto statuses = backfill_manager_->all_statuses();
+        QueryResult qr;
+        qr.column_names = {"table_name", "status", "processed", "generated",
+                            "skipped", "rows_per_sec"};
+        qr.column_types = {TypeId::STRING,  TypeId::STRING,  TypeId::INT64,
+                            TypeId::INT64,   TypeId::INT64,   TypeId::FLOAT64};
+        for (const auto& s : statuses) {
+            qr.rows.push_back({Value(s.table_name),
+                                Value(std::string(s.running ? "running" : "completed")),
+                                Value(s.processed),
+                                Value(s.generated),
+                                Value(s.skipped),
+                                Value(s.rows_per_sec)});
+        }
         return ok(std::move(qr));
     }
 

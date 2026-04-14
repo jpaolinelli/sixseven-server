@@ -2288,6 +2288,121 @@ DistanceMetric to_distance_metric(NearestMetric m) {
     }
 }
 
+/// Parse a comma-separated column list (e.g. "a,b,c") into individual names.
+std::vector<std::string> parse_index_columns(const std::string& columns) {
+    std::vector<std::string> result;
+    size_t start = 0;
+    while (start < columns.size()) {
+        size_t end = columns.find(',', start);
+        if (end == std::string::npos) {
+            end = columns.size();
+        }
+        // Trim whitespace.
+        auto s = start;
+        while (s < end && columns[s] == ' ') {
+            ++s;
+        }
+        auto e = end;
+        while (e > s && columns[e - 1] == ' ') {
+            --e;
+        }
+        if (s < e) {
+            result.emplace_back(columns.substr(s, e - s));
+        }
+        start = end + 1;
+    }
+    return result;
+}
+
+/// Check if a binary predicate is a simple comparison between a column and a
+/// literal (e.g., `col = 42` or `col > 10`). Returns the column name, the
+/// literal Value, and the operator.
+struct SimpleComparison {
+    std::string column_name;
+    Value literal_value;
+    BinaryOp op = BinaryOp::EQUAL;
+};
+
+std::optional<SimpleComparison> extract_simple_comparison(const Expr* expr) {
+    auto* bin = dynamic_cast<const BinaryExpr*>(expr);
+    if (bin == nullptr) {
+        return std::nullopt;
+    }
+
+    // Only handle comparison operators.
+    switch (bin->op) {
+    case BinaryOp::EQUAL:
+    case BinaryOp::LESS:
+    case BinaryOp::GREATER:
+    case BinaryOp::LESS_EQUAL:
+    case BinaryOp::GREATER_EQUAL:
+        break;
+    default:
+        return std::nullopt;
+    }
+
+    auto* col = dynamic_cast<const ColumnRefExpr*>(bin->lhs.get());
+    auto* lit = dynamic_cast<const LiteralExpr*>(bin->rhs.get());
+
+    if (col == nullptr || lit == nullptr) {
+        // Try reversed: literal op column.
+        col = dynamic_cast<const ColumnRefExpr*>(bin->rhs.get());
+        lit = dynamic_cast<const LiteralExpr*>(bin->lhs.get());
+        if (col == nullptr || lit == nullptr) {
+            return std::nullopt;
+        }
+        // Flip the operator for reversed operands.
+        SimpleComparison cmp;
+        cmp.column_name = col->column;
+        switch (bin->op) {
+        case BinaryOp::LESS:
+            cmp.op = BinaryOp::GREATER;
+            break;
+        case BinaryOp::GREATER:
+            cmp.op = BinaryOp::LESS;
+            break;
+        case BinaryOp::LESS_EQUAL:
+            cmp.op = BinaryOp::GREATER_EQUAL;
+            break;
+        case BinaryOp::GREATER_EQUAL:
+            cmp.op = BinaryOp::LESS_EQUAL;
+            break;
+        default:
+            cmp.op = bin->op;
+            break;
+        }
+
+        // Parse the literal value.
+        if (lit->kind == LiteralKind::INTEGER) {
+            cmp.literal_value = Value(static_cast<int64_t>(std::stoll(lit->value)));
+        } else if (lit->kind == LiteralKind::FLOAT) {
+            cmp.literal_value = Value(std::stod(lit->value));
+        } else if (lit->kind == LiteralKind::STRING) {
+            cmp.literal_value = Value(lit->value);
+        } else {
+            return std::nullopt;
+        }
+        return cmp;
+    }
+
+    SimpleComparison cmp;
+    cmp.column_name = col->column;
+    cmp.op = bin->op;
+
+    // Parse the literal value.
+    if (lit->kind == LiteralKind::INTEGER) {
+        cmp.literal_value = Value(static_cast<int64_t>(std::stoll(lit->value)));
+    } else if (lit->kind == LiteralKind::FLOAT) {
+        cmp.literal_value = Value(std::stod(lit->value));
+    } else if (lit->kind == LiteralKind::STRING) {
+        cmp.literal_value = Value(lit->value);
+    } else {
+        return std::nullopt;
+    }
+
+    return cmp;
+}
+
 } // anonymous namespace
 
 Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
@@ -2493,6 +2608,120 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
         }
     }
 
+    // --- Btree-accelerated pre-filtering ---
+    // When the WHERE clause matches a btree index and the filter is selective
+    // (≤ 10,000 candidates), collect RIDs from the btree and compute distances
+    // only for those rows via brute-force. This avoids searching the entire
+    // HNSW index for highly selective predicates.
+    static constexpr size_t kPrefilterThreshold = 10'000;
+
+    if (stmt.where_expr != nullptr && btree_indexes_ != nullptr &&
+        !btree_indexes_->empty() && config.allowed_node_ids.empty()) {
+        auto cmp = extract_simple_comparison(stmt.where_expr.get());
+        if (cmp) {
+            auto indexes = catalog_.list_indexes(table_schema->table_id);
+            for (const auto& idx_def : indexes) {
+                if (idx_def.index_type != "btree") {
+                    continue;
+                }
+                auto it = btree_indexes_->find(idx_def.index_id);
+                if (it == btree_indexes_->end()) {
+                    continue;
+                }
+                auto idx_columns = parse_index_columns(idx_def.columns);
+                if (idx_columns.empty() || idx_columns[0] != cmp->column_name) {
+                    continue;
+                }
+
+                auto* btree = it->second;
+
+                // Coerce the literal to the column's actual type.
+                Value coerced_value = cmp->literal_value;
+                for (const auto& col : table_schema->columns) {
+                    if (col.name == cmp->column_name &&
+                        coerced_value.type_id() != col.type_id &&
+                        can_coerce(coerced_value.type_id(), col.type_id)) {
+                        auto cv = coerce(coerced_value, col.type_id);
+                        if (cv) {
+                            coerced_value = std::move(*cv);
+                        }
+                        break;
+                    }
+                }
+                KeyType key_value = {coerced_value};
+
+                // Determine scan bounds.
+                std::optional<KeyType> begin_key;
+                std::optional<KeyType> end_key;
+                switch (cmp->op) {
+                case BinaryOp::EQUAL:
+                case BinaryOp::GREATER:
+                case BinaryOp::GREATER_EQUAL:
+                    begin_key = key_value;
+                    break;
+                case BinaryOp::LESS:
+                case BinaryOp::LESS_EQUAL:
+                    end_key = key_value;
+                    break;
+                default:
+                    break;
+                }
+
+                // Perform the btree range scan to collect candidate RIDs.
+                auto scan_result = btree->range_scan(begin_key, end_key);
+                if (!scan_result) {
+                    break; // Fall through to HNSW path.
+                }
+                auto& btree_iter = *scan_result;
+
+                std::vector<RID> candidate_rids;
+                bool exceeded_threshold = false;
+                while (true) {
+                    auto entry = btree_iter.next();
+                    if (!entry || !entry->has_value()) {
+                        break;
+                    }
+                    auto& [entry_key, rid] = **entry;
+
+                    // For equality scans, stop once key moves past target.
+                    if (cmp->op == BinaryOp::EQUAL &&
+                        entry_key.size() == key_value.size()) {
+                        bool keys_match = true;
+                        for (size_t i = 0; i < entry_key.size(); ++i) {
+                            auto kcmp = compare(entry_key[i], key_value[i]);
+                            if (!kcmp || *kcmp != std::strong_ordering::equal) {
+                                keys_match = false;
+                                break;
+                            }
+                        }
+                        if (!keys_match) {
+                            break;
+                        }
+                    }
+
+                    candidate_rids.push_back(rid);
+                    if (candidate_rids.size() > kPrefilterThreshold) {
+                        exceeded_threshold = true;
+                        break;
+                    }
+                }
+
+                if (!exceeded_threshold && !candidate_rids.empty()) {
+                    SIXSEVEN_LOG_DEBUG(
+                        "plan_nearest: btree prefilter on '{}' found {} candidates",
+                        cmp->column_name, candidate_rids.size());
+                    config.prefiltered_rids = std::move(candidate_rids);
+                } else if (exceeded_threshold) {
+                    SIXSEVEN_LOG_DEBUG(
+                        "plan_nearest: btree prefilter on '{}' exceeded {} threshold, "
+                        "falling back to HNSW",
+                        cmp->column_name, kPrefilterThreshold);
+                }
+                break; // Use first matching index.
+            }
+        }
+    }
+
     // Look up the companion HNSW index by index_id (globally unique).
     HnswIndex* hnsw_index = nullptr;
     std::vector<RID>* rid_map = nullptr;
@@ -2546,125 +2775,6 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
 // ---------------------------------------------------------------------------
 // Index scan planning
 // ---------------------------------------------------------------------------
-
-namespace {
-
-/// Parse a comma-separated column list (e.g. "a,b,c") into individual names.
-std::vector<std::string> parse_index_columns(const std::string& columns) {
-    std::vector<std::string> result;
-    size_t start = 0;
-    while (start < columns.size()) {
-        size_t end = columns.find(',', start);
-        if (end == std::string::npos) {
-            end = columns.size();
-        }
-        // Trim whitespace.
-        auto s = start;
-        while (s < end && columns[s] == ' ') {
-            ++s;
-        }
-        auto e = end;
-        while (e > s && columns[e - 1] == ' ') {
-            --e;
-        }
-        if (s < e) {
-            result.emplace_back(columns.substr(s, e - s));
-        }
-        start = end + 1;
-    }
-    return result;
-}
-
-/// Check if a binary predicate is a simple comparison between a column and a
-/// literal (e.g., `col = 42` or `col > 10`). Returns the column name, the
-/// literal Value, and the operator.
-struct SimpleComparison {
-    std::string column_name;
-    Value literal_value;
-    BinaryOp op = BinaryOp::EQUAL;
-};
-
-std::optional<SimpleComparison> extract_simple_comparison(const Expr* expr) {
-    auto* bin = dynamic_cast<const BinaryExpr*>(expr);
-    if (bin == nullptr) {
-        return std::nullopt;
-    }
-
-    // Only handle comparison operators.
-    switch (bin->op) {
-    case BinaryOp::EQUAL:
-    case BinaryOp::LESS:
-    case BinaryOp::GREATER:
-    case BinaryOp::LESS_EQUAL:
-    case BinaryOp::GREATER_EQUAL:
-        break;
-    default:
-        return std::nullopt;
-    }
-
-    auto* col = dynamic_cast<const ColumnRefExpr*>(bin->lhs.get());
-    auto* lit = dynamic_cast<const LiteralExpr*>(bin->rhs.get());
-
-    if (col == nullptr || lit == nullptr) {
-        // Try reversed: literal op column.
-        col = dynamic_cast<const ColumnRefExpr*>(bin->rhs.get());
-        lit = dynamic_cast<const LiteralExpr*>(bin->lhs.get());
-        if (col == nullptr || lit == nullptr) {
-            return std::nullopt;
-        }
-        // Flip the operator for reversed operands.
-        SimpleComparison cmp;
-        cmp.column_name = col->column;
-        switch (bin->op) {
-        case BinaryOp::LESS:
-            cmp.op = BinaryOp::GREATER;
-            break;
-        case BinaryOp::GREATER:
-            cmp.op = BinaryOp::LESS;
-            break;
-        case BinaryOp::LESS_EQUAL:
-            cmp.op = BinaryOp::GREATER_EQUAL;
-            break;
-        case BinaryOp::GREATER_EQUAL:
-            cmp.op = BinaryOp::LESS_EQUAL;
-            break;
-        default:
-            cmp.op = bin->op;
-            break;
-        }
-
-        // Parse the literal value.
-        if (lit->kind == LiteralKind::INTEGER) {
-            cmp.literal_value = Value(static_cast<int64_t>(std::stoll(lit->value)));
-        } else if (lit->kind == LiteralKind::FLOAT) {
-            cmp.literal_value = Value(std::stod(lit->value));
-        } else if (lit->kind == LiteralKind::STRING) {
-            cmp.literal_value = Value(lit->value);
-        } else {
-            return std::nullopt;
-        }
-        return cmp;
-    }
-
-    SimpleComparison cmp;
-    cmp.column_name = col->column;
-    cmp.op = bin->op;
-
-    // Parse the literal value.
-    if (lit->kind == LiteralKind::INTEGER) {
-        cmp.literal_value = Value(static_cast<int64_t>(std::stoll(lit->value)));
-    } else if (lit->kind == LiteralKind::FLOAT) {
-        cmp.literal_value = Value(std::stod(lit->value));
-    } else if (lit->kind == LiteralKind::STRING) {
-        cmp.literal_value = Value(lit->value);
-    } else {
-        return std::nullopt;
-    }
-
-    return cmp;
-}
-
-} // anonymous namespace
 
 Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema& table_schema,
                                                                TableStorage* storage,

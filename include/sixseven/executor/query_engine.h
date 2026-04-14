@@ -20,6 +20,7 @@ namespace sixseven {
 class AlgorithmRegistry;
 class CatalogPersistence;
 enum class AuthMethod : uint8_t;
+struct BackfillStmt;
 struct AlterTableStmt;
 struct AlterUserStmt;
 struct BoundStatement;
@@ -41,6 +42,7 @@ struct ReindexStmt;
 struct SetStmt;
 struct ShowStmt;
 struct UnlinkStmt;
+class BackfillManager;
 class EmbeddingWorkerPool;
 class HnswIndex;
 class IndexManager;
@@ -173,6 +175,9 @@ public:
     /// Set the index manager for B+ tree and hash index lifecycle.
     void set_index_manager(IndexManager* mgr);
 
+    /// Set the backfill manager for BACKFILL EMBEDDINGS command.
+    void set_backfill_manager(BackfillManager* mgr);
+
 private:
     /// Execute a CREATE USER statement.
     [[nodiscard]] Result<QueryResult> execute_create_user(const CreateUserStmt& stmt);
@@ -227,6 +232,9 @@ private:
     [[nodiscard]] Result<QueryResult> execute_unlink(const UnlinkStmt& stmt,
                                                      const BoundStatement& bound);
 
+    /// Execute a BACKFILL EMBEDDINGS ON table statement.
+    [[nodiscard]] Result<QueryResult> execute_backfill(const BackfillStmt& stmt);
+
     /// Execute a REEMBED TABLE statement (bulk embedding regeneration).
     [[nodiscard]] Result<QueryResult> execute_reembed(const ReembedStmt& stmt);
 
@@ -273,6 +281,7 @@ private:
     EmbeddingWorkerPool* embedding_pool_ = nullptr;
     AlgorithmRegistry* algorithm_registry_ = nullptr;
     IndexManager* index_manager_ = nullptr;
+    BackfillManager* backfill_manager_ = nullptr;
     CatalogPersistence* catalog_persistence_ = nullptr;
     AuthMethod auth_method_{};
     database_id_t current_database_id_ = default_database_id;

@@ -3,6 +3,7 @@ find_package(httplib CONFIG REQUIRED)
 find_package(onnxruntime CONFIG REQUIRED)
 
 add_library(sixseven_vector STATIC
+    backfill_manager.cpp
     bpe_tokenizer.cpp
     distance.cpp
     hnsw_page.cpp

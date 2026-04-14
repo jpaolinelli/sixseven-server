@@ -1967,6 +1967,7 @@ public:
     void visit(const ShowStmt&) override { visited_type = "ShowStmt"; }
     void visit(const ExplainStmt&) override { visited_type = "ExplainStmt"; }
     void visit(const DescribeStmt&) override { visited_type = "DescribeStmt"; }
+    void visit(const BackfillStmt&) override { visited_type = "BackfillStmt"; }
     void visit(const ReembedStmt&) override { visited_type = "ReembedStmt"; }
     void visit(const ReindexStmt&) override { visited_type = "ReindexStmt"; }
     void visit(const VacuumStmt&) override { visited_type = "VacuumStmt"; }
@@ -2026,6 +2027,7 @@ TEST(AstVisitor, DispatchesAdmin) {
     EXPECT_EQ(visit_stmt("SHOW TABLES"), "ShowStmt");
     EXPECT_EQ(visit_stmt("EXPLAIN SELECT 1"), "ExplainStmt");
     EXPECT_EQ(visit_stmt("DESCRIBE users"), "DescribeStmt");
+    EXPECT_EQ(visit_stmt("BACKFILL EMBEDDINGS ON users"), "BackfillStmt");
     EXPECT_EQ(visit_stmt("REEMBED TABLE users"), "ReembedStmt");
     EXPECT_EQ(visit_stmt("VACUUM"), "VacuumStmt");
     EXPECT_EQ(visit_stmt("ANALYZE"), "AnalyzeStmt");
@@ -2118,4 +2120,76 @@ TEST(AstVisitor, DispatchesPredicateExprs) {
     ASSERT_NE(sel4, nullptr);
     sel4->where_expr->accept(v);
     EXPECT_EQ(v.visited_type, "InExpr");
+}
+
+// =============================================================================
+// BACKFILL parser tests
+// =============================================================================
+
+TEST(ParseBackfill, BasicBackfill) {
+    auto stmt = parse_one("BACKFILL EMBEDDINGS ON my_table");
+    auto* backfill = dynamic_cast<BackfillStmt*>(stmt.get());
+    ASSERT_NE(backfill, nullptr);
+    EXPECT_EQ(backfill->table_name, "my_table");
+    EXPECT_EQ(backfill->batch_size, 100u); // default
+    EXPECT_EQ(backfill->rate_limit, 0u);   // default (unlimited)
+}
+
+TEST(ParseBackfill, WithBatchSize) {
+    auto stmt = parse_one("BACKFILL EMBEDDINGS ON posts BATCH 500");
+    auto* backfill = dynamic_cast<BackfillStmt*>(stmt.get());
+    ASSERT_NE(backfill, nullptr);
+    EXPECT_EQ(backfill->table_name, "posts");
+    EXPECT_EQ(backfill->batch_size, 500u);
+    EXPECT_EQ(backfill->rate_limit, 0u);
+}
+
+TEST(ParseBackfill, WithRateLimit) {
+    auto stmt = parse_one("BACKFILL EMBEDDINGS ON posts RATE_LIMIT 1000");
+    auto* backfill = dynamic_cast<BackfillStmt*>(stmt.get());
+    ASSERT_NE(backfill, nullptr);
+    EXPECT_EQ(backfill->table_name, "posts");
+    EXPECT_EQ(backfill->batch_size, 100u);
+    EXPECT_EQ(backfill->rate_limit, 1000u);
+}
+
+TEST(ParseBackfill, WithBothOptions) {
+    auto stmt = parse_one("BACKFILL EMBEDDINGS ON posts BATCH 200 RATE_LIMIT 5000");
+    auto* backfill = dynamic_cast<BackfillStmt*>(stmt.get());
+    ASSERT_NE(backfill, nullptr);
+    EXPECT_EQ(backfill->table_name, "posts");
+    EXPECT_EQ(backfill->batch_size, 200u);
+    EXPECT_EQ(backfill->rate_limit, 5000u);
+}
+
+TEST(ParseBackfill, MissingEmbeddingsKeyword) {
+    Lexer lexer("BACKFILL ON posts");
+    auto tokens = lexer.tokenize();
+    ASSERT_TRUE(tokens.has_value());
+    Parser parser(std::move(*tokens));
+    auto result = parser.parse();
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(ParseBackfill, MissingOnKeyword) {
+    Lexer lexer("BACKFILL EMBEDDINGS posts");
+    auto tokens = lexer.tokenize();
+    ASSERT_TRUE(tokens.has_value());
+    Parser parser(std::move(*tokens));
+    auto result = parser.parse();
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(ParseBackfill, ShowBackfillStatus) {
+    auto stmt = parse_one("SHOW BACKFILL STATUS");
+    auto* show = dynamic_cast<ShowStmt*>(stmt.get());
+    ASSERT_NE(show, nullptr);
+    EXPECT_EQ(show->target, ShowTarget::BACKFILL);
+}
+
+TEST(ParseBackfill, ShowBackfillWithoutStatus) {
+    auto stmt = parse_one("SHOW BACKFILL");
+    auto* show = dynamic_cast<ShowStmt*>(stmt.get());
+    ASSERT_NE(show, nullptr);
+    EXPECT_EQ(show->target, ShowTarget::BACKFILL);
 }

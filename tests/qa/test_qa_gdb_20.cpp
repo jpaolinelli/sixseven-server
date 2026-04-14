@@ -1419,6 +1419,7 @@ public:
     void visit(const ShowStmt&) override { count++; }
     void visit(const ExplainStmt&) override { count++; }
     void visit(const DescribeStmt&) override { count++; }
+    void visit(const BackfillStmt&) override { count++; }
     void visit(const ReembedStmt&) override { count++; }
     void visit(const ReindexStmt&) override { count++; }
     void visit(const VacuumStmt&) override { count++; }

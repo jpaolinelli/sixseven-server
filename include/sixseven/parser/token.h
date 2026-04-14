@@ -125,6 +125,7 @@ enum class TokenType : uint8_t {
 
     // -- SixSevenDB-specific keywords ----------------------------------------------
 
+    BACKFILL,
     DIRECTION,
     EDGE,
     EMBEDDING,
@@ -414,6 +415,8 @@ constexpr std::string_view token_type_name(TokenType type) {
         return "MIN";
     case TokenType::SUM:
         return "SUM";
+    case TokenType::BACKFILL:
+        return "BACKFILL";
     case TokenType::DIRECTION:
         return "DIRECTION";
     case TokenType::EDGE:

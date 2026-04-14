@@ -661,3 +661,191 @@ TEST_F(NearestScanTest, SingleNearestNeighbor) {
 
     op.close();
 }
+
+// =============================================================================
+// Pre-filtered search tests (btree-accelerated)
+// =============================================================================
+
+TEST_F(NearestScanTest, PrefilteredBasicNearest) {
+    TableHeap heap(*table_bpm_, dm_, table_file_id_);
+
+    // Insert 5 rows and record their RIDs.
+    insert_row(heap, 1, "alpha", {1.0F, 0.0F, 0.0F});
+    auto rid2 = insert_row(heap, 2, "beta", {0.0F, 1.0F, 0.0F});
+    insert_row(heap, 3, "gamma", {0.0F, 0.0F, 1.0F});
+    auto rid4 = insert_row(heap, 4, "delta", {1.0F, 1.0F, 0.0F});
+    auto rid5 = insert_row(heap, 5, "epsilon", {0.5F, 0.5F, 0.5F});
+
+    // Pre-filter to only rows 2, 4, 5 (simulating btree lookup result).
+    NearestScanConfig config;
+    config.k = 2;
+    config.query_vector = {1.0F, 0.0F, 0.0F};
+    config.metric = DistanceMetric::L2;
+    config.embedding_column_index = 2;
+    config.prefiltered_rids = {rid2, rid4, rid5};
+
+    OutputSchema schema(output_cols_);
+    BoundStatement bound;
+
+    NearestScanOperator op(
+        heap, storage_schema_, std::move(config), std::move(schema), nullptr, bound);
+
+    ASSERT_TRUE(op.open().has_value());
+    auto results = drain(op);
+    ASSERT_EQ(results.size(), 2u);
+
+    // Among {beta [0,1,0], delta [1,1,0], epsilon [0.5,0.5,0.5]}, nearest to [1,0,0]:
+    // delta: L2 = 0+1+0 = 1.0
+    // epsilon: L2 = 0.25+0.25+0.25 = 0.75
+    // beta: L2 = 1+1+0 = 2.0
+    // Top-2: epsilon (0.75), delta (1.0)
+    EXPECT_EQ(results[0].values[0].as_int32(), 5); // epsilon
+    EXPECT_EQ(results[1].values[0].as_int32(), 4); // delta
+
+    op.close();
+}
+
+TEST_F(NearestScanTest, PrefilteredEmptyRIDs) {
+    TableHeap heap(*table_bpm_, dm_, table_file_id_);
+
+    insert_row(heap, 1, "a", {1.0F, 0.0F, 0.0F});
+
+    // Empty prefiltered set should return no results (but NOT fall through
+    // to brute-force — empty means "no candidates matched the btree filter").
+    // Actually, empty prefiltered_rids means "no prefilter", so it falls through.
+    // A non-empty prefiltered_rids with no valid rows is the real test.
+    NearestScanConfig config;
+    config.k = 5;
+    config.query_vector = {1.0F, 0.0F, 0.0F};
+    config.metric = DistanceMetric::L2;
+    config.embedding_column_index = 2;
+    // Use an invalid RID that won't match any real tuple.
+    config.prefiltered_rids = {RID{9999, 9999}};
+
+    OutputSchema schema(output_cols_);
+    BoundStatement bound;
+
+    NearestScanOperator op(
+        heap, storage_schema_, std::move(config), std::move(schema), nullptr, bound);
+
+    ASSERT_TRUE(op.open().has_value());
+    auto results = drain(op);
+    EXPECT_TRUE(results.empty());
+    op.close();
+}
+
+TEST_F(NearestScanTest, PrefilteredWithWherePostFilter) {
+    TableHeap heap(*table_bpm_, dm_, table_file_id_);
+
+    auto rid1 = insert_row(heap, 1, "alpha", {1.0F, 0.0F, 0.0F});
+    auto rid2 = insert_row(heap, 2, "beta", {0.9F, 0.1F, 0.0F});
+    auto rid3 = insert_row(heap, 3, "alpha", {0.5F, 0.5F, 0.0F});
+    auto rid4 = insert_row(heap, 4, "beta", {0.0F, 1.0F, 0.0F});
+
+    // Pre-filtered RIDs include all rows (simulating btree on a different column),
+    // but WHERE post-filter selects only "beta" rows.
+    auto where = binary_expr(BinaryOp::EQUAL, col_ref("name"), lit_string("beta"));
+    BoundStatement bound;
+    auto* col_expr =
+        dynamic_cast<const ColumnRefExpr*>(dynamic_cast<const BinaryExpr*>(where.get())->lhs.get());
+    bound.expr_types[col_expr] = {TypeId::STRING, false, false};
+    auto* lit_expr =
+        dynamic_cast<const LiteralExpr*>(dynamic_cast<const BinaryExpr*>(where.get())->rhs.get());
+    bound.expr_types[lit_expr] = {TypeId::STRING, false, false};
+    bound.expr_types[where.get()] = {TypeId::BOOL, false, false};
+
+    NearestScanConfig config;
+    config.k = 2;
+    config.query_vector = {1.0F, 0.0F, 0.0F};
+    config.metric = DistanceMetric::L2;
+    config.embedding_column_index = 2;
+    config.prefiltered_rids = {rid1, rid2, rid3, rid4};
+
+    OutputSchema schema(output_cols_);
+
+    NearestScanOperator op(
+        heap, storage_schema_, std::move(config), std::move(schema), where.get(), bound);
+
+    ASSERT_TRUE(op.open().has_value());
+    auto results = drain(op);
+    ASSERT_EQ(results.size(), 2u);
+
+    // Only beta rows: rid2 (closer) and rid4 (further).
+    EXPECT_EQ(results[0].values[1].as_string(), "beta");
+    EXPECT_EQ(results[1].values[1].as_string(), "beta");
+    EXPECT_EQ(results[0].values[0].as_int32(), 2);
+    EXPECT_EQ(results[1].values[0].as_int32(), 4);
+
+    op.close();
+}
+
+TEST_F(NearestScanTest, PrefilteredTopKSelection) {
+    TableHeap heap(*table_bpm_, dm_, table_file_id_);
+
+    // Insert 10 rows with embeddings at increasing distance from [0,0,0].
+    std::vector<RID> rids;
+    for (int i = 1; i <= 10; ++i) {
+        auto f = static_cast<float>(i);
+        rids.push_back(insert_row(heap, i, "row" + std::to_string(i), {f, 0.0F, 0.0F}));
+    }
+
+    // Pre-filter all 10, ask for top-3 nearest to origin.
+    NearestScanConfig config;
+    config.k = 3;
+    config.query_vector = {0.0F, 0.0F, 0.0F};
+    config.metric = DistanceMetric::L2;
+    config.embedding_column_index = 2;
+    config.prefiltered_rids = rids;
+
+    OutputSchema schema(output_cols_);
+    BoundStatement bound;
+
+    NearestScanOperator op(
+        heap, storage_schema_, std::move(config), std::move(schema), nullptr, bound);
+
+    ASSERT_TRUE(op.open().has_value());
+    auto results = drain(op);
+    ASSERT_EQ(results.size(), 3u);
+
+    // Closest 3: ids 1, 2, 3.
+    EXPECT_EQ(results[0].values[0].as_int32(), 1);
+    EXPECT_EQ(results[1].values[0].as_int32(), 2);
+    EXPECT_EQ(results[2].values[0].as_int32(), 3);
+
+    op.close();
+}
+
+TEST_F(NearestScanTest, PrefilteredSkipsNullEmbeddings) {
+    TableHeap heap(*table_bpm_, dm_, table_file_id_);
+
+    // Insert a row with a null embedding.
+    std::vector<Value> null_vals = {Value(int32_t{1}), Value(std::string("null_emb")), Value()};
+    auto bytes = TupleSerializer::serialize(null_vals, storage_schema_);
+    ASSERT_TRUE(bytes.has_value());
+    auto rid_null = heap.insert_tuple(*bytes);
+    ASSERT_TRUE(rid_null.has_value());
+
+    auto rid2 = insert_row(heap, 2, "has_emb", {1.0F, 0.0F, 0.0F});
+
+    NearestScanConfig config;
+    config.k = 5;
+    config.query_vector = {1.0F, 0.0F, 0.0F};
+    config.metric = DistanceMetric::L2;
+    config.embedding_column_index = 2;
+    config.prefiltered_rids = {*rid_null, rid2};
+
+    OutputSchema schema(output_cols_);
+    BoundStatement bound;
+
+    NearestScanOperator op(
+        heap, storage_schema_, std::move(config), std::move(schema), nullptr, bound);
+
+    ASSERT_TRUE(op.open().has_value());
+    auto results = drain(op);
+
+    // Only the row with a non-null embedding should be returned.
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_EQ(results[0].values[0].as_int32(), 2);
+
+    op.close();
+}

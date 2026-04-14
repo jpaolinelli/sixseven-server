@@ -11,6 +11,7 @@
 #include "sixseven/graph/graph_engine.h"
 #include "sixseven/server/server.h"
 #include "sixseven/storage/disk_manager.h"
+#include "sixseven/vector/backfill_manager.h"
 #include "sixseven/vector/builtin_provider.h"
 #include "sixseven/vector/embedding_worker.h"
 #include "sixseven/vector/provider_registry.h"
@@ -118,10 +119,13 @@ int main(int argc, char* argv[]) {
     embedding_pool.register_provider("builtin/384", std::make_shared<sixseven::BuiltinProvider>(384));
     embedding_pool.set_provider_registry(&provider_registry);
 
+    sixseven::BackfillManager backfill_manager(catalog, storage, embedding_pool);
+
     sixseven::QueryEngine engine(catalog, storage, &graph_engine);
     engine.set_provider_registry(&provider_registry);
     engine.set_catalog_persistence(&persistence);
     engine.set_embedding_worker_pool(&embedding_pool);
+    engine.set_backfill_manager(&backfill_manager);
 
     // Bootstrap system database (creates/loads system tables and catalog).
     auto boot =

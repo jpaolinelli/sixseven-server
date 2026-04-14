@@ -60,6 +60,7 @@ bool is_name_token(TokenType type) {
     case TokenType::MATCH:
     case TokenType::LINK:
     case TokenType::UNLINK:
+    case TokenType::BACKFILL:
     case TokenType::REEMBED:
     case TokenType::REINDEX:
     case TokenType::RETURN:
@@ -389,6 +390,8 @@ Result<StmtPtr> Parser::parse_statement() {
         return parse_explain();
     case TokenType::DESCRIBE:
         return parse_describe();
+    case TokenType::BACKFILL:
+        return parse_backfill();
     case TokenType::REEMBED:
         return parse_reembed();
     case TokenType::REINDEX:
@@ -2837,6 +2840,17 @@ Result<StmtPtr> Parser::parse_show() {
         return ok(StmtPtr(std::move(stmt)));
     }
 
+    // SHOW BACKFILL [STATUS]
+    if (check(TokenType::BACKFILL)) {
+        advance(); // consume BACKFILL
+        // Optional STATUS keyword.
+        if (match_ident_ci(peek(), "STATUS")) {
+            advance();
+        }
+        stmt->target = ShowTarget::BACKFILL;
+        return ok(StmtPtr(std::move(stmt)));
+    }
+
     // SHOW PROVIDERS / SHOW PROVIDER
     if (match_ident_ci(peek(), "PROVIDERS") || match_ident_ci(peek(), "PROVIDER")) {
         advance();
@@ -2936,6 +2950,52 @@ Result<StmtPtr> Parser::parse_describe() {
     if (!name)
         return tl::unexpected(name.error());
     stmt->table_name = std::move(*name);
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+// -- Admin: BACKFILL ----------------------------------------------------------
+
+Result<StmtPtr> Parser::parse_backfill() {
+    advance(); // consume BACKFILL
+
+    // Expect EMBEDDINGS keyword.
+    if (!check(TokenType::EMBEDDING) && !match_ident_ci(peek(), "EMBEDDINGS")) {
+        return error("expected EMBEDDINGS after BACKFILL");
+    }
+    advance(); // consume EMBEDDINGS
+
+    // Expect ON keyword.
+    auto on = expect(TokenType::ON, "expected ON after EMBEDDINGS");
+    if (!on)
+        return tl::unexpected(on.error());
+
+    auto stmt = std::make_unique<BackfillStmt>();
+
+    auto name = parse_name("table name");
+    if (!name)
+        return tl::unexpected(name.error());
+    stmt->table_name = std::move(*name);
+
+    // Optional BATCH <n>.
+    if (match_ident_ci(peek(), "BATCH")) {
+        advance(); // consume BATCH
+        if (!check(TokenType::INTEGER_LITERAL)) {
+            return error("expected integer after BATCH");
+        }
+        stmt->batch_size = static_cast<uint32_t>(std::stoul(std::string(peek().lexeme)));
+        advance();
+    }
+
+    // Optional RATE_LIMIT <n>.
+    if (match_ident_ci(peek(), "RATE_LIMIT")) {
+        advance(); // consume RATE_LIMIT
+        if (!check(TokenType::INTEGER_LITERAL)) {
+            return error("expected integer after RATE_LIMIT");
+        }
+        stmt->rate_limit = static_cast<uint32_t>(std::stoul(std::string(peek().lexeme)));
+        advance();
+    }
 
     return ok(StmtPtr(std::move(stmt)));
 }

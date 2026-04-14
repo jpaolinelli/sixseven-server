@@ -37,6 +37,14 @@ Result<void> NearestScanOperator::do_open() {
         where_filter_schema_ = build_where_filter_schema();
     }
 
+    // Pre-filtered path: btree already identified candidate RIDs — compute
+    // distances only for those rows (brute-force on a small set).
+    if (!config_.prefiltered_rids.empty()) {
+        SIXSEVEN_LOG_DEBUG("NEAREST: using prefiltered search ({} candidate RIDs)",
+                            config_.prefiltered_rids.size());
+        return execute_prefiltered_search();
+    }
+
     if (hnsw_index_ != nullptr && hnsw_index_->node_count() > 0) {
         SIXSEVEN_LOG_DEBUG("NEAREST: using HNSW index (node_count={}, rid_map={})",
                             hnsw_index_->node_count(),
@@ -141,6 +149,72 @@ Result<void> NearestScanOperator::execute_brute_force() {
         count += *emitted;
     }
 
+    return ok();
+}
+
+// ---------------------------------------------------------------------------
+// Pre-filtered search (btree-accelerated)
+// ---------------------------------------------------------------------------
+
+Result<void> NearestScanOperator::execute_prefiltered_search() {
+    struct Candidate {
+        float distance;
+        Tuple tuple;
+    };
+    std::vector<Candidate> candidates;
+
+    std::span<const float> query_span(config_.query_vector);
+    auto col_idx = static_cast<size_t>(config_.embedding_column_index);
+
+    for (const auto& rid : config_.prefiltered_rids) {
+        auto data = heap_.get_tuple(rid);
+        if (!data) {
+            // Deleted or invalid row — skip gracefully.
+            SIXSEVEN_LOG_DEBUG("NEAREST prefiltered: get_tuple failed for rid=({},{}): {}",
+                               rid.page_id, rid.slot_id, data.error().message);
+            continue;
+        }
+
+        auto values = TupleSerializer::deserialize(*data, storage_schema_);
+        if (!values) {
+            return make_error(values.error().code, values.error().message);
+        }
+
+        // Check embedding column is valid and non-null.
+        if (col_idx >= values->size() || (*values)[col_idx].is_null()) {
+            continue;
+        }
+
+        Tuple tuple{std::move(*values), rid};
+
+        const auto& embedding = tuple.values[col_idx].as_embedding();
+        std::span<const float> emb_span(embedding);
+        float dist = compute_distance(config_.metric, query_span, emb_span);
+
+        candidates.push_back({dist, std::move(tuple)});
+    }
+
+    // Sort by distance ASC.
+    std::sort(candidates.begin(), candidates.end(),
+              [](const Candidate& a, const Candidate& b) {
+                  return a.distance < b.distance;
+              });
+
+    // Take top-k and apply WHERE filter.
+    size_t count = 0;
+    for (auto& cand : candidates) {
+        if (count >= config_.k) {
+            break;
+        }
+        auto emitted = filter_and_emit(cand.tuple, cand.distance);
+        if (!emitted) {
+            return make_error(emitted.error().code, emitted.error().message);
+        }
+        count += *emitted;
+    }
+
+    SIXSEVEN_LOG_DEBUG("NEAREST prefiltered: {} candidates, {} results emitted",
+                       candidates.size(), count);
     return ok();
 }
 

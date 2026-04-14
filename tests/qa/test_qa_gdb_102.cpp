@@ -241,6 +241,10 @@ public:
         last_type = "DescribeStmt";
         ++total;
     }
+    void visit(const BackfillStmt&) override {
+        last_type = "BackfillStmt";
+        ++total;
+    }
     void visit(const ReembedStmt&) override {
         last_type = "ReembedStmt";
         ++total;

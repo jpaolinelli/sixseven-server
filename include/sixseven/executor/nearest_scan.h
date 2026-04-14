@@ -39,6 +39,11 @@ struct NearestScanConfig {
     /// Optional set of allowed node IDs (for graph-scoped search).
     /// When non-empty, only rows whose ordinal is in this set are eligible.
     std::unordered_set<uint32_t> allowed_node_ids;
+
+    /// Pre-filtered RIDs from a btree index lookup (for btree-accelerated
+    /// filtered NEAREST). When non-empty, the operator computes distances
+    /// only for these specific rows via brute-force, skipping HNSW entirely.
+    std::vector<RID> prefiltered_rids;
 };
 
 /// NEAREST query executor operator.
@@ -91,6 +96,10 @@ private:
 
     /// HNSW index search: use the index for approximate nearest neighbors.
     Result<void> execute_hnsw_search();
+
+    /// Pre-filtered search: compute distances only for pre-selected RIDs
+    /// (from a btree index lookup), sort, and take top-k.
+    Result<void> execute_prefiltered_search();
 
     /// Build the WHERE filter output schema (table columns without _distance).
     /// Called once during open() when where_expr_ is set.

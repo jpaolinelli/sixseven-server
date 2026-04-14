@@ -116,6 +116,7 @@ enum class ShowTarget : uint8_t {
     STANDBY_STATUS,
     PARAMETER,
     ALL,
+    BACKFILL,
 };
 
 /// Literal value kinds.
@@ -794,6 +795,14 @@ struct ReembedStmt : Stmt {
     void accept(AstVisitor& visitor) const override;
 };
 
+/// BACKFILL EMBEDDINGS ON table [BATCH n] [RATE_LIMIT n].
+struct BackfillStmt : Stmt {
+    std::string table_name;
+    uint32_t batch_size = 100;
+    uint32_t rate_limit = 0; ///< 0 = unlimited.
+    void accept(AstVisitor& visitor) const override;
+};
+
 /// REINDEX [INDEX|TABLE] name.
 struct ReindexStmt : Stmt {
     std::string name;
@@ -897,6 +906,7 @@ public:
     virtual void visit(const ShowStmt& node) = 0;
     virtual void visit(const ExplainStmt& node) = 0;
     virtual void visit(const DescribeStmt& node) = 0;
+    virtual void visit(const BackfillStmt& node) = 0;
     virtual void visit(const ReembedStmt& node) = 0;
     virtual void visit(const ReindexStmt& node) = 0;
     virtual void visit(const VacuumStmt& node) = 0;
@@ -1048,6 +1058,9 @@ inline void ExplainStmt::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void DescribeStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void BackfillStmt::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void ReembedStmt::accept(AstVisitor& v) const {

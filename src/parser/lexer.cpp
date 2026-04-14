@@ -42,6 +42,7 @@ const std::unordered_map<std::string, TokenType>& keyword_map() {
         {"DATABASE", TokenType::DATABASE},
         {"DATE", TokenType::DATE},
         {"DECIMAL", TokenType::DECIMAL},
+        {"BACKFILL", TokenType::BACKFILL},
         {"DEFAULT", TokenType::DEFAULT},
         {"DELETE", TokenType::DELETE},
         {"DESC", TokenType::DESC},
