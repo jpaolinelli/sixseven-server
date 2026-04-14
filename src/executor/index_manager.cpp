@@ -223,18 +223,65 @@ Result<void> IndexManager::load_hnsw_from_disk(const IndexDef& def, database_id_
         return make_error(load.error().code, load.error().message);
     }
 
-    // NOTE: We do NOT build the node_id → RID map here. The HNSW index was
-    // built during a prior rebuild_hnsw_from_table call, but rows may have been
-    // moved (deleted + reinserted) since then, so the heap scan order may not
-    // match the original node_id assignment order. Instead, the NearestScan
-    // operator falls back to a full table scan (slow path) for loaded indexes.
-    // After a REINDEX, the RID map is rebuilt consistently.
+    // Build the node_id → RID map by scanning the table in heap order.
+    // Node IDs were assigned sequentially during the original rebuild, matching
+    // the heap scan order for rows with non-null embeddings.
+    std::vector<RID> rid_map;
+    auto node_count = hnsw->node_count();
+
+    auto col_names = parse_columns(def.columns);
+    if (!col_names.empty()) {
+        auto table_schema = catalog_.get_table_by_id(def.table_id);
+        if (table_schema) {
+            int32_t emb_ordinal = -1;
+            for (const auto& col : table_schema->columns) {
+                if (col.name == col_names[0]) {
+                    emb_ordinal = col.ordinal;
+                    break;
+                }
+            }
+            if (emb_ordinal >= 0) {
+                auto ts = storage_.get_table_storage(def.table_id);
+                if (ts) {
+                    auto storage_schema = StorageManager::build_storage_schema(*table_schema);
+                    auto it = (*ts)->heap->begin();
+                    if (it) {
+                        rid_map.reserve(node_count);
+                        while (auto row = it->next()) {
+                            auto& [rid, data] = *row;
+                            auto vals = TupleSerializer::deserialize(data, storage_schema);
+                            if (!vals) continue;
+                            auto& emb_val = (*vals)[static_cast<size_t>(emb_ordinal)];
+                            if (!emb_val.is_null() && emb_val.type_id() == TypeId::EMBEDDING) {
+                                rid_map.push_back(rid);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // If the RID map size doesn't match the HNSW node count, the persisted
+    // index is stale (e.g. rows were added after the last REINDEX). Fall back
+    // to a full rebuild so node_ids and RIDs are consistent.
+    if (!rid_map.empty() && rid_map.size() != node_count) {
+        SIXSEVEN_LOG_INFO(
+            "index manager: HNSW '{}' (id={}) stale on disk (nodes={}, embeddings={}), rebuilding",
+            def.name, def.index_id, node_count, rid_map.size());
+        return rebuild_hnsw_from_table(def, db_id);
+    }
 
     auto* ptr = hnsw.get();
+    auto rid_count = rid_map.size();
     std::unique_lock lk(maps_latch_);
     owned_hnsw_.push_back(std::move(hnsw));
     hnsw_indexes_[def.index_id] = ptr;
-    // Leave hnsw_rid_maps_ empty for this index — slow path will be used.
+    if (!rid_map.empty()) {
+        hnsw_rid_maps_[def.index_id] = std::move(rid_map);
+        SIXSEVEN_LOG_INFO("index manager: HNSW '{}' (id={}) loaded from disk with {} RID entries",
+                          def.name, def.index_id, rid_count);
+    }
     return ok();
 }
 

@@ -540,3 +540,32 @@ TEST(ExplicitCast, NegativeOneToUint64) {
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
 }
+
+// -- cross-type compare (coercible) -------------------------------------------
+
+TEST(CrossTypeCompare, StringToUUIDEqual) {
+    auto uuid = *parse_uuid("00000000-0000-1287-2532-8c33c3d93df3");
+    auto result = compare(Value(std::string("00000000-0000-1287-2532-8c33c3d93df3")), Value(uuid));
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(*result, std::strong_ordering::equal);
+}
+
+TEST(CrossTypeCompare, UUIDToStringEqual) {
+    auto uuid = *parse_uuid("00000000-0000-1287-2532-8c33c3d93df3");
+    auto result = compare(Value(uuid), Value(std::string("00000000-0000-1287-2532-8c33c3d93df3")));
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(*result, std::strong_ordering::equal);
+}
+
+TEST(CrossTypeCompare, StringToUUIDNotEqual) {
+    auto uuid = *parse_uuid("00000000-0000-1287-2532-8c33c3d93df3");
+    auto result = compare(Value(std::string("11111111-1111-1111-1111-111111111111")), Value(uuid));
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_NE(*result, std::strong_ordering::equal);
+}
+
+TEST(CrossTypeCompare, StringToUUIDInvalidFormat) {
+    auto uuid = *parse_uuid("00000000-0000-1287-2532-8c33c3d93df3");
+    auto result = compare(Value(std::string("not-a-uuid")), Value(uuid));
+    ASSERT_FALSE(result.has_value());
+}

@@ -523,6 +523,20 @@ Result<std::strong_ordering> compare(const Value& lhs, const Value& rhs) {
         return compare_same_type(*lc, *rc);
     }
 
+    // Cross-type coercible comparison (e.g. STRING vs UUID, STRING vs DATE).
+    if (can_coerce(lt, rt)) {
+        auto lc = coerce(lhs, rt);
+        if (lc) {
+            return compare_same_type(*lc, rhs);
+        }
+    }
+    if (can_coerce(rt, lt)) {
+        auto rc = coerce(rhs, lt);
+        if (rc) {
+            return compare_same_type(lhs, *rc);
+        }
+    }
+
     return make_error(StatusCode::TYPE_ERROR,
                       "cannot compare " + std::string(type_name(lt)) + " with " +
                           std::string(type_name(rt)));
