@@ -51,7 +51,8 @@ public:
                       std::vector<size_t> index_col_indexes,
                       bool index_only = false,
                       const Expr* predicate = nullptr,
-                      const BoundStatement* bound = nullptr);
+                      const BoundStatement* bound = nullptr,
+                      std::optional<KeyType> equality_key = std::nullopt);
 
     const OutputSchema& output_schema() const override;
 
@@ -78,6 +79,7 @@ private:
     bool index_only_;
     const Expr* predicate_;
     const BoundStatement* bound_;
+    std::optional<KeyType> equality_key_;
     std::optional<BTreeIterator> iter_;
 };
 

@@ -1,5 +1,6 @@
 #include "sixseven/executor/index_scan.h"
 
+#include "sixseven/common/coercion.h"
 #include "sixseven/executor/expr_evaluator.h"
 #include "sixseven/table/tuple.h"
 
@@ -14,11 +15,13 @@ IndexScanOperator::IndexScanOperator(const BTreeIndex& index,
                                      std::vector<size_t> index_col_indexes,
                                      bool index_only,
                                      const Expr* predicate,
-                                     const BoundStatement* bound)
+                                     const BoundStatement* bound,
+                                     std::optional<KeyType> equality_key)
     : index_(index), heap_(heap), storage_schema_(storage_schema),
       schema_(std::move(output_schema)), begin_key_(std::move(begin_key)),
       end_key_(std::move(end_key)), index_col_indexes_(std::move(index_col_indexes)),
-      index_only_(index_only), predicate_(predicate), bound_(bound) {}
+      index_only_(index_only), predicate_(predicate), bound_(bound),
+      equality_key_(std::move(equality_key)) {}
 
 Result<void> IndexScanOperator::do_open() {
     auto it = index_.range_scan(begin_key_, end_key_);
@@ -45,6 +48,22 @@ Result<std::optional<Tuple>> IndexScanOperator::do_next() {
         }
 
         auto& [key, rid] = **entry;
+
+        // For equality scans, terminate as soon as the key moves past the
+        // target. The btree is sorted, so no further entries can match.
+        if (equality_key_ && key.size() == equality_key_->size()) {
+            bool keys_match = true;
+            for (size_t i = 0; i < key.size(); ++i) {
+                auto cmp = compare(key[i], (*equality_key_)[i]);
+                if (!cmp || *cmp != std::strong_ordering::equal) {
+                    keys_match = false;
+                    break;
+                }
+            }
+            if (!keys_match) {
+                return ok(std::optional<Tuple>(std::nullopt));
+            }
+        }
 
         // Index-only path: build tuple from key values, skip heap fetch.
         if (index_only_) {

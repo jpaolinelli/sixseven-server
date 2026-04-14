@@ -2702,7 +2702,21 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema
 
             // Found a matching hash index for an equality predicate.
             auto* hash_idx = it->second;
-            KeyType lookup_key = {cmp->literal_value};
+
+            // Coerce the literal to the column's actual type (e.g. STRING → UUID).
+            Value coerced_value = cmp->literal_value;
+            for (const auto& col : table_schema.columns) {
+                if (col.name == cmp->column_name &&
+                    coerced_value.type_id() != col.type_id &&
+                    can_coerce(coerced_value.type_id(), col.type_id)) {
+                    auto cv = coerce(coerced_value, col.type_id);
+                    if (cv) {
+                        coerced_value = std::move(*cv);
+                    }
+                    break;
+                }
+            }
+            KeyType lookup_key = {coerced_value};
 
             std::vector<size_t> index_col_indexes;
             for (const auto& icol : idx_columns) {
@@ -2755,7 +2769,21 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema
 
         // Found a matching index. Build scan bounds.
         auto* btree = it->second;
-        KeyType key_value = {cmp->literal_value};
+
+        // Coerce the literal to the column's actual type (e.g. STRING → UUID).
+        Value coerced_value = cmp->literal_value;
+        for (const auto& col : table_schema.columns) {
+            if (col.name == cmp->column_name &&
+                coerced_value.type_id() != col.type_id &&
+                can_coerce(coerced_value.type_id(), col.type_id)) {
+                auto cv = coerce(coerced_value, col.type_id);
+                if (cv) {
+                    coerced_value = std::move(*cv);
+                }
+                break;
+            }
+        }
+        KeyType key_value = {coerced_value};
 
         std::optional<KeyType> begin_key;
         std::optional<KeyType> end_key;
@@ -2802,6 +2830,13 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema
             }
         }
 
+        // For equality scans, pass the key so IndexScan can terminate early
+        // once the btree cursor moves past the matching entries.
+        std::optional<KeyType> eq_key;
+        if (cmp->op == BinaryOp::EQUAL) {
+            eq_key = key_value;
+        }
+
         auto scan = std::make_unique<IndexScanOperator>(*btree,
                                                         *storage->heap,
                                                         storage->storage_schema,
@@ -2811,7 +2846,8 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema
                                                         std::move(index_col_indexes),
                                                         false, // index_only: conservative default
                                                         residual,
-                                                        &bound);
+                                                        &bound,
+                                                        std::move(eq_key));
 
         return ok(std::unique_ptr<Iterator>(std::move(scan)));
     }
