@@ -21,97 +21,165 @@ namespace {
 
 void register_pg_type(Catalog& catalog) {
     static constexpr std::array<TypeId, 23> all_types = {
-        TypeId::BOOL,      TypeId::INT8,      TypeId::INT16,     TypeId::INT32,
-        TypeId::INT64,     TypeId::UINT8,     TypeId::UINT16,    TypeId::UINT32,
-        TypeId::UINT64,    TypeId::FLOAT32,   TypeId::FLOAT64,   TypeId::DECIMAL,
-        TypeId::STRING,    TypeId::BLOB,      TypeId::DATE,      TypeId::TIME,
-        TypeId::TIMESTAMP, TypeId::INTERVAL,  TypeId::POINT,     TypeId::JSON,
-        TypeId::UUID,      TypeId::EMBEDDING, TypeId::PATH,
+        TypeId::BOOL,    TypeId::INT8,      TypeId::INT16,    TypeId::INT32,  TypeId::INT64,
+        TypeId::UINT8,   TypeId::UINT16,    TypeId::UINT32,   TypeId::UINT64, TypeId::FLOAT32,
+        TypeId::FLOAT64, TypeId::DECIMAL,   TypeId::STRING,   TypeId::BLOB,   TypeId::DATE,
+        TypeId::TIME,    TypeId::TIMESTAMP, TypeId::INTERVAL, TypeId::POINT,  TypeId::JSON,
+        TypeId::UUID,    TypeId::EMBEDDING, TypeId::PATH,
     };
 
     auto pg_typname = [](TypeId t) -> std::string {
         switch (t) {
-        case TypeId::BOOL:      return "bool";
-        case TypeId::INT8:      return "int2";
-        case TypeId::INT16:     return "int2";
-        case TypeId::INT32:     return "int4";
-        case TypeId::INT64:     return "int8";
-        case TypeId::UINT8:     return "int2";
-        case TypeId::UINT16:    return "int4";
-        case TypeId::UINT32:    return "int8";
-        case TypeId::UINT64:    return "numeric";
-        case TypeId::FLOAT32:   return "float4";
-        case TypeId::FLOAT64:   return "float8";
-        case TypeId::DECIMAL:   return "numeric";
-        case TypeId::STRING:    return "text";
-        case TypeId::BLOB:      return "bytea";
-        case TypeId::DATE:      return "date";
-        case TypeId::TIME:      return "time";
-        case TypeId::TIMESTAMP: return "timestamp";
-        case TypeId::INTERVAL:  return "interval";
-        case TypeId::POINT:     return "point";
-        case TypeId::JSON:      return "json";
-        case TypeId::UUID:      return "uuid";
-        case TypeId::EMBEDDING: return "embedding";
-        case TypeId::PATH:      return "text";
+        case TypeId::BOOL:
+            return "bool";
+        case TypeId::INT8:
+            return "int2";
+        case TypeId::INT16:
+            return "int2";
+        case TypeId::INT32:
+            return "int4";
+        case TypeId::INT64:
+            return "int8";
+        case TypeId::UINT8:
+            return "int2";
+        case TypeId::UINT16:
+            return "int4";
+        case TypeId::UINT32:
+            return "int8";
+        case TypeId::UINT64:
+            return "numeric";
+        case TypeId::FLOAT32:
+            return "float4";
+        case TypeId::FLOAT64:
+            return "float8";
+        case TypeId::DECIMAL:
+            return "numeric";
+        case TypeId::STRING:
+            return "text";
+        case TypeId::BLOB:
+            return "bytea";
+        case TypeId::DATE:
+            return "date";
+        case TypeId::TIME:
+            return "time";
+        case TypeId::TIMESTAMP:
+            return "timestamp";
+        case TypeId::INTERVAL:
+            return "interval";
+        case TypeId::POINT:
+            return "point";
+        case TypeId::JSON:
+            return "json";
+        case TypeId::UUID:
+            return "uuid";
+        case TypeId::EMBEDDING:
+            return "embedding";
+        case TypeId::PATH:
+            return "text";
         }
         return "text";
     };
 
     auto pg_typlen = [](TypeId t) -> int32_t {
         switch (t) {
-        case TypeId::BOOL:      return 1;
-        case TypeId::INT8:      return 2;
-        case TypeId::INT16:     return 2;
-        case TypeId::INT32:     return 4;
-        case TypeId::INT64:     return 8;
-        case TypeId::UINT8:     return 2;
-        case TypeId::UINT16:    return 4;
-        case TypeId::UINT32:    return 8;
-        case TypeId::UINT64:    return -1;
-        case TypeId::FLOAT32:   return 4;
-        case TypeId::FLOAT64:   return 8;
-        case TypeId::DECIMAL:   return -1;
-        case TypeId::STRING:    return -1;
-        case TypeId::BLOB:      return -1;
-        case TypeId::DATE:      return 4;
-        case TypeId::TIME:      return 8;
-        case TypeId::TIMESTAMP: return 8;
-        case TypeId::INTERVAL:  return 16;
-        case TypeId::POINT:     return 16;
-        case TypeId::JSON:      return -1;
-        case TypeId::UUID:      return 16;
-        case TypeId::EMBEDDING: return -1;
-        case TypeId::PATH:      return -1;
+        case TypeId::BOOL:
+            return 1;
+        case TypeId::INT8:
+            return 2;
+        case TypeId::INT16:
+            return 2;
+        case TypeId::INT32:
+            return 4;
+        case TypeId::INT64:
+            return 8;
+        case TypeId::UINT8:
+            return 2;
+        case TypeId::UINT16:
+            return 4;
+        case TypeId::UINT32:
+            return 8;
+        case TypeId::UINT64:
+            return -1;
+        case TypeId::FLOAT32:
+            return 4;
+        case TypeId::FLOAT64:
+            return 8;
+        case TypeId::DECIMAL:
+            return -1;
+        case TypeId::STRING:
+            return -1;
+        case TypeId::BLOB:
+            return -1;
+        case TypeId::DATE:
+            return 4;
+        case TypeId::TIME:
+            return 8;
+        case TypeId::TIMESTAMP:
+            return 8;
+        case TypeId::INTERVAL:
+            return 16;
+        case TypeId::POINT:
+            return 16;
+        case TypeId::JSON:
+            return -1;
+        case TypeId::UUID:
+            return 16;
+        case TypeId::EMBEDDING:
+            return -1;
+        case TypeId::PATH:
+            return -1;
         }
         return -1;
     };
 
     auto pg_oid = [](TypeId t) -> uint32_t {
         switch (t) {
-        case TypeId::BOOL:      return 16;
-        case TypeId::INT8:      return 21;
-        case TypeId::INT16:     return 21;
-        case TypeId::INT32:     return 23;
-        case TypeId::INT64:     return 20;
-        case TypeId::UINT8:     return 21;
-        case TypeId::UINT16:    return 23;
-        case TypeId::UINT32:    return 20;
-        case TypeId::UINT64:    return 1700;
-        case TypeId::FLOAT32:   return 700;
-        case TypeId::FLOAT64:   return 701;
-        case TypeId::DECIMAL:   return 1700;
-        case TypeId::STRING:    return 25;
-        case TypeId::BLOB:      return 17;
-        case TypeId::DATE:      return 1082;
-        case TypeId::TIME:      return 1083;
-        case TypeId::TIMESTAMP: return 1114;
-        case TypeId::INTERVAL:  return 1186;
-        case TypeId::POINT:     return 600;
-        case TypeId::JSON:      return 114;
-        case TypeId::UUID:      return 2950;
-        case TypeId::EMBEDDING: return 100000;
-        case TypeId::PATH:      return 25;
+        case TypeId::BOOL:
+            return 16;
+        case TypeId::INT8:
+            return 21;
+        case TypeId::INT16:
+            return 21;
+        case TypeId::INT32:
+            return 23;
+        case TypeId::INT64:
+            return 20;
+        case TypeId::UINT8:
+            return 21;
+        case TypeId::UINT16:
+            return 23;
+        case TypeId::UINT32:
+            return 20;
+        case TypeId::UINT64:
+            return 1700;
+        case TypeId::FLOAT32:
+            return 700;
+        case TypeId::FLOAT64:
+            return 701;
+        case TypeId::DECIMAL:
+            return 1700;
+        case TypeId::STRING:
+            return 25;
+        case TypeId::BLOB:
+            return 17;
+        case TypeId::DATE:
+            return 1082;
+        case TypeId::TIME:
+            return 1083;
+        case TypeId::TIMESTAMP:
+            return 1114;
+        case TypeId::INTERVAL:
+            return 1186;
+        case TypeId::POINT:
+            return 600;
+        case TypeId::JSON:
+            return 114;
+        case TypeId::UUID:
+            return 2950;
+        case TypeId::EMBEDDING:
+            return 100000;
+        case TypeId::PATH:
+            return 25;
         }
         return 25;
     };
@@ -179,7 +247,8 @@ struct TypeRow {
 std::vector<TypeRow> scan_pg_type(Catalog& catalog) {
     auto vt = catalog.get_virtual_table("pg_type");
     EXPECT_TRUE(vt.has_value());
-    if (!vt.has_value()) return {};
+    if (!vt.has_value())
+        return {};
 
     OutputSchema schema(std::vector<OutputColumn>{
         {"pg_type", "oid", TypeId::INT32, false, vt->table_id},
@@ -195,14 +264,17 @@ std::vector<TypeRow> scan_pg_type(Catalog& catalog) {
     VirtualCatalogScanOperator scan(std::move(*vt), std::move(schema));
     auto open_r = scan.open();
     EXPECT_TRUE(open_r.has_value());
-    if (!open_r.has_value()) return {};
+    if (!open_r.has_value())
+        return {};
 
     std::vector<TypeRow> rows;
     while (true) {
         auto next_r = scan.next();
         EXPECT_TRUE(next_r.has_value());
-        if (!next_r.has_value()) break;
-        if (!next_r->has_value()) break;
+        if (!next_r.has_value())
+            break;
+        if (!next_r->has_value())
+            break;
         auto& tuple = next_r->value();
         rows.push_back({
             tuple.values[0].as_int32(),
@@ -238,8 +310,8 @@ TEST(PgType, EmbeddingTypeHasOid100000) {
     register_pg_type(catalog);
 
     auto rows = scan_pg_type(catalog);
-    auto it = std::find_if(rows.begin(), rows.end(),
-                           [](const TypeRow& r) { return r.typname == "embedding"; });
+    auto it = std::find_if(
+        rows.begin(), rows.end(), [](const TypeRow& r) { return r.typname == "embedding"; });
     ASSERT_NE(it, rows.end());
     EXPECT_EQ(it->oid, 100000);
 }
@@ -302,7 +374,11 @@ TEST(PgType, VariableLengthTypesHaveNegativeTyplen) {
 
     auto rows = scan_pg_type(catalog);
     std::unordered_set<std::string> variable_types = {
-        "text", "bytea", "json", "numeric", "embedding",
+        "text",
+        "bytea",
+        "json",
+        "numeric",
+        "embedding",
     };
 
     for (const auto& r : rows) {
@@ -323,7 +399,8 @@ TEST(PgType, SpecificTypeLengths) {
 
     auto find = [&](const std::string& name) -> const TypeRow* {
         for (const auto& r : rows) {
-            if (r.typname == name) return &r;
+            if (r.typname == name)
+                return &r;
         }
         return nullptr;
     };
@@ -371,7 +448,8 @@ TEST(PgNamespace, ReturnsTwoNamespaces) {
     while (true) {
         auto next_r = scan.next();
         ASSERT_TRUE(next_r.has_value());
-        if (!next_r->has_value()) break;
+        if (!next_r->has_value())
+            break;
         auto& tuple = next_r->value();
         rows.emplace_back(tuple.values[0].as_int32(),
                           std::string(tuple.values[1].as_string()),
