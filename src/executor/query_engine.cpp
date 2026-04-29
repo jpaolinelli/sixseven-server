@@ -6,8 +6,8 @@
 #include "sixseven/common/types.h"
 #include "sixseven/executor/catalog_persistence.h"
 #include "sixseven/executor/explain.h"
-#include "sixseven/executor/index_manager.h"
 #include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/executor/index_manager.h"
 #include "sixseven/executor/pk_value_string.h"
 #include "sixseven/executor/planner.h"
 #include "sixseven/executor/provider_cache.h"
@@ -207,8 +207,10 @@ void QueryEngine::set_embedding_worker_pool(EmbeddingWorkerPool* pool) {
                             if (it != hnsw_indexes_->end()) {
                                 auto ins = it->second->insert(embedding);
                                 if (!ins) {
-                                    SIXSEVEN_LOG_WARN("embedding store: HNSW insert failed for '{}': {}",
-                                                      idx.name, ins.error().message);
+                                    SIXSEVEN_LOG_WARN(
+                                        "embedding store: HNSW insert failed for '{}': {}",
+                                        idx.name,
+                                        ins.error().message);
                                 } else if (index_manager_) {
                                     index_manager_->append_hnsw_rid(idx.index_id, effective_rid);
                                 }
@@ -223,198 +225,189 @@ void QueryEngine::set_embedding_worker_pool(EmbeddingWorkerPool* pool) {
         });
 
         // -- Batch store callback: groups writes by page to cut latch contention --
-        pool->set_batch_store_callback(
-            [this](std::vector<EmbeddingStoreRequest> requests)
-                -> Result<std::vector<int64_t>> {
-                // Group requests by table_id to minimise get_table_storage calls.
-                std::unordered_map<table_id_t, std::vector<size_t>> table_groups;
-                for (size_t i = 0; i < requests.size(); ++i) {
-                    table_groups[requests[i].table_id].push_back(i);
+        pool->set_batch_store_callback([this](std::vector<EmbeddingStoreRequest> requests)
+                                           -> Result<std::vector<int64_t>> {
+            // Group requests by table_id to minimise get_table_storage calls.
+            std::unordered_map<table_id_t, std::vector<size_t>> table_groups;
+            for (size_t i = 0; i < requests.size(); ++i) {
+                table_groups[requests[i].table_id].push_back(i);
+            }
+
+            std::vector<int64_t> failed_row_ids;
+
+            for (auto& [table_id, indices] : table_groups) {
+                auto ts = storage_.get_table_storage(table_id);
+                if (!ts) {
+                    SIXSEVEN_LOG_WARN("batch store: get_table_storage({}) failed: {}",
+                                      table_id,
+                                      ts.error().message);
+                    for (auto idx : indices) {
+                        failed_row_ids.push_back(requests[idx].row_id);
+                    }
+                    continue;
+                }
+                auto* table_storage = *ts;
+
+                auto table_schema = catalog_.get_table_by_id(table_id);
+                if (!table_schema) {
+                    SIXSEVEN_LOG_WARN("batch store: get_table_by_id({}) failed: {}",
+                                      table_id,
+                                      table_schema.error().message);
+                    for (auto idx : indices) {
+                        failed_row_ids.push_back(requests[idx].row_id);
+                    }
+                    continue;
                 }
 
-                std::vector<int64_t> failed_row_ids;
+                // Pre-compute serialized bytes for all embeddings OUTSIDE
+                // any exclusive page lock. get_tuple uses a shared latch.
+                std::vector<TableHeap::TupleUpdate> updates;
+                std::vector<std::vector<uint8_t>> serialized_bufs;
+                updates.reserve(indices.size());
+                serialized_bufs.reserve(indices.size());
 
-                for (auto& [table_id, indices] : table_groups) {
-                    auto ts = storage_.get_table_storage(table_id);
-                    if (!ts) {
-                        SIXSEVEN_LOG_WARN("batch store: get_table_storage({}) failed: {}",
-                                          table_id, ts.error().message);
-                        for (auto idx : indices) {
-                            failed_row_ids.push_back(requests[idx].row_id);
-                        }
-                        continue;
-                    }
-                    auto* table_storage = *ts;
+                for (auto idx : indices) {
+                    auto& req = requests[idx];
+                    RID rid{static_cast<PageId>(static_cast<uint64_t>(req.row_id) >> 32),
+                            static_cast<SlotId>(req.row_id & 0xFFFF)};
 
-                    auto table_schema = catalog_.get_table_by_id(table_id);
-                    if (!table_schema) {
-                        SIXSEVEN_LOG_WARN("batch store: get_table_by_id({}) failed: {}",
-                                          table_id, table_schema.error().message);
-                        for (auto idx : indices) {
-                            failed_row_ids.push_back(requests[idx].row_id);
-                        }
+                    auto data = table_storage->heap->get_tuple(rid);
+                    if (!data) {
+                        failed_row_ids.push_back(req.row_id);
                         continue;
                     }
 
-                    // Pre-compute serialized bytes for all embeddings OUTSIDE
-                    // any exclusive page lock. get_tuple uses a shared latch.
-                    std::vector<TableHeap::TupleUpdate> updates;
-                    std::vector<std::vector<uint8_t>> serialized_bufs;
-                    updates.reserve(indices.size());
-                    serialized_bufs.reserve(indices.size());
+                    auto values =
+                        TupleSerializer::deserialize(*data, table_storage->storage_schema);
+                    if (!values) {
+                        failed_row_ids.push_back(req.row_id);
+                        continue;
+                    }
 
+                    // Patch the embedding column.
+                    for (size_t c = 0; c < table_schema->columns.size(); ++c) {
+                        if (table_schema->columns[c].ordinal == req.column_id) {
+                            (*values)[c] = Value(Embedding(std::move(req.embedding)));
+                            break;
+                        }
+                    }
+
+                    auto serialized =
+                        TupleSerializer::serialize(*values, table_storage->storage_schema);
+                    if (!serialized) {
+                        failed_row_ids.push_back(req.row_id);
+                        continue;
+                    }
+
+                    serialized_bufs.push_back(std::move(*serialized));
+                    updates.push_back(TableHeap::TupleUpdate{
+                        rid, std::span<const uint8_t>(serialized_bufs.back())});
+                }
+
+                // Batch update: one page pin per page instead of per tuple.
+                auto batch_result = table_storage->heap->update_tuples_batch(updates);
+                if (!batch_result) {
+                    SIXSEVEN_LOG_WARN("batch store: update_tuples_batch failed: {}",
+                                      batch_result.error().message);
+                    for (auto idx : indices) {
+                        failed_row_ids.push_back(requests[idx].row_id);
+                    }
+                    continue;
+                }
+
+                // Handle per-tuple failures: delete + reinsert on a
+                // new page (tuple grew due to embedding and no longer
+                // fits on the original page).
+                for (auto& failed_rid : *batch_result) {
+                    // Find the serialized buffer for this RID.
+                    std::span<const uint8_t> new_data;
+                    for (size_t u = 0; u < updates.size(); ++u) {
+                        if (updates[u].rid.page_id == failed_rid.page_id &&
+                            updates[u].rid.slot_id == failed_rid.slot_id) {
+                            new_data = updates[u].data;
+                            break;
+                        }
+                    }
+                    if (new_data.empty()) {
+                        int64_t packed =
+                            (static_cast<int64_t>(static_cast<uint64_t>(failed_rid.page_id) << 32) |
+                             failed_rid.slot_id);
+                        failed_row_ids.push_back(packed);
+                        continue;
+                    }
+
+                    // Delete old tuple and reinsert on a page with room.
+                    auto del = table_storage->heap->delete_tuple(failed_rid);
+                    if (!del) {
+                        int64_t packed =
+                            (static_cast<int64_t>(static_cast<uint64_t>(failed_rid.page_id) << 32) |
+                             failed_rid.slot_id);
+                        failed_row_ids.push_back(packed);
+                        continue;
+                    }
+                    auto new_rid = table_storage->heap->insert_tuple(new_data);
+                    if (!new_rid) {
+                        int64_t packed =
+                            (static_cast<int64_t>(static_cast<uint64_t>(failed_rid.page_id) << 32) |
+                             failed_rid.slot_id);
+                        failed_row_ids.push_back(packed);
+                        continue;
+                    }
+                    // Successfully moved to a new page — not a failure.
+                }
+
+                // Insert embeddings into HNSW indexes.
+                if (hnsw_indexes_ != nullptr) {
                     for (auto idx : indices) {
                         auto& req = requests[idx];
-                        RID rid{static_cast<PageId>(
-                                    static_cast<uint64_t>(req.row_id) >> 32),
-                                static_cast<SlotId>(req.row_id & 0xFFFF)};
-
-                        auto data = table_storage->heap->get_tuple(rid);
-                        if (!data) {
-                            failed_row_ids.push_back(req.row_id);
-                            continue;
-                        }
-
-                        auto values = TupleSerializer::deserialize(
-                            *data, table_storage->storage_schema);
-                        if (!values) {
-                            failed_row_ids.push_back(req.row_id);
-                            continue;
-                        }
-
-                        // Patch the embedding column.
-                        for (size_t c = 0; c < table_schema->columns.size(); ++c) {
-                            if (table_schema->columns[c].ordinal == req.column_id) {
-                                (*values)[c] = Value(Embedding(
-                                    std::move(req.embedding)));
+                        std::string col_name;
+                        for (const auto& col : table_schema->columns) {
+                            if (col.ordinal == req.column_id) {
+                                col_name = col.name;
                                 break;
                             }
                         }
-
-                        auto serialized = TupleSerializer::serialize(
-                            *values, table_storage->storage_schema);
-                        if (!serialized) {
-                            failed_row_ids.push_back(req.row_id);
+                        if (col_name.empty())
                             continue;
-                        }
-
-                        serialized_bufs.push_back(std::move(*serialized));
-                        updates.push_back(TableHeap::TupleUpdate{
-                            rid,
-                            std::span<const uint8_t>(serialized_bufs.back())});
-                    }
-
-                    // Batch update: one page pin per page instead of per tuple.
-                    auto batch_result =
-                        table_storage->heap->update_tuples_batch(updates);
-                    if (!batch_result) {
-                        SIXSEVEN_LOG_WARN("batch store: update_tuples_batch failed: {}",
-                                          batch_result.error().message);
-                        for (auto idx : indices) {
-                            failed_row_ids.push_back(requests[idx].row_id);
-                        }
-                        continue;
-                    }
-
-                    // Handle per-tuple failures: delete + reinsert on a
-                    // new page (tuple grew due to embedding and no longer
-                    // fits on the original page).
-                    for (auto& failed_rid : *batch_result) {
-                        // Find the serialized buffer for this RID.
-                        std::span<const uint8_t> new_data;
-                        for (size_t u = 0; u < updates.size(); ++u) {
-                            if (updates[u].rid.page_id == failed_rid.page_id &&
-                                updates[u].rid.slot_id == failed_rid.slot_id) {
-                                new_data = updates[u].data;
+                        // Find HNSW index by table_id + column name.
+                        auto batch_indexes = catalog_.list_indexes(table_id);
+                        for (const auto& bidx : batch_indexes) {
+                            if (bidx.index_type != "hnsw" || bidx.columns != col_name)
+                                continue;
+                            auto hit = hnsw_indexes_->find(bidx.index_id);
+                            if (hit == hnsw_indexes_->end())
                                 break;
-                            }
-                        }
-                        if (new_data.empty()) {
-                            int64_t packed =
-                                (static_cast<int64_t>(
-                                     static_cast<uint64_t>(failed_rid.page_id)
-                                     << 32) |
-                                 failed_rid.slot_id);
-                            failed_row_ids.push_back(packed);
-                            continue;
-                        }
-
-                        // Delete old tuple and reinsert on a page with room.
-                        auto del =
-                            table_storage->heap->delete_tuple(failed_rid);
-                        if (!del) {
-                            int64_t packed =
-                                (static_cast<int64_t>(
-                                     static_cast<uint64_t>(failed_rid.page_id)
-                                     << 32) |
-                                 failed_rid.slot_id);
-                            failed_row_ids.push_back(packed);
-                            continue;
-                        }
-                        auto new_rid =
-                            table_storage->heap->insert_tuple(new_data);
-                        if (!new_rid) {
-                            int64_t packed =
-                                (static_cast<int64_t>(
-                                     static_cast<uint64_t>(failed_rid.page_id)
-                                     << 32) |
-                                 failed_rid.slot_id);
-                            failed_row_ids.push_back(packed);
-                            continue;
-                        }
-                        // Successfully moved to a new page — not a failure.
-                    }
-
-                    // Insert embeddings into HNSW indexes.
-                    if (hnsw_indexes_ != nullptr) {
-                        for (auto idx : indices) {
-                            auto& req = requests[idx];
-                            std::string col_name;
-                            for (const auto& col : table_schema->columns) {
-                                if (col.ordinal == req.column_id) {
-                                    col_name = col.name;
+                            // req.embedding was moved into the Value earlier;
+                            // re-read from the tuple on disk.
+                            RID rid{static_cast<PageId>(static_cast<uint64_t>(req.row_id) >> 32),
+                                    static_cast<SlotId>(req.row_id & 0xFFFF)};
+                            auto data = table_storage->heap->get_tuple(rid);
+                            if (!data)
+                                break;
+                            auto values =
+                                TupleSerializer::deserialize(*data, table_storage->storage_schema);
+                            if (!values)
+                                break;
+                            for (size_t c = 0; c < table_schema->columns.size(); ++c) {
+                                if (table_schema->columns[c].ordinal == req.column_id &&
+                                    !(*values)[c].is_null() &&
+                                    (*values)[c].type_id() == TypeId::EMBEDDING) {
+                                    const auto& vec = (*values)[c].as_embedding();
+                                    auto ins = hit->second->insert(std::span<const float>(vec));
+                                    if (ins && index_manager_) {
+                                        index_manager_->append_hnsw_rid(bidx.index_id, rid);
+                                    }
                                     break;
                                 }
                             }
-                            if (col_name.empty()) continue;
-                            // Find HNSW index by table_id + column name.
-                            auto batch_indexes = catalog_.list_indexes(table_id);
-                            for (const auto& bidx : batch_indexes) {
-                                if (bidx.index_type != "hnsw" || bidx.columns != col_name) continue;
-                                auto hit = hnsw_indexes_->find(bidx.index_id);
-                                if (hit == hnsw_indexes_->end()) break;
-                                // req.embedding was moved into the Value earlier;
-                                // re-read from the tuple on disk.
-                                RID rid{static_cast<PageId>(
-                                            static_cast<uint64_t>(req.row_id) >> 32),
-                                        static_cast<SlotId>(req.row_id & 0xFFFF)};
-                                auto data = table_storage->heap->get_tuple(rid);
-                                if (!data) break;
-                                auto values = TupleSerializer::deserialize(
-                                    *data, table_storage->storage_schema);
-                                if (!values) break;
-                                for (size_t c = 0; c < table_schema->columns.size(); ++c) {
-                                    if (table_schema->columns[c].ordinal == req.column_id &&
-                                        !(*values)[c].is_null() &&
-                                        (*values)[c].type_id() == TypeId::EMBEDDING) {
-                                        const auto& vec = (*values)[c].as_embedding();
-                                        auto ins = hit->second->insert(
-                                            std::span<const float>(vec));
-                                        if (ins && index_manager_) {
-                                            index_manager_->append_hnsw_rid(
-                                                bidx.index_id, rid);
-                                        }
-                                        break;
-                                    }
-                                }
-                                break;
-                            }
+                            break;
                         }
                     }
                 }
+            }
 
-                return ok(std::move(failed_row_ids));
-            });
+            return ok(std::move(failed_row_ids));
+        });
     }
 }
 
@@ -794,6 +787,15 @@ Result<QueryResult> QueryEngine::execute_drop_database(const DropDatabaseStmt& s
             if (!drop_storage) {
                 return make_error(drop_storage.error().code, drop_storage.error().message);
             }
+
+            if (catalog_persistence_ != nullptr) {
+                auto remove = catalog_persistence_->remove_table(table.table_id);
+                if (!remove) {
+                    SIXSEVEN_LOG_WARN("failed to remove table '{}' from persistence: {}",
+                                      table.name,
+                                      remove.error().message);
+                }
+            }
         }
     }
 
@@ -1069,14 +1071,16 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
                             auto p = catalog_persistence_->persist_index(idx);
                             if (!p) {
                                 SIXSEVEN_LOG_WARN("failed to persist HNSW index '{}': {}",
-                                                  idx.name, p.error().message);
+                                                  idx.name,
+                                                  p.error().message);
                             }
                         }
                         if (index_manager_ != nullptr) {
                             auto r = index_manager_->create_and_populate_index(idx, *table_schema);
                             if (!r) {
                                 SIXSEVEN_LOG_WARN("failed to create HNSW index '{}': {}",
-                                                  idx.name, r.error().message);
+                                                  idx.name,
+                                                  r.error().message);
                             }
                         }
                     }
@@ -1375,7 +1379,9 @@ Result<void> QueryEngine::ensure_pk_cache(table_id_t table_id) {
         if (pk_val.is_null()) {
             SIXSEVEN_LOG_WARN(
                 "skipping row with NULL PK while building pk_cache for table {} (rid={}:{})",
-                table_id, rid.page_id, rid.slot_id);
+                table_id,
+                rid.page_id,
+                rid.slot_id);
             continue;
         }
         pk_set.insert(pk_value_to_string(pk_val));
@@ -1483,7 +1489,7 @@ Result<QueryResult> QueryEngine::execute_link(const LinkStmt& stmt, const BoundS
 // ---------------------------------------------------------------------------
 
 Result<QueryResult> QueryEngine::execute_bulk_link(const BulkLinkStmt& stmt,
-                                                    const BoundStatement& bound) {
+                                                   const BoundStatement& bound) {
     if (!graph_engine_) {
         return make_error(StatusCode::INTERNAL_ERROR, "graph engine not available for LINK");
     }
@@ -1519,14 +1525,14 @@ Result<QueryResult> QueryEngine::execute_bulk_link(const BulkLinkStmt& stmt,
         auto src_val = evaluate_expr(*row[0], empty_tuple, empty_schema, bound);
         if (!src_val) {
             return make_error(src_val.error().code,
-                              "row " + std::to_string(i + 1) + " source_key: " +
-                                  src_val.error().message);
+                              "row " + std::to_string(i + 1) +
+                                  " source_key: " + src_val.error().message);
         }
         auto tgt_val = evaluate_expr(*row[1], empty_tuple, empty_schema, bound);
         if (!tgt_val) {
             return make_error(tgt_val.error().code,
-                              "row " + std::to_string(i + 1) + " target_key: " +
-                                  tgt_val.error().message);
+                              "row " + std::to_string(i + 1) +
+                                  " target_key: " + tgt_val.error().message);
         }
 
         // Coerce keys.
@@ -1745,8 +1751,7 @@ Result<QueryResult> QueryEngine::execute_reindex(const ReindexStmt& stmt) {
 
 Result<QueryResult> QueryEngine::execute_backfill(const BackfillStmt& stmt) {
     if (!backfill_manager_) {
-        return make_error(StatusCode::INTERNAL_ERROR,
-                          "backfill manager not initialized");
+        return make_error(StatusCode::INTERNAL_ERROR, "backfill manager not initialized");
     }
 
     auto result = backfill_manager_->start(stmt, current_database_id_);
@@ -1945,7 +1950,8 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
                     break;
                 }
             }
-            if (reembed_idx_id == 0) continue;
+            if (reembed_idx_id == 0)
+                continue;
             auto idx_it = hnsw_indexes_->find(reembed_idx_id);
             if (idx_it == hnsw_indexes_->end()) {
                 continue;
@@ -2697,25 +2703,33 @@ Result<QueryResult> QueryEngine::execute_show(const ShowStmt& stmt) {
     case ShowTarget::BACKFILL: {
         if (!backfill_manager_) {
             QueryResult qr;
-            qr.column_names = {"table_name", "status", "processed", "generated",
-                                "skipped", "rows_per_sec"};
-            qr.column_types = {TypeId::STRING,  TypeId::STRING,  TypeId::INT64,
-                                TypeId::INT64,   TypeId::INT64,   TypeId::FLOAT64};
+            qr.column_names = {
+                "table_name", "status", "processed", "generated", "skipped", "rows_per_sec"};
+            qr.column_types = {TypeId::STRING,
+                               TypeId::STRING,
+                               TypeId::INT64,
+                               TypeId::INT64,
+                               TypeId::INT64,
+                               TypeId::FLOAT64};
             return ok(std::move(qr));
         }
         auto statuses = backfill_manager_->all_statuses();
         QueryResult qr;
-        qr.column_names = {"table_name", "status", "processed", "generated",
-                            "skipped", "rows_per_sec"};
-        qr.column_types = {TypeId::STRING,  TypeId::STRING,  TypeId::INT64,
-                            TypeId::INT64,   TypeId::INT64,   TypeId::FLOAT64};
+        qr.column_names = {
+            "table_name", "status", "processed", "generated", "skipped", "rows_per_sec"};
+        qr.column_types = {TypeId::STRING,
+                           TypeId::STRING,
+                           TypeId::INT64,
+                           TypeId::INT64,
+                           TypeId::INT64,
+                           TypeId::FLOAT64};
         for (const auto& s : statuses) {
             qr.rows.push_back({Value(s.table_name),
-                                Value(std::string(s.running ? "running" : "completed")),
-                                Value(s.processed),
-                                Value(s.generated),
-                                Value(s.skipped),
-                                Value(s.rows_per_sec)});
+                               Value(std::string(s.running ? "running" : "completed")),
+                               Value(s.processed),
+                               Value(s.generated),
+                               Value(s.skipped),
+                               Value(s.rows_per_sec)});
         }
         return ok(std::move(qr));
     }
@@ -3141,8 +3155,8 @@ Result<QueryResult> QueryEngine::execute_create_index(const CreateIndexStmt& stm
         if (created_def2) {
             auto populate = index_manager_->create_and_populate_index(*created_def2, *schema);
             if (!populate) {
-                SIXSEVEN_LOG_WARN("failed to populate index '{}': {}",
-                                  stmt.name, populate.error().message);
+                SIXSEVEN_LOG_WARN(
+                    "failed to populate index '{}': {}", stmt.name, populate.error().message);
             }
         }
     }
