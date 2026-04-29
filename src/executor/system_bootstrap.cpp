@@ -3,10 +3,12 @@
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/catalog/schema.h"
 #include "sixseven/common/logging.h"
+#include "sixseven/common/types.h"
 #include "sixseven/executor/catalog_persistence.h"
 #include "sixseven/executor/query_engine.h"
 #include "sixseven/executor/storage_manager.h"
 
+#include <array>
 #include <fstream>
 #include <string>
 
@@ -67,8 +69,7 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
             auto r_db = catalog.restore_database(default_database_id, "sixseven");
             if (!r_db) {
                 return make_error(r_db.error().code,
-                                  "failed to create sixseven database: " +
-                                      r_db.error().message);
+                                  "failed to create sixseven database: " + r_db.error().message);
             }
         }
         auto dir_db = storage.create_database_storage(default_database_id);
@@ -80,8 +81,7 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
         auto p_db = persistence.persist_database(default_database_id, "sixseven");
         if (!p_db) {
             return make_error(p_db.error().code,
-                              "failed to persist sixseven database: " +
-                                  p_db.error().message);
+                              "failed to persist sixseven database: " + p_db.error().message);
         }
 
         // Ensure user table IDs start after all system tables.
@@ -139,8 +139,7 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
             auto migrate = persistence.migrate_databases_from_sys_tables();
             if (!migrate) {
                 return make_error(migrate.error().code,
-                                  "failed to migrate databases: " +
-                                      migrate.error().message);
+                                  "failed to migrate databases: " + migrate.error().message);
             }
         }
 
@@ -211,8 +210,10 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
 
                 auto idx_id = catalog.create_index(def);
                 if (!idx_id) {
-                    SIXSEVEN_LOG_WARN("system bootstrap: failed to create missing HNSW index '{}': {}",
-                                      index_name, idx_id.error().message);
+                    SIXSEVEN_LOG_WARN(
+                        "system bootstrap: failed to create missing HNSW index '{}': {}",
+                        index_name,
+                        idx_id.error().message);
                     continue;
                 }
 
@@ -221,7 +222,8 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
                 auto pr = persistence.persist_index(def);
                 if (!pr) {
                     SIXSEVEN_LOG_WARN("system bootstrap: failed to persist HNSW index '{}': {}",
-                                      index_name, pr.error().message);
+                                      index_name,
+                                      pr.error().message);
                     continue;
                 }
 
@@ -400,6 +402,218 @@ void SystemBootstrap::register_virtual_catalog_tables(Catalog& catalog) {
         return rows;
     };
     catalog.register_virtual_table(std::move(pg_database));
+
+    // pg_namespace — lists database schemas.
+    VirtualTableDef pg_namespace;
+    pg_namespace.name = "pg_namespace";
+    pg_namespace.columns = {
+        {0, "oid", TypeId::INT32, false, ""},
+        {1, "nspname", TypeId::STRING, false, ""},
+        {2, "nspowner", TypeId::INT32, false, ""},
+    };
+    pg_namespace.generator = []() -> std::vector<std::vector<std::string>> {
+        return {
+            {"11", "pg_catalog", "10"},
+            {"2200", "public", "10"},
+        };
+    };
+    catalog.register_virtual_table(std::move(pg_namespace));
+
+    // pg_type — maps SixSevenDB types to PostgreSQL type metadata.
+    static constexpr std::array<TypeId, 23> all_types = {
+        TypeId::BOOL,    TypeId::INT8,      TypeId::INT16,    TypeId::INT32,  TypeId::INT64,
+        TypeId::UINT8,   TypeId::UINT16,    TypeId::UINT32,   TypeId::UINT64, TypeId::FLOAT32,
+        TypeId::FLOAT64, TypeId::DECIMAL,   TypeId::STRING,   TypeId::BLOB,   TypeId::DATE,
+        TypeId::TIME,    TypeId::TIMESTAMP, TypeId::INTERVAL, TypeId::POINT,  TypeId::JSON,
+        TypeId::UUID,    TypeId::EMBEDDING, TypeId::PATH,
+    };
+
+    auto pg_typname = [](TypeId t) -> std::string {
+        switch (t) {
+        case TypeId::BOOL:
+            return "bool";
+        case TypeId::INT8:
+            return "int2";
+        case TypeId::INT16:
+            return "int2";
+        case TypeId::INT32:
+            return "int4";
+        case TypeId::INT64:
+            return "int8";
+        case TypeId::UINT8:
+            return "int2";
+        case TypeId::UINT16:
+            return "int4";
+        case TypeId::UINT32:
+            return "int8";
+        case TypeId::UINT64:
+            return "numeric";
+        case TypeId::FLOAT32:
+            return "float4";
+        case TypeId::FLOAT64:
+            return "float8";
+        case TypeId::DECIMAL:
+            return "numeric";
+        case TypeId::STRING:
+            return "text";
+        case TypeId::BLOB:
+            return "bytea";
+        case TypeId::DATE:
+            return "date";
+        case TypeId::TIME:
+            return "time";
+        case TypeId::TIMESTAMP:
+            return "timestamp";
+        case TypeId::INTERVAL:
+            return "interval";
+        case TypeId::POINT:
+            return "point";
+        case TypeId::JSON:
+            return "json";
+        case TypeId::UUID:
+            return "uuid";
+        case TypeId::EMBEDDING:
+            return "embedding";
+        case TypeId::PATH:
+            return "text";
+        }
+        return "text";
+    };
+
+    auto pg_typlen = [](TypeId t) -> int32_t {
+        switch (t) {
+        case TypeId::BOOL:
+            return 1;
+        case TypeId::INT8:
+            return 2;
+        case TypeId::INT16:
+            return 2;
+        case TypeId::INT32:
+            return 4;
+        case TypeId::INT64:
+            return 8;
+        case TypeId::UINT8:
+            return 2;
+        case TypeId::UINT16:
+            return 4;
+        case TypeId::UINT32:
+            return 8;
+        case TypeId::UINT64:
+            return -1;
+        case TypeId::FLOAT32:
+            return 4;
+        case TypeId::FLOAT64:
+            return 8;
+        case TypeId::DECIMAL:
+            return -1;
+        case TypeId::STRING:
+            return -1;
+        case TypeId::BLOB:
+            return -1;
+        case TypeId::DATE:
+            return 4;
+        case TypeId::TIME:
+            return 8;
+        case TypeId::TIMESTAMP:
+            return 8;
+        case TypeId::INTERVAL:
+            return 16;
+        case TypeId::POINT:
+            return 16;
+        case TypeId::JSON:
+            return -1;
+        case TypeId::UUID:
+            return 16;
+        case TypeId::EMBEDDING:
+            return -1;
+        case TypeId::PATH:
+            return -1;
+        }
+        return -1;
+    };
+
+    auto pg_oid = [](TypeId t) -> uint32_t {
+        switch (t) {
+        case TypeId::BOOL:
+            return 16;
+        case TypeId::INT8:
+            return 21;
+        case TypeId::INT16:
+            return 21;
+        case TypeId::INT32:
+            return 23;
+        case TypeId::INT64:
+            return 20;
+        case TypeId::UINT8:
+            return 21;
+        case TypeId::UINT16:
+            return 23;
+        case TypeId::UINT32:
+            return 20;
+        case TypeId::UINT64:
+            return 1700;
+        case TypeId::FLOAT32:
+            return 700;
+        case TypeId::FLOAT64:
+            return 701;
+        case TypeId::DECIMAL:
+            return 1700;
+        case TypeId::STRING:
+            return 25;
+        case TypeId::BLOB:
+            return 17;
+        case TypeId::DATE:
+            return 1082;
+        case TypeId::TIME:
+            return 1083;
+        case TypeId::TIMESTAMP:
+            return 1114;
+        case TypeId::INTERVAL:
+            return 1186;
+        case TypeId::POINT:
+            return 600;
+        case TypeId::JSON:
+            return 114;
+        case TypeId::UUID:
+            return 2950;
+        case TypeId::EMBEDDING:
+            return 100000;
+        case TypeId::PATH:
+            return 25;
+        }
+        return 25;
+    };
+
+    VirtualTableDef pg_type;
+    pg_type.name = "pg_type";
+    pg_type.columns = {
+        {0, "oid", TypeId::INT32, false, ""},
+        {1, "typname", TypeId::STRING, false, ""},
+        {2, "typnamespace", TypeId::INT32, false, ""},
+        {3, "typlen", TypeId::INT32, false, ""},
+        {4, "typtype", TypeId::STRING, false, ""},
+        {5, "typelem", TypeId::INT32, false, ""},
+        {6, "typrelid", TypeId::INT32, false, ""},
+        {7, "typbasetype", TypeId::INT32, false, ""},
+    };
+    pg_type.generator = [pg_typname, pg_typlen, pg_oid]() -> std::vector<std::vector<std::string>> {
+        std::vector<std::vector<std::string>> rows;
+        rows.reserve(all_types.size());
+        for (auto t : all_types) {
+            rows.push_back({
+                std::to_string(pg_oid(t)),
+                pg_typname(t),
+                "11",
+                std::to_string(pg_typlen(t)),
+                "b",
+                "0",
+                "0",
+                "0",
+            });
+        }
+        return rows;
+    };
+    catalog.register_virtual_table(std::move(pg_type));
 
     SIXSEVEN_LOG_INFO("system bootstrap: registered {} pg_catalog virtual tables",
                       catalog.list_virtual_tables().size());
