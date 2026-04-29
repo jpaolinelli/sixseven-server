@@ -615,6 +615,77 @@ void SystemBootstrap::register_virtual_catalog_tables(Catalog& catalog) {
     };
     catalog.register_virtual_table(std::move(pg_type));
 
+    // pg_class — one row per user table (relkind='r').
+    VirtualTableDef pg_class;
+    pg_class.name = "pg_class";
+    pg_class.columns = {
+        {0, "oid", TypeId::INT32, false, ""},
+        {1, "relname", TypeId::STRING, false, ""},
+        {2, "relnamespace", TypeId::INT32, false, ""},
+        {3, "relkind", TypeId::STRING, false, ""},
+        {4, "reltuples", TypeId::FLOAT64, false, ""},
+        {5, "relhasindex", TypeId::BOOL, false, ""},
+        {6, "relnatts", TypeId::INT32, false, ""},
+    };
+    pg_class.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
+        std::vector<std::vector<std::string>> rows;
+        for (const auto& db : catalog.list_databases()) {
+            for (const auto& table : catalog.list_tables(db.database_id)) {
+                if (table.table_id < first_user_table_id) {
+                    continue;
+                }
+                bool has_index = !catalog.list_indexes(table.table_id).empty();
+                rows.push_back({
+                    std::to_string(table.table_id),
+                    table.name,
+                    "2200",
+                    "r",
+                    "-1",
+                    has_index ? "true" : "false",
+                    std::to_string(static_cast<int32_t>(table.columns.size())),
+                });
+            }
+        }
+        return rows;
+    };
+    catalog.register_virtual_table(std::move(pg_class));
+
+    // pg_attribute — one row per column per user table.
+    VirtualTableDef pg_attribute;
+    pg_attribute.name = "pg_attribute";
+    pg_attribute.columns = {
+        {0, "attrelid", TypeId::INT32, false, ""},
+        {1, "attname", TypeId::STRING, false, ""},
+        {2, "atttypid", TypeId::INT32, false, ""},
+        {3, "attlen", TypeId::INT32, false, ""},
+        {4, "attnum", TypeId::INT32, false, ""},
+        {5, "attnotnull", TypeId::BOOL, false, ""},
+        {6, "attisdropped", TypeId::BOOL, false, ""},
+    };
+    pg_attribute.generator = [&catalog, pg_oid, pg_typlen]() -> std::vector<std::vector<std::string>> {
+        std::vector<std::vector<std::string>> rows;
+        for (const auto& db : catalog.list_databases()) {
+            for (const auto& table : catalog.list_tables(db.database_id)) {
+                if (table.table_id < first_user_table_id) {
+                    continue;
+                }
+                for (const auto& col : table.columns) {
+                    rows.push_back({
+                        std::to_string(table.table_id),
+                        col.name,
+                        std::to_string(pg_oid(col.type_id)),
+                        std::to_string(pg_typlen(col.type_id)),
+                        std::to_string(col.ordinal + 1),
+                        col.nullable ? "false" : "true",
+                        "false",
+                    });
+                }
+            }
+        }
+        return rows;
+    };
+    catalog.register_virtual_table(std::move(pg_attribute));
+
     SIXSEVEN_LOG_INFO("system bootstrap: registered {} pg_catalog virtual tables",
                       catalog.list_virtual_tables().size());
 }
