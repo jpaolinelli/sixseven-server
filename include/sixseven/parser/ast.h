@@ -185,6 +185,7 @@ struct TableConstraint {
 /// or algorithm function call).
 struct TableRef {
     std::string name;
+    std::string schema;     ///< Schema qualifier (e.g., "pg_catalog" in pg_catalog.pg_type).
     std::string alias;
     StmtPtr subquery;
     StmtPtr traverse_source;

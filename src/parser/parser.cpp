@@ -2130,7 +2130,17 @@ Result<TableRef> Parser::parse_table_ref() {
         return ok(std::move(ref));
     }
 
-    ref.name = std::move(*name);
+    // Check for schema-qualified name: schema.table
+    if (check(TokenType::DOT)) {
+        advance(); // consume DOT
+        auto table_name = parse_name("table name after schema qualifier");
+        if (!table_name)
+            return tl::unexpected(table_name.error());
+        ref.schema = std::move(*name);
+        ref.name = std::move(*table_name);
+    } else {
+        ref.name = std::move(*name);
+    }
 
     // Optional alias (explicit AS or implicit).
     if (match(TokenType::AS)) {
