@@ -662,7 +662,8 @@ void SystemBootstrap::register_virtual_catalog_tables(Catalog& catalog) {
         {5, "attnotnull", TypeId::BOOL, false, ""},
         {6, "attisdropped", TypeId::BOOL, false, ""},
     };
-    pg_attribute.generator = [&catalog, pg_oid, pg_typlen]() -> std::vector<std::vector<std::string>> {
+    pg_attribute.generator =
+        [&catalog, pg_oid, pg_typlen]() -> std::vector<std::vector<std::string>> {
         std::vector<std::vector<std::string>> rows;
         for (const auto& db : catalog.list_databases()) {
             for (const auto& table : catalog.list_tables(db.database_id)) {
