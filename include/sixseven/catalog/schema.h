@@ -4,6 +4,7 @@
 #include "sixseven/common/types.h"
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -126,6 +127,33 @@ inline constexpr table_id_t sys_databases_table_id = 9;
 
 /// First table ID available for user tables (after all system tables).
 inline constexpr table_id_t first_user_table_id = 10;
+
+/// Starting table ID for virtual catalog tables (negative to avoid collisions).
+inline constexpr table_id_t first_virtual_table_id = -1000;
+
+/// The pg_catalog schema name.
+inline constexpr const char* pg_catalog_schema = "pg_catalog";
+
+/// A row generator that produces rows as vectors of string values.
+/// Each inner vector corresponds to one row, with string representations
+/// of column values in ordinal order. Empty strings are treated as NULL.
+using VirtualTableGenerator = std::function<std::vector<std::vector<std::string>>()>;
+
+/// Definition of a virtual catalog table (not persisted, registered at startup).
+struct VirtualTableDef {
+    table_id_t table_id = 0;
+    std::string name;
+    std::vector<CatalogColumnDef> columns;
+    VirtualTableGenerator generator;
+
+    TableSchema to_table_schema() const {
+        TableSchema ts;
+        ts.table_id = table_id;
+        ts.name = name;
+        ts.columns = columns;
+        return ts;
+    }
+};
 
 /// Returns the system table schema for sys_databases(database_id INT32, name STRING).
 inline TableSchema sys_databases_schema() {

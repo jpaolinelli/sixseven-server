@@ -957,4 +957,50 @@ int64_t Catalog::get_autoincrement_counter(table_id_t table_id) const {
     return it->second;
 }
 
+// ===========================================================================
+// Virtual catalog table operations
+// ===========================================================================
+
+void Catalog::register_virtual_table(VirtualTableDef def) {
+    std::lock_guard lock(mu_);
+    if (def.table_id == 0) {
+        def.table_id = next_virtual_table_id_--;
+    }
+    virtual_tables_.emplace(def.name, std::move(def));
+}
+
+Result<VirtualTableDef> Catalog::get_virtual_table(const std::string& name) const {
+    std::lock_guard lock(mu_);
+    auto it = virtual_tables_.find(name);
+    if (it == virtual_tables_.end()) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "virtual table 'pg_catalog." + name + "' does not exist");
+    }
+    return it->second;
+}
+
+std::vector<VirtualTableDef> Catalog::list_virtual_tables() const {
+    std::lock_guard lock(mu_);
+    std::vector<VirtualTableDef> result;
+    result.reserve(virtual_tables_.size());
+    for (const auto& [_, def] : virtual_tables_) {
+        result.push_back(def);
+    }
+    return result;
+}
+
+bool Catalog::is_virtual_schema(const std::string& schema_name) {
+    return schema_name == pg_catalog_schema;
+}
+
+bool Catalog::is_virtual_table(table_id_t id) const {
+    std::lock_guard lock(mu_);
+    for (const auto& [_, def] : virtual_tables_) {
+        if (def.table_id == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace sixseven

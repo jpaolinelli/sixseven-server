@@ -222,6 +222,24 @@ public:
     /// Get the current next_table_id value.
     [[nodiscard]] table_id_t next_table_id() const;
 
+    // -- Virtual catalog table operations -------------------------------------
+
+    /// Register a virtual table in pg_catalog. Called at server startup.
+    void register_virtual_table(VirtualTableDef def);
+
+    /// Look up a virtual table by name in pg_catalog.
+    /// Fails with NOT_FOUND if the virtual table does not exist.
+    [[nodiscard]] Result<VirtualTableDef> get_virtual_table(const std::string& name) const;
+
+    /// List all registered virtual tables.
+    [[nodiscard]] std::vector<VirtualTableDef> list_virtual_tables() const;
+
+    /// Check whether a schema name refers to the pg_catalog virtual schema.
+    [[nodiscard]] static bool is_virtual_schema(const std::string& schema_name);
+
+    /// Check whether a table_id refers to a virtual table.
+    [[nodiscard]] bool is_virtual_table(table_id_t id) const;
+
 private:
     /// Drop a table by name (caller must hold mu_). Used internally by
     /// drop_table() and drop_database() with cascade.
@@ -273,6 +291,12 @@ private:
 
     /// Per-table auto-increment counters. Stores the next value to assign.
     std::unordered_map<table_id_t, int64_t> autoincrement_counters_;
+
+    /// Virtual catalog tables (pg_catalog), keyed by name.
+    std::unordered_map<std::string, VirtualTableDef> virtual_tables_;
+
+    /// Next virtual table ID (decrements from first_virtual_table_id).
+    table_id_t next_virtual_table_id_ = first_virtual_table_id;
 };
 
 } // namespace sixseven

@@ -27,6 +27,7 @@
 #include "sixseven/executor/traversal.h"
 #include "sixseven/executor/update.h"
 #include "sixseven/executor/variable_length_match.h"
+#include "sixseven/executor/virtual_catalog_scan.h"
 #include "sixseven/executor/window_function.h"
 #include "sixseven/parser/lexer.h"
 #include "sixseven/parser/parser.h"
@@ -831,7 +832,19 @@ Planner::plan_from_source(const TableRef& table_ref,
         return ok(PlannedSource{std::move(iter), std::move(out_schema)});
     }
 
-    // Case 6: Physical table.
+    // Case 6: Virtual catalog table (pg_catalog).
+    if (Catalog::is_virtual_schema(table_ref.schema)) {
+        auto vt = catalog_.get_virtual_table(table_ref.name);
+        if (!vt) {
+            return make_error(vt.error().code, vt.error().message);
+        }
+        auto ts = vt->to_table_schema();
+        auto table_output = build_table_output_schema(ts, alias);
+        auto scan = std::make_unique<VirtualCatalogScanOperator>(std::move(*vt), table_output);
+        return ok(PlannedSource{std::move(scan), std::move(table_output)});
+    }
+
+    // Case 7: Physical table.
     auto table_schema = catalog_.get_table(database_id_, table_ref.name);
     if (!table_schema) {
         return make_error(table_schema.error().code, table_schema.error().message);

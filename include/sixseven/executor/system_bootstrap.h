@@ -51,6 +51,9 @@ private:
     [[nodiscard]] static Result<void> seed_default_settings(QueryEngine& engine,
                                                             const Config& config);
 
+    /// Register pg_catalog virtual tables in the catalog.
+    static void register_virtual_catalog_tables(Catalog& catalog);
+
     /// Write the bootstrap flag file to the data directory.
     static void mark_bootstrapped(const std::filesystem::path& data_dir);
 

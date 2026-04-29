@@ -29,6 +29,7 @@ add_library(sixseven_executor STATIC
     variable_length_match.cpp
     match_shortest_path.cpp
     nearest_scan.cpp
+    virtual_catalog_scan.cpp
     catalog_persistence.cpp
     index_manager.cpp
     storage_manager.cpp

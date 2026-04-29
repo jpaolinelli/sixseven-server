@@ -236,6 +236,9 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
         SIXSEVEN_LOG_INFO("system bootstrap: catalog loaded from disk");
     }
 
+    // Register pg_catalog virtual tables (always, regardless of first run).
+    register_virtual_catalog_tables(catalog);
+
     return ok();
 }
 
@@ -379,6 +382,27 @@ Result<void> SystemBootstrap::seed_default_settings(QueryEngine& engine, const C
     }
 
     return ok();
+}
+
+void SystemBootstrap::register_virtual_catalog_tables(Catalog& catalog) {
+    // pg_database — lists all databases.
+    VirtualTableDef pg_database;
+    pg_database.name = "pg_database";
+    pg_database.columns = {
+        {0, "oid", TypeId::INT32, false, ""},
+        {1, "datname", TypeId::STRING, false, ""},
+    };
+    pg_database.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
+        std::vector<std::vector<std::string>> rows;
+        for (const auto& db : catalog.list_databases()) {
+            rows.push_back({std::to_string(db.database_id), db.name});
+        }
+        return rows;
+    };
+    catalog.register_virtual_table(std::move(pg_database));
+
+    SIXSEVEN_LOG_INFO("system bootstrap: registered {} pg_catalog virtual tables",
+                      catalog.list_virtual_tables().size());
 }
 
 void SystemBootstrap::mark_bootstrapped(const std::filesystem::path& data_dir) {

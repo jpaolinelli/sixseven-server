@@ -1351,9 +1351,20 @@ Binder::build_from_scope(const SelectStmt& stmt, Scope* parent, BoundStatement& 
             }
             scope.add_table(std::move(st));
         } else {
+            // Check for pg_catalog schema-qualified reference.
+            if (Catalog::is_virtual_schema(tref.schema)) {
+                auto vt = catalog_.get_virtual_table(tref.name);
+                if (!vt) {
+                    return tl::unexpected(vt.error());
+                }
+                auto ts = vt->to_table_schema();
+                std::string alias = tref.alias.empty() ? tref.name : tref.alias;
+                scope.add_table(make_scope_table(ts, alias));
+                bound.referenced_tables.push_back(ts.table_id);
+            }
             // Check if this is a CTE reference.
-            auto cte_it = cte_results_.find(to_upper(tref.name));
-            if (cte_it != cte_results_.end()) {
+            else if (auto cte_it = cte_results_.find(to_upper(tref.name));
+                     cte_it != cte_results_.end()) {
                 ScopeTable st;
                 st.table_id = 0;
                 std::string alias = tref.alias.empty() ? tref.name : tref.alias;
@@ -1410,9 +1421,20 @@ Binder::build_from_scope(const SelectStmt& stmt, Scope* parent, BoundStatement& 
             }
             scope.add_table(std::move(st));
         } else {
+            // Check for pg_catalog schema-qualified reference.
+            if (Catalog::is_virtual_schema(jtref.schema)) {
+                auto vt = catalog_.get_virtual_table(jtref.name);
+                if (!vt) {
+                    return tl::unexpected(vt.error());
+                }
+                auto ts = vt->to_table_schema();
+                std::string alias = jtref.alias.empty() ? jtref.name : jtref.alias;
+                scope.add_table(make_scope_table(ts, alias));
+                bound.referenced_tables.push_back(ts.table_id);
+            }
             // Check if this is a CTE reference.
-            auto cte_it = cte_results_.find(to_upper(jtref.name));
-            if (cte_it != cte_results_.end()) {
+            else if (auto cte_it = cte_results_.find(to_upper(jtref.name));
+                     cte_it != cte_results_.end()) {
                 ScopeTable st;
                 st.table_id = 0;
                 std::string alias = jtref.alias.empty() ? jtref.name : jtref.alias;
