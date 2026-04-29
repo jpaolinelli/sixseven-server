@@ -1,8 +1,11 @@
 #include "sixseven/catalog/catalog.h"
+#include "sixseven/common/config.h"
 #include "sixseven/common/types.h"
 #include "sixseven/common/value.h"
+#include "sixseven/executor/catalog_persistence.h"
 #include "sixseven/executor/query_engine.h"
 #include "sixseven/executor/storage_manager.h"
+#include "sixseven/executor/system_bootstrap.h"
 #include "sixseven/graph/graph_engine.h"
 #include "sixseven/storage/disk_manager.h"
 
@@ -196,6 +199,73 @@ TEST_F(QueryEngineTest, DropDatabaseCascade) {
     EXPECT_EQ(qr.message, "DROP DATABASE");
     // Database should be gone — creating it again should work.
     exec_ok("CREATE DATABASE mydb");
+}
+
+TEST(DropDatabaseCascadePersistence, RemovesOrphanedSysTableRows) {
+    namespace fs = std::filesystem;
+    auto data_dir = fs::temp_directory_path() / "sixseven_test_drop_db_cascade_persist";
+    fs::remove_all(data_dir);
+    fs::create_directories(data_dir);
+    auto config = Config::load_defaults();
+    config.data_dir = data_dir.string();
+
+    {
+        DiskManager dm;
+        Catalog catalog;
+        init_test_catalog(catalog);
+        StorageManager storage(dm, data_dir);
+        CatalogPersistence persistence(catalog, storage);
+        QueryEngine engine(catalog, storage);
+        engine.set_catalog_persistence(&persistence);
+
+        auto boot =
+            SystemBootstrap::bootstrap(engine, catalog, storage, persistence, config, data_dir);
+        ASSERT_TRUE(boot.has_value()) << boot.error().message;
+
+        engine.set_current_database(default_database_id);
+
+        auto r1 = engine.execute("CREATE DATABASE testdb");
+        ASSERT_TRUE(r1.has_value()) << r1.error().message;
+
+        auto db = catalog.get_database("testdb");
+        ASSERT_TRUE(db.has_value());
+        engine.set_current_database(db->database_id);
+
+        auto r2 = engine.execute("CREATE TABLE t1 (id INT, name VARCHAR)");
+        ASSERT_TRUE(r2.has_value()) << r2.error().message;
+
+        engine.set_current_database(default_database_id);
+
+        auto r3 = engine.execute("DROP DATABASE testdb CASCADE");
+        ASSERT_TRUE(r3.has_value()) << r3.error().message;
+    }
+
+    // Simulate restart: load_catalog should produce no warnings about orphaned tables.
+    {
+        DiskManager dm;
+        Catalog catalog;
+        init_test_catalog(catalog);
+        StorageManager storage(dm, data_dir);
+        CatalogPersistence persistence(catalog, storage);
+        QueryEngine engine(catalog, storage);
+        engine.set_catalog_persistence(&persistence);
+
+        auto boot =
+            SystemBootstrap::bootstrap(engine, catalog, storage, persistence, config, data_dir);
+        ASSERT_TRUE(boot.has_value()) << boot.error().message;
+
+        // The database should not exist after restart.
+        auto db = catalog.get_database("testdb");
+        EXPECT_FALSE(db.has_value());
+
+        // No table named t1 should exist in any database.
+        auto tables = catalog.list_tables(default_database_id);
+        for (const auto& t : tables) {
+            EXPECT_NE(t.name, "t1") << "orphaned table 't1' found after restart";
+        }
+    }
+
+    fs::remove_all(data_dir);
 }
 
 // =============================================================================
