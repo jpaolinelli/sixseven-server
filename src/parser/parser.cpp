@@ -3516,8 +3516,12 @@ Result<ExprPtr> Parser::parse_primary() {
     // Positional parameter reference ($1, $2, ...).
     if (match(TokenType::PARAM_REF)) {
         auto param = std::make_unique<ParamRefExpr>();
-        auto lexeme = std::string(previous().lexeme);
-        param->index = std::stoi(lexeme.substr(1));
+        auto lexeme = previous().lexeme;
+        auto idx = safe_stoi(lexeme.substr(1));
+        if (!idx) {
+            return make_error(idx.error().code, idx.error().message);
+        }
+        param->index = *idx;
         param->line = previous().line;
         param->col = previous().column;
         return ok(ExprPtr(std::move(param)));
