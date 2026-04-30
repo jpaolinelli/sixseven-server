@@ -117,6 +117,7 @@ private:
     [[nodiscard]] Result<StmtPtr> parse_commit();
     [[nodiscard]] Result<StmtPtr> parse_rollback();
     [[nodiscard]] Result<StmtPtr> parse_savepoint();
+    [[nodiscard]] Result<StmtPtr> parse_release_savepoint();
 
     // -- Admin --------------------------------------------------------------
 

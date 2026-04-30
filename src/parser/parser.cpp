@@ -68,6 +68,7 @@ bool is_name_token(TokenType type) {
     case TokenType::ANALYZE:
     case TokenType::DESCRIBE:
     case TokenType::EXPLAIN:
+    case TokenType::RELEASE:
     case TokenType::SAVEPOINT:
     case TokenType::SHOW:
     case TokenType::VACUUM:
@@ -382,6 +383,8 @@ Result<StmtPtr> Parser::parse_statement() {
         return parse_rollback();
     case TokenType::SAVEPOINT:
         return parse_savepoint();
+    case TokenType::RELEASE:
+        return parse_release_savepoint();
     case TokenType::SET:
         return parse_set_stmt();
     case TokenType::SHOW:
@@ -2726,9 +2729,13 @@ Result<StmtPtr> Parser::parse_rollback() {
     advance(); // consume ROLLBACK
     auto stmt = std::make_unique<RollbackStmt>();
 
-    // Optional TO savepoint_name.
+    // Optional TO [SAVEPOINT] savepoint_name.
     if (match_ident_ci(peek(), "TO")) {
         advance();
+        // Optional SAVEPOINT keyword after TO.
+        if (check(TokenType::SAVEPOINT)) {
+            advance();
+        }
         auto name = parse_name("savepoint name");
         if (!name)
             return tl::unexpected(name.error());
@@ -2741,6 +2748,25 @@ Result<StmtPtr> Parser::parse_rollback() {
 Result<StmtPtr> Parser::parse_savepoint() {
     advance(); // consume SAVEPOINT
     auto stmt = std::make_unique<SavepointStmt>();
+
+    auto name = parse_name("savepoint name");
+    if (!name)
+        return tl::unexpected(name.error());
+    stmt->name = std::move(*name);
+
+    return ok(StmtPtr(std::move(stmt)));
+}
+
+Result<StmtPtr> Parser::parse_release_savepoint() {
+    advance(); // consume RELEASE
+
+    // Expect SAVEPOINT keyword.
+    if (!check(TokenType::SAVEPOINT)) {
+        return make_error(StatusCode::PARSE_ERROR, "expected SAVEPOINT after RELEASE");
+    }
+    advance(); // consume SAVEPOINT
+
+    auto stmt = std::make_unique<ReleaseSavepointStmt>();
 
     auto name = parse_name("savepoint name");
     if (!name)

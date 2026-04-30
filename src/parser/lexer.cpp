@@ -107,6 +107,7 @@ const std::unordered_map<std::string, TokenType>& keyword_map() {
         {"REEMBED", TokenType::REEMBED},
         {"REINDEX", TokenType::REINDEX},
         {"REFERENCES", TokenType::REFERENCES},
+        {"RELEASE", TokenType::RELEASE},
         {"RETURN", TokenType::RETURN},
         {"RANGE", TokenType::RANGE},
         {"RESTRICT", TokenType::RESTRICT},

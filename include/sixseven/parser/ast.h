@@ -752,6 +752,12 @@ struct SavepointStmt : Stmt {
     void accept(AstVisitor& visitor) const override;
 };
 
+/// RELEASE SAVEPOINT name.
+struct ReleaseSavepointStmt : Stmt {
+    std::string name;
+    void accept(AstVisitor& visitor) const override;
+};
+
 // ---------------------------------------------------------------------------
 // Admin statements
 // ---------------------------------------------------------------------------
@@ -900,6 +906,7 @@ public:
     virtual void visit(const CommitStmt& node) = 0;
     virtual void visit(const RollbackStmt& node) = 0;
     virtual void visit(const SavepointStmt& node) = 0;
+    virtual void visit(const ReleaseSavepointStmt& node) = 0;
 
     // -- Admin statements -----------------------------------------------------
 
@@ -1047,6 +1054,9 @@ inline void RollbackStmt::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void SavepointStmt::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void ReleaseSavepointStmt::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void SetStmt::accept(AstVisitor& v) const {
