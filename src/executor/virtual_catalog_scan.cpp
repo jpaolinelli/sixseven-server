@@ -8,6 +8,8 @@ namespace {
 
 Value string_to_value(const std::string& s, TypeId type_id) {
     switch (type_id) {
+    case TypeId::INT16:
+        return Value(static_cast<int16_t>(std::stoi(s)));
     case TypeId::INT32:
         return Value(static_cast<int32_t>(std::stoi(s)));
     case TypeId::INT64:

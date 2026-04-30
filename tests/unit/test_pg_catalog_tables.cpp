@@ -1,5 +1,6 @@
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/types.h"
+#include "sixseven/executor/pg_catalog_tables.h"
 #include "sixseven/executor/virtual_catalog_scan.h"
 
 #include <gtest/gtest.h>
@@ -20,217 +21,11 @@ namespace {
 // =========================================================================
 
 void register_pg_type(Catalog& catalog) {
-    static constexpr std::array<TypeId, 23> all_types = {
-        TypeId::BOOL,    TypeId::INT8,      TypeId::INT16,    TypeId::INT32,  TypeId::INT64,
-        TypeId::UINT8,   TypeId::UINT16,    TypeId::UINT32,   TypeId::UINT64, TypeId::FLOAT32,
-        TypeId::FLOAT64, TypeId::DECIMAL,   TypeId::STRING,   TypeId::BLOB,   TypeId::DATE,
-        TypeId::TIME,    TypeId::TIMESTAMP, TypeId::INTERVAL, TypeId::POINT,  TypeId::JSON,
-        TypeId::UUID,    TypeId::EMBEDDING, TypeId::PATH,
-    };
-
-    auto pg_typname = [](TypeId t) -> std::string {
-        switch (t) {
-        case TypeId::BOOL:
-            return "bool";
-        case TypeId::INT8:
-            return "int2";
-        case TypeId::INT16:
-            return "int2";
-        case TypeId::INT32:
-            return "int4";
-        case TypeId::INT64:
-            return "int8";
-        case TypeId::UINT8:
-            return "int2";
-        case TypeId::UINT16:
-            return "int4";
-        case TypeId::UINT32:
-            return "int8";
-        case TypeId::UINT64:
-            return "numeric";
-        case TypeId::FLOAT32:
-            return "float4";
-        case TypeId::FLOAT64:
-            return "float8";
-        case TypeId::DECIMAL:
-            return "numeric";
-        case TypeId::STRING:
-            return "text";
-        case TypeId::BLOB:
-            return "bytea";
-        case TypeId::DATE:
-            return "date";
-        case TypeId::TIME:
-            return "time";
-        case TypeId::TIMESTAMP:
-            return "timestamp";
-        case TypeId::INTERVAL:
-            return "interval";
-        case TypeId::POINT:
-            return "point";
-        case TypeId::JSON:
-            return "json";
-        case TypeId::UUID:
-            return "uuid";
-        case TypeId::EMBEDDING:
-            return "embedding";
-        case TypeId::PATH:
-            return "text";
-        }
-        return "text";
-    };
-
-    auto pg_typlen = [](TypeId t) -> int32_t {
-        switch (t) {
-        case TypeId::BOOL:
-            return 1;
-        case TypeId::INT8:
-            return 2;
-        case TypeId::INT16:
-            return 2;
-        case TypeId::INT32:
-            return 4;
-        case TypeId::INT64:
-            return 8;
-        case TypeId::UINT8:
-            return 2;
-        case TypeId::UINT16:
-            return 4;
-        case TypeId::UINT32:
-            return 8;
-        case TypeId::UINT64:
-            return -1;
-        case TypeId::FLOAT32:
-            return 4;
-        case TypeId::FLOAT64:
-            return 8;
-        case TypeId::DECIMAL:
-            return -1;
-        case TypeId::STRING:
-            return -1;
-        case TypeId::BLOB:
-            return -1;
-        case TypeId::DATE:
-            return 4;
-        case TypeId::TIME:
-            return 8;
-        case TypeId::TIMESTAMP:
-            return 8;
-        case TypeId::INTERVAL:
-            return 16;
-        case TypeId::POINT:
-            return 16;
-        case TypeId::JSON:
-            return -1;
-        case TypeId::UUID:
-            return 16;
-        case TypeId::EMBEDDING:
-            return -1;
-        case TypeId::PATH:
-            return -1;
-        }
-        return -1;
-    };
-
-    auto pg_oid = [](TypeId t) -> uint32_t {
-        switch (t) {
-        case TypeId::BOOL:
-            return 16;
-        case TypeId::INT8:
-            return 21;
-        case TypeId::INT16:
-            return 21;
-        case TypeId::INT32:
-            return 23;
-        case TypeId::INT64:
-            return 20;
-        case TypeId::UINT8:
-            return 21;
-        case TypeId::UINT16:
-            return 23;
-        case TypeId::UINT32:
-            return 20;
-        case TypeId::UINT64:
-            return 1700;
-        case TypeId::FLOAT32:
-            return 700;
-        case TypeId::FLOAT64:
-            return 701;
-        case TypeId::DECIMAL:
-            return 1700;
-        case TypeId::STRING:
-            return 25;
-        case TypeId::BLOB:
-            return 17;
-        case TypeId::DATE:
-            return 1082;
-        case TypeId::TIME:
-            return 1083;
-        case TypeId::TIMESTAMP:
-            return 1114;
-        case TypeId::INTERVAL:
-            return 1186;
-        case TypeId::POINT:
-            return 600;
-        case TypeId::JSON:
-            return 114;
-        case TypeId::UUID:
-            return 2950;
-        case TypeId::EMBEDDING:
-            return 100000;
-        case TypeId::PATH:
-            return 25;
-        }
-        return 25;
-    };
-
-    VirtualTableDef def;
-    def.name = "pg_type";
-    def.columns = {
-        {0, "oid", TypeId::INT32, false, ""},
-        {1, "typname", TypeId::STRING, false, ""},
-        {2, "typnamespace", TypeId::INT32, false, ""},
-        {3, "typlen", TypeId::INT32, false, ""},
-        {4, "typtype", TypeId::STRING, false, ""},
-        {5, "typelem", TypeId::INT32, false, ""},
-        {6, "typrelid", TypeId::INT32, false, ""},
-        {7, "typbasetype", TypeId::INT32, false, ""},
-    };
-    def.generator = [pg_typname, pg_typlen, pg_oid]() -> std::vector<std::vector<std::string>> {
-        std::vector<std::vector<std::string>> rows;
-        rows.reserve(all_types.size());
-        for (auto t : all_types) {
-            rows.push_back({
-                std::to_string(pg_oid(t)),
-                pg_typname(t),
-                "11",
-                std::to_string(pg_typlen(t)),
-                "b",
-                "0",
-                "0",
-                "0",
-            });
-        }
-        return rows;
-    };
-    catalog.register_virtual_table(std::move(def));
+    catalog.register_virtual_table(make_pg_type());
 }
 
 void register_pg_namespace(Catalog& catalog) {
-    VirtualTableDef def;
-    def.name = "pg_namespace";
-    def.columns = {
-        {0, "oid", TypeId::INT32, false, ""},
-        {1, "nspname", TypeId::STRING, false, ""},
-        {2, "nspowner", TypeId::INT32, false, ""},
-    };
-    def.generator = []() -> std::vector<std::vector<std::string>> {
-        return {
-            {"11", "pg_catalog", "10"},
-            {"2200", "public", "10"},
-        };
-    };
-    catalog.register_virtual_table(std::move(def));
+    catalog.register_virtual_table(make_pg_namespace());
 }
 
 struct TypeRow {
@@ -483,155 +278,18 @@ TEST(PgNamespace, LookupSucceeds) {
 // Helper: pg_oid / pg_typlen lambdas (matching production)
 // =========================================================================
 
-uint32_t test_pg_oid(TypeId t) {
-    switch (t) {
-    case TypeId::BOOL:
-        return 16;
-    case TypeId::INT8:
-    case TypeId::INT16:
-    case TypeId::UINT8:
-        return 21;
-    case TypeId::INT32:
-    case TypeId::UINT16:
-        return 23;
-    case TypeId::INT64:
-    case TypeId::UINT32:
-        return 20;
-    case TypeId::UINT64:
-    case TypeId::DECIMAL:
-        return 1700;
-    case TypeId::FLOAT32:
-        return 700;
-    case TypeId::FLOAT64:
-        return 701;
-    case TypeId::STRING:
-    case TypeId::PATH:
-        return 25;
-    case TypeId::BLOB:
-        return 17;
-    case TypeId::DATE:
-        return 1082;
-    case TypeId::TIME:
-        return 1083;
-    case TypeId::TIMESTAMP:
-        return 1114;
-    case TypeId::INTERVAL:
-        return 1186;
-    case TypeId::POINT:
-        return 600;
-    case TypeId::JSON:
-        return 114;
-    case TypeId::UUID:
-        return 2950;
-    case TypeId::EMBEDDING:
-        return 100000;
-    }
-    return 25;
-}
 
-int32_t test_pg_typlen(TypeId t) {
-    switch (t) {
-    case TypeId::BOOL:
-        return 1;
-    case TypeId::INT8:
-    case TypeId::INT16:
-    case TypeId::UINT8:
-        return 2;
-    case TypeId::INT32:
-    case TypeId::UINT16:
-    case TypeId::FLOAT32:
-    case TypeId::DATE:
-        return 4;
-    case TypeId::INT64:
-    case TypeId::UINT32:
-    case TypeId::FLOAT64:
-    case TypeId::TIME:
-    case TypeId::TIMESTAMP:
-        return 8;
-    case TypeId::INTERVAL:
-    case TypeId::POINT:
-    case TypeId::UUID:
-        return 16;
-    default:
-        return -1;
-    }
-}
 
 // =========================================================================
 // Helper: register pg_class and pg_attribute
 // =========================================================================
 
 void register_pg_class(Catalog& catalog) {
-    VirtualTableDef def;
-    def.name = "pg_class";
-    def.columns = {
-        {0, "oid", TypeId::INT32, false, ""},
-        {1, "relname", TypeId::STRING, false, ""},
-        {2, "relnamespace", TypeId::INT32, false, ""},
-        {3, "relkind", TypeId::STRING, false, ""},
-        {4, "reltuples", TypeId::FLOAT64, false, ""},
-        {5, "relhasindex", TypeId::BOOL, false, ""},
-        {6, "relnatts", TypeId::INT32, false, ""},
-    };
-    def.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
-        std::vector<std::vector<std::string>> rows;
-        for (const auto& db : catalog.list_databases()) {
-            for (const auto& table : catalog.list_tables(db.database_id)) {
-                if (table.table_id < first_user_table_id) {
-                    continue;
-                }
-                bool has_index = !catalog.list_indexes(table.table_id).empty();
-                rows.push_back({
-                    std::to_string(table.table_id),
-                    table.name,
-                    "2200",
-                    "r",
-                    "-1",
-                    has_index ? "true" : "false",
-                    std::to_string(static_cast<int32_t>(table.columns.size())),
-                });
-            }
-        }
-        return rows;
-    };
-    catalog.register_virtual_table(std::move(def));
+    catalog.register_virtual_table(make_pg_class(catalog));
 }
 
 void register_pg_attribute(Catalog& catalog) {
-    VirtualTableDef def;
-    def.name = "pg_attribute";
-    def.columns = {
-        {0, "attrelid", TypeId::INT32, false, ""},
-        {1, "attname", TypeId::STRING, false, ""},
-        {2, "atttypid", TypeId::INT32, false, ""},
-        {3, "attlen", TypeId::INT32, false, ""},
-        {4, "attnum", TypeId::INT32, false, ""},
-        {5, "attnotnull", TypeId::BOOL, false, ""},
-        {6, "attisdropped", TypeId::BOOL, false, ""},
-    };
-    def.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
-        std::vector<std::vector<std::string>> rows;
-        for (const auto& db : catalog.list_databases()) {
-            for (const auto& table : catalog.list_tables(db.database_id)) {
-                if (table.table_id < first_user_table_id) {
-                    continue;
-                }
-                for (const auto& col : table.columns) {
-                    rows.push_back({
-                        std::to_string(table.table_id),
-                        col.name,
-                        std::to_string(test_pg_oid(col.type_id)),
-                        std::to_string(test_pg_typlen(col.type_id)),
-                        std::to_string(col.ordinal + 1),
-                        col.nullable ? "false" : "true",
-                        "false",
-                    });
-                }
-            }
-        }
-        return rows;
-    };
-    catalog.register_virtual_table(std::move(def));
+    catalog.register_virtual_table(make_pg_attribute(catalog));
 }
 
 // =========================================================================
@@ -1045,6 +703,328 @@ TEST(PgAttribute, FilterByAttrelid) {
         }
     }
     EXPECT_EQ(count, 3);
+}
+
+// =========================================================================
+// Helper: register pg_index and pg_database
+// =========================================================================
+
+void register_pg_index(Catalog& catalog) {
+    catalog.register_virtual_table(make_pg_index(catalog));
+}
+
+void register_pg_database(Catalog& catalog) {
+    catalog.register_virtual_table(make_pg_database());
+}
+
+// =========================================================================
+// Helper: scan helpers for pg_index and pg_database
+// =========================================================================
+
+struct IndexRow {
+    int32_t indexrelid;
+    int32_t indrelid;
+    int16_t indnatts;
+    bool indisunique;
+    bool indisprimary;
+    std::string indkey;
+};
+
+std::vector<IndexRow> scan_pg_index(Catalog& catalog) {
+    auto vt = catalog.get_virtual_table("pg_index");
+    EXPECT_TRUE(vt.has_value());
+    if (!vt.has_value())
+        return {};
+
+    OutputSchema schema(std::vector<OutputColumn>{
+        {"pg_index", "indexrelid", TypeId::INT32, false, vt->table_id},
+        {"pg_index", "indrelid", TypeId::INT32, false, vt->table_id},
+        {"pg_index", "indnatts", TypeId::INT16, false, vt->table_id},
+        {"pg_index", "indisunique", TypeId::BOOL, false, vt->table_id},
+        {"pg_index", "indisprimary", TypeId::BOOL, false, vt->table_id},
+        {"pg_index", "indkey", TypeId::STRING, false, vt->table_id},
+    });
+
+    VirtualCatalogScanOperator scan(std::move(*vt), std::move(schema));
+    auto open_r = scan.open();
+    EXPECT_TRUE(open_r.has_value());
+    if (!open_r.has_value())
+        return {};
+
+    std::vector<IndexRow> rows;
+    while (true) {
+        auto next_r = scan.next();
+        EXPECT_TRUE(next_r.has_value());
+        if (!next_r.has_value())
+            break;
+        if (!next_r->has_value())
+            break;
+        auto& tuple = next_r->value();
+        rows.push_back({
+            tuple.values[0].as_int32(),
+            tuple.values[1].as_int32(),
+            tuple.values[2].as_int16(),
+            tuple.values[3].as_bool(),
+            tuple.values[4].as_bool(),
+            std::string(tuple.values[5].as_string()),
+        });
+    }
+    scan.close();
+    return rows;
+}
+
+struct DatabaseRow {
+    int32_t oid;
+    std::string datname;
+    int32_t datdba;
+    int32_t encoding;
+};
+
+std::vector<DatabaseRow> scan_pg_database(Catalog& catalog) {
+    auto vt = catalog.get_virtual_table("pg_database");
+    EXPECT_TRUE(vt.has_value());
+    if (!vt.has_value())
+        return {};
+
+    OutputSchema schema(std::vector<OutputColumn>{
+        {"pg_database", "oid", TypeId::INT32, false, vt->table_id},
+        {"pg_database", "datname", TypeId::STRING, false, vt->table_id},
+        {"pg_database", "datdba", TypeId::INT32, false, vt->table_id},
+        {"pg_database", "encoding", TypeId::INT32, false, vt->table_id},
+    });
+
+    VirtualCatalogScanOperator scan(std::move(*vt), std::move(schema));
+    auto open_r = scan.open();
+    EXPECT_TRUE(open_r.has_value());
+    if (!open_r.has_value())
+        return {};
+
+    std::vector<DatabaseRow> rows;
+    while (true) {
+        auto next_r = scan.next();
+        EXPECT_TRUE(next_r.has_value());
+        if (!next_r.has_value())
+            break;
+        if (!next_r->has_value())
+            break;
+        auto& tuple = next_r->value();
+        rows.push_back({
+            tuple.values[0].as_int32(),
+            std::string(tuple.values[1].as_string()),
+            tuple.values[2].as_int32(),
+            tuple.values[3].as_int32(),
+        });
+    }
+    scan.close();
+    return rows;
+}
+
+// =========================================================================
+// pg_database tests
+// =========================================================================
+
+TEST(PgDatabase, ReturnsSingleRow) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    register_pg_database(catalog);
+
+    auto rows = scan_pg_database(catalog);
+    ASSERT_EQ(rows.size(), 1u);
+}
+
+TEST(PgDatabase, HasCorrectValues) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    register_pg_database(catalog);
+
+    auto rows = scan_pg_database(catalog);
+    ASSERT_EQ(rows.size(), 1u);
+
+    EXPECT_EQ(rows[0].oid, 1);
+    EXPECT_EQ(rows[0].datname, "sixsevendb");
+    EXPECT_EQ(rows[0].datdba, 10);
+    EXPECT_EQ(rows[0].encoding, 6);
+}
+
+// =========================================================================
+// pg_index tests
+// =========================================================================
+
+void create_test_indexes(Catalog& catalog, table_id_t users_table_id) {
+    IndexDef idx;
+    idx.table_id = users_table_id;
+    idx.name = "idx_users_email";
+    idx.index_type = "btree";
+    idx.columns = "email";
+    idx.is_unique = true;
+    auto r = catalog.create_index(std::move(idx));
+    ASSERT_TRUE(r.has_value());
+
+    IndexDef idx2;
+    idx2.table_id = users_table_id;
+    idx2.name = "idx_users_name";
+    idx2.index_type = "btree";
+    idx2.columns = "name";
+    idx2.is_unique = false;
+    auto r2 = catalog.create_index(std::move(idx2));
+    ASSERT_TRUE(r2.has_value());
+}
+
+TEST(PgIndex, ReturnsOneRowPerIndex) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+
+    auto tables = catalog.list_tables(default_database_id);
+    auto users_it =
+        std::find_if(tables.begin(), tables.end(), [](const auto& t) { return t.name == "users"; });
+    ASSERT_NE(users_it, tables.end());
+
+    create_test_indexes(catalog, users_it->table_id);
+    register_pg_index(catalog);
+
+    auto rows = scan_pg_index(catalog);
+    EXPECT_EQ(rows.size(), 2u);
+}
+
+TEST(PgIndex, IndrelidReferencesPgClassOid) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+
+    auto tables = catalog.list_tables(default_database_id);
+    auto users_it =
+        std::find_if(tables.begin(), tables.end(), [](const auto& t) { return t.name == "users"; });
+    ASSERT_NE(users_it, tables.end());
+
+    create_test_indexes(catalog, users_it->table_id);
+    register_pg_class(catalog);
+    register_pg_index(catalog);
+
+    auto class_rows = scan_pg_class(catalog);
+    auto index_rows = scan_pg_index(catalog);
+
+    std::unordered_set<int32_t> class_oids;
+    for (const auto& r : class_rows) {
+        class_oids.insert(r.oid);
+    }
+
+    for (const auto& r : index_rows) {
+        EXPECT_TRUE(class_oids.count(r.indrelid))
+            << "indrelid=" << r.indrelid << " not found in pg_class";
+    }
+}
+
+TEST(PgIndex, IndisuniqueFlagIsCorrect) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+
+    auto tables = catalog.list_tables(default_database_id);
+    auto users_it =
+        std::find_if(tables.begin(), tables.end(), [](const auto& t) { return t.name == "users"; });
+    ASSERT_NE(users_it, tables.end());
+
+    create_test_indexes(catalog, users_it->table_id);
+    register_pg_index(catalog);
+
+    auto rows = scan_pg_index(catalog);
+    ASSERT_EQ(rows.size(), 2u);
+
+    auto find = [&](const std::string& key) -> const IndexRow* {
+        for (const auto& r : rows) {
+            if (r.indkey == key)
+                return &r;
+        }
+        return nullptr;
+    };
+
+    auto* email_idx = find("3");
+    ASSERT_NE(email_idx, nullptr);
+    EXPECT_TRUE(email_idx->indisunique);
+
+    auto* name_idx = find("2");
+    ASSERT_NE(name_idx, nullptr);
+    EXPECT_FALSE(name_idx->indisunique);
+}
+
+TEST(PgIndex, IndkeyContainsColumnPositions) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+
+    auto tables = catalog.list_tables(default_database_id);
+    auto users_it =
+        std::find_if(tables.begin(), tables.end(), [](const auto& t) { return t.name == "users"; });
+    ASSERT_NE(users_it, tables.end());
+
+    create_test_indexes(catalog, users_it->table_id);
+    register_pg_index(catalog);
+
+    auto rows = scan_pg_index(catalog);
+    for (const auto& r : rows) {
+        EXPECT_FALSE(r.indkey.empty());
+        EXPECT_EQ(r.indnatts, 1);
+    }
+}
+
+TEST(PgIndex, IndisprimaryDetectsPrimaryKey) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+
+    auto tables = catalog.list_tables(default_database_id);
+    auto users_it =
+        std::find_if(tables.begin(), tables.end(), [](const auto& t) { return t.name == "users"; });
+    ASSERT_NE(users_it, tables.end());
+
+    IndexDef pk_idx;
+    pk_idx.table_id = users_it->table_id;
+    pk_idx.name = "pk_users";
+    pk_idx.index_type = "btree";
+    pk_idx.columns = "id";
+    pk_idx.is_unique = true;
+    auto r = catalog.create_index(std::move(pk_idx));
+    ASSERT_TRUE(r.has_value());
+
+    IndexDef non_pk_idx;
+    non_pk_idx.table_id = users_it->table_id;
+    non_pk_idx.name = "idx_users_email";
+    non_pk_idx.index_type = "btree";
+    non_pk_idx.columns = "email";
+    non_pk_idx.is_unique = true;
+    auto r2 = catalog.create_index(std::move(non_pk_idx));
+    ASSERT_TRUE(r2.has_value());
+
+    register_pg_index(catalog);
+
+    auto rows = scan_pg_index(catalog);
+    ASSERT_EQ(rows.size(), 2u);
+
+    auto find_by_key = [&](const std::string& key) -> const IndexRow* {
+        for (const auto& r : rows) {
+            if (r.indkey == key)
+                return &r;
+        }
+        return nullptr;
+    };
+
+    auto* pk = find_by_key("1");
+    ASSERT_NE(pk, nullptr);
+    EXPECT_TRUE(pk->indisprimary);
+
+    auto* non_pk = find_by_key("3");
+    ASSERT_NE(non_pk, nullptr);
+    EXPECT_FALSE(non_pk->indisprimary);
+}
+
+TEST(PgIndex, EmptyCatalogReturnsNoRows) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    register_pg_index(catalog);
+
+    auto rows = scan_pg_index(catalog);
+    EXPECT_TRUE(rows.empty());
 }
 
 } // namespace
