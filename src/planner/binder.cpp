@@ -261,7 +261,14 @@ Result<std::vector<ResolvedColumn>> Scope::columns_for(const std::string& alias)
 Result<TableSchema> Binder::resolve_table(const std::string& table_name) const {
     auto schema = catalog_.get_table(database_id_, table_name);
     if (!schema && schema.error().code == StatusCode::NOT_FOUND) {
-        // Try to find the database name for a better error message.
+        // Fallback: unqualified pg_catalog virtual table (e.g. "pg_type"
+        // without the "pg_catalog." prefix). psqlODBC and other PostgreSQL
+        // tools query these without a schema qualifier.
+        auto vt = catalog_.get_virtual_table(table_name);
+        if (vt) {
+            return ok(vt->to_table_schema());
+        }
+
         auto dbs = catalog_.list_databases();
         std::string db_name = "database_id=" + std::to_string(database_id_);
         for (const auto& db : dbs) {
@@ -740,6 +747,13 @@ Result<ExprType> Binder::bind_expr(const Expr& expr, Scope& scope, BoundStatemen
 
     if (auto* e = dynamic_cast<const LiteralExpr*>(&expr)) {
         result = bind_literal(*e);
+    } else if ([[maybe_unused]] auto* e = dynamic_cast<const ParamRefExpr*>(&expr)) {
+        // Parameter placeholders ($1, $2, ...) are substituted before execution.
+        // During describe, treat them as unknown-type STRING placeholders.
+        ExprType et;
+        et.type_id = TypeId::STRING;
+        et.nullable = true;
+        result = ok(et);
     } else if (auto* e = dynamic_cast<const ColumnRefExpr*>(&expr)) {
         result = bind_column_ref(*e, scope);
     } else if (auto* e = dynamic_cast<const BinaryExpr*>(&expr)) {
@@ -862,13 +876,13 @@ Result<ExprType> Binder::bind_binary(const BinaryExpr& expr, Scope& scope, Bound
     case BinaryOp::GREATER:
     case BinaryOp::LESS_EQUAL:
     case BinaryOp::GREATER_EQUAL: {
-        // Skip type compatibility check when either operand is a NULL literal,
-        // because NULL is typed as STRING (placeholder) and is polymorphic.
         auto* lhs_lit = dynamic_cast<const LiteralExpr*>(expr.lhs.get());
         auto* rhs_lit = dynamic_cast<const LiteralExpr*>(expr.rhs.get());
         bool lhs_null = lhs_lit && lhs_lit->kind == LiteralKind::NULL_LITERAL;
         bool rhs_null = rhs_lit && rhs_lit->kind == LiteralKind::NULL_LITERAL;
-        if (!lhs_null && !rhs_null) {
+        bool lhs_param = dynamic_cast<const ParamRefExpr*>(expr.lhs.get()) != nullptr;
+        bool rhs_param = dynamic_cast<const ParamRefExpr*>(expr.rhs.get()) != nullptr;
+        if (!lhs_null && !rhs_null && !lhs_param && !rhs_param) {
             auto ct = common_type(lhs->type_id, rhs->type_id);
             if (!ct) {
                 return make_error(
@@ -2328,8 +2342,8 @@ Result<BoundStatement> Binder::bind_bulk_link(const BulkLinkStmt& stmt) {
             if (stmt.rows[i].size() != expected_width) {
                 return make_error(StatusCode::INVALID_ARGUMENT,
                                   "LINK VALUES row " + std::to_string(i + 1) + " has " +
-                                      std::to_string(stmt.rows[i].size()) +
-                                      " values, expected " + std::to_string(expected_width));
+                                      std::to_string(stmt.rows[i].size()) + " values, expected " +
+                                      std::to_string(expected_width));
             }
         }
     }

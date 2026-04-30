@@ -63,6 +63,19 @@ const std::unordered_map<std::string, std::string> Session::DEFAULT_VARIABLES = 
     {"embedding_provider_url", ""},
     {"embedding_api_key", ""},
     {"statement_timeout", "0"},
+    // PostgreSQL session variables expected by psqlODBC during connection setup.
+    {"datestyle", "ISO, MDY"},
+    {"client_encoding", "UTF8"},
+    {"extra_float_digits", "3"},
+    {"application_name", ""},
+    {"lc_messages", "en_US.UTF-8"},
+    {"lc_monetary", "en_US.UTF-8"},
+    {"lc_numeric", "en_US.UTF-8"},
+    {"lc_time", "en_US.UTF-8"},
+    {"timezone", "UTC"},
+    {"intervalstyle", "postgres"},
+    {"standard_conforming_strings", "on"},
+    {"bytea_output", "hex"},
 };
 
 // -- Construction -------------------------------------------------------------

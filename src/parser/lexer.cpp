@@ -410,6 +410,16 @@ Result<Token> Lexer::scan_token() {
         return scan_number();
     }
 
+    // Positional parameter reference ($1, $2, ...).
+    if (c == '$' && current_ < source_.size() &&
+        std::isdigit(static_cast<unsigned char>(source_[current_]))) {
+        while (current_ < source_.size() &&
+               std::isdigit(static_cast<unsigned char>(source_[current_]))) {
+            advance();
+        }
+        return make_token(TokenType::PARAM_REF);
+    }
+
     // Identifier or keyword.
     if (is_ident_start(c)) {
         return scan_identifier();

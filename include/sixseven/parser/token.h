@@ -198,6 +198,7 @@ enum class TokenType : uint8_t {
     // -- Special --------------------------------------------------------------
 
     IDENTIFIER,
+    PARAM_REF, // $1, $2, ... (positional parameter reference)
     END_OF_FILE,
 };
 
@@ -532,6 +533,8 @@ constexpr std::string_view token_type_name(TokenType type) {
         return "STRING_LITERAL";
     case TokenType::IDENTIFIER:
         return "IDENTIFIER";
+    case TokenType::PARAM_REF:
+        return "PARAM_REF";
     case TokenType::END_OF_FILE:
         return "END_OF_FILE";
     }

@@ -1374,6 +1374,7 @@ public:
     int count = 0;
 
     void visit(const LiteralExpr&) override { count++; }
+    void visit(const ParamRefExpr&) override { count++; }
     void visit(const ColumnRefExpr&) override { count++; }
     void visit(const BinaryExpr&) override { count++; }
     void visit(const UnaryExpr&) override { count++; }
