@@ -479,5 +479,573 @@ TEST(PgNamespace, LookupSucceeds) {
     EXPECT_EQ(vt->columns.size(), 3u);
 }
 
+// =========================================================================
+// Helper: pg_oid / pg_typlen lambdas (matching production)
+// =========================================================================
+
+uint32_t test_pg_oid(TypeId t) {
+    switch (t) {
+    case TypeId::BOOL:
+        return 16;
+    case TypeId::INT8:
+    case TypeId::INT16:
+    case TypeId::UINT8:
+        return 21;
+    case TypeId::INT32:
+    case TypeId::UINT16:
+        return 23;
+    case TypeId::INT64:
+    case TypeId::UINT32:
+        return 20;
+    case TypeId::UINT64:
+    case TypeId::DECIMAL:
+        return 1700;
+    case TypeId::FLOAT32:
+        return 700;
+    case TypeId::FLOAT64:
+        return 701;
+    case TypeId::STRING:
+    case TypeId::PATH:
+        return 25;
+    case TypeId::BLOB:
+        return 17;
+    case TypeId::DATE:
+        return 1082;
+    case TypeId::TIME:
+        return 1083;
+    case TypeId::TIMESTAMP:
+        return 1114;
+    case TypeId::INTERVAL:
+        return 1186;
+    case TypeId::POINT:
+        return 600;
+    case TypeId::JSON:
+        return 114;
+    case TypeId::UUID:
+        return 2950;
+    case TypeId::EMBEDDING:
+        return 100000;
+    }
+    return 25;
+}
+
+int32_t test_pg_typlen(TypeId t) {
+    switch (t) {
+    case TypeId::BOOL:
+        return 1;
+    case TypeId::INT8:
+    case TypeId::INT16:
+    case TypeId::UINT8:
+        return 2;
+    case TypeId::INT32:
+    case TypeId::UINT16:
+    case TypeId::FLOAT32:
+    case TypeId::DATE:
+        return 4;
+    case TypeId::INT64:
+    case TypeId::UINT32:
+    case TypeId::FLOAT64:
+    case TypeId::TIME:
+    case TypeId::TIMESTAMP:
+        return 8;
+    case TypeId::INTERVAL:
+    case TypeId::POINT:
+    case TypeId::UUID:
+        return 16;
+    default:
+        return -1;
+    }
+}
+
+// =========================================================================
+// Helper: register pg_class and pg_attribute
+// =========================================================================
+
+void register_pg_class(Catalog& catalog) {
+    VirtualTableDef def;
+    def.name = "pg_class";
+    def.columns = {
+        {0, "oid", TypeId::INT32, false, ""},
+        {1, "relname", TypeId::STRING, false, ""},
+        {2, "relnamespace", TypeId::INT32, false, ""},
+        {3, "relkind", TypeId::STRING, false, ""},
+        {4, "reltuples", TypeId::FLOAT64, false, ""},
+        {5, "relhasindex", TypeId::BOOL, false, ""},
+        {6, "relnatts", TypeId::INT32, false, ""},
+    };
+    def.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
+        std::vector<std::vector<std::string>> rows;
+        for (const auto& db : catalog.list_databases()) {
+            for (const auto& table : catalog.list_tables(db.database_id)) {
+                if (table.table_id < first_user_table_id) {
+                    continue;
+                }
+                bool has_index = !catalog.list_indexes(table.table_id).empty();
+                rows.push_back({
+                    std::to_string(table.table_id),
+                    table.name,
+                    "2200",
+                    "r",
+                    "-1",
+                    has_index ? "true" : "false",
+                    std::to_string(static_cast<int32_t>(table.columns.size())),
+                });
+            }
+        }
+        return rows;
+    };
+    catalog.register_virtual_table(std::move(def));
+}
+
+void register_pg_attribute(Catalog& catalog) {
+    VirtualTableDef def;
+    def.name = "pg_attribute";
+    def.columns = {
+        {0, "attrelid", TypeId::INT32, false, ""},
+        {1, "attname", TypeId::STRING, false, ""},
+        {2, "atttypid", TypeId::INT32, false, ""},
+        {3, "attlen", TypeId::INT32, false, ""},
+        {4, "attnum", TypeId::INT32, false, ""},
+        {5, "attnotnull", TypeId::BOOL, false, ""},
+        {6, "attisdropped", TypeId::BOOL, false, ""},
+    };
+    def.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
+        std::vector<std::vector<std::string>> rows;
+        for (const auto& db : catalog.list_databases()) {
+            for (const auto& table : catalog.list_tables(db.database_id)) {
+                if (table.table_id < first_user_table_id) {
+                    continue;
+                }
+                for (const auto& col : table.columns) {
+                    rows.push_back({
+                        std::to_string(table.table_id),
+                        col.name,
+                        std::to_string(test_pg_oid(col.type_id)),
+                        std::to_string(test_pg_typlen(col.type_id)),
+                        std::to_string(col.ordinal + 1),
+                        col.nullable ? "false" : "true",
+                        "false",
+                    });
+                }
+            }
+        }
+        return rows;
+    };
+    catalog.register_virtual_table(std::move(def));
+}
+
+// =========================================================================
+// Helper: scan helpers for pg_class and pg_attribute
+// =========================================================================
+
+struct ClassRow {
+    int32_t oid;
+    std::string relname;
+    int32_t relnamespace;
+    std::string relkind;
+    double reltuples;
+    bool relhasindex;
+    int32_t relnatts;
+};
+
+std::vector<ClassRow> scan_pg_class(Catalog& catalog) {
+    auto vt = catalog.get_virtual_table("pg_class");
+    EXPECT_TRUE(vt.has_value());
+    if (!vt.has_value())
+        return {};
+
+    OutputSchema schema(std::vector<OutputColumn>{
+        {"pg_class", "oid", TypeId::INT32, false, vt->table_id},
+        {"pg_class", "relname", TypeId::STRING, false, vt->table_id},
+        {"pg_class", "relnamespace", TypeId::INT32, false, vt->table_id},
+        {"pg_class", "relkind", TypeId::STRING, false, vt->table_id},
+        {"pg_class", "reltuples", TypeId::FLOAT64, false, vt->table_id},
+        {"pg_class", "relhasindex", TypeId::BOOL, false, vt->table_id},
+        {"pg_class", "relnatts", TypeId::INT32, false, vt->table_id},
+    });
+
+    VirtualCatalogScanOperator scan(std::move(*vt), std::move(schema));
+    auto open_r = scan.open();
+    EXPECT_TRUE(open_r.has_value());
+    if (!open_r.has_value())
+        return {};
+
+    std::vector<ClassRow> rows;
+    while (true) {
+        auto next_r = scan.next();
+        EXPECT_TRUE(next_r.has_value());
+        if (!next_r.has_value())
+            break;
+        if (!next_r->has_value())
+            break;
+        auto& tuple = next_r->value();
+        rows.push_back({
+            tuple.values[0].as_int32(),
+            std::string(tuple.values[1].as_string()),
+            tuple.values[2].as_int32(),
+            std::string(tuple.values[3].as_string()),
+            tuple.values[4].as_float64(),
+            tuple.values[5].as_bool(),
+            tuple.values[6].as_int32(),
+        });
+    }
+    scan.close();
+    return rows;
+}
+
+struct AttributeRow {
+    int32_t attrelid;
+    std::string attname;
+    int32_t atttypid;
+    int32_t attlen;
+    int32_t attnum;
+    bool attnotnull;
+    bool attisdropped;
+};
+
+std::vector<AttributeRow> scan_pg_attribute(Catalog& catalog) {
+    auto vt = catalog.get_virtual_table("pg_attribute");
+    EXPECT_TRUE(vt.has_value());
+    if (!vt.has_value())
+        return {};
+
+    OutputSchema schema(std::vector<OutputColumn>{
+        {"pg_attribute", "attrelid", TypeId::INT32, false, vt->table_id},
+        {"pg_attribute", "attname", TypeId::STRING, false, vt->table_id},
+        {"pg_attribute", "atttypid", TypeId::INT32, false, vt->table_id},
+        {"pg_attribute", "attlen", TypeId::INT32, false, vt->table_id},
+        {"pg_attribute", "attnum", TypeId::INT32, false, vt->table_id},
+        {"pg_attribute", "attnotnull", TypeId::BOOL, false, vt->table_id},
+        {"pg_attribute", "attisdropped", TypeId::BOOL, false, vt->table_id},
+    });
+
+    VirtualCatalogScanOperator scan(std::move(*vt), std::move(schema));
+    auto open_r = scan.open();
+    EXPECT_TRUE(open_r.has_value());
+    if (!open_r.has_value())
+        return {};
+
+    std::vector<AttributeRow> rows;
+    while (true) {
+        auto next_r = scan.next();
+        EXPECT_TRUE(next_r.has_value());
+        if (!next_r.has_value())
+            break;
+        if (!next_r->has_value())
+            break;
+        auto& tuple = next_r->value();
+        rows.push_back({
+            tuple.values[0].as_int32(),
+            std::string(tuple.values[1].as_string()),
+            tuple.values[2].as_int32(),
+            tuple.values[3].as_int32(),
+            tuple.values[4].as_int32(),
+            tuple.values[5].as_bool(),
+            tuple.values[6].as_bool(),
+        });
+    }
+    scan.close();
+    return rows;
+}
+
+// Helper: create a test catalog with user tables for pg_class/pg_attribute tests.
+void create_test_tables(Catalog& catalog) {
+    catalog.set_next_table_id(first_user_table_id);
+
+    TableSchema users;
+    users.name = "users";
+    users.columns = {
+        {0, "id", TypeId::INT32, false, ""},
+        {1, "name", TypeId::STRING, true, ""},
+        {2, "email", TypeId::STRING, false, ""},
+    };
+    users.pk_columns = "id";
+    auto r1 = catalog.create_table(default_database_id, std::move(users));
+    ASSERT_TRUE(r1.has_value());
+
+    TableSchema orders;
+    orders.name = "orders";
+    orders.columns = {
+        {0, "order_id", TypeId::INT64, false, ""},
+        {1, "user_id", TypeId::INT32, false, ""},
+        {2, "amount", TypeId::FLOAT64, true, ""},
+        {3, "created_at", TypeId::TIMESTAMP, true, ""},
+    };
+    orders.pk_columns = "order_id";
+    auto r2 = catalog.create_table(default_database_id, std::move(orders));
+    ASSERT_TRUE(r2.has_value());
+}
+
+// =========================================================================
+// pg_class tests
+// =========================================================================
+
+TEST(PgClass, ReturnsOneRowPerUserTable) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+    register_pg_class(catalog);
+
+    auto rows = scan_pg_class(catalog);
+    EXPECT_EQ(rows.size(), 2u);
+}
+
+TEST(PgClass, ExcludesSystemTables) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+    register_pg_class(catalog);
+
+    auto rows = scan_pg_class(catalog);
+    for (const auto& r : rows) {
+        EXPECT_GE(r.oid, first_user_table_id) << "relname=" << r.relname;
+    }
+}
+
+TEST(PgClass, ColumnsHaveCorrectValues) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+    register_pg_class(catalog);
+
+    auto rows = scan_pg_class(catalog);
+    ASSERT_EQ(rows.size(), 2u);
+
+    auto find = [&](const std::string& name) -> const ClassRow* {
+        for (const auto& r : rows) {
+            if (r.relname == name)
+                return &r;
+        }
+        return nullptr;
+    };
+
+    auto* users = find("users");
+    ASSERT_NE(users, nullptr);
+    EXPECT_EQ(users->relnamespace, 2200);
+    EXPECT_EQ(users->relkind, "r");
+    EXPECT_EQ(users->reltuples, -1.0);
+    EXPECT_EQ(users->relnatts, 3);
+
+    auto* orders = find("orders");
+    ASSERT_NE(orders, nullptr);
+    EXPECT_EQ(orders->relnamespace, 2200);
+    EXPECT_EQ(orders->relkind, "r");
+    EXPECT_EQ(orders->relnatts, 4);
+}
+
+TEST(PgClass, OidsAreDerivedFromTableId) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+    register_pg_class(catalog);
+
+    auto rows = scan_pg_class(catalog);
+    std::unordered_set<int32_t> oids;
+    for (const auto& r : rows) {
+        EXPECT_TRUE(oids.insert(r.oid).second) << "duplicate oid=" << r.oid;
+    }
+}
+
+TEST(PgClass, EmptyCatalogReturnsNoRows) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    register_pg_class(catalog);
+
+    auto rows = scan_pg_class(catalog);
+    EXPECT_TRUE(rows.empty());
+}
+
+// =========================================================================
+// pg_attribute tests
+// =========================================================================
+
+TEST(PgAttribute, ReturnsOneRowPerColumnPerTable) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+    register_pg_attribute(catalog);
+
+    auto rows = scan_pg_attribute(catalog);
+    EXPECT_EQ(rows.size(), 7u);
+}
+
+TEST(PgAttribute, AttrelidMatchesPgClassOid) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+    register_pg_class(catalog);
+    register_pg_attribute(catalog);
+
+    auto class_rows = scan_pg_class(catalog);
+    auto attr_rows = scan_pg_attribute(catalog);
+
+    std::unordered_set<int32_t> class_oids;
+    for (const auto& r : class_rows) {
+        class_oids.insert(r.oid);
+    }
+
+    for (const auto& r : attr_rows) {
+        EXPECT_TRUE(class_oids.count(r.attrelid))
+            << "attrelid=" << r.attrelid << " attname=" << r.attname;
+    }
+}
+
+TEST(PgAttribute, AtttypidUsesTypeToOidMapping) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+    register_pg_attribute(catalog);
+
+    auto rows = scan_pg_attribute(catalog);
+
+    auto find = [&](const std::string& name) -> const AttributeRow* {
+        for (const auto& r : rows) {
+            if (r.attname == name)
+                return &r;
+        }
+        return nullptr;
+    };
+
+    auto* id_col = find("id");
+    ASSERT_NE(id_col, nullptr);
+    EXPECT_EQ(id_col->atttypid, 23);
+
+    auto* name_col = find("name");
+    ASSERT_NE(name_col, nullptr);
+    EXPECT_EQ(name_col->atttypid, 25);
+
+    auto* order_id_col = find("order_id");
+    ASSERT_NE(order_id_col, nullptr);
+    EXPECT_EQ(order_id_col->atttypid, 20);
+
+    auto* amount_col = find("amount");
+    ASSERT_NE(amount_col, nullptr);
+    EXPECT_EQ(amount_col->atttypid, 701);
+
+    auto* created_col = find("created_at");
+    ASSERT_NE(created_col, nullptr);
+    EXPECT_EQ(created_col->atttypid, 1114);
+}
+
+TEST(PgAttribute, AttlenMatchesTypeLength) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+    register_pg_attribute(catalog);
+
+    auto rows = scan_pg_attribute(catalog);
+
+    auto find = [&](const std::string& name) -> const AttributeRow* {
+        for (const auto& r : rows) {
+            if (r.attname == name)
+                return &r;
+        }
+        return nullptr;
+    };
+
+    auto* id_col = find("id");
+    ASSERT_NE(id_col, nullptr);
+    EXPECT_EQ(id_col->attlen, 4);
+
+    auto* name_col = find("name");
+    ASSERT_NE(name_col, nullptr);
+    EXPECT_EQ(name_col->attlen, -1);
+
+    auto* order_id_col = find("order_id");
+    ASSERT_NE(order_id_col, nullptr);
+    EXPECT_EQ(order_id_col->attlen, 8);
+}
+
+TEST(PgAttribute, AttNumIsOneBased) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+    register_pg_attribute(catalog);
+
+    auto rows = scan_pg_attribute(catalog);
+
+    auto find = [&](const std::string& name) -> const AttributeRow* {
+        for (const auto& r : rows) {
+            if (r.attname == name)
+                return &r;
+        }
+        return nullptr;
+    };
+
+    EXPECT_EQ(find("id")->attnum, 1);
+    EXPECT_EQ(find("name")->attnum, 2);
+    EXPECT_EQ(find("email")->attnum, 3);
+
+    EXPECT_EQ(find("order_id")->attnum, 1);
+    EXPECT_EQ(find("user_id")->attnum, 2);
+    EXPECT_EQ(find("amount")->attnum, 3);
+    EXPECT_EQ(find("created_at")->attnum, 4);
+}
+
+TEST(PgAttribute, AttnotnullReflectsNullability) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+    register_pg_attribute(catalog);
+
+    auto rows = scan_pg_attribute(catalog);
+
+    auto find = [&](const std::string& name) -> const AttributeRow* {
+        for (const auto& r : rows) {
+            if (r.attname == name)
+                return &r;
+        }
+        return nullptr;
+    };
+
+    EXPECT_TRUE(find("id")->attnotnull);
+    EXPECT_FALSE(find("name")->attnotnull);
+    EXPECT_TRUE(find("email")->attnotnull);
+    EXPECT_TRUE(find("order_id")->attnotnull);
+    EXPECT_FALSE(find("amount")->attnotnull);
+}
+
+TEST(PgAttribute, AttisdroppedAlwaysFalse) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+    register_pg_attribute(catalog);
+
+    auto rows = scan_pg_attribute(catalog);
+    for (const auto& r : rows) {
+        EXPECT_FALSE(r.attisdropped) << "attname=" << r.attname;
+    }
+}
+
+TEST(PgAttribute, FilterByAttrelid) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+    register_pg_class(catalog);
+    register_pg_attribute(catalog);
+
+    auto class_rows = scan_pg_class(catalog);
+    auto attr_rows = scan_pg_attribute(catalog);
+
+    auto find_class = [&](const std::string& name) -> const ClassRow* {
+        for (const auto& r : class_rows) {
+            if (r.relname == name)
+                return &r;
+        }
+        return nullptr;
+    };
+
+    auto* users_class = find_class("users");
+    ASSERT_NE(users_class, nullptr);
+
+    int count = 0;
+    for (const auto& r : attr_rows) {
+        if (r.attrelid == users_class->oid) {
+            ++count;
+        }
+    }
+    EXPECT_EQ(count, 3);
+}
+
 } // namespace
 } // namespace sixseven
