@@ -4,12 +4,12 @@
 #include "sixseven/server/pg_protocol.h"
 
 #include <cstdint>
+#include <deque>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <deque>
 
 namespace sixseven {
 
@@ -153,8 +153,7 @@ private:
     try_handle_release_savepoint(const std::string& sql);
 
     /// Try to handle a ROLLBACK TO [SAVEPOINT] command.
-    [[nodiscard]] std::optional<Result<QueryResult>>
-    try_handle_rollback_to(const std::string& sql);
+    [[nodiscard]] std::optional<Result<QueryResult>> try_handle_rollback_to(const std::string& sql);
 
     int32_t backend_pid_;
     std::unordered_map<std::string, std::string> variables_;

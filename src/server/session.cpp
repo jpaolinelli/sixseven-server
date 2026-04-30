@@ -222,8 +222,7 @@ Result<void> Session::release_savepoint(const std::string& name) {
             return ok();
         }
     }
-    return make_error(StatusCode::INVALID_ARGUMENT,
-                      "savepoint \"" + name + "\" does not exist");
+    return make_error(StatusCode::INVALID_ARGUMENT, "savepoint \"" + name + "\" does not exist");
 }
 
 Result<void> Session::rollback_to_savepoint(const std::string& name) {
@@ -241,15 +240,15 @@ Result<void> Session::rollback_to_savepoint(const std::string& name) {
             if (txn_state_ == TransactionState::FAILED) {
                 txn_state_ = TransactionState::IN_TRANSACTION;
                 SIXSEVEN_LOG_DEBUG("session {}: ROLLBACK TO SAVEPOINT {} (recovered from FAILED)",
-                                   backend_pid_, name);
+                                   backend_pid_,
+                                   name);
             } else {
                 SIXSEVEN_LOG_DEBUG("session {}: ROLLBACK TO SAVEPOINT {}", backend_pid_, name);
             }
             return ok();
         }
     }
-    return make_error(StatusCode::INVALID_ARGUMENT,
-                      "savepoint \"" + name + "\" does not exist");
+    return make_error(StatusCode::INVALID_ARGUMENT, "savepoint \"" + name + "\" does not exist");
 }
 
 const std::deque<std::string>& Session::savepoints() const {
@@ -543,8 +542,7 @@ std::optional<Result<QueryResult>> Session::try_handle_savepoint(const std::stri
     return ok(std::move(qr));
 }
 
-std::optional<Result<QueryResult>>
-Session::try_handle_release_savepoint(const std::string& sql) {
+std::optional<Result<QueryResult>> Session::try_handle_release_savepoint(const std::string& sql) {
     // Parse: RELEASE [SAVEPOINT] name
     auto rest = trim(sql.substr(8)); // Skip "RELEASE "
     if (rest.empty()) {
@@ -575,8 +573,8 @@ std::optional<Result<QueryResult>> Session::try_handle_rollback_to(const std::st
     // Parse: ROLLBACK TO [SAVEPOINT] name
     auto rest = trim(sql.substr(12)); // Skip "ROLLBACK TO "
     if (rest.empty()) {
-        return Result<QueryResult>(make_error(StatusCode::PARSE_ERROR,
-                                              "syntax error: ROLLBACK TO requires a savepoint name"));
+        return Result<QueryResult>(make_error(
+            StatusCode::PARSE_ERROR, "syntax error: ROLLBACK TO requires a savepoint name"));
     }
 
     // Skip optional SAVEPOINT keyword.
