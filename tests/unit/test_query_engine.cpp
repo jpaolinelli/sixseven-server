@@ -1391,3 +1391,55 @@ TEST_F(QueryEngineTest, SelectNullLiteral) {
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_TRUE(qr.rows[0][0].is_null());
 }
+
+// GDB-661: SELECT-without-FROM must fold unary expressions wrapping literals.
+
+TEST_F(QueryEngineTest, SelectNegativeIntegerLiteral) {
+    auto qr = exec_ok("SELECT -5 AS neg");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    ASSERT_EQ(qr.column_names.size(), 1u);
+    EXPECT_EQ(qr.column_names[0], "neg");
+    ASSERT_EQ(qr.column_types.size(), 1u);
+    EXPECT_EQ(qr.column_types[0], TypeId::INT32);
+    EXPECT_EQ(qr.rows[0][0].as_int32(), -5);
+}
+
+TEST_F(QueryEngineTest, SelectNegativeIntegerLiteralNoAlias) {
+    // No alias: fall back to a rendered default name "-<value>".
+    auto qr = exec_ok("SELECT -42");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    ASSERT_EQ(qr.column_names.size(), 1u);
+    EXPECT_EQ(qr.column_names[0], "-42");
+    EXPECT_EQ(qr.rows[0][0].as_int32(), -42);
+}
+
+TEST_F(QueryEngineTest, SelectNegativeFloatLiteral) {
+    auto qr = exec_ok("SELECT -3.14 AS neg_pi");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.column_types[0], TypeId::FLOAT64);
+    EXPECT_DOUBLE_EQ(qr.rows[0][0].as_float64(), -3.14);
+}
+
+TEST_F(QueryEngineTest, SelectDoubleNegateInteger) {
+    // `- -5` parses as UnaryExpr(NEGATE, UnaryExpr(NEGATE, LiteralExpr(5))).
+    // (`--5` would be a SQL line comment, so the space matters.)
+    auto qr = exec_ok("SELECT - -5 AS pos");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 5);
+}
+
+TEST_F(QueryEngineTest, SelectNotBooleanLiteral) {
+    auto qr = exec_ok("SELECT NOT TRUE AS flipped");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.column_types[0], TypeId::BOOL);
+    EXPECT_FALSE(qr.rows[0][0].as_bool());
+}
+
+TEST_F(QueryEngineTest, SelectMixedNegativeAndPositiveLiterals) {
+    auto qr = exec_ok("SELECT -1 AS a, 2 AS b, -3.5 AS c");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    ASSERT_EQ(qr.column_names.size(), 3u);
+    EXPECT_EQ(qr.rows[0][0].as_int32(), -1);
+    EXPECT_EQ(qr.rows[0][1].as_int32(), 2);
+    EXPECT_DOUBLE_EQ(qr.rows[0][2].as_float64(), -3.5);
+}

@@ -48,6 +48,125 @@ std::string to_upper(std::string s) {
     return s;
 }
 
+/// Result of folding a constant expression for the SELECT-without-FROM fast path.
+struct ConstFoldResult {
+    Value value;
+    TypeId type_id;
+    std::string default_name; ///< Default column label when no alias is given.
+};
+
+/// Try to evaluate a SELECT-list expression as a compile-time constant.
+///
+/// Supports:
+///   - LiteralExpr (INTEGER / FLOAT / STRING / BOOLEAN / NULL).
+///   - UnaryExpr(NEGATE) wrapping a numeric literal or another foldable
+///     numeric expression (e.g. `-5`, `--5`).
+///   - UnaryExpr(NOT) wrapping a foldable boolean expression.
+///
+/// Returns std::nullopt for any expression shape that requires the planner.
+std::optional<ConstFoldResult> try_fold_const_expr(const Expr& expr) {
+    if (const auto* lit = dynamic_cast<const LiteralExpr*>(&expr)) {
+        ConstFoldResult r;
+        switch (lit->kind) {
+        case LiteralKind::INTEGER:
+            r.type_id = TypeId::INT32;
+            try {
+                r.value = Value(static_cast<int32_t>(std::stoi(lit->value)));
+            } catch (...) {
+                return std::nullopt;
+            }
+            r.default_name = lit->value;
+            return r;
+        case LiteralKind::FLOAT:
+            r.type_id = TypeId::FLOAT64;
+            try {
+                r.value = Value(std::stod(lit->value));
+            } catch (...) {
+                return std::nullopt;
+            }
+            r.default_name = lit->value;
+            return r;
+        case LiteralKind::BOOLEAN:
+            r.type_id = TypeId::BOOL;
+            r.value = Value(lit->value == "true" || lit->value == "TRUE");
+            r.default_name = lit->value;
+            return r;
+        case LiteralKind::NULL_LITERAL:
+            r.type_id = TypeId::STRING;
+            r.value = Value::make_null();
+            r.default_name = "NULL";
+            return r;
+        case LiteralKind::STRING:
+            r.type_id = TypeId::STRING;
+            r.value = Value(lit->value);
+            r.default_name = lit->value;
+            return r;
+        }
+        return std::nullopt;
+    }
+
+    if (const auto* un = dynamic_cast<const UnaryExpr*>(&expr)) {
+        if (un->operand == nullptr) {
+            return std::nullopt;
+        }
+        auto inner = try_fold_const_expr(*un->operand);
+        if (!inner) {
+            return std::nullopt;
+        }
+
+        if (un->op == UnaryOp::NEGATE) {
+            ConstFoldResult r;
+            r.default_name = "-" + inner->default_name;
+            if (inner->value.is_null()) {
+                // Negating NULL stays NULL; preserve numeric type when known.
+                r.type_id = inner->type_id == TypeId::STRING ? TypeId::INT32 : inner->type_id;
+                r.value = Value::make_null();
+                return r;
+            }
+            switch (inner->type_id) {
+            case TypeId::INT32: {
+                int32_t v = inner->value.as_int32();
+                r.type_id = TypeId::INT32;
+                r.value = Value(static_cast<int32_t>(-v));
+                return r;
+            }
+            case TypeId::INT64: {
+                int64_t v = inner->value.as_int64();
+                r.type_id = TypeId::INT64;
+                r.value = Value(static_cast<int64_t>(-v));
+                return r;
+            }
+            case TypeId::FLOAT64: {
+                double v = inner->value.as_float64();
+                r.type_id = TypeId::FLOAT64;
+                r.value = Value(-v);
+                return r;
+            }
+            default:
+                return std::nullopt; // Unary minus on non-numeric is not foldable here.
+            }
+        }
+
+        if (un->op == UnaryOp::NOT) {
+            ConstFoldResult r;
+            r.default_name = "NOT " + inner->default_name;
+            if (inner->value.is_null()) {
+                r.type_id = TypeId::BOOL;
+                r.value = Value::make_null();
+                return r;
+            }
+            if (inner->type_id != TypeId::BOOL) {
+                return std::nullopt;
+            }
+            r.type_id = TypeId::BOOL;
+            r.value = Value(!inner->value.as_bool());
+            return r;
+        }
+    }
+
+    return std::nullopt;
+}
+
 } // namespace
 
 QueryEngine::QueryEngine(Catalog& catalog, StorageManager& storage, GraphEngine* graph_engine)
@@ -618,38 +737,34 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
                 return ok(std::move(qr));
             }
 
-            // Handle SELECT <literal_expr> without FROM (e.g. SELECT 1, SELECT 'hello').
-            bool all_literals = true;
+            // Handle SELECT <constant_expr> without FROM (e.g. SELECT 1, SELECT 'hello',
+            // SELECT -5 AS neg). Folds literal and unary-wrapped-literal expressions so
+            // PostgreSQL clients (psqlODBC, etc.) can evaluate trivial constant queries
+            // without requiring the full planner. (GDB-661)
+            std::vector<ConstFoldResult> folded;
+            folded.reserve(select->items.size());
+            bool all_const = true;
             for (const auto& item : select->items) {
-                if (!dynamic_cast<const LiteralExpr*>(item.expr.get())) {
-                    all_literals = false;
+                if (item.expr == nullptr) {
+                    all_const = false;
                     break;
                 }
+                auto r = try_fold_const_expr(*item.expr);
+                if (!r) {
+                    all_const = false;
+                    break;
+                }
+                folded.push_back(std::move(*r));
             }
-            if (all_literals) {
+            if (all_const) {
                 QueryResult qr;
                 std::vector<Value> row;
-                for (const auto& item : select->items) {
-                    auto* lit = dynamic_cast<const LiteralExpr*>(item.expr.get());
-                    std::string col_name = item.alias.empty() ? lit->value : item.alias;
-                    qr.column_names.push_back(col_name);
-
-                    if (lit->kind == LiteralKind::INTEGER) {
-                        qr.column_types.push_back(TypeId::INT32);
-                        row.emplace_back(static_cast<int32_t>(std::stoi(lit->value)));
-                    } else if (lit->kind == LiteralKind::FLOAT) {
-                        qr.column_types.push_back(TypeId::FLOAT64);
-                        row.emplace_back(std::stod(lit->value));
-                    } else if (lit->kind == LiteralKind::BOOLEAN) {
-                        qr.column_types.push_back(TypeId::BOOL);
-                        row.emplace_back(lit->value == "true" || lit->value == "TRUE");
-                    } else if (lit->kind == LiteralKind::NULL_LITERAL) {
-                        qr.column_types.push_back(TypeId::STRING);
-                        row.emplace_back(Value::make_null());
-                    } else {
-                        qr.column_types.push_back(TypeId::STRING);
-                        row.emplace_back(lit->value);
-                    }
+                for (size_t i = 0; i < select->items.size(); ++i) {
+                    const auto& item = select->items[i];
+                    auto& f = folded[i];
+                    qr.column_names.push_back(item.alias.empty() ? f.default_name : item.alias);
+                    qr.column_types.push_back(f.type_id);
+                    row.emplace_back(std::move(f.value));
                 }
                 qr.rows.push_back(std::move(row));
                 return ok(std::move(qr));
