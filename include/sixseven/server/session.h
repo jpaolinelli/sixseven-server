@@ -4,6 +4,7 @@
 #include "sixseven/server/pg_protocol.h"
 
 #include <cstdint>
+#include <deque>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -94,6 +95,21 @@ public:
     /// Return the ReadyForQuery status byte: 'I', 'T', or 'E'.
     [[nodiscard]] char ready_for_query_status() const;
 
+    // -- Savepoints -------------------------------------------------------------
+
+    /// Create a savepoint. Must be inside a transaction.
+    [[nodiscard]] Result<void> create_savepoint(const std::string& name);
+
+    /// Release (remove) a savepoint by name. Must be inside a transaction.
+    [[nodiscard]] Result<void> release_savepoint(const std::string& name);
+
+    /// Rollback to a savepoint. If in FAILED state, resets to IN_TRANSACTION.
+    /// Pops all savepoints created after the named one (the named one remains).
+    [[nodiscard]] Result<void> rollback_to_savepoint(const std::string& name);
+
+    /// Get the current savepoint stack (for testing).
+    [[nodiscard]] const std::deque<std::string>& savepoints() const;
+
     // -- Session lifecycle ----------------------------------------------------
 
     /// Clean up all session resources (prepared statements, portals, variables).
@@ -129,11 +145,22 @@ private:
     /// Try to handle a DEALLOCATE command.
     [[nodiscard]] std::optional<Result<QueryResult>> try_handle_deallocate(const std::string& sql);
 
+    /// Try to handle a SAVEPOINT command.
+    [[nodiscard]] std::optional<Result<QueryResult>> try_handle_savepoint(const std::string& sql);
+
+    /// Try to handle a RELEASE SAVEPOINT command.
+    [[nodiscard]] std::optional<Result<QueryResult>>
+    try_handle_release_savepoint(const std::string& sql);
+
+    /// Try to handle a ROLLBACK TO [SAVEPOINT] command.
+    [[nodiscard]] std::optional<Result<QueryResult>> try_handle_rollback_to(const std::string& sql);
+
     int32_t backend_pid_;
     std::unordered_map<std::string, std::string> variables_;
     std::unordered_map<std::string, PreparedStatement> prepared_statements_;
     std::unordered_map<std::string, Portal> portals_;
     TransactionState txn_state_ = TransactionState::IDLE;
+    std::deque<std::string> savepoints_;
 
     /// Default values for built-in session variables.
     static const std::unordered_map<std::string, std::string> DEFAULT_VARIABLES;

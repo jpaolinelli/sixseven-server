@@ -1415,6 +1415,7 @@ public:
     void visit(const CommitStmt&) override { count++; }
     void visit(const RollbackStmt&) override { count++; }
     void visit(const SavepointStmt&) override { count++; }
+    void visit(const ReleaseSavepointStmt&) override { count++; }
     void visit(const SetStmt&) override { count++; }
     void visit(const ShowStmt&) override { count++; }
     void visit(const ExplainStmt&) override { count++; }

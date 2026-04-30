@@ -1961,6 +1961,7 @@ public:
     void visit(const CommitStmt&) override { visited_type = "CommitStmt"; }
     void visit(const RollbackStmt&) override { visited_type = "RollbackStmt"; }
     void visit(const SavepointStmt&) override { visited_type = "SavepointStmt"; }
+    void visit(const ReleaseSavepointStmt&) override { visited_type = "ReleaseSavepointStmt"; }
 
     // -- Admin --
     void visit(const SetStmt&) override { visited_type = "SetStmt"; }

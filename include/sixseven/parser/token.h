@@ -87,6 +87,7 @@ enum class TokenType : uint8_t {
     POINT_KW,
     PRIMARY,
     REFERENCES,
+    RELEASE,
     RESTRICT,
     RETURNING,
     RIGHT,
@@ -351,6 +352,8 @@ constexpr std::string_view token_type_name(TokenType type) {
         return "PRIMARY";
     case TokenType::REFERENCES:
         return "REFERENCES";
+    case TokenType::RELEASE:
+        return "RELEASE";
     case TokenType::RESTRICT:
         return "RESTRICT";
     case TokenType::RETURNING:

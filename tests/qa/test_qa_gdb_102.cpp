@@ -223,6 +223,10 @@ public:
         last_type = "SavepointStmt";
         ++total;
     }
+    void visit(const ReleaseSavepointStmt&) override {
+        last_type = "ReleaseSavepointStmt";
+        ++total;
+    }
 
     // -- Admin --
     void visit(const SetStmt&) override {

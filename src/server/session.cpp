@@ -187,6 +187,74 @@ char Session::ready_for_query_status() const {
     return 'I'; // Unreachable.
 }
 
+// -- Savepoints ---------------------------------------------------------------
+
+Result<void> Session::create_savepoint(const std::string& name) {
+    if (txn_state_ == TransactionState::IDLE) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "SAVEPOINT can only be used in a transaction block");
+    }
+    if (txn_state_ == TransactionState::FAILED) {
+        return make_error(StatusCode::TXN_ABORTED,
+                          "current transaction is aborted, commands ignored until end of "
+                          "transaction block");
+    }
+    savepoints_.push_back(name);
+    SIXSEVEN_LOG_DEBUG("session {}: SAVEPOINT {}", backend_pid_, name);
+    return ok();
+}
+
+Result<void> Session::release_savepoint(const std::string& name) {
+    if (txn_state_ == TransactionState::IDLE) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "RELEASE SAVEPOINT can only be used in a transaction block");
+    }
+    if (txn_state_ == TransactionState::FAILED) {
+        return make_error(StatusCode::TXN_ABORTED,
+                          "current transaction is aborted, commands ignored until end of "
+                          "transaction block");
+    }
+    // Find the savepoint from the back (most recent first).
+    for (auto it = savepoints_.rbegin(); it != savepoints_.rend(); ++it) {
+        if (*it == name) {
+            savepoints_.erase(std::next(it).base());
+            SIXSEVEN_LOG_DEBUG("session {}: RELEASE SAVEPOINT {}", backend_pid_, name);
+            return ok();
+        }
+    }
+    return make_error(StatusCode::INVALID_ARGUMENT, "savepoint \"" + name + "\" does not exist");
+}
+
+Result<void> Session::rollback_to_savepoint(const std::string& name) {
+    if (txn_state_ == TransactionState::IDLE) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "ROLLBACK TO SAVEPOINT can only be used in a transaction block");
+    }
+    // Find the savepoint from the back.
+    for (auto it = savepoints_.rbegin(); it != savepoints_.rend(); ++it) {
+        if (*it == name) {
+            // Pop all savepoints after this one (keep the named one).
+            auto forward_it = std::next(it).base();
+            savepoints_.erase(std::next(forward_it), savepoints_.end());
+            // If in FAILED state, recover to IN_TRANSACTION.
+            if (txn_state_ == TransactionState::FAILED) {
+                txn_state_ = TransactionState::IN_TRANSACTION;
+                SIXSEVEN_LOG_DEBUG("session {}: ROLLBACK TO SAVEPOINT {} (recovered from FAILED)",
+                                   backend_pid_,
+                                   name);
+            } else {
+                SIXSEVEN_LOG_DEBUG("session {}: ROLLBACK TO SAVEPOINT {}", backend_pid_, name);
+            }
+            return ok();
+        }
+    }
+    return make_error(StatusCode::INVALID_ARGUMENT, "savepoint \"" + name + "\" does not exist");
+}
+
+const std::deque<std::string>& Session::savepoints() const {
+    return savepoints_;
+}
+
 // -- Session lifecycle --------------------------------------------------------
 
 void Session::cleanup() {
@@ -195,6 +263,7 @@ void Session::cleanup() {
     portals_.clear();
     reset_all_variables();
     txn_state_ = TransactionState::IDLE;
+    savepoints_.clear();
 }
 
 // -- Session command handling --------------------------------------------------
@@ -220,6 +289,17 @@ std::optional<Result<QueryResult>> Session::try_handle_command(const std::string
     }
     if (starts_with_ci(trimmed, "DEALLOCATE ")) {
         return try_handle_deallocate(trimmed);
+    }
+
+    // Handle savepoint commands at the session level.
+    if (starts_with_ci(trimmed, "SAVEPOINT ")) {
+        return try_handle_savepoint(trimmed);
+    }
+    if (starts_with_ci(trimmed, "RELEASE ")) {
+        return try_handle_release_savepoint(trimmed);
+    }
+    if (starts_with_ci(trimmed, "ROLLBACK TO ")) {
+        return try_handle_rollback_to(trimmed);
     }
 
     // Track transaction state for BEGIN/COMMIT/ROLLBACK.
@@ -444,6 +524,78 @@ std::optional<Result<QueryResult>> Session::try_handle_deallocate(const std::str
     return ok(std::move(qr));
 }
 
+std::optional<Result<QueryResult>> Session::try_handle_savepoint(const std::string& sql) {
+    // Parse: SAVEPOINT name
+    auto rest = trim(sql.substr(10)); // Skip "SAVEPOINT "
+    if (rest.empty()) {
+        return Result<QueryResult>(
+            make_error(StatusCode::PARSE_ERROR, "syntax error: SAVEPOINT requires a name"));
+    }
+
+    auto result = create_savepoint(rest);
+    if (!result) {
+        return Result<QueryResult>(tl::unexpected(result.error()));
+    }
+
+    QueryResult qr;
+    qr.message = "SAVEPOINT";
+    return ok(std::move(qr));
+}
+
+std::optional<Result<QueryResult>> Session::try_handle_release_savepoint(const std::string& sql) {
+    // Parse: RELEASE [SAVEPOINT] name
+    auto rest = trim(sql.substr(8)); // Skip "RELEASE "
+    if (rest.empty()) {
+        return Result<QueryResult>(
+            make_error(StatusCode::PARSE_ERROR, "syntax error: RELEASE requires SAVEPOINT name"));
+    }
+
+    // Skip optional SAVEPOINT keyword.
+    if (starts_with_ci(rest, "SAVEPOINT ")) {
+        rest = trim(rest.substr(10));
+    }
+    if (rest.empty()) {
+        return Result<QueryResult>(
+            make_error(StatusCode::PARSE_ERROR, "syntax error: RELEASE SAVEPOINT requires a name"));
+    }
+
+    auto result = release_savepoint(rest);
+    if (!result) {
+        return Result<QueryResult>(tl::unexpected(result.error()));
+    }
+
+    QueryResult qr;
+    qr.message = "RELEASE";
+    return ok(std::move(qr));
+}
+
+std::optional<Result<QueryResult>> Session::try_handle_rollback_to(const std::string& sql) {
+    // Parse: ROLLBACK TO [SAVEPOINT] name
+    auto rest = trim(sql.substr(12)); // Skip "ROLLBACK TO "
+    if (rest.empty()) {
+        return Result<QueryResult>(make_error(
+            StatusCode::PARSE_ERROR, "syntax error: ROLLBACK TO requires a savepoint name"));
+    }
+
+    // Skip optional SAVEPOINT keyword.
+    if (starts_with_ci(rest, "SAVEPOINT ")) {
+        rest = trim(rest.substr(10));
+    }
+    if (rest.empty()) {
+        return Result<QueryResult>(make_error(
+            StatusCode::PARSE_ERROR, "syntax error: ROLLBACK TO SAVEPOINT requires a name"));
+    }
+
+    auto result = rollback_to_savepoint(rest);
+    if (!result) {
+        return Result<QueryResult>(tl::unexpected(result.error()));
+    }
+
+    QueryResult qr;
+    qr.message = "ROLLBACK";
+    return ok(std::move(qr));
+}
+
 void Session::update_transaction_state(const std::string& sql, bool success) {
     auto trimmed = to_lower(trim(sql));
 
@@ -457,6 +609,7 @@ void Session::update_transaction_state(const std::string& sql, bool success) {
     if (trimmed == "commit" || trimmed == "end") {
         if (success) {
             txn_state_ = TransactionState::IDLE;
+            savepoints_.clear();
         }
         return;
     }
@@ -464,6 +617,7 @@ void Session::update_transaction_state(const std::string& sql, bool success) {
     if (trimmed == "rollback" || trimmed == "abort") {
         // Rollback always resets to idle (even from FAILED state).
         txn_state_ = TransactionState::IDLE;
+        savepoints_.clear();
         return;
     }
 
