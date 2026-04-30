@@ -617,6 +617,43 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
                 qr.rows.push_back(std::move(row));
                 return ok(std::move(qr));
             }
+
+            // Handle SELECT <literal_expr> without FROM (e.g. SELECT 1, SELECT 'hello').
+            bool all_literals = true;
+            for (const auto& item : select->items) {
+                if (!dynamic_cast<const LiteralExpr*>(item.expr.get())) {
+                    all_literals = false;
+                    break;
+                }
+            }
+            if (all_literals) {
+                QueryResult qr;
+                std::vector<Value> row;
+                for (const auto& item : select->items) {
+                    auto* lit = dynamic_cast<const LiteralExpr*>(item.expr.get());
+                    std::string col_name = item.alias.empty() ? lit->value : item.alias;
+                    qr.column_names.push_back(col_name);
+
+                    if (lit->kind == LiteralKind::INTEGER) {
+                        qr.column_types.push_back(TypeId::INT32);
+                        row.emplace_back(static_cast<int32_t>(std::stoi(lit->value)));
+                    } else if (lit->kind == LiteralKind::FLOAT) {
+                        qr.column_types.push_back(TypeId::FLOAT64);
+                        row.emplace_back(std::stod(lit->value));
+                    } else if (lit->kind == LiteralKind::BOOLEAN) {
+                        qr.column_types.push_back(TypeId::BOOL);
+                        row.emplace_back(lit->value == "true" || lit->value == "TRUE");
+                    } else if (lit->kind == LiteralKind::NULL_LITERAL) {
+                        qr.column_types.push_back(TypeId::STRING);
+                        row.emplace_back(Value::make_null());
+                    } else {
+                        qr.column_types.push_back(TypeId::STRING);
+                        row.emplace_back(lit->value);
+                    }
+                }
+                qr.rows.push_back(std::move(row));
+                return ok(std::move(qr));
+            }
         }
     }
 

@@ -851,8 +851,8 @@ TEST(Parser, LinkWithProperties) {
 // -- BULK LINK tests ----------------------------------------------------------
 
 TEST(Parser, BulkLinkBasic) {
-    auto stmt = parse_one(
-        "LINK users TO users VIA follows VALUES ('alice', 'bob'), ('carol', 'dave')");
+    auto stmt =
+        parse_one("LINK users TO users VIA follows VALUES ('alice', 'bob'), ('carol', 'dave')");
     auto* blk = dynamic_cast<BulkLinkStmt*>(stmt.get());
     ASSERT_NE(blk, nullptr);
     EXPECT_EQ(blk->source_table, "users");
@@ -870,10 +870,9 @@ TEST(Parser, BulkLinkBasic) {
 }
 
 TEST(Parser, BulkLinkWithProperties) {
-    auto stmt = parse_one(
-        "LINK users TO products VIA rated VALUES "
-        "('alice', 42, 4.5, 'great'), "
-        "('bob', 17, 3.0, 'meh')");
+    auto stmt = parse_one("LINK users TO products VIA rated VALUES "
+                          "('alice', 42, 4.5, 'great'), "
+                          "('bob', 17, 3.0, 'meh')");
     auto* blk = dynamic_cast<BulkLinkStmt*>(stmt.get());
     ASSERT_NE(blk, nullptr);
     ASSERT_EQ(blk->rows.size(), 2u);
@@ -1912,6 +1911,7 @@ public:
 
     // -- Expressions --
     void visit(const LiteralExpr&) override { visited_type = "LiteralExpr"; }
+    void visit(const ParamRefExpr&) override { visited_type = "ParamRefExpr"; }
     void visit(const ColumnRefExpr&) override { visited_type = "ColumnRefExpr"; }
     void visit(const BinaryExpr&) override { visited_type = "BinaryExpr"; }
     void visit(const UnaryExpr&) override { visited_type = "UnaryExpr"; }
@@ -2193,4 +2193,71 @@ TEST(ParseBackfill, ShowBackfillWithoutStatus) {
     auto* show = dynamic_cast<ShowStmt*>(stmt.get());
     ASSERT_NE(show, nullptr);
     EXPECT_EQ(show->target, ShowTarget::BACKFILL);
+}
+
+// -- ParamRef ($N) tests -------------------------------------------------------
+
+TEST(ParamRef, ParseSingleParam) {
+    auto stmt = parse_one("SELECT name FROM users WHERE id = $1");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_NE(sel->where_expr, nullptr);
+    auto* bin = dynamic_cast<BinaryExpr*>(sel->where_expr.get());
+    ASSERT_NE(bin, nullptr);
+    auto* param = dynamic_cast<ParamRefExpr*>(bin->rhs.get());
+    ASSERT_NE(param, nullptr);
+    EXPECT_EQ(param->index, 1);
+}
+
+TEST(ParamRef, ParseMultipleParams) {
+    auto stmt = parse_one("SELECT * FROM t WHERE a = $1 AND b = $2");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* and_expr = dynamic_cast<BinaryExpr*>(sel->where_expr.get());
+    ASSERT_NE(and_expr, nullptr);
+    auto* lhs_bin = dynamic_cast<BinaryExpr*>(and_expr->lhs.get());
+    auto* rhs_bin = dynamic_cast<BinaryExpr*>(and_expr->rhs.get());
+    ASSERT_NE(lhs_bin, nullptr);
+    ASSERT_NE(rhs_bin, nullptr);
+    auto* p1 = dynamic_cast<ParamRefExpr*>(lhs_bin->rhs.get());
+    auto* p2 = dynamic_cast<ParamRefExpr*>(rhs_bin->rhs.get());
+    ASSERT_NE(p1, nullptr);
+    ASSERT_NE(p2, nullptr);
+    EXPECT_EQ(p1->index, 1);
+    EXPECT_EQ(p2->index, 2);
+}
+
+TEST(ParamRef, LexerTokenizesParamRef) {
+    Lexer lexer("$1 $23");
+    auto tokens = lexer.tokenize();
+    ASSERT_TRUE(tokens.has_value());
+    ASSERT_GE(tokens->size(), 2u);
+    EXPECT_EQ((*tokens)[0].type, TokenType::PARAM_REF);
+    EXPECT_EQ((*tokens)[0].lexeme, "$1");
+    EXPECT_EQ((*tokens)[1].type, TokenType::PARAM_REF);
+    EXPECT_EQ((*tokens)[1].lexeme, "$23");
+}
+
+// -- SELECT without FROM -------------------------------------------------------
+
+TEST(SelectWithoutFrom, ParseSelectLiteral) {
+    auto stmt = parse_one("SELECT 1 AS val");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    EXPECT_TRUE(sel->from.empty());
+    ASSERT_EQ(sel->items.size(), 1u);
+    auto* lit = dynamic_cast<LiteralExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(lit, nullptr);
+    EXPECT_EQ(lit->kind, LiteralKind::INTEGER);
+    EXPECT_EQ(sel->items[0].alias, "val");
+}
+
+TEST(SelectWithoutFrom, ParseSelectStringLiteral) {
+    auto stmt = parse_one("SELECT 'hello' AS greeting");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    EXPECT_TRUE(sel->from.empty());
+    auto* lit = dynamic_cast<LiteralExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(lit, nullptr);
+    EXPECT_EQ(lit->kind, LiteralKind::STRING);
 }

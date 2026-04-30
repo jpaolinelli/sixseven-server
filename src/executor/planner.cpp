@@ -290,8 +290,8 @@ Planner::Planner(Catalog& catalog,
     : catalog_(catalog), storage_(storage), database_id_(database_id), graph_engine_(graph_engine),
       provider_registry_(provider_registry), hnsw_indexes_(hnsw_indexes),
       btree_indexes_(btree_indexes), hash_indexes_(hash_indexes), hnsw_rid_maps_(hnsw_rid_maps),
-      embedding_pool_(embedding_pool),
-      algorithm_registry_(algorithm_registry), subquery_ctx_{catalog_, storage_} {}
+      embedding_pool_(embedding_pool), algorithm_registry_(algorithm_registry),
+      subquery_ctx_{catalog_, storage_} {}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -847,6 +847,19 @@ Planner::plan_from_source(const TableRef& table_ref,
     // Case 7: Physical table.
     auto table_schema = catalog_.get_table(database_id_, table_ref.name);
     if (!table_schema) {
+        // Fallback: unqualified pg_catalog table names (e.g. "pg_type" without
+        // "pg_catalog." prefix). psqlODBC and other PostgreSQL tools query these
+        // without a schema qualifier.
+        if (table_ref.schema.empty()) {
+            auto vt = catalog_.get_virtual_table(table_ref.name);
+            if (vt) {
+                auto ts = vt->to_table_schema();
+                auto table_output = build_table_output_schema(ts, alias);
+                auto scan =
+                    std::make_unique<VirtualCatalogScanOperator>(std::move(*vt), table_output);
+                return ok(PlannedSource{std::move(scan), std::move(table_output)});
+            }
+        }
         return make_error(table_schema.error().code, table_schema.error().message);
     }
 
@@ -2628,8 +2641,8 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
     // HNSW index for highly selective predicates.
     static constexpr size_t kPrefilterThreshold = 10'000;
 
-    if (stmt.where_expr != nullptr && btree_indexes_ != nullptr &&
-        !btree_indexes_->empty() && config.allowed_node_ids.empty()) {
+    if (stmt.where_expr != nullptr && btree_indexes_ != nullptr && !btree_indexes_->empty() &&
+        config.allowed_node_ids.empty()) {
         auto cmp = extract_simple_comparison(stmt.where_expr.get());
         if (cmp) {
             auto indexes = catalog_.list_indexes(table_schema->table_id);
@@ -2651,8 +2664,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
                 // Coerce the literal to the column's actual type.
                 Value coerced_value = cmp->literal_value;
                 for (const auto& col : table_schema->columns) {
-                    if (col.name == cmp->column_name &&
-                        coerced_value.type_id() != col.type_id &&
+                    if (col.name == cmp->column_name && coerced_value.type_id() != col.type_id &&
                         can_coerce(coerced_value.type_id(), col.type_id)) {
                         auto cv = coerce(coerced_value, col.type_id);
                         if (cv) {
@@ -2697,8 +2709,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
                     auto& [entry_key, rid] = **entry;
 
                     // For equality scans, stop once key moves past target.
-                    if (cmp->op == BinaryOp::EQUAL &&
-                        entry_key.size() == key_value.size()) {
+                    if (cmp->op == BinaryOp::EQUAL && entry_key.size() == key_value.size()) {
                         bool keys_match = true;
                         for (size_t i = 0; i < entry_key.size(); ++i) {
                             auto kcmp = compare(entry_key[i], key_value[i]);
@@ -2720,15 +2731,16 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
                 }
 
                 if (!exceeded_threshold && !candidate_rids.empty()) {
-                    SIXSEVEN_LOG_DEBUG(
-                        "plan_nearest: btree prefilter on '{}' found {} candidates",
-                        cmp->column_name, candidate_rids.size());
+                    SIXSEVEN_LOG_DEBUG("plan_nearest: btree prefilter on '{}' found {} candidates",
+                                       cmp->column_name,
+                                       candidate_rids.size());
                     config.prefiltered_rids = std::move(candidate_rids);
                 } else if (exceeded_threshold) {
                     SIXSEVEN_LOG_DEBUG(
                         "plan_nearest: btree prefilter on '{}' exceeded {} threshold, "
                         "falling back to HNSW",
-                        cmp->column_name, kPrefilterThreshold);
+                        cmp->column_name,
+                        kPrefilterThreshold);
                 }
                 break; // Use first matching index.
             }
@@ -2761,7 +2773,9 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
             }
         }
         SIXSEVEN_LOG_DEBUG("plan_nearest: table_id={} col={} idx_id={} hnsw={} rid_map={}",
-                           table_schema->table_id, stmt.column_name, hnsw_idx_id,
+                           table_schema->table_id,
+                           stmt.column_name,
+                           hnsw_idx_id,
                            hnsw_index != nullptr ? "found" : "miss",
                            rid_map != nullptr ? "found" : "miss");
     }
@@ -2829,8 +2843,7 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema
             // Coerce the literal to the column's actual type (e.g. STRING → UUID).
             Value coerced_value = cmp->literal_value;
             for (const auto& col : table_schema.columns) {
-                if (col.name == cmp->column_name &&
-                    coerced_value.type_id() != col.type_id &&
+                if (col.name == cmp->column_name && coerced_value.type_id() != col.type_id &&
                     can_coerce(coerced_value.type_id(), col.type_id)) {
                     auto cv = coerce(coerced_value, col.type_id);
                     if (cv) {
@@ -2896,8 +2909,7 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema
         // Coerce the literal to the column's actual type (e.g. STRING → UUID).
         Value coerced_value = cmp->literal_value;
         for (const auto& col : table_schema.columns) {
-            if (col.name == cmp->column_name &&
-                coerced_value.type_id() != col.type_id &&
+            if (col.name == cmp->column_name && coerced_value.type_id() != col.type_id &&
                 can_coerce(coerced_value.type_id(), col.type_id)) {
                 auto cv = coerce(coerced_value, col.type_id);
                 if (cv) {

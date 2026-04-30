@@ -1355,3 +1355,39 @@ TEST_F(QueryEngineGraphTest, MatchWhereNameInWhereAgeInSelect) {
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_int32(), 50);
 }
+
+// -- SELECT without FROM (literal expressions) ---------------------------------
+
+TEST_F(QueryEngineTest, SelectIntegerLiteral) {
+    auto qr = exec_ok("SELECT 1 AS val");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    ASSERT_EQ(qr.column_names.size(), 1u);
+    EXPECT_EQ(qr.column_names[0], "val");
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 1);
+}
+
+TEST_F(QueryEngineTest, SelectStringLiteral) {
+    auto qr = exec_ok("SELECT 'hello' AS greeting");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "hello");
+}
+
+TEST_F(QueryEngineTest, SelectMultipleLiterals) {
+    auto qr = exec_ok("SELECT 42 AS num, 'world' AS text");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    ASSERT_EQ(qr.column_names.size(), 2u);
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 42);
+    EXPECT_EQ(qr.rows[0][1].as_string(), "world");
+}
+
+TEST_F(QueryEngineTest, SelectBoolLiteral) {
+    auto qr = exec_ok("SELECT TRUE AS flag");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_TRUE(qr.rows[0][0].as_bool());
+}
+
+TEST_F(QueryEngineTest, SelectNullLiteral) {
+    auto qr = exec_ok("SELECT NULL AS nothing");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_TRUE(qr.rows[0][0].is_null());
+}

@@ -185,7 +185,7 @@ struct TableConstraint {
 /// or algorithm function call).
 struct TableRef {
     std::string name;
-    std::string schema;     ///< Schema qualifier (e.g., "pg_catalog" in pg_catalog.pg_type).
+    std::string schema; ///< Schema qualifier (e.g., "pg_catalog" in pg_catalog.pg_type).
     std::string alias;
     StmtPtr subquery;
     StmtPtr traverse_source;
@@ -307,6 +307,12 @@ protected:
 struct LiteralExpr : Expr {
     LiteralKind kind;
     std::string value;
+    void accept(AstVisitor& visitor) const override;
+};
+
+/// Positional parameter reference: $1, $2, etc.
+struct ParamRefExpr : Expr {
+    int index = 0;
     void accept(AstVisitor& visitor) const override;
 };
 
@@ -853,6 +859,7 @@ public:
     // -- Expressions ----------------------------------------------------------
 
     virtual void visit(const LiteralExpr& node) = 0;
+    virtual void visit(const ParamRefExpr& node) = 0;
     virtual void visit(const ColumnRefExpr& node) = 0;
     virtual void visit(const BinaryExpr& node) = 0;
     virtual void visit(const UnaryExpr& node) = 0;
@@ -928,6 +935,9 @@ public:
 // -- Expressions --------------------------------------------------------------
 
 inline void LiteralExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void ParamRefExpr::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void ColumnRefExpr::accept(AstVisitor& v) const {

@@ -51,6 +51,10 @@ public:
         last_type = "LiteralExpr";
         ++total;
     }
+    void visit(const ParamRefExpr&) override {
+        last_type = "ParamRefExpr";
+        ++total;
+    }
     void visit(const ColumnRefExpr&) override {
         last_type = "ColumnRefExpr";
         ++total;

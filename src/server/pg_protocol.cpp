@@ -647,6 +647,11 @@ Result<std::string> format_param_as_sql(const std::optional<std::string>& value,
         return ok(val);
     }
 
+    // OID 0 means unspecified — infer from value content.
+    if (oid == 0 && is_valid_numeric_literal(val)) {
+        return ok(val);
+    }
+
     // All other types (text, date, timestamp, etc.): single-quote with escaping.
     return ok("'" + escape_sql_string(val) + "'");
 }

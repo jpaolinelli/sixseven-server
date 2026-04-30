@@ -118,8 +118,7 @@ TEST(Session, GetAllVariablesSortedByName) {
     Session session(1);
     auto vars = session.get_all_variables();
 
-    // Should have all 6 built-in variables.
-    ASSERT_EQ(vars.size(), 6u);
+    ASSERT_EQ(vars.size(), 18u);
 
     // Verify sorted by name.
     for (size_t i = 1; i < vars.size(); ++i) {
@@ -397,7 +396,7 @@ TEST(Session, HandleShowAll) {
     EXPECT_EQ(qr.column_names.size(), 2u);
     EXPECT_EQ(qr.column_names[0], "name");
     EXPECT_EQ(qr.column_names[1], "setting");
-    EXPECT_EQ(qr.rows.size(), 6u); // 6 built-in variables.
+    EXPECT_EQ(qr.rows.size(), 18u);
 }
 
 TEST(Session, HandleShowUnknownPassesThrough) {
@@ -717,17 +716,19 @@ TEST(Session, ProtocolPrepareAndExecute) {
     PgProtocolHandler handler(3);
 
     int exec_count = 0;
-    handler.set_query_executor([&exec_count](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
-        ++exec_count;
-        if (sql == "SELECT 42") {
-            QueryResult qr;
-            qr.column_names = {"col"};
-            qr.column_types = {TypeId::INT32};
-            qr.rows = {{Value(static_cast<int32_t>(42))}};
-            return ok(std::move(qr));
-        }
-        return make_error(StatusCode::INTERNAL_ERROR, "unexpected sql: " + sql);
-    });
+    handler.set_query_executor(
+        [&exec_count](const std::string& sql,
+                      const std::string& /*database*/) -> Result<QueryResult> {
+            ++exec_count;
+            if (sql == "SELECT 42") {
+                QueryResult qr;
+                qr.column_names = {"col"};
+                qr.column_types = {TypeId::INT32};
+                qr.rows = {{Value(static_cast<int32_t>(42))}};
+                return ok(std::move(qr));
+            }
+            return make_error(StatusCode::INTERNAL_ERROR, "unexpected sql: " + sql);
+        });
 
     do_startup(client_fd, conn, handler);
 
@@ -796,21 +797,22 @@ TEST(Session, ProtocolTransactionStateTracking) {
     Connection conn(server_fd);
     PgProtocolHandler handler(5);
 
-    handler.set_query_executor([](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
-        if (sql == "BEGIN" || sql == "COMMIT" || sql == "ROLLBACK") {
-            QueryResult qr;
-            qr.message = sql;
-            return ok(std::move(qr));
-        }
-        if (sql == "SELECT 1") {
-            QueryResult qr;
-            qr.column_names = {"col"};
-            qr.column_types = {TypeId::INT32};
-            qr.rows = {{Value(static_cast<int32_t>(1))}};
-            return ok(std::move(qr));
-        }
-        return make_error(StatusCode::PARSE_ERROR, "error");
-    });
+    handler.set_query_executor(
+        [](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
+            if (sql == "BEGIN" || sql == "COMMIT" || sql == "ROLLBACK") {
+                QueryResult qr;
+                qr.message = sql;
+                return ok(std::move(qr));
+            }
+            if (sql == "SELECT 1") {
+                QueryResult qr;
+                qr.column_names = {"col"};
+                qr.column_types = {TypeId::INT32};
+                qr.rows = {{Value(static_cast<int32_t>(1))}};
+                return ok(std::move(qr));
+            }
+            return make_error(StatusCode::PARSE_ERROR, "error");
+        });
 
     do_startup(client_fd, conn, handler);
 
@@ -904,7 +906,8 @@ TEST(Session, ProtocolNonSessionSetPassesThrough) {
 
     bool query_executor_called = false;
     handler.set_query_executor(
-        [&query_executor_called](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
+        [&query_executor_called](const std::string& /*sql*/,
+                                 const std::string& /*database*/) -> Result<QueryResult> {
             query_executor_called = true;
             QueryResult qr;
             qr.message = "SET";
@@ -930,7 +933,8 @@ TEST(Session, ProtocolShowTablesPassesThrough) {
 
     bool query_executor_called = false;
     handler.set_query_executor(
-        [&query_executor_called](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
+        [&query_executor_called](const std::string& /*sql*/,
+                                 const std::string& /*database*/) -> Result<QueryResult> {
             query_executor_called = true;
             QueryResult qr;
             qr.column_names = {"table_name"};

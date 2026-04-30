@@ -3513,6 +3513,16 @@ Result<ExprPtr> Parser::parse_primary() {
         return ok(ExprPtr(std::move(lit)));
     }
 
+    // Positional parameter reference ($1, $2, ...).
+    if (match(TokenType::PARAM_REF)) {
+        auto param = std::make_unique<ParamRefExpr>();
+        auto lexeme = std::string(previous().lexeme);
+        param->index = std::stoi(lexeme.substr(1));
+        param->line = previous().line;
+        param->col = previous().column;
+        return ok(ExprPtr(std::move(param)));
+    }
+
     // EXISTS (SELECT ...).
     if (match(TokenType::EXISTS)) {
         uint32_t line = previous().line;
