@@ -10,7 +10,9 @@
 
 #include <array>
 #include <fstream>
+#include <sstream>
 #include <string>
+#include <unordered_map>
 
 namespace sixseven {
 
@@ -387,19 +389,17 @@ Result<void> SystemBootstrap::seed_default_settings(QueryEngine& engine, const C
 }
 
 void SystemBootstrap::register_virtual_catalog_tables(Catalog& catalog) {
-    // pg_database — lists all databases.
+    // pg_database — static single-row table for connection setup.
     VirtualTableDef pg_database;
     pg_database.name = "pg_database";
     pg_database.columns = {
         {0, "oid", TypeId::INT32, false, ""},
         {1, "datname", TypeId::STRING, false, ""},
+        {2, "datdba", TypeId::INT32, false, ""},
+        {3, "encoding", TypeId::INT32, false, ""},
     };
-    pg_database.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
-        std::vector<std::vector<std::string>> rows;
-        for (const auto& db : catalog.list_databases()) {
-            rows.push_back({std::to_string(db.database_id), db.name});
-        }
-        return rows;
+    pg_database.generator = []() -> std::vector<std::vector<std::string>> {
+        return {{"1", "sixsevendb", "10", "6"}};
     };
     catalog.register_virtual_table(std::move(pg_database));
 
@@ -686,6 +686,61 @@ void SystemBootstrap::register_virtual_catalog_tables(Catalog& catalog) {
         return rows;
     };
     catalog.register_virtual_table(std::move(pg_attribute));
+
+    // pg_index — one row per index.
+    VirtualTableDef pg_index;
+    pg_index.name = "pg_index";
+    pg_index.columns = {
+        {0, "indexrelid", TypeId::INT32, false, ""},
+        {1, "indrelid", TypeId::INT32, false, ""},
+        {2, "indnatts", TypeId::INT16, false, ""},
+        {3, "indisunique", TypeId::BOOL, false, ""},
+        {4, "indisprimary", TypeId::BOOL, false, ""},
+        {5, "indkey", TypeId::STRING, false, ""},
+    };
+    pg_index.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
+        std::vector<std::vector<std::string>> rows;
+        for (const auto& idx : catalog.list_all_indexes()) {
+            auto table_r = catalog.get_table_by_id(idx.table_id);
+            if (!table_r.has_value()) {
+                continue;
+            }
+            const auto& table = table_r.value();
+
+            // Build column name → 1-based position map.
+            std::unordered_map<std::string, int> col_pos;
+            for (const auto& col : table.columns) {
+                col_pos[col.name] = col.ordinal + 1;
+            }
+
+            // Parse comma-separated index columns and resolve to positions.
+            std::string indkey;
+            int natts = 0;
+            std::istringstream stream(idx.columns);
+            std::string col_name;
+            while (std::getline(stream, col_name, ',')) {
+                if (!indkey.empty()) {
+                    indkey += ' ';
+                }
+                auto it = col_pos.find(col_name);
+                indkey += (it != col_pos.end()) ? std::to_string(it->second) : "0";
+                ++natts;
+            }
+
+            bool is_primary = (idx.columns == table.pk_columns);
+
+            rows.push_back({
+                std::to_string(idx.index_id),
+                std::to_string(idx.table_id),
+                std::to_string(natts),
+                idx.is_unique ? "true" : "false",
+                is_primary ? "true" : "false",
+                indkey,
+            });
+        }
+        return rows;
+    };
+    catalog.register_virtual_table(std::move(pg_index));
 
     SIXSEVEN_LOG_INFO("system bootstrap: registered {} pg_catalog virtual tables",
                       catalog.list_virtual_tables().size());

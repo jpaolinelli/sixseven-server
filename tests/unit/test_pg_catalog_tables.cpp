@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -1045,6 +1046,389 @@ TEST(PgAttribute, FilterByAttrelid) {
         }
     }
     EXPECT_EQ(count, 3);
+}
+
+// =========================================================================
+// Helper: register pg_index and pg_database
+// =========================================================================
+
+void register_pg_index(Catalog& catalog) {
+    VirtualTableDef def;
+    def.name = "pg_index";
+    def.columns = {
+        {0, "indexrelid", TypeId::INT32, false, ""},
+        {1, "indrelid", TypeId::INT32, false, ""},
+        {2, "indnatts", TypeId::INT16, false, ""},
+        {3, "indisunique", TypeId::BOOL, false, ""},
+        {4, "indisprimary", TypeId::BOOL, false, ""},
+        {5, "indkey", TypeId::STRING, false, ""},
+    };
+    def.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
+        std::vector<std::vector<std::string>> rows;
+        for (const auto& idx : catalog.list_all_indexes()) {
+            auto table_r = catalog.get_table_by_id(idx.table_id);
+            if (!table_r.has_value()) {
+                continue;
+            }
+            const auto& table = table_r.value();
+
+            std::unordered_map<std::string, int> col_pos;
+            for (const auto& col : table.columns) {
+                col_pos[col.name] = col.ordinal + 1;
+            }
+
+            std::string indkey;
+            int natts = 0;
+            std::istringstream stream(idx.columns);
+            std::string col_name;
+            while (std::getline(stream, col_name, ',')) {
+                if (!indkey.empty()) {
+                    indkey += ' ';
+                }
+                auto it = col_pos.find(col_name);
+                indkey += (it != col_pos.end()) ? std::to_string(it->second) : "0";
+                ++natts;
+            }
+
+            bool is_primary = (idx.columns == table.pk_columns);
+
+            rows.push_back({
+                std::to_string(idx.index_id),
+                std::to_string(idx.table_id),
+                std::to_string(natts),
+                idx.is_unique ? "true" : "false",
+                is_primary ? "true" : "false",
+                indkey,
+            });
+        }
+        return rows;
+    };
+    catalog.register_virtual_table(std::move(def));
+}
+
+void register_pg_database(Catalog& catalog) {
+    VirtualTableDef def;
+    def.name = "pg_database";
+    def.columns = {
+        {0, "oid", TypeId::INT32, false, ""},
+        {1, "datname", TypeId::STRING, false, ""},
+        {2, "datdba", TypeId::INT32, false, ""},
+        {3, "encoding", TypeId::INT32, false, ""},
+    };
+    def.generator = []() -> std::vector<std::vector<std::string>> {
+        return {{"1", "sixsevendb", "10", "6"}};
+    };
+    catalog.register_virtual_table(std::move(def));
+}
+
+// =========================================================================
+// Helper: scan helpers for pg_index and pg_database
+// =========================================================================
+
+struct IndexRow {
+    int32_t indexrelid;
+    int32_t indrelid;
+    int16_t indnatts;
+    bool indisunique;
+    bool indisprimary;
+    std::string indkey;
+};
+
+std::vector<IndexRow> scan_pg_index(Catalog& catalog) {
+    auto vt = catalog.get_virtual_table("pg_index");
+    EXPECT_TRUE(vt.has_value());
+    if (!vt.has_value())
+        return {};
+
+    OutputSchema schema(std::vector<OutputColumn>{
+        {"pg_index", "indexrelid", TypeId::INT32, false, vt->table_id},
+        {"pg_index", "indrelid", TypeId::INT32, false, vt->table_id},
+        {"pg_index", "indnatts", TypeId::INT16, false, vt->table_id},
+        {"pg_index", "indisunique", TypeId::BOOL, false, vt->table_id},
+        {"pg_index", "indisprimary", TypeId::BOOL, false, vt->table_id},
+        {"pg_index", "indkey", TypeId::STRING, false, vt->table_id},
+    });
+
+    VirtualCatalogScanOperator scan(std::move(*vt), std::move(schema));
+    auto open_r = scan.open();
+    EXPECT_TRUE(open_r.has_value());
+    if (!open_r.has_value())
+        return {};
+
+    std::vector<IndexRow> rows;
+    while (true) {
+        auto next_r = scan.next();
+        EXPECT_TRUE(next_r.has_value());
+        if (!next_r.has_value())
+            break;
+        if (!next_r->has_value())
+            break;
+        auto& tuple = next_r->value();
+        rows.push_back({
+            tuple.values[0].as_int32(),
+            tuple.values[1].as_int32(),
+            tuple.values[2].as_int16(),
+            tuple.values[3].as_bool(),
+            tuple.values[4].as_bool(),
+            std::string(tuple.values[5].as_string()),
+        });
+    }
+    scan.close();
+    return rows;
+}
+
+struct DatabaseRow {
+    int32_t oid;
+    std::string datname;
+    int32_t datdba;
+    int32_t encoding;
+};
+
+std::vector<DatabaseRow> scan_pg_database(Catalog& catalog) {
+    auto vt = catalog.get_virtual_table("pg_database");
+    EXPECT_TRUE(vt.has_value());
+    if (!vt.has_value())
+        return {};
+
+    OutputSchema schema(std::vector<OutputColumn>{
+        {"pg_database", "oid", TypeId::INT32, false, vt->table_id},
+        {"pg_database", "datname", TypeId::STRING, false, vt->table_id},
+        {"pg_database", "datdba", TypeId::INT32, false, vt->table_id},
+        {"pg_database", "encoding", TypeId::INT32, false, vt->table_id},
+    });
+
+    VirtualCatalogScanOperator scan(std::move(*vt), std::move(schema));
+    auto open_r = scan.open();
+    EXPECT_TRUE(open_r.has_value());
+    if (!open_r.has_value())
+        return {};
+
+    std::vector<DatabaseRow> rows;
+    while (true) {
+        auto next_r = scan.next();
+        EXPECT_TRUE(next_r.has_value());
+        if (!next_r.has_value())
+            break;
+        if (!next_r->has_value())
+            break;
+        auto& tuple = next_r->value();
+        rows.push_back({
+            tuple.values[0].as_int32(),
+            std::string(tuple.values[1].as_string()),
+            tuple.values[2].as_int32(),
+            tuple.values[3].as_int32(),
+        });
+    }
+    scan.close();
+    return rows;
+}
+
+// =========================================================================
+// pg_database tests
+// =========================================================================
+
+TEST(PgDatabase, ReturnsSingleRow) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    register_pg_database(catalog);
+
+    auto rows = scan_pg_database(catalog);
+    ASSERT_EQ(rows.size(), 1u);
+}
+
+TEST(PgDatabase, HasCorrectValues) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    register_pg_database(catalog);
+
+    auto rows = scan_pg_database(catalog);
+    ASSERT_EQ(rows.size(), 1u);
+
+    EXPECT_EQ(rows[0].oid, 1);
+    EXPECT_EQ(rows[0].datname, "sixsevendb");
+    EXPECT_EQ(rows[0].datdba, 10);
+    EXPECT_EQ(rows[0].encoding, 6);
+}
+
+// =========================================================================
+// pg_index tests
+// =========================================================================
+
+void create_test_indexes(Catalog& catalog, table_id_t users_table_id) {
+    IndexDef idx;
+    idx.table_id = users_table_id;
+    idx.name = "idx_users_email";
+    idx.index_type = "btree";
+    idx.columns = "email";
+    idx.is_unique = true;
+    auto r = catalog.create_index(std::move(idx));
+    ASSERT_TRUE(r.has_value());
+
+    IndexDef idx2;
+    idx2.table_id = users_table_id;
+    idx2.name = "idx_users_name";
+    idx2.index_type = "btree";
+    idx2.columns = "name";
+    idx2.is_unique = false;
+    auto r2 = catalog.create_index(std::move(idx2));
+    ASSERT_TRUE(r2.has_value());
+}
+
+TEST(PgIndex, ReturnsOneRowPerIndex) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+
+    auto tables = catalog.list_tables(default_database_id);
+    auto users_it =
+        std::find_if(tables.begin(), tables.end(), [](const auto& t) { return t.name == "users"; });
+    ASSERT_NE(users_it, tables.end());
+
+    create_test_indexes(catalog, users_it->table_id);
+    register_pg_index(catalog);
+
+    auto rows = scan_pg_index(catalog);
+    EXPECT_EQ(rows.size(), 2u);
+}
+
+TEST(PgIndex, IndrelidReferencesPgClassOid) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+
+    auto tables = catalog.list_tables(default_database_id);
+    auto users_it =
+        std::find_if(tables.begin(), tables.end(), [](const auto& t) { return t.name == "users"; });
+    ASSERT_NE(users_it, tables.end());
+
+    create_test_indexes(catalog, users_it->table_id);
+    register_pg_class(catalog);
+    register_pg_index(catalog);
+
+    auto class_rows = scan_pg_class(catalog);
+    auto index_rows = scan_pg_index(catalog);
+
+    std::unordered_set<int32_t> class_oids;
+    for (const auto& r : class_rows) {
+        class_oids.insert(r.oid);
+    }
+
+    for (const auto& r : index_rows) {
+        EXPECT_TRUE(class_oids.count(r.indrelid))
+            << "indrelid=" << r.indrelid << " not found in pg_class";
+    }
+}
+
+TEST(PgIndex, IndisuniqueFlagIsCorrect) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+
+    auto tables = catalog.list_tables(default_database_id);
+    auto users_it =
+        std::find_if(tables.begin(), tables.end(), [](const auto& t) { return t.name == "users"; });
+    ASSERT_NE(users_it, tables.end());
+
+    create_test_indexes(catalog, users_it->table_id);
+    register_pg_index(catalog);
+
+    auto rows = scan_pg_index(catalog);
+    ASSERT_EQ(rows.size(), 2u);
+
+    auto find = [&](const std::string& key) -> const IndexRow* {
+        for (const auto& r : rows) {
+            if (r.indkey == key)
+                return &r;
+        }
+        return nullptr;
+    };
+
+    auto* email_idx = find("3");
+    ASSERT_NE(email_idx, nullptr);
+    EXPECT_TRUE(email_idx->indisunique);
+
+    auto* name_idx = find("2");
+    ASSERT_NE(name_idx, nullptr);
+    EXPECT_FALSE(name_idx->indisunique);
+}
+
+TEST(PgIndex, IndkeyContainsColumnPositions) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+
+    auto tables = catalog.list_tables(default_database_id);
+    auto users_it =
+        std::find_if(tables.begin(), tables.end(), [](const auto& t) { return t.name == "users"; });
+    ASSERT_NE(users_it, tables.end());
+
+    create_test_indexes(catalog, users_it->table_id);
+    register_pg_index(catalog);
+
+    auto rows = scan_pg_index(catalog);
+    for (const auto& r : rows) {
+        EXPECT_FALSE(r.indkey.empty());
+        EXPECT_EQ(r.indnatts, 1);
+    }
+}
+
+TEST(PgIndex, IndisprimaryDetectsPrimaryKey) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    create_test_tables(catalog);
+
+    auto tables = catalog.list_tables(default_database_id);
+    auto users_it =
+        std::find_if(tables.begin(), tables.end(), [](const auto& t) { return t.name == "users"; });
+    ASSERT_NE(users_it, tables.end());
+
+    IndexDef pk_idx;
+    pk_idx.table_id = users_it->table_id;
+    pk_idx.name = "pk_users";
+    pk_idx.index_type = "btree";
+    pk_idx.columns = "id";
+    pk_idx.is_unique = true;
+    auto r = catalog.create_index(std::move(pk_idx));
+    ASSERT_TRUE(r.has_value());
+
+    IndexDef non_pk_idx;
+    non_pk_idx.table_id = users_it->table_id;
+    non_pk_idx.name = "idx_users_email";
+    non_pk_idx.index_type = "btree";
+    non_pk_idx.columns = "email";
+    non_pk_idx.is_unique = true;
+    auto r2 = catalog.create_index(std::move(non_pk_idx));
+    ASSERT_TRUE(r2.has_value());
+
+    register_pg_index(catalog);
+
+    auto rows = scan_pg_index(catalog);
+    ASSERT_EQ(rows.size(), 2u);
+
+    auto find_by_key = [&](const std::string& key) -> const IndexRow* {
+        for (const auto& r : rows) {
+            if (r.indkey == key)
+                return &r;
+        }
+        return nullptr;
+    };
+
+    auto* pk = find_by_key("1");
+    ASSERT_NE(pk, nullptr);
+    EXPECT_TRUE(pk->indisprimary);
+
+    auto* non_pk = find_by_key("3");
+    ASSERT_NE(non_pk, nullptr);
+    EXPECT_FALSE(non_pk->indisprimary);
+}
+
+TEST(PgIndex, EmptyCatalogReturnsNoRows) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    register_pg_index(catalog);
+
+    auto rows = scan_pg_index(catalog);
+    EXPECT_TRUE(rows.empty());
 }
 
 } // namespace
