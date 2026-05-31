@@ -81,8 +81,9 @@ protected:
     void exec_error(const std::string& sql, StatusCode expected) {
         auto result = engine_->execute(sql);
         EXPECT_FALSE(result.has_value());
-        if (!result.has_value())
+        if (!result.has_value()) {
             EXPECT_EQ(result.error().code, expected);
+        }
     }
 
     DiskManager dm_;

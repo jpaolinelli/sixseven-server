@@ -271,6 +271,7 @@ inline void platform_cleanup() { WSACleanup(); }
 
 // ── POSIX (Linux / macOS) — include native headers ───────────────────────────
 
+#include <cstdlib>    // mkstemp, mkdtemp
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -301,6 +302,13 @@ inline int fstat64(int fd, stat64_t* st) { return ::fstat(fd, st); }
 
 // Socket helpers — on POSIX, sockets are regular file descriptors.
 inline int socket_close(int fd) { return ::close(fd); }
+inline int socketpair(int domain, int type, int protocol, int fds[2]) {
+    return ::socketpair(domain, type, protocol, fds);
+}
+
+// mkstemp / mkdtemp — just forward to the native POSIX functions.
+inline int mkstemp(char* tmpl) { return ::mkstemp(tmpl); }
+inline char* mkdtemp(char* tmpl) { return ::mkdtemp(tmpl); }
 
 } // namespace sixseven_platform
 

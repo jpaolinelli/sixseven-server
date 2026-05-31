@@ -56,6 +56,14 @@ constexpr std::size_t kAltStackSize = 64 * 1024; // 64 KiB
 std::uintmax_t g_main_image_load_address = 0;
 #endif
 
+// GCC's write() has __attribute__((warn_unused_result)) which -Werror makes
+// fatal, and GCC ignores (void) casts for this attribute. Use a helper macro
+// that assigns to a volatile local so the return value is "used".
+#if !defined(_WIN32)
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define SAFE_WRITE(fd, buf, n) do { ssize_t rc_ = ::write((fd), (buf), (n)); (void)rc_; } while (0)
+#endif
+
 // Async-signal-safe write of a NUL-terminated literal C-string.
 void safe_write(const char* msg) {
     std::size_t n = 0;
@@ -67,7 +75,7 @@ void safe_write(const char* msg) {
     DWORD written = 0;
     WriteFile(h, msg, static_cast<DWORD>(n), &written, nullptr);
 #else
-    (void)::write(STDERR_FILENO, msg, n);
+    SAFE_WRITE(STDERR_FILENO, msg, n);
 #endif
 }
 
@@ -89,7 +97,7 @@ void safe_write_uint(std::uintmax_t v) {
     WriteFile(h, buf + i, static_cast<DWORD>(sizeof(buf) - static_cast<std::size_t>(i)),
               &written, nullptr);
 #else
-    (void)::write(STDERR_FILENO, buf + i, static_cast<std::size_t>(sizeof(buf) - i));
+    SAFE_WRITE(STDERR_FILENO, buf + i, static_cast<std::size_t>(sizeof(buf) - i));
 #endif
 }
 
@@ -113,8 +121,8 @@ void safe_write_hex(std::uintmax_t v) {
     WriteFile(h, buf + i, static_cast<DWORD>(sizeof(buf) - static_cast<std::size_t>(i)),
               &written, nullptr);
 #else
-    (void)::write(STDERR_FILENO, "0x", 2);
-    (void)::write(STDERR_FILENO, buf + i, static_cast<std::size_t>(sizeof(buf) - i));
+    SAFE_WRITE(STDERR_FILENO, "0x", 2);
+    SAFE_WRITE(STDERR_FILENO, buf + i, static_cast<std::size_t>(sizeof(buf) - i));
 #endif
 }
 

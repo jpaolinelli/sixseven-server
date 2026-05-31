@@ -14,6 +14,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
 
+# GCC-specific: suppress known false positives in libstdc++ headers
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    add_compile_options(-Wno-stringop-overflow -Wno-missing-field-initializers)
+endif()
+
 # Windows: suppress MSVC CRT deprecation warnings so POSIX-compat names
 # (open, close, read, write, unlink, strerror, getpid, …) compile without
 # -Werror,-Wdeprecated-declarations errors. These must be set globally

@@ -147,7 +147,7 @@ public:
 
     void wakeup() override {
         char byte = 1;
-        (void)::write(wakeup_pipe_[1], &byte, 1);
+        { ssize_t rc = ::write(wakeup_pipe_[1], &byte, 1); (void)rc; }
     }
 
     Result<void> add_fd(int fd, EventType type) override { return add_filters(fd, type); }
@@ -438,7 +438,7 @@ public:
 
     void wakeup() override {
         char byte = 1;
-        (void)::write(wakeup_pipe_[1], &byte, 1);
+        { ssize_t rc = ::write(wakeup_pipe_[1], &byte, 1); (void)rc; }
     }
 
     Result<void> add_fd(int fd, EventType type) override {
