@@ -378,7 +378,10 @@ Result<std::unique_ptr<OnnxSession>> create_onnx_session(const std::string& mode
         // filter above. BASIC retains the high-win optimizations without the diagnostic spam.
         options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
 
-        auto session = std::make_unique<Ort::Session>(env, model_path.c_str(), options);
+        // Use filesystem::path::c_str() — returns wchar_t* on Windows (which
+        // Ort::Session expects) and char* on POSIX.
+        std::filesystem::path fs_model_path(model_path);
+        auto session = std::make_unique<Ort::Session>(env, fs_model_path.c_str(), options);
 
         Ort::AllocatorWithDefaultOptions allocator;
 

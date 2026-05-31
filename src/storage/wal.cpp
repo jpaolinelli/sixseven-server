@@ -4,9 +4,7 @@
 #include "sixseven/storage/wal_record.h"
 #include "sixseven/storage/wal_recovery.h" // serialize_checkpoint_data()
 
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -56,15 +54,21 @@ std::vector<uint64_t> list_wal_segments(const std::filesystem::path& wal_dir) {
 }
 
 /// Fsync a file descriptor using the best available mechanism.
-/// On macOS, F_FULLFSYNC flushes the drive's write cache; on Linux, fsync.
+/// On macOS, F_FULLFSYNC flushes the drive's write cache; on Linux, fsync;
+/// on Windows, _commit().
 Result<void> fsync_fd(int fd) {
 #ifdef __APPLE__
     if (::fcntl(fd, F_FULLFSYNC) < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "F_FULLFSYNC failed: " + std::string(std::strerror(errno)));
     }
+#elif defined(_WIN32)
+    if (::_commit(fd) < 0) {
+        return make_error(StatusCode::IO_ERROR,
+                          "fsync (_commit) failed: " + std::string(std::strerror(errno)));
+    }
 #else
-    if (::fsync(fd) < 0) {
+    if (sixseven_platform::fsync(fd) < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "fsync failed: " + std::string(std::strerror(errno)));
     }
@@ -211,7 +215,7 @@ Result<lsn_t> WalWriter::append(WalRecord& record) {
 
     // Write to the current segment using pwrite.
     auto offset = static_cast<off_t>(segment_offset_);
-    ssize_t written = ::pwrite(segment_fd_, buf.data(), buf.size(), offset);
+    ssize_t written = sixseven_platform::pwrite(segment_fd_, buf.data(), buf.size(), offset);
     if (written < 0 || static_cast<size_t>(written) != buf.size()) {
         return make_error(StatusCode::IO_ERROR,
                           "WAL pwrite failed: " + std::string(std::strerror(errno)));
@@ -266,7 +270,7 @@ uint64_t WalWriter::current_segment_id() const {
 Result<void> WalWriter::open_segment(uint64_t seg_id) {
     auto path = segment_path(seg_id);
 
-    int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    int fd = ::open(path.string().c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
     if (fd < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to open WAL segment: " + path.string() + ": " +
@@ -287,7 +291,7 @@ Result<void> WalWriter::close_segment() {
 
     // Truncate to the actual written size to avoid trailing garbage.
     if (segment_offset_ > 0) {
-        if (::ftruncate(segment_fd_, static_cast<off_t>(segment_offset_)) < 0) {
+        if (sixseven_platform::ftruncate(segment_fd_, static_cast<off_t>(segment_offset_)) < 0) {
             return make_error(StatusCode::IO_ERROR,
                               "WAL segment truncate failed: " + std::string(std::strerror(errno)));
         }
@@ -344,8 +348,8 @@ Result<void> WalWriter::scan_segment() {
     }
 
     // Get the file size.
-    struct stat st = {};
-    if (::fstat(segment_fd_, &st) < 0) {
+    sixseven_platform::stat64_t st = {};
+    if (sixseven_platform::fstat64(segment_fd_, &st) < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "fstat failed on WAL segment: " + std::string(std::strerror(errno)));
     }
@@ -359,7 +363,7 @@ Result<void> WalWriter::scan_segment() {
 
     // Read the entire segment into memory for scanning.
     std::vector<uint8_t> buf(file_size);
-    ssize_t bytes_read = ::pread(segment_fd_, buf.data(), file_size, 0);
+    ssize_t bytes_read = sixseven_platform::pread(segment_fd_, buf.data(), file_size, 0);
     if (bytes_read < 0 || static_cast<size_t>(bytes_read) != file_size) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to read WAL segment for scanning: " +
@@ -642,7 +646,7 @@ Result<void> WalReader::load_segment(uint64_t seg_id) {
     }
 
     // Read the entire segment into memory.
-    int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    int fd = ::open(path.string().c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to open WAL segment for reading: " + path.string() + ": " +
@@ -650,7 +654,7 @@ Result<void> WalReader::load_segment(uint64_t seg_id) {
     }
 
     buf_.resize(file_size);
-    ssize_t bytes_read = ::pread(fd, buf_.data(), file_size, 0);
+    ssize_t bytes_read = sixseven_platform::pread(fd, buf_.data(), file_size, 0);
     ::close(fd);
 
     if (bytes_read < 0 || static_cast<size_t>(bytes_read) != file_size) {

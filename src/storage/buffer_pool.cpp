@@ -1,7 +1,6 @@
 #include "sixseven/storage/buffer_pool.h"
 
-#include <fcntl.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -474,14 +473,14 @@ Result<void> BufferPoolManager::enable_double_write(const std::filesystem::path&
         return make_error(StatusCode::ALREADY_EXISTS, "double-write buffer already enabled");
     }
 
-    int fd = ::open(dwb_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+    int fd = ::open(dwb_path.string().c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to create DWB file: " + std::string(std::strerror(errno)));
     }
 
     // Pre-allocate one page of space.
-    if (::ftruncate(fd, static_cast<off_t>(page_size)) < 0) {
+    if (sixseven_platform::ftruncate(fd, static_cast<off_t>(page_size)) < 0) {
         ::close(fd);
         return make_error(StatusCode::IO_ERROR,
                           "failed to extend DWB file: " + std::string(std::strerror(errno)));
@@ -586,7 +585,7 @@ Result<void> BufferPoolManager::write_page_impl(PageId page_id, Page& page) {
         // Compute and store checksum so the DWB copy has a valid checksum.
         page.set_checksum(compute_page_checksum(page));
 
-        ssize_t written = ::pwrite(dwb_fd_, page.raw().data(), page_size, 0);
+        ssize_t written = sixseven_platform::pwrite(dwb_fd_, page.raw().data(), page_size, 0);
         if (written < 0 || static_cast<size_t>(written) != page_size) {
             return make_error(StatusCode::IO_ERROR,
                               "DWB write failed: " + std::string(std::strerror(errno)));
@@ -597,8 +596,13 @@ Result<void> BufferPoolManager::write_page_impl(PageId page_id, Page& page) {
             return make_error(StatusCode::IO_ERROR,
                               "DWB fsync failed: " + std::string(std::strerror(errno)));
         }
+#elif defined(_WIN32)
+        if (::_commit(dwb_fd_) < 0) {
+            return make_error(StatusCode::IO_ERROR,
+                              "DWB fsync (_commit) failed: " + std::string(std::strerror(errno)));
+        }
 #else
-        if (::fsync(dwb_fd_) < 0) {
+        if (sixseven_platform::fsync(dwb_fd_) < 0) {
             return make_error(StatusCode::IO_ERROR,
                               "DWB fsync failed: " + std::string(std::strerror(errno)));
         }

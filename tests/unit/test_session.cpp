@@ -8,8 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include <sys/socket.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -552,7 +551,7 @@ std::vector<uint8_t> build_query_message(std::string_view sql) {
 /// Helper: create a socketpair and return the server-side fd.
 int create_socketpair(int& client_fd_out) {
     int fds[2];
-    int rc = ::socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
+    int rc = sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
     EXPECT_EQ(rc, 0);
     client_fd_out = fds[1];
     return fds[0];
@@ -673,7 +672,7 @@ TEST(Session, ProtocolSetShowVariable) {
     EXPECT_EQ(value, "16MB");
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(Session, ProtocolResetVariable) {
@@ -705,7 +704,7 @@ TEST(Session, ProtocolResetVariable) {
     EXPECT_EQ(value, "4MB");
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(Session, ProtocolPrepareAndExecute) {
@@ -760,7 +759,7 @@ TEST(Session, ProtocolPrepareAndExecute) {
     EXPECT_EQ(exec_count, 2);
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(Session, ProtocolDeallocate) {
@@ -787,7 +786,7 @@ TEST(Session, ProtocolDeallocate) {
     EXPECT_EQ(handler.session().get_prepared_statement("my_stmt"), nullptr);
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(Session, ProtocolTransactionStateTracking) {
@@ -866,7 +865,7 @@ TEST(Session, ProtocolTransactionStateTracking) {
     }
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(Session, ProtocolSessionVariableIsolation) {
@@ -893,8 +892,8 @@ TEST(Session, ProtocolSessionVariableIsolation) {
 
     conn1.close();
     conn2.close();
-    ::close(client_fd1);
-    ::close(client_fd2);
+    sixseven_platform::socket_close(client_fd1);
+    sixseven_platform::socket_close(client_fd2);
 }
 
 TEST(Session, ProtocolNonSessionSetPassesThrough) {
@@ -921,7 +920,7 @@ TEST(Session, ProtocolNonSessionSetPassesThrough) {
     EXPECT_TRUE(query_executor_called);
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(Session, ProtocolShowTablesPassesThrough) {
@@ -949,7 +948,7 @@ TEST(Session, ProtocolShowTablesPassesThrough) {
     EXPECT_TRUE(query_executor_called);
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(Session, ProtocolSharedPreparedStmtStore) {
@@ -969,7 +968,7 @@ TEST(Session, ProtocolSharedPreparedStmtStore) {
     EXPECT_EQ(handler.prepared_statements().at("sql_stmt").sql, "SELECT 1");
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(Session, ProtocolCleanupOnTerminate) {
@@ -997,5 +996,5 @@ TEST(Session, ProtocolCleanupOnTerminate) {
     EXPECT_EQ(*handler.session().get_variable("work_mem"), "4MB");
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }

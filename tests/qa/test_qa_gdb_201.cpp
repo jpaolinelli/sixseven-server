@@ -14,9 +14,7 @@
 
 #include <gtest/gtest.h>
 
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <cstdint>
 #include <cstring>
@@ -170,7 +168,7 @@ std::vector<uint8_t> build_close_message(char type, std::string_view name) {
 
 int create_socketpair(int& client_fd_out) {
     int fds[2];
-    int rc = ::socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
+    int rc = sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
     EXPECT_EQ(rc, 0);
     client_fd_out = fds[1];
     return fds[0];
@@ -302,7 +300,7 @@ TEST(QA_GDB201_Protocol, DescribeInvalidTypeByteSendsError) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(QA_GDB201_Protocol, DescribeInvalidTypeByteZero) {
@@ -340,7 +338,7 @@ TEST(QA_GDB201_Protocol, DescribeInvalidTypeByteZero) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
@@ -380,7 +378,7 @@ TEST(QA_GDB201_Protocol, DescribeNonExistentStatementSendsError) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(QA_GDB201_Protocol, DescribeNonExistentPortalSendsError) {
@@ -414,7 +412,7 @@ TEST(QA_GDB201_Protocol, DescribeNonExistentPortalSendsError) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
@@ -460,7 +458,7 @@ TEST(QA_GDB201_Protocol, DescribeUnnamedStatementRowDescription) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(QA_GDB201_Protocol, DescribeUnnamedPortalRowDescription) {
@@ -507,7 +505,7 @@ TEST(QA_GDB201_Protocol, DescribeUnnamedPortalRowDescription) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
@@ -562,7 +560,7 @@ TEST(QA_GDB201_Protocol, MultipleDescribesOnSameStatement) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
@@ -620,7 +618,7 @@ TEST(QA_GDB201_Protocol, DescribeAfterCloseStatementFails) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
@@ -727,7 +725,7 @@ TEST(QA_GDB201_Protocol, DescribeAllSupportedColumnTypes) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
@@ -811,7 +809,7 @@ TEST(QA_GDB201_Protocol, DescribeThenExecuteBothWork) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
@@ -861,7 +859,7 @@ TEST(QA_GDB201_Protocol, DescribeSkippedAfterErrorInBatch) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
@@ -902,7 +900,7 @@ TEST(QA_GDB201_Protocol, DescribeWithNoDescriberFallsBackToNoData) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(QA_GDB201_Protocol, DescribePortalWithNoDescriberFallsBackToNoData) {
@@ -944,7 +942,7 @@ TEST(QA_GDB201_Protocol, DescribePortalWithNoDescriberFallsBackToNoData) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
@@ -998,7 +996,7 @@ TEST(QA_GDB201_Protocol, DescribeDMLStatementsReturnNoData) {
     }
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
@@ -1056,7 +1054,7 @@ TEST(QA_GDB201_Protocol, RowDescriptionColumnOIDsAreCorrect) {
     EXPECT_EQ(rd.read_int16(), 0);                  // format code = text
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
@@ -1102,7 +1100,7 @@ TEST(QA_GDB201_Protocol, DescribeZeroColumnsReturnsNoData) {
     ASSERT_TRUE(find_message(response, pos, 'n', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
@@ -1148,7 +1146,7 @@ TEST(QA_GDB201_Protocol, DescribePortalDMLReturnsNoData) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
@@ -1202,7 +1200,7 @@ TEST(QA_GDB201_Protocol, StatementDescribeIncludesParameterDescription) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(QA_GDB201_Protocol, PortalDescribeDoesNotIncludeParameterDescription) {
@@ -1251,7 +1249,7 @@ TEST(QA_GDB201_Protocol, PortalDescribeDoesNotIncludeParameterDescription) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================

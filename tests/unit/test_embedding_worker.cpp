@@ -372,8 +372,8 @@ TEST(EmbeddingWorker, BackoffDelayExponential) {
 TEST(EmbeddingWorker, InsertJobsPrioritizedOverUpdate) {
     auto provider = std::make_shared<TestProvider>(128);
 
-    std::mutex order_mu;
-    std::vector<EmbeddingJob::Type> processing_order;
+    [[maybe_unused]] std::mutex order_mu;
+    [[maybe_unused]] std::vector<EmbeddingJob::Type> processing_order;
 
     EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = 1});
     pool.register_provider("test", provider);

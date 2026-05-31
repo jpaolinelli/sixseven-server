@@ -34,8 +34,11 @@ void signal_handler(int /*signo*/) {
 }
 
 void install_signal_handlers() {
+#if !defined(_WIN32)
     // Ignore SIGPIPE — broken pipe from disconnected clients.
+    // (Windows has no SIGPIPE; Winsock returns WSAECONNRESET instead.)
     std::signal(SIGPIPE, SIG_IGN);
+#endif
 
     // Graceful shutdown on SIGINT (Ctrl+C) and SIGTERM.
     std::signal(SIGINT, signal_handler);

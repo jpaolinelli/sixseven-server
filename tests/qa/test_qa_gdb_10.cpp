@@ -11,7 +11,7 @@
 
 #include <gtest/gtest.h>
 
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <climits>
 #include <cstdio>
@@ -206,7 +206,7 @@ protected:
         auto tmpl = (tmp_dir / "sixseven_qa_XXXXXX").string();
         std::vector<char> buf(tmpl.begin(), tmpl.end());
         buf.push_back('\0');
-        int fd = mkstemp(buf.data());
+        int fd = sixseven_platform::mkstemp(buf.data());
         ASSERT_NE(fd, -1) << "mkstemp failed";
         close(fd);
         tmp_path_ = std::string(buf.data()) + ".json";

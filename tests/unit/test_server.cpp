@@ -2,10 +2,7 @@
 
 #include <gtest/gtest.h>
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <chrono>
 #include <cstring>
@@ -34,7 +31,7 @@ protected:
         ::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
         if (::connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
-            ::close(fd);
+            sixseven_platform::socket_close(fd);
             return -1;
         }
         return fd;
@@ -75,7 +72,7 @@ TEST_F(ServerTest, AcceptsSingleConnection) {
     auto info = server.health();
     EXPECT_EQ(info.active_connections, 1u);
 
-    ::close(client);
+    sixseven_platform::socket_close(client);
     server.shutdown();
     t.join();
 }
@@ -98,7 +95,7 @@ TEST_F(ServerTest, AcceptsMultipleConcurrentConnections) {
     EXPECT_EQ(info.active_connections, static_cast<size_t>(NUM_CLIENTS));
 
     for (int fd : clients) {
-        ::close(fd);
+        sixseven_platform::socket_close(fd);
     }
     server.shutdown();
     t.join();
@@ -127,9 +124,9 @@ TEST_F(ServerTest, RejectsWhenMaxConnectionsReached) {
     EXPECT_EQ(server.health().active_connections, 2u);
 
     if (c3 >= 0)
-        ::close(c3);
-    ::close(c2);
-    ::close(c1);
+        sixseven_platform::socket_close(c3);
+    sixseven_platform::socket_close(c2);
+    sixseven_platform::socket_close(c1);
     server.shutdown();
     t.join();
 }
@@ -158,14 +155,14 @@ TEST_F(ServerTest, PgStartupHandshake) {
     startup.push_back(static_cast<uint8_t>(version & 0xFF));
     startup.insert(startup.end(), params.begin(), params.end());
 
-    ASSERT_EQ(::send(client, startup.data(), startup.size(), 0),
+    ASSERT_EQ(::send(client, reinterpret_cast<const char*>(startup.data()), startup.size(), 0),
               static_cast<ssize_t>(startup.size()));
 
     // Wait for the server response.
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     char buf[4096] = {};
-    ssize_t n = ::recv(client, buf, sizeof(buf), 0);
+    ssize_t n = ::recv(client, reinterpret_cast<char*>(buf), sizeof(buf), 0);
     ASSERT_GT(n, 0);
 
     // First message should be AuthenticationOk: 'R' + int32(8) + int32(0).
@@ -181,7 +178,7 @@ TEST_F(ServerTest, PgStartupHandshake) {
     }
     EXPECT_TRUE(found_ready);
 
-    ::close(client);
+    sixseven_platform::socket_close(client);
     server.shutdown();
     t.join();
 }
@@ -212,7 +209,7 @@ TEST_F(ServerTest, HandlesClientDisconnect) {
     EXPECT_EQ(server.health().active_connections, 1u);
 
     // Disconnect.
-    ::close(client);
+    sixseven_platform::socket_close(client);
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     // Server should have cleaned up.

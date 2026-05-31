@@ -14,9 +14,7 @@
 
 #include <gtest/gtest.h>
 
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <cstdint>
 #include <cstring>
@@ -340,20 +338,20 @@ class QA146ProtocolTest : public ::testing::Test {
 protected:
     void SetUp() override {
         int fds[2];
-        ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+        ASSERT_EQ(sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
         client_fd_ = fds[0];
         server_fd_ = fds[1];
     }
 
     void TearDown() override {
         if (client_fd_ >= 0) {
-            ::close(client_fd_);
+            sixseven_platform::socket_close(client_fd_);
         }
     }
 
     /// Send raw bytes to the server side.
     void send_raw(const void* data, size_t len) {
-        ASSERT_EQ(::send(client_fd_, data, len, 0), static_cast<ssize_t>(len));
+        ASSERT_EQ(::send(client_fd_, reinterpret_cast<const char*>(data), len, 0), static_cast<ssize_t>(len));
     }
 
     /// Build and send a PG StartupMessage.
@@ -432,7 +430,7 @@ protected:
     std::vector<uint8_t> read_response(size_t max_bytes = 8192) {
         // First flush the server's write buffer, then read from the client end.
         std::vector<uint8_t> buf(max_bytes);
-        ssize_t n = ::recv(client_fd_, buf.data(), buf.size(), 0);
+        ssize_t n = ::recv(client_fd_, reinterpret_cast<char*>(buf.data()), buf.size(), 0);
         if (n <= 0) {
             return {};
         }

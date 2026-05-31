@@ -6,6 +6,15 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+
+#if defined(_WIN32)
+
+TEST(CrashHandler, SkippedOnWindows) {
+    GTEST_SKIP() << "Crash handler fork tests are POSIX-only";
+}
+
+#else // !_WIN32
+
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -123,3 +132,5 @@ TEST(CrashHandler, IsIdempotent) {
     std::string out = capture_child_crash(SIGABRT);
     EXPECT_TRUE(contains(out, "--- backtrace")) << out;
 }
+
+#endif // !_WIN32

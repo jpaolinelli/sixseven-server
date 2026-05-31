@@ -12,8 +12,9 @@
 
 #include <gtest/gtest.h>
 
+#include "sixseven/common/platform.h"
+
 #include <fcntl.h>
-#include <unistd.h>
 
 #include <atomic>
 #include <chrono>

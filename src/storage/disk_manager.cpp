@@ -1,9 +1,6 @@
 #include "sixseven/storage/disk_manager.h"
 
-#include <fcntl.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <array>
 #include <cerrno>
@@ -168,7 +165,7 @@ DiskManager::create_file(const std::filesystem::path& path, bool direct_io, bool
         flags |= O_DIRECT;
     }
 #endif
-    int fd = ::open(path.c_str(), flags, 0644);
+    int fd = ::open(path.string().c_str(), flags, 0644);
     if (fd < 0) {
         if (errno == EEXIST) {
             return make_error(StatusCode::ALREADY_EXISTS, "file already exists: " + path.string());
@@ -178,7 +175,7 @@ DiskManager::create_file(const std::filesystem::path& path, bool direct_io, bool
     }
 
     // Acquire an exclusive advisory lock to prevent concurrent access.
-    if (::flock(fd, LOCK_EX | LOCK_NB) < 0) {
+    if (sixseven_platform::flock(fd, LOCK_EX | LOCK_NB) < 0) {
         ::close(fd);
         return make_error(StatusCode::IO_ERROR,
                           "failed to lock file (already in use?): " + path.string());
@@ -193,6 +190,9 @@ DiskManager::create_file(const std::filesystem::path& path, bool direct_io, bool
                               "F_NOCACHE failed: " + std::string(std::strerror(errno)));
         }
     }
+#elif defined(_WIN32)
+    // Windows has no F_NOCACHE equivalent — the OS manages its own page cache.
+    (void)direct_io;
 #endif
 
     FileId file_id = acquire_file_id();
@@ -207,7 +207,7 @@ DiskManager::create_file(const std::filesystem::path& path, bool direct_io, bool
     auto extend_result = ensure_file_size(file, file_growth_pages);
     if (!extend_result) {
         ::close(fd);
-        ::unlink(path.c_str());
+        ::unlink(path.string().c_str());
         file.fd = -1;
         free_ids_.push_back(file_id);
         return tl::unexpected(extend_result.error());
@@ -217,7 +217,7 @@ DiskManager::create_file(const std::filesystem::path& path, bool direct_io, bool
     auto header_result = write_file_header(file);
     if (!header_result) {
         ::close(fd);
-        ::unlink(path.c_str());
+        ::unlink(path.string().c_str());
         file.fd = -1;
         free_ids_.push_back(file_id);
         return tl::unexpected(header_result.error());
@@ -233,14 +233,14 @@ Result<FileId> DiskManager::open_file(const std::filesystem::path& path, bool di
         flags |= O_DIRECT;
     }
 #endif
-    int fd = ::open(path.c_str(), flags);
+    int fd = ::open(path.string().c_str(), flags);
     if (fd < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to open file: " + path.string() + ": " + std::strerror(errno));
     }
 
     // Acquire an exclusive advisory lock to prevent concurrent access.
-    if (::flock(fd, LOCK_EX | LOCK_NB) < 0) {
+    if (sixseven_platform::flock(fd, LOCK_EX | LOCK_NB) < 0) {
         ::close(fd);
         return make_error(StatusCode::IO_ERROR,
                           "failed to lock file (already in use?): " + path.string());
@@ -255,6 +255,8 @@ Result<FileId> DiskManager::open_file(const std::filesystem::path& path, bool di
                               "F_NOCACHE failed: " + std::string(std::strerror(errno)));
         }
     }
+#elif defined(_WIN32)
+    (void)direct_io; // No F_NOCACHE on Windows.
 #endif
 
     FileId file_id = acquire_file_id();
@@ -277,14 +279,14 @@ Result<FileId> DiskManager::open_file(const std::filesystem::path& path, bool di
 }
 
 Result<FileId> DiskManager::open_file_readonly(const std::filesystem::path& path) {
-    int fd = ::open(path.c_str(), O_RDONLY);
+    int fd = ::open(path.string().c_str(), O_RDONLY);
     if (fd < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to open file: " + path.string() + ": " + std::strerror(errno));
     }
 
     // Acquire a shared advisory lock (allows concurrent readers).
-    if (::flock(fd, LOCK_SH | LOCK_NB) < 0) {
+    if (sixseven_platform::flock(fd, LOCK_SH | LOCK_NB) < 0) {
         ::close(fd);
         return make_error(StatusCode::IO_ERROR,
                           "failed to acquire shared lock on file: " + path.string());
@@ -327,14 +329,14 @@ Result<void> DiskManager::reopen_file_readwrite(FileId file_id) {
     file->fd = -1;
 
     // Re-open in read/write mode.
-    int fd = ::open(path.c_str(), O_RDWR);
+    int fd = ::open(path.string().c_str(), O_RDWR);
     if (fd < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to reopen file: " + path.string() + ": " + std::strerror(errno));
     }
 
     // Acquire exclusive advisory lock.
-    if (::flock(fd, LOCK_EX | LOCK_NB) < 0) {
+    if (sixseven_platform::flock(fd, LOCK_EX | LOCK_NB) < 0) {
         ::close(fd);
         return make_error(StatusCode::IO_ERROR,
                           "failed to acquire exclusive lock on file: " + path.string());
@@ -382,7 +384,7 @@ Result<void> DiskManager::read_page(FileId file_id, PageId page_id, Page& page) 
     }
 
     auto offset = static_cast<off_t>(page_id) * static_cast<off_t>(page_size);
-    ssize_t bytes_read = ::pread(file->fd, page.raw().data(), page_size, offset);
+    ssize_t bytes_read = sixseven_platform::pread(file->fd, page.raw().data(), page_size, offset);
     if (bytes_read < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to read page " + std::to_string(page_id) + ": " +
@@ -433,7 +435,7 @@ Result<void> DiskManager::write_page(FileId file_id, PageId page_id, Page& page)
     page.set_checksum(compute_page_checksum(page));
 
     auto offset = static_cast<off_t>(page_id) * static_cast<off_t>(page_size);
-    ssize_t written = ::pwrite(file->fd, page.raw().data(), page_size, offset);
+    ssize_t written = sixseven_platform::pwrite(file->fd, page.raw().data(), page_size, offset);
     if (written < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to write page " + std::to_string(page_id) + ": " +
@@ -513,8 +515,14 @@ Result<void> DiskManager::sync_file(FileId file_id) {
         return make_error(StatusCode::IO_ERROR,
                           "F_FULLFSYNC failed: " + std::string(std::strerror(errno)));
     }
+#elif defined(_WIN32)
+    // _commit() flushes CRT buffers and calls FlushFileBuffers.
+    if (::_commit(file->fd) < 0) {
+        return make_error(StatusCode::IO_ERROR,
+                          "fsync (_commit) failed: " + std::string(std::strerror(errno)));
+    }
 #else
-    if (::fsync(file->fd) < 0) {
+    if (sixseven_platform::fsync(file->fd) < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "fsync failed: " + std::string(std::strerror(errno)));
     }
@@ -537,10 +545,16 @@ Result<void> DiskManager::sync_data(FileId file_id) {
         return make_error(StatusCode::IO_ERROR,
                           "fsync failed: " + std::string(std::strerror(errno)));
     }
+#elif defined(_WIN32)
+    // _commit() is equivalent to fdatasync on Windows.
+    if (::_commit(file->fd) < 0) {
+        return make_error(StatusCode::IO_ERROR,
+                          "fdatasync (_commit) failed: " + std::string(std::strerror(errno)));
+    }
 #else
     // fdatasync skips metadata updates (e.g., access time), which is cheaper
     // than fsync for data file writes.
-    if (::fdatasync(file->fd) < 0) {
+    if (sixseven_platform::fdatasync(file->fd) < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "fdatasync failed: " + std::string(std::strerror(errno)));
     }
@@ -564,7 +578,7 @@ Result<uint64_t> DiskManager::read_header_ext_u64(FileId file_id, size_t offset)
     }
 
     std::array<uint8_t, page_size> header{};
-    ssize_t bytes_read = ::pread(file->fd, header.data(), page_size, 0);
+    ssize_t bytes_read = sixseven_platform::pread(file->fd, header.data(), page_size, 0);
     if (bytes_read < 0 || static_cast<size_t>(bytes_read) != page_size) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to read file header: " + std::string(std::strerror(errno)));
@@ -594,7 +608,7 @@ Result<void> DiskManager::write_header_ext_u64(FileId file_id, size_t offset, ui
 
     // Read existing header.
     std::array<uint8_t, page_size> header{};
-    ssize_t bytes_read = ::pread(file->fd, header.data(), page_size, 0);
+    ssize_t bytes_read = sixseven_platform::pread(file->fd, header.data(), page_size, 0);
     if (bytes_read < 0 || static_cast<size_t>(bytes_read) != page_size) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to read file header: " + std::string(std::strerror(errno)));
@@ -609,7 +623,7 @@ Result<void> DiskManager::write_header_ext_u64(FileId file_id, size_t offset, ui
     std::memcpy(&header[fh_checksum_offset], &cksum, sizeof(uint32_t));
 
     // Write header back.
-    ssize_t written = ::pwrite(file->fd, header.data(), page_size, 0);
+    ssize_t written = sixseven_platform::pwrite(file->fd, header.data(), page_size, 0);
     if (written < 0 || static_cast<size_t>(written) != page_size) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to write file header: " + std::string(std::strerror(errno)));
@@ -650,7 +664,7 @@ Result<void> DiskManager::write_file_header(OpenFile& file) {
     std::memcpy(&header[fh_checksum_offset], &cksum, sizeof(uint32_t));
 
     // Write header page (page 0) to disk.
-    ssize_t written = ::pwrite(file.fd, header.data(), page_size, 0);
+    ssize_t written = sixseven_platform::pwrite(file.fd, header.data(), page_size, 0);
     if (written < 0 || static_cast<size_t>(written) != page_size) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to write file header: " + std::string(std::strerror(errno)));
@@ -662,7 +676,7 @@ Result<void> DiskManager::write_file_header(OpenFile& file) {
 Result<void> DiskManager::read_file_header(OpenFile& file) {
     std::array<uint8_t, page_size> header{};
 
-    ssize_t bytes_read = ::pread(file.fd, header.data(), page_size, 0);
+    ssize_t bytes_read = sixseven_platform::pread(file.fd, header.data(), page_size, 0);
     if (bytes_read < 0 || static_cast<size_t>(bytes_read) != page_size) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to read file header: " + std::string(std::strerror(errno)));
@@ -701,8 +715,8 @@ Result<void> DiskManager::read_file_header(OpenFile& file) {
 }
 
 Result<void> DiskManager::ensure_file_size(OpenFile& file, uint32_t needed_pages) {
-    struct stat st = {};
-    if (::fstat(file.fd, &st) < 0) {
+    sixseven_platform::stat64_t st = {};
+    if (sixseven_platform::fstat64(file.fd, &st) < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "fstat failed: " + std::string(std::strerror(errno)));
     }
@@ -716,7 +730,7 @@ Result<void> DiskManager::ensure_file_size(OpenFile& file, uint32_t needed_pages
     auto growth_chunk = static_cast<off_t>(file_growth_pages) * static_cast<off_t>(page_size);
     auto new_size = ((needed_size + growth_chunk - 1) / growth_chunk) * growth_chunk;
 
-    if (::ftruncate(file.fd, new_size) < 0) {
+    if (sixseven_platform::ftruncate(file.fd, new_size) < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to extend file: " + std::string(std::strerror(errno)));
     }

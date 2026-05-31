@@ -15,8 +15,7 @@
 
 #include <gtest/gtest.h>
 
-#include <sys/socket.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <cstdint>
 #include <cstring>
@@ -34,7 +33,7 @@ namespace {
 
 int create_socketpair147(int& client_fd_out) {
     int fds[2];
-    int rc = ::socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
+    int rc = sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
     EXPECT_EQ(rc, 0);
     client_fd_out = fds[1];
     return fds[0];
@@ -320,7 +319,7 @@ protected:
 
     void TearDown() override {
         conn_->close();
-        ::close(client_fd_);
+        sixseven_platform::socket_close(client_fd_);
     }
 
     /// Send a batch of messages and process them.

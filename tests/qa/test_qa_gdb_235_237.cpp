@@ -14,23 +14,39 @@
 // =============================================================================
 
 #include "sixseven/vector/embedding_worker.h"
+#include "sixseven/common/platform.h"
 #include "sixseven/vector/hnsw_index.h"
+#include "sixseven/common/platform.h"
 #include "sixseven/vector/hnsw_page.h"
+#include "sixseven/common/platform.h"
 #include "sixseven/vector/http_client.h"
+#include "sixseven/common/platform.h"
 #include "sixseven/vector/openai_provider.h"
+#include "sixseven/common/platform.h"
 
 #include <gtest/gtest.h>
+#include "sixseven/common/platform.h"
 
 #include <atomic>
+#include "sixseven/common/platform.h"
 #include <chrono>
+#include "sixseven/common/platform.h"
 #include <cstring>
+#include "sixseven/common/platform.h"
 #include <filesystem>
+#include "sixseven/common/platform.h"
 #include <memory>
+#include "sixseven/common/platform.h"
 #include <mutex>
+#include "sixseven/common/platform.h"
 #include <set>
+#include "sixseven/common/platform.h"
 #include <string>
+#include "sixseven/common/platform.h"
 #include <thread>
+#include "sixseven/common/platform.h"
 #include <vector>
+#include "sixseven/common/platform.h"
 
 using namespace sixseven;
 
@@ -45,7 +61,7 @@ public:
     TempDir() {
         path_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb_235_237_XXXXXX";
         std::string tmpl = path_.string();
-        char* result = mkdtemp(tmpl.data());
+        char* result = sixseven_platform::mkdtemp(tmpl.data());
         EXPECT_NE(result, nullptr);
         path_ = result;
     }

@@ -3,9 +3,7 @@
 #include "sixseven/common/logging.h"
 #include "sixseven/storage/disk_manager.h" // crc32c()
 
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <algorithm>
 #include <cstring>
@@ -414,7 +412,7 @@ Result<uint32_t> WalArchiveManager::file_checksum(const std::filesystem::path& p
                               ec.message());
     }
 
-    int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    int fd = ::open(path.string().c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to open file for checksum: " + path.string() + ": " +
@@ -422,7 +420,7 @@ Result<uint32_t> WalArchiveManager::file_checksum(const std::filesystem::path& p
     }
 
     std::vector<uint8_t> buf(file_size);
-    ssize_t bytes_read = ::pread(fd, buf.data(), file_size, 0);
+    ssize_t bytes_read = sixseven_platform::pread(fd, buf.data(), file_size, 0);
     ::close(fd);
 
     if (bytes_read < 0 || static_cast<size_t>(bytes_read) != file_size) {

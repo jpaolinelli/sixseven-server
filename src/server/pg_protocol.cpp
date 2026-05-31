@@ -327,7 +327,11 @@ std::string value_to_pg_text(const Value& value) {
         // Simple calculation from days since epoch.
         time_t secs = static_cast<time_t>(days) * 86400;
         struct tm tm_buf{};
+#ifdef _WIN32
+        gmtime_s(&tm_buf, &secs);
+#else
         gmtime_r(&secs, &tm_buf);
+#endif
         std::ostringstream oss;
         oss << std::setfill('0') << std::setw(4) << (tm_buf.tm_year + 1900) << '-' << std::setw(2)
             << (tm_buf.tm_mon + 1) << '-' << std::setw(2) << tm_buf.tm_mday;
@@ -360,7 +364,11 @@ std::string value_to_pg_text(const Value& value) {
             frac += 1000000LL;
         }
         struct tm tm_buf{};
+#ifdef _WIN32
+        gmtime_s(&tm_buf, &secs);
+#else
         gmtime_r(&secs, &tm_buf);
+#endif
         std::ostringstream oss;
         oss << std::setfill('0') << std::setw(4) << (tm_buf.tm_year + 1900) << '-' << std::setw(2)
             << (tm_buf.tm_mon + 1) << '-' << std::setw(2) << tm_buf.tm_mday << ' ' << std::setw(2)

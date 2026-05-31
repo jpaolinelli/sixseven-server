@@ -13,10 +13,7 @@
 
 #include <gtest/gtest.h>
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <atomic>
 #include <chrono>
@@ -43,7 +40,7 @@ protected:
 
 TEST_F(QA144EventLoopTest, ZeroTimeoutPoll) {
     int fds[2];
-    ASSERT_EQ(::pipe(fds), 0);
+    ASSERT_EQ(sixseven_platform::pipe(fds), 0);
     ASSERT_TRUE(loop_->add_fd(fds[0], EventType::READ).has_value());
 
     // Zero-timeout poll: should return immediately with no events.
@@ -58,8 +55,8 @@ TEST_F(QA144EventLoopTest, ZeroTimeoutPoll) {
 TEST_F(QA144EventLoopTest, MultipleFdsReportCorrectly) {
     int p1[2];
     int p2[2];
-    ASSERT_EQ(::pipe(p1), 0);
-    ASSERT_EQ(::pipe(p2), 0);
+    ASSERT_EQ(sixseven_platform::pipe(p1), 0);
+    ASSERT_EQ(sixseven_platform::pipe(p2), 0);
 
     ASSERT_TRUE(loop_->add_fd(p1[0], EventType::READ).has_value());
     ASSERT_TRUE(loop_->add_fd(p2[0], EventType::READ).has_value());
@@ -94,7 +91,7 @@ TEST_F(QA144EventLoopTest, MultipleFdsReportCorrectly) {
 
 TEST_F(QA144EventLoopTest, ReadWriteEventType) {
     int socks[2];
-    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, socks), 0);
+    ASSERT_EQ(sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, socks), 0);
 
     // Register for both read and write.
     ASSERT_TRUE(loop_->add_fd(socks[0], EventType::READ_WRITE).has_value());
@@ -106,13 +103,13 @@ TEST_F(QA144EventLoopTest, ReadWriteEventType) {
     ASSERT_TRUE(result.has_value());
     EXPECT_GE(result->size(), 1u);
 
-    ::close(socks[0]);
-    ::close(socks[1]);
+    sixseven_platform::socket_close(socks[0]);
+    sixseven_platform::socket_close(socks[1]);
 }
 
 TEST_F(QA144EventLoopTest, AddRemoveAddSameFd) {
     int fds[2];
-    ASSERT_EQ(::pipe(fds), 0);
+    ASSERT_EQ(sixseven_platform::pipe(fds), 0);
 
     ASSERT_TRUE(loop_->add_fd(fds[0], EventType::READ).has_value());
     ASSERT_TRUE(loop_->remove_fd(fds[0]).has_value());
@@ -130,7 +127,7 @@ TEST_F(QA144EventLoopTest, AddRemoveAddSameFd) {
 
 TEST_F(QA144EventLoopTest, ConsecutivePollCalls) {
     int fds[2];
-    ASSERT_EQ(::pipe(fds), 0);
+    ASSERT_EQ(sixseven_platform::pipe(fds), 0);
     ASSERT_TRUE(loop_->add_fd(fds[0], EventType::READ).has_value());
 
     // First poll: no data yet.
@@ -158,14 +155,14 @@ class QA144ConnectionTest : public ::testing::Test {
 protected:
     void SetUp() override {
         int fds[2];
-        ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+        ASSERT_EQ(sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
         fd_a_ = fds[0];
         fd_b_ = fds[1];
     }
 
     void TearDown() override {
         if (fd_b_ >= 0) {
-            ::close(fd_b_);
+            sixseven_platform::socket_close(fd_b_);
         }
     }
 
@@ -277,7 +274,7 @@ TEST_F(QA144ConnectionTest, BinaryWriteData) {
 
     // Read from peer.
     uint8_t buf[64] = {};
-    ssize_t n = ::recv(fd_b_, buf, sizeof(buf), 0);
+    ssize_t n = ::recv(fd_b_, reinterpret_cast<char*>(buf), sizeof(buf), 0);
     ASSERT_EQ(n, static_cast<ssize_t>(binary.size()));
     EXPECT_EQ(std::memcmp(buf, binary.data(), binary.size()), 0);
 }
@@ -296,7 +293,7 @@ TEST_F(QA144ConnectionTest, MultipleEnqueueWrites) {
     EXPECT_EQ(*wr, 11u);
 
     char buf[64] = {};
-    ssize_t n = ::recv(fd_b_, buf, sizeof(buf), 0);
+    ssize_t n = ::recv(fd_b_, reinterpret_cast<char*>(buf), sizeof(buf), 0);
     ASSERT_EQ(n, 11);
     EXPECT_EQ(std::string(buf, 11), "hello world");
 }
@@ -317,7 +314,7 @@ TEST_F(QA144ConnectionTest, ReadAfterPeerClose) {
     Connection conn(fd_a_);
     fd_a_ = -1;
 
-    ::close(fd_b_);
+    sixseven_platform::socket_close(fd_b_);
     fd_b_ = -1;
 
     auto r = conn.read_from_socket();
@@ -449,7 +446,7 @@ protected:
         ::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
         if (::connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
-            ::close(fd);
+            sixseven_platform::socket_close(fd);
             return -1;
         }
         return fd;
@@ -472,7 +469,7 @@ TEST_F(QA144ServerTest, RapidConnectDisconnect) {
     for (int i = 0; i < 20; ++i) {
         int fd = connect_to(server.bound_port());
         if (fd >= 0) {
-            ::close(fd);
+            sixseven_platform::socket_close(fd);
         }
     }
 
@@ -537,9 +534,9 @@ TEST_F(QA144ServerTest, MaxConnectionsOne) {
     EXPECT_EQ(server.health().active_connections, 1u);
 
     if (c2 >= 0) {
-        ::close(c2);
+        sixseven_platform::socket_close(c2);
     }
-    ::close(c1);
+    sixseven_platform::socket_close(c1);
     server.shutdown();
     t.join();
 }
@@ -561,7 +558,7 @@ TEST_F(QA144ServerTest, ConnectionCountDecreasesOnDisconnect) {
 
     // Close 3 clients.
     for (int i = 0; i < 3; ++i) {
-        ::close(clients[i]);
+        sixseven_platform::socket_close(clients[i]);
         clients[i] = -1;
     }
 
@@ -571,7 +568,7 @@ TEST_F(QA144ServerTest, ConnectionCountDecreasesOnDisconnect) {
     // Close remaining.
     for (int fd : clients) {
         if (fd >= 0) {
-            ::close(fd);
+            sixseven_platform::socket_close(fd);
         }
     }
 

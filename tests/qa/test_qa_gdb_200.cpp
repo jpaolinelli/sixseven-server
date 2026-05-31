@@ -10,9 +10,7 @@
 
 #include <gtest/gtest.h>
 
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <climits>
 #include <cstdint>
@@ -718,7 +716,7 @@ namespace {
 
 int create_socketpair_qa(int& client_fd) {
     int fds[2];
-    EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+    EXPECT_EQ(sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
     client_fd = fds[0];
     return fds[1];
 }
@@ -917,7 +915,7 @@ TEST(QA_GDB200_Wire, InjectionViaWireProtocolTextParam) {
     EXPECT_NE(received_sql.find("'''"), std::string::npos);
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(QA_GDB200_Wire, AllNullParamsViaWire) {
@@ -958,7 +956,7 @@ TEST(QA_GDB200_Wire, AllNullParamsViaWire) {
     EXPECT_EQ(received_sql, "INSERT INTO t (a, b) VALUES (NULL, NULL)");
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(QA_GDB200_Wire, MixedTypeParamsViaWire) {
@@ -1004,7 +1002,7 @@ TEST(QA_GDB200_Wire, MixedTypeParamsViaWire) {
               "INSERT INTO t (id, name, active, score) VALUES (42, 'hello', TRUE, 3.14)");
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(QA_GDB200_Wire, InvalidNumericParamViaWireReturnsError) {
@@ -1044,7 +1042,7 @@ TEST(QA_GDB200_Wire, InvalidNumericParamViaWireReturnsError) {
         << "Executor should not be called when parameter substitution fails";
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(QA_GDB200_Wire, NoParamsNoSubstitution) {
@@ -1085,5 +1083,5 @@ TEST(QA_GDB200_Wire, NoParamsNoSubstitution) {
     EXPECT_EQ(received_sql, "SELECT 1");
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }

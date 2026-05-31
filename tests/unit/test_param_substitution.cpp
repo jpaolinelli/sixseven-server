@@ -7,9 +7,7 @@
 
 #include <gtest/gtest.h>
 
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <cstdint>
 #include <optional>
@@ -341,7 +339,7 @@ namespace {
 
 int create_socketpair_for_test(int& client_fd) {
     int fds[2];
-    EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+    EXPECT_EQ(sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
     client_fd = fds[0];
     return fds[1];
 }
@@ -554,7 +552,7 @@ TEST(ParamSubstitutionWire, ParameterSubstitutionPassesSqlToExecutor) {
     EXPECT_EQ(received_sql, "SELECT * FROM t WHERE id = 42");
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(ParamSubstitutionWire, NullParameterSubstitution) {
@@ -594,7 +592,7 @@ TEST(ParamSubstitutionWire, NullParameterSubstitution) {
     EXPECT_EQ(received_sql, "UPDATE t SET name = NULL WHERE id = 5");
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(ParamSubstitutionWire, StringParameterWithEscaping) {
@@ -634,7 +632,7 @@ TEST(ParamSubstitutionWire, StringParameterWithEscaping) {
     EXPECT_EQ(received_sql, "INSERT INTO t (name) VALUES ('it''s a test')");
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(ParamSubstitutionWire, DeleteWithParameter) {
@@ -674,7 +672,7 @@ TEST(ParamSubstitutionWire, DeleteWithParameter) {
     EXPECT_EQ(received_sql, "DELETE FROM t WHERE status = 'inactive'");
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(ParamSubstitutionWire, NoParamsPassthroughUnchanged) {
@@ -715,7 +713,7 @@ TEST(ParamSubstitutionWire, NoParamsPassthroughUnchanged) {
     EXPECT_EQ(received_sql, "SELECT 1");
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
@@ -762,5 +760,5 @@ TEST(ParamSubstitutionWire, SqlLevelExecuteWithParams) {
     EXPECT_EQ(received_sql, "SELECT * FROM t WHERE id = 42");
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }

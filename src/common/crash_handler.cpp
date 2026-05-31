@@ -1,17 +1,25 @@
 #include "sixseven/common/crash_handler.h"
 
+#include "sixseven/common/platform.h"
+
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
 
+#if !defined(_WIN32)
 #include <execinfo.h>
 #include <pthread.h>
 #include <unistd.h>
+#endif
 
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
+#endif
+
+#if defined(_WIN32)
+#include <windows.h>
 #endif
 
 namespace sixseven {
@@ -39,12 +47,14 @@ namespace {
 // the handler.
 
 constexpr int kBacktraceMaxFrames = 64;
+#if !defined(_WIN32)
 constexpr std::size_t kAltStackSize = 64 * 1024; // 64 KiB
 
 // Captured at install time (normal context, safe to call dyld). Used inside
 // the signal handler — where dyld calls would deadlock — so users can
 // pass it to `atos -l` to symbolize backtrace addresses.
 std::uintmax_t g_main_image_load_address = 0;
+#endif
 
 // Async-signal-safe write of a NUL-terminated literal C-string.
 void safe_write(const char* msg) {
@@ -52,7 +62,13 @@ void safe_write(const char* msg) {
     while (msg[n] != '\0') {
         ++n;
     }
+#if defined(_WIN32)
+    HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
+    DWORD written = 0;
+    WriteFile(h, msg, static_cast<DWORD>(n), &written, nullptr);
+#else
     (void)::write(STDERR_FILENO, msg, n);
+#endif
 }
 
 // Async-signal-safe write of an unsigned integer in decimal.
@@ -67,7 +83,14 @@ void safe_write_uint(std::uintmax_t v) {
             v /= 10;
         }
     }
+#if defined(_WIN32)
+    HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
+    DWORD written = 0;
+    WriteFile(h, buf + i, static_cast<DWORD>(sizeof(buf) - static_cast<std::size_t>(i)),
+              &written, nullptr);
+#else
     (void)::write(STDERR_FILENO, buf + i, static_cast<std::size_t>(sizeof(buf) - i));
+#endif
 }
 
 // Async-signal-safe write of an unsigned integer in hex (with 0x prefix).
@@ -83,8 +106,16 @@ void safe_write_hex(std::uintmax_t v) {
             v >>= 4;
         }
     }
+#if defined(_WIN32)
+    HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
+    DWORD written = 0;
+    WriteFile(h, "0x", 2, &written, nullptr);
+    WriteFile(h, buf + i, static_cast<DWORD>(sizeof(buf) - static_cast<std::size_t>(i)),
+              &written, nullptr);
+#else
     (void)::write(STDERR_FILENO, "0x", 2);
     (void)::write(STDERR_FILENO, buf + i, static_cast<std::size_t>(sizeof(buf) - i));
+#endif
 }
 
 const char* signal_name(int signo) {
@@ -107,6 +138,19 @@ const char* signal_name(int signo) {
 }
 
 void write_backtrace() {
+#if defined(_WIN32)
+    safe_write("--- backtrace (use WinDbg or dumpbin to symbolize) ---\n");
+    void* frames[kBacktraceMaxFrames];
+    USHORT frame_count = CaptureStackBackTrace(
+        0, static_cast<ULONG>(kBacktraceMaxFrames), frames, nullptr);
+    for (USHORT i = 0; i < frame_count; ++i) {
+        safe_write("  #");
+        safe_write_uint(static_cast<std::uintmax_t>(i));
+        safe_write(" ");
+        safe_write_hex(reinterpret_cast<std::uintmax_t>(frames[i]));
+        safe_write("\n");
+    }
+#else
     safe_write("--- backtrace (symbolize with `atos -o <binary> -l ");
     safe_write_hex(g_main_image_load_address);
     safe_write(" <addr...>`) ---\n");
@@ -119,9 +163,11 @@ void write_backtrace() {
         safe_write_hex(reinterpret_cast<std::uintmax_t>(frames[i]));
         safe_write("\n");
     }
+#endif
     safe_write("--- end backtrace ---\n");
 }
 
+#if !defined(_WIN32)
 extern "C" void crash_signal_handler(int signo, siginfo_t* info, void* /*context*/) {
     safe_write("\n=== sixseven-server caught fatal signal: ");
     safe_write(signal_name(signo));
@@ -155,6 +201,7 @@ extern "C" void crash_signal_handler(int signo, siginfo_t* info, void* /*context
     // we already wrote, not from a core file.
     ::_exit(128 + signo);
 }
+#endif // !defined(_WIN32)
 
 void terminate_handler() {
     safe_write("\n=== sixseven-server std::terminate called ===\n");
@@ -189,6 +236,51 @@ void terminate_handler() {
 } // namespace
 
 void install_crash_handlers() {
+#if defined(_WIN32)
+
+    // Windows: use Structured Exception Handling (SEH) for crash capture.
+    // SetUnhandledExceptionFilter installs a top-level filter that runs
+    // when an unhandled SEH exception occurs (access violation, etc.).
+    static auto seh_filter = [](EXCEPTION_POINTERS* ep) -> LONG {
+        safe_write("\n=== sixseven-server caught fatal exception ===\n");
+        safe_write("  ExceptionCode: ");
+        safe_write_hex(static_cast<std::uintmax_t>(ep->ExceptionRecord->ExceptionCode));
+        safe_write("\n  ExceptionAddress: ");
+        safe_write_hex(
+            reinterpret_cast<std::uintmax_t>(ep->ExceptionRecord->ExceptionAddress));
+        safe_write("\n  thread:  ");
+        safe_write_uint(static_cast<std::uintmax_t>(GetCurrentThreadId()));
+        safe_write("\n  pid:     ");
+        safe_write_uint(static_cast<std::uintmax_t>(getpid()));
+        safe_write("\n");
+        write_backtrace();
+        ::_exit(1);
+        return EXCEPTION_EXECUTE_HANDLER; // Unreachable; satisfies the type.
+    };
+    SetUnhandledExceptionFilter(seh_filter);
+
+    // Also install POSIX-style signal handlers for the signals Windows does support.
+    // (SIGABRT, SIGFPE, SIGILL, SIGSEGV, SIGTERM are available on Windows.)
+    auto win_sig_handler = [](int signo) {
+        safe_write("\n=== sixseven-server caught fatal signal: ");
+        safe_write(signal_name(signo));
+        safe_write(" ===\n");
+        safe_write("  thread:  ");
+        safe_write_uint(static_cast<std::uintmax_t>(GetCurrentThreadId()));
+        safe_write("\n  pid:     ");
+        safe_write_uint(static_cast<std::uintmax_t>(getpid()));
+        safe_write("\n");
+        write_backtrace();
+        ::_exit(128 + signo);
+    };
+
+    signal(SIGSEGV, win_sig_handler);
+    signal(SIGABRT, win_sig_handler);
+    signal(SIGFPE,  win_sig_handler);
+    signal(SIGILL,  win_sig_handler);
+
+#else // POSIX
+
     // Capture the main binary's load address once, in normal context, so
     // the signal handler doesn't need to call dyld functions (which would
     // deadlock against the dyld lock if held by another thread). Image 0
@@ -223,6 +315,8 @@ void install_crash_handlers() {
     for (int sig : fatal_signals) {
         (void)::sigaction(sig, &sa, nullptr);
     }
+
+#endif // _WIN32
 
     // Catch terminate-via-uncaught-exception (tl::bad_expected_access,
     // Ort::Exception escaping noexcept, etc.) before it becomes a bare abort.

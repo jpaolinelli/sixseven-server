@@ -1,6 +1,8 @@
 #include "sixseven/vector/hnsw_index.h"
 #include "sixseven/vector/hnsw_page.h"
 
+#include "sixseven/common/platform.h"
+
 #include <gtest/gtest.h>
 
 #include <cmath>
@@ -298,7 +300,7 @@ public:
         path_ = std::filesystem::temp_directory_path() / "sixseven_hnsw_test_XXXXXX";
         // Create a unique temp directory.
         std::string tmpl = path_.string();
-        char* result = mkdtemp(tmpl.data());
+        char* result = sixseven_platform::mkdtemp(tmpl.data());
         EXPECT_NE(result, nullptr);
         path_ = result;
     }

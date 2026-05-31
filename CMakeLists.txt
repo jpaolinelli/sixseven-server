@@ -14,6 +14,19 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
 
+# Windows: suppress MSVC CRT deprecation warnings so POSIX-compat names
+# (open, close, read, write, unlink, strerror, getpid, …) compile without
+# -Werror,-Wdeprecated-declarations errors. These must be set globally
+# (before any CRT header is included), which a per-header #define can't
+# guarantee.
+if(WIN32)
+    add_compile_definitions(
+        _CRT_SECURE_NO_WARNINGS
+        _CRT_NONSTDC_NO_WARNINGS
+        _CRT_NONSTDC_NO_DEPRECATION_WARNINGS
+    )
+endif()
+
 # Testing
 enable_testing()
 

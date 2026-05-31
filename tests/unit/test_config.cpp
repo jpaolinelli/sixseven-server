@@ -2,7 +2,7 @@
 
 #include <gtest/gtest.h>
 
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -37,9 +37,9 @@ protected:
         auto tmpl = (tmp_dir / "sixseven_test_XXXXXX").string();
         std::vector<char> buf(tmpl.begin(), tmpl.end());
         buf.push_back('\0');
-        int fd = mkstemp(buf.data());
+        int fd = sixseven_platform::mkstemp(buf.data());
         ASSERT_NE(fd, -1) << "mkstemp failed";
-        close(fd);
+        ::close(fd);
         tmp_path_ = std::string(buf.data()) + ".json";
         std::rename(buf.data(), tmp_path_.c_str());
     }

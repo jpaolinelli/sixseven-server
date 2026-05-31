@@ -13,7 +13,9 @@
       "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "VCPKG_OVERLAY_PORTS": "${sourceDir}/vcpkg-overlay"
+        "VCPKG_OVERLAY_PORTS": "${sourceDir}/vcpkg-overlay",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
       }
     },
     {

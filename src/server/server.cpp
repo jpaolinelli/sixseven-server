@@ -2,11 +2,7 @@
 
 #include "sixseven/common/logging.h"
 
-#include <arpa/inet.h>
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <cerrno>
 #include <cstring>
@@ -16,6 +12,13 @@ namespace sixseven {
 namespace {
 
 Result<void> set_nonblocking(int fd) {
+#if defined(_WIN32)
+    if (sixseven_platform::set_socket_nonblocking(fd) != 0) {
+        return make_error(StatusCode::IO_ERROR,
+                          std::string("ioctlsocket(FIONBIO): WSAError=") +
+                              std::to_string(WSAGetLastError()));
+    }
+#else
     int flags = ::fcntl(fd, F_GETFL, 0);
     if (flags < 0) {
         return make_error(StatusCode::IO_ERROR,
@@ -25,6 +28,7 @@ Result<void> set_nonblocking(int fd) {
         return make_error(StatusCode::IO_ERROR,
                           std::string("fcntl(F_SETFL): ") + std::strerror(errno));
     }
+#endif
     return ok();
 }
 
@@ -53,7 +57,7 @@ Server::~Server() {
     request_shutdown();
     do_shutdown();
     if (listen_fd_ >= 0) {
-        ::close(listen_fd_);
+        sixseven_platform::socket_close(listen_fd_);
         listen_fd_ = -1;
     }
 }
@@ -66,7 +70,8 @@ Result<void> Server::setup_listener() {
 
     // Allow address reuse.
     int opt = 1;
-    ::setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    ::setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR,
+                 reinterpret_cast<const char*>(&opt), sizeof(opt));
 
     auto nb_result = set_nonblocking(listen_fd_);
     if (!nb_result) {
@@ -143,7 +148,7 @@ void Server::do_shutdown() {
     // Step 1: Stop accepting new connections.
     if (listen_fd_ >= 0) {
         (void)event_loop_->remove_fd(listen_fd_);
-        ::close(listen_fd_);
+        sixseven_platform::socket_close(listen_fd_);
         listen_fd_ = -1;
         SIXSEVEN_LOG_INFO("shutdown: stopped accepting new connections");
     }
@@ -218,10 +223,17 @@ void Server::accept_connection() {
     int client_fd =
         ::accept(listen_fd_, reinterpret_cast<struct sockaddr*>(&client_addr), &addr_len);
     if (client_fd < 0) {
+#if defined(_WIN32)
+        if (sixseven_platform::is_socket_would_block()) {
+            return; // No pending connections.
+        }
+        SIXSEVEN_LOG_WARN("accept() failed: WSAError={}", WSAGetLastError());
+#else
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             return; // No pending connections.
         }
         SIXSEVEN_LOG_WARN("accept() failed: {}", std::strerror(errno));
+#endif
         return;
     }
 
@@ -232,7 +244,7 @@ void Server::accept_connection() {
             SIXSEVEN_LOG_WARN("max connections ({}) reached, rejecting fd={}",
                            config_.max_connections,
                            client_fd);
-            ::close(client_fd);
+            sixseven_platform::socket_close(client_fd);
             return;
         }
     }
@@ -241,7 +253,7 @@ void Server::accept_connection() {
     if (!nb_result) {
         SIXSEVEN_LOG_WARN(
             "failed to set non-blocking on fd={}: {}", client_fd, nb_result.error().message);
-        ::close(client_fd);
+        sixseven_platform::socket_close(client_fd);
         return;
     }
 
@@ -249,7 +261,7 @@ void Server::accept_connection() {
     if (!add_result) {
         SIXSEVEN_LOG_WARN(
             "failed to add fd={} to event loop: {}", client_fd, add_result.error().message);
-        ::close(client_fd);
+        sixseven_platform::socket_close(client_fd);
         return;
     }
 

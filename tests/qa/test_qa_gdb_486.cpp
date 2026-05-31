@@ -288,8 +288,8 @@ TEST_F(QA_GDB486, AC2_OutputRowsContainTwoValues) {
     for (const auto& row : *result) {
         EXPECT_EQ(row.values.size(), 2u);
         // Both values must be int64_t.
-        EXPECT_NO_THROW(std::get<int64_t>(row.values[0].data()));
-        EXPECT_NO_THROW(std::get<int64_t>(row.values[1].data()));
+        EXPECT_NO_THROW((void)std::get<int64_t>(row.values[0].data()));
+        EXPECT_NO_THROW((void)std::get<int64_t>(row.values[1].data()));
     }
 }
 

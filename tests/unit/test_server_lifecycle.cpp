@@ -2,10 +2,7 @@
 
 #include <gtest/gtest.h>
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <chrono>
 #include <csignal>
@@ -33,7 +30,7 @@ protected:
         addr.sin_port = htons(port);
         ::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
         if (::connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
-            ::close(fd);
+            sixseven_platform::socket_close(fd);
             return -1;
         }
         return fd;
@@ -70,11 +67,11 @@ TEST_F(ServerLifecycleTest, GracefulShutdownClosesConnections) {
 
     // Verify the peer sockets detect closure.
     char buf[16];
-    EXPECT_LE(::recv(c1, buf, sizeof(buf), 0), 0);
-    EXPECT_LE(::recv(c2, buf, sizeof(buf), 0), 0);
+    EXPECT_LE(::recv(c1, reinterpret_cast<char*>(buf), sizeof(buf), 0), 0);
+    EXPECT_LE(::recv(c2, reinterpret_cast<char*>(buf), sizeof(buf), 0), 0);
 
-    ::close(c1);
-    ::close(c2);
+    sixseven_platform::socket_close(c1);
+    sixseven_platform::socket_close(c2);
 }
 
 TEST_F(ServerLifecycleTest, ShutdownWhileNoConnections) {
@@ -125,7 +122,7 @@ TEST_F(ServerLifecycleTest, NoNewConnectionsAfterShutdown) {
     if (fd >= 0) {
         // Connection may still succeed at TCP level if the OS hasn't released
         // the port yet, but the server should not be handling it.
-        ::close(fd);
+        sixseven_platform::socket_close(fd);
     }
     EXPECT_FALSE(server.is_running());
 }

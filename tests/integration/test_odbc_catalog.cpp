@@ -15,6 +15,8 @@
 #include "sixseven/server/server.h"
 #include "sixseven/storage/disk_manager.h"
 
+#include "sixseven/common/platform.h"
+
 #include <gtest/gtest.h>
 
 #include <sql.h>

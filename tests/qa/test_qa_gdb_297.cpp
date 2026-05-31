@@ -535,6 +535,7 @@ TEST(QA_GDB297_Worker, PersistenceRemoveCalledForSkippedEmptyJobs) {
         [](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> { return ok(); });
     pool.set_persistence(
         EmbeddingJobPersistence{.persist = [](const EmbeddingJob&) -> Result<void> { return ok(); },
+                                .persist_batch = {},
                                 .remove = [&](table_id_t, int64_t row_id, int32_t) -> Result<void> {
                                     std::lock_guard lock(remove_mu);
                                     removed_rows.push_back(row_id);

@@ -8,18 +8,29 @@
 /// insert after compaction, multi-round delete/compact.
 
 #include "sixseven/storage/buffer_pool.h"
+#include "sixseven/common/platform.h"
 #include "sixseven/storage/disk_manager.h"
+#include "sixseven/common/platform.h"
 #include "sixseven/vector/hnsw_index.h"
+#include "sixseven/common/platform.h"
 #include "sixseven/vector/hnsw_page.h"
+#include "sixseven/common/platform.h"
 
 #include <gtest/gtest.h>
+#include "sixseven/common/platform.h"
 
 #include <cmath>
+#include "sixseven/common/platform.h"
 #include <filesystem>
+#include "sixseven/common/platform.h"
 #include <numeric>
+#include "sixseven/common/platform.h"
 #include <random>
+#include "sixseven/common/platform.h"
 #include <set>
+#include "sixseven/common/platform.h"
 #include <vector>
+#include "sixseven/common/platform.h"
 
 using namespace sixseven;
 
@@ -30,7 +41,7 @@ public:
     TempDir() {
         path_ = std::filesystem::temp_directory_path() / "sixseven_qa124_XXXXXX";
         std::string tmpl = path_.string();
-        char* result = mkdtemp(tmpl.data());
+        char* result = sixseven_platform::mkdtemp(tmpl.data());
         EXPECT_NE(result, nullptr);
         path_ = result;
     }

@@ -2,20 +2,77 @@
 
 #include "sixseven/common/logging.h"
 
+#include "sixseven/common/platform.h"
+
 #include <cerrno>
 #include <cstring>
-#include <fcntl.h>
 
 #ifdef __APPLE__
 #include <sys/event.h>
 #include <sys/types.h>
-#include <unistd.h>
-#else
+#elif !defined(_WIN32)
 #include <sys/epoll.h>
-#include <unistd.h>
 #endif
 
 namespace {
+
+#if defined(_WIN32)
+
+/// On Windows we cannot use pipe fds with WSAPoll (pipes are not sockets).
+/// Instead, create a pair of connected loopback UDP sockets for wakeup.
+/// pipe_fds[0] = recv socket (polled), pipe_fds[1] = send socket.
+bool make_wakeup_pipe(int pipe_fds[2]) {
+    SOCKET recv_sock = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    SOCKET send_sock = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (recv_sock == INVALID_SOCKET || send_sock == INVALID_SOCKET) {
+        if (recv_sock != INVALID_SOCKET) closesocket(recv_sock);
+        if (send_sock != INVALID_SOCKET) closesocket(send_sock);
+        return false;
+    }
+
+    struct sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0; // OS picks port.
+
+    if (bind(recv_sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) != 0) {
+        closesocket(recv_sock);
+        closesocket(send_sock);
+        return false;
+    }
+
+    int addrlen = sizeof(addr);
+    if (getsockname(recv_sock, reinterpret_cast<struct sockaddr*>(&addr), &addrlen) != 0) {
+        closesocket(recv_sock);
+        closesocket(send_sock);
+        return false;
+    }
+
+    // Connect the send socket so we can call send() without specifying dest.
+    if (connect(send_sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) != 0) {
+        closesocket(recv_sock);
+        closesocket(send_sock);
+        return false;
+    }
+
+    // Make recv socket non-blocking.
+    u_long mode = 1;
+    ioctlsocket(recv_sock, FIONBIO, &mode);
+
+    pipe_fds[0] = static_cast<int>(recv_sock);
+    pipe_fds[1] = static_cast<int>(send_sock);
+    return true;
+}
+
+/// Drain all bytes from the read-end of the wakeup socket pair.
+void drain_wakeup_pipe(int read_fd) {
+    char buf[64];
+    while (::recv(static_cast<SOCKET>(read_fd), buf, sizeof(buf), 0) > 0) {
+        // Discard.
+    }
+}
+
+#else // POSIX
 
 /// Create a non-blocking pipe. Returns true on success.
 bool make_wakeup_pipe(int pipe_fds[2]) {
@@ -41,6 +98,8 @@ void drain_wakeup_pipe(int read_fd) {
         // Discard.
     }
 }
+
+#endif // _WIN32
 
 } // anonymous namespace
 
@@ -201,6 +260,139 @@ private:
 
 std::unique_ptr<EventLoop> EventLoop::create() {
     return std::make_unique<KqueueEventLoop>();
+}
+
+#elif defined(_WIN32)
+
+// ─── WSAPoll implementation ─────────────────────────────────────────────────
+
+class WsaPollEventLoop : public EventLoop {
+public:
+    WsaPollEventLoop() = default;
+
+    ~WsaPollEventLoop() override {
+        if (wakeup_pair_[0] >= 0) sixseven_platform::socket_close(wakeup_pair_[0]);
+        if (wakeup_pair_[1] >= 0) sixseven_platform::socket_close(wakeup_pair_[1]);
+    }
+
+    WsaPollEventLoop(const WsaPollEventLoop&) = delete;
+    WsaPollEventLoop& operator=(const WsaPollEventLoop&) = delete;
+
+    Result<void> init() override {
+        if (!make_wakeup_pipe(wakeup_pair_)) {
+            return make_error(StatusCode::IO_ERROR,
+                              std::string("wakeup socket pair creation failed: WSAError=") +
+                                  std::to_string(WSAGetLastError()));
+        }
+        // Register wakeup recv socket.
+        WSAPOLLFD pfd{};
+        pfd.fd = static_cast<SOCKET>(wakeup_pair_[0]);
+        pfd.events = POLLRDNORM;
+        poll_fds_.push_back(pfd);
+        return ok();
+    }
+
+    void wakeup() override {
+        char byte = 1;
+        (void)::send(static_cast<SOCKET>(wakeup_pair_[1]), &byte, 1, 0);
+    }
+
+    Result<void> add_fd(int fd, EventType type) override {
+        WSAPOLLFD pfd{};
+        pfd.fd = static_cast<SOCKET>(fd);
+        pfd.events = to_poll_events(type);
+        poll_fds_.push_back(pfd);
+        return ok();
+    }
+
+    Result<void> modify_fd(int fd, EventType type) override {
+        for (auto& pfd : poll_fds_) {
+            if (pfd.fd == static_cast<SOCKET>(fd)) {
+                pfd.events = to_poll_events(type);
+                return ok();
+            }
+        }
+        return make_error(StatusCode::NOT_FOUND,
+                          "modify_fd: fd not registered: " + std::to_string(fd));
+    }
+
+    Result<void> remove_fd(int fd) override {
+        auto it = poll_fds_.begin();
+        while (it != poll_fds_.end()) {
+            if (it->fd == static_cast<SOCKET>(fd)) {
+                poll_fds_.erase(it);
+                return ok();
+            }
+            ++it;
+        }
+        return ok(); // Silently ignore if not found (matches POSIX epoll_ctl DEL behaviour).
+    }
+
+    Result<std::vector<IoEvent>> poll(int timeout_ms) override {
+        if (poll_fds_.empty()) {
+            return ok(std::vector<IoEvent>{});
+        }
+
+        int n = WSAPoll(poll_fds_.data(),
+                        static_cast<ULONG>(poll_fds_.size()),
+                        timeout_ms);
+        if (n == SOCKET_ERROR) {
+            if (WSAGetLastError() == WSAEINTR) {
+                return ok(std::vector<IoEvent>{});
+            }
+            return make_error(StatusCode::IO_ERROR,
+                              std::string("WSAPoll(): WSAError=") +
+                                  std::to_string(WSAGetLastError()));
+        }
+
+        std::vector<IoEvent> result;
+        result.reserve(static_cast<size_t>(n));
+        for (auto& pfd : poll_fds_) {
+            if (pfd.revents == 0) {
+                continue;
+            }
+            int fd = static_cast<int>(pfd.fd);
+            // Drain the wakeup socket but don't expose it as a client event.
+            if (fd == wakeup_pair_[0]) {
+                drain_wakeup_pipe(fd);
+                continue;
+            }
+            EventType type{};
+            bool has_read  = (pfd.revents & (POLLRDNORM | POLLERR | POLLHUP)) != 0;
+            bool has_write = (pfd.revents & POLLWRNORM) != 0;
+            if (has_read && has_write) {
+                type = EventType::READ_WRITE;
+            } else if (has_read) {
+                type = EventType::READ;
+            } else if (has_write) {
+                type = EventType::WRITE;
+            } else {
+                // Error / hangup — treat as readable so the read path detects EOF.
+                type = EventType::READ;
+            }
+            result.push_back({fd, type});
+        }
+        return ok(std::move(result));
+    }
+
+private:
+    static SHORT to_poll_events(EventType type) {
+        SHORT ev = 0;
+        if ((static_cast<uint8_t>(type) & static_cast<uint8_t>(EventType::READ)) != 0) {
+            ev |= POLLRDNORM;
+        }
+        if ((static_cast<uint8_t>(type) & static_cast<uint8_t>(EventType::WRITE)) != 0) {
+            ev |= POLLWRNORM;
+        }
+        return ev;
+    }
+
+    std::vector<WSAPOLLFD> poll_fds_;
+    int wakeup_pair_[2] = {-1, -1};
+};
+
+std::unique_ptr<EventLoop> EventLoop::create() {
+    return std::make_unique<WsaPollEventLoop>();
 }
 
 #else

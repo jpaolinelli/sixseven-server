@@ -9,10 +9,7 @@
 
 #include <gtest/gtest.h>
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <chrono>
 #include <csignal>
@@ -41,7 +38,7 @@ protected:
         addr.sin_port = htons(port);
         ::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
         if (::connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
-            ::close(fd);
+            sixseven_platform::socket_close(fd);
             return -1;
         }
         return fd;
@@ -155,7 +152,7 @@ TEST_F(QA145LifecycleTest, HealthAfterShutdownShowsZeroConnections) {
     EXPECT_EQ(h.active_connections, 0u);
     EXPECT_FALSE(server.is_running());
 
-    ::close(c);
+    sixseven_platform::socket_close(c);
 }
 
 TEST_F(QA145LifecycleTest, HealthUptimeStopsAfterShutdown) {
@@ -214,9 +211,9 @@ TEST_F(QA145LifecycleTest, ShutdownClosesAllConnections) {
     // All client sockets should detect peer closure.
     for (int fd : clients) {
         char buf[16];
-        ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
+        ssize_t n = ::recv(fd, reinterpret_cast<char*>(buf), sizeof(buf), 0);
         EXPECT_LE(n, 0) << "fd " << fd << " still readable after shutdown";
-        ::close(fd);
+        sixseven_platform::socket_close(fd);
     }
 }
 
@@ -276,7 +273,7 @@ TEST_F(QA145LifecycleTest, ConnectionDuringShutdownWindow) {
     t.join();
 
     EXPECT_FALSE(server.is_running());
-    ::close(c);
+    sixseven_platform::socket_close(c);
 }
 
 // --------------------------------------------------------------------------
@@ -303,13 +300,14 @@ TEST_F(QA145LifecycleTest, PeerWritesDuringShutdown) {
     t.join();
 
     EXPECT_FALSE(server.is_running());
-    ::close(c);
+    sixseven_platform::socket_close(c);
 }
 
 // --------------------------------------------------------------------------
 // SIGPIPE is ignored (write to closed socket doesn't crash)
 // --------------------------------------------------------------------------
 
+#if !defined(_WIN32)
 TEST_F(QA145LifecycleTest, SigpipeIgnored) {
     // SIGPIPE should be ignored by the server. Verify it's safe to set
     // SIG_IGN as main.cpp does.
@@ -319,18 +317,23 @@ TEST_F(QA145LifecycleTest, SigpipeIgnored) {
     // Create a socketpair, close one end, write to the other.
     // If SIGPIPE is properly ignored, we get EPIPE instead of a crash.
     int fds[2];
-    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
-    ::close(fds[0]);
+    ASSERT_EQ(sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+    sixseven_platform::socket_close(fds[0]);
 
     ssize_t n = ::write(fds[1], "x", 1);
     EXPECT_EQ(n, -1);
     EXPECT_EQ(errno, EPIPE);
 
-    ::close(fds[1]);
+    sixseven_platform::socket_close(fds[1]);
 
     // Restore previous handler.
     std::signal(SIGPIPE, prev_handler);
 }
+#else
+TEST_F(QA145LifecycleTest, SigpipeIgnored) {
+    GTEST_SKIP() << "SIGPIPE test is POSIX-only";
+}
+#endif
 
 // --------------------------------------------------------------------------
 // Bound port is valid after start

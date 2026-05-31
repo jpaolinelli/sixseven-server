@@ -2,8 +2,7 @@
 
 #include <gtest/gtest.h>
 
-#include <sys/socket.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <cstring>
 
@@ -26,14 +25,14 @@ protected:
     void SetUp() override {
         // Create a socketpair for testing.
         int fds[2];
-        ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+        ASSERT_EQ(sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
         fd_a_ = fds[0];
         fd_b_ = fds[1];
     }
 
     void TearDown() override {
         if (fd_b_ >= 0) {
-            ::close(fd_b_);
+            sixseven_platform::socket_close(fd_b_);
         }
     }
 
@@ -141,7 +140,7 @@ TEST_F(ConnectionStateTest, EnqueueAndWriteToSocket) {
 
     // Read from the peer side.
     char buf[64] = {};
-    ssize_t n = ::recv(fd_b_, buf, sizeof(buf), 0);
+    ssize_t n = ::recv(fd_b_, reinterpret_cast<char*>(buf), sizeof(buf), 0);
     ASSERT_EQ(n, static_cast<ssize_t>(msg.size()));
     EXPECT_EQ(std::string(buf, static_cast<size_t>(n)), msg);
 }
@@ -189,7 +188,7 @@ TEST_F(ConnectionStateTest, ReadReturnsZeroOnEof) {
     fd_a_ = -1;
 
     // Close the peer to trigger EOF.
-    ::close(fd_b_);
+    sixseven_platform::socket_close(fd_b_);
     fd_b_ = -1;
 
     auto result = conn.read_from_socket();
@@ -229,9 +228,9 @@ TEST_F(ConnectionStateTest, MoveAssignment) {
 
     // Create a second connection with a separate socketpair.
     int fds[2];
-    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+    ASSERT_EQ(sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
     Connection conn2(fds[0]);
-    ::close(fds[1]);
+    sixseven_platform::socket_close(fds[1]);
 
     conn2 = std::move(conn1);
     EXPECT_EQ(conn2.fd(), fd1);

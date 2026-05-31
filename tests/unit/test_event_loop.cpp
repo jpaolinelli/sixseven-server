@@ -2,10 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include "sixseven/common/platform.h"
+
 #include <chrono>
-#include <sys/socket.h>
 #include <thread>
-#include <unistd.h>
 
 namespace sixseven {
 
@@ -19,7 +19,7 @@ protected:
 
         // Create a pipe for I/O testing.
         int fds[2];
-        ASSERT_EQ(::pipe(fds), 0);
+        ASSERT_EQ(sixseven_platform::pipe(fds), 0);
         pipe_read_ = fds[0];
         pipe_write_ = fds[1];
     }
@@ -84,7 +84,7 @@ TEST_F(EventLoopTest, PollDetectsWriteReady) {
     // Use a socketpair — sockets reliably report write-ready on kqueue,
     // whereas pipe write filters on kqueue require a preceding read.
     int socks[2];
-    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, socks), 0);
+    ASSERT_EQ(sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, socks), 0);
 
     auto add = loop_->add_fd(socks[0], EventType::WRITE);
     ASSERT_TRUE(add.has_value());
@@ -95,8 +95,8 @@ TEST_F(EventLoopTest, PollDetectsWriteReady) {
     EXPECT_EQ(result->at(0).fd, socks[0]);
     EXPECT_EQ(result->at(0).type, EventType::WRITE);
 
-    ::close(socks[0]);
-    ::close(socks[1]);
+    sixseven_platform::socket_close(socks[0]);
+    sixseven_platform::socket_close(socks[1]);
 }
 
 TEST_F(EventLoopTest, ModifyFd) {

@@ -14,9 +14,7 @@
 
 #include <gtest/gtest.h>
 
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <climits>
 #include <cstdint>
@@ -217,7 +215,7 @@ namespace {
 
 int create_socketpair_for_test(int& client_fd) {
     int fds[2];
-    EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+    EXPECT_EQ(sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
     client_fd = fds[0];
     return fds[1];
 }
@@ -332,7 +330,7 @@ TEST(QA_GDB383_WireExecute, OverflowParamInSqlExecuteDoesNotCrash) {
     });
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(QA_GDB383_WireExecute, IntMaxPlusOneParamInSqlExecuteDoesNotCrash) {
@@ -371,7 +369,7 @@ TEST(QA_GDB383_WireExecute, IntMaxPlusOneParamInSqlExecuteDoesNotCrash) {
     });
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================

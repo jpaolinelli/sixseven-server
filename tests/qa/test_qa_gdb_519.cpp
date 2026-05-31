@@ -875,17 +875,17 @@ TEST_F(GDB519_WassermanFaust, Schema_SixColumnsCorrectTypes) {
     for (const auto& row : *result) {
         ASSERT_EQ(row.values.size(), 6u);
         // node_id: INT64
-        EXPECT_NO_THROW(std::get<int64_t>(row.values[0].data()));
+        EXPECT_NO_THROW((void)std::get<int64_t>(row.values[0].data()));
         // closeness: FLOAT64
-        EXPECT_NO_THROW(std::get<double>(row.values[1].data()));
+        EXPECT_NO_THROW((void)std::get<double>(row.values[1].data()));
         // sum_farness: INT64
-        EXPECT_NO_THROW(std::get<int64_t>(row.values[2].data()));
+        EXPECT_NO_THROW((void)std::get<int64_t>(row.values[2].data()));
         // reachable_count: INT64
-        EXPECT_NO_THROW(std::get<int64_t>(row.values[3].data()));
+        EXPECT_NO_THROW((void)std::get<int64_t>(row.values[3].data()));
         // component_size: INT64
-        EXPECT_NO_THROW(std::get<int64_t>(row.values[4].data()));
+        EXPECT_NO_THROW((void)std::get<int64_t>(row.values[4].data()));
         // normalized_closeness: FLOAT64
-        EXPECT_NO_THROW(std::get<double>(row.values[5].data()));
+        EXPECT_NO_THROW((void)std::get<double>(row.values[5].data()));
     }
 }
 

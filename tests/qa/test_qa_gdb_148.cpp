@@ -11,8 +11,7 @@
 
 #include <gtest/gtest.h>
 
-#include <sys/socket.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <cstdint>
 #include <cstring>
@@ -379,7 +378,7 @@ namespace {
 
 int create_socketpair148(int& client_fd_out) {
     int fds[2];
-    int rc = ::socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
+    int rc = sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
     EXPECT_EQ(rc, 0);
     client_fd_out = fds[1];
     return fds[0];
@@ -504,7 +503,7 @@ TEST(QA148Wire, TrustAuthImmediateOk) {
     EXPECT_TRUE(has_message148(resp, 'Z'));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // --------------------------------------------------------------------------
@@ -574,7 +573,7 @@ TEST(QA148Wire, Md5AuthCorrectPassword) {
     EXPECT_TRUE(has_message148(resp2, 'Z'));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // --------------------------------------------------------------------------
@@ -618,7 +617,7 @@ TEST(QA148Wire, Md5AuthWrongPassword) {
     EXPECT_TRUE(has_message148(resp, 'E'));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // --------------------------------------------------------------------------
@@ -649,7 +648,7 @@ TEST(QA148Wire, Md5AuthNonexistentUser) {
     EXPECT_TRUE(has_message148(resp, 'E'));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // --------------------------------------------------------------------------
@@ -679,7 +678,7 @@ TEST(QA148Wire, ScramAuthNonexistentUser) {
     EXPECT_TRUE(has_message148(resp, 'E'));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // --------------------------------------------------------------------------
@@ -720,7 +719,7 @@ TEST(QA148Wire, NonPasswordMessageDuringAuth) {
     EXPECT_EQ(handler.state(), ProtocolState::CLOSED);
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // --------------------------------------------------------------------------
@@ -745,5 +744,5 @@ TEST(QA148Wire, TrustAuthNoUserParam) {
     EXPECT_EQ(handler.state(), ProtocolState::READY);
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }

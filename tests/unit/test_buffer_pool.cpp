@@ -2,8 +2,9 @@
 
 #include <gtest/gtest.h>
 
+#include "sixseven/common/platform.h"
+
 #include <fcntl.h>
-#include <unistd.h>
 
 #include <atomic>
 #include <chrono>
@@ -959,11 +960,11 @@ TEST_F(BufferPoolTest, DoubleWriteBufferWritesThroughDWB) {
     EXPECT_EQ((*get_result)[0], 0xFF);
 
     // Verify the DWB file contains a valid page with correct checksum.
-    int dwb_fd = ::open(dwb_path.c_str(), O_RDONLY);
+    int dwb_fd = ::open(dwb_path.string().c_str(), O_RDONLY);
     ASSERT_GE(dwb_fd, 0);
 
     std::array<uint8_t, page_size> dwb_data{};
-    ssize_t bytes_read = ::pread(dwb_fd, dwb_data.data(), page_size, 0);
+    ssize_t bytes_read = sixseven_platform::pread(dwb_fd, dwb_data.data(), page_size, 0);
     EXPECT_EQ(static_cast<size_t>(bytes_read), page_size);
     ::close(dwb_fd);
 
@@ -1048,11 +1049,11 @@ TEST_F(BufferPoolTest, FlusherWithDoubleWriteBuffer) {
     EXPECT_EQ((*get_result)[0], 0xAA);
 
     // Verify the DWB file has valid content.
-    int dwb_fd = ::open(dwb_path.c_str(), O_RDONLY);
+    int dwb_fd = ::open(dwb_path.string().c_str(), O_RDONLY);
     ASSERT_GE(dwb_fd, 0);
 
     std::array<uint8_t, page_size> dwb_data{};
-    ssize_t bytes_read = ::pread(dwb_fd, dwb_data.data(), page_size, 0);
+    ssize_t bytes_read = sixseven_platform::pread(dwb_fd, dwb_data.data(), page_size, 0);
     EXPECT_EQ(static_cast<size_t>(bytes_read), page_size);
     ::close(dwb_fd);
 

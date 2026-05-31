@@ -7,9 +7,7 @@
 
 #include <gtest/gtest.h>
 
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include "sixseven/common/platform.h"
 
 #include <cstdint>
 #include <cstring>
@@ -331,7 +329,7 @@ std::vector<uint8_t> build_ssl_request() {
 /// The client-side fd is stored in client_fd_out.
 int create_socketpair(int& client_fd_out) {
     int fds[2];
-    int rc = ::socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
+    int rc = sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
     EXPECT_EQ(rc, 0);
     client_fd_out = fds[1];
     return fds[0]; // Server side.
@@ -461,7 +459,7 @@ TEST(PgProtocol, StartupHandshake) {
     EXPECT_TRUE(found_ready);
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, SslRequestDenied) {
@@ -491,7 +489,7 @@ TEST(PgProtocol, SslRequestDenied) {
     EXPECT_EQ(response[0], 'N'); // SSL not supported.
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, SimpleQuerySelect) {
@@ -563,7 +561,7 @@ TEST(PgProtocol, SimpleQuerySelect) {
     EXPECT_EQ(payload[0], 'I');
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, SimpleQueryError) {
@@ -642,7 +640,7 @@ TEST(PgProtocol, SimpleQueryError) {
     EXPECT_EQ(payload[0], 'I');
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, EmptyQuery) {
@@ -684,7 +682,7 @@ TEST(PgProtocol, EmptyQuery) {
     EXPECT_EQ(payload[0], 'I');
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, TerminateMessage) {
@@ -714,7 +712,7 @@ TEST(PgProtocol, TerminateMessage) {
     EXPECT_EQ(handler.state(), ProtocolState::CLOSED);
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, DmlQueryInsert) {
@@ -763,7 +761,7 @@ TEST(PgProtocol, DmlQueryInsert) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, DdlQuery) {
@@ -806,7 +804,7 @@ TEST(PgProtocol, DdlQuery) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, PartialMessageReassembly) {
@@ -839,7 +837,7 @@ TEST(PgProtocol, PartialMessageReassembly) {
     EXPECT_EQ(handler.state(), ProtocolState::READY); // Now complete.
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, DataRowNullValues) {
@@ -888,7 +886,7 @@ TEST(PgProtocol, DataRowNullValues) {
     EXPECT_EQ(field_len, -1); // NULL.
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
@@ -1087,7 +1085,7 @@ TEST(PgProtocol, ParseBindExecuteSync) {
     EXPECT_EQ(payload[0], 'I');
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, NamedPreparedStatementPersists) {
@@ -1144,7 +1142,7 @@ TEST(PgProtocol, NamedPreparedStatementPersists) {
     EXPECT_EQ(call_count, 2);
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, CloseStatement) {
@@ -1197,7 +1195,7 @@ TEST(PgProtocol, CloseStatement) {
     EXPECT_EQ(handler.prepared_statements().count("todelete"), 0u);
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, DescribeStatement) {
@@ -1244,7 +1242,7 @@ TEST(PgProtocol, DescribeStatement) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, DescribeStatementRowDescription) {
@@ -1326,7 +1324,7 @@ TEST(PgProtocol, DescribeStatementRowDescription) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, DescribeStatementNoDataForDML) {
@@ -1374,7 +1372,7 @@ TEST(PgProtocol, DescribeStatementNoDataForDML) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, DescribePortalRowDescription) {
@@ -1461,7 +1459,7 @@ TEST(PgProtocol, DescribePortalRowDescription) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, DescribePortalNoDataForDML) {
@@ -1513,7 +1511,7 @@ TEST(PgProtocol, DescribePortalNoDataForDML) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, DescribeStatementDescriberError) {
@@ -1560,7 +1558,7 @@ TEST(PgProtocol, DescribeStatementDescriberError) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, DescribePortalDescriberError) {
@@ -1611,7 +1609,7 @@ TEST(PgProtocol, DescribePortalDescriberError) {
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, ErrorInBatchSkipsUntilSync) {
@@ -1658,7 +1656,7 @@ TEST(PgProtocol, ErrorInBatchSkipsUntilSync) {
     EXPECT_EQ(call_count, 0);
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
@@ -1798,7 +1796,7 @@ TEST(PgProtocol, MultiStatementSimpleQuery) {
     EXPECT_EQ(call_count, 3);
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 TEST(PgProtocol, MultiStatementErrorStopsExecution) {
@@ -1855,7 +1853,7 @@ TEST(PgProtocol, MultiStatementErrorStopsExecution) {
     EXPECT_EQ(call_count, 2);
 
     conn.close();
-    ::close(client_fd);
+    sixseven_platform::socket_close(client_fd);
 }
 
 // =============================================================================
