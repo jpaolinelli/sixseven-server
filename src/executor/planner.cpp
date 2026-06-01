@@ -17,7 +17,9 @@
 #include "sixseven/executor/limit.h"
 #include "sixseven/executor/match_shortest_path.h"
 #include "sixseven/executor/nearest_scan.h"
+#include "sixseven/executor/hash_join.h"
 #include "sixseven/executor/nested_loop_join.h"
+#include "sixseven/planner/rewrite_rules.h"
 #include "sixseven/executor/pattern_match.h"
 #include "sixseven/executor/project.h"
 #include "sixseven/executor/seq_scan.h"
@@ -1203,8 +1205,37 @@ Planner::plan_select(const SelectStmt& stmt,
 
     std::unique_ptr<Iterator> child = std::move(source->iter);
 
+    // Predicate pushdown state — declared here so the post-join filter
+    // logic can access which conjuncts were consumed.
+    std::vector<const Expr*> where_conjuncts;
+    std::vector<bool> conjunct_consumed;
+
     // -- 2b. JOIN operators ---------------------------------------------------
     if (has_joins) {
+        // ── Predicate pushdown: decompose WHERE into per-table filters ────
+        // For INNER joins, single-table predicates can be pushed down to
+        // the individual table scans, dramatically reducing join input size.
+        if (stmt.where_expr) {
+            where_conjuncts = extract_conjuncts(*stmt.where_expr);
+            conjunct_consumed.resize(where_conjuncts.size(), false);
+
+            // Push predicates that belong to the base table.
+            auto base_preds = extract_table_predicates(where_conjuncts, alias);
+            if (!base_preds.empty()) {
+                // Wrap the base scan with a filter for each pushed predicate.
+                for (const Expr* pred : base_preds) {
+                    child = std::make_unique<FilterOperator>(
+                        std::move(child), *pred, bound, &subquery_ctx_);
+                }
+                // Mark these conjuncts as consumed.
+                for (size_t i = 0; i < where_conjuncts.size(); ++i) {
+                    if (is_single_table_predicate(*where_conjuncts[i], alias)) {
+                        conjunct_consumed[i] = true;
+                    }
+                }
+            }
+        }
+
         for (const auto& join_clause : stmt.joins) {
             const auto& jtref = join_clause.table;
             const auto& join_alias = jtref.alias.empty() ? jtref.name : jtref.alias;
@@ -1212,6 +1243,21 @@ Planner::plan_select(const SelectStmt& stmt,
             auto join_source = plan_from_source(jtref, join_alias, cte_map, bound, owned_exprs);
             if (!join_source) {
                 return make_error(join_source.error().code, join_source.error().message);
+            }
+
+            // ── Push single-table predicates into the join source ─────────
+            // Only safe for INNER joins — outer join nullable-side predicates
+            // must remain in the post-join filter.
+            if (join_clause.type == JoinType::INNER && !where_conjuncts.empty()) {
+                for (size_t i = 0; i < where_conjuncts.size(); ++i) {
+                    if (!conjunct_consumed[i] &&
+                        is_single_table_predicate(*where_conjuncts[i], join_alias)) {
+                        join_source->iter = std::make_unique<FilterOperator>(
+                            std::move(join_source->iter), *where_conjuncts[i], bound,
+                            &subquery_ctx_);
+                        conjunct_consumed[i] = true;
+                    }
+                }
             }
 
             // Build combined output schema: left columns + right columns.
@@ -1230,24 +1276,116 @@ Planner::plan_select(const SelectStmt& stmt,
 
             const Expr* on_expr = join_clause.on_expr ? join_clause.on_expr.get() : nullptr;
 
-            child = std::make_unique<NestedLoopJoinOperator>(std::move(child),
-                                                             std::move(join_source->iter),
-                                                             join_clause.type,
-                                                             on_expr,
-                                                             bound,
-                                                             std::move(combined));
+            // ── Choose join method: HashJoin for equi-joins, NestedLoop otherwise
+            bool used_hash_join = false;
+            if (on_expr) {
+                auto* bin = dynamic_cast<const BinaryExpr*>(on_expr);
+                if (bin && bin->op == BinaryOp::EQUAL) {
+                    auto* lhs_col = dynamic_cast<const ColumnRefExpr*>(bin->lhs.get());
+                    auto* rhs_col = dynamic_cast<const ColumnRefExpr*>(bin->rhs.get());
+                    if (lhs_col && rhs_col) {
+                        // Equi-join detected. Determine which key belongs to which side.
+                        // The left child's schema contains columns from previously joined
+                        // tables; the right child is the current join source.
+                        const Expr* probe_key = bin->lhs.get();
+                        const Expr* build_key = bin->rhs.get();
+
+                        // Check if lhs belongs to the right side (join source).
+                        // If so, swap probe/build keys.
+                        bool lhs_is_right = false;
+                        for (size_t c = 0; c < right_schema_ref.column_count(); ++c) {
+                            if (right_schema_ref.column(c).table_name == lhs_col->table) {
+                                lhs_is_right = true;
+                                break;
+                            }
+                        }
+                        if (lhs_is_right) {
+                            std::swap(probe_key, build_key);
+                        }
+
+                        child = std::make_unique<HashJoinOperator>(
+                            std::move(child),
+                            std::move(join_source->iter),
+                            join_clause.type,
+                            probe_key,
+                            build_key,
+                            bound,
+                            std::move(combined));
+                        used_hash_join = true;
+                    }
+                }
+            }
+
+            if (!used_hash_join) {
+                child = std::make_unique<NestedLoopJoinOperator>(std::move(child),
+                                                                 std::move(join_source->iter),
+                                                                 join_clause.type,
+                                                                 on_expr,
+                                                                 bound,
+                                                                 std::move(combined));
+            }
+        }
+
+        // Mark WHERE as pushed if all conjuncts were consumed.
+        if (!where_conjuncts.empty()) {
+            bool all_consumed = true;
+            for (bool c : conjunct_consumed) {
+                if (!c) { all_consumed = false; break; }
+            }
+            if (all_consumed) {
+                pushed_where = true;
+            }
         }
     }
 
     // -- 2c. Subquery predicate rewriting (EXISTS/NOT EXISTS/IN) ----------------
     const Expr* remaining_where = nullptr;
     if (stmt.where_expr && !pushed_where) {
-        auto rewrite_result =
-            rewrite_subquery_predicates(*stmt.where_expr, child, bound, cte_map, owned_exprs);
-        if (!rewrite_result) {
-            return make_error(rewrite_result.error().code, rewrite_result.error().message);
+        // When some conjuncts were pushed but others remain, rebuild a WHERE
+        // from just the unconsumed conjuncts.
+        if (has_joins && !conjunct_consumed.empty()) {
+            std::vector<const Expr*> remaining;
+            for (size_t i = 0; i < where_conjuncts.size(); ++i) {
+                if (!conjunct_consumed[i]) {
+                    remaining.push_back(where_conjuncts[i]);
+                }
+            }
+            if (remaining.empty()) {
+                // All pushed — nothing to apply.
+                pushed_where = true;
+            } else if (remaining.size() == 1) {
+                remaining_where = remaining[0];
+            } else {
+                // Rebuild AND chain from remaining predicates.
+                // Build right-to-left: (a AND (b AND c))
+                const Expr* chain = remaining.back();
+                for (int i = static_cast<int>(remaining.size()) - 2; i >= 0; --i) {
+                    auto and_expr = std::make_unique<BinaryExpr>();
+                    and_expr->op = BinaryOp::AND;
+                    // Clone references (non-owning) by wrapping.
+                    and_expr->lhs = nullptr; // placeholder
+                    and_expr->rhs = nullptr; // placeholder
+                    // Since we can't easily own new AND nodes, apply remaining
+                    // predicates as chained FilterOperators instead.
+                    (void)chain;
+                    (void)and_expr;
+                }
+                // Simpler approach: chain FilterOperators for each remaining predicate.
+                for (const Expr* pred : remaining) {
+                    child = std::make_unique<FilterOperator>(
+                        std::move(child), *pred, bound, &subquery_ctx_);
+                }
+                pushed_where = true;
+                remaining_where = nullptr;
+            }
+        } else {
+            auto rewrite_result =
+                rewrite_subquery_predicates(*stmt.where_expr, child, bound, cte_map, owned_exprs);
+            if (!rewrite_result) {
+                return make_error(rewrite_result.error().code, rewrite_result.error().message);
+            }
+            remaining_where = *rewrite_result;
         }
-        remaining_where = *rewrite_result;
     }
 
     // -- 2d. Apply remaining WHERE as a filter ---------------------------------

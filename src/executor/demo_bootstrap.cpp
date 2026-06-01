@@ -222,11 +222,17 @@ static Result<void> create_schema(QueryEngine& engine) {
     DEMO_EXEC(engine, "CREATE EDGE TYPE follows FROM readers TO readers");
     DEMO_EXEC(engine, "CREATE EDGE TYPE tagged_as FROM books TO tags");
 
-    // Indexes
-    DEMO_EXEC(engine, "CREATE INDEX idx_books_genre  ON books(genre)");
-    DEMO_EXEC(engine, "CREATE INDEX idx_books_rating ON books(rating)");
+    // Indexes — cover every column used in WHERE, JOIN, and ORDER BY
+    // across the demo queries so nothing falls back to sequential scan.
+    DEMO_EXEC(engine, "CREATE INDEX idx_books_genre    ON books(genre)");
+    DEMO_EXEC(engine, "CREATE INDEX idx_books_rating   ON books(rating)");
+    DEMO_EXEC(engine, "CREATE INDEX idx_books_pubyear  ON books(published_year)");
     DEMO_EXEC(engine, "CREATE INDEX idx_reviews_book   ON reviews(book_id)");
     DEMO_EXEC(engine, "CREATE INDEX idx_reviews_reader ON reviews(reader_id)");
+    DEMO_EXEC(engine, "CREATE INDEX idx_reviews_stars  ON reviews(stars)");
+    DEMO_EXEC(engine, "CREATE INDEX idx_readers_city   ON readers(city)");
+    DEMO_EXEC(engine, "CREATE INDEX idx_readers_joined ON readers(joined_year)");
+    DEMO_EXEC(engine, "CREATE INDEX idx_authors_nat    ON authors(nationality)");
 
     return ok();
 }
@@ -529,16 +535,22 @@ static Result<void> seed_edges(QueryEngine& engine) {
         }
     }
 
-    // --- follows: each reader follows 3 others ---
+    // --- follows: each reader follows 5–8 others ---
+    // Use varied step sizes so the social graph fans out quickly and
+    // every city is reachable within 2–3 hops from any starting reader.
     {
         constexpr int batch = 100;
-        // Generate all follow pairs first, batch them
         struct FollowPair { int src; int tgt; };
         std::vector<FollowPair> follows;
-        follows.reserve(static_cast<size_t>(k_reader_count) * 3);
+        follows.reserve(static_cast<size_t>(k_reader_count) * 8);
+        // Step sizes chosen to cover all 20 city residues within 2 hops.
+        static constexpr int steps[] = {1, 3, 7, 13, 31, 67, 137, 251};
+        static constexpr int step_count = 8;
         for (int r = 1; r <= k_reader_count; ++r) {
-            for (int j = 1; j <= 3; ++j) {
-                int tgt = ((r - 1 + j * 37) % k_reader_count) + 1;
+            // Each reader follows 5–8 others depending on their ID.
+            int n_follows = 5 + (r % 4); // 5, 6, 7, or 8
+            for (int j = 0; j < n_follows; ++j) {
+                int tgt = ((r - 1 + steps[j % step_count]) % k_reader_count) + 1;
                 if (tgt != r) {
                     follows.push_back({r, tgt});
                 }
