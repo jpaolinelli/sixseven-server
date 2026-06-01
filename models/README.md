@@ -4,16 +4,28 @@ This directory holds ONNX embedding models for local inference. Models are not c
 
 ## Quick Start
 
-```bash
+### 1. Install the downloader
+
+```
 pip install huggingface-hub
+```
 
-# Download the recommended model (~180 MB total)
-hf download onnx-community/all-MiniLM-L6-v2-ONNX \
+### 2. Download the recommended model (~180 MB)
+
+**macOS / Linux:**
+```bash
+huggingface-cli download onnx-community/all-MiniLM-L6-v2-ONNX \
     --local-dir models/all-MiniLM-L6-v2
-
-# Clean up the download cache
 rm -rf models/all-MiniLM-L6-v2/.cache
 ```
+
+**Windows (PowerShell):**
+```powershell
+python -c "from huggingface_hub import snapshot_download; snapshot_download('onnx-community/all-MiniLM-L6-v2-ONNX', local_dir='models/all-MiniLM-L6-v2')"
+Remove-Item -Recurse -Force models\all-MiniLM-L6-v2\.cache -ErrorAction SilentlyContinue
+```
+
+> **Note:** On Windows, `huggingface-cli` often installs to a user Scripts directory that isn't on PATH. The `python -c` approach above avoids this issue entirely and works on all platforms.
 
 ## Directory Layout
 
@@ -40,20 +52,34 @@ SixSevenDB auto-discovers `model.onnx` (or `model.ort`) inside the `onnx/` subdi
 
 Best balance of size and quality for general-purpose semantic search.
 
+**macOS / Linux:**
 ```bash
-hf download onnx-community/all-MiniLM-L6-v2-ONNX \
+huggingface-cli download onnx-community/all-MiniLM-L6-v2-ONNX \
     --local-dir models/all-MiniLM-L6-v2
 rm -rf models/all-MiniLM-L6-v2/.cache
+```
+
+**Windows (PowerShell):**
+```powershell
+python -c "from huggingface_hub import snapshot_download; snapshot_download('onnx-community/all-MiniLM-L6-v2-ONNX', local_dir='models/all-MiniLM-L6-v2')"
+Remove-Item -Recurse -Force models\all-MiniLM-L6-v2\.cache -ErrorAction SilentlyContinue
 ```
 
 ### bge-small-en-v1.5 (384 dimensions, WordPiece tokenizer)
 
 Strong retrieval performance.
 
+**macOS / Linux:**
 ```bash
-hf download onnx-community/bge-small-en-v1.5-ONNX \
+huggingface-cli download onnx-community/bge-small-en-v1.5-ONNX \
     --local-dir models/bge-small-en-v1.5
 rm -rf models/bge-small-en-v1.5/.cache
+```
+
+**Windows (PowerShell):**
+```powershell
+python -c "from huggingface_hub import snapshot_download; snapshot_download('onnx-community/bge-small-en-v1.5-ONNX', local_dir='models/bge-small-en-v1.5')"
+Remove-Item -Recurse -Force models\bge-small-en-v1.5\.cache -ErrorAction SilentlyContinue
 ```
 
 ### Export Your Own Model
@@ -65,6 +91,8 @@ optimum-cli export onnx \
     --model sentence-transformers/all-MiniLM-L6-v2 \
     models/all-MiniLM-L6-v2
 ```
+
+On Windows, replace `\` with `` ` `` (backtick) for line continuations, or put everything on one line.
 
 ## Supported Tokenizer Types
 
