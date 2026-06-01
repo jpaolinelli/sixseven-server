@@ -3,6 +3,7 @@
 #include "sixseven/common/crash_handler.h"
 #include "sixseven/common/logging.h"
 #include "sixseven/executor/catalog_persistence.h"
+#include "sixseven/executor/demo_bootstrap.h"
 #include "sixseven/executor/index_manager.h"
 #include "sixseven/executor/query_engine.h"
 #include "sixseven/executor/settings_cache.h"
@@ -130,6 +131,9 @@ int main(int argc, char* argv[]) {
     engine.set_embedding_worker_pool(&embedding_pool);
     engine.set_backfill_manager(&backfill_manager);
 
+    // Detect first run before bootstrap so we can seed demo data afterwards.
+    bool first_run = !sixseven::SystemBootstrap::is_bootstrapped(data_dir);
+
     // Bootstrap system database (creates/loads system tables and catalog).
     auto boot =
         sixseven::SystemBootstrap::bootstrap(engine, catalog, storage, persistence, config, data_dir);
@@ -197,6 +201,18 @@ int main(int argc, char* argv[]) {
 
     // Switch engine to default user database.
     engine.set_current_database(sixseven::default_database_id);
+
+    // On first run, populate the demo database so new users can immediately
+    // explore relational, graph, and vector queries without any setup.
+    if (first_run) {
+        auto demo = sixseven::create_demo_database(engine);
+        if (!demo) {
+            SIXSEVEN_LOG_WARN("demo database creation failed (non-fatal): {}",
+                              demo.error().message);
+        } else {
+            SIXSEVEN_LOG_INFO("demo database created successfully");
+        }
+    }
 
     install_signal_handlers();
 

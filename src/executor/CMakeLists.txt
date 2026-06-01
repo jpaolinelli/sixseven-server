@@ -35,6 +35,7 @@ add_library(sixseven_executor STATIC
     index_manager.cpp
     storage_manager.cpp
     system_bootstrap.cpp
+    demo_bootstrap.cpp
     settings_cache.cpp
     provider_cache.cpp
     explain.cpp

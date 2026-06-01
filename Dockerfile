@@ -4,7 +4,7 @@
 # Stages:
 #   1. build    — install tools + vcpkg deps + compile release binaries
 #   2. test     — build debug + run unit/QA tests (optional target)
-#   3. runtime  — slim image with just the server binary
+#   3. runtime  — slim image with server binary + ONNX model
 #
 # Build:
 #   docker build -t sixsevendb .                            # runtime image
@@ -24,7 +24,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Build tools + GCC 13 (Clang has known issues with onnxruntime intrinsics)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-13 g++-13 cmake ninja-build make git curl zip unzip tar pkg-config \
-        ca-certificates python3 python3-dev \
+        ca-certificates python3 python3-dev python3-pip \
         linux-libc-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -50,6 +50,11 @@ RUN cmake --preset release \
         -DVCPKG_HOST_TRIPLET=x64-linux-release \
     && cmake --build build/release -j$(nproc)
 
+# Download the ONNX embedding model for the runtime image
+RUN pip install --break-system-packages huggingface-hub \
+    && python3 -c "from huggingface_hub import snapshot_download; snapshot_download('onnx-community/all-MiniLM-L6-v2-ONNX', local_dir='/opt/models/all-MiniLM-L6-v2')" \
+    && rm -rf /opt/models/all-MiniLM-L6-v2/.cache
+
 # ---------------------------------------------------------------------------
 # Stage 2: test (optional — use: docker build --target test)
 # ---------------------------------------------------------------------------
@@ -72,8 +77,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libstdc++6 libgcc-s1 ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -r -s /bin/false sixseven \
-    && mkdir -p /data /config \
-    && chown sixseven:sixseven /data /config
+    && mkdir -p /data /config /models \
+    && chown -R sixseven:sixseven /data /config /models
 
 # Copy the release binaries
 COPY --from=build /src/build/release/src/sixseven-server /usr/local/bin/
@@ -82,6 +87,9 @@ COPY --from=build /src/build/release/src/sixseven-cli /usr/local/bin/
 # Copy shared libraries the binaries need
 COPY --from=build /src/build/release/vcpkg_installed/x64-linux-release/lib/*.so* /usr/local/lib/
 RUN ldconfig
+
+# Bundle the ONNX embedding model so vector search works out of the box
+COPY --from=build /opt/models/all-MiniLM-L6-v2 /models/all-MiniLM-L6-v2
 
 EXPOSE 5432
 VOLUME ["/data", "/config"]
