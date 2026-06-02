@@ -103,15 +103,15 @@ WHERE city = 'London';
 -- ============================================================================
 
 -- PageRank: who are the most influential readers?
-SELECT node_id, rank
+SELECT node_id, score
 FROM PageRank('follows')
-ORDER BY rank DESC
+ORDER BY score DESC
 LIMIT 10;
 
 -- PageRank with custom damping factor
-SELECT node_id, rank
+SELECT node_id, score
 FROM PageRank('follows', damping := 0.9, iterations := 30)
-ORDER BY rank DESC
+ORDER BY score DESC
 LIMIT 10;
 
 -- Connected components: are there isolated reader communities?

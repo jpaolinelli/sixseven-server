@@ -72,6 +72,10 @@ public:
     /// Drop storage for a table. Flushes, closes the file, and removes it.
     [[nodiscard]] Result<void> drop_table_storage(database_id_t db_id, table_id_t table_id);
 
+    /// Flush all dirty pages across every open table and index to disk.
+    /// Call after bulk data loading to ensure crash safety.
+    [[nodiscard]] Result<void> flush_all();
+
     /// Build a byte-level Schema from a TableSchema (CatalogColumnDef -> ColumnDef).
     [[nodiscard]] static Schema build_storage_schema(const TableSchema& ts);
 

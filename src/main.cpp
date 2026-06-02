@@ -9,7 +9,19 @@
 #include "sixseven/executor/settings_cache.h"
 #include "sixseven/executor/storage_manager.h"
 #include "sixseven/executor/system_bootstrap.h"
+#include "sixseven/graph/algorithm_registry.h"
+#include "sixseven/graph/betweenness_centrality.h"
+#include "sixseven/graph/closeness_centrality.h"
+#include "sixseven/graph/clustering_coefficient.h"
+#include "sixseven/graph/connected_components.h"
+#include "sixseven/graph/degree_centrality.h"
+#include "sixseven/graph/eigenvector_centrality.h"
 #include "sixseven/graph/graph_engine.h"
+#include "sixseven/graph/harmonic_centrality.h"
+#include "sixseven/graph/louvain.h"
+#include "sixseven/graph/pagerank.h"
+#include "sixseven/graph/strongly_connected_components.h"
+#include "sixseven/graph/triangle_count.h"
 #include "sixseven/server/server.h"
 #include "sixseven/storage/disk_manager.h"
 #include "sixseven/vector/backfill_manager.h"
@@ -125,11 +137,26 @@ int main(int argc, char* argv[]) {
 
     sixseven::BackfillManager backfill_manager(catalog, storage, embedding_pool);
 
+    // Register all graph algorithms so FROM pagerank('follows') etc. work.
+    sixseven::AlgorithmRegistry algorithm_registry;
+    (void)algorithm_registry.register_algorithm(sixseven::make_pagerank_def(), sixseven::pagerank_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_connected_components_def(), sixseven::connected_components_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_betweenness_centrality_def(), sixseven::betweenness_centrality_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_closeness_centrality_def(), sixseven::closeness_centrality_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_degree_centrality_def(), sixseven::degree_centrality_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_eigenvector_centrality_def(), sixseven::eigenvector_centrality_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_harmonic_centrality_def(), sixseven::harmonic_centrality_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_clustering_coefficient_def(), sixseven::clustering_coefficient_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_community_detect_def(), sixseven::community_detect_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_triangle_count_def(), sixseven::triangle_count_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_strongly_connected_components_def(), sixseven::strongly_connected_components_execute);
+
     sixseven::QueryEngine engine(catalog, storage, &graph_engine);
     engine.set_provider_registry(&provider_registry);
     engine.set_catalog_persistence(&persistence);
     engine.set_embedding_worker_pool(&embedding_pool);
     engine.set_backfill_manager(&backfill_manager);
+    engine.set_algorithm_registry(&algorithm_registry);
 
     // Detect first run before bootstrap so we can seed demo data afterwards.
     bool first_run = !sixseven::SystemBootstrap::is_bootstrapped(data_dir);
@@ -211,6 +238,12 @@ int main(int argc, char* argv[]) {
                               demo.error().message);
         } else {
             SIXSEVEN_LOG_INFO("demo database created successfully");
+        }
+        // Flush all buffer pools to disk so the demo data survives a crash
+        // or hard kill before the background flusher has a chance to run.
+        auto flush = storage.flush_all();
+        if (!flush) {
+            SIXSEVEN_LOG_WARN("post-demo flush failed: {}", flush.error().message);
         }
     }
 

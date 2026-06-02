@@ -318,4 +318,28 @@ Result<void> StorageManager::write_index_meta_page_id(index_id_t index_id, PageI
     return dm_.write_header_ext_u64(it->second->file_id, 0, static_cast<uint64_t>(meta_page_id));
 }
 
+// -- Flush all dirty pages to disk -------------------------------------------
+
+Result<void> StorageManager::flush_all() {
+    std::lock_guard lock(mu_);
+
+    for (auto& [id, ts] : tables_) {
+        if (ts && ts->bpm) {
+            auto r = ts->bpm->flush_all();
+            if (!r) return r;
+            auto s = dm_.sync_file(ts->file_id);
+            if (!s) return s;
+        }
+    }
+    for (auto& [id, is] : indexes_) {
+        if (is && is->bpm) {
+            auto r = is->bpm->flush_all();
+            if (!r) return r;
+            auto s = dm_.sync_file(is->file_id);
+            if (!s) return s;
+        }
+    }
+    return ok();
+}
+
 } // namespace sixseven
