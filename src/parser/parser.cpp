@@ -1944,14 +1944,44 @@ Result<SelectItem> Parser::parse_select_item() {
     return ok(std::move(item));
 }
 
+// -- Query: subquery statement ------------------------------------------------
+
+bool Parser::starts_query_stmt() const {
+    switch (peek().type) {
+        case TokenType::SELECT:
+        case TokenType::TRAVERSE:
+        case TokenType::NEAREST:
+        case TokenType::MATCH:
+            return true;
+        default:
+            return false;
+    }
+}
+
+Result<StmtPtr> Parser::parse_query_stmt() {
+    switch (peek().type) {
+        case TokenType::SELECT:
+            return parse_select();
+        case TokenType::TRAVERSE:
+            return parse_traverse();
+        case TokenType::NEAREST:
+            return parse_nearest();
+        case TokenType::MATCH:
+            return parse_match();
+        default:
+            return make_error(StatusCode::PARSE_ERROR,
+                              "expected SELECT, TRAVERSE, NEAREST, or MATCH in subquery");
+    }
+}
+
 // -- Query: table reference ---------------------------------------------------
 
 Result<TableRef> Parser::parse_table_ref() {
     TableRef ref;
 
-    // Subquery: (SELECT ...) [AS] alias
+    // Subquery: (SELECT ... | TRAVERSE ... | NEAREST ... | MATCH ...) [AS] alias
     if (match(TokenType::LPAREN)) {
-        auto subquery = parse_select();
+        auto subquery = parse_query_stmt();
         if (!subquery)
             return tl::unexpected(subquery.error());
         ref.subquery = std::move(*subquery);
@@ -3224,8 +3254,8 @@ Result<ExprPtr> Parser::parse_comparison() {
         in_expr->line = line;
         in_expr->col = col;
 
-        if (check(TokenType::SELECT)) {
-            auto subquery = parse_select();
+        if (starts_query_stmt()) {
+            auto subquery = parse_query_stmt();
             if (!subquery)
                 return tl::unexpected(subquery.error());
             in_expr->subquery = std::move(*subquery);
@@ -3536,7 +3566,7 @@ Result<ExprPtr> Parser::parse_primary() {
         if (!lp)
             return tl::unexpected(lp.error());
 
-        auto subquery = parse_select();
+        auto subquery = parse_query_stmt();
         if (!subquery)
             return tl::unexpected(subquery.error());
 
@@ -3604,9 +3634,9 @@ Result<ExprPtr> Parser::parse_primary() {
 
     // Parenthesized expression or subquery.
     if (match(TokenType::LPAREN)) {
-        // Subquery: (SELECT ...)
-        if (check(TokenType::SELECT)) {
-            auto subquery = parse_select();
+        // Subquery: (SELECT ... | TRAVERSE ... | NEAREST ... | MATCH ...)
+        if (starts_query_stmt()) {
+            auto subquery = parse_query_stmt();
             if (!subquery)
                 return tl::unexpected(subquery.error());
 

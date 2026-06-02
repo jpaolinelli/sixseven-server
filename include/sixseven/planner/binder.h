@@ -117,6 +117,11 @@ public:
     /// Bind a parsed statement. Validates names, types, and semantics.
     [[nodiscard]] Result<BoundStatement> bind(const Stmt& stmt);
 
+    /// Bind a query statement that may reference columns from an enclosing query
+    /// through `parent_scope` (a correlated subquery). Supports SELECT, TRAVERSE,
+    /// NEAREST, and MATCH; other statement types ignore the parent scope.
+    [[nodiscard]] Result<BoundStatement> bind_with_outer(const Stmt& stmt, Scope* parent_scope);
+
     /// Inject outer CTE bindings so subquery binders can resolve CTE references.
     /// Injected CTEs survive the top-level bind() call's CTE clearing.
     void add_cte(const std::string& name, const BoundStatement& bound) {
@@ -158,9 +163,9 @@ private:
     Result<BoundStatement> bind_link(const LinkStmt& stmt);
     Result<BoundStatement> bind_bulk_link(const BulkLinkStmt& stmt);
     Result<BoundStatement> bind_unlink(const UnlinkStmt& stmt);
-    Result<BoundStatement> bind_traverse(const TraverseStmt& stmt);
-    Result<BoundStatement> bind_nearest(const NearestStmt& stmt);
-    Result<BoundStatement> bind_match(const MatchStmt& stmt);
+    Result<BoundStatement> bind_traverse(const TraverseStmt& stmt, Scope* parent_scope = nullptr);
+    Result<BoundStatement> bind_nearest(const NearestStmt& stmt, Scope* parent_scope = nullptr);
+    Result<BoundStatement> bind_match(const MatchStmt& stmt, Scope* parent_scope = nullptr);
     Result<BoundStatement> bind_shortest_path(const ShortestPathStmt& stmt);
     Result<BoundStatement> bind_explain(const ExplainStmt& stmt);
     Result<BoundStatement> bind_describe(const DescribeStmt& stmt);
@@ -211,6 +216,18 @@ private:
 
     /// Build a ScopeTable for a TRAVERSE source in FROM/JOIN.
     Result<ScopeTable> build_traverse_scope(const TableRef& tref, BoundStatement& bound);
+
+    /// Columns a TRAVERSE produces (target table cols + meta cols + edge props),
+    /// together with the resolved target table id. Shared by build_traverse_scope
+    /// (FROM source) and bind_traverse (top-level / subquery statement) so the
+    /// output schema stays consistent. Performs catalog lookups only — does not
+    /// mutate `bound` or bind from_key/where.
+    struct TraverseColumns {
+        std::vector<ResolvedColumn> columns;
+        table_id_t target_table_id = 0;
+    };
+    Result<TraverseColumns> compute_traverse_columns(const TraverseStmt& trav,
+                                                     const std::string& alias) const;
 
     /// Bind a MATCH source in FROM/JOIN — resolve pattern tables and edges into scope.
     Result<void> bind_match_source(const MatchStmt& match, Scope& scope, BoundStatement& bound);

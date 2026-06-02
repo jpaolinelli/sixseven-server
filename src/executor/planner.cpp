@@ -21,6 +21,7 @@
 #include "sixseven/executor/nested_loop_join.h"
 #include "sixseven/planner/rewrite_rules.h"
 #include "sixseven/executor/pattern_match.h"
+#include "sixseven/executor/prepend_tuple.h"
 #include "sixseven/executor/project.h"
 #include "sixseven/executor/seq_scan.h"
 #include "sixseven/executor/shortest_path.h"
@@ -293,7 +294,7 @@ Planner::Planner(Catalog& catalog,
       provider_registry_(provider_registry), hnsw_indexes_(hnsw_indexes),
       btree_indexes_(btree_indexes), hash_indexes_(hash_indexes), hnsw_rid_maps_(hnsw_rid_maps),
       embedding_pool_(embedding_pool), algorithm_registry_(algorithm_registry),
-      subquery_ctx_{catalog_, storage_} {}
+      subquery_ctx_{catalog_, storage_, graph_engine_, provider_registry_} {}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -420,20 +421,17 @@ Planner::plan_from_source(const TableRef& table_ref,
                           const std::unordered_map<std::string, const SelectStmt*>& cte_map,
                           const BoundStatement& bound,
                           std::vector<ExprPtr>& owned_exprs) {
-    // Case 1: Derived table (FROM (SELECT ...) AS sub).
+    // Case 1: Derived table (FROM (SELECT|TRAVERSE|NEAREST|MATCH ...) AS sub).
     if (table_ref.subquery) {
-        auto* sub_sel = dynamic_cast<const SelectStmt*>(table_ref.subquery.get());
-        if (!sub_sel) {
-            return make_error(StatusCode::INTERNAL_ERROR, "FROM subquery is not a SELECT");
-        }
-
         Binder binder(catalog_, database_id_, algorithm_registry_);
-        auto sub_bound = binder.bind(*sub_sel);
+        auto sub_bound = binder.bind(*table_ref.subquery);
         if (!sub_bound) {
             return make_error(sub_bound.error().code, sub_bound.error().message);
         }
 
-        auto sub_iter = plan_select(*sub_sel, *sub_bound, owned_exprs);
+        // Generic dispatch: SELECT / TRAVERSE / NEAREST / MATCH all produce a
+        // standard (Tuple, OutputSchema) stream that SubquerySourceOperator wraps.
+        auto sub_iter = plan(*sub_bound, owned_exprs);
         if (!sub_iter) {
             return make_error(sub_iter.error().code, sub_iter.error().message);
         }
@@ -977,19 +975,31 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
     if (auto* in_expr = dynamic_cast<const InExpr*>(&where_expr)) {
         if (in_expr->subquery) {
             auto* sub_sel = dynamic_cast<const SelectStmt*>(in_expr->subquery.get());
-            if (sub_sel && !sub_sel->from.empty()) {
+            // SELECT subqueries are decorrelated only when they have a FROM
+            // clause; TRAVERSE / NEAREST / MATCH subqueries (sub_sel == null)
+            // always produce a tuple stream we can materialise and SEMI-join.
+            bool can_rewrite = sub_sel ? !sub_sel->from.empty() : true;
+            if (can_rewrite) {
                 // Plan the entire subquery (not just the FROM table), so that
                 // any filters, aggregations, etc. inside the subquery are
                 // correctly applied.
                 Binder binder(catalog_, database_id_, algorithm_registry_);
                 // Inject outer CTE bindings so the subquery can reference CTEs.
                 inject_cte_bindings(binder, cte_map);
-                auto sub_bound = binder.bind(*sub_sel);
+                auto sub_bound = binder.bind(*in_expr->subquery);
                 if (!sub_bound) {
-                    return make_error(sub_bound.error().code, sub_bound.error().message);
+                    // The subquery does not bind standalone — most likely it is
+                    // correlated (references the outer row). Decorrelation into a
+                    // join is not possible; leave the predicate to be applied as a
+                    // filter, where eval_in re-executes it per outer row.
+                    return ok(static_cast<const Expr*>(&where_expr));
                 }
 
-                auto sub_iter = plan_select(*sub_sel, *sub_bound, owned_exprs, cte_map);
+                // SELECT keeps cte_map propagation for nested CTE references;
+                // graph/vector statements dispatch through the generic planner.
+                auto sub_iter = sub_sel
+                                    ? plan_select(*sub_sel, *sub_bound, owned_exprs, cte_map)
+                                    : plan(*sub_bound, owned_exprs);
                 if (!sub_iter) {
                     return make_error(sub_iter.error().code, sub_iter.error().message);
                 }
@@ -2184,9 +2194,13 @@ Result<std::unique_ptr<Iterator>> Planner::plan_traverse(const TraverseStmt& stm
         return make_error(StatusCode::INTERNAL_ERROR, "graph engine not available for TRAVERSE");
     }
 
-    // Evaluate the start key.
-    Tuple empty_tuple;
-    OutputSchema empty_schema;
+    // Evaluate the start key. When this is a correlated subquery, the start key
+    // (e.g. TRAVERSE edge FROM t(outer.id)) evaluates against the outer row.
+    Tuple fallback_tuple;
+    OutputSchema fallback_schema;
+    const Tuple& empty_tuple = outer_tuple_ != nullptr ? *outer_tuple_ : fallback_tuple;
+    const OutputSchema& empty_schema =
+        outer_schema_ != nullptr ? *outer_schema_ : fallback_schema;
     auto key_val = evaluate_expr(*stmt.from_key, empty_tuple, empty_schema, bound);
     if (!key_val) {
         return make_error(key_val.error().code, key_val.error().message);
@@ -2410,6 +2424,21 @@ Result<std::unique_ptr<Iterator>> Planner::plan_match(const MatchStmt& stmt,
                                                        bound);
     }
 
+    // Correlated MATCH: prepend the fixed outer row so the WHERE / pattern
+    // filters can resolve outer columns alongside the matched pattern columns.
+    if (outer_tuple_ != nullptr && outer_schema_ != nullptr) {
+        std::vector<OutputColumn> combined_cols;
+        for (size_t i = 0; i < outer_schema_->column_count(); ++i) {
+            combined_cols.push_back(outer_schema_->column(i));
+        }
+        const auto& match_schema = child->output_schema();
+        for (size_t i = 0; i < match_schema.column_count(); ++i) {
+            combined_cols.push_back(match_schema.column(i));
+        }
+        child = std::make_unique<PrependTupleOperator>(
+            std::move(child), *outer_tuple_, OutputSchema(std::move(combined_cols)));
+    }
+
     // Apply WHERE as a FilterOperator over the full-scope output.
     if (stmt.where_expr) {
         child =
@@ -2597,9 +2626,16 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
                           "column " + stmt.column_name + " not found in table " + stmt.table_name);
     }
 
+    // Configuration expressions (k, target vector, WITHIN start key) evaluate
+    // against the outer row when this is a correlated subquery, else an empty
+    // tuple. This lets `NEAREST k FROM t.vec TO outer.embedding` work.
+    Tuple fallback_tuple;
+    OutputSchema fallback_schema;
+    const Tuple& empty_tuple = outer_tuple_ != nullptr ? *outer_tuple_ : fallback_tuple;
+    const OutputSchema& empty_schema =
+        outer_schema_ != nullptr ? *outer_schema_ : fallback_schema;
+
     // Evaluate k.
-    Tuple empty_tuple;
-    OutputSchema empty_schema;
     auto k_val = evaluate_expr(*stmt.k, empty_tuple, empty_schema, bound);
     if (!k_val) {
         return make_error(k_val.error().code, k_val.error().message);

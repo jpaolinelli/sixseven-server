@@ -13,15 +13,22 @@ class Catalog;
 class StorageManager;
 class WalReceiver;
 class WalWriter;
+class GraphEngine;
+class ProviderRegistry;
 
 /// Context for evaluating subquery expressions at runtime.
 ///
 /// When provided, the expression evaluator can plan and execute
 /// SubqueryExpr, ExistsExpr, and InExpr-with-subquery nodes inline.
 /// Without this context, those nodes return NOT_IMPLEMENTED errors.
+///
+/// `graph_engine` and `provider_registry` are optional and only required when a
+/// subquery is a graph (TRAVERSE/MATCH) or vector (NEAREST) statement.
 struct SubqueryContext {
     Catalog& catalog;
     StorageManager& storage;
+    GraphEngine* graph_engine = nullptr;
+    ProviderRegistry* provider_registry = nullptr;
 };
 
 /// Context for evaluating system functions (pg_current_wal_lsn, etc.).
