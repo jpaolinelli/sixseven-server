@@ -230,17 +230,19 @@ FROM books
 WHERE rating > 4.0
 ORDER BY rating DESC;
 
--- Traverse the social graph, then look up what those readers reviewed
--- "What do reader 1's friends think about books?"
-SELECT rd.username, b.title, r.stars
+-- Who does reader 1 follow, and what did they review?
+-- Step 1: see reader 1's friends
+SELECT username, city, __depth
+FROM TRAVERSE follows FROM readers(1) DIRECTION OUT MAX_DEPTH 1;
+
+-- Step 2: pick a friend and see their reviews
+-- (use a reader ID from the traversal above, e.g. reader 2)
+SELECT b.title, b.genre, r.stars, r.review_text
 FROM reviews r
-JOIN readers rd ON rd.id = r.reader_id
 JOIN books b ON b.id = r.book_id
-WHERE rd.id IN (
-    SELECT __node FROM TRAVERSE follows FROM readers(1) DIRECTION OUT MAX_DEPTH 1
-)
+WHERE r.reader_id = 2
 ORDER BY r.stars DESC
-LIMIT 15;
+LIMIT 5;
 
 
 -- ============================================================================
