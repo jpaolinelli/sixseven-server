@@ -30,6 +30,7 @@
 #include "sixseven/vector/provider_registry.h"
 
 #include <algorithm>
+#include <chrono>
 #include <csignal>
 #include <filesystem>
 #include <string>
@@ -238,9 +239,78 @@ int main(int argc, char* argv[]) {
                               demo.error().message);
         } else {
             SIXSEVEN_LOG_INFO("demo database created successfully");
+
+            // Generate every EMBEDDING vector synchronously before the server
+            // starts serving. EMBEDDING columns are filled asynchronously by the
+            // worker pool, and under the bootstrap insert flood some jobs are
+            // dropped; BACKFILL re-enqueues any row still missing its vector.
+            // Waiting here means NEAREST works immediately and the HNSW index can
+            // be persisted populated (instead of empty).
+            auto count_nulls = [&engine](const char* sql) -> int64_t {
+                auto r = engine.execute(sql);
+                if (!r || r->rows.empty() || r->rows[0].empty()) return -1;
+                return r->rows[0][0].as_int64();
+            };
+            (void)engine.execute("BACKFILL EMBEDDINGS ON books");
+            (void)engine.execute("BACKFILL EMBEDDINGS ON reviews");
+            SIXSEVEN_LOG_INFO("demo: generating embeddings (one-time, on first start)...");
+
+            const auto deadline =
+                std::chrono::steady_clock::now() + std::chrono::seconds(300);
+            auto last_progress = std::chrono::steady_clock::now();
+            int64_t prev_remaining = -1;
+            while (std::chrono::steady_clock::now() < deadline) {
+                int64_t books_null =
+                    count_nulls("SELECT COUNT(*) FROM books WHERE description_vec IS NULL");
+                int64_t reviews_null =
+                    count_nulls("SELECT COUNT(*) FROM reviews WHERE review_vec IS NULL");
+                if (books_null == 0 && reviews_null == 0) {
+                    SIXSEVEN_LOG_INFO("demo: all embeddings generated");
+                    break;
+                }
+                int64_t remaining =
+                    std::max<int64_t>(0, books_null) + std::max<int64_t>(0, reviews_null);
+                auto now = std::chrono::steady_clock::now();
+                if (remaining != prev_remaining) {
+                    SIXSEVEN_LOG_INFO("demo: embeddings remaining: {}", remaining);
+                    prev_remaining = remaining;
+                    last_progress = now;
+                } else if (now - last_progress > std::chrono::seconds(20)) {
+                    // No progress for a while — some jobs were dropped; re-issue.
+                    (void)engine.execute("BACKFILL EMBEDDINGS ON books");
+                    (void)engine.execute("BACKFILL EMBEDDINGS ON reviews");
+                    last_progress = now;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            }
+            if (prev_remaining != 0 && count_nulls(
+                    "SELECT COUNT(*) FROM books WHERE description_vec IS NULL") != 0) {
+                SIXSEVEN_LOG_WARN(
+                    "demo: embedding generation did not fully complete within timeout");
+            }
+
+            // Build secondary indexes only now — after embedding write-backs have
+            // moved rows to their final heap slots — so the indexes point at live
+            // tuples instead of deleted ones.
+            if (auto r = sixseven::create_demo_indexes(engine); !r) {
+                SIXSEVEN_LOG_WARN("demo index creation failed (non-fatal): {}",
+                                  r.error().message);
+            }
+
+            // Make the whole demo dataset durable now, so it survives a hard kill
+            // before any clean shutdown/checkpoint. INSERT does not maintain
+            // secondary indexes, LINK keeps edges only in the (WAL-less) edge
+            // heap buffer pool, and embedding write-backs populate the HNSW index
+            // in memory — none of these are flushed until shutdown otherwise.
+            if (auto r = index_manager.flush_all_indexes(); !r) {
+                SIXSEVEN_LOG_WARN("post-demo index flush failed: {}", r.error().message);
+            }
+            if (auto r = graph_engine.flush_edges(); !r) {
+                SIXSEVEN_LOG_WARN("post-demo edge flush failed: {}", r.error().message);
+            }
         }
-        // Flush all buffer pools to disk so the demo data survives a crash
-        // or hard kill before the background flusher has a chance to run.
+        // Flush all table heaps to disk (includes written-back embedding vectors)
+        // so the demo data survives a crash or hard kill.
         auto flush = storage.flush_all();
         if (!flush) {
             SIXSEVEN_LOG_WARN("post-demo flush failed: {}", flush.error().message);

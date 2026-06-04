@@ -2261,3 +2261,62 @@ TEST(SelectWithoutFrom, ParseSelectStringLiteral) {
     ASSERT_NE(lit, nullptr);
     EXPECT_EQ(lit->kind, LiteralKind::STRING);
 }
+
+// -- Graph / vector statements as subqueries ----------------------------------
+
+TEST(SubqueryStmt, DerivedTableNearest) {
+    auto stmt = parse_one("SELECT * FROM (NEAREST 5 FROM docs.vec TO [1.0, 2.0]) AS n");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->from.size(), 1u);
+    ASSERT_NE(sel->from[0].subquery, nullptr);
+    EXPECT_NE(dynamic_cast<NearestStmt*>(sel->from[0].subquery.get()), nullptr);
+    EXPECT_EQ(sel->from[0].alias, "n");
+}
+
+TEST(SubqueryStmt, InTraverse) {
+    auto stmt =
+        parse_one("SELECT * FROM users WHERE id IN (TRAVERSE follows FROM users(1))");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* in = dynamic_cast<InExpr*>(sel->where_expr.get());
+    ASSERT_NE(in, nullptr);
+    ASSERT_NE(in->subquery, nullptr);
+    EXPECT_NE(dynamic_cast<TraverseStmt*>(in->subquery.get()), nullptr);
+}
+
+TEST(SubqueryStmt, ExistsNearest) {
+    auto stmt =
+        parse_one("SELECT * FROM docs WHERE EXISTS (NEAREST 1 FROM docs.vec TO [1.0])");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* ex = dynamic_cast<ExistsExpr*>(sel->where_expr.get());
+    ASSERT_NE(ex, nullptr);
+    ASSERT_NE(ex->subquery, nullptr);
+    EXPECT_NE(dynamic_cast<NearestStmt*>(ex->subquery.get()), nullptr);
+}
+
+TEST(SubqueryStmt, ScalarTraverse) {
+    auto stmt = parse_one("SELECT (TRAVERSE follows FROM users(1)) FROM users");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_FALSE(sel->items.empty());
+    auto* sub = dynamic_cast<SubqueryExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(sub, nullptr);
+    EXPECT_NE(dynamic_cast<TraverseStmt*>(sub->subquery.get()), nullptr);
+}
+
+TEST(SubqueryStmt, MatchDerivedTable) {
+    auto stmt =
+        parse_one("SELECT * FROM (MATCH (a:users)-[r:follows]->(b:users) RETURN a.id) AS m");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->from.size(), 1u);
+    ASSERT_NE(sel->from[0].subquery, nullptr);
+    EXPECT_NE(dynamic_cast<MatchStmt*>(sel->from[0].subquery.get()), nullptr);
+}
+
+TEST(SubqueryStmt, NonQueryStatementInExistsIsError) {
+    // EXISTS ( must be followed by a query statement, not an arbitrary expression.
+    expect_parse_error("SELECT * FROM docs WHERE EXISTS (1 + 1)");
+}

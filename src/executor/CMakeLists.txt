@@ -21,6 +21,7 @@ add_library(sixseven_executor STATIC
     hash_aggregate.cpp
     window_function.cpp
     subquery_source.cpp
+    prepend_tuple.cpp
     traversal.cpp
     enriched_traversal.cpp
     edge_traversal.cpp

@@ -222,20 +222,9 @@ static Result<void> create_schema(QueryEngine& engine) {
     DEMO_EXEC(engine, "CREATE EDGE TYPE follows FROM readers TO readers");
     DEMO_EXEC(engine, "CREATE EDGE TYPE tagged_as FROM books TO tags");
 
-    // Indexes — cover every column used in WHERE, JOIN, and ORDER BY
-    // across the demo queries so nothing falls back to sequential scan.
-    DEMO_EXEC(engine, "CREATE INDEX idx_books_genre    ON books(genre)");
-    DEMO_EXEC(engine, "CREATE INDEX idx_books_rating   ON books(rating)");
-    DEMO_EXEC(engine, "CREATE INDEX idx_books_pubyear  ON books(published_year)");
-    DEMO_EXEC(engine, "CREATE INDEX idx_reviews_book   ON reviews(book_id)");
-    DEMO_EXEC(engine, "CREATE INDEX idx_reviews_reader ON reviews(reader_id)");
-    DEMO_EXEC(engine, "CREATE INDEX idx_reviews_stars  ON reviews(stars)");
-    DEMO_EXEC(engine, "CREATE INDEX idx_readers_city   ON readers(city)");
-    DEMO_EXEC(engine, "CREATE INDEX idx_readers_joined ON readers(joined_year)");
-    DEMO_EXEC(engine, "CREATE INDEX idx_authors_nat    ON authors(nationality)");
-
     return ok();
 }
+
 
 // ---------------------------------------------------------------------------
 // Seed authors (200 rows, batches of 50)
@@ -645,11 +634,42 @@ Result<void> create_demo_database(QueryEngine& engine) {
     auto r_edges = seed_edges(engine);
     if (!r_edges) return r_edges;
 
+    // NOTE: secondary indexes are intentionally NOT created here. They must be
+    // built only after EMBEDDING vectors are generated (see create_demo_indexes),
+    // because embedding write-backs move rows to new heap slots and would leave
+    // any pre-existing index pointing at deleted slots.
+
     SIXSEVEN_LOG_INFO(
         "demo: dataset ready — {} authors, {} books, {} readers, {} reviews, {} tags",
         k_author_count, k_book_count, k_reader_count, k_review_count, k_tag_count);
     SIXSEVEN_LOG_INFO("demo: EMBEDDING vectors are generating in the background");
 
+    return ok();
+}
+
+Result<void> create_demo_indexes(QueryEngine& engine) {
+    SIXSEVEN_LOG_INFO("demo: building secondary indexes over seeded data");
+
+    // Cover every column used in WHERE, JOIN, and ORDER BY across the demo
+    // queries so nothing falls back to a sequential scan. CREATE INDEX scans
+    // the now-stable heap and populates the index from existing rows.
+    static const char* const k_index_ddl[] = {
+        "CREATE INDEX idx_books_genre    ON books(genre)",
+        "CREATE INDEX idx_books_rating   ON books(rating)",
+        "CREATE INDEX idx_books_pubyear  ON books(published_year)",
+        "CREATE INDEX idx_reviews_book   ON reviews(book_id)",
+        "CREATE INDEX idx_reviews_reader ON reviews(reader_id)",
+        "CREATE INDEX idx_reviews_stars  ON reviews(stars)",
+        "CREATE INDEX idx_readers_city   ON readers(city)",
+        "CREATE INDEX idx_readers_joined ON readers(joined_year)",
+        "CREATE INDEX idx_authors_nat    ON authors(nationality)",
+    };
+    for (const char* ddl : k_index_ddl) {
+        auto r = engine.execute(ddl);
+        if (!r) {
+            return make_error(r.error().code, "demo indexes: " + r.error().message);
+        }
+    }
     return ok();
 }
 

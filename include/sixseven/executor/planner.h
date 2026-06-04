@@ -70,6 +70,18 @@ public:
     [[nodiscard]] Result<std::unique_ptr<Iterator>> plan(const BoundStatement& bound,
                                                          std::vector<ExprPtr>& owned_exprs);
 
+    /// Provide the current outer row when planning a correlated subquery so that
+    /// configuration expressions that reference outer columns — a NEAREST target
+    /// vector or a TRAVERSE start key — evaluate against it. Pass nullptrs to
+    /// clear. The pointed-to objects must outlive planning.
+    void set_outer_context(const Tuple* tuple,
+                           const OutputSchema* schema,
+                           const BoundStatement* bound) {
+        outer_tuple_ = tuple;
+        outer_schema_ = schema;
+        outer_bound_ = bound;
+    }
+
 private:
     [[nodiscard]] Result<std::unique_ptr<Iterator>> plan_select(const SelectStmt& stmt,
                                                                 const BoundStatement& bound,
@@ -180,6 +192,11 @@ private:
     EmbeddingWorkerPool* embedding_pool_;
     AlgorithmRegistry* algorithm_registry_;
     SubqueryContext subquery_ctx_;
+
+    // Outer row for correlated-subquery planning (see set_outer_context).
+    const Tuple* outer_tuple_ = nullptr;
+    const OutputSchema* outer_schema_ = nullptr;
+    const BoundStatement* outer_bound_ = nullptr;
 };
 
 } // namespace sixseven

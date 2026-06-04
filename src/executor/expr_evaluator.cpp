@@ -603,6 +603,62 @@ Result<Value> eval_between(const BetweenExpr& expr,
 }
 
 // ---------------------------------------------------------------------------
+// Correlated subquery support
+// ---------------------------------------------------------------------------
+
+/// Build a name-resolution Scope from an output schema so that a correlated
+/// subquery can resolve references to the enclosing query's columns.
+Scope build_outer_scope(const OutputSchema& schema) {
+    std::vector<ScopeTable> tables;
+    std::unordered_map<std::string, size_t> index_by_alias;
+    for (size_t i = 0; i < schema.column_count(); ++i) {
+        const auto& col = schema.column(i);
+        auto it = index_by_alias.find(col.table_name);
+        if (it == index_by_alias.end()) {
+            ScopeTable st;
+            st.table_id = col.table_id;
+            st.alias = col.table_name;
+            it = index_by_alias.emplace(col.table_name, tables.size()).first;
+            tables.push_back(std::move(st));
+        }
+        ResolvedColumn rc;
+        rc.table_id = col.table_id;
+        rc.ordinal = -1;
+        rc.table_name = col.table_name;
+        rc.column_name = col.name;
+        rc.type_id = col.type_id;
+        rc.nullable = col.nullable;
+        tables[it->second].columns.push_back(std::move(rc));
+    }
+    Scope scope;
+    for (auto& t : tables) {
+        scope.add_table(std::move(t));
+    }
+    return scope;
+}
+
+/// Bind a subquery statement, trying a self-contained (non-correlated) bind
+/// first and falling back to a correlated bind against the outer schema.
+/// Sets `correlated` true when the fallback was used.
+Result<BoundStatement> bind_subquery_stmt(const SubqueryContext& ctx,
+                                          const Stmt& stmt,
+                                          const OutputSchema& outer_schema,
+                                          bool& correlated) {
+    Binder binder(ctx.catalog);
+    auto self_contained = binder.bind(stmt);
+    if (self_contained) {
+        correlated = false;
+        return self_contained;
+    }
+    // Binding failed standalone — likely an outer column reference. Retry with
+    // the enclosing query's columns in scope.
+    Binder corr_binder(ctx.catalog);
+    Scope outer = build_outer_scope(outer_schema);
+    correlated = true;
+    return corr_binder.bind_with_outer(stmt, &outer);
+}
+
+// ---------------------------------------------------------------------------
 // IN
 // ---------------------------------------------------------------------------
 
@@ -621,19 +677,22 @@ Result<Value> eval_in(const InExpr& expr,
     }
 
     // IN (subquery) — execute the subquery and check membership.
+    // The subquery may be a SELECT, TRAVERSE, NEAREST, or MATCH; the generic
+    // binder/planner produce a tuple stream whose first column is compared.
+    // A correlated subquery (referencing the outer row) is re-executed here per
+    // outer tuple, with the outer row threaded into binding and planning.
     if (expr.subquery && subquery_ctx) {
-        auto* sel = dynamic_cast<const SelectStmt*>(expr.subquery.get());
-        if (!sel) {
-            return make_error(StatusCode::INTERNAL_ERROR, "IN subquery is not a SELECT");
-        }
-
-        Binder binder(subquery_ctx->catalog);
-        auto sub_bound = binder.bind(*sel);
+        bool correlated = false;
+        auto sub_bound = bind_subquery_stmt(*subquery_ctx, *expr.subquery, schema, correlated);
         if (!sub_bound) {
             return make_error(sub_bound.error().code, sub_bound.error().message);
         }
 
-        Planner planner(subquery_ctx->catalog, subquery_ctx->storage);
+        Planner planner(subquery_ctx->catalog, subquery_ctx->storage, default_database_id,
+                        subquery_ctx->graph_engine, subquery_ctx->provider_registry);
+        if (correlated) {
+            planner.set_outer_context(&tuple, &schema, &bound);
+        }
         std::vector<ExprPtr> owned;
         auto iter = planner.plan(*sub_bound, owned);
         if (!iter) {
@@ -1045,17 +1104,16 @@ Result<Value> eval_exists(const ExistsExpr& expr,
     }
 
     auto* sel = dynamic_cast<const SelectStmt*>(expr.subquery.get());
-    if (!sel) {
-        return make_error(StatusCode::INTERNAL_ERROR, "EXISTS subquery is not a SELECT");
-    }
 
-    // Try non-correlated binding first.
+    // Try non-correlated binding first. This works for any query statement —
+    // SELECT, TRAVERSE, NEAREST, or MATCH — via the generic binder/planner.
     Binder binder(subquery_ctx->catalog);
-    auto sub_bound = binder.bind(*sel);
+    auto sub_bound = binder.bind(*expr.subquery);
 
     if (sub_bound) {
         // Non-correlated: plan and execute normally.
-        Planner planner(subquery_ctx->catalog, subquery_ctx->storage);
+        Planner planner(subquery_ctx->catalog, subquery_ctx->storage, default_database_id,
+                        subquery_ctx->graph_engine, subquery_ctx->provider_registry);
         std::vector<ExprPtr> owned;
         auto iter = planner.plan(*sub_bound, owned);
         if (!iter) {
@@ -1077,6 +1135,35 @@ Result<Value> eval_exists(const ExistsExpr& expr,
     }
 
     // Correlated subquery: binding failed because of outer column references.
+    // For graph/vector statements (TRAVERSE/NEAREST/MATCH), re-bind against the
+    // outer scope and execute with the outer row threaded into planning.
+    if (!sel) {
+        Binder corr_binder(subquery_ctx->catalog);
+        Scope outer = build_outer_scope(outer_schema);
+        auto corr_bound = corr_binder.bind_with_outer(*expr.subquery, &outer);
+        if (!corr_bound) {
+            return make_error(corr_bound.error().code, corr_bound.error().message);
+        }
+        Planner planner(subquery_ctx->catalog, subquery_ctx->storage, default_database_id,
+                        subquery_ctx->graph_engine, subquery_ctx->provider_registry);
+        planner.set_outer_context(&outer_tuple, &outer_schema, &outer_bound);
+        std::vector<ExprPtr> owned;
+        auto iter = planner.plan(*corr_bound, owned);
+        if (!iter) {
+            return make_error(iter.error().code, iter.error().message);
+        }
+        auto open_res = (*iter)->open();
+        if (!open_res) {
+            return make_error(open_res.error().code, open_res.error().message);
+        }
+        auto row = (*iter)->next();
+        (*iter)->close();
+        if (!row) {
+            return make_error(row.error().code, row.error().message);
+        }
+        return ok(Value(row->has_value()));
+    }
+
     // Fall back to manual correlation: scan the inner table, combine each row
     // with the outer tuple, and evaluate the WHERE condition.
     if (sel->from.empty()) {
@@ -1170,24 +1257,36 @@ Result<Value> eval_exists(const ExistsExpr& expr,
 // Scalar subquery expression
 // ---------------------------------------------------------------------------
 
-Result<Value> eval_scalar_subquery(const SubqueryExpr& expr, const SubqueryContext* subquery_ctx) {
+Result<Value> eval_scalar_subquery(const SubqueryExpr& expr,
+                                   const Tuple& tuple,
+                                   const OutputSchema& schema,
+                                   const SubqueryContext* subquery_ctx) {
     if (!subquery_ctx) {
         return make_error(StatusCode::NOT_IMPLEMENTED,
                           "scalar subquery evaluation requires SubqueryContext");
     }
 
-    auto* sel = dynamic_cast<const SelectStmt*>(expr.subquery.get());
-    if (!sel) {
-        return make_error(StatusCode::INTERNAL_ERROR, "scalar subquery is not a SELECT");
-    }
-
-    Binder binder(subquery_ctx->catalog);
-    auto sub_bound = binder.bind(*sel);
+    // The subquery may be a SELECT, TRAVERSE, NEAREST, or MATCH, and may be
+    // correlated (reference the outer row).
+    bool correlated = false;
+    auto sub_bound = bind_subquery_stmt(*subquery_ctx, *expr.subquery, schema, correlated);
     if (!sub_bound) {
         return make_error(sub_bound.error().code, sub_bound.error().message);
     }
 
-    Planner planner(subquery_ctx->catalog, subquery_ctx->storage);
+    // A scalar subquery must yield exactly one column. Multi-column graph/vector
+    // statements (e.g. NEAREST, which appends a _distance column) are rejected
+    // here — wrap them in a single-column SELECT to use as a scalar.
+    if (sub_bound->output_columns.size() != 1) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "scalar subquery must return exactly one column");
+    }
+
+    Planner planner(subquery_ctx->catalog, subquery_ctx->storage, default_database_id,
+                    subquery_ctx->graph_engine, subquery_ctx->provider_registry);
+    if (correlated) {
+        planner.set_outer_context(&tuple, &schema, nullptr);
+    }
     std::vector<ExprPtr> owned;
     auto iter = planner.plan(*sub_bound, owned);
     if (!iter) {
@@ -1277,7 +1376,7 @@ Result<Value> eval(const Expr& expr,
         return eval_exists(*exists, tuple, schema, bound, subquery_ctx);
     }
     if (auto* sub = dynamic_cast<const SubqueryExpr*>(&expr)) {
-        return eval_scalar_subquery(*sub, subquery_ctx);
+        return eval_scalar_subquery(*sub, tuple, schema, subquery_ctx);
     }
 
     return make_error(StatusCode::INTERNAL_ERROR, "unknown expression type in evaluator");

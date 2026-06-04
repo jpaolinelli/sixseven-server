@@ -103,6 +103,11 @@ private:
     [[nodiscard]] Result<SelectItem> parse_select_item();
     [[nodiscard]] Result<TableRef> parse_table_ref();
 
+    /// Parse a query statement usable as a subquery: SELECT / TRAVERSE / NEAREST / MATCH.
+    [[nodiscard]] Result<StmtPtr> parse_query_stmt();
+    /// True if the upcoming token begins a query statement (SELECT/TRAVERSE/NEAREST/MATCH).
+    [[nodiscard]] bool starts_query_stmt() const;
+
     // -- Graph / Vector -----------------------------------------------------
 
     [[nodiscard]] Result<StmtPtr> parse_traverse();

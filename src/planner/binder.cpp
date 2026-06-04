@@ -333,62 +333,50 @@ ScopeTable Binder::build_algorithm_scope(const TableRef& tref) const {
     return st;
 }
 
-Result<ScopeTable> Binder::build_traverse_scope(const TableRef& tref, BoundStatement& bound) {
-    auto* trav = dynamic_cast<const TraverseStmt*>(tref.traverse_source.get());
-    if (!trav) {
-        return make_error(StatusCode::INTERNAL_ERROR, "expected TraverseStmt in traverse_source");
-    }
-
+Result<Binder::TraverseColumns>
+Binder::compute_traverse_columns(const TraverseStmt& trav, const std::string& alias) const {
     // 1. Resolve edge type.
-    auto edge = catalog_.get_edge_type(database_id_, trav->edge_type);
+    auto edge = catalog_.get_edge_type(database_id_, trav.edge_type);
     if (!edge) {
         return tl::unexpected(edge.error());
     }
-    bound.referenced_edge_types.push_back(edge->edge_id);
 
     // 2. Resolve FROM table and verify it's an endpoint of the edge type.
-    auto from_schema = resolve_table(trav->from_table);
+    auto from_schema = resolve_table(trav.from_table);
     if (!from_schema) {
         return tl::unexpected(from_schema.error());
     }
-    bound.referenced_tables.push_back(from_schema->table_id);
-
     if (from_schema->table_id != edge->source_table_id &&
         from_schema->table_id != edge->target_table_id) {
         return make_error(StatusCode::TYPE_ERROR,
-                          "TRAVERSE FROM table " + trav->from_table +
-                              " is not an endpoint of edge type " + trav->edge_type);
+                          "TRAVERSE FROM table " + trav.from_table +
+                              " is not an endpoint of edge type " + trav.edge_type);
     }
 
     // 3. Determine target table based on direction.
-    //    OUT: traversal reaches the target end of edges.
-    //    IN:  traversal reaches the source end of edges.
-    //    BOTH: only valid for homogeneous edges (same source/target table).
-    if (trav->direction == TraverseDirection::BOTH &&
+    if (trav.direction == TraverseDirection::BOTH &&
         edge->source_table_id != edge->target_table_id) {
         return make_error(
             StatusCode::TYPE_ERROR,
-            "DIRECTION BOTH not supported for edge type '" + trav->edge_type +
+            "DIRECTION BOTH not supported for edge type '" + trav.edge_type +
                 "' because it connects different tables; use DIRECTION OUT or DIRECTION IN");
     }
 
     table_id_t target_table_id = 0;
-    if (trav->direction == TraverseDirection::BOTH) {
+    if (trav.direction == TraverseDirection::BOTH) {
         target_table_id = (from_schema->table_id == edge->source_table_id) ? edge->target_table_id
                                                                            : edge->source_table_id;
-    } else if (trav->direction == TraverseDirection::OUT) {
+    } else if (trav.direction == TraverseDirection::OUT) {
         target_table_id = edge->target_table_id;
     } else {
         target_table_id = edge->source_table_id;
     }
 
-    // 4. Resolve target table schema.
     auto target_schema = catalog_.get_table_by_id(target_table_id);
     if (!target_schema) {
         return tl::unexpected(target_schema.error());
     }
 
-    // 5. Resolve PK types for both edge endpoints.
     auto resolve_pk_type = [](const TableSchema& schema) {
         TypeId pk = TypeId::INT64;
         if (!schema.pk_columns.empty()) {
@@ -404,23 +392,15 @@ Result<ScopeTable> Binder::build_traverse_scope(const TableRef& tref, BoundState
 
     TypeId target_pk_type = resolve_pk_type(*target_schema);
 
-    // 6. Build ScopeTable depending on mode.
-    std::string alias = tref.alias.empty() ? trav->edge_type : tref.alias;
-    ScopeTable st;
-    st.table_id = target_schema->table_id;
-    st.alias = alias;
-
-    if (trav->mode == TraverseMode::EDGES) {
-        // Edge mode: __from, __to, __depth + edge property columns.
-        // Resolve source table PK type (may differ from target for heterogeneous).
+    std::vector<ResolvedColumn> columns;
+    if (trav.mode == TraverseMode::EDGES) {
+        // Edge mode: __from, __to, __depth (+ edge properties below).
         auto source_schema = catalog_.get_table_by_id(edge->source_table_id);
         if (!source_schema) {
             return tl::unexpected(source_schema.error());
         }
         TypeId source_pk_type = resolve_pk_type(*source_schema);
         TypeId edge_target_pk_type = target_pk_type;
-        // For heterogeneous IN, target table is actually the source table of the
-        // edge, so we need the edge's actual target PK type too.
         if (edge->source_table_id != edge->target_table_id) {
             auto edge_target_schema = catalog_.get_table_by_id(edge->target_table_id);
             if (!edge_target_schema) {
@@ -428,11 +408,9 @@ Result<ScopeTable> Binder::build_traverse_scope(const TableRef& tref, BoundState
             }
             edge_target_pk_type = resolve_pk_type(*edge_target_schema);
         }
-
-        // __from = edge source PK type, __to = edge target PK type.
-        st.columns.push_back({0, -1, alias, "__from", source_pk_type, false});
-        st.columns.push_back({0, -1, alias, "__to", edge_target_pk_type, false});
-        st.columns.push_back({0, -1, alias, "__depth", TypeId::INT64, false});
+        columns.push_back({0, -1, alias, "__from", source_pk_type, false});
+        columns.push_back({0, -1, alias, "__to", edge_target_pk_type, false});
+        columns.push_back({0, -1, alias, "__depth", TypeId::INT64, false});
     } else {
         // Node mode (default): target table columns + __node, __depth, __source.
         for (const auto& col : target_schema->columns) {
@@ -443,20 +421,55 @@ Result<ScopeTable> Binder::build_traverse_scope(const TableRef& tref, BoundState
             rc.column_name = col.name;
             rc.type_id = col.type_id;
             rc.nullable = col.nullable;
-            st.columns.push_back(std::move(rc));
+            columns.push_back(std::move(rc));
         }
-
-        st.columns.push_back({0, -1, alias, "__node", target_pk_type, false});
-        st.columns.push_back({0, -1, alias, "__depth", TypeId::INT64, false});
-        st.columns.push_back({0, -1, alias, "__source", target_pk_type, true});
+        columns.push_back({0, -1, alias, "__node", target_pk_type, false});
+        columns.push_back({0, -1, alias, "__depth", TypeId::INT64, false});
+        columns.push_back({0, -1, alias, "__source", target_pk_type, true});
     }
 
     // Edge property columns — qualified by edge type name for
     // edge_type.property access syntax.
-    auto edge_props = parse_edge_property_columns(edge->properties, trav->edge_type);
-    st.columns.insert(st.columns.end(),
-                      std::make_move_iterator(edge_props.begin()),
-                      std::make_move_iterator(edge_props.end()));
+    auto edge_props = parse_edge_property_columns(edge->properties, trav.edge_type);
+    columns.insert(columns.end(),
+                   std::make_move_iterator(edge_props.begin()),
+                   std::make_move_iterator(edge_props.end()));
+
+    return ok(TraverseColumns{std::move(columns), target_table_id});
+}
+
+Result<ScopeTable> Binder::build_traverse_scope(const TableRef& tref, BoundStatement& bound) {
+    auto* trav = dynamic_cast<const TraverseStmt*>(tref.traverse_source.get());
+    if (!trav) {
+        return make_error(StatusCode::INTERNAL_ERROR, "expected TraverseStmt in traverse_source");
+    }
+
+    // 1. Resolve edge type.
+    auto edge = catalog_.get_edge_type(database_id_, trav->edge_type);
+    if (!edge) {
+        return tl::unexpected(edge.error());
+    }
+    bound.referenced_edge_types.push_back(edge->edge_id);
+
+    // 2. Resolve FROM table for reference bookkeeping (validation of the
+    //    endpoint/direction happens inside compute_traverse_columns).
+    auto from_schema = resolve_table(trav->from_table);
+    if (!from_schema) {
+        return tl::unexpected(from_schema.error());
+    }
+    bound.referenced_tables.push_back(from_schema->table_id);
+
+    // 3. Compute the output columns (target cols + meta cols + edge props).
+    std::string alias = tref.alias.empty() ? trav->edge_type : tref.alias;
+    auto tc = compute_traverse_columns(*trav, alias);
+    if (!tc) {
+        return tl::unexpected(tc.error());
+    }
+
+    ScopeTable st;
+    st.table_id = tc->target_table_id;
+    st.alias = alias;
+    st.columns = std::move(tc->columns);
 
     // 7. Bind internal from_key expression.
     Scope empty_scope;
@@ -736,6 +749,25 @@ Result<BoundStatement> Binder::bind(const Stmt& stmt) {
     // TCL and other admin pass-through (BEGIN, COMMIT, ROLLBACK, SAVEPOINT,
     // SET, REEMBED, VACUUM, ANALYZE).
     return bind_passthrough(stmt);
+}
+
+Result<BoundStatement> Binder::bind_with_outer(const Stmt& stmt, Scope* parent_scope) {
+    if (parent_scope == nullptr) {
+        return bind(stmt);
+    }
+    if (auto* s = dynamic_cast<const SelectStmt*>(&stmt)) {
+        return bind_select(*s, parent_scope);
+    }
+    if (auto* s = dynamic_cast<const TraverseStmt*>(&stmt)) {
+        return bind_traverse(*s, parent_scope);
+    }
+    if (auto* s = dynamic_cast<const NearestStmt*>(&stmt)) {
+        return bind_nearest(*s, parent_scope);
+    }
+    if (auto* s = dynamic_cast<const MatchStmt*>(&stmt)) {
+        return bind_match(*s, parent_scope);
+    }
+    return bind(stmt);
 }
 
 // ===========================================================================
@@ -1162,7 +1194,9 @@ Result<ExprType> Binder::bind_in(const InExpr& expr, Scope& scope, BoundStatemen
                 return tl::unexpected(sub.error());
             }
         } else {
-            auto sub = bind(*expr.subquery);
+            // TRAVERSE / NEAREST / MATCH — bind with the parent scope so a
+            // correlated start key / target vector can resolve outer columns.
+            auto sub = bind_with_outer(*expr.subquery, &scope);
             if (!sub) {
                 return tl::unexpected(sub.error());
             }
@@ -1245,7 +1279,9 @@ Binder::bind_exists(const ExistsExpr& expr, Scope& scope, BoundStatement& /*boun
                 return tl::unexpected(sub.error());
             }
         } else {
-            auto sub = bind(*expr.subquery);
+            // TRAVERSE / NEAREST / MATCH — bind with the parent scope to allow
+            // a correlated EXISTS (e.g. EXISTS (TRAVERSE edge FROM t(outer.id))).
+            auto sub = bind_with_outer(*expr.subquery, &scope);
             if (!sub) {
                 return tl::unexpected(sub.error());
             }
@@ -1268,7 +1304,8 @@ Binder::bind_subquery(const SubqueryExpr& expr, Scope& scope, BoundStatement& /*
     if (auto* sub_sel = dynamic_cast<const SelectStmt*>(expr.subquery.get())) {
         sub = bind_select(*sub_sel, &scope);
     } else {
-        sub = bind(*expr.subquery);
+        // TRAVERSE / NEAREST / MATCH — bind with the parent scope for correlation.
+        sub = bind_with_outer(*expr.subquery, &scope);
     }
     if (!sub) {
         return tl::unexpected(sub.error());
@@ -2429,7 +2466,7 @@ Result<BoundStatement> Binder::bind_unlink(const UnlinkStmt& stmt) {
     return ok(std::move(bound));
 }
 
-Result<BoundStatement> Binder::bind_traverse(const TraverseStmt& stmt) {
+Result<BoundStatement> Binder::bind_traverse(const TraverseStmt& stmt, Scope* parent_scope) {
     BoundStatement bound;
     bound.stmt = &stmt;
 
@@ -2452,18 +2489,40 @@ Result<BoundStatement> Binder::bind_traverse(const TraverseStmt& stmt) {
                               " is not an endpoint of edge type " + stmt.edge_type);
     }
 
-    // Bind FROM key expression.
-    Scope empty_scope;
+    // Output columns mirror plan_traverse (the standalone TRAVERSE operator):
+    // node, depth, and source (only when FETCH is set). This lets a TRAVERSE
+    // statement be used as a subquery / derived table. Note this differs from
+    // the enriched FROM-clause traverse source (build_traverse_scope), which
+    // also exposes the target table's columns.
+    TypeId pk_type = TypeId::INT64;
+    if (!from->pk_columns.empty()) {
+        for (const auto& col : from->columns) {
+            if (col.name == from->pk_columns) {
+                pk_type = col.type_id;
+                break;
+            }
+        }
+    }
+    bound.output_columns.push_back({0, -1, stmt.edge_type, "node", pk_type, false});
+    bound.output_columns.push_back({0, -1, stmt.edge_type, "depth", TypeId::INT64, false});
+    if (stmt.fetch) {
+        bound.output_columns.push_back({0, -1, stmt.edge_type, "source", pk_type, true});
+    }
+
+    // Bind FROM key expression. Chained to the parent scope so a correlated
+    // start key (e.g. TRAVERSE edge FROM t(outer.id)) can resolve outer columns.
+    Scope key_scope(parent_scope);
     if (stmt.from_key) {
-        auto et = bind_expr(*stmt.from_key, empty_scope, bound);
+        auto et = bind_expr(*stmt.from_key, key_scope, bound);
         if (!et) {
             return tl::unexpected(et.error());
         }
     }
 
-    // Bind WHERE.
+    // Bind WHERE (also chained to the parent scope for correlation).
     if (stmt.where_expr) {
-        auto et = bind_expr(*stmt.where_expr, empty_scope, bound);
+        Scope where_scope(parent_scope);
+        auto et = bind_expr(*stmt.where_expr, where_scope, bound);
         if (!et) {
             return tl::unexpected(et.error());
         }
@@ -2472,7 +2531,7 @@ Result<BoundStatement> Binder::bind_traverse(const TraverseStmt& stmt) {
     return ok(std::move(bound));
 }
 
-Result<BoundStatement> Binder::bind_nearest(const NearestStmt& stmt) {
+Result<BoundStatement> Binder::bind_nearest(const NearestStmt& stmt, Scope* parent_scope) {
     BoundStatement bound;
     bound.stmt = &stmt;
 
@@ -2501,7 +2560,7 @@ Result<BoundStatement> Binder::bind_nearest(const NearestStmt& stmt) {
                           "column " + stmt.column_name + " not found in table " + stmt.table_name);
     }
 
-    // Bind k (must be integer).
+    // Bind k (must be integer). k is a constant, so it uses an empty scope.
     Scope empty_scope;
     if (stmt.k) {
         auto et = bind_expr(*stmt.k, empty_scope, bound);
@@ -2515,17 +2574,19 @@ Result<BoundStatement> Binder::bind_nearest(const NearestStmt& stmt) {
         }
     }
 
-    // Bind target expression.
+    // Bind target expression. Chained to the parent scope so a correlated query
+    // vector (e.g. NEAREST k FROM t.vec TO outer.embedding) resolves outer cols.
     if (stmt.target) {
-        auto et = bind_expr(*stmt.target, empty_scope, bound);
+        Scope target_scope(parent_scope);
+        auto et = bind_expr(*stmt.target, target_scope, bound);
         if (!et) {
             return tl::unexpected(et.error());
         }
     }
 
-    // Bind WHERE.
+    // Bind WHERE against the table scope, chained to the parent for correlation.
     if (stmt.where_expr) {
-        Scope tbl_scope;
+        Scope tbl_scope(parent_scope);
         tbl_scope.add_table(make_scope_table(*schema, schema->name));
         auto et = bind_expr(*stmt.where_expr, tbl_scope, bound);
         if (!et) {
@@ -2541,14 +2602,26 @@ Result<BoundStatement> Binder::bind_nearest(const NearestStmt& stmt) {
         }
     }
 
+    // Output columns: all table columns + a trailing _distance column, matching
+    // the schema produced by plan_nearest. Needed when NEAREST is used as a
+    // subquery / derived table.
+    for (const auto& col : schema->columns) {
+        bound.output_columns.push_back(
+            {schema->table_id, col.ordinal, stmt.table_name, col.name, col.type_id, col.nullable});
+    }
+    bound.output_columns.push_back(
+        {schema->table_id, -1, stmt.table_name, "_distance", TypeId::FLOAT64, false});
+
     return ok(std::move(bound));
 }
 
-Result<BoundStatement> Binder::bind_match(const MatchStmt& stmt) {
+Result<BoundStatement> Binder::bind_match(const MatchStmt& stmt, Scope* parent_scope) {
     BoundStatement bound;
     bound.stmt = &stmt;
 
-    Scope scope;
+    // Chained to the parent scope so a correlated MATCH (its WHERE / filters
+    // referencing an outer column) can resolve those columns.
+    Scope scope(parent_scope);
 
     auto mr = bind_match_source(stmt, scope, bound);
     if (!mr) {

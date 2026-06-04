@@ -168,6 +168,17 @@ public:
     /// instead of being rebuilt from the edge heap.
     [[nodiscard]] Result<void> flush_edge_indexes();
 
+    /// Durably flush all edge data — both the edge heap pages (the source of
+    /// truth that load_edges() scans) and the B+ tree index pages — to disk.
+    ///
+    /// Unlike flush_edge_indexes(), which only persists the index structures,
+    /// this also flushes the edge heap buffer pools. Edge inserts are normally
+    /// only made durable by a clean shutdown (the destructor flushes the heaps)
+    /// or eviction/checkpoint; there is no WAL when the GraphEngine runs without
+    /// one. Call this after bulk-loading edges (e.g. demo bootstrap) so they
+    /// survive a hard kill that never reaches the destructor.
+    [[nodiscard]] Result<void> flush_edges();
+
 private:
     /// Build a compound map key from database_id and edge type name.
     [[nodiscard]] static std::string make_edge_key(database_id_t database_id,
