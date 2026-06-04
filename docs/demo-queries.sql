@@ -214,7 +214,7 @@ SHOW EDGE TYPES;
 SHOW INDEXES;
 
 -- See embedding configuration
-SHOW EMBEDDING;
+SHOW EMBEDDINGS;
 
 
 -- ============================================================================

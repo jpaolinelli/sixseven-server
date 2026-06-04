@@ -979,6 +979,57 @@ Result<void> GraphEngine::flush_edge_indexes() {
     return ok();
 }
 
+Result<void> GraphEngine::flush_edges() {
+    std::lock_guard lock(mu_);
+
+    if (!has_persistence()) {
+        return ok();
+    }
+
+    auto t_start = std::chrono::steady_clock::now();
+
+    // 1. Flush edge heap + index data pages so the on-disk files reflect every
+    //    in-memory edge. load_edges() rebuilds adjacency by scanning the heap,
+    //    so the heap is the durability-critical piece.
+    for (auto& [key, storage] : edge_storage_) {
+        if (!storage) continue;
+        if (storage->bpm) {
+            (void)storage->bpm->flush_all();
+        }
+        auto flush_idx = [](const std::unique_ptr<EdgeIndexStorage>& idx) {
+            if (idx && idx->bpm) {
+                (void)idx->bpm->flush_all();
+            }
+        };
+        flush_idx(storage->fwd_idx);
+        flush_idx(storage->rev_idx);
+        flush_idx(storage->uniq_idx);
+    }
+
+    // 2. Persist the B+ tree index structures so the next startup can load them
+    //    directly instead of rebuilding from the heap.
+    size_t flushed = 0;
+    for (auto& [key, table] : edge_tables_) {
+        auto colon = key.find(':');
+        if (colon == std::string::npos) continue;
+        auto db_id = static_cast<database_id_t>(std::stoul(key.substr(0, colon)));
+        auto r = persist_edge_indexes(key, db_id, table->config().edge_id);
+        if (r) {
+            ++flushed;
+        } else {
+            SIXSEVEN_LOG_WARN("failed to persist edge indexes for '{}': {}",
+                              table->config().name, r.error().message);
+        }
+    }
+
+    auto elapsed = std::chrono::steady_clock::now() - t_start;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    SIXSEVEN_LOG_INFO("graph engine: flushed edge heaps + {} index set(s) to disk in {}ms",
+                      flushed, ms);
+
+    return ok();
+}
+
 Result<void> GraphEngine::load_edges() {
     std::lock_guard lock(mu_);
 
