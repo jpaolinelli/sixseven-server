@@ -1,6 +1,7 @@
 #include "sixseven/executor/update.h"
 
 #include "sixseven/common/coercion.h"
+#include "sixseven/common/logging.h"
 #include "sixseven/common/types.h"
 #include "sixseven/executor/expr_evaluator.h"
 
@@ -75,6 +76,25 @@ Result<std::optional<Tuple>> UpdateOperator::do_next() {
         auto update_result = heap_.update_tuple(*tuple.rid, *bytes);
         if (!update_result) {
             return make_error(update_result.error().code, update_result.error().message);
+        }
+
+        // Maintain BM25 indexes: re-index the row's (possibly changed) text.
+        // update_tuple keeps the same RID, and add_document replaces the prior
+        // postings for that RID, so this is correct whether or not the text
+        // column changed.
+        for (const auto& target : bm25_targets_) {
+            if (target.index == nullptr || target.text_column_index >= new_values.size()) {
+                continue;
+            }
+            const auto& v = new_values[target.text_column_index];
+            Result<void> r = v.is_null() ? target.index->remove_document(*tuple.rid)
+                                         : target.index->add_document(*tuple.rid, v.as_string());
+            if (!r) {
+                SIXSEVEN_LOG_WARN("BM25 update maintenance failed for rid=({},{}): {}",
+                                  tuple.rid->page_id,
+                                  tuple.rid->slot_id,
+                                  r.error().message);
+            }
         }
         ++count;
     }

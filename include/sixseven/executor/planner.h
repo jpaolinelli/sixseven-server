@@ -8,6 +8,7 @@
 #include "sixseven/executor/tuple.h"
 #include "sixseven/graph/algorithm_registry.h"
 #include "sixseven/graph/graph_engine.h"
+#include "sixseven/index/bm25_index.h"
 #include "sixseven/index/btree_index.h"
 #include "sixseven/index/hash_index.h"
 #include "sixseven/index/rid.h"
@@ -58,7 +59,8 @@ public:
             std::unordered_map<index_id_t, HashIndex*>* hash_indexes = nullptr,
             EmbeddingWorkerPool* embedding_pool = nullptr,
             AlgorithmRegistry* algorithm_registry = nullptr,
-            std::unordered_map<index_id_t, std::vector<RID>>* hnsw_rid_maps = nullptr);
+            std::unordered_map<index_id_t, std::vector<RID>>* hnsw_rid_maps = nullptr,
+            std::unordered_map<index_id_t, Bm25Index*>* bm25_indexes = nullptr);
 
     /// Build an iterator tree for a DML/query statement.
     ///
@@ -74,9 +76,8 @@ public:
     /// configuration expressions that reference outer columns — a NEAREST target
     /// vector or a TRAVERSE start key — evaluate against it. Pass nullptrs to
     /// clear. The pointed-to objects must outlive planning.
-    void set_outer_context(const Tuple* tuple,
-                           const OutputSchema* schema,
-                           const BoundStatement* bound) {
+    void
+    set_outer_context(const Tuple* tuple, const OutputSchema* schema, const BoundStatement* bound) {
         outer_tuple_ = tuple;
         outer_schema_ = schema;
         outer_bound_ = bound;
@@ -158,6 +159,24 @@ private:
                         const Expr* where_expr,
                         const BoundStatement& bound);
 
+    /// Try to create a Bm25ScanOperator for a `MATCH(col) TO 'q'` WHERE
+    /// predicate. @p score_output must already include the trailing _score
+    /// column. Returns an error if MATCH appears in an unsupported position or
+    /// no BM25 index exists for the column; returns nullptr if there is no
+    /// MATCH predicate at all.
+    [[nodiscard]] Result<std::unique_ptr<Iterator>>
+    try_plan_bm25_scan(const TableSchema& table_schema,
+                       TableStorage* storage,
+                       const OutputSchema& score_output,
+                       const Expr* where_expr,
+                       const BoundStatement& bound);
+
+    /// Collect the BM25 indexes (and their text-column ordinals) on a table so
+    /// INSERT/UPDATE/DELETE operators can maintain them. Empty if none or the
+    /// index map is unavailable.
+    [[nodiscard]] std::vector<Bm25MaintenanceTarget>
+    collect_bm25_targets(const TableSchema& schema) const;
+
     /// Build a full-scope OutputSchema from all node tables in a MATCH pattern.
     /// Includes all columns from every node variable's label table so that
     /// WHERE clauses can reference columns not in the SELECT list.
@@ -177,8 +196,23 @@ private:
 
     // -- Vector query planning ------------------------------------------------
 
-    [[nodiscard]] Result<std::unique_ptr<Iterator>> plan_nearest(const NearestStmt& stmt,
-                                                                 const BoundStatement& bound);
+    /// Build a NearestScanOperator from the individual NEAREST parameters
+    /// (borrowed from a NearestExpr). Output schema is table columns + _distance.
+    [[nodiscard]] Result<std::unique_ptr<Iterator>>
+    plan_nearest_impl(const std::string& table_name,
+                      const std::string& column_name,
+                      const Expr* k_expr,
+                      const Expr* target_expr,
+                      NearestMetric metric,
+                      const Stmt* within_traverse,
+                      const Expr* where_expr,
+                      const BoundStatement& bound);
+
+    /// Try to build a vector scan for a `NEAREST(col, k) TO ...` WHERE predicate.
+    /// Returns nullptr if there is no NEAREST predicate; errors if it appears in
+    /// an unsupported position.
+    [[nodiscard]] Result<std::unique_ptr<Iterator>> try_plan_vector_scan(
+        const TableSchema& table_schema, const Expr* where_expr, const BoundStatement& bound);
 
     Catalog& catalog_;
     StorageManager& storage_;
@@ -189,6 +223,7 @@ private:
     std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes_;
     std::unordered_map<index_id_t, HashIndex*>* hash_indexes_;
     std::unordered_map<index_id_t, std::vector<RID>>* hnsw_rid_maps_;
+    std::unordered_map<index_id_t, Bm25Index*>* bm25_indexes_;
     EmbeddingWorkerPool* embedding_pool_;
     AlgorithmRegistry* algorithm_registry_;
     SubqueryContext subquery_ctx_;

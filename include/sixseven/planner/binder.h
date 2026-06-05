@@ -119,7 +119,7 @@ public:
 
     /// Bind a query statement that may reference columns from an enclosing query
     /// through `parent_scope` (a correlated subquery). Supports SELECT, TRAVERSE,
-    /// NEAREST, and MATCH; other statement types ignore the parent scope.
+    /// and MATCH; other statement types ignore the parent scope.
     [[nodiscard]] Result<BoundStatement> bind_with_outer(const Stmt& stmt, Scope* parent_scope);
 
     /// Inject outer CTE bindings so subquery binders can resolve CTE references.
@@ -164,7 +164,6 @@ private:
     Result<BoundStatement> bind_bulk_link(const BulkLinkStmt& stmt);
     Result<BoundStatement> bind_unlink(const UnlinkStmt& stmt);
     Result<BoundStatement> bind_traverse(const TraverseStmt& stmt, Scope* parent_scope = nullptr);
-    Result<BoundStatement> bind_nearest(const NearestStmt& stmt, Scope* parent_scope = nullptr);
     Result<BoundStatement> bind_match(const MatchStmt& stmt, Scope* parent_scope = nullptr);
     Result<BoundStatement> bind_shortest_path(const ShortestPathStmt& stmt);
     Result<BoundStatement> bind_explain(const ExplainStmt& stmt);
@@ -187,6 +186,9 @@ private:
     Result<ExprType> bind_between(const BetweenExpr& expr, Scope& scope, BoundStatement& bound);
     Result<ExprType> bind_is_null(const IsNullExpr& expr, Scope& scope, BoundStatement& bound);
     Result<ExprType> bind_like(const LikeExpr& expr, Scope& scope, BoundStatement& bound);
+    Result<ExprType> bind_match(const MatchExpr& expr, Scope& scope, BoundStatement& bound);
+    Result<ExprType>
+    bind_nearest_expr(const NearestExpr& expr, Scope& scope, BoundStatement& bound);
     Result<ExprType> bind_exists(const ExistsExpr& expr, Scope& scope, BoundStatement& bound);
     Result<ExprType> bind_subquery(const SubqueryExpr& expr, Scope& scope, BoundStatement& bound);
     Result<ExprType> bind_array(const ArrayExpr& expr, Scope& scope, BoundStatement& bound);

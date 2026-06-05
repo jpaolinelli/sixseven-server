@@ -11,7 +11,7 @@
 #   docker build --target test -t sixsevendb-test .         # build + test
 #
 # Run:
-#   docker run -p 5432:5432 sixsevendb
+#   docker run -p 6767:6767 sixsevendb
 # ============================================================================
 
 # ---------------------------------------------------------------------------
@@ -91,7 +91,7 @@ RUN ldconfig
 # Bundle the ONNX embedding model so vector search works out of the box
 COPY --from=build /opt/models/all-MiniLM-L6-v2 /models/all-MiniLM-L6-v2
 
-EXPOSE 5432
+EXPOSE 6767
 VOLUME ["/data", "/config"]
 USER sixseven
 

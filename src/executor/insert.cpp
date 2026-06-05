@@ -124,6 +124,7 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
                 return make_error(rid.error().code, rid.error().message);
             }
             enqueue_embedding_jobs(*rid, values);
+            maintain_bm25(*rid, values);
             ++count;
         }
     } else {
@@ -206,9 +207,10 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
             return make_error(rids.error().code, rids.error().message);
         }
 
-        // Enqueue embedding jobs for each inserted row.
+        // Enqueue embedding jobs and maintain BM25 indexes for each inserted row.
         for (size_t i = 0; i < rids->size(); ++i) {
             enqueue_embedding_jobs((*rids)[i], all_values[i]);
+            maintain_bm25((*rids)[i], all_values[i]);
         }
         count = static_cast<int64_t>(rids->size());
     }
@@ -244,7 +246,7 @@ void InsertOperator::enqueue_embedding_jobs(const RID& rid, const std::vector<Va
     if (embedding_pool_ == nullptr || embedding_cols_.empty()) {
         if (embedding_pool_ == nullptr && !embedding_cols_.empty()) {
             SIXSEVEN_LOG_WARN("embedding pool is null but table has {} embedding columns",
-                             embedding_cols_.size());
+                              embedding_cols_.size());
         }
         return;
     }
@@ -292,14 +294,37 @@ void InsertOperator::enqueue_embedding_jobs(const RID& rid, const std::vector<Va
         // the in-memory enqueue attempt, so even if the queue is full the
         // jobs survive on disk and the background recovery sweep will
         // re-enqueue them once workers drain the queue.
-        auto result = embedding_pool_->try_enqueue_batch(
-            std::move(jobs), std::chrono::milliseconds(0));
+        auto result =
+            embedding_pool_->try_enqueue_batch(std::move(jobs), std::chrono::milliseconds(0));
         if (!result) {
             // Queue full is expected under load — jobs are persisted to disk
             // and will be recovered by the background sweep.  Use DEBUG to
             // avoid log spam during bulk inserts.
             SIXSEVEN_LOG_DEBUG("embedding enqueue deferred (persisted to disk): {}",
                                result.error().message);
+        }
+    }
+}
+
+void InsertOperator::maintain_bm25(const RID& rid, const std::vector<Value>& values) {
+    for (const auto& target : bm25_targets_) {
+        if (target.index == nullptr || target.text_column_index >= values.size()) {
+            continue;
+        }
+        const auto& v = values[target.text_column_index];
+        if (v.is_null()) {
+            continue;
+        }
+        auto s = v.try_as_string();
+        if (!s) {
+            continue;
+        }
+        auto r = target.index->add_document(rid, **s);
+        if (!r) {
+            SIXSEVEN_LOG_WARN("BM25 insert maintenance failed for rid=({},{}): {}",
+                              rid.page_id,
+                              rid.slot_id,
+                              r.error().message);
         }
     }
 }

@@ -1,5 +1,7 @@
 #include "sixseven/executor/delete.h"
 
+#include "sixseven/common/logging.h"
+
 namespace sixseven {
 
 DeleteOperator::DeleteOperator(TableHeap& heap, std::unique_ptr<Iterator> child)
@@ -36,6 +38,21 @@ Result<std::optional<Tuple>> DeleteOperator::do_next() {
         auto del = heap_.delete_tuple(*tuple.rid);
         if (!del) {
             return make_error(del.error().code, del.error().message);
+        }
+
+        // Maintain BM25 indexes: remove the deleted document's postings so it
+        // no longer matches (and its RID can't be wrongly reused by a later
+        // insert).
+        for (const auto& target : bm25_targets_) {
+            if (target.index != nullptr) {
+                auto r = target.index->remove_document(*tuple.rid);
+                if (!r) {
+                    SIXSEVEN_LOG_WARN("BM25 delete maintenance failed for rid=({},{}): {}",
+                                      tuple.rid->page_id,
+                                      tuple.rid->slot_id,
+                                      r.error().message);
+                }
+            }
         }
         ++count;
     }

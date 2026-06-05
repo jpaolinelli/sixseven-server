@@ -753,21 +753,24 @@ TEST(Ast, TraverseStmt) {
     EXPECT_TRUE(stmt->fetch);
 }
 
-TEST(Ast, NearestStmt) {
-    auto stmt = std::make_unique<NearestStmt>();
-    stmt->k = make_int("10");
-    stmt->table_name = "products";
-    stmt->column_name = "embedding";
-    stmt->metric = NearestMetric::COSINE;
+TEST(Ast, NearestExpr) {
+    auto expr = std::make_unique<NearestExpr>();
+    auto col = std::make_unique<ColumnRefExpr>();
+    col->column = "embedding";
+    expr->column = std::move(col);
+    expr->k = make_int("10");
+    expr->metric = NearestMetric::COSINE;
 
     auto arr = std::make_unique<ArrayExpr>();
     arr->elements.push_back(make_int("1"));
     arr->elements.push_back(make_int("2"));
-    stmt->target = std::move(arr);
+    expr->target = std::move(arr);
 
-    EXPECT_EQ(stmt->table_name, "products");
-    EXPECT_EQ(stmt->metric, NearestMetric::COSINE);
-    auto* target = dynamic_cast<ArrayExpr*>(stmt->target.get());
+    auto* col_ref = dynamic_cast<ColumnRefExpr*>(expr->column.get());
+    ASSERT_NE(col_ref, nullptr);
+    EXPECT_EQ(col_ref->column, "embedding");
+    EXPECT_EQ(expr->metric, NearestMetric::COSINE);
+    auto* target = dynamic_cast<ArrayExpr*>(expr->target.get());
     ASSERT_NE(target, nullptr);
     EXPECT_EQ(target->elements.size(), 2u);
 }

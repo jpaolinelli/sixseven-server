@@ -3,9 +3,9 @@
 #include "sixseven/common/result.h"
 #include "sixseven/executor/iterator.h"
 #include "sixseven/executor/tuple.h"
+#include "sixseven/index/rid.h"
 #include "sixseven/parser/ast.h"
 #include "sixseven/planner/binder.h"
-#include "sixseven/index/rid.h"
 #include "sixseven/table/table_heap.h"
 #include "sixseven/table/tuple.h"
 #include "sixseven/vector/distance.h"
@@ -16,6 +16,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <unordered_set>
 #include <vector>
@@ -122,6 +123,11 @@ private:
     /// Output schema for WHERE predicate evaluation (excludes _distance).
     /// Built once in open() to avoid per-row allocation.
     OutputSchema where_filter_schema_;
+
+    /// RIDs already emitted, so a physical row is never returned twice even if
+    /// the HNSW index holds more than one node pointing at it (e.g. a row that
+    /// was embedded twice during bootstrap). Reset per search / widening pass.
+    std::set<RID> seen_rids_;
 
     std::vector<Tuple> results_;
     size_t cursor_ = 0;

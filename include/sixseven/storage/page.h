@@ -27,6 +27,8 @@ enum class PageType : uint8_t {
     BTREE_META,
     HASH_META,
     HASH_BUCKET,
+    BM25_META, ///< BM25 inverted index metadata (config, stats, page directory).
+    BM25_DATA, ///< BM25 posting and document-length records.
 };
 
 /// Slot identifier within a page (0-based index into the slot directory).

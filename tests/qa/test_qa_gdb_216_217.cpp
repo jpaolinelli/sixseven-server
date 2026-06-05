@@ -175,14 +175,14 @@ TEST(QA_GDB216_Overflow, TraverseMaxDepthZeroParsesOk) {
 // -- NEAREST WITHIN TRAVERSE MAX_DEPTH overflow -------------------------------
 
 TEST(QA_GDB216_Overflow, NearestTraverseMaxDepthOverflowReturnsError) {
-    auto r = try_parse("NEAREST 5 FROM t.col TO [1,2,3] "
+    auto r = try_parse("SELECT * FROM t WHERE NEAREST(col, 5) TO [1,2,3] "
                        "WITHIN TRAVERSE follows FROM users(1) MAX_DEPTH 99999999999999999");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::PARSE_ERROR);
 }
 
 TEST(QA_GDB216_Overflow, NearestTraverseMaxDepthIntMaxPlusOneError) {
-    auto r = try_parse("NEAREST 5 FROM t.col TO [1,2,3] "
+    auto r = try_parse("SELECT * FROM t WHERE NEAREST(col, 5) TO [1,2,3] "
                        "WITHIN TRAVERSE follows FROM users(1) MAX_DEPTH 2147483648");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::PARSE_ERROR);

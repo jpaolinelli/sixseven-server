@@ -470,6 +470,67 @@ TEST_F(NearestScanTest, HnswIndexBasicSearch) {
     op.close();
 }
 
+// Regression: a single physical row can be referenced by more than one HNSW
+// node (e.g. it was embedded twice during demo bootstrap). NEAREST must still
+// return that row exactly once, not once per node.
+TEST_F(NearestScanTest, DeduplicatesRowWithMultipleHnswNodes) {
+    TableHeap heap(*table_bpm_, dm_, table_file_id_);
+    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+
+    HnswIndexConfig hnsw_config;
+    hnsw_config.dimension = 3;
+    hnsw_config.m = 8;
+    hnsw_config.ef_construction = 50;
+    hnsw_config.ef_search = 50;
+    ASSERT_TRUE(hnsw.create(hnsw_config).has_value());
+
+    Embedding emb1 = {1.0F, 0.0F, 0.0F};
+    Embedding emb2 = {0.0F, 1.0F, 0.0F};
+    RID r1 = insert_row(heap, 1, "alpha", emb1);
+    RID r2 = insert_row(heap, 2, "beta", emb2);
+
+    // Row 1 was embedded twice: emb1 appears as two distinct HNSW nodes.
+    ASSERT_TRUE(hnsw.insert(emb1).has_value()); // node 0 -> r1
+    ASSERT_TRUE(hnsw.insert(emb1).has_value()); // node 1 -> r1 (duplicate)
+    ASSERT_TRUE(hnsw.insert(emb2).has_value()); // node 2 -> r2
+
+    // node_id -> RID map with two nodes pointing at the same row.
+    std::vector<RID> rid_map = {r1, r1, r2};
+
+    NearestScanConfig config;
+    config.k = 5;
+    config.query_vector = {1.0F, 0.0F, 0.0F};
+    config.metric = DistanceMetric::L2;
+    config.embedding_column_index = 2;
+
+    OutputSchema schema(output_cols_);
+    BoundStatement bound;
+
+    NearestScanOperator op(heap,
+                           storage_schema_,
+                           std::move(config),
+                           std::move(schema),
+                           nullptr,
+                           bound,
+                           &hnsw,
+                           &rid_map);
+
+    ASSERT_TRUE(op.open().has_value());
+    auto results = drain(op);
+
+    // Two distinct rows exist; row 1 must appear exactly once.
+    EXPECT_EQ(results.size(), 2u);
+    int count_r1 = 0;
+    for (const auto& t : results) {
+        if (t.values[0].as_int32() == 1) {
+            ++count_r1;
+        }
+    }
+    EXPECT_EQ(count_r1, 1);
+
+    op.close();
+}
+
 TEST_F(NearestScanTest, HnswIndexFilteredSearch) {
     TableHeap heap(*table_bpm_, dm_, table_file_id_);
     HnswIndex hnsw(*hnsw_bpm_, nullptr);

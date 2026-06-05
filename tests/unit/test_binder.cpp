@@ -965,20 +965,22 @@ TEST_F(BinderTest, TraverseFromStarExpansion) {
 }
 
 TEST_F(BinderTest, NearestValid) {
-    auto bound = bind_ok("NEAREST 5 FROM products.desc_vector TO [1.0, 2.0, 3.0]");
+    auto bound = bind_ok("SELECT * FROM products WHERE NEAREST(desc_vector, 5) TO [1.0, 2.0, 3.0]");
     EXPECT_FALSE(bound.referenced_tables.empty());
 }
 
 TEST_F(BinderTest, NearestNonEmbeddingError) {
-    bind_error("NEAREST 5 FROM products.name TO [1.0, 2.0]", StatusCode::TYPE_ERROR);
+    bind_error("SELECT * FROM products WHERE NEAREST(name, 5) TO [1.0, 2.0]",
+               StatusCode::TYPE_ERROR);
 }
 
 TEST_F(BinderTest, NearestColumnNotFound) {
-    bind_error("NEAREST 5 FROM products.nonexistent TO [1.0]", StatusCode::NOT_FOUND);
+    bind_error("SELECT * FROM products WHERE NEAREST(nonexistent, 5) TO [1.0]",
+               StatusCode::NOT_FOUND);
 }
 
 TEST_F(BinderTest, NearestTableNotFound) {
-    bind_error("NEAREST 5 FROM nonexistent.col TO [1.0]", StatusCode::NOT_FOUND);
+    bind_error("SELECT * FROM nonexistent WHERE NEAREST(col, 5) TO [1.0]", StatusCode::NOT_FOUND);
 }
 
 TEST_F(BinderTest, ShortestPathValid) {

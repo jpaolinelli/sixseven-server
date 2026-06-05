@@ -49,6 +49,46 @@ static void expect_parse_error(std::string_view sql) {
     EXPECT_FALSE(stmts.has_value()) << "expected parse error for: " << sql;
 }
 
+/// Recursively locate the NearestExpr embedded in a WHERE expression tree,
+/// descending through AND/OR (BinaryExpr) and NOT (UnaryExpr) nodes.
+static const NearestExpr* find_nearest_expr(const Expr* e) {
+    if (e == nullptr)
+        return nullptr;
+    if (auto* n = dynamic_cast<const NearestExpr*>(e))
+        return n;
+    if (auto* bin = dynamic_cast<const BinaryExpr*>(e)) {
+        if (auto* found = find_nearest_expr(bin->lhs.get()))
+            return found;
+        return find_nearest_expr(bin->rhs.get());
+    }
+    if (auto* un = dynamic_cast<const UnaryExpr*>(e))
+        return find_nearest_expr(un->operand.get());
+    return nullptr;
+}
+
+/// Parse a SELECT carrying a NEAREST predicate and return the NearestExpr.
+/// The owning statements are kept alive in a static store so the returned
+/// borrowed pointer stays valid for the duration of the test program.
+static const NearestExpr* parse_nearest(std::string_view sql) {
+    static std::vector<StmtPtr> keep_alive;
+    auto stmt = parse_one(sql);
+    EXPECT_NE(stmt, nullptr);
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    EXPECT_NE(sel, nullptr);
+    if (sel == nullptr)
+        return nullptr;
+    const NearestExpr* n = find_nearest_expr(sel->where_expr.get());
+    keep_alive.push_back(std::move(stmt));
+    return n;
+}
+
+/// Extract the column name from a NearestExpr's column field.
+static std::string nearest_column(const NearestExpr* n) {
+    auto* col = dynamic_cast<const ColumnRefExpr*>(n->column.get());
+    EXPECT_NE(col, nullptr);
+    return col != nullptr ? col->column : std::string{};
+}
+
 // ---------------------------------------------------------------------------
 // TRAVERSE tests
 // ---------------------------------------------------------------------------
@@ -203,20 +243,16 @@ TEST(QA_GDB_106_Traverse, DirectionAfterMaxDepth) {
 // ---------------------------------------------------------------------------
 
 TEST(QA_GDB_106_Nearest, BasicNearest) {
-    auto stmt = parse_one("NEAREST 5 FROM products.embedding TO [1.0, 2.0, 3.0]");
-    ASSERT_NE(stmt, nullptr);
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    auto* n =
+        parse_nearest("SELECT * FROM products WHERE NEAREST(embedding, 5) TO [1.0, 2.0, 3.0]");
     ASSERT_NE(n, nullptr);
-    EXPECT_EQ(n->table_name, "products");
-    EXPECT_EQ(n->column_name, "embedding");
+    EXPECT_EQ(nearest_column(n), "embedding");
     EXPECT_EQ(n->metric, NearestMetric::COSINE); // default
-    EXPECT_EQ(n->where_expr, nullptr);
     EXPECT_EQ(n->within_traverse, nullptr);
 }
 
 TEST(QA_GDB_106_Nearest, WithTextTarget) {
-    auto stmt = parse_one("NEAREST 10 FROM docs.embed TO 'machine learning'");
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    auto* n = parse_nearest("SELECT * FROM docs WHERE NEAREST(embed, 10) TO 'machine learning'");
     ASSERT_NE(n, nullptr);
     auto* lit = dynamic_cast<LiteralExpr*>(n->target.get());
     ASSERT_NE(lit, nullptr);
@@ -224,45 +260,39 @@ TEST(QA_GDB_106_Nearest, WithTextTarget) {
 }
 
 TEST(QA_GDB_106_Nearest, UsingCosine) {
-    auto stmt = parse_one("NEAREST 5 FROM t.col TO [1.0] USING COSINE");
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    auto* n = parse_nearest("SELECT * FROM t WHERE NEAREST(col, 5) TO [1.0] USING COSINE");
     ASSERT_NE(n, nullptr);
     EXPECT_EQ(n->metric, NearestMetric::COSINE);
 }
 
 TEST(QA_GDB_106_Nearest, UsingL2) {
-    auto stmt = parse_one("NEAREST 5 FROM t.col TO [1.0] USING L2");
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    auto* n = parse_nearest("SELECT * FROM t WHERE NEAREST(col, 5) TO [1.0] USING L2");
     ASSERT_NE(n, nullptr);
     EXPECT_EQ(n->metric, NearestMetric::L2);
 }
 
 TEST(QA_GDB_106_Nearest, UsingDot) {
-    auto stmt = parse_one("NEAREST 5 FROM t.col TO [1.0] USING DOT");
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    auto* n = parse_nearest("SELECT * FROM t WHERE NEAREST(col, 5) TO [1.0] USING DOT");
     ASSERT_NE(n, nullptr);
     EXPECT_EQ(n->metric, NearestMetric::DOT);
 }
 
 TEST(QA_GDB_106_Nearest, WithWhere) {
-    auto stmt = parse_one("NEAREST 5 FROM t.col TO [1.0] WHERE active = true");
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    // Residual predicate becomes a trailing AND alongside the NEAREST predicate.
+    auto* n = parse_nearest("SELECT * FROM t WHERE NEAREST(col, 5) TO [1.0] AND active = true");
     ASSERT_NE(n, nullptr);
-    EXPECT_NE(n->where_expr, nullptr);
 }
 
 TEST(QA_GDB_106_Nearest, WithWhereAndUsing) {
-    auto stmt = parse_one("NEAREST 5 FROM t.col TO [1.0] WHERE active = true USING L2");
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    auto* n =
+        parse_nearest("SELECT * FROM t WHERE NEAREST(col, 5) TO [1.0] USING L2 AND active = true");
     ASSERT_NE(n, nullptr);
-    EXPECT_NE(n->where_expr, nullptr);
     EXPECT_EQ(n->metric, NearestMetric::L2);
 }
 
 TEST(QA_GDB_106_Nearest, WithinTraverse) {
-    auto stmt = parse_one("NEAREST 5 FROM products.embedding TO 'laptop' "
-                          "WITHIN TRAVERSE similar FROM products(1)");
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    auto* n = parse_nearest("SELECT * FROM products WHERE NEAREST(embedding, 5) TO 'laptop' "
+                            "WITHIN TRAVERSE similar FROM products(1)");
     ASSERT_NE(n, nullptr);
     ASSERT_NE(n->within_traverse, nullptr);
     auto* trav = dynamic_cast<TraverseStmt*>(n->within_traverse.get());
@@ -272,9 +302,8 @@ TEST(QA_GDB_106_Nearest, WithinTraverse) {
 }
 
 TEST(QA_GDB_106_Nearest, WithinTraverseWithDirection) {
-    auto stmt = parse_one("NEAREST 5 FROM t.col TO 'x' "
-                          "WITHIN TRAVERSE e FROM t(1) DIRECTION BOTH");
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    auto* n = parse_nearest("SELECT * FROM t WHERE NEAREST(col, 5) TO 'x' "
+                            "WITHIN TRAVERSE e FROM t(1) DIRECTION BOTH");
     ASSERT_NE(n, nullptr);
     auto* trav = dynamic_cast<TraverseStmt*>(n->within_traverse.get());
     ASSERT_NE(trav, nullptr);
@@ -282,9 +311,8 @@ TEST(QA_GDB_106_Nearest, WithinTraverseWithDirection) {
 }
 
 TEST(QA_GDB_106_Nearest, WithinTraverseWithMaxDepth) {
-    auto stmt = parse_one("NEAREST 5 FROM t.col TO 'x' "
-                          "WITHIN TRAVERSE e FROM t(1) MAX_DEPTH 3");
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    auto* n = parse_nearest("SELECT * FROM t WHERE NEAREST(col, 5) TO 'x' "
+                            "WITHIN TRAVERSE e FROM t(1) MAX_DEPTH 3");
     ASSERT_NE(n, nullptr);
     auto* trav = dynamic_cast<TraverseStmt*>(n->within_traverse.get());
     ASSERT_NE(trav, nullptr);
@@ -293,43 +321,33 @@ TEST(QA_GDB_106_Nearest, WithinTraverseWithMaxDepth) {
 }
 
 TEST(QA_GDB_106_Nearest, WithinTraverseAndWhereAndUsing) {
-    auto stmt = parse_one("NEAREST 10 FROM products.embed TO [1.0, 2.0] "
-                          "WITHIN TRAVERSE related FROM products(42) DIRECTION IN MAX_DEPTH 2 "
-                          "WHERE price < 100 USING DOT");
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    auto* n = parse_nearest(
+        "SELECT * FROM products WHERE NEAREST(embed, 10) TO [1.0, 2.0] "
+        "WITHIN TRAVERSE related FROM products(42) DIRECTION IN MAX_DEPTH 2 USING DOT "
+        "AND price < 100");
     ASSERT_NE(n, nullptr);
     ASSERT_NE(n->within_traverse, nullptr);
-    EXPECT_NE(n->where_expr, nullptr);
     EXPECT_EQ(n->metric, NearestMetric::DOT);
 }
 
 TEST(QA_GDB_106_Nearest, ExpressionK) {
-    auto stmt = parse_one("NEAREST 2 + 3 FROM t.col TO 'x'");
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    auto* n = parse_nearest("SELECT * FROM t WHERE NEAREST(col, 2 + 3) TO 'x'");
     ASSERT_NE(n, nullptr);
     auto* bin = dynamic_cast<BinaryExpr*>(n->k.get());
     ASSERT_NE(bin, nullptr);
 }
 
 // Error paths
-TEST(QA_GDB_106_Nearest, MissingFrom) {
-    expect_parse_error("NEAREST 5 products.col TO [1.0]");
-}
-
-TEST(QA_GDB_106_Nearest, MissingDot) {
-    expect_parse_error("NEAREST 5 FROM products TO [1.0]");
-}
-
 TEST(QA_GDB_106_Nearest, MissingTo) {
-    expect_parse_error("NEAREST 5 FROM t.col [1.0]");
+    expect_parse_error("SELECT * FROM t WHERE NEAREST(col, 5) [1.0]");
 }
 
 TEST(QA_GDB_106_Nearest, InvalidMetric) {
-    expect_parse_error("NEAREST 5 FROM t.col TO [1.0] USING MANHATTAN");
+    expect_parse_error("SELECT * FROM t WHERE NEAREST(col, 5) TO [1.0] USING MANHATTAN");
 }
 
 TEST(QA_GDB_106_Nearest, WithinWithoutTraverse) {
-    expect_parse_error("NEAREST 5 FROM t.col TO 'x' WITHIN e FROM t(1)");
+    expect_parse_error("SELECT * FROM t WHERE NEAREST(col, 5) TO 'x' WITHIN e FROM t(1)");
 }
 
 // ---------------------------------------------------------------------------

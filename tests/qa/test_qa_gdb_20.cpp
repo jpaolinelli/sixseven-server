@@ -56,6 +56,23 @@ static Result<StmtPtr> try_parse(std::string_view sql) {
     return parser.parse();
 }
 
+/// Recursively locate the first NearestExpr inside an expression tree,
+/// descending through BinaryExpr (lhs/rhs) and UnaryExpr (operand).
+static const NearestExpr* find_nearest_expr(const Expr* e) {
+    if (e == nullptr)
+        return nullptr;
+    if (auto* nn = dynamic_cast<const NearestExpr*>(e))
+        return nn;
+    if (auto* bin = dynamic_cast<const BinaryExpr*>(e)) {
+        if (auto* found = find_nearest_expr(bin->lhs.get()))
+            return found;
+        return find_nearest_expr(bin->rhs.get());
+    }
+    if (auto* un = dynamic_cast<const UnaryExpr*>(e))
+        return find_nearest_expr(un->operand.get());
+    return nullptr;
+}
+
 // =============================================================================
 // [BUG] std::stoi overflow in type spec integer parameters
 // Parser uses std::stoi to convert integer literals in type parameters
@@ -92,7 +109,7 @@ TEST(QA_ParserOverflow, TraverseMaxDepthOverflow) {
 
 TEST(QA_ParserOverflow, NearestWithinTraverseMaxDepthOverflow) {
     EXPECT_NO_THROW({
-        auto r = try_parse("SELECT NEAREST 5 TO embedding FROM t WITHIN "
+        auto r = try_parse("SELECT * FROM t WHERE NEAREST(embedding, 5) TO [1.0] WITHIN "
                            "TRAVERSE follows FROM users(1) MAX_DEPTH 99999999999999999");
     });
 }
@@ -1100,28 +1117,34 @@ TEST(QA_GraphEdge, TraverseMinimal) {
 }
 
 TEST(QA_GraphEdge, NearestWithinTraverse) {
-    auto stmt = parse_one("NEAREST 5 FROM docs.embedding TO 'search query' "
+    auto stmt = parse_one("SELECT * FROM docs WHERE NEAREST(embedding, 5) TO 'search query' "
                           "WITHIN TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 3 "
-                          "WHERE category = 'tech' USING COSINE");
-    auto* nn = dynamic_cast<NearestStmt*>(stmt.get());
+                          "USING COSINE AND category = 'tech'");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    const auto* nn = find_nearest_expr(sel->where_expr.get());
     ASSERT_NE(nn, nullptr);
-    EXPECT_EQ(nn->table_name, "docs");
-    EXPECT_EQ(nn->column_name, "embedding");
+    auto* col = dynamic_cast<const ColumnRefExpr*>(nn->column.get());
+    ASSERT_NE(col, nullptr);
+    EXPECT_EQ(col->column, "embedding");
     EXPECT_NE(nn->within_traverse, nullptr);
-    EXPECT_NE(nn->where_expr, nullptr);
     EXPECT_EQ(nn->metric, NearestMetric::COSINE);
 }
 
 TEST(QA_GraphEdge, NearestL2Metric) {
-    auto stmt = parse_one("NEAREST 10 FROM t.col TO [1.0, 2.0, 3.0] USING L2");
-    auto* nn = dynamic_cast<NearestStmt*>(stmt.get());
+    auto stmt = parse_one("SELECT * FROM t WHERE NEAREST(col, 10) TO [1.0, 2.0, 3.0] USING L2");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    const auto* nn = find_nearest_expr(sel->where_expr.get());
     ASSERT_NE(nn, nullptr);
     EXPECT_EQ(nn->metric, NearestMetric::L2);
 }
 
 TEST(QA_GraphEdge, NearestDotMetric) {
-    auto stmt = parse_one("NEAREST 10 FROM t.col TO [1.0] USING DOT");
-    auto* nn = dynamic_cast<NearestStmt*>(stmt.get());
+    auto stmt = parse_one("SELECT * FROM t WHERE NEAREST(col, 10) TO [1.0] USING DOT");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    const auto* nn = find_nearest_expr(sel->where_expr.get());
     ASSERT_NE(nn, nullptr);
     EXPECT_EQ(nn->metric, NearestMetric::DOT);
 }
@@ -1385,6 +1408,8 @@ public:
     void visit(const BetweenExpr&) override { count++; }
     void visit(const IsNullExpr&) override { count++; }
     void visit(const LikeExpr&) override { count++; }
+    void visit(const MatchExpr&) override { count++; }
+    void visit(const NearestExpr&) override { count++; }
     void visit(const ExistsExpr&) override { count++; }
     void visit(const SubqueryExpr&) override { count++; }
     void visit(const ArrayExpr&) override { count++; }
@@ -1409,7 +1434,6 @@ public:
     void visit(const UnlinkStmt&) override { count++; }
     void visit(const SelectStmt&) override { count++; }
     void visit(const TraverseStmt&) override { count++; }
-    void visit(const NearestStmt&) override { count++; }
     void visit(const MatchStmt&) override { count++; }
     void visit(const ShortestPathStmt&) override { count++; }
     void visit(const BeginStmt&) override { count++; }
@@ -1443,7 +1467,7 @@ TEST(QA_Visitor, EveryStatementTypeDispatchesCorrectly) {
         "DELETE FROM t",
         "SELECT 1",
         "TRAVERSE e FROM t(1)",
-        "NEAREST 5 FROM t.c TO 'x'",
+        "SELECT * FROM t WHERE NEAREST(c, 5) TO 'x'",
         "MATCH (a:t)-[r:e]->(b:t) RETURN a",
         "SHORTEST PATH FROM t(1) TO t(2) VIA e",
         "BEGIN",
@@ -1548,7 +1572,7 @@ TEST(QA_ErrorCases, ExplainInvalidFormat) {
 }
 
 TEST(QA_ErrorCases, NearestMissingTo) {
-    expect_parse_error("NEAREST 5 FROM t.c");
+    expect_parse_error("SELECT * FROM t WHERE NEAREST(c, 5)");
 }
 
 TEST(QA_ErrorCases, LinkMissingVia) {

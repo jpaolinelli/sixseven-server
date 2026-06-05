@@ -126,7 +126,7 @@ TEST_F(QA_GDB258, NearestTextQueryOnEmptyTable) {
     create_embedding_table();
 
     // No rows inserted — NEAREST should return empty, not crash.
-    auto qr = exec_ok("NEAREST 5 FROM articles.title_vec TO 'hello world'");
+    auto qr = exec_ok("SELECT * FROM articles WHERE NEAREST(title_vec, 5) TO 'hello world'");
     EXPECT_EQ(qr.rows.size(), 0u);
 }
 
@@ -134,7 +134,7 @@ TEST_F(QA_GDB258, NearestVectorQueryOnEmptyTable) {
     wire_registry();
     create_embedding_table();
 
-    auto qr = exec_ok("NEAREST 5 FROM articles.title_vec TO [1.0, 0.0, 0.0, 0.0]");
+    auto qr = exec_ok("SELECT * FROM articles WHERE NEAREST(title_vec, 5) TO [1.0, 0.0, 0.0, 0.0]");
     EXPECT_EQ(qr.rows.size(), 0u);
 }
 
@@ -148,7 +148,7 @@ TEST_F(QA_GDB258, NearestWithKZero) {
     insert_row(1, "test", {1.0F, 0.0F, 0.0F, 0.0F});
 
     // k=0 should return 0 rows.
-    auto qr = exec_ok("NEAREST 0 FROM articles.title_vec TO 'test'");
+    auto qr = exec_ok("SELECT * FROM articles WHERE NEAREST(title_vec, 0) TO 'test'");
     EXPECT_EQ(qr.rows.size(), 0u);
 }
 
@@ -159,7 +159,7 @@ TEST_F(QA_GDB258, NearestWithKLargerThanRowCount) {
     insert_row(2, "b", {0.0F, 1.0F, 0.0F, 0.0F});
 
     // k=100 but only 2 rows — should return 2, not error.
-    auto qr = exec_ok("NEAREST 100 FROM articles.title_vec TO 'test'");
+    auto qr = exec_ok("SELECT * FROM articles WHERE NEAREST(title_vec, 100) TO 'test'");
     EXPECT_LE(qr.rows.size(), 2u);
 }
 
@@ -173,7 +173,7 @@ TEST_F(QA_GDB258, NearestWithEmptyStringTarget) {
     insert_row(1, "hello", {1.0F, 0.0F, 0.0F, 0.0F});
 
     // Empty string target — the provider correctly rejects empty text.
-    auto result = engine_->execute("NEAREST 1 FROM articles.title_vec TO ''");
+    auto result = engine_->execute("SELECT * FROM articles WHERE NEAREST(title_vec, 1) TO ''");
     EXPECT_FALSE(result.has_value());
 }
 
@@ -186,7 +186,7 @@ TEST_F(QA_GDB258, NearestOnNonEmbeddingColumn) {
     exec_ok("CREATE TABLE simple (id INT, name VARCHAR)");
 
     // NEAREST on a VARCHAR column — should fail with a clear error.
-    auto result = engine_->execute("NEAREST 5 FROM simple.name TO 'test'");
+    auto result = engine_->execute("SELECT * FROM simple WHERE NEAREST(name, 5) TO 'test'");
     EXPECT_FALSE(result.has_value());
 }
 
@@ -197,7 +197,7 @@ TEST_F(QA_GDB258, NearestOnNonEmbeddingColumn) {
 TEST_F(QA_GDB258, NearestOnNonExistentTable) {
     wire_registry();
 
-    auto result = engine_->execute("NEAREST 5 FROM ghost.vec TO 'test'");
+    auto result = engine_->execute("SELECT * FROM ghost WHERE NEAREST(vec, 5) TO 'test'");
     EXPECT_FALSE(result.has_value());
 }
 
@@ -246,16 +246,17 @@ TEST_F(QA_GDB258, SetProviderRegistryMultipleTimes) {
     create_embedding_table();
     insert_row(1, "test", {1.0F, 0.0F, 0.0F, 0.0F});
 
-    auto qr = exec_ok("NEAREST 1 FROM articles.title_vec TO 'test'");
+    auto qr = exec_ok("SELECT * FROM articles WHERE NEAREST(title_vec, 1) TO 'test'");
     EXPECT_EQ(qr.rows.size(), 1u);
 
     // Unwire
     engine_->set_provider_registry(nullptr);
-    exec_error("NEAREST 1 FROM articles.title_vec TO 'test'", StatusCode::NOT_IMPLEMENTED);
+    exec_error("SELECT * FROM articles WHERE NEAREST(title_vec, 1) TO 'test'",
+               StatusCode::NOT_IMPLEMENTED);
 
     // Re-wire
     wire_registry();
-    auto qr2 = exec_ok("NEAREST 1 FROM articles.title_vec TO 'test'");
+    auto qr2 = exec_ok("SELECT * FROM articles WHERE NEAREST(title_vec, 1) TO 'test'");
     EXPECT_EQ(qr2.rows.size(), 1u);
 }
 
@@ -268,7 +269,8 @@ TEST_F(QA_GDB258, ExplainNearestTextFailsWithoutRegistry) {
     create_embedding_table();
     insert_row(1, "test", {1.0F, 0.0F, 0.0F, 0.0F});
 
-    exec_error("EXPLAIN NEAREST 1 FROM articles.title_vec TO 'test'", StatusCode::NOT_IMPLEMENTED);
+    exec_error("EXPLAIN SELECT * FROM articles WHERE NEAREST(title_vec, 1) TO 'test'",
+               StatusCode::NOT_IMPLEMENTED);
 }
 
 // =============================================================================
@@ -279,7 +281,8 @@ TEST_F(QA_GDB258, ExplainNearestVectorWorksWithoutRegistry) {
     create_embedding_table();
     insert_row(1, "test", {1.0F, 0.0F, 0.0F, 0.0F});
 
-    auto qr = exec_ok("EXPLAIN NEAREST 1 FROM articles.title_vec TO [1.0, 0.0, 0.0, 0.0]");
+    auto qr =
+        exec_ok("EXPLAIN SELECT * FROM articles WHERE NEAREST(title_vec, 1) TO [1.0, 0.0, 0.0, 0.0]");
     EXPECT_FALSE(qr.rows.empty());
 }
 
@@ -300,7 +303,7 @@ TEST_F(QA_GDB258, NearestTextQueryWithManyRows) {
         insert_row(i, "row_" + std::to_string(i), emb);
     }
 
-    auto qr = exec_ok("NEAREST 10 FROM articles.title_vec TO 'test query'");
+    auto qr = exec_ok("SELECT * FROM articles WHERE NEAREST(title_vec, 10) TO 'test query'");
     EXPECT_EQ(qr.rows.size(), 10u);
 }
 
@@ -349,7 +352,7 @@ TEST_F(QA_GDB258, NearestSkipsRowsWithNullEmbedding) {
     ASSERT_TRUE(rid.has_value()) << rid.error().message;
 
     // NEAREST k=5 on 2 rows (one NULL) — should not crash.
-    auto qr = exec_ok("NEAREST 5 FROM articles.title_vec TO [1.0, 0.0, 0.0, 0.0]");
+    auto qr = exec_ok("SELECT * FROM articles WHERE NEAREST(title_vec, 5) TO [1.0, 0.0, 0.0, 0.0]");
     // Should return at least the non-null row.
     EXPECT_GE(qr.rows.size(), 1u);
 }
@@ -398,7 +401,7 @@ TEST_F(QA_GDB258, NearestK1ReturnsExactlyOneResult) {
     insert_row(2, "second", {0.0F, 1.0F, 0.0F, 0.0F});
     insert_row(3, "third", {0.0F, 0.0F, 1.0F, 0.0F});
 
-    auto qr = exec_ok("NEAREST 1 FROM articles.title_vec TO 'find nearest'");
+    auto qr = exec_ok("SELECT * FROM articles WHERE NEAREST(title_vec, 1) TO 'find nearest'");
     EXPECT_EQ(qr.rows.size(), 1u);
 }
 
@@ -411,6 +414,7 @@ TEST_F(QA_GDB258, ExplainAnalyzeNearestTextWithRegistry) {
     create_embedding_table();
     insert_row(1, "test", {1.0F, 0.0F, 0.0F, 0.0F});
 
-    auto qr = exec_ok("EXPLAIN ANALYZE NEAREST 1 FROM articles.title_vec TO 'analyze text'");
+    auto qr = exec_ok(
+        "EXPLAIN ANALYZE SELECT * FROM articles WHERE NEAREST(title_vec, 1) TO 'analyze text'");
     EXPECT_FALSE(qr.rows.empty());
 }

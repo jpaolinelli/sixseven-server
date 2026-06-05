@@ -2,10 +2,12 @@
 
 #include "sixseven/executor/iterator.h"
 #include "sixseven/executor/tuple.h"
+#include "sixseven/index/bm25_index.h"
 #include "sixseven/table/table_heap.h"
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace sixseven {
 
@@ -24,6 +26,10 @@ public:
     std::string plan_node_name() const override { return "Delete"; }
     std::string plan_node_detail() const override { return ""; }
     std::vector<const Iterator*> plan_children() const override;
+
+    /// BM25 indexes on this table to maintain on delete. Set by the planner.
+    /// Only the index pointer is used (removal is keyed by RID).
+    std::vector<Bm25MaintenanceTarget> bm25_targets_;
 
 protected:
     Result<void> do_open() override;

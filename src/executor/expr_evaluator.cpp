@@ -688,8 +688,11 @@ Result<Value> eval_in(const InExpr& expr,
             return make_error(sub_bound.error().code, sub_bound.error().message);
         }
 
-        Planner planner(subquery_ctx->catalog, subquery_ctx->storage, default_database_id,
-                        subquery_ctx->graph_engine, subquery_ctx->provider_registry);
+        Planner planner(subquery_ctx->catalog,
+                        subquery_ctx->storage,
+                        default_database_id,
+                        subquery_ctx->graph_engine,
+                        subquery_ctx->provider_registry);
         if (correlated) {
             planner.set_outer_context(&tuple, &schema, &bound);
         }
@@ -1112,8 +1115,11 @@ Result<Value> eval_exists(const ExistsExpr& expr,
 
     if (sub_bound) {
         // Non-correlated: plan and execute normally.
-        Planner planner(subquery_ctx->catalog, subquery_ctx->storage, default_database_id,
-                        subquery_ctx->graph_engine, subquery_ctx->provider_registry);
+        Planner planner(subquery_ctx->catalog,
+                        subquery_ctx->storage,
+                        default_database_id,
+                        subquery_ctx->graph_engine,
+                        subquery_ctx->provider_registry);
         std::vector<ExprPtr> owned;
         auto iter = planner.plan(*sub_bound, owned);
         if (!iter) {
@@ -1144,8 +1150,11 @@ Result<Value> eval_exists(const ExistsExpr& expr,
         if (!corr_bound) {
             return make_error(corr_bound.error().code, corr_bound.error().message);
         }
-        Planner planner(subquery_ctx->catalog, subquery_ctx->storage, default_database_id,
-                        subquery_ctx->graph_engine, subquery_ctx->provider_registry);
+        Planner planner(subquery_ctx->catalog,
+                        subquery_ctx->storage,
+                        default_database_id,
+                        subquery_ctx->graph_engine,
+                        subquery_ctx->provider_registry);
         planner.set_outer_context(&outer_tuple, &outer_schema, &outer_bound);
         std::vector<ExprPtr> owned;
         auto iter = planner.plan(*corr_bound, owned);
@@ -1282,8 +1291,11 @@ Result<Value> eval_scalar_subquery(const SubqueryExpr& expr,
                           "scalar subquery must return exactly one column");
     }
 
-    Planner planner(subquery_ctx->catalog, subquery_ctx->storage, default_database_id,
-                    subquery_ctx->graph_engine, subquery_ctx->provider_registry);
+    Planner planner(subquery_ctx->catalog,
+                    subquery_ctx->storage,
+                    default_database_id,
+                    subquery_ctx->graph_engine,
+                    subquery_ctx->provider_registry);
     if (correlated) {
         planner.set_outer_context(&tuple, &schema, nullptr);
     }
@@ -1362,6 +1374,18 @@ Result<Value> eval(const Expr& expr,
     }
     if (auto* like = dynamic_cast<const LikeExpr*>(&expr)) {
         return eval_like(*like, tuple, schema, bound, subquery_ctx);
+    }
+    if (dynamic_cast<const MatchExpr*>(&expr) != nullptr) {
+        // A BM25 MATCH(...) predicate is satisfied by construction: the BM25
+        // index scan only produces rows that already matched. In a residual
+        // WHERE (e.g. MATCH(...) AND id > 5) it therefore evaluates to TRUE.
+        return ok(Value(true));
+    }
+    if (dynamic_cast<const NearestExpr*>(&expr) != nullptr) {
+        // A NEAREST(...) predicate is satisfied by construction: the vector scan
+        // only produces the k nearest rows. In a residual WHERE (e.g.
+        // NEAREST(...) AND stars >= 4) it therefore evaluates to TRUE.
+        return ok(Value(true));
     }
     if (auto* case_e = dynamic_cast<const CaseExpr*>(&expr)) {
         return eval_case(*case_e, tuple, schema, bound, subquery_ctx);

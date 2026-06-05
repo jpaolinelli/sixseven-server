@@ -95,6 +95,14 @@ public:
         last_type = "LikeExpr";
         ++total;
     }
+    void visit(const MatchExpr&) override {
+        last_type = "MatchExpr";
+        ++total;
+    }
+    void visit(const NearestExpr&) override {
+        last_type = "NearestExpr";
+        ++total;
+    }
     void visit(const ExistsExpr&) override {
         last_type = "ExistsExpr";
         ++total;
@@ -195,10 +203,6 @@ public:
     }
     void visit(const TraverseStmt&) override {
         last_type = "TraverseStmt";
-        ++total;
-    }
-    void visit(const NearestStmt&) override {
-        last_type = "NearestStmt";
         ++total;
     }
     void visit(const MatchStmt&) override {
@@ -459,16 +463,13 @@ TEST(QA_GDB102, VisitorDispatch_AllStatementTypes) {
     s17.accept(v);
     EXPECT_EQ(v.last_type, "UnlinkStmt");
 
-    // Query (5 types)
+    // Query (4 types)
     SelectStmt s18;
     s18.accept(v);
     EXPECT_EQ(v.last_type, "SelectStmt");
     TraverseStmt s19;
     s19.accept(v);
     EXPECT_EQ(v.last_type, "TraverseStmt");
-    NearestStmt s20;
-    s20.accept(v);
-    EXPECT_EQ(v.last_type, "NearestStmt");
     MatchStmt s21;
     s21.accept(v);
     EXPECT_EQ(v.last_type, "MatchStmt");
@@ -513,8 +514,8 @@ TEST(QA_GDB102, VisitorDispatch_AllStatementTypes) {
     s33.accept(v);
     EXPECT_EQ(v.last_type, "AnalyzeStmt");
 
-    // 12 DDL + 5 DML + 5 Query + 4 TCL + 7 Admin = 33 statements total
-    EXPECT_EQ(v.total, 33);
+    // 12 DDL + 5 DML + 4 Query + 4 TCL + 7 Admin = 32 statements total
+    EXPECT_EQ(v.total, 32);
 }
 
 // =============================================================================
@@ -573,7 +574,7 @@ TEST(QA_GDB102, VisitorViaExprBasePtr) {
 TEST(QA_GDB102, VisitorViaStmtBasePtr) {
     CountingVisitor v;
 
-    // Create all 33 statement types and dispatch through Stmt*
+    // Create all 32 statement types and dispatch through Stmt*
     std::vector<StmtPtr> stmts;
     stmts.push_back(std::make_unique<CreateTableStmt>());
     stmts.push_back(std::make_unique<DropTableStmt>());
@@ -594,7 +595,6 @@ TEST(QA_GDB102, VisitorViaStmtBasePtr) {
     stmts.push_back(std::make_unique<UnlinkStmt>());
     stmts.push_back(std::make_unique<SelectStmt>());
     stmts.push_back(std::make_unique<TraverseStmt>());
-    stmts.push_back(std::make_unique<NearestStmt>());
     stmts.push_back(std::make_unique<MatchStmt>());
     stmts.push_back(std::make_unique<ShortestPathStmt>());
     stmts.push_back(std::make_unique<BeginStmt>());
@@ -613,7 +613,7 @@ TEST(QA_GDB102, VisitorViaStmtBasePtr) {
         s->accept(v);
     }
 
-    EXPECT_EQ(v.total, 33);
+    EXPECT_EQ(v.total, 32);
 }
 
 // =============================================================================
@@ -701,11 +701,10 @@ TEST(QA_GDB102, TraverseStmtDefaults) {
     EXPECT_FALSE(s.fetch);
 }
 
-TEST(QA_GDB102, NearestStmtDefaults) {
-    NearestStmt s;
-    EXPECT_EQ(s.metric, NearestMetric::COSINE);
-    EXPECT_EQ(s.within_traverse, nullptr);
-    EXPECT_EQ(s.where_expr, nullptr);
+TEST(QA_GDB102, NearestExprDefaults) {
+    NearestExpr e;
+    EXPECT_EQ(e.metric, NearestMetric::COSINE);
+    EXPECT_EQ(e.within_traverse, nullptr);
 }
 
 TEST(QA_GDB102, ExplainStmtDefaults) {
@@ -1244,18 +1243,17 @@ TEST(QA_GDB102, MatchStmtComplexPattern) {
 }
 
 TEST(QA_GDB102, NearestWithinTraverse) {
-    // NEAREST 5 FROM products.embedding TO [1,2,3] WITHIN TRAVERSE ...
-    auto stmt = std::make_unique<NearestStmt>();
-    stmt->k = make_int("5");
-    stmt->table_name = "products";
-    stmt->column_name = "embedding";
-    stmt->metric = NearestMetric::L2;
+    // NEAREST(embedding, 5) TO [1,2,3] WITHIN TRAVERSE ...
+    auto expr = std::make_unique<NearestExpr>();
+    expr->k = make_int("5");
+    expr->column = make_col("embedding", "products");
+    expr->metric = NearestMetric::L2;
 
     auto arr = std::make_unique<ArrayExpr>();
     arr->elements.push_back(make_int("1"));
     arr->elements.push_back(make_int("2"));
     arr->elements.push_back(make_int("3"));
-    stmt->target = std::move(arr);
+    expr->target = std::move(arr);
 
     auto traverse = std::make_unique<TraverseStmt>();
     traverse->edge_type = "belongs_to";
@@ -1263,16 +1261,13 @@ TEST(QA_GDB102, NearestWithinTraverse) {
     traverse->from_key = make_int("42");
     traverse->direction = TraverseDirection::IN;
     traverse->max_depth = 2;
-    stmt->within_traverse = std::move(traverse);
+    expr->within_traverse = std::move(traverse);
 
-    stmt->where_expr = make_int("1");
-
-    EXPECT_EQ(stmt->metric, NearestMetric::L2);
-    EXPECT_NE(stmt->within_traverse, nullptr);
-    EXPECT_NE(stmt->where_expr, nullptr);
+    EXPECT_EQ(expr->metric, NearestMetric::L2);
+    EXPECT_NE(expr->within_traverse, nullptr);
 
     // The inner traverse should be correctly accessible
-    auto* inner = dynamic_cast<TraverseStmt*>(stmt->within_traverse.get());
+    auto* inner = dynamic_cast<TraverseStmt*>(expr->within_traverse.get());
     ASSERT_NE(inner, nullptr);
     EXPECT_EQ(inner->direction, TraverseDirection::IN);
     EXPECT_EQ(inner->max_depth.value(), 2);

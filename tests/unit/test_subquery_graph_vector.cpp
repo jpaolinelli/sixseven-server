@@ -148,9 +148,10 @@ protected:
 // =============================================================================
 
 TEST_F(SubqueryGraphVectorTest, DerivedTableNearest) {
-    // The two nearest docs to [1,0,0,0] are docs 1 and 2.
+    // The two nearest docs to [1,0,0,0] are docs 1 and 2. Vector search is now a
+    // WHERE predicate (the NEAREST derived-table form was removed).
     auto qr = exec_ok(
-        "SELECT n.id FROM (NEAREST 2 FROM docs.body_vec TO [1.0, 0.0, 0.0, 0.0]) AS n");
+        "SELECT id FROM docs WHERE NEAREST(body_vec, 2) TO [1.0, 0.0, 0.0, 0.0]");
 
     ASSERT_EQ(qr.rows.size(), 2u);
     auto ids = collect_column_ints(qr, 0);
@@ -172,9 +173,10 @@ TEST_F(SubqueryGraphVectorTest, DerivedTableTraverse) {
 // =============================================================================
 
 TEST_F(SubqueryGraphVectorTest, InNearest) {
-    // Bodies of the two docs nearest to [1,0,0,0]: alpha and beta.
+    // Bodies of the two docs nearest to [1,0,0,0]: alpha and beta. Vector search
+    // is now a WHERE predicate (the NEAREST IN-subquery form was removed).
     auto qr = exec_ok("SELECT docs.body FROM docs "
-                      "WHERE docs.id IN (NEAREST 2 FROM docs.body_vec TO [1.0, 0.0, 0.0, 0.0])");
+                      "WHERE NEAREST(body_vec, 2) TO [1.0, 0.0, 0.0, 0.0]");
 
     auto bodies = collect_column_strings(qr, 0);
     EXPECT_EQ(bodies.size(), 2u);
@@ -221,23 +223,24 @@ TEST_F(SubqueryGraphVectorTest, ExistsTraverse) {
     EXPECT_EQ(qr.rows.size(), 4u);
 }
 
-TEST_F(SubqueryGraphVectorTest, ExistsNearest) {
-    // NEAREST always returns rows here, so EXISTS is true for every outer row.
-    auto qr = exec_ok("SELECT docs.body FROM docs "
-                      "WHERE EXISTS (NEAREST 1 FROM docs.body_vec TO [1.0, 0.0, 0.0, 0.0])");
-
-    EXPECT_EQ(qr.rows.size(), 4u);
+TEST_F(SubqueryGraphVectorTest, ExistsNearestRejected) {
+    // Vector search is no longer a standalone statement/subquery, so an EXISTS
+    // subquery wrapping NEAREST no longer parses. (Pure subquery-composition
+    // mechanics with no single-table predicate equivalent.)
+    exec_error("SELECT docs.body FROM docs "
+               "WHERE EXISTS (NEAREST 1 FROM docs.body_vec TO [1.0, 0.0, 0.0, 0.0])",
+               StatusCode::PARSE_ERROR);
 }
 
 // =============================================================================
-// Scalar subqueries: multi-column graph/vector statements are rejected.
+// Scalar subqueries: a NEAREST scalar subquery is rejected.
 // =============================================================================
 
-TEST_F(SubqueryGraphVectorTest, ScalarNearestRejectedMultiColumn) {
-    // NEAREST returns multiple columns (table cols + _distance); it cannot be a
-    // scalar subquery.
+TEST_F(SubqueryGraphVectorTest, ScalarNearestRejected) {
+    // Vector search is no longer a standalone statement/subquery, so a NEAREST
+    // scalar subquery no longer parses.
     exec_error("SELECT (NEAREST 1 FROM docs.body_vec TO [1.0, 0.0, 0.0, 0.0]) FROM docs",
-               StatusCode::INVALID_ARGUMENT);
+               StatusCode::PARSE_ERROR);
 }
 
 // =============================================================================
@@ -272,25 +275,23 @@ TEST_F(SubqueryGraphVectorTest, CorrelatedInTraverse) {
     EXPECT_TRUE(bodies.count("beta"));
 }
 
-TEST_F(SubqueryGraphVectorTest, CorrelatedNearest) {
-    // A second table of query vectors; for each query row, the inner NEAREST
-    // searches docs using THAT row's vector (TO queries.qvec). Only the query
-    // whose single nearest doc is doc 1 should qualify.
+TEST_F(SubqueryGraphVectorTest, CorrelatedNearestRejected) {
+    // A correlated vector subquery — for each query row, search docs using THAT
+    // row's vector (TO queries.qvec) — composed only the searched-table differs
+    // from the outer FROM table, so it has no single-table WHERE-predicate
+    // equivalent. Since vector search is no longer a subquery, this no longer
+    // parses.
     exec_ok("CREATE TABLE queries (qid INT PRIMARY KEY, qvec EMBEDDING)");
     auto qschema = catalog_.get_table(default_database_id, "queries");
     ASSERT_TRUE(qschema.has_value());
     register_embedding(qschema->table_id, 1, 4, "qid", "builtin/4");
 
-    exec_ok("INSERT INTO queries VALUES (10, [1.0, 0.0, 0.0, 0.0])"); // nearest doc = 1
-    exec_ok("INSERT INTO queries VALUES (20, [0.0, 1.0, 0.0, 0.0])"); // nearest doc = 3
+    exec_ok("INSERT INTO queries VALUES (10, [1.0, 0.0, 0.0, 0.0])");
+    exec_ok("INSERT INTO queries VALUES (20, [0.0, 1.0, 0.0, 0.0])");
 
-    auto qr = exec_ok("SELECT queries.qid FROM queries "
-                      "WHERE 1 IN (NEAREST 1 FROM docs.body_vec TO queries.qvec)");
-
-    auto ids = collect_column_ints(qr, 0);
-    EXPECT_EQ(ids.size(), 1u);
-    EXPECT_TRUE(ids.count(10));
-    EXPECT_FALSE(ids.count(20));
+    exec_error("SELECT queries.qid FROM queries "
+               "WHERE 1 IN (NEAREST 1 FROM docs.body_vec TO queries.qvec)",
+               StatusCode::PARSE_ERROR);
 }
 
 // =============================================================================

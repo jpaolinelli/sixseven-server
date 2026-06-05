@@ -713,15 +713,17 @@ TEST_F(QA_Binder, ShortestPathBadEdge) {
 // ===========================================================================
 
 TEST_F(QA_Binder, NearestOnNonEmbeddingColumn) {
-    bind_error("NEAREST 5 FROM products.name TO [1.0, 2.0]", StatusCode::TYPE_ERROR);
+    bind_error("SELECT * FROM products WHERE NEAREST(name, 5) TO [1.0, 2.0]",
+               StatusCode::TYPE_ERROR);
 }
 
 TEST_F(QA_Binder, NearestOnNonexistentTable) {
-    bind_error("NEAREST 5 FROM nonexistent.col TO [1.0]", StatusCode::NOT_FOUND);
+    bind_error("SELECT * FROM nonexistent WHERE NEAREST(col, 5) TO [1.0]", StatusCode::NOT_FOUND);
 }
 
 TEST_F(QA_Binder, NearestOnNonexistentColumn) {
-    bind_error("NEAREST 5 FROM products.nonexistent TO [1.0]", StatusCode::NOT_FOUND);
+    bind_error("SELECT * FROM products WHERE NEAREST(nonexistent, 5) TO [1.0]",
+               StatusCode::NOT_FOUND);
 }
 
 // ===========================================================================

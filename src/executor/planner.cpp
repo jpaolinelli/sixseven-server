@@ -4,6 +4,7 @@
 #include "sixseven/common/logging.h"
 #include "sixseven/common/value_hash.h"
 #include "sixseven/executor/algorithm_scan.h"
+#include "sixseven/executor/bm25_scan.h"
 #include "sixseven/executor/count_scan.h"
 #include "sixseven/executor/delete.h"
 #include "sixseven/executor/edge_traversal.h"
@@ -11,15 +12,14 @@
 #include "sixseven/executor/filter.h"
 #include "sixseven/executor/hash_aggregate.h"
 #include "sixseven/executor/hash_index_scan.h"
+#include "sixseven/executor/hash_join.h"
 #include "sixseven/executor/index_manager.h"
 #include "sixseven/executor/index_scan.h"
 #include "sixseven/executor/insert.h"
 #include "sixseven/executor/limit.h"
 #include "sixseven/executor/match_shortest_path.h"
 #include "sixseven/executor/nearest_scan.h"
-#include "sixseven/executor/hash_join.h"
 #include "sixseven/executor/nested_loop_join.h"
-#include "sixseven/planner/rewrite_rules.h"
 #include "sixseven/executor/pattern_match.h"
 #include "sixseven/executor/prepend_tuple.h"
 #include "sixseven/executor/project.h"
@@ -34,6 +34,7 @@
 #include "sixseven/executor/window_function.h"
 #include "sixseven/parser/lexer.h"
 #include "sixseven/parser/parser.h"
+#include "sixseven/planner/rewrite_rules.h"
 #include "sixseven/planner/type_resolver.h"
 #include "sixseven/vector/embedding_column.h"
 
@@ -46,6 +47,10 @@
 namespace sixseven {
 
 namespace {
+
+// Defined further below; forward-declared for use in plan_select.
+bool expr_contains_match(const Expr* e);
+bool expr_contains_nearest(const Expr* e);
 
 std::string to_upper(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
@@ -289,11 +294,13 @@ Planner::Planner(Catalog& catalog,
                  std::unordered_map<index_id_t, HashIndex*>* hash_indexes,
                  EmbeddingWorkerPool* embedding_pool,
                  AlgorithmRegistry* algorithm_registry,
-                 std::unordered_map<index_id_t, std::vector<RID>>* hnsw_rid_maps)
+                 std::unordered_map<index_id_t, std::vector<RID>>* hnsw_rid_maps,
+                 std::unordered_map<index_id_t, Bm25Index*>* bm25_indexes)
     : catalog_(catalog), storage_(storage), database_id_(database_id), graph_engine_(graph_engine),
       provider_registry_(provider_registry), hnsw_indexes_(hnsw_indexes),
       btree_indexes_(btree_indexes), hash_indexes_(hash_indexes), hnsw_rid_maps_(hnsw_rid_maps),
-      embedding_pool_(embedding_pool), algorithm_registry_(algorithm_registry),
+      bm25_indexes_(bm25_indexes), embedding_pool_(embedding_pool),
+      algorithm_registry_(algorithm_registry),
       subquery_ctx_{catalog_, storage_, graph_engine_, provider_registry_} {}
 
 // ---------------------------------------------------------------------------
@@ -322,9 +329,6 @@ Result<std::unique_ptr<Iterator>> Planner::plan(const BoundStatement& bound,
     }
     if (auto* match = dynamic_cast<const MatchStmt*>(bound.stmt)) {
         return plan_match(*match, bound, owned_exprs);
-    }
-    if (auto* nearest = dynamic_cast<const NearestStmt*>(bound.stmt)) {
-        return plan_nearest(*nearest, bound);
     }
     return make_error(StatusCode::NOT_IMPLEMENTED, "planner does not support this statement type");
 }
@@ -997,9 +1001,8 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
 
                 // SELECT keeps cte_map propagation for nested CTE references;
                 // graph/vector statements dispatch through the generic planner.
-                auto sub_iter = sub_sel
-                                    ? plan_select(*sub_sel, *sub_bound, owned_exprs, cte_map)
-                                    : plan(*sub_bound, owned_exprs);
+                auto sub_iter = sub_sel ? plan_select(*sub_sel, *sub_bound, owned_exprs, cte_map)
+                                        : plan(*sub_bound, owned_exprs);
                 if (!sub_iter) {
                     return make_error(sub_iter.error().code, sub_iter.error().message);
                 }
@@ -1191,22 +1194,64 @@ Planner::plan_select(const SelectStmt& stmt,
                     auto* storage = *ts;
                     auto table_output = build_table_output_schema(*table_schema, alias);
 
-                    // Try to use an index scan if a suitable B+ tree index exists.
-                    auto idx_scan = try_plan_index_scan(
-                        *table_schema, *ts, table_output, stmt.where_expr.get(), bound);
-                    if (idx_scan && *idx_scan) {
-                        source->iter = std::move(*idx_scan);
-                        source->schema = std::move(table_output);
+                    // NEAREST vector predicate: build a distance-ranked scan
+                    // that appends a synthetic _distance column. Checked first so
+                    // it takes precedence; combining NEAREST and MATCH in one
+                    // WHERE is unsupported (a single scan drives the result).
+                    if (expr_contains_nearest(stmt.where_expr.get())) {
+                        if (expr_contains_match(stmt.where_expr.get())) {
+                            return make_error(
+                                StatusCode::INVALID_ARGUMENT,
+                                "cannot combine NEAREST and MATCH in the same WHERE clause");
+                        }
+                        auto vec_scan =
+                            try_plan_vector_scan(*table_schema, stmt.where_expr.get(), bound);
+                        if (!vec_scan) {
+                            return make_error(vec_scan.error().code, vec_scan.error().message);
+                        }
+                        // plan_nearest_impl builds the (table columns + _distance)
+                        // output schema; adopt it so downstream projection /
+                        // ORDER BY resolve against the same columns.
+                        source->schema = (*vec_scan)->output_schema();
+                        source->iter = std::move(*vec_scan);
+                        pushed_where = true;
+                    } else if (expr_contains_match(stmt.where_expr.get())) {
+                        // BM25 full-text predicate: build a relevance-ranked scan
+                        // that appends a synthetic _score column.
+                        std::vector<OutputColumn> score_cols = table_output.columns();
+                        score_cols.push_back({alias.empty() ? table_ref.name : alias,
+                                              "_score",
+                                              TypeId::FLOAT64,
+                                              false,
+                                              table_schema->table_id});
+                        auto score_output = OutputSchema(score_cols);
+                        auto bm25_scan = try_plan_bm25_scan(
+                            *table_schema, *ts, score_output, stmt.where_expr.get(), bound);
+                        if (!bm25_scan) {
+                            return make_error(bm25_scan.error().code, bm25_scan.error().message);
+                        }
+                        source->iter = std::move(*bm25_scan);
+                        source->schema = std::move(score_output);
                         pushed_where = true;
                     } else {
-                        // Fall back to sequential scan with predicate pushdown.
-                        source->iter = std::make_unique<SeqScanOperator>(*storage->heap,
-                                                                         storage->storage_schema,
-                                                                         table_output,
-                                                                         stmt.where_expr.get(),
-                                                                         &bound);
-                        source->schema = std::move(table_output);
-                        pushed_where = true;
+                        // Try to use an index scan if a suitable B+ tree index exists.
+                        auto idx_scan = try_plan_index_scan(
+                            *table_schema, *ts, table_output, stmt.where_expr.get(), bound);
+                        if (idx_scan && *idx_scan) {
+                            source->iter = std::move(*idx_scan);
+                            source->schema = std::move(table_output);
+                            pushed_where = true;
+                        } else {
+                            // Fall back to sequential scan with predicate pushdown.
+                            source->iter =
+                                std::make_unique<SeqScanOperator>(*storage->heap,
+                                                                  storage->storage_schema,
+                                                                  table_output,
+                                                                  stmt.where_expr.get(),
+                                                                  &bound);
+                            source->schema = std::move(table_output);
+                            pushed_where = true;
+                        }
                     }
                 }
             }
@@ -1262,9 +1307,11 @@ Planner::plan_select(const SelectStmt& stmt,
                 for (size_t i = 0; i < where_conjuncts.size(); ++i) {
                     if (!conjunct_consumed[i] &&
                         is_single_table_predicate(*where_conjuncts[i], join_alias)) {
-                        join_source->iter = std::make_unique<FilterOperator>(
-                            std::move(join_source->iter), *where_conjuncts[i], bound,
-                            &subquery_ctx_);
+                        join_source->iter =
+                            std::make_unique<FilterOperator>(std::move(join_source->iter),
+                                                             *where_conjuncts[i],
+                                                             bound,
+                                                             &subquery_ctx_);
                         conjunct_consumed[i] = true;
                     }
                 }
@@ -1313,14 +1360,13 @@ Planner::plan_select(const SelectStmt& stmt,
                             std::swap(probe_key, build_key);
                         }
 
-                        child = std::make_unique<HashJoinOperator>(
-                            std::move(child),
-                            std::move(join_source->iter),
-                            join_clause.type,
-                            probe_key,
-                            build_key,
-                            bound,
-                            std::move(combined));
+                        child = std::make_unique<HashJoinOperator>(std::move(child),
+                                                                   std::move(join_source->iter),
+                                                                   join_clause.type,
+                                                                   probe_key,
+                                                                   build_key,
+                                                                   bound,
+                                                                   std::move(combined));
                         used_hash_join = true;
                     }
                 }
@@ -1340,7 +1386,10 @@ Planner::plan_select(const SelectStmt& stmt,
         if (!where_conjuncts.empty()) {
             bool all_consumed = true;
             for (bool c : conjunct_consumed) {
-                if (!c) { all_consumed = false; break; }
+                if (!c) {
+                    all_consumed = false;
+                    break;
+                }
             }
             if (all_consumed) {
                 pushed_where = true;
@@ -2083,6 +2132,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
                 }
             }
         }
+        iter->bm25_targets_ = collect_bm25_targets(*table_schema);
 
         return ok(std::unique_ptr<Iterator>(std::move(iter)));
     }
@@ -2106,6 +2156,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
             }
         }
     }
+    iter->bm25_targets_ = collect_bm25_targets(*table_schema);
 
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
 }
@@ -2154,6 +2205,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_update(const UpdateStmt& stmt,
 
     auto iter = std::make_unique<UpdateOperator>(
         *storage->heap, storage->storage_schema, std::move(scan), std::move(assignments), bound);
+    iter->bm25_targets_ = collect_bm25_targets(*table_schema);
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
 }
 
@@ -2181,6 +2233,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_delete(const DeleteStmt& stmt,
         *storage->heap, storage->storage_schema, table_output, predicate, &bound);
 
     auto iter = std::make_unique<DeleteOperator>(*storage->heap, std::move(scan));
+    iter->bm25_targets_ = collect_bm25_targets(*table_schema);
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
 }
 
@@ -2199,8 +2252,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_traverse(const TraverseStmt& stm
     Tuple fallback_tuple;
     OutputSchema fallback_schema;
     const Tuple& empty_tuple = outer_tuple_ != nullptr ? *outer_tuple_ : fallback_tuple;
-    const OutputSchema& empty_schema =
-        outer_schema_ != nullptr ? *outer_schema_ : fallback_schema;
+    const OutputSchema& empty_schema = outer_schema_ != nullptr ? *outer_schema_ : fallback_schema;
     auto key_val = evaluate_expr(*stmt.from_key, empty_tuple, empty_schema, bound);
     if (!key_val) {
         return make_error(key_val.error().code, key_val.error().message);
@@ -2507,6 +2559,84 @@ std::vector<std::string> parse_index_columns(const std::string& columns) {
     return result;
 }
 
+/// True if the expression tree contains a BM25 MATCH(...) predicate anywhere.
+bool expr_contains_match(const Expr* e) {
+    if (e == nullptr) {
+        return false;
+    }
+    if (dynamic_cast<const MatchExpr*>(e) != nullptr) {
+        return true;
+    }
+    if (auto* b = dynamic_cast<const BinaryExpr*>(e)) {
+        return expr_contains_match(b->lhs.get()) || expr_contains_match(b->rhs.get());
+    }
+    if (auto* u = dynamic_cast<const UnaryExpr*>(e)) {
+        return expr_contains_match(u->operand.get());
+    }
+    return false;
+}
+
+/// Find a BM25 MATCH(...) predicate that sits in a "usable" position: either the
+/// whole WHERE predicate, or a conjunct of a top-level AND chain. MATCH under
+/// OR / NOT is not usable (the index scan cannot represent those semantics in
+/// v1), so this returns nullptr for those cases — the caller distinguishes
+/// "no match" from "unusable match" via expr_contains_match().
+const MatchExpr* extract_match_predicate(const Expr* e) {
+    if (e == nullptr) {
+        return nullptr;
+    }
+    if (auto* m = dynamic_cast<const MatchExpr*>(e)) {
+        return m;
+    }
+    if (auto* b = dynamic_cast<const BinaryExpr*>(e)) {
+        if (b->op == BinaryOp::AND) {
+            if (auto* l = extract_match_predicate(b->lhs.get())) {
+                return l;
+            }
+            return extract_match_predicate(b->rhs.get());
+        }
+    }
+    return nullptr;
+}
+
+/// True if the expression tree contains a NEAREST(...) predicate anywhere.
+bool expr_contains_nearest(const Expr* e) {
+    if (e == nullptr) {
+        return false;
+    }
+    if (dynamic_cast<const NearestExpr*>(e) != nullptr) {
+        return true;
+    }
+    if (auto* b = dynamic_cast<const BinaryExpr*>(e)) {
+        return expr_contains_nearest(b->lhs.get()) || expr_contains_nearest(b->rhs.get());
+    }
+    if (auto* u = dynamic_cast<const UnaryExpr*>(e)) {
+        return expr_contains_nearest(u->operand.get());
+    }
+    return false;
+}
+
+/// Find a NEAREST(...) predicate in a usable position: the whole WHERE
+/// predicate, or a conjunct of a top-level AND chain (mirrors
+/// extract_match_predicate).
+const NearestExpr* extract_nearest_predicate(const Expr* e) {
+    if (e == nullptr) {
+        return nullptr;
+    }
+    if (auto* n = dynamic_cast<const NearestExpr*>(e)) {
+        return n;
+    }
+    if (auto* b = dynamic_cast<const BinaryExpr*>(e)) {
+        if (b->op == BinaryOp::AND) {
+            if (auto* l = extract_nearest_predicate(b->lhs.get())) {
+                return l;
+            }
+            return extract_nearest_predicate(b->rhs.get());
+        }
+    }
+    return nullptr;
+}
+
 /// Check if a binary predicate is a simple comparison between a column and a
 /// literal (e.g., `col = 42` or `col > 10`). Returns the column name, the
 /// literal Value, and the operator.
@@ -2598,10 +2728,16 @@ std::optional<SimpleComparison> extract_simple_comparison(const Expr* expr) {
 
 } // anonymous namespace
 
-Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
-                                                        const BoundStatement& bound) {
+Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& table_name,
+                                                             const std::string& column_name,
+                                                             const Expr* k_expr,
+                                                             const Expr* target_expr,
+                                                             NearestMetric metric,
+                                                             const Stmt* within_traverse,
+                                                             const Expr* where_expr,
+                                                             const BoundStatement& bound) {
     // Resolve the table.
-    auto table_schema = catalog_.get_table(database_id_, stmt.table_name);
+    auto table_schema = catalog_.get_table(database_id_, table_name);
     if (!table_schema) {
         return make_error(table_schema.error().code, table_schema.error().message);
     }
@@ -2616,14 +2752,14 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
     // Find the EMBEDDING column index.
     int32_t emb_col_idx = -1;
     for (size_t i = 0; i < table_schema->columns.size(); ++i) {
-        if (to_upper(table_schema->columns[i].name) == to_upper(stmt.column_name)) {
+        if (to_upper(table_schema->columns[i].name) == to_upper(column_name)) {
             emb_col_idx = static_cast<int32_t>(i);
             break;
         }
     }
     if (emb_col_idx < 0) {
         return make_error(StatusCode::NOT_FOUND,
-                          "column " + stmt.column_name + " not found in table " + stmt.table_name);
+                          "column " + column_name + " not found in table " + table_name);
     }
 
     // Configuration expressions (k, target vector, WITHIN start key) evaluate
@@ -2632,18 +2768,17 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
     Tuple fallback_tuple;
     OutputSchema fallback_schema;
     const Tuple& empty_tuple = outer_tuple_ != nullptr ? *outer_tuple_ : fallback_tuple;
-    const OutputSchema& empty_schema =
-        outer_schema_ != nullptr ? *outer_schema_ : fallback_schema;
+    const OutputSchema& empty_schema = outer_schema_ != nullptr ? *outer_schema_ : fallback_schema;
 
     // Evaluate k.
-    auto k_val = evaluate_expr(*stmt.k, empty_tuple, empty_schema, bound);
+    auto k_val = evaluate_expr(*k_expr, empty_tuple, empty_schema, bound);
     if (!k_val) {
         return make_error(k_val.error().code, k_val.error().message);
     }
     auto k = static_cast<uint32_t>(k_val->as_int64());
 
     // Evaluate the target expression to get the query vector.
-    auto target_val = evaluate_expr(*stmt.target, empty_tuple, empty_schema, bound);
+    auto target_val = evaluate_expr(*target_expr, empty_tuple, empty_schema, bound);
     if (!target_val) {
         return make_error(target_val.error().code, target_val.error().message);
     }
@@ -2671,7 +2806,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
         }
         if (provider_name.empty()) {
             return make_error(StatusCode::NOT_FOUND,
-                              "no embedding provider configured for column " + stmt.column_name);
+                              "no embedding provider configured for column " + column_name);
         }
 
         auto provider = provider_registry_->resolve(provider_name);
@@ -2692,17 +2827,17 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
     NearestScanConfig config;
     config.k = k;
     config.query_vector = std::move(query_vector);
-    config.metric = to_distance_metric(stmt.metric);
+    config.metric = to_distance_metric(metric);
     config.embedding_column_index = emb_col_idx;
 
     // Handle WITHIN TRAVERSE (graph-scoped search).
-    if (stmt.within_traverse) {
+    if (within_traverse != nullptr) {
         if (!graph_engine_) {
             return make_error(StatusCode::INTERNAL_ERROR,
                               "graph engine not available for WITHIN TRAVERSE");
         }
 
-        auto* trav_stmt = dynamic_cast<const TraverseStmt*>(stmt.within_traverse.get());
+        auto* trav_stmt = dynamic_cast<const TraverseStmt*>(within_traverse);
         if (!trav_stmt) {
             return make_error(StatusCode::INTERNAL_ERROR, "expected TraverseStmt in WITHIN clause");
         }
@@ -2815,9 +2950,9 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
     // HNSW index for highly selective predicates.
     static constexpr size_t kPrefilterThreshold = 10'000;
 
-    if (stmt.where_expr != nullptr && btree_indexes_ != nullptr && !btree_indexes_->empty() &&
+    if (where_expr != nullptr && btree_indexes_ != nullptr && !btree_indexes_->empty() &&
         config.allowed_node_ids.empty()) {
-        auto cmp = extract_simple_comparison(stmt.where_expr.get());
+        auto cmp = extract_simple_comparison(where_expr);
         if (cmp) {
             auto indexes = catalog_.list_indexes(table_schema->table_id);
             for (const auto& idx_def : indexes) {
@@ -2929,7 +3064,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
         auto indexes = catalog_.list_indexes(table_schema->table_id);
         index_id_t hnsw_idx_id = 0;
         for (const auto& idx : indexes) {
-            if (idx.index_type == "hnsw" && idx.columns == stmt.column_name) {
+            if (idx.index_type == "hnsw" && idx.columns == column_name) {
                 hnsw_idx_id = idx.index_id;
                 break;
             }
@@ -2948,7 +3083,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
         }
         SIXSEVEN_LOG_DEBUG("plan_nearest: table_id={} col={} idx_id={} hnsw={} rid_map={}",
                            table_schema->table_id,
-                           stmt.column_name,
+                           column_name,
                            hnsw_idx_id,
                            hnsw_index != nullptr ? "found" : "miss",
                            rid_map != nullptr ? "found" : "miss");
@@ -2957,20 +3092,156 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest(const NearestStmt& stmt,
     // Build output schema: all table columns + _distance.
     auto table_output = build_table_output_schema(*table_schema);
     std::vector<OutputColumn> out_cols = table_output.columns();
-    out_cols.push_back(
-        {stmt.table_name, "_distance", TypeId::FLOAT64, false, table_schema->table_id});
+    out_cols.push_back({table_name, "_distance", TypeId::FLOAT64, false, table_schema->table_id});
     auto schema = OutputSchema(std::move(out_cols));
 
     auto iter = std::make_unique<NearestScanOperator>(*storage->heap,
                                                       storage->storage_schema,
                                                       std::move(config),
                                                       std::move(schema),
-                                                      stmt.where_expr.get(),
+                                                      where_expr,
                                                       bound,
                                                       hnsw_index,
                                                       rid_map);
 
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
+}
+
+// ---------------------------------------------------------------------------
+// BM25 full-text scan planning
+// ---------------------------------------------------------------------------
+
+Result<std::unique_ptr<Iterator>> Planner::try_plan_bm25_scan(const TableSchema& table_schema,
+                                                              TableStorage* storage,
+                                                              const OutputSchema& score_output,
+                                                              const Expr* where_expr,
+                                                              const BoundStatement& bound) {
+    if (!expr_contains_match(where_expr)) {
+        return ok(std::unique_ptr<Iterator>(nullptr));
+    }
+
+    // The MATCH must be a top-level predicate or AND conjunct.
+    const MatchExpr* match = extract_match_predicate(where_expr);
+    if (match == nullptr) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "MATCH(...) is only supported as a top-level AND predicate");
+    }
+
+    // Resolve the searched column name.
+    auto* col_ref = dynamic_cast<const ColumnRefExpr*>(match->column.get());
+    if (col_ref == nullptr) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "MATCH(...) requires a column reference");
+    }
+    const std::string& column_name = col_ref->column;
+
+    // The query must be a string literal (v1 limitation).
+    auto* query_lit = dynamic_cast<const LiteralExpr*>(match->query.get());
+    if (query_lit == nullptr || query_lit->kind != LiteralKind::STRING) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "MATCH(...) TO requires a string literal query");
+    }
+
+    // Find the BM25 index for this column.
+    if (bm25_indexes_ == nullptr) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "no BM25 index available; CREATE INDEX ... USING bm25 on '" +
+                              column_name + "'");
+    }
+    auto indexes = catalog_.list_indexes(table_schema.table_id);
+    index_id_t bm25_idx_id = 0;
+    for (const auto& idx : indexes) {
+        if (idx.index_type == "bm25" && idx.columns == column_name) {
+            bm25_idx_id = idx.index_id;
+            break;
+        }
+    }
+    if (bm25_idx_id == 0) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "no BM25 index on column '" + column_name +
+                              "'; CREATE INDEX ... USING bm25 first");
+    }
+    auto it = bm25_indexes_->find(bm25_idx_id);
+    if (it == bm25_indexes_->end() || it->second == nullptr) {
+        return make_error(StatusCode::NOT_FOUND,
+                          "BM25 index for '" + column_name + "' is not loaded");
+    }
+
+    Bm25ScanConfig config;
+    config.query = query_lit->value;
+    config.k = 0; // all matches; ORDER BY / LIMIT downstream handle truncation.
+
+    // The full WHERE is passed as the residual filter: the MATCH conjunct
+    // evaluates to TRUE (every emitted row already matched), so any sibling
+    // AND conjuncts (e.g. id > 5) are still applied correctly.
+    auto iter = std::make_unique<Bm25ScanOperator>(*storage->heap,
+                                                   storage->storage_schema,
+                                                   std::move(config),
+                                                   score_output,
+                                                   where_expr,
+                                                   bound,
+                                                   it->second);
+    return ok(std::unique_ptr<Iterator>(std::move(iter)));
+}
+
+// ---------------------------------------------------------------------------
+// Vector (NEAREST) scan planning
+// ---------------------------------------------------------------------------
+
+Result<std::unique_ptr<Iterator>> Planner::try_plan_vector_scan(const TableSchema& table_schema,
+                                                                const Expr* where_expr,
+                                                                const BoundStatement& bound) {
+    if (!expr_contains_nearest(where_expr)) {
+        return ok(std::unique_ptr<Iterator>(nullptr));
+    }
+
+    // The NEAREST must be a top-level predicate or AND conjunct.
+    const NearestExpr* nearest = extract_nearest_predicate(where_expr);
+    if (nearest == nullptr) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "NEAREST(...) is only supported as a top-level AND predicate");
+    }
+
+    auto* col_ref = dynamic_cast<const ColumnRefExpr*>(nearest->column.get());
+    if (col_ref == nullptr) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "NEAREST(...) requires a column reference");
+    }
+
+    // Desugar into the existing NEAREST execution. The full WHERE is passed as
+    // the residual filter: the NEAREST conjunct evaluates TRUE (every emitted
+    // row already matched), so any sibling AND conjuncts still apply. The
+    // resulting operator's output schema is table columns + _distance.
+    return plan_nearest_impl(table_schema.name,
+                             col_ref->column,
+                             nearest->k.get(),
+                             nearest->target.get(),
+                             nearest->metric,
+                             nearest->within_traverse.get(),
+                             where_expr,
+                             bound);
+}
+
+std::vector<Bm25MaintenanceTarget> Planner::collect_bm25_targets(const TableSchema& schema) const {
+    std::vector<Bm25MaintenanceTarget> targets;
+    if (bm25_indexes_ == nullptr) {
+        return targets;
+    }
+    auto indexes = catalog_.list_indexes(schema.table_id);
+    for (const auto& idx : indexes) {
+        if (idx.index_type != "bm25") {
+            continue;
+        }
+        auto it = bm25_indexes_->find(idx.index_id);
+        if (it == bm25_indexes_->end() || it->second == nullptr) {
+            continue;
+        }
+        for (const auto& col : schema.columns) {
+            if (col.name == idx.columns) {
+                targets.push_back({it->second, static_cast<size_t>(col.ordinal)});
+                break;
+            }
+        }
+    }
+    return targets;
 }
 
 // ---------------------------------------------------------------------------

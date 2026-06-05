@@ -168,7 +168,7 @@ TEST_F(QA_GDB597, UuidPk_ExactReproduction) {
 
     // This was the crashing query — must succeed now.
     auto result = engine_->execute(
-        "NEAREST 5 FROM posts.body_vec TO [1.0, 0.0, 0.0, 0.0] "
+        "SELECT * FROM posts WHERE NEAREST(body_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
         "WITHIN TRAVERSE follows FROM posts('" + u1 + "') DIRECTION OUT MAX_DEPTH 2");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
@@ -205,7 +205,7 @@ TEST_F(QA_GDB597, Int64Pk_NonRegression) {
     exec_ok("LINK docs(200) TO docs(300) VIA cites");
 
     auto result = engine_->execute(
-        "NEAREST 5 FROM docs.body_vec TO [1.0, 0.0, 0.0, 0.0] "
+        "SELECT * FROM docs WHERE NEAREST(body_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
         "WITHIN TRAVERSE cites FROM docs(100) DIRECTION OUT MAX_DEPTH 2");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
@@ -241,7 +241,7 @@ TEST_F(QA_GDB597, Int32Pk_CoercionPath) {
 
     // Integer literal 1 is parsed as INT64, must coerce to INT32 for PK lookup.
     auto result = engine_->execute(
-        "NEAREST 5 FROM items.body_vec TO [1.0, 0.0, 0.0, 0.0] "
+        "SELECT * FROM items WHERE NEAREST(body_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
         "WITHIN TRAVERSE related FROM items(1) DIRECTION OUT MAX_DEPTH 2");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
@@ -275,7 +275,7 @@ TEST_F(QA_GDB597, StringPk_Works) {
     exec_ok("LINK articles('chap1') TO articles('chap2') VIA links");
 
     auto result = engine_->execute(
-        "NEAREST 5 FROM articles.body_vec TO [1.0, 0.0, 0.0, 0.0] "
+        "SELECT * FROM articles WHERE NEAREST(body_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
         "WITHIN TRAVERSE links FROM articles('intro') DIRECTION OUT MAX_DEPTH 2");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
@@ -309,7 +309,7 @@ TEST_F(QA_GDB597, UuidPk_NoOutgoingEdges) {
     // No edges created — u1 is isolated.
 
     auto result = engine_->execute(
-        "NEAREST 5 FROM nodes.text_vec TO [1.0, 0.0, 0.0, 0.0] "
+        "SELECT * FROM nodes WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
         "WITHIN TRAVERSE connects FROM nodes('" + u1 + "') DIRECTION OUT MAX_DEPTH 2");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
@@ -337,7 +337,7 @@ TEST_F(QA_GDB597, UuidPk_MaxDepthZero) {
     exec_ok("LINK pg('" + u1 + "') TO pg('" + u2 + "') VIA link");
 
     auto result = engine_->execute(
-        "NEAREST 5 FROM pg.text_vec TO [1.0, 0.0, 0.0, 0.0] "
+        "SELECT * FROM pg WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
         "WITHIN TRAVERSE link FROM pg('" + u1 + "') DIRECTION OUT MAX_DEPTH 0");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
@@ -369,7 +369,7 @@ TEST_F(QA_GDB597, UuidPk_DirectionIn) {
     exec_ok("LINK rev('" + u3 + "') TO rev('" + u2 + "') VIA parent");
 
     auto result = engine_->execute(
-        "NEAREST 5 FROM rev.text_vec TO [1.0, 0.0, 0.0, 0.0] "
+        "SELECT * FROM rev WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
         "WITHIN TRAVERSE parent FROM rev('" + u1 + "') DIRECTION IN MAX_DEPTH 2");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
@@ -400,7 +400,7 @@ TEST_F(QA_GDB597, Int32Pk_DirectionBoth) {
     exec_ok("LINK bidir(10) TO bidir(30) VIA adj");
 
     auto result = engine_->execute(
-        "NEAREST 5 FROM bidir.text_vec TO [1.0, 0.0, 0.0, 0.0] "
+        "SELECT * FROM bidir WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
         "WITHIN TRAVERSE adj FROM bidir(10) DIRECTION BOTH MAX_DEPTH 1");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
@@ -449,7 +449,7 @@ TEST_F(QA_GDB597, UuidPk_DeepChain) {
 
     // Query with MAX_DEPTH = 5 from start.
     auto result = engine_->execute(
-        "NEAREST 10 FROM chain.text_vec TO [1.0, 0.0, 0.0, 0.0] "
+        "SELECT * FROM chain WHERE NEAREST(text_vec, 10) TO [1.0, 0.0, 0.0, 0.0] "
         "WITHIN TRAVERSE next FROM chain('" + uuids[0] + "') DIRECTION OUT MAX_DEPTH 5");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
@@ -486,7 +486,7 @@ TEST_F(QA_GDB597, Int32Pk_FanOut) {
     }
 
     auto result = engine_->execute(
-        "NEAREST 10 FROM hub.text_vec TO [1.0, 0.0, 0.0, 0.0] "
+        "SELECT * FROM hub WHERE NEAREST(text_vec, 10) TO [1.0, 0.0, 0.0, 0.0] "
         "WITHIN TRAVERSE spoke FROM hub(0) DIRECTION OUT MAX_DEPTH 1");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
@@ -519,7 +519,7 @@ TEST_F(QA_GDB597, UuidPk_NonExistentStartKey) {
     // Start from a UUID that doesn't exist in the table.
     std::string ghost = "ffffffff-ffff-ffff-ffff-ffffffffffff";
     auto result = engine_->execute(
-        "NEAREST 5 FROM sparse.text_vec TO [1.0, 0.0, 0.0, 0.0] "
+        "SELECT * FROM sparse WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
         "WITHIN TRAVERSE link2 FROM sparse('" + ghost + "') DIRECTION OUT MAX_DEPTH 2");
 
     // Must NOT crash — that's the GDB-597 guarantee.
@@ -550,7 +550,7 @@ TEST_F(QA_GDB597, UuidPk_SelfLoop) {
     exec_ok("LINK loops('" + u1 + "') TO loops('" + u1 + "') VIA selfedge");
 
     auto result = engine_->execute(
-        "NEAREST 5 FROM loops.text_vec TO [1.0, 0.0, 0.0, 0.0] "
+        "SELECT * FROM loops WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
         "WITHIN TRAVERSE selfedge FROM loops('" + u1 + "') DIRECTION OUT MAX_DEPTH 5");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
@@ -584,7 +584,7 @@ TEST_F(QA_GDB597, UuidPk_Cycle) {
     exec_ok("LINK cyc('" + u3 + "') TO cyc('" + u1 + "') VIA ring"); // cycle back
 
     auto result = engine_->execute(
-        "NEAREST 5 FROM cyc.text_vec TO [1.0, 0.0, 0.0, 0.0] "
+        "SELECT * FROM cyc WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
         "WITHIN TRAVERSE ring FROM cyc('" + u1 + "') DIRECTION OUT MAX_DEPTH 10");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
@@ -624,7 +624,7 @@ TEST_F(QA_GDB597, UuidPk_NearestK1) {
     exec_ok("LINK k1('" + u2 + "') TO k1('" + u3 + "') VIA conn");
 
     auto result = engine_->execute(
-        "NEAREST 1 FROM k1.text_vec TO [1.0, 0.0, 0.0, 0.0] "
+        "SELECT * FROM k1 WHERE NEAREST(text_vec, 1) TO [1.0, 0.0, 0.0, 0.0] "
         "WITHIN TRAVERSE conn FROM k1('" + u1 + "') DIRECTION OUT MAX_DEPTH 2");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
@@ -650,7 +650,7 @@ TEST_F(QA_GDB597, Int16Pk_NarrowCoercion) {
     exec_ok("LINK small(1) TO small(2) VIA seq");
 
     auto result = engine_->execute(
-        "NEAREST 5 FROM small.text_vec TO [1.0, 0.0, 0.0, 0.0] "
+        "SELECT * FROM small WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
         "WITHIN TRAVERSE seq FROM small(1) DIRECTION OUT MAX_DEPTH 1");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 

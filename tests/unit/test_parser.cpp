@@ -1695,45 +1695,71 @@ TEST(Parser, MatchMultiHop) {
     EXPECT_FALSE(m->pattern[2].outgoing_edge.has_value());
 }
 
-// -- NEAREST tests ------------------------------------------------------------
+// -- NEAREST predicate tests --------------------------------------------------
+
+// Find the NEAREST(...) predicate in a WHERE expression tree.
+static const NearestExpr* find_nearest(const Expr* e) {
+    if (e == nullptr) {
+        return nullptr;
+    }
+    if (auto* n = dynamic_cast<const NearestExpr*>(e)) {
+        return n;
+    }
+    if (auto* b = dynamic_cast<const BinaryExpr*>(e)) {
+        if (auto* l = find_nearest(b->lhs.get())) {
+            return l;
+        }
+        return find_nearest(b->rhs.get());
+    }
+    if (auto* u = dynamic_cast<const UnaryExpr*>(e)) {
+        return find_nearest(u->operand.get());
+    }
+    return nullptr;
+}
 
 TEST(Parser, NearestBasic) {
-    auto stmt = parse_one("NEAREST 5 FROM products.embedding TO [1.0, 2.0, 3.0]");
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    auto stmt = parse_one("SELECT * FROM products WHERE NEAREST(embedding, 5) TO [1.0, 2.0, 3.0]");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* n = find_nearest(sel->where_expr.get());
     ASSERT_NE(n, nullptr);
     auto* k = dynamic_cast<LiteralExpr*>(n->k.get());
     ASSERT_NE(k, nullptr);
     EXPECT_EQ(k->value, "5");
-    EXPECT_EQ(n->table_name, "products");
-    EXPECT_EQ(n->column_name, "embedding");
+    auto* col = dynamic_cast<ColumnRefExpr*>(n->column.get());
+    ASSERT_NE(col, nullptr);
+    EXPECT_EQ(col->column, "embedding");
     EXPECT_EQ(n->metric, NearestMetric::COSINE);
 }
 
-TEST(Parser, NearestWithWhere) {
-    auto stmt = parse_one("NEAREST 10 FROM products.vec TO [1.0, 0.0] WHERE active = TRUE");
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
-    ASSERT_NE(n, nullptr);
-    EXPECT_NE(n->where_expr, nullptr);
+TEST(Parser, NearestWithResidualFilter) {
+    auto stmt =
+        parse_one("SELECT * FROM products WHERE NEAREST(vec, 10) TO [1.0, 0.0] AND active = TRUE");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    EXPECT_NE(find_nearest(sel->where_expr.get()), nullptr);
 }
 
 TEST(Parser, NearestWithMetric) {
-    auto stmt = parse_one("NEAREST 5 FROM items.embedding TO [1.0, 2.0] USING L2");
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    auto stmt = parse_one("SELECT * FROM items WHERE NEAREST(embedding, 5) TO [1.0, 2.0] USING L2");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* n = find_nearest(sel->where_expr.get());
     ASSERT_NE(n, nullptr);
     EXPECT_EQ(n->metric, NearestMetric::L2);
 }
 
 TEST(Parser, NearestWithinTraverse) {
     auto stmt =
-        parse_one("NEAREST 5 FROM articles.content_vec TO 'machine learning' "
+        parse_one("SELECT * FROM articles WHERE NEAREST(content_vec, 5) TO 'machine learning' "
                   "WITHIN TRAVERSE cites FROM articles('abc-123') DIRECTION OUT MAX_DEPTH 3");
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* n = find_nearest(sel->where_expr.get());
     ASSERT_NE(n, nullptr);
-    auto* k = dynamic_cast<LiteralExpr*>(n->k.get());
-    ASSERT_NE(k, nullptr);
-    EXPECT_EQ(k->value, "5");
-    EXPECT_EQ(n->table_name, "articles");
-    EXPECT_EQ(n->column_name, "content_vec");
+    auto* col = dynamic_cast<ColumnRefExpr*>(n->column.get());
+    ASSERT_NE(col, nullptr);
+    EXPECT_EQ(col->column, "content_vec");
     ASSERT_NE(n->within_traverse, nullptr);
     auto* t = dynamic_cast<TraverseStmt*>(n->within_traverse.get());
     ASSERT_NE(t, nullptr);
@@ -1744,14 +1770,15 @@ TEST(Parser, NearestWithinTraverse) {
     EXPECT_EQ(*t->max_depth, 3);
 }
 
-TEST(Parser, NearestWithinTraverseAndWhereUsing) {
-    auto stmt = parse_one("NEAREST 10 FROM posts.body_vec TO 'data analysis' "
+TEST(Parser, NearestWithinTraverseAndResidualUsing) {
+    auto stmt = parse_one("SELECT * FROM posts WHERE NEAREST(body_vec, 10) TO 'data analysis' "
                           "WITHIN TRAVERSE authored FROM users('u1') DIRECTION OUT MAX_DEPTH 1 "
-                          "WHERE score > 0.5 USING L2");
-    auto* n = dynamic_cast<NearestStmt*>(stmt.get());
+                          "USING L2 AND score > 0.5");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* n = find_nearest(sel->where_expr.get());
     ASSERT_NE(n, nullptr);
     EXPECT_NE(n->within_traverse, nullptr);
-    EXPECT_NE(n->where_expr, nullptr);
     EXPECT_EQ(n->metric, NearestMetric::L2);
 }
 
@@ -1922,6 +1949,8 @@ public:
     void visit(const BetweenExpr&) override { visited_type = "BetweenExpr"; }
     void visit(const IsNullExpr&) override { visited_type = "IsNullExpr"; }
     void visit(const LikeExpr&) override { visited_type = "LikeExpr"; }
+    void visit(const MatchExpr&) override { visited_type = "MatchExpr"; }
+    void visit(const NearestExpr&) override { visited_type = "NearestExpr"; }
     void visit(const ExistsExpr&) override { visited_type = "ExistsExpr"; }
     void visit(const SubqueryExpr&) override { visited_type = "SubqueryExpr"; }
     void visit(const ArrayExpr&) override { visited_type = "ArrayExpr"; }
@@ -1952,7 +1981,6 @@ public:
     // -- Query --
     void visit(const SelectStmt&) override { visited_type = "SelectStmt"; }
     void visit(const TraverseStmt&) override { visited_type = "TraverseStmt"; }
-    void visit(const NearestStmt&) override { visited_type = "NearestStmt"; }
     void visit(const MatchStmt&) override { visited_type = "MatchStmt"; }
     void visit(const ShortestPathStmt&) override { visited_type = "ShortestPathStmt"; }
 
@@ -2010,7 +2038,6 @@ TEST(AstVisitor, DispatchesDML) {
 TEST(AstVisitor, DispatchesQuery) {
     EXPECT_EQ(visit_stmt("SELECT 1"), "SelectStmt");
     EXPECT_EQ(visit_stmt("TRAVERSE follows FROM users(1)"), "TraverseStmt");
-    EXPECT_EQ(visit_stmt("NEAREST 5 FROM t.col TO [1.0]"), "NearestStmt");
     EXPECT_EQ(visit_stmt("MATCH (a:users)-[e:follows]->(b:users) RETURN a.name"), "MatchStmt");
     EXPECT_EQ(visit_stmt("SHORTEST PATH FROM users(1) TO users(2) VIA follows"),
               "ShortestPathStmt");
@@ -2264,19 +2291,14 @@ TEST(SelectWithoutFrom, ParseSelectStringLiteral) {
 
 // -- Graph / vector statements as subqueries ----------------------------------
 
-TEST(SubqueryStmt, DerivedTableNearest) {
-    auto stmt = parse_one("SELECT * FROM (NEAREST 5 FROM docs.vec TO [1.0, 2.0]) AS n");
-    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
-    ASSERT_NE(sel, nullptr);
-    ASSERT_EQ(sel->from.size(), 1u);
-    ASSERT_NE(sel->from[0].subquery, nullptr);
-    EXPECT_NE(dynamic_cast<NearestStmt*>(sel->from[0].subquery.get()), nullptr);
-    EXPECT_EQ(sel->from[0].alias, "n");
+TEST(SubqueryStmt, DerivedTableNearestRejected) {
+    // Vector search is a WHERE predicate now; NEAREST is no longer a statement,
+    // so it cannot be used as a derived table / subquery.
+    expect_parse_error("SELECT * FROM (NEAREST 5 FROM docs.vec TO [1.0, 2.0]) AS n");
 }
 
 TEST(SubqueryStmt, InTraverse) {
-    auto stmt =
-        parse_one("SELECT * FROM users WHERE id IN (TRAVERSE follows FROM users(1))");
+    auto stmt = parse_one("SELECT * FROM users WHERE id IN (TRAVERSE follows FROM users(1))");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
     auto* in = dynamic_cast<InExpr*>(sel->where_expr.get());
@@ -2285,15 +2307,9 @@ TEST(SubqueryStmt, InTraverse) {
     EXPECT_NE(dynamic_cast<TraverseStmt*>(in->subquery.get()), nullptr);
 }
 
-TEST(SubqueryStmt, ExistsNearest) {
-    auto stmt =
-        parse_one("SELECT * FROM docs WHERE EXISTS (NEAREST 1 FROM docs.vec TO [1.0])");
-    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
-    ASSERT_NE(sel, nullptr);
-    auto* ex = dynamic_cast<ExistsExpr*>(sel->where_expr.get());
-    ASSERT_NE(ex, nullptr);
-    ASSERT_NE(ex->subquery, nullptr);
-    EXPECT_NE(dynamic_cast<NearestStmt*>(ex->subquery.get()), nullptr);
+TEST(SubqueryStmt, ExistsNearestRejected) {
+    // NEAREST is no longer a statement, so it cannot appear inside EXISTS(...).
+    expect_parse_error("SELECT * FROM docs WHERE EXISTS (NEAREST 1 FROM docs.vec TO [1.0])");
 }
 
 TEST(SubqueryStmt, ScalarTraverse) {

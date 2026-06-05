@@ -164,7 +164,8 @@ TEST_F(NearestGraphScopeTest, UuidPrimaryKeysDoNotCrash) {
     exec_ok("LINK posts('" + uuid_b + "') TO posts('" + uuid_c + "') VIA follows");
 
     // Run NEAREST ... WITHIN TRAVERSE — this must not crash.
-    auto result = engine_->execute("NEAREST 5 FROM posts.body_vec TO [1.0, 0.0, 0.0, 0.0] "
+    auto result = engine_->execute("SELECT * FROM posts "
+                                   "WHERE NEAREST(body_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
                                    "WITHIN TRAVERSE follows FROM posts('" +
                                    uuid_a + "') DIRECTION OUT MAX_DEPTH 2");
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -208,7 +209,8 @@ TEST_F(NearestGraphScopeTest, IntPrimaryKeysStillWork) {
     exec_ok("LINK docs(2) TO docs(3) VIA refs");
 
     // NEAREST scoped to graph.
-    auto result = engine_->execute("NEAREST 5 FROM docs.body_vec TO [1.0, 0.0, 0.0, 0.0] "
+    auto result = engine_->execute("SELECT * FROM docs "
+                                   "WHERE NEAREST(body_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
                                    "WITHIN TRAVERSE refs FROM docs(1) DIRECTION OUT MAX_DEPTH 2");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 

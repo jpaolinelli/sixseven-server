@@ -112,6 +112,20 @@ void collect_ungrouped_columns(const Expr& expr,
             collect_ungrouped_columns(*like->pattern, bound, out);
         return;
     }
+    if (auto* match = dynamic_cast<const MatchExpr*>(&expr)) {
+        if (match->column)
+            collect_ungrouped_columns(*match->column, bound, out);
+        if (match->query)
+            collect_ungrouped_columns(*match->query, bound, out);
+        return;
+    }
+    if (auto* nearest = dynamic_cast<const NearestExpr*>(&expr)) {
+        if (nearest->column)
+            collect_ungrouped_columns(*nearest->column, bound, out);
+        if (nearest->target)
+            collect_ungrouped_columns(*nearest->target, bound, out);
+        return;
+    }
     // Literals, subqueries, etc. have no column refs to collect.
 }
 
@@ -153,6 +167,42 @@ std::vector<ResolvedColumn> parse_edge_property_columns(const std::string& prope
     }
 
     return result;
+}
+
+/// Recursively search an expression tree for a BM25 MATCH(...) TO ... predicate.
+/// Used by bind_select to expose the synthetic `_score` column.
+bool expr_contains_match(const Expr* expr) {
+    if (expr == nullptr) {
+        return false;
+    }
+    if (dynamic_cast<const MatchExpr*>(expr) != nullptr) {
+        return true;
+    }
+    if (auto* b = dynamic_cast<const BinaryExpr*>(expr)) {
+        return expr_contains_match(b->lhs.get()) || expr_contains_match(b->rhs.get());
+    }
+    if (auto* u = dynamic_cast<const UnaryExpr*>(expr)) {
+        return expr_contains_match(u->operand.get());
+    }
+    return false;
+}
+
+/// Recursively search an expression tree for a NEAREST(...) TO ... predicate.
+/// Used by bind_select to expose the synthetic `_distance` column.
+bool expr_contains_nearest(const Expr* expr) {
+    if (expr == nullptr) {
+        return false;
+    }
+    if (dynamic_cast<const NearestExpr*>(expr) != nullptr) {
+        return true;
+    }
+    if (auto* b = dynamic_cast<const BinaryExpr*>(expr)) {
+        return expr_contains_nearest(b->lhs.get()) || expr_contains_nearest(b->rhs.get());
+    }
+    if (auto* u = dynamic_cast<const UnaryExpr*>(expr)) {
+        return expr_contains_nearest(u->operand.get());
+    }
+    return false;
 }
 
 } // namespace
@@ -333,8 +383,8 @@ ScopeTable Binder::build_algorithm_scope(const TableRef& tref) const {
     return st;
 }
 
-Result<Binder::TraverseColumns>
-Binder::compute_traverse_columns(const TraverseStmt& trav, const std::string& alias) const {
+Result<Binder::TraverseColumns> Binder::compute_traverse_columns(const TraverseStmt& trav,
+                                                                 const std::string& alias) const {
     // 1. Resolve edge type.
     auto edge = catalog_.get_edge_type(database_id_, trav.edge_type);
     if (!edge) {
@@ -725,9 +775,6 @@ Result<BoundStatement> Binder::bind(const Stmt& stmt) {
     if (auto* s = dynamic_cast<const TraverseStmt*>(&stmt)) {
         return bind_traverse(*s);
     }
-    if (auto* s = dynamic_cast<const NearestStmt*>(&stmt)) {
-        return bind_nearest(*s);
-    }
     if (auto* s = dynamic_cast<const MatchStmt*>(&stmt)) {
         return bind_match(*s);
     }
@@ -760,9 +807,6 @@ Result<BoundStatement> Binder::bind_with_outer(const Stmt& stmt, Scope* parent_s
     }
     if (auto* s = dynamic_cast<const TraverseStmt*>(&stmt)) {
         return bind_traverse(*s, parent_scope);
-    }
-    if (auto* s = dynamic_cast<const NearestStmt*>(&stmt)) {
-        return bind_nearest(*s, parent_scope);
     }
     if (auto* s = dynamic_cast<const MatchStmt*>(&stmt)) {
         return bind_match(*s, parent_scope);
@@ -806,6 +850,10 @@ Result<ExprType> Binder::bind_expr(const Expr& expr, Scope& scope, BoundStatemen
         result = bind_is_null(*e, scope, bound);
     } else if (auto* e = dynamic_cast<const LikeExpr*>(&expr)) {
         result = bind_like(*e, scope, bound);
+    } else if (auto* e = dynamic_cast<const MatchExpr*>(&expr)) {
+        result = bind_match(*e, scope, bound);
+    } else if (auto* e = dynamic_cast<const NearestExpr*>(&expr)) {
+        result = bind_nearest_expr(*e, scope, bound);
     } else if (auto* e = dynamic_cast<const ExistsExpr*>(&expr)) {
         result = bind_exists(*e, scope, bound);
     } else if (auto* e = dynamic_cast<const SubqueryExpr*>(&expr)) {
@@ -1270,6 +1318,36 @@ Result<ExprType> Binder::bind_like(const LikeExpr& expr, Scope& scope, BoundStat
     return ok(et);
 }
 
+Result<ExprType> Binder::bind_match(const MatchExpr& expr, Scope& scope, BoundStatement& bound) {
+    // The column must resolve to a STRING column (whether a BM25 index actually
+    // exists is decided by the planner, which falls back / errors accordingly).
+    auto col = bind_expr(*expr.column, scope, bound);
+    if (!col) {
+        return col;
+    }
+    if (dynamic_cast<const ColumnRefExpr*>(expr.column.get()) == nullptr) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "MATCH(...) requires a column reference as its first argument");
+    }
+    if (col->type_id != TypeId::STRING) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "MATCH(...) requires a STRING column");
+    }
+
+    auto query = bind_expr(*expr.query, scope, bound);
+    if (!query) {
+        return query;
+    }
+    if (query->type_id != TypeId::STRING) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "MATCH(...) TO requires a string query");
+    }
+
+    ExprType et;
+    et.type_id = TypeId::BOOL;
+    et.nullable = false;
+    et.is_aggregate = false;
+    return ok(et);
+}
+
 Result<ExprType>
 Binder::bind_exists(const ExistsExpr& expr, Scope& scope, BoundStatement& /*bound*/) {
     if (expr.subquery) {
@@ -1653,6 +1731,41 @@ Result<BoundStatement> Binder::bind_select(const SelectStmt& stmt, Scope* parent
         return tl::unexpected(scope_result.error());
     }
     auto scope = std::move(*scope_result);
+
+    // 1b. A BM25 MATCH(...) predicate in WHERE produces a synthetic `_score`
+    //     relevance column. Expose it in the scope so `SELECT _score` and
+    //     `ORDER BY _score` resolve (mirrors NEAREST's `_distance`).
+    if (expr_contains_match(stmt.where_expr.get())) {
+        ScopeTable score_table;
+        score_table.table_id = 0;
+        score_table.alias = "";
+        ResolvedColumn score_col;
+        score_col.table_id = 0;
+        score_col.ordinal = -1;
+        score_col.table_name = "";
+        score_col.column_name = "_score";
+        score_col.type_id = TypeId::FLOAT64;
+        score_col.nullable = false;
+        score_table.columns.push_back(std::move(score_col));
+        scope.add_table(std::move(score_table));
+    }
+
+    // 1c. A NEAREST(...) predicate in WHERE produces a synthetic `_distance`
+    //     column. Expose it so `SELECT _distance` / `ORDER BY _distance` resolve.
+    if (expr_contains_nearest(stmt.where_expr.get())) {
+        ScopeTable dist_table;
+        dist_table.table_id = 0;
+        dist_table.alias = "";
+        ResolvedColumn dist_col;
+        dist_col.table_id = 0;
+        dist_col.ordinal = -1;
+        dist_col.table_name = "";
+        dist_col.column_name = "_distance";
+        dist_col.type_id = TypeId::FLOAT64;
+        dist_col.nullable = false;
+        dist_table.columns.push_back(std::move(dist_col));
+        scope.add_table(std::move(dist_table));
+    }
 
     // 2. Bind JOIN ON expressions.
     for (auto& join : stmt.joins) {
@@ -2531,88 +2644,57 @@ Result<BoundStatement> Binder::bind_traverse(const TraverseStmt& stmt, Scope* pa
     return ok(std::move(bound));
 }
 
-Result<BoundStatement> Binder::bind_nearest(const NearestStmt& stmt, Scope* parent_scope) {
-    BoundStatement bound;
-    bound.stmt = &stmt;
-
-    // Resolve table.
-    auto schema = resolve_table(stmt.table_name);
-    if (!schema) {
-        return tl::unexpected(schema.error());
+Result<ExprType>
+Binder::bind_nearest_expr(const NearestExpr& expr, Scope& scope, BoundStatement& bound) {
+    // The column must resolve to an EMBEDDING column in the current scope.
+    auto col = bind_expr(*expr.column, scope, bound);
+    if (!col) {
+        return col;
     }
-    bound.referenced_tables.push_back(schema->table_id);
-
-    // Verify column is EMBEDDING type.
-    bool found = false;
-    for (auto& col : schema->columns) {
-        if (to_upper(col.name) == to_upper(stmt.column_name)) {
-            if (col.type_id != TypeId::EMBEDDING) {
-                return make_error(StatusCode::TYPE_ERROR,
-                                  "NEAREST requires an EMBEDDING column, got " +
-                                      std::string(type_name(col.type_id)));
-            }
-            found = true;
-            break;
-        }
+    if (dynamic_cast<const ColumnRefExpr*>(expr.column.get()) == nullptr) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "NEAREST(...) requires a column reference as its first argument");
     }
-    if (!found) {
-        return make_error(StatusCode::NOT_FOUND,
-                          "column " + stmt.column_name + " not found in table " + stmt.table_name);
+    if (col->type_id != TypeId::EMBEDDING) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "NEAREST(...) requires an EMBEDDING column, got " +
+                              std::string(type_name(col->type_id)));
     }
 
-    // Bind k (must be integer). k is a constant, so it uses an empty scope.
+    // k must be an integer constant (bound in an empty scope).
     Scope empty_scope;
-    if (stmt.k) {
-        auto et = bind_expr(*stmt.k, empty_scope, bound);
-        if (!et) {
-            return tl::unexpected(et.error());
-        }
-        if (!is_integer(et->type_id)) {
-            return make_error(StatusCode::TYPE_ERROR,
-                              "NEAREST k must be an integer, got " +
-                                  std::string(type_name(et->type_id)));
-        }
+    auto k = bind_expr(*expr.k, empty_scope, bound);
+    if (!k) {
+        return k;
+    }
+    if (!is_integer(k->type_id)) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "NEAREST k must be an integer, got " +
+                              std::string(type_name(k->type_id)));
     }
 
-    // Bind target expression. Chained to the parent scope so a correlated query
-    // vector (e.g. NEAREST k FROM t.vec TO outer.embedding) resolves outer cols.
-    if (stmt.target) {
-        Scope target_scope(parent_scope);
-        auto et = bind_expr(*stmt.target, target_scope, bound);
-        if (!et) {
-            return tl::unexpected(et.error());
-        }
+    // Target: a vector literal or text to auto-embed.
+    auto target = bind_expr(*expr.target, scope, bound);
+    if (!target) {
+        return target;
+    }
+    if (target->type_id != TypeId::STRING && target->type_id != TypeId::EMBEDDING) {
+        return make_error(StatusCode::TYPE_ERROR, "NEAREST target must be a vector or text string");
     }
 
-    // Bind WHERE against the table scope, chained to the parent for correlation.
-    if (stmt.where_expr) {
-        Scope tbl_scope(parent_scope);
-        tbl_scope.add_table(make_scope_table(*schema, schema->name));
-        auto et = bind_expr(*stmt.where_expr, tbl_scope, bound);
-        if (!et) {
-            return tl::unexpected(et.error());
-        }
-    }
-
-    // Bind WITHIN TRAVERSE.
-    if (stmt.within_traverse) {
-        auto sub = bind(*stmt.within_traverse);
+    // Optional WITHIN TRAVERSE graph scope.
+    if (expr.within_traverse) {
+        auto sub = bind(*expr.within_traverse);
         if (!sub) {
             return tl::unexpected(sub.error());
         }
     }
 
-    // Output columns: all table columns + a trailing _distance column, matching
-    // the schema produced by plan_nearest. Needed when NEAREST is used as a
-    // subquery / derived table.
-    for (const auto& col : schema->columns) {
-        bound.output_columns.push_back(
-            {schema->table_id, col.ordinal, stmt.table_name, col.name, col.type_id, col.nullable});
-    }
-    bound.output_columns.push_back(
-        {schema->table_id, -1, stmt.table_name, "_distance", TypeId::FLOAT64, false});
-
-    return ok(std::move(bound));
+    ExprType et;
+    et.type_id = TypeId::BOOL;
+    et.nullable = false;
+    et.is_aggregate = false;
+    return ok(et);
 }
 
 Result<BoundStatement> Binder::bind_match(const MatchStmt& stmt, Scope* parent_scope) {

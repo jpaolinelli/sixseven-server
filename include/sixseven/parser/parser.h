@@ -111,7 +111,11 @@ private:
     // -- Graph / Vector -----------------------------------------------------
 
     [[nodiscard]] Result<StmtPtr> parse_traverse();
-    [[nodiscard]] Result<StmtPtr> parse_nearest();
+    /// Parse the `WITHIN TRAVERSE ...` graph-scope clause of a NEAREST(...)
+    /// predicate (precondition: next token is the contextual keyword WITHIN).
+    [[nodiscard]] Result<StmtPtr> parse_within_traverse();
+    /// Parse an optional `USING COSINE|L2|DOT` clause; default COSINE.
+    [[nodiscard]] Result<NearestMetric> parse_nearest_metric();
     [[nodiscard]] Result<StmtPtr> parse_match();
     [[nodiscard]] Result<std::vector<PathElement>> parse_match_pattern();
     [[nodiscard]] Result<StmtPtr> parse_shortest_path();

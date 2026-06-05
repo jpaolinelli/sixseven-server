@@ -1,6 +1,6 @@
 # Vector Search Guide
 
-SixSevenDB provides native vector search through `EMBEDDING` columns and the `NEAREST` query. Vectors are indexed automatically using HNSW (Hierarchical Navigable Small World) graphs for fast approximate nearest neighbor lookup.
+SixSevenDB provides native vector search through `EMBEDDING` columns and the `NEAREST` predicate. Vectors are indexed automatically using HNSW (Hierarchical Navigable Small World) graphs for fast approximate nearest neighbor lookup.
 
 ## EMBEDDING Columns
 
@@ -40,38 +40,46 @@ To inspect registered embedding columns:
 SHOW EMBEDDINGS;
 ```
 
-## NEAREST Query Reference
+## NEAREST Predicate Reference
 
 ### Syntax
 
+`NEAREST` is a `WHERE` predicate inside a normal `SELECT`:
+
 ```
-NEAREST <k> FROM <table>.<column> TO <target>
-    [WHERE <condition>]
+SELECT <cols> FROM <table>
+WHERE NEAREST(<column>, <k>) TO <target>
     [WITHIN TRAVERSE <edge> FROM <table>(<pk>) DIRECTION <dir> MAX_DEPTH <n>]
-    [USING COSINE | L2 | DOT];
+    [USING COSINE | L2 | DOT]
+    [AND <residual predicate>];
 ```
+
+The clauses after `TO <target>` are ordered: optional `WITHIN TRAVERSE ...`, then optional `USING <metric>`, then an optional `AND <predicate>` that further filters the matched rows.
 
 ### Parameters
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
+| `column` | Yes | EMBEDDING column to search (within the `FROM` table) |
 | `k` | Yes | Number of nearest neighbors to return (positive integer) |
-| `table.column` | Yes | Table name and EMBEDDING column, dot-separated |
 | `TO target` | Yes | Query vector — either a text string (auto-embedded) or a vector literal `[0.1, 0.2, ...]` |
-| `WHERE` | No | Post-filter applied to results after the vector search |
 | `WITHIN TRAVERSE` | No | Restrict search to nodes reachable via graph traversal |
 | `USING` | No | Distance metric (default: `COSINE`) |
+| `AND <pred>` | No | Residual filter applied to the matched rows |
 
 ### Output
 
-Results include all columns from the table plus a `_distance` pseudo-column (`FLOAT64`), sorted by distance ascending (closest first).
+`SELECT *` returns the table's columns. The nearest-first ordering is implicit, so results come back closest-first. To expose the distance, add the `_distance` pseudo-column (`FLOAT64`, lower = nearer) to the select list and optionally `ORDER BY _distance`.
 
 ```sql
-NEAREST 3 FROM articles.title_vec TO 'machine learning';
--- Returns: id | title | body | title_vec | body_vec | _distance
---          5  | ...   | ...  | ...       | ...      | 0.123
---          2  | ...   | ...  | ...       | ...      | 0.234
---          8  | ...   | ...  | ...       | ...      | 0.345
+SELECT id, title, _distance
+FROM articles
+WHERE NEAREST(title_vec, 3) TO 'machine learning'
+ORDER BY _distance;
+-- Returns: id | title | _distance
+--          5  | ...   | 0.123
+--          2  | ...   | 0.234
+--          8  | ...   | 0.345
 ```
 
 ## Choosing k
@@ -91,7 +99,7 @@ The `k` parameter controls how many nearest neighbors are returned. It directly 
 
 **Increase k** when:
 - Results feel too narrow or repetitive
-- Using a `WHERE` filter that may reject some nearest neighbors
+- Using an `AND` residual filter that may reject some nearest neighbors
 - You need diversity in results (e.g., recommendations)
 
 **Decrease k** when:
@@ -99,9 +107,9 @@ The `k` parameter controls how many nearest neighbors are returned. It directly 
 - Feeding results to an LLM with limited context
 - Query latency is critical
 
-### k with WHERE Filters
+### k with Residual Filters
 
-When a `WHERE` clause is present, SixSevenDB over-fetches from the HNSW index (retrieving `k * 4` candidates) then post-filters to the requested `k`. This means some queries may return fewer than `k` results if the filter is very selective. If you consistently get fewer results than expected, increase `k` to compensate.
+When an `AND` residual filter is present, SixSevenDB over-fetches from the HNSW index (retrieving `k * 4` candidates) then post-filters to the requested `k`. This means some queries may return fewer than `k` results if the filter is very selective. If you consistently get fewer results than expected, increase `k` to compensate.
 
 ### Edge Cases
 
@@ -120,7 +128,7 @@ Measures the angle between vectors, ignoring magnitude. Range: `[0, 2]` where 0 
 Best for: **semantic similarity** — comparing meaning regardless of text length.
 
 ```sql
-NEAREST 5 FROM articles.body_vec TO 'neural networks' USING COSINE;
+SELECT * FROM articles WHERE NEAREST(body_vec, 5) TO 'neural networks' USING COSINE;
 ```
 
 ### L2
@@ -130,7 +138,7 @@ Squared Euclidean distance. Range: `[0, +inf)` where 0 means identical vectors.
 Best for: **spatial proximity** — when vector magnitude matters (e.g., geographic data, image features).
 
 ```sql
-NEAREST 5 FROM articles.body_vec TO 'neural networks' USING L2;
+SELECT * FROM articles WHERE NEAREST(body_vec, 5) TO 'neural networks' USING L2;
 ```
 
 ### DOT
@@ -140,7 +148,7 @@ Dot product (negated internally so lower = better). Higher raw dot product means
 Best for: **normalized vectors** where providers already L2-normalize their output (e.g., OpenAI embeddings).
 
 ```sql
-NEAREST 5 FROM articles.body_vec TO 'neural networks' USING DOT;
+SELECT * FROM articles WHERE NEAREST(body_vec, 5) TO 'neural networks' USING DOT;
 ```
 
 ### Selection Guide
@@ -177,7 +185,8 @@ Use `WITHIN TRAVERSE` to restrict vector search to a subgraph:
 
 ```sql
 -- Only search among articles reachable from user 1 via "authored" edges
-NEAREST 5 FROM articles.body_vec TO 'data science'
+SELECT * FROM articles
+WHERE NEAREST(body_vec, 5) TO 'data science'
 WITHIN TRAVERSE authored FROM users(1) DIRECTION OUT MAX_DEPTH 2;
 ```
 
@@ -189,7 +198,7 @@ This first performs a BFS traversal to find reachable node IDs, then passes them
 
 ```sql
 -- Find the 5 articles most similar to "machine learning"
-NEAREST 5 FROM articles.title_vec TO 'machine learning';
+SELECT * FROM articles WHERE NEAREST(title_vec, 5) TO 'machine learning';
 ```
 
 The text string is automatically embedded using the column's configured provider before searching.
@@ -198,32 +207,34 @@ The text string is automatically embedded using the column's configured provider
 
 ```sql
 -- Find similar articles, but only in the 'tech' category
-NEAREST 10 FROM articles.body_vec TO 'distributed databases'
-WHERE category = 'tech';
+SELECT * FROM articles
+WHERE NEAREST(body_vec, 10) TO 'distributed databases'
+AND category = 'tech';
 ```
 
 ### Explicit Vector
 
 ```sql
 -- Search with a pre-computed vector
-NEAREST 5 FROM products.embedding TO [0.1, 0.2, 0.3, 0.4];
+SELECT * FROM products WHERE NEAREST(embedding, 5) TO [0.1, 0.2, 0.3, 0.4];
 ```
 
 ### Different Metrics
 
 ```sql
 -- Euclidean distance for spatial data
-NEAREST 10 FROM locations.geo_vec TO 'downtown restaurant' USING L2;
+SELECT * FROM locations WHERE NEAREST(geo_vec, 10) TO 'downtown restaurant' USING L2;
 
 -- Dot product for normalized embeddings
-NEAREST 10 FROM articles.body_vec TO 'query' USING DOT;
+SELECT * FROM articles WHERE NEAREST(body_vec, 10) TO 'query' USING DOT;
 ```
 
 ### Graph-Scoped
 
 ```sql
 -- Relevant articles among a user's social graph
-NEAREST 5 FROM articles.body_vec TO 'data science'
+SELECT * FROM articles
+WHERE NEAREST(body_vec, 5) TO 'data science'
 WITHIN TRAVERSE follows FROM users(42) DIRECTION OUT MAX_DEPTH 2;
 ```
 
@@ -261,9 +272,9 @@ Higher-dimension embeddings (e.g., 1536 vs 384) require more computation per dis
 | `openai/text-embedding-3-small` | 1536 | Moderate (network call) |
 | `openai/text-embedding-3-large` | 3072 | Slower (network call, larger vectors) |
 
-### WHERE Filter Interaction
+### Residual Filter Interaction
 
-With a `WHERE` clause, SixSevenDB retrieves `k * 4` candidates from the HNSW index, then post-filters. Very selective filters may cause fewer than `k` results. Increase `k` if needed.
+With an `AND` residual predicate, SixSevenDB retrieves `k * 4` candidates from the HNSW index, then post-filters. Very selective filters may cause fewer than `k` results. Increase `k` if needed.
 
 ### Re-embedding
 

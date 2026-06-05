@@ -17,18 +17,15 @@ namespace {
 // ---------------------------------------------------------------------------
 
 static const char* const k_first_names[] = {
-    "James",  "Maria",  "Wei",   "Aisha",  "Carlos",
-    "Elena",  "Raj",    "Yuki",  "Olga",   "Ahmed",
-    "Sarah",  "David",  "Lin",   "Fatima", "Miguel",
-    "Anna",   "Kwame",  "Priya", "Thomas", "Ingrid",
+    "James", "Maria", "Wei", "Aisha",  "Carlos", "Elena", "Raj",   "Yuki",  "Olga",   "Ahmed",
+    "Sarah", "David", "Lin", "Fatima", "Miguel", "Anna",  "Kwame", "Priya", "Thomas", "Ingrid",
 };
 static constexpr int k_first_count = 20;
 
 static const char* const k_last_names[] = {
-    "Morrison", "Chen",     "Okafor",   "Nakamura", "Garcia",
-    "Volkov",   "Patel",    "Johansson", "Kim",      "Schmidt",
-    "Santos",   "Williams", "Nguyen",   "Andersson", "Hassan",
-    "Taylor",   "Suzuki",   "Petrov",   "Singh",    "Torres",
+    "Morrison",  "Chen",   "Okafor",  "Nakamura", "Garcia",   "Volkov", "Patel",
+    "Johansson", "Kim",    "Schmidt", "Santos",   "Williams", "Nguyen", "Andersson",
+    "Hassan",    "Taylor", "Suzuki",  "Petrov",   "Singh",    "Torres",
 };
 static constexpr int k_last_count = 20;
 
@@ -36,103 +33,189 @@ static constexpr int k_last_count = 20;
 static constexpr int k_author_count = 200;
 
 static const char* const k_nationalities[] = {
-    "American", "British", "Chinese",  "Nigerian", "Japanese",
-    "Brazilian","Indian",  "Swedish",  "Mexican",  "German",
+    "American",
+    "British",
+    "Chinese",
+    "Nigerian",
+    "Japanese",
+    "Brazilian",
+    "Indian",
+    "Swedish",
+    "Mexican",
+    "German",
 };
 static constexpr int k_nat_count = 10;
 
 static const char* const k_genres[] = {
-    "Science Fiction", "Fantasy",          "Mystery",       "Romance",
-    "Historical Fiction","Literary Fiction","Thriller",      "Horror",
-    "Biography",        "Science",          "Philosophy",    "Self-Help",
+    "Science Fiction",
+    "Fantasy",
+    "Mystery",
+    "Romance",
+    "Historical Fiction",
+    "Literary Fiction",
+    "Thriller",
+    "Horror",
+    "Biography",
+    "Science",
+    "Philosophy",
+    "Self-Help",
 };
 static constexpr int k_genre_count = 12;
 
 static const char* const k_title_adj[] = {
-    "The Last",      "A Thousand",   "The Silent",  "Midnight",      "The Forgotten",
-    "Crimson",       "The Infinite", "Golden",      "The Secret",    "Shattered",
-    "The Luminous",  "Dark",         "The Wandering","Emerald",      "The Seventh",
+    "The Last",
+    "A Thousand",
+    "The Silent",
+    "Midnight",
+    "The Forgotten",
+    "Crimson",
+    "The Infinite",
+    "Golden",
+    "The Secret",
+    "Shattered",
+    "The Luminous",
+    "Dark",
+    "The Wandering",
+    "Emerald",
+    "The Seventh",
 };
 static constexpr int k_adj_count = 15;
 
 static const char* const k_title_noun[] = {
-    "Garden", "Stars",   "Kingdom", "Song",    "Shadow",
-    "River",  "Dream",   "Forest",  "Storm",   "Light",
-    "Ocean",  "Mountain","City",    "Fire",    "Winter",
+    "Garden",
+    "Stars",
+    "Kingdom",
+    "Song",
+    "Shadow",
+    "River",
+    "Dream",
+    "Forest",
+    "Storm",
+    "Light",
+    "Ocean",
+    "Mountain",
+    "City",
+    "Fire",
+    "Winter",
 };
 static constexpr int k_noun_count = 15;
 
 static const char* const k_desc_theme[] = {
-    "betrayal and redemption",  "love across worlds",     "the search for identity",
-    "political intrigue",       "scientific discovery",   "spiritual awakening",
-    "survival against all odds","family secrets",         "revolution and justice",
+    "betrayal and redemption",
+    "love across worlds",
+    "the search for identity",
+    "political intrigue",
+    "scientific discovery",
+    "spiritual awakening",
+    "survival against all odds",
+    "family secrets",
+    "revolution and justice",
     "memory and loss",
 };
 static constexpr int k_theme_count = 10;
 
 static const char* const k_desc_setting[] = {
-    "a dystopian future",       "a mythical kingdom",      "a bustling metropolis",
-    "a remote island",          "a space colony",          "medieval Europe",
-    "a parallel universe",      "rural Japan",             "colonial Africa",
+    "a dystopian future",
+    "a mythical kingdom",
+    "a bustling metropolis",
+    "a remote island",
+    "a space colony",
+    "medieval Europe",
+    "a parallel universe",
+    "rural Japan",
+    "colonial Africa",
     "a deep-sea research base",
 };
 static constexpr int k_setting_count = 10;
 
 static const char* const k_desc_protagonist[] = {
-    "a reluctant hero",         "an unlikely detective",   "a brilliant scientist",
-    "a young apprentice",       "a hardened soldier",      "a street-smart orphan",
-    "a disgraced noble",        "a time-traveling historian","a rogue AI",
+    "a reluctant hero",
+    "an unlikely detective",
+    "a brilliant scientist",
+    "a young apprentice",
+    "a hardened soldier",
+    "a street-smart orphan",
+    "a disgraced noble",
+    "a time-traveling historian",
+    "a rogue AI",
     "a grieving parent",
 };
 static constexpr int k_protag_count = 10;
 
 static const char* const k_desc_concept[] = {
-    "the nature of power",      "human connection",        "the cost of ambition",
-    "truth and deception",      "sacrifice and duty",      "hope in darkness",
-    "the passage of time",      "cultural identity",       "the limits of knowledge",
+    "the nature of power",
+    "human connection",
+    "the cost of ambition",
+    "truth and deception",
+    "sacrifice and duty",
+    "hope in darkness",
+    "the passage of time",
+    "cultural identity",
+    "the limits of knowledge",
     "morality without certainty",
 };
 static constexpr int k_concept_count = 10;
 
 static const char* const k_cities[] = {
-    "New York",    "London",      "Tokyo",        "Lagos",        "São Paulo",
-    "Mumbai",      "Berlin",      "Sydney",       "Cairo",        "Toronto",
-    "Seoul",       "Paris",       "Nairobi",      "Mexico City",  "Stockholm",
-    "Dubai",       "Singapore",   "Buenos Aires", "Cape Town",    "Amsterdam",
+    "New York",  "London", "Tokyo",     "Lagos",        "São Paulo", "Mumbai",    "Berlin",
+    "Sydney",    "Cairo",  "Toronto",   "Seoul",        "Paris",     "Nairobi",   "Mexico City",
+    "Stockholm", "Dubai",  "Singapore", "Buenos Aires", "Cape Town", "Amsterdam",
 };
 static constexpr int k_city_count = 20;
 
 static constexpr int k_reader_count = 500;
-static constexpr int k_book_count   = 200; // Scaled down for reasonable startup time
+static constexpr int k_book_count = 200; // Scaled down for reasonable startup time
 static constexpr int k_review_count = 1000;
 
 static const char* const k_tags[] = {
-    "page-turner",     "classic",        "award-winner",   "debut",
-    "bestseller",      "must-read",      "dark",           "uplifting",
-    "epic",            "thought-provoking","slow-burn",    "action-packed",
-    "lyrical",         "gritty",         "whimsical",      "haunting",
-    "funny",           "romantic",       "educational",    "controversial",
-    "international",   "debut-novel",    "series",         "standalone",
-    "short-stories",   "novella",        "translated",     "illustrated",
-    "audio-friendly",  "book-club-pick",
+    "page-turner",   "classic",       "award-winner", "debut",          "bestseller",
+    "must-read",     "dark",          "uplifting",    "epic",           "thought-provoking",
+    "slow-burn",     "action-packed", "lyrical",      "gritty",         "whimsical",
+    "haunting",      "funny",         "romantic",     "educational",    "controversial",
+    "international", "debut-novel",   "series",       "standalone",     "short-stories",
+    "novella",       "translated",    "illustrated",  "audio-friendly", "book-club-pick",
 };
 static constexpr int k_tag_count = 30;
 
 static const char* const k_review_adj[] = {
-    "stunning", "gripping", "mediocre", "brilliant", "disappointing",
-    "unforgettable", "overrated", "captivating", "dense", "refreshing",
+    "stunning",
+    "gripping",
+    "mediocre",
+    "brilliant",
+    "disappointing",
+    "unforgettable",
+    "overrated",
+    "captivating",
+    "dense",
+    "refreshing",
 };
 static constexpr int k_review_adj_count = 10;
 
 static const char* const k_review_aspect[] = {
-    "world-building", "character development", "plot structure", "prose style",
-    "dialogue", "pacing", "ending", "atmosphere", "themes", "originality",
+    "world-building",
+    "character development",
+    "plot structure",
+    "prose style",
+    "dialogue",
+    "pacing",
+    "ending",
+    "atmosphere",
+    "themes",
+    "originality",
 };
 static constexpr int k_review_aspect_count = 10;
 
 static const char* const k_review_assessment[] = {
-    "exceptional", "above average", "solid", "underwhelming", "remarkable",
-    "inconsistent", "masterful", "predictable", "nuanced", "bold",
+    "exceptional",
+    "above average",
+    "solid",
+    "underwhelming",
+    "remarkable",
+    "inconsistent",
+    "masterful",
+    "predictable",
+    "nuanced",
+    "bold",
 };
 static constexpr int k_review_assessment_count = 10;
 
@@ -155,13 +238,12 @@ static std::string esc(const std::string& s) {
 // ---------------------------------------------------------------------------
 // Helper: execute and propagate error
 // ---------------------------------------------------------------------------
-#define DEMO_EXEC(engine, sql)                                                  \
-    do {                                                                        \
-        auto _r = (engine).execute((sql));                                      \
-        if (!_r) {                                                              \
-            return make_error(_r.error().code,                                  \
-                              "demo bootstrap: " + _r.error().message);         \
-        }                                                                       \
+#define DEMO_EXEC(engine, sql)                                                                     \
+    do {                                                                                           \
+        auto _r = (engine).execute((sql));                                                         \
+        if (!_r) {                                                                                 \
+            return make_error(_r.error().code, "demo bootstrap: " + _r.error().message);           \
+        }                                                                                          \
     } while (false)
 
 // ---------------------------------------------------------------------------
@@ -171,50 +253,50 @@ static Result<void> create_schema(QueryEngine& engine) {
     SIXSEVEN_LOG_INFO("demo: creating bookstore schema");
 
     DEMO_EXEC(engine,
-        "CREATE TABLE authors ("
-        "  id         INT PRIMARY KEY,"
-        "  name       TEXT NOT NULL,"
-        "  nationality TEXT,"
-        "  birth_year INT,"
-        "  bio        TEXT"
-        ")");
+              "CREATE TABLE authors ("
+              "  id         INT PRIMARY KEY,"
+              "  name       TEXT NOT NULL,"
+              "  nationality TEXT,"
+              "  birth_year INT,"
+              "  bio        TEXT"
+              ")");
 
     DEMO_EXEC(engine,
-        "CREATE TABLE books ("
-        "  id              INT PRIMARY KEY,"
-        "  title           TEXT NOT NULL,"
-        "  genre           TEXT NOT NULL,"
-        "  published_year  INT,"
-        "  pages           INT,"
-        "  rating          DOUBLE,"
-        "  description     TEXT,"
-        "  description_vec EMBEDDING(384, description, 'onnx/models/all-MiniLM-L6-v2')"
-        ")");
+              "CREATE TABLE books ("
+              "  id              INT PRIMARY KEY,"
+              "  title           TEXT NOT NULL,"
+              "  genre           TEXT NOT NULL,"
+              "  published_year  INT,"
+              "  pages           INT,"
+              "  rating          DOUBLE,"
+              "  description     TEXT,"
+              "  description_vec EMBEDDING(384, description, 'onnx/models/all-MiniLM-L6-v2')"
+              ")");
 
     DEMO_EXEC(engine,
-        "CREATE TABLE readers ("
-        "  id          INT PRIMARY KEY,"
-        "  username    TEXT NOT NULL,"
-        "  email       TEXT,"
-        "  city        TEXT,"
-        "  joined_year INT"
-        ")");
+              "CREATE TABLE readers ("
+              "  id          INT PRIMARY KEY,"
+              "  username    TEXT NOT NULL,"
+              "  email       TEXT,"
+              "  city        TEXT,"
+              "  joined_year INT"
+              ")");
 
     DEMO_EXEC(engine,
-        "CREATE TABLE reviews ("
-        "  id          INT PRIMARY KEY,"
-        "  book_id     INT NOT NULL,"
-        "  reader_id   INT NOT NULL,"
-        "  stars       INT NOT NULL,"
-        "  review_text TEXT,"
-        "  review_vec  EMBEDDING(384, review_text, 'onnx/models/all-MiniLM-L6-v2')"
-        ")");
+              "CREATE TABLE reviews ("
+              "  id          INT PRIMARY KEY,"
+              "  book_id     INT NOT NULL,"
+              "  reader_id   INT NOT NULL,"
+              "  stars       INT NOT NULL,"
+              "  review_text TEXT,"
+              "  review_vec  EMBEDDING(384, review_text, 'onnx/models/all-MiniLM-L6-v2')"
+              ")");
 
     DEMO_EXEC(engine,
-        "CREATE TABLE tags ("
-        "  id   INT PRIMARY KEY,"
-        "  name TEXT NOT NULL"
-        ")");
+              "CREATE TABLE tags ("
+              "  id   INT PRIMARY KEY,"
+              "  name TEXT NOT NULL"
+              ")");
 
     // Edge types
     DEMO_EXEC(engine, "CREATE EDGE TYPE wrote FROM authors TO books");
@@ -224,7 +306,6 @@ static Result<void> create_schema(QueryEngine& engine) {
 
     return ok();
 }
-
 
 // ---------------------------------------------------------------------------
 // Seed authors (200 rows, batches of 50)
@@ -255,11 +336,12 @@ static Result<void> seed_authors(QueryEngine& engine) {
         for (int i = row; i < end; ++i) {
             std::string name = std::string(k_first_names[i % k_first_count]) + " " +
                                std::string(k_last_names[(i / k_first_count) % k_last_count]);
-            const char* nat  = k_nationalities[i % k_nat_count];
-            int birth_year   = 1930 + (i * 17) % 70; // 1930–1999
-            const char* bio  = bios[i % k_bio_count];
+            const char* nat = k_nationalities[i % k_nat_count];
+            int birth_year = 1930 + (i * 17) % 70; // 1930–1999
+            const char* bio = bios[i % k_bio_count];
 
-            if (!first_val) sql += ", ";
+            if (!first_val)
+                sql += ", ";
             first_val = false;
             sql += "(";
             sql += std::to_string(i + 1);
@@ -302,7 +384,7 @@ static Result<void> seed_books(QueryEngine& engine) {
             const char* genre = k_genres[i % k_genre_count];
 
             int pub_year = 1950 + (i * 13) % 74; // 1950–2023
-            int pages    = 150 + (i * 47) % 750;  // 150–899
+            int pages = 150 + (i * 47) % 750;    // 150–899
 
             // rating 2.0 – 5.0 in 0.1 steps (deterministic)
             double rating = 2.0 + static_cast<double>((i * 7) % 30) / 10.0;
@@ -310,11 +392,12 @@ static Result<void> seed_books(QueryEngine& engine) {
             // Build description from templates
             std::string desc =
                 "A " + std::string(k_desc_theme[i % k_theme_count]) + " story set in " +
-                std::string(k_desc_setting[(i + 3) % k_setting_count]) +
-                ", following " + std::string(k_desc_protagonist[(i + 1) % k_protag_count]) +
-                " as they confront " + std::string(k_desc_concept[(i + 2) % k_concept_count]) + ".";
+                std::string(k_desc_setting[(i + 3) % k_setting_count]) + ", following " +
+                std::string(k_desc_protagonist[(i + 1) % k_protag_count]) + " as they confront " +
+                std::string(k_desc_concept[(i + 2) % k_concept_count]) + ".";
 
-            if (!first_val) sql += ", ";
+            if (!first_val)
+                sql += ", ";
             first_val = false;
 
             // Format rating with one decimal place
@@ -350,34 +433,50 @@ static Result<void> seed_readers(QueryEngine& engine) {
     SIXSEVEN_LOG_INFO("demo: seeding {} readers", k_reader_count);
 
     static const char* const k_handle_adj[] = {
-        "avid",   "eager",  "swift",  "quiet", "bright",
-        "bold",   "gentle", "keen",   "sharp", "wise",
+        "avid",
+        "eager",
+        "swift",
+        "quiet",
+        "bright",
+        "bold",
+        "gentle",
+        "keen",
+        "sharp",
+        "wise",
     };
     static constexpr int k_handle_adj_count = 10;
 
     static const char* const k_handle_noun[] = {
-        "reader",   "bookworm", "librarian", "scholar",  "narrator",
-        "reviewer", "browser",  "listener",  "collector","archivist",
+        "reader",
+        "bookworm",
+        "librarian",
+        "scholar",
+        "narrator",
+        "reviewer",
+        "browser",
+        "listener",
+        "collector",
+        "archivist",
     };
     static constexpr int k_handle_noun_count = 10;
 
     constexpr int batch = 50;
     int row = 0;
     while (row < k_reader_count) {
-        std::string sql =
-            "INSERT INTO readers (id, username, email, city, joined_year) VALUES ";
+        std::string sql = "INSERT INTO readers (id, username, email, city, joined_year) VALUES ";
         bool first_val = true;
         int end = std::min(row + batch, k_reader_count);
         for (int i = row; i < end; ++i) {
-            std::string username = std::string(k_handle_adj[i % k_handle_adj_count]) + "_" +
-                                   std::string(k_handle_noun[(i / k_handle_adj_count) %
-                                                             k_handle_noun_count]) +
-                                   std::to_string(i + 1);
-            std::string email    = username + "@bookmail.example";
-            const char* city     = k_cities[i % k_city_count];
-            int joined_year      = 2010 + (i * 3) % 14; // 2010–2023
+            std::string username =
+                std::string(k_handle_adj[i % k_handle_adj_count]) + "_" +
+                std::string(k_handle_noun[(i / k_handle_adj_count) % k_handle_noun_count]) +
+                std::to_string(i + 1);
+            std::string email = username + "@bookmail.example";
+            const char* city = k_cities[i % k_city_count];
+            int joined_year = 2010 + (i * 3) % 14; // 2010–2023
 
-            if (!first_val) sql += ", ";
+            if (!first_val)
+                sql += ", ";
             first_val = false;
             sql += "(";
             sql += std::to_string(i + 1);
@@ -405,7 +504,8 @@ static Result<void> seed_tags(QueryEngine& engine) {
 
     std::string sql = "INSERT INTO tags (id, name) VALUES ";
     for (int i = 0; i < k_tag_count; ++i) {
-        if (i > 0) sql += ", ";
+        if (i > 0)
+            sql += ", ";
         sql += "(";
         sql += std::to_string(i + 1);
         sql += ", '";
@@ -430,21 +530,19 @@ static Result<void> seed_reviews(QueryEngine& engine) {
         bool first_val = true;
         int end = std::min(row + batch, k_review_count);
         for (int i = row; i < end; ++i) {
-            int book_id   = (i % k_book_count) + 1;
+            int book_id = (i % k_book_count) + 1;
             int reader_id = (i % k_reader_count) + 1;
-            int stars     = 1 + (i * 7 + 3) % 5; // 1–5
+            int stars = 1 + (i * 7 + 3) % 5; // 1–5
 
             // Build review sentence deterministically
             std::string review_text =
-                "An absolutely " +
-                std::string(k_review_adj[i % k_review_adj_count]) +
-                " read. The " +
-                std::string(k_review_aspect[(i + 2) % k_review_aspect_count]) +
-                " was " +
-                std::string(k_review_assessment[(i + 1) % k_review_assessment_count]) +
+                "An absolutely " + std::string(k_review_adj[i % k_review_adj_count]) +
+                " read. The " + std::string(k_review_aspect[(i + 2) % k_review_aspect_count]) +
+                " was " + std::string(k_review_assessment[(i + 1) % k_review_assessment_count]) +
                 " and I could not put it down.";
 
-            if (!first_val) sql += ", ";
+            if (!first_val)
+                sql += ", ";
             first_val = false;
             sql += "(";
             sql += std::to_string(i + 1);
@@ -476,7 +574,8 @@ static Result<void> seed_edges(QueryEngine& engine) {
         bool first_val = true;
         for (int book = 1; book <= k_book_count; ++book) {
             int author1 = ((book - 1) % k_author_count) + 1;
-            if (!first_val) sql += ", ";
+            if (!first_val)
+                sql += ", ";
             first_val = false;
             sql += "(";
             sql += std::to_string(author1);
@@ -509,9 +608,10 @@ static Result<void> seed_edges(QueryEngine& engine) {
             bool first_val = true;
             int end = std::min(row + batch, k_review_count);
             for (int i = row; i < end; ++i) {
-                int book_id   = (i % k_book_count) + 1;
+                int book_id = (i % k_book_count) + 1;
                 int reader_id = (i % k_reader_count) + 1;
-                if (!first_val) sql += ", ";
+                if (!first_val)
+                    sql += ", ";
                 first_val = false;
                 sql += "(";
                 sql += std::to_string(book_id);
@@ -529,7 +629,10 @@ static Result<void> seed_edges(QueryEngine& engine) {
     // every city is reachable within 2–3 hops from any starting reader.
     {
         constexpr int batch = 100;
-        struct FollowPair { int src; int tgt; };
+        struct FollowPair {
+            int src;
+            int tgt;
+        };
         std::vector<FollowPair> follows;
         follows.reserve(static_cast<size_t>(k_reader_count) * 8);
         // Step sizes chosen to cover all 20 city residues within 2 hops.
@@ -553,7 +656,8 @@ static Result<void> seed_edges(QueryEngine& engine) {
             bool first_val = true;
             int end = std::min(row + batch, total);
             for (int i = row; i < end; ++i) {
-                if (!first_val) sql += ", ";
+                if (!first_val)
+                    sql += ", ";
                 first_val = false;
                 sql += "(";
                 sql += std::to_string(follows[i].src);
@@ -569,7 +673,10 @@ static Result<void> seed_edges(QueryEngine& engine) {
     // --- tagged_as: 1–3 tags per book ---
     {
         constexpr int batch = 100;
-        struct TagPair { int book; int tag; };
+        struct TagPair {
+            int book;
+            int tag;
+        };
         std::vector<TagPair> tagged;
         tagged.reserve(static_cast<size_t>(k_book_count) * 3);
         for (int b = 1; b <= k_book_count; ++b) {
@@ -587,7 +694,8 @@ static Result<void> seed_edges(QueryEngine& engine) {
             bool first_val = true;
             int end = std::min(row + batch, total);
             for (int i = row; i < end; ++i) {
-                if (!first_val) sql += ", ";
+                if (!first_val)
+                    sql += ", ";
                 first_val = false;
                 sql += "(";
                 sql += std::to_string(tagged[i].book);
@@ -614,34 +722,44 @@ Result<void> create_demo_database(QueryEngine& engine) {
     SIXSEVEN_LOG_INFO("demo: bootstrapping 'SixSeven Bookstore' demo dataset");
 
     auto r_schema = create_schema(engine);
-    if (!r_schema) return r_schema;
+    if (!r_schema)
+        return r_schema;
 
     auto r_tags = seed_tags(engine);
-    if (!r_tags) return r_tags;
+    if (!r_tags)
+        return r_tags;
 
     auto r_authors = seed_authors(engine);
-    if (!r_authors) return r_authors;
+    if (!r_authors)
+        return r_authors;
 
     auto r_books = seed_books(engine);
-    if (!r_books) return r_books;
+    if (!r_books)
+        return r_books;
 
     auto r_readers = seed_readers(engine);
-    if (!r_readers) return r_readers;
+    if (!r_readers)
+        return r_readers;
 
     auto r_reviews = seed_reviews(engine);
-    if (!r_reviews) return r_reviews;
+    if (!r_reviews)
+        return r_reviews;
 
     auto r_edges = seed_edges(engine);
-    if (!r_edges) return r_edges;
+    if (!r_edges)
+        return r_edges;
 
     // NOTE: secondary indexes are intentionally NOT created here. They must be
     // built only after EMBEDDING vectors are generated (see create_demo_indexes),
     // because embedding write-backs move rows to new heap slots and would leave
     // any pre-existing index pointing at deleted slots.
 
-    SIXSEVEN_LOG_INFO(
-        "demo: dataset ready — {} authors, {} books, {} readers, {} reviews, {} tags",
-        k_author_count, k_book_count, k_reader_count, k_review_count, k_tag_count);
+    SIXSEVEN_LOG_INFO("demo: dataset ready — {} authors, {} books, {} readers, {} reviews, {} tags",
+                      k_author_count,
+                      k_book_count,
+                      k_reader_count,
+                      k_review_count,
+                      k_tag_count);
     SIXSEVEN_LOG_INFO("demo: EMBEDDING vectors are generating in the background");
 
     return ok();
@@ -663,6 +781,9 @@ Result<void> create_demo_indexes(QueryEngine& engine) {
         "CREATE INDEX idx_readers_city   ON readers(city)",
         "CREATE INDEX idx_readers_joined ON readers(joined_year)",
         "CREATE INDEX idx_authors_nat    ON authors(nationality)",
+        // BM25 full-text indexes so MATCH(...) TO ... works out of the box.
+        "CREATE INDEX idx_books_desc     ON books(description) USING bm25",
+        "CREATE INDEX idx_reviews_text   ON reviews(review_text) USING bm25",
     };
     for (const char* ddl : k_index_ddl) {
         auto r = engine.execute(ddl);

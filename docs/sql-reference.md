@@ -143,49 +143,45 @@ SELECT name,
 FROM users;
 ```
 
-## Graph & Vector Subqueries
+## Graph Subqueries
 
-`TRAVERSE` (graph), `NEAREST` (vector), and `MATCH` (graph pattern) are first-class
-query statements: anywhere a `SELECT` subquery is allowed, they may be used too. This
-is what lets relational, graph, and vector queries blend in a single SQL statement.
+`TRAVERSE` (graph) and `MATCH` (graph pattern) are first-class query statements:
+anywhere a `SELECT` subquery is allowed, they may be used too. This is what lets
+relational and graph queries blend in a single SQL statement.
 
 Supported positions: derived tables (`FROM (...)`), `IN (...)`, `EXISTS (...)`, and
-scalar subqueries. The subquery produces a normal row stream — `NEAREST` yields the
-table's columns plus a trailing `_distance`; `TRAVERSE` yields `node`, `depth`, and
-(with `FETCH`) `source`; `MATCH` yields its `RETURN` columns.
+scalar subqueries. The subquery produces a normal row stream — `TRAVERSE` yields
+`node`, `depth`, and (with `FETCH`) `source`; `MATCH` yields its `RETURN` columns.
+
+> **Vector search is not a subquery.** `NEAREST` is a `WHERE` predicate on a single
+> table (`SELECT ... FROM t WHERE NEAREST(col, k) TO ...`), not a statement, so it
+> cannot appear as a derived table, in `IN (...)`, or in `EXISTS (...)`. See the
+> [Vector Search Guide](./vector-search.md) for the predicate form.
 
 ```sql
--- Derived tables: treat a vector or graph result like a table.
-SELECT n.id, n._distance
-FROM (NEAREST 10 FROM articles.body_vec TO 'machine learning') AS n
-WHERE n._distance < 0.4;
-
+-- Derived tables: treat a graph result like a table.
 SELECT * FROM (TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 2) AS t;
 
--- IN / EXISTS: filter relational rows by a graph or vector result.
-SELECT body FROM docs
-WHERE id IN (NEAREST 5 FROM docs.body_vec TO [0.1, 0.2, 0.3, 0.4]);
-
+-- IN / EXISTS: filter relational rows by a graph result.
 SELECT name FROM users
 WHERE EXISTS (TRAVERSE follows FROM users(1) DIRECTION OUT MAX_DEPTH 2);
 
 SELECT body FROM docs
 WHERE id IN (MATCH (a:docs)-[r:refs]->(b:docs) RETURN b.id);
+
+-- Vector search uses the NEAREST predicate instead of a subquery:
+SELECT *, _distance FROM docs
+WHERE NEAREST(body_vec, 5) TO [0.1, 0.2, 0.3, 0.4]
+ORDER BY _distance;
 ```
 
 ### Correlated subqueries
 
-A nested `TRAVERSE` or `NEAREST` may reference a column from the enclosing query
-(a *correlated* subquery). The subquery is re-evaluated per outer row, with the outer
-value substituted into the start key (`TRAVERSE`) or target vector (`NEAREST`):
+A nested `TRAVERSE` may reference a column from the enclosing query (a *correlated*
+subquery). The subquery is re-evaluated per outer row, with the outer value substituted
+into the start key:
 
 ```sql
--- For each user, recommend articles similar to that user's own bio vector.
-SELECT u.name, a.title
-FROM users u
-JOIN articles a
-  ON a.id IN (NEAREST 5 FROM articles.body_vec TO u.bio_vec);
-
 -- Keep only users who follow at least one other user.
 SELECT u.name FROM users u
 WHERE EXISTS (TRAVERSE follows FROM users(u.id) DIRECTION OUT MAX_DEPTH 1);
@@ -197,11 +193,10 @@ WHERE EXISTS (
 ```
 
 **Notes / limitations.** A scalar subquery must return exactly one column, so a
-multi-column `NEAREST`/`TRAVERSE` is rejected there (wrap it in a single-column
-`SELECT`). Correlation is supported for `TRAVERSE` (start key), `NEAREST` (target
-vector), and `MATCH` (its `WHERE` clause); outer columns referenced in inline node /
-edge pattern filters of a `MATCH` are not yet supported — put the correlation in the
-`WHERE` clause.
+multi-column `TRAVERSE` is rejected there (wrap it in a single-column `SELECT`).
+Correlation is supported for `TRAVERSE` (start key) and `MATCH` (its `WHERE` clause);
+outer columns referenced in inline node / edge pattern filters of a `MATCH` are not yet
+supported — put the correlation in the `WHERE` clause.
 
 ## Aggregate Functions
 

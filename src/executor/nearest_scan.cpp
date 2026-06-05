@@ -18,8 +18,8 @@ NearestScanOperator::NearestScanOperator(TableHeap& heap,
                                          HnswIndex* hnsw_index,
                                          std::vector<RID>* hnsw_rid_map)
     : heap_(heap), storage_schema_(storage_schema), config_(std::move(config)),
-      schema_(std::move(schema)), where_expr_(where_expr), bound_(bound),
-      hnsw_index_(hnsw_index), hnsw_rid_map_(hnsw_rid_map) {}
+      schema_(std::move(schema)), where_expr_(where_expr), bound_(bound), hnsw_index_(hnsw_index),
+      hnsw_rid_map_(hnsw_rid_map) {}
 
 std::string NearestScanOperator::plan_node_name() const {
     return "Nearest Scan";
@@ -30,6 +30,7 @@ std::string NearestScanOperator::plan_node_detail() const {
 
 Result<void> NearestScanOperator::do_open() {
     results_.clear();
+    seen_rids_.clear();
     cursor_ = 0;
 
     // Build the WHERE filter schema once (if needed).
@@ -41,18 +42,18 @@ Result<void> NearestScanOperator::do_open() {
     // distances only for those rows (brute-force on a small set).
     if (!config_.prefiltered_rids.empty()) {
         SIXSEVEN_LOG_DEBUG("NEAREST: using prefiltered search ({} candidate RIDs)",
-                            config_.prefiltered_rids.size());
+                           config_.prefiltered_rids.size());
         return execute_prefiltered_search();
     }
 
     if (hnsw_index_ != nullptr && hnsw_index_->node_count() > 0) {
         SIXSEVEN_LOG_DEBUG("NEAREST: using HNSW index (node_count={}, rid_map={})",
-                            hnsw_index_->node_count(),
-                            hnsw_rid_map_ ? hnsw_rid_map_->size() : 0);
+                           hnsw_index_->node_count(),
+                           hnsw_rid_map_ ? hnsw_rid_map_->size() : 0);
         return execute_hnsw_search();
     }
     SIXSEVEN_LOG_DEBUG("NEAREST: using brute-force scan (hnsw={})",
-                        hnsw_index_ != nullptr ? "empty" : "null");
+                       hnsw_index_ != nullptr ? "empty" : "null");
     return execute_brute_force();
 }
 
@@ -171,7 +172,9 @@ Result<void> NearestScanOperator::execute_prefiltered_search() {
         if (!data) {
             // Deleted or invalid row — skip gracefully.
             SIXSEVEN_LOG_DEBUG("NEAREST prefiltered: get_tuple failed for rid=({},{}): {}",
-                               rid.page_id, rid.slot_id, data.error().message);
+                               rid.page_id,
+                               rid.slot_id,
+                               data.error().message);
             continue;
         }
 
@@ -195,10 +198,9 @@ Result<void> NearestScanOperator::execute_prefiltered_search() {
     }
 
     // Sort by distance ASC.
-    std::sort(candidates.begin(), candidates.end(),
-              [](const Candidate& a, const Candidate& b) {
-                  return a.distance < b.distance;
-              });
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+        return a.distance < b.distance;
+    });
 
     // Take top-k and apply WHERE filter.
     size_t count = 0;
@@ -213,8 +215,8 @@ Result<void> NearestScanOperator::execute_prefiltered_search() {
         count += *emitted;
     }
 
-    SIXSEVEN_LOG_DEBUG("NEAREST prefiltered: {} candidates, {} results emitted",
-                       candidates.size(), count);
+    SIXSEVEN_LOG_DEBUG(
+        "NEAREST prefiltered: {} candidates, {} results emitted", candidates.size(), count);
     return ok();
 }
 
@@ -249,9 +251,8 @@ Result<void> NearestScanOperator::execute_hnsw_search() {
     while (true) {
         Result<std::vector<HnswSearchResult>> search_results;
         if (predicate) {
-            search_results =
-                hnsw_index_->search(std::span<const float>(config_.query_vector), search_k,
-                                    predicate);
+            search_results = hnsw_index_->search(
+                std::span<const float>(config_.query_vector), search_k, predicate);
         } else {
             search_results =
                 hnsw_index_->search(std::span<const float>(config_.query_vector), search_k);
@@ -261,8 +262,8 @@ Result<void> NearestScanOperator::execute_hnsw_search() {
             return make_error(search_results.error().code, search_results.error().message);
         }
 
-        SIXSEVEN_LOG_DEBUG("NEAREST: HNSW returned {} candidates (search_k={})",
-                           search_results->size(), search_k);
+        SIXSEVEN_LOG_DEBUG(
+            "NEAREST: HNSW returned {} candidates (search_k={})", search_results->size(), search_k);
 
         std::vector<MatchedRow> matched;
 
@@ -272,14 +273,17 @@ Result<void> NearestScanOperator::execute_hnsw_search() {
             for (const auto& sr : *search_results) {
                 if (sr.node_id >= hnsw_rid_map_->size()) {
                     SIXSEVEN_LOG_DEBUG("NEAREST: node_id {} out of range (map_size={})",
-                                       sr.node_id, hnsw_rid_map_->size());
+                                       sr.node_id,
+                                       hnsw_rid_map_->size());
                     continue; // Out of range — skip.
                 }
                 auto rid = (*hnsw_rid_map_)[sr.node_id];
                 auto data = heap_.get_tuple(rid);
                 if (!data) {
                     SIXSEVEN_LOG_DEBUG("NEAREST: get_tuple failed for node_id={} rid=({},{}): {}",
-                                       sr.node_id, rid.page_id, rid.slot_id,
+                                       sr.node_id,
+                                       rid.page_id,
+                                       rid.slot_id,
                                        data.error().message);
                     continue; // Deleted row — skip.
                 }
@@ -333,10 +337,9 @@ Result<void> NearestScanOperator::execute_hnsw_search() {
         }
 
         // Sort by distance ASC.
-        std::sort(matched.begin(), matched.end(),
-                  [](const MatchedRow& a, const MatchedRow& b) {
-                      return a.distance < b.distance;
-                  });
+        std::sort(matched.begin(), matched.end(), [](const MatchedRow& a, const MatchedRow& b) {
+            return a.distance < b.distance;
+        });
 
         // Apply WHERE filter and take top-k.
         size_t count = 0;
@@ -352,20 +355,25 @@ Result<void> NearestScanOperator::execute_hnsw_search() {
             count += *emitted;
         }
 
-        // If we found enough results, or there's no WHERE filter, or we've
-        // already searched the entire index, we're done.
-        if (count >= config_.k || where_expr_ == nullptr || search_k >= total_nodes) {
+        // If we found enough results, or we've already searched the entire
+        // index, we're done. We widen on any under-fill — a WHERE filter or
+        // de-duplicated rows can both leave us short of k.
+        if (count >= config_.k || search_k >= total_nodes) {
             break;
         }
 
         // Widen the search: double search_k, capped at total node count.
         results_.clear();
+        seen_rids_.clear();
         uint32_t next_k = std::min(search_k * 2, total_nodes);
         if (next_k == search_k) {
             break; // No point searching the same amount again.
         }
         SIXSEVEN_LOG_DEBUG("NEAREST: widening search from {} to {} (found {}/{})",
-                           search_k, next_k, count, config_.k);
+                           search_k,
+                           next_k,
+                           count,
+                           config_.k);
         search_k = next_k;
     }
 
@@ -387,6 +395,13 @@ OutputSchema NearestScanOperator::build_where_filter_schema() const {
 }
 
 Result<size_t> NearestScanOperator::filter_and_emit(Tuple& candidate_tuple, float distance) {
+    // Skip rows already emitted in this search. A single physical row can be
+    // referenced by more than one HNSW node (e.g. it was embedded twice during
+    // bootstrap), and must still surface as exactly one result.
+    if (candidate_tuple.rid.has_value() && seen_rids_.count(*candidate_tuple.rid) > 0) {
+        return ok(size_t{0});
+    }
+
     // Apply WHERE post-filter if present.
     if (where_expr_ != nullptr) {
         auto pass = evaluate_predicate(*where_expr_, candidate_tuple, where_filter_schema_, bound_);
@@ -403,6 +418,9 @@ Result<size_t> NearestScanOperator::filter_and_emit(Tuple& candidate_tuple, floa
     result.values = std::move(candidate_tuple.values);
     result.values.push_back(Value(static_cast<double>(distance)));
     result.rid = candidate_tuple.rid;
+    if (candidate_tuple.rid.has_value()) {
+        seen_rids_.insert(*candidate_tuple.rid);
+    }
     results_.push_back(std::move(result));
     return ok(size_t{1});
 }

@@ -83,6 +83,11 @@ protected:
         return std::move(*result);
     }
 
+    void exec_error(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_FALSE(result.has_value()) << "SQL should have failed: " << sql;
+    }
+
     void register_embedding(table_id_t table_id, int32_t col_id, int32_t dim,
                             const std::string& source, const std::string& provider) {
         EmbeddingColumnDef emb_def;
@@ -123,45 +128,42 @@ protected:
 // vector similarity search, each nested as a subquery.
 TEST_F(QASubqueryBlendTest, RelationalGraphVectorBlendInOneQuery) {
     // Articles authored by bob (user 2) AND close to [1,0,0,0]:
-    //   authored OUT from bob -> {10, 11}; NEAREST < 0.5 -> {10, 12}; ∩ -> {10}.
+    //   authored OUT from bob -> {10, 11}; the 2 nearest to [1,0,0,0] are the
+    //   distance-0 articles {10, 12} (11 is far); ∩ -> {10}.
+    // Vector search is now a WHERE predicate combined with the graph IN-subquery
+    // over the same articles scan; both filter the relational rows in one query.
     auto qr = exec_ok(
         "SELECT articles.title FROM articles "
-        "WHERE articles.id IN (TRAVERSE authored FROM users(2) DIRECTION OUT) "
-        "AND articles.id IN (SELECT n.id FROM "
-        "  (NEAREST 5 FROM articles.body_vec TO [1.0, 0.0, 0.0, 0.0]) AS n "
-        "  WHERE n._distance < 0.5)");
+        "WHERE NEAREST(body_vec, 2) TO [1.0, 0.0, 0.0, 0.0] "
+        "AND articles.id IN (TRAVERSE authored FROM users(2) DIRECTION OUT)");
 
     auto got = titles(qr);
     EXPECT_EQ(got.size(), 1u);
     EXPECT_TRUE(got.count("ml"));
 }
 
-// Correlated graph + vector: per user, does an article near THAT user's interest
-// vector exist that the user authored? (Uses a correlated NEAREST start vector.)
-TEST_F(QASubqueryBlendTest, CorrelatedVectorPerUser) {
-    // For each user, is their single nearest article id in {10,11,12} equal to
-    // a specific article? alice([1,0,0,0]) -> 10 or 12; bob([0,1,0,0]) -> 11.
-    auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE 11 IN (NEAREST 1 FROM articles.body_vec TO users.interest_vec)");
-
-    auto got = titles(qr);
-    EXPECT_EQ(got.size(), 1u);
-    EXPECT_TRUE(got.count("bob")); // bob's interest is nearest to article 11
+// Correlated graph + vector: a correlated NEAREST subquery whose searched table
+// (articles) differs from the outer FROM table (users) and whose query vector is
+// the outer row's interest_vec. This is a pure vector-subquery composition with
+// no single-table WHERE-predicate equivalent; since vector search is no longer a
+// subquery, it no longer parses.
+TEST_F(QASubqueryBlendTest, CorrelatedVectorPerUserRejected) {
+    exec_error("SELECT users.name FROM users "
+               "WHERE 11 IN (NEAREST 1 FROM articles.body_vec TO users.interest_vec)");
 }
 
 // Graph pattern (MATCH) nested as an IN subquery, intersected with a vector match.
 TEST_F(QASubqueryBlendTest, MatchAndVectorBlend) {
     // Articles authored by a user that alice follows, near [0,1,0,0]:
     //   MATCH alice-follows->u-authored->art  => bob's articles {10,11};
-    //   NEAREST to [0,1,0,0] < 0.5 => {11};  ∩ => {11} = 'db'.
+    //   the single nearest to [0,1,0,0] => {11};  ∩ => {11} = 'db'.
+    // Vector search is now a WHERE predicate combined with the MATCH IN-subquery.
     auto qr = exec_ok(
         "SELECT articles.title FROM articles "
-        "WHERE articles.id IN "
+        "WHERE NEAREST(body_vec, 1) TO [0.0, 1.0, 0.0, 0.0] "
+        "AND articles.id IN "
         "  (MATCH (a:users)-[f:follows]->(u:users)-[w:authored]->(art:articles) "
-        "   WHERE a.id = 1 RETURN art.id) "
-        "AND articles.id IN (SELECT n.id FROM "
-        "  (NEAREST 5 FROM articles.body_vec TO [0.0, 1.0, 0.0, 0.0]) AS n "
-        "  WHERE n._distance < 0.5)");
+        "   WHERE a.id = 1 RETURN art.id)");
 
     auto got = titles(qr);
     EXPECT_EQ(got.size(), 1u);

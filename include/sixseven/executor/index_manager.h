@@ -2,6 +2,7 @@
 
 #include "sixseven/catalog/schema.h"
 #include "sixseven/common/result.h"
+#include "sixseven/index/bm25_index.h"
 #include "sixseven/index/btree_index.h"
 #include "sixseven/index/hash_index.h"
 #include "sixseven/index/rid.h"
@@ -79,6 +80,7 @@ public:
     [[nodiscard]] std::unordered_map<index_id_t, BTreeIndex*>* btree_map();
     [[nodiscard]] std::unordered_map<index_id_t, HashIndex*>* hash_map();
     [[nodiscard]] std::unordered_map<index_id_t, HnswIndex*>* hnsw_map();
+    [[nodiscard]] std::unordered_map<index_id_t, Bm25Index*>* bm25_map();
 
     /// HNSW node_id → RID maps for direct tuple lookup (avoids full table scan).
     [[nodiscard]] std::unordered_map<index_id_t, std::vector<RID>>* hnsw_rid_maps();
@@ -107,17 +109,27 @@ private:
     /// Rebuild an HNSW index from table data (slow path).
     [[nodiscard]] Result<void> rebuild_hnsw_from_table(const IndexDef& def, database_id_t db_id);
 
+    /// Load a single BM25 index from its persisted file.
+    [[nodiscard]] Result<void> load_bm25_from_disk(const IndexDef& def, database_id_t db_id);
+
+    /// Rebuild a BM25 index from table data (slow path / first build).
+    [[nodiscard]] Result<void> rebuild_bm25_from_table(const IndexDef& def, database_id_t db_id);
+
+    /// Persist a single BM25 index to disk.
+    [[nodiscard]] Result<void>
+    persist_bm25(const IndexDef& def, database_id_t db_id, const Bm25Index& index);
+
     /// Persist a single btree index to disk.
-    [[nodiscard]] Result<void> persist_btree(const IndexDef& def, database_id_t db_id,
-                                             const BTreeIndex& index);
+    [[nodiscard]] Result<void>
+    persist_btree(const IndexDef& def, database_id_t db_id, const BTreeIndex& index);
 
     /// Persist a single hash index to disk.
-    [[nodiscard]] Result<void> persist_hash(const IndexDef& def, database_id_t db_id,
-                                            const HashIndex& index);
+    [[nodiscard]] Result<void>
+    persist_hash(const IndexDef& def, database_id_t db_id, const HashIndex& index);
 
     /// Flush an HNSW index's metadata and BPM to disk.
-    [[nodiscard]] Result<void> flush_hnsw(const IndexDef& def, database_id_t db_id,
-                                          HnswIndex& index);
+    [[nodiscard]] Result<void>
+    flush_hnsw(const IndexDef& def, database_id_t db_id, HnswIndex& index);
 
     /// Find the database_id that owns a given table_id.
     [[nodiscard]] database_id_t find_database_for_table(table_id_t table_id) const;
@@ -130,6 +142,7 @@ private:
     std::vector<std::unique_ptr<BTreeIndex>> owned_btrees_;
     std::vector<std::unique_ptr<HashIndex>> owned_hashes_;
     std::vector<std::unique_ptr<HnswIndex>> owned_hnsw_;
+    std::vector<std::unique_ptr<Bm25Index>> owned_bm25_;
 
     /// Non-owning pointer maps keyed by index_id (for Planner).
     std::unordered_map<index_id_t, BTreeIndex*> btree_indexes_;
@@ -137,6 +150,9 @@ private:
 
     /// HNSW pointer map keyed by index_id (globally unique, no naming collisions).
     std::unordered_map<index_id_t, HnswIndex*> hnsw_indexes_;
+
+    /// BM25 pointer map keyed by index_id.
+    std::unordered_map<index_id_t, Bm25Index*> bm25_indexes_;
 
     /// HNSW node_id → heap RID mapping. node_id N maps to hnsw_rid_maps_[id][N].
     /// Built during rebuild/load, extended during INSERT via append_hnsw_rid().

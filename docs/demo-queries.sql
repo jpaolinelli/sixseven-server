@@ -139,26 +139,95 @@ LIMIT 10;
 -- ============================================================================
 
 -- Find books about "time travel adventure" (natural language query)
-NEAREST 5 FROM books.description_vec TO 'time travel adventure';
+SELECT * FROM books WHERE NEAREST(description_vec, 5) TO 'time travel adventure';
 
 -- Find books about "political drama in a kingdom"
-NEAREST 5 FROM books.description_vec TO 'political drama in a kingdom';
+SELECT * FROM books WHERE NEAREST(description_vec, 5) TO 'political drama in a kingdom';
 
 -- Find books about "AI and technology in the future"
-NEAREST 5 FROM books.description_vec TO 'artificial intelligence and technology';
+SELECT * FROM books WHERE NEAREST(description_vec, 5) TO 'artificial intelligence and technology';
 
 -- Find reviews that talk about "beautiful writing style"
-NEAREST 5 FROM reviews.review_vec TO 'beautiful prose and writing style';
+SELECT * FROM reviews WHERE NEAREST(review_vec, 5) TO 'beautiful prose and writing style';
 
 -- Find reviews mentioning "disappointing ending"
-NEAREST 5 FROM reviews.review_vec TO 'the ending was disappointing';
+SELECT * FROM reviews WHERE NEAREST(review_vec, 5) TO 'the ending was disappointing';
 
 -- Cosine similarity search (explicit distance metric)
-NEAREST 10 FROM books.description_vec TO 'survival story on a remote island' USING COSINE;
+SELECT * FROM books WHERE NEAREST(description_vec, 10) TO 'survival story on a remote island' USING COSINE;
 
 
 -- ============================================================================
--- 6. EDGE OPERATIONS — Create and manage relationships
+-- 6. FULL-TEXT SEARCH (BM25) — Keyword relevance ranking
+-- ============================================================================
+-- BM25 is classic lexical search: it ranks rows by how well their text matches
+-- your *keywords* — using term frequency, term rarity, and document length. It's
+-- the algorithm behind Lucene / Elasticsearch. Where NEAREST finds text that
+-- *means* the same thing, MATCH finds text that actually *contains* the words.
+
+-- The demo database ships with BM25 indexes on books.description and
+-- reviews.review_text already built, so MATCH works immediately. These
+-- IF NOT EXISTS statements are no-ops here, and show how you'd add one yourself.
+CREATE INDEX IF NOT EXISTS idx_books_desc ON books(description) USING bm25;
+CREATE INDEX IF NOT EXISTS idx_reviews_text ON reviews(review_text) USING bm25;
+
+-- Basic keyword search — books whose descriptions mention these words.
+SELECT id, title, genre
+FROM books
+WHERE MATCH(description) TO 'survival island';
+
+-- Relevance ranking — _score is the BM25 score, most relevant first.
+SELECT title, genre, _score
+FROM books
+WHERE MATCH(description) TO 'political intrigue power'
+ORDER BY _score DESC
+LIMIT 10;
+
+-- Full-text + normal SQL filters together — keyword match AND a genre filter.
+SELECT title, rating, _score
+FROM books
+WHERE MATCH(description) TO 'detective' AND genre = 'Mystery'
+ORDER BY _score DESC
+LIMIT 10;
+
+-- Stemming is built in — the plural 'kingdoms' matches descriptions with "kingdom".
+SELECT title, _score
+FROM books
+WHERE MATCH(description) TO 'kingdoms'
+ORDER BY _score DESC
+LIMIT 5;
+
+-- Search the review text — the most relevant "disappointing ending" reviews.
+SELECT id, stars, _score
+FROM reviews
+WHERE MATCH(review_text) TO 'disappointing ending'
+ORDER BY _score DESC
+LIMIT 10;
+
+-- Lexical vs semantic — same intent, two engines, side by side.
+-- BM25 requires the keywords to actually appear:
+SELECT title, _score
+FROM books
+WHERE MATCH(description) TO 'survival island'
+ORDER BY _score DESC
+LIMIT 5;
+-- Vector search finds the meaning, even without those exact words:
+SELECT * FROM books WHERE NEAREST(description_vec, 5) TO 'survival story on a remote island';
+
+-- Maintenance is automatic — inserts/updates/deletes keep the index in sync.
+INSERT INTO books (id, title, genre, published_year, pages, rating, description)
+VALUES (99001, 'Test Title', 'Thriller', 2024, 320, 4.2,
+        'A gripping submarine thriller about survival beneath the ice.');
+-- The new row is immediately searchable:
+SELECT id, title, _score
+FROM books
+WHERE MATCH(description) TO 'submarine survival'
+ORDER BY _score DESC
+LIMIT 5;
+
+
+-- ============================================================================
+-- 7. EDGE OPERATIONS — Create and manage relationships
 -- ============================================================================
 
 -- Add a new follow relationship
@@ -174,7 +243,7 @@ UNLINK readers(1) FROM readers(100) VIA follows;
 
 
 -- ============================================================================
--- 7. EXPLAIN — See the query execution plan
+-- 8. EXPLAIN — See the query execution plan
 -- ============================================================================
 
 -- Understand how a filter query is executed
@@ -193,11 +262,18 @@ ORDER BY r.stars DESC
 LIMIT 5;
 
 -- Explain a vector search
-EXPLAIN ANALYZE NEAREST 5 FROM books.description_vec TO 'epic space adventure';
+EXPLAIN ANALYZE
+SELECT * FROM books WHERE NEAREST(description_vec, 5) TO 'epic space adventure';
+
+-- Explain a BM25 full-text search (shows the BM25 Scan operator)
+EXPLAIN ANALYZE
+SELECT title, _score FROM books
+WHERE MATCH(description) TO 'political intrigue'
+ORDER BY _score DESC LIMIT 5;
 
 
 -- ============================================================================
--- 8. DDL — Schema management
+-- 9. DDL — Schema management
 -- ============================================================================
 
 -- See all tables
@@ -210,7 +286,7 @@ SHOW COLUMNS FROM reviews;
 -- See edge types
 SHOW EDGE TYPES;
 
--- See indexes
+-- See indexes (B+ tree, HNSW vector, and BM25 full-text all listed here)
 SHOW INDEXES;
 
 -- See embedding configuration
@@ -218,12 +294,12 @@ SHOW EMBEDDINGS;
 
 
 -- ============================================================================
--- 9. COMBINED QUERIES — The real power: relational + graph + vector together
+-- 10. COMBINED QUERIES — Relational + graph + vector + full-text together
 -- ============================================================================
 
 -- Find semantically similar books, then check their ratings
 -- "Which highly-rated books are similar to 'survival in a harsh environment'?"
-NEAREST 10 FROM books.description_vec TO 'survival in a harsh environment';
+SELECT * FROM books WHERE NEAREST(description_vec, 10) TO 'survival in a harsh environment';
 -- Then manually cross-reference with ratings:
 SELECT title, genre, rating, description
 FROM books
@@ -246,7 +322,7 @@ LIMIT 5;
 
 
 -- ============================================================================
--- 10. DATA EXPLORATION — Quick stats about the demo dataset
+-- 11. DATA EXPLORATION — Quick stats about the demo dataset
 -- ============================================================================
 
 -- Dataset overview

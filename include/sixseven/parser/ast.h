@@ -402,6 +402,34 @@ struct LikeExpr : Expr {
     void accept(AstVisitor& visitor) const override;
 };
 
+/// BM25 full-text search predicate: MATCH(column) TO query.
+///
+/// Evaluates to a relevance-ranked match; planned into a BM25 index scan that
+/// injects a synthetic `_score` column. `column` is a ColumnRefExpr naming a
+/// text column that has a BM25 index; `query` is the search string.
+struct MatchExpr : Expr {
+    ExprPtr column;
+    ExprPtr query;
+    void accept(AstVisitor& visitor) const override;
+};
+
+/// Vector similarity search predicate: NEAREST(column, k) TO target
+///   [USING COSINE|L2|DOT] [WITHIN TRAVERSE ...].
+///
+/// Planned into a NearestScanOperator that returns the k nearest rows by
+/// distance and injects a synthetic `_distance` column. `column` is a
+/// ColumnRefExpr naming an EMBEDDING column; `k` is the neighbor count;
+/// `target` is a vector literal or text to auto-embed; `within_traverse` is an
+/// optional graph-scoping TraverseStmt.
+struct NearestExpr : Expr {
+    ExprPtr column;
+    ExprPtr k;
+    ExprPtr target;
+    NearestMetric metric = NearestMetric::COSINE;
+    StmtPtr within_traverse;
+    void accept(AstVisitor& visitor) const override;
+};
+
 /// EXISTS (SELECT ...).
 struct ExistsExpr : Expr {
     StmtPtr subquery;
@@ -689,19 +717,6 @@ struct TraverseStmt : Stmt {
     void accept(AstVisitor& visitor) const override;
 };
 
-/// NEAREST k FROM table.col TO target [WITHIN TRAVERSE ...]
-///   [WHERE expr] [USING metric].
-struct NearestStmt : Stmt {
-    ExprPtr k;
-    std::string table_name;
-    std::string column_name;
-    ExprPtr target;
-    ExprPtr where_expr;
-    NearestMetric metric = NearestMetric::COSINE;
-    StmtPtr within_traverse;
-    void accept(AstVisitor& visitor) const override;
-};
-
 /// MATCH pattern WHERE expr RETURN items.
 ///
 /// Supports path selectors for shortest-path queries:
@@ -870,6 +885,8 @@ public:
     virtual void visit(const BetweenExpr& node) = 0;
     virtual void visit(const IsNullExpr& node) = 0;
     virtual void visit(const LikeExpr& node) = 0;
+    virtual void visit(const MatchExpr& node) = 0;
+    virtual void visit(const NearestExpr& node) = 0;
     virtual void visit(const ExistsExpr& node) = 0;
     virtual void visit(const SubqueryExpr& node) = 0;
     virtual void visit(const ArrayExpr& node) = 0;
@@ -903,7 +920,6 @@ public:
 
     virtual void visit(const SelectStmt& node) = 0;
     virtual void visit(const TraverseStmt& node) = 0;
-    virtual void visit(const NearestStmt& node) = 0;
     virtual void visit(const MatchStmt& node) = 0;
     virtual void visit(const ShortestPathStmt& node) = 0;
 
@@ -968,6 +984,12 @@ inline void IsNullExpr::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void LikeExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void MatchExpr::accept(AstVisitor& v) const {
+    v.visit(*this);
+}
+inline void NearestExpr::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void ExistsExpr::accept(AstVisitor& v) const {
@@ -1043,9 +1065,6 @@ inline void SelectStmt::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void TraverseStmt::accept(AstVisitor& v) const {
-    v.visit(*this);
-}
-inline void NearestStmt::accept(AstVisitor& v) const {
     v.visit(*this);
 }
 inline void MatchStmt::accept(AstVisitor& v) const {

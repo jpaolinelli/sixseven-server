@@ -369,8 +369,6 @@ Result<StmtPtr> Parser::parse_statement() {
         return parse_unlink();
     case TokenType::TRAVERSE:
         return parse_traverse();
-    case TokenType::NEAREST:
-        return parse_nearest();
     case TokenType::MATCH:
         return parse_match();
     case TokenType::SHORTEST:
@@ -1948,29 +1946,26 @@ Result<SelectItem> Parser::parse_select_item() {
 
 bool Parser::starts_query_stmt() const {
     switch (peek().type) {
-        case TokenType::SELECT:
-        case TokenType::TRAVERSE:
-        case TokenType::NEAREST:
-        case TokenType::MATCH:
-            return true;
-        default:
-            return false;
+    case TokenType::SELECT:
+    case TokenType::TRAVERSE:
+    case TokenType::MATCH:
+        return true;
+    default:
+        return false;
     }
 }
 
 Result<StmtPtr> Parser::parse_query_stmt() {
     switch (peek().type) {
-        case TokenType::SELECT:
-            return parse_select();
-        case TokenType::TRAVERSE:
-            return parse_traverse();
-        case TokenType::NEAREST:
-            return parse_nearest();
-        case TokenType::MATCH:
-            return parse_match();
-        default:
-            return make_error(StatusCode::PARSE_ERROR,
-                              "expected SELECT, TRAVERSE, NEAREST, or MATCH in subquery");
+    case TokenType::SELECT:
+        return parse_select();
+    case TokenType::TRAVERSE:
+        return parse_traverse();
+    case TokenType::MATCH:
+        return parse_match();
+    default:
+        return make_error(StatusCode::PARSE_ERROR,
+                          "expected SELECT, TRAVERSE, or MATCH in subquery");
     }
 }
 
@@ -1979,7 +1974,7 @@ Result<StmtPtr> Parser::parse_query_stmt() {
 Result<TableRef> Parser::parse_table_ref() {
     TableRef ref;
 
-    // Subquery: (SELECT ... | TRAVERSE ... | NEAREST ... | MATCH ...) [AS] alias
+    // Subquery: (SELECT ... | TRAVERSE ... | MATCH ...) [AS] alias
     if (match(TokenType::LPAREN)) {
         auto subquery = parse_query_stmt();
         if (!subquery)
@@ -2275,136 +2270,91 @@ Result<StmtPtr> Parser::parse_traverse() {
     return ok(StmtPtr(std::move(stmt)));
 }
 
-// -- Graph: NEAREST -----------------------------------------------------------
+// -- Vector: NEAREST predicate helpers ----------------------------------------
 
-Result<StmtPtr> Parser::parse_nearest() {
-    advance(); // consume NEAREST
-    auto stmt = std::make_unique<NearestStmt>();
-
-    // k (number of neighbors).
-    auto k = parse_expression();
-    if (!k)
-        return tl::unexpected(k.error());
-    stmt->k = std::move(*k);
-
-    // FROM table.column.
-    auto from = expect(TokenType::FROM, "expected FROM");
-    if (!from)
-        return tl::unexpected(from.error());
-
-    auto tbl = parse_name("table name");
-    if (!tbl)
-        return tl::unexpected(tbl.error());
-    stmt->table_name = std::move(*tbl);
-
-    auto dot = expect(TokenType::DOT, "expected '.' after table name");
-    if (!dot)
-        return tl::unexpected(dot.error());
-
-    auto col = parse_name("column name");
-    if (!col)
-        return tl::unexpected(col.error());
-    stmt->column_name = std::move(*col);
-
-    // TO target.
-    if (!match_ident_ci(peek(), "TO")) {
-        return error("expected TO after column name");
+// Parse a `WITHIN TRAVERSE edge FROM table(key) [DIRECTION ...] [MAX_DEPTH n]`
+// graph-scoping clause used by the NEAREST(...) predicate. Precondition: the
+// next token is the contextual keyword `WITHIN`. Only the core traverse clause
+// is parsed (no WHERE/FETCH), since those belong to the outer SELECT.
+Result<StmtPtr> Parser::parse_within_traverse() {
+    advance(); // consume WITHIN
+    if (!match(TokenType::TRAVERSE)) {
+        return error("expected TRAVERSE after WITHIN");
     }
-    advance();
+    auto trav = std::make_unique<TraverseStmt>();
 
-    auto target = parse_expression();
-    if (!target)
-        return tl::unexpected(target.error());
-    stmt->target = std::move(*target);
+    auto edge = parse_name("edge type");
+    if (!edge)
+        return tl::unexpected(edge.error());
+    trav->edge_type = std::move(*edge);
 
-    // Optional WITHIN TRAVERSE scope.
-    // Only parses the core traverse clause (edge, FROM, DIRECTION, MAX_DEPTH)
-    // without WHERE/FETCH, since those belong to the outer NEAREST.
-    if (match_ident_ci(peek(), "WITHIN")) {
-        advance(); // consume WITHIN
-        if (!match(TokenType::TRAVERSE)) {
-            return error("expected TRAVERSE after WITHIN");
-        }
-        auto trav = std::make_unique<TraverseStmt>();
+    auto from_tok = expect(TokenType::FROM, "expected FROM after edge type");
+    if (!from_tok)
+        return tl::unexpected(from_tok.error());
 
-        auto edge = parse_name("edge type");
-        if (!edge)
-            return tl::unexpected(edge.error());
-        trav->edge_type = std::move(*edge);
+    auto tbl_name = parse_name("table name");
+    if (!tbl_name)
+        return tl::unexpected(tbl_name.error());
+    trav->from_table = std::move(*tbl_name);
 
-        auto from_tok = expect(TokenType::FROM, "expected FROM after edge type");
-        if (!from_tok)
-            return tl::unexpected(from_tok.error());
+    auto lp = expect(TokenType::LPAREN, "expected '(' after table name");
+    if (!lp)
+        return tl::unexpected(lp.error());
+    auto key_expr = parse_expression();
+    if (!key_expr)
+        return tl::unexpected(key_expr.error());
+    trav->from_key = std::move(*key_expr);
+    auto rp = expect(TokenType::RPAREN, "expected ')'");
+    if (!rp)
+        return tl::unexpected(rp.error());
 
-        auto tbl_name = parse_name("table name");
-        if (!tbl_name)
-            return tl::unexpected(tbl_name.error());
-        trav->from_table = std::move(*tbl_name);
-
-        auto lp = expect(TokenType::LPAREN, "expected '(' after table name");
-        if (!lp)
-            return tl::unexpected(lp.error());
-        auto key_expr = parse_expression();
-        if (!key_expr)
-            return tl::unexpected(key_expr.error());
-        trav->from_key = std::move(*key_expr);
-        auto rp = expect(TokenType::RPAREN, "expected ')'");
-        if (!rp)
-            return tl::unexpected(rp.error());
-
-        if (match(TokenType::DIRECTION)) {
-            if (match(TokenType::IN)) {
-                trav->direction = TraverseDirection::IN;
-            } else if (match_ident_ci(peek(), "OUT")) {
-                advance();
-                trav->direction = TraverseDirection::OUT;
-            } else if (match_ident_ci(peek(), "BOTH")) {
-                advance();
-                trav->direction = TraverseDirection::BOTH;
-            } else {
-                return error("expected IN, OUT, or BOTH after DIRECTION");
-            }
-        }
-
-        if (match(TokenType::MAX_DEPTH)) {
-            auto depth = expect(TokenType::INTEGER_LITERAL, "expected integer after MAX_DEPTH");
-            if (!depth)
-                return tl::unexpected(depth.error());
-            auto depth_val = safe_stoi(depth->lexeme);
-            if (!depth_val)
-                return tl::unexpected(depth_val.error());
-            trav->max_depth = *depth_val;
-        }
-
-        stmt->within_traverse = std::move(trav);
-    }
-
-    // Optional WHERE.
-    if (match(TokenType::WHERE)) {
-        auto expr = parse_expression();
-        if (!expr)
-            return tl::unexpected(expr.error());
-        stmt->where_expr = std::move(*expr);
-    }
-
-    // Optional USING metric.
-    if (match_ident_ci(peek(), "USING")) {
-        advance();
-        if (match_ident_ci(peek(), "COSINE")) {
+    if (match(TokenType::DIRECTION)) {
+        if (match(TokenType::IN)) {
+            trav->direction = TraverseDirection::IN;
+        } else if (match_ident_ci(peek(), "OUT")) {
             advance();
-            stmt->metric = NearestMetric::COSINE;
-        } else if (match_ident_ci(peek(), "L2")) {
+            trav->direction = TraverseDirection::OUT;
+        } else if (match_ident_ci(peek(), "BOTH")) {
             advance();
-            stmt->metric = NearestMetric::L2;
-        } else if (match_ident_ci(peek(), "DOT")) {
-            advance();
-            stmt->metric = NearestMetric::DOT;
+            trav->direction = TraverseDirection::BOTH;
         } else {
-            return error("expected COSINE, L2, or DOT after USING");
+            return error("expected IN, OUT, or BOTH after DIRECTION");
         }
     }
 
-    return ok(StmtPtr(std::move(stmt)));
+    if (match(TokenType::MAX_DEPTH)) {
+        auto depth = expect(TokenType::INTEGER_LITERAL, "expected integer after MAX_DEPTH");
+        if (!depth)
+            return tl::unexpected(depth.error());
+        auto depth_val = safe_stoi(depth->lexeme);
+        if (!depth_val)
+            return tl::unexpected(depth_val.error());
+        trav->max_depth = *depth_val;
+    }
+
+    return ok(StmtPtr(std::move(trav)));
+}
+
+// Parse an optional `USING COSINE|L2|DOT` clause for the NEAREST(...) predicate.
+// Returns COSINE (the default) when no USING clause is present.
+Result<NearestMetric> Parser::parse_nearest_metric() {
+    if (!match_ident_ci(peek(), "USING")) {
+        return ok(NearestMetric::COSINE);
+    }
+    advance(); // consume USING
+    if (match_ident_ci(peek(), "COSINE")) {
+        advance();
+        return ok(NearestMetric::COSINE);
+    }
+    if (match_ident_ci(peek(), "L2")) {
+        advance();
+        return ok(NearestMetric::L2);
+    }
+    if (match_ident_ci(peek(), "DOT")) {
+        advance();
+        return ok(NearestMetric::DOT);
+    }
+    return make_error(StatusCode::PARSE_ERROR, "expected COSINE, L2, or DOT after USING");
 }
 
 // -- Graph: MATCH -------------------------------------------------------------
@@ -3486,6 +3436,100 @@ Result<ExprPtr> Parser::parse_postfix() {
 Result<ExprPtr> Parser::parse_primary() {
     const auto& tok = peek();
 
+    // BM25 full-text predicate: MATCH(column) TO query.
+    //
+    // This is unambiguous in expression context: the graph MATCH statement is
+    // only reached via parse_query_stmt()/parse_table_ref(), and a parenthesized
+    // graph subquery is consumed by the LPAREN + starts_query_stmt() path before
+    // a bare MATCH token can reach here. The query is parsed as a primary (not a
+    // full expression) so it does not swallow a trailing AND / ORDER BY.
+    if (match(TokenType::MATCH)) {
+        uint32_t line = previous().line;
+        uint32_t col = previous().column;
+
+        auto lp = expect(TokenType::LPAREN, "expected '(' after MATCH");
+        if (!lp)
+            return tl::unexpected(lp.error());
+        auto column = parse_expression();
+        if (!column)
+            return tl::unexpected(column.error());
+        auto rp = expect(TokenType::RPAREN, "expected ')' after MATCH column");
+        if (!rp)
+            return tl::unexpected(rp.error());
+
+        if (!match_ident_ci(peek(), "TO")) {
+            return make_error(StatusCode::PARSE_ERROR, "expected TO after MATCH(column)");
+        }
+        advance();
+        auto query = parse_primary();
+        if (!query)
+            return tl::unexpected(query.error());
+
+        auto match_expr = std::make_unique<MatchExpr>();
+        match_expr->column = std::move(*column);
+        match_expr->query = std::move(*query);
+        match_expr->line = line;
+        match_expr->col = col;
+        return ok(ExprPtr(std::move(match_expr)));
+    }
+
+    // Vector similarity predicate:
+    //   NEAREST(column, k) TO target [USING COSINE|L2|DOT] [WITHIN TRAVERSE ...].
+    //
+    // Unambiguous: vector search is only a WHERE predicate now, so a bare
+    // NEAREST token in expression context is always this form. The target is a
+    // primary (literal vector / text / param) so it does not swallow a trailing
+    // AND / ORDER BY.
+    if (match(TokenType::NEAREST)) {
+        uint32_t line = previous().line;
+        uint32_t col = previous().column;
+
+        auto lp = expect(TokenType::LPAREN, "expected '(' after NEAREST");
+        if (!lp)
+            return tl::unexpected(lp.error());
+        auto column = parse_expression();
+        if (!column)
+            return tl::unexpected(column.error());
+        auto comma = expect(TokenType::COMMA, "expected ',' after NEAREST column");
+        if (!comma)
+            return tl::unexpected(comma.error());
+        auto k = parse_expression();
+        if (!k)
+            return tl::unexpected(k.error());
+        auto rp = expect(TokenType::RPAREN, "expected ')' after NEAREST(column, k)");
+        if (!rp)
+            return tl::unexpected(rp.error());
+
+        if (!match_ident_ci(peek(), "TO")) {
+            return make_error(StatusCode::PARSE_ERROR, "expected TO after NEAREST(column, k)");
+        }
+        advance();
+        auto target = parse_primary();
+        if (!target)
+            return tl::unexpected(target.error());
+
+        auto nearest_expr = std::make_unique<NearestExpr>();
+        nearest_expr->column = std::move(*column);
+        nearest_expr->k = std::move(*k);
+        nearest_expr->target = std::move(*target);
+        nearest_expr->line = line;
+        nearest_expr->col = col;
+
+        // Optional WITHIN TRAVERSE graph scope, then optional USING metric.
+        if (match_ident_ci(peek(), "WITHIN")) {
+            auto trav = parse_within_traverse();
+            if (!trav)
+                return tl::unexpected(trav.error());
+            nearest_expr->within_traverse = std::move(*trav);
+        }
+        auto metric = parse_nearest_metric();
+        if (!metric)
+            return tl::unexpected(metric.error());
+        nearest_expr->metric = *metric;
+
+        return ok(ExprPtr(std::move(nearest_expr)));
+    }
+
     // Integer literal.
     if (match(TokenType::INTEGER_LITERAL)) {
         auto lit = std::make_unique<LiteralExpr>();
@@ -3634,7 +3678,7 @@ Result<ExprPtr> Parser::parse_primary() {
 
     // Parenthesized expression or subquery.
     if (match(TokenType::LPAREN)) {
-        // Subquery: (SELECT ... | TRAVERSE ... | NEAREST ... | MATCH ...)
+        // Subquery: (SELECT ... | TRAVERSE ... | MATCH ...)
         if (starts_query_stmt()) {
             auto subquery = parse_query_stmt();
             if (!subquery)

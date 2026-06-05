@@ -4,6 +4,7 @@
 #include "sixseven/common/types.h"
 #include "sixseven/executor/iterator.h"
 #include "sixseven/executor/tuple.h"
+#include "sixseven/index/bm25_index.h"
 #include "sixseven/index/rid.h"
 #include "sixseven/parser/ast.h"
 #include "sixseven/planner/binder.h"
@@ -79,6 +80,9 @@ public:
     /// Embedding worker pool for async embedding generation. Set by the planner.
     EmbeddingWorkerPool* embedding_pool_ = nullptr;
 
+    /// BM25 indexes on this table to maintain on insert. Set by the planner.
+    std::vector<Bm25MaintenanceTarget> bm25_targets_;
+
 protected:
     Result<void> do_open() override;
     Result<std::optional<Tuple>> do_next() override;
@@ -92,6 +96,10 @@ private:
     /// Enqueue async embedding jobs for EMBEDDING columns on the table.
     /// Best-effort: logs warnings on failure but does not propagate errors.
     void enqueue_embedding_jobs(const RID& rid, const std::vector<Value>& values);
+
+    /// Synchronously index the row's text into any BM25 indexes on the table.
+    /// Best-effort: logs warnings on failure but does not propagate errors.
+    void maintain_bm25(const RID& rid, const std::vector<Value>& values);
 
     TableHeap& heap_;
     const Schema& storage_schema_;

@@ -2204,7 +2204,8 @@ Result<QueryResult> QueryEngine::execute_explain(const ExplainStmt& stmt,
                     index_manager_ ? index_manager_->hash_map() : nullptr,
                     embedding_pool_,
                     algorithm_registry_,
-                    index_manager_ ? index_manager_->hnsw_rid_maps() : nullptr);
+                    index_manager_ ? index_manager_->hnsw_rid_maps() : nullptr,
+                    index_manager_ ? index_manager_->bm25_map() : nullptr);
     std::vector<ExprPtr> owned_exprs;
     auto iter = planner.plan(*inner_bound, owned_exprs);
     if (!iter) {
@@ -2336,7 +2337,8 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                     index_manager_ ? index_manager_->hash_map() : nullptr,
                     embedding_pool_,
                     algorithm_registry_,
-                    index_manager_ ? index_manager_->hnsw_rid_maps() : nullptr);
+                    index_manager_ ? index_manager_->hnsw_rid_maps() : nullptr,
+                    index_manager_ ? index_manager_->bm25_map() : nullptr);
     std::vector<ExprPtr> owned_exprs;
     auto iter = planner.plan(bound, owned_exprs);
     if (!iter) {
@@ -3266,11 +3268,35 @@ Result<QueryResult> QueryEngine::execute_create_index(const CreateIndexStmt& stm
         }
     }
 
+    // Normalize the index method to lowercase so "USING BM25" and "USING bm25"
+    // resolve to the same index_type the IndexManager dispatches on.
+    std::string method_lower = stmt.method;
+    std::transform(method_lower.begin(),
+                   method_lower.end(),
+                   method_lower.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    // BM25 full-text indexes require exactly one STRING column.
+    if (method_lower == "bm25") {
+        if (stmt.columns.size() != 1) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "BM25 index requires exactly one text column");
+        }
+        auto upper_col = to_upper(stmt.columns[0]);
+        for (const auto& col : schema->columns) {
+            if (to_upper(col.name) == upper_col && col.type_id != TypeId::STRING) {
+                return make_error(StatusCode::INVALID_ARGUMENT,
+                                  "BM25 index requires a STRING column, but '" + stmt.columns[0] +
+                                      "' is " + std::string(type_name(col.type_id)));
+            }
+        }
+    }
+
     // Build the index definition.
     IndexDef def;
     def.table_id = schema->table_id;
     def.name = stmt.name;
-    def.index_type = stmt.method.empty() ? "btree" : stmt.method;
+    def.index_type = stmt.method.empty() ? "btree" : method_lower;
     def.is_unique = stmt.is_unique;
 
     // Build comma-separated column list.

@@ -127,7 +127,7 @@ TEST_F(GDB258ProviderRegistryTest, NearestTextQueryFailsWithoutRegistry) {
     insert_row(1, "AI in 2025", {1.0F, 0.0F, 0.0F, 0.0F});
     insert_row(2, "Machine learning basics", {0.0F, 1.0F, 0.0F, 0.0F});
 
-    exec_error("NEAREST 2 FROM articles.title_vec TO 'machine learning'",
+    exec_error("SELECT * FROM articles WHERE NEAREST(title_vec, 2) TO 'machine learning'",
                StatusCode::NOT_IMPLEMENTED);
 }
 
@@ -141,7 +141,7 @@ TEST_F(GDB258ProviderRegistryTest, NearestTextQuerySucceedsWithRegistry) {
 
     // This would previously fail with "text auto-embedding requires a ProviderRegistry"
     // because the Planner was never given provider_registry_.
-    auto qr = exec_ok("NEAREST 2 FROM articles.title_vec TO 'machine learning'");
+    auto qr = exec_ok("SELECT * FROM articles WHERE NEAREST(title_vec, 2) TO 'machine learning'");
     EXPECT_EQ(qr.rows.size(), 2u);
 }
 
@@ -152,7 +152,7 @@ TEST_F(GDB258ProviderRegistryTest, NearestVectorQueryWorksWithoutRegistry) {
     insert_row(1, "AI in 2025", {1.0F, 0.0F, 0.0F, 0.0F});
     insert_row(2, "Machine learning basics", {0.0F, 1.0F, 0.0F, 0.0F});
 
-    auto qr = exec_ok("NEAREST 2 FROM articles.title_vec TO [1.0, 0.0, 0.0, 0.0]");
+    auto qr = exec_ok("SELECT * FROM articles WHERE NEAREST(title_vec, 2) TO [1.0, 0.0, 0.0, 0.0]");
     EXPECT_EQ(qr.rows.size(), 2u);
 }
 
@@ -187,6 +187,6 @@ TEST_F(GDB258ProviderRegistryTest, ExplainNearestTextWithRegistry) {
     create_embedding_table();
     insert_row(1, "AI in 2025", {1.0F, 0.0F, 0.0F, 0.0F});
 
-    auto qr = exec_ok("EXPLAIN NEAREST 1 FROM articles.title_vec TO 'search text'");
+    auto qr = exec_ok("EXPLAIN SELECT * FROM articles WHERE NEAREST(title_vec, 1) TO 'search text'");
     EXPECT_FALSE(qr.rows.empty());
 }
