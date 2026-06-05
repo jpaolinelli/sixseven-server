@@ -4,6 +4,7 @@
 #include "sixseven/catalog/schema.h"
 #include "sixseven/common/result.h"
 #include "sixseven/executor/storage_manager.h"
+#include "sixseven/server/auth.h"
 #include "sixseven/vector/embedding_column.h"
 
 namespace sixseven {
@@ -91,6 +92,23 @@ public:
     /// Migrate databases from sys_tables for old deployments lacking sys_databases.
     /// Scans sys_tables for distinct database_id values and inserts them into sys_databases.
     [[nodiscard]] Result<void> migrate_databases_from_sys_tables();
+
+    // -- User credential persistence (sys_users) --------------------------------
+
+    /// Create the sys_users table (first run only).
+    [[nodiscard]] Result<void> create_users_table();
+
+    /// Open the existing sys_users table (subsequent runs).
+    [[nodiscard]] Result<void> open_users_table();
+
+    /// Upsert a user record into sys_users (delete-by-username then insert).
+    [[nodiscard]] Result<void> persist_user(const UserRecord& user);
+
+    /// Remove a user from sys_users by username.
+    [[nodiscard]] Result<void> remove_user(const std::string& username);
+
+    /// Load all persisted user records from sys_users.
+    [[nodiscard]] Result<std::vector<UserRecord>> load_users();
 
     /// Register a system table schema in the catalog and create its physical storage.
     /// Used by SystemBootstrap for sys_settings/sys_providers in addition to catalog tables.

@@ -43,6 +43,18 @@ public:
     [[nodiscard]] static Result<void>
     load_settings(QueryEngine& engine, Catalog& catalog, Config& config);
 
+    /// Ensure the sys_users credential table exists and is open. Idempotent:
+    /// creates it on first run, opens it on subsequent runs. Must be called
+    /// AFTER bootstrap() so legacy user tables are loaded and the table-id
+    /// collision guard can detect them.
+    ///
+    /// @return true if persisted authentication is available; false if the
+    ///   reserved table id is occupied by a pre-existing user table (legacy
+    ///   data directory), in which case the caller should fall back to an
+    ///   in-memory UserManager.
+    [[nodiscard]] static Result<bool>
+    ensure_users_table(CatalogPersistence& persistence, Catalog& catalog, StorageManager& storage);
+
     /// Check whether the data directory has been bootstrapped.
     [[nodiscard]] static bool is_bootstrapped(const std::filesystem::path& data_dir);
 

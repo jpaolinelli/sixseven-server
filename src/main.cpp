@@ -22,6 +22,7 @@
 #include "sixseven/graph/pagerank.h"
 #include "sixseven/graph/strongly_connected_components.h"
 #include "sixseven/graph/triangle_count.h"
+#include "sixseven/server/auth.h"
 #include "sixseven/server/server.h"
 #include "sixseven/storage/disk_manager.h"
 #include "sixseven/vector/backfill_manager.h"
@@ -206,6 +207,43 @@ int main(int argc, char* argv[]) {
     }
     engine.set_settings_cache(&settings_cache);
 
+    // Set up authentication. Resolve the configured method before `config` is
+    // moved into the Server below. Users are persisted in sys_users so they
+    // survive restart; on first run (or empty store) we seed the default admin
+    // 'sixseven'/'sixseven'. ensure_users_table() runs after bootstrap so the
+    // table-id collision guard can see any loaded user tables.
+    sixseven::AuthMethod auth_method = sixseven::AuthMethod::SCRAM_SHA_256;
+    if (auto m = sixseven::parse_auth_method(config.auth_method)) {
+        auth_method = *m;
+    } else {
+        SIXSEVEN_LOG_WARN("invalid auth_method '{}', defaulting to scram-sha-256: {}",
+                          config.auth_method,
+                          m.error().message);
+    }
+
+    sixseven::UserManager user_manager;
+    auto users_table = sixseven::SystemBootstrap::ensure_users_table(persistence, catalog, storage);
+    if (!users_table) {
+        SIXSEVEN_LOG_ERROR("sys_users setup failed: {}", users_table.error().message);
+        return 1;
+    }
+    if (*users_table) {
+        user_manager.set_persistence(
+            [&persistence](const sixseven::UserRecord& u) { return persistence.persist_user(u); },
+            [&persistence](const std::string& name) { return persistence.remove_user(name); });
+        auto loaded = persistence.load_users();
+        if (loaded) {
+            user_manager.load(std::move(*loaded));
+        } else {
+            SIXSEVEN_LOG_WARN("failed to load persisted users: {}", loaded.error().message);
+        }
+    }
+    if (user_manager.empty()) {
+        user_manager.ensure_default_admin(auth_method);
+    }
+    engine.set_user_manager(&user_manager);
+    engine.set_auth_method(auth_method);
+
     // NOTE: Embedding job persistence (sys_embedding_jobs) is available but
     // intentionally NOT wired here.  The INSERT hot path uses try_enqueue_batch
     // with 0ms timeout — pure in-memory, zero disk I/O.  Jobs that overflow
@@ -321,6 +359,9 @@ int main(int argc, char* argv[]) {
 
     sixseven::Server server(std::move(config));
     g_server = &server;
+
+    // Wire the user store so the server can authenticate incoming connections.
+    server.set_user_manager(&user_manager);
 
     // Wire query executor: route SQL to the shared QueryEngine.
     // Resolves the client's startup database name to a database_id.

@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -23,6 +24,10 @@ enum class AuthMethod : uint8_t {
 
 /// Parse an auth method name string (e.g., "trust", "md5", "scram-sha-256").
 Result<AuthMethod> parse_auth_method(const std::string& name);
+
+/// Serialize an auth method to its canonical name ("trust"/"md5"/"scram-sha-256").
+/// Inverse of parse_auth_method; used when persisting user records.
+std::string auth_method_to_string(AuthMethod method);
 
 // -- Cryptographic helpers ----------------------------------------------------
 
@@ -52,17 +57,40 @@ std::vector<uint8_t> base64_decode(const std::string& encoded);
 /// Stored user credentials.
 struct UserRecord {
     std::string username;
-    std::string password_hash; ///< MD5: "md5" + hex. SCRAM: stored key material.
-    std::string salt;          ///< Base64-encoded salt (for SCRAM).
-    int32_t iterations = 4096; ///< PBKDF2 iteration count (for SCRAM).
+    std::string password_hash;             ///< MD5: "md5" + hex. SCRAM: stored key material.
+    std::string salt;                      ///< Base64-encoded salt (for SCRAM).
+    int32_t iterations = 4096;             ///< PBKDF2 iteration count (for SCRAM).
+    AuthMethod method = AuthMethod::TRUST; ///< Method used to hash this record.
 };
 
 // -- User manager -------------------------------------------------------------
 
 /// Thread-safe in-memory user credential store.
+///
+/// Credentials live in memory for fast auth lookups. When persistence hooks are
+/// installed via set_persistence(), every mutating operation also writes through
+/// to durable storage (the sys_users table) so users survive restart. At startup
+/// load() repopulates the in-memory map from persisted records.
 class UserManager {
 public:
+    /// Called to durably upsert a user record (e.g., write to sys_users).
+    using PersistUserFn = std::function<Result<void>(const UserRecord&)>;
+    /// Called to durably remove a user by name (e.g., delete from sys_users).
+    using RemoveUserFn = std::function<Result<void>(const std::string&)>;
+
     UserManager() = default;
+
+    /// Install write-through persistence hooks. When set, create/alter/drop and
+    /// ensure_default_admin synchronize their changes to durable storage. Without
+    /// hooks the manager is purely in-memory (the prior behavior).
+    void set_persistence(PersistUserFn on_upsert, RemoveUserFn on_remove);
+
+    /// Bulk-load persisted user records into the in-memory map (startup only).
+    /// Does NOT fire persistence hooks — the records already exist on disk.
+    void load(std::vector<UserRecord> records);
+
+    /// True when no users are registered.
+    [[nodiscard]] bool empty() const;
 
     /// Create a user with the given plain-text password.
     /// Stores the password hash appropriate for the given auth method.
@@ -88,6 +116,8 @@ public:
 private:
     mutable std::mutex mu_;
     std::unordered_map<std::string, UserRecord> users_;
+    PersistUserFn on_upsert_;
+    RemoveUserFn on_remove_;
 };
 
 // -- SCRAM-SHA-256 state machine ----------------------------------------------

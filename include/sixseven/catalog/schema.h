@@ -124,9 +124,10 @@ inline constexpr table_id_t sys_edge_types_table_id = 6;
 inline constexpr table_id_t sys_embedding_columns_table_id = 7;
 inline constexpr table_id_t sys_embedding_jobs_table_id = 8;
 inline constexpr table_id_t sys_databases_table_id = 9;
+inline constexpr table_id_t sys_users_table_id = 11;
 
 /// First table ID available for user tables (after all system tables).
-inline constexpr table_id_t first_user_table_id = 10;
+inline constexpr table_id_t first_user_table_id = 12;
 
 /// Starting table ID for virtual catalog tables (negative to avoid collisions).
 inline constexpr table_id_t first_virtual_table_id = -1000;
@@ -165,6 +166,33 @@ inline TableSchema sys_databases_schema() {
         {1, "name", TypeId::STRING, false, ""},
     };
     schema.pk_columns = "database_id";
+    return schema;
+}
+
+/// Returns the system table schema for sys_users.
+///
+/// Stores database login credentials so they survive restart. password_hash
+/// and salt hold one-way SCRAM stored-key material (or "md5"+hex for MD5), so
+/// they are safe at rest. auth_method records how the row was hashed, letting a
+/// reloaded record still verify even if the server's configured method changes.
+///
+/// NOTE: id 10 is intentionally skipped. The catalog's table-id counter is
+/// global, so on data directories created before sys_users existed, id 10 may
+/// already belong to a user table. sys_users uses id 11 and user tables now
+/// start at 12 to avoid colliding with those legacy files.
+inline TableSchema sys_users_schema() {
+    TableSchema schema;
+    schema.table_id = sys_users_table_id;
+    schema.name = "sys_users";
+    schema.columns = {
+        {0, "username", TypeId::STRING, false, ""},
+        {1, "password_hash", TypeId::STRING, true, ""},
+        {2, "salt", TypeId::STRING, true, ""},
+        {3, "iterations", TypeId::INT32, true, ""},
+        {4, "auth_method", TypeId::STRING, false, ""},
+        {5, "created_at", TypeId::TIMESTAMP, true, ""},
+    };
+    schema.pk_columns = "username";
     return schema;
 }
 

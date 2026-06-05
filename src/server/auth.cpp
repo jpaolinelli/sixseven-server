@@ -44,6 +44,18 @@ Result<AuthMethod> parse_auth_method(const std::string& name) {
                       "unknown auth method: " + name + " (valid: trust, md5, scram-sha-256)");
 }
 
+std::string auth_method_to_string(AuthMethod method) {
+    switch (method) {
+    case AuthMethod::TRUST:
+        return "trust";
+    case AuthMethod::MD5:
+        return "md5";
+    case AuthMethod::SCRAM_SHA_256:
+        return "scram-sha-256";
+    }
+    return "trust";
+}
+
 // -- Cryptographic helpers ----------------------------------------------------
 
 std::string md5_hex(const std::string& input) {
@@ -267,15 +279,11 @@ UserRecord hash_password_scram(const std::string& username, const std::string& p
 
 // -- UserManager --------------------------------------------------------------
 
-Result<void> UserManager::create_user(const std::string& username,
-                                      const std::string& password,
-                                      AuthMethod method) {
-    std::lock_guard<std::mutex> lock(mu_);
+namespace {
 
-    if (users_.count(username) > 0) {
-        return make_error(StatusCode::ALREADY_EXISTS, "user already exists: " + username);
-    }
-
+/// Build a UserRecord with the password hashed per the chosen auth method.
+UserRecord
+build_user_record(const std::string& username, const std::string& password, AuthMethod method) {
     UserRecord record;
     switch (method) {
     case AuthMethod::TRUST:
@@ -288,13 +296,61 @@ Result<void> UserManager::create_user(const std::string& username,
         record = hash_password_scram(username, password);
         break;
     }
+    record.method = method;
+    return record;
+}
 
-    users_[username] = std::move(record);
+} // namespace
+
+void UserManager::set_persistence(PersistUserFn on_upsert, RemoveUserFn on_remove) {
+    std::lock_guard<std::mutex> lock(mu_);
+    on_upsert_ = std::move(on_upsert);
+    on_remove_ = std::move(on_remove);
+}
+
+void UserManager::load(std::vector<UserRecord> records) {
+    std::lock_guard<std::mutex> lock(mu_);
+    users_.clear();
+    for (auto& record : records) {
+        users_[record.username] = std::move(record);
+    }
+}
+
+bool UserManager::empty() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    return users_.empty();
+}
+
+Result<void> UserManager::create_user(const std::string& username,
+                                      const std::string& password,
+                                      AuthMethod method) {
+    std::unique_lock<std::mutex> lock(mu_);
+
+    if (users_.contains(username)) {
+        return make_error(StatusCode::ALREADY_EXISTS, "user already exists: " + username);
+    }
+
+    UserRecord record = build_user_record(username, password, method);
+    users_[username] = record;
+
+    // Write through to durable storage outside the lock (the hook touches the
+    // buffer pool). Roll back the in-memory insert if persistence fails so disk
+    // and memory never diverge.
+    PersistUserFn upsert = on_upsert_;
+    lock.unlock();
+    if (upsert) {
+        auto persisted = upsert(record);
+        if (!persisted) {
+            lock.lock();
+            users_.erase(username);
+            return persisted;
+        }
+    }
     return ok();
 }
 
 Result<void> UserManager::drop_user(const std::string& username, bool if_exists) {
-    std::lock_guard<std::mutex> lock(mu_);
+    std::unique_lock<std::mutex> lock(mu_);
 
     auto it = users_.find(username);
     if (it == users_.end()) {
@@ -304,34 +360,46 @@ Result<void> UserManager::drop_user(const std::string& username, bool if_exists)
         return make_error(StatusCode::NOT_FOUND, "user does not exist: " + username);
     }
 
+    UserRecord removed = it->second; // Saved for rollback.
     users_.erase(it);
+
+    RemoveUserFn remove = on_remove_;
+    lock.unlock();
+    if (remove) {
+        auto removed_ok = remove(username);
+        if (!removed_ok) {
+            lock.lock();
+            users_[username] = std::move(removed);
+            return removed_ok;
+        }
+    }
     return ok();
 }
 
 Result<void> UserManager::alter_user(const std::string& username,
                                      const std::string& new_password,
                                      AuthMethod method) {
-    std::lock_guard<std::mutex> lock(mu_);
+    std::unique_lock<std::mutex> lock(mu_);
 
     auto it = users_.find(username);
     if (it == users_.end()) {
         return make_error(StatusCode::NOT_FOUND, "user does not exist: " + username);
     }
 
-    UserRecord record;
-    switch (method) {
-    case AuthMethod::TRUST:
-        record.username = username;
-        break;
-    case AuthMethod::MD5:
-        record = hash_password_md5(username, new_password);
-        break;
-    case AuthMethod::SCRAM_SHA_256:
-        record = hash_password_scram(username, new_password);
-        break;
-    }
+    UserRecord previous = it->second; // Saved for rollback.
+    UserRecord record = build_user_record(username, new_password, method);
+    it->second = record;
 
-    it->second = std::move(record);
+    PersistUserFn upsert = on_upsert_;
+    lock.unlock();
+    if (upsert) {
+        auto persisted = upsert(record);
+        if (!persisted) {
+            lock.lock();
+            users_[username] = std::move(previous);
+            return persisted;
+        }
+    }
     return ok();
 }
 
@@ -350,26 +418,27 @@ bool UserManager::user_exists(const std::string& username) const {
 }
 
 void UserManager::ensure_default_admin(AuthMethod method) {
-    std::lock_guard<std::mutex> lock(mu_);
-    if (users_.count("sixseven") > 0) {
+    std::unique_lock<std::mutex> lock(mu_);
+    if (users_.contains("sixseven")) {
         return;
     }
 
-    UserRecord record;
-    switch (method) {
-    case AuthMethod::TRUST:
-        record.username = "sixseven";
-        break;
-    case AuthMethod::MD5:
-        record = hash_password_md5("sixseven", "sixseven");
-        break;
-    case AuthMethod::SCRAM_SHA_256:
-        record = hash_password_scram("sixseven", "sixseven");
-        break;
-    }
-
-    users_["sixseven"] = std::move(record);
+    UserRecord record = build_user_record("sixseven", "sixseven", method);
+    users_["sixseven"] = record;
     SIXSEVEN_LOG_INFO("created default admin user 'sixseven'");
+
+    // Persist the seeded admin. If persistence fails we keep the in-memory
+    // record so the running server still has a working login; it will be
+    // re-seeded (idempotently) on the next restart.
+    PersistUserFn upsert = on_upsert_;
+    lock.unlock();
+    if (upsert) {
+        auto persisted = upsert(record);
+        if (!persisted) {
+            SIXSEVEN_LOG_ERROR("failed to persist default admin user 'sixseven': {}",
+                               persisted.error().message);
+        }
+    }
 }
 
 // -- MD5 verification ---------------------------------------------------------

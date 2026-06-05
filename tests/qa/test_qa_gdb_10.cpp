@@ -494,7 +494,7 @@ TEST(QA_Defaults, AllDefaultsCorrect) {
     EXPECT_FALSE(config.archive_enabled);
     EXPECT_EQ(config.archive_cleanup_policy, "keep_all");
     EXPECT_FALSE(config.standby_mode);
-    EXPECT_EQ(config.auth_method, "trust");
+    EXPECT_EQ(config.auth_method, "scram-sha-256");
     EXPECT_EQ(config.shutdown_timeout_s, 30);
 }
 

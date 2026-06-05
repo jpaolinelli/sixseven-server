@@ -273,6 +273,50 @@ bool SystemBootstrap::is_bootstrapped(const std::filesystem::path& data_dir) {
     return std::filesystem::exists(data_dir / bootstrap_flag_file);
 }
 
+Result<bool> SystemBootstrap::ensure_users_table(CatalogPersistence& persistence,
+                                                 Catalog& catalog,
+                                                 StorageManager& storage) {
+    // Collision guard: the catalog table-id counter is global, so on data
+    // directories created before sys_users existed, its reserved id may already
+    // belong to a user table. If so, do NOT register sys_users on top of it
+    // (restore_table would silently overwrite the entry). Fall back to in-memory
+    // auth instead.
+    auto existing = catalog.get_table_by_id(sys_users_table_id);
+    if (existing) {
+        bool is_ours = existing->name == "sys_users" &&
+                       catalog.get_table_database_id(sys_users_table_id) == system_database_id;
+        if (!is_ours) {
+            SIXSEVEN_LOG_ERROR("sys_users table id {} is occupied by table '{}' — persisted "
+                               "authentication disabled; users will be in-memory only. Use a data "
+                               "directory created with this version for persisted auth.",
+                               sys_users_table_id,
+                               existing->name);
+            return ok(false);
+        }
+        return ok(true); // Already registered as sys_users.
+    }
+
+    // Not yet registered: create on first run, open on subsequent runs. Decide
+    // by whether the storage file exists so we never call open (which registers
+    // the schema before failing on a missing file) on a fresh data dir.
+    if (storage.table_file_exists(system_database_id, sys_users_table_id)) {
+        auto open_r = persistence.open_users_table();
+        if (!open_r) {
+            return make_error(open_r.error().code,
+                              "failed to open sys_users: " + open_r.error().message);
+        }
+        SIXSEVEN_LOG_INFO("system bootstrap: opened sys_users");
+    } else {
+        auto create_r = persistence.create_users_table();
+        if (!create_r) {
+            return make_error(create_r.error().code,
+                              "failed to create sys_users: " + create_r.error().message);
+        }
+        SIXSEVEN_LOG_INFO("system bootstrap: created sys_users");
+    }
+    return ok(true);
+}
+
 Result<void> SystemBootstrap::seed_default_settings(QueryEngine& engine, const Config& config) {
     struct Setting {
         const char* key;

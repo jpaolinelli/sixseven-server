@@ -497,9 +497,9 @@ TEST(UserManager, TrustModeStoresNoHash) {
 // Config auth_method
 // =============================================================================
 
-TEST(AuthConfig, DefaultAuthMethodIsTrust) {
+TEST(AuthConfig, DefaultAuthMethodIsScram) {
     Config config;
-    EXPECT_EQ(config.auth_method, "trust");
+    EXPECT_EQ(config.auth_method, "scram-sha-256");
 }
 
 TEST(AuthConfig, AuthMethodFromConfigFile) {

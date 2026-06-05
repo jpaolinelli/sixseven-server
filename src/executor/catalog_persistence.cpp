@@ -796,4 +796,72 @@ Result<std::vector<EmbeddingJob>> CatalogPersistence::load_embedding_jobs() {
     return ok(std::move(jobs));
 }
 
+// ---------------------------------------------------------------------------
+// User credential persistence (sys_users)
+// ---------------------------------------------------------------------------
+
+Result<void> CatalogPersistence::create_users_table() {
+    return create_sys_table(sys_users_schema());
+}
+
+Result<void> CatalogPersistence::open_users_table() {
+    return open_sys_table(sys_users_schema());
+}
+
+Result<void> CatalogPersistence::persist_user(const UserRecord& user) {
+    // Upsert: ALTER USER reuses the username, so remove any existing row first.
+    auto removed = remove_user(user.username);
+    if (!removed) {
+        return removed;
+    }
+
+    return insert_row(sys_users_table_id,
+                      {Value(user.username),
+                       Value(user.password_hash),
+                       Value(user.salt),
+                       Value(user.iterations),
+                       Value(auth_method_to_string(user.method)),
+                       Value::make_null()});
+}
+
+Result<void> CatalogPersistence::remove_user(const std::string& username) {
+    return delete_rows(sys_users_table_id, [&username](const std::vector<Value>& v) {
+        return !v[0].is_null() && v[0].as_string() == username;
+    });
+}
+
+Result<std::vector<UserRecord>> CatalogPersistence::load_users() {
+    auto ts = storage_.get_table_storage(sys_users_table_id);
+    if (!ts) {
+        return make_error(ts.error().code, ts.error().message);
+    }
+
+    auto storage_schema = StorageManager::build_storage_schema(sys_users_schema());
+    auto it = (*ts)->heap->begin();
+    if (!it) {
+        return make_error(it.error().code, it.error().message);
+    }
+
+    std::vector<UserRecord> users;
+    while (auto row = it->next()) {
+        auto values = TupleSerializer::deserialize(row->second, storage_schema);
+        if (!values) {
+            SIXSEVEN_LOG_WARN("user persistence: skipping corrupt row");
+            continue;
+        }
+        auto& v = *values;
+        UserRecord record;
+        record.username = v[0].is_null() ? "" : v[0].as_string();
+        record.password_hash = v[1].is_null() ? "" : v[1].as_string();
+        record.salt = v[2].is_null() ? "" : v[2].as_string();
+        record.iterations = v[3].is_null() ? 4096 : v[3].as_int32();
+        auto method = parse_auth_method(v[4].is_null() ? "trust" : v[4].as_string());
+        record.method = method ? *method : AuthMethod::TRUST;
+        users.push_back(std::move(record));
+    }
+
+    SIXSEVEN_LOG_INFO("user persistence: loaded {} users", users.size());
+    return ok(std::move(users));
+}
+
 } // namespace sixseven

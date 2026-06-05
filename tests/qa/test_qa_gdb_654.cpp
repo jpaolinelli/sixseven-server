@@ -126,11 +126,12 @@ TEST_F(QA_GDB654, AC1_SysDatabasesTableIdIs9) {
 }
 
 // ============================================================================
-// AC2: first_user_table_id bumped to 10
+// AC2: first_user_table_id sits above all reserved system table ids.
+// (Originally 10; bumped to 12 when sys_users reserved id 11 was added.)
 // ============================================================================
 
-TEST_F(QA_GDB654, AC2_FirstUserTableIdIs10) {
-    EXPECT_EQ(first_user_table_id, 10);
+TEST_F(QA_GDB654, AC2_FirstUserTableIdAboveSystemIds) {
+    EXPECT_EQ(first_user_table_id, 12);
 }
 
 // AC2 boundary: sys_databases_table_id must be strictly less than first_user_table_id

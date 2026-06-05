@@ -41,7 +41,7 @@ struct Config {
     std::string replication_synchronous_fallback = "error"; ///< error/warn/block.
 
     // Authentication settings.
-    std::string auth_method = "trust"; ///< trust, md5, or scram-sha-256.
+    std::string auth_method = "scram-sha-256"; ///< trust, md5, or scram-sha-256.
 
     // Server lifecycle settings.
     int32_t shutdown_timeout_s = 30; ///< Seconds to wait for active queries on shutdown.

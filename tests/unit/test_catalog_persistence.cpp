@@ -604,7 +604,8 @@ TEST_F(CatalogPersistenceTest, SystemTableIdsAreStable) {
     EXPECT_EQ(sys_embedding_columns_table_id, 7);
     EXPECT_EQ(sys_embedding_jobs_table_id, 8);
     EXPECT_EQ(sys_databases_table_id, 9);
-    EXPECT_EQ(first_user_table_id, 10);
+    EXPECT_EQ(sys_users_table_id, 11);
+    EXPECT_EQ(first_user_table_id, 12);
 }
 
 TEST_F(CatalogPersistenceTest, SystemTableSchemaIdsMatch) {
