@@ -31,7 +31,7 @@ administrator:
 
 | Username | Password |
 |----------|----------|
-| `sixseven` | `sixseven` |
+| `demo` | `demo` |
 
 The credential is hashed with the configured `auth_method` and persisted to
 `sixseven_system.sys_users`.
@@ -39,7 +39,7 @@ The credential is hashed with the configured `auth_method` and persisted to
 > **Change the default password immediately** on any non-local deployment:
 >
 > ```sql
-> ALTER USER sixseven WITH PASSWORD 'a-strong-secret';
+> ALTER USER demo WITH PASSWORD 'a-strong-secret';
 > ```
 
 ## Connecting
@@ -47,8 +47,8 @@ The credential is hashed with the configured `auth_method` and persisted to
 Any PostgreSQL client works. For example, with `psql`:
 
 ```bash
-psql "host=localhost port=6767 user=sixseven dbname=sixseven"
-# password: sixseven   (until you change it)
+psql "host=localhost port=6767 user=demo dbname=demo"
+# password: demo   (until you change it)
 ```
 
 ## Managing users

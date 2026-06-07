@@ -419,13 +419,13 @@ bool UserManager::user_exists(const std::string& username) const {
 
 void UserManager::ensure_default_admin(AuthMethod method) {
     std::unique_lock<std::mutex> lock(mu_);
-    if (users_.contains("sixseven")) {
+    if (users_.contains("demo")) {
         return;
     }
 
-    UserRecord record = build_user_record("sixseven", "sixseven", method);
-    users_["sixseven"] = record;
-    SIXSEVEN_LOG_INFO("created default admin user 'sixseven'");
+    UserRecord record = build_user_record("demo", "demo", method);
+    users_["demo"] = record;
+    SIXSEVEN_LOG_INFO("created default admin user 'demo'");
 
     // Persist the seeded admin. If persistence fails we keep the in-memory
     // record so the running server still has a working login; it will be
@@ -435,7 +435,7 @@ void UserManager::ensure_default_admin(AuthMethod method) {
     if (upsert) {
         auto persisted = upsert(record);
         if (!persisted) {
-            SIXSEVEN_LOG_ERROR("failed to persist default admin user 'sixseven': {}",
+            SIXSEVEN_LOG_ERROR("failed to persist default admin user 'demo': {}",
                                persisted.error().message);
         }
     }

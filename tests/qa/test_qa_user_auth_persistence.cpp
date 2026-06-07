@@ -27,7 +27,7 @@ using namespace sixseven;
 namespace {
 
 void init_default_db(Catalog& catalog) {
-    auto r = catalog.restore_database(default_database_id, "sixseven");
+    auto r = catalog.restore_database(default_database_id, "demo");
     (void)r;
 }
 
@@ -105,9 +105,9 @@ protected:
 
 // The default admin is seeded on first boot and survives restart.
 TEST_F(QAUserAuthPersistence, DefaultAdminPresentAndPersistent) {
-    EXPECT_TRUE(users_->user_exists("sixseven"));
+    EXPECT_TRUE(users_->user_exists("demo"));
     restart();
-    EXPECT_TRUE(users_->user_exists("sixseven"));
+    EXPECT_TRUE(users_->user_exists("demo"));
 }
 
 // CREATE USER via SQL no longer errors with "user manager not initialized".
@@ -167,7 +167,7 @@ TEST(QAUserAuthLegacyCollision, ReservedIdOccupiedFallsBack) {
     {
         DiskManager dm;
         Catalog catalog;
-        ASSERT_TRUE(catalog.restore_database(default_database_id, "sixseven").has_value());
+        ASSERT_TRUE(catalog.restore_database(default_database_id, "demo").has_value());
         StorageManager storage(dm, data_dir);
         CatalogPersistence persistence(catalog, storage);
 

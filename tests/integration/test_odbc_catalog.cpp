@@ -155,7 +155,7 @@ protected:
         // Connect with a connection string (bypasses DSN).
         std::string conn_str =
             "DRIVER={PostgreSQL Unicode};Server=localhost;Port=" + std::to_string(port_) +
-            ";Database=sixseven;Uid=sixseven;Pwd=;" + "Debug=1;CommLog=1;";
+            ";Database=demo;Uid=demo;Pwd=;" + "Debug=1;CommLog=1;";
         SQLCHAR out_conn[1024];
         SQLSMALLINT out_len;
         auto rc = SQLDriverConnect(dbc_,

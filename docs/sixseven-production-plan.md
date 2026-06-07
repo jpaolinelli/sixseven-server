@@ -707,7 +707,7 @@ After all phases, this sequence validates the complete system:
 ./sixseven-server config.json
 
 # 2. Connect with psql (PG protocol compatibility)
-psql -h localhost -p 6767 -U admin sixseven
+psql -h localhost -p 6767 -U demo demo
 ```
 
 ```sql

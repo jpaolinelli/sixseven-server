@@ -270,9 +270,9 @@ TEST_F(QA_GDB602, MultipleDropIfExists_NoStateLeak) {
 // =============================================================================
 
 TEST_F(QA_GDB602, DropDefaultDB_IfExistsAfterName_StillFails) {
-    exec_error("DROP DATABASE sixseven IF EXISTS", StatusCode::CONSTRAINT_VIOLATION);
+    exec_error("DROP DATABASE demo IF EXISTS", StatusCode::CONSTRAINT_VIOLATION);
 }
 
 TEST_F(QA_GDB602, DropDefaultDB_IfExistsBeforeName_StillFails) {
-    exec_error("DROP DATABASE IF EXISTS sixseven", StatusCode::CONSTRAINT_VIOLATION);
+    exec_error("DROP DATABASE IF EXISTS demo", StatusCode::CONSTRAINT_VIOLATION);
 }

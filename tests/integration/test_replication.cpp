@@ -270,7 +270,7 @@ TEST_F(ReplicationIntegrationTest, WriteRejectionOnStandby) {
     engine.set_settings_cache(&cache);
 
     // Switch to user DB and create a table before enabling standby mode.
-    auto db = catalog.get_database("sixseven");
+    auto db = catalog.get_database("demo");
     ASSERT_TRUE(db.has_value());
     engine.set_current_database(db->database_id);
     auto create = engine.execute("CREATE TABLE test_tbl (id INT, val VARCHAR, PRIMARY KEY (id))");
@@ -361,7 +361,7 @@ TEST_F(ReplicationIntegrationTest, ReplicationLagMonitoring) {
     engine.set_wal_sender_manager(&sender_mgr);
     engine.set_wal_writer(primary_writer_.get());
 
-    auto db = catalog.get_database("sixseven");
+    auto db = catalog.get_database("demo");
     ASSERT_TRUE(db.has_value());
     engine.set_current_database(db->database_id);
 
@@ -409,7 +409,7 @@ TEST_F(ReplicationIntegrationTest, FailoverPromotion) {
     engine.set_standby_mode(true);
     engine.set_wal_writer(standby_writer.get());
 
-    auto db = catalog.get_database("sixseven");
+    auto db = catalog.get_database("demo");
     ASSERT_TRUE(db.has_value());
     engine.set_current_database(db->database_id);
 

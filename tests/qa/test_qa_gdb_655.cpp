@@ -56,7 +56,7 @@ TEST(QA_GDB655_Constructor, OnlySystemDatabaseExists) {
 
 TEST(QA_GDB655_Constructor, DefaultDatabaseDoesNotExist) {
     Catalog catalog;
-    auto result = catalog.get_database("sixseven");
+    auto result = catalog.get_database("demo");
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
@@ -73,20 +73,20 @@ TEST(QA_GDB655_Constructor, CreateTableInDefaultDbFailsBeforeRestore) {
 
 TEST(QA_GDB655_DropDefault, CanDropDefaultDatabase) {
     Catalog catalog;
-    auto r = catalog.restore_database(default_database_id, "sixseven");
+    auto r = catalog.restore_database(default_database_id, "demo");
     ASSERT_TRUE(r.has_value()) << r.error().message;
 
     auto drop = catalog.drop_database(default_database_id, /*cascade=*/false);
     ASSERT_TRUE(drop.has_value()) << drop.error().message;
 
     // Verify it's gone.
-    auto get = catalog.get_database("sixseven");
+    auto get = catalog.get_database("demo");
     EXPECT_FALSE(get.has_value());
 }
 
 TEST(QA_GDB655_DropDefault, CanDropDefaultWithCascade) {
     Catalog catalog;
-    auto r = catalog.restore_database(default_database_id, "sixseven");
+    auto r = catalog.restore_database(default_database_id, "demo");
     ASSERT_TRUE(r.has_value()) << r.error().message;
 
     // Create a table so cascade has work to do.
@@ -127,13 +127,13 @@ TEST(QA_GDB655_DropDefault, DropNonExistentFails) {
 
 TEST(QA_GDB655_Restore, BasicRestore) {
     Catalog catalog;
-    auto r = catalog.restore_database(default_database_id, "sixseven");
+    auto r = catalog.restore_database(default_database_id, "demo");
     ASSERT_TRUE(r.has_value()) << r.error().message;
 
-    auto db = catalog.get_database("sixseven");
+    auto db = catalog.get_database("demo");
     ASSERT_TRUE(db.has_value()) << db.error().message;
     EXPECT_EQ(db->database_id, default_database_id);
-    EXPECT_EQ(db->name, "sixseven");
+    EXPECT_EQ(db->name, "demo");
 }
 
 TEST(QA_GDB655_Restore, RestoreWithArbitraryId) {
@@ -200,7 +200,7 @@ TEST(QA_GDB655_Restore, RestoreEmptyName) {
 
 TEST(QA_GDB655_Restore, RestoreThenCreateTable) {
     Catalog catalog;
-    ASSERT_TRUE(catalog.restore_database(default_database_id, "sixseven").has_value());
+    ASSERT_TRUE(catalog.restore_database(default_database_id, "demo").has_value());
 
     auto tid = catalog.create_table(default_database_id, make_schema("users"));
     ASSERT_TRUE(tid.has_value()) << tid.error().message;
@@ -212,14 +212,14 @@ TEST(QA_GDB655_Restore, RestoreThenCreateTable) {
 
 TEST(QA_GDB655_Restore, RestoreAfterDrop) {
     Catalog catalog;
-    ASSERT_TRUE(catalog.restore_database(default_database_id, "sixseven").has_value());
+    ASSERT_TRUE(catalog.restore_database(default_database_id, "demo").has_value());
     ASSERT_TRUE(catalog.drop_database(default_database_id, false).has_value());
 
     // Re-restore with the same id and name.
-    auto r = catalog.restore_database(default_database_id, "sixseven");
+    auto r = catalog.restore_database(default_database_id, "demo");
     ASSERT_TRUE(r.has_value()) << r.error().message;
 
-    auto db = catalog.get_database("sixseven");
+    auto db = catalog.get_database("demo");
     ASSERT_TRUE(db.has_value());
     EXPECT_EQ(db->database_id, default_database_id);
 }
@@ -321,16 +321,16 @@ TEST(QA_GDB655_Stress, RestoreManyDatabases) {
 
 TEST(QA_GDB655_Stress, DropAndReCreateCycle) {
     Catalog catalog;
-    ASSERT_TRUE(catalog.restore_database(default_database_id, "sixseven").has_value());
+    ASSERT_TRUE(catalog.restore_database(default_database_id, "demo").has_value());
 
     for (int i = 0; i < 50; ++i) {
         ASSERT_TRUE(catalog.drop_database(default_database_id, false).has_value())
             << "drop failed at iteration " << i;
-        ASSERT_TRUE(catalog.restore_database(default_database_id, "sixseven").has_value())
+        ASSERT_TRUE(catalog.restore_database(default_database_id, "demo").has_value())
             << "restore failed at iteration " << i;
     }
 
-    auto db = catalog.get_database("sixseven");
+    auto db = catalog.get_database("demo");
     ASSERT_TRUE(db.has_value());
     EXPECT_EQ(db->database_id, default_database_id);
 }

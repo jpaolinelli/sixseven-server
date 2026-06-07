@@ -53,7 +53,7 @@ protected:
         engine_->set_settings_cache(cache_.get());
 
         // Switch to default database for user operations.
-        use_database("sixseven");
+        use_database("demo");
     }
 
     void TearDown() override {
@@ -343,15 +343,15 @@ TEST_F(SetShowTest, ShowDatabases) {
     EXPECT_EQ(qr.column_names[0], "database_name");
 
     // Default databases: sixseven and sixseven_system.
-    bool found_sixseven = false;
+    bool found_demo = false;
     bool found_system = false;
     for (const auto& row : qr.rows) {
-        if (row[0].as_string() == "sixseven")
-            found_sixseven = true;
+        if (row[0].as_string() == "demo")
+            found_demo = true;
         if (row[0].as_string() == "sixseven_system")
             found_system = true;
     }
-    EXPECT_TRUE(found_sixseven);
+    EXPECT_TRUE(found_demo);
     EXPECT_TRUE(found_system);
 }
 

@@ -17,7 +17,7 @@ namespace sixseven {
 /// the same table name may exist in different databases.
 ///
 /// Only the system database "sixseven_system" is created on construction.
-/// The default "sixseven" database is created during bootstrap and persisted.
+/// The default "demo" database is created during bootstrap and persisted.
 ///
 /// Thread safety: All public methods are protected by a mutex.
 ///

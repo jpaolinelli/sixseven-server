@@ -22,8 +22,11 @@ using index_id_t = int32_t;
 /// Unique identifier for edge types within the catalog.
 using edge_id_t = int32_t;
 
-/// Default database ID for the built-in 'sixseven' database.
+/// Default database ID for the built-in 'demo' database.
 inline constexpr database_id_t default_database_id = 1;
+
+/// Default database name.
+inline constexpr const char* default_database_name = "demo";
 
 /// System database ID for the built-in 'sixseven_system' database.
 inline constexpr database_id_t system_database_id = 2;

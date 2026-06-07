@@ -4,7 +4,8 @@
 # Stages:
 #   1. build    — install tools + vcpkg deps + compile release binaries
 #   2. test     — build debug + run unit/QA tests (optional target)
-#   3. runtime  — slim image with server binary + ONNX model
+#   3. seed     — run server to generate demo data with embeddings
+#   4. runtime  — slim image with server binary + ONNX model + pre-seeded data
 #
 # Build:
 #   docker build -t sixsevendb .                            # runtime image
@@ -69,7 +70,45 @@ RUN ctest --test-dir build/debug -L unit --output-on-failure
 RUN ctest --test-dir build/debug -L qa --output-on-failure
 
 # ---------------------------------------------------------------------------
-# Stage 3: slim runtime image
+# Stage 3: seed — run server to pre-generate demo data with embeddings
+# ---------------------------------------------------------------------------
+FROM ubuntu:24.04 AS seed
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libstdc++6 libgcc-s1 ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /src/build/release/src/sixseven-server /usr/local/bin/
+COPY --from=build /src/build/release/src/sixseven-cli /usr/local/bin/
+COPY --from=build /src/build/release/vcpkg_installed/x64-linux-release/lib/*.so* /usr/local/lib/
+RUN ldconfig
+
+COPY --from=build /opt/models/all-MiniLM-L6-v2 /models/all-MiniLM-L6-v2
+
+RUN mkdir -p /data /config \
+    && printf '{"data_dir":"/data","port":6767,"log_level":"info","auth_method":"trust"}\n' \
+       > /config/config.json
+
+# Start the server, wait for demo data + embeddings to finish, then stop it.
+# The server logs "demo: all embeddings generated" on success or
+# "embedding generation did not fully complete" on timeout.
+RUN sixseven-server /config/config.json > /tmp/seed.log 2>&1 & \
+    SERVER_PID=$! && \
+    sleep 5 && \
+    for i in $(seq 1 120); do \
+        if grep -q "all embeddings generated\|embedding generation did not fully complete" /tmp/seed.log 2>/dev/null; then \
+            break; \
+        fi; \
+        sleep 5; \
+    done && \
+    kill $SERVER_PID 2>/dev/null; \
+    wait $SERVER_PID 2>/dev/null || true && \
+    test -f /data/.bootstrapped || (cat /tmp/seed.log && exit 1)
+
+# ---------------------------------------------------------------------------
+# Stage 4: slim runtime image
 # ---------------------------------------------------------------------------
 FROM ubuntu:24.04 AS runtime
 
@@ -77,8 +116,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libstdc++6 libgcc-s1 ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -r -s /bin/false sixseven \
-    && mkdir -p /data /config /models \
-    && chown -R sixseven:sixseven /data /config /models
+    && mkdir -p /config /models \
+    && chown -R sixseven:sixseven /config /models
 
 # Copy the release binaries
 COPY --from=build /src/build/release/src/sixseven-server /usr/local/bin/
@@ -91,8 +130,12 @@ RUN ldconfig
 # Bundle the ONNX embedding model so vector search works out of the box
 COPY --from=build /opt/models/all-MiniLM-L6-v2 /models/all-MiniLM-L6-v2
 
+# Copy pre-seeded demo data (database + embeddings already generated)
+COPY --from=seed /data /data
+RUN chown -R sixseven:sixseven /data
+
 EXPOSE 6767
-VOLUME ["/data", "/config"]
+VOLUME ["/config"]
 USER sixseven
 
 ENTRYPOINT ["sixseven-server"]

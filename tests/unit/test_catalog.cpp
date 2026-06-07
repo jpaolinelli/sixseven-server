@@ -883,7 +883,7 @@ TEST(Catalog, OnlySystemDatabaseExistsOnInit) {
     ASSERT_TRUE(db.has_value()) << db.error().message;
     EXPECT_EQ(db->database_id, system_database_id);
 
-    auto no_default = catalog.get_database("sixseven");
+    auto no_default = catalog.get_database("demo");
     EXPECT_FALSE(no_default.has_value());
 }
 
@@ -930,10 +930,10 @@ TEST(Catalog, CreateDatabaseDuplicateNameFails) {
     EXPECT_EQ(id2.error().code, StatusCode::ALREADY_EXISTS);
 }
 
-TEST(Catalog, CreateDatabaseSixsevenSucceeds) {
+TEST(Catalog, CreateDatabaseDemoSucceeds) {
     Catalog catalog;
 
-    auto id = catalog.create_database("sixseven");
+    auto id = catalog.create_database("demo");
     ASSERT_TRUE(id.has_value()) << id.error().message;
     EXPECT_GT(*id, system_database_id);
 }
@@ -972,8 +972,8 @@ TEST(Catalog, ListDatabasesSortedById) {
     ASSERT_TRUE(catalog.create_database("alpha").has_value());
 
     auto dbs = catalog.list_databases();
-    ASSERT_EQ(dbs.size(), 4u); // sixseven (restored) + sixseven_system + zeta + alpha
-    EXPECT_EQ(dbs[0].name, "sixseven");
+    ASSERT_EQ(dbs.size(), 4u); // demo (restored) + sixseven_system + zeta + alpha
+    EXPECT_EQ(dbs[0].name, "demo");
     EXPECT_EQ(dbs[1].name, system_database_name);
     EXPECT_LT(dbs[0].database_id, dbs[1].database_id);
     EXPECT_LT(dbs[1].database_id, dbs[2].database_id);
@@ -1013,7 +1013,7 @@ TEST(Catalog, DefaultDatabaseIsDroppable) {
     auto drop = catalog.drop_database(default_database_id, false);
     ASSERT_TRUE(drop.has_value()) << drop.error().message;
 
-    auto get = catalog.get_database("sixseven");
+    auto get = catalog.get_database("demo");
     EXPECT_FALSE(get.has_value());
 }
 
@@ -1087,8 +1087,8 @@ TEST(Catalog, DropDatabaseRemovesFromList) {
     ASSERT_TRUE(catalog.drop_database(*id, false).has_value());
 
     auto dbs = catalog.list_databases();
-    ASSERT_EQ(dbs.size(), 2u); // sixseven (restored) + sixseven_system remain.
-    EXPECT_EQ(dbs[0].name, "sixseven");
+    ASSERT_EQ(dbs.size(), 2u); // demo (restored) + sixseven_system remain.
+    EXPECT_EQ(dbs[0].name, "demo");
     EXPECT_EQ(dbs[1].name, system_database_name);
 }
 

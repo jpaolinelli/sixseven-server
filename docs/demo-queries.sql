@@ -2,7 +2,7 @@
 -- SixSevenDB Demo Queries
 -- Run against the auto-generated "SixSeven Bookstore" demo database.
 --
--- Connect:  psql -h localhost -p 6767 -U sixseven
+-- Connect:  psql -h localhost -p 6767 -U demo
 -- ============================================================================
 
 

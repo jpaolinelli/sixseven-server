@@ -275,7 +275,7 @@ TEST_F(SystemBootstrapTest, LoadSettingsAppliesOverrides) {
     exec_ok("UPDATE sys_settings SET value = '9999' WHERE key = 'server.port'");
 
     // Restore to default database.
-    use_database("sixseven");
+    use_database("demo");
 
     // Load settings from sys_settings.
     Config config = Config::load_defaults();
@@ -302,7 +302,7 @@ TEST_F(SystemBootstrapTest, ConfigPriorityChain) {
     EXPECT_EQ(qr.rows[0][0].as_string(), "7777");
 
     // Now load settings into a fresh defaults config.
-    use_database("sixseven");
+    use_database("demo");
     Config fresh = Config::load_defaults();
     EXPECT_EQ(fresh.port, 6767); // Default.
 

@@ -23,7 +23,7 @@ namespace sixseven {
 // ===========================================================================
 
 static void init_test_catalog(Catalog& catalog) {
-    auto r = catalog.restore_database(default_database_id, "sixseven");
+    auto r = catalog.restore_database(default_database_id, "demo");
     (void)r;
 }
 
@@ -47,7 +47,7 @@ static VirtualTableDef make_pg_database_def() {
         {1, "datname", TypeId::STRING, false, ""},
     };
     def.generator = []() -> std::vector<std::vector<std::string>> {
-        return {{"1", "sixseven"}, {"2", "sixseven_system"}};
+        return {{"1", "demo"}, {"2", "sixseven_system"}};
     };
     return def;
 }
@@ -573,7 +573,7 @@ TEST(QA_GDB564, Adversarial_ParserSchemaQualifiedInJoin) {
         {1, "datname", TypeId::STRING, false, ""},
     };
     def.generator = []() -> std::vector<std::vector<std::string>> {
-        return {{"1", "sixseven"}};
+        return {{"1", "demo"}};
     };
     catalog.register_virtual_table(def);
 

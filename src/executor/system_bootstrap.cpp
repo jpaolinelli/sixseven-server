@@ -63,25 +63,25 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
                               "failed to create sys_embedding_jobs: " + r_ej.error().message);
         }
 
-        // Create the default 'sixseven' database and persist it.
-        auto existing_db = catalog.get_database("sixseven");
+        // Create the default 'demo' database and persist it.
+        auto existing_db = catalog.get_database(default_database_name);
         if (!existing_db) {
-            auto r_db = catalog.restore_database(default_database_id, "sixseven");
+            auto r_db = catalog.restore_database(default_database_id, default_database_name);
             if (!r_db) {
                 return make_error(r_db.error().code,
-                                  "failed to create sixseven database: " + r_db.error().message);
+                                  "failed to create default database: " + r_db.error().message);
             }
         }
         auto dir_db = storage.create_database_storage(default_database_id);
         if (!dir_db) {
             return make_error(dir_db.error().code,
-                              "failed to create sixseven database storage: " +
+                              "failed to create default database storage: " +
                                   dir_db.error().message);
         }
-        auto p_db = persistence.persist_database(default_database_id, "sixseven");
+        auto p_db = persistence.persist_database(default_database_id, default_database_name);
         if (!p_db) {
             return make_error(p_db.error().code,
-                              "failed to persist sixseven database: " + p_db.error().message);
+                              "failed to persist default database: " + p_db.error().message);
         }
 
         // Ensure user table IDs start after all system tables.

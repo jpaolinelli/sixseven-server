@@ -500,7 +500,7 @@ TEST_F(QA_GDB657, DropSixsevenDatabaseBehavior) {
     // We just verify no crash. If it's allowed, check persistence is cleaned up.
     // If it's disallowed, that's also valid.
     if (result.has_value()) {
-        EXPECT_FALSE(sys_databases_contains("sixseven"))
+        EXPECT_FALSE(sys_databases_contains("demo"))
             << "if drop succeeds, sixseven should be removed from sys_databases";
     }
     // No crash is the main assertion here.

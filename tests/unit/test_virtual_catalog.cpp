@@ -44,7 +44,7 @@ TEST(VirtualCatalog, RegisterAndLookup) {
         {1, "datname", TypeId::STRING, false, ""},
     };
     def.generator = []() -> std::vector<std::vector<std::string>> {
-        return {{"1", "sixseven"}, {"2", "sixseven_system"}};
+        return {{"1", "demo"}, {"2", "sixseven_system"}};
     };
     catalog.register_virtual_table(std::move(def));
 
@@ -224,7 +224,7 @@ protected:
             {1, "datname", TypeId::STRING, false, ""},
         };
         def.generator = []() -> std::vector<std::vector<std::string>> {
-            return {{"1", "sixseven"}};
+            return {{"1", "demo"}};
         };
         catalog.register_virtual_table(std::move(def));
     }

@@ -53,7 +53,7 @@ protected:
         engine_->set_provider_cache(cache_.get());
 
         // Switch to default database for user operations.
-        use_database("sixseven");
+        use_database("demo");
     }
 
     void TearDown() override {
@@ -103,7 +103,7 @@ protected:
                           (is_default ? "TRUE" : "FALSE") + ", NULL)";
         exec_ok(sql);
 
-        use_database("sixseven");
+        use_database("demo");
         return id;
     }
 
@@ -222,7 +222,7 @@ TEST_F(ProviderCacheTest, UpdateProviderModel) {
     use_database(system_database_name);
     exec_ok("UPDATE sys_providers SET model = 'text-embedding-3-large' "
             "WHERE name = 'openai-prod'");
-    use_database("sixseven");
+    use_database("demo");
 
     auto provider = cache_->get("openai-prod");
     ASSERT_TRUE(provider.has_value());
@@ -235,7 +235,7 @@ TEST_F(ProviderCacheTest, UpdateProviderEndpoint) {
     use_database(system_database_name);
     exec_ok("UPDATE sys_providers SET endpoint = 'http://gpu-server:11434' "
             "WHERE name = 'ollama-local'");
-    use_database("sixseven");
+    use_database("demo");
 
     auto provider = cache_->get("ollama-local");
     ASSERT_TRUE(provider.has_value());
@@ -303,7 +303,7 @@ TEST_F(ProviderCacheTest, DeleteProvider) {
 
     use_database(system_database_name);
     exec_ok("DELETE FROM sys_providers WHERE name = 'openai-prod'");
-    use_database("sixseven");
+    use_database("demo");
 
     EXPECT_EQ(cache_->size(), 1u);
     EXPECT_FALSE(cache_->get("openai-prod").has_value());
@@ -347,7 +347,7 @@ TEST_F(ProviderCacheTest, ChangeDefault) {
     use_database(system_database_name);
     exec_ok("UPDATE sys_providers SET is_default = FALSE WHERE name = 'openai-prod'");
     exec_ok("UPDATE sys_providers SET is_default = TRUE WHERE name = 'ollama-local'");
-    use_database("sixseven");
+    use_database("demo");
 
     auto def = cache_->get_default();
     ASSERT_TRUE(def.has_value());
@@ -427,7 +427,7 @@ TEST_F(ProviderCacheTest, CacheConsistentAfterUpdate) {
 
     use_database(system_database_name);
     exec_ok("UPDATE sys_providers SET model = 'new-model' WHERE name = 'test-provider'");
-    use_database("sixseven");
+    use_database("demo");
 
     auto p = cache_->get("test-provider");
     ASSERT_TRUE(p.has_value());
@@ -440,7 +440,7 @@ TEST_F(ProviderCacheTest, CacheConsistentAfterDelete) {
 
     use_database(system_database_name);
     exec_ok("DELETE FROM sys_providers WHERE name = 'test-provider'");
-    use_database("sixseven");
+    use_database("demo");
 
     EXPECT_EQ(cache_->size(), 0u);
     EXPECT_FALSE(cache_->get("test-provider").has_value());
@@ -474,7 +474,7 @@ TEST_F(ProviderCacheTest, SelectFromSysProviders) {
 
     use_database(system_database_name);
     auto qr = exec_ok("SELECT name, type, model FROM sys_providers");
-    use_database("sixseven");
+    use_database("demo");
 
     ASSERT_EQ(qr.rows.size(), 2u);
 }
@@ -490,7 +490,7 @@ TEST_F(ProviderCacheTest, SelectWithWhereClause) {
 
     use_database(system_database_name);
     auto qr = exec_ok("SELECT name FROM sys_providers WHERE type = 'openai'");
-    use_database("sixseven");
+    use_database("demo");
 
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "openai-prod");
@@ -597,7 +597,7 @@ TEST_F(ProviderCacheTest, DeleteInUseProviderFails) {
     auto result = engine_->execute("DELETE FROM sys_providers WHERE name = 'openai-prod'");
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::CONSTRAINT_VIOLATION);
-    use_database("sixseven");
+    use_database("demo");
 
     // The provider should still exist in the cache (compensating re-insert).
     EXPECT_TRUE(cache_->get("openai-prod").has_value());
@@ -624,7 +624,7 @@ TEST_F(ProviderCacheTest, DeleteUnusedProviderSucceeds) {
     // Deleting the unused provider (ollama-local) should succeed.
     use_database(system_database_name);
     exec_ok("DELETE FROM sys_providers WHERE name = 'ollama-local'");
-    use_database("sixseven");
+    use_database("demo");
 
     EXPECT_FALSE(cache_->get("ollama-local").has_value());
     EXPECT_TRUE(cache_->get("openai-prod").has_value());
@@ -674,7 +674,7 @@ TEST_F(ProviderCacheTest, UpdateToDefaultAutomaticallyUnsetsOld) {
     // Update ollama-local to be the new default.
     use_database(system_database_name);
     exec_ok("UPDATE sys_providers SET is_default = TRUE WHERE name = 'ollama-local'");
-    use_database("sixseven");
+    use_database("demo");
 
     // ollama-local should now be the sole default.
     auto def = cache_->get_default();
@@ -762,7 +762,7 @@ protected:
         engine_->set_provider_cache(cache_.get());
 
         // Switch to default database for user operations.
-        use_database("sixseven");
+        use_database("demo");
     }
 
     void TearDown() override {
@@ -803,7 +803,7 @@ protected:
                           (is_default ? "TRUE" : "FALSE") + ", NULL)";
         exec_ok(sql);
 
-        use_database("sixseven");
+        use_database("demo");
         return id;
     }
 
@@ -815,7 +815,7 @@ protected:
                           "WHERE provider_id = " +
                           std::to_string(provider_id));
         engine_->pop_skip_masking();
-        use_database("sixseven");
+        use_database("demo");
 
         if (qr.rows.empty() || qr.rows[0][0].is_null()) {
             return "";
@@ -876,7 +876,7 @@ TEST_F(EncryptedProviderCacheTest, SelectMasksApiKey) {
 
     use_database(system_database_name);
     auto qr = exec_ok("SELECT name, api_key_encrypted FROM sys_providers");
-    use_database("sixseven");
+    use_database("demo");
 
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "openai-prod");
@@ -893,7 +893,7 @@ TEST_F(EncryptedProviderCacheTest, SelectStarMasksApiKey) {
 
     use_database(system_database_name);
     auto qr = exec_ok("SELECT * FROM sys_providers");
-    use_database("sixseven");
+    use_database("demo");
 
     ASSERT_EQ(qr.rows.size(), 1u);
 
@@ -914,7 +914,7 @@ TEST_F(EncryptedProviderCacheTest, NullApiKeyNotMasked) {
 
     use_database(system_database_name);
     auto qr = exec_ok("SELECT api_key_encrypted FROM sys_providers");
-    use_database("sixseven");
+    use_database("demo");
 
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_TRUE(qr.rows[0][0].is_null());
@@ -954,7 +954,7 @@ TEST_F(EncryptedProviderCacheTest, UpdateApiKeyReEncrypts) {
     use_database(system_database_name);
     exec_ok("UPDATE sys_providers SET api_key_encrypted = 'sk-new-key' "
             "WHERE name = 'openai-prod'");
-    use_database("sixseven");
+    use_database("demo");
 
     // The cache should have the new decrypted key.
     auto provider = cache_->get("openai-prod");

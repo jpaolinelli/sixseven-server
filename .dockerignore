@@ -1,8 +1,11 @@
 build/
+data/
+models/
 .git/
 .github/
 .vscode/
 .claude/
+scripts/
 *.exe
 *.obj
 *.o

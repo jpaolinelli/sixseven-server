@@ -117,7 +117,7 @@ protected:
         engine_->set_wal_writer(writer_.get());
 
         // Switch to user database.
-        use_database("sixseven");
+        use_database("demo");
     }
 
     void TearDown() override {

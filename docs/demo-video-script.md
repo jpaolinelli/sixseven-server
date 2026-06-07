@@ -1,418 +1,409 @@
-# SixSevenDB — Demo Video / Loom Script
-
-A ready-to-record walkthrough that shows off **one engine doing relational + graph +
-vector**, across both the **server** (PostgreSQL wire protocol) and the **web admin
-console**. Every query below is copy-paste-able and comes from
-[`docs/demo-queries.sql`](./demo-queries.sql), run against the auto-seeded **SixSeven
-Bookstore** demo database.
+# SixSevenDB Demo Video Script
 
-- **Target length:** ~9 minutes (a 60-second teaser cut is at the bottom).
-- **Goal:** get viewers to `docker pull` and try it. Lead with the payoff (three
-  databases in one), prove it live, end with a single command.
+Target length: 4:30
+Queries: docs/demo-queries.sql
+Demo database: SixSeven Bookstore (auto-seeded on first run)
 
----
 
-## Before you hit record (2-minute checklist)
+========================================
+PRE-RECORD CHECKLIST
+========================================
 
-- [ ] **Start from a clean data dir** so the demo DB seeds fresh and embeddings are
-      ready. The demo "SixSeven Bookstore" is auto-created on first run.
-- [ ] **Pre-warm vector search.** On first boot the ONNX model generates embeddings in
-      the background. Run one `NEAREST ...` query *before* recording so the model is
-      loaded and results are instant on camera.
-- [ ] **BM25 indexes ship pre-built.** The demo database auto-creates full-text indexes on
-      `books.description` and `reviews.review_text`, so the `MATCH ... TO` queries
-      return immediately — no setup needed. (If you want the "watch me add full-text
-      search" beat, you can still run `CREATE INDEX ... USING bm25` on another column live.)
-- [ ] **Web console running** (`cd web && npm run dev`) and connected — the status dot
-      top-right should be **green**.
-- [ ] **Login:** the connection profile defaults to `sixseven` / `sixseven`. Make sure
-      the password is filled in (auth is SCRAM-SHA-256 by default).
-- [ ] **Zoom in.** Bump the SQL editor / terminal font size (≥16pt) and use a ~1280×800
-      capture so text is legible after compression.
-- [ ] **Have a terminal ready** with `psql` (or the bundled `sixseven-cli`) for the
-      "it's just Postgres" moment.
-- [ ] **Hide secrets** — no real API keys / tokens on screen.
-- [ ] Keep `docs/demo-queries.sql` open in a side tab to copy from.
-
-> **Port note:** the server listens on **6767** by default and the Docker image exposes
-> **6767**, so `docker run -p 6767:6767 ...` and `psql -p 6767` match out of the box. If
-> you override the port via a mounted `config.json`, publish and connect to that port
-> instead.
+- Start from a clean data dir so the demo DB seeds fresh
+- Pre-warm vector search: run one NEAREST query before recording
+- Pre-run ALL hero queries once to verify results with current seed data
+- BM25 indexes ship pre-built, no setup needed
+- Web console running (cd web && npm run dev), green status dot
+- Login: sixseven / sixseven (SCRAM-SHA-256)
+- Font size 16pt or larger, capture at 1280x800
+- Terminal ready with psql or sixseven-cli
+- No API keys or tokens visible on screen
+- Keep docs/demo-queries.sql open in a side tab
+- Confirm reader 1 has enough follows for a visually impressive graph view
+- Test graph view renders on TRAVERSE results (click Graph tab)
 
----
 
-## 0:00 — Cold open (the hook) · ~15s
+========================================
+0:00  MONOLOGUE + REVEAL
+~30 seconds
+========================================
 
-**ON SCREEN:** The web console, Graph panel already showing a colorful node-and-edge
-network. Hold for a beat.
-
-**SAY:**
-> "This is one database. It's running a SQL query, a graph traversal, and a semantic
-> vector search — at the same time, over the same data. No Postgres plus Neo4j plus a
-> vector store glued together. One engine. It speaks the PostgreSQL wire protocol, and
-> it ships as a single Docker image. Let me show you."
-
----
-
-## 0:15 — What it is · ~30s
-
-**ON SCREEN:** Slowly pan the four panels in the left nav: **Schema, Query, Graph,
-Dashboard.**
+[BLACK SCREEN OR PRESENTER ON SIMPLE BACKDROP]
+[NO PRODUCT ON SCREEN YET]
 
-**SAY:**
-> "SixSevenDB is a hybrid relational, graph, and vector database written in C++20. If
-> you know SQL, you already know how to use it — it's PostgreSQL wire-compatible, so
-> `psql`, your ORM, and any Postgres driver just connect. The twist: alongside normal
-> tables and joins, you get native graph traversals, graph algorithms like PageRank,
-> semantic vector search, *and* BM25 full-text search — all in the same query language,
-> the same transaction, the same engine."
+I needed a relational database for structured data.
+A graph database for relationships and traversals.
+And a vector database for semantic search and AI.
 
----
-
-## 0:45 — Setup: one command, zero config · ~45s
-
-**ON SCREEN:** Terminal.
-
-```bash
-docker pull <your-registry>/sixsevendb:latest
-docker run -p 6767:6767 -v sixseven-data:/data <your-registry>/sixsevendb:latest
-```
-
-**SAY:**
-> "Here's the whole setup. Pull the image, run it. On first boot it bootstraps a demo
-> dataset — a fictional bookstore with authors, books, readers, reviews, a social graph
-> of who-follows-who, and pre-computed text embeddings. The embedding model is bundled
-> *inside the image*, so semantic search works offline, out of the box — no API keys,
-> no external service."
-
-**ON SCREEN:** Switch to the web console; point at the green status dot top-right.
+Three databases.
+Three sync pipelines.
+Three things to operate.
 
-**SAY:**
-> "I'll drive most of this from the web admin console, which talks to that same server.
-> Green dot — we're connected as the `sixseven` user."
-
----
-
-## 1:30 — Dashboard tour · ~30s
-
-**ON SCREEN:** Click **Dashboard**.
-
-**SAY:**
-> "The dashboard gives you the live pulse of the server — connections, throughput, and
-> the shape of your data at a glance. This is the admin console you get for free; point
-> any Postgres BI tool at the same port if you'd rather."
+And every time I wanted to answer one question
+that touched all three, I was writing glue code
+to stitch separate systems together.
 
----
+So I built one engine that does all three natively.
 
-## 2:00 — Relational basics: it's real SQL · ~60s
+[CUT TO SIXSEVENDB LOGO]
 
-**ON SCREEN:** Click **Query**. Paste and run, one at a time.
-
-```sql
-SELECT * FROM books LIMIT 10;
-```
-
-```sql
-SELECT title, rating, published_year, pages
-FROM books
-WHERE genre LIKE 'Thriller'
-ORDER BY rating DESC
-LIMIT 10;
-```
-
-```sql
-SELECT genre, COUNT(*) AS book_count, AVG(rating) AS avg_rating
-FROM books
-GROUP BY genre
-ORDER BY avg_rating DESC;
-```
+SixSevenDB.
 
-**SAY:**
-> "Let's start where everyone's comfortable — plain SQL. Select, filter, sort. Group-by
-> with aggregates. Notice the autocomplete knows the schema. This is a familiar
-> relational database; nothing exotic yet. The point is: your existing SQL knowledge
-> carries over completely."
+[CUT TO TERMINAL]
 
----
+    psql -h localhost -p 6767 -U sixseven
 
-## 3:00 — Joins: relational power · ~45s
+It speaks PostgreSQL wire protocol.
+psql connects. Your ORM connects.
+Let me show you what this engine can do.
 
-**ON SCREEN:** Run:
 
-```sql
-SELECT b.title, b.genre, r.stars, rd.username
-FROM reviews r
-JOIN books b ON b.id = r.book_id
-JOIN readers rd ON rd.id = r.reader_id
-WHERE rd.city = 'Tokyo'
-ORDER BY r.stars DESC
-LIMIT 10;
-```
-
-**SAY:**
-> "Multi-table joins, exactly as you'd expect — what are readers in Tokyo reviewing?
-> Three tables, joined and filtered. So far, a competent SQL database. Now let's do the
-> thing other SQL databases make painful."
+========================================
+0:30  SCHEMA DDL: BUILDING A GRAPH RAG SCHEMA
+~45 seconds
+========================================
 
----
+[WEB CONSOLE QUERY PANEL]
 
-## 3:45 — Graph traversal (the visual wow) · ~90s
+First, how you build a Graph RAG schema.
 
-**ON SCREEN:** Run:
+    CREATE TABLE documents (
+        id INT PRIMARY KEY,
+        title TEXT,
+        body TEXT,
+        body_vec EMBEDDING(384, body, 'local')
+    );
 
-```sql
-SELECT username, city, __depth
-FROM TRAVERSE follows FROM readers(1) DIRECTION OUT MAX_DEPTH 3;
-```
+EMBEDDING is a column type.
+You declare the source text column and the provider.
+The engine generates and indexes vectors automatically.
+No external pipeline, no batch job.
 
-**SAY:**
-> "This is a graph traversal — walk the `follows` relationships out from reader 1, up to
-> three hops. Friend, friend-of-friend, friend-of-friend-of-friend. In a normal SQL
-> database that's a gnarly recursive CTE. Here it's a first-class `TRAVERSE` clause, and
-> `__depth` tells you how many hops away each reader is."
+    CREATE EDGE TYPE cites FROM documents TO documents;
+    CREATE EDGE TYPE authored FROM authors TO documents;
 
-**ON SCREEN:** Switch the results view from **Table** to **Graph**. Let the network
-render and settle.
-
-**SAY:**
-> "And because it knows this is a graph, the console renders it as one — nodes are
-> readers, edges are follows. You can see the network structure immediately."
+Edge types are first-class schema objects.
+They define relationships between tables.
 
-**ON SCREEN:** Run the filtered traversal:
-
-```sql
-SELECT username, city, __depth
-FROM TRAVERSE follows FROM readers(1) DIRECTION OUT MAX_DEPTH 3
-WHERE city = 'London';
-```
-
-**SAY:**
-> "I can filter mid-traversal — say, only readers in London within three hops — and
-> still see how they connect back through the network. Relational filtering and graph
-> structure, together, in one query."
-
-> **Recorder tip:** drag a node or two so the layout looks alive; hover an edge to show
-> the relationship. This filtered query's nodes connect through intermediate readers, so
-> the graph stays connected.
-
----
-
-## 5:15 — Graph algorithms as table functions · ~45s
-
-**ON SCREEN:** Run:
-
-```sql
-SELECT node_id, score
-FROM PageRank('follows')
-ORDER BY score DESC
-LIMIT 10;
-```
-
-```sql
-SELECT node_id, centrality
-FROM betweenness('follows')
-ORDER BY centrality DESC
-LIMIT 10;
-```
-
-**SAY:**
-> "It's not just traversal — real graph analytics ship in the box. PageRank to find the
-> most influential readers. Betweenness centrality to find the people who bridge
-> communities. There's also connected components and closeness. They're exposed as table
-> functions, so you `SELECT` from them and compose them with the rest of your SQL."
-
----
-
-## 6:00 — Vector search: semantic, built in · ~75s
-
-**ON SCREEN:** Run:
-
-```sql
-SELECT * FROM books WHERE NEAREST(description_vec, 5) TO 'time travel adventure';
-```
-
-```sql
-SELECT * FROM books WHERE NEAREST(description_vec, 5) TO 'artificial intelligence and technology';
-```
-
-**SAY:**
-> "Now the third database. These books have an embedding column — a vector generated from
-> the description by the bundled model. `NEAREST` does semantic search: I type a
-> natural-language idea — 'time travel adventure' — and it returns the books that *mean*
-> that, even when the words don't match. Change the phrase, change the meaning, get
-> different books. This is the same kind of search powering AI apps and RAG — and it's a
-> native column type with an HNSW index, not a bolted-on extension."
-
-**ON SCREEN:** Run:
-
-```sql
-SELECT * FROM books WHERE NEAREST(description_vec, 10) TO 'survival story on a remote island' USING COSINE;
-```
-
-**SAY:**
-> "You pick the distance metric, and it's indexed for speed. No separate vector store to
-> keep in sync — the embeddings live next to your rows and update with them."
+    LINK authors(1) TO documents(42) VIA authored;
+    LINK documents(42) TO documents(7) VIA cites;
 
----
+LINK connects rows with typed edges.
+Now you have a knowledge graph
+with embedded vectors, in one schema.
 
-## 7:15 — Full-text search: BM25, the other kind of search · ~60s
+The demo ships with a bookstore dataset
+that already has this wired up:
+books, authors, readers, reviews,
+a social graph, and text embeddings.
 
-**ON SCREEN:** Run, one at a time:
+Let me show you what you can do with it.
 
-```sql
-SELECT title, genre, _score
-FROM books
-WHERE MATCH(description) TO 'political intrigue power'
-ORDER BY _score DESC
-LIMIT 10;
-```
 
-**SAY:**
-> "Vector search finds *meaning*. But sometimes you want the opposite — exact keywords,
-> ranked by relevance. That's BM25, the algorithm behind Lucene and Elasticsearch. The
-> demo ships with a full-text index on the book descriptions — built with one
-> `CREATE INDEX ... USING bm25` — so `MATCH ... TO` ranks every book by how well its
-> description matches my keywords. `_score` is the relevance, highest first — and it
-> composes with everything else SQL gives you."
+========================================
+1:15  GRAPH + VECTOR BASICS
+~45 seconds
+========================================
 
-**ON SCREEN:** Run the hybrid filter, then the lexical-vs-semantic contrast:
+[RUN QUERY]
 
-```sql
-SELECT title, rating, _score
-FROM books
-WHERE MATCH(description) TO 'detective' AND genre = 'Mystery'
-ORDER BY _score DESC LIMIT 10;
-```
+    SELECT username, city, __depth
+    FROM TRAVERSE follows FROM readers(1) DIRECTION OUT MAX_DEPTH 3;
 
-```sql
--- Keywords must appear (lexical):
-SELECT title, _score FROM books
-WHERE MATCH(description) TO 'survival island'
-ORDER BY _score DESC LIMIT 5;
--- Meaning, even without those words (semantic):
-SELECT * FROM books WHERE NEAREST(description_vec, 5) TO 'survival story on a remote island';
-```
+Graph traversal. One clause.
+Walk the social network three hops deep.
+Friend, friend-of-friend, friend-of-friend-of-friend.
 
-**SAY:**
-> "I can mix full-text relevance with a plain `genre` filter in the same `WHERE`. And
-> here's the punchline — lexical and semantic search, side by side: BM25 wants the words
-> 'survival' and 'island' to actually appear; the vector search returns books that *mean*
-> survival on a remote island even when the wording differs. Same data, same engine, two
-> complementary kinds of search — and the index stays in sync automatically as rows
-> change."
+Not a recursive CTE. A first-class TRAVERSE.
 
----
+[SWITCH TO GRAPH VIEW -- LET THE NETWORK RENDER AND SETTLE]
+[DRAG A NODE OR TWO SO THE LAYOUT LOOKS ALIVE]
 
-## 8:15 — The payoff: one engine, four models · ~30s
+And the console renders it as a network.
 
-**SAY:**
-> "Here's why that matters. In a normal stack you'd run Postgres for the tables, a graph
-> database for the relationships, a vector store for the embeddings, and a search engine
-> like Elasticsearch for full-text — four systems, four sync pipelines, four things to
-> operate. SixSevenDB is *one* engine, *one* copy of the data, *one* transaction.
-> Relational, graph, vector, and full-text, side by side."
+[BACK TO QUERY PANEL]
+[RUN QUERY]
 
----
+    SELECT title, genre, rating
+    FROM books
+    WHERE NEAREST(description_vec, 5)
+      TO 'a desperate struggle for survival against nature';
 
-## 8:45 — "It's just Postgres" + EXPLAIN · ~30s
+Semantic search. One clause.
+Natural language in, relevant books out,
+even when the exact words don't appear.
 
-**ON SCREEN:** Terminal — connect with plain `psql`:
+Graph traversal, one clause.
+Semantic search, one clause.
 
-```bash
-psql -h localhost -p 6767 -U sixseven
-```
+Now watch what happens when you combine them.
 
-```sql
-EXPLAIN ANALYZE SELECT * FROM books WHERE rating > 4.0;
-```
 
-**SAY:**
-> "And it really is wire-compatible — here's stock `psql` connecting, no special client.
-> `EXPLAIN ANALYZE` shows you the real execution plan and timing, just like you'd
-> expect. Your tools, your drivers, your habits — they all work."
+========================================
+2:00  HERO 1: GRAPH-SCOPED VECTOR SEARCH
+~45 seconds
+========================================
 
----
+[PAUSE FOR EFFECT]
+[TYPE THE QUERY SLOWLY, LET THE AUDIENCE READ IT]
+[RUN QUERY]
 
-## 9:15 — Close + call to action · ~20s
+    SELECT title, genre, rating
+    FROM books
+    WHERE NEAREST(description_vec, 5)
+      TO 'mind-bending science fiction about consciousness'
+    WITHIN TRAVERSE follows FROM readers(1) DIRECTION OUT MAX_DEPTH 2;
 
-**ON SCREEN:** Back to the Graph panel (the pretty shot). Overlay the pull command.
+Graph RAG in one statement.
 
-**SAY:**
-> "That's SixSevenDB: relational, graph, vector, and full-text in a single
-> PostgreSQL-compatible engine, in one Docker image you can run right now. Pull it, point
-> `psql` at it, open the console, and try your own data. Link's in the description — I'd
-> love to hear what you build."
+The engine traverses reader 1's social network
+two hops deep, collects the candidate set,
+then runs semantic vector search
+only within that subgraph.
 
-```bash
-docker run -p 6767:6767 <your-registry>/sixsevendb:latest
-```
+No pipeline. No orchestration code.
+No syncing between systems.
+One query. One transaction.
 
----
+The graph shapes what the vector search sees.
 
-## Appendix A — 60-second teaser cut (for X / LinkedIn)
+This is what Graph RAG looks like
+when it's native to the engine.
+
+
+========================================
+2:45  HERO 2: MATCH PATTERN + VECTOR SEARCH
+~50 seconds
+========================================
+
+[TYPE THE QUERY]
+[RUN QUERY]
+
+    SELECT b.title, b.genre, b.rating
+    FROM books b
+    WHERE NEAREST(b.description_vec, 10)
+      TO 'epic fantasy with political intrigue'
+    AND b.id IN (
+      MATCH (rd:readers)-[f:follows]->{1,3}(friend:readers)
+            <-[rv:reviewed_by]-(book:books)
+      WHERE rd.id = 1
+      RETURN book.id
+    );
+
+One query. Let me break it down.
+
+The MATCH clause pattern-matches
+reader 1's social network
+with variable-length paths:
+one to three hops of follows.
+
+For every friend-of-a-friend it finds,
+it discovers books they reviewed
+via the graph edge.
+
+Then NEAREST runs semantic vector search
+over only those books
+for "epic fantasy with political intrigue."
+
+Graph pattern matching.
+Variable-length traversal.
+Semantic vector similarity.
+All in one SQL statement.
+
+This is what no combination of separate
+databases can give you.
+
+
+========================================
+3:35  HERO 3: PAGERANK + JOIN + BM25
+~40 seconds
+========================================
+
+[RUN QUERY]
+
+    SELECT rd.username, r.stars, r.review_text, _score
+    FROM reviews r
+    JOIN readers rd ON rd.id = r.reader_id
+    JOIN (
+      SELECT node_id FROM PageRank('follows')
+      ORDER BY score DESC LIMIT 20
+    ) AS influencers ON influencers.node_id = r.reader_id
+    WHERE MATCH(r.review_text) TO 'masterpiece'
+      AND r.stars >= 4
+    ORDER BY _score DESC
+    LIMIT 10;
+
+PageRank runs over the social graph.
+Finds the 20 most influential readers.
+
+Standard SQL JOIN pulls their reviews.
+
+BM25 full-text search ranks by
+the keyword "masterpiece."
+Filter to four stars and above.
+
+Graph algorithm, relational join, full-text search.
+One query. One result set.
+
+Algorithms are table functions.
+They compose with everything SQL gives you.
+
+
+========================================
+4:15  CLOSE + CALL TO ACTION
+~15 seconds
+========================================
+
+[GRAPH PANEL -- THE PRETTY SHOT]
+[OVERLAY THE DOCKER RUN COMMAND]
+
+That is SixSevenDB.
+
+Your relational database,
+your graph database,
+your vector database,
+and your search engine.
+
+One C++ engine.
+One transaction.
+PostgreSQL-compatible.
+
+    docker run -p 6767:6767 sixsevendb/sixsevendb:latest
+
+Pull it and try your own data.
+
+
+========================================
+QUERY REFERENCE SHEET
+========================================
+
+Copy-paste these from docs/demo-queries.sql
+
+SETUP
+    psql -h localhost -p 6767 -U sixseven
+
+DDL-1  CREATE TABLE documents (
+           id INT PRIMARY KEY,
+           title TEXT,
+           body TEXT,
+           body_vec EMBEDDING(384, body, 'local')
+       );
+
+DDL-2  CREATE EDGE TYPE cites FROM documents TO documents;
+       CREATE EDGE TYPE authored FROM authors TO documents;
+
+DDL-3  LINK authors(1) TO documents(42) VIA authored;
+       LINK documents(42) TO documents(7) VIA cites;
+
+Q1  SELECT username, city, __depth
+    FROM TRAVERSE follows FROM readers(1) DIRECTION OUT MAX_DEPTH 3;
+
+Q2  SELECT title, genre, rating FROM books
+    WHERE NEAREST(description_vec, 5)
+      TO 'a desperate struggle for survival against nature';
+
+HERO-1  SELECT title, genre, rating FROM books
+        WHERE NEAREST(description_vec, 5)
+          TO 'mind-bending science fiction about consciousness'
+        WITHIN TRAVERSE follows FROM readers(1) DIRECTION OUT MAX_DEPTH 2;
+
+HERO-2  SELECT b.title, b.genre, b.rating
+        FROM books b
+        WHERE NEAREST(b.description_vec, 10)
+          TO 'epic fantasy with political intrigue'
+        AND b.id IN (
+          MATCH (rd:readers)-[f:follows]->{1,3}(friend:readers)
+                <-[rv:reviewed_by]-(book:books)
+          WHERE rd.id = 1
+          RETURN book.id
+        );
+
+HERO-3  SELECT rd.username, r.stars, r.review_text, _score
+        FROM reviews r
+        JOIN readers rd ON rd.id = r.reader_id
+        JOIN (
+          SELECT node_id FROM PageRank('follows')
+          ORDER BY score DESC LIMIT 20
+        ) AS influencers ON influencers.node_id = r.reader_id
+        WHERE MATCH(r.review_text) TO 'masterpiece'
+          AND r.stars >= 4
+        ORDER BY _score DESC LIMIT 10;
+
+
+========================================
+APPENDIX A: 60-SECOND TEASER CUT (X / LINKEDIN)
+========================================
 
 Fast, no narration pauses, captions on. One screen: the web console.
 
-1. **0:00–0:05** — Graph panel network on screen. Caption: *"One database. SQL + Graph +
-   Vector + Full-text."*
-2. **0:05–0:16** — Type and run a `GROUP BY` aggregate. Caption: *"Real SQL. It's
-   Postgres-wire compatible."*
-3. **0:16–0:30** — Run the `TRAVERSE ... MAX_DEPTH 3` query, flip to Graph view, drag a
-   node. Caption: *"Native graph traversals — no recursive CTEs."*
-4. **0:30–0:42** — Run `SELECT * FROM books WHERE NEAREST(description_vec, 5) TO 'time travel adventure'`.
-   Caption: *"Semantic vector search, built in. Model included."*
-5. **0:42–0:52** — Run `... WHERE MATCH(description) TO 'political intrigue' ORDER BY
-   _score DESC`. Caption: *"BM25 full-text search, ranked by relevance."*
-6. **0:52–1:00** — Cut to terminal: `docker run -p 6767:6767 .../sixsevendb`. Caption:
-   *"One image. Try it now 👇"*
+0:00-0:05   Graph panel network on screen
+            Caption: "One database. Graph + Vector + Full-text. Native Graph RAG."
 
----
+0:05-0:15   Type and run TRAVERSE query, flip to Graph view
+            Caption: "First-class graph traversals. Not a recursive CTE."
 
-## Appendix B — Query cheat-sheet (in record order)
+0:15-0:25   Run NEAREST description_vec TO 'survival against nature'
+            Caption: "Semantic vector search. Embeddings are a column type."
 
-| # | Segment | Query (short form) |
-|---|---------|--------------------|
-| 1 | Relational | `SELECT * FROM books LIMIT 10;` |
-| 2 | Filter/sort | `... FROM books WHERE genre LIKE 'Thriller' ORDER BY rating DESC` |
-| 3 | Aggregate | `SELECT genre, COUNT(*), AVG(rating) FROM books GROUP BY genre` |
-| 4 | Join | `reviews ⋈ books ⋈ readers WHERE rd.city = 'Tokyo'` |
-| 5 | Traversal | `TRAVERSE follows FROM readers(1) DIRECTION OUT MAX_DEPTH 3` |
-| 6 | Filtered traversal | `... MAX_DEPTH 3 WHERE city = 'London'` |
-| 7 | PageRank | `SELECT node_id, score FROM PageRank('follows') ...` |
-| 8 | Betweenness | `SELECT node_id, centrality FROM betweenness('follows') ...` |
-| 9 | Vector | `SELECT * FROM books WHERE NEAREST(description_vec, 5) TO 'time travel adventure'` |
-| 10 | Vector + metric | `... WHERE NEAREST(description_vec, 10) TO 'survival story on a remote island' USING COSINE` |
-| 11 | BM25 search | `... WHERE MATCH(description) TO 'political intrigue power' ORDER BY _score DESC` |
-| 12 | BM25 + filter | `... WHERE MATCH(description) TO 'detective' AND genre = 'Mystery'` |
-| 13 | Plan | `EXPLAIN ANALYZE SELECT * FROM books WHERE rating > 4.0` |
+0:25-0:42   Run HERO-1: NEAREST WITHIN TRAVERSE
+            Caption: "Graph RAG in one query. Traverse the graph, vector search the subgraph."
 
-(The BM25 indexes ship pre-built with the demo DB; `CREATE INDEX ... USING bm25` is how you'd add your own.)
+0:42-0:52   Run HERO-2: MATCH + NEAREST
+            Caption: "Pattern matching + variable-length paths + vector search. One statement."
 
-Full set: [`docs/demo-queries.sql`](./demo-queries.sql).
+0:52-1:00   Cut to terminal: docker run -p 6767:6767 sixsevendb/sixsevendb:latest
+            Caption: "PostgreSQL-compatible. Try it now."
 
----
 
-## Appendix C — Talking points / FAQ to keep in your back pocket
+========================================
+APPENDIX B: TALKING POINTS / FAQ
+========================================
 
-- **"Why not just use Postgres + pgvector + a graph extension?"** One engine means one
-  copy of the data, one transaction boundary, and one thing to operate — no ETL/sync
-  between three systems, and your graph/vector queries join directly against your tables.
-- **"Is it really Postgres-compatible?"** It speaks the v3 wire protocol — `psql` and
-  standard Postgres drivers connect. (Set expectations honestly on SQL surface coverage.)
-- **"Where do the embeddings come from?"** A local ONNX model (`all-MiniLM-L6-v2`) is
-  bundled in the image — semantic search works with no external API. You can also wire up
-  OpenAI/Ollama providers for other models.
-- **"BM25 vs vector search — when do I use which?"** BM25 (full-text) is *lexical*: it
-  ranks by exact keyword matches, with stemming and stop-words — great for precise terms,
-  names, and codes. Vector search is *semantic*: it matches meaning even when the words
-  differ — great for natural-language and RAG. They're complementary, and because both
-  live in one engine you can combine them (and add plain SQL filters) in a single query.
-- **"Does the full-text index stay in sync?"** Yes — `INSERT`/`UPDATE`/`DELETE` maintain
-  the BM25 index incrementally, and it's persisted so it survives a restart.
-- **"What's under the hood?"** C++20, Volcano-style executor, buffer pool, write-ahead
-  log, MVCC, B+-tree indexes, an HNSW index for vectors, and a BM25 inverted index for
-  full-text.
-- **Default login** is `sixseven` / `sixseven` over SCRAM-SHA-256 — tell viewers to
-  change it for anything real.
-</content>
-</invoke>
+"Why not Postgres + pgvector + Apache AGE?"
+    One engine = one copy of the data, one transaction boundary,
+    one thing to operate. No ETL/sync between systems.
+    Graph traversals and vector search compose natively in one query.
+    You cannot do NEAREST WITHIN TRAVERSE in a Postgres extension stack.
+
+"What is Graph RAG?"
+    Retrieval-Augmented Generation where the retrieval step uses
+    graph structure to scope or enrich the context window.
+    Instead of naive top-K vector search, you traverse relationships
+    first, then search semantically within that subgraph.
+    SixSevenDB makes this a single query, not a multi-step pipeline.
+
+"Is it really Postgres-compatible?"
+    It speaks the v3 wire protocol. psql and standard Postgres
+    drivers connect. Be honest about SQL surface coverage:
+    the core language is there, not every pg_catalog view.
+
+"Where do the embeddings come from?"
+    A local ONNX model (all-MiniLM-L6-v2) is bundled in the image.
+    Semantic search works with no external API. You can also wire
+    up OpenAI/Ollama providers for other models via configuration.
+
+"How does EMBEDDING differ from pgvector?"
+    EMBEDDING is a column type that auto-generates vectors from a
+    source text column. You don't manage embeddings yourself.
+    INSERT a row with text, the engine embeds it, indexes it.
+    UPDATE the text, the vector updates automatically.
+
+"BM25 vs vector search: when do I use which?"
+    BM25 is lexical: ranks by exact keyword matches with stemming.
+    Vector search is semantic: matches meaning.
+    They're complementary. Both live in one engine so you can
+    combine them or use them independently in the same query.
+
+"What graph algorithms ship built-in?"
+    PageRank, betweenness centrality, closeness centrality,
+    connected components. Exposed as table functions so they
+    compose with standard SQL (JOIN, WHERE, ORDER BY, etc.).
+
+"What's under the hood?"
+    C++20, Volcano-style executor, buffer pool, write-ahead log,
+    MVCC, B+-tree indexes, HNSW index for vectors, BM25 inverted
+    index for full-text. Everything from scratch, no Postgres fork.
+
+"Default login?"
+    sixseven / sixseven over SCRAM-SHA-256.
+    Tell viewers to change it for anything real.

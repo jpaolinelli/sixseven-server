@@ -460,14 +460,14 @@ TEST(UserManager, GetNonexistentUserReturnsNullopt) {
 
 TEST(UserManager, EnsureDefaultAdmin) {
     UserManager mgr;
-    EXPECT_FALSE(mgr.user_exists("sixseven"));
+    EXPECT_FALSE(mgr.user_exists("demo"));
 
     mgr.ensure_default_admin(AuthMethod::SCRAM_SHA_256);
-    EXPECT_TRUE(mgr.user_exists("sixseven"));
+    EXPECT_TRUE(mgr.user_exists("demo"));
 
-    auto record = mgr.get_user("sixseven");
+    auto record = mgr.get_user("demo");
     ASSERT_TRUE(record.has_value());
-    EXPECT_EQ(record->username, "sixseven");
+    EXPECT_EQ(record->username, "demo");
     // Should be SCRAM-formatted hash.
     EXPECT_TRUE(record->password_hash.substr(0, 14) == "SCRAM-SHA-256$");
 }
@@ -475,11 +475,11 @@ TEST(UserManager, EnsureDefaultAdmin) {
 TEST(UserManager, EnsureDefaultAdminIdempotent) {
     UserManager mgr;
     mgr.ensure_default_admin(AuthMethod::MD5);
-    auto first_hash = mgr.get_user("sixseven")->password_hash;
+    auto first_hash = mgr.get_user("demo")->password_hash;
 
     // Calling again should not overwrite.
     mgr.ensure_default_admin(AuthMethod::MD5);
-    auto second_hash = mgr.get_user("sixseven")->password_hash;
+    auto second_hash = mgr.get_user("demo")->password_hash;
     EXPECT_EQ(first_hash, second_hash);
 }
 

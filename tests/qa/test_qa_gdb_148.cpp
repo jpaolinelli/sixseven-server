@@ -296,12 +296,12 @@ TEST(QA148UserMgr, AlterFromMd5ToScram) {
 
 TEST(QA148UserMgr, EnsureDefaultAdminDoesNotOverwrite) {
     UserManager mgr;
-    (void)mgr.create_user("sixseven", "custom_pass", AuthMethod::MD5);
-    auto before = mgr.get_user("sixseven");
+    (void)mgr.create_user("demo", "custom_pass", AuthMethod::MD5);
+    auto before = mgr.get_user("demo");
 
     mgr.ensure_default_admin(AuthMethod::SCRAM_SHA_256);
 
-    auto after = mgr.get_user("sixseven");
+    auto after = mgr.get_user("demo");
     ASSERT_TRUE(after.has_value());
     // Should NOT have been overwritten to SCRAM.
     EXPECT_EQ(before->password_hash, after->password_hash);

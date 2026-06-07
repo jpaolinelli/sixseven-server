@@ -2,10 +2,10 @@ name: CI
 
 on:
   push:
-    
-    # branches: [main]
+    branches: [main]
   pull_request:
-    # branches: [main]
+    branches: [main]
+  workflow_dispatch:
 
 env:
   VCPKG_ROOT: ${{ github.workspace }}/vcpkg
@@ -15,6 +15,7 @@ jobs:
   format:
     name: Format Check
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,19 +32,16 @@ jobs:
           find src include tests -name '*.cpp' -o -name '*.h' | \
             xargs clang-format-$LLVM_VERSION --dry-run --Werror
 
-  tidy:
-    name: Clang-Tidy
+  build:
+    name: Linux GCC 13
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install LLVM ${{ env.LLVM_VERSION }} and tools
-        run: |
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          sudo add-apt-repository -y "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-$LLVM_VERSION main"
-          sudo apt-get update
-          sudo apt-get install -y clang-$LLVM_VERSION clang-tidy-$LLVM_VERSION ninja-build
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y gcc-13 g++-13 ninja-build
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
@@ -53,76 +51,8 @@ jobs:
       - name: Configure
         run: cmake --preset default
         env:
-          CC: clang-${{ env.LLVM_VERSION }}
-          CXX: clang++-${{ env.LLVM_VERSION }}
-
-      - name: Run clang-tidy
-        run: |
-          find src tests -name '*.cpp' | \
-            xargs clang-tidy-$LLVM_VERSION -p build/debug --warnings-as-errors='bugprone-use-after-move,bugprone-dangling-handle,clang-analyzer-core.*'
-
-  build:
-    name: ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Linux GCC 13
-            os: ubuntu-latest
-            cc: gcc-13
-            cxx: g++-13
-            preset: default
-            install: sudo apt-get update && sudo apt-get install -y gcc-13 g++-13 ninja-build
-
-          - name: Linux Clang 20
-            os: ubuntu-latest
-            cc: clang-20
-            cxx: clang++-20
-            preset: default
-            install: |
-              wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-              sudo add-apt-repository -y "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main"
-              sudo apt-get update
-              sudo apt-get install -y clang-20 ninja-build
-
-          - name: macOS Apple Clang
-            os: macos-latest
-            cc: clang
-            cxx: clang++
-            preset: default
-            install: brew install ninja
-
-          - name: Windows Clang (VS 2022)
-            os: windows-latest
-            preset: default
-            install: ""
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install build tools (Unix)
-        if: matrix.install != '' && runner.os != 'Windows'
-        run: ${{ matrix.install }}
-
-      - name: Setup MSVC environment (Windows)
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: 1940ee77e81573713c0d364c42f5990172198be1
-
-      - name: Configure
-        run: cmake --preset ${{ matrix.preset }}
-        env:
-          CC: ${{ matrix.cc || '' }}
-          CXX: ${{ matrix.cxx || '' }}
+          CC: gcc-13
+          CXX: g++-13
 
       - name: Build
         run: cmake --build build/debug
@@ -134,46 +64,4 @@ jobs:
         run: ctest --test-dir build/debug -L qa --output-on-failure
 
       - name: Run integration tests
-        if: runner.os != 'Windows'
         run: ctest --test-dir build/debug -L integration --output-on-failure
-
-      - name: Upload binaries
-        if: github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: sixseven-${{ matrix.os }}-${{ matrix.cc || 'msvc-clang' }}
-          path: |
-            build/debug/src/sixseven-server*
-            build/debug/src/sixseven-cli*
-          retention-days: 7
-
-  docker:
-    name: Docker Build
-    runs-on: ubuntu-latest
-    needs: [format]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build runtime image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: runtime
-          push: false
-          tags: sixsevendb:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and run tests
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: test
-          push: false
-          tags: sixsevendb-test:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max

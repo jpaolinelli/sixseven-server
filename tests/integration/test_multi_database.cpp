@@ -142,10 +142,10 @@ TEST_F(MultiDatabaseTest, DropDatabaseIfExistsOnNonExistentSucceeds) {
 }
 
 TEST_F(MultiDatabaseTest, CannotDropDefaultDatabase) {
-    exec_error("DROP DATABASE sixseven", StatusCode::CONSTRAINT_VIOLATION);
+    exec_error("DROP DATABASE demo", StatusCode::CONSTRAINT_VIOLATION);
 
     // Default database should still exist.
-    auto db = catalog_.get_database("sixseven");
+    auto db = catalog_.get_database("demo");
     EXPECT_TRUE(db.has_value());
 }
 
@@ -172,7 +172,7 @@ TEST_F(MultiDatabaseTest, SameTableNameInDifferentDatabases) {
     EXPECT_EQ(qr_app.rows[0][1].as_string(), "app_bob");
 
     // Switch back and verify default database sees only its own data.
-    use_database("sixseven");
+    use_database("demo");
 
     auto qr_default = exec_ok("SELECT * FROM users");
     ASSERT_EQ(qr_default.rows.size(), 1u);
@@ -195,7 +195,7 @@ TEST_F(MultiDatabaseTest, InsertIsolationAcrossDatabases) {
     ASSERT_EQ(qr_metrics.rows.size(), 1u);
     EXPECT_EQ(qr_metrics.rows[0][1].as_int32(), 999);
 
-    use_database("sixseven");
+    use_database("demo");
     auto qr_default = exec_ok("SELECT * FROM counters");
     ASSERT_EQ(qr_default.rows.size(), 1u);
     EXPECT_EQ(qr_default.rows[0][1].as_int32(), 100);
@@ -216,7 +216,7 @@ TEST_F(MultiDatabaseTest, DropTableInOneDatabaseDoesNotAffectOther) {
     exec_error("SELECT * FROM shared", StatusCode::NOT_FOUND);
 
     // Default database table should be untouched.
-    use_database("sixseven");
+    use_database("demo");
     auto qr = exec_ok("SELECT * FROM shared");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_int32(), 1);
@@ -237,7 +237,7 @@ TEST_F(MultiDatabaseTest, CascadeDropRemovesAllTablesAndDatabase) {
     exec_ok("CREATE TABLE inventory (id INT, qty INT)");
 
     // Switch back so we're not in the database being dropped.
-    use_database("sixseven");
+    use_database("demo");
 
     auto qr = exec_ok("DROP DATABASE warehouse CASCADE");
     EXPECT_EQ(qr.message, "DROP DATABASE");
@@ -253,7 +253,7 @@ TEST_F(MultiDatabaseTest, DropDatabaseWithoutCascadeFailsIfTablesExist) {
 
     exec_ok("CREATE TABLE t1 (id INT)");
 
-    use_database("sixseven");
+    use_database("demo");
     exec_error("DROP DATABASE mydb", StatusCode::CONSTRAINT_VIOLATION);
 
     // Database should still exist.
@@ -275,7 +275,7 @@ TEST_F(MultiDatabaseTest, CascadeDropCleansUpStorageDirectory) {
     EXPECT_TRUE(fs::exists(database_dir(db_id)))
         << "database directory should exist after creating tables";
 
-    use_database("sixseven");
+    use_database("demo");
     exec_ok("DROP DATABASE storagetest CASCADE");
 
     // Verify the database directory is removed from disk.
@@ -323,7 +323,7 @@ TEST_F(MultiDatabaseTest, DDLTargetsCurrentDatabase) {
     EXPECT_EQ(qr.rows.size(), 1u);
 
     // Default database should not see it.
-    use_database("sixseven");
+    use_database("demo");
     exec_error("SELECT * FROM local_table", StatusCode::NOT_FOUND);
 }
 
@@ -468,7 +468,7 @@ TEST_F(MultiDatabaseTest, FullLifecycleAcrossTwoDatabases) {
     EXPECT_EQ(sales_check.rows.size(), 2u);
 
     // Step 9: Drop 'inventory' database with cascade.
-    use_database("sixseven");
+    use_database("demo");
     exec_ok("DROP DATABASE inventory CASCADE");
 
     // Step 10: Verify 'sales' is still intact.

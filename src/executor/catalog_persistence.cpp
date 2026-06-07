@@ -660,12 +660,12 @@ Result<void> CatalogPersistence::migrate_databases_from_sys_tables() {
         }
     }
 
-    // Always ensure the default sixseven database is included.
+    // Always ensure the default database is included.
     db_ids.insert(default_database_id);
 
     // Insert each database into sys_databases.
     for (auto db_id : db_ids) {
-        std::string name = (db_id == default_database_id) ? "sixseven"
+        std::string name = (db_id == default_database_id) ? default_database_name
                                                           : "database_" + std::to_string(db_id);
         auto r = insert_row(sys_databases_table_id, {Value(db_id), Value(name)});
         if (!r) {

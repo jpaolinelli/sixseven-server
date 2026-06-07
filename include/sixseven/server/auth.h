@@ -110,7 +110,7 @@ public:
     /// Check if a user exists.
     bool user_exists(const std::string& username) const;
 
-    /// Ensure default admin user exists (username: "sixseven", password: "sixseven").
+    /// Ensure default admin user exists (username: "demo", password: "demo").
     void ensure_default_admin(AuthMethod method);
 
 private:

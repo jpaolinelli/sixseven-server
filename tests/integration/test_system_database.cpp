@@ -72,7 +72,7 @@ protected:
         engine_->set_provider_cache(provider_cache_.get());
 
         // Switch to default database for user operations.
-        use_database("sixseven");
+        use_database("demo");
     }
 
     void TearDown() override {
@@ -149,7 +149,7 @@ protected:
                           (is_default ? "TRUE" : "FALSE") + ", NULL)";
         exec_ok(sql);
 
-        use_database("sixseven");
+        use_database("demo");
         return id;
     }
 
@@ -161,7 +161,7 @@ protected:
                           "WHERE provider_id = " +
                           std::to_string(provider_id));
         engine_->pop_skip_masking();
-        use_database("sixseven");
+        use_database("demo");
 
         if (qr.rows.empty() || qr.rows[0][0].is_null()) {
             return "";
@@ -378,7 +378,7 @@ TEST_F(SystemDatabaseIntegrationTest, SetProviderAsDefaultVerifyOnlyOneDefault) 
     // Set ollama-local as default (this auto-unsets old default).
     use_database(system_database_name);
     exec_ok("UPDATE sys_providers SET is_default = TRUE WHERE name = 'ollama-local'");
-    use_database("sixseven");
+    use_database("demo");
 
     // Verify only one default exists.
     auto def2 = provider_cache_->get_default();
@@ -399,7 +399,7 @@ TEST_F(SystemDatabaseIntegrationTest, UpdateProviderModelPersists) {
     use_database(system_database_name);
     exec_ok("UPDATE sys_providers SET model = 'text-embedding-3-large' "
             "WHERE name = 'openai-prod'");
-    use_database("sixseven");
+    use_database("demo");
 
     // Verify cache updated.
     auto provider = provider_cache_->get("openai-prod");
@@ -420,7 +420,7 @@ TEST_F(SystemDatabaseIntegrationTest, DeleteUnusedProviderSucceeds) {
 
     use_database(system_database_name);
     exec_ok("DELETE FROM sys_providers WHERE name = 'to-delete'");
-    use_database("sixseven");
+    use_database("demo");
 
     EXPECT_EQ(provider_cache_->size(), 0u);
     EXPECT_FALSE(provider_cache_->get("to-delete").has_value());
@@ -448,7 +448,7 @@ TEST_F(SystemDatabaseIntegrationTest, DeleteInUseProviderFails) {
     auto result = engine_->execute("DELETE FROM sys_providers WHERE name = 'openai-prod'");
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::CONSTRAINT_VIOLATION);
-    use_database("sixseven");
+    use_database("demo");
 
     // Provider should still exist.
     EXPECT_TRUE(provider_cache_->get("openai-prod").has_value());
@@ -464,7 +464,7 @@ TEST_F(SystemDatabaseIntegrationTest, SelectFromSysProvidersMasksApiKeys) {
 
     use_database(system_database_name);
     auto qr = exec_ok("SELECT * FROM sys_providers");
-    use_database("sixseven");
+    use_database("demo");
 
     ASSERT_EQ(qr.rows.size(), 1u);
 
@@ -534,7 +534,7 @@ TEST_F(SystemDatabaseIntegrationTest, CorruptEncryptedValueHandledGracefully) {
     exec_ok("UPDATE sys_providers SET api_key_encrypted = 'CORRUPT_DATA_NOT_BASE64!!!' "
             "WHERE name = 'openai-prod'");
     engine_->pop_skip_masking();
-    use_database("sixseven");
+    use_database("demo");
 
     // Create a fresh cache and attempt to load — the corrupt value should
     // be handled gracefully (treated as plaintext and re-encrypted).
@@ -559,7 +559,7 @@ TEST_F(SystemDatabaseIntegrationTest, ApiKeyNeverInPlaintextInQueryResults) {
     // SELECT api_key_encrypted should return masked value, not plaintext.
     use_database(system_database_name);
     auto qr = exec_ok("SELECT api_key_encrypted FROM sys_providers");
-    use_database("sixseven");
+    use_database("demo");
 
     ASSERT_EQ(qr.rows.size(), 1u);
     if (!qr.rows[0][0].is_null()) {
@@ -571,7 +571,7 @@ TEST_F(SystemDatabaseIntegrationTest, ApiKeyNeverInPlaintextInQueryResults) {
     // SELECT name, api_key_encrypted also masks the key column.
     use_database(system_database_name);
     auto qr2 = exec_ok("SELECT name, api_key_encrypted FROM sys_providers");
-    use_database("sixseven");
+    use_database("demo");
 
     ASSERT_EQ(qr2.rows.size(), 1u);
     EXPECT_EQ(qr2.rows[0][0].as_string(), "openai-prod");

@@ -39,7 +39,7 @@ cmake --build build/debug
 ./build/debug/src/sixseven-server
 
 # Connect with psql (default port 6767, trust auth)
-psql -h localhost -p 6767 -U sixseven
+psql -h localhost -p 6767 -U demo
 ```
 
 ## Documentation

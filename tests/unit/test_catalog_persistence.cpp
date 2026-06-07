@@ -831,14 +831,14 @@ TEST_F(CatalogPersistenceTest, PersistDatabase) {
 // GDB-656: sixseven database created and persisted during first bootstrap
 // =============================================================================
 
-TEST_F(CatalogPersistenceTest, SixsevenDatabaseCreatedDuringFirstBootstrap) {
+TEST_F(CatalogPersistenceTest, DemoDatabaseCreatedDuringFirstBootstrap) {
     run_bootstrap();
 
-    // The sixseven database should exist in the catalog.
-    auto db = catalog_->get_database("sixseven");
+    // The demo database should exist in the catalog.
+    auto db = catalog_->get_database("demo");
     ASSERT_TRUE(db.has_value()) << db.error().message;
     EXPECT_EQ(db->database_id, default_database_id);
-    EXPECT_EQ(db->name, "sixseven");
+    EXPECT_EQ(db->name, "demo");
 
     // It should be persisted in sys_databases.
     auto ts = storage_->get_table_storage(sys_databases_table_id);
@@ -853,11 +853,11 @@ TEST_F(CatalogPersistenceTest, SixsevenDatabaseCreatedDuringFirstBootstrap) {
         auto values = TupleSerializer::deserialize(row->second, storage_schema);
         ASSERT_TRUE(values.has_value());
         if ((*values)[0].as_int32() == default_database_id) {
-            EXPECT_EQ((*values)[1].as_string(), "sixseven");
+            EXPECT_EQ((*values)[1].as_string(), "demo");
             found = true;
         }
     }
-    EXPECT_TRUE(found) << "sixseven not found in sys_databases after first bootstrap";
+    EXPECT_TRUE(found) << "demo not found in sys_databases after first bootstrap";
 }
 
 // =============================================================================
@@ -867,24 +867,24 @@ TEST_F(CatalogPersistenceTest, SixsevenDatabaseCreatedDuringFirstBootstrap) {
 TEST_F(CatalogPersistenceTest, DatabasesSurviveRestart) {
     run_bootstrap();
 
-    // sixseven exists after first bootstrap.
-    auto db = catalog_->get_database("sixseven");
+    // demo exists after first bootstrap.
+    auto db = catalog_->get_database("demo");
     ASSERT_TRUE(db.has_value());
 
     // Restart and verify.
     restart();
     run_bootstrap();
 
-    auto restored = catalog_->get_database("sixseven");
+    auto restored = catalog_->get_database("demo");
     ASSERT_TRUE(restored.has_value()) << restored.error().message;
     EXPECT_EQ(restored->database_id, default_database_id);
-    EXPECT_EQ(restored->name, "sixseven");
+    EXPECT_EQ(restored->name, "demo");
 }
 
 TEST_F(CatalogPersistenceTest, MultipleRestartsDatabasesPersist) {
     run_bootstrap();
 
-    // Create a user table in sixseven database.
+    // Create a user table in demo database.
     engine_->set_current_database(default_database_id);
     exec_ok("CREATE TABLE restart_test (id INT, val VARCHAR)");
 
@@ -892,7 +892,7 @@ TEST_F(CatalogPersistenceTest, MultipleRestartsDatabasesPersist) {
     restart();
     run_bootstrap();
 
-    auto db = catalog_->get_database("sixseven");
+    auto db = catalog_->get_database("demo");
     ASSERT_TRUE(db.has_value());
 
     auto tbl = catalog_->get_table(default_database_id, "restart_test");
@@ -902,7 +902,7 @@ TEST_F(CatalogPersistenceTest, MultipleRestartsDatabasesPersist) {
     restart();
     run_bootstrap();
 
-    db = catalog_->get_database("sixseven");
+    db = catalog_->get_database("demo");
     ASSERT_TRUE(db.has_value());
 
     tbl = catalog_->get_table(default_database_id, "restart_test");
@@ -926,7 +926,7 @@ TEST_F(CatalogPersistenceTest, DatabasesLoadedBeforeTables) {
     run_bootstrap();
 
     // Both database and table should be restored.
-    auto db = catalog_->get_database("sixseven");
+    auto db = catalog_->get_database("demo");
     ASSERT_TRUE(db.has_value());
 
     auto tbl = catalog_->get_table(default_database_id, "db_order_test");
@@ -1094,7 +1094,7 @@ TEST_F(CatalogPersistenceTest, SixsevenLoadedFromSysDatabasesNotHardcoded) {
     run_bootstrap();
 
     // sixseven should exist after first bootstrap.
-    auto db = catalog_->get_database("sixseven");
+    auto db = catalog_->get_database("demo");
     ASSERT_TRUE(db.has_value());
     EXPECT_EQ(db->database_id, default_database_id);
 
@@ -1102,16 +1102,16 @@ TEST_F(CatalogPersistenceTest, SixsevenLoadedFromSysDatabasesNotHardcoded) {
     restart_without_default_db();
     run_bootstrap();
 
-    auto restored = catalog_->get_database("sixseven");
+    auto restored = catalog_->get_database("demo");
     ASSERT_TRUE(restored.has_value()) << restored.error().message;
     EXPECT_EQ(restored->database_id, default_database_id);
-    EXPECT_EQ(restored->name, "sixseven");
+    EXPECT_EQ(restored->name, "demo");
 
     // Verify it appears in the databases list (loaded from persistence).
     auto all_dbs = catalog_->list_databases();
     bool found = false;
     for (const auto& d : all_dbs) {
-        if (d.name == "sixseven") {
+        if (d.name == "demo") {
             found = true;
             EXPECT_EQ(d.database_id, default_database_id);
         }
@@ -1122,12 +1122,12 @@ TEST_F(CatalogPersistenceTest, SixsevenLoadedFromSysDatabasesNotHardcoded) {
 TEST_F(CatalogPersistenceTest, SixsevenIsDroppableAndDoesNotReappear) {
     run_bootstrap();
 
-    auto db = catalog_->get_database("sixseven");
+    auto db = catalog_->get_database("demo");
     ASSERT_TRUE(db.has_value());
 
-    exec_ok("DROP DATABASE sixseven");
+    exec_ok("DROP DATABASE demo");
 
-    auto gone = catalog_->get_database("sixseven");
+    auto gone = catalog_->get_database("demo");
     EXPECT_FALSE(gone.has_value());
 
     // Restart without pre-seeding sixseven — it was dropped and should not reappear.
@@ -1135,13 +1135,13 @@ TEST_F(CatalogPersistenceTest, SixsevenIsDroppableAndDoesNotReappear) {
     run_bootstrap();
 
     // sixseven should NOT reappear — it was dropped and removed from sys_databases.
-    auto after_restart = catalog_->get_database("sixseven");
+    auto after_restart = catalog_->get_database("demo");
     EXPECT_FALSE(after_restart.has_value());
 
     // Verify it's not in the databases list either.
     auto all_dbs = catalog_->list_databases();
     for (const auto& d : all_dbs) {
-        EXPECT_NE(d.name, "sixseven") << "sixseven should not reappear after being dropped";
+        EXPECT_NE(d.name, "demo") << "demo should not reappear after being dropped";
     }
 }
 

@@ -126,10 +126,10 @@ protected:
 TEST_F(QA_GDB656, FirstBootstrapCreatesSixsevenDatabase) {
     run_bootstrap();
 
-    auto db = catalog_->get_database("sixseven");
+    auto db = catalog_->get_database("demo");
     ASSERT_TRUE(db.has_value()) << db.error().message;
     EXPECT_EQ(db->database_id, default_database_id);
-    EXPECT_EQ(db->name, "sixseven");
+    EXPECT_EQ(db->name, "demo");
 }
 
 TEST_F(QA_GDB656, FirstBootstrapPersistsSixsevenToSysDatabases) {
@@ -139,7 +139,7 @@ TEST_F(QA_GDB656, FirstBootstrapPersistsSixsevenToSysDatabases) {
     bool found = false;
     for (const auto& [id, name] : entries) {
         if (id == default_database_id) {
-            EXPECT_EQ(name, "sixseven");
+            EXPECT_EQ(name, "demo");
             found = true;
         }
     }
@@ -157,7 +157,7 @@ TEST_F(QA_GDB656, FirstBootstrapCreatesSixsevenStorageDirectory) {
 TEST_F(QA_GDB656, FirstBootstrapSixsevenIdIsOne) {
     run_bootstrap();
 
-    auto db = catalog_->get_database("sixseven");
+    auto db = catalog_->get_database("demo");
     ASSERT_TRUE(db.has_value());
     EXPECT_EQ(db->database_id, 1)
         << "sixseven must have database_id=1 (default_database_id)";
@@ -204,7 +204,7 @@ TEST_F(QA_GDB656, DatabasesLoadedBeforeTablesOnRestart) {
 
     // If databases were loaded after tables, restore_table would fail
     // because the database doesn't exist yet. Verify both are present.
-    auto db = catalog_->get_database("sixseven");
+    auto db = catalog_->get_database("demo");
     ASSERT_TRUE(db.has_value()) << "database should be restored before tables";
 
     auto tbl = catalog_->get_table(default_database_id, "load_order_test");
@@ -235,7 +235,7 @@ TEST_F(QA_GDB656, SixsevenSurvivesSingleRestart) {
     restart();
     run_bootstrap();
 
-    auto db = catalog_->get_database("sixseven");
+    auto db = catalog_->get_database("demo");
     ASSERT_TRUE(db.has_value()) << db.error().message;
     EXPECT_EQ(db->database_id, default_database_id);
 }
@@ -247,7 +247,7 @@ TEST_F(QA_GDB656, SixsevenSurvivesMultipleRestarts) {
         restart();
         run_bootstrap();
 
-        auto db = catalog_->get_database("sixseven");
+        auto db = catalog_->get_database("demo");
         ASSERT_TRUE(db.has_value())
             << "sixseven missing after restart " << (i + 1) << ": " << db.error().message;
         EXPECT_EQ(db->database_id, default_database_id);
@@ -267,7 +267,7 @@ TEST_F(QA_GDB656, PersistedDatabaseSurvivesRestart) {
     run_bootstrap();
 
     // Both sixseven and user_db should exist.
-    auto ss = catalog_->get_database("sixseven");
+    auto ss = catalog_->get_database("demo");
     ASSERT_TRUE(ss.has_value()) << ss.error().message;
     EXPECT_EQ(ss->database_id, default_database_id);
 
@@ -314,7 +314,7 @@ TEST_F(QA_GDB656, MigrationCreatesAndBackfillsSysDatabases) {
     run_bootstrap();
 
     // sixseven database should still be accessible.
-    auto db = catalog_->get_database("sixseven");
+    auto db = catalog_->get_database("demo");
     ASSERT_TRUE(db.has_value()) << "migration should restore sixseven: " << db.error().message;
     EXPECT_EQ(db->database_id, default_database_id);
 
@@ -337,7 +337,7 @@ TEST_F(QA_GDB656, MigrationAlwaysIncludesSixseven) {
     restart();
     run_bootstrap();
 
-    auto db = catalog_->get_database("sixseven");
+    auto db = catalog_->get_database("demo");
     ASSERT_TRUE(db.has_value()) << "migration should include sixseven even with no user tables";
 }
 
@@ -395,7 +395,7 @@ TEST_F(QA_GDB656, MultipleDatabasesAllSurviveRestart) {
     run_bootstrap();
 
     // sixseven should exist.
-    auto ss = catalog_->get_database("sixseven");
+    auto ss = catalog_->get_database("demo");
     ASSERT_TRUE(ss.has_value());
 
     // All 10 user databases should exist.
@@ -503,14 +503,14 @@ TEST_F(QA_GDB656, EmptyDatabasePersists) {
     auto entries_before = scan_sys_databases();
     bool found = false;
     for (const auto& [id, name] : entries_before) {
-        if (id == default_database_id && name == "sixseven") found = true;
+        if (id == default_database_id && name == "demo") found = true;
     }
     ASSERT_TRUE(found);
 
     restart();
     run_bootstrap();
 
-    auto db = catalog_->get_database("sixseven");
+    auto db = catalog_->get_database("demo");
     ASSERT_TRUE(db.has_value());
     auto user_tables = catalog_->list_tables(default_database_id);
     EXPECT_TRUE(user_tables.empty()) << "no user tables should exist in empty database";

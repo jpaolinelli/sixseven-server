@@ -199,12 +199,12 @@ TEST_F(UserPersistenceTest, DefaultAdminSeedsAndPersists) {
     // Store starts empty; seed and verify it lands on disk.
     EXPECT_TRUE(users_->empty());
     users_->ensure_default_admin(AuthMethod::SCRAM_SHA_256);
-    EXPECT_TRUE(users_->user_exists("sixseven"));
+    EXPECT_TRUE(users_->user_exists("demo"));
 
     restart();
 
     // Reloaded from disk without re-seeding.
-    EXPECT_TRUE(users_->user_exists("sixseven"));
+    EXPECT_TRUE(users_->user_exists("demo"));
 }
 
 TEST_F(UserPersistenceTest, DefaultAdminIdempotentAcrossRestart) {
@@ -217,7 +217,7 @@ TEST_F(UserPersistenceTest, DefaultAdminIdempotentAcrossRestart) {
     ASSERT_TRUE(rows.has_value());
     int admin_count = 0;
     for (const auto& r : *rows) {
-        if (r.username == "sixseven") {
+        if (r.username == "demo") {
             ++admin_count;
         }
     }

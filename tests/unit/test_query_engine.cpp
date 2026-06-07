@@ -154,7 +154,7 @@ TEST_F(QueryEngineTest, DropDatabaseNotFound) {
 }
 
 TEST_F(QueryEngineTest, DropDefaultDatabaseSucceeds) {
-    auto qr = exec_ok("DROP DATABASE sixseven");
+    auto qr = exec_ok("DROP DATABASE demo");
     EXPECT_EQ(qr.message, "DROP DATABASE");
 }
 

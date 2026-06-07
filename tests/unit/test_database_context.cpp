@@ -142,7 +142,7 @@ TEST_F(DatabaseContextTest, TablesAreIsolatedAcrossDatabases) {
     EXPECT_EQ(qr.rows[0][1].as_string(), "other_db");
 
     // Switch back to default database — should see default data.
-    use_database("sixseven");
+    use_database("demo");
 
     auto qr2 = exec_ok("SELECT * FROM shared_name");
     ASSERT_EQ(qr2.rows.size(), 1u);
@@ -178,7 +178,7 @@ TEST_F(DatabaseContextTest, InsertIsolatedAcrossDatabases) {
     EXPECT_EQ(qr.rows[0][1].as_int32(), 999);
 
     // default db sees 100.
-    use_database("sixseven");
+    use_database("demo");
     auto qr2 = exec_ok("SELECT * FROM accounts");
     ASSERT_EQ(qr2.rows.size(), 1u);
     EXPECT_EQ(qr2.rows[0][1].as_int32(), 100);
@@ -202,7 +202,7 @@ TEST_F(DatabaseContextTest, UpdateIsolatedAcrossDatabases) {
     EXPECT_EQ(qr.rows[0][1].as_int32(), 99);
 
     // Default db should still have 10.
-    use_database("sixseven");
+    use_database("demo");
     auto qr2 = exec_ok("SELECT * FROM counters");
     ASSERT_EQ(qr2.rows.size(), 1u);
     EXPECT_EQ(qr2.rows[0][1].as_int32(), 10);
@@ -228,7 +228,7 @@ TEST_F(DatabaseContextTest, DeleteIsolatedAcrossDatabases) {
     EXPECT_EQ(qr.rows[0][0].as_int32(), 4);
 
     // Default db should still have both rows.
-    use_database("sixseven");
+    use_database("demo");
     auto qr2 = exec_ok("SELECT * FROM items");
     ASSERT_EQ(qr2.rows.size(), 2u);
 }
@@ -241,8 +241,8 @@ TEST_F(DatabaseContextTest, ErrorMessageIncludesDatabaseName) {
     auto result = engine_->execute("SELECT * FROM nonexistent_table");
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
-    // Error should reference the database name 'sixseven'.
-    EXPECT_NE(result.error().message.find("'sixseven'"), std::string::npos)
+    // Error should reference the database name 'demo'.
+    EXPECT_NE(result.error().message.find("'demo'"), std::string::npos)
         << "Error message should include database name: " << result.error().message;
 }
 

@@ -28,7 +28,7 @@ using namespace sixseven;
 // =============================================================================
 
 static void init_test_catalog(Catalog& catalog) {
-    auto r = catalog.restore_database(default_database_id, "sixseven");
+    auto r = catalog.restore_database(default_database_id, "demo");
     (void)r;
 }
 
