@@ -2644,9 +2644,18 @@ Result<BoundStatement> Binder::bind_traverse(const TraverseStmt& stmt, Scope* pa
         }
     }
 
-    // Bind WHERE (also chained to the parent scope for correlation).
+    // Bind WHERE (also chained to the parent scope for correlation). The
+    // traversal's own output columns (node, depth, and source/__path when
+    // present) are exposed so the WHERE clause can post-filter traversal
+    // rows (GDB-695); TraversalOperator evaluates the predicate against the
+    // matching output schema at execution time.
     if (stmt.where_expr) {
         Scope where_scope(parent_scope);
+        ScopeTable traversal_table;
+        traversal_table.table_id = 0;
+        traversal_table.alias = stmt.edge_type;
+        traversal_table.columns = bound.output_columns;
+        where_scope.add_table(std::move(traversal_table));
         auto et = bind_expr(*stmt.where_expr, where_scope, bound);
         if (!et) {
             return tl::unexpected(et.error());
