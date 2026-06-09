@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sixseven/common/result.h"
+#include "sixseven/common/value_hash.h"
 #include "sixseven/executor/iterator.h"
 #include "sixseven/executor/tuple.h"
 #include "sixseven/graph/graph_engine.h"
@@ -11,6 +12,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace sixseven {
@@ -25,6 +27,7 @@ struct TraversalConfig {
     size_t max_visited = 100000;
     bool fetch = false;
     bool collect_edges = false;
+    bool trace = false; ///< When true, build a parent map during BFS and emit a __path column.
 };
 
 /// A single result row from BFS traversal (before FETCH enrichment).
@@ -32,6 +35,7 @@ struct TraversalResult {
     Value node_pk;
     int32_t depth = 0;
     Value source_pk;
+    int64_t edge_row_id = -1;           ///< Row ID of the edge used to reach this node (-1 = none).
     std::vector<Value> edge_properties; ///< Properties from the edge used to reach this node.
 };
 
@@ -76,11 +80,21 @@ protected:
     void do_close() override;
 
 private:
+    /// Parent-pointer entry used to reconstruct paths when trace is enabled.
+    struct ParentInfo {
+        Value parent_pk;          ///< PK of the node this one was first reached from.
+        int64_t edge_row_id = -1; ///< Row ID of the edge used to reach this node.
+    };
+
     /// Run the BFS traversal and populate results_.
     Result<void> run_bfs();
 
     /// Get neighbor PKs from edges in the configured direction.
     Result<std::vector<std::pair<Value, EdgeRow>>> get_neighbors(const Value& node_pk) const;
+
+    /// Reconstruct the full path from the start node to @p target by walking the
+    /// parent map backward and reversing. Only valid when trace is enabled.
+    Result<Path> reconstruct_path(const Value& target) const;
 
     GraphEngine& graph_engine_;
     TraversalConfig config_;
@@ -90,6 +104,9 @@ private:
 
     std::vector<Tuple> results_;
     std::vector<EdgeRow> edges_;
+    /// Maps a node PK to the (parent, edge) it was first reached from.
+    /// Populated only when config_.trace is true.
+    std::unordered_map<Value, ParentInfo, ValueHash, ValueEqual> parent_map_;
     size_t cursor_ = 0;
 };
 

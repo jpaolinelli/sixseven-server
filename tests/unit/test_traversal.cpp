@@ -8,8 +8,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "test_catalog_helpers.h"
@@ -342,6 +346,173 @@ TEST_F(TraversalTest, WhereFilterExcludesNodes) {
     std::sort(nodes.begin(), nodes.end());
     EXPECT_EQ(nodes[0], 4);
     EXPECT_EQ(nodes[1], 5);
+}
+
+// ---------------------------------------------------------------------------
+// TRACE / path reconstruction (GDB-678)
+// ---------------------------------------------------------------------------
+
+TEST_F(TraversalTest, TraceEmitsPathColumn) {
+    // Linear chain reachability: from 1, node 5 is reached via 1→...→4→5.
+    TraversalConfig config;
+    config.edge_type = "follows";
+    config.start_key = Value(static_cast<int64_t>(1));
+    config.direction = TraverseDirection::OUT;
+    config.max_depth = 100;
+    config.trace = true;
+
+    std::vector<OutputColumn> cols;
+    cols.push_back({"", "node", TypeId::INT64, false, 0});
+    cols.push_back({"", "depth", TypeId::INT64, false, 0});
+    cols.push_back({"", "__path", TypeId::PATH, false, 0});
+    OutputSchema schema(std::move(cols));
+
+    BoundStatement bound;
+    TraversalOperator op(*graph_, std::move(config), std::move(schema), nullptr, bound);
+    auto open_result = op.open();
+    ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
+
+    std::unordered_map<int64_t, Path> paths;
+    while (true) {
+        auto row = op.next();
+        ASSERT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value()) {
+            break;
+        }
+        auto& vals = row->value().values;
+        ASSERT_EQ(vals.size(), 3u);
+        ASSERT_EQ(vals[2].type_id(), TypeId::PATH);
+        paths.emplace(vals[0].as_int64(), vals[2].as_path());
+    }
+    op.close();
+
+    ASSERT_EQ(paths.size(), 4u);
+
+    // Path to node 2 (depth 1): start at 1, end at 2.
+    const Path& p2 = paths.at(2);
+    ASSERT_EQ(p2.steps.size(), 2u);
+    EXPECT_EQ(p2.steps.front().node_pk, 1);
+    EXPECT_EQ(p2.steps.back().node_pk, 2);
+    EXPECT_EQ(p2.steps.back().edge_id, -1); // terminal step has no outgoing edge
+    EXPECT_EQ(p2.length(), 1);
+
+    // Path to node 5 (depth 3): 1 → ... → 5, four nodes, three hops.
+    const Path& p5 = paths.at(5);
+    ASSERT_EQ(p5.steps.size(), 4u);
+    EXPECT_EQ(p5.steps.front().node_pk, 1);
+    EXPECT_EQ(p5.steps.back().node_pk, 5);
+    EXPECT_EQ(p5.length(), 3);
+    // The node-4 hop in the chain is the second-to-last node.
+    EXPECT_EQ(p5.steps[3].node_pk, 5);
+    EXPECT_EQ(p5.steps[2].node_pk, 4);
+}
+
+TEST_F(TraversalTest, TracePathEdgeIdsAreValid) {
+    // Every non-terminal step in a traced path must reference a real edge row.
+    TraversalConfig config;
+    config.edge_type = "follows";
+    config.start_key = Value(static_cast<int64_t>(1));
+    config.direction = TraverseDirection::OUT;
+    config.max_depth = 1; // only direct neighbors of 1: nodes 2 and 3
+    config.trace = true;
+
+    std::vector<OutputColumn> cols;
+    cols.push_back({"", "node", TypeId::INT64, false, 0});
+    cols.push_back({"", "depth", TypeId::INT64, false, 0});
+    cols.push_back({"", "__path", TypeId::PATH, false, 0});
+    OutputSchema schema(std::move(cols));
+
+    BoundStatement bound;
+    TraversalOperator op(*graph_, std::move(config), std::move(schema), nullptr, bound);
+    auto open_result = op.open();
+    ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
+
+    int rows = 0;
+    while (true) {
+        auto row = op.next();
+        ASSERT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value()) {
+            break;
+        }
+        ++rows;
+        const Path& p = row->value().values[2].as_path();
+        ASSERT_EQ(p.steps.size(), 2u);
+        EXPECT_EQ(p.steps[0].node_pk, 1);
+        // The start step carries the outgoing edge id used to reach the neighbor.
+        EXPECT_GE(p.steps[0].edge_id, 0);
+        EXPECT_EQ(p.steps[1].edge_id, -1);
+    }
+    op.close();
+    EXPECT_EQ(rows, 2);
+}
+
+TEST_F(TraversalTest, TracePathsAreCycleFree) {
+    // Introduce a cycle 5 → 1. BFS visited set must still yield acyclic paths.
+    link(5, 1);
+
+    TraversalConfig config;
+    config.edge_type = "follows";
+    config.start_key = Value(static_cast<int64_t>(1));
+    config.direction = TraverseDirection::OUT;
+    config.max_depth = 100;
+    config.trace = true;
+
+    std::vector<OutputColumn> cols;
+    cols.push_back({"", "node", TypeId::INT64, false, 0});
+    cols.push_back({"", "depth", TypeId::INT64, false, 0});
+    cols.push_back({"", "__path", TypeId::PATH, false, 0});
+    OutputSchema schema(std::move(cols));
+
+    BoundStatement bound;
+    TraversalOperator op(*graph_, std::move(config), std::move(schema), nullptr, bound);
+    auto open_result = op.open();
+    ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
+
+    while (true) {
+        auto row = op.next();
+        ASSERT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value()) {
+            break;
+        }
+        const Path& p = row->value().values[2].as_path();
+        // No node PK may repeat within a single path.
+        std::unordered_set<int64_t> seen;
+        for (const auto& step : p.steps) {
+            EXPECT_TRUE(seen.insert(step.node_pk).second)
+                << "path contains a repeated node: " << step.node_pk;
+        }
+    }
+    op.close();
+}
+
+TEST_F(TraversalTest, NoTraceEmitsNoPathColumn) {
+    // When trace is false (default), tuples carry only node + depth — no path.
+    auto nodes = run_bfs(1);
+    ASSERT_EQ(nodes.size(), 4u);
+
+    TraversalConfig config;
+    config.edge_type = "follows";
+    config.start_key = Value(static_cast<int64_t>(1));
+    config.direction = TraverseDirection::OUT;
+    config.max_depth = 100;
+    // trace defaults to false
+
+    std::vector<OutputColumn> cols;
+    cols.push_back({"", "node", TypeId::INT64, false, 0});
+    cols.push_back({"", "depth", TypeId::INT64, false, 0});
+    OutputSchema schema(std::move(cols));
+
+    BoundStatement bound;
+    TraversalOperator op(*graph_, std::move(config), std::move(schema), nullptr, bound);
+    auto open_result = op.open();
+    ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
+
+    auto row = op.next();
+    ASSERT_TRUE(row.has_value());
+    ASSERT_TRUE(row->has_value());
+    // Only 2 columns: no trailing __path value appended.
+    EXPECT_EQ(row->value().values.size(), 2u);
+    op.close();
 }
 
 } // namespace

@@ -3,10 +3,30 @@
 #include "sixseven/common/value_hash.h"
 #include "sixseven/executor/expr_evaluator.h"
 
+#include <algorithm>
 #include <deque>
 #include <unordered_set>
 
 namespace sixseven {
+
+namespace {
+
+/// Convert a Value PK to int64_t for PathStep storage.
+/// Returns an error if the PK is not an integer type.
+Result<int64_t> pk_to_int64(const Value& pk) {
+    if (!pk.is_null()) {
+        if (auto* p = std::get_if<int64_t>(&pk.data())) {
+            return ok(*p);
+        }
+        if (auto* p32 = std::get_if<int32_t>(&pk.data())) {
+            return ok(static_cast<int64_t>(*p32));
+        }
+    }
+    return make_error(StatusCode::INVALID_ARGUMENT,
+                      "TRAVERSE WITH TRACE requires integer primary keys");
+}
+
+} // namespace
 
 TraversalOperator::TraversalOperator(GraphEngine& graph_engine,
                                      TraversalConfig config,
@@ -26,6 +46,7 @@ std::string TraversalOperator::plan_node_detail() const {
 Result<void> TraversalOperator::do_open() {
     results_.clear();
     edges_.clear();
+    parent_map_.clear();
     cursor_ = 0;
     return run_bfs();
 }
@@ -53,6 +74,7 @@ Result<std::optional<Tuple>> TraversalOperator::do_next() {
 void TraversalOperator::do_close() {
     results_.clear();
     edges_.clear();
+    parent_map_.clear();
     cursor_ = 0;
 }
 
@@ -69,7 +91,7 @@ Result<void> TraversalOperator::run_bfs() {
 
     // Seed the BFS with the start node.
     visited.insert(config_.start_key);
-    queue.push_back({config_.start_key, 0, Value(), {}});
+    queue.push_back({config_.start_key, 0, Value(), -1, {}});
 
     while (!queue.empty()) {
         auto current = std::move(queue.front());
@@ -85,6 +107,16 @@ Result<void> TraversalOperator::run_bfs() {
             } else {
                 tuple.values = {current.node_pk, Value(static_cast<int64_t>(current.depth))};
             }
+
+            // TRACE mode: append the full start-to-node path as a trailing column.
+            if (config_.trace) {
+                auto path = reconstruct_path(current.node_pk);
+                if (!path) {
+                    return tl::unexpected(path.error());
+                }
+                tuple.values.push_back(Value(std::move(*path)));
+            }
+
             results_.push_back(std::move(tuple));
         }
 
@@ -112,11 +144,19 @@ Result<void> TraversalOperator::run_bfs() {
 
             visited.insert(neighbor_pk);
 
+            // TRACE mode: record how this node was first reached so the path can
+            // be reconstructed later. Done before the edge is moved-from below.
+            if (config_.trace) {
+                parent_map_.emplace(
+                    neighbor_pk,
+                    ParentInfo{current.node_pk, static_cast<int64_t>(edge.edge_row_id)});
+            }
+
             if (config_.collect_edges) {
                 edges_.push_back(std::move(edge));
             }
 
-            queue.push_back({neighbor_pk, current.depth + 1, current.node_pk, {}});
+            queue.push_back({neighbor_pk, current.depth + 1, current.node_pk, -1, {}});
         }
     }
 
@@ -150,6 +190,50 @@ TraversalOperator::get_neighbors(const Value& node_pk) const {
     }
 
     return ok(std::move(result));
+}
+
+Result<Path> TraversalOperator::reconstruct_path(const Value& target) const {
+    // Walk parent pointers backward from target to the start node, collecting
+    // (node_pk, incoming_edge_row_id) pairs, then reverse to get start->target.
+    std::vector<PathStep> reversed;
+
+    Value cursor = target;
+    while (true) {
+        auto cursor_int = pk_to_int64(cursor);
+        if (!cursor_int) {
+            return tl::unexpected(cursor_int.error());
+        }
+
+        auto it = parent_map_.find(cursor);
+        if (it == parent_map_.end()) {
+            // Reached the start node (no parent entry). The start node has no
+            // incoming edge: edge_id = -1.
+            reversed.push_back({*cursor_int, -1});
+            break;
+        }
+
+        // The edge_row_id stored here is the edge from parent -> cursor, i.e. the
+        // edge that, in start->target order, leaves the parent. We attach it to
+        // the parent's step below, so carry it as this step's edge for now and
+        // shift after reversal.
+        reversed.push_back({*cursor_int, it->second.edge_row_id});
+        cursor = it->second.parent_pk;
+    }
+
+    // reversed is target..start. Reverse to start..target.
+    std::reverse(reversed.begin(), reversed.end());
+
+    // After reversal each step still carries its own *incoming* edge id. In Path
+    // semantics a step's edge_id is the *outgoing* edge to the next step, so shift
+    // edge ids one position toward the start and clear the terminal step's edge.
+    Path path;
+    path.steps.reserve(reversed.size());
+    for (size_t i = 0; i < reversed.size(); ++i) {
+        int64_t outgoing = (i + 1 < reversed.size()) ? reversed[i + 1].edge_id : -1;
+        path.steps.push_back({reversed[i].node_pk, outgoing});
+    }
+
+    return ok(std::move(path));
 }
 
 } // namespace sixseven
