@@ -426,14 +426,14 @@ TEST_F(QA_GDB680_Trace, HeterogeneousEnrichedTraceDistinctPks) {
     EXPECT_EQ(p.length(), 1);
 }
 
-// DISABLED: demonstrates a Critical hang. When a heterogeneous edge links a
-// target node whose PK equals the start node's PK (users(1) -> posts(1)),
-// the BFS records the node as its own parent (visited is intentionally not
-// seeded with the start key for heterogeneous edges) and reconstruct_path()
-// loops forever, growing the steps vector until OOM.
-// Bug: see QA report for GDB-680 (filed as a Critical bug ticket).
-// Expected behavior once fixed: one row with a two-step path [1, 1].
-TEST_F(QA_GDB680_Trace, DISABLED_HeterogeneousEnrichedTraceSamePkHangs) {
+// Regression for GDB-694 (Critical hang found during GDB-680 QA). When a
+// heterogeneous edge links a target node whose PK equals the start node's
+// PK (users(1) -> posts(1)), the BFS records the node as its own parent
+// (visited is intentionally not seeded with the start key for heterogeneous
+// edges) and reconstruct_path() used to loop forever, growing the steps
+// vector until OOM. GDB-694's depth-bounded reconstruction fixes this:
+// one row with a two-step path [1, 1].
+TEST_F(QA_GDB680_Trace, HeterogeneousEnrichedTraceSamePkHangs) {
     exec_ok("CREATE TABLE posts (id INT PRIMARY KEY, title VARCHAR)");
     exec_ok("INSERT INTO posts VALUES (1, 'Hello')");
     exec_ok("CREATE EDGE TYPE authored FROM users TO posts");
@@ -448,11 +448,11 @@ TEST_F(QA_GDB680_Trace, DISABLED_HeterogeneousEnrichedTraceSamePkHangs) {
     EXPECT_EQ(p.steps.size(), 2u) << "path must be start -> target, not an infinite self-chain";
 }
 
-// DISABLED: same root cause as above, MODE EDGES flavor — collect_edges()
-// calls reconstruct_path(edge.source_pk) and hangs when source PK == start PK
-// has a self-referential parent_map entry.
-// Expected behavior once fixed: one edge row whose path is the trivial [1].
-TEST_F(QA_GDB680_Trace, DISABLED_HeterogeneousEdgeModeTraceSamePkHangs) {
+// Regression for GDB-694: same root cause as above, MODE EDGES flavor —
+// collect_edges() calls reconstruct_path(edge.source_pk) and used to hang
+// when source PK == start PK has a self-referential parent_map entry.
+// Fixed in GDB-694: one edge row whose path is the trivial [1].
+TEST_F(QA_GDB680_Trace, HeterogeneousEdgeModeTraceSamePkHangs) {
     exec_ok("CREATE TABLE posts (id INT PRIMARY KEY, title VARCHAR)");
     exec_ok("INSERT INTO posts VALUES (1, 'Hello')");
     exec_ok("CREATE EDGE TYPE authored FROM users TO posts");
