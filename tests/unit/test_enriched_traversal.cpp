@@ -266,5 +266,72 @@ TEST_F(EnrichedTraversalTest, StandaloneBackcompat) {
     ASSERT_EQ(qr.rows.size(), 4u);
 }
 
+// ============================================================================
+// 9. TraceAddsPathColumn — WITH TRACE surfaces a __path column (GDB-678)
+// ============================================================================
+
+TEST_F(EnrichedTraversalTest, TraceAddsPathColumn) {
+    auto qr = exec_ok("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT WITH TRACE");
+
+    // __path must be present in the projected columns.
+    size_t path_idx = qr.column_names.size();
+    size_t node_idx = qr.column_names.size();
+    for (size_t i = 0; i < qr.column_names.size(); ++i) {
+        if (qr.column_names[i] == "__path") {
+            path_idx = i;
+        }
+        if (qr.column_names[i] == "__node") {
+            node_idx = i;
+        }
+    }
+    ASSERT_LT(path_idx, qr.column_names.size()) << "__path column missing";
+    ASSERT_LT(node_idx, qr.column_names.size());
+
+    ASSERT_EQ(qr.rows.size(), 4u);
+
+    // Every row carries a PATH value whose final node equals __node.
+    for (const auto& row : qr.rows) {
+        ASSERT_EQ(row[path_idx].type_id(), TypeId::PATH) << "__path should be a PATH value";
+        const Path& p = row[path_idx].as_path();
+        ASSERT_FALSE(p.steps.empty());
+        EXPECT_EQ(p.steps.front().node_pk, 1) << "path must start at the source node";
+        EXPECT_EQ(p.steps.back().node_pk, val_to_int64(row[node_idx]))
+            << "path must end at the result node";
+    }
+}
+
+// ============================================================================
+// 10. TracePathLengthMatchesDepth — path hop count equals __depth (GDB-678)
+// ============================================================================
+
+TEST_F(EnrichedTraversalTest, TracePathLengthMatchesDepth) {
+    auto qr = exec_ok("SELECT __depth, __path FROM TRAVERSE follows FROM users(1) "
+                      "DIRECTION OUT WITH TRACE");
+
+    ASSERT_EQ(qr.column_names.size(), 2u);
+    EXPECT_EQ(qr.column_names[0], "__depth");
+    EXPECT_EQ(qr.column_names[1], "__path");
+    ASSERT_EQ(qr.rows.size(), 4u);
+
+    for (const auto& row : qr.rows) {
+        const int64_t depth = val_to_int64(row[0]);
+        ASSERT_EQ(row[1].type_id(), TypeId::PATH);
+        const Path& p = row[1].as_path();
+        // A path reaching a node at depth d has d edges (d + 1 nodes).
+        EXPECT_EQ(p.length(), depth) << "path length must equal traversal depth";
+    }
+}
+
+// ============================================================================
+// 11. NoTraceNoPathColumn — without WITH TRACE there is no __path (GDB-678)
+// ============================================================================
+
+TEST_F(EnrichedTraversalTest, NoTraceNoPathColumn) {
+    auto qr = exec_ok("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    for (const auto& name : qr.column_names) {
+        EXPECT_NE(name, "__path") << "__path must not appear without WITH TRACE";
+    }
+}
+
 } // namespace
 } // namespace sixseven

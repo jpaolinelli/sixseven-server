@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -464,6 +465,65 @@ TEST_F(EdgeTraversalTest, DirectionBothHomogeneous) {
     EXPECT_NE(std::find(edges.begin(), edges.end(), std::make_pair(1L, 2L)), edges.end());
     EXPECT_NE(std::find(edges.begin(), edges.end(), std::make_pair(1L, 3L)), edges.end());
     EXPECT_NE(std::find(edges.begin(), edges.end(), std::make_pair(2L, 1L)), edges.end());
+}
+
+// ============================================================================
+// WITH TRACE adds a __path column showing the path to each edge's __from node
+// (GDB-678)
+// ============================================================================
+
+TEST_F(EdgeTraversalTest, TraceAddsPathToFromNode) {
+    auto qr = exec_ok("SELECT __from, __to, __path "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES WITH TRACE");
+
+    ASSERT_EQ(qr.column_names.size(), 3u);
+    EXPECT_EQ(qr.column_names[2], "__path");
+
+    // 5 edges: 1→2, 1→3, 2→4, 3→4, 4→5.
+    ASSERT_EQ(qr.rows.size(), 5u);
+
+    // Index path values by (from, to).
+    std::map<std::pair<int64_t, int64_t>, Path> paths;
+    for (const auto& row : qr.rows) {
+        ASSERT_EQ(row[2].type_id(), TypeId::PATH);
+        paths.emplace(std::make_pair(val_to_int64(row[0]), val_to_int64(row[1])), row[2].as_path());
+    }
+
+    // Edge 1→2: __from = 1 (the start node), so the path is just [1].
+    const Path& p_1_2 = paths.at(std::make_pair(1L, 2L));
+    ASSERT_EQ(p_1_2.steps.size(), 1u);
+    EXPECT_EQ(p_1_2.steps[0].node_pk, 1);
+
+    // Edge 4→5: __from = 4, reached via 1 → (2 or 3) → 4, so the path ends at 4.
+    const Path& p_4_5 = paths.at(std::make_pair(4L, 5L));
+    EXPECT_EQ(p_4_5.steps.front().node_pk, 1);
+    EXPECT_EQ(p_4_5.steps.back().node_pk, 4);
+    EXPECT_EQ(p_4_5.length(), 2); // two hops from 1 to 4
+}
+
+TEST_F(EdgeTraversalTest, TracePathsAreCycleFree) {
+    // Add a cycle 5 → 1; traced paths must still be acyclic.
+    exec_ok("LINK users(5) TO users(1) VIA follows");
+
+    auto qr = exec_ok("SELECT __from, __path "
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES WITH TRACE");
+
+    for (const auto& row : qr.rows) {
+        ASSERT_EQ(row[1].type_id(), TypeId::PATH);
+        const Path& p = row[1].as_path();
+        std::set<int64_t> seen;
+        for (const auto& step : p.steps) {
+            EXPECT_TRUE(seen.insert(step.node_pk).second)
+                << "path contains a repeated node: " << step.node_pk;
+        }
+    }
+}
+
+TEST_F(EdgeTraversalTest, NoTraceNoPathColumn) {
+    auto qr = exec_ok("SELECT * FROM TRAVERSE follows FROM users(1) DIRECTION OUT MODE EDGES");
+    for (const auto& name : qr.column_names) {
+        EXPECT_NE(name, "__path") << "__path must not appear without WITH TRACE";
+    }
 }
 
 } // namespace

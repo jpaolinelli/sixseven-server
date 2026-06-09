@@ -582,6 +582,7 @@ Planner::plan_from_source(const TableRef& table_ref,
         config.direction = trav->direction;
         config.max_depth = trav->max_depth.value_or(100);
         config.fetch = true; // Always fetch for enrichment.
+        config.trace = trav->trace;
 
         // Resolve edge type.
         auto edge_def = catalog_.get_edge_type(database_id_, trav->edge_type);
@@ -719,6 +720,9 @@ Planner::plan_from_source(const TableRef& table_ref,
             out_cols.push_back({trav_alias, "__from", source_pk_type, false, 0});
             out_cols.push_back({trav_alias, "__to", edge_target_pk_type, false, 0});
             out_cols.push_back({trav_alias, "__depth", TypeId::INT64, false, 0});
+            if (trav->trace) {
+                out_cols.push_back({trav_alias, "__path", TypeId::PATH, false, 0});
+            }
 
             // Append edge property columns (qualified by edge type name, not alias,
             // to support the edge_type.property access syntax).
@@ -746,6 +750,9 @@ Planner::plan_from_source(const TableRef& table_ref,
         out_cols.push_back({trav_alias, "__node", pk_type, false, 0});
         out_cols.push_back({trav_alias, "__depth", TypeId::INT64, false, 0});
         out_cols.push_back({trav_alias, "__source", pk_type, true, 0});
+        if (trav->trace) {
+            out_cols.push_back({trav_alias, "__path", TypeId::PATH, false, 0});
+        }
 
         // Append edge property columns (nullable — start node has no incoming edge).
         // Qualified by edge type name for edge_type.property access syntax.
@@ -2297,6 +2304,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_traverse(const TraverseStmt& stm
     config.max_depth = stmt.max_depth.value_or(100);
     config.fetch = stmt.fetch;
     config.collect_edges = true;
+    config.trace = stmt.trace;
 
     // For heterogeneous edges, cap depth to 1 (target nodes live in a
     // different table and cannot have further edges of the same type).
@@ -2309,6 +2317,9 @@ Result<std::unique_ptr<Iterator>> Planner::plan_traverse(const TraverseStmt& stm
     out_cols.push_back({"", "depth", TypeId::INT64, false, 0});
     if (stmt.fetch) {
         out_cols.push_back({"", "source", pk_type, true, 0});
+    }
+    if (stmt.trace) {
+        out_cols.push_back({"", "__path", TypeId::PATH, false, 0});
     }
     auto schema = OutputSchema(std::move(out_cols));
 
