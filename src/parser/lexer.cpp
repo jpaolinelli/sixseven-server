@@ -129,6 +129,7 @@ const std::unordered_map<std::string, TokenType>& keyword_map() {
         {"TIMESTAMP", TokenType::TIMESTAMP},
         {"TINYINT", TokenType::TINYINT},
         {"TRANSACTION", TokenType::TRANSACTION},
+        {"TRACE", TokenType::TRACE},
         {"TRAVERSE", TokenType::TRAVERSE},
         {"TRUE", TokenType::TRUE_KW},
         {"UNBOUNDED", TokenType::UNBOUNDED},

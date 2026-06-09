@@ -714,6 +714,7 @@ struct TraverseStmt : Stmt {
     TraverseMode mode = TraverseMode::NODES;
     ExprPtr where_expr;
     bool fetch = false;
+    bool trace = false;
     void accept(AstVisitor& visitor) const override;
 };
 

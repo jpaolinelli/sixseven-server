@@ -2267,6 +2267,14 @@ Result<StmtPtr> Parser::parse_traverse() {
         stmt->fetch = true;
     }
 
+    // Optional WITH TRACE.
+    if (match(TokenType::WITH)) {
+        auto trace = expect(TokenType::TRACE, "expected TRACE after WITH");
+        if (!trace)
+            return tl::unexpected(trace.error());
+        stmt->trace = true;
+    }
+
     return ok(StmtPtr(std::move(stmt)));
 }
 

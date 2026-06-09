@@ -141,6 +141,7 @@ enum class TokenType : uint8_t {
     REINDEX,
     RETURN,
     SHORTEST,
+    TRACE,
     TRAVERSE,
     TYPE,
     UNLINK,
@@ -449,6 +450,8 @@ constexpr std::string_view token_type_name(TokenType type) {
         return "RETURN";
     case TokenType::SHORTEST:
         return "SHORTEST";
+    case TokenType::TRACE:
+        return "TRACE";
     case TokenType::TRAVERSE:
         return "TRAVERSE";
     case TokenType::TYPE:
