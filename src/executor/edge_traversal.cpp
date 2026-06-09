@@ -209,9 +209,9 @@ Result<void> EdgeTraversalOperator::collect_edges() {
             Value(static_cast<int64_t>(std::max(from_depth, to_depth)))); // __depth
 
         // TRACE mode: append the start-to-__from path after __depth, before
-        // edge properties. The __from node is edge.source_pk.
+        // edge properties. The __from node is edge.source_pk at from_depth.
         if (config_.trace) {
-            auto path = reconstruct_path(edge.source_pk);
+            auto path = reconstruct_path(edge.source_pk, from_depth);
             if (!path) {
                 return tl::unexpected(path.error());
             }
@@ -314,16 +314,37 @@ Result<void> EdgeTraversalOperator::collect_edges() {
     return ok();
 }
 
-Result<Path> EdgeTraversalOperator::reconstruct_path(const Value& target) const {
+Result<Path> EdgeTraversalOperator::reconstruct_path(const Value& target,
+                                                     int32_t target_depth) const {
     // Walk parent pointers backward from target to the start node, collecting
     // (node_pk, incoming_edge_row_id) pairs, then reverse to get start->target.
     std::vector<PathStep> reversed;
 
+    // A valid parent chain consumes each parent-map entry at most once plus a
+    // terminal step for the start node; anything longer means the parent map
+    // contains a cycle (GDB-694).
+    const size_t max_steps = parent_map_.size() + 1;
+
     Value cursor = target;
+    int32_t remaining = target_depth;
     while (true) {
+        if (reversed.size() >= max_steps) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "TRACE path reconstruction detected a cycle in the parent map");
+        }
+
         auto cursor_int = pk_to_int64(cursor);
         if (!cursor_int) {
             return tl::unexpected(cursor_int.error());
+        }
+
+        // After target_depth hops the cursor is the start node. The depth guard
+        // is required for heterogeneous edges: the parent map is keyed by PK
+        // only, so a node in another table sharing the start node's PK would
+        // otherwise be treated as its own parent and loop forever (GDB-694).
+        if (remaining <= 0) {
+            reversed.push_back({*cursor_int, -1});
+            break;
         }
 
         auto it = parent_map_.find(cursor);
@@ -335,6 +356,7 @@ Result<Path> EdgeTraversalOperator::reconstruct_path(const Value& target) const 
 
         reversed.push_back({*cursor_int, it->second.edge_row_id});
         cursor = it->second.parent_pk;
+        --remaining;
     }
 
     // reversed is target..start. Reverse to start..target.

@@ -284,7 +284,7 @@ Result<void> EnrichedTraversalOperator::enrich_results() {
         // before the edge property columns.
         const size_t meta_columns = config_.trace ? 4 : 3;
         if (config_.trace) {
-            auto path = reconstruct_path(bfs.node_pk);
+            auto path = reconstruct_path(bfs.node_pk, bfs.depth);
             if (!path) {
                 return tl::unexpected(path.error());
             }
@@ -311,16 +311,37 @@ Result<void> EnrichedTraversalOperator::enrich_results() {
     return ok();
 }
 
-Result<Path> EnrichedTraversalOperator::reconstruct_path(const Value& target) const {
+Result<Path> EnrichedTraversalOperator::reconstruct_path(const Value& target,
+                                                         int32_t target_depth) const {
     // Walk parent pointers backward from target to the start node, collecting
     // (node_pk, incoming_edge_row_id) pairs, then reverse to get start->target.
     std::vector<PathStep> reversed;
 
+    // A valid parent chain consumes each parent-map entry at most once plus a
+    // terminal step for the start node; anything longer means the parent map
+    // contains a cycle (GDB-694).
+    const size_t max_steps = parent_map_.size() + 1;
+
     Value cursor = target;
+    int32_t remaining = target_depth;
     while (true) {
+        if (reversed.size() >= max_steps) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "TRACE path reconstruction detected a cycle in the parent map");
+        }
+
         auto cursor_int = pk_to_int64(cursor);
         if (!cursor_int) {
             return tl::unexpected(cursor_int.error());
+        }
+
+        // After target_depth hops the cursor is the start node. The depth guard
+        // is required for heterogeneous edges: the parent map is keyed by PK
+        // only, so a node in another table sharing the start node's PK would
+        // otherwise be treated as its own parent and loop forever (GDB-694).
+        if (remaining <= 0) {
+            reversed.push_back({*cursor_int, -1});
+            break;
         }
 
         auto it = parent_map_.find(cursor);
@@ -332,6 +353,7 @@ Result<Path> EnrichedTraversalOperator::reconstruct_path(const Value& target) co
 
         reversed.push_back({*cursor_int, it->second.edge_row_id});
         cursor = it->second.parent_pk;
+        --remaining;
     }
 
     // reversed is target..start. Reverse to start..target.

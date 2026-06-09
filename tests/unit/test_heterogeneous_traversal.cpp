@@ -251,6 +251,114 @@ TEST_F(HeterogeneousTraversalTest, PKCollisionInDirection) {
 }
 
 // ============================================================================
+// GDB-694: heterogeneous TRACE must not hang when a target PK equals the
+// start PK. The parent map is keyed by PK only, so posts(1) reached from
+// users(1) used to record itself as its own parent and reconstruct_path()
+// looped forever (unbounded memory growth from plain SQL).
+// ============================================================================
+
+TEST_F(HeterogeneousTraversalTest, TraceSamePkEnrichedOutTwoStepPath) {
+    exec_ok("INSERT INTO posts VALUES (1, 'Collider')");
+    exec_ok("LINK users(1) TO posts(1) VIA authored");
+
+    auto qr = exec_ok("SELECT title, __node, __depth, __path "
+                      "FROM TRAVERSE authored FROM users(1) DIRECTION OUT WITH TRACE");
+
+    // users(1) authored posts 10, 20, and 1.
+    ASSERT_EQ(qr.rows.size(), 3u);
+    bool saw_collider = false;
+    for (const auto& row : qr.rows) {
+        ASSERT_EQ(row[3].type_id(), TypeId::PATH);
+        const Path& p = row[3].as_path();
+        ASSERT_EQ(p.steps.size(), 2u) << "path must be start -> target, not a self-chain";
+        EXPECT_EQ(p.steps[0].node_pk, 1);
+        EXPECT_EQ(p.steps[1].node_pk, val_to_int64(row[1]));
+        EXPECT_GE(p.steps[0].edge_id, 0) << "start step must carry the outgoing edge";
+        EXPECT_EQ(p.steps[1].edge_id, -1) << "terminal step has no outgoing edge";
+        if (val_to_int64(row[1]) == 1) {
+            saw_collider = true;
+            EXPECT_EQ(row[0].as_string(), "Collider");
+        }
+    }
+    EXPECT_TRUE(saw_collider) << "posts(1) must be reached despite the PK collision";
+}
+
+TEST_F(HeterogeneousTraversalTest, TraceSamePkEdgeModeOutTrivialPath) {
+    exec_ok("INSERT INTO posts VALUES (1, 'Collider')");
+    exec_ok("LINK users(1) TO posts(1) VIA authored");
+
+    auto qr = exec_ok("SELECT __from, __to, __path "
+                      "FROM TRAVERSE authored FROM users(1) DIRECTION OUT MODE EDGES WITH TRACE");
+
+    // Three edges out of users(1): to posts 10, 20, and 1.
+    ASSERT_EQ(qr.rows.size(), 3u);
+    for (const auto& row : qr.rows) {
+        EXPECT_EQ(val_to_int64(row[0]), 1);
+        ASSERT_EQ(row[2].type_id(), TypeId::PATH);
+        const Path& p = row[2].as_path();
+        ASSERT_EQ(p.steps.size(), 1u)
+            << "path to the start (__from) node must be the trivial single step";
+        EXPECT_EQ(p.steps[0].node_pk, 1);
+        EXPECT_EQ(p.steps[0].edge_id, -1);
+    }
+}
+
+TEST_F(HeterogeneousTraversalTest, TraceSamePkEnrichedInTwoStepPath) {
+    exec_ok("INSERT INTO posts VALUES (1, 'Collider')");
+    exec_ok("LINK users(1) TO posts(1) VIA authored");
+
+    auto qr = exec_ok("SELECT name, __node, __depth, __path "
+                      "FROM TRAVERSE authored FROM posts(1) DIRECTION IN WITH TRACE");
+
+    // posts(1) was authored by users(1) (Alice).
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "Alice");
+    ASSERT_EQ(qr.rows[0][3].type_id(), TypeId::PATH);
+    const Path& p = qr.rows[0][3].as_path();
+    ASSERT_EQ(p.steps.size(), 2u) << "path must be start -> source node, not a self-chain";
+    EXPECT_EQ(p.steps[0].node_pk, 1); // start: posts(1)
+    EXPECT_EQ(p.steps[1].node_pk, 1); // reached: users(1)
+    EXPECT_GE(p.steps[0].edge_id, 0);
+    EXPECT_EQ(p.steps[1].edge_id, -1);
+}
+
+TEST_F(HeterogeneousTraversalTest, TraceSamePkEdgeModeInTwoStepPath) {
+    exec_ok("INSERT INTO posts VALUES (1, 'Collider')");
+    exec_ok("LINK users(1) TO posts(1) VIA authored");
+
+    auto qr = exec_ok("SELECT __from, __to, __path "
+                      "FROM TRAVERSE authored FROM posts(1) DIRECTION IN MODE EDGES WITH TRACE");
+
+    // One edge users(1) -> posts(1); __from is users(1), discovered at depth 1.
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(val_to_int64(qr.rows[0][0]), 1);
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 1);
+    ASSERT_EQ(qr.rows[0][2].type_id(), TypeId::PATH);
+    const Path& p = qr.rows[0][2].as_path();
+    ASSERT_EQ(p.steps.size(), 2u) << "path must be start -> __from node, not a self-chain";
+    EXPECT_EQ(p.steps[0].node_pk, 1);
+    EXPECT_EQ(p.steps[1].node_pk, 1);
+    EXPECT_GE(p.steps[0].edge_id, 0);
+    EXPECT_EQ(p.steps[1].edge_id, -1);
+}
+
+TEST_F(HeterogeneousTraversalTest, TraceDistinctPksStillCorrect) {
+    auto qr = exec_ok("SELECT title, __node, __path "
+                      "FROM TRAVERSE authored FROM users(2) DIRECTION OUT WITH TRACE");
+
+    // users(2) authored only posts(30); the depth-bounded reconstruction must
+    // not change the non-colliding heterogeneous path shape.
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "Draft");
+    ASSERT_EQ(qr.rows[0][2].type_id(), TypeId::PATH);
+    const Path& p = qr.rows[0][2].as_path();
+    ASSERT_EQ(p.steps.size(), 2u);
+    EXPECT_EQ(p.steps[0].node_pk, 2);
+    EXPECT_EQ(p.steps[1].node_pk, 30);
+    EXPECT_EQ(p.length(), 1);
+}
+
+// ============================================================================
 // GDB-605: Heterogeneous edges with DIFFERENT PK types (UUID vs INT).
 //
 // The bug: TRAVERSE start key was validated against the wrong table's PK type
