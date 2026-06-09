@@ -5,8 +5,9 @@
 /// parse_traverse() handling of the optional `WITH TRACE` clause. Covers the
 /// story's acceptance criteria plus adversarial edge cases: case-insensitivity,
 /// error paths (WITH without TRACE), clause ordering, CTE-WITH non-conflict,
-/// trailing tokens, and the reserved-keyword backward-compatibility regression
-/// introduced by making TRACE a keyword.
+/// and trailing tokens. The reserved-keyword regression that making TRACE a
+/// keyword introduced was fixed by GDB-693; the QA_GDB677_Regression cases here
+/// now pin the restored behavior (see test_qa_gdb_693.cpp for full coverage).
 
 #include "sixseven/parser/ast.h"
 #include "sixseven/parser/lexer.h"
@@ -230,10 +231,18 @@ TEST(QA_GDB677_Parser, CteWithStillParsesAsCte) {
     EXPECT_EQ(sel->ctes.size(), 1u);
 }
 
-// A statement-leading `WITH TRACE` is a CTE context, not a traverse modifier;
-// TRACE is not a valid CTE name, so this must error (and must not crash).
-TEST(QA_GDB677_Parser, LeadingWithTraceIsCteErrorNotModifier) {
-    EXPECT_TRUE(is_parse_error("WITH TRACE AS (SELECT 1) SELECT * FROM TRACE"));
+// A statement-leading `WITH TRACE` is a CTE context, not a traverse modifier.
+// After GDB-693, TRACE is a valid name token, so `trace` is an acceptable CTE
+// name and FROM table: this parses as a single CTE named `trace` rather than
+// erroring. (Before GDB-693 it errored because TRACE was reserved.)
+TEST(QA_GDB677_Parser, LeadingWithTraceIsCteNotModifier) {
+    auto stmt = parse_first("WITH TRACE AS (SELECT 1) SELECT * FROM TRACE");
+    const auto* sel = dynamic_cast<const SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->ctes.size(), 1u);
+    EXPECT_EQ(sel->ctes[0].name, "TRACE");
+    ASSERT_EQ(sel->from.size(), 1u);
+    EXPECT_EQ(sel->from[0].name, "TRACE");
 }
 
 // CTE feeding a traverse-in-select that itself uses WITH TRACE: both the
@@ -273,38 +282,39 @@ TEST(QA_GDB677_Parser, PerStatementTraceFlagIsIndependent) {
 }
 
 // =============================================================================
-// REGRESSION: TRACE is now a fully reserved word.
+// REGRESSION (resolved by GDB-693): `trace` is usable as an identifier again.
 //
-// Before this change, `trace` lexed as an IDENTIFIER and was usable as a
-// table/column/edge name. The keyword was added to the lexer but NOT to
-// parser.cpp is_name_token() (unlike the analogous traverse modifier FETCH,
-// which *is* listed there). As a result previously-valid SQL that uses the
-// bare word `trace` as an identifier no longer parses. These tests characterize
-// the CURRENT (regressed) behavior; see the filed bug ticket. If TRACE is added
-// to is_name_token() the expectations below should flip to success.
+// GDB-677 added TRACE to the lexer but omitted it from parser.cpp
+// is_name_token(), making the bare word `trace` a fully reserved keyword and
+// breaking previously-valid SQL. These tests originally characterized that
+// regression (asserting a parse error). GDB-693 added `case TokenType::TRACE:`
+// to is_name_token(), restoring `trace` as a valid table/column/edge name, so
+// the expectations below were flipped to success per the GDB-693 ticket. The
+// exhaustive identifier-context coverage now lives in test_qa_gdb_693.cpp; the
+// cases retained here guard against this specific regression returning.
 // =============================================================================
 
-TEST(QA_GDB677_Regression, TraceAsTableNameRejected) {
-    // Previously valid: CREATE TABLE trace (...). Now a parse error.
-    EXPECT_TRUE(is_parse_error("CREATE TABLE trace (id INT)"));
+TEST(QA_GDB677_Regression, TraceAsTableNameAccepted) {
+    // Previously regressed to a parse error; restored by GDB-693.
+    EXPECT_FALSE(is_parse_error("CREATE TABLE trace (id INT)"));
 }
 
-TEST(QA_GDB677_Regression, TraceAsColumnNameRejected) {
-    EXPECT_TRUE(is_parse_error("CREATE TABLE t (trace INT)"));
+TEST(QA_GDB677_Regression, TraceAsColumnNameAccepted) {
+    EXPECT_FALSE(is_parse_error("CREATE TABLE t (trace INT)"));
 }
 
-TEST(QA_GDB677_Regression, TraceAsSelectColumnRejected) {
-    EXPECT_TRUE(is_parse_error("SELECT trace FROM events"));
+TEST(QA_GDB677_Regression, TraceAsSelectColumnAccepted) {
+    EXPECT_FALSE(is_parse_error("SELECT trace FROM events"));
 }
 
-TEST(QA_GDB677_Regression, TraceAsEdgeTypeRejected) {
+TEST(QA_GDB677_Regression, TraceAsEdgeTypeAccepted) {
     // TRAVERSE trace FROM users(1): edge type goes through parse_name(), which
-    // rejects the now-reserved TRACE keyword.
-    EXPECT_TRUE(is_parse_error("TRAVERSE trace FROM users(1)"));
+    // now accepts TRACE as a name token.
+    EXPECT_FALSE(is_parse_error("TRAVERSE trace FROM users(1)"));
 }
 
-// Control: the analogous FETCH modifier keyword *is* usable as an identifier,
-// demonstrating the inconsistency TRACE introduces.
+// Control: the analogous FETCH modifier keyword is also usable as an
+// identifier — `trace` now matches its (correct) behavior.
 TEST(QA_GDB677_Regression, FetchAsTableNameStillAccepted) {
     EXPECT_FALSE(is_parse_error("CREATE TABLE fetch (id INT)"));
 }
