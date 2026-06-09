@@ -1715,6 +1715,62 @@ TEST(Parser, FetchUsableAsTableName) {
     EXPECT_EQ(ct->columns[0].name, "id");
 }
 
+// -- WITH TRACE clause-combination tests (GDB-680) -----------------------------
+//
+// WITH TRACE is the final optional clause of a TRAVERSE statement. These tests
+// pin its interaction with every other optional clause (DIRECTION, MAX_DEPTH,
+// MODE, WHERE, FETCH) and its error handling.
+
+TEST(Parser, TraverseTraceAfterDirectionAndMaxDepth) {
+    auto stmt = parse_one("TRAVERSE follows FROM users(1) DIRECTION IN MAX_DEPTH 2 WITH TRACE");
+    auto* tr = dynamic_cast<TraverseStmt*>(stmt.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->direction, TraverseDirection::IN);
+    ASSERT_TRUE(tr->max_depth.has_value());
+    EXPECT_EQ(*tr->max_depth, 2);
+    EXPECT_TRUE(tr->trace);
+}
+
+TEST(Parser, TraverseModeEdgesWithTrace) {
+    auto stmt = parse_one("SELECT * FROM TRAVERSE follows FROM users(1) MODE EDGES WITH TRACE");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->from.size(), 1u);
+    auto* tr = dynamic_cast<TraverseStmt*>(sel->from[0].traverse_source.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->mode, TraverseMode::EDGES);
+    EXPECT_TRUE(tr->trace);
+}
+
+TEST(Parser, TraverseWhereThenTrace) {
+    auto stmt = parse_one("TRAVERSE follows FROM users(1) WHERE depth > 1 WITH TRACE");
+    auto* tr = dynamic_cast<TraverseStmt*>(stmt.get());
+    ASSERT_NE(tr, nullptr);
+    ASSERT_NE(tr->where_expr, nullptr);
+    EXPECT_TRUE(tr->trace);
+}
+
+TEST(Parser, TraverseAllClausesWithTrace) {
+    auto stmt = parse_one("TRAVERSE follows FROM users(1) DIRECTION BOTH MAX_DEPTH 3 "
+                          "WHERE depth > 0 FETCH WITH TRACE");
+    auto* tr = dynamic_cast<TraverseStmt*>(stmt.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->direction, TraverseDirection::BOTH);
+    ASSERT_TRUE(tr->max_depth.has_value());
+    EXPECT_EQ(*tr->max_depth, 3);
+    ASSERT_NE(tr->where_expr, nullptr);
+    EXPECT_TRUE(tr->fetch);
+    EXPECT_TRUE(tr->trace);
+}
+
+TEST(Parser, TraverseWithMissingTraceKeywordErrors) {
+    expect_parse_error("TRAVERSE follows FROM users(1) WITH");
+}
+
+TEST(Parser, TraverseWithWrongKeywordAfterWithErrors) {
+    expect_parse_error("TRAVERSE follows FROM users(1) WITH FETCH");
+}
+
 // -- SHORTEST PATH tests ------------------------------------------------------
 
 TEST(Parser, ShortestPathBasic) {
