@@ -2627,6 +2627,12 @@ Result<BoundStatement> Binder::bind_traverse(const TraverseStmt& stmt, Scope* pa
     if (stmt.fetch) {
         bound.output_columns.push_back({0, -1, stmt.edge_type, "source", pk_type, true});
     }
+    // WITH TRACE surfaces the reconstructed BFS path as a trailing __path column
+    // (mirrors plan_traverse's iterator output schema). Placed after source so the
+    // binder-declared column order matches the planner-produced schema.
+    if (stmt.trace) {
+        bound.output_columns.push_back({0, -1, stmt.edge_type, "__path", TypeId::PATH, false});
+    }
 
     // Bind FROM key expression. Chained to the parent scope so a correlated
     // start key (e.g. TRAVERSE edge FROM t(outer.id)) can resolve outer columns.
