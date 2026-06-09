@@ -112,14 +112,26 @@ Let me show you what you can do with it.
 
 Graph traversal. One clause.
 Walk the social network three hops deep.
-Friend, friend-of-friend, friend-of-friend-of-friend.
+Just the results: the readers within three hops.
 
-Not a recursive CTE. A first-class TRAVERSE.
+Now add WITH TRACE.
+
+[RUN QUERY]
+
+    SELECT username, city, __depth
+    FROM TRAVERSE follows FROM readers(1) DIRECTION OUT MAX_DEPTH 3
+    WITH TRACE;
 
 [SWITCH TO GRAPH VIEW -- LET THE NETWORK RENDER AND SETTLE]
 [DRAG A NODE OR TWO SO THE LAYOUT LOOKS ALIVE]
 
-And the console renders it as a network.
+WITH TRACE returns every node and edge
+the engine walked through to reach those results.
+Without it, you get the destination rows.
+With it, you see the full path the traversal took.
+
+Not a recursive CTE. A first-class TRAVERSE
+that shows you exactly how it got there.
 
 [BACK TO QUERY PANEL]
 [RUN QUERY]
@@ -295,8 +307,12 @@ DDL-2  CREATE EDGE TYPE cites FROM documents TO documents;
 DDL-3  LINK authors(1) TO documents(42) VIA authored;
        LINK documents(42) TO documents(7) VIA cites;
 
-Q1  SELECT username, city, __depth
+Q1a SELECT username, city, __depth
     FROM TRAVERSE follows FROM readers(1) DIRECTION OUT MAX_DEPTH 3;
+
+Q1b SELECT username, city, __depth
+    FROM TRAVERSE follows FROM readers(1) DIRECTION OUT MAX_DEPTH 3
+    WITH TRACE;
 
 Q2  SELECT title, genre, rating FROM books
     WHERE NEAREST(description_vec, 5)
