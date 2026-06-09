@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace sixseven {
@@ -64,6 +65,12 @@ protected:
     void do_close() override;
 
 private:
+    /// Parent-pointer entry used to reconstruct paths when trace is enabled.
+    struct ParentInfo {
+        Value parent_pk;          ///< PK of the node this one was first reached from.
+        int64_t edge_row_id = -1; ///< Row ID of the edge used to reach this node.
+    };
+
     /// Run BFS and populate bfs_results_.
     [[nodiscard]] Result<void> run_bfs();
 
@@ -74,6 +81,10 @@ private:
     /// Scan target table and build PK -> row_data hash map, then assemble
     /// enriched tuples from BFS results.
     [[nodiscard]] Result<void> enrich_results();
+
+    /// Reconstruct the full path from the start node to @p target by walking the
+    /// parent map backward and reversing. Only valid when trace is enabled.
+    [[nodiscard]] Result<Path> reconstruct_path(const Value& target) const;
 
     GraphEngine& graph_engine_;
     TraversalConfig config_;
@@ -90,6 +101,9 @@ private:
 
     std::vector<TraversalResult> bfs_results_;
     std::vector<Tuple> enriched_results_;
+    /// Maps a node PK to the (parent, edge) it was first reached from.
+    /// Populated only when config_.trace is true.
+    std::unordered_map<Value, ParentInfo, ValueHash, ValueEqual> parent_map_;
     size_t cursor_ = 0;
 };
 

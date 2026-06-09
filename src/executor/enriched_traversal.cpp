@@ -4,12 +4,32 @@
 #include "sixseven/common/value_hash.h"
 #include "sixseven/executor/expr_evaluator.h"
 
+#include <algorithm>
 #include <cassert>
 #include <deque>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace sixseven {
+
+namespace {
+
+/// Convert a Value PK to int64_t for PathStep storage.
+/// Returns an error if the PK is not an integer type.
+Result<int64_t> pk_to_int64(const Value& pk) {
+    if (!pk.is_null()) {
+        if (auto* p = std::get_if<int64_t>(&pk.data())) {
+            return ok(*p);
+        }
+        if (auto* p32 = std::get_if<int32_t>(&pk.data())) {
+            return ok(static_cast<int64_t>(*p32));
+        }
+    }
+    return make_error(StatusCode::INVALID_ARGUMENT,
+                      "TRAVERSE WITH TRACE requires integer primary keys");
+}
+
+} // namespace
 
 EnrichedTraversalOperator::EnrichedTraversalOperator(GraphEngine& graph_engine,
                                                      TraversalConfig config,
@@ -41,6 +61,7 @@ const OutputSchema& EnrichedTraversalOperator::output_schema() const {
 Result<void> EnrichedTraversalOperator::do_open() {
     bfs_results_.clear();
     enriched_results_.clear();
+    parent_map_.clear();
     cursor_ = 0;
 
     auto bfs = run_bfs();
@@ -74,6 +95,7 @@ Result<std::optional<Tuple>> EnrichedTraversalOperator::do_next() {
 void EnrichedTraversalOperator::do_close() {
     bfs_results_.clear();
     enriched_results_.clear();
+    parent_map_.clear();
     cursor_ = 0;
 }
 
@@ -95,7 +117,7 @@ Result<void> EnrichedTraversalOperator::run_bfs() {
     if (!heterogeneous_) {
         visited.insert(config_.start_key);
     }
-    queue.push_back({config_.start_key, 0, Value(), {}});
+    queue.push_back({config_.start_key, 0, Value(), -1, {}});
 
     while (!queue.empty()) {
         auto current = std::move(queue.front());
@@ -129,7 +151,16 @@ Result<void> EnrichedTraversalOperator::run_bfs() {
             }
 
             visited.insert(neighbor_pk);
-            queue.push_back({neighbor_pk, current.depth + 1, current.node_pk, edge.properties});
+
+            // TRACE mode: record how this node was first reached so the path can
+            // be reconstructed during enrichment.
+            if (config_.trace) {
+                parent_map_.emplace(
+                    neighbor_pk,
+                    ParentInfo{current.node_pk, static_cast<int64_t>(edge.edge_row_id)});
+            }
+
+            queue.push_back({neighbor_pk, current.depth + 1, current.node_pk, -1, edge.properties});
         }
     }
 
@@ -244,15 +275,26 @@ Result<void> EnrichedTraversalOperator::enrich_results() {
             }
         }
 
-        // Meta-columns: __node, __depth, __source.
+        // Meta-columns: __node, __depth, __source[, __path].
         tuple.values.push_back(bfs.node_pk);
         tuple.values.push_back(Value(static_cast<int64_t>(bfs.depth)));
         tuple.values.push_back(bfs.source_pk);
 
+        // TRACE mode adds a fourth meta-column (__path) after __source and
+        // before the edge property columns.
+        const size_t meta_columns = config_.trace ? 4 : 3;
+        if (config_.trace) {
+            auto path = reconstruct_path(bfs.node_pk);
+            if (!path) {
+                return tl::unexpected(path.error());
+            }
+            tuple.values.push_back(Value(std::move(*path)));
+        }
+
         // Edge property values (after meta-columns).
         // The number of expected properties is schema_.column_count() minus
-        // target_column_count_ minus 3 (meta-columns).
-        size_t expected_props = schema_.column_count() - target_column_count_ - 3;
+        // target_column_count_ minus the meta-column count.
+        size_t expected_props = schema_.column_count() - target_column_count_ - meta_columns;
         for (size_t i = 0; i < expected_props; ++i) {
             if (i < bfs.edge_properties.size()) {
                 tuple.values.push_back(bfs.edge_properties[i]);
@@ -267,6 +309,45 @@ Result<void> EnrichedTraversalOperator::enrich_results() {
     }
 
     return ok();
+}
+
+Result<Path> EnrichedTraversalOperator::reconstruct_path(const Value& target) const {
+    // Walk parent pointers backward from target to the start node, collecting
+    // (node_pk, incoming_edge_row_id) pairs, then reverse to get start->target.
+    std::vector<PathStep> reversed;
+
+    Value cursor = target;
+    while (true) {
+        auto cursor_int = pk_to_int64(cursor);
+        if (!cursor_int) {
+            return tl::unexpected(cursor_int.error());
+        }
+
+        auto it = parent_map_.find(cursor);
+        if (it == parent_map_.end()) {
+            // Reached the start node (no parent entry): no incoming edge.
+            reversed.push_back({*cursor_int, -1});
+            break;
+        }
+
+        reversed.push_back({*cursor_int, it->second.edge_row_id});
+        cursor = it->second.parent_pk;
+    }
+
+    // reversed is target..start. Reverse to start..target.
+    std::reverse(reversed.begin(), reversed.end());
+
+    // Each step carries its own *incoming* edge id; Path semantics want the
+    // *outgoing* edge to the next step, so shift edge ids toward the start and
+    // clear the terminal step's edge.
+    Path path;
+    path.steps.reserve(reversed.size());
+    for (size_t i = 0; i < reversed.size(); ++i) {
+        int64_t outgoing = (i + 1 < reversed.size()) ? reversed[i + 1].edge_id : -1;
+        path.steps.push_back({reversed[i].node_pk, outgoing});
+    }
+
+    return ok(std::move(path));
 }
 
 } // namespace sixseven

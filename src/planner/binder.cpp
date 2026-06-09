@@ -461,6 +461,9 @@ Result<Binder::TraverseColumns> Binder::compute_traverse_columns(const TraverseS
         columns.push_back({0, -1, alias, "__from", source_pk_type, false});
         columns.push_back({0, -1, alias, "__to", edge_target_pk_type, false});
         columns.push_back({0, -1, alias, "__depth", TypeId::INT64, false});
+        if (trav.trace) {
+            columns.push_back({0, -1, alias, "__path", TypeId::PATH, false});
+        }
     } else {
         // Node mode (default): target table columns + __node, __depth, __source.
         for (const auto& col : target_schema->columns) {
@@ -476,6 +479,9 @@ Result<Binder::TraverseColumns> Binder::compute_traverse_columns(const TraverseS
         columns.push_back({0, -1, alias, "__node", target_pk_type, false});
         columns.push_back({0, -1, alias, "__depth", TypeId::INT64, false});
         columns.push_back({0, -1, alias, "__source", target_pk_type, true});
+        if (trav.trace) {
+            columns.push_back({0, -1, alias, "__path", TypeId::PATH, false});
+        }
     }
 
     // Edge property columns — qualified by edge type name for
