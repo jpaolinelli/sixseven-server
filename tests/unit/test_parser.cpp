@@ -1618,6 +1618,44 @@ TEST(Parser, TraverseInFromMalformedMissingKey) {
     expect_parse_error("SELECT * FROM TRAVERSE follows FROM users");
 }
 
+// -- TRAVERSE WITH TRACE tests (GDB-677) --------------------------------------
+
+TEST(Parser, TraverseWithTrace) {
+    auto stmt = parse_one("TRAVERSE follows FROM users(1) WITH TRACE");
+    auto* tr = dynamic_cast<TraverseStmt*>(stmt.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->edge_type, "follows");
+    EXPECT_EQ(tr->from_table, "users");
+    EXPECT_TRUE(tr->trace);
+    EXPECT_FALSE(tr->fetch);
+}
+
+TEST(Parser, TraverseFetchWithTrace) {
+    auto stmt = parse_one("TRAVERSE follows FROM users(1) FETCH WITH TRACE");
+    auto* tr = dynamic_cast<TraverseStmt*>(stmt.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_TRUE(tr->fetch);
+    EXPECT_TRUE(tr->trace);
+}
+
+TEST(Parser, TraverseNoTraceDefault) {
+    auto stmt = parse_one("TRAVERSE follows FROM users(1)");
+    auto* tr = dynamic_cast<TraverseStmt*>(stmt.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_FALSE(tr->trace);
+}
+
+TEST(Parser, TraverseWithTraceInSelect) {
+    auto stmt = parse_one("SELECT * FROM TRAVERSE follows FROM users(1) WITH TRACE");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->from.size(), 1u);
+    ASSERT_NE(sel->from[0].traverse_source, nullptr);
+    auto* tr = dynamic_cast<TraverseStmt*>(sel->from[0].traverse_source.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_TRUE(tr->trace);
+}
+
 // -- SHORTEST PATH tests ------------------------------------------------------
 
 TEST(Parser, ShortestPathBasic) {
