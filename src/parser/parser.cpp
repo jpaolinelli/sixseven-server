@@ -57,6 +57,7 @@ bool is_name_token(TokenType type) {
     case TokenType::NEAREST:
     case TokenType::SHORTEST:
     case TokenType::TRAVERSE:
+    case TokenType::TRACE:
     case TokenType::MATCH:
     case TokenType::LINK:
     case TokenType::UNLINK:

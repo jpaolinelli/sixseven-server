@@ -1656,6 +1656,65 @@ TEST(Parser, TraverseWithTraceInSelect) {
     EXPECT_TRUE(tr->trace);
 }
 
+// -- TRACE-as-identifier regression tests (GDB-693) ---------------------------
+//
+// GDB-677 added TRACE to the lexer keyword map but omitted it from
+// is_name_token(), making the bare word `trace` a fully reserved keyword and
+// breaking previously-valid SQL. These tests pin the fix: `trace` must remain
+// usable as a table name, column name, SELECT column, and edge-type identifier,
+// consistent with the analogous TRAVERSE-modifier keyword FETCH.
+
+TEST(Parser, TraceUsableAsTableName) {
+    auto stmt = parse_one("CREATE TABLE trace (id INT)");
+    auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
+    ASSERT_NE(ct, nullptr);
+    EXPECT_EQ(ct->name, "trace");
+    ASSERT_EQ(ct->columns.size(), 1u);
+    EXPECT_EQ(ct->columns[0].name, "id");
+}
+
+TEST(Parser, TraceUsableAsColumnName) {
+    auto stmt = parse_one("CREATE TABLE t (trace INT)");
+    auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
+    ASSERT_NE(ct, nullptr);
+    EXPECT_EQ(ct->name, "t");
+    ASSERT_EQ(ct->columns.size(), 1u);
+    EXPECT_EQ(ct->columns[0].name, "trace");
+    EXPECT_EQ(ct->columns[0].type.name, "INT");
+}
+
+TEST(Parser, TraceUsableAsSelectColumn) {
+    auto stmt = parse_one("SELECT trace FROM events");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->items.size(), 1u);
+    auto* col = dynamic_cast<ColumnRefExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(col, nullptr);
+    EXPECT_EQ(col->column, "trace");
+    ASSERT_EQ(sel->from.size(), 1u);
+    EXPECT_EQ(sel->from[0].name, "events");
+}
+
+TEST(Parser, TraceUsableAsEdgeType) {
+    auto stmt = parse_one("TRAVERSE trace FROM users(1)");
+    auto* tr = dynamic_cast<TraverseStmt*>(stmt.get());
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->edge_type, "trace");
+    EXPECT_EQ(tr->from_table, "users");
+    EXPECT_FALSE(tr->trace);
+}
+
+// Control: the sibling TRAVERSE-modifier keyword FETCH was already accepted as
+// an identifier. This guards against a regression in the opposite direction.
+TEST(Parser, FetchUsableAsTableName) {
+    auto stmt = parse_one("CREATE TABLE fetch (id INT)");
+    auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
+    ASSERT_NE(ct, nullptr);
+    EXPECT_EQ(ct->name, "fetch");
+    ASSERT_EQ(ct->columns.size(), 1u);
+    EXPECT_EQ(ct->columns[0].name, "id");
+}
+
 // -- SHORTEST PATH tests ------------------------------------------------------
 
 TEST(Parser, ShortestPathBasic) {
