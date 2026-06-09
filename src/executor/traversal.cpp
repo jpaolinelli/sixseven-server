@@ -110,7 +110,7 @@ Result<void> TraversalOperator::run_bfs() {
 
             // TRACE mode: append the full start-to-node path as a trailing column.
             if (config_.trace) {
-                auto path = reconstruct_path(current.node_pk);
+                auto path = reconstruct_path(current.node_pk, current.depth);
                 if (!path) {
                     return tl::unexpected(path.error());
                 }
@@ -192,16 +192,35 @@ TraversalOperator::get_neighbors(const Value& node_pk) const {
     return ok(std::move(result));
 }
 
-Result<Path> TraversalOperator::reconstruct_path(const Value& target) const {
+Result<Path> TraversalOperator::reconstruct_path(const Value& target, int32_t target_depth) const {
     // Walk parent pointers backward from target to the start node, collecting
     // (node_pk, incoming_edge_row_id) pairs, then reverse to get start->target.
     std::vector<PathStep> reversed;
 
+    // A valid parent chain consumes each parent-map entry at most once plus a
+    // terminal step for the start node; anything longer means the parent map
+    // contains a cycle (GDB-694).
+    const size_t max_steps = parent_map_.size() + 1;
+
     Value cursor = target;
+    int32_t remaining = target_depth;
     while (true) {
+        if (reversed.size() >= max_steps) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "TRACE path reconstruction detected a cycle in the parent map");
+        }
+
         auto cursor_int = pk_to_int64(cursor);
         if (!cursor_int) {
             return tl::unexpected(cursor_int.error());
+        }
+
+        // After target_depth hops the cursor is the start node. The depth guard
+        // keeps reconstruction bounded even if the parent map contains a cycle
+        // (e.g. cross-table PK collisions, GDB-694).
+        if (remaining <= 0) {
+            reversed.push_back({*cursor_int, -1});
+            break;
         }
 
         auto it = parent_map_.find(cursor);
@@ -218,6 +237,7 @@ Result<Path> TraversalOperator::reconstruct_path(const Value& target) const {
         // shift after reversal.
         reversed.push_back({*cursor_int, it->second.edge_row_id});
         cursor = it->second.parent_pk;
+        --remaining;
     }
 
     // reversed is target..start. Reverse to start..target.

@@ -94,7 +94,13 @@ private:
 
     /// Reconstruct the full path from the start node to @p target by walking the
     /// parent map backward and reversing. Only valid when trace is enabled.
-    Result<Path> reconstruct_path(const Value& target) const;
+    ///
+    /// @p target_depth is the BFS depth of @p target; the walk stops after that
+    /// many hops. The depth guard makes reconstruction immune to parent-map
+    /// cycles (e.g. cross-table PK collisions, GDB-694). The walk is
+    /// additionally bounded by the parent map size and returns INTERNAL_ERROR
+    /// if that bound is exceeded.
+    Result<Path> reconstruct_path(const Value& target, int32_t target_depth) const;
 
     GraphEngine& graph_engine_;
     TraversalConfig config_;
