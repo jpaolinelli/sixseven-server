@@ -2305,10 +2305,13 @@ Result<std::unique_ptr<Iterator>> Planner::plan_traverse(const TraverseStmt& stm
     config.fetch = stmt.fetch;
     config.collect_edges = true;
     config.trace = stmt.trace;
+    // Heterogeneous edges (different source/target tables) must not seed the
+    // BFS visited set with the start key (GDB-696, mirroring GDB-304).
+    config.heterogeneous = edge_def->source_table_id != edge_def->target_table_id;
 
     // For heterogeneous edges, cap depth to 1 (target nodes live in a
     // different table and cannot have further edges of the same type).
-    if (edge_def->source_table_id != edge_def->target_table_id && config.max_depth > 1) {
+    if (config.heterogeneous && config.max_depth > 1) {
         config.max_depth = 1;
     }
 

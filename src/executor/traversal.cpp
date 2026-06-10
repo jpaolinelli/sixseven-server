@@ -89,8 +89,14 @@ Result<void> TraversalOperator::run_bfs() {
     // BFS queue: (node_pk, depth, source_pk).
     std::deque<TraversalResult> queue;
 
-    // Seed the BFS with the start node.
-    visited.insert(config_.start_key);
+    // Seed the BFS with the start node. For heterogeneous edges the start node
+    // lives in a different table than the target nodes, so adding its PK to the
+    // visited set would incorrectly suppress target nodes whose PK happens to
+    // match (GDB-696). TRACE remains safe without the seed: reconstruct_path()
+    // is depth-guarded against parent-map cycles (GDB-694).
+    if (!config_.heterogeneous) {
+        visited.insert(config_.start_key);
+    }
     queue.push_back({config_.start_key, 0, Value(), -1, {}});
 
     while (!queue.empty()) {

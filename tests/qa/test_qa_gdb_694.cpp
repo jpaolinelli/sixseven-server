@@ -289,12 +289,10 @@ TEST_F(QA_GDB694_TraceCollision, DanglingColliderEdgeStillTerminatesWithNullRow)
 // Standalone TRAVERSE statement form (TraversalOperator)
 // ---------------------------------------------------------------------------
 
-// The standalone form always seeds the BFS visited set with the start key
-// (TraversalOperator has no heterogeneous flag), so a colliding target is
-// silently suppressed instead of emitted. This pins the current behavior:
-// the query must terminate with 0 rows — never hang. The suppression itself
-// is a separate pre-existing inconsistency with the FROM TRAVERSE form
-// (see QA report for GDB-694).
+// GDB-696 fixed the standalone form to mirror GDB-304: the BFS visited set is
+// no longer seeded with the start key for heterogeneous edges, so a colliding
+// target is emitted instead of suppressed. Both rows must appear, each with a
+// bounded, cycle-free two-step path.
 TEST_F(QA_GDB694_TraceCollision, StandaloneTraverseCollisionTerminates) {
     exec_ok("INSERT INTO posts VALUES (1, 'Collider')");
     exec_ok("INSERT INTO posts VALUES (10, 'Plain')");
@@ -303,17 +301,21 @@ TEST_F(QA_GDB694_TraceCollision, StandaloneTraverseCollisionTerminates) {
 
     auto qr = exec_ok("TRAVERSE authored FROM users(1) WITH TRACE");
 
-    // Non-colliding target emitted; colliding target suppressed by the
-    // visited-set seed. Both outcomes must be bounded and cycle-free.
-    ASSERT_EQ(qr.rows.size(), 1u)
-        << "standalone TRAVERSE currently suppresses the colliding target";
-    EXPECT_EQ(val_to_int64(qr.rows[0][0]), 10);
-    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 1);
-    ASSERT_EQ(qr.rows[0][2].type_id(), TypeId::PATH);
-    const Path& p = qr.rows[0][2].as_path();
-    ASSERT_EQ(p.steps.size(), 2u);
-    EXPECT_EQ(p.steps[0].node_pk, 1);
-    EXPECT_EQ(p.steps[1].node_pk, 10);
+    // Both targets emitted at depth 1, including the colliding posts(1).
+    ASSERT_EQ(qr.rows.size(), 2u) << "standalone TRAVERSE must emit the colliding target (GDB-696)";
+    bool saw_collider = false;
+    for (const auto& row : qr.rows) {
+        EXPECT_EQ(val_to_int64(row[1]), 1);
+        ASSERT_EQ(row[2].type_id(), TypeId::PATH);
+        const Path& p = row[2].as_path();
+        ASSERT_EQ(p.steps.size(), 2u);
+        EXPECT_EQ(p.steps[0].node_pk, 1);
+        EXPECT_EQ(p.steps[1].node_pk, val_to_int64(row[0]));
+        if (val_to_int64(row[0]) == 1) {
+            saw_collider = true;
+        }
+    }
+    EXPECT_TRUE(saw_collider) << "colliding target posts(1) must be present";
 }
 
 // ---------------------------------------------------------------------------
@@ -479,9 +481,8 @@ TEST_F(QA_GDB694_TraceCollision, ManyCollidingPairsEdgeModeTrivialPaths) {
     }
 
     for (int64_t i = 1; i <= pairs; ++i) {
-        auto qr =
-            exec_ok("SELECT __from, __to, __path FROM TRAVERSE authored FROM users(" +
-                    std::to_string(i) + ") DIRECTION OUT MODE EDGES WITH TRACE");
+        auto qr = exec_ok("SELECT __from, __to, __path FROM TRAVERSE authored FROM users(" +
+                          std::to_string(i) + ") DIRECTION OUT MODE EDGES WITH TRACE");
         ASSERT_EQ(qr.rows.size(), 1u) << "start users(" << i << ")";
         EXPECT_EQ(val_to_int64(qr.rows[0][0]), i);
         EXPECT_EQ(val_to_int64(qr.rows[0][1]), i);
