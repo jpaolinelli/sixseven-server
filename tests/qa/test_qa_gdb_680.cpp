@@ -232,28 +232,41 @@ TEST_F(QA_GDB680_Trace, WhereFilteringAllRowsYieldsEmptyResult) {
     EXPECT_EQ(qr.rows.size(), 0u);
 }
 
-// BUG (High, filed during GDB-680 QA): standalone `TRAVERSE ... WHERE depth = 2`
-// fails at bind time with "column not found: depth" because bind_traverse()
-// binds the WHERE expression in a scope that never receives the traversal's
-// own output columns (node/depth/source/__path). The parser accepts the
-// syntax (pinned by Parser.TraverseWhereThenTrace) but it can never execute.
-// This test pins the current graceful-error behavior; once fixed it should be
-// rewritten to assert 1 row (node 4) with a complete two-hop path.
-TEST_F(QA_GDB680_Trace, StandaloneWhereOnDepthCurrentlyFailsToBind) {
-    auto err = exec_err("TRAVERSE follows FROM users(1) WHERE depth = 2 WITH TRACE");
-    EXPECT_NE(err.message.find("column not found"), std::string::npos)
-        << "actual message: " << err.message;
+// Regression for GDB-695 (High, filed during GDB-680 QA): standalone
+// `TRAVERSE ... WHERE depth = 2` used to fail at bind time with
+// "column not found: depth" because bind_traverse() bound the WHERE
+// expression in a scope that never received the traversal's own output
+// columns (node/depth/source/__path). GDB-695 exposes those columns to the
+// standalone WHERE scope, so the query now succeeds and filters on depth.
+TEST_F(QA_GDB680_Trace, StandaloneWhereOnDepthFiltersWithTrace) {
+    auto qr = exec_ok("TRAVERSE follows FROM users(1) WHERE depth = 2 WITH TRACE");
 
-    // The same filter works through the enriched (FROM TRAVERSE) form.
-    auto qr = exec_ok("SELECT __node, __path "
-                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-                      "WHERE __depth = 2 WITH TRACE");
+    auto node_idx = col_index(qr, "node");
+    auto path_idx = col_index(qr, "__path");
+    ASSERT_TRUE(node_idx.has_value());
+    ASSERT_TRUE(path_idx.has_value()) << "WITH TRACE must surface __path";
+
+    // Only node 4 sits at depth 2 in the diamond, reached by a complete
+    // two-hop path 1 -> {2|3} -> 4.
     ASSERT_EQ(qr.rows.size(), 1u);
-    ASSERT_EQ(qr.rows[0][1].type_id(), TypeId::PATH);
-    const Path& p = qr.rows[0][1].as_path();
-    ASSERT_EQ(p.steps.size(), 3u) << "depth-2 hit must keep its full two-hop path";
-    EXPECT_EQ(p.steps.front().node_pk, 1);
-    EXPECT_EQ(p.steps.back().node_pk, 4);
+    EXPECT_EQ(val_to_int64(qr.rows[0][*node_idx]), 4);
+    ASSERT_EQ(qr.rows[0][*path_idx].type_id(), TypeId::PATH);
+    const Path& standalone_path = qr.rows[0][*path_idx].as_path();
+    ASSERT_EQ(standalone_path.steps.size(), 3u) << "depth-2 hit must keep its full two-hop path";
+    EXPECT_EQ(standalone_path.steps.front().node_pk, 1);
+    EXPECT_EQ(standalone_path.steps.back().node_pk, 4);
+    expect_cycle_free(standalone_path);
+
+    // The same filter also works through the enriched (FROM TRAVERSE) form.
+    auto enriched = exec_ok("SELECT __node, __path "
+                            "FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                            "WHERE __depth = 2 WITH TRACE");
+    ASSERT_EQ(enriched.rows.size(), 1u);
+    ASSERT_EQ(enriched.rows[0][1].type_id(), TypeId::PATH);
+    const Path& enriched_path = enriched.rows[0][1].as_path();
+    ASSERT_EQ(enriched_path.steps.size(), 3u) << "depth-2 hit must keep its full two-hop path";
+    EXPECT_EQ(enriched_path.steps.front().node_pk, 1);
+    EXPECT_EQ(enriched_path.steps.back().node_pk, 4);
 }
 
 // ---------------------------------------------------------------------------
@@ -377,8 +390,10 @@ TEST(QA_GDB680_TraceOperator, Uint32PkTraceFailsCleanly) {
         default_database_id, "ulinks", *tid, *tid, TypeId::UINT32, TypeId::UINT32, {});
     ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
-    auto linked = graph.link(
-        default_database_id, "ulinks", Value(static_cast<uint32_t>(1)), Value(static_cast<uint32_t>(2)));
+    auto linked = graph.link(default_database_id,
+                             "ulinks",
+                             Value(static_cast<uint32_t>(1)),
+                             Value(static_cast<uint32_t>(2)));
     ASSERT_TRUE(linked.has_value()) << linked.error().message;
 
     TraversalConfig config;
