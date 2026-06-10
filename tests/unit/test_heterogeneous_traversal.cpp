@@ -251,6 +251,96 @@ TEST_F(HeterogeneousTraversalTest, PKCollisionInDirection) {
 }
 
 // ============================================================================
+// GDB-696: standalone TRAVERSE must not drop heterogeneous targets whose PK
+// equals the start PK. The TraversalOperator used to unconditionally seed the
+// BFS visited set with the start key, so posts(1) reached from users(1) was
+// skipped as "already visited" — disagreeing with the FROM TRAVERSE form.
+// ============================================================================
+
+TEST_F(HeterogeneousTraversalTest, StandaloneTraverseEmitsCollidingTargetOut) {
+    exec_ok("INSERT INTO posts VALUES (1, 'Collider')");
+    exec_ok("LINK users(1) TO posts(1) VIA authored");
+
+    auto qr = exec_ok("TRAVERSE authored FROM users(1)");
+
+    // users(1) authored posts 10, 20, and 1 — all three at depth 1.
+    ASSERT_EQ(qr.rows.size(), 3u);
+    std::vector<int64_t> nodes;
+    for (const auto& row : qr.rows) {
+        nodes.push_back(val_to_int64(row[0]));
+        EXPECT_EQ(val_to_int64(row[1]), 1) << "all targets are at depth 1";
+    }
+    std::sort(nodes.begin(), nodes.end());
+    EXPECT_EQ(nodes, (std::vector<int64_t>{1, 10, 20}));
+}
+
+TEST_F(HeterogeneousTraversalTest, StandaloneTraverseEmitsCollidingSourceIn) {
+    exec_ok("INSERT INTO posts VALUES (1, 'Collider')");
+    exec_ok("LINK users(1) TO posts(1) VIA authored");
+
+    auto qr = exec_ok("TRAVERSE authored FROM posts(1) DIRECTION IN");
+
+    // posts(1) was authored by users(1) — must not be skipped despite PK 1 == 1.
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(val_to_int64(qr.rows[0][0]), 1);
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 1);
+}
+
+TEST_F(HeterogeneousTraversalTest, StandaloneTraverseTraceCollidingTargetPath) {
+    exec_ok("INSERT INTO posts VALUES (1, 'Collider')");
+    exec_ok("LINK users(1) TO posts(1) VIA authored");
+
+    auto qr = exec_ok("TRAVERSE authored FROM users(1) WITH TRACE");
+
+    // All three targets emitted, each with a two-step path users(1) -> post.
+    ASSERT_EQ(qr.rows.size(), 3u);
+    bool saw_collider = false;
+    for (const auto& row : qr.rows) {
+        ASSERT_EQ(row[2].type_id(), TypeId::PATH);
+        const Path& p = row[2].as_path();
+        ASSERT_EQ(p.steps.size(), 2u) << "path must be start -> target, not a self-chain";
+        EXPECT_EQ(p.steps[0].node_pk, 1);
+        EXPECT_EQ(p.steps[1].node_pk, val_to_int64(row[0]));
+        EXPECT_EQ(p.steps[1].edge_id, -1) << "terminal step has no outgoing edge";
+        if (val_to_int64(row[0]) == 1) {
+            saw_collider = true;
+        }
+    }
+    EXPECT_TRUE(saw_collider) << "posts(1) must be reached despite the PK collision";
+}
+
+TEST_F(HeterogeneousTraversalTest, StandaloneTraverseFetchEmitsCollidingTarget) {
+    exec_ok("INSERT INTO posts VALUES (1, 'Collider')");
+    exec_ok("LINK users(1) TO posts(1) VIA authored");
+
+    auto qr = exec_ok("TRAVERSE authored FROM users(1) FETCH");
+
+    // FETCH mode emits (node, depth, source); the colliding target must appear.
+    ASSERT_EQ(qr.rows.size(), 3u);
+    bool saw_collider = false;
+    for (const auto& row : qr.rows) {
+        if (val_to_int64(row[0]) == 1) {
+            saw_collider = true;
+            EXPECT_EQ(val_to_int64(row[1]), 1);
+        }
+    }
+    EXPECT_TRUE(saw_collider) << "FETCH mode must include the colliding target";
+}
+
+TEST_F(HeterogeneousTraversalTest, StandaloneTraverseHomogeneousStillSuppressesCycle) {
+    // follows is homogeneous (users -> users); a back-edge to the start node
+    // must still be suppressed by the visited-set seed (no revisit of start).
+    exec_ok("LINK users(2) TO users(1) VIA follows");
+
+    auto qr = exec_ok("TRAVERSE follows FROM users(1)");
+
+    // 1 -> 2 -> (back to 1, suppressed). Only node 2 is emitted.
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(val_to_int64(qr.rows[0][0]), 2);
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 1);
+}
+
+// ============================================================================
 // GDB-694: heterogeneous TRACE must not hang when a target PK equals the
 // start PK. The parent map is keyed by PK only, so posts(1) reached from
 // users(1) used to record itself as its own parent and reconstruct_path()

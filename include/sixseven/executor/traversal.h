@@ -28,6 +28,12 @@ struct TraversalConfig {
     bool fetch = false;
     bool collect_edges = false;
     bool trace = false; ///< When true, build a parent map during BFS and emit a __path column.
+    /// True when the edge connects different tables. For heterogeneous edges
+    /// the start node lives in a different table than the target nodes, so the
+    /// BFS visited set must not be seeded with the start key — a target whose
+    /// PK happens to equal the start PK would otherwise be silently dropped
+    /// (GDB-696, mirroring GDB-304).
+    bool heterogeneous = false;
 };
 
 /// A single result row from BFS traversal (before FETCH enrichment).
