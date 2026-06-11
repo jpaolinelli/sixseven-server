@@ -34,7 +34,7 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
         // -----------------------------------------------------------------
         // First run: create all system tables from scratch.
         // -----------------------------------------------------------------
-        SIXSEVEN_LOG_INFO("system bootstrap: first run — creating system tables");
+        SIXSEVEN_LOG_INFO("system bootstrap: first run â€” creating system tables");
 
         // Create sys_settings and sys_providers with reserved IDs.
         auto r1 = persistence.create_sys_table_public(sys_settings_schema());
@@ -128,8 +128,8 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
         // back-fill from sys_tables.
         auto r_sdb = persistence.open_sys_table_public(sys_databases_schema());
         if (!r_sdb) {
-            // Old deployment without sys_databases — migrate.
-            SIXSEVEN_LOG_INFO("system bootstrap: migrating — creating sys_databases");
+            // Old deployment without sys_databases â€” migrate.
+            SIXSEVEN_LOG_INFO("system bootstrap: migrating â€” creating sys_databases");
             auto create_sdb = persistence.create_sys_table_public(sys_databases_schema());
             if (!create_sdb) {
                 return make_error(create_sdb.error().code,
@@ -259,11 +259,20 @@ SystemBootstrap::load_settings(QueryEngine& engine, Catalog& /*catalog*/, Config
     }
 
     // Apply each setting to the config.
+    // Defense-in-depth: if a persisted value is malformed (e.g. written before
+    // this fix was deployed), LOG_WARN and skip rather than crashing the boot.
     for (const auto& row : result->rows) {
         if (row.size() < 2 || row[0].is_null() || row[1].is_null()) {
             continue;
         }
-        config.apply_setting(row[0].as_string(), row[1].as_string());
+        const std::string& k = row[0].as_string();
+        const std::string& v = row[1].as_string();
+        auto apply_result = config.apply_setting(k, v);
+        if (!apply_result) {
+            SIXSEVEN_LOG_WARN("load_settings: skipping persisted value for key '{}': {}",
+                              k,
+                              apply_result.error().message);
+        }
     }
 
     return ok();
@@ -286,7 +295,7 @@ Result<bool> SystemBootstrap::ensure_users_table(CatalogPersistence& persistence
         bool is_ours = existing->name == "sys_users" &&
                        catalog.get_table_database_id(sys_users_table_id) == system_database_id;
         if (!is_ours) {
-            SIXSEVEN_LOG_ERROR("sys_users table id {} is occupied by table '{}' — persisted "
+            SIXSEVEN_LOG_ERROR("sys_users table id {} is occupied by table '{}' â€” persisted "
                                "authentication disabled; users will be in-memory only. Use a data "
                                "directory created with this version for persisted auth.",
                                sys_users_table_id,
