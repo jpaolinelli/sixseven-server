@@ -491,7 +491,51 @@ void push_be64(std::vector<uint8_t>& buf, int64_t val) {
     buf.push_back(static_cast<uint8_t>(uval & 0xFF));
 }
 
+/// Write the IEEE-754 bits of a double as a big-endian float8.
+void push_be_float8(std::vector<uint8_t>& buf, double d) {
+    uint64_t bits = 0;
+    std::memcpy(&bits, &d, sizeof(bits));
+    push_be64(buf, static_cast<int64_t>(bits));
+}
+
+// PostgreSQL epoch (2000-01-01) offsets from the Unix epoch (1970-01-01).
+constexpr int32_t PG_EPOCH_OFFSET_DAYS = 10957;
+constexpr int64_t PG_EPOCH_OFFSET_US = 946684800000000LL;
+
+/// Encode an unsigned 64-bit integer in the PostgreSQL numeric binary
+/// format: int16 ndigits, int16 weight, int16 sign, int16 dscale, then
+/// ndigits base-10000 digit groups (most significant first, trailing zero
+/// groups trimmed, as numeric_send does for integral values).
+void push_numeric_uint64(std::vector<uint8_t>& buf, uint64_t v) {
+    std::vector<int16_t> groups; // Least significant first.
+    while (v > 0) {
+        groups.push_back(static_cast<int16_t>(v % 10000));
+        v /= 10000;
+    }
+    // Trim trailing zero groups (least significant); the weight already
+    // fixes the magnitude of the remaining digits.
+    size_t skip = 0;
+    while (skip < groups.size() && groups[skip] == 0) {
+        ++skip;
+    }
+    auto ndigits = static_cast<int16_t>(groups.size() - skip);
+    auto weight = groups.empty() ? int16_t{0} : static_cast<int16_t>(groups.size() - 1);
+    push_be16(buf, ndigits);
+    push_be16(buf, weight);
+    push_be16(buf, 0); // Sign: positive (0x0000).
+    push_be16(buf, 0); // Display scale: 0 (integral value).
+    for (size_t i = groups.size(); i > skip; --i) {
+        push_be16(buf, groups[i - 1]);
+    }
+}
+
 } // namespace
+
+bool pg_binary_result_supported(TypeId type) {
+    // DECIMAL is advertised as numeric but Decimal128 has no scale at the
+    // Value level, so no faithful numeric encoding exists (GDB-718).
+    return type != TypeId::DECIMAL;
+}
 
 std::vector<uint8_t> value_to_pg_binary(const Value& value) {
     if (value.is_null()) {
@@ -529,6 +573,10 @@ std::vector<uint8_t> value_to_pg_binary(const Value& value) {
         // Maps to PG int8 (8 bytes big-endian).
         push_be64(buf, static_cast<int64_t>(value.as_uint32()));
         break;
+    case TypeId::UINT64:
+        // Maps to PG numeric: base-10000 digit groups (GDB-718).
+        push_numeric_uint64(buf, value.as_uint64());
+        break;
     case TypeId::FLOAT32: {
         float f = value.as_float32();
         uint32_t bits = 0;
@@ -536,20 +584,85 @@ std::vector<uint8_t> value_to_pg_binary(const Value& value) {
         push_be32(buf, static_cast<int32_t>(bits));
         break;
     }
-    case TypeId::FLOAT64: {
-        double d = value.as_float64();
-        uint64_t bits = 0;
-        std::memcpy(&bits, &d, sizeof(bits));
-        push_be64(buf, static_cast<int64_t>(bits));
+    case TypeId::FLOAT64:
+        push_be_float8(buf, value.as_float64());
         break;
-    }
+    case TypeId::DECIMAL:
+        // No faithful binary encoding exists (no scale at the Value level).
+        // Callers must check pg_binary_result_supported() and reject format
+        // code 1 instead; an empty field makes any client that does receive
+        // it fail loudly rather than misread text bytes as numeric (GDB-718).
+        break;
     case TypeId::STRING: {
+        // PG text binary representation is the text payload itself.
         const auto& s = value.as_string();
         buf.insert(buf.end(), s.begin(), s.end());
         break;
     }
-    default: {
-        // Unsupported types fall back to text representation.
+    case TypeId::BLOB: {
+        // PG bytea binary representation is the raw bytes (GDB-718).
+        const auto& blob = value.as_blob();
+        buf.insert(buf.end(), blob.begin(), blob.end());
+        break;
+    }
+    case TypeId::DATE:
+        // PG binary date: int32 days since 2000-01-01 (GDB-718).
+        push_be32(buf, value.as_date().days_since_epoch - PG_EPOCH_OFFSET_DAYS);
+        break;
+    case TypeId::TIME:
+        // PG binary time: int64 microseconds since midnight (GDB-718).
+        push_be64(buf, value.as_time().microseconds);
+        break;
+    case TypeId::TIMESTAMP:
+        // PG binary timestamp: int64 microseconds since 2000-01-01 (GDB-718).
+        push_be64(buf, value.as_timestamp().microseconds - PG_EPOCH_OFFSET_US);
+        break;
+    case TypeId::INTERVAL: {
+        // PG binary interval: int64 microseconds, int32 days, int32 months.
+        // SixSevenDB intervals have no day component, so days is always 0;
+        // months is narrowed from int64 (PG itself caps months at int32).
+        const auto& iv = value.as_interval();
+        push_be64(buf, iv.microseconds);
+        push_be32(buf, 0); // Days.
+        push_be32(buf, static_cast<int32_t>(iv.months));
+        break;
+    }
+    case TypeId::POINT: {
+        // PG binary point: two float8 values, x then y (GDB-718).
+        const auto& p = value.as_point();
+        push_be_float8(buf, p.x);
+        push_be_float8(buf, p.y);
+        break;
+    }
+    case TypeId::JSON: {
+        // PG json (OID 114, not jsonb) binary representation is the JSON
+        // text itself — no version prefix (GDB-718).
+        const auto& j = value.as_json().data;
+        buf.insert(buf.end(), j.begin(), j.end());
+        break;
+    }
+    case TypeId::UUID: {
+        // PG binary uuid: the 16 raw bytes (GDB-718).
+        const auto& uuid = value.as_uuid();
+        buf.insert(buf.end(), uuid.begin(), uuid.end());
+        break;
+    }
+    case TypeId::EMBEDDING: {
+        // Custom OID; use the pgvector wire format: int16 dimension,
+        // int16 reserved (0), then dimension float4 values (GDB-718).
+        const auto& emb = value.as_embedding();
+        push_be16(buf, static_cast<int16_t>(emb.size()));
+        push_be16(buf, 0); // Reserved (pgvector "unused").
+        for (float f : emb) {
+            uint32_t bits = 0;
+            std::memcpy(&bits, &f, sizeof(bits));
+            push_be32(buf, static_cast<int32_t>(bits));
+        }
+        break;
+    }
+    case TypeId::PATH: {
+        // PATH is advertised as text (see type_to_pg_oid), and PG text
+        // binary representation is the text payload itself (GDB-718).
         std::string text = value_to_pg_text(value);
         buf.insert(buf.end(), text.begin(), text.end());
         break;
@@ -2010,6 +2123,23 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
     const auto& qr = *result;
 
     if (!qr.column_names.empty()) {
+        // Reject binary result format (code 1) for columns whose type has no
+        // faithful PostgreSQL binary encoding, instead of mislabeling text
+        // bytes as binary (GDB-718). Checked before any DataRow is sent so
+        // the client sees a clean ErrorResponse, not a truncated result set.
+        for (size_t i = 0; i < qr.column_types.size(); ++i) {
+            if (resolve_format_code(portal.result_format_codes, i) == 1 &&
+                !pg_binary_result_supported(qr.column_types[i])) {
+                send_error_response(conn,
+                                    "ERROR",
+                                    "0A000", // feature_not_supported.
+                                    "binary output of type " +
+                                        std::string(type_name(qr.column_types[i])) +
+                                        " is not supported");
+                error_in_extended_ = true;
+                return;
+            }
+        }
         // SELECT: send DataRows + CommandComplete (RowDescription already sent by Describe).
         for (const auto& row : qr.rows) {
             send_data_row(conn, row, qr.column_types, portal.result_format_codes);
