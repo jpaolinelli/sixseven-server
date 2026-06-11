@@ -1,4 +1,4 @@
-﻿#include "sixseven/executor/settings_cache.h"
+#include "sixseven/executor/settings_cache.h"
 
 #include "sixseven/catalog/schema.h"
 #include "sixseven/common/config.h"

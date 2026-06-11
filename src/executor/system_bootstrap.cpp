@@ -1,4 +1,4 @@
-﻿#include "sixseven/executor/system_bootstrap.h"
+#include "sixseven/executor/system_bootstrap.h"
 
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/catalog/schema.h"

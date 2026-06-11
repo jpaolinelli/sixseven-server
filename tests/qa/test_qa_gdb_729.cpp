@@ -249,3 +249,89 @@ TEST(QA_GDB729_ApplySetting, UnknownKeyIgnoredWithoutError) {
     auto r = config.apply_setting("no.such.key", "garbage");
     ASSERT_TRUE(r.has_value()) << r.error().message;
 }
+
+// =============================================================================
+// Boot-resilience: poisoned sys_settings row must be skipped, not fatal.
+// Kills the mutation "load_settings propagates the error instead of skip".
+// =============================================================================
+
+// Fixture for boot-resilience tests — identical setup to QA729SettingsValidationTest
+// but gives direct access to the system database for injecting poisoned rows.
+class QA729BootResilienceTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa729_boot";
+        std::filesystem::remove_all(data_dir_);
+        std::filesystem::create_directories(data_dir_);
+
+        dm_ = std::make_unique<DiskManager>();
+        catalog_ = std::make_unique<Catalog>();
+        bootstrap_qa_catalog(*catalog_);
+        storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
+        persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
+        engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
+        config_ = Config::load_defaults();
+
+        auto boot = SystemBootstrap::bootstrap(
+            *engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
+        ASSERT_TRUE(boot.has_value()) << boot.error().message;
+    }
+
+    void TearDown() override {
+        engine_.reset();
+        persistence_.reset();
+        storage_.reset();
+        catalog_.reset();
+        dm_.reset();
+        std::filesystem::remove_all(data_dir_);
+    }
+
+    std::unique_ptr<DiskManager> dm_;
+    std::unique_ptr<Catalog> catalog_;
+    std::filesystem::path data_dir_;
+    std::unique_ptr<StorageManager> storage_;
+    std::unique_ptr<CatalogPersistence> persistence_;
+    std::unique_ptr<QueryEngine> engine_;
+    Config config_;
+};
+
+// QA729BootWithPoisonedSysSettings:
+//   1. Inject a malformed value ("NOT_A_NUMBER") for a numeric key directly into
+//      sys_settings — bypassing SettingsCache validation (simulating a pre-fix
+//      poisoned row or a manual DB edit).
+//   2. Call SystemBootstrap::load_settings.
+//   3. Assert: returns ok() (boot does NOT fail).
+//   4. Assert: config.replication_keepalive_interval_ms retains its default (10000),
+//      proving the poisoned row was skipped and not applied.
+//
+// This test kills the mutation "load_settings propagates the error instead of skip":
+// if load_settings were changed to return the apply_setting error, the test would
+// fail on ASSERT_TRUE(load_result.has_value()), catching the regression.
+TEST_F(QA729BootResilienceTest, BootWithPoisonedSysSettings) {
+    // Inject poisoned value directly into sys_settings, bypassing validation.
+    // We switch to the system DB and use UPDATE to overwrite the persisted value.
+    engine_->set_current_database(system_database_id);
+    auto inject = engine_->execute("UPDATE sys_settings SET value = 'NOT_A_NUMBER' "
+                                   "WHERE key = 'replication.keepalive_interval_ms'");
+    ASSERT_TRUE(inject.has_value()) << "Failed to inject poison row: " << inject.error().message;
+
+    // Verify the poisoned value is actually in the table.
+    auto check = engine_->execute(
+        "SELECT value FROM sys_settings WHERE key = 'replication.keepalive_interval_ms'");
+    ASSERT_TRUE(check.has_value());
+    ASSERT_FALSE(check->rows.empty());
+    EXPECT_EQ(check->rows[0][0].as_string(), "NOT_A_NUMBER");
+
+    // load_settings must survive the poisoned row — boot resilience.
+    Config fresh_config = Config::load_defaults();
+    auto load_result = SystemBootstrap::load_settings(*engine_, *catalog_, fresh_config);
+
+    // AC: load_settings returns ok() even with a poisoned row (skips, does not crash).
+    ASSERT_TRUE(load_result.has_value())
+        << "load_settings must not fail on a poisoned sys_settings row: "
+        << load_result.error().message;
+
+    // AC: the poisoned setting was skipped — default value retained.
+    EXPECT_EQ(fresh_config.replication_keepalive_interval_ms, 10000)
+        << "Poisoned row must be skipped; default must be preserved";
+}

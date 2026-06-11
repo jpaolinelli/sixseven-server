@@ -1,4 +1,4 @@
-﻿#include "sixseven/common/config.h"
+#include "sixseven/common/config.h"
 
 #include <nlohmann/json.hpp>
 
@@ -219,6 +219,8 @@ Result<uint16_t> parse_port(const std::string& key, const std::string& value) {
 // validate_setting — parse-only, no mutation.
 // ---------------------------------------------------------------------------
 
+// NOTE: keep in sync with apply_setting — every numeric key handled there must
+// be validated here with the same parse helper and range logic.
 // NOLINTNEXTLINE(bugprone-branch-clone)
 Result<void> Config::validate_setting(const std::string& key, const std::string& value) {
     if (key == "server.port") {
@@ -310,6 +312,8 @@ Result<void> Config::validate_setting(const std::string& key, const std::string&
 // apply_setting — validate then mutate.
 // ---------------------------------------------------------------------------
 
+// NOTE: keep in sync with validate_setting — every numeric key handled here
+// must appear in validate_setting with the same parse helper and range logic.
 // NOLINTNEXTLINE(bugprone-branch-clone)
 Result<void> Config::apply_setting(const std::string& key, const std::string& value) {
     if (key == "server.port") {
