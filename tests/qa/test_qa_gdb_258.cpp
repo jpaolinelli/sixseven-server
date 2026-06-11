@@ -201,8 +201,12 @@ TEST_F(QA_GDB258, NearestOnNonEmbeddingColumn) {
 TEST_F(QA_GDB258, NearestOnNonExistentTable) {
     wire_registry();
 
+    // GDB-739: assert specific NOT_FOUND code + message names the missing table.
     auto result = engine_->execute("SELECT * FROM ghost WHERE NEAREST(vec, 5) TO 'test'");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
+    EXPECT_NE(result.error().message.find("ghost"), std::string::npos)
+        << "Error message should name the missing table; got: " << result.error().message;
 }
 
 // =============================================================================
@@ -223,8 +227,12 @@ TEST_F(QA_GDB258, ReembedOnTableWithNoEmbeddingColumns) {
 TEST_F(QA_GDB258, ReembedOnNonExistentTable) {
     wire_registry();
 
+    // GDB-739: assert specific NOT_FOUND code + message names the missing table.
     auto result = engine_->execute("REEMBED TABLE does_not_exist");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
+    EXPECT_NE(result.error().message.find("does_not_exist"), std::string::npos)
+        << "Error message should name the missing table; got: " << result.error().message;
 }
 
 // =============================================================================
