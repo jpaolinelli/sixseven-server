@@ -319,7 +319,7 @@ TEST_F(ReplicationIntegrationTest, WriteRejectionOnStandby) {
 // =============================================================================
 
 TEST_F(ReplicationIntegrationTest, ReplicationLagMonitoring) {
-    // Write several transactions.
+    // Write several transactions (3 WAL records each) to create lag.
     for (txn_id_t i = 1; i <= 10; i++) {
         write_txn(*primary_writer_, i, 1, "data_" + std::to_string(i));
     }
@@ -329,20 +329,46 @@ TEST_F(ReplicationIntegrationTest, ReplicationLagMonitoring) {
 
     WalSenderOptions opts;
     opts.keepalive_interval = std::chrono::milliseconds(50);
-    opts.sender_timeout = std::chrono::milliseconds(5000);
+    // Generous timeout: the replica in this test only acknowledges when the
+    // test injects a status message, so the sender must not disconnect it.
+    opts.sender_timeout = std::chrono::milliseconds(60000);
     WalSenderManager sender_mgr(
         primary_wal_dir_, nullptr, *primary_writer_, 10, opts, primary_slot_mgr_.get());
 
+    // Keep handles to the replica->primary direction so the test can inject
+    // standby status messages later.
+    auto to_replica_buf = std::make_shared<std::vector<uint8_t>>();
+    auto to_primary_buf = std::make_shared<std::vector<uint8_t>>();
+    auto to_replica_mu = std::make_shared<std::mutex>();
+    auto to_primary_mu = std::make_shared<std::mutex>();
+    auto to_replica_cv = std::make_shared<std::condition_variable>();
+    auto to_primary_cv = std::make_shared<std::condition_variable>();
     auto conn = std::make_unique<LinkedConnection>("lag_replica",
-                                                   std::make_shared<std::vector<uint8_t>>(),
-                                                   std::make_shared<std::vector<uint8_t>>(),
-                                                   std::make_shared<std::mutex>(),
-                                                   std::make_shared<std::mutex>(),
-                                                   std::make_shared<std::condition_variable>(),
-                                                   std::make_shared<std::condition_variable>());
+                                                   to_replica_buf,
+                                                   to_primary_buf,
+                                                   to_replica_mu,
+                                                   to_primary_mu,
+                                                   to_replica_cv,
+                                                   to_primary_cv);
     ASSERT_TRUE(sender_mgr.accept_connection(std::move(conn), 1, "lag_replica").has_value());
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // Bounded wait helper — avoids fixed-sleep timing assumptions.
+    auto wait_until = [](auto&& pred) {
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!pred()) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return true;
+    };
+
+    // Wait until the sender has caught up and switched to real-time streaming.
+    ASSERT_TRUE(wait_until([&] {
+        auto statuses = sender_mgr.get_sender_statuses();
+        return statuses.size() == 1 && statuses[0].state == WalSender::State::STREAMING;
+    })) << "sender never reached streaming state";
 
     // Set up QueryEngine for monitoring.
     auto data_dir = base_dir_ / "monitor_data";
@@ -367,8 +393,92 @@ TEST_F(ReplicationIntegrationTest, ReplicationLagMonitoring) {
 
     auto qr = engine.execute("SHOW REPLICATION STATUS");
     ASSERT_TRUE(qr.has_value()) << qr.error().message;
+
+    // The lag/LSN reporting columns must all be present.
+    const std::vector<std::string> expected_columns = {"slot_name",
+                                                       "client_addr",
+                                                       "state",
+                                                       "sent_lsn",
+                                                       "write_lsn",
+                                                       "flush_lsn",
+                                                       "replay_lsn",
+                                                       "write_lag_ms",
+                                                       "flush_lag_ms",
+                                                       "replay_lag_ms",
+                                                       "sync_state"};
+    EXPECT_EQ(qr->column_names, expected_columns);
+
     ASSERT_EQ(qr->rows.size(), 1u);
-    EXPECT_EQ(qr->rows[0][0].as_string(), "lag_replica"); // slot_name
+    const auto& row = qr->rows[0];
+    ASSERT_EQ(row.size(), expected_columns.size());
+    EXPECT_EQ(row[0].as_string(), "lag_replica"); // slot_name
+    EXPECT_EQ(row[2].as_string(), "streaming");   // state (waited for above)
+
+    // Catch-up sent every flushed record, so sent_lsn equals the primary's
+    // flushed LSN — and is positive, since 10 transactions were written.
+    ASSERT_FALSE(row[3].is_null());
+    EXPECT_EQ(row[3].as_int64(), static_cast<int64_t>(primary_writer_->flushed_lsn()));
+    EXPECT_GT(row[3].as_int64(), 0);
+
+    // The replica has not acknowledged anything: its positions are unknown
+    // (NULL) and every lag column reports the -1 "unknown" sentinel.
+    EXPECT_TRUE(row[4].is_null()); // write_lsn
+    EXPECT_TRUE(row[5].is_null()); // flush_lsn
+    EXPECT_TRUE(row[6].is_null()); // replay_lsn
+    ASSERT_FALSE(row[7].is_null());
+    EXPECT_EQ(row[7].as_int64(), -1); // write_lag_ms
+    ASSERT_FALSE(row[8].is_null());
+    EXPECT_EQ(row[8].as_int64(), -1); // flush_lag_ms
+    ASSERT_FALSE(row[9].is_null());
+    EXPECT_EQ(row[9].as_int64(), -1);        // replay_lag_ms
+    EXPECT_EQ(row[10].as_string(), "async"); // sync_state
+
+    // Inject a standby status acknowledging only the first few records. The
+    // replica is far behind the 30 records written, so lag must be positive.
+    StandbyStatusMessage status;
+    status.received_lsn = 3;
+    status.flushed_lsn = 2;
+    status.applied_lsn = 1;
+    status.timestamp_us = 1;
+    auto status_bytes = serialize_standby_status(status);
+    {
+        std::lock_guard lock(*to_primary_mu);
+        to_primary_buf->insert(to_primary_buf->end(), status_bytes.begin(), status_bytes.end());
+    }
+    to_primary_cv->notify_all();
+
+    // Wait until the sender has consumed the status update.
+    ASSERT_TRUE(wait_until([&] {
+        auto statuses = sender_mgr.get_sender_statuses();
+        return statuses.size() == 1 && statuses[0].flushed_lsn != invalid_lsn;
+    })) << "sender never processed the standby status update";
+
+    auto qr2 = engine.execute("SHOW REPLICATION STATUS");
+    ASSERT_TRUE(qr2.has_value()) << qr2.error().message;
+    ASSERT_EQ(qr2->rows.size(), 1u);
+    const auto& row2 = qr2->rows[0];
+    ASSERT_EQ(row2.size(), expected_columns.size());
+
+    // Replica positions now reflect the acknowledged LSNs.
+    ASSERT_FALSE(row2[4].is_null());
+    EXPECT_EQ(row2[4].as_int64(), 3); // write_lsn = received_lsn
+    ASSERT_FALSE(row2[5].is_null());
+    EXPECT_EQ(row2[5].as_int64(), 2); // flush_lsn
+    ASSERT_FALSE(row2[6].is_null());
+    EXPECT_EQ(row2[6].as_int64(), 1); // replay_lsn
+
+    // Lag is the distance from the primary's current LSN to each acknowledged
+    // position. Nothing writes WAL after the setup above, so it is exact.
+    const auto current_lsn = static_cast<int64_t>(primary_writer_->current_lsn());
+    ASSERT_FALSE(row2[7].is_null());
+    EXPECT_EQ(row2[7].as_int64(), current_lsn - 3); // write_lag_ms
+    EXPECT_GT(row2[7].as_int64(), 0);
+    ASSERT_FALSE(row2[8].is_null());
+    EXPECT_EQ(row2[8].as_int64(), current_lsn - 2); // flush_lag_ms
+    EXPECT_GT(row2[8].as_int64(), 0);
+    ASSERT_FALSE(row2[9].is_null());
+    EXPECT_EQ(row2[9].as_int64(), current_lsn - 1); // replay_lag_ms
+    EXPECT_GT(row2[9].as_int64(), 0);
 
     sender_mgr.stop_all();
 }
