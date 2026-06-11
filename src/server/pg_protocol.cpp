@@ -52,6 +52,7 @@ constexpr uint32_t PG_OID_FLOAT4 = 700;
 constexpr uint32_t PG_OID_FLOAT8 = 701;
 constexpr uint32_t PG_OID_NUMERIC = 1700;
 constexpr uint32_t PG_OID_TEXT = 25;
+constexpr uint32_t PG_OID_VARCHAR = 1043;
 constexpr uint32_t PG_OID_BYTEA = 17;
 constexpr uint32_t PG_OID_DATE = 1082;
 constexpr uint32_t PG_OID_TIME = 1083;
@@ -664,6 +665,33 @@ Result<std::string> format_param_as_sql(const std::optional<std::string>& value,
     return ok("'" + escape_sql_string(val) + "'");
 }
 
+/// Read a big-endian unsigned integer from up to 8 raw bytes.
+uint64_t read_be_uint(const std::string& bytes) {
+    uint64_t result = 0;
+    for (char c : bytes) {
+        result = (result << 8) | static_cast<uint8_t>(c);
+    }
+    return result;
+}
+
+/// Format a floating-point value as locale-independent round-trippable text.
+template <typename T>
+std::string float_to_text(T value) {
+    std::array<char, 64> buf{};
+    auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
+    if (ec != std::errc{}) {
+        return "0"; // Unreachable: 64 chars always fit the shortest representation.
+    }
+    return std::string(buf.data(), ptr);
+}
+
+/// Build the error for a binary parameter whose byte count does not match its type.
+tl::unexpected<Error> binary_length_error(const char* type_name, size_t expected, size_t actual) {
+    return make_error(StatusCode::INVALID_ARGUMENT,
+                      std::string("binary ") + type_name + " parameter must be " +
+                          std::to_string(expected) + " bytes, got " + std::to_string(actual));
+}
+
 } // namespace
 
 Result<std::string>
@@ -737,6 +765,97 @@ substitute_parameters(const std::string& sql,
     }
 
     return ok(std::move(result));
+}
+
+Result<std::string> decode_binary_parameter(const std::string& bytes, uint32_t oid) {
+    switch (oid) {
+    case PG_OID_BOOL:
+        if (bytes.size() != 1) {
+            return binary_length_error("bool", 1, bytes.size());
+        }
+        return ok(std::string(bytes[0] != 0 ? "t" : "f"));
+    case PG_OID_INT2:
+        if (bytes.size() != 2) {
+            return binary_length_error("int2", 2, bytes.size());
+        }
+        return ok(std::to_string(static_cast<int16_t>(read_be_uint(bytes))));
+    case PG_OID_INT4:
+        if (bytes.size() != 4) {
+            return binary_length_error("int4", 4, bytes.size());
+        }
+        return ok(std::to_string(static_cast<int32_t>(read_be_uint(bytes))));
+    case PG_OID_INT8:
+        if (bytes.size() != 8) {
+            return binary_length_error("int8", 8, bytes.size());
+        }
+        return ok(std::to_string(static_cast<int64_t>(read_be_uint(bytes))));
+    case PG_OID_FLOAT4: {
+        if (bytes.size() != 4) {
+            return binary_length_error("float4", 4, bytes.size());
+        }
+        auto bits = static_cast<uint32_t>(read_be_uint(bytes));
+        float value = 0.0F;
+        std::memcpy(&value, &bits, sizeof(value));
+        return ok(float_to_text(value));
+    }
+    case PG_OID_FLOAT8: {
+        if (bytes.size() != 8) {
+            return binary_length_error("float8", 8, bytes.size());
+        }
+        uint64_t bits = read_be_uint(bytes);
+        double value = 0.0;
+        std::memcpy(&value, &bits, sizeof(value));
+        return ok(float_to_text(value));
+    }
+    case PG_OID_TEXT:
+    case PG_OID_VARCHAR:
+    case PG_OID_JSON:
+        // The binary representation of text-like types is identical to the
+        // text representation: pass the raw bytes through unchanged.
+        return ok(bytes);
+    default:
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "binary format (format code 1) is not supported for parameter type "
+                          "OID " +
+                              std::to_string(oid));
+    }
+}
+
+Result<std::vector<std::optional<std::string>>>
+decode_bind_parameters(const std::vector<std::optional<std::string>>& param_values,
+                       const std::vector<int16_t>& param_format_codes,
+                       const std::vector<uint32_t>& param_oids) {
+    if (!param_format_codes.empty() && param_format_codes.size() != 1 &&
+        param_format_codes.size() != param_values.size()) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "bind message has " + std::to_string(param_format_codes.size()) +
+                              " parameter format codes but " + std::to_string(param_values.size()) +
+                              " parameters");
+    }
+
+    std::vector<std::optional<std::string>> decoded;
+    decoded.reserve(param_values.size());
+    for (size_t i = 0; i < param_values.size(); ++i) {
+        int16_t format = resolve_format_code(param_format_codes, i);
+        if (format != 0 && format != 1) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "unsupported parameter format code " + std::to_string(format) +
+                                  " for parameter $" + std::to_string(i + 1));
+        }
+        if (format == 0 || !param_values[i].has_value()) {
+            // Text format (or SQL NULL): pass through unchanged.
+            decoded.push_back(param_values[i]);
+            continue;
+        }
+        uint32_t oid = i < param_oids.size() ? param_oids[i] : 0;
+        auto text = decode_binary_parameter(*param_values[i], oid);
+        if (!text) {
+            return make_error(text.error().code,
+                              "parameter $" + std::to_string(i + 1) + ": " + text.error().message);
+        }
+        decoded.push_back(std::move(*text));
+    }
+    return ok(std::move(decoded));
 }
 
 namespace {
@@ -1695,12 +1814,14 @@ void PgProtocolHandler::handle_bind(Connection& conn, const uint8_t* payload, si
     auto portal_name = std::string(reader.read_cstring());
     auto stmt_name = std::string(reader.read_cstring());
 
-    // Parameter format codes.
+    // Parameter format codes (0 = text, 1 = binary).
     int16_t num_format_codes = reader.read_int16();
     std::vector<int16_t> param_formats;
-    param_formats.reserve(static_cast<size_t>(num_format_codes));
-    for (int16_t i = 0; i < num_format_codes; ++i) {
-        param_formats.push_back(reader.read_int16());
+    if (num_format_codes > 0) {
+        param_formats.reserve(static_cast<size_t>(num_format_codes));
+        for (int16_t i = 0; i < num_format_codes; ++i) {
+            param_formats.push_back(reader.read_int16());
+        }
     }
 
     // Parameter values.
@@ -1730,6 +1851,19 @@ void PgProtocolHandler::handle_bind(Connection& conn, const uint8_t* payload, si
         result_formats.push_back(reader.read_int16());
     }
 
+    // Per PostgreSQL Bind semantics the parameter format-code count must be
+    // 0 (all text), 1 (applies to all parameters), or one per parameter.
+    if (param_formats.size() > 1 && param_formats.size() != param_values.size()) {
+        send_error_response(conn,
+                            "ERROR",
+                            "08P01",
+                            "bind message has " + std::to_string(param_formats.size()) +
+                                " parameter format codes but " +
+                                std::to_string(param_values.size()) + " parameters");
+        error_in_extended_ = true;
+        return;
+    }
+
     // Look up the prepared statement in the session.
     const auto* stmt = session_->get_prepared_statement(stmt_name);
     if (stmt == nullptr) {
@@ -1747,6 +1881,7 @@ void PgProtocolHandler::handle_bind(Connection& conn, const uint8_t* payload, si
     portal.sql = stmt->sql;
     portal.param_values = std::move(param_values);
     portal.param_oids = stmt->param_oids;
+    portal.param_format_codes = std::move(param_formats);
     portal.result_format_codes = std::move(result_formats);
     session_->add_portal(portal_name, std::move(portal));
 
@@ -1842,8 +1977,19 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
         return;
     }
 
+    // Decode binary-format parameters (format code 1) into their text
+    // representation per their type OID before substitution (GDB-712).
+    auto decoded_params =
+        decode_bind_parameters(portal.param_values, portal.param_format_codes, portal.param_oids);
+    if (!decoded_params) {
+        const auto& err = decoded_params.error();
+        send_error_response(conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+        error_in_extended_ = true;
+        return;
+    }
+
     // Substitute parameter values into the SQL.
-    auto substituted = substitute_parameters(portal.sql, portal.param_values, portal.param_oids);
+    auto substituted = substitute_parameters(portal.sql, *decoded_params, portal.param_oids);
     if (!substituted) {
         const auto& err = substituted.error();
         send_error_response(conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
