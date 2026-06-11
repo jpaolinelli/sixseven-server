@@ -6,7 +6,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -227,14 +229,32 @@ TEST_F(WindowFunctionTest, RowNumberNoPartition) {
     auto rows = run(*win);
     ASSERT_EQ(rows.size(), 6u);
 
-    // All rows should get row numbers. Since order is by salary ASC:
+    // Order is by salary ASC:
     // frank(80)=1, dave(90)=2, eve(95)=3, alice(100)=4, charlie(110)=5, bob(120)=6
-    // But since we preserve original order in output, verify each row got a number.
+    // Output preserves insertion order; collect rns by name then assert both the
+    // full set {1..6} and the exact per-row mapping.
+    std::map<std::string, int64_t> rn_by_name;
     for (auto& row : rows) {
+        const std::string& name = row.values[1].as_string();
         int64_t rn = win_col(row, 3, 0).as_int64();
-        EXPECT_GE(rn, 1);
-        EXPECT_LE(rn, 6);
+        rn_by_name[name] = rn;
     }
+
+    // Full set of row numbers must be exactly {1,2,3,4,5,6}.
+    std::vector<int64_t> all_rns;
+    for (auto& [n, rn] : rn_by_name) {
+        all_rns.push_back(rn);
+    }
+    std::sort(all_rns.begin(), all_rns.end());
+    EXPECT_EQ(all_rns, (std::vector<int64_t>{1, 2, 3, 4, 5, 6}));
+
+    // Exact salary-to-row-number mapping.
+    EXPECT_EQ(rn_by_name.at("frank"), 1);   // salary 80
+    EXPECT_EQ(rn_by_name.at("dave"), 2);    // salary 90
+    EXPECT_EQ(rn_by_name.at("eve"), 3);     // salary 95
+    EXPECT_EQ(rn_by_name.at("alice"), 4);   // salary 100
+    EXPECT_EQ(rn_by_name.at("charlie"), 5); // salary 110
+    EXPECT_EQ(rn_by_name.at("bob"), 6);     // salary 120
 }
 
 TEST_F(WindowFunctionTest, RowNumberWithPartition) {
