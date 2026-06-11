@@ -123,21 +123,15 @@ TEST(WeightParser, SelectFromMatchWeight) {
 }
 
 // ===========================================================================
-// Executor tests for weighted shortest path (Dijkstra)
+// Shared base fixture for weighted graph executor tests
 // ===========================================================================
 
-/// Test fixture with a weighted graph.
-///
-/// Graph topology (edge weights in parentheses):
-///   1 --(10)--> 2 --(20)--> 5
-///   1 --(5)---> 3 --(3)---> 4 --(2)--> 5
-///
-///   Direct path 1→2→5: cost = 30
-///   Cheaper path 1→3→4→5: cost = 10
-class WeightedShortestPathTest : public ::testing::Test {
+/// Base fixture that sets up Catalog/StorageManager/GraphEngine backed by a
+/// temporary directory.  Derived fixtures call create_node_table(), insert_node(),
+/// link(), and make_weight_expr() to build the topology they need.
+class WeightedGraphTestBase : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_weighted_sp";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -148,52 +142,6 @@ protected:
 
         auto db_storage = storage_->create_database_storage(default_database_id);
         ASSERT_TRUE(db_storage.has_value()) << db_storage.error().message;
-
-        // Create 'cities' table with id column.
-        {
-            TableSchema ts;
-            ts.name = "cities";
-            CatalogColumnDef pk_col;
-            pk_col.ordinal = 0;
-            pk_col.name = "id";
-            pk_col.type_id = TypeId::INT64;
-            pk_col.nullable = false;
-            ts.columns.push_back(pk_col);
-            ts.pk_columns = "id";
-            auto tid = catalog_->create_table(default_database_id, std::move(ts));
-            ASSERT_TRUE(tid.has_value()) << tid.error().message;
-            cities_id_ = *tid;
-
-            auto schema = catalog_->get_table(default_database_id, "cities");
-            ASSERT_TRUE(schema.has_value());
-            auto sr = storage_->create_table_storage(default_database_id, cities_id_, *schema);
-            ASSERT_TRUE(sr.has_value()) << sr.error().message;
-        }
-
-        // Insert cities: 1, 2, 3, 4, 5.
-        for (int64_t id : {1, 2, 3, 4, 5}) {
-            insert_city(id);
-        }
-
-        // Create 'road' edge type with a 'distance' property.
-        ColumnDef dist_col{"distance", TypeId::FLOAT64};
-        auto eid = graph_->create_edge_type(default_database_id,
-                                            "road",
-                                            cities_id_,
-                                            cities_id_,
-                                            TypeId::INT64,
-                                            TypeId::INT64,
-                                            {dist_col});
-        ASSERT_TRUE(eid.has_value()) << eid.error().message;
-
-        // Build weighted graph:
-        // Path 1→2→5 costs 30 (10+20)
-        // Path 1→3→4→5 costs 10 (5+3+2)
-        link(1, 2, 10.0);
-        link(2, 5, 20.0);
-        link(1, 3, 5.0);
-        link(3, 4, 3.0);
-        link(4, 5, 2.0);
     }
 
     void TearDown() override {
@@ -201,18 +149,34 @@ protected:
         std::filesystem::remove_all(data_dir_);
     }
 
-    void link(int64_t from, int64_t to, double distance) {
-        auto r =
-            graph_->link(default_database_id, "road", Value(from), Value(to), {Value(distance)});
-        ASSERT_TRUE(r.has_value()) << r.error().message;
+    /// Create a node table with a single INT64 'id' primary key column.
+    /// Returns the assigned table_id.
+    table_id_t create_node_table(const std::string& name) {
+        TableSchema ts;
+        ts.name = name;
+        CatalogColumnDef pk_col;
+        pk_col.ordinal = 0;
+        pk_col.name = "id";
+        pk_col.type_id = TypeId::INT64;
+        pk_col.nullable = false;
+        ts.columns.push_back(pk_col);
+        ts.pk_columns = "id";
+        auto tid = catalog_->create_table(default_database_id, std::move(ts));
+        EXPECT_TRUE(tid.has_value()) << tid.error().message;
+
+        auto schema = catalog_->get_table(default_database_id, name);
+        EXPECT_TRUE(schema.has_value());
+        auto sr = storage_->create_table_storage(default_database_id, *tid, *schema);
+        EXPECT_TRUE(sr.has_value()) << sr.error().message;
+        return *tid;
     }
 
-    void insert_city(int64_t id) {
-        auto ts = storage_->get_table_storage(cities_id_);
+    /// Insert a single node row with the given id into the table identified by table_id.
+    void insert_node(table_id_t table_id, int64_t id) {
+        auto ts = storage_->get_table_storage(table_id);
         ASSERT_TRUE(ts.has_value()) << ts.error().message;
-        auto schema = catalog_->get_table(default_database_id, "cities");
+        auto schema = catalog_->get_table_by_id(table_id);
         ASSERT_TRUE(schema.has_value());
-
         std::vector<Value> vals = {Value(id)};
         auto data = TupleSerializer::serialize(vals, (*ts)->storage_schema);
         ASSERT_TRUE(data.has_value()) << data.error().message;
@@ -220,21 +184,29 @@ protected:
         ASSERT_TRUE(rid.has_value()) << rid.error().message;
     }
 
-    /// Build a weight expression: ColumnRefExpr for "r.distance".
-    std::unique_ptr<ColumnRefExpr> make_weight_expr() {
+    /// Insert an edge between two nodes.
+    void link(const std::string& edge_type, int64_t from, int64_t to, double weight) {
+        auto r =
+            graph_->link(default_database_id, edge_type, Value(from), Value(to), {Value(weight)});
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+    }
+
+    /// Build a weight expression: ColumnRefExpr for "<alias>.<column>".
+    std::unique_ptr<ColumnRefExpr> make_weight_expr(const std::string& alias = "r",
+                                                    const std::string& column = "distance") {
         auto expr = std::make_unique<ColumnRefExpr>();
-        expr->table = "r";
-        expr->column = "distance";
+        expr->table = alias;
+        expr->column = column;
         return expr;
     }
 
     /// Run a weighted shortest-path MATCH operator and collect output tuples.
-    std::vector<Tuple> run_weighted_match(MatchConfig config,
-                                          OutputSchema schema,
-                                          PathSelector selector,
-                                          const Expr* weight_expr,
-                                          const std::string& path_var = "p",
-                                          int32_t k = 0) {
+    std::vector<Tuple> run_match(MatchConfig config,
+                                 OutputSchema schema,
+                                 PathSelector selector,
+                                 const Expr* weight_expr,
+                                 const std::string& path_var = "p",
+                                 int32_t k = 0) {
         BoundStatement bound;
         MatchShortestPathOperator op(*graph_,
                                      *catalog_,
@@ -264,7 +236,62 @@ protected:
         return results;
     }
 
-    /// Build default config for cities→cities via road.
+    static constexpr database_id_t default_database_id = 1;
+    DiskManager dm_;
+    std::filesystem::path data_dir_{std::filesystem::temp_directory_path() /
+                                    "sixseven_test_weighted_graph_base"};
+    std::unique_ptr<Catalog> catalog_;
+    std::unique_ptr<StorageManager> storage_;
+    std::unique_ptr<GraphEngine> graph_;
+};
+
+// ===========================================================================
+// Executor tests for weighted shortest path (Dijkstra)
+// ===========================================================================
+
+/// Test fixture with a weighted graph.
+///
+/// Graph topology (edge weights in parentheses):
+///   1 --(10)--> 2 --(20)--> 5
+///   1 --(5)---> 3 --(3)---> 4 --(2)--> 5
+///
+///   Direct path 1->2->5: cost = 30
+///   Cheaper path 1->3->4->5: cost = 10
+class WeightedShortestPathTest : public WeightedGraphTestBase {
+protected:
+    void SetUp() override {
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_weighted_sp";
+        WeightedGraphTestBase::SetUp();
+
+        cities_id_ = create_node_table("cities");
+
+        // Insert cities: 1, 2, 3, 4, 5.
+        for (int64_t id : {1, 2, 3, 4, 5}) {
+            insert_node(cities_id_, id);
+        }
+
+        // Create 'road' edge type with a 'distance' property.
+        ColumnDef dist_col{"distance", TypeId::FLOAT64};
+        auto eid = graph_->create_edge_type(default_database_id,
+                                            "road",
+                                            cities_id_,
+                                            cities_id_,
+                                            TypeId::INT64,
+                                            TypeId::INT64,
+                                            {dist_col});
+        ASSERT_TRUE(eid.has_value()) << eid.error().message;
+
+        // Build weighted graph:
+        // Path 1->2->5 costs 30 (10+20)
+        // Path 1->3->4->5 costs 10 (5+3+2)
+        link("road", 1, 2, 10.0);
+        link("road", 2, 5, 20.0);
+        link("road", 1, 3, 5.0);
+        link("road", 3, 4, 3.0);
+        link("road", 4, 5, 2.0);
+    }
+
+    /// Build default config for cities->cities via road.
     MatchConfig make_config() {
         MatchConfig config;
         config.nodes.push_back({"a", "cities"});
@@ -282,21 +309,15 @@ protected:
         return OutputSchema(std::move(cols));
     }
 
-    static constexpr database_id_t default_database_id = 1;
-    DiskManager dm_;
-    std::filesystem::path data_dir_;
-    std::unique_ptr<Catalog> catalog_;
-    std::unique_ptr<StorageManager> storage_;
-    std::unique_ptr<GraphEngine> graph_;
     table_id_t cities_id_ = 0;
 };
 
 TEST_F(WeightedShortestPathTest, DijkstraFindsWeightedShortestPath) {
-    // The weighted shortest path from 1 to 5 should be 1→3→4→5 (cost 10),
-    // NOT 1→2→5 (cost 30).
+    // The weighted shortest path from 1 to 5 should be 1->3->4->5 (cost 10),
+    // NOT 1->2->5 (cost 30).
     auto weight = make_weight_expr();
     auto results =
-        run_weighted_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST, weight.get());
+        run_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST, weight.get());
 
     std::vector<Tuple> from_1_to_5;
     for (auto& t : results) {
@@ -307,7 +328,7 @@ TEST_F(WeightedShortestPathTest, DijkstraFindsWeightedShortestPath) {
 
     ASSERT_EQ(from_1_to_5.size(), 1u);
     const auto& path = from_1_to_5[0].values[2].as_path();
-    // Should be 1→3→4→5 (3 hops, cost 10).
+    // Should be 1->3->4->5 (3 hops, cost 10).
     EXPECT_EQ(path.length(), 3);
     ASSERT_EQ(path.steps.size(), 4u);
     EXPECT_EQ(path.steps[0].node_pk, 1);
@@ -317,10 +338,10 @@ TEST_F(WeightedShortestPathTest, DijkstraFindsWeightedShortestPath) {
 }
 
 TEST_F(WeightedShortestPathTest, PathCostReturnsCorrectTotal) {
-    // path_cost(p) should return 10.0 for the 1→3→4→5 path.
+    // path_cost(p) should return 10.0 for the 1->3->4->5 path.
     auto weight = make_weight_expr();
     auto results =
-        run_weighted_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST, weight.get());
+        run_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST, weight.get());
 
     std::vector<Tuple> from_1_to_5;
     for (auto& t : results) {
@@ -335,13 +356,13 @@ TEST_F(WeightedShortestPathTest, PathCostReturnsCorrectTotal) {
 }
 
 TEST_F(WeightedShortestPathTest, DisconnectedGraphReturnsEmpty) {
-    // City 1 to city that doesn't exist in edges — should return no path.
+    // City 1 to city that doesn't exist in edges -- should return no path.
     // Insert an isolated city.
-    insert_city(99);
+    insert_node(cities_id_, 99);
 
     auto weight = make_weight_expr();
     auto results =
-        run_weighted_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST, weight.get());
+        run_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST, weight.get());
 
     std::vector<Tuple> from_1_to_99;
     for (auto& t : results) {
@@ -356,7 +377,7 @@ TEST_F(WeightedShortestPathTest, DisconnectedGraphReturnsEmpty) {
 TEST_F(WeightedShortestPathTest, SameNodeReturnsZeroCostPath) {
     auto weight = make_weight_expr();
     auto results =
-        run_weighted_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST, weight.get());
+        run_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST, weight.get());
 
     std::vector<Tuple> from_1_to_1;
     for (auto& t : results) {
@@ -377,12 +398,12 @@ TEST_F(WeightedShortestPathTest, SameNodeReturnsZeroCostPath) {
 
 TEST_F(WeightedShortestPathTest, AllShortestOnlyReturnsCheapestPaths) {
     // Graph has two paths from 1 to 5:
-    //   1→2→5 costs 30
-    //   1→3→4→5 costs 10
+    //   1->2->5 costs 30
+    //   1->3->4->5 costs 10
     // ALL_SHORTEST should only return the cost-10 path.
     auto weight = make_weight_expr();
     auto results =
-        run_weighted_match(make_config(), make_schema(), PathSelector::ALL_SHORTEST, weight.get());
+        run_match(make_config(), make_schema(), PathSelector::ALL_SHORTEST, weight.get());
 
     std::vector<Tuple> from_1_to_5;
     for (auto& t : results) {
@@ -403,11 +424,11 @@ TEST_F(WeightedShortestPathTest, AllShortestOnlyReturnsCheapestPaths) {
 }
 
 TEST_F(WeightedShortestPathTest, ShortestKOnlyReturnsCheapestPaths) {
-    // Graph has 2 paths from 1→5: cost 10 (via 3→4) and cost 30 (via 2).
+    // Graph has 2 paths from 1->5: cost 10 (via 3->4) and cost 30 (via 2).
     // SHORTEST 5 should return both, sorted by cost.
     auto weight = make_weight_expr();
-    auto results = run_weighted_match(
-        make_config(), make_schema(), PathSelector::SHORTEST_K, weight.get(), "p", 5);
+    auto results =
+        run_match(make_config(), make_schema(), PathSelector::SHORTEST_K, weight.get(), "p", 5);
 
     std::vector<Tuple> from_1_to_5;
     for (auto& t : results) {
@@ -437,43 +458,16 @@ TEST_F(WeightedShortestPathTest, ShortestKOnlyReturnsCheapestPaths) {
 ///
 /// Dijkstra pops node 2 (entry cost 1) before node 3 (entry cost 50),
 /// so the cost-101 path reaches node 4 first.
-class LateCheeperArrivalTest : public ::testing::Test {
+class LateCheaperArrivalTest : public WeightedGraphTestBase {
 protected:
     void SetUp() override {
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_late_cheaper";
-        std::filesystem::remove_all(data_dir_);
-        std::filesystem::create_directories(data_dir_);
+        WeightedGraphTestBase::SetUp();
 
-        catalog_ = std::make_unique<Catalog>();
-        init_test_catalog(*catalog_);
-        storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
-        graph_ = std::make_unique<GraphEngine>(*catalog_);
-
-        auto db_storage = storage_->create_database_storage(default_database_id);
-        ASSERT_TRUE(db_storage.has_value()) << db_storage.error().message;
-
-        {
-            TableSchema ts;
-            ts.name = "nodes";
-            CatalogColumnDef pk_col;
-            pk_col.ordinal = 0;
-            pk_col.name = "id";
-            pk_col.type_id = TypeId::INT64;
-            pk_col.nullable = false;
-            ts.columns.push_back(pk_col);
-            ts.pk_columns = "id";
-            auto tid = catalog_->create_table(default_database_id, std::move(ts));
-            ASSERT_TRUE(tid.has_value()) << tid.error().message;
-            nodes_id_ = *tid;
-
-            auto schema = catalog_->get_table(default_database_id, "nodes");
-            ASSERT_TRUE(schema.has_value());
-            auto sr = storage_->create_table_storage(default_database_id, nodes_id_, *schema);
-            ASSERT_TRUE(sr.has_value()) << sr.error().message;
-        }
+        nodes_id_ = create_node_table("nodes");
 
         for (int64_t id : {1, 2, 3, 4}) {
-            insert_node(id);
+            insert_node(nodes_id_, id);
         }
 
         ColumnDef dist_col{"distance", TypeId::FLOAT64};
@@ -487,45 +481,15 @@ protected:
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         // Expensive path reaches destination first (node 2 popped at cost 1).
-        link(1, 2, 1.0);
-        link(2, 4, 100.0); // total: 101
+        link("road", 1, 2, 1.0);
+        link("road", 2, 4, 100.0); // total: 101
 
         // Cheaper path reaches destination later (node 3 popped at cost 50).
-        link(1, 3, 50.0);
-        link(3, 4, 1.0); // total: 51
+        link("road", 1, 3, 50.0);
+        link("road", 3, 4, 1.0); // total: 51
     }
 
-    void TearDown() override {
-        storage_.reset();
-        std::filesystem::remove_all(data_dir_);
-    }
-
-    void link(int64_t from, int64_t to, double distance) {
-        auto r =
-            graph_->link(default_database_id, "road", Value(from), Value(to), {Value(distance)});
-        ASSERT_TRUE(r.has_value()) << r.error().message;
-    }
-
-    void insert_node(int64_t id) {
-        auto ts = storage_->get_table_storage(nodes_id_);
-        ASSERT_TRUE(ts.has_value()) << ts.error().message;
-        auto schema = catalog_->get_table(default_database_id, "nodes");
-        ASSERT_TRUE(schema.has_value());
-        std::vector<Value> vals = {Value(id)};
-        auto data = TupleSerializer::serialize(vals, (*ts)->storage_schema);
-        ASSERT_TRUE(data.has_value()) << data.error().message;
-        auto rid = (*ts)->heap->insert_tuple(*data);
-        ASSERT_TRUE(rid.has_value()) << rid.error().message;
-    }
-
-    std::unique_ptr<ColumnRefExpr> make_weight_expr() {
-        auto expr = std::make_unique<ColumnRefExpr>();
-        expr->table = "r";
-        expr->column = "distance";
-        return expr;
-    }
-
-    std::vector<Tuple> run_match(PathSelector selector, int32_t k = 0) {
+    std::vector<Tuple> run_match_nodes(PathSelector selector, int32_t k = 0) {
         MatchConfig config;
         config.nodes.push_back({"a", "nodes"});
         config.nodes.push_back({"b", "nodes"});
@@ -538,49 +502,17 @@ protected:
         OutputSchema schema(std::move(cols));
 
         auto weight = make_weight_expr();
-        BoundStatement bound;
-        MatchShortestPathOperator op(*graph_,
-                                     *catalog_,
-                                     *storage_,
-                                     default_database_id,
-                                     std::move(config),
-                                     std::move(schema),
-                                     nullptr,
-                                     bound,
-                                     selector,
-                                     "p",
-                                     k,
-                                     MatchShortestPathOperator::DEFAULT_MAX_VISITED,
-                                     weight.get());
-        auto open_result = op.open();
-        EXPECT_TRUE(open_result.has_value()) << open_result.error().message;
-
-        std::vector<Tuple> results;
-        while (true) {
-            auto row = op.next();
-            EXPECT_TRUE(row.has_value()) << row.error().message;
-            if (!row->has_value())
-                break;
-            results.push_back(std::move(**row));
-        }
-        op.close();
-        return results;
+        return run_match(std::move(config), std::move(schema), selector, weight.get(), "p", k);
     }
 
-    static constexpr database_id_t default_database_id = 1;
-    DiskManager dm_;
-    std::filesystem::path data_dir_;
-    std::unique_ptr<Catalog> catalog_;
-    std::unique_ptr<StorageManager> storage_;
-    std::unique_ptr<GraphEngine> graph_;
     table_id_t nodes_id_ = 0;
 };
 
-TEST_F(LateCheeperArrivalTest, AllShortestPurgesExpensivePathOnCheaperArrival) {
+TEST_F(LateCheaperArrivalTest, AllShortestPurgesExpensivePathOnCheaperArrival) {
     // The expensive path (cost 101 via node 2) reaches node 4 first,
     // then the cheaper path (cost 51 via node 3) arrives later.
     // Only the cost-51 path should be returned.
-    auto results = run_match(PathSelector::ALL_SHORTEST);
+    auto results = run_match_nodes(PathSelector::ALL_SHORTEST);
 
     std::vector<Tuple> from_1_to_4;
     for (auto& t : results) {
@@ -599,10 +531,10 @@ TEST_F(LateCheeperArrivalTest, AllShortestPurgesExpensivePathOnCheaperArrival) {
     EXPECT_EQ(path.steps[2].node_pk, 4);
 }
 
-TEST_F(LateCheeperArrivalTest, AnyShortestReturnsCheapestNotFirstArrival) {
+TEST_F(LateCheaperArrivalTest, AnyShortestReturnsCheapestNotFirstArrival) {
     // GDB-560: ANY_SHORTEST must return the cheapest path, not the first
     // to arrive. The cost-101 path via node 2 arrives first but is not shortest.
-    auto results = run_match(PathSelector::ANY_SHORTEST);
+    auto results = run_match_nodes(PathSelector::ANY_SHORTEST);
 
     std::vector<Tuple> from_1_to_4;
     for (auto& t : results) {
@@ -617,10 +549,10 @@ TEST_F(LateCheeperArrivalTest, AnyShortestReturnsCheapestNotFirstArrival) {
         << "ANY_SHORTEST should return the cheapest path (51), not the first arrival (101)";
 }
 
-TEST_F(LateCheeperArrivalTest, ShortestKDoesNotEarlyReturnWithExpensivePaths) {
+TEST_F(LateCheaperArrivalTest, ShortestKDoesNotEarlyReturnWithExpensivePaths) {
     // GDB-561: SHORTEST 1 must not early-return with the first (expensive)
     // arrival before discovering cheaper paths.
-    auto results = run_match(PathSelector::SHORTEST_K, /*k=*/1);
+    auto results = run_match_nodes(PathSelector::SHORTEST_K, /*k=*/1);
 
     std::vector<Tuple> from_1_to_4;
     for (auto& t : results) {
@@ -639,51 +571,16 @@ TEST_F(LateCheeperArrivalTest, ShortestKDoesNotEarlyReturnWithExpensivePaths) {
 // Negative weight rejection
 // ===========================================================================
 
-class NegativeWeightTest : public ::testing::Test {
+class NegativeWeightTest : public WeightedGraphTestBase {
 protected:
     void SetUp() override {
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_neg_weight";
-        std::filesystem::remove_all(data_dir_);
-        std::filesystem::create_directories(data_dir_);
+        WeightedGraphTestBase::SetUp();
 
-        catalog_ = std::make_unique<Catalog>();
-        init_test_catalog(*catalog_);
-        storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
-        graph_ = std::make_unique<GraphEngine>(*catalog_);
-
-        auto db_storage = storage_->create_database_storage(default_database_id);
-        ASSERT_TRUE(db_storage.has_value()) << db_storage.error().message;
-
-        {
-            TableSchema ts;
-            ts.name = "nodes";
-            CatalogColumnDef pk_col;
-            pk_col.ordinal = 0;
-            pk_col.name = "id";
-            pk_col.type_id = TypeId::INT64;
-            pk_col.nullable = false;
-            ts.columns.push_back(pk_col);
-            ts.pk_columns = "id";
-            auto tid = catalog_->create_table(default_database_id, std::move(ts));
-            ASSERT_TRUE(tid.has_value()) << tid.error().message;
-            nodes_id_ = *tid;
-
-            auto schema = catalog_->get_table(default_database_id, "nodes");
-            ASSERT_TRUE(schema.has_value());
-            auto sr = storage_->create_table_storage(default_database_id, nodes_id_, *schema);
-            ASSERT_TRUE(sr.has_value()) << sr.error().message;
-        }
+        nodes_id_ = create_node_table("nodes");
 
         for (int64_t id : {1, 2}) {
-            auto ts = storage_->get_table_storage(nodes_id_);
-            ASSERT_TRUE(ts.has_value());
-            auto schema = catalog_->get_table(default_database_id, "nodes");
-            ASSERT_TRUE(schema.has_value());
-            std::vector<Value> vals = {Value(id)};
-            auto data = TupleSerializer::serialize(vals, (*ts)->storage_schema);
-            ASSERT_TRUE(data.has_value());
-            auto rid = (*ts)->heap->insert_tuple(*data);
-            ASSERT_TRUE(rid.has_value());
+            insert_node(nodes_id_, id);
         }
 
         ColumnDef weight_col{"cost", TypeId::FLOAT64};
@@ -702,24 +599,11 @@ protected:
         ASSERT_TRUE(r.has_value());
     }
 
-    void TearDown() override {
-        storage_.reset();
-        std::filesystem::remove_all(data_dir_);
-    }
-
-    static constexpr database_id_t default_database_id = 1;
-    DiskManager dm_;
-    std::filesystem::path data_dir_;
-    std::unique_ptr<Catalog> catalog_;
-    std::unique_ptr<StorageManager> storage_;
-    std::unique_ptr<GraphEngine> graph_;
     table_id_t nodes_id_ = 0;
 };
 
 TEST_F(NegativeWeightTest, NegativeWeightProducesError) {
-    auto weight_expr = std::make_unique<ColumnRefExpr>();
-    weight_expr->table = "r";
-    weight_expr->column = "cost";
+    auto weight_expr = make_weight_expr("r", "cost");
 
     MatchConfig config;
     config.nodes.push_back({"a", "nodes"});
