@@ -352,3 +352,85 @@ TEST(JoinOrderTest, PrefersSmallerBuildSide) {
     ASSERT_NE(plan, nullptr);
     EXPECT_GT(plan->cost.total_cost, 0.0);
 }
+
+// =============================================================================
+// GDB-741 regression tests: dense remapping of sparse / large table IDs
+// =============================================================================
+
+// Before the fix, table_ids {3, 40} would cause dp_join_order to set
+// full_set = (1<<3)|(1<<40) = 0x10000000008 and iterate ~2^40 subsets.
+// After the fix, relations are remapped to dense indices 0 and 1; the loop
+// runs 3 times (subsets of 0b11).  This test must complete in milliseconds.
+TEST(JoinOrderTest, GDB741_SparseTableIds_CompletesInstantly) {
+    CostModel cm;
+
+    // table_ids 3 and 40 -- sparse, previously causing O(2^40) iteration
+    std::vector<JoinRelation> rels;
+    rels.push_back({1ULL << 3, {0.0, 10.0, 100.0}, make_test_scan(3, 100.0, 10.0)});
+    rels.push_back({1ULL << 40, {0.0, 20.0, 1000.0}, make_test_scan(40, 1000.0, 20.0)});
+
+    std::vector<JoinEdge> edges = {{3, 40, 0.01}};
+
+    auto plan = optimize_join_order(rels, edges, cm);
+    ASSERT_NE(plan, nullptr);
+    EXPECT_EQ(plan->type, PhysicalPlanNode::Type::JOIN);
+    EXPECT_GT(plan->cost.total_cost, 0.0);
+}
+
+// Three tables with widely separated IDs: {1, 50, 63}.
+// Before the fix this set full_set = (1<<63)-1... iterating ~2^63 subsets.
+// After the fix, 3 dense bits, 7 subsets.
+TEST(JoinOrderTest, GDB741_VerySparseBitPositions_ThreeTables) {
+    CostModel cm;
+
+    std::vector<JoinRelation> rels;
+    rels.push_back({1ULL << 1, {0.0, 10.0, 100.0}, make_test_scan(1, 100.0, 10.0)});
+    rels.push_back({1ULL << 50, {0.0, 5.0, 50.0}, make_test_scan(50, 50.0, 5.0)});
+    rels.push_back({1ULL << 63, {0.0, 20.0, 1000.0}, make_test_scan(63, 1000.0, 20.0)});
+
+    std::vector<JoinEdge> edges = {
+        {1, 50, 0.01},
+        {50, 63, 0.02},
+    };
+
+    auto plan = optimize_join_order(rels, edges, cm);
+    ASSERT_NE(plan, nullptr);
+    EXPECT_EQ(plan->type, PhysicalPlanNode::Type::JOIN);
+    EXPECT_GT(plan->cost.total_cost, 0.0);
+}
+
+// Correctness regression: result for dense ids {0,1,2} must be identical
+// (same join method and cost) with the pre-fix behaviour since dense ids
+// were already a special case of the fix (dense index == original id).
+TEST(JoinOrderTest, GDB741_DenseIdsResultUnchanged) {
+    CostModel cm;
+
+    std::vector<JoinRelation> rels1;
+    rels1.push_back({1ULL << 0, {0.0, 10.0, 100.0}, make_test_scan(0, 100.0, 10.0)});
+    rels1.push_back({1ULL << 1, {0.0, 20.0, 1000.0}, make_test_scan(1, 1000.0, 20.0)});
+    rels1.push_back({1ULL << 2, {0.0, 5.0, 50.0}, make_test_scan(2, 50.0, 5.0)});
+
+    std::vector<JoinEdge> edges = {{0, 1, 0.01}, {1, 2, 0.02}};
+
+    auto plan1 = optimize_join_order(rels1, edges, cm);
+    ASSERT_NE(plan1, nullptr);
+    EXPECT_EQ(plan1->type, PhysicalPlanNode::Type::JOIN);
+
+    // Same logical query but with table_ids remapped to {10, 11, 12}.
+    // The result plan shape and cost must be the same because the only
+    // thing that changes is the table identifier -- not the costs or edges.
+    std::vector<JoinRelation> rels2;
+    rels2.push_back({1ULL << 10, {0.0, 10.0, 100.0}, make_test_scan(10, 100.0, 10.0)});
+    rels2.push_back({1ULL << 11, {0.0, 20.0, 1000.0}, make_test_scan(11, 1000.0, 20.0)});
+    rels2.push_back({1ULL << 12, {0.0, 5.0, 50.0}, make_test_scan(12, 50.0, 5.0)});
+
+    std::vector<JoinEdge> edges2 = {{10, 11, 0.01}, {11, 12, 0.02}};
+
+    auto plan2 = optimize_join_order(rels2, edges2, cm);
+    ASSERT_NE(plan2, nullptr);
+    EXPECT_EQ(plan2->type, PhysicalPlanNode::Type::JOIN);
+
+    // Costs must match because inputs are identical up to table id labelling.
+    EXPECT_NEAR(plan1->cost.total_cost, plan2->cost.total_cost, 1e-6);
+    EXPECT_NEAR(plan1->cost.estimated_rows, plan2->cost.estimated_rows, 1e-6);
+}
