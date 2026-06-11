@@ -293,8 +293,7 @@ TEST_F(GDB607WindowFrameDefaultQA, NullPartitionKeys) {
     exec_ok("INSERT INTO nullgrp VALUES (3, NULL)");
     exec_ok("INSERT INTO nullgrp VALUES (4, 'A')");
 
-    auto qr =
-        exec_ok("SELECT id, grp, COUNT(*) OVER (PARTITION BY grp) AS total FROM nullgrp");
+    auto qr = exec_ok("SELECT id, grp, COUNT(*) OVER (PARTITION BY grp) AS total FROM nullgrp");
     ASSERT_EQ(qr.rows.size(), 4);
     for (auto& row : qr.rows) {
         auto total = get_int(row[2]);
@@ -448,8 +447,8 @@ TEST_F(GDB607WindowFrameDefaultQA, StressManyPartitions) {
     exec_ok("CREATE TABLE many_parts (id INT PRIMARY KEY, grp INT, val INT)");
     const int N = 100;
     for (int i = 1; i <= N; ++i) {
-        exec_ok("INSERT INTO many_parts VALUES (" + std::to_string(i) + ", " +
-                std::to_string(i) + ", " + std::to_string(i * 10) + ")");
+        exec_ok("INSERT INTO many_parts VALUES (" + std::to_string(i) + ", " + std::to_string(i) +
+                ", " + std::to_string(i * 10) + ")");
     }
 
     auto qr = exec_ok("SELECT id, SUM(val) OVER (PARTITION BY grp) AS total FROM many_parts");
