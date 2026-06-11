@@ -466,16 +466,26 @@ TEST(QA_GDB_243_Accessors, EmptyModelPath) {
     EXPECT_EQ(provider.dimension(), 384u);
 }
 
-TEST(QA_GDB_243_Accessors, DimensionZero) {
-    auto mock = std::make_unique<MockOnnxSession>();
-    OnnxProvider provider("model.onnx", 0, std::move(mock));
-    EXPECT_EQ(provider.dimension(), 0u);
-}
+// DimensionZero (pure round-trip) dropped -- DimensionZeroEmbedFails in
+// QA_GDB_243_Embed already covers the interesting dim=0 embed behaviour.
 
-TEST(QA_GDB_243_Accessors, LargeDimension) {
+// Strengthened: provider configured with dim=100000 but mock session returns
+// only 3 floats -- embed() must propagate the mismatch error rather than
+// silently returning a wrong-size vector.
+TEST(QA_GDB_243_Accessors, LargeDimensionEmbedMismatchFails) {
     auto mock = std::make_unique<MockOnnxSession>();
+    // Return 3 floats; provider expects 100000 -- session will reject.
+    mock->set_embedding({1.0f, 2.0f, 3.0f});
+    auto* mock_ptr = mock.get();
+
     OnnxProvider provider("model.onnx", 100000, std::move(mock));
-    EXPECT_EQ(provider.dimension(), 100000u);
+    auto result = provider.embed("hello");
+    ASSERT_FALSE(result.has_value())
+        << "embed() must fail when session output size != configured dimension";
+    EXPECT_EQ(result.error().code, StatusCode::INTERNAL_ERROR);
+    // The provider must forward its configured dimension to the session --
+    // otherwise the failure above could occur for the wrong reason.
+    EXPECT_EQ(mock_ptr->last_expected_dim_, 100000u);
 }
 
 TEST(QA_GDB_243_Accessors, PathWithSlashes) {
