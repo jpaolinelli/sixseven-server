@@ -164,7 +164,7 @@ TEST_F(QA_GDB258, NearestWithKLargerThanRowCount) {
 
     // k=100 but only 2 rows — should return 2, not error.
     auto qr = exec_ok("SELECT * FROM articles WHERE NEAREST(title_vec, 100) TO 'test'");
-    EXPECT_LE(qr.rows.size(), 2u);
+    EXPECT_EQ(qr.rows.size(), 2u);
 }
 
 // =============================================================================
