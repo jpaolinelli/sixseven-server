@@ -28,6 +28,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -490,17 +491,13 @@ TEST_F(ReplicationIntegrationTest, ReplicationLagMonitoring) {
 // =============================================================================
 
 TEST_F(ReplicationIntegrationTest, FailoverPromotion) {
-    // Write initial data.
-    write_txn(*primary_writer_, 1, 1, "pre_promote_data");
-    ASSERT_TRUE(primary_writer_->flush().has_value());
-
-    // Create a standby-side writer for the promotion test.
+    // --- Set up standby-side WAL writer ---
     auto standby_wal_dir = base_dir_ / "standby_promote_wal";
     fs::create_directories(standby_wal_dir);
     auto standby_writer = std::make_unique<WalWriter>(standby_wal_dir, test_wal_opts());
     ASSERT_TRUE(standby_writer->open().has_value());
 
-    // Set up standby query engine.
+    // --- Set up standby query engine in standby mode ---
     auto standby_data = base_dir_ / "standby_promote_data";
     fs::create_directories(standby_data);
     DiskManager dm;
@@ -523,15 +520,58 @@ TEST_F(ReplicationIntegrationTest, FailoverPromotion) {
     ASSERT_TRUE(db.has_value());
     engine.set_current_database(db->database_id);
 
-    // Verify standby reports in recovery.
+    // Confirm the engine is in standby (recovery) mode before promotion.
     auto recovery = engine.execute("SELECT pg_is_in_recovery()");
     ASSERT_TRUE(recovery.has_value());
+    ASSERT_EQ(recovery->rows.size(), 1u);
     EXPECT_TRUE(recovery->rows[0][0].as_bool());
 
-    // Simulate promotion: disable standby mode.
-    engine.set_standby_mode(false);
+    // Writes must be rejected while in standby mode.
+    auto rejected = engine.execute("CREATE TABLE should_fail (id INT)");
+    EXPECT_FALSE(rejected.has_value()) << "standby should reject DDL before promotion";
 
-    // Now the promoted standby should accept writes.
+    // --- Drive promotion through PromotionManager ---
+    // receiver = nullptr: no live WAL receiver to stop (offline failover scenario).
+    PromotionManager promo_mgr(config, /*receiver=*/nullptr, *standby_writer, dm, standby_wal_dir);
+
+    // Timeline starts at 1 and must report standby mode.
+    EXPECT_EQ(promo_mgr.timeline_id(), 1u);
+    EXPECT_TRUE(promo_mgr.is_standby());
+
+    // Wire the promotion callback: flip the query engine out of standby.
+    bool callback_invoked = false;
+    promo_mgr.set_on_promoted([&] {
+        engine.set_standby_mode(false);
+        callback_invoked = true;
+    });
+
+    // Promote — stops any receiver, writes a PROMOTE WAL record, increments
+    // the timeline, flips config_.standby_mode, and invokes the callback.
+    auto promote_result = promo_mgr.promote();
+    ASSERT_TRUE(promote_result.has_value()) << promote_result.error().message;
+
+    // --- Verify PromotionManager state after promotion ---
+    EXPECT_TRUE(callback_invoked) << "on-promoted callback was not invoked";
+    EXPECT_FALSE(promo_mgr.is_standby())
+        << "PromotionManager still reports standby after promotion";
+    EXPECT_EQ(promo_mgr.timeline_id(), 2u) << "timeline ID was not incremented by promotion";
+
+    // The PROMOTE record must be in the WAL — flushed_lsn advances beyond 0.
+    EXPECT_GT(standby_writer->flushed_lsn(), lsn_t{0})
+        << "PROMOTE WAL record was not flushed to the standby WAL";
+
+    // Promoting a second time must be rejected (already primary).
+    auto second_promote = promo_mgr.promote();
+    EXPECT_FALSE(second_promote.has_value()) << "double-promote should return an error";
+
+    // --- Verify the engine now accepts writes ---
+    // pg_is_in_recovery() must return false on the new primary.
+    auto post_promote = engine.execute("SELECT pg_is_in_recovery()");
+    ASSERT_TRUE(post_promote.has_value());
+    ASSERT_EQ(post_promote->rows.size(), 1u);
+    EXPECT_FALSE(post_promote->rows[0][0].as_bool())
+        << "engine still reports in_recovery after promotion";
+
     auto create =
         engine.execute("CREATE TABLE promoted_tbl (id INT, val VARCHAR, PRIMARY KEY (id))");
     ASSERT_TRUE(create.has_value()) << create.error().message;
@@ -539,18 +579,22 @@ TEST_F(ReplicationIntegrationTest, FailoverPromotion) {
     auto ins = engine.execute("INSERT INTO promoted_tbl VALUES (1, 'after_promote')");
     ASSERT_TRUE(ins.has_value()) << ins.error().message;
 
-    // Verify data.
     auto sel = engine.execute("SELECT val FROM promoted_tbl WHERE id = 1");
     ASSERT_TRUE(sel.has_value()) << sel.error().message;
     ASSERT_EQ(sel->rows.size(), 1u);
     EXPECT_EQ(sel->rows[0][0].as_string(), "after_promote");
 
-    // pg_is_in_recovery should now be false.
-    auto post_promote = engine.execute("SELECT pg_is_in_recovery()");
-    ASSERT_TRUE(post_promote.has_value());
-    EXPECT_FALSE(post_promote->rows[0][0].as_bool());
+    // --- Timeline must be persisted to disk ---
+    auto tl_path = standby_wal_dir / "timeline_id";
+    EXPECT_TRUE(fs::exists(tl_path)) << "timeline_id file not written by PromotionManager";
+    if (fs::exists(tl_path)) {
+        std::ifstream tl_file(tl_path);
+        uint64_t persisted_tl = 0;
+        tl_file >> persisted_tl;
+        EXPECT_EQ(persisted_tl, 2u) << "persisted timeline_id does not match promoted timeline";
+    }
 
-    standby_writer->close().has_value();
+    static_cast<void>(standby_writer->close());
 }
 
 // =============================================================================
