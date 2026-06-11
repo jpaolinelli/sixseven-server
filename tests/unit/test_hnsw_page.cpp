@@ -1,7 +1,6 @@
+#include "sixseven/common/platform.h"
 #include "sixseven/vector/hnsw_index.h"
 #include "sixseven/vector/hnsw_page.h"
-
-#include "sixseven/common/platform.h"
 
 #include <gtest/gtest.h>
 
@@ -177,8 +176,9 @@ TEST(HnswMetaSerialization, DefaultMetaRoundTrip) {
     meta.next_node_id = 0;
 
     auto bytes = serialize_hnsw_meta(meta);
-    // Fixed header (28) + node_page_count (4) + vector_page_count (4) = 36.
-    EXPECT_EQ(bytes.size(), hnsw_meta_size + 8);
+    // Fixed header (28) + node_page_count (4) + vector_page_count (4) +
+    // metric byte (1, GDB-723) = 37.
+    EXPECT_EQ(bytes.size(), hnsw_meta_size + 9);
 
     auto result = deserialize_hnsw_meta(bytes);
     ASSERT_TRUE(result.has_value());
@@ -210,8 +210,8 @@ TEST(HnswMetaSerialization, PopulatedMetaRoundTrip) {
     meta.vector_page_ids = {40, 50};
 
     auto bytes = serialize_hnsw_meta(meta);
-    // 28 + 4 + 3*4 + 4 + 2*4 = 28 + 16 + 12 = 56.
-    EXPECT_EQ(bytes.size(), hnsw_meta_size + 4 + 3 * 4 + 4 + 2 * 4);
+    // 28 + 4 + 3*4 + 4 + 2*4 + 1 (metric byte, GDB-723) = 57.
+    EXPECT_EQ(bytes.size(), hnsw_meta_size + 4 + 3 * 4 + 4 + 2 * 4 + 1);
 
     auto result = deserialize_hnsw_meta(bytes);
     ASSERT_TRUE(result.has_value());
@@ -233,6 +233,54 @@ TEST(HnswMetaSerialization, PopulatedMetaRoundTrip) {
     ASSERT_EQ(decoded.vector_page_ids.size(), 2u);
     EXPECT_EQ(decoded.vector_page_ids[0], 40u);
     EXPECT_EQ(decoded.vector_page_ids[1], 50u);
+}
+
+// GDB-723: the distance metric round-trips through meta serialization.
+TEST(HnswMetaSerialization, MetricRoundTrip) {
+    HnswMeta meta;
+    meta.dimension = 8;
+    meta.metric = DistanceMetric::COSINE;
+
+    auto result = deserialize_hnsw_meta(serialize_hnsw_meta(meta));
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().metric, DistanceMetric::COSINE);
+
+    meta.metric = DistanceMetric::INNER_PRODUCT;
+    auto result2 = deserialize_hnsw_meta(serialize_hnsw_meta(meta));
+    ASSERT_TRUE(result2.has_value());
+    EXPECT_EQ(result2.value().metric, DistanceMetric::INNER_PRODUCT);
+}
+
+// GDB-723: legacy meta blobs (written before the metric byte existed) end at
+// the page lists; they must deserialize with the L2 default, since legacy
+// graphs were built with hardcoded L2 distances.
+TEST(HnswMetaSerialization, LegacyMetaWithoutMetricDefaultsToL2) {
+    HnswMeta meta;
+    meta.dimension = 16;
+    meta.node_page_ids = {7};
+    meta.vector_page_ids = {9};
+    meta.metric = DistanceMetric::COSINE;
+
+    auto bytes = serialize_hnsw_meta(meta);
+    bytes.pop_back(); // Strip the trailing metric byte => legacy layout.
+
+    auto result = deserialize_hnsw_meta(bytes);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().metric, DistanceMetric::L2);
+    ASSERT_EQ(result.value().node_page_ids.size(), 1u);
+    EXPECT_EQ(result.value().node_page_ids[0], 7u);
+}
+
+// GDB-723: an out-of-range metric byte is rejected, not silently mapped.
+TEST(HnswMetaSerialization, InvalidMetricByteFails) {
+    HnswMeta meta;
+    meta.dimension = 16;
+    auto bytes = serialize_hnsw_meta(meta);
+    bytes.back() = 0xFF;
+
+    auto result = deserialize_hnsw_meta(bytes);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
 TEST(HnswMetaSerialization, DeserializeTooShortFails) {
@@ -653,6 +701,99 @@ TEST(HnswInsertSearch, InsertAndSearchExactMatch) {
     ASSERT_GE(search_result.value().size(), 1u);
     EXPECT_EQ(search_result.value()[0].node_id, 0u);
     EXPECT_FLOAT_EQ(search_result.value()[0].distance, 0.0F);
+}
+
+// GDB-723: a COSINE-configured index must rank by cosine distance, not L2.
+// Non-unit-norm vectors make the two orderings diverge: [5,0] is the cosine
+// best for query [1,0] (cos dist 0) but L2-far (16); [0.9,0.1] is L2-nearest.
+TEST(HnswInsertSearch, CosineMetricRanksByCosineNotL2) {
+    TestFixture fix;
+
+    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndexConfig config;
+    config.dimension = 2;
+    config.m = 4;
+    config.ef_construction = 16;
+    config.ef_search = 16;
+    config.metric = DistanceMetric::COSINE;
+    auto cr = index.create(config);
+    ASSERT_TRUE(cr.has_value()) << cr.error().message;
+    EXPECT_EQ(index.metric(), DistanceMetric::COSINE);
+
+    ASSERT_TRUE(index.insert(std::vector<float>{0.9F, 0.1F}).has_value()); // node 0
+    ASSERT_TRUE(index.insert(std::vector<float>{5.0F, 0.0F}).has_value()); // node 1
+    ASSERT_TRUE(index.insert(std::vector<float>{0.0F, 1.0F}).has_value()); // node 2
+
+    std::vector<float> query = {1.0F, 0.0F};
+    auto search_result = index.search(query, 3);
+    ASSERT_TRUE(search_result.has_value()) << search_result.error().message;
+    ASSERT_EQ(search_result.value().size(), 3u);
+
+    // Cosine order: node 1 (dist 0) < node 0 (~0.0062) < node 2 (1.0).
+    // Pre-fix L2 order was node 0, node 2, node 1.
+    EXPECT_EQ(search_result.value()[0].node_id, 1u);
+    EXPECT_EQ(search_result.value()[1].node_id, 0u);
+    EXPECT_EQ(search_result.value()[2].node_id, 2u);
+    EXPECT_NEAR(search_result.value()[0].distance, 0.0F, 1e-5F);
+    EXPECT_NEAR(search_result.value()[2].distance, 1.0F, 1e-5F);
+}
+
+// GDB-723: a dot-product index (DOT_PRODUCT normalized to INNER_PRODUCT)
+// ranks by negated dot — the largest-dot vector comes first.
+TEST(HnswInsertSearch, InnerProductMetricRanksByDot) {
+    TestFixture fix;
+
+    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndexConfig config;
+    config.dimension = 2;
+    config.m = 4;
+    config.ef_construction = 16;
+    config.ef_search = 16;
+    config.metric = DistanceMetric::DOT_PRODUCT;
+    auto cr = index.create(config);
+    ASSERT_TRUE(cr.has_value()) << cr.error().message;
+    // DOT_PRODUCT is normalized to the sort-form INNER_PRODUCT.
+    EXPECT_EQ(index.metric(), DistanceMetric::INNER_PRODUCT);
+
+    ASSERT_TRUE(index.insert(std::vector<float>{0.9F, 0.0F}).has_value()); // node 0, dot 0.9
+    ASSERT_TRUE(index.insert(std::vector<float>{5.0F, 0.0F}).has_value()); // node 1, dot 5.0
+    ASSERT_TRUE(index.insert(std::vector<float>{0.0F, 1.0F}).has_value()); // node 2, dot 0.0
+
+    std::vector<float> query = {1.0F, 0.0F};
+    auto search_result = index.search(query, 3);
+    ASSERT_TRUE(search_result.has_value()) << search_result.error().message;
+    ASSERT_EQ(search_result.value().size(), 3u);
+
+    EXPECT_EQ(search_result.value()[0].node_id, 1u);
+    EXPECT_EQ(search_result.value()[1].node_id, 0u);
+    EXPECT_EQ(search_result.value()[2].node_id, 2u);
+    // Distances are negated dot products (lower = more similar).
+    EXPECT_NEAR(search_result.value()[0].distance, -5.0F, 1e-5F);
+    EXPECT_NEAR(search_result.value()[1].distance, -0.9F, 1e-5F);
+    EXPECT_NEAR(search_result.value()[2].distance, 0.0F, 1e-5F);
+}
+
+// GDB-723: the metric survives a create → flush → load round trip.
+TEST(HnswInsertSearch, MetricPersistsAcrossLoad) {
+    TestFixture fix;
+
+    PageId meta_page_id = 0;
+    {
+        HnswIndex index(*fix.bpm, nullptr);
+        HnswIndexConfig config;
+        config.dimension = 2;
+        config.m = 4;
+        config.metric = DistanceMetric::COSINE;
+        ASSERT_TRUE(index.create(config).has_value());
+        ASSERT_TRUE(index.insert(std::vector<float>{1.0F, 2.0F}).has_value());
+        meta_page_id = index.meta_page_id();
+    }
+
+    HnswIndex reloaded(*fix.bpm, nullptr);
+    auto load = reloaded.load(meta_page_id);
+    ASSERT_TRUE(load.has_value()) << load.error().message;
+    EXPECT_EQ(reloaded.metric(), DistanceMetric::COSINE);
+    EXPECT_EQ(reloaded.node_count(), 1u);
 }
 
 TEST(HnswInsertSearch, SearchTopK) {

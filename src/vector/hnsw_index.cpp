@@ -10,6 +10,17 @@
 
 namespace sixseven {
 
+namespace {
+
+/// Normalize a metric into the sort form used inside the index: lower
+/// distance = more similar for every metric. Raw DOT_PRODUCT (higher =
+/// more similar) becomes the negated INNER_PRODUCT variant (GDB-723).
+DistanceMetric normalize_metric(DistanceMetric metric) {
+    return metric == DistanceMetric::DOT_PRODUCT ? DistanceMetric::INNER_PRODUCT : metric;
+}
+
+} // anonymous namespace
+
 HnswIndex::HnswIndex(BufferPoolManager& buffer_pool, WalWriter* wal)
     : buffer_pool_(buffer_pool), wal_(wal) {}
 
@@ -42,6 +53,7 @@ Result<void> HnswIndex::create(const HnswIndexConfig& config) {
     meta_.node_count = 0;
     meta_.tombstone_count = 0;
     meta_.next_node_id = 0;
+    meta_.metric = normalize_metric(config.metric);
 
     auto meta_bytes = serialize_hnsw_meta(meta_);
     auto insert_result = meta_page->insert_tuple(meta_bytes);
@@ -55,12 +67,13 @@ Result<void> HnswIndex::create(const HnswIndexConfig& config) {
         return make_error(StatusCode::INTERNAL_ERROR, "Failed to unpin HNSW metadata page");
     }
 
-    SIXSEVEN_LOG_INFO("Created HNSW index: dim={}, M={}, ef_c={}, ef_s={}, meta_page={}",
-                   config.dimension,
-                   config.m,
-                   config.ef_construction,
-                   config.ef_search,
-                   meta_page_id_);
+    SIXSEVEN_LOG_INFO("Created HNSW index: dim={}, M={}, ef_c={}, ef_s={}, metric={}, meta_page={}",
+                      config.dimension,
+                      config.m,
+                      config.ef_construction,
+                      config.ef_search,
+                      distance_metric_name(meta_.metric),
+                      meta_page_id_);
 
     return ok();
 }
@@ -93,6 +106,8 @@ Result<void> HnswIndex::load(PageId meta_page_id) {
         return make_error(meta_result.error().code, meta_result.error().message);
     }
     meta_ = meta_result.value();
+    // Defensive: persisted metric must be in sort form (see create()).
+    meta_.metric = normalize_metric(meta_.metric);
 
     (void)buffer_pool_.unpin_page(meta_page_id_, false);
 
@@ -127,11 +142,11 @@ Result<void> HnswIndex::load(PageId meta_page_id) {
     }
 
     SIXSEVEN_LOG_INFO("Loaded HNSW index: dim={}, nodes={}, meta_page={}, "
-                   "node_map_size={}",
-                   meta_.dimension,
-                   meta_.node_count,
-                   meta_page_id_,
-                   node_map_.size());
+                      "node_map_size={}",
+                      meta_.dimension,
+                      meta_.node_count,
+                      meta_page_id_,
+                      node_map_.size());
 
     return ok();
 }
@@ -584,8 +599,8 @@ Result<void> HnswIndex::compact() {
     }
 
     SIXSEVEN_LOG_INFO("HNSW compaction: freed {} tombstoned nodes, "
-                   "repaired neighbor connections",
-                   tombstoned.size());
+                      "repaired neighbor connections",
+                      tombstoned.size());
 
     return ok();
 }
@@ -873,7 +888,7 @@ Result<uint32_t> HnswIndex::greedy_search_layer(std::span<const float> query,
     }
 
     uint32_t current_id = entry_id;
-    float current_dist = compute_distance(DistanceMetric::L2, query, entry_vec_result.value());
+    float current_dist = compute_distance(meta_.metric, query, entry_vec_result.value());
 
     bool changed = true;
     while (changed) {
@@ -908,7 +923,7 @@ Result<uint32_t> HnswIndex::greedy_search_layer(std::span<const float> query,
             if (!nvec.has_value()) {
                 continue;
             }
-            float dist = compute_distance(DistanceMetric::L2, query, nvec.value());
+            float dist = compute_distance(meta_.metric, query, nvec.value());
             if (dist < current_dist) {
                 current_id = neighbor.node_id;
                 current_dist = dist;
@@ -949,7 +964,7 @@ HnswIndex::search_layer(std::span<const float> query,
         return ok(std::vector<Candidate>{});
     }
 
-    float entry_dist = compute_distance(DistanceMetric::L2, query, entry_vec.value());
+    float entry_dist = compute_distance(meta_.metric, query, entry_vec.value());
     candidates.push({entry_id, entry_dist});
     result.push({entry_id, entry_dist});
     visited.insert(entry_id);
@@ -999,7 +1014,7 @@ HnswIndex::search_layer(std::span<const float> query,
                 continue;
             }
 
-            float dist = compute_distance(DistanceMetric::L2, query, nvec.value());
+            float dist = compute_distance(meta_.metric, query, nvec.value());
 
             if (result.size() < ef || dist < result.top().distance) {
                 candidates.push({neighbor.node_id, dist});

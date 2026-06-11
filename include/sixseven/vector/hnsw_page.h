@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sixseven/common/result.h"
+#include "sixseven/vector/distance.h"
 
 #include <cstdint>
 #include <span>
@@ -69,6 +70,12 @@ static constexpr size_t hnsw_node_header_size = 12; // 4 + 1 + 1 + 4 + 2
 ///   [node_count:      uint32]  4 bytes
 ///   [tombstone_count: uint32]  4 bytes
 ///   [next_node_id:    uint32]  4 bytes
+///
+/// Variable-length tail (appended after the fixed portion, in order):
+///   [node_page_count:   uint32][page ids...]
+///   [vector_page_count: uint32][page ids...]
+///   [metric:            uint8]  1 byte (GDB-723; absent in legacy indexes,
+///                                which were built with L2 — missing => L2)
 struct HnswMeta {
     uint32_t entry_point_id = hnsw_invalid_node_id;
     uint16_t max_layer = 0;
@@ -82,6 +89,11 @@ struct HnswMeta {
     /// Page IDs for node and vector data pages (persisted for restart).
     std::vector<uint32_t> node_page_ids;
     std::vector<uint32_t> vector_page_ids;
+    /// Distance metric the graph was built with and is searched under
+    /// (GDB-723). Stored in sort form (lower = more similar): dot-product
+    /// indexes use INNER_PRODUCT (negated dot), never DOT_PRODUCT.
+    /// Legacy on-disk indexes lack this field and deserialize as L2.
+    DistanceMetric metric = DistanceMetric::L2;
 };
 
 static constexpr size_t hnsw_meta_size = 28;
