@@ -698,11 +698,10 @@ TEST_F(QA_GDB711_Stats, ReservoirSamplingPathOnLargeTable) {
 // out-of-bounds vector write (crashes under MSVC debug iterator checks;
 // silent heap corruption in release).
 //
-// DISABLED because the failure mode is a process abort, which would take down
-// the whole QA binary. Re-enable once GDB-1232 is fixed. Run manually with:
-//   sixseven_qa_tests --gtest_also_run_disabled_tests \
-//       --gtest_filter=*CorruptTupleDuringReservoirSampling*
-TEST_F(QA_GDB711_Stats, DISABLED_CorruptTupleDuringReservoirSamplingMustNotCorruptMemory) {
+// Fixed by GDB-1232: the reservoir is now driven by a valid-rows counter, so
+// skipped corrupt tuples can no longer leave the sample under-filled while the
+// replacement branch indexes up to max_sample_size.
+TEST_F(QA_GDB711_Stats, CorruptTupleDuringReservoirSamplingMustNotCorruptMemory) {
     // 2 valid rows, then 1 corrupt tuple injected straight into the heap,
     // then 200 more valid rows. With sample_size = 4 the corrupt tuple is
     // inside the fill window, so sample.size() == 3 when the reservoir
