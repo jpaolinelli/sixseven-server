@@ -185,14 +185,6 @@ static std::unique_ptr<PhysicalPlanNode> dp_join_order(std::vector<JoinRelation>
         return std::move(base_relations[0].plan);
     }
 
-    // Build dense map: caller's table_set (single-bit value) -> dense bit index.
-    // Each base_relation.table_set is expected to be a single-bit mask
-    // representing one table.  We assign dense indices 0..n-1 in input order.
-    std::unordered_map<uint64_t, uint64_t> sparse_to_dense; // caller bit -> dense bit
-    for (size_t i = 0; i < n; ++i) {
-        sparse_to_dense[base_relations[i].table_set] = static_cast<uint64_t>(i);
-    }
-
     // Remap join_edges: translate left_table / right_table (raw table_id values)
     // to dense bit positions.  Edges referencing tables not in base_relations are
     // skipped.  We encode the raw table_id -> its single-bit mask -> dense index.
