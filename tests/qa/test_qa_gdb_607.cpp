@@ -7,10 +7,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "test_qa_helpers.h"
 
@@ -476,14 +479,20 @@ TEST_F(GDB607WindowFrameDefaultQA, StressManyPartitions) {
 TEST_F(GDB607WindowFrameDefaultQA, RowNumberUnaffectedByFrameChange) {
     auto qr = exec_ok("SELECT id, ROW_NUMBER() OVER () AS rn FROM t");
     ASSERT_EQ(qr.rows.size(), 5);
+    // Collect all row-number values and assert they form exactly {1,2,3,4,5}.
+    std::vector<int64_t> rns;
+    rns.reserve(5);
     for (auto& row : qr.rows) {
-        auto rn = get_int(row[1]);
-        EXPECT_GE(rn, 1);
-        EXPECT_LE(rn, 5);
+        rns.push_back(get_int(row[1]));
     }
+    std::sort(rns.begin(), rns.end());
+    const std::vector<int64_t> expected{1, 2, 3, 4, 5};
+    EXPECT_EQ(rns, expected) << "ROW_NUMBER() OVER () must assign each of {1..5} exactly once";
 }
 
 // RANK OVER (PARTITION BY grp) — should not be affected by frame.
+// Data: grp=A has val 10 (rank 1) and val 20 (rank 2); grp=B has val 30 (rank 1).
+// Expected ranks by id: id=1 -> rank 1, id=2 -> rank 2, id=3 -> rank 1.
 TEST_F(GDB607WindowFrameDefaultQA, RankUnaffectedByFrameChange) {
     exec_ok("CREATE TABLE rank_tbl (id INT PRIMARY KEY, grp TEXT, val INT)");
     exec_ok("INSERT INTO rank_tbl VALUES (1, 'A', 10)");
@@ -491,9 +500,18 @@ TEST_F(GDB607WindowFrameDefaultQA, RankUnaffectedByFrameChange) {
     exec_ok("INSERT INTO rank_tbl VALUES (3, 'B', 30)");
 
     auto qr = exec_ok("SELECT id, RANK() OVER (PARTITION BY grp ORDER BY val) AS rnk "
-                      "FROM rank_tbl");
+                      "FROM rank_tbl ORDER BY id");
     ASSERT_EQ(qr.rows.size(), 3);
+
+    // Build a map from id -> rank for order-independent verification.
+    std::map<int64_t, int64_t> rank_by_id;
     for (auto& row : qr.rows) {
-        EXPECT_GE(get_int(row[1]), 1);
+        rank_by_id[get_int(row[0])] = get_int(row[1]);
     }
+    // id=1: first in partition A (val=10) → rank 1
+    EXPECT_EQ(rank_by_id[1], 1) << "id=1 (grp=A, val=10) must have rank 1";
+    // id=2: second in partition A (val=20) → rank 2
+    EXPECT_EQ(rank_by_id[2], 2) << "id=2 (grp=A, val=20) must have rank 2";
+    // id=3: only row in partition B (val=30) → rank 1
+    EXPECT_EQ(rank_by_id[3], 1) << "id=3 (grp=B, val=30) must have rank 1";
 }
