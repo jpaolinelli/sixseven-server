@@ -7,7 +7,6 @@
 #include "sixseven/executor/storage_manager.h"
 #include "sixseven/graph/graph_engine.h"
 #include "sixseven/planner/statistics.h"
-#include "sixseven/txn/txn_manager.h"
 
 #include <cstdint>
 #include <string>
@@ -245,9 +244,11 @@ private:
     /// Execute a REINDEX statement (rebuild one or all indexes).
     [[nodiscard]] Result<QueryResult> execute_reindex(const ReindexStmt& stmt);
 
-    /// Execute a VACUUM statement (reclaim dead MVCC tuple versions).
-    /// With a table name, vacuums that table; otherwise vacuums every user
-    /// table in the current database. Dispatches to the txn module Vacuum.
+    /// Execute a VACUUM statement. Resolves and validates the target table(s)
+    /// (the named table, or every user table in the current database) and
+    /// returns the VACUUM completion tag. Reclamation is deferred until the
+    /// MVCC epic provides headed tuples and a shared transaction manager
+    /// (GDB-1230); running txn::Vacuum over raw heap tuples destroys live rows.
     [[nodiscard]] Result<QueryResult> execute_vacuum(const VacuumStmt& stmt);
 
     /// Execute an ANALYZE statement (gather table/column statistics).
@@ -302,14 +303,9 @@ private:
     int skip_masking_depth_ = 0;
     bool standby_mode_ = false;
 
-    /// Transaction manager used to compute the vacuum horizon for VACUUM.
-    /// Owned here because the executor runtime does not otherwise expose one;
-    /// with no active transactions its xmin_horizon makes all committed-dead
-    /// tuple versions reclaimable.
-    TransactionManager txn_manager_;
-
-    /// Statistics gathered by ANALYZE, keyed by table_id. Consumed by the
-    /// optimizer for cost-based planning decisions.
+    /// Statistics gathered by ANALYZE, keyed by table_id. Populated only;
+    /// not yet consumed by the planner (optimizer wiring belongs to the
+    /// Planner Completion epic).
     StatisticsStore statistics_store_;
 
     /// Per-table PK value cache for fast LINK existence checks.

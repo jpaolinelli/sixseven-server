@@ -25,7 +25,6 @@
 #include "sixseven/server/wal_sender_manager.h"
 #include "sixseven/storage/wal.h"
 #include "sixseven/table/tuple.h"
-#include "sixseven/txn/vacuum.h"
 #include "sixseven/vector/backfill_manager.h"
 #include "sixseven/vector/embedding_column.h"
 #include "sixseven/vector/embedding_worker.h"
@@ -1923,48 +1922,15 @@ Result<QueryResult> QueryEngine::execute_vacuum(const VacuumStmt& stmt) {
         targets = catalog_.list_tables(current_database_id_);
     }
 
-    VacuumStats totals;
-    uint32_t tables_vacuumed = 0;
-
-    for (const auto& schema : targets) {
-        // Ensure the table's storage is open before vacuuming.
-        auto ts = storage_.get_table_storage(schema.table_id);
-        if (!ts) {
-            if (storage_.table_file_exists(current_database_id_, schema.table_id)) {
-                auto opened =
-                    storage_.open_table_storage(current_database_id_, schema.table_id, schema);
-                if (!opened) {
-                    return make_error(opened.error().code, opened.error().message);
-                }
-                ts = storage_.get_table_storage(schema.table_id);
-            }
-            if (!ts) {
-                return make_error(ts.error().code, ts.error().message);
-            }
-        }
-        auto* table_storage = *ts;
-
-        Vacuum vacuum(*table_storage->bpm,
-                      table_storage->bpm->disk_manager(),
-                      table_storage->file_id,
-                      txn_manager_);
-        auto stats = vacuum.run();
-        if (!stats) {
-            return make_error(stats.error().code, stats.error().message);
-        }
-
-        totals.pages_scanned += stats->pages_scanned;
-        totals.tuples_examined += stats->tuples_examined;
-        totals.dead_tuples += stats->dead_tuples;
-        totals.pages_compacted += stats->pages_compacted;
-        totals.bytes_reclaimed += stats->bytes_reclaimed;
-        ++tables_vacuumed;
-    }
-
-    SIXSEVEN_LOG_INFO("vacuumed {} table(s): scanned {} pages, removed {} dead tuples",
-                      tables_vacuumed,
-                      totals.pages_scanned,
-                      totals.dead_tuples);
+    // Validated no-op (GDB-1230): txn::Vacuum must not run over the executor's
+    // heap pages yet. The write path does not produce MVCC-headed tuples, and
+    // there is no shared TransactionManager to supply a vacuum horizon — under
+    // those conditions Vacuum misreads raw tuple bytes as an xmin, resolves
+    // unknown xids as ABORTED, and deletes live rows. Targets are still
+    // resolved above so VACUUM keeps PostgreSQL-compatible error behavior.
+    SIXSEVEN_LOG_INFO("VACUUM: validated {} table(s); reclamation deferred until MVCC "
+                      "integration (GDB-1230)",
+                      targets.size());
 
     QueryResult qr;
     qr.message = "VACUUM";

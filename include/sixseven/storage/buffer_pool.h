@@ -191,10 +191,6 @@ public:
     /// Return the current number of pages in the buffer pool.
     [[nodiscard]] uint32_t pool_page_count() const;
 
-    /// Return the DiskManager backing this buffer pool's file. Needed by
-    /// callers (e.g. Vacuum) that operate on the same file at the disk level.
-    [[nodiscard]] DiskManager& disk_manager() const { return disk_manager_; }
-
     /// Return the number of buffer pool hits (page already in pool).
     [[nodiscard]] uint64_t hit_count() const { return hits_.load(std::memory_order_relaxed); }
 

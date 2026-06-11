@@ -147,6 +147,27 @@ TEST_F(QA_GDB711, VacuumPreservesLiveRows) {
     EXPECT_EQ(qr.rows.size(), 4u);
 }
 
+// Tripwire for GDB-1230: rows whose serialized form is >= 24 bytes (the
+// txn-module MVCC header size). Running txn::Vacuum over raw heap tuples
+// misreads such rows as MVCC-headed, resolves their fake xmin as ABORTED, and
+// destroys them (debug builds crash on the OOB read first). VACUUM must keep
+// these rows intact regardless of how it is implemented.
+TEST_F(QA_GDB711, VacuumPreservesWideRows) {
+    exec_ok("CREATE TABLE wide_t (id INT, name VARCHAR, qty INT)");
+    exec_ok("INSERT INTO wide_t VALUES (1, 'a-thirty-character-wide-string', 10)");
+    exec_ok("INSERT INTO wide_t VALUES (2, 'another-thirty-char-wide-value', 20)");
+
+    EXPECT_EQ(exec_ok("VACUUM wide_t").message, "VACUUM");
+
+    auto qr = exec_ok("SELECT id, name FROM wide_t");
+    EXPECT_EQ(qr.rows.size(), 2u);
+
+    // Bare VACUUM sweeps every user table, including the wide one.
+    EXPECT_EQ(exec_ok("VACUUM").message, "VACUUM");
+    qr = exec_ok("SELECT id FROM wide_t");
+    EXPECT_EQ(qr.rows.size(), 2u);
+}
+
 // =============================================================================
 // AC 2: Fix implemented — ANALYZE dispatches to StatisticsStore and succeeds.
 // =============================================================================
