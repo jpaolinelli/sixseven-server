@@ -189,13 +189,10 @@ TEST_F(QA_GDB710_NextIdCounter, MultipleDatabasesHaveUniqueIds) {
     ASSERT_TRUE(c.has_value()) << c.error().message;
 
     // All IDs must be distinct and different from system/default.
-    std::vector<database_id_t> ids = {
-        default_database_id, system_database_id, *a, *b, *c
-    };
+    std::vector<database_id_t> ids = {default_database_id, system_database_id, *a, *b, *c};
     for (size_t i = 0; i < ids.size(); ++i) {
         for (size_t j = i + 1; j < ids.size(); ++j) {
-            EXPECT_NE(ids[i], ids[j])
-                << "duplicate database id at indices " << i << " and " << j;
+            EXPECT_NE(ids[i], ids[j]) << "duplicate database id at indices " << i << " and " << j;
         }
     }
 }
@@ -288,7 +285,8 @@ TEST_F(QA_GDB710_ListDatabases, DoubleBootstrapNoDuplicates) {
     auto dbs = catalog_.list_databases();
     size_t count_default = 0;
     for (auto& db : dbs) {
-        if (db.database_id == default_database_id) ++count_default;
+        if (db.database_id == default_database_id)
+            ++count_default;
     }
     EXPECT_EQ(count_default, 1u) << "duplicate default database entry after double bootstrap";
 }
@@ -346,8 +344,7 @@ TEST_F(QA_GDB710_IsolationBetweenFixtures, TableInANotVisibleInB) {
 
     // Querying the same table name in B must fail.
     auto qr = engine_b_->execute("SELECT id FROM private_a");
-    EXPECT_FALSE(qr.has_value())
-        << "table from engine A should not be visible in engine B";
+    EXPECT_FALSE(qr.has_value()) << "table from engine A should not be visible in engine B";
 }
 
 /// Both engines can independently create a table with the same name.
@@ -508,13 +505,13 @@ TEST_F(QA_GDB710_FullPipeline, SelectFromNonExistentTableErrors) {
 /// Many tables created in the same session after a single bootstrap call.
 TEST_F(QA_GDB710_FullPipeline, ManyTablesInOneSession) {
     for (int i = 0; i < 20; ++i) {
-        std::string sql = "CREATE TABLE tbl_" + std::to_string(i) +
-                          " (id INT PRIMARY KEY, val INT)";
+        std::string sql =
+            "CREATE TABLE tbl_" + std::to_string(i) + " (id INT PRIMARY KEY, val INT)";
         exec_ok(sql);
     }
     for (int i = 0; i < 20; ++i) {
-        std::string ins = "INSERT INTO tbl_" + std::to_string(i) +
-                          " VALUES (" + std::to_string(i) + ", " + std::to_string(i * 10) + ")";
+        std::string ins = "INSERT INTO tbl_" + std::to_string(i) + " VALUES (" + std::to_string(i) +
+                          ", " + std::to_string(i * 10) + ")";
         exec_ok(ins);
     }
     for (int i = 0; i < 20; ++i) {
