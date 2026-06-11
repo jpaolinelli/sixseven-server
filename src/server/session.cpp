@@ -55,6 +55,32 @@ bool starts_with_ci(std::string_view str, std::string_view prefix) {
 } // namespace
 
 // -- Default session variable values ------------------------------------------
+//
+// Enforcement matrix (GDB-721). Each variable is either:
+//   HONORED  — the value changes engine behavior;
+//   INERT    — accepted and SHOWn for PostgreSQL driver compatibility
+//              (psqlODBC, psql, JDBC issue these at connect time; erroring
+//              would break clients, matching PG's tolerance), but the engine
+//              does not consume the value yet.
+//
+//   statement_timeout              HONORED — armed as a thread-local deadline
+//                                  (StatementDeadlineGuard) before each query
+//                                  executor call; the QueryEngine drain loop
+//                                  cancels the statement with SQLSTATE 57014
+//                                  once the deadline passes. Value validated
+//                                  at SET time (integer ms, or ms/s/min unit).
+//   work_mem                       INERT — ExternalSort/HashJoin take memory
+//                                  budgets, but the planner wires fixed
+//                                  defaults; session plumbing is future work.
+//   default_transaction_isolation  INERT — single isolation level today.
+//   search_path                    INERT — no schema namespaces.
+//   embedding_provider_url         INERT — providers come from sys_providers
+//                                  (ProviderCache), not a session URL.
+//   embedding_api_key              INERT — same as above.
+//   datestyle, client_encoding, extra_float_digits, application_name,
+//   lc_messages, lc_monetary, lc_numeric, lc_time, timezone, intervalstyle,
+//   standard_conforming_strings, bytea_output
+//                                  INERT — PG-driver compatibility surface.
 
 const std::unordered_map<std::string, std::string> Session::DEFAULT_VARIABLES = {
     {"work_mem", "4MB"},
@@ -89,6 +115,14 @@ Result<void> Session::set_variable(const std::string& name, const std::string& v
     if (DEFAULT_VARIABLES.find(lower_name) == DEFAULT_VARIABLES.end()) {
         return make_error(StatusCode::INVALID_ARGUMENT,
                           "unrecognized session variable \"" + name + "\"");
+    }
+    // statement_timeout is honored by the engine, so reject values we could
+    // not enforce instead of silently storing garbage.
+    if (lower_name == "statement_timeout") {
+        auto parsed = parse_timeout_ms(value);
+        if (!parsed) {
+            return make_error(parsed.error().code, parsed.error().message);
+        }
     }
     variables_[lower_name] = value;
     SIXSEVEN_LOG_DEBUG("session {}: SET {} = '{}'", backend_pid_, lower_name, value);
@@ -134,6 +168,48 @@ std::vector<std::pair<std::string, std::string>> Session::get_all_variables() co
 
 bool Session::is_session_variable(const std::string& name) const {
     return DEFAULT_VARIABLES.find(to_lower(name)) != DEFAULT_VARIABLES.end();
+}
+
+Result<int64_t> Session::parse_timeout_ms(const std::string& value) {
+    auto trimmed = trim(value);
+    if (trimmed.empty()) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "invalid value for parameter \"statement_timeout\": \"" + value + "\"");
+    }
+    size_t pos = 0;
+    while (pos < trimmed.size() && std::isdigit(static_cast<unsigned char>(trimmed[pos]))) {
+        ++pos;
+    }
+    if (pos == 0) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "invalid value for parameter \"statement_timeout\": \"" + value + "\"");
+    }
+    int64_t ms = 0;
+    try {
+        ms = std::stoll(trimmed.substr(0, pos));
+    } catch (const std::exception&) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "invalid value for parameter \"statement_timeout\": \"" + value + "\"");
+    }
+    auto unit = to_lower(trim(trimmed.substr(pos)));
+    if (unit == "s") {
+        ms *= 1000;
+    } else if (unit == "min") {
+        ms *= 60000;
+    } else if (!unit.empty() && unit != "ms") {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "invalid value for parameter \"statement_timeout\": \"" + value + "\"");
+    }
+    return ok(ms);
+}
+
+int64_t Session::statement_timeout_ms() const {
+    auto val = get_variable("statement_timeout");
+    if (!val) {
+        return 0;
+    }
+    auto parsed = parse_timeout_ms(*val);
+    return parsed ? *parsed : 0;
 }
 
 // -- Prepared statements ------------------------------------------------------
