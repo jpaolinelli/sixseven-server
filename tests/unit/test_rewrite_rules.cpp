@@ -528,12 +528,67 @@ TEST(ProjectionPushdown, NeededColumns) {
 // Boolean simplification tests
 // ============================================================================
 
-TEST(BooleanSimplification, DelegatesToFoldConstants) {
-    // simplify_boolean is implemented as fold_constants
+// NOT NOT x -> x (double negation elimination)
+TEST(BooleanSimplification, DoubleNegationEliminated) {
+    auto col = make_column_ref("", "active");
+    auto not_not = make_unary(UnaryOp::NOT, make_unary(UnaryOp::NOT, std::move(col)));
+    auto result = simplify_boolean(*not_not);
+    ASSERT_NE(result, nullptr);
+    const auto* col_result = dynamic_cast<const ColumnRefExpr*>(result.get());
+    ASSERT_NE(col_result, nullptr);
+    EXPECT_EQ(col_result->column, "active");
+}
+
+// NOT NOT NOT x -> NOT x (odd negation count reduces to one NOT)
+TEST(BooleanSimplification, TripleNegationReducesToSingleNot) {
+    auto col = make_column_ref("", "active");
+    auto triple_not = make_unary(
+        UnaryOp::NOT, make_unary(UnaryOp::NOT, make_unary(UnaryOp::NOT, std::move(col))));
+    auto result = simplify_boolean(*triple_not);
+    ASSERT_NE(result, nullptr);
+    const auto* unary_result = dynamic_cast<const UnaryExpr*>(result.get());
+    ASSERT_NE(unary_result, nullptr);
+    EXPECT_EQ(unary_result->op, UnaryOp::NOT);
+    const auto* inner_col = dynamic_cast<const ColumnRefExpr*>(unary_result->operand.get());
+    ASSERT_NE(inner_col, nullptr);
+    EXPECT_EQ(inner_col->column, "active");
+}
+
+// NOT true -> false (literal boolean folding still works)
+TEST(BooleanSimplification, NotTrueFoldsToFalse) {
+    auto expr = make_unary(UnaryOp::NOT, make_bool_lit(true));
+    auto result = simplify_boolean(*expr);
+    ASSERT_NE(result, nullptr);
+    const auto* lit = as_lit(result);
+    ASSERT_NE(lit, nullptr);
+    EXPECT_EQ(lit->kind, LiteralKind::BOOLEAN);
+    EXPECT_EQ(lit->value, "false");
+}
+
+// NOT false -> true
+TEST(BooleanSimplification, NotFalseFoldsToTrue) {
+    auto expr = make_unary(UnaryOp::NOT, make_bool_lit(false));
+    auto result = simplify_boolean(*expr);
+    ASSERT_NE(result, nullptr);
+    const auto* lit = as_lit(result);
+    ASSERT_NE(lit, nullptr);
+    EXPECT_EQ(lit->kind, LiteralKind::BOOLEAN);
+    EXPECT_EQ(lit->value, "true");
+}
+
+// Non-boolean constant expression still folds (regression: 1+2 -> 3)
+TEST(BooleanSimplification, NonBooleanConstantFolded) {
     auto expr = make_binary(BinaryOp::ADD, make_int_lit(1), make_int_lit(2));
     auto result = simplify_boolean(*expr);
     ASSERT_NE(result, nullptr);
     EXPECT_EQ(as_lit(result)->value, "3");
+}
+
+// Expression with no simplification returns nullptr (no-change convention)
+TEST(BooleanSimplification, NoChangeReturnsNullptr) {
+    auto col = make_column_ref("t", "x");
+    auto result = simplify_boolean(*col);
+    EXPECT_EQ(result, nullptr);
 }
 
 // ============================================================================
