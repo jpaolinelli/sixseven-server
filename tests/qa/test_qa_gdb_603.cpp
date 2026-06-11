@@ -22,6 +22,8 @@
 #include <memory>
 #include <string>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -34,6 +36,8 @@ protected:
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb603";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
+
+        bootstrap_qa_catalog(catalog_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
@@ -83,9 +87,8 @@ protected:
 // =============================================================================
 
 TEST_F(QA_GDB603, ExactReproducer_AVGAliasWithHavingOrderBy) {
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) AS cnt, AVG(salary) AS avg_sal "
-        "FROM emp GROUP BY dept HAVING COUNT(*) > 2 ORDER BY avg_sal DESC");
+    auto qr = exec_ok("SELECT dept, COUNT(*) AS cnt, AVG(salary) AS avg_sal "
+                      "FROM emp GROUP BY dept HAVING COUNT(*) > 2 ORDER BY avg_sal DESC");
     // eng(3, avg~116.67) and sales(3, avg~90) pass HAVING; hr(2), ops(1) don't.
     ASSERT_EQ(qr.rows.size(), 2u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "eng");
@@ -97,9 +100,8 @@ TEST_F(QA_GDB603, ExactReproducer_AVGAliasWithHavingOrderBy) {
 // =============================================================================
 
 TEST_F(QA_GDB603, AliasOrderByWithoutHaving) {
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) AS cnt, AVG(salary) AS avg_sal "
-        "FROM emp GROUP BY dept ORDER BY avg_sal DESC");
+    auto qr = exec_ok("SELECT dept, COUNT(*) AS cnt, AVG(salary) AS avg_sal "
+                      "FROM emp GROUP BY dept ORDER BY avg_sal DESC");
     ASSERT_EQ(qr.rows.size(), 4u);
     // eng(116.67) > sales(90) > hr(72.5) > ops(60)
     EXPECT_EQ(qr.rows[0][0].as_string(), "eng");
@@ -111,9 +113,8 @@ TEST_F(QA_GDB603, AliasOrderByWithoutHaving) {
 // =============================================================================
 
 TEST_F(QA_GDB603, HavingWithoutOrderByAlias) {
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) AS cnt, AVG(salary) AS avg_sal "
-        "FROM emp GROUP BY dept HAVING COUNT(*) > 2");
+    auto qr = exec_ok("SELECT dept, COUNT(*) AS cnt, AVG(salary) AS avg_sal "
+                      "FROM emp GROUP BY dept HAVING COUNT(*) > 2");
     ASSERT_EQ(qr.rows.size(), 2u);
 }
 
@@ -122,9 +123,8 @@ TEST_F(QA_GDB603, HavingWithoutOrderByAlias) {
 // =============================================================================
 
 TEST_F(QA_GDB603, OrderByCountAliasWithHaving) {
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) AS cnt "
-        "FROM emp GROUP BY dept HAVING COUNT(*) > 1 ORDER BY cnt ASC");
+    auto qr = exec_ok("SELECT dept, COUNT(*) AS cnt "
+                      "FROM emp GROUP BY dept HAVING COUNT(*) > 1 ORDER BY cnt ASC");
     // hr(2), eng(3), sales(3) pass; ops(1) doesn't.
     ASSERT_EQ(qr.rows.size(), 3u);
     EXPECT_EQ(qr.rows[0][1].as_int64(), 2);
@@ -135,9 +135,8 @@ TEST_F(QA_GDB603, OrderByCountAliasWithHaving) {
 // =============================================================================
 
 TEST_F(QA_GDB603, MultipleAliasesInOrderBy) {
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) AS cnt, AVG(salary) AS avg_sal "
-        "FROM emp GROUP BY dept HAVING COUNT(*) > 1 ORDER BY cnt DESC, avg_sal ASC");
+    auto qr = exec_ok("SELECT dept, COUNT(*) AS cnt, AVG(salary) AS avg_sal "
+                      "FROM emp GROUP BY dept HAVING COUNT(*) > 1 ORDER BY cnt DESC, avg_sal ASC");
     ASSERT_EQ(qr.rows.size(), 3u);
     // cnt: eng=3, sales=3, hr=2. Tied cnt=3 sorted by avg_sal ASC: sales(90) < eng(116.67).
     EXPECT_EQ(qr.rows[0][0].as_string(), "sales");
@@ -150,9 +149,8 @@ TEST_F(QA_GDB603, MultipleAliasesInOrderBy) {
 // =============================================================================
 
 TEST_F(QA_GDB603, CaseInsensitiveAliasOrderBy) {
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) AS MyCount "
-        "FROM emp GROUP BY dept HAVING COUNT(*) > 2 ORDER BY mycount DESC");
+    auto qr = exec_ok("SELECT dept, COUNT(*) AS MyCount "
+                      "FROM emp GROUP BY dept HAVING COUNT(*) > 2 ORDER BY mycount DESC");
     ASSERT_EQ(qr.rows.size(), 2u);
     EXPECT_EQ(qr.rows[0][1].as_int64(), 3);
 }
@@ -162,8 +160,7 @@ TEST_F(QA_GDB603, CaseInsensitiveAliasOrderBy) {
 // =============================================================================
 
 TEST_F(QA_GDB603, NonAggregateAliasOrderBy) {
-    auto qr = exec_ok(
-        "SELECT id, salary AS pay FROM emp ORDER BY pay DESC");
+    auto qr = exec_ok("SELECT id, salary AS pay FROM emp ORDER BY pay DESC");
     ASSERT_EQ(qr.rows.size(), 9u);
     EXPECT_EQ(qr.rows[0][1].as_int32(), 130); // highest salary
     EXPECT_EQ(qr.rows[8][1].as_int32(), 60);  // lowest salary
@@ -176,8 +173,7 @@ TEST_F(QA_GDB603, NonAggregateAliasOrderBy) {
 TEST_F(QA_GDB603, AliasShadowsActualColumn) {
     // 'id' is a real column, but alias 'id' refers to salary.
     // PostgreSQL: ORDER BY resolves to the alias if present.
-    auto qr = exec_ok(
-        "SELECT salary AS id FROM emp ORDER BY id ASC");
+    auto qr = exec_ok("SELECT salary AS id FROM emp ORDER BY id ASC");
     ASSERT_EQ(qr.rows.size(), 9u);
     // Should sort by salary (the alias), not the actual id column.
     EXPECT_EQ(qr.rows[0][0].as_int32(), 60);
@@ -189,9 +185,8 @@ TEST_F(QA_GDB603, AliasShadowsActualColumn) {
 // =============================================================================
 
 TEST_F(QA_GDB603, MixedAliasAndRealColumnOrderBy) {
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) AS cnt, AVG(salary) AS avg_sal "
-        "FROM emp GROUP BY dept ORDER BY dept ASC");
+    auto qr = exec_ok("SELECT dept, COUNT(*) AS cnt, AVG(salary) AS avg_sal "
+                      "FROM emp GROUP BY dept ORDER BY dept ASC");
     ASSERT_EQ(qr.rows.size(), 4u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "eng");
     EXPECT_EQ(qr.rows[1][0].as_string(), "hr");
@@ -204,9 +199,8 @@ TEST_F(QA_GDB603, MixedAliasAndRealColumnOrderBy) {
 // =============================================================================
 
 TEST_F(QA_GDB603, AliasOrderByHavingLimit) {
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) AS cnt "
-        "FROM emp GROUP BY dept HAVING COUNT(*) > 1 ORDER BY cnt DESC LIMIT 2");
+    auto qr = exec_ok("SELECT dept, COUNT(*) AS cnt "
+                      "FROM emp GROUP BY dept HAVING COUNT(*) > 1 ORDER BY cnt DESC LIMIT 2");
     ASSERT_EQ(qr.rows.size(), 2u);
     // Top 2 by count: eng(3) and sales(3).
     EXPECT_EQ(qr.rows[0][1].as_int64(), 3);
@@ -218,9 +212,9 @@ TEST_F(QA_GDB603, AliasOrderByHavingLimit) {
 // =============================================================================
 
 TEST_F(QA_GDB603, AliasOrderByHavingLimitOffset) {
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) AS cnt "
-        "FROM emp GROUP BY dept HAVING COUNT(*) > 1 ORDER BY cnt DESC LIMIT 1 OFFSET 1");
+    auto qr =
+        exec_ok("SELECT dept, COUNT(*) AS cnt "
+                "FROM emp GROUP BY dept HAVING COUNT(*) > 1 ORDER BY cnt DESC LIMIT 1 OFFSET 1");
     ASSERT_EQ(qr.rows.size(), 1u);
 }
 
@@ -229,10 +223,9 @@ TEST_F(QA_GDB603, AliasOrderByHavingLimitOffset) {
 // =============================================================================
 
 TEST_F(QA_GDB603, UnknownAliasErrors) {
-    exec_error(
-        "SELECT dept, COUNT(*) AS cnt FROM emp GROUP BY dept HAVING COUNT(*) > 1 "
-        "ORDER BY nonexistent",
-        StatusCode::NOT_FOUND);
+    exec_error("SELECT dept, COUNT(*) AS cnt FROM emp GROUP BY dept HAVING COUNT(*) > 1 "
+               "ORDER BY nonexistent",
+               StatusCode::NOT_FOUND);
 }
 
 // =============================================================================
@@ -240,9 +233,8 @@ TEST_F(QA_GDB603, UnknownAliasErrors) {
 // =============================================================================
 
 TEST_F(QA_GDB603, UnknownAliasWithoutHavingErrors) {
-    exec_error(
-        "SELECT dept, COUNT(*) AS cnt FROM emp GROUP BY dept ORDER BY bogus",
-        StatusCode::NOT_FOUND);
+    exec_error("SELECT dept, COUNT(*) AS cnt FROM emp GROUP BY dept ORDER BY bogus",
+               StatusCode::NOT_FOUND);
 }
 
 // =============================================================================
@@ -250,9 +242,8 @@ TEST_F(QA_GDB603, UnknownAliasWithoutHavingErrors) {
 // =============================================================================
 
 TEST_F(QA_GDB603, SumAliasWithHaving) {
-    auto qr = exec_ok(
-        "SELECT dept, SUM(salary) AS total_pay "
-        "FROM emp GROUP BY dept HAVING SUM(salary) > 200 ORDER BY total_pay ASC");
+    auto qr = exec_ok("SELECT dept, SUM(salary) AS total_pay "
+                      "FROM emp GROUP BY dept HAVING SUM(salary) > 200 ORDER BY total_pay ASC");
     // eng: 350, sales: 270 pass; hr: 145, ops: 60 don't.
     ASSERT_EQ(qr.rows.size(), 2u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "sales"); // 270
@@ -264,9 +255,8 @@ TEST_F(QA_GDB603, SumAliasWithHaving) {
 // =============================================================================
 
 TEST_F(QA_GDB603, MinMaxAliasWithHaving) {
-    auto qr = exec_ok(
-        "SELECT dept, MIN(salary) AS low, MAX(salary) AS high "
-        "FROM emp GROUP BY dept HAVING COUNT(*) > 1 ORDER BY low DESC");
+    auto qr = exec_ok("SELECT dept, MIN(salary) AS low, MAX(salary) AS high "
+                      "FROM emp GROUP BY dept HAVING COUNT(*) > 1 ORDER BY low DESC");
     // eng(100), sales(80), hr(70). ops excluded.
     ASSERT_EQ(qr.rows.size(), 3u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "eng");
@@ -278,9 +268,8 @@ TEST_F(QA_GDB603, MinMaxAliasWithHaving) {
 // =============================================================================
 
 TEST_F(QA_GDB603, OrderBySecondAggregateAlias) {
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) AS cnt, SUM(salary) AS total, AVG(rating) AS avg_r "
-        "FROM emp GROUP BY dept HAVING COUNT(*) >= 2 ORDER BY avg_r DESC");
+    auto qr = exec_ok("SELECT dept, COUNT(*) AS cnt, SUM(salary) AS total, AVG(rating) AS avg_r "
+                      "FROM emp GROUP BY dept HAVING COUNT(*) >= 2 ORDER BY avg_r DESC");
     // eng: avg_r=4, sales: avg_r=4, hr: avg_r=4.5. All have count >= 2 except ops.
     ASSERT_EQ(qr.rows.size(), 3u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "hr"); // highest avg rating
@@ -291,9 +280,8 @@ TEST_F(QA_GDB603, OrderBySecondAggregateAlias) {
 // =============================================================================
 
 TEST_F(QA_GDB603, HavingCountOrderByAvg) {
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) AS cnt, AVG(rating) AS avg_r "
-        "FROM emp GROUP BY dept HAVING COUNT(*) >= 3 ORDER BY avg_r ASC");
+    auto qr = exec_ok("SELECT dept, COUNT(*) AS cnt, AVG(rating) AS avg_r "
+                      "FROM emp GROUP BY dept HAVING COUNT(*) >= 3 ORDER BY avg_r ASC");
     // Only eng(3) and sales(3) have count >= 3.
     ASSERT_EQ(qr.rows.size(), 2u);
     // eng avg_r=4, sales avg_r=4 — same avg, order may be either.
@@ -305,12 +293,10 @@ TEST_F(QA_GDB603, HavingCountOrderByAvg) {
 // =============================================================================
 
 TEST_F(QA_GDB603, OrderByAscDescDirections) {
-    auto asc = exec_ok(
-        "SELECT dept, COUNT(*) AS cnt "
-        "FROM emp GROUP BY dept ORDER BY cnt ASC");
-    auto desc = exec_ok(
-        "SELECT dept, COUNT(*) AS cnt "
-        "FROM emp GROUP BY dept ORDER BY cnt DESC");
+    auto asc = exec_ok("SELECT dept, COUNT(*) AS cnt "
+                       "FROM emp GROUP BY dept ORDER BY cnt ASC");
+    auto desc = exec_ok("SELECT dept, COUNT(*) AS cnt "
+                        "FROM emp GROUP BY dept ORDER BY cnt DESC");
     ASSERT_EQ(asc.rows.size(), 4u);
     ASSERT_EQ(desc.rows.size(), 4u);
     // First of ASC should equal last of DESC.
@@ -323,9 +309,8 @@ TEST_F(QA_GDB603, OrderByAscDescDirections) {
 // =============================================================================
 
 TEST_F(QA_GDB603, SingleGroupPassesHaving) {
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) AS cnt "
-        "FROM emp GROUP BY dept HAVING COUNT(*) = 1 ORDER BY cnt DESC");
+    auto qr = exec_ok("SELECT dept, COUNT(*) AS cnt "
+                      "FROM emp GROUP BY dept HAVING COUNT(*) = 1 ORDER BY cnt DESC");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "ops");
     EXPECT_EQ(qr.rows[0][1].as_int64(), 1);
@@ -336,9 +321,8 @@ TEST_F(QA_GDB603, SingleGroupPassesHaving) {
 // =============================================================================
 
 TEST_F(QA_GDB603, NoGroupsPassHaving) {
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) AS cnt "
-        "FROM emp GROUP BY dept HAVING COUNT(*) > 100 ORDER BY cnt DESC");
+    auto qr = exec_ok("SELECT dept, COUNT(*) AS cnt "
+                      "FROM emp GROUP BY dept HAVING COUNT(*) > 100 ORDER BY cnt DESC");
     EXPECT_EQ(qr.rows.size(), 0u);
 }
 
@@ -347,9 +331,8 @@ TEST_F(QA_GDB603, NoGroupsPassHaving) {
 // =============================================================================
 
 TEST_F(QA_GDB603, AllGroupsPassHaving) {
-    auto qr = exec_ok(
-        "SELECT dept, COUNT(*) AS cnt "
-        "FROM emp GROUP BY dept HAVING COUNT(*) >= 1 ORDER BY cnt ASC");
+    auto qr = exec_ok("SELECT dept, COUNT(*) AS cnt "
+                      "FROM emp GROUP BY dept HAVING COUNT(*) >= 1 ORDER BY cnt ASC");
     ASSERT_EQ(qr.rows.size(), 4u);
     EXPECT_EQ(qr.rows[0][1].as_int64(), 1); // ops
 }
@@ -360,9 +343,8 @@ TEST_F(QA_GDB603, AllGroupsPassHaving) {
 
 TEST_F(QA_GDB603, OrderByAliasOnEmptyTable) {
     exec_ok("CREATE TABLE empty_t (id INT, grp VARCHAR)");
-    auto qr = exec_ok(
-        "SELECT grp, COUNT(*) AS cnt FROM empty_t GROUP BY grp "
-        "HAVING COUNT(*) > 0 ORDER BY cnt DESC");
+    auto qr = exec_ok("SELECT grp, COUNT(*) AS cnt FROM empty_t GROUP BY grp "
+                      "HAVING COUNT(*) > 0 ORDER BY cnt DESC");
     EXPECT_EQ(qr.rows.size(), 0u);
 }
 
@@ -374,7 +356,6 @@ TEST_F(QA_GDB603, OrderByAliasOnEmptyTable) {
 TEST_F(QA_GDB603, QualifiedColumnRefNotMatchedAsAlias) {
     // "emp.cnt" is qualified — should look for column 'cnt' in table 'emp',
     // NOT resolve to the alias. This should error because 'cnt' is not a column.
-    exec_error(
-        "SELECT dept, COUNT(*) AS cnt FROM emp GROUP BY dept ORDER BY emp.cnt",
-        StatusCode::NOT_FOUND);
+    exec_error("SELECT dept, COUNT(*) AS cnt FROM emp GROUP BY dept ORDER BY emp.cnt",
+               StatusCode::NOT_FOUND);
 }

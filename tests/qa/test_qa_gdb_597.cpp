@@ -38,6 +38,8 @@
 #include <string>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -50,6 +52,8 @@ protected:
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_qa_gdb597";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
+
+        bootstrap_qa_catalog(catalog_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         graph_engine_ = std::make_unique<GraphEngine>(catalog_);
@@ -167,9 +171,10 @@ TEST_F(QA_GDB597, UuidPk_ExactReproduction) {
     exec_ok("LINK posts('" + u2 + "') TO posts('" + u3 + "') VIA follows");
 
     // This was the crashing query — must succeed now.
-    auto result = engine_->execute(
-        "SELECT * FROM posts WHERE NEAREST(body_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
-        "WITHIN TRAVERSE follows FROM posts('" + u1 + "') DIRECTION OUT MAX_DEPTH 2");
+    auto result =
+        engine_->execute("SELECT * FROM posts WHERE NEAREST(body_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE follows FROM posts('" +
+                         u1 + "') DIRECTION OUT MAX_DEPTH 2");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // Reachable: u1, u2, u3. u4 must be excluded.
@@ -204,9 +209,9 @@ TEST_F(QA_GDB597, Int64Pk_NonRegression) {
     exec_ok("LINK docs(100) TO docs(200) VIA cites");
     exec_ok("LINK docs(200) TO docs(300) VIA cites");
 
-    auto result = engine_->execute(
-        "SELECT * FROM docs WHERE NEAREST(body_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
-        "WITHIN TRAVERSE cites FROM docs(100) DIRECTION OUT MAX_DEPTH 2");
+    auto result =
+        engine_->execute("SELECT * FROM docs WHERE NEAREST(body_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE cites FROM docs(100) DIRECTION OUT MAX_DEPTH 2");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     EXPECT_GE(result->rows.size(), 1u);
@@ -240,9 +245,9 @@ TEST_F(QA_GDB597, Int32Pk_CoercionPath) {
     exec_ok("LINK items(2) TO items(3) VIA related");
 
     // Integer literal 1 is parsed as INT64, must coerce to INT32 for PK lookup.
-    auto result = engine_->execute(
-        "SELECT * FROM items WHERE NEAREST(body_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
-        "WITHIN TRAVERSE related FROM items(1) DIRECTION OUT MAX_DEPTH 2");
+    auto result =
+        engine_->execute("SELECT * FROM items WHERE NEAREST(body_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE related FROM items(1) DIRECTION OUT MAX_DEPTH 2");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     EXPECT_GE(result->rows.size(), 1u);
@@ -308,9 +313,10 @@ TEST_F(QA_GDB597, UuidPk_NoOutgoingEdges) {
     exec_ok("CREATE EDGE TYPE connects FROM nodes TO nodes");
     // No edges created — u1 is isolated.
 
-    auto result = engine_->execute(
-        "SELECT * FROM nodes WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
-        "WITHIN TRAVERSE connects FROM nodes('" + u1 + "') DIRECTION OUT MAX_DEPTH 2");
+    auto result =
+        engine_->execute("SELECT * FROM nodes WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE connects FROM nodes('" +
+                         u1 + "') DIRECTION OUT MAX_DEPTH 2");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // Only the start node itself should be reachable.
@@ -336,9 +342,10 @@ TEST_F(QA_GDB597, UuidPk_MaxDepthZero) {
     exec_ok("CREATE EDGE TYPE link FROM pg TO pg");
     exec_ok("LINK pg('" + u1 + "') TO pg('" + u2 + "') VIA link");
 
-    auto result = engine_->execute(
-        "SELECT * FROM pg WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
-        "WITHIN TRAVERSE link FROM pg('" + u1 + "') DIRECTION OUT MAX_DEPTH 0");
+    auto result =
+        engine_->execute("SELECT * FROM pg WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE link FROM pg('" +
+                         u1 + "') DIRECTION OUT MAX_DEPTH 0");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // MAX_DEPTH 0 → only start node reachable (no traversal).
@@ -368,9 +375,10 @@ TEST_F(QA_GDB597, UuidPk_DirectionIn) {
     exec_ok("LINK rev('" + u2 + "') TO rev('" + u1 + "') VIA parent");
     exec_ok("LINK rev('" + u3 + "') TO rev('" + u2 + "') VIA parent");
 
-    auto result = engine_->execute(
-        "SELECT * FROM rev WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
-        "WITHIN TRAVERSE parent FROM rev('" + u1 + "') DIRECTION IN MAX_DEPTH 2");
+    auto result =
+        engine_->execute("SELECT * FROM rev WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE parent FROM rev('" +
+                         u1 + "') DIRECTION IN MAX_DEPTH 2");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // Traversing IN from u1: reaches u2 (who points to u1) and u3 (who points to u2).
@@ -399,9 +407,9 @@ TEST_F(QA_GDB597, Int32Pk_DirectionBoth) {
     exec_ok("LINK bidir(20) TO bidir(10) VIA adj");
     exec_ok("LINK bidir(10) TO bidir(30) VIA adj");
 
-    auto result = engine_->execute(
-        "SELECT * FROM bidir WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
-        "WITHIN TRAVERSE adj FROM bidir(10) DIRECTION BOTH MAX_DEPTH 1");
+    auto result =
+        engine_->execute("SELECT * FROM bidir WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE adj FROM bidir(10) DIRECTION BOTH MAX_DEPTH 1");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // BOTH from 10: reaches 20 (incoming) and 30 (outgoing). 40 unreachable.
@@ -429,16 +437,14 @@ TEST_F(QA_GDB597, UuidPk_DeepChain) {
     std::vector<std::string> uuids;
     for (int i = 0; i < CHAIN_LEN; ++i) {
         char buf[48];
-        snprintf(buf, sizeof(buf),
-                 "%08x-0000-4000-8000-%012x", i + 1, i + 1);
+        snprintf(buf, sizeof(buf), "%08x-0000-4000-8000-%012x", i + 1, i + 1);
         uuids.emplace_back(buf);
     }
 
     // Insert nodes with progressively different embeddings.
     for (int i = 0; i < CHAIN_LEN; ++i) {
         float v = 1.0F - (static_cast<float>(i) / CHAIN_LEN);
-        insert_row_uuid("chain", uuids[i], "node_" + std::to_string(i),
-                         {v, 1.0F - v, 0.0F, 0.0F});
+        insert_row_uuid("chain", uuids[i], "node_" + std::to_string(i), {v, 1.0F - v, 0.0F, 0.0F});
     }
 
     // Create a linear chain: 0 -> 1 -> 2 -> ... -> 19
@@ -448,9 +454,10 @@ TEST_F(QA_GDB597, UuidPk_DeepChain) {
     }
 
     // Query with MAX_DEPTH = 5 from start.
-    auto result = engine_->execute(
-        "SELECT * FROM chain WHERE NEAREST(text_vec, 10) TO [1.0, 0.0, 0.0, 0.0] "
-        "WITHIN TRAVERSE next FROM chain('" + uuids[0] + "') DIRECTION OUT MAX_DEPTH 5");
+    auto result =
+        engine_->execute("SELECT * FROM chain WHERE NEAREST(text_vec, 10) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE next FROM chain('" +
+                         uuids[0] + "') DIRECTION OUT MAX_DEPTH 5");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // Reachable: nodes 0..5 (6 nodes). Rest excluded.
@@ -473,10 +480,9 @@ TEST_F(QA_GDB597, Int32Pk_FanOut) {
     exec_ok("INSERT INTO hub VALUES (0, 'hub', [1.0, 0.0, 0.0, 0.0])");
     for (int i = 1; i <= SPOKES; ++i) {
         float v = 1.0F - (static_cast<float>(i) / (SPOKES + 1));
-        std::string emb = "[" + std::to_string(v) + ", " + std::to_string(1.0F - v) +
-                           ", 0.0, 0.0]";
-        exec_ok("INSERT INTO hub VALUES (" + std::to_string(i) + ", 'spoke_" +
-                std::to_string(i) + "', " + emb + ")");
+        std::string emb = "[" + std::to_string(v) + ", " + std::to_string(1.0F - v) + ", 0.0, 0.0]";
+        exec_ok("INSERT INTO hub VALUES (" + std::to_string(i) + ", 'spoke_" + std::to_string(i) +
+                "', " + emb + ")");
     }
     exec_ok("INSERT INTO hub VALUES (999, 'unreachable', [0.0, 0.0, 0.0, 1.0])");
 
@@ -485,9 +491,9 @@ TEST_F(QA_GDB597, Int32Pk_FanOut) {
         exec_ok("LINK hub(0) TO hub(" + std::to_string(i) + ") VIA spoke");
     }
 
-    auto result = engine_->execute(
-        "SELECT * FROM hub WHERE NEAREST(text_vec, 10) TO [1.0, 0.0, 0.0, 0.0] "
-        "WITHIN TRAVERSE spoke FROM hub(0) DIRECTION OUT MAX_DEPTH 1");
+    auto result =
+        engine_->execute("SELECT * FROM hub WHERE NEAREST(text_vec, 10) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE spoke FROM hub(0) DIRECTION OUT MAX_DEPTH 1");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     EXPECT_GE(result->rows.size(), 1u);
@@ -518,9 +524,10 @@ TEST_F(QA_GDB597, UuidPk_NonExistentStartKey) {
 
     // Start from a UUID that doesn't exist in the table.
     std::string ghost = "ffffffff-ffff-ffff-ffff-ffffffffffff";
-    auto result = engine_->execute(
-        "SELECT * FROM sparse WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
-        "WITHIN TRAVERSE link2 FROM sparse('" + ghost + "') DIRECTION OUT MAX_DEPTH 2");
+    auto result =
+        engine_->execute("SELECT * FROM sparse WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE link2 FROM sparse('" +
+                         ghost + "') DIRECTION OUT MAX_DEPTH 2");
 
     // Must NOT crash — that's the GDB-597 guarantee.
     // NOTE: Current behavior returns unfiltered results when the start key is
@@ -549,9 +556,10 @@ TEST_F(QA_GDB597, UuidPk_SelfLoop) {
     exec_ok("CREATE EDGE TYPE selfedge FROM loops TO loops");
     exec_ok("LINK loops('" + u1 + "') TO loops('" + u1 + "') VIA selfedge");
 
-    auto result = engine_->execute(
-        "SELECT * FROM loops WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
-        "WITHIN TRAVERSE selfedge FROM loops('" + u1 + "') DIRECTION OUT MAX_DEPTH 5");
+    auto result =
+        engine_->execute("SELECT * FROM loops WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE selfedge FROM loops('" +
+                         u1 + "') DIRECTION OUT MAX_DEPTH 5");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // Only u1 is reachable (self-loop doesn't expand to new nodes).
@@ -583,9 +591,10 @@ TEST_F(QA_GDB597, UuidPk_Cycle) {
     exec_ok("LINK cyc('" + u2 + "') TO cyc('" + u3 + "') VIA ring");
     exec_ok("LINK cyc('" + u3 + "') TO cyc('" + u1 + "') VIA ring"); // cycle back
 
-    auto result = engine_->execute(
-        "SELECT * FROM cyc WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
-        "WITHIN TRAVERSE ring FROM cyc('" + u1 + "') DIRECTION OUT MAX_DEPTH 10");
+    auto result =
+        engine_->execute("SELECT * FROM cyc WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE ring FROM cyc('" +
+                         u1 + "') DIRECTION OUT MAX_DEPTH 10");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // Cycle: all 3 nodes reachable (u1, u2, u3). u4 not reachable.
@@ -623,9 +632,10 @@ TEST_F(QA_GDB597, UuidPk_NearestK1) {
     exec_ok("LINK k1('" + u1 + "') TO k1('" + u2 + "') VIA conn");
     exec_ok("LINK k1('" + u2 + "') TO k1('" + u3 + "') VIA conn");
 
-    auto result = engine_->execute(
-        "SELECT * FROM k1 WHERE NEAREST(text_vec, 1) TO [1.0, 0.0, 0.0, 0.0] "
-        "WITHIN TRAVERSE conn FROM k1('" + u1 + "') DIRECTION OUT MAX_DEPTH 2");
+    auto result =
+        engine_->execute("SELECT * FROM k1 WHERE NEAREST(text_vec, 1) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE conn FROM k1('" +
+                         u1 + "') DIRECTION OUT MAX_DEPTH 2");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // Exactly 1 result.
@@ -649,9 +659,9 @@ TEST_F(QA_GDB597, Int16Pk_NarrowCoercion) {
     exec_ok("CREATE EDGE TYPE seq FROM small TO small");
     exec_ok("LINK small(1) TO small(2) VIA seq");
 
-    auto result = engine_->execute(
-        "SELECT * FROM small WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
-        "WITHIN TRAVERSE seq FROM small(1) DIRECTION OUT MAX_DEPTH 1");
+    auto result =
+        engine_->execute("SELECT * FROM small WHERE NEAREST(text_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE seq FROM small(1) DIRECTION OUT MAX_DEPTH 1");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     EXPECT_GE(result->rows.size(), 1u);

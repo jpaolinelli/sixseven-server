@@ -22,6 +22,8 @@
 #include <string>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -34,6 +36,8 @@ protected:
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_qa_gdb258";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
+
+        bootstrap_qa_catalog(catalog_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
@@ -281,8 +285,8 @@ TEST_F(QA_GDB258, ExplainNearestVectorWorksWithoutRegistry) {
     create_embedding_table();
     insert_row(1, "test", {1.0F, 0.0F, 0.0F, 0.0F});
 
-    auto qr =
-        exec_ok("EXPLAIN SELECT * FROM articles WHERE NEAREST(title_vec, 1) TO [1.0, 0.0, 0.0, 0.0]");
+    auto qr = exec_ok(
+        "EXPLAIN SELECT * FROM articles WHERE NEAREST(title_vec, 1) TO [1.0, 0.0, 0.0, 0.0]");
     EXPECT_FALSE(qr.rows.empty());
 }
 
