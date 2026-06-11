@@ -72,14 +72,14 @@ struct ColumnRef {
 // Boolean simplification
 // =============================================================================
 
-/// Simplify boolean expressions:
-/// - true AND x -> x
-/// - false AND x -> false
-/// - true OR x -> true
-/// - false OR x -> x
-/// - NOT NOT x -> x
-/// - NOT true -> false, NOT false -> true
+/// Simplify boolean expressions.
+/// Implemented rules:
+/// - NOT NOT x -> x  (double-negation elimination, applied recursively so
+///   NOT NOT NOT x -> NOT x, NOT NOT NOT NOT x -> x, etc.)
+/// - NOT true -> false, NOT false -> true  (via fold_constants fallback)
+/// - Constant arithmetic folding (e.g. 1+2 -> 3) via fold_constants fallback
 /// Returns a new expression if simplified, or nullptr if no change.
+/// Note: identity rules such as true AND x -> x are NOT implemented.
 [[nodiscard]] ExprPtr simplify_boolean(const Expr& expr);
 
 // =============================================================================

@@ -649,6 +649,26 @@ std::unordered_set<std::string> needed_columns(const std::vector<ColumnRef>& ref
 // =============================================================================
 
 ExprPtr simplify_boolean(const Expr& expr) {
+    // NOT NOT x  ->  x  (double negation elimination, applied recursively)
+    // NOT NOT NOT x -> NOT x, NOT NOT NOT NOT x -> x, etc.
+    if (const auto* unary = dynamic_cast<const UnaryExpr*>(&expr)) {
+        if (unary->op == UnaryOp::NOT) {
+            if (const auto* inner = dynamic_cast<const UnaryExpr*>(unary->operand.get())) {
+                if (inner->op == UnaryOp::NOT) {
+                    // Eliminate the two NOTs: recurse on x.
+                    // If x itself simplifies further, return the simplified form.
+                    // Otherwise clone x so we always return a non-null (changed) result.
+                    auto simplified = simplify_boolean(*inner->operand);
+                    if (simplified) {
+                        return simplified;
+                    }
+                    return clone_expr(*inner->operand);
+                }
+            }
+        }
+    }
+    // Fall back to fold_constants for literal boolean folding
+    // (NOT true -> false, NOT false -> true, constant arithmetic, etc.)
     return fold_constants(expr);
 }
 
