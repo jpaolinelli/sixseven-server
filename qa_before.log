@@ -1,0 +1,1928 @@
+﻿Running main() from C:\Users\jdpni\Documents\repos\sixseven-server\build\debug\vcpkg_installed\vcpkg\blds\gtest\src\v1.17.0-0c449efaff.clean\googletest\src\gtest_main.cc
+[==========] Running 6803 tests from 595 test suites.
+[----------] Global test environment set-up.
+[----------] 5 tests from QABackfillTest
+[ RUN      ] QABackfillTest.BackfillParsesAndExecutes
+[2026-06-11 08:18:20.282] [info] [embedding_worker.cpp:86] embedding worker pool started: workers=1
+[2026-06-11 08:18:20.288] [info] [embedding_column.cpp:72] registered EMBEDDING column: table=t1, column=vec, dim=4, provider=builtin/4, index=hnsw_t1_vec
+[2026-06-11 08:18:20.382] [info] [backfill_manager.cpp:64] backfill started for table 't1' (batch=100, rate_limit=0)
+[2026-06-11 08:18:20.382] [info] [backfill_manager.cpp:297] backfill completed for 't1': processed=3, generated=0, skipped=3, 0.0 rows/sec
+[2026-06-11 08:18:20.509] [info] [embedding_worker.cpp:115] embedding worker pool stopped: processed=3, failed=0
+[       OK ] QABackfillTest.BackfillParsesAndExecutes (230 ms)
+[ RUN      ] QABackfillTest.BackfillWithBatchAndRateLimit
+[2026-06-11 08:18:20.512] [info] [embedding_worker.cpp:86] embedding worker pool started: workers=1
+[2026-06-11 08:18:20.517] [info] [embedding_column.cpp:72] registered EMBEDDING column: table=t2, column=vec, dim=4, provider=builtin/4, index=hnsw_t2_vec
+[2026-06-11 08:18:20.573] [info] [backfill_manager.cpp:64] backfill started for table 't2' (batch=50, rate_limit=100)
+[2026-06-11 08:18:20.573] [info] [backfill_manager.cpp:297] backfill completed for 't2': processed=1, generated=0, skipped=1, 0.0 rows/sec
+[2026-06-11 08:18:20.636] [info] [embedding_worker.cpp:115] embedding worker pool stopped: processed=1, failed=0
+[       OK ] QABackfillTest.BackfillWithBatchAndRateLimit (127 ms)
+[ RUN      ] QABackfillTest.BackfillOnNonExistentTableFails
+[2026-06-11 08:18:20.639] [info] [embedding_worker.cpp:86] embedding worker pool started: workers=1
+[2026-06-11 08:18:20.640] [info] [embedding_worker.cpp:115] embedding worker pool stopped: processed=0, failed=0
+[       OK ] QABackfillTest.BackfillOnNonExistentTableFails (3 ms)
+[ RUN      ] QABackfillTest.ShowBackfillStatus
+[2026-06-11 08:18:20.642] [info] [embedding_worker.cpp:86] embedding worker pool started: workers=1
+[2026-06-11 08:18:20.647] [info] [embedding_column.cpp:72] registered EMBEDDING column: table=t3, column=vec, dim=4, provider=builtin/4, index=hnsw_t3_vec
+[2026-06-11 08:18:20.698] [info] [backfill_manager.cpp:64] backfill started for table 't3' (batch=100, rate_limit=0)
+[2026-06-11 08:18:20.698] [info] [backfill_manager.cpp:297] backfill completed for 't3': processed=1, generated=0, skipped=1, 0.0 rows/sec
+[2026-06-11 08:18:20.762] [info] [embedding_worker.cpp:115] embedding worker pool stopped: processed=1, failed=0
+[       OK ] QABackfillTest.ShowBackfillStatus (122 ms)
+[ RUN      ] QABackfillTest.ShowBackfillWithoutStatus
+[2026-06-11 08:18:20.765] [info] [embedding_worker.cpp:86] embedding worker pool started: workers=1
+[2026-06-11 08:18:20.766] [info] [embedding_worker.cpp:115] embedding worker pool stopped: processed=0, failed=0
+[       OK ] QABackfillTest.ShowBackfillWithoutStatus (3 ms)
+[----------] 5 tests from QABackfillTest (487 ms total)
+
+[----------] 5 tests from QA_Logging
+[ RUN      ] QA_Logging.InitWithInvalidLevel
+[       OK ] QA_Logging.InitWithInvalidLevel (0 ms)
+[ RUN      ] QA_Logging.InitWithEmptyString
+[       OK ] QA_Logging.InitWithEmptyString (0 ms)
+[ RUN      ] QA_Logging.InitCalledMultipleTimes
+[       OK ] QA_Logging.InitCalledMultipleTimes (4 ms)
+[ RUN      ] QA_Logging.AllValidLevels
+[       OK ] QA_Logging.AllValidLevels (0 ms)
+[ RUN      ] QA_Logging.LogWithFormatArgs
+[2026-06-11 08:18:20.773] [info] [test_qa_gdb_10.cpp:56] int: 42
+[2026-06-11 08:18:20.773] [info] [test_qa_gdb_10.cpp:57] string: hello
+[2026-06-11 08:18:20.773] [info] [test_qa_gdb_10.cpp:58] double: 3.14
+[       OK ] QA_Logging.LogWithFormatArgs (0 ms)
+[----------] 5 tests from QA_Logging (5 ms total)
+
+[----------] 11 tests from QA_Result
+[ RUN      ] QA_Result.VoidResultSuccess
+[       OK ] QA_Result.VoidResultSuccess (0 ms)
+[ RUN      ] QA_Result.VoidResultError
+[       OK ] QA_Result.VoidResultError (0 ms)
+[ RUN      ] QA_Result.ErrorWithEmptyMessage
+[       OK ] QA_Result.ErrorWithEmptyMessage (0 ms)
+[ RUN      ] QA_Result.ErrorWithVeryLongMessage
+[       OK ] QA_Result.ErrorWithVeryLongMessage (0 ms)
+[ RUN      ] QA_Result.MoveSemantics
+[       OK ] QA_Result.MoveSemantics (0 ms)
+[ RUN      ] QA_Result.OkWithZero
+[       OK ] QA_Result.OkWithZero (0 ms)
+[ RUN      ] QA_Result.OkWithNegative
+[       OK ] QA_Result.OkWithNegative (0 ms)
+[ RUN      ] QA_Result.OkWithMaxInt
+[       OK ] QA_Result.OkWithMaxInt (0 ms)
+[ RUN      ] QA_Result.OkWithMinInt
+[       OK ] QA_Result.OkWithMinInt (0 ms)
+[ RUN      ] QA_Result.OkWithEmptyString
+[       OK ] QA_Result.OkWithEmptyString (0 ms)
+[ RUN      ] QA_Result.SourceLocationCapture
+[       OK ] QA_Result.SourceLocationCapture (0 ms)
+[----------] 11 tests from QA_Result (0 ms total)
+
+[----------] 2 tests from QA_StatusCode
+[ RUN      ] QA_StatusCode.AllCodesHaveNames
+[       OK ] QA_StatusCode.AllCodesHaveNames (0 ms)
+[ RUN      ] QA_StatusCode.EveryCodeUsableInError
+[       OK ] QA_StatusCode.EveryCodeUsableInError (0 ms)
+[----------] 2 tests from QA_StatusCode (0 ms total)
+
+[----------] 20 tests from QA_ConfigFile
+[ RUN      ] QA_ConfigFile.PortZero
+[       OK ] QA_ConfigFile.PortZero (1 ms)
+[ RUN      ] QA_ConfigFile.PortMaxValid
+[       OK ] QA_ConfigFile.PortMaxValid (2 ms)
+[ RUN      ] QA_ConfigFile.PortExactly65536
+[       OK ] QA_ConfigFile.PortExactly65536 (6 ms)
+[ RUN      ] QA_ConfigFile.PortNegative
+[       OK ] QA_ConfigFile.PortNegative (4 ms)
+[ RUN      ] QA_ConfigFile.PortAsString
+[       OK ] QA_ConfigFile.PortAsString (5 ms)
+[ RUN      ] QA_ConfigFile.PortAsFloat
+[       OK ] QA_ConfigFile.PortAsFloat (6 ms)
+[ RUN      ] QA_ConfigFile.BufferPoolSizeZero
+[       OK ] QA_ConfigFile.BufferPoolSizeZero (5 ms)
+[ RUN      ] QA_ConfigFile.MaxConnectionsZero
+[       OK ] QA_ConfigFile.MaxConnectionsZero (1 ms)
+[ RUN      ] QA_ConfigFile.EmptyDataDir
+[       OK ] QA_ConfigFile.EmptyDataDir (5 ms)
+[ RUN      ] QA_ConfigFile.DataDirWithSpecialChars
+[       OK ] QA_ConfigFile.DataDirWithSpecialChars (1 ms)
+[ RUN      ] QA_ConfigFile.UnknownFieldsIgnored
+[       OK ] QA_ConfigFile.UnknownFieldsIgnored (1 ms)
+[ RUN      ] QA_ConfigFile.JsonArray
+[       OK ] QA_ConfigFile.JsonArray (1 ms)
+[ RUN      ] QA_ConfigFile.EmptyFile
+[       OK ] QA_ConfigFile.EmptyFile (1 ms)
+[ RUN      ] QA_ConfigFile.WhitespaceOnlyFile
+[       OK ] QA_ConfigFile.WhitespaceOnlyFile (1 ms)
+[ RUN      ] QA_ConfigFile.VeryLargeJson
+[       OK ] QA_ConfigFile.VeryLargeJson (10 ms)
+[ RUN      ] QA_ConfigFile.MasterKeyPathDefaultDerived
+[       OK ] QA_ConfigFile.MasterKeyPathDefaultDerived (5 ms)
+[ RUN      ] QA_ConfigFile.MasterKeyPathExplicit
+[       OK ] QA_ConfigFile.MasterKeyPathExplicit (5 ms)
+[ RUN      ] QA_ConfigFile.StandbyModeFromServerObject
+[       OK ] QA_ConfigFile.StandbyModeFromServerObject (5 ms)
+[ RUN      ] QA_ConfigFile.PrimaryModeFromServerObject
+[       OK ] QA_ConfigFile.PrimaryModeFromServerObject (5 ms)
+[ RUN      ] QA_ConfigFile.ReplicationSettings
+[       OK ] QA_ConfigFile.ReplicationSettings (6 ms)
+[----------] 20 tests from QA_ConfigFile (88 ms total)
+
+[----------] 8 tests from QA_ApplySetting
+[ RUN      ] QA_ApplySetting.ValidPortSetting
+[       OK ] QA_ApplySetting.ValidPortSetting (0 ms)
+[ RUN      ] QA_ApplySetting.PortOverflow
+[       OK ] QA_ApplySetting.PortOverflow (0 ms)
+[ RUN      ] QA_ApplySetting.UnknownKeyIgnored
+[       OK ] QA_ApplySetting.UnknownKeyIgnored (0 ms)
+[ RUN      ] QA_ApplySetting.EmptyValue
+[       OK ] QA_ApplySetting.EmptyValue (0 ms)
+[ RUN      ] QA_ApplySetting.BoolSettingVariants
+[       OK ] QA_ApplySetting.BoolSettingVariants (0 ms)
+[ RUN      ] QA_ApplySetting.StandbyModeSetting
+[       OK ] QA_ApplySetting.StandbyModeSetting (0 ms)
+[ RUN      ] QA_ApplySetting.AllStringSettings
+[       OK ] QA_ApplySetting.AllStringSettings (0 ms)
+[ RUN      ] QA_ApplySetting.NumericSettings
+[       OK ] QA_ApplySetting.NumericSettings (0 ms)
+[----------] 8 tests from QA_ApplySetting (0 ms total)
+
+[----------] 1 test from QA_Defaults
+[ RUN      ] QA_Defaults.AllDefaultsCorrect
+[       OK ] QA_Defaults.AllDefaultsCorrect (0 ms)
+[----------] 1 test from QA_Defaults (0 ms total)
+
+[----------] 1 test from QA_BuildSystem
+[ RUN      ] QA_BuildSystem.UnitTestTargetRuns
+[       OK ] QA_BuildSystem.UnitTestTargetRuns (0 ms)
+[----------] 1 test from QA_BuildSystem (0 ms total)
+
+[----------] 21 tests from QA_GDB100
+[ RUN      ] QA_GDB100.InsertEmptyTupleFails
+[       OK ] QA_GDB100.InsertEmptyTupleFails (2 ms)
+[ RUN      ] QA_GDB100.InsertOneByteTuple
+[       OK ] QA_GDB100.InsertOneByteTuple (2 ms)
+[ RUN      ] QA_GDB100.InsertManySmallTuples
+[       OK ] QA_GDB100.InsertManySmallTuples (9 ms)
+[ RUN      ] QA_GDB100.InsertLargeTuples
+[       OK ] QA_GDB100.InsertLargeTuples (2 ms)
+[ RUN      ] QA_GDB100.InsertMixedSizes
+[       OK ] QA_GDB100.InsertMixedSizes (2 ms)
+[ RUN      ] QA_GDB100.GetInvalidRid
+[       OK ] QA_GDB100.GetInvalidRid (2 ms)
+[ RUN      ] QA_GDB100.GetDeletedTuple
+[       OK ] QA_GDB100.GetDeletedTuple (2 ms)
+[ RUN      ] QA_GDB100.DeleteAllTuples
+[       OK ] QA_GDB100.DeleteAllTuples (3 ms)
+[ RUN      ] QA_GDB100.DeleteFirstAndLastTuples
+[       OK ] QA_GDB100.DeleteFirstAndLastTuples (2 ms)
+[ RUN      ] QA_GDB100.UpdateSameSize
+[       OK ] QA_GDB100.UpdateSameSize (2 ms)
+[ RUN      ] QA_GDB100.UpdateShrinkData
+[       OK ] QA_GDB100.UpdateShrinkData (2 ms)
+[ RUN      ] QA_GDB100.UpdateGrowData
+[       OK ] QA_GDB100.UpdateGrowData (2 ms)
+[ RUN      ] QA_GDB100.UpdateEmptyDataFails
+[       OK ] QA_GDB100.UpdateEmptyDataFails (2 ms)
+[ RUN      ] QA_GDB100.ScanEmptyTable
+[       OK ] QA_GDB100.ScanEmptyTable (1 ms)
+[ RUN      ] QA_GDB100.ScanReturnsSortedRids
+[       OK ] QA_GDB100.ScanReturnsSortedRids (3 ms)
+[ RUN      ] QA_GDB100.ScanSkipsDeletedAcrossPages
+[       OK ] QA_GDB100.ScanSkipsDeletedAcrossPages (7 ms)
+[ RUN      ] QA_GDB100.ScanAfterDeleteAndReinsert
+[       OK ] QA_GDB100.ScanAfterDeleteAndReinsert (3 ms)
+[ RUN      ] QA_GDB100.SpaceReuseAfterDelete
+[       OK ] QA_GDB100.SpaceReuseAfterDelete (4 ms)
+[ RUN      ] QA_GDB100.PageCountEmpty
+[       OK ] QA_GDB100.PageCountEmpty (1 ms)
+[ RUN      ] QA_GDB100.PageCountGrowsWithInserts
+[       OK ] QA_GDB100.PageCountGrowsWithInserts (2 ms)
+[ RUN      ] QA_GDB100.StressInsertDeleteScan
+[       OK ] QA_GDB100.StressInsertDeleteScan (17 ms)
+[----------] 21 tests from QA_GDB100 (82 ms total)
+
+[----------] 81 tests from QA_GDB102
+[ RUN      ] QA_GDB102.VisitorDispatch_LiteralExpr
+[       OK ] QA_GDB102.VisitorDispatch_LiteralExpr (0 ms)
+[ RUN      ] QA_GDB102.VisitorDispatch_ColumnRefExpr
+[       OK ] QA_GDB102.VisitorDispatch_ColumnRefExpr (0 ms)
+[ RUN      ] QA_GDB102.VisitorDispatch_BinaryExpr
+[       OK ] QA_GDB102.VisitorDispatch_BinaryExpr (0 ms)
+[ RUN      ] QA_GDB102.VisitorDispatch_UnaryExpr
+[       OK ] QA_GDB102.VisitorDispatch_UnaryExpr (0 ms)
+[ RUN      ] QA_GDB102.VisitorDispatch_FunctionCallExpr
+[       OK ] QA_GDB102.VisitorDispatch_FunctionCallExpr (0 ms)
+[ RUN      ] QA_GDB102.VisitorDispatch_CastExpr
+[       OK ] QA_GDB102.VisitorDispatch_CastExpr (0 ms)
+[ RUN      ] QA_GDB102.VisitorDispatch_CaseExpr
+[       OK ] QA_GDB102.VisitorDispatch_CaseExpr (0 ms)
+[ RUN      ] QA_GDB102.VisitorDispatch_InExpr
+[       OK ] QA_GDB102.VisitorDispatch_InExpr (0 ms)
+[ RUN      ] QA_GDB102.VisitorDispatch_BetweenExpr
+[       OK ] QA_GDB102.VisitorDispatch_BetweenExpr (0 ms)
+[ RUN      ] QA_GDB102.VisitorDispatch_IsNullExpr
+[       OK ] QA_GDB102.VisitorDispatch_IsNullExpr (0 ms)
+[ RUN      ] QA_GDB102.VisitorDispatch_LikeExpr
+[       OK ] QA_GDB102.VisitorDispatch_LikeExpr (0 ms)
+[ RUN      ] QA_GDB102.VisitorDispatch_ExistsExpr
+[       OK ] QA_GDB102.VisitorDispatch_ExistsExpr (0 ms)
+[ RUN      ] QA_GDB102.VisitorDispatch_SubqueryExpr
+[       OK ] QA_GDB102.VisitorDispatch_SubqueryExpr (0 ms)
+[ RUN      ] QA_GDB102.VisitorDispatch_ArrayExpr
+[       OK ] QA_GDB102.VisitorDispatch_ArrayExpr (0 ms)
+[ RUN      ] QA_GDB102.VisitorDispatch_AllStatementTypes
+[       OK ] QA_GDB102.VisitorDispatch_AllStatementTypes (0 ms)
+[ RUN      ] QA_GDB102.VisitorViaExprBasePtr
+[       OK ] QA_GDB102.VisitorViaExprBasePtr (0 ms)
+[ RUN      ] QA_GDB102.VisitorViaStmtBasePtr
+[       OK ] QA_GDB102.VisitorViaStmtBasePtr (0 ms)
+[ RUN      ] QA_GDB102.ExprDefaultLineCol
+[       OK ] QA_GDB102.ExprDefaultLineCol (0 ms)
+[ RUN      ] QA_GDB102.AstColumnDefDefaults
+[       OK ] QA_GDB102.AstColumnDefDefaults (0 ms)
+[ RUN      ] QA_GDB102.TableConstraintDefaults
+[       OK ] QA_GDB102.TableConstraintDefaults (0 ms)
+[ RUN      ] QA_GDB102.JoinClauseDefaults
+[       OK ] QA_GDB102.JoinClauseDefaults (0 ms)
+[ RUN      ] QA_GDB102.OrderByItemDefaults
+[       OK ] QA_GDB102.OrderByItemDefaults (0 ms)
+[ RUN      ] QA_GDB102.SelectItemDefaults
+[       OK ] QA_GDB102.SelectItemDefaults (0 ms)
+[ RUN      ] QA_GDB102.EdgePatternDefDefaults
+[       OK ] QA_GDB102.EdgePatternDefDefaults (0 ms)
+[ RUN      ] QA_GDB102.SelectStmtDefaults
+[       OK ] QA_GDB102.SelectStmtDefaults (0 ms)
+[ RUN      ] QA_GDB102.TraverseStmtDefaults
+[       OK ] QA_GDB102.TraverseStmtDefaults (0 ms)
+[ RUN      ] QA_GDB102.NearestExprDefaults
+[       OK ] QA_GDB102.NearestExprDefaults (0 ms)
+[ RUN      ] QA_GDB102.ExplainStmtDefaults
+[       OK ] QA_GDB102.ExplainStmtDefaults (0 ms)
+[ RUN      ] QA_GDB102.InExprDefaults
+[       OK ] QA_GDB102.InExprDefaults (0 ms)
+[ RUN      ] QA_GDB102.BetweenExprDefaults
+[       OK ] QA_GDB102.BetweenExprDefaults (0 ms)
+[ RUN      ] QA_GDB102.IsNullExprDefaults
+[       OK ] QA_GDB102.IsNullExprDefaults (0 ms)
+[ RUN      ] QA_GDB102.LikeExprDefaults
+[       OK ] QA_GDB102.LikeExprDefaults (0 ms)
+[ RUN      ] QA_GDB102.FunctionCallExprDefaults
+[       OK ] QA_GDB102.FunctionCallExprDefaults (0 ms)
+[ RUN      ] QA_GDB102.CreateTableStmtDefaults
+[       OK ] QA_GDB102.CreateTableStmtDefaults (0 ms)
+[ RUN      ] QA_GDB102.DropTableStmtDefaults
+[       OK ] QA_GDB102.DropTableStmtDefaults (0 ms)
+[ RUN      ] QA_GDB102.CreateIndexStmtDefaults
+[       OK ] QA_GDB102.CreateIndexStmtDefaults (0 ms)
+[ RUN      ] QA_GDB102.DropIndexStmtDefaults
+[       OK ] QA_GDB102.DropIndexStmtDefaults (0 ms)
+[ RUN      ] QA_GDB102.CreateDatabaseStmtDefaults
+[       OK ] QA_GDB102.CreateDatabaseStmtDefaults (0 ms)
+[ RUN      ] QA_GDB102.DropDatabaseStmtDefaults
+[       OK ] QA_GDB102.DropDatabaseStmtDefaults (0 ms)
+[ RUN      ] QA_GDB102.DropEdgeTypeStmtDefaults
+[       OK ] QA_GDB102.DropEdgeTypeStmtDefaults (0 ms)
+[ RUN      ] QA_GDB102.DropUserStmtDefaults
+[       OK ] QA_GDB102.DropUserStmtDefaults (0 ms)
+[ RUN      ] QA_GDB102.RollbackStmtDefaults
+[       OK ] QA_GDB102.RollbackStmtDefaults (0 ms)
+[ RUN      ] QA_GDB102.BinaryOpAllValues
+[       OK ] QA_GDB102.BinaryOpAllValues (0 ms)
+[ RUN      ] QA_GDB102.JoinTypeAllValues
+[       OK ] QA_GDB102.JoinTypeAllValues (0 ms)
+[ RUN      ] QA_GDB102.ShowTargetAllValues
+[       OK ] QA_GDB102.ShowTargetAllValues (0 ms)
+[ RUN      ] QA_GDB102.LiteralKindAllValues
+[       OK ] QA_GDB102.LiteralKindAllValues (0 ms)
+[ RUN      ] QA_GDB102.SelectSetOpAllValues
+[       OK ] QA_GDB102.SelectSetOpAllValues (0 ms)
+[ RUN      ] QA_GDB102.ExplainFormatValues
+[       OK ] QA_GDB102.ExplainFormatValues (0 ms)
+[ RUN      ] QA_GDB102.TableConstraintKindAllValues
+[       OK ] QA_GDB102.TableConstraintKindAllValues (0 ms)
+[ RUN      ] QA_GDB102.NearestMetricAllValues
+[       OK ] QA_GDB102.NearestMetricAllValues (0 ms)
+[ RUN      ] QA_GDB102.DeeplyNestedBinaryExprTree
+[       OK ] QA_GDB102.DeeplyNestedBinaryExprTree (0 ms)
+[ RUN      ] QA_GDB102.SelectWithAllClauses
+[       OK ] QA_GDB102.SelectWithAllClauses (0 ms)
+[ RUN      ] QA_GDB102.MultipleCTEs
+[       OK ] QA_GDB102.MultipleCTEs (0 ms)
+[ RUN      ] QA_GDB102.ChainedSetOperations
+[       OK ] QA_GDB102.ChainedSetOperations (0 ms)
+[ RUN      ] QA_GDB102.CreateTableAllConstraintTypes
+[       OK ] QA_GDB102.CreateTableAllConstraintTypes (0 ms)
+[ RUN      ] QA_GDB102.InsertWithSelectSubquery
+[       OK ] QA_GDB102.InsertWithSelectSubquery (0 ms)
+[ RUN      ] QA_GDB102.UpdateWithMultipleAssignmentsAndReturning
+[       OK ] QA_GDB102.UpdateWithMultipleAssignmentsAndReturning (0 ms)
+[ RUN      ] QA_GDB102.CaseExprMultipleWhens
+[       OK ] QA_GDB102.CaseExprMultipleWhens (0 ms)
+[ RUN      ] QA_GDB102.MatchStmtComplexPattern
+[       OK ] QA_GDB102.MatchStmtComplexPattern (0 ms)
+[ RUN      ] QA_GDB102.NearestWithinTraverse
+[       OK ] QA_GDB102.NearestWithinTraverse (0 ms)
+[ RUN      ] QA_GDB102.ExplainAnalyzeJsonFormat
+[       OK ] QA_GDB102.ExplainAnalyzeJsonFormat (0 ms)
+[ RUN      ] QA_GDB102.MultipleJoinsOnSelect
+[       OK ] QA_GDB102.MultipleJoinsOnSelect (0 ms)
+[ RUN      ] QA_GDB102.FromSubquery
+[       OK ] QA_GDB102.FromSubquery (0 ms)
+[ RUN      ] QA_GDB102.InExprSubqueryVsValues
+[       OK ] QA_GDB102.InExprSubqueryVsValues (0 ms)
+[ RUN      ] QA_GDB102.EdgePropertyTypes
+[       OK ] QA_GDB102.EdgePropertyTypes (0 ms)
+[ RUN      ] QA_GDB102.TypeSpecEmbeddingFullParams
+[       OK ] QA_GDB102.TypeSpecEmbeddingFullParams (0 ms)
+[ RUN      ] QA_GDB102.ShortestPathWithAllFields
+[       OK ] QA_GDB102.ShortestPathWithAllFields (0 ms)
+[ RUN      ] QA_GDB102.TraverseAllDirections
+[       OK ] QA_GDB102.TraverseAllDirections (0 ms)
+[ RUN      ] QA_GDB102.ShowTargetAllVariants
+[       OK ] QA_GDB102.ShowTargetAllVariants (0 ms)
+[ RUN      ] QA_GDB102.MoveExprOwnership
+[       OK ] QA_GDB102.MoveExprOwnership (0 ms)
+[ RUN      ] QA_GDB102.MoveStmtIntoExplain
+[       OK ] QA_GDB102.MoveStmtIntoExplain (0 ms)
+[ RUN      ] QA_GDB102.AlterTableDropColumn
+[       OK ] QA_GDB102.AlterTableDropColumn (0 ms)
+[ RUN      ] QA_GDB102.LinkWithMultipleProperties
+[       OK ] QA_GDB102.LinkWithMultipleProperties (0 ms)
+[ RUN      ] QA_GDB102.UnlinkWithWhere
+[       OK ] QA_GDB102.UnlinkWithWhere (0 ms)
+[ RUN      ] QA_GDB102.CreateUserAndAlterUser
+[       OK ] QA_GDB102.CreateUserAndAlterUser (0 ms)
+[ RUN      ] QA_GDB102.InsertMultipleRowsMultipleColumns
+[       OK ] QA_GDB102.InsertMultipleRowsMultipleColumns (0 ms)
+[ RUN      ] QA_GDB102.ArrayExprEmpty
+[       OK ] QA_GDB102.ArrayExprEmpty (0 ms)
+[ RUN      ] QA_GDB102.ArrayExprLargeVector
+[       OK ] QA_GDB102.ArrayExprLargeVector (0 ms)
+[ RUN      ] QA_GDB102.DeleteWithReturningMultipleItems
+[       OK ] QA_GDB102.DeleteWithReturningMultipleItems (0 ms)
+[ RUN      ] QA_GDB102.SelectMultipleFromTables
+[       OK ] QA_GDB102.SelectMultipleFromTables (0 ms)
+[ RUN      ] QA_GDB102.SourceLocationOnExpr
+[       OK ] QA_GDB102.SourceLocationOnExpr (0 ms)
+[----------] 81 tests from QA_GDB102 (2 ms total)
+
+[----------] 108 tests from QA_GDB103
+[ RUN      ] QA_GDB103.CreateTableEmptyColumnList
+[       OK ] QA_GDB103.CreateTableEmptyColumnList (0 ms)
+[ RUN      ] QA_GDB103.CreateTableTrailingComma
+[       OK ] QA_GDB103.CreateTableTrailingComma (0 ms)
+[ RUN      ] QA_GDB103.CreateTableOnlyConstraints
+[       OK ] QA_GDB103.CreateTableOnlyConstraints (0 ms)
+[ RUN      ] QA_GDB103.CreateTableMissingEverything
+[       OK ] QA_GDB103.CreateTableMissingEverything (0 ms)
+[ RUN      ] QA_GDB103.CreateTableUnclosedParen
+[       OK ] QA_GDB103.CreateTableUnclosedParen (0 ms)
+[ RUN      ] QA_GDB103.CreateTableMissingColumnType
+[       OK ] QA_GDB103.CreateTableMissingColumnType (0 ms)
+[ RUN      ] QA_GDB103.CreateTableDuplicateColumnConstraints
+[       OK ] QA_GDB103.CreateTableDuplicateColumnConstraints (0 ms)
+[ RUN      ] QA_GDB103.CreateTableNullThenNotNull
+[       OK ] QA_GDB103.CreateTableNullThenNotNull (0 ms)
+[ RUN      ] QA_GDB103.CreateTableNotNullThenNull
+[       OK ] QA_GDB103.CreateTableNotNullThenNull (0 ms)
+[ RUN      ] QA_GDB103.CreateTableMultiplePrimaryKeysInline
+[       OK ] QA_GDB103.CreateTableMultiplePrimaryKeysInline (0 ms)
+[ RUN      ] QA_GDB103.CreateTableAllConstraintTypes
+[       OK ] QA_GDB103.CreateTableAllConstraintTypes (0 ms)
+[ RUN      ] QA_GDB103.CreateTableForeignKeyOnDeleteRestrict
+[       OK ] QA_GDB103.CreateTableForeignKeyOnDeleteRestrict (0 ms)
+[ RUN      ] QA_GDB103.CreateTableForeignKeyNoOnDelete
+[       OK ] QA_GDB103.CreateTableForeignKeyNoOnDelete (0 ms)
+[ RUN      ] QA_GDB103.CreateTableForeignKeyOnDeleteInvalid
+[       OK ] QA_GDB103.CreateTableForeignKeyOnDeleteInvalid (0 ms)
+[ RUN      ] QA_GDB103.CreateTableForeignKeyOnMissingDelete
+[       OK ] QA_GDB103.CreateTableForeignKeyOnMissingDelete (0 ms)
+[ RUN      ] QA_GDB103.CreateTableConstraintForeignKey
+[       OK ] QA_GDB103.CreateTableConstraintForeignKey (0 ms)
+[ RUN      ] QA_GDB103.CreateTableNamedConstraint
+[       OK ] QA_GDB103.CreateTableNamedConstraint (0 ms)
+[ RUN      ] QA_GDB103.CreateTableNamedConstraintFollowedByInvalid
+[       OK ] QA_GDB103.CreateTableNamedConstraintFollowedByInvalid (0 ms)
+[ RUN      ] QA_GDB103.CreateTableCheckConstraintTable
+[       OK ] QA_GDB103.CreateTableCheckConstraintTable (0 ms)
+[ RUN      ] QA_GDB103.CreateTableUniqueConstraint
+[       OK ] QA_GDB103.CreateTableUniqueConstraint (0 ms)
+[ RUN      ] QA_GDB103.CreateTableMultipleMixedConstraints
+[       OK ] QA_GDB103.CreateTableMultipleMixedConstraints (0 ms)
+[ RUN      ] QA_GDB103.TypeSpecAllBaseTypes
+[       OK ] QA_GDB103.TypeSpecAllBaseTypes (0 ms)
+[ RUN      ] QA_GDB103.TypeSpecDecimalWithPrecisionAndScale
+[       OK ] QA_GDB103.TypeSpecDecimalWithPrecisionAndScale (0 ms)
+[ RUN      ] QA_GDB103.TypeSpecDecimalPrecisionOnly
+[       OK ] QA_GDB103.TypeSpecDecimalPrecisionOnly (0 ms)
+[ RUN      ] QA_GDB103.TypeSpecVarcharWithLength
+[       OK ] QA_GDB103.TypeSpecVarcharWithLength (0 ms)
+[ RUN      ] QA_GDB103.TypeSpecEmbeddingFull
+[       OK ] QA_GDB103.TypeSpecEmbeddingFull (0 ms)
+[ RUN      ] QA_GDB103.TypeSpecEmbeddingMissingProvider
+[       OK ] QA_GDB103.TypeSpecEmbeddingMissingProvider (0 ms)
+[ RUN      ] QA_GDB103.TypeSpecEmbeddingMissingSource
+[       OK ] QA_GDB103.TypeSpecEmbeddingMissingSource (0 ms)
+[ RUN      ] QA_GDB103.TypeSpecEmbeddingMissingDimension
+[       OK ] QA_GDB103.TypeSpecEmbeddingMissingDimension (0 ms)
+[ RUN      ] QA_GDB103.TypeSpecEmbeddingWithoutParens
+[       OK ] QA_GDB103.TypeSpecEmbeddingWithoutParens (0 ms)
+[ RUN      ] QA_GDB103.TypeSpecOverflowInteger
+[       OK ] QA_GDB103.TypeSpecOverflowInteger (0 ms)
+[ RUN      ] QA_GDB103.TypeSpecZeroPrecision
+[       OK ] QA_GDB103.TypeSpecZeroPrecision (0 ms)
+[ RUN      ] QA_GDB103.TypeSpecCaseInsensitive
+[       OK ] QA_GDB103.TypeSpecCaseInsensitive (0 ms)
+[ RUN      ] QA_GDB103.TypeSpecInvalidTypeName
+[       OK ] QA_GDB103.TypeSpecInvalidTypeName (0 ms)
+[ RUN      ] QA_GDB103.DropTableBasic
+[       OK ] QA_GDB103.DropTableBasic (0 ms)
+[ RUN      ] QA_GDB103.DropTableIfExistsCascade
+[       OK ] QA_GDB103.DropTableIfExistsCascade (0 ms)
+[ RUN      ] QA_GDB103.DropTableRestrict
+[       OK ] QA_GDB103.DropTableRestrict (0 ms)
+[ RUN      ] QA_GDB103.DropTableMissingName
+[       OK ] QA_GDB103.DropTableMissingName (0 ms)
+[ RUN      ] QA_GDB103.DropTableIfMissingExists
+[       OK ] QA_GDB103.DropTableIfMissingExists (0 ms)
+[ RUN      ] QA_GDB103.AlterTableAddColumnFull
+[       OK ] QA_GDB103.AlterTableAddColumnFull (0 ms)
+[ RUN      ] QA_GDB103.AlterTableAddWithoutColumn
+[       OK ] QA_GDB103.AlterTableAddWithoutColumn (0 ms)
+[ RUN      ] QA_GDB103.AlterTableDropColumn
+[       OK ] QA_GDB103.AlterTableDropColumn (0 ms)
+[ RUN      ] QA_GDB103.AlterTableDropWithoutColumn
+[       OK ] QA_GDB103.AlterTableDropWithoutColumn (0 ms)
+[ RUN      ] QA_GDB103.AlterTableRenameColumn
+[       OK ] QA_GDB103.AlterTableRenameColumn (0 ms)
+[ RUN      ] QA_GDB103.AlterTableRenameWithoutColumn
+[       OK ] QA_GDB103.AlterTableRenameWithoutColumn (0 ms)
+[ RUN      ] QA_GDB103.AlterTableInvalidAction
+[       OK ] QA_GDB103.AlterTableInvalidAction (0 ms)
+[ RUN      ] QA_GDB103.AlterTableMissingTableName
+[       OK ] QA_GDB103.AlterTableMissingTableName (0 ms)
+[ RUN      ] QA_GDB103.AlterTableRenameMissingTo
+[       OK ] QA_GDB103.AlterTableRenameMissingTo (0 ms)
+[ RUN      ] QA_GDB103.AlterTableRenameMissingNewName
+[       OK ] QA_GDB103.AlterTableRenameMissingNewName (0 ms)
+[ RUN      ] QA_GDB103.AlterTableAddMissingType
+[       OK ] QA_GDB103.AlterTableAddMissingType (0 ms)
+[ RUN      ] QA_GDB103.CreateIndexBasic
+[       OK ] QA_GDB103.CreateIndexBasic (0 ms)
+[ RUN      ] QA_GDB103.CreateUniqueIndex
+[       OK ] QA_GDB103.CreateUniqueIndex (0 ms)
+[ RUN      ] QA_GDB103.CreateIndexMultiColumn
+[       OK ] QA_GDB103.CreateIndexMultiColumn (0 ms)
+[ RUN      ] QA_GDB103.CreateIndexUsing
+[       OK ] QA_GDB103.CreateIndexUsing (0 ms)
+[ RUN      ] QA_GDB103.CreateIndexIfNotExists
+[       OK ] QA_GDB103.CreateIndexIfNotExists (0 ms)
+[ RUN      ] QA_GDB103.CreateIndexMissingOn
+[       OK ] QA_GDB103.CreateIndexMissingOn (0 ms)
+[ RUN      ] QA_GDB103.CreateIndexMissingColumns
+[       OK ] QA_GDB103.CreateIndexMissingColumns (0 ms)
+[ RUN      ] QA_GDB103.CreateIndexEmptyColumns
+[       OK ] QA_GDB103.CreateIndexEmptyColumns (0 ms)
+[ RUN      ] QA_GDB103.DropIndexBasic
+[       OK ] QA_GDB103.DropIndexBasic (0 ms)
+[ RUN      ] QA_GDB103.DropIndexIfExists
+[       OK ] QA_GDB103.DropIndexIfExists (0 ms)
+[ RUN      ] QA_GDB103.DropIndexMissingName
+[       OK ] QA_GDB103.DropIndexMissingName (0 ms)
+[ RUN      ] QA_GDB103.CreateEdgeTypeBasic
+[       OK ] QA_GDB103.CreateEdgeTypeBasic (0 ms)
+[ RUN      ] QA_GDB103.CreateEdgeTypeWithProperties
+[       OK ] QA_GDB103.CreateEdgeTypeWithProperties (0 ms)
+[ RUN      ] QA_GDB103.CreateEdgeTypeEmptyProperties
+[       OK ] QA_GDB103.CreateEdgeTypeEmptyProperties (0 ms)
+[ RUN      ] QA_GDB103.CreateEdgeTypeMissingFrom
+[       OK ] QA_GDB103.CreateEdgeTypeMissingFrom (0 ms)
+[ RUN      ] QA_GDB103.CreateEdgeTypeMissingTo
+[       OK ] QA_GDB103.CreateEdgeTypeMissingTo (0 ms)
+[ RUN      ] QA_GDB103.CreateEdgeTypeMissingType
+[       OK ] QA_GDB103.CreateEdgeTypeMissingType (0 ms)
+[ RUN      ] QA_GDB103.DropEdgeTypeBasic
+[       OK ] QA_GDB103.DropEdgeTypeBasic (0 ms)
+[ RUN      ] QA_GDB103.DropEdgeTypeIfExists
+[       OK ] QA_GDB103.DropEdgeTypeIfExists (0 ms)
+[ RUN      ] QA_GDB103.DropEdgeTypeMissingName
+[       OK ] QA_GDB103.DropEdgeTypeMissingName (0 ms)
+[ RUN      ] QA_GDB103.CreateDatabaseBasic
+[       OK ] QA_GDB103.CreateDatabaseBasic (0 ms)
+[ RUN      ] QA_GDB103.CreateDatabaseIfNotExists
+[       OK ] QA_GDB103.CreateDatabaseIfNotExists (0 ms)
+[ RUN      ] QA_GDB103.CreateDatabaseMissingName
+[       OK ] QA_GDB103.CreateDatabaseMissingName (0 ms)
+[ RUN      ] QA_GDB103.DropDatabaseBasic
+[       OK ] QA_GDB103.DropDatabaseBasic (0 ms)
+[ RUN      ] QA_GDB103.DropDatabaseCascade
+[       OK ] QA_GDB103.DropDatabaseCascade (0 ms)
+[ RUN      ] QA_GDB103.DropDatabaseMissingName
+[       OK ] QA_GDB103.DropDatabaseMissingName (0 ms)
+[ RUN      ] QA_GDB103.ErrorRecoveryMultipleErrors
+[       OK ] QA_GDB103.ErrorRecoveryMultipleErrors (0 ms)
+[ RUN      ] QA_GDB103.ErrorRecoveryValidAmongInvalid
+[       OK ] QA_GDB103.ErrorRecoveryValidAmongInvalid (0 ms)
+[ RUN      ] QA_GDB103.ErrorMessageContainsLineColumn
+[       OK ] QA_GDB103.ErrorMessageContainsLineColumn (0 ms)
+[ RUN      ] QA_GDB103.ParseMultipleValidDDL
+[       OK ] QA_GDB103.ParseMultipleValidDDL (0 ms)
+[ RUN      ] QA_GDB103.ParseStraySemicolons
+[       OK ] QA_GDB103.ParseStraySemicolons (0 ms)
+[ RUN      ] QA_GDB103.KeywordAsTableNameInCreateTable
+[       OK ] QA_GDB103.KeywordAsTableNameInCreateTable (0 ms)
+[ RUN      ] QA_GDB103.TypeKeywordAsColumnName
+[       OK ] QA_GDB103.TypeKeywordAsColumnName (0 ms)
+[ RUN      ] QA_GDB103.KeywordAsEdgeTypeName
+[       OK ] QA_GDB103.KeywordAsEdgeTypeName (0 ms)
+[ RUN      ] QA_GDB103.CreateTableIfNotExistsPartiallyTyped
+[       OK ] QA_GDB103.CreateTableIfNotExistsPartiallyTyped (0 ms)
+[ RUN      ] QA_GDB103.CreateTableIfNotWithoutExists
+[       OK ] QA_GDB103.CreateTableIfNotWithoutExists (0 ms)
+[ RUN      ] QA_GDB103.DropTableIfWithoutExists
+[       OK ] QA_GDB103.DropTableIfWithoutExists (0 ms)
+[ RUN      ] QA_GDB103.CreateIndexIfNotExistsPartial
+[       OK ] QA_GDB103.CreateIndexIfNotExistsPartial (0 ms)
+[ RUN      ] QA_GDB103.CreateTableManyColumns
+[       OK ] QA_GDB103.CreateTableManyColumns (1 ms)
+[ RUN      ] QA_GDB103.CreateIndexManyColumns
+[       OK ] QA_GDB103.CreateIndexManyColumns (0 ms)
+[ RUN      ] QA_GDB103.CreateTableLongIdentifier
+[       OK ] QA_GDB103.CreateTableLongIdentifier (0 ms)
+[ RUN      ] QA_GDB103.ManyStatements
+[       OK ] QA_GDB103.ManyStatements (1 ms)
+[ RUN      ] QA_GDB103.ParseSingleStatement
+[       OK ] QA_GDB103.ParseSingleStatement (0 ms)
+[ RUN      ] QA_GDB103.ParseSingleStatementWithSemicolon
+[       OK ] QA_GDB103.ParseSingleStatementWithSemicolon (0 ms)
+[ RUN      ] QA_GDB103.ParseEmptyInput
+[       OK ] QA_GDB103.ParseEmptyInput (0 ms)
+[ RUN      ] QA_GDB103.CreateUserBasic
+[       OK ] QA_GDB103.CreateUserBasic (0 ms)
+[ RUN      ] QA_GDB103.DropUserBasic
+[       OK ] QA_GDB103.DropUserBasic (0 ms)
+[ RUN      ] QA_GDB103.DropUserIfExists
+[       OK ] QA_GDB103.DropUserIfExists (0 ms)
+[ RUN      ] QA_GDB103.AlterUserPassword
+[       OK ] QA_GDB103.AlterUserPassword (0 ms)
+[ RUN      ] QA_GDB103.CreateUnknownObject
+[       OK ] QA_GDB103.CreateUnknownObject (0 ms)
+[ RUN      ] QA_GDB103.DropUnknownObject
+[       OK ] QA_GDB103.DropUnknownObject (0 ms)
+[ RUN      ] QA_GDB103.AlterUnknownObject
+[       OK ] QA_GDB103.AlterUnknownObject (0 ms)
+[ RUN      ] QA_GDB103.CreateEdgeMissingType
+[       OK ] QA_GDB103.CreateEdgeMissingType (0 ms)
+[ RUN      ] QA_GDB103.DropEdgeMissingType
+[       OK ] QA_GDB103.DropEdgeMissingType (0 ms)
+[ RUN      ] QA_GDB103.DefaultExpressionInteger
+[       OK ] QA_GDB103.DefaultExpressionInteger (0 ms)
+[ RUN      ] QA_GDB103.DefaultExpressionString
+[       OK ] QA_GDB103.DefaultExpressionString (0 ms)
+[ RUN      ] QA_GDB103.DefaultExpressionNull
+[       OK ] QA_GDB103.DefaultExpressionNull (0 ms)
+[ RUN      ] QA_GDB103.DefaultExpressionBoolean
+[       OK ] QA_GDB103.DefaultExpressionBoolean (0 ms)
+[----------] 108 tests from QA_GDB103 (9 ms total)
+
+[----------] 87 tests from QA_GDB104
+[ RUN      ] QA_GDB104.InsertBasic
+[       OK ] QA_GDB104.InsertBasic (0 ms)
+[ RUN      ] QA_GDB104.InsertMultipleRows
+[       OK ] QA_GDB104.InsertMultipleRows (0 ms)
+[ RUN      ] QA_GDB104.InsertWithoutColumnList
+[       OK ] QA_GDB104.InsertWithoutColumnList (0 ms)
+[ RUN      ] QA_GDB104.InsertWithSelect
+[       OK ] QA_GDB104.InsertWithSelect (0 ms)
+[ RUN      ] QA_GDB104.InsertWithReturning
+[       OK ] QA_GDB104.InsertWithReturning (0 ms)
+[ RUN      ] QA_GDB104.InsertWithReturningStar
+[       OK ] QA_GDB104.InsertWithReturningStar (0 ms)
+[ RUN      ] QA_GDB104.InsertMissingInto
+[       OK ] QA_GDB104.InsertMissingInto (0 ms)
+[ RUN      ] QA_GDB104.InsertMissingValues
+[       OK ] QA_GDB104.InsertMissingValues (0 ms)
+[ RUN      ] QA_GDB104.InsertEmptyValues
+[       OK ] QA_GDB104.InsertEmptyValues (0 ms)
+[ RUN      ] QA_GDB104.InsertNullValue
+[       OK ] QA_GDB104.InsertNullValue (0 ms)
+[ RUN      ] QA_GDB104.InsertExpressionValues
+[       OK ] QA_GDB104.InsertExpressionValues (0 ms)
+[ RUN      ] QA_GDB104.UpdateBasic
+[       OK ] QA_GDB104.UpdateBasic (0 ms)
+[ RUN      ] QA_GDB104.UpdateMultipleAssignments
+[       OK ] QA_GDB104.UpdateMultipleAssignments (0 ms)
+[ RUN      ] QA_GDB104.UpdateWithoutWhere
+[       OK ] QA_GDB104.UpdateWithoutWhere (0 ms)
+[ RUN      ] QA_GDB104.UpdateWithReturning
+[       OK ] QA_GDB104.UpdateWithReturning (0 ms)
+[ RUN      ] QA_GDB104.UpdateMissingSet
+[       OK ] QA_GDB104.UpdateMissingSet (0 ms)
+[ RUN      ] QA_GDB104.UpdateMissingEquals
+[       OK ] QA_GDB104.UpdateMissingEquals (0 ms)
+[ RUN      ] QA_GDB104.UpdateWithComplexExpression
+[       OK ] QA_GDB104.UpdateWithComplexExpression (0 ms)
+[ RUN      ] QA_GDB104.DeleteBasic
+[       OK ] QA_GDB104.DeleteBasic (0 ms)
+[ RUN      ] QA_GDB104.DeleteWithoutWhere
+[       OK ] QA_GDB104.DeleteWithoutWhere (0 ms)
+[ RUN      ] QA_GDB104.DeleteWithReturning
+[       OK ] QA_GDB104.DeleteWithReturning (0 ms)
+[ RUN      ] QA_GDB104.DeleteMissingFrom
+[       OK ] QA_GDB104.DeleteMissingFrom (0 ms)
+[ RUN      ] QA_GDB104.LinkBasic
+[       OK ] QA_GDB104.LinkBasic (0 ms)
+[ RUN      ] QA_GDB104.LinkWithProperties
+[       OK ] QA_GDB104.LinkWithProperties (0 ms)
+[ RUN      ] QA_GDB104.LinkWithExpressionKeys
+[       OK ] QA_GDB104.LinkWithExpressionKeys (0 ms)
+[ RUN      ] QA_GDB104.LinkMissingVia
+[       OK ] QA_GDB104.LinkMissingVia (0 ms)
+[ RUN      ] QA_GDB104.LinkMissingTo
+[       OK ] QA_GDB104.LinkMissingTo (0 ms)
+[ RUN      ] QA_GDB104.UnlinkBasic
+[       OK ] QA_GDB104.UnlinkBasic (0 ms)
+[ RUN      ] QA_GDB104.UnlinkWithWhere
+[       OK ] QA_GDB104.UnlinkWithWhere (0 ms)
+[ RUN      ] QA_GDB104.UnlinkMissingFrom
+[       OK ] QA_GDB104.UnlinkMissingFrom (0 ms)
+[ RUN      ] QA_GDB104.UnlinkMissingVia
+[       OK ] QA_GDB104.UnlinkMissingVia (0 ms)
+[ RUN      ] QA_GDB104.PrecedenceMultiplyOverAdd
+[       OK ] QA_GDB104.PrecedenceMultiplyOverAdd (0 ms)
+[ RUN      ] QA_GDB104.PrecedenceParensOverride
+[       OK ] QA_GDB104.PrecedenceParensOverride (0 ms)
+[ RUN      ] QA_GDB104.PrecedenceLeftAssociativeSubtraction
+[       OK ] QA_GDB104.PrecedenceLeftAssociativeSubtraction (0 ms)
+[ RUN      ] QA_GDB104.PrecedenceAndOverOr
+[       OK ] QA_GDB104.PrecedenceAndOverOr (0 ms)
+[ RUN      ] QA_GDB104.PrecedenceNotOverAnd
+[       OK ] QA_GDB104.PrecedenceNotOverAnd (0 ms)
+[ RUN      ] QA_GDB104.PrecedenceComparisonOverLogical
+[       OK ] QA_GDB104.PrecedenceComparisonOverLogical (0 ms)
+[ RUN      ] QA_GDB104.PrecedenceUnaryNegation
+[       OK ] QA_GDB104.PrecedenceUnaryNegation (0 ms)
+[ RUN      ] QA_GDB104.PrecedenceDoubleNegation
+[       OK ] QA_GDB104.PrecedenceDoubleNegation (0 ms)
+[ RUN      ] QA_GDB104.PrecedenceModulo
+[       OK ] QA_GDB104.PrecedenceModulo (0 ms)
+[ RUN      ] QA_GDB104.PrecedenceConcat
+[       OK ] QA_GDB104.PrecedenceConcat (0 ms)
+[ RUN      ] QA_GDB104.IsNull
+[       OK ] QA_GDB104.IsNull (0 ms)
+[ RUN      ] QA_GDB104.IsNotNull
+[       OK ] QA_GDB104.IsNotNull (0 ms)
+[ RUN      ] QA_GDB104.InList
+[       OK ] QA_GDB104.InList (0 ms)
+[ RUN      ] QA_GDB104.NotInList
+[       OK ] QA_GDB104.NotInList (0 ms)
+[ RUN      ] QA_GDB104.InSubquery
+[       OK ] QA_GDB104.InSubquery (0 ms)
+[ RUN      ] QA_GDB104.BetweenBasic
+[       OK ] QA_GDB104.BetweenBasic (0 ms)
+[ RUN      ] QA_GDB104.NotBetween
+[       OK ] QA_GDB104.NotBetween (0 ms)
+[ RUN      ] QA_GDB104.LikeBasic
+[       OK ] QA_GDB104.LikeBasic (0 ms)
+[ RUN      ] QA_GDB104.NotLike
+[       OK ] QA_GDB104.NotLike (0 ms)
+[ RUN      ] QA_GDB104.CaseSearched
+[       OK ] QA_GDB104.CaseSearched (0 ms)
+[ RUN      ] QA_GDB104.CaseSimple
+[       OK ] QA_GDB104.CaseSimple (0 ms)
+[ RUN      ] QA_GDB104.CaseNoWhen
+[       OK ] QA_GDB104.CaseNoWhen (0 ms)
+[ RUN      ] QA_GDB104.CastFunction
+[       OK ] QA_GDB104.CastFunction (0 ms)
+[ RUN      ] QA_GDB104.CastPostgresStyle
+[       OK ] QA_GDB104.CastPostgresStyle (0 ms)
+[ RUN      ] QA_GDB104.CastChained
+[       OK ] QA_GDB104.CastChained (0 ms)
+[ RUN      ] QA_GDB104.ExistsSubquery
+[       OK ] QA_GDB104.ExistsSubquery (0 ms)
+[ RUN      ] QA_GDB104.ScalarSubquery
+[       OK ] QA_GDB104.ScalarSubquery (0 ms)
+[ RUN      ] QA_GDB104.FunctionCallNoArgs
+[       OK ] QA_GDB104.FunctionCallNoArgs (0 ms)
+[ RUN      ] QA_GDB104.FunctionCallMultipleArgs
+[       OK ] QA_GDB104.FunctionCallMultipleArgs (0 ms)
+[ RUN      ] QA_GDB104.CountStar
+[       OK ] QA_GDB104.CountStar (0 ms)
+[ RUN      ] QA_GDB104.CountDistinct
+[       OK ] QA_GDB104.CountDistinct (0 ms)
+[ RUN      ] QA_GDB104.NestedFunctionCalls
+[       OK ] QA_GDB104.NestedFunctionCalls (0 ms)
+[ RUN      ] QA_GDB104.UnqualifiedColumn
+[       OK ] QA_GDB104.UnqualifiedColumn (0 ms)
+[ RUN      ] QA_GDB104.QualifiedColumn
+[       OK ] QA_GDB104.QualifiedColumn (0 ms)
+[ RUN      ] QA_GDB104.LiteralInteger
+[       OK ] QA_GDB104.LiteralInteger (0 ms)
+[ RUN      ] QA_GDB104.LiteralFloat
+[       OK ] QA_GDB104.LiteralFloat (0 ms)
+[ RUN      ] QA_GDB104.LiteralString
+[       OK ] QA_GDB104.LiteralString (0 ms)
+[ RUN      ] QA_GDB104.LiteralStringWithEscapedQuote
+[       OK ] QA_GDB104.LiteralStringWithEscapedQuote (0 ms)
+[ RUN      ] QA_GDB104.LiteralNull
+[       OK ] QA_GDB104.LiteralNull (0 ms)
+[ RUN      ] QA_GDB104.LiteralBoolean
+[       OK ] QA_GDB104.LiteralBoolean (0 ms)
+[ RUN      ] QA_GDB104.ArrayLiteralBasic
+[       OK ] QA_GDB104.ArrayLiteralBasic (0 ms)
+[ RUN      ] QA_GDB104.ArrayLiteralEmpty
+[       OK ] QA_GDB104.ArrayLiteralEmpty (0 ms)
+[ RUN      ] QA_GDB104.ArrayLiteralNested
+[       OK ] QA_GDB104.ArrayLiteralNested (0 ms)
+[ RUN      ] QA_GDB104.ComplexWhereClause
+[       OK ] QA_GDB104.ComplexWhereClause (0 ms)
+[ RUN      ] QA_GDB104.BetweenInWhere
+[       OK ] QA_GDB104.BetweenInWhere (0 ms)
+[ RUN      ] QA_GDB104.DeeplyNestedParens
+[       OK ] QA_GDB104.DeeplyNestedParens (0 ms)
+[ RUN      ] QA_GDB104.ExpressionInInsertValue
+[       OK ] QA_GDB104.ExpressionInInsertValue (0 ms)
+[ RUN      ] QA_GDB104.ComparisonAllOps
+[       OK ] QA_GDB104.ComparisonAllOps (0 ms)
+[ RUN      ] QA_GDB104.UnclosedParen
+[       OK ] QA_GDB104.UnclosedParen (0 ms)
+[ RUN      ] QA_GDB104.UnclosedBracket
+[       OK ] QA_GDB104.UnclosedBracket (0 ms)
+[ RUN      ] QA_GDB104.MissingExpression
+[       OK ] QA_GDB104.MissingExpression (0 ms)
+[ RUN      ] QA_GDB104.CaseMissingEnd
+[       OK ] QA_GDB104.CaseMissingEnd (0 ms)
+[ RUN      ] QA_GDB104.CastMissingAs
+[       OK ] QA_GDB104.CastMissingAs (0 ms)
+[ RUN      ] QA_GDB104.InMissingParen
+[       OK ] QA_GDB104.InMissingParen (0 ms)
+[ RUN      ] QA_GDB104.BetweenMissingAnd
+[       OK ] QA_GDB104.BetweenMissingAnd (0 ms)
+[ RUN      ] QA_GDB104.ExistsMissingParen
+[       OK ] QA_GDB104.ExistsMissingParen (0 ms)
+[----------] 87 tests from QA_GDB104 (4 ms total)
+
+[----------] 60 tests from QA_GDB105
+[ RUN      ] QA_GDB105.SelectStar
+[       OK ] QA_GDB105.SelectStar (0 ms)
+[ RUN      ] QA_GDB105.SelectTableStar
+[       OK ] QA_GDB105.SelectTableStar (0 ms)
+[ RUN      ] QA_GDB105.SelectColumns
+[       OK ] QA_GDB105.SelectColumns (0 ms)
+[ RUN      ] QA_GDB105.SelectWithExplicitAlias
+[       OK ] QA_GDB105.SelectWithExplicitAlias (0 ms)
+[ RUN      ] QA_GDB105.SelectWithImplicitAlias
+[       OK ] QA_GDB105.SelectWithImplicitAlias (0 ms)
+[ RUN      ] QA_GDB105.SelectDistinct
+[       OK ] QA_GDB105.SelectDistinct (0 ms)
+[ RUN      ] QA_GDB105.SelectWithoutFrom
+[       OK ] QA_GDB105.SelectWithoutFrom (0 ms)
+[ RUN      ] QA_GDB105.SelectExpressionItem
+[       OK ] QA_GDB105.SelectExpressionItem (0 ms)
+[ RUN      ] QA_GDB105.FromMultipleTables
+[       OK ] QA_GDB105.FromMultipleTables (0 ms)
+[ RUN      ] QA_GDB105.FromTableExplicitAlias
+[       OK ] QA_GDB105.FromTableExplicitAlias (0 ms)
+[ RUN      ] QA_GDB105.FromTableImplicitAlias
+[       OK ] QA_GDB105.FromTableImplicitAlias (0 ms)
+[ RUN      ] QA_GDB105.FromSubquery
+[       OK ] QA_GDB105.FromSubquery (0 ms)
+[ RUN      ] QA_GDB105.FromSubqueryImplicitAlias
+[       OK ] QA_GDB105.FromSubqueryImplicitAlias (0 ms)
+[ RUN      ] QA_GDB105.InnerJoin
+[       OK ] QA_GDB105.InnerJoin (0 ms)
+[ RUN      ] QA_GDB105.BareJoinIsInner
+[       OK ] QA_GDB105.BareJoinIsInner (0 ms)
+[ RUN      ] QA_GDB105.LeftJoin
+[       OK ] QA_GDB105.LeftJoin (0 ms)
+[ RUN      ] QA_GDB105.LeftOuterJoin
+[       OK ] QA_GDB105.LeftOuterJoin (0 ms)
+[ RUN      ] QA_GDB105.RightJoin
+[       OK ] QA_GDB105.RightJoin (0 ms)
+[ RUN      ] QA_GDB105.FullJoin
+[       OK ] QA_GDB105.FullJoin (0 ms)
+[ RUN      ] QA_GDB105.FullOuterJoin
+[       OK ] QA_GDB105.FullOuterJoin (0 ms)
+[ RUN      ] QA_GDB105.CrossJoin
+[       OK ] QA_GDB105.CrossJoin (0 ms)
+[ RUN      ] QA_GDB105.MultipleJoins
+[       OK ] QA_GDB105.MultipleJoins (0 ms)
+[ RUN      ] QA_GDB105.JoinWithComplexCondition
+[       OK ] QA_GDB105.JoinWithComplexCondition (0 ms)
+[ RUN      ] QA_GDB105.JoinWithTableAlias
+[       OK ] QA_GDB105.JoinWithTableAlias (0 ms)
+[ RUN      ] QA_GDB105.WhereBasic
+[       OK ] QA_GDB105.WhereBasic (0 ms)
+[ RUN      ] QA_GDB105.WhereComplex
+[       OK ] QA_GDB105.WhereComplex (0 ms)
+[ RUN      ] QA_GDB105.GroupByBasic
+[       OK ] QA_GDB105.GroupByBasic (0 ms)
+[ RUN      ] QA_GDB105.GroupByMultiple
+[       OK ] QA_GDB105.GroupByMultiple (0 ms)
+[ RUN      ] QA_GDB105.GroupByWithHaving
+[       OK ] QA_GDB105.GroupByWithHaving (0 ms)
+[ RUN      ] QA_GDB105.HavingWithoutGroupBy
+[       OK ] QA_GDB105.HavingWithoutGroupBy (0 ms)
+[ RUN      ] QA_GDB105.GroupByMissingBy
+[       OK ] QA_GDB105.GroupByMissingBy (0 ms)
+[ RUN      ] QA_GDB105.OrderByBasic
+[       OK ] QA_GDB105.OrderByBasic (0 ms)
+[ RUN      ] QA_GDB105.OrderByDesc
+[       OK ] QA_GDB105.OrderByDesc (0 ms)
+[ RUN      ] QA_GDB105.OrderByMultiple
+[       OK ] QA_GDB105.OrderByMultiple (0 ms)
+[ RUN      ] QA_GDB105.OrderByExpression
+[       OK ] QA_GDB105.OrderByExpression (0 ms)
+[ RUN      ] QA_GDB105.OrderByMissingBy
+[       OK ] QA_GDB105.OrderByMissingBy (0 ms)
+[ RUN      ] QA_GDB105.LimitBasic
+[       OK ] QA_GDB105.LimitBasic (0 ms)
+[ RUN      ] QA_GDB105.LimitWithOffset
+[       OK ] QA_GDB105.LimitWithOffset (0 ms)
+[ RUN      ] QA_GDB105.OffsetWithoutLimit
+[       OK ] QA_GDB105.OffsetWithoutLimit (0 ms)
+[ RUN      ] QA_GDB105.LimitExpression
+[       OK ] QA_GDB105.LimitExpression (0 ms)
+[ RUN      ] QA_GDB105.UnionBasic
+[       OK ] QA_GDB105.UnionBasic (0 ms)
+[ RUN      ] QA_GDB105.UnionAll
+[       OK ] QA_GDB105.UnionAll (0 ms)
+[ RUN      ] QA_GDB105.Intersect
+[       OK ] QA_GDB105.Intersect (0 ms)
+[ RUN      ] QA_GDB105.Except
+[       OK ] QA_GDB105.Except (0 ms)
+[ RUN      ] QA_GDB105.CTEBasic
+[       OK ] QA_GDB105.CTEBasic (0 ms)
+[ RUN      ] QA_GDB105.CTEMultiple
+[       OK ] QA_GDB105.CTEMultiple (0 ms)
+[ RUN      ] QA_GDB105.CTEMissingAs
+[       OK ] QA_GDB105.CTEMissingAs (0 ms)
+[ RUN      ] QA_GDB105.CTEMissingParen
+[       OK ] QA_GDB105.CTEMissingParen (0 ms)
+[ RUN      ] QA_GDB105.WhereInSubquery
+[       OK ] QA_GDB105.WhereInSubquery (0 ms)
+[ RUN      ] QA_GDB105.WhereExistsSubquery
+[       OK ] QA_GDB105.WhereExistsSubquery (0 ms)
+[ RUN      ] QA_GDB105.WhereScalarSubquery
+[       OK ] QA_GDB105.WhereScalarSubquery (0 ms)
+[ RUN      ] QA_GDB105.FullQuery
+[       OK ] QA_GDB105.FullQuery (0 ms)
+[ RUN      ] QA_GDB105.SelectMixedStarAndColumns
+[       OK ] QA_GDB105.SelectMixedStarAndColumns (0 ms)
+[ RUN      ] QA_GDB105.NestedSubqueryInFrom
+[       OK ] QA_GDB105.NestedSubqueryInFrom (0 ms)
+[ RUN      ] QA_GDB105.ManyJoins
+[       OK ] QA_GDB105.ManyJoins (0 ms)
+[ RUN      ] QA_GDB105.ManySelectItems
+[       OK ] QA_GDB105.ManySelectItems (0 ms)
+[ RUN      ] QA_GDB105.ManyOrderByItems
+[       OK ] QA_GDB105.ManyOrderByItems (0 ms)
+[ RUN      ] QA_GDB105.JoinMissingOn
+[       OK ] QA_GDB105.JoinMissingOn (0 ms)
+[ RUN      ] QA_GDB105.JoinMissingCondition
+[       OK ] QA_GDB105.JoinMissingCondition (0 ms)
+[ RUN      ] QA_GDB105.UnionMissingSelect
+[       OK ] QA_GDB105.UnionMissingSelect (0 ms)
+[----------] 60 tests from QA_GDB105 (4 ms total)
+
+[----------] 20 tests from QA_GDB_106_Traverse
+[ RUN      ] QA_GDB_106_Traverse.BasicTraverse
+[       OK ] QA_GDB_106_Traverse.BasicTraverse (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.DirectionIn
+[       OK ] QA_GDB_106_Traverse.DirectionIn (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.DirectionOut
+[       OK ] QA_GDB_106_Traverse.DirectionOut (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.DirectionBoth
+[       OK ] QA_GDB_106_Traverse.DirectionBoth (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.MaxDepth
+[       OK ] QA_GDB_106_Traverse.MaxDepth (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.MaxDepthZero
+[       OK ] QA_GDB_106_Traverse.MaxDepthZero (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.WhereClause
+[       OK ] QA_GDB_106_Traverse.WhereClause (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.FetchFlag
+[       OK ] QA_GDB_106_Traverse.FetchFlag (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.AllOptions
+[       OK ] QA_GDB_106_Traverse.AllOptions (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.ExpressionKey
+[       OK ] QA_GDB_106_Traverse.ExpressionKey (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.StringKey
+[       OK ] QA_GDB_106_Traverse.StringKey (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.MissingEdgeType
+[       OK ] QA_GDB_106_Traverse.MissingEdgeType (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.MissingFrom
+[       OK ] QA_GDB_106_Traverse.MissingFrom (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.MissingTableName
+[       OK ] QA_GDB_106_Traverse.MissingTableName (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.MissingKey
+[       OK ] QA_GDB_106_Traverse.MissingKey (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.MissingLeftParen
+[       OK ] QA_GDB_106_Traverse.MissingLeftParen (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.MissingRightParen
+[       OK ] QA_GDB_106_Traverse.MissingRightParen (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.InvalidDirection
+[       OK ] QA_GDB_106_Traverse.InvalidDirection (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.MaxDepthNonInteger
+[       OK ] QA_GDB_106_Traverse.MaxDepthNonInteger (0 ms)
+[ RUN      ] QA_GDB_106_Traverse.DirectionAfterMaxDepth
+[       OK ] QA_GDB_106_Traverse.DirectionAfterMaxDepth (0 ms)
+[----------] 20 tests from QA_GDB_106_Traverse (0 ms total)
+
+[----------] 15 tests from QA_GDB_106_Nearest
+[ RUN      ] QA_GDB_106_Nearest.BasicNearest
+[       OK ] QA_GDB_106_Nearest.BasicNearest (0 ms)
+[ RUN      ] QA_GDB_106_Nearest.WithTextTarget
+[       OK ] QA_GDB_106_Nearest.WithTextTarget (0 ms)
+[ RUN      ] QA_GDB_106_Nearest.UsingCosine
+[       OK ] QA_GDB_106_Nearest.UsingCosine (0 ms)
+[ RUN      ] QA_GDB_106_Nearest.UsingL2
+[       OK ] QA_GDB_106_Nearest.UsingL2 (0 ms)
+[ RUN      ] QA_GDB_106_Nearest.UsingDot
+[       OK ] QA_GDB_106_Nearest.UsingDot (0 ms)
+[ RUN      ] QA_GDB_106_Nearest.WithWhere
+[       OK ] QA_GDB_106_Nearest.WithWhere (0 ms)
+[ RUN      ] QA_GDB_106_Nearest.WithWhereAndUsing
+[       OK ] QA_GDB_106_Nearest.WithWhereAndUsing (0 ms)
+[ RUN      ] QA_GDB_106_Nearest.WithinTraverse
+[       OK ] QA_GDB_106_Nearest.WithinTraverse (0 ms)
+[ RUN      ] QA_GDB_106_Nearest.WithinTraverseWithDirection
+[       OK ] QA_GDB_106_Nearest.WithinTraverseWithDirection (0 ms)
+[ RUN      ] QA_GDB_106_Nearest.WithinTraverseWithMaxDepth
+[       OK ] QA_GDB_106_Nearest.WithinTraverseWithMaxDepth (0 ms)
+[ RUN      ] QA_GDB_106_Nearest.WithinTraverseAndWhereAndUsing
+[       OK ] QA_GDB_106_Nearest.WithinTraverseAndWhereAndUsing (0 ms)
+[ RUN      ] QA_GDB_106_Nearest.ExpressionK
+[       OK ] QA_GDB_106_Nearest.ExpressionK (0 ms)
+[ RUN      ] QA_GDB_106_Nearest.MissingTo
+[       OK ] QA_GDB_106_Nearest.MissingTo (0 ms)
+[ RUN      ] QA_GDB_106_Nearest.InvalidMetric
+[       OK ] QA_GDB_106_Nearest.InvalidMetric (0 ms)
+[ RUN      ] QA_GDB_106_Nearest.WithinWithoutTraverse
+[       OK ] QA_GDB_106_Nearest.WithinWithoutTraverse (0 ms)
+[----------] 15 tests from QA_GDB_106_Nearest (1 ms total)
+
+[----------] 21 tests from QA_GDB_106_Match
+[ RUN      ] QA_GDB_106_Match.SingleNode
+[       OK ] QA_GDB_106_Match.SingleNode (0 ms)
+[ RUN      ] QA_GDB_106_Match.NodeWithLabel
+[       OK ] QA_GDB_106_Match.NodeWithLabel (0 ms)
+[ RUN      ] QA_GDB_106_Match.NodeLabelOnly
+[       OK ] QA_GDB_106_Match.NodeLabelOnly (0 ms)
+[ RUN      ] QA_GDB_106_Match.EmptyNode
+[       OK ] QA_GDB_106_Match.EmptyNode (0 ms)
+[ RUN      ] QA_GDB_106_Match.OutgoingEdge
+[       OK ] QA_GDB_106_Match.OutgoingEdge (0 ms)
+[ RUN      ] QA_GDB_106_Match.IncomingEdge
+[       OK ] QA_GDB_106_Match.IncomingEdge (0 ms)
+[ RUN      ] QA_GDB_106_Match.UndirectedEdge
+[       OK ] QA_GDB_106_Match.UndirectedEdge (0 ms)
+[ RUN      ] QA_GDB_106_Match.BidirectionalEdge
+[       OK ] QA_GDB_106_Match.BidirectionalEdge (0 ms)
+[ RUN      ] QA_GDB_106_Match.EdgeWithVariable
+[       OK ] QA_GDB_106_Match.EdgeWithVariable (0 ms)
+[ RUN      ] QA_GDB_106_Match.EdgeTypeOnly
+[       OK ] QA_GDB_106_Match.EdgeTypeOnly (0 ms)
+[ RUN      ] QA_GDB_106_Match.EmptyEdgeBrackets
+[       OK ] QA_GDB_106_Match.EmptyEdgeBrackets (0 ms)
+[ RUN      ] QA_GDB_106_Match.BareEdgeNoBrackets
+[       OK ] QA_GDB_106_Match.BareEdgeNoBrackets (0 ms)
+[ RUN      ] QA_GDB_106_Match.BareEdgeWithBracketsNonDirectional
+[       OK ] QA_GDB_106_Match.BareEdgeWithBracketsNonDirectional (0 ms)
+[ RUN      ] QA_GDB_106_Match.ThreeNodePath
+[       OK ] QA_GDB_106_Match.ThreeNodePath (0 ms)
+[ RUN      ] QA_GDB_106_Match.WithWhere
+[       OK ] QA_GDB_106_Match.WithWhere (0 ms)
+[ RUN      ] QA_GDB_106_Match.MultipleReturnItems
+[       OK ] QA_GDB_106_Match.MultipleReturnItems (0 ms)
+[ RUN      ] QA_GDB_106_Match.ReturnStar
+[       OK ] QA_GDB_106_Match.ReturnStar (0 ms)
+[ RUN      ] QA_GDB_106_Match.MissingReturn
+[       OK ] QA_GDB_106_Match.MissingReturn (0 ms)
+[ RUN      ] QA_GDB_106_Match.MissingNodeParen
+[       OK ] QA_GDB_106_Match.MissingNodeParen (0 ms)
+[ RUN      ] QA_GDB_106_Match.MissingClosingNodeParen
+[       OK ] QA_GDB_106_Match.MissingClosingNodeParen (0 ms)
+[ RUN      ] QA_GDB_106_Match.MissingEdgeBracketClose
+[       OK ] QA_GDB_106_Match.MissingEdgeBracketClose (0 ms)
+[----------] 21 tests from QA_GDB_106_Match (1 ms total)
+
+[----------] 12 tests from QA_GDB_106_ShortestPath
+[ RUN      ] QA_GDB_106_ShortestPath.Basic
+[       OK ] QA_GDB_106_ShortestPath.Basic (0 ms)
+[ RUN      ] QA_GDB_106_ShortestPath.WithDirection
+[       OK ] QA_GDB_106_ShortestPath.WithDirection (0 ms)
+[ RUN      ] QA_GDB_106_ShortestPath.WithMaxDepth
+[       OK ] QA_GDB_106_ShortestPath.WithMaxDepth (0 ms)
+[ RUN      ] QA_GDB_106_ShortestPath.AllOptions
+[       OK ] QA_GDB_106_ShortestPath.AllOptions (0 ms)
+[ RUN      ] QA_GDB_106_ShortestPath.ExpressionKeys
+[       OK ] QA_GDB_106_ShortestPath.ExpressionKeys (0 ms)
+[ RUN      ] QA_GDB_106_ShortestPath.DifferentTables
+[       OK ] QA_GDB_106_ShortestPath.DifferentTables (0 ms)
+[ RUN      ] QA_GDB_106_ShortestPath.MissingPath
+[       OK ] QA_GDB_106_ShortestPath.MissingPath (0 ms)
+[ RUN      ] QA_GDB_106_ShortestPath.MissingFrom
+[       OK ] QA_GDB_106_ShortestPath.MissingFrom (0 ms)
+[ RUN      ] QA_GDB_106_ShortestPath.MissingTo
+[       OK ] QA_GDB_106_ShortestPath.MissingTo (0 ms)
+[ RUN      ] QA_GDB_106_ShortestPath.MissingVia
+[       OK ] QA_GDB_106_ShortestPath.MissingVia (0 ms)
+[ RUN      ] QA_GDB_106_ShortestPath.MissingFromKey
+[       OK ] QA_GDB_106_ShortestPath.MissingFromKey (0 ms)
+[ RUN      ] QA_GDB_106_ShortestPath.MissingToKey
+[       OK ] QA_GDB_106_ShortestPath.MissingToKey (0 ms)
+[----------] 12 tests from QA_GDB_106_ShortestPath (0 ms total)
+
+[----------] 8 tests from QA_GDB_106_TCL
+[ RUN      ] QA_GDB_106_TCL.Begin
+[       OK ] QA_GDB_106_TCL.Begin (0 ms)
+[ RUN      ] QA_GDB_106_TCL.BeginTransaction
+[       OK ] QA_GDB_106_TCL.BeginTransaction (0 ms)
+[ RUN      ] QA_GDB_106_TCL.Commit
+[       OK ] QA_GDB_106_TCL.Commit (0 ms)
+[ RUN      ] QA_GDB_106_TCL.Rollback
+[       OK ] QA_GDB_106_TCL.Rollback (0 ms)
+[ RUN      ] QA_GDB_106_TCL.RollbackToSavepoint
+[       OK ] QA_GDB_106_TCL.RollbackToSavepoint (0 ms)
+[ RUN      ] QA_GDB_106_TCL.Savepoint
+[       OK ] QA_GDB_106_TCL.Savepoint (0 ms)
+[ RUN      ] QA_GDB_106_TCL.SavepointMissingName
+[       OK ] QA_GDB_106_TCL.SavepointMissingName (0 ms)
+[ RUN      ] QA_GDB_106_TCL.MultipleStatements
+[       OK ] QA_GDB_106_TCL.MultipleStatements (0 ms)
+[----------] 8 tests from QA_GDB_106_TCL (0 ms total)
+
+[----------] 9 tests from QA_GDB_106_Set
+[ RUN      ] QA_GDB_106_Set.BasicSet
+[       OK ] QA_GDB_106_Set.BasicSet (0 ms)
+[ RUN      ] QA_GDB_106_Set.DottedParam
+[       OK ] QA_GDB_106_Set.DottedParam (0 ms)
+[ RUN      ] QA_GDB_106_Set.DeepDottedParam
+[       OK ] QA_GDB_106_Set.DeepDottedParam (0 ms)
+[ RUN      ] QA_GDB_106_Set.IntegerValue
+[       OK ] QA_GDB_106_Set.IntegerValue (0 ms)
+[ RUN      ] QA_GDB_106_Set.BooleanValue
+[       OK ] QA_GDB_106_Set.BooleanValue (0 ms)
+[ RUN      ] QA_GDB_106_Set.ExpressionValue
+[       OK ] QA_GDB_106_Set.ExpressionValue (0 ms)
+[ RUN      ] QA_GDB_106_Set.MissingEquals
+[       OK ] QA_GDB_106_Set.MissingEquals (0 ms)
+[ RUN      ] QA_GDB_106_Set.MissingValue
+[       OK ] QA_GDB_106_Set.MissingValue (0 ms)
+[ RUN      ] QA_GDB_106_Set.MissingParam
+[       OK ] QA_GDB_106_Set.MissingParam (0 ms)
+[----------] 9 tests from QA_GDB_106_Set (0 ms total)
+
+[----------] 25 tests from QA_GDB_106_Show
+[ RUN      ] QA_GDB_106_Show.ShowDatabases
+[       OK ] QA_GDB_106_Show.ShowDatabases (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowTables
+[       OK ] QA_GDB_106_Show.ShowTables (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowColumns
+[       OK ] QA_GDB_106_Show.ShowColumns (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowColumnSingular
+[       OK ] QA_GDB_106_Show.ShowColumnSingular (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowEdgeTypes
+[       OK ] QA_GDB_106_Show.ShowEdgeTypes (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowEdgeType
+[       OK ] QA_GDB_106_Show.ShowEdgeType (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowIndexes
+[       OK ] QA_GDB_106_Show.ShowIndexes (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowIndex
+[       OK ] QA_GDB_106_Show.ShowIndex (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowEmbeddings
+[       OK ] QA_GDB_106_Show.ShowEmbeddings (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowEmbeddingsFromTable
+[       OK ] QA_GDB_106_Show.ShowEmbeddingsFromTable (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowEmbeddingSingular
+[       OK ] QA_GDB_106_Show.ShowEmbeddingSingular (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowProviders
+[       OK ] QA_GDB_106_Show.ShowProviders (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowProvider
+[       OK ] QA_GDB_106_Show.ShowProvider (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowReplicationSlots
+[       OK ] QA_GDB_106_Show.ShowReplicationSlots (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowReplicationStatus
+[       OK ] QA_GDB_106_Show.ShowReplicationStatus (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowStandbyStatus
+[       OK ] QA_GDB_106_Show.ShowStandbyStatus (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowAll
+[       OK ] QA_GDB_106_Show.ShowAll (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowSettings
+[       OK ] QA_GDB_106_Show.ShowSettings (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowParameter
+[       OK ] QA_GDB_106_Show.ShowParameter (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowDottedParameter
+[       OK ] QA_GDB_106_Show.ShowDottedParameter (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowDeepDottedParameter
+[       OK ] QA_GDB_106_Show.ShowDeepDottedParameter (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowColumnsMissingFrom
+[       OK ] QA_GDB_106_Show.ShowColumnsMissingFrom (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowReplicationInvalid
+[       OK ] QA_GDB_106_Show.ShowReplicationInvalid (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowStandbyMissingStatus
+[       OK ] QA_GDB_106_Show.ShowStandbyMissingStatus (0 ms)
+[ RUN      ] QA_GDB_106_Show.ShowEdgeMissingType
+[       OK ] QA_GDB_106_Show.ShowEdgeMissingType (0 ms)
+[----------] 25 tests from QA_GDB_106_Show (0 ms total)
+
+[----------] 9 tests from QA_GDB_106_Explain
+[ RUN      ] QA_GDB_106_Explain.BasicExplain
+[       OK ] QA_GDB_106_Explain.BasicExplain (0 ms)
+[ RUN      ] QA_GDB_106_Explain.ExplainAnalyze
+[       OK ] QA_GDB_106_Explain.ExplainAnalyze (0 ms)
+[ RUN      ] QA_GDB_106_Explain.FormatText
+[       OK ] QA_GDB_106_Explain.FormatText (0 ms)
+[ RUN      ] QA_GDB_106_Explain.FormatJson
+[       OK ] QA_GDB_106_Explain.FormatJson (0 ms)
+[ RUN      ] QA_GDB_106_Explain.AnalyzeFormatJson
+[       OK ] QA_GDB_106_Explain.AnalyzeFormatJson (0 ms)
+[ RUN      ] QA_GDB_106_Explain.ExplainInsert
+[       OK ] QA_GDB_106_Explain.ExplainInsert (0 ms)
+[ RUN      ] QA_GDB_106_Explain.ExplainUpdate
+[       OK ] QA_GDB_106_Explain.ExplainUpdate (0 ms)
+[ RUN      ] QA_GDB_106_Explain.ExplainDelete
+[       OK ] QA_GDB_106_Explain.ExplainDelete (0 ms)
+[ RUN      ] QA_GDB_106_Explain.InvalidFormat
+[       OK ] QA_GDB_106_Explain.InvalidFormat (0 ms)
+[----------] 9 tests from QA_GDB_106_Explain (0 ms total)
+
+[----------] 2 tests from QA_GDB_106_Describe
+[ RUN      ] QA_GDB_106_Describe.BasicDescribe
+[       OK ] QA_GDB_106_Describe.BasicDescribe (0 ms)
+[ RUN      ] QA_GDB_106_Describe.MissingTable
+[       OK ] QA_GDB_106_Describe.MissingTable (0 ms)
+[----------] 2 tests from QA_GDB_106_Describe (0 ms total)
+
+[----------] 3 tests from QA_GDB_106_Reembed
+[ RUN      ] QA_GDB_106_Reembed.BasicReembed
+[       OK ] QA_GDB_106_Reembed.BasicReembed (0 ms)
+[ RUN      ] QA_GDB_106_Reembed.ReembedTable
+[       OK ] QA_GDB_106_Reembed.ReembedTable (0 ms)
+[ RUN      ] QA_GDB_106_Reembed.MissingTable
+[       OK ] QA_GDB_106_Reembed.MissingTable (0 ms)
+[----------] 3 tests from QA_GDB_106_Reembed (0 ms total)
+
+[----------] 2 tests from QA_GDB_106_Vacuum
+[ RUN      ] QA_GDB_106_Vacuum.VacuumNoTable
+[       OK ] QA_GDB_106_Vacuum.VacuumNoTable (0 ms)
+[ RUN      ] QA_GDB_106_Vacuum.VacuumWithTable
+[       OK ] QA_GDB_106_Vacuum.VacuumWithTable (0 ms)
+[----------] 2 tests from QA_GDB_106_Vacuum (0 ms total)
+
+[----------] 2 tests from QA_GDB_106_Analyze
+[ RUN      ] QA_GDB_106_Analyze.AnalyzeNoTable
+[       OK ] QA_GDB_106_Analyze.AnalyzeNoTable (0 ms)
+[ RUN      ] QA_GDB_106_Analyze.AnalyzeWithTable
+[       OK ] QA_GDB_106_Analyze.AnalyzeWithTable (0 ms)
+[----------] 2 tests from QA_GDB_106_Analyze (0 ms total)
+
+[----------] 3 tests from QA_GDB_106_Stress
+[ RUN      ] QA_GDB_106_Stress.LongMatchPattern
+[       OK ] QA_GDB_106_Stress.LongMatchPattern (0 ms)
+[ RUN      ] QA_GDB_106_Stress.ManyShowStatements
+[       OK ] QA_GDB_106_Stress.ManyShowStatements (0 ms)
+[ RUN      ] QA_GDB_106_Stress.ManyTCLStatements
+[       OK ] QA_GDB_106_Stress.ManyTCLStatements (0 ms)
+[----------] 3 tests from QA_GDB_106_Stress (0 ms total)
+
+[----------] 4 tests from QA_TypeId
+[ RUN      ] QA_TypeId.AllTwentyTwoTypesPresent
+[       OK ] QA_TypeId.AllTwentyTwoTypesPresent (0 ms)
+[ RUN      ] QA_TypeId.FixedSizeConsistencyWithAlignment
+[       OK ] QA_TypeId.FixedSizeConsistencyWithAlignment (0 ms)
+[ RUN      ] QA_TypeId.VariableLengthTypesHaveNoFixedSize
+[       OK ] QA_TypeId.VariableLengthTypesHaveNoFixedSize (0 ms)
+[ RUN      ] QA_TypeId.IsComparableExcludesOnlyBlobAndEmbedding
+[       OK ] QA_TypeId.IsComparableExcludesOnlyBlobAndEmbedding (0 ms)
+[----------] 4 tests from QA_TypeId (0 ms total)
+
+[----------] 5 tests from QA_Value
+[ RUN      ] QA_Value.NullTypeIdReturnsInt8ButIsNullIsTrue
+[       OK ] QA_Value.NullTypeIdReturnsInt8ButIsNullIsTrue (0 ms)
+[ RUN      ] QA_Value.NullThrowsOnAllTypedAccessors
+[       OK ] QA_Value.NullThrowsOnAllTypedAccessors (0 ms)
+[ RUN      ] QA_Value.TryAsReturnsErrorForAllTypeMismatches
+[       OK ] QA_Value.TryAsReturnsErrorForAllTypeMismatches (0 ms)
+[ RUN      ] QA_Value.BoolVsInt8AreDistinct
+[       OK ] QA_Value.BoolVsInt8AreDistinct (0 ms)
+[ RUN      ] QA_Value.MaxAndMinBoundaryValues
+[       OK ] QA_Value.MaxAndMinBoundaryValues (0 ms)
+[----------] 5 tests from QA_Value (0 ms total)
+
+[----------] 8 tests from QA_Coercion
+[ RUN      ] QA_Coercion.SignedToUnsignedSameWidthNotAllowed
+[       OK ] QA_Coercion.SignedToUnsignedSameWidthNotAllowed (0 ms)
+[ RUN      ] QA_Coercion.SignedToLargerUnsignedNotAllowed
+[       OK ] QA_Coercion.SignedToLargerUnsignedNotAllowed (0 ms)
+[ RUN      ] QA_Coercion.CoerceNegativeSignedToUnsignedReturnsError
+[       OK ] QA_Coercion.CoerceNegativeSignedToUnsignedReturnsError (0 ms)
+[ RUN      ] QA_Coercion.UnsignedToSignedNarrowing
+[       OK ] QA_Coercion.UnsignedToSignedNarrowing (0 ms)
+[ RUN      ] QA_Coercion.UINT64CannotCoerceToAnySigned
+[       OK ] QA_Coercion.UINT64CannotCoerceToAnySigned (0 ms)
+[ RUN      ] QA_Coercion.CoerceAllValidIntegerWidenings
+[       OK ] QA_Coercion.CoerceAllValidIntegerWidenings (0 ms)
+[ RUN      ] QA_Coercion.CoerceIntMaxToLargerSignedType
+[       OK ] QA_Coercion.CoerceIntMaxToLargerSignedType (0 ms)
+[ RUN      ] QA_Coercion.CoerceNullPreservesNullForAllTargets
+[       OK ] QA_Coercion.CoerceNullPreservesNullForAllTargets (0 ms)
+[----------] 8 tests from QA_Coercion (0 ms total)
+
+[----------] 20 tests from QA_Compare
+[ RUN      ] QA_Compare.DecimalCrossTypeComparisonWithInt
+[       OK ] QA_Compare.DecimalCrossTypeComparisonWithInt (0 ms)
+[ RUN      ] QA_Compare.DecimalCrossTypeComparisonGreater
+[       OK ] QA_Compare.DecimalCrossTypeComparisonGreater (0 ms)
+[ RUN      ] QA_Compare.DecimalCrossTypeComparisonLess
+[       OK ] QA_Compare.DecimalCrossTypeComparisonLess (0 ms)
+[ RUN      ] QA_Compare.DecimalSameTypeZeroValues
+[       OK ] QA_Compare.DecimalSameTypeZeroValues (0 ms)
+[ RUN      ] QA_Compare.DecimalSameTypeNegativeValues
+[       OK ] QA_Compare.DecimalSameTypeNegativeValues (0 ms)
+[ RUN      ] QA_Compare.NullVsNullIsEqual
+[       OK ] QA_Compare.NullVsNullIsEqual (0 ms)
+[ RUN      ] QA_Compare.NullSortsBeforeAllNonNullTypes
+[       OK ] QA_Compare.NullSortsBeforeAllNonNullTypes (0 ms)
+[ RUN      ] QA_Compare.BlobCompareShouldReturnError
+[       OK ] QA_Compare.BlobCompareShouldReturnError (0 ms)
+[ RUN      ] QA_Compare.EmbeddingCompareShouldReturnError
+[       OK ] QA_Compare.EmbeddingCompareShouldReturnError (0 ms)
+[ RUN      ] QA_Compare.IncompatibleTypesStringVsInt
+[       OK ] QA_Compare.IncompatibleTypesStringVsInt (0 ms)
+[ RUN      ] QA_Compare.IncompatibleTypesDateVsInt
+[       OK ] QA_Compare.IncompatibleTypesDateVsInt (0 ms)
+[ RUN      ] QA_Compare.SignedUnsignedBoundary_Int64MaxVsUint64
+[       OK ] QA_Compare.SignedUnsignedBoundary_Int64MaxVsUint64 (0 ms)
+[ RUN      ] QA_Compare.UINT64MaxVsInt64Zero
+[       OK ] QA_Compare.UINT64MaxVsInt64Zero (0 ms)
+[ RUN      ] QA_Compare.NegativeInt64VsUint64Zero
+[       OK ] QA_Compare.NegativeInt64VsUint64Zero (0 ms)
+[ RUN      ] QA_Compare.FloatNaNVsInfinity
+[       OK ] QA_Compare.FloatNaNVsInfinity (0 ms)
+[ RUN      ] QA_Compare.PointWithNaNCoordinates
+[       OK ] QA_Compare.PointWithNaNCoordinates (0 ms)
+[ RUN      ] QA_Compare.IntervalLexicographicOrdering
+[       OK ] QA_Compare.IntervalLexicographicOrdering (0 ms)
+[ RUN      ] QA_Compare.UuidLexicographicOrdering
+[       OK ] QA_Compare.UuidLexicographicOrdering (0 ms)
+[ RUN      ] QA_Compare.StringEmptyVsNonEmpty
+[       OK ] QA_Compare.StringEmptyVsNonEmpty (0 ms)
+[ RUN      ] QA_Compare.BoolOrdering
+[       OK ] QA_Compare.BoolOrdering (0 ms)
+[----------] 20 tests from QA_Compare (0 ms total)
+
+[----------] 16 tests from QA_Serialization
+[ RUN      ] QA_Serialization.SerializedSizeMatchesActualBufferSize
+[       OK ] QA_Serialization.SerializedSizeMatchesActualBufferSize (0 ms)
+[ RUN      ] QA_Serialization.RoundTripAllBoundaryIntegers
+[       OK ] QA_Serialization.RoundTripAllBoundaryIntegers (0 ms)
+[ RUN      ] QA_Serialization.RoundTripNegativeDateAndTimestamp
+[       OK ] QA_Serialization.RoundTripNegativeDateAndTimestamp (0 ms)
+[ RUN      ] QA_Serialization.RoundTripStringWithNullAndSpecialBytes
+[       OK ] QA_Serialization.RoundTripStringWithNullAndSpecialBytes (0 ms)
+[ RUN      ] QA_Serialization.RoundTripLargeEmbedding
+[       OK ] QA_Serialization.RoundTripLargeEmbedding (0 ms)
+[ RUN      ] QA_Serialization.RoundTripUuidAllBytes
+[       OK ] QA_Serialization.RoundTripUuidAllBytes (0 ms)
+[ RUN      ] QA_Serialization.DeserializeEmptyBufferReturnsError
+[       OK ] QA_Serialization.DeserializeEmptyBufferReturnsError (0 ms)
+[ RUN      ] QA_Serialization.DeserializeInvalidNullFlagReturnsError
+[       OK ] QA_Serialization.DeserializeInvalidNullFlagReturnsError (0 ms)
+[ RUN      ] QA_Serialization.DeserializeTruncatedFixedTypes
+[       OK ] QA_Serialization.DeserializeTruncatedFixedTypes (0 ms)
+[ RUN      ] QA_Serialization.DeserializeCraftedStringLengthOverflow
+[       OK ] QA_Serialization.DeserializeCraftedStringLengthOverflow (0 ms)
+[ RUN      ] QA_Serialization.DeserializeCraftedEmbeddingCountOverflow
+[       OK ] QA_Serialization.DeserializeCraftedEmbeddingCountOverflow (0 ms)
+[ RUN      ] QA_Serialization.NullDeserializesWithAnyTypeId
+[       OK ] QA_Serialization.NullDeserializesWithAnyTypeId (0 ms)
+[ RUN      ] QA_Serialization.LittleEndianEncodingInt64
+[       OK ] QA_Serialization.LittleEndianEncodingInt64 (0 ms)
+[ RUN      ] QA_Serialization.LittleEndianEncodingUUID
+[       OK ] QA_Serialization.LittleEndianEncodingUUID (0 ms)
+[ RUN      ] QA_Serialization.BoolEncodingIsZeroOrOne
+[       OK ] QA_Serialization.BoolEncodingIsZeroOrOne (0 ms)
+[ RUN      ] QA_Serialization.DecimalRoundTripNegativeValue
+[       OK ] QA_Serialization.DecimalRoundTripNegativeValue (0 ms)
+[----------] 16 tests from QA_Serialization (0 ms total)
+
+[----------] 18 tests from QA_GDB_122_Node
+[ RUN      ] QA_GDB_122_Node.HeaderOnlyNode
+[       OK ] QA_GDB_122_Node.HeaderOnlyNode (0 ms)
+[ RUN      ] QA_GDB_122_Node.MaxNodeId
+[       OK ] QA_GDB_122_Node.MaxNodeId (0 ms)
+[ RUN      ] QA_GDB_122_Node.SentinelNodeId
+[       OK ] QA_GDB_122_Node.SentinelNodeId (0 ms)
+[ RUN      ] QA_GDB_122_Node.MaxVectorPageId
+[       OK ] QA_GDB_122_Node.MaxVectorPageId (0 ms)
+[ RUN      ] QA_GDB_122_Node.MultiLayerEmptyNeighbors
+[       OK ] QA_GDB_122_Node.MultiLayerEmptyNeighbors (0 ms)
+[ RUN      ] QA_GDB_122_Node.TombstonePreservesData
+[       OK ] QA_GDB_122_Node.TombstonePreservesData (0 ms)
+[ RUN      ] QA_GDB_122_Node.AllFlagsSet
+[       OK ] QA_GDB_122_Node.AllFlagsSet (0 ms)
+[ RUN      ] QA_GDB_122_Node.NeighborWithZeroDistance
+[       OK ] QA_GDB_122_Node.NeighborWithZeroDistance (0 ms)
+[ RUN      ] QA_GDB_122_Node.NeighborWithNegativeDistance
+[       OK ] QA_GDB_122_Node.NeighborWithNegativeDistance (0 ms)
+[ RUN      ] QA_GDB_122_Node.NeighborWithInfDistance
+[       OK ] QA_GDB_122_Node.NeighborWithInfDistance (0 ms)
+[ RUN      ] QA_GDB_122_Node.Layer0With2MNeighbors
+[       OK ] QA_GDB_122_Node.Layer0With2MNeighbors (0 ms)
+[ RUN      ] QA_GDB_122_Node.SerializedSizeEmptyNode
+[       OK ] QA_GDB_122_Node.SerializedSizeEmptyNode (0 ms)
+[ RUN      ] QA_GDB_122_Node.SerializedSizeMultiLayer
+[       OK ] QA_GDB_122_Node.SerializedSizeMultiLayer (0 ms)
+[ RUN      ] QA_GDB_122_Node.DeserializeEmptyData
+[       OK ] QA_GDB_122_Node.DeserializeEmptyData (0 ms)
+[ RUN      ] QA_GDB_122_Node.DeserializeOneByteShort
+[       OK ] QA_GDB_122_Node.DeserializeOneByteShort (0 ms)
+[ RUN      ] QA_GDB_122_Node.DeserializeExactHeaderNoLayers
+[       OK ] QA_GDB_122_Node.DeserializeExactHeaderNoLayers (0 ms)
+[ RUN      ] QA_GDB_122_Node.DeserializeTruncatedNeighborEntries
+[       OK ] QA_GDB_122_Node.DeserializeTruncatedNeighborEntries (0 ms)
+[ RUN      ] QA_GDB_122_Node.DeserializeTruncatedAtLayer2
+[       OK ] QA_GDB_122_Node.DeserializeTruncatedAtLayer2 (0 ms)
+[----------] 18 tests from QA_GDB_122_Node (0 ms total)
+
+[----------] 8 tests from QA_GDB_122_Meta
+[ RUN      ] QA_GDB_122_Meta.DefaultValues
+[       OK ] QA_GDB_122_Meta.DefaultValues (0 ms)
+[ RUN      ] QA_GDB_122_Meta.RoundTripWithEmptyPageLists
+[       OK ] QA_GDB_122_Meta.RoundTripWithEmptyPageLists (0 ms)
+[ RUN      ] QA_GDB_122_Meta.RoundTripMaxValues
+[       OK ] QA_GDB_122_Meta.RoundTripMaxValues (0 ms)
+[ RUN      ] QA_GDB_122_Meta.LargePageLists
+[       OK ] QA_GDB_122_Meta.LargePageLists (0 ms)
+[ RUN      ] QA_GDB_122_Meta.FixedHeaderOnlyNoPageLists
+[       OK ] QA_GDB_122_Meta.FixedHeaderOnlyNoPageLists (0 ms)
+[ RUN      ] QA_GDB_122_Meta.DeserializeEmptyData
+[       OK ] QA_GDB_122_Meta.DeserializeEmptyData (0 ms)
+[ RUN      ] QA_GDB_122_Meta.DeserializeTruncatedNodePageList
+[       OK ] QA_GDB_122_Meta.DeserializeTruncatedNodePageList (0 ms)
+[ RUN      ] QA_GDB_122_Meta.DeserializeTruncatedVectorPageList
+[       OK ] QA_GDB_122_Meta.DeserializeTruncatedVectorPageList (0 ms)
+[----------] 8 tests from QA_GDB_122_Meta (0 ms total)
+
+[----------] 8 tests from QA_GDB_122_Vector
+[ RUN      ] QA_GDB_122_Vector.SingleDimension
+[       OK ] QA_GDB_122_Vector.SingleDimension (0 ms)
+[ RUN      ] QA_GDB_122_Vector.EmptyVector
+[       OK ] QA_GDB_122_Vector.EmptyVector (0 ms)
+[ RUN      ] QA_GDB_122_Vector.NegativeValues
+[       OK ] QA_GDB_122_Vector.NegativeValues (0 ms)
+[ RUN      ] QA_GDB_122_Vector.SpecialFloatValues
+[       OK ] QA_GDB_122_Vector.SpecialFloatValues (0 ms)
+[ RUN      ] QA_GDB_122_Vector.NaNRoundTrip
+[       OK ] QA_GDB_122_Vector.NaNRoundTrip (0 ms)
+[ RUN      ] QA_GDB_122_Vector.LargeDimension
+[       OK ] QA_GDB_122_Vector.LargeDimension (0 ms)
+[ RUN      ] QA_GDB_122_Vector.DimensionMismatchTooShort
+[       OK ] QA_GDB_122_Vector.DimensionMismatchTooShort (0 ms)
+[ RUN      ] QA_GDB_122_Vector.DimensionMismatchExtraData
+[       OK ] QA_GDB_122_Vector.DimensionMismatchExtraData (0 ms)
+[----------] 8 tests from QA_GDB_122_Vector (0 ms total)
+
+[----------] 2 tests from QA_GDB_122_Constants
+[ RUN      ] QA_GDB_122_Constants.DefaultParameters
+[       OK ] QA_GDB_122_Constants.DefaultParameters (0 ms)
+[ RUN      ] QA_GDB_122_Constants.DefaultMetaConstructor
+[       OK ] QA_GDB_122_Constants.DefaultMetaConstructor (0 ms)
+[----------] 2 tests from QA_GDB_122_Constants (0 ms total)
+
+[----------] 2 tests from QA_GDB_122_Stress
+[ RUN      ] QA_GDB_122_Stress.ManyNodeRoundTrips
+[       OK ] QA_GDB_122_Stress.ManyNodeRoundTrips (6 ms)
+[ RUN      ] QA_GDB_122_Stress.ManyMetaRoundTrips
+[       OK ] QA_GDB_122_Stress.ManyMetaRoundTrips (0 ms)
+[----------] 2 tests from QA_GDB_122_Stress (7 ms total)
+
+[----------] 7 tests from QA_GDB_123_Search
+[ RUN      ] QA_GDB_123_Search.SearchKZero
+[2026-06-11 08:18:20.986] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_123_Search.SearchKZero (3 ms)
+[ RUN      ] QA_GDB_123_Search.SearchKLargerThanDataset
+[2026-06-11 08:18:20.989] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_123_Search.SearchKLargerThanDataset (3 ms)
+[ RUN      ] QA_GDB_123_Search.SearchSingleElement
+[2026-06-11 08:18:20.992] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_123_Search.SearchSingleElement (3 ms)
+[ RUN      ] QA_GDB_123_Search.DuplicateVectors
+[2026-06-11 08:18:20.996] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_123_Search.DuplicateVectors (3 ms)
+[ RUN      ] QA_GDB_123_Search.FilterRejectsAll
+[2026-06-11 08:18:21.000] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_123_Search.FilterRejectsAll (4 ms)
+[ RUN      ] QA_GDB_123_Search.FilterAcceptsAll
+[2026-06-11 08:18:21.004] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_123_Search.FilterAcceptsAll (3 ms)
+[ RUN      ] QA_GDB_123_Search.WrongQueryDimension
+[2026-06-11 08:18:21.007] [info] [hnsw_index.cpp:63] Created HNSW index: dim=4, M=16, ef_c=200, ef_s=64, meta_page=1
+[       OK ] QA_GDB_123_Search.WrongQueryDimension (3 ms)
+[----------] 7 tests from QA_GDB_123_Search (25 ms total)
+
+[----------] 6 tests from QA_GDB_123_Insert
+[ RUN      ] QA_GDB_123_Insert.ZeroDimensionConfig
+[       OK ] QA_GDB_123_Insert.ZeroDimensionConfig (3 ms)
+[ RUN      ] QA_GDB_123_Insert.ZeroMConfig
+[       OK ] QA_GDB_123_Insert.ZeroMConfig (2 ms)
+[ RUN      ] QA_GDB_123_Insert.InsertEmptyVector
+[2026-06-11 08:18:21.017] [info] [hnsw_index.cpp:63] Created HNSW index: dim=4, M=16, ef_c=200, ef_s=64, meta_page=1
+[       OK ] QA_GDB_123_Insert.InsertEmptyVector (3 ms)
+[ RUN      ] QA_GDB_123_Insert.InsertWrongDimension
+[2026-06-11 08:18:21.020] [info] [hnsw_index.cpp:63] Created HNSW index: dim=4, M=16, ef_c=200, ef_s=64, meta_page=1
+[       OK ] QA_GDB_123_Insert.InsertWrongDimension (3 ms)
+[ RUN      ] QA_GDB_123_Insert.SequentialNodeIds
+[2026-06-11 08:18:21.023] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_123_Insert.SequentialNodeIds (9 ms)
+[ RUN      ] QA_GDB_123_Insert.LargeDimension
+[2026-06-11 08:18:21.033] [info] [hnsw_index.cpp:63] Created HNSW index: dim=1024, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_123_Insert.LargeDimension (4 ms)
+[----------] 6 tests from QA_GDB_123_Insert (26 ms total)
+
+[----------] 1 test from QA_GDB_123_Reset
+[ RUN      ] QA_GDB_123_Reset.InsertAfterReset
+[2026-06-11 08:18:21.037] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_123_Reset.InsertAfterReset (3 ms)
+[----------] 1 test from QA_GDB_123_Reset (3 ms total)
+
+[----------] 2 tests from QA_GDB_123_MParam
+[ RUN      ] QA_GDB_123_MParam.SmallM
+[2026-06-11 08:18:21.041] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=2, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_123_MParam.SmallM (6 ms)
+[ RUN      ] QA_GDB_123_MParam.LargeM
+[2026-06-11 08:18:21.047] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=64, ef_c=128, ef_s=128, meta_page=1
+[       OK ] QA_GDB_123_MParam.LargeM (20 ms)
+[----------] 2 tests from QA_GDB_123_MParam (26 ms total)
+
+[----------] 1 test from QA_GDB_123_Persistence
+[ RUN      ] QA_GDB_123_Persistence.NodeCountAfterLoad
+[2026-06-11 08:18:21.067] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[2026-06-11 08:18:21.074] [info] [hnsw_index.cpp:134] Loaded HNSW index: dim=2, nodes=25, meta_page=1, node_map_size=25
+[       OK ] QA_GDB_123_Persistence.NodeCountAfterLoad (10 ms)
+[----------] 1 test from QA_GDB_123_Persistence (10 ms total)
+
+[----------] 5 tests from QA_GDB_124_Delete
+[ RUN      ] QA_GDB_124_Delete.DeleteOnlyNode
+[2026-06-11 08:18:21.078] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_124_Delete.DeleteOnlyNode (3 ms)
+[ RUN      ] QA_GDB_124_Delete.DeleteAllNodes
+[2026-06-11 08:18:21.082] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_124_Delete.DeleteAllNodes (5 ms)
+[ RUN      ] QA_GDB_124_Delete.DeleteFirstNode
+[2026-06-11 08:18:21.087] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_124_Delete.DeleteFirstNode (3 ms)
+[ RUN      ] QA_GDB_124_Delete.DeleteLastNode
+[2026-06-11 08:18:21.091] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_124_Delete.DeleteLastNode (3 ms)
+[ RUN      ] QA_GDB_124_Delete.DeleteEntryPointAndCompact
+[2026-06-11 08:18:21.095] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[2026-06-11 08:18:21.100] [info] [hnsw_index.cpp:588] HNSW compaction: freed 1 tombstoned nodes, repaired neighbor connections
+[       OK ] QA_GDB_124_Delete.DeleteEntryPointAndCompact (8 ms)
+[----------] 5 tests from QA_GDB_124_Delete (25 ms total)
+
+[----------] 2 tests from QA_GDB_124_DeleteInsert
+[ RUN      ] QA_GDB_124_DeleteInsert.InsertAfterDelete
+[2026-06-11 08:18:21.103] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_124_DeleteInsert.InsertAfterDelete (3 ms)
+[ RUN      ] QA_GDB_124_DeleteInsert.InsertAfterDeleteAll
+[2026-06-11 08:18:21.107] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_124_DeleteInsert.InsertAfterDeleteAll (3 ms)
+[----------] 2 tests from QA_GDB_124_DeleteInsert (6 ms total)
+
+[----------] 5 tests from QA_GDB_124_Compact
+[ RUN      ] QA_GDB_124_Compact.CompactAllTombstoned
+[2026-06-11 08:18:21.110] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[2026-06-11 08:18:21.111] [info] [hnsw_index.cpp:588] HNSW compaction: freed 5 tombstoned nodes, repaired neighbor connections
+[       OK ] QA_GDB_124_Compact.CompactAllTombstoned (3 ms)
+[ RUN      ] QA_GDB_124_Compact.CompactThenSearch
+[2026-06-11 08:18:21.114] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[2026-06-11 08:18:21.117] [info] [hnsw_index.cpp:588] HNSW compaction: freed 5 tombstoned nodes, repaired neighbor connections
+[       OK ] QA_GDB_124_Compact.CompactThenSearch (6 ms)
+[ RUN      ] QA_GDB_124_Compact.InsertAfterCompaction
+[2026-06-11 08:18:21.121] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[2026-06-11 08:18:21.122] [info] [hnsw_index.cpp:588] HNSW compaction: freed 2 tombstoned nodes, repaired neighbor connections
+[       OK ] QA_GDB_124_Compact.InsertAfterCompaction (3 ms)
+[ RUN      ] QA_GDB_124_Compact.MultiRoundDeleteCompact
+[2026-06-11 08:18:21.125] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[2026-06-11 08:18:21.127] [info] [hnsw_index.cpp:588] HNSW compaction: freed 3 tombstoned nodes, repaired neighbor connections
+[2026-06-11 08:18:21.128] [info] [hnsw_index.cpp:588] HNSW compaction: freed 2 tombstoned nodes, repaired neighbor connections
+[       OK ] QA_GDB_124_Compact.MultiRoundDeleteCompact (6 ms)
+[ RUN      ] QA_GDB_124_Compact.CompactTwiceIsIdempotent
+[2026-06-11 08:18:21.132] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[2026-06-11 08:18:21.133] [info] [hnsw_index.cpp:588] HNSW compaction: freed 1 tombstoned nodes, repaired neighbor connections
+[       OK ] QA_GDB_124_Compact.CompactTwiceIsIdempotent (3 ms)
+[----------] 5 tests from QA_GDB_124_Compact (25 ms total)
+
+[----------] 2 tests from QA_GDB_124_Filter
+[ RUN      ] QA_GDB_124_Filter.FilteredSearchAfterDelete
+[2026-06-11 08:18:21.136] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_124_Filter.FilteredSearchAfterDelete (5 ms)
+[ RUN      ] QA_GDB_124_Filter.FilterRejectsAllAfterDelete
+[2026-06-11 08:18:21.141] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_124_Filter.FilterRejectsAllAfterDelete (3 ms)
+[----------] 2 tests from QA_GDB_124_Filter (8 ms total)
+
+[----------] 2 tests from QA_GDB_124_Persistence
+[ RUN      ] QA_GDB_124_Persistence.TombstonesSurviveLoad
+[2026-06-11 08:18:21.145] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[2026-06-11 08:18:21.147] [info] [hnsw_index.cpp:134] Loaded HNSW index: dim=2, nodes=8, meta_page=1, node_map_size=10
+[       OK ] QA_GDB_124_Persistence.TombstonesSurviveLoad (5 ms)
+[ RUN      ] QA_GDB_124_Persistence.CompactAfterLoad
+[2026-06-11 08:18:21.150] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[2026-06-11 08:18:21.152] [info] [hnsw_index.cpp:134] Loaded HNSW index: dim=2, nodes=5, meta_page=1, node_map_size=8
+[2026-06-11 08:18:21.152] [info] [hnsw_index.cpp:588] HNSW compaction: freed 3 tombstoned nodes, repaired neighbor connections
+[       OK ] QA_GDB_124_Persistence.CompactAfterLoad (4 ms)
+[----------] 2 tests from QA_GDB_124_Persistence (10 ms total)
+
+[----------] 1 test from QA_GDB_124_NodeCount
+[ RUN      ] QA_GDB_124_NodeCount.AccurateThroughCycles
+[2026-06-11 08:18:21.155] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[2026-06-11 08:18:21.156] [info] [hnsw_index.cpp:588] HNSW compaction: freed 2 tombstoned nodes, repaired neighbor connections
+[       OK ] QA_GDB_124_NodeCount.AccurateThroughCycles (4 ms)
+[----------] 1 test from QA_GDB_124_NodeCount (4 ms total)
+
+[----------] 2 tests from QA_GDB_124_Stress
+[ RUN      ] QA_GDB_124_Stress.DeleteHalfAndSearch
+[2026-06-11 08:18:21.159] [info] [hnsw_index.cpp:63] Created HNSW index: dim=4, M=8, ef_c=32, ef_s=32, meta_page=1
+[2026-06-11 08:18:21.195] [info] [hnsw_index.cpp:588] HNSW compaction: freed 25 tombstoned nodes, repaired neighbor connections
+[       OK ] QA_GDB_124_Stress.DeleteHalfAndSearch (40 ms)
+[ RUN      ] QA_GDB_124_Stress.AlternatingInsertDelete
+[2026-06-11 08:18:21.200] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=4, ef_c=16, ef_s=16, meta_page=1
+[       OK ] QA_GDB_124_Stress.AlternatingInsertDelete (8 ms)
+[----------] 2 tests from QA_GDB_124_Stress (49 ms total)
+
+[----------] 6 tests from QA_GDB_126_Boundaries
+[ RUN      ] QA_GDB_126_Boundaries.ExactNeonWidth
+[       OK ] QA_GDB_126_Boundaries.ExactNeonWidth (0 ms)
+[ RUN      ] QA_GDB_126_Boundaries.ExactAvx2Width
+[       OK ] QA_GDB_126_Boundaries.ExactAvx2Width (0 ms)
+[ RUN      ] QA_GDB_126_Boundaries.ExactAvx512Width
+[       OK ] QA_GDB_126_Boundaries.ExactAvx512Width (0 ms)
+[ RUN      ] QA_GDB_126_Boundaries.NeonWidthPlusOne
+[       OK ] QA_GDB_126_Boundaries.NeonWidthPlusOne (0 ms)
+[ RUN      ] QA_GDB_126_Boundaries.Avx2WidthPlusOne
+[       OK ] QA_GDB_126_Boundaries.Avx2WidthPlusOne (0 ms)
+[ RUN      ] QA_GDB_126_Boundaries.Avx2WidthMinusOne
+[       OK ] QA_GDB_126_Boundaries.Avx2WidthMinusOne (0 ms)
+[----------] 6 tests from QA_GDB_126_Boundaries (0 ms total)
+
+[----------] 5 tests from QA_GDB_126_Special
+[ RUN      ] QA_GDB_126_Special.SubnormalValues
+[       OK ] QA_GDB_126_Special.SubnormalValues (0 ms)
+[ RUN      ] QA_GDB_126_Special.InfinityInput
+[       OK ] QA_GDB_126_Special.InfinityInput (0 ms)
+[ RUN      ] QA_GDB_126_Special.NegativeInfinity
+[       OK ] QA_GDB_126_Special.NegativeInfinity (0 ms)
+[ RUN      ] QA_GDB_126_Special.MaxFloatValues
+[       OK ] QA_GDB_126_Special.MaxFloatValues (0 ms)
+[ RUN      ] QA_GDB_126_Special.NegativeZero
+[       OK ] QA_GDB_126_Special.NegativeZero (0 ms)
+[----------] 5 tests from QA_GDB_126_Special (0 ms total)
+
+[----------] 1 test from QA_GDB_126_InnerProduct
+[ RUN      ] QA_GDB_126_InnerProduct.ConsistentWithDotNegation
+[       OK ] QA_GDB_126_InnerProduct.ConsistentWithDotNegation (0 ms)
+[----------] 1 test from QA_GDB_126_InnerProduct (0 ms total)
+
+[----------] 4 tests from QA_GDB_126_Cosine
+[ RUN      ] QA_GDB_126_Cosine.NearlyParallelVectors
+[       OK ] QA_GDB_126_Cosine.NearlyParallelVectors (0 ms)
+[ RUN      ] QA_GDB_126_Cosine.AntiparallelVectors
+[       OK ] QA_GDB_126_Cosine.AntiparallelVectors (0 ms)
+[ RUN      ] QA_GDB_126_Cosine.UnitVectorsOrthogonal
+[       OK ] QA_GDB_126_Cosine.UnitVectorsOrthogonal (0 ms)
+[ RUN      ] QA_GDB_126_Cosine.ScaledIdentical
+[       OK ] QA_GDB_126_Cosine.ScaledIdentical (0 ms)
+[----------] 4 tests from QA_GDB_126_Cosine (0 ms total)
+
+[----------] 3 tests from QA_GDB_126_Batch
+[ RUN      ] QA_GDB_126_Batch.LargeBatch
+[       OK ] QA_GDB_126_Batch.LargeBatch (1 ms)
+[ RUN      ] QA_GDB_126_Batch.AllMetricsConsistent
+[       OK ] QA_GDB_126_Batch.AllMetricsConsistent (0 ms)
+[ RUN      ] QA_GDB_126_Batch.BatchDim1
+[       OK ] QA_GDB_126_Batch.BatchDim1 (0 ms)
+[----------] 3 tests from QA_GDB_126_Batch (1 ms total)
+
+[----------] 1 test from QA_GDB_126_AllMetrics
+[ RUN      ] QA_GDB_126_AllMetrics.IdenticalVectorsAllMetrics
+[       OK ] QA_GDB_126_AllMetrics.IdenticalVectorsAllMetrics (0 ms)
+[----------] 1 test from QA_GDB_126_AllMetrics (0 ms total)
+
+[----------] 1 test from QA_GDB_126_Names
+[ RUN      ] QA_GDB_126_Names.AllMetricNamesNonNull
+[       OK ] QA_GDB_126_Names.AllMetricNamesNonNull (0 ms)
+[----------] 1 test from QA_GDB_126_Names (0 ms total)
+
+[----------] 2 tests from QA_GDB_126_Stress
+[ RUN      ] QA_GDB_126_Stress.Dim4096AllMetrics
+[       OK ] QA_GDB_126_Stress.Dim4096AllMetrics (0 ms)
+[ RUN      ] QA_GDB_126_Stress.ManyRandomDimensions
+[       OK ] QA_GDB_126_Stress.ManyRandomDimensions (0 ms)
+[----------] 2 tests from QA_GDB_126_Stress (0 ms total)
+
+[----------] 12 tests from QA_GDB_129_Ollama
+[ RUN      ] QA_GDB_129_Ollama.EmptyResponseBody
+[       OK ] QA_GDB_129_Ollama.EmptyResponseBody (0 ms)
+[ RUN      ] QA_GDB_129_Ollama.EmptyEmbeddingArray
+[       OK ] QA_GDB_129_Ollama.EmptyEmbeddingArray (0 ms)
+[ RUN      ] QA_GDB_129_Ollama.EmbeddingNotArray
+[       OK ] QA_GDB_129_Ollama.EmbeddingNotArray (0 ms)
+[ RUN      ] QA_GDB_129_Ollama.EmbeddingContainsNonNumber
+[       OK ] QA_GDB_129_Ollama.EmbeddingContainsNonNumber (0 ms)
+[ RUN      ] QA_GDB_129_Ollama.TruncatedJson
+[       OK ] QA_GDB_129_Ollama.TruncatedJson (0 ms)
+[ RUN      ] QA_GDB_129_Ollama.ExtraDimensionInResponse
+[       OK ] QA_GDB_129_Ollama.ExtraDimensionInResponse (0 ms)
+[ RUN      ] QA_GDB_129_Ollama.HttpStatus404
+[       OK ] QA_GDB_129_Ollama.HttpStatus404 (0 ms)
+[ RUN      ] QA_GDB_129_Ollama.BatchWithSingleItem
+[       OK ] QA_GDB_129_Ollama.BatchWithSingleItem (0 ms)
+[ RUN      ] QA_GDB_129_Ollama.BatchCallsPostPerItem
+[       OK ] QA_GDB_129_Ollama.BatchCallsPostPerItem (0 ms)
+[ RUN      ] QA_GDB_129_Ollama.HealthCheckEmptyModelList
+[       OK ] QA_GDB_129_Ollama.HealthCheckEmptyModelList (0 ms)
+[ RUN      ] QA_GDB_129_Ollama.HealthCheckMalformedJson
+[       OK ] QA_GDB_129_Ollama.HealthCheckMalformedJson (0 ms)
+[ RUN      ] QA_GDB_129_Ollama.HealthCheckHttp500
+[       OK ] QA_GDB_129_Ollama.HealthCheckHttp500 (0 ms)
+[----------] 12 tests from QA_GDB_129_Ollama (1 ms total)
+
+[----------] 8 tests from QA_GDB_129_Builtin
+[ RUN      ] QA_GDB_129_Builtin.VeryLongText
+[       OK ] QA_GDB_129_Builtin.VeryLongText (12 ms)
+[ RUN      ] QA_GDB_129_Builtin.UnicodeText
+[       OK ] QA_GDB_129_Builtin.UnicodeText (0 ms)
+[ RUN      ] QA_GDB_129_Builtin.SpecialCharactersInText
+[       OK ] QA_GDB_129_Builtin.SpecialCharactersInText (0 ms)
+[ RUN      ] QA_GDB_129_Builtin.SingleCharacter
+[       OK ] QA_GDB_129_Builtin.SingleCharacter (0 ms)
+[ RUN      ] QA_GDB_129_Builtin.BatchEmptyList
+[       OK ] QA_GDB_129_Builtin.BatchEmptyList (0 ms)
+[ RUN      ] QA_GDB_129_Builtin.BatchWithEmptyString
+[       OK ] QA_GDB_129_Builtin.BatchWithEmptyString (0 ms)
+[ RUN      ] QA_GDB_129_Builtin.SmallDimension
+[       OK ] QA_GDB_129_Builtin.SmallDimension (0 ms)
+[ RUN      ] QA_GDB_129_Builtin.LargeDimension
+[       OK ] QA_GDB_129_Builtin.LargeDimension (3 ms)
+[----------] 8 tests from QA_GDB_129_Builtin (16 ms total)
+
+[----------] 5 tests from QA_GDB_129_Registry
+[ RUN      ] QA_GDB_129_Registry.InvalidProviderName
+[       OK ] QA_GDB_129_Registry.InvalidProviderName (0 ms)
+[ RUN      ] QA_GDB_129_Registry.EmptyProviderName
+[       OK ] QA_GDB_129_Registry.EmptyProviderName (0 ms)
+[ RUN      ] QA_GDB_129_Registry.UnknownProviderType
+[       OK ] QA_GDB_129_Registry.UnknownProviderType (0 ms)
+[ RUN      ] QA_GDB_129_Registry.BuiltinWithNonNumericDimension
+[2026-06-11 08:18:21.225] [info] [provider_registry.cpp:126] created builtin provider: dimension=384
+[       OK ] QA_GDB_129_Registry.BuiltinWithNonNumericDimension (0 ms)
+[ RUN      ] QA_GDB_129_Registry.DifferentBuiltinDimensionsDifferentInstances
+[2026-06-11 08:18:21.226] [info] [provider_registry.cpp:126] created builtin provider: dimension=64
+[2026-06-11 08:18:21.226] [info] [provider_registry.cpp:126] created builtin provider: dimension=128
+[       OK ] QA_GDB_129_Registry.DifferentBuiltinDimensionsDifferentInstances (0 ms)
+[----------] 5 tests from QA_GDB_129_Registry (0 ms total)
+
+[----------] 4 tests from QA_GDB_129_OpenAI
+[ RUN      ] QA_GDB_129_OpenAI.EmptyDataArray
+[       OK ] QA_GDB_129_OpenAI.EmptyDataArray (0 ms)
+[ RUN      ] QA_GDB_129_OpenAI.BatchEmptyList
+[       OK ] QA_GDB_129_OpenAI.BatchEmptyList (0 ms)
+[ RUN      ] QA_GDB_129_OpenAI.LargeBatch
+[       OK ] QA_GDB_129_OpenAI.LargeBatch (0 ms)
+[ RUN      ] QA_GDB_129_OpenAI.CustomBaseUrl
+[       OK ] QA_GDB_129_OpenAI.CustomBaseUrl (0 ms)
+[----------] 4 tests from QA_GDB_129_OpenAI (0 ms total)
+
+[----------] 14 tests from QA_Page
+[ RUN      ] QA_Page.InsertExactlyFreeSpace
+[       OK ] QA_Page.InsertExactlyFreeSpace (0 ms)
+[ RUN      ] QA_Page.InsertOneBeyondFreeSpaceFails
+[       OK ] QA_Page.InsertOneBeyondFreeSpaceFails (0 ms)
+[ RUN      ] QA_Page.InsertMinimumSizeTuple
+[       OK ] QA_Page.InsertMinimumSizeTuple (0 ms)
+[ RUN      ] QA_Page.UpdateGrowFailureDoesNotCorruptOriginalData
+[       OK ] QA_Page.UpdateGrowFailureDoesNotCorruptOriginalData (0 ms)
+[ RUN      ] QA_Page.UpdateGrowSingleTuplePageFailure
+[       OK ] QA_Page.UpdateGrowSingleTuplePageFailure (0 ms)
+[ RUN      ] QA_Page.CompactAfterShrinkingUpdate
+[       OK ] QA_Page.CompactAfterShrinkingUpdate (0 ms)
+[ RUN      ] QA_Page.CompactAllDeletedThenInsert
+[       OK ] QA_Page.CompactAllDeletedThenInsert (0 ms)
+[ RUN      ] QA_Page.SlotReuseDoesNotGrowDirectory
+[       OK ] QA_Page.SlotReuseDoesNotGrowDirectory (0 ms)
+[ RUN      ] QA_Page.InsertDeleteCompactCycle
+[       OK ] QA_Page.InsertDeleteCompactCycle (0 ms)
+[ RUN      ] QA_Page.RawBytesRoundTrip
+[       OK ] QA_Page.RawBytesRoundTrip (0 ms)
+[ RUN      ] QA_Page.AllPageTypes
+[       OK ] QA_Page.AllPageTypes (0 ms)
+[ RUN      ] QA_Page.FillWithMinimalTuples
+[       OK ] QA_Page.FillWithMinimalTuples (17 ms)
+[ RUN      ] QA_Page.UpdateSameLengthPreservesDataOffset
+[       OK ] QA_Page.UpdateSameLengthPreservesDataOffset (0 ms)
+[ RUN      ] QA_Page.CompactDataIntegrity
+[       OK ] QA_Page.CompactDataIntegrity (0 ms)
+[----------] 14 tests from QA_Page (18 ms total)
+
+[----------] 13 tests from QA_TupleSerializer
+[ RUN      ] QA_TupleSerializer.AllNullVariableColumns
+[       OK ] QA_TupleSerializer.AllNullVariableColumns (0 ms)
+[ RUN      ] QA_TupleSerializer.MultipleEmptyStrings
+sixseven_qa_tests.exe : C:\Program Files\Microsoft Visual 
+Studio\18\Community\VC\Tools\MSVC\14.51.36231\include\span(462) : Assertion failed: span subscript out of range
+At line:1 char:122
++ ... ests.exe) { & .\build\debug\tests\qa\sixseven_qa_tests.exe 2>&1 | Out ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Program File...pt out of range:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+unknown file: error: SEH exception with code 0xc000001d thrown in the test body.
+Stack trace:
+
+
+[  FAILED  ] QA_TupleSerializer.MultipleEmptyStrings (0 ms)
+[ RUN      ] QA_TupleSerializer.InterleavedNullAndNonNullVarFields
+[       OK ] QA_TupleSerializer.InterleavedNullAndNonNullVarFields (0 ms)
+[ RUN      ] QA_TupleSerializer.NullBitmapExactly8Cols
+[       OK ] QA_TupleSerializer.NullBitmapExactly8Cols (0 ms)
+[ RUN      ] QA_TupleSerializer.NullBitmapExactly9Cols
+[       OK ] QA_TupleSerializer.NullBitmapExactly9Cols (0 ms)
+[ RUN      ] QA_TupleSerializer.NullInSecondBitmapByte
+[       OK ] QA_TupleSerializer.NullInSecondBitmapByte (0 ms)
+[ RUN      ] QA_TupleSerializer.ComputeSizeMatchesActual
+[       OK ] QA_TupleSerializer.ComputeSizeMatchesActual (0 ms)
+[ RUN      ] QA_TupleSerializer.ComputeSizeAllNulls
+[       OK ] QA_TupleSerializer.ComputeSizeAllNulls (0 ms)
+[ RUN      ] QA_TupleSerializer.GetFieldAllPositions
+[       OK ] QA_TupleSerializer.GetFieldAllPositions (0 ms)
+[ RUN      ] QA_TupleSerializer.PureFixedSchema
+[       OK ] QA_TupleSerializer.PureFixedSchema (0 ms)
+[ RUN      ] QA_TupleSerializer.NearMaxTupleSize
+[       OK ] QA_TupleSerializer.NearMaxTupleSize (0 ms)
+[ RUN      ] QA_TupleSerializer.TupleExceedingMaxSizeFails
+[       OK ] QA_TupleSerializer.TupleExceedingMaxSizeFails (0 ms)
+[ RUN      ] QA_TupleSerializer.CorruptedBufferDetected
+[       OK ] QA_TupleSerializer.CorruptedBufferDetected (0 ms)
+[----------] 13 tests from QA_TupleSerializer (1 ms total)
+
+[----------] 13 tests from QA_Overflow
+[ RUN      ] QA_Overflow.ExactlyThresholdNeedsNoOverflow
+[       OK ] QA_Overflow.ExactlyThresholdNeedsNoOverflow (0 ms)
+[ RUN      ] QA_Overflow.ThresholdPlusOneNeedsOverflow
+[       OK ] QA_Overflow.ThresholdPlusOneNeedsOverflow (0 ms)
+[ RUN      ] QA_Overflow.OneByteBeforeChunkBoundary
+[       OK ] QA_Overflow.OneByteBeforeChunkBoundary (0 ms)
+[ RUN      ] QA_Overflow.ExactlyChunkCapacity
+[       OK ] QA_Overflow.ExactlyChunkCapacity (0 ms)
+[ RUN      ] QA_Overflow.ChunkCapacityPlusOne
+[       OK ] QA_Overflow.ChunkCapacityPlusOne (0 ms)
+[ RUN      ] QA_Overflow.FreeAndRestore
+[       OK ] QA_Overflow.FreeAndRestore (0 ms)
+[ RUN      ] QA_Overflow.AllZerosAtVariousSizes
+[       OK ] QA_Overflow.AllZerosAtVariousSizes (1 ms)
+[ RUN      ] QA_Overflow.AllOnesRoundTrip
+[       OK ] QA_Overflow.AllOnesRoundTrip (0 ms)
+[ RUN      ] QA_Overflow.FreeZeroPageIdFails
+[       OK ] QA_Overflow.FreeZeroPageIdFails (0 ms)
+[ RUN      ] QA_Overflow.ReadZeroLengthFails
+[       OK ] QA_Overflow.ReadZeroLengthFails (0 ms)
+[ RUN      ] QA_Overflow.StoredPagesHaveOverflowType
+[       OK ] QA_Overflow.StoredPagesHaveOverflowType (0 ms)
+[ RUN      ] QA_Overflow.FreeReleasesAllPagesInChain
+[       OK ] QA_Overflow.FreeReleasesAllPagesInChain (0 ms)
+[ RUN      ] QA_Overflow.IndependentChainIntegrity
+[       OK ] QA_Overflow.IndependentChainIntegrity (0 ms)
+[----------] 13 tests from QA_Overflow (2 ms total)
+
+[----------] 2 tests from QA_InMemoryAllocator
+[ RUN      ] QA_InMemoryAllocator.FreeInvalidIdZeroFails
+[       OK ] QA_InMemoryAllocator.FreeInvalidIdZeroFails (0 ms)
+[ RUN      ] QA_InMemoryAllocator.GetAfterDoubleFree
+[       OK ] QA_InMemoryAllocator.GetAfterDoubleFree (0 ms)
+[----------] 2 tests from QA_InMemoryAllocator (0 ms total)
+
+[----------] 25 tests from QA_GDB_130_OpenAI
+[ RUN      ] QA_GDB_130_OpenAI.EmbeddingContainsNonNumber
+[       OK ] QA_GDB_130_OpenAI.EmbeddingContainsNonNumber (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.EmbeddingContainsNull
+[       OK ] QA_GDB_130_OpenAI.EmbeddingContainsNull (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.IndexIsString
+[       OK ] QA_GDB_130_OpenAI.IndexIsString (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.IndexIsNegative
+[       OK ] QA_GDB_130_OpenAI.IndexIsNegative (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.IndexMissing
+[       OK ] QA_GDB_130_OpenAI.IndexMissing (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.BatchWithEmptyTexts
+[       OK ] QA_GDB_130_OpenAI.BatchWithEmptyTexts (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.BatchMoreEntriesThanRequested
+[       OK ] QA_GDB_130_OpenAI.BatchMoreEntriesThanRequested (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.BatchPartialResponse
+[       OK ] QA_GDB_130_OpenAI.BatchPartialResponse (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.BatchDuplicateIndices
+[       OK ] QA_GDB_130_OpenAI.BatchDuplicateIndices (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.BatchMixedDimensions
+[       OK ] QA_GDB_130_OpenAI.BatchMixedDimensions (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.Http429RateLimit
+[       OK ] QA_GDB_130_OpenAI.Http429RateLimit (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.Http401InvalidKey
+[       OK ] QA_GDB_130_OpenAI.Http401InvalidKey (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.Http500WithMalformedErrorBody
+[       OK ] QA_GDB_130_OpenAI.Http500WithMalformedErrorBody (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.Http500WithJsonErrorBody
+[       OK ] QA_GDB_130_OpenAI.Http500WithJsonErrorBody (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.EmptyResponseBody
+[       OK ] QA_GDB_130_OpenAI.EmptyResponseBody (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.TruncatedJsonResponse
+[       OK ] QA_GDB_130_OpenAI.TruncatedJsonResponse (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.HealthCheckNetworkError
+[       OK ] QA_GDB_130_OpenAI.HealthCheckNetworkError (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.HealthCheckDimensionMismatch
+[       OK ] QA_GDB_130_OpenAI.HealthCheckDimensionMismatch (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.AuthHeaderContainsBearerToken
+[       OK ] QA_GDB_130_OpenAI.AuthHeaderContainsBearerToken (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.RequestBodyContainsModelAndInput
+[       OK ] QA_GDB_130_OpenAI.RequestBodyContainsModelAndInput (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.DataFieldIsNotArray
+[       OK ] QA_GDB_130_OpenAI.DataFieldIsNotArray (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.EntryMissingEmbeddingField
+[       OK ] QA_GDB_130_OpenAI.EntryMissingEmbeddingField (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.EmbeddingFieldIsNotArray
+[       OK ] QA_GDB_130_OpenAI.EmbeddingFieldIsNotArray (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.NameIncludesModel
+[       OK ] QA_GDB_130_OpenAI.NameIncludesModel (0 ms)
+[ RUN      ] QA_GDB_130_OpenAI.DimensionMatchesConstructor
+[       OK ] QA_GDB_130_OpenAI.DimensionMatchesConstructor (0 ms)
+[----------] 25 tests from QA_GDB_130_OpenAI (2 ms total)
+
+[----------] 6 tests from QA_GDB_130_Registry
+[ RUN      ] QA_GDB_130_Registry.OpenAIWithoutApiKeyFails
+[       OK ] QA_GDB_130_Registry.OpenAIWithoutApiKeyFails (0 ms)
+[ RUN      ] QA_GDB_130_Registry.TrailingSlashInProviderName
+[       OK ] QA_GDB_130_Registry.TrailingSlashInProviderName (0 ms)
+[ RUN      ] QA_GDB_130_Registry.LeadingSlashInProviderName
+[       OK ] QA_GDB_130_Registry.LeadingSlashInProviderName (0 ms)
+[ RUN      ] QA_GDB_130_Registry.MultipleSlashesInProviderName
+[       OK ] QA_GDB_130_Registry.MultipleSlashesInProviderName (0 ms)
+[ RUN      ] QA_GDB_130_Registry.CacheSameProviderTwice
+[2026-06-11 08:18:21.251] [info] [provider_registry.cpp:126] created builtin provider: dimension=64
+Assertion failed: has_value(), file 
+C:/Users/jdpni/Documents/repos/sixseven-server/build/debug/vcpkg_installed/x64-windows/include\tl/expected.hpp, line 
+1996
+[       OK ] QA_GDB_130_Registry.CacheSameProviderTwice (0 ms)
+[ RUN      ] QA_GDB_130_Registry.ClearCacheCreatesNewInstance
+[2026-06-11 08:18:21.251] [info] [provider_registry.cpp:126] created builtin provider: dimension=64
+[2026-06-11 08:18:21.251] [info] [provider_registry.cpp:126] created builtin provider: dimension=64
+[       OK ] QA_GDB_130_Registry.ClearCacheCreatesNewInstance (0 ms)
+[----------] 6 tests from QA_GDB_130_Registry (0 ms total)
+
+[----------] 1 test from QA_GDB_130_ONNX
+[ RUN      ] QA_GDB_130_ONNX.OnnxProviderTypeRecognizedButModelNotFound
+[       OK ] QA_GDB_130_ONNX.OnnxProviderTypeRecognizedButModelNotFound (0 ms)
+[----------] 1 test from QA_GDB_130_ONNX (0 ms total)
+
+[----------] 16 tests from QA131NearestScanTest
+[ RUN      ] QA131NearestScanTest.KZeroReturnsEmpty
+[       OK ] QA131NearestScanTest.KZeroReturnsEmpty (5 ms)
+[ RUN      ] QA131NearestScanTest.NullEmbeddingsSkipped
+[       OK ] QA131NearestScanTest.NullEmbeddingsSkipped (5 ms)
+[ RUN      ] QA131NearestScanTest.AllNullEmbeddingsReturnsEmpty
+[       OK ] QA131NearestScanTest.AllNullEmbeddingsReturnsEmpty (5 ms)
+[ RUN      ] QA131NearestScanTest.IdenticalVectorsAllDistanceZero
+[       OK ] QA131NearestScanTest.IdenticalVectorsAllDistanceZero (5 ms)
+[ RUN      ] QA131NearestScanTest.GraphScopeEmptyAllowedSet
+[       OK ] QA131NearestScanTest.GraphScopeEmptyAllowedSet (4 ms)
+[ RUN      ] QA131NearestScanTest.GraphScopeAllExcluded
+[       OK ] QA131NearestScanTest.GraphScopeAllExcluded (5 ms)
+[ RUN      ] QA131NearestScanTest.GraphScopeSingleNodeAllowed
+[       OK ] QA131NearestScanTest.GraphScopeSingleNodeAllowed (5 ms)
+[ RUN      ] QA131NearestScanTest.DotProductMetric
+[       OK ] QA131NearestScanTest.DotProductMetric (5 ms)
+[ RUN      ] QA131NearestScanTest.WhereFilterRejectsAll
+[       OK ] QA131NearestScanTest.WhereFilterRejectsAll (5 ms)
+[ RUN      ] QA131NearestScanTest.HnswMatchesBruteForceTopResult
+[2026-06-11 08:18:21.303] [info] [hnsw_index.cpp:63] Created HNSW index: dim=3, M=8, ef_c=50, ef_s=50, meta_page=1
+[       OK ] QA131NearestScanTest.HnswMatchesBruteForceTopResult (6 ms)
+[ RUN      ] QA131NearestScanTest.HnswGraphScopeFilteredSearch
+[2026-06-11 08:18:21.309] [info] [hnsw_index.cpp:63] Created HNSW index: dim=2, M=8, ef_c=50, ef_s=50, meta_page=1
+[       OK ] QA131NearestScanTest.HnswGraphScopeFilteredSearch (5 ms)
+[ RUN      ] QA131NearestScanTest.ReopenProducesSameResults
+[       OK ] QA131NearestScanTest.ReopenProducesSameResults (5 ms)
+[ RUN      ] QA131NearestScanTest.LargeDatasetBruteForce
+[       OK ] QA131NearestScanTest.LargeDatasetBruteForce (10 ms)
+[ RUN      ] QA131NearestScanTest.GraphScopeWithNullEmbeddingNode
+[       OK ] QA131NearestScanTest.GraphScopeWithNullEmbeddingNode (4 ms)
+[ RUN      ] QA131NearestScanTest.CosineUnitVectorsCorrectOrder
+[       OK ] QA131NearestScanTest.CosineUnitVectorsCorrectOrder (4 ms)
+[ RUN      ] QA131NearestScanTest.HnswEmptyIndexFallsToBruteForce
+[2026-06-11 08:18:21.341] [info] [hnsw_index.cpp:63] Created HNSW index: dim=3, M=8, ef_c=50, ef_s=50, meta_page=1
+[       OK ] QA131NearestScanTest.HnswEmptyIndexFallsToBruteForce (4 ms)
+[----------] 16 tests from QA131NearestScanTest (90 ms total)
+
+[----------] 15 tests from QA132ReembedTest
+[ RUN      ] QA132ReembedTest.ExactlyBatchSize32Rows
+C:/Users/jdpni/Documents/repos/sixseven-server/tests/qa/test_qa_gdb_132.cpp(55): error: Value of: result.has_value()
+  Actual: false
+Expected: true
+database with id 1 not found
+
+EXIT: 3

@@ -54,8 +54,17 @@ public:
     explicit StatementDeadlineGuard(int64_t timeout_ms) {
         if (timeout_ms > 0) {
             armed_here_ = true;
-            StatementDeadline::arm(StatementDeadline::Clock::now() +
-                                   std::chrono::milliseconds(timeout_ms));
+            // Clamp so now + timeout cannot overflow the clock's nanosecond
+            // counter (GDB-1238): an overflowed deadline lands in the past and
+            // cancels every query instantly.
+            const auto now = StatementDeadline::Clock::now();
+            const auto max_delta = StatementDeadline::Clock::time_point::max() - now;
+            const auto requested = std::chrono::milliseconds(timeout_ms);
+            if (requested >= std::chrono::duration_cast<std::chrono::milliseconds>(max_delta)) {
+                StatementDeadline::arm(StatementDeadline::Clock::time_point::max());
+            } else {
+                StatementDeadline::arm(now + requested);
+            }
         }
     }
 

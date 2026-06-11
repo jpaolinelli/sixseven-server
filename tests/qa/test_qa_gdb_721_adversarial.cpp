@@ -188,17 +188,19 @@ TEST_F(QA721Adversarial, CancelledQueryFollowedByFastQuerySucceeds) {
 //    will also exhibit the same wrap on any 64-bit clock.
 // ─────────────────────────────────────────────────────────────────────────────
 
-TEST_F(QA721Adversarial, DISABLED_VeryLargeTimeoutDoesNotOverflowOrCancel) {
+TEST_F(QA721Adversarial, VeryLargeTimeoutDoesNotOverflowOrCancel) {
     make_rows_table(5);
 
-    // INT64_MAX ms ≈ 292 million years — effectively "never"
+    // INT64_MAX ms ≈ 292 million years — effectively "never". Exercise the
+    // production path (StatementDeadlineGuard, as armed by pg_protocol), which
+    // clamps the deadline so the addition cannot wrap (GDB-1238).
     const int64_t huge_ms = std::numeric_limits<int64_t>::max();
 
-    StatementDeadline::arm(StatementDeadline::Clock::now() +
-                           std::chrono::milliseconds(huge_ms));
-
-    bool expired_immediately = StatementDeadline::expired();
-    StatementDeadline::clear();
+    bool expired_immediately = false;
+    {
+        StatementDeadlineGuard guard(huge_ms);
+        expired_immediately = StatementDeadline::expired();
+    }
 
     EXPECT_FALSE(expired_immediately)
         << "INT64_MAX ms deadline wrapped and is already expired — "

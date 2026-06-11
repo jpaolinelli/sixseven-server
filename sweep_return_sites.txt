@@ -1,0 +1,560 @@
+﻿=== test_qa_backfill.cpp:85 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_132.cpp:56 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_143.cpp:53 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_21.cpp:101 ===
+        auto result = parser.parse();
+        if (!result.has_value()) {
+            ADD_FAILURE() << "Parse failed: " << result.error().message;
+            return nullptr;
+        }
+        return std::move(*result);
+=== test_qa_gdb_21.cpp:115 ===
+        auto result = binder->bind(*stmt);
+        if (!result.has_value()) {
+            ADD_FAILURE() << "Bind failed: " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_215.cpp:73 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_218_219_220.cpp:24 ===
+    auto result = lexer.tokenize();
+    if (!result.has_value()) {
+        ADD_FAILURE() << "Lex failed: " << result.error().message;
+        return {};
+    }
+    return std::move(*result);
+=== test_qa_gdb_218_219_220.cpp:197 ===
+        auto result = parser.parse();
+        if (!result.has_value()) {
+            ADD_FAILURE() << "Parse failed: " << result.error().message;
+            return nullptr;
+        }
+        return std::move(*result);
+=== test_qa_gdb_218_219_220.cpp:210 ===
+        auto result = binder->bind(*stmt);
+        if (!result.has_value()) {
+            ADD_FAILURE() << "Bind failed: " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_22.cpp:1281 ===
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value())
+            << "SQL failed: " << sql << "\nError: " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_221_226.cpp:135 ===
+        auto result = parser.parse();
+        if (!result.has_value()) {
+            ADD_FAILURE() << "Parse failed: " << result.error().message;
+            return nullptr;
+        }
+        return std::move(*result);
+=== test_qa_gdb_221_226.cpp:148 ===
+        auto result = binder->bind(*stmt);
+        if (!result.has_value()) {
+            ADD_FAILURE() << "Bind failed for: " << sql << "\nError: " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_221_226.cpp:499 ===
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value())
+            << "SQL failed: " << sql << "\nError: " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_229_232.cpp:74 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << "SQL: " << sql << "\nError: " << result.error().message;
+            return QueryResult{};
+        }
+        return std::move(*result);
+=== test_qa_gdb_238.cpp:69 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << "SQL: " << sql << "\nError: " << result.error().message;
+            return QueryResult{};
+        }
+        return std::move(*result);
+=== test_qa_gdb_239.cpp:88 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << "SQL: " << sql << "\nError: " << result.error().message;
+            return QueryResult{};
+        }
+        return std::move(*result);
+=== test_qa_gdb_24.cpp:184 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << "SQL failed: " << sql << "\n" << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_250.cpp:70 ===
+        if (!result.has_value()) {
+            ADD_FAILURE() << "exec_ok failed for: " << sql
+                          << "\n  error: " << result.error().message;
+            return QueryResult{};
+        }
+        return std::move(*result);
+=== test_qa_gdb_251.cpp:82 ===
+        if (!result.has_value()) {
+            ADD_FAILURE() << "exec_ok failed for: " << sql
+                          << "\n  error: " << result.error().message;
+            return QueryResult{};
+        }
+        return std::move(*result);
+=== test_qa_gdb_254.cpp:44 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << "SQL failed: " << sql << "\n  Error: " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_256.cpp:52 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_256.cpp:97 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_257_261_300_303_308_adversarial.cpp:168 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << sql << ": " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_257_261_300_303_308_adversarial.cpp:248 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << sql << ": " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_257_261_300_303_308_adversarial.cpp:346 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << sql << ": " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_257_261_300_303_308_adversarial.cpp:512 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << sql << ": " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_258.cpp:60 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << "Expected success but got error: " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_258_impl.cpp:59 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_259.cpp:54 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_259_impl.cpp:50 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_26.cpp:65 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << "SQL: " << sql << "\nError: " << result.error().message;
+            return QueryResult{};
+        }
+        return std::move(*result);
+=== test_qa_gdb_260.cpp:53 ===
+
+    /// Execute SQL, assert success, return the result.
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << " => " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_261.cpp:44 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << sql << ": " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_264.cpp:146 ===
+        auto result = parser.parse();
+        if (!result.has_value()) {
+            ADD_FAILURE() << "Parse failed: " << result.error().message;
+            return nullptr;
+        }
+        return std::move(*result);
+=== test_qa_gdb_264.cpp:159 ===
+        auto result = binder->bind(*stmt);
+        if (!result.has_value()) {
+            ADD_FAILURE() << "Bind failed for: " << sql << "\n  Error: " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_265.cpp:79 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_266.cpp:79 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << sql << ": " << result.error().message;
+            return QueryResult{}; // Return empty result on failure.
+        }
+        return std::move(*result);
+=== test_qa_gdb_267.cpp:94 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_281.cpp:443 ===
+        if (!result.has_value()) {
+            ADD_FAILURE() << "exec_ok failed for: " << sql
+                          << "\n  error: " << result.error().message;
+            return QueryResult{};
+        }
+        return std::move(*result);
+=== test_qa_gdb_282.cpp:75 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_297.cpp:80 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_298.cpp:54 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << sql << ": " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_300_301_302.cpp:64 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << sql << ": " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_303.cpp:56 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << sql << ": " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_307.cpp:56 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << sql << ": " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_308.cpp:55 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << sql << ": " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_309.cpp:57 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << sql << ": " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_314_315_316.cpp:62 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << sql << ": " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_478.cpp:644 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_480.cpp:540 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_548.cpp:146 ===
+        auto result = parser.parse();
+        if (!result.has_value()) {
+            ADD_FAILURE() << "Parse failed: " << result.error().message;
+            return nullptr;
+        }
+        return std::move(*result);
+=== test_qa_gdb_548.cpp:159 ===
+        auto result = binder->bind(*stmt);
+        if (!result.has_value()) {
+            ADD_FAILURE() << "Bind failed: " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_548.cpp:551 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_549.cpp:97 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_553.cpp:71 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_569.cpp:60 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_596.cpp:91 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_597.cpp:79 ===
+        auto result = engine_->execute(sql);
+        if (!result.has_value()) {
+            ADD_FAILURE() << "Expected success but got error: " << result.error().message;
+            return {};
+        }
+        return std::move(*result);
+=== test_qa_gdb_599.cpp:47 ===
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << "SQL: " << sql << "\n"
+                                        << "Error: " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_601.cpp:70 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << "SQL failed: " << sql << "\n" << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_602.cpp:82 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_603.cpp:67 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << "\n  -> " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_605.cpp:68 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_605.cpp:329 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_605.cpp:444 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_605.cpp:517 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_606.cpp:93 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_607.cpp:55 ===
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << "SQL: " << sql << "\n"
+                                        << "Error: " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_656.cpp:92 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << " => " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_657.cpp:90 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << " => " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_660.cpp:87 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << " => " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_679.cpp:75 ===
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": "
+                                        << (result ? "" : result.error().message);
+        return std::move(*result);
+=== test_qa_gdb_680.cpp:91 ===
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        if (!result.has_value()) {
+            return QueryResult{};
+        }
+        return std::move(*result);
+=== test_qa_gdb_694.cpp:82 ===
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        if (!result.has_value()) {
+            return QueryResult{};
+        }
+        return std::move(*result);
+=== test_qa_gdb_695.cpp:93 ===
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        if (!result.has_value()) {
+            return QueryResult{};
+        }
+        return std::move(*result);
+=== test_qa_gdb_696.cpp:88 ===
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
+        if (!result.has_value()) {
+            return QueryResult{};
+        }
+        return std::move(*result);
+=== test_qa_gdb_710.cpp:458 ===
+        auto r = engine_->execute(sql);
+        if (!r.has_value()) {
+            ADD_FAILURE() << "SQL failed: " << sql << "\n" << r.error().message;
+            return {};
+        }
+        return std::move(*r);
+=== test_qa_gdb_717.cpp:92 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << "SQL: " << sql << "\nError: " << result.error().message;
+        return std::move(*result);
+=== test_qa_gdb_717_adversarial.cpp:94 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << "SQL: " << sql << "\nError: " << result.error().message;
+        return std::move(*result);
+=== test_qa_subquery_blend.cpp:83 ===
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << "SQL: " << sql << "\nError: " << result.error().message;
+        return std::move(*result);
