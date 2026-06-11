@@ -741,3 +741,123 @@ TEST_F(QA_GDB711_Stats, CorruptTupleDuringReservoirSamplingMustNotCorruptMemory)
     ASSERT_NE(stats, nullptr);
     EXPECT_EQ(stats->row_count, 203u);
 }
+
+// GDB-1232 verification probe: corrupt tuple exactly at the fill boundary.
+// With sample_size = 4 and exactly 3 valid rows before the corrupt tuple,
+// the corrupt tuple occupies the physical position that would have completed
+// the fill. Pre-fix, row_index reached 4 with sample.size() == 3, so the very
+// next valid row entered the replacement branch and could write sample[3]
+// out of bounds. Post-fix, valid_rows == 3 means the next valid row completes
+// the fill via push_back, and replacement only begins with a full sample.
+TEST_F(QA_GDB711_Stats, CorruptTupleExactlyAtFillBoundary) {
+    exec_ok("CREATE TABLE corrupt_edge (v INT)");
+    exec_ok("INSERT INTO corrupt_edge VALUES (1), (2), (3)");
+
+    auto t = target_for("corrupt_edge");
+    ASSERT_NE(t.storage, nullptr);
+
+    const std::vector<uint8_t> garbage = {0x00};
+    auto injected = t.storage->heap->insert_tuple(garbage);
+    ASSERT_TRUE(injected.has_value()) << injected.error().message;
+
+    std::string sql = "INSERT INTO corrupt_edge VALUES ";
+    for (int i = 0; i < 200; ++i) {
+        if (i > 0) {
+            sql += ", ";
+        }
+        sql += "(" + std::to_string(i + 10) + ")";
+    }
+    exec_ok(sql);
+
+    StatisticsStore store;
+    AnalyzeConfig config;
+    config.sample_size = 4;
+    auto analyzed = analyze_into(t, store, config);
+
+    ASSERT_TRUE(analyzed.has_value()) << analyzed.error().message;
+    const auto* stats = store.get_table_stats(t.table_id);
+    ASSERT_NE(stats, nullptr);
+    EXPECT_EQ(stats->row_count, 204u) << "row_count must include the corrupt tuple";
+
+    // The sample holds exactly sample_size valid rows; ndistinct is derived
+    // from the sample, so it must be within [1, 4].
+    const auto* col = store.get_column_stats(t.table_id, 0);
+    ASSERT_NE(col, nullptr);
+    EXPECT_GE(col->ndistinct, 1u);
+    EXPECT_LE(col->ndistinct, 4u);
+}
+
+// GDB-1232 verification probe: corrupt tuples appearing only AFTER the fill
+// window is already full. These must be pure no-ops for the sample (skipped
+// without perturbing the reservoir distribution or sample bounds) while still
+// being counted in row_count.
+TEST_F(QA_GDB711_Stats, CorruptTuplesAfterFillWindowAreSkippedButCounted) {
+    exec_ok("CREATE TABLE corrupt_tail (v INT)");
+    exec_ok("INSERT INTO corrupt_tail VALUES (1), (2), (3), (4), (5), (6), (7), (8), (9), (10)");
+
+    auto t = target_for("corrupt_tail");
+    ASSERT_NE(t.storage, nullptr);
+
+    const std::vector<uint8_t> garbage = {0x00};
+    for (int i = 0; i < 5; ++i) {
+        auto injected = t.storage->heap->insert_tuple(garbage);
+        ASSERT_TRUE(injected.has_value()) << injected.error().message;
+    }
+
+    std::string sql = "INSERT INTO corrupt_tail VALUES ";
+    for (int i = 0; i < 50; ++i) {
+        if (i > 0) {
+            sql += ", ";
+        }
+        sql += "(" + std::to_string(i + 100) + ")";
+    }
+    exec_ok(sql);
+
+    StatisticsStore store;
+    AnalyzeConfig config;
+    config.sample_size = 4;
+    auto analyzed = analyze_into(t, store, config);
+
+    ASSERT_TRUE(analyzed.has_value()) << analyzed.error().message;
+    const auto* stats = store.get_table_stats(t.table_id);
+    ASSERT_NE(stats, nullptr);
+    EXPECT_EQ(stats->row_count, 65u) << "10 + 5 corrupt + 50 = 65 total tuples";
+
+    const auto* col = store.get_column_stats(t.table_id, 0);
+    ASSERT_NE(col, nullptr);
+    EXPECT_GE(col->ndistinct, 1u);
+    EXPECT_LE(col->ndistinct, 4u) << "sample must never exceed sample_size rows";
+}
+
+// GDB-1232 verification probe: a table containing ONLY corrupt tuples. The
+// sample stays empty (valid_rows never advances), every column gets default
+// zeroed stats, and row_count still reports the full physical tuple count.
+TEST_F(QA_GDB711_Stats, AllCorruptTableYieldsEmptySampleAndFullRowCount) {
+    exec_ok("CREATE TABLE corrupt_all (v INT)");
+
+    auto t = target_for("corrupt_all");
+    ASSERT_NE(t.storage, nullptr);
+
+    const std::vector<uint8_t> garbage = {0x00};
+    for (int i = 0; i < 10; ++i) {
+        auto injected = t.storage->heap->insert_tuple(garbage);
+        ASSERT_TRUE(injected.has_value()) << injected.error().message;
+    }
+
+    StatisticsStore store;
+    AnalyzeConfig config;
+    config.sample_size = 4;
+    auto analyzed = analyze_into(t, store, config);
+
+    ASSERT_TRUE(analyzed.has_value()) << analyzed.error().message;
+    const auto* stats = store.get_table_stats(t.table_id);
+    ASSERT_NE(stats, nullptr);
+    EXPECT_EQ(stats->row_count, 10u) << "corrupt tuples are counted in row_count";
+
+    const auto* col = store.get_column_stats(t.table_id, 0);
+    ASSERT_NE(col, nullptr);
+    EXPECT_EQ(col->ndistinct, 0u) << "empty sample must produce zeroed column stats";
+    EXPECT_TRUE(col->mcv_list.empty());
+    EXPECT_TRUE(col->min_value.is_null());
+    EXPECT_TRUE(col->histogram.empty());
+}
