@@ -98,7 +98,9 @@ Result<void> StorageManager::create_table_storage(database_id_t db_id,
     auto storage = std::make_unique<TableStorage>();
     storage->file_id = *fid;
     storage->bpm = std::make_unique<BufferPoolManager>(dm_, *fid, pool_size_);
-    storage->heap = std::make_unique<TableHeap>(*storage->bpm, dm_, *fid);
+    // SQL table files store MVCC tuple headers (v2 file format, GDB-714).
+    storage->heap = std::make_unique<TableHeap>(
+        *storage->bpm, dm_, *fid, TableHeapOptions{.mvcc_headers = true});
     storage->storage_schema = build_storage_schema(table_schema);
 
     tables_[table_id] = std::move(storage);
@@ -127,7 +129,9 @@ Result<void> StorageManager::open_table_storage(database_id_t db_id,
     auto storage = std::make_unique<TableStorage>();
     storage->file_id = *fid;
     storage->bpm = std::make_unique<BufferPoolManager>(dm_, *fid, pool_size_);
-    storage->heap = std::make_unique<TableHeap>(*storage->bpm, dm_, *fid);
+    // SQL table files store MVCC tuple headers (v2 file format, GDB-714).
+    storage->heap = std::make_unique<TableHeap>(
+        *storage->bpm, dm_, *fid, TableHeapOptions{.mvcc_headers = true});
     storage->storage_schema = build_storage_schema(table_schema);
 
     tables_[table_id] = std::move(storage);

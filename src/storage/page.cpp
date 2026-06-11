@@ -75,6 +75,13 @@ Result<SlotId> Page::insert_tuple(std::span<const uint8_t> data) {
     if (data.empty()) {
         return make_error(StatusCode::INVALID_ARGUMENT, "cannot insert empty tuple");
     }
+    // Reject before the uint16_t length cast below: an image larger than the
+    // page (possible once the 24-byte MVCC header is added to a near-64KB
+    // payload) would otherwise truncate to a tiny length, pass the space
+    // check, and persist garbage while reporting success (GDB-714 review).
+    if (data.size() > page_size - page_header_size - slot_entry_size) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "tuple too large for a page");
+    }
 
     std::unique_lock lock(latch_);
 
@@ -172,6 +179,11 @@ Result<void> Page::update_tuple(SlotId slot_id, std::span<const uint8_t> data) {
     if (data.empty()) {
         return make_error(StatusCode::INVALID_ARGUMENT, "cannot update with empty tuple");
     }
+    // Same oversize guard as insert_tuple: prevent uint16_t truncation of the
+    // image length for near-64KB payloads carrying the MVCC header.
+    if (data.size() > page_size - page_header_size - slot_entry_size) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "tuple too large for a page");
+    }
 
     std::unique_lock lock(latch_);
 
@@ -218,6 +230,82 @@ Result<void> Page::update_tuple(SlotId slot_id, std::span<const uint8_t> data) {
     return ok();
 }
 
+Result<void> Page::restore_tuple(SlotId slot_id, std::span<const uint8_t> data) {
+    if (data.empty()) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "cannot restore empty tuple");
+    }
+    if (data.size() > page_size - page_header_size - slot_entry_size) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "tuple too large for a page");
+    }
+
+    std::unique_lock lock(latch_);
+
+    auto tuple_len = static_cast<uint16_t>(data.size());
+    uint16_t sc = slot_count();
+
+    if (slot_id < sc) {
+        SlotEntry entry = read_slot(slot_id);
+        if (entry.offset != 0) {
+            // Live slot — overwrite (same logic as update_tuple, but the
+            // latch is already held so the logic is inlined here).
+            if (tuple_len <= entry.length) {
+                std::memcpy(&data_[entry.offset], data.data(), tuple_len);
+                if (tuple_len < entry.length) {
+                    std::memset(&data_[entry.offset + tuple_len], 0, entry.length - tuple_len);
+                }
+                write_slot(slot_id, {entry.offset, tuple_len});
+                return ok();
+            }
+            size_t raw_avail = data_offset() - slot_directory_end();
+            if (tuple_len > raw_avail) {
+                return make_error(StatusCode::INVALID_ARGUMENT,
+                                  "not enough free space to restore tuple");
+            }
+            std::memset(&data_[entry.offset], 0, entry.length);
+            auto new_offset = static_cast<uint16_t>(data_offset() - tuple_len);
+            std::memcpy(&data_[new_offset], data.data(), tuple_len);
+            write_slot(slot_id, {new_offset, tuple_len});
+            set_data_offset(new_offset);
+            return ok();
+        }
+
+        // Deleted slot — revive it. The slot entry already exists, so only
+        // raw space for the tuple bytes is needed.
+        size_t raw_avail = data_offset() - slot_directory_end();
+        if (tuple_len > raw_avail) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "not enough free space to restore tuple");
+        }
+        auto new_offset = static_cast<uint16_t>(data_offset() - tuple_len);
+        std::memcpy(&data_[new_offset], data.data(), tuple_len);
+        write_slot(slot_id, {new_offset, tuple_len});
+        set_data_offset(new_offset);
+        return ok();
+    }
+
+    // Slot beyond the current directory — extend it, creating intermediate
+    // slots as deleted so future redo of their records can revive them.
+    size_t extra_slots = static_cast<size_t>(slot_id) - sc + 1;
+    size_t needed = tuple_len + extra_slots * slot_entry_size;
+    size_t dir_end = slot_directory_end();
+    size_t d_off = data_offset();
+    size_t raw_avail = (d_off > dir_end) ? (d_off - dir_end) : 0;
+    if (needed > raw_avail) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "not enough free space to restore tuple");
+    }
+
+    for (SlotId i = sc; i < slot_id; ++i) {
+        write_slot(i, {0, 0});
+    }
+    set_slot_count(static_cast<uint16_t>(slot_id + 1));
+
+    auto new_offset = static_cast<uint16_t>(data_offset() - tuple_len);
+    std::memcpy(&data_[new_offset], data.data(), tuple_len);
+    write_slot(slot_id, {new_offset, tuple_len});
+    set_data_offset(new_offset);
+    return ok();
+}
+
 size_t Page::free_space() const {
     size_t dir_end = slot_directory_end();
     size_t d_off = data_offset();
@@ -255,8 +343,12 @@ void Page::compact() {
         }
     }
 
-    // Copy repacked tuples back and zero the freed region.
-    std::memcpy(&data_[write_pos], &tmp[write_pos], page_size - write_pos);
+    // Copy repacked tuples back and zero the freed region. Use data()+offset
+    // pointer arithmetic instead of operator[]: when every slot is deleted,
+    // write_pos stays at page_size and &data_[page_size] is an out-of-bounds
+    // access that aborts under MSVC debug iterator checks (GDB-1227), even
+    // though the memcpy length is zero.
+    std::memcpy(data_.data() + write_pos, tmp.data() + write_pos, page_size - write_pos);
     size_t dir_end = slot_directory_end();
     if (write_pos > dir_end) {
         std::memset(&data_[dir_end], 0, write_pos - dir_end);

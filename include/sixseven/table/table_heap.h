@@ -5,6 +5,8 @@
 #include "sixseven/storage/buffer_pool.h"
 #include "sixseven/storage/disk_manager.h"
 #include "sixseven/storage/page.h"
+#include "sixseven/storage/wal_record.h"
+#include "sixseven/txn/mvcc_tuple.h"
 
 #include <atomic>
 #include <cstdint>
@@ -15,8 +17,22 @@
 
 namespace sixseven {
 
-/// Forward declaration.
+/// Forward declarations.
 class TableIterator;
+class WalWriter;
+
+/// Configuration options for a TableHeap (GDB-714).
+struct TableHeapOptions {
+    /// When true, every tuple stored on a page is prefixed with a 24-byte
+    /// MvccTupleHeader (xmin / xmax / t_ctid). The header is transparent to
+    /// callers: insert/update accept user bytes and get/scan return user
+    /// bytes; the header is read via get_tuple_header().
+    ///
+    /// StorageManager enables this for all SQL table files (the v2 file
+    /// format); raw heaps constructed without options keep the legacy
+    /// headerless layout (used by edge heaps and low-level tests).
+    bool mvcc_headers = false;
+};
 
 /// Manages tuple storage in a heap file (unordered collection of data pages).
 ///
@@ -24,11 +40,32 @@ class TableIterator;
 /// file. Tuples are inserted into the first page with available space.
 /// Each tuple is identified by its RID (page_id + slot_id).
 ///
+/// MVCC headers (GDB-714): when constructed with
+/// TableHeapOptions{.mvcc_headers = true}, the on-page representation of a
+/// tuple is [MvccTupleHeader (24 bytes) | user data]:
+///  - insert stamps xmin (default: frozen_txn_id while DML runs without
+///    transaction context) and xmax = invalid (live);
+///  - update preserves the existing header and replaces the user data
+///    (in-place update does not create a new version chain entry yet);
+///  - delete stamps xmax into the WAL before-image and then physically
+///    deletes the slot. Physical deletion is intentionally preserved so the
+///    executor's observable semantics (deleted rows vanish immediately, page
+///    space is reclaimable via compact) are unchanged; visibility-based
+///    deletes and VACUUM-driven reclamation arrive with the transactions
+///    epic (see GDB-1230).
+///
+/// WAL (GDB-714): after attach_wal(), insert/update/delete append
+/// physiological WAL records whose payload carries full tuple images
+/// including the MVCC header (see table_wal.h), so redo reconstructs
+/// identical page contents. Logging is best-effort: WAL append failures are
+/// logged and do not fail the heap operation.
+///
 /// Usage:
 /// ```
-///   TableHeap heap(bpm, dm, file_id);
+///   TableHeap heap(bpm, dm, file_id, TableHeapOptions{.mvcc_headers = true});
 ///   auto rid = heap.insert_tuple(data).value();
-///   auto tuple = heap.get_tuple(rid).value();
+///   auto tuple = heap.get_tuple(rid).value();       // user bytes
+///   auto hdr = heap.get_tuple_header(rid).value();  // xmin/xmax
 ///   heap.delete_tuple(rid);
 /// ```
 class TableHeap {
@@ -37,36 +74,64 @@ public:
     /// @param bpm Buffer pool manager (must be tied to the same file_id).
     /// @param dm  Disk manager for page count queries.
     /// @param file_id The file backing this heap.
-    TableHeap(BufferPoolManager& bpm, DiskManager& dm, FileId file_id);
+    /// @param options Heap behavior options (MVCC headers, see above).
+    TableHeap(BufferPoolManager& bpm,
+              DiskManager& dm,
+              FileId file_id,
+              TableHeapOptions options = {});
+
+    /// Attach a WAL writer (GDB-714). Subsequent insert/update/delete
+    /// operations append INSERT/UPDATE/DELETE records carrying full tuple
+    /// images for redo. Pass nullptr to detach.
+    /// @param wal WAL writer (not owned; must outlive this heap or be detached).
+    /// @param table_id Table identifier stamped into each record.
+    void attach_wal(WalWriter* wal, uint32_t table_id);
+
+    /// Whether this heap stores MVCC tuple headers.
+    [[nodiscard]] bool mvcc_headers() const { return options_.mvcc_headers; }
 
     /// Insert a tuple into the heap. Finds the first page with sufficient
     /// free space, or allocates a new page if none has room.
     /// @param data Tuple bytes (must be non-empty and fit in a single page).
+    /// @param xmin Creating transaction id stamped into the MVCC header
+    ///             (MVCC mode only). Defaults to frozen_txn_id (autocommit).
     /// @return The RID (page_id, slot_id) of the inserted tuple.
-    [[nodiscard]] Result<RID> insert_tuple(std::span<const uint8_t> data);
+    [[nodiscard]] Result<RID> insert_tuple(std::span<const uint8_t> data,
+                                           txn_id_t xmin = frozen_txn_id);
 
     /// Insert multiple tuples in batch, reducing buffer pool latch acquisitions
     /// from O(rows) to O(pages). Each page is pinned once and filled with as
     /// many tuples as fit before unpinning and moving to the next page.
     /// @param tuples Vector of tuple byte spans (empty tuples are rejected).
+    /// @param xmin Creating transaction id for the MVCC headers (MVCC mode).
     /// @return A vector of RIDs, one per inserted tuple, in the same order.
     [[nodiscard]] Result<std::vector<RID>>
-    insert_batch(const std::vector<std::span<const uint8_t>>& tuples);
+    insert_batch(const std::vector<std::span<const uint8_t>>& tuples,
+                 txn_id_t xmin = frozen_txn_id);
 
-    /// Read a tuple by RID. Returns a copy of the tuple data.
+    /// Read a tuple by RID. Returns a copy of the tuple data (user bytes
+    /// only — the MVCC header, if present, is stripped).
     /// The page is unpinned before returning, so the data is a snapshot.
-    /// @return A vector containing the tuple bytes.
     [[nodiscard]] Result<std::vector<uint8_t>> get_tuple(RID rid);
+
+    /// Read the MVCC header of a tuple (MVCC mode only).
+    /// Returns NOT_IMPLEMENTED for heaps without MVCC headers.
+    [[nodiscard]] Result<MvccTupleHeader> get_tuple_header(RID rid);
 
     /// Update a tuple in-place. If the new data fits in the existing slot,
     /// the update is done directly. If not, the page is compacted and the
     /// update is retried. If the tuple still doesn't fit after compaction
     /// (e.g., it exceeds available page space), the update fails.
+    /// In MVCC mode the existing header (xmin / t_ctid) is preserved.
     /// The RID remains stable on success.
     [[nodiscard]] Result<void> update_tuple(RID rid, std::span<const uint8_t> data);
 
     /// Delete a tuple by marking its slot as deleted.
-    [[nodiscard]] Result<void> delete_tuple(RID rid);
+    /// @param xmax Deleting transaction id. In MVCC mode it is stamped into
+    ///             the WAL before-image (the on-page slot is then physically
+    ///             deleted — see class documentation). Defaults to
+    ///             frozen_txn_id (autocommit).
+    [[nodiscard]] Result<void> delete_tuple(RID rid, txn_id_t xmax = frozen_txn_id);
 
     /// A single in-page tuple update request for batch processing.
     struct TupleUpdate {
@@ -81,6 +146,22 @@ public:
     /// @return A vector of RIDs that failed (caller can retry or escalate).
     [[nodiscard]] Result<std::vector<RID>>
     update_tuples_batch(const std::vector<TupleUpdate>& updates);
+
+    // -- WAL recovery primitives (GDB-714) -------------------------------------
+    //
+    // Raw-image operations used by TableHeapRecoveryHandler during redo/undo.
+    // They take full on-page tuple images (MVCC header included for MVCC
+    // heaps), are idempotent, never log WAL themselves, and keep the
+    // persistent row count consistent.
+
+    /// Write a raw tuple image at an exact RID, allocating pages and
+    /// extending the slot directory as needed. Overwrites a live slot,
+    /// revives a deleted one. Idempotent.
+    [[nodiscard]] Result<void> restore_raw_tuple(RID rid, std::span<const uint8_t> raw_image);
+
+    /// Delete the slot at an exact RID if it is live. Succeeds (no-op) if the
+    /// slot/page is already deleted or absent. Idempotent.
+    [[nodiscard]] Result<void> delete_raw_tuple(RID rid);
 
     /// Return a sequential-scan iterator starting from the first tuple.
     /// Fails if the file page count cannot be read.
@@ -97,6 +178,12 @@ private:
     BufferPoolManager& bpm_;
     DiskManager& dm_;
     FileId file_id_;
+    TableHeapOptions options_;
+
+    /// Optional WAL writer for logging tuple mutations (not owned).
+    WalWriter* wal_ = nullptr;
+    /// Table id stamped into WAL records when wal_ is attached.
+    uint32_t wal_table_id_ = 0;
 
     /// Hint: last page we successfully inserted into.
     /// Speeds up sequential inserts by avoiding full scans.
@@ -112,6 +199,18 @@ private:
 
     /// Write row count to header page (page 0) for persistence.
     void persist_row_count();
+
+    /// Build the on-page image for user data: prepends an MvccTupleHeader in
+    /// MVCC mode, otherwise returns a plain copy of the user bytes.
+    [[nodiscard]] std::vector<uint8_t> make_on_page_image(std::span<const uint8_t> user_data,
+                                                          txn_id_t xmin) const;
+
+    /// Best-effort WAL append for a tuple mutation (no-op when detached).
+    void log_wal(WalRecordType type,
+                 RID rid,
+                 txn_id_t txn_id,
+                 std::span<const uint8_t> before_image,
+                 std::span<const uint8_t> after_image);
 };
 
 /// Sequential scan iterator over all live tuples in a TableHeap.
@@ -126,10 +225,14 @@ private:
 /// ```
 class TableIterator {
 public:
-    TableIterator(BufferPoolManager& bpm, PageId start_page, uint32_t total_pages);
+    TableIterator(BufferPoolManager& bpm,
+                  PageId start_page,
+                  uint32_t total_pages,
+                  bool strip_mvcc_headers = false);
 
     /// Advance to the next live tuple.
     /// @return A pair of (RID, tuple data copy), or nullopt if scan is exhausted.
+    ///         For MVCC heaps the data is the user payload (header stripped).
     [[nodiscard]] std::optional<std::pair<RID, std::vector<uint8_t>>> next();
 
     /// Skip @p count live tuples without deserializing or copying their data.
@@ -144,6 +247,8 @@ private:
     SlotId current_slot_ = 0;
     uint32_t total_pages_;
     bool exhausted_ = false;
+    /// Strip the 24-byte MvccTupleHeader from returned tuples (GDB-714).
+    bool strip_mvcc_headers_ = false;
 };
 
 } // namespace sixseven

@@ -1923,11 +1923,12 @@ Result<QueryResult> QueryEngine::execute_vacuum(const VacuumStmt& stmt) {
     }
 
     // Validated no-op (GDB-1230): txn::Vacuum must not run over the executor's
-    // heap pages yet. The write path does not produce MVCC-headed tuples, and
-    // there is no shared TransactionManager to supply a vacuum horizon — under
-    // those conditions Vacuum misreads raw tuple bytes as an xmin, resolves
-    // unknown xids as ABORTED, and deletes live rows. Targets are still
-    // resolved above so VACUUM keeps PostgreSQL-compatible error behavior.
+    // heap pages yet. Tuples now carry MVCC headers (GDB-714), but there is
+    // still no shared TransactionManager to supply a vacuum horizon — the
+    // executor stamps frozen_txn_id, and a fresh manager resolves real txn
+    // ids as ABORTED, so running Vacuum could still reclaim live rows.
+    // Targets are resolved above so VACUUM keeps PostgreSQL-compatible
+    // error behavior.
     SIXSEVEN_LOG_INFO("VACUUM: validated {} table(s); reclamation deferred until MVCC "
                       "integration (GDB-1230)",
                       targets.size());

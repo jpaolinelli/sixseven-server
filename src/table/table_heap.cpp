@@ -1,6 +1,8 @@
 #include "sixseven/table/table_heap.h"
 
 #include "sixseven/common/logging.h"
+#include "sixseven/storage/wal.h"
+#include "sixseven/table/table_wal.h"
 
 #include <cstring>
 #include <unordered_map>
@@ -13,14 +15,66 @@ static constexpr size_t kRowCountExtOffset = 0;
 
 // -- TableHeap ----------------------------------------------------------------
 
-TableHeap::TableHeap(BufferPoolManager& bpm, DiskManager& dm, FileId file_id)
-    : bpm_(bpm), dm_(dm), file_id_(file_id) {
+TableHeap::TableHeap(BufferPoolManager& bpm,
+                     DiskManager& dm,
+                     FileId file_id,
+                     TableHeapOptions options)
+    : bpm_(bpm), dm_(dm), file_id_(file_id), options_(options) {
     load_row_count_from_header();
 }
 
-Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data) {
+void TableHeap::attach_wal(WalWriter* wal, uint32_t table_id) {
+    wal_ = wal;
+    wal_table_id_ = table_id;
+}
+
+std::vector<uint8_t> TableHeap::make_on_page_image(std::span<const uint8_t> user_data,
+                                                   txn_id_t xmin) const {
+    if (!options_.mvcc_headers) {
+        return std::vector<uint8_t>(user_data.begin(), user_data.end());
+    }
+    MvccTupleHeader header;
+    header.xmin = xmin;
+    header.xmax = invalid_txn_id;
+    return prepend_mvcc_header(header, user_data);
+}
+
+void TableHeap::log_wal(WalRecordType type,
+                        RID rid,
+                        txn_id_t txn_id,
+                        std::span<const uint8_t> before_image,
+                        std::span<const uint8_t> after_image) {
+    if (wal_ == nullptr) {
+        return;
+    }
+    WalRecord record;
+    record.type = type;
+    record.txn_id = txn_id;
+    record.table_id = wal_table_id_;
+    record.page_id = rid.page_id;
+    record.slot_id = rid.slot_id;
+    record.data = serialize_table_wal_payload(before_image, after_image);
+    auto result = wal_->append(record);
+    if (!result) {
+        SIXSEVEN_LOG_WARN("table heap WAL append failed (table {}, page {}, slot {}): {}",
+                          wal_table_id_,
+                          rid.page_id,
+                          rid.slot_id,
+                          result.error().message);
+    }
+}
+
+Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data, txn_id_t xmin) {
     if (data.empty()) {
         return make_error(StatusCode::INVALID_ARGUMENT, "cannot insert empty tuple");
+    }
+
+    // Build the on-page image (MVCC header prepended in MVCC mode).
+    std::vector<uint8_t> image;
+    std::span<const uint8_t> on_page = data;
+    if (options_.mvcc_headers) {
+        image = make_on_page_image(data, xmin);
+        on_page = image;
     }
 
     auto pc = dm_.file_page_count(file_id_);
@@ -34,11 +88,12 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data) {
         auto page_result = bpm_.fetch_page(last_insert_page_);
         if (page_result) {
             Page* page = *page_result;
-            auto slot = page->insert_tuple(data);
+            auto slot = page->insert_tuple(on_page);
             if (slot) {
                 ++row_count_;
                 persist_row_count();
                 RID rid{last_insert_page_, *slot};
+                log_wal(WalRecordType::INSERT, rid, xmin, {}, on_page);
                 auto unpin = bpm_.unpin_page(last_insert_page_, true);
                 if (!unpin) {
                     return tl::unexpected(unpin.error());
@@ -65,12 +120,13 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data) {
             auto page_result = bpm_.fetch_page(next_pid);
             if (page_result) {
                 Page* page = *page_result;
-                auto slot = page->insert_tuple(data);
+                auto slot = page->insert_tuple(on_page);
                 if (slot) {
                     ++row_count_;
                     persist_row_count();
                     last_insert_page_ = next_pid;
                     RID rid{next_pid, *slot};
+                    log_wal(WalRecordType::INSERT, rid, xmin, {}, on_page);
                     auto unpin = bpm_.unpin_page(next_pid, true);
                     if (!unpin) {
                         return tl::unexpected(unpin.error());
@@ -94,7 +150,7 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data) {
     Page* new_page = *new_page_result;
     PageId new_pid = new_page->page_id();
 
-    auto slot = new_page->insert_tuple(data);
+    auto slot = new_page->insert_tuple(on_page);
     if (!slot) {
         // Tuple too large for an empty page.
         auto unpin = bpm_.unpin_page(new_pid, false);
@@ -110,6 +166,7 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data) {
     persist_row_count();
     last_insert_page_ = new_pid;
     RID rid{new_pid, *slot};
+    log_wal(WalRecordType::INSERT, rid, xmin, {}, on_page);
 
     auto unpin = bpm_.unpin_page(new_pid, true);
     if (!unpin) {
@@ -120,24 +177,38 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data) {
 }
 
 Result<std::vector<RID>>
-TableHeap::insert_batch(const std::vector<std::span<const uint8_t>>& tuples) {
+TableHeap::insert_batch(const std::vector<std::span<const uint8_t>>& tuples, txn_id_t xmin) {
     if (tuples.empty()) {
         return ok(std::vector<RID>{});
     }
 
     // Pre-validate all tuples so we never partially insert and then fail.
-    static constexpr size_t kMaxTupleSize = page_size - page_header_size - slot_entry_size;
+    static constexpr size_t kMaxImageSize = page_size - page_header_size - slot_entry_size;
+    const size_t header_overhead = options_.mvcc_headers ? mvcc_header_size : 0;
     for (size_t i = 0; i < tuples.size(); ++i) {
         if (tuples[i].empty()) {
             return make_error(StatusCode::INVALID_ARGUMENT,
                               "cannot insert empty tuple at index " + std::to_string(i));
         }
-        if (tuples[i].size() > kMaxTupleSize) {
+        if (tuples[i].size() + header_overhead > kMaxImageSize) {
             return make_error(StatusCode::INVALID_ARGUMENT,
                               "tuple at index " + std::to_string(i) +
                                   " too large for a single page");
         }
     }
+
+    // Build the on-page images (MVCC headers prepended in MVCC mode).
+    std::vector<std::vector<uint8_t>> images;
+    std::vector<std::span<const uint8_t>> on_page;
+    if (options_.mvcc_headers) {
+        images.reserve(tuples.size());
+        on_page.reserve(tuples.size());
+        for (const auto& t : tuples) {
+            images.push_back(make_on_page_image(t, xmin));
+            on_page.emplace_back(images.back());
+        }
+    }
+    const std::vector<std::span<const uint8_t>>& spans = options_.mvcc_headers ? on_page : tuples;
 
     auto pc = dm_.file_page_count(file_id_);
     if (!pc) {
@@ -146,13 +217,13 @@ TableHeap::insert_batch(const std::vector<std::span<const uint8_t>>& tuples) {
     uint32_t total_pages = *pc;
 
     std::vector<RID> rids;
-    rids.reserve(tuples.size());
+    rids.reserve(spans.size());
     size_t idx = 0;
 
     // Helper: try to insert as many tuples as possible into a pinned page.
     auto fill_page = [&](Page* page, PageId pid) {
-        while (idx < tuples.size()) {
-            auto slot = page->insert_tuple(tuples[idx]);
+        while (idx < spans.size()) {
+            auto slot = page->insert_tuple(spans[idx]);
             if (!slot) {
                 break; // Page full.
             }
@@ -176,7 +247,7 @@ TableHeap::insert_batch(const std::vector<std::span<const uint8_t>>& tuples) {
     }
 
     // Try the next page after the hint.
-    if (idx < tuples.size() && last_insert_page_ >= 1) {
+    if (idx < spans.size() && last_insert_page_ >= 1) {
         PageId next_pid = last_insert_page_ + 1;
         if (next_pid < total_pages) {
             auto page_result = bpm_.fetch_page(next_pid);
@@ -197,7 +268,7 @@ TableHeap::insert_batch(const std::vector<std::span<const uint8_t>>& tuples) {
     }
 
     // Allocate new pages as needed for remaining tuples.
-    while (idx < tuples.size()) {
+    while (idx < spans.size()) {
         auto new_page_result = bpm_.new_page();
         if (!new_page_result) {
             return tl::unexpected(new_page_result.error());
@@ -211,6 +282,13 @@ TableHeap::insert_batch(const std::vector<std::span<const uint8_t>>& tuples) {
         auto unpin = bpm_.unpin_page(new_pid, true);
         if (!unpin) {
             return tl::unexpected(unpin.error());
+        }
+    }
+
+    // Log one INSERT record per tuple with its full on-page image.
+    if (wal_ != nullptr) {
+        for (size_t i = 0; i < rids.size(); ++i) {
+            log_wal(WalRecordType::INSERT, rids[i], xmin, {}, spans[i]);
         }
     }
 
@@ -247,7 +325,44 @@ Result<std::vector<uint8_t>> TableHeap::get_tuple(RID rid) {
         return tl::unexpected(unpin.error());
     }
 
+    if (options_.mvcc_headers) {
+        if (tuple->size() <= mvcc_header_size) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "tuple smaller than MVCC header (corrupt page or wrong heap mode)");
+        }
+        tuple->erase(tuple->begin(),
+                     tuple->begin() + static_cast<std::ptrdiff_t>(mvcc_header_size));
+    }
+
     return ok(std::move(*tuple));
+}
+
+Result<MvccTupleHeader> TableHeap::get_tuple_header(RID rid) {
+    if (!options_.mvcc_headers) {
+        return make_error(StatusCode::NOT_IMPLEMENTED, "heap does not store MVCC tuple headers");
+    }
+
+    auto page_result = bpm_.fetch_page(rid.page_id);
+    if (!page_result) {
+        return tl::unexpected(page_result.error());
+    }
+
+    Page* page = *page_result;
+    auto tuple = page->get_tuple(rid.slot_id);
+    auto unpin = bpm_.unpin_page(rid.page_id, false);
+    if (!unpin) {
+        SIXSEVEN_LOG_WARN("unpin failed after get_tuple_header on page {}: {}",
+                          rid.page_id,
+                          unpin.error().message);
+    }
+    if (!tuple) {
+        return tl::unexpected(tuple.error());
+    }
+    if (tuple->size() < mvcc_header_size) {
+        return make_error(StatusCode::INTERNAL_ERROR,
+                          "tuple smaller than MVCC header (corrupt page or wrong heap mode)");
+    }
+    return ok(read_mvcc_header(*tuple));
 }
 
 Result<void> TableHeap::update_tuple(RID rid, std::span<const uint8_t> data) {
@@ -259,14 +374,45 @@ Result<void> TableHeap::update_tuple(RID rid, std::span<const uint8_t> data) {
     if (!page_result) {
         return tl::unexpected(page_result.error());
     }
-
     Page* page = *page_result;
-    auto result = page->update_tuple(rid.slot_id, data);
+
+    // In MVCC mode (or when WAL logging) read the current on-page image: the
+    // existing header is preserved across in-place updates and the old image
+    // becomes the WAL before-image.
+    std::vector<uint8_t> before;
+    if (options_.mvcc_headers || wal_ != nullptr) {
+        auto old = page->get_tuple(rid.slot_id);
+        if (!old) {
+            auto unpin = bpm_.unpin_page(rid.page_id, false);
+            if (!unpin) {
+                SIXSEVEN_LOG_WARN("unpin failed after update_tuple error on page {}: {}",
+                                  rid.page_id,
+                                  unpin.error().message);
+            }
+            return tl::unexpected(old.error());
+        }
+        before = std::move(*old);
+    }
+
+    std::vector<uint8_t> image;
+    std::span<const uint8_t> on_page = data;
+    if (options_.mvcc_headers) {
+        MvccTupleHeader header;
+        if (before.size() >= mvcc_header_size) {
+            header = read_mvcc_header(before);
+        } else {
+            header.xmin = frozen_txn_id;
+        }
+        image = prepend_mvcc_header(header, data);
+        on_page = image;
+    }
+
+    auto result = page->update_tuple(rid.slot_id, on_page);
     if (!result) {
         // If update failed due to space, try compact and retry.
         if (result.error().code == StatusCode::INVALID_ARGUMENT) {
             page->compact();
-            result = page->update_tuple(rid.slot_id, data);
+            result = page->update_tuple(rid.slot_id, on_page);
         }
         if (!result) {
             auto unpin = bpm_.unpin_page(rid.page_id, false);
@@ -278,6 +424,8 @@ Result<void> TableHeap::update_tuple(RID rid, std::span<const uint8_t> data) {
             return tl::unexpected(result.error());
         }
     }
+
+    log_wal(WalRecordType::UPDATE, rid, frozen_txn_id, before, on_page);
 
     auto unpin = bpm_.unpin_page(rid.page_id, true);
     if (!unpin) {
@@ -322,19 +470,44 @@ Result<std::vector<RID>> TableHeap::update_tuples_batch(
                 continue;
             }
 
-            auto result = page->update_tuple(upd.rid.slot_id, upd.data);
+            // Preserve the existing MVCC header / capture the WAL before-image.
+            std::vector<uint8_t> before;
+            if (options_.mvcc_headers || wal_ != nullptr) {
+                auto old = page->get_tuple(upd.rid.slot_id);
+                if (!old) {
+                    failed_rids.push_back(upd.rid);
+                    continue;
+                }
+                before = std::move(*old);
+            }
+
+            std::vector<uint8_t> image;
+            std::span<const uint8_t> on_page = upd.data;
+            if (options_.mvcc_headers) {
+                MvccTupleHeader header;
+                if (before.size() >= mvcc_header_size) {
+                    header = read_mvcc_header(before);
+                } else {
+                    header.xmin = frozen_txn_id;
+                }
+                image = prepend_mvcc_header(header, upd.data);
+                on_page = image;
+            }
+
+            auto result = page->update_tuple(upd.rid.slot_id, on_page);
             if (!result) {
                 // Compact once per page if update fails due to fragmentation.
                 if (!compacted && result.error().code == StatusCode::INVALID_ARGUMENT) {
                     page->compact();
                     compacted = true;
-                    result = page->update_tuple(upd.rid.slot_id, upd.data);
+                    result = page->update_tuple(upd.rid.slot_id, on_page);
                 }
                 if (!result) {
                     failed_rids.push_back(upd.rid);
                     continue;
                 }
             }
+            log_wal(WalRecordType::UPDATE, upd.rid, frozen_txn_id, before, on_page);
             any_dirty = true;
         }
 
@@ -348,13 +521,35 @@ Result<std::vector<RID>> TableHeap::update_tuples_batch(
     return ok(std::move(failed_rids));
 }
 
-Result<void> TableHeap::delete_tuple(RID rid) {
+Result<void> TableHeap::delete_tuple(RID rid, txn_id_t xmax) {
     auto page_result = bpm_.fetch_page(rid.page_id);
     if (!page_result) {
         return tl::unexpected(page_result.error());
     }
-
     Page* page = *page_result;
+
+    // Capture the on-page image and stamp xmax into it. The stamped image is
+    // persisted via the WAL DELETE record (redo-able header mutation); the
+    // slot itself is then physically deleted to preserve the executor's
+    // current observable semantics (see class documentation in table_heap.h).
+    std::vector<uint8_t> before;
+    if (options_.mvcc_headers || wal_ != nullptr) {
+        auto old = page->get_tuple(rid.slot_id);
+        if (!old) {
+            auto unpin = bpm_.unpin_page(rid.page_id, false);
+            if (!unpin) {
+                SIXSEVEN_LOG_WARN("unpin failed after delete_tuple error on page {}: {}",
+                                  rid.page_id,
+                                  unpin.error().message);
+            }
+            return tl::unexpected(old.error());
+        }
+        before = std::move(*old);
+        if (options_.mvcc_headers && before.size() >= mvcc_header_size) {
+            write_mvcc_xmax(before.data(), xmax);
+        }
+    }
+
     auto result = page->delete_tuple(rid.slot_id);
     if (!result) {
         auto unpin = bpm_.unpin_page(rid.page_id, false);
@@ -368,6 +563,7 @@ Result<void> TableHeap::delete_tuple(RID rid) {
 
     --row_count_;
     persist_row_count();
+    log_wal(WalRecordType::DELETE, rid, xmax, before, {});
 
     auto unpin = bpm_.unpin_page(rid.page_id, true);
     if (!unpin) {
@@ -377,12 +573,126 @@ Result<void> TableHeap::delete_tuple(RID rid) {
     return ok();
 }
 
+// -- WAL recovery primitives (GDB-714) -----------------------------------------
+
+Result<void> TableHeap::restore_raw_tuple(RID rid, std::span<const uint8_t> raw_image) {
+    if (raw_image.empty()) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "cannot restore empty tuple image");
+    }
+    if (rid.page_id == 0) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "cannot restore into header page 0");
+    }
+
+    // Allocate pages until the target page exists (redo onto a fresh or
+    // truncated file). new_page() allocates sequentially ascending ids.
+    auto pc = dm_.file_page_count(file_id_);
+    if (!pc) {
+        return tl::unexpected(pc.error());
+    }
+    while (*pc <= rid.page_id) {
+        auto new_page_result = bpm_.new_page();
+        if (!new_page_result) {
+            return tl::unexpected(new_page_result.error());
+        }
+        PageId new_pid = (*new_page_result)->page_id();
+        auto unpin = bpm_.unpin_page(new_pid, true);
+        if (!unpin) {
+            return tl::unexpected(unpin.error());
+        }
+        pc = dm_.file_page_count(file_id_);
+        if (!pc) {
+            return tl::unexpected(pc.error());
+        }
+    }
+
+    auto page_result = bpm_.fetch_page(rid.page_id);
+    if (!page_result) {
+        return tl::unexpected(page_result.error());
+    }
+    Page* page = *page_result;
+
+    bool was_live = page->is_slot_live(rid.slot_id);
+    auto result = page->restore_tuple(rid.slot_id, raw_image);
+    if (!result && result.error().code == StatusCode::INVALID_ARGUMENT) {
+        page->compact();
+        result = page->restore_tuple(rid.slot_id, raw_image);
+    }
+    if (!result) {
+        auto unpin = bpm_.unpin_page(rid.page_id, false);
+        if (!unpin) {
+            SIXSEVEN_LOG_WARN("unpin failed after restore_raw_tuple error on page {}: {}",
+                              rid.page_id,
+                              unpin.error().message);
+        }
+        return tl::unexpected(result.error());
+    }
+
+    if (!was_live) {
+        ++row_count_;
+        persist_row_count();
+    }
+
+    auto unpin = bpm_.unpin_page(rid.page_id, true);
+    if (!unpin) {
+        return tl::unexpected(unpin.error());
+    }
+    return ok();
+}
+
+Result<void> TableHeap::delete_raw_tuple(RID rid) {
+    auto pc = dm_.file_page_count(file_id_);
+    if (!pc) {
+        return tl::unexpected(pc.error());
+    }
+    if (rid.page_id == 0 || rid.page_id >= *pc) {
+        return ok(); // Page absent — nothing to delete (idempotent).
+    }
+
+    auto page_result = bpm_.fetch_page(rid.page_id);
+    if (!page_result) {
+        // Page allocated but never written (e.g., redo onto a partially
+        // recovered file) — nothing to delete.
+        return ok();
+    }
+    Page* page = *page_result;
+
+    if (!page->is_slot_live(rid.slot_id)) {
+        auto unpin = bpm_.unpin_page(rid.page_id, false);
+        if (!unpin) {
+            return tl::unexpected(unpin.error());
+        }
+        return ok(); // Already deleted or out of range (idempotent).
+    }
+
+    auto result = page->delete_tuple(rid.slot_id);
+    if (!result) {
+        auto unpin = bpm_.unpin_page(rid.page_id, false);
+        if (!unpin) {
+            SIXSEVEN_LOG_WARN("unpin failed after delete_raw_tuple error on page {}: {}",
+                              rid.page_id,
+                              unpin.error().message);
+        }
+        return tl::unexpected(result.error());
+    }
+
+    if (row_count_.load(std::memory_order_relaxed) > 0) {
+        --row_count_;
+    }
+    persist_row_count();
+
+    auto unpin = bpm_.unpin_page(rid.page_id, true);
+    if (!unpin) {
+        return tl::unexpected(unpin.error());
+    }
+    return ok();
+}
+
 Result<TableIterator> TableHeap::begin() {
     auto pc = dm_.file_page_count(file_id_);
     if (!pc) {
         return tl::unexpected(pc.error());
     }
-    return ok(TableIterator(bpm_, 1, *pc));
+    return ok(TableIterator(bpm_, 1, *pc, options_.mvcc_headers));
 }
 
 Result<uint32_t> TableHeap::page_count() const {
@@ -415,8 +725,12 @@ void TableHeap::persist_row_count() {
 
 // -- TableIterator ------------------------------------------------------------
 
-TableIterator::TableIterator(BufferPoolManager& bpm, PageId start_page, uint32_t total_pages)
-    : bpm_(bpm), current_page_(start_page), total_pages_(total_pages) {}
+TableIterator::TableIterator(BufferPoolManager& bpm,
+                             PageId start_page,
+                             uint32_t total_pages,
+                             bool strip_mvcc_headers)
+    : bpm_(bpm), current_page_(start_page), total_pages_(total_pages),
+      strip_mvcc_headers_(strip_mvcc_headers) {}
 
 std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
     while (!exhausted_ && current_page_ < total_pages_) {
@@ -447,6 +761,14 @@ std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
                     SIXSEVEN_LOG_WARN("unpin failed during scan on page {}: {}",
                                       current_page_,
                                       unpin.error().message);
+                }
+                if (strip_mvcc_headers_) {
+                    // Drop the MVCC header prefix; a tuple shorter than the
+                    // header (corrupt) yields an empty payload, which the
+                    // deserialization layer rejects per row.
+                    auto strip = std::min(tuple->size(), mvcc_header_size);
+                    tuple->erase(tuple->begin(),
+                                 tuple->begin() + static_cast<std::ptrdiff_t>(strip));
                 }
                 return std::make_pair(rid, std::move(*tuple));
             }
