@@ -476,12 +476,16 @@ TEST(QA_GDB_243_Accessors, LargeDimensionEmbedMismatchFails) {
     auto mock = std::make_unique<MockOnnxSession>();
     // Return 3 floats; provider expects 100000 -- session will reject.
     mock->set_embedding({1.0f, 2.0f, 3.0f});
+    auto* mock_ptr = mock.get();
 
     OnnxProvider provider("model.onnx", 100000, std::move(mock));
     auto result = provider.embed("hello");
     ASSERT_FALSE(result.has_value())
         << "embed() must fail when session output size != configured dimension";
     EXPECT_EQ(result.error().code, StatusCode::INTERNAL_ERROR);
+    // The provider must forward its configured dimension to the session --
+    // otherwise the failure above could occur for the wrong reason.
+    EXPECT_EQ(mock_ptr->last_expected_dim_, 100000u);
 }
 
 TEST(QA_GDB_243_Accessors, PathWithSlashes) {
