@@ -16,9 +16,9 @@
 ///  - Path consistency: brute-force vs btree-prefiltered must produce
 ///    identical ordering AND identical _distance values; prefiltered RIDs
 ///    pointing at nonexistent rows; dimension-mismatched query vectors.
-///  - HNSW interaction: a populated HNSW index hijacks the DOT query and
-///    returns L2-ordered raw index distances (known-wrong, GDB-723). Pinned
-///    here as stable behavior so a change in either direction is visible.
+///  - HNSW interaction: a dot-product HNSW index serves DOT queries with
+///    true dot ordering and raw-dot _distance values, matching the
+///    brute-force path (fixed by GDB-723).
 ///  - Metric guards: the default (no USING) metric remains COSINE ordering.
 
 #include "sixseven/catalog/catalog.h"
@@ -663,13 +663,12 @@ TEST_F(QA717AdvNearestScanOperatorTest, PrefilteredAllRidsInvalidReturnsEmpty) {
     op.close();
 }
 
-// HNSW interaction pin (GDB-723, pre-existing, NOT this ticket's inversion):
-// with a populated HNSW index a dot-product query is served by the index,
-// which computes L2 regardless of the metric, and distances pass through
-// without the dot-product display negation. The L2-nearest row (id=1, dot
-// 0.9) therefore beats the dot-best row (id=2, dot 5.0). This test pins that
-// known-wrong-but-stable behavior; it must FLIP when GDB-723 is fixed.
-TEST_F(QA717AdvNearestScanOperatorTest, HnswPathStillL2OrderedForDotQueries) {
+// FLIPPED for GDB-723 (was the GDB-717-era pin of the L2-on-HNSW bug): the
+// HNSW index now honors its configured metric, so a dot-product query served
+// by a dot-product HNSW index must return true DOT ordering with the raw dot
+// product as _distance (descending emission), exactly like the brute-force
+// path (GDB-717 display conventions).
+TEST_F(QA717AdvNearestScanOperatorTest, HnswPathDotOrderedForDotQueries) {
     TableHeap heap(*table_bpm_, dm_, table_fid_);
     HnswIndex hnsw(*hnsw_bpm_, nullptr);
 
@@ -678,9 +677,12 @@ TEST_F(QA717AdvNearestScanOperatorTest, HnswPathStillL2OrderedForDotQueries) {
     hnsw_config.m = 8;
     hnsw_config.ef_construction = 50;
     hnsw_config.ef_search = 50;
+    // Raw DOT_PRODUCT must be normalized to the INNER_PRODUCT sort form.
+    hnsw_config.metric = DistanceMetric::DOT_PRODUCT;
     ASSERT_TRUE(hnsw.create(hnsw_config).has_value());
+    ASSERT_EQ(hnsw.metric(), DistanceMetric::INNER_PRODUCT);
 
-    // id=1: L2^2 = 0.01 (nearest), dot = 0.9. id=2: L2^2 = 16, dot = 5 (best).
+    // id=1: L2^2 = 0.01 (L2-nearest), dot = 0.9. id=2: L2^2 = 16, dot = 5 (best).
     Embedding embs[] = {
         {0.9F, 0.0F, 0.0F},
         {5.0F, 0.0F, 0.0F},
@@ -706,22 +708,16 @@ TEST_F(QA717AdvNearestScanOperatorTest, HnswPathStillL2OrderedForDotQueries) {
     auto results = drain(op);
     ASSERT_EQ(results.size(), 3u);
 
-    // L2 ordering (0.01, 2.0, 16.0), not dot ordering (5.0, 0.9, 0.0): the
-    // dot-best row id=2 lands LAST because its L2 distance is largest.
-    EXPECT_EQ(results[0].values[0].as_int32(), 1);
-    EXPECT_EQ(results[1].values[0].as_int32(), 3);
-    EXPECT_EQ(results[2].values[0].as_int32(), 2);
+    // True dot ordering (5.0, 0.9, 0.0): the dot-best row id=2 is first.
+    // Pre-GDB-723 the index returned L2 ordering (1, 3, 2).
+    EXPECT_EQ(results[0].values[0].as_int32(), 2);
+    EXPECT_EQ(results[1].values[0].as_int32(), 1);
+    EXPECT_EQ(results[2].values[0].as_int32(), 3);
 
-    // Distances are raw index (L2-squared) values, ascending and >= 0 — the
-    // dot-product display negation must NOT be applied on this path.
-    for (size_t i = 0; i < results.size(); ++i) {
-        EXPECT_GE(results[i].values[3].as_float64(), 0.0)
-            << "HNSW distance unexpectedly negated at rank " << i;
-        if (i > 0) {
-            EXPECT_LE(results[i - 1].values[3].as_float64(), results[i].values[3].as_float64());
-        }
-    }
-    EXPECT_NEAR(results[0].values[3].as_float64(), 0.01, 1e-4);
+    // _distance is the raw dot product (GDB-717 convention), descending.
+    EXPECT_NEAR(results[0].values[3].as_float64(), 5.0, 1e-4);
+    EXPECT_NEAR(results[1].values[3].as_float64(), 0.9, 1e-4);
+    EXPECT_NEAR(results[2].values[3].as_float64(), 0.0, 1e-4);
     op.close();
 }
 

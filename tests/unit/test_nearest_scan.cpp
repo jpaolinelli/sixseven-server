@@ -913,3 +913,129 @@ TEST_F(NearestScanTest, PrefilteredSkipsNullEmbeddings) {
 
     op.close();
 }
+
+// =============================================================================
+// GDB-723: HNSW path honors the query metric
+// =============================================================================
+
+// Gold assertion: for every metric, the HNSW path and the brute-force path
+// must produce IDENTICAL ordering and IDENTICAL _distance values on the same
+// data. The dataset uses non-unit-norm vectors so L2 / COSINE / DOT all rank
+// differently — the tiny size makes HNSW exact.
+TEST_F(NearestScanTest, HnswAndBruteForceIdenticalForAllMetrics) {
+    TableHeap heap(*table_bpm_, dm_, table_file_id_);
+
+    const std::vector<Embedding> embs = {
+        {0.9F, 0.1F, 0.0F},  // id 1: L2-nearest to query
+        {5.0F, 0.0F, 0.0F},  // id 2: dot-best, cosine-best
+        {0.0F, 1.0F, 0.0F},  // id 3: orthogonal
+        {-2.0F, 0.0F, 0.0F}, // id 4: anti-parallel
+    };
+    for (size_t i = 0; i < embs.size(); ++i) {
+        insert_row(heap, static_cast<int32_t>(i + 1), "r" + std::to_string(i + 1), embs[i]);
+    }
+
+    const DistanceMetric metrics[] = {
+        DistanceMetric::L2,
+        DistanceMetric::COSINE,
+        DistanceMetric::INNER_PRODUCT,
+    };
+
+    for (auto metric : metrics) {
+        // Build an HNSW index with the matching metric.
+        HnswIndex hnsw(*hnsw_bpm_, nullptr);
+        HnswIndexConfig hnsw_config;
+        hnsw_config.dimension = 3;
+        hnsw_config.m = 8;
+        hnsw_config.ef_construction = 50;
+        hnsw_config.ef_search = 50;
+        hnsw_config.metric = metric;
+        ASSERT_TRUE(hnsw.create(hnsw_config).has_value());
+        for (const auto& e : embs) {
+            ASSERT_TRUE(hnsw.insert(e).has_value());
+        }
+
+        auto run = [&](HnswIndex* index) {
+            NearestScanConfig config;
+            config.k = 4;
+            config.query_vector = {1.0F, 0.0F, 0.0F};
+            config.metric = metric;
+            config.embedding_column_index = 2;
+            OutputSchema schema(output_cols_);
+            BoundStatement bound;
+            NearestScanOperator op(
+                heap, storage_schema_, std::move(config), std::move(schema), nullptr, bound, index);
+            EXPECT_TRUE(op.open().has_value());
+            auto results = drain(op);
+            op.close();
+            return results;
+        };
+
+        auto hnsw_results = run(&hnsw);
+        auto brute_results = run(nullptr);
+
+        ASSERT_EQ(hnsw_results.size(), brute_results.size())
+            << "metric=" << distance_metric_name(metric);
+        for (size_t i = 0; i < hnsw_results.size(); ++i) {
+            EXPECT_EQ(hnsw_results[i].values[0].as_int32(), brute_results[i].values[0].as_int32())
+                << "metric=" << distance_metric_name(metric) << " rank=" << i;
+            EXPECT_NEAR(hnsw_results[i].values[3].as_float64(),
+                        brute_results[i].values[3].as_float64(),
+                        1e-5)
+                << "metric=" << distance_metric_name(metric) << " rank=" << i;
+        }
+    }
+}
+
+// GDB-723: when the query metric differs from the metric the HNSW index was
+// built with, the operator must fall back to the exact brute-force scan
+// rather than emit index-metric distances.
+TEST_F(NearestScanTest, MetricMismatchFallsBackToBruteForce) {
+    TableHeap heap(*table_bpm_, dm_, table_file_id_);
+    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+
+    // Index built with L2 (the legacy on-disk default).
+    HnswIndexConfig hnsw_config;
+    hnsw_config.dimension = 3;
+    hnsw_config.m = 8;
+    hnsw_config.ef_construction = 50;
+    hnsw_config.ef_search = 50;
+    ASSERT_TRUE(hnsw.create(hnsw_config).has_value());
+    ASSERT_EQ(hnsw.metric(), DistanceMetric::L2);
+
+    // [5,0,0] is cosine-perfect for [1,0,0] but L2-farthest.
+    Embedding embs[] = {
+        {0.9F, 0.5F, 0.0F},
+        {5.0F, 0.0F, 0.0F},
+        {0.0F, 1.0F, 0.0F},
+    };
+    for (int i = 0; i < 3; ++i) {
+        insert_row(heap, i + 1, "r" + std::to_string(i + 1), embs[i]);
+        ASSERT_TRUE(hnsw.insert(embs[i]).has_value());
+    }
+
+    NearestScanConfig config;
+    config.k = 3;
+    config.query_vector = {1.0F, 0.0F, 0.0F};
+    config.metric = DistanceMetric::COSINE; // mismatch vs L2 index
+    config.embedding_column_index = 2;
+
+    OutputSchema schema(output_cols_);
+    BoundStatement bound;
+    NearestScanOperator op(
+        heap, storage_schema_, std::move(config), std::move(schema), nullptr, bound, &hnsw);
+
+    ASSERT_TRUE(op.open().has_value());
+    auto results = drain(op);
+    ASSERT_EQ(results.size(), 3u);
+
+    // COSINE ordering: id=2 (dist 0) < id=1 (~0.126) < id=3 (1.0).
+    // L2 ordering would have been id=1, id=3, id=2.
+    EXPECT_EQ(results[0].values[0].as_int32(), 2);
+    EXPECT_EQ(results[1].values[0].as_int32(), 1);
+    EXPECT_EQ(results[2].values[0].as_int32(), 3);
+    EXPECT_NEAR(results[0].values[3].as_float64(), 0.0, 1e-5);
+    EXPECT_NEAR(results[2].values[3].as_float64(), 1.0, 1e-5);
+
+    op.close();
+}

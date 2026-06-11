@@ -131,8 +131,8 @@ Result<HnswNode> deserialize_hnsw_node(std::span<const uint8_t> data) {
 // -- HnswMeta serialization --------------------------------------------------
 
 std::vector<uint8_t> serialize_hnsw_meta(const HnswMeta& meta) {
-    const size_t total =
-        hnsw_meta_size + 4 + meta.node_page_ids.size() * 4 + 4 + meta.vector_page_ids.size() * 4;
+    const size_t total = hnsw_meta_size + 4 + meta.node_page_ids.size() * 4 + 4 +
+                         meta.vector_page_ids.size() * 4 + 1;
     std::vector<uint8_t> buf(total, 0);
     size_t off = 0;
 
@@ -168,6 +168,11 @@ std::vector<uint8_t> serialize_hnsw_meta(const HnswMeta& meta) {
         write_u32(buf, off, pid);
         off += 4;
     }
+
+    // Distance metric (GDB-723). Appended after the page lists so legacy
+    // readers/writers (which stop at the page lists) stay compatible.
+    buf[off] = static_cast<uint8_t>(meta.metric);
+    off += 1;
 
     return buf;
 }
@@ -225,6 +230,17 @@ Result<HnswMeta> deserialize_hnsw_meta(std::span<const uint8_t> data) {
             meta.vector_page_ids[i] = read_u32(data.data(), off);
             off += 4;
         }
+    }
+
+    // Distance metric byte (GDB-723). Legacy indexes were built with L2 and
+    // lack this field — the default (L2) already set on `meta` applies.
+    if (off < data.size()) {
+        uint8_t raw_metric = data[off];
+        off += 1;
+        if (raw_metric > static_cast<uint8_t>(DistanceMetric::INNER_PRODUCT)) {
+            return make_error(StatusCode::INVALID_ARGUMENT, "HNSW meta has invalid metric byte");
+        }
+        meta.metric = static_cast<DistanceMetric>(raw_metric);
     }
 
     return ok(meta);

@@ -22,6 +22,11 @@ struct HnswIndexConfig {
     uint16_t m = hnsw_default_m;
     uint16_t ef_construction = hnsw_default_ef_construction;
     uint16_t ef_search = hnsw_default_ef_search;
+    /// Distance metric used for both graph construction and search (GDB-723).
+    /// DOT_PRODUCT is normalized to INNER_PRODUCT (negated dot, lower =
+    /// closer) so every metric sorts ascending. Defaults to L2, matching
+    /// legacy indexes persisted before the metric field existed.
+    DistanceMetric metric = DistanceMetric::L2;
 };
 
 /// Location of an HNSW node in the buffer pool.
@@ -111,6 +116,10 @@ public:
 
     /// Return the vector dimension.
     [[nodiscard]] uint32_t dimension() const { return meta_.dimension; }
+
+    /// Return the distance metric the index was built with (GDB-723).
+    /// Always in sort form: DOT_PRODUCT is stored as INNER_PRODUCT.
+    [[nodiscard]] DistanceMetric metric() const { return meta_.metric; }
 
     // -- Page-level operations (used by subtasks 2 & 3) -----------------------
 

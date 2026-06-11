@@ -228,6 +228,19 @@ Result<void> IndexManager::load_hnsw_from_disk(const IndexDef& def, database_id_
         return make_error(load.error().code, load.error().message);
     }
 
+    // Legacy indexes persisted before GDB-723 were built with hardcoded L2
+    // graph connectivity (their meta deserializes as L2). Auto-created
+    // EMBEDDING indexes must serve the default COSINE metric, so rebuild
+    // them with the correct metric instead of loading the stale graph.
+    if (hnsw->metric() != DistanceMetric::COSINE) {
+        SIXSEVEN_LOG_INFO(
+            "index manager: HNSW '{}' (id={}) persisted with metric {}, rebuilding as COSINE",
+            def.name,
+            def.index_id,
+            distance_metric_name(hnsw->metric()));
+        return rebuild_hnsw_from_table(def, db_id);
+    }
+
     // Build the node_id → RID map by scanning the table in heap order.
     // Node IDs were assigned sequentially during the original rebuild, matching
     // the heap scan order for rows with non-null embeddings.
@@ -343,6 +356,10 @@ Result<void> IndexManager::rebuild_hnsw_from_table(const IndexDef& def, database
     auto hnsw = std::make_unique<HnswIndex>(*(*storage)->bpm, nullptr);
     HnswIndexConfig config;
     config.dimension = dimension;
+    // Auto-created EMBEDDING indexes serve the default NEAREST metric, which
+    // is COSINE (GDB-723). Queries with a different USING metric fall back to
+    // the exact brute-force scan in NearestScanOperator.
+    config.metric = DistanceMetric::COSINE;
     auto create = hnsw->create(config);
     if (!create) {
         return make_error(create.error().code,

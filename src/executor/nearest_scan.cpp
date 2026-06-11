@@ -60,9 +60,22 @@ Result<void> NearestScanOperator::do_open() {
     }
 
     if (hnsw_index_ != nullptr && hnsw_index_->node_count() > 0) {
-        SIXSEVEN_LOG_DEBUG("NEAREST: using HNSW index (node_count={}, rid_map={})",
+        // The HNSW graph was built (and is searched) under a single metric.
+        // If the query asks for a different metric, the index distances and
+        // graph connectivity are wrong for this query — fall back to the
+        // exact brute-force scan instead of re-ranking approximate results
+        // (GDB-723).
+        if (hnsw_index_->metric() != sort_metric(config_.metric)) {
+            SIXSEVEN_LOG_DEBUG(
+                "NEAREST: metric mismatch (query={}, index={}) — brute-force fallback",
+                distance_metric_name(sort_metric(config_.metric)),
+                distance_metric_name(hnsw_index_->metric()));
+            return execute_brute_force();
+        }
+        SIXSEVEN_LOG_DEBUG("NEAREST: using HNSW index (node_count={}, rid_map={}, metric={})",
                            hnsw_index_->node_count(),
-                           hnsw_rid_map_ ? hnsw_rid_map_->size() : 0);
+                           hnsw_rid_map_ ? hnsw_rid_map_->size() : 0,
+                           distance_metric_name(hnsw_index_->metric()));
         return execute_hnsw_search();
     }
     SIXSEVEN_LOG_DEBUG("NEAREST: using brute-force scan (hnsw={})",
@@ -349,10 +362,9 @@ Result<void> NearestScanOperator::execute_hnsw_search() {
             }
         }
 
-        // Sort by distance ASC. HNSW distances come straight from the index
-        // (which currently computes L2 regardless of the requested metric —
-        // GDB-723) and are passed through unchanged, so no display
-        // translation is applied on this path.
+        // Sort by distance ASC. The HNSW path only runs when the index metric
+        // matches the query's sort metric (GDB-723), so index distances are
+        // already sort-form values (lower = more similar) for this metric.
         std::sort(matched.begin(), matched.end(), [](const MatchedRow& a, const MatchedRow& b) {
             return a.distance < b.distance;
         });
@@ -364,7 +376,7 @@ Result<void> NearestScanOperator::execute_hnsw_search() {
                 break;
             }
 
-            auto emitted = filter_and_emit(m.tuple, m.distance);
+            auto emitted = filter_and_emit(m.tuple, display_distance(m.distance));
             if (!emitted) {
                 return make_error(emitted.error().code, emitted.error().message);
             }
