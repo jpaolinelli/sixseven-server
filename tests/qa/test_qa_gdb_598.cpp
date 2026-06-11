@@ -16,6 +16,8 @@
 #include <string>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -23,8 +25,7 @@ namespace {
 // Helpers
 // ============================================================================
 
-static TableSchema make_schema(const std::string& name,
-                               TypeId pk_type = TypeId::INT64) {
+static TableSchema make_schema(const std::string& name, TypeId pk_type = TypeId::INT64) {
     TableSchema schema;
     schema.name = name;
     schema.columns = {
@@ -35,7 +36,9 @@ static TableSchema make_schema(const std::string& name,
     return schema;
 }
 
-static Value pk(int64_t v) { return Value(v); }
+static Value pk(int64_t v) {
+    return Value(v);
+}
 
 // ============================================================================
 // Fixture: Two databases, each with their own tables
@@ -46,6 +49,10 @@ protected:
     void SetUp() override {
         catalog_ = std::make_unique<Catalog>();
         graph_ = std::make_unique<GraphEngine>(*catalog_);
+
+        // Bootstrap the default database (id=1) so tests that reference
+        // default_database_id can create tables and edge types in it.
+        bootstrap_qa_catalog(*catalog_);
 
         // Create database 1.
         auto db1 = catalog_->create_database("db1");
@@ -119,14 +126,16 @@ TEST_F(QA_GDB598, DuplicateInSameDatabaseFails) {
 
 /// Edges in db1 are isolated from db2.
 TEST_F(QA_GDB598, LinkIsolationBetweenDatabases) {
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
 
     // Link in db1.
     auto link1 = graph_->link(db1_id_, "follows", pk(1), pk(2));
@@ -149,18 +158,21 @@ TEST_F(QA_GDB598, LinkIsolationBetweenDatabases) {
 
 /// list_edge_types returns only the current database's types.
 TEST_F(QA_GDB598, ListEdgeTypesIsScoped) {
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "authored", db1_users_, db1_posts_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "authored", db1_users_, db1_posts_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
 
     auto db1_types = graph_->list_edge_types(db1_id_);
     EXPECT_EQ(db1_types.size(), 2u);
@@ -172,14 +184,16 @@ TEST_F(QA_GDB598, ListEdgeTypesIsScoped) {
 
 /// Drop edge type in one DB doesn't affect same-named type in another.
 TEST_F(QA_GDB598, DropEdgeTypeIsolation) {
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
 
     // Drop from db1.
     auto drop = graph_->drop_edge_type(db1_id_, "follows");
@@ -197,14 +211,16 @@ TEST_F(QA_GDB598, DropEdgeTypeIsolation) {
 
 /// Cross-database get_edges_from isolation.
 TEST_F(QA_GDB598, GetEdgesFromIsolation) {
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
 
     ASSERT_TRUE(graph_->link(db1_id_, "follows", pk(1), pk(2)).has_value());
     ASSERT_TRUE(graph_->link(db1_id_, "follows", pk(1), pk(3)).has_value());
@@ -221,10 +237,11 @@ TEST_F(QA_GDB598, GetEdgesFromIsolation) {
 
 /// Edge type not found in wrong database.
 TEST_F(QA_GDB598, EdgeTypeNotFoundInWrongDatabase) {
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
 
     // Attempt to use in db2 (doesn't exist there).
     auto link = graph_->link(db2_id_, "follows", pk(1), pk(2));
@@ -246,10 +263,11 @@ TEST_F(QA_GDB598, EdgeTypeNotFoundInWrongDatabase) {
 
 /// AC: drop_edge_types_for_table removes edge types where the table is source.
 TEST_F(QA_GDB598, DropEdgeTypesForSourceTable) {
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "authored", db1_users_, db1_posts_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "authored", db1_users_, db1_posts_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
 
     // Drop table = db1_users_ (source).
     auto drop = graph_->drop_edge_types_for_table(db1_id_, db1_users_);
@@ -262,10 +280,11 @@ TEST_F(QA_GDB598, DropEdgeTypesForSourceTable) {
 
 /// AC: drop_edge_types_for_table removes edge types where the table is target.
 TEST_F(QA_GDB598, DropEdgeTypesForTargetTable) {
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "authored", db1_users_, db1_posts_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "authored", db1_users_, db1_posts_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
 
     // Drop table = db1_posts_ (target).
     auto drop = graph_->drop_edge_types_for_table(db1_id_, db1_posts_);
@@ -277,10 +296,11 @@ TEST_F(QA_GDB598, DropEdgeTypesForTargetTable) {
 
 /// AC: After CASCADE cleanup, can re-create same-named edge type.
 TEST_F(QA_GDB598, RecreateAfterCascadeCleanup) {
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
 
     // Simulate DROP TABLE CASCADE.
     auto drop = graph_->drop_edge_types_for_table(db1_id_, db1_users_);
@@ -298,14 +318,16 @@ TEST_F(QA_GDB598, RecreateAfterCascadeCleanup) {
 
 /// CASCADE for a table in db1 does not affect edge types in db2.
 TEST_F(QA_GDB598, CascadeDoesNotAffectOtherDatabases) {
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
 
     // CASCADE in db1.
     auto drop = graph_->drop_edge_types_for_table(db1_id_, db1_users_);
@@ -331,14 +353,16 @@ TEST_F(QA_GDB598, CascadeNoopForTableWithoutEdges) {
 
 /// Multiple edge types referencing same table — all cleaned up on CASCADE.
 TEST_F(QA_GDB598, CascadeCleansUpMultipleEdgeTypes) {
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "authored", db1_users_, db1_posts_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "authored", db1_users_, db1_posts_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
     ASSERT_TRUE(graph_
                     ->create_edge_type(
                         db1_id_, "likes", db1_users_, db1_posts_, TypeId::INT64, TypeId::INT64, {})
@@ -358,14 +382,16 @@ TEST_F(QA_GDB598, CascadeCleansUpMultipleEdgeTypes) {
 /// CASCADE preserves edge types that don't reference the dropped table.
 TEST_F(QA_GDB598, CascadePreservesUnrelatedEdgeTypes) {
     // "follows" links users->users, "post_tags" links posts->posts.
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "post_tags", db1_posts_, db1_posts_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "post_tags", db1_posts_, db1_posts_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
 
     // Drop db1_users_ — only "follows" should be removed.
     auto drop = graph_->drop_edge_types_for_table(db1_id_, db1_users_);
@@ -382,14 +408,16 @@ TEST_F(QA_GDB598, CascadePreservesUnrelatedEdgeTypes) {
 
 /// Unlink in a specific database doesn't cross boundaries.
 TEST_F(QA_GDB598, UnlinkIsolation) {
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
 
     ASSERT_TRUE(graph_->link(db1_id_, "follows", pk(1), pk(2)).has_value());
     ASSERT_TRUE(graph_->link(db2_id_, "follows", pk(1), pk(2)).has_value());
@@ -411,14 +439,16 @@ TEST_F(QA_GDB598, UnlinkIsolation) {
 
 /// get_edge_table returns correct table per database.
 TEST_F(QA_GDB598, GetEdgeTableIsolation) {
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
 
     auto et1 = graph_->get_edge_table(db1_id_, "follows");
     ASSERT_TRUE(et1.has_value()) << et1.error().message;
@@ -432,14 +462,16 @@ TEST_F(QA_GDB598, GetEdgeTableIsolation) {
 
 /// get_edges_to is scoped per database.
 TEST_F(QA_GDB598, GetEdgesToIsolation) {
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
 
     ASSERT_TRUE(graph_->link(db1_id_, "follows", pk(10), pk(1)).has_value());
     ASSERT_TRUE(graph_->link(db1_id_, "follows", pk(20), pk(1)).has_value());
@@ -456,20 +488,22 @@ TEST_F(QA_GDB598, GetEdgesToIsolation) {
 
 /// unlink_where is scoped per database.
 TEST_F(QA_GDB598, UnlinkWhereIsolation) {
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
-    ASSERT_TRUE(graph_
-                    ->create_edge_type(
-                        db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
-                    .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->create_edge_type(
+                db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64, TypeId::INT64, {})
+            .has_value());
 
     ASSERT_TRUE(graph_->link(db1_id_, "follows", pk(1), pk(2)).has_value());
     ASSERT_TRUE(graph_->link(db2_id_, "follows", pk(1), pk(2)).has_value());
 
-    auto count = graph_->unlink_where(db1_id_, "follows", pk(1), pk(2),
-                                      [](const EdgeRow&) { return true; });
+    auto count =
+        graph_->unlink_where(db1_id_, "follows", pk(1), pk(2), [](const EdgeRow&) { return true; });
     ASSERT_TRUE(count.has_value()) << count.error().message;
     EXPECT_EQ(*count, 1u);
 
@@ -571,12 +605,22 @@ TEST_F(QA_GDB598, ScopedEdgeTypeWithProperties) {
     ColumnDef weight_col{"weight", TypeId::FLOAT64};
 
     ASSERT_TRUE(graph_
-                    ->create_edge_type(db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64,
-                                       TypeId::INT64, {weight_col})
+                    ->create_edge_type(db1_id_,
+                                       "follows",
+                                       db1_users_,
+                                       db1_users_,
+                                       TypeId::INT64,
+                                       TypeId::INT64,
+                                       {weight_col})
                     .has_value());
     ASSERT_TRUE(graph_
-                    ->create_edge_type(db2_id_, "follows", db2_users_, db2_users_, TypeId::INT64,
-                                       TypeId::INT64, {weight_col})
+                    ->create_edge_type(db2_id_,
+                                       "follows",
+                                       db2_users_,
+                                       db2_users_,
+                                       TypeId::INT64,
+                                       TypeId::INT64,
+                                       {weight_col})
                     .has_value());
 
     auto link1 = graph_->link(db1_id_, "follows", pk(1), pk(2), {Value(1.5)});

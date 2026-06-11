@@ -1,0 +1,2410 @@
+{
+ "created": "2026-06-10",
+ "epics": {
+  "E1": "GDB-697",
+  "E2": "GDB-698",
+  "E3": "GDB-699",
+  "E4": "GDB-700",
+  "E5": "GDB-701",
+  "E6": "GDB-702",
+  "E7": "GDB-703",
+  "E8": "GDB-704",
+  "E9": "GDB-705",
+  "E10": "GDB-706",
+  "E11": "GDB-707",
+  "E12": "GDB-708",
+  "E13": "GDB-709"
+ },
+ "tickets": [
+  {
+   "key": "GDB-710",
+   "type": "Story",
+   "parent": "GDB-697",
+   "summary": "Fix QA fixture bootstrap: 10 suites fail at SetUp with 'database with id 1 not found'"
+  },
+  {
+   "key": "GDB-713",
+   "type": "Subtask",
+   "parent": "GDB-710",
+   "summary": "Add database-id-1 bootstrap to shared QA fixture helper"
+  },
+  {
+   "key": "GDB-715",
+   "type": "Subtask",
+   "parent": "GDB-710",
+   "summary": "Migrate the 10 broken suites to the shared fixture"
+  },
+  {
+   "key": "GDB-716",
+   "type": "Subtask",
+   "parent": "GDB-710",
+   "summary": "Add CI check that the QA binary runs to completion"
+  },
+  {
+   "key": "GDB-720",
+   "type": "Bug",
+   "parent": "GDB-697",
+   "summary": "QA fixtures abort the entire test binary via unchecked Result::operator*"
+  },
+  {
+   "key": "GDB-722",
+   "type": "Bug",
+   "parent": "GDB-697",
+   "summary": "Backfill QA suite never verifies any embedding is actually generated or persisted"
+  },
+  {
+   "key": "GDB-726",
+   "type": "Bug",
+   "parent": "GDB-697",
+   "summary": "BasicReplicationFlow claims to 'verify data flows' but never verifies any WAL data is streamed"
+  },
+  {
+   "key": "GDB-731",
+   "type": "Bug",
+   "parent": "GDB-697",
+   "summary": "QA test locks in inverted NEAREST ordering for USING DOT metric"
+  },
+  {
+   "key": "GDB-758",
+   "type": "Bug",
+   "parent": "GDB-697",
+   "summary": "QA_GDB250.StringDefaultWithSingleQuote cannot fail: it logs and returns when the known quoting bug fires"
+  },
+  {
+   "key": "GDB-762",
+   "type": "Bug",
+   "parent": "GDB-697",
+   "summary": "Binder rejection tests never invoke the binder; quantifier validation is untested project-wide"
+  },
+  {
+   "key": "GDB-767",
+   "type": "Bug",
+   "parent": "GDB-697",
+   "summary": "GDB-478 E2E tests never read result rows; named-parameter value plumbing and WHERE/ORDER BY effects are unverifiable"
+  },
+  {
+   "key": "GDB-773",
+   "type": "Bug",
+   "parent": "GDB-697",
+   "summary": "GDB-565 QA suite re-implements pg_type/pg_namespace inside the test and never calls the production code"
+  },
+  {
+   "key": "GDB-795",
+   "type": "Bug",
+   "parent": "GDB-697",
+   "summary": "GDB-566 QA suite re-implements pg_class/pg_attribute inside the test and never calls the production code"
+  },
+  {
+   "key": "GDB-801",
+   "type": "Bug",
+   "parent": "GDB-697",
+   "summary": "GDB-569 SelectNegativeInteger locks in a bug as expected behavior and now fails at HEAD (bug fixed by GDB-661)"
+  },
+  {
+   "key": "GDB-807",
+   "type": "Bug",
+   "parent": "GDB-697",
+   "summary": "Three case-insensitivity tests cannot fail if the feature regresses (stale 'documenting behavior' guards)"
+  },
+  {
+   "key": "GDB-812",
+   "type": "Bug",
+   "parent": "GDB-697",
+   "summary": "GDB-656 migration tests delete sys_databases at the wrong path, so the migration code path (AC5) is never exercised"
+  },
+  {
+   "key": "GDB-836",
+   "type": "Bug",
+   "parent": "GDB-697",
+   "summary": "CreateTableDuplicateColumnNames has zero assertions and masks a real DDL correctness gap"
+  },
+  {
+   "key": "GDB-845",
+   "type": "Bug",
+   "parent": "GDB-697",
+   "summary": "FlushPersistsLatestState cannot fail even if flush_all_indexes persists nothing"
+  },
+  {
+   "key": "GDB-852",
+   "type": "Bug",
+   "parent": "GDB-697",
+   "summary": "BroadcastNotify cannot fail if WAL broadcast is broken"
+  },
+  {
+   "key": "GDB-858",
+   "type": "Bug",
+   "parent": "GDB-697",
+   "summary": "SameNodeReturnsZeroCostPath locks in 0-hop self-paths that violate the {1,20} quantifier"
+  },
+  {
+   "key": "GDB-874",
+   "type": "Story",
+   "parent": "GDB-698",
+   "summary": "Route BEGIN/COMMIT/ROLLBACK through QueryEngine to a real TransactionManager"
+  },
+  {
+   "key": "GDB-883",
+   "type": "Bug",
+   "parent": "GDB-698",
+   "summary": "Wire-protocol SAVEPOINT / ROLLBACK TO SAVEPOINT are name-tracking no-ops that report success"
+  },
+  {
+   "key": "GDB-905",
+   "type": "Subtask",
+   "parent": "GDB-874",
+   "summary": "Add TCL dispatch in QueryEngine::execute before binding"
+  },
+  {
+   "key": "GDB-907",
+   "type": "Subtask",
+   "parent": "GDB-874",
+   "summary": "Thread per-session transaction context into QueryEngine"
+  },
+  {
+   "key": "GDB-908",
+   "type": "Subtask",
+   "parent": "GDB-874",
+   "summary": "Replace Session::update_transaction_state string matching"
+  },
+  {
+   "key": "GDB-911",
+   "type": "Subtask",
+   "parent": "GDB-874",
+   "summary": "QA tests for transaction lifecycle over the wire"
+  },
+  {
+   "key": "GDB-711",
+   "type": "Bug",
+   "parent": "GDB-698",
+   "summary": "VACUUM/ANALYZE parse and bind, then fail with 'planner does not support this statement type'"
+  },
+  {
+   "key": "GDB-714",
+   "type": "Story",
+   "parent": "GDB-699",
+   "summary": "Add MVCC tuple headers (xmin/xmax) to TableHeap storage"
+  },
+  {
+   "key": "GDB-725",
+   "type": "Subtask",
+   "parent": "GDB-714",
+   "summary": "Extend slot/tuple layout with MvccTupleHeader"
+  },
+  {
+   "key": "GDB-730",
+   "type": "Subtask",
+   "parent": "GDB-714",
+   "summary": "Data-file migration or rebuild path for existing databases"
+  },
+  {
+   "key": "GDB-736",
+   "type": "Subtask",
+   "parent": "GDB-714",
+   "summary": "WAL record updates for header mutations"
+  },
+  {
+   "key": "GDB-747",
+   "type": "Story",
+   "parent": "GDB-699",
+   "summary": "Stamp xmin/xmax in DML; UPDATE creates new versions"
+  },
+  {
+   "key": "GDB-753",
+   "type": "Subtask",
+   "parent": "GDB-747",
+   "summary": "InsertOperator/UpdateOperator/DeleteOperator transaction stamping"
+  },
+  {
+   "key": "GDB-755",
+   "type": "Subtask",
+   "parent": "GDB-747",
+   "summary": "Version-chain or new-RID strategy for UPDATE"
+  },
+  {
+   "key": "GDB-761",
+   "type": "Subtask",
+   "parent": "GDB-747",
+   "summary": "Unit + QA tests for version visibility after commit/abort"
+  },
+  {
+   "key": "GDB-777",
+   "type": "Story",
+   "parent": "GDB-699",
+   "summary": "Apply snapshot visibility in all scan operators"
+  },
+  {
+   "key": "GDB-897",
+   "type": "Subtask",
+   "parent": "GDB-777",
+   "summary": "IndexScan and CountScan visibility"
+  },
+  {
+   "key": "GDB-930",
+   "type": "Story",
+   "parent": "GDB-699",
+   "summary": "Wire LockManager + DeadlockDetector into DML; write-write conflict handling"
+  },
+  {
+   "key": "GDB-969",
+   "type": "Story",
+   "parent": "GDB-699",
+   "summary": "Execute VACUUM: reclaim dead versions via xmin horizon"
+  },
+  {
+   "key": "GDB-978",
+   "type": "Story",
+   "parent": "GDB-699",
+   "summary": "Honor isolation levels (READ COMMITTED, SNAPSHOT ISOLATION)"
+  },
+  {
+   "key": "GDB-984",
+   "type": "Story",
+   "parent": "GDB-700",
+   "summary": "Per-row index maintenance API in IndexManager"
+  },
+  {
+   "key": "GDB-994",
+   "type": "Subtask",
+   "parent": "GDB-984",
+   "summary": "HNSW tombstone/delete + update reinsert"
+  },
+  {
+   "key": "GDB-1013",
+   "type": "Bug",
+   "parent": "GDB-698",
+   "summary": "VACUUM/ANALYZE parse and bind, then fail with 'planner does not support this statement type'"
+  },
+  {
+   "key": "GDB-1014",
+   "type": "Story",
+   "parent": "GDB-699",
+   "summary": "Add MVCC tuple headers (xmin/xmax) to TableHeap storage"
+  },
+  {
+   "key": "GDB-1015",
+   "type": "Subtask",
+   "parent": "GDB-1014",
+   "summary": "Extend slot/tuple layout with MvccTupleHeader"
+  },
+  {
+   "key": "GDB-1016",
+   "type": "Subtask",
+   "parent": "GDB-1014",
+   "summary": "Data-file migration or rebuild path for existing databases"
+  },
+  {
+   "key": "GDB-1017",
+   "type": "Subtask",
+   "parent": "GDB-1014",
+   "summary": "WAL record updates for header mutations"
+  },
+  {
+   "key": "GDB-1018",
+   "type": "Story",
+   "parent": "GDB-699",
+   "summary": "Stamp xmin/xmax in DML; UPDATE creates new versions"
+  },
+  {
+   "key": "GDB-1019",
+   "type": "Subtask",
+   "parent": "GDB-1018",
+   "summary": "InsertOperator/UpdateOperator/DeleteOperator transaction stamping"
+  },
+  {
+   "key": "GDB-1020",
+   "type": "Subtask",
+   "parent": "GDB-1018",
+   "summary": "Version-chain or new-RID strategy for UPDATE"
+  },
+  {
+   "key": "GDB-1021",
+   "type": "Subtask",
+   "parent": "GDB-1018",
+   "summary": "Unit + QA tests for version visibility after commit/abort"
+  },
+  {
+   "key": "GDB-1022",
+   "type": "Story",
+   "parent": "GDB-699",
+   "summary": "Apply snapshot visibility in all scan operators"
+  },
+  {
+   "key": "GDB-1023",
+   "type": "Subtask",
+   "parent": "GDB-1022",
+   "summary": "Thread Snapshot through operator open/next"
+  },
+  {
+   "key": "GDB-1024",
+   "type": "Subtask",
+   "parent": "GDB-1022",
+   "summary": "SeqScan + TableIterator visibility filtering"
+  },
+  {
+   "key": "GDB-1025",
+   "type": "Subtask",
+   "parent": "GDB-1022",
+   "summary": "IndexScan and CountScan visibility"
+  },
+  {
+   "key": "GDB-1026",
+   "type": "Subtask",
+   "parent": "GDB-1022",
+   "summary": "Concurrent-session QA tests"
+  },
+  {
+   "key": "GDB-1027",
+   "type": "Story",
+   "parent": "GDB-699",
+   "summary": "Wire LockManager + DeadlockDetector into DML; write-write conflict handling"
+  },
+  {
+   "key": "GDB-1028",
+   "type": "Subtask",
+   "parent": "GDB-1027",
+   "summary": "Acquire/release locks in DML operators and commit/abort"
+  },
+  {
+   "key": "GDB-1029",
+   "type": "Subtask",
+   "parent": "GDB-1027",
+   "summary": "Deadlock victim abort path returns TXN_ABORTED to client"
+  },
+  {
+   "key": "GDB-1030",
+   "type": "Subtask",
+   "parent": "GDB-1027",
+   "summary": "Lock timeout configuration"
+  },
+  {
+   "key": "GDB-1031",
+   "type": "Story",
+   "parent": "GDB-699",
+   "summary": "Execute VACUUM: reclaim dead versions via xmin horizon"
+  },
+  {
+   "key": "GDB-1032",
+   "type": "Story",
+   "parent": "GDB-699",
+   "summary": "Honor isolation levels (READ COMMITTED, SNAPSHOT ISOLATION)"
+  },
+  {
+   "key": "GDB-1033",
+   "type": "Story",
+   "parent": "GDB-700",
+   "summary": "Per-row index maintenance API in IndexManager"
+  },
+  {
+   "key": "GDB-1034",
+   "type": "Subtask",
+   "parent": "GDB-1033",
+   "summary": "btree/hash per-row insert/remove"
+  },
+  {
+   "key": "GDB-1035",
+   "type": "Subtask",
+   "parent": "GDB-1033",
+   "summary": "HNSW tombstone/delete + update reinsert"
+  },
+  {
+   "key": "GDB-1036",
+   "type": "Subtask",
+   "parent": "GDB-1033",
+   "summary": "BM25 routed through the same API (replace ad-hoc maintain_bm25)"
+  },
+  {
+   "key": "GDB-1037",
+   "type": "Story",
+   "parent": "GDB-700",
+   "summary": "DML operators maintain all indexes on every row"
+  },
+  {
+   "key": "GDB-1038",
+   "type": "Subtask",
+   "parent": "GDB-1037",
+   "summary": "Insert path maintenance"
+  },
+  {
+   "key": "GDB-1039",
+   "type": "Subtask",
+   "parent": "GDB-1037",
+   "summary": "Update path with old/new value diff"
+  },
+  {
+   "key": "GDB-1040",
+   "type": "Subtask",
+   "parent": "GDB-1037",
+   "summary": "Delete path maintenance"
+  },
+  {
+   "key": "GDB-1041",
+   "type": "Subtask",
+   "parent": "GDB-1037",
+   "summary": "Insert-after-index regression QA suite"
+  },
+  {
+   "key": "GDB-1042",
+   "type": "Bug",
+   "parent": "GDB-700",
+   "summary": "ValueHash hashes 11 of the 23 value types to constant 0, degrading HashIndex to a linear scan"
+  },
+  {
+   "key": "GDB-1043",
+   "type": "Bug",
+   "parent": "GDB-700",
+   "summary": "hash_join.cpp duplicates the flawed ValueHash; joins on temporal/decimal/uuid keys degrade to one bucket"
+  },
+  {
+   "key": "GDB-1044",
+   "type": "Bug",
+   "parent": "GDB-701",
+   "summary": "fit_to_storage silently stores 0 when fitting FLOAT/DECIMAL values into integer columns"
+  },
+  {
+   "key": "GDB-1045",
+   "type": "Bug",
+   "parent": "GDB-701",
+   "summary": "fit_to_storage performs integer narrowing with no range check \u2014 silent wraparound"
+  },
+  {
+   "key": "GDB-1046",
+   "type": "Bug",
+   "parent": "GDB-701",
+   "summary": "DECIMAL(p,s) precision and scale are parsed but silently discarded by the catalog"
+  },
+  {
+   "key": "GDB-1047",
+   "type": "Bug",
+   "parent": "GDB-701",
+   "summary": "Implicit FLOAT-to-DECIMAL coercion silently truncates the fractional part; DECIMAL scale is ignored entirely"
+  },
+  {
+   "key": "GDB-1048",
+   "type": "Story",
+   "parent": "GDB-701",
+   "summary": "Real DECIMAL arithmetic honoring precision and scale"
+  },
+  {
+   "key": "GDB-1049",
+   "type": "Bug",
+   "parent": "GDB-701",
+   "summary": "Integer division returns FLOAT64 (SELECT 7/2 = 3.5); diverges from PostgreSQL integer division"
+  },
+  {
+   "key": "GDB-1050",
+   "type": "Bug",
+   "parent": "GDB-701",
+   "summary": "Integer arithmetic wraps silently on overflow (no checks in the both_integer fast path)"
+  },
+  {
+   "key": "GDB-1051",
+   "type": "Story",
+   "parent": "GDB-701",
+   "summary": "INTERVAL / POINT / JSON operator support or explicit errors"
+  },
+  {
+   "key": "GDB-1052",
+   "type": "Subtask",
+   "parent": "GDB-1048",
+   "summary": "Decimal128 arithmetic library (add/sub/mul/div, scale/rounding rules)"
+  },
+  {
+   "key": "GDB-1053",
+   "type": "Subtask",
+   "parent": "GDB-1048",
+   "summary": "eval_arithmetic DECIMAL paths (no to_double)"
+  },
+  {
+   "key": "GDB-1054",
+   "type": "Subtask",
+   "parent": "GDB-1048",
+   "summary": "Catalog/tuple plumbing for (p,s) + insert validation"
+  },
+  {
+   "key": "GDB-1055",
+   "type": "Subtask",
+   "parent": "GDB-1048",
+   "summary": "Display/wire formatting with scale"
+  },
+  {
+   "key": "GDB-717",
+   "type": "Bug",
+   "parent": "GDB-702",
+   "summary": "NEAREST ... DOT returns the k LEAST similar rows (dot product sorted ascending)"
+  },
+  {
+   "key": "GDB-723",
+   "type": "Bug",
+   "parent": "GDB-702",
+   "summary": "HNSW index hardcodes L2 distance, ignoring the query's requested metric (COSINE/DOT)"
+  },
+  {
+   "key": "GDB-745",
+   "type": "Bug",
+   "parent": "GDB-702",
+   "summary": "Graph-scoped NEAREST via HNSW filters on the wrong node-id space (heap ordinals vs HNSW node ids)"
+  },
+  {
+   "key": "GDB-757",
+   "type": "Bug",
+   "parent": "GDB-702",
+   "summary": "ONNX provider silently falls back to hash tokenizer, feeding random token IDs into a real transformer model"
+  },
+  {
+   "key": "GDB-776",
+   "type": "Bug",
+   "parent": "GDB-702",
+   "summary": "tokenizer.json loader only maps bracket-style BERT special tokens, so BPE (RoBERTa/GPT-style) models get wrong PAD/CLS/SEP IDs"
+  },
+  {
+   "key": "GDB-791",
+   "type": "Bug",
+   "parent": "GDB-703",
+   "summary": "Multi-hop MATCH with undirected (BOTH) edges binds the wrong target node"
+  },
+  {
+   "key": "GDB-827",
+   "type": "Bug",
+   "parent": "GDB-703",
+   "summary": "Variable-length MATCH with undirected (BOTH) edges drops all incoming-edge expansions and emits wrong rows on fixed segments"
+  },
+  {
+   "key": "GDB-842",
+   "type": "Bug",
+   "parent": "GDB-703",
+   "summary": "Heterogeneous PK collision bug class (GDB-694/696) unfixed in ShortestPathOperator"
+  },
+  {
+   "key": "GDB-851",
+   "type": "Bug",
+   "parent": "GDB-703",
+   "summary": "Heterogeneous PK collision bug class also unfixed in MatchShortestPathOperator"
+  },
+  {
+   "key": "GDB-862",
+   "type": "Bug",
+   "parent": "GDB-703",
+   "summary": "Wasserman-Faust closeness mixes weak-component size with directed reachability, producing scores > 1.0"
+  },
+  {
+   "key": "GDB-871",
+   "type": "Bug",
+   "parent": "GDB-703",
+   "summary": "prevent_duplicates edge constraint silently lost across restart"
+  },
+  {
+   "key": "GDB-884",
+   "type": "Bug",
+   "parent": "GDB-704",
+   "summary": "Edge WAL logging is write-only theater; durability claim in comments is false"
+  },
+  {
+   "key": "GDB-894",
+   "type": "Story",
+   "parent": "GDB-703",
+   "summary": "Extract shared traversal/BFS core from the operator clone family"
+  },
+  {
+   "key": "GDB-1056",
+   "type": "Bug",
+   "parent": "GDB-702",
+   "summary": "NEAREST ... DOT returns the k LEAST similar rows (dot product sorted ascending)"
+  },
+  {
+   "key": "GDB-1057",
+   "type": "Bug",
+   "parent": "GDB-702",
+   "summary": "HNSW index hardcodes L2 distance, ignoring the query's requested metric (COSINE/DOT)"
+  },
+  {
+   "key": "GDB-1058",
+   "type": "Bug",
+   "parent": "GDB-702",
+   "summary": "Graph-scoped NEAREST via HNSW filters on the wrong node-id space (heap ordinals vs HNSW node ids)"
+  },
+  {
+   "key": "GDB-1059",
+   "type": "Bug",
+   "parent": "GDB-702",
+   "summary": "ONNX provider silently falls back to hash tokenizer, feeding random token IDs into a real transformer model"
+  },
+  {
+   "key": "GDB-1060",
+   "type": "Bug",
+   "parent": "GDB-702",
+   "summary": "tokenizer.json loader only maps bracket-style BERT special tokens, so BPE (RoBERTa/GPT-style) models get wrong PAD/CLS/SEP IDs"
+  },
+  {
+   "key": "GDB-1061",
+   "type": "Bug",
+   "parent": "GDB-703",
+   "summary": "Multi-hop MATCH with undirected (BOTH) edges binds the wrong target node"
+  },
+  {
+   "key": "GDB-1062",
+   "type": "Bug",
+   "parent": "GDB-703",
+   "summary": "Variable-length MATCH with undirected (BOTH) edges drops all incoming-edge expansions and emits wrong rows on fixed segments"
+  },
+  {
+   "key": "GDB-1063",
+   "type": "Bug",
+   "parent": "GDB-703",
+   "summary": "Heterogeneous PK collision bug class (GDB-694/696) unfixed in ShortestPathOperator"
+  },
+  {
+   "key": "GDB-1064",
+   "type": "Bug",
+   "parent": "GDB-703",
+   "summary": "Heterogeneous PK collision bug class also unfixed in MatchShortestPathOperator"
+  },
+  {
+   "key": "GDB-1065",
+   "type": "Bug",
+   "parent": "GDB-703",
+   "summary": "Wasserman-Faust closeness mixes weak-component size with directed reachability, producing scores > 1.0"
+  },
+  {
+   "key": "GDB-1066",
+   "type": "Bug",
+   "parent": "GDB-703",
+   "summary": "prevent_duplicates edge constraint silently lost across restart"
+  },
+  {
+   "key": "GDB-1067",
+   "type": "Bug",
+   "parent": "GDB-704",
+   "summary": "Edge WAL logging is write-only theater; durability claim in comments is false"
+  },
+  {
+   "key": "GDB-1068",
+   "type": "Story",
+   "parent": "GDB-703",
+   "summary": "Extract shared traversal/BFS core from the operator clone family"
+  },
+  {
+   "key": "GDB-1069",
+   "type": "Subtask",
+   "parent": "GDB-1068",
+   "summary": "Shared neighbor-expansion utility with (table, pk) node identity"
+  },
+  {
+   "key": "GDB-1070",
+   "type": "Subtask",
+   "parent": "GDB-1068",
+   "summary": "Migrate traversal trio to the shared core"
+  },
+  {
+   "key": "GDB-1071",
+   "type": "Subtask",
+   "parent": "GDB-1068",
+   "summary": "Migrate shortest-path/match operators to the shared core"
+  },
+  {
+   "key": "GDB-1072",
+   "type": "Story",
+   "parent": "GDB-704",
+   "summary": "Wire WAL crash recovery into server startup"
+  },
+  {
+   "key": "GDB-1073",
+   "type": "Subtask",
+   "parent": "GDB-1072",
+   "summary": "Startup recovery sequence in main.cpp/SystemBootstrap"
+  },
+  {
+   "key": "GDB-1074",
+   "type": "Subtask",
+   "parent": "GDB-1072",
+   "summary": "Clean-shutdown marker to skip recovery"
+  },
+  {
+   "key": "GDB-1075",
+   "type": "Subtask",
+   "parent": "GDB-1072",
+   "summary": "Production RecoveryHandler implementation"
+  },
+  {
+   "key": "GDB-1076",
+   "type": "Subtask",
+   "parent": "GDB-1072",
+   "summary": "Checkpoint scheduling (background or threshold)"
+  },
+  {
+   "key": "GDB-1077",
+   "type": "Bug",
+   "parent": "GDB-704",
+   "summary": "Recovery discards pre-checkpoint records of transactions still active at the checkpoint, making their undo impossible"
+  },
+  {
+   "key": "GDB-1078",
+   "type": "Bug",
+   "parent": "GDB-704",
+   "summary": "Double-write buffer has a write path but no recovery path; torn-page protection cannot actually restore pages"
+  },
+  {
+   "key": "GDB-1079",
+   "type": "Bug",
+   "parent": "GDB-704",
+   "summary": "WalArchiveOptions (enabled, cleanup_policy, keep_last_n) accepted and config-parsed but never honored"
+  },
+  {
+   "key": "GDB-1080",
+   "type": "Bug",
+   "parent": "GDB-704",
+   "summary": "Auto-increment counter restoration after restart is currently broken (caught by GDB-251 QA tests)"
+  },
+  {
+   "key": "GDB-1081",
+   "type": "Story",
+   "parent": "GDB-705",
+   "summary": "Wire standby mode end-to-end from the server binary"
+  },
+  {
+   "key": "GDB-1082",
+   "type": "Subtask",
+   "parent": "GDB-1081",
+   "summary": "Standby startup: construct/start WalReceiver, set_standby_mode(true)"
+  },
+  {
+   "key": "GDB-1083",
+   "type": "Subtask",
+   "parent": "GDB-1081",
+   "summary": "Primary: WalSenderManager accepts replication connections in the server loop"
+  },
+  {
+   "key": "GDB-1084",
+   "type": "Subtask",
+   "parent": "GDB-1081",
+   "summary": "Promotion trigger (config/SQL) wiring PromotionManager"
+  },
+  {
+   "key": "GDB-1085",
+   "type": "Subtask",
+   "parent": "GDB-1081",
+   "summary": "Two-process integration test with data-flow assertions"
+  },
+  {
+   "key": "GDB-712",
+   "type": "Bug",
+   "parent": "GDB-706",
+   "summary": "Bind: parameter format codes parsed then discarded \u2014 binary-format parameters are spliced into SQL as raw text"
+  },
+  {
+   "key": "GDB-718",
+   "type": "Bug",
+   "parent": "GDB-706",
+   "summary": "value_to_pg_binary emits text bytes for most types while DataRow declares binary format"
+  },
+  {
+   "key": "GDB-721",
+   "type": "Bug",
+   "parent": "GDB-706",
+   "summary": "Per-session SET variables (statement_timeout, work_mem, embedding_provider_url, ...) are accepted and SHOWn but never honored by anything"
+  },
+  {
+   "key": "GDB-729",
+   "type": "Bug",
+   "parent": "GDB-706",
+   "summary": "Config::apply_setting throws uncaught exceptions on non-numeric values \u2014 user SQL can poison-pill server startup"
+  },
+  {
+   "key": "GDB-750",
+   "type": "Story",
+   "parent": "GDB-706",
+   "summary": "Error UX: SQLSTATE coverage and parse-error positions"
+  },
+  {
+   "key": "GDB-754",
+   "type": "Story",
+   "parent": "GDB-707",
+   "summary": "Wire cost-based optimizer and statistics into the live planner"
+  },
+  {
+   "key": "GDB-759",
+   "type": "Subtask",
+   "parent": "GDB-754",
+   "summary": "ANALYZE statement executes analyze_table into StatisticsStore"
+  },
+  {
+   "key": "GDB-768",
+   "type": "Subtask",
+   "parent": "GDB-754",
+   "summary": "Planner consults choose_access_path for seq vs index vs bitmap"
+  },
+  {
+   "key": "GDB-774",
+   "type": "Subtask",
+   "parent": "GDB-754",
+   "summary": "Join method selection (hash vs sort-merge vs NLJ) via cost model"
+  },
+  {
+   "key": "GDB-779",
+   "type": "Subtask",
+   "parent": "GDB-754",
+   "summary": "Join order optimization for 3+ tables"
+  },
+  {
+   "key": "GDB-792",
+   "type": "Subtask",
+   "parent": "GDB-754",
+   "summary": "EXPLAIN displays estimated costs/rows"
+  },
+  {
+   "key": "GDB-803",
+   "type": "Story",
+   "parent": "GDB-707",
+   "summary": "Make SortMergeJoin, BitmapScan, and ExternalSort reachable"
+  },
+  {
+   "key": "GDB-815",
+   "type": "Subtask",
+   "parent": "GDB-803",
+   "summary": "ExternalSortOperator for sorts exceeding memory budget (uses work_mem once honored)"
+  },
+  {
+   "key": "GDB-822",
+   "type": "Subtask",
+   "parent": "GDB-803",
+   "summary": "SortMergeJoinOperator for pre-sorted/index-ordered inputs"
+  },
+  {
+   "key": "GDB-830",
+   "type": "Subtask",
+   "parent": "GDB-803",
+   "summary": "BitmapScanOperator for multi-predicate index combination"
+  },
+  {
+   "key": "GDB-902",
+   "type": "Bug",
+   "parent": "GDB-708",
+   "summary": "Catalog::get_index/drop_index resolve names across all databases nondeterministically"
+  },
+  {
+   "key": "GDB-915",
+   "type": "Bug",
+   "parent": "GDB-708",
+   "summary": "TableIterator::next() silently skips pages it cannot fetch, producing incomplete scan results"
+  },
+  {
+   "key": "GDB-942",
+   "type": "Story",
+   "parent": "GDB-708",
+   "summary": "Replace all 51 throwing std::sto* call sites with safe parsing"
+  },
+  {
+   "key": "GDB-951",
+   "type": "Story",
+   "parent": "GDB-708",
+   "summary": "Real interactive CLI to replace the 4-line stub"
+  },
+  {
+   "key": "GDB-959",
+   "type": "Story",
+   "parent": "GDB-708",
+   "summary": "Wire tests/e2e tier into CMake and seed it with durability/replication e2e tests"
+  },
+  {
+   "key": "GDB-966",
+   "type": "Story",
+   "parent": "GDB-708",
+   "summary": "Correct documentation claims to match shipped reality"
+  },
+  {
+   "key": "GDB-1086",
+   "type": "Bug",
+   "parent": "GDB-706",
+   "summary": "Bind: parameter format codes parsed then discarded \u2014 binary-format parameters are spliced into SQL as raw text"
+  },
+  {
+   "key": "GDB-1087",
+   "type": "Bug",
+   "parent": "GDB-706",
+   "summary": "value_to_pg_binary emits text bytes for most types while DataRow declares binary format"
+  },
+  {
+   "key": "GDB-1088",
+   "type": "Bug",
+   "parent": "GDB-706",
+   "summary": "Per-session SET variables (statement_timeout, work_mem, embedding_provider_url, ...) are accepted and SHOWn but never honored by anything"
+  },
+  {
+   "key": "GDB-1089",
+   "type": "Bug",
+   "parent": "GDB-706",
+   "summary": "Config::apply_setting throws uncaught exceptions on non-numeric values \u2014 user SQL can poison-pill server startup"
+  },
+  {
+   "key": "GDB-1090",
+   "type": "Story",
+   "parent": "GDB-706",
+   "summary": "Error UX: SQLSTATE coverage and parse-error positions"
+  },
+  {
+   "key": "GDB-1091",
+   "type": "Story",
+   "parent": "GDB-707",
+   "summary": "Wire cost-based optimizer and statistics into the live planner"
+  },
+  {
+   "key": "GDB-1092",
+   "type": "Subtask",
+   "parent": "GDB-1091",
+   "summary": "ANALYZE statement executes analyze_table into StatisticsStore"
+  },
+  {
+   "key": "GDB-1093",
+   "type": "Subtask",
+   "parent": "GDB-1091",
+   "summary": "Planner consults choose_access_path for seq vs index vs bitmap"
+  },
+  {
+   "key": "GDB-1094",
+   "type": "Subtask",
+   "parent": "GDB-1091",
+   "summary": "Join method selection (hash vs sort-merge vs NLJ) via cost model"
+  },
+  {
+   "key": "GDB-1095",
+   "type": "Subtask",
+   "parent": "GDB-1091",
+   "summary": "Join order optimization for 3+ tables"
+  },
+  {
+   "key": "GDB-1096",
+   "type": "Subtask",
+   "parent": "GDB-1091",
+   "summary": "EXPLAIN displays estimated costs/rows"
+  },
+  {
+   "key": "GDB-1097",
+   "type": "Story",
+   "parent": "GDB-707",
+   "summary": "Make SortMergeJoin, BitmapScan, and ExternalSort reachable"
+  },
+  {
+   "key": "GDB-1098",
+   "type": "Subtask",
+   "parent": "GDB-1097",
+   "summary": "ExternalSortOperator for sorts exceeding memory budget (uses work_mem once honored)"
+  },
+  {
+   "key": "GDB-1099",
+   "type": "Subtask",
+   "parent": "GDB-1097",
+   "summary": "SortMergeJoinOperator for pre-sorted/index-ordered inputs"
+  },
+  {
+   "key": "GDB-1100",
+   "type": "Subtask",
+   "parent": "GDB-1097",
+   "summary": "BitmapScanOperator for multi-predicate index combination"
+  },
+  {
+   "key": "GDB-1101",
+   "type": "Story",
+   "parent": "GDB-707",
+   "summary": "Implement IN (subquery) evaluation"
+  },
+  {
+   "key": "GDB-1102",
+   "type": "Bug",
+   "parent": "GDB-707",
+   "summary": "COUNT(DISTINCT) is O(n^2) per group by explicit comment"
+  },
+  {
+   "key": "GDB-1103",
+   "type": "Bug",
+   "parent": "GDB-708",
+   "summary": "SIXSEVEN_LOG_TRACE/DEBUG are compiled out everywhere \u2014 'trace' and 'debug' log levels silently do nothing"
+  },
+  {
+   "key": "GDB-1104",
+   "type": "Bug",
+   "parent": "GDB-708",
+   "summary": "Catalog::get_index/drop_index resolve names across all databases nondeterministically"
+  },
+  {
+   "key": "GDB-1105",
+   "type": "Bug",
+   "parent": "GDB-708",
+   "summary": "TableIterator::next() silently skips pages it cannot fetch, producing incomplete scan results"
+  },
+  {
+   "key": "GDB-1106",
+   "type": "Bug",
+   "parent": "GDB-708",
+   "summary": "Raw std::stoll/std::stoul in parser can throw uncaught exceptions and silently truncate user-supplied integers, bypassing the file's own safe_stoi"
+  },
+  {
+   "key": "GDB-1107",
+   "type": "Bug",
+   "parent": "GDB-708",
+   "summary": "BM25 index maintenance failures swallowed as warnings; index silently drifts from table"
+  },
+  {
+   "key": "GDB-1108",
+   "type": "Story",
+   "parent": "GDB-708",
+   "summary": "Replace all 51 throwing std::sto* call sites with safe parsing"
+  },
+  {
+   "key": "GDB-1109",
+   "type": "Story",
+   "parent": "GDB-708",
+   "summary": "Real interactive CLI to replace the 4-line stub"
+  },
+  {
+   "key": "GDB-1110",
+   "type": "Story",
+   "parent": "GDB-708",
+   "summary": "Wire tests/e2e tier into CMake and seed it with durability/replication e2e tests"
+  },
+  {
+   "key": "GDB-1111",
+   "type": "Story",
+   "parent": "GDB-708",
+   "summary": "Correct documentation claims to match shipped reality"
+  },
+  {
+   "ref": "E5",
+   "key": "GDB-701",
+   "type": "Epic",
+   "summary": "Type System Integrity"
+  },
+  {
+   "ref": "E6",
+   "key": "GDB-702",
+   "type": "Epic",
+   "summary": "Vector Search Correctness"
+  },
+  {
+   "ref": "E7",
+   "key": "GDB-703",
+   "type": "Epic",
+   "summary": "Graph Engine Correctness"
+  },
+  {
+   "ref": "E8",
+   "key": "GDB-704",
+   "type": "Epic",
+   "summary": "Durability & Crash Recovery"
+  },
+  {
+   "ref": "E9",
+   "key": "GDB-705",
+   "type": "Epic",
+   "summary": "Replication & Standby Wiring"
+  },
+  {
+   "ref": "E10",
+   "key": "GDB-706",
+   "type": "Epic",
+   "summary": "Wire Protocol & Session Fidelity"
+  },
+  {
+   "ref": "E11",
+   "key": "GDB-707",
+   "type": "Epic",
+   "summary": "Planner Completion & Unwired Operators"
+  },
+  {
+   "ref": "E12",
+   "key": "GDB-708",
+   "type": "Epic",
+   "summary": "Code Hygiene, Tooling & Docs Truthfulness"
+  },
+  {
+   "ref": "E13",
+   "key": "GDB-709",
+   "type": "Epic",
+   "summary": "Audit Lead Triage (unverified findings)"
+  },
+  {
+   "key": "GDB-719",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] ReplicationLagMonitoring asserts only the slot name, never any lag information"
+  },
+  {
+   "key": "GDB-724",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] FailoverPromotion tests a flag toggle the test itself sets, not promotion machinery"
+  },
+  {
+   "key": "GDB-728",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] QA_GDB_243_Accessors dimension tests only assert a constructor argument back through a trivial getter"
+  },
+  {
+   "key": "GDB-733",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] exec_ok helpers dereference an errored Result after non-fatal EXPECT, aborting the whole test binary"
+  },
+  {
+   "key": "GDB-739",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Error-path tests assert only has_value()==false and pass for the wrong reason while the engine is completely broken"
+  },
+  {
+   "key": "GDB-742",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] ScalarSubqueryInWhereClause accepts both success and NOT_IMPLEMENTED, so it can never catch a regression"
+  },
+  {
+   "key": "GDB-744",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] NearestWithKLargerThanRowCount asserts rows <= 2, so it passes when NEAREST returns nothing"
+  },
+  {
+   "key": "GDB-732",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] FirstValueNoOrderBy cannot detect the GDB-607 regression it guards"
+  },
+  {
+   "key": "GDB-738",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] RowNumber/Rank regression guards assert only range membership and cannot fail for broken ranking"
+  },
+  {
+   "key": "GDB-740",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] AC2_ConversionFormula asserts compile-time constant arithmetic, exercising no production code"
+  },
+  {
+   "key": "GDB-734",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] HNSW 'persistence' tests never flush or reopen the file, so disk durability is untested"
+  },
+  {
+   "key": "GDB-748",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Grace hash join tests assert only row counts / probe keys, never the joined build-side values"
+  },
+  {
+   "key": "GDB-727",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] RowNumberNoPartition asserts only that row numbers are between 1 and 6"
+  },
+  {
+   "key": "GDB-735",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Three fixtures in test_weighted_shortest_path.cpp duplicate ~60 lines of setup each"
+  },
+  {
+   "key": "GDB-737",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] simplify_boolean is an alias for fold_constants; documented 'NOT NOT x -> x' simplification is not implemented"
+  },
+  {
+   "key": "GDB-741",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] optimize_join_order treats raw table ids as bit positions: UB for table_id >= 64 and exponential subset loop in max table id"
+  },
+  {
+   "key": "GDB-746",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Duplicate to_upper() helper in binder.cpp and type_resolver.cpp"
+  },
+  {
+   "key": "GDB-749",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Missing per-file unit tests: no test_type_resolver.cpp or test_optimizer.cpp"
+  },
+  {
+   "key": "GDB-752",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] CREATE TABLE accepts duplicate column names; only ALTER TABLE ADD COLUMN validates"
+  },
+  {
+   "key": "GDB-786",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] drop_database leaks orphaned and dangling edge type definitions"
+  },
+  {
+   "key": "GDB-793",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] TupleSerializer::serialize never validates value types against the schema; mismatched fixed-size types overflow the buffer"
+  },
+  {
+   "key": "GDB-799",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] PATH serialization round-trip silently drops Path::total_weight"
+  },
+  {
+   "key": "GDB-806",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Dropped tables leak their auto-increment counters"
+  },
+  {
+   "key": "GDB-808",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Catalog::set_next_index_id and set_next_edge_id are dead code"
+  },
+  {
+   "key": "GDB-828",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Catalog::is_virtual_table(table_id) is production-dead and O(n)"
+  },
+  {
+   "key": "GDB-834",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] TupleSerializer::compute_tuple_size is only called from tests and duplicates serialize()'s sizing logic"
+  },
+  {
+   "key": "GDB-838",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] TableHeap::last_insert_page_ is non-atomic shared state in a class otherwise built for concurrency"
+  },
+  {
+   "key": "GDB-846",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] SecretsManager::decrypt returns ok() with empty/garbage plaintext when EVP init or update fails"
+  },
+  {
+   "key": "GDB-853",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Config::load_from_file silently ignores five Config fields and all wrong-typed JSON values"
+  },
+  {
+   "key": "GDB-873",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] coerce UINT64 \u2192 DECIMAL produces wrong negative value for inputs above INT64_MAX"
+  },
+  {
+   "key": "GDB-882",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] crash_handler.h documentation contradicts the implementation on three claims"
+  },
+  {
+   "key": "GDB-888",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Dead helper: types.h alignment() is never called anywhere in the repo"
+  },
+  {
+   "key": "GDB-893",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] '22 types' claim is stale: the enum defines 23 types including PATH"
+  },
+  {
+   "key": "GDB-898",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] pg_database is a single hardcoded canned row that ignores the real catalog"
+  },
+  {
+   "key": "GDB-949",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] pg_type emits duplicate oid rows (oid 21 three times, 23/20/1700/25 twice each)"
+  },
+  {
+   "key": "GDB-955",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] VirtualCatalogScan converts values with throwing std::stoi/stoll/stod and conflates empty string with NULL"
+  },
+  {
+   "key": "GDB-960",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] TableIterator silently skips pages that fail to fetch, so Seq Scan / NEAREST brute force silently drop rows on I/O errors"
+  },
+  {
+   "key": "GDB-968",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] MVCC visibility module is never wired into any scan or DML path \u2014 isolation advertised but absent"
+  },
+  {
+   "key": "GDB-975",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] No unit tests for hash_index_scan, bitmap_scan, bm25_scan, algorithm_scan despite project convention"
+  },
+  {
+   "key": "GDB-743",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] HealthMonitorIntegration contains zero assertions about monitor behavior"
+  },
+  {
+   "key": "GDB-751",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] TrackingRecoveryHandler is dead code; replica-apply path never exercised"
+  },
+  {
+   "key": "GDB-756",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Block of ~25 GDB-102 tests assert back struct fields the test itself just assigned"
+  },
+  {
+   "key": "GDB-760",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Integer overflow in STRING/BLOB/JSON deserialize length check allows out-of-bounds read"
+  },
+  {
+   "key": "GDB-763",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Adversarial_Uint32OverflowBoundary documents integer overflow using only literals, no code under test"
+  },
+  {
+   "key": "GDB-764",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] QA_BuildSystem.UnitTestTargetRuns is EXPECT_TRUE(true) and misstates which target it proves"
+  },
+  {
+   "key": "GDB-765",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Page::insert_tuple/update_tuple silently truncate tuple length to uint16_t, storing wrong data and returning ok"
+  },
+  {
+   "key": "GDB-766",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] AC2_StorageManagerDefaultArg cannot detect a wrong default pool size"
+  },
+  {
+   "key": "GDB-769",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Group commit provides no way to wait for durability of a specific LSN; append+ack precedes fsync"
+  },
+  {
+   "key": "GDB-770",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Logging.LevelFilteringWorks asserts only EXPECT_NO_THROW; filtering is never verified"
+  },
+  {
+   "key": "GDB-771",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] GDB621_ConfigToStorageManagerWiring re-implements the main.cpp wiring inside the test instead of testing it"
+  },
+  {
+   "key": "GDB-772",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] DirectionAfterMaxDepth tests the normal clause order, not the reversed order its name claims"
+  },
+  {
+   "key": "GDB-775",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] ConcurrentReadWriteSamePage claims torn-write detection but performs no writes and verifies no data"
+  },
+  {
+   "key": "GDB-778",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Background flusher and destructor swallow page write errors without logging"
+  },
+  {
+   "key": "GDB-780",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] HavingWithoutGroupBy parses a query containing no HAVING clause"
+  },
+  {
+   "key": "GDB-781",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] NearestSkipsRowsWithNullEmbedding never verifies the NULL row is skipped"
+  },
+  {
+   "key": "GDB-782",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Archive metadata sidecar write failure silently ignored, making the segment permanently exempt from LSN-based cleanup"
+  },
+  {
+   "key": "GDB-783",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] NodeWithNeighborsRoundTrip: layer-2 size assertion is a copy-paste of the layer-1 check"
+  },
+  {
+   "key": "GDB-784",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] WhereOnDanglingEdgeIsNull and WhereOnDanglingEdgeIsNotNull are byte-identical tests that no longer test their names"
+  },
+  {
+   "key": "GDB-785",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] ThresholdEdgeValues is a setter/getter roundtrip with no system transformation"
+  },
+  {
+   "key": "GDB-787",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Index WAL logging of structural changes is inert: never enabled in production, never replayable"
+  },
+  {
+   "key": "GDB-788",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] SchemaColumnTypesCorrect asserts no column types"
+  },
+  {
+   "key": "GDB-789",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] parse_ok/parse_one/expect_parse_error helpers copy-pasted across four parser QA files"
+  },
+  {
+   "key": "GDB-790",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] AC2_AllSystemTableIdsUnique omits sys_users_table_id from the uniqueness check"
+  },
+  {
+   "key": "GDB-794",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] BTreePersistence/HashPersistence read index internals without taking the index latch (BM25 persist does)"
+  },
+  {
+   "key": "GDB-796",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] AC_FetchEnrichesResultsWithRowData asserts nothing about FETCH"
+  },
+  {
+   "key": "GDB-797",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] SHORTEST PATH tests assert only rows.size() >= 1 with no path content verification"
+  },
+  {
+   "key": "GDB-798",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Louvain parameter/self-loop tests pass even if the feature under test is ignored"
+  },
+  {
+   "key": "GDB-800",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] MergeWidth1 test silently tests width 2; merge_width<=1 infinite loop remains unguarded and untested"
+  },
+  {
+   "key": "GDB-802",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Stale 'KNOWN BUG / currently FAILS' comments in PK-collision tests contradict the shipped fix"
+  },
+  {
+   "key": "GDB-804",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] GDB-657 DropSixsevenDatabaseBehavior targets a database name that does not exist; zero assertions ever execute"
+  },
+  {
+   "key": "GDB-805",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Per-node latches (GDB-96) are declared on every B+ tree node but never used anywhere"
+  },
+  {
+   "key": "GDB-809",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] IndexScanFasterThanSeqScanForSelectiveQuery performs no performance comparison and duplicates PointLookupFindsExactMatch"
+  },
+  {
+   "key": "GDB-810",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Debug log in BTreePersistence::load references out-of-scope variables; compiles only because SPDLOG_DEBUG is compiled out"
+  },
+  {
+   "key": "GDB-811",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Five selectivity edge-case tests assert only 0<=sel<=1 and pass with any stub implementation"
+  },
+  {
+   "key": "GDB-813",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Hash index persistence has no overflow handling: directory must fit a single page tuple"
+  },
+  {
+   "key": "GDB-814",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] GDB-661 'NotFolded' guard tests contain no assertions \u2014 they pass even if the fold silently produces wrong results"
+  },
+  {
+   "key": "GDB-816",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] B+ tree persistence requires each node to fit a single page tuple; large string keys make the index unpersistable"
+  },
+  {
+   "key": "GDB-817",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Plan-choice tests in GDB-138 discard the chosen method and cannot detect the DP/greedy threshold"
+  },
+  {
+   "key": "GDB-818",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] ~90-line fixture copy-pasted between test_qa_gdb_258.cpp and test_qa_gdb_258_impl.cpp (same for the 259 pair)"
+  },
+  {
+   "key": "GDB-819",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] PageRank CustomDamping/CustomIterations tests cannot detect silently ignored parameters"
+  },
+  {
+   "key": "GDB-820",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] GDB-680 regression tests are named '...Hangs' but assert the fixed non-hanging behavior"
+  },
+  {
+   "key": "GDB-821",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] CREATE DATABASE IF NOT EXISTS tests never verify the database was actually created"
+  },
+  {
+   "key": "GDB-823",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Bootstrap QA fixtures for GDB-656/657/660 are ~70-line copy-paste duplicates, including a byte-identical scan_sys_databases helper"
+  },
+  {
+   "key": "GDB-824",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] BuiltinWithNonNumericDimension has zero assertions \u2014 result explicitly discarded"
+  },
+  {
+   "key": "GDB-825",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Test name WhereExprWithNonMetaColumnFails asserts the opposite of its name"
+  },
+  {
+   "key": "GDB-826",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Buffer pool pin leaks on persist error paths in btree and hash persistence"
+  },
+  {
+   "key": "GDB-829",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] PathFunctions Nodes/Edges tests assert back test-set struct fields and never call the production nodes()/edges() functions"
+  },
+  {
+   "key": "GDB-831",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] test_ast.cpp is ~60 tests that only assert back values the test itself just set"
+  },
+  {
+   "key": "GDB-832",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] CosineWithInfinityInput asserts a logical tautology and can never fail"
+  },
+  {
+   "key": "GDB-833",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] BTreeIndex has no RID-qualified remove; remove(key) deletes an arbitrary duplicate in non-unique trees"
+  },
+  {
+   "key": "GDB-835",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] SelectWhereUuidMatchesInserted never executes a WHERE clause"
+  },
+  {
+   "key": "GDB-839",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] OpenAI BatchEmptyList assertion is conditional and unreachable on failure; redundant with stricter GDB-130 test"
+  },
+  {
+   "key": "GDB-840",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Concurrent-latch shrink test has only one observable transition; its torn-read assertion is inert for the rest of the run"
+  },
+  {
+   "key": "GDB-841",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] BM25 reload drops doc_terms_ entries for term-less documents, making their later removal a permanent no-op"
+  },
+  {
+   "key": "GDB-843",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] PrefilteredPrioritizedOverHnsw cannot test the priority it claims: it passes nullptr for the HNSW index"
+  },
+  {
+   "key": "GDB-844",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] 'SequentialMultiThreadInsert' concurrency test uses no threads"
+  },
+  {
+   "key": "GDB-847",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] PrefilteredEmptyRIDs tests an invalid RID, not empty RIDs; the documented empty-set fall-through behavior is untested"
+  },
+  {
+   "key": "GDB-848",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] StatsIncludeLatency's latency assertion is a tautology on an unsigned field"
+  },
+  {
+   "key": "GDB-849",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] CompactAfterShrinkingUpdate claims compact recovers 400 bytes but asserts only >=, passing for a no-op compact"
+  },
+  {
+   "key": "GDB-850",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] AlgorithmRegistry ExecuteReturnsRows never calls execute"
+  },
+  {
+   "key": "GDB-854",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] TrackingProvider::batch_count_ is dead code that would return wrong data if used"
+  },
+  {
+   "key": "GDB-855",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] OutputSchema 'standardisation' tests assert fields on a locally built struct, exercising no code"
+  },
+  {
+   "key": "GDB-856",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Byte-packing and key (de)serialization helpers duplicated verbatim across three persistence files"
+  },
+  {
+   "key": "GDB-857",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] MockHttpClient duplicated nearly verbatim between GDB-129 and GDB-130 QA files"
+  },
+  {
+   "key": "GDB-859",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Unused test-provider helpers in QA31TestProvider (call_count, set_should_fail)"
+  },
+  {
+   "key": "GDB-860",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] PathSelectorEnum.AllValues asserts inequality of distinct enum constants"
+  },
+  {
+   "key": "GDB-861",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] DefaultAdminPresentAndPersistent's restart assertion cannot fail: the fixture re-seeds the admin when persistence is broken"
+  },
+  {
+   "key": "GDB-863",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] No unit test files for btree_iterator.cpp and btree_key.cpp despite project convention"
+  },
+  {
+   "key": "GDB-864",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] GDB-282 batch-poisoning test is a near-identical duplicate of the GDB-297 repro"
+  },
+  {
+   "key": "GDB-865",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] community_detect implements only Louvain Phase 1 \u2014 no aggregation/coarsening phase"
+  },
+  {
+   "key": "GDB-866",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] sixseven/common/platform.h included 13 times in one file (codemod artifact)"
+  },
+  {
+   "key": "GDB-867",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Wire-protocol message builders and socket helpers duplicated between test_param_substitution.cpp and test_pg_protocol.cpp"
+  },
+  {
+   "key": "GDB-868",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Scripted-edit artifact: platform.h re-included after every include in GDB-123/124"
+  },
+  {
+   "key": "GDB-869",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] GDB-96 file claims to test 'latch crabbing' but implementation and tests cover a single tree-wide rwlock"
+  },
+  {
+   "key": "GDB-870",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] GraphEngine::open_edge_storage is dead code"
+  },
+  {
+   "key": "GDB-872",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Near-duplicate unique-violation-after-split tests across GDB-93 and GDB-97"
+  },
+  {
+   "key": "GDB-875",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] ConfigureUpdatesThresholds has zero assertions and cannot detect a broken configure()"
+  },
+  {
+   "key": "GDB-876",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] BTreeQA_WAL.InsertWithWalWriter never exercises a WAL writer"
+  },
+  {
+   "key": "GDB-877",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] GDB-318 config tests exercise std::unordered_map and enum assignment, not project code"
+  },
+  {
+   "key": "GDB-879",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] drop_edge_type and drop_edge_type_locked are ~45-line copy-paste duplicates"
+  },
+  {
+   "key": "GDB-881",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Test name RangeScanWithBeginKeyMissesDuplicates asserts the opposite of its body"
+  },
+  {
+   "key": "GDB-885",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] AuthMethodFromConfigFile writes the default value, so it cannot detect a parsing regression"
+  },
+  {
+   "key": "GDB-886",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Null-tokenizer test is unconditional SUCCEED() and never calls embed()"
+  },
+  {
+   "key": "GDB-887",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Iterative Tarjan copies the full neighbor vector on every loop iteration"
+  },
+  {
+   "key": "GDB-889",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] DeserializeRecordLengthExactlyFour locks in acceptance of garbage WAL records"
+  },
+  {
+   "key": "GDB-891",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] WalAccumulationWarning / WalAccumulationNoWarningForActive cannot distinguish warning from no-warning"
+  },
+  {
+   "key": "GDB-895",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] HNSW WAL crash-recovery path is dead code: production always constructs HnswIndex with wal_ = nullptr"
+  },
+  {
+   "key": "GDB-896",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Unigram 'unsupported' test passes for an unrelated reason; HashTokenizer fallback path never exercised"
+  },
+  {
+   "key": "GDB-899",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Tautological assertion: find() compared to npos - 1 can never fail"
+  },
+  {
+   "key": "GDB-901",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Backfill silently embeds the wrong column (or skips rows) when source_expr is not an exact single column name"
+  },
+  {
+   "key": "GDB-903",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] MD5 password hashing/verification tests are self-referential; no known-answer vector pins the PostgreSQL md5(password+username) convention"
+  },
+  {
+   "key": "GDB-904",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] RecoverWithTxnIdZeroDataRecords asserts the silent data drop its own comment calls data loss"
+  },
+  {
+   "key": "GDB-906",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Promotion lag guard rail rejection path is untested; 'Guard rail tests' only covers the no-op default with a null receiver"
+  },
+  {
+   "key": "GDB-909",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] FallsBackToShorterPrefixWhenLongerFails cannot detect breakage of the named behavior"
+  },
+  {
+   "key": "GDB-912",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] BTreeConcurrency::SequentialMultiThreadInsert spawns no threads despite its name"
+  },
+  {
+   "key": "GDB-914",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Embedding retry sleeps in worker threads (up to 60s each) while enqueue() blocks INSERTs indefinitely, so a down provider can stall ingest"
+  },
+  {
+   "key": "GDB-916",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] SigpipeIgnored tests libc/OS behavior, not the SixSevenDB server"
+  },
+  {
+   "key": "GDB-917",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] BTreeStress::FullScanSortedAfterMixedOps passes vacuously if the scan returns zero entries"
+  },
+  {
+   "key": "GDB-918",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Health monitor compares replication lag in bytes against a threshold configured in milliseconds"
+  },
+  {
+   "key": "GDB-919",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] HnswIndex::remove() and compact() have no production callers \u2014 DELETE never removes vectors from the index"
+  },
+  {
+   "key": "GDB-920",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] BetweennessCentralityTest::CycleGraph asserts only score equality; an all-zero result passes"
+  },
+  {
+   "key": "GDB-921",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] GDB-325 QA file near-verbatim duplicates ~10 tests from the GDB-319/321/322/323 QA files"
+  },
+  {
+   "key": "GDB-923",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Re-running BACKFILL on a table reports stale status forever; finished jobs are never pruned"
+  },
+  {
+   "key": "GDB-924",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] ParseShowReplicationStatus and ParseShowStandbyStatus are strict-subset duplicates of earlier tests in the same file"
+  },
+  {
+   "key": "GDB-925",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Twelve 'documenting current behavior' catalog tests guard all assertions behind if(result.has_value()) and cannot fail"
+  },
+  {
+   "key": "GDB-927",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Stale pre-fix comments in GDB-320 tests directly contradict the assertions"
+  },
+  {
+   "key": "GDB-928",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] NFC/NFKC normalizer is parsed from tokenizer.json but silently maps to a no-op"
+  },
+  {
+   "key": "GDB-929",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Bm25IndexManagerTest::exec_ok dereferences an errored tl::expected (UB) instead of failing cleanly"
+  },
+  {
+   "key": "GDB-931",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Sanity.TrueIsTrue asserts a literal constant and can never fail"
+  },
+  {
+   "key": "GDB-933",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] QA tests enshrine inconsistent max_length=1 truncation across Tokenizer implementations ([SEP] vs [CLS])"
+  },
+  {
+   "key": "GDB-934",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] QueryEngine bootstrap/restart fixture duplicated across three test files"
+  },
+  {
+   "key": "GDB-935",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Stale BUG_ comments claim the buffer-pool leak regression tests fail, but the bug is fixed"
+  },
+  {
+   "key": "GDB-937",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Builtin provider dimension parse swallows exceptions and silently defaults malformed 'builtin/<dim>' to 384"
+  },
+  {
+   "key": "GDB-938",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] parse/bind_ok/bind_error helpers copy-pasted between binder test files"
+  },
+  {
+   "key": "GDB-939",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] PathFunctions_NullArgReturnsNull asserts back the null it just created; path_length(NULL) is never tested"
+  },
+  {
+   "key": "GDB-941",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] NoNewConnectionsAfterShutdown never asserts that new connections are rejected"
+  },
+  {
+   "key": "GDB-943",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Ollama embed_batch claims 'connection reuse' but the HTTP client creates a new connection per request"
+  },
+  {
+   "key": "GDB-944",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] MaxVisitedLimitTruncatesResults cannot fail if max_visited is ignored"
+  },
+  {
+   "key": "GDB-945",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] ExplainAnalyzeInsertExecutes tests DELETE, never INSERT"
+  },
+  {
+   "key": "GDB-946",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] JoinMethodTest.NestedLoopForSmallInner asserts only cost > 0 while the implementation actually picks HASH_JOIN for these inputs"
+  },
+  {
+   "key": "GDB-950",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Extended-protocol Execute ignores max_rows; portal suspension (PortalSuspended) not implemented"
+  },
+  {
+   "key": "GDB-952",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] ShutdownTimeoutConfigRespected never exercises the shutdown timeout"
+  },
+  {
+   "key": "GDB-956",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] CancelRequest silently ignored while BackendKeyData advertises cancellation support"
+  },
+  {
+   "key": "GDB-957",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] ExplainMultiJoin asserts only that 'Scan' appears, never any join operator"
+  },
+  {
+   "key": "GDB-958",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Two QA files (GDB-489 and GDB-495) target the same Jira ticket with ~8 near-duplicate tests"
+  },
+  {
+   "key": "GDB-961",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] JoinOrderTest suite never inspects join order, join method, or build side; PrefersSmallerBuildSide verifies none of what its comment claims"
+  },
+  {
+   "key": "GDB-962",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Health uptime assertion `>= 0` is tautological; test duplicates HealthReturnsCorrectInfo"
+  },
+  {
+   "key": "GDB-963",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] AnalyzeTimingNonZero never inspects any timing field"
+  },
+  {
+   "key": "GDB-964",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Closeness 'variant' parameter (wasserman_faust) and component_size column have zero behavioral coverage; def test is misnamed"
+  },
+  {
+   "key": "GDB-965",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Malformed frontend message length underflows: body_len < 4 makes payload_len wrap to ~4 GiB"
+  },
+  {
+   "key": "GDB-967",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Torn-read regression test counts attempted updates, not successful ones, so it passes vacuously if update_tuple always fails"
+  },
+  {
+   "key": "GDB-970",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] random_bytes() documented as 'cryptographically random' but uses std::mt19937 for auth salts and SCRAM nonces"
+  },
+  {
+   "key": "GDB-971",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] MinHopsZeroWithNodeFilter cannot detect the depth-0 filter boundary it targets"
+  },
+  {
+   "key": "GDB-972",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Selectivity range/between tests accept any value in (0,1), including the default fallback"
+  },
+  {
+   "key": "GDB-973",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] HealthUptimeIncreases passes with permanently frozen uptime"
+  },
+  {
+   "key": "GDB-974",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] EvictionFollowsLRUKOrder cannot detect one of the two possible wrong eviction victims"
+  },
+  {
+   "key": "GDB-976",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] ReadyForQuery transaction status tracks only exact 'begin'/'start transaction'; 'BEGIN TRANSACTION' leaves status 'I'"
+  },
+  {
+   "key": "GDB-977",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Path-struct tests in GDB-424 duplicate GDB-422's and needlessly run on the disk-backed fixture"
+  },
+  {
+   "key": "GDB-979",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Dead run_standard helper; the two *MatchesStandard tests never actually compare against the standard variant"
+  },
+  {
+   "key": "GDB-980",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Event loop registers idle WRITE interest on in-flight connections, causing a busy-poll spin for the duration of every query"
+  },
+  {
+   "key": "GDB-981",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] ProtocolTransactionStateTracking assertions are conditional on finding 'Z' and the first scan loop is dead code"
+  },
+  {
+   "key": "GDB-982",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] QA146ValueText.NullValue and StringWithNullByte end in SUCCEED() with zero output assertions"
+  },
+  {
+   "key": "GDB-983",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] MassiveDuplication_StillCorrect cannot detect the GDB-551 duplicate-edge regression"
+  },
+  {
+   "key": "GDB-985",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Graph-algorithm test fixtures and row-extraction helpers duplicated verbatim across four test files"
+  },
+  {
+   "key": "GDB-986",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] ScanVerifiesAllValues is a strict subset duplicate of ScanSingleRow"
+  },
+  {
+   "key": "GDB-987",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Connection state machine (ConnectionState / transition_to) is dead code in production"
+  },
+  {
+   "key": "GDB-988",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] BackendPidAndSecretKeyAreSet does not verify the secret key"
+  },
+  {
+   "key": "GDB-989",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] FromMatchVariableLength_ExactHops passes even with the GDB-553 quantifier-dropping bug present"
+  },
+  {
+   "key": "GDB-991",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] CreateIndexOnTableWithData cannot detect broken index backfill: no IndexManager is wired, so the physical index path is dead in the entire file"
+  },
+  {
+   "key": "GDB-992",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Stale/wrong comments in main.cpp: default admin documented as 'sixseven'/'sixseven' but code seeds 'demo'/'demo'; embedding pool comment says half the cores but code uses a quarter"
+  },
+  {
+   "key": "GDB-993",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] AC4_OrderByDesc claims to verify ordering but contains no ordering assertion"
+  },
+  {
+   "key": "GDB-995",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] ShortestPathConfig::max_visited accepted but never enforced"
+  },
+  {
+   "key": "GDB-996",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] ReplicationHealthMonitor compares LSN byte lag against a milliseconds threshold"
+  },
+  {
+   "key": "GDB-997",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] FasterThanSequential asserts batch may be up to 2x SLOWER than sequential, so the test passes even if batching provides zero speedup"
+  },
+  {
+   "key": "GDB-998",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] SetLoggingLevelChangesAndPersists never verifies the advertised immediate log-level change"
+  },
+  {
+   "key": "GDB-999",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Sha256EmptyData and HmacSha256EmptyKeyAndMessage check only output length despite published known-answer vectors"
+  },
+  {
+   "key": "GDB-1000",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] WhereOnRank never asserts the filtered row count"
+  },
+  {
+   "key": "GDB-1001",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Graph-engine errors silently swallowed in MATCH operators; unweighted path errors discarded as 'legacy behavior'"
+  },
+  {
+   "key": "GDB-1002",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] EdgePropertyCorrespondsToTraversedEdge passes with zero property assertions executed if depths or names are wrong"
+  },
+  {
+   "key": "GDB-1003",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] NEAREST clause order documented in ast.h ([USING] then [WITHIN TRAVERSE]) does not parse; parser only accepts WITHIN before USING"
+  },
+  {
+   "key": "GDB-1006",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Invariant_ComponentSizesSumToN never checks the invariant in its name"
+  },
+  {
+   "key": "GDB-1007",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Tokenizer interface tests exercise only a test-local stub, not production code"
+  },
+  {
+   "key": "GDB-1008",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] QA_LexerEdge section in the parser ticket file duplicates seven lexer tests from test_qa_gdb_19.cpp"
+  },
+  {
+   "key": "GDB-1009",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] fetch_node_data is a full table scan per PK lookup, executed per output column per result row"
+  },
+  {
+   "key": "GDB-1010",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] Verbatim duplicate test between GDB-555 and GDB-559 files"
+  },
+  {
+   "key": "GDB-1011",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] pk_value_to_string fallback collides for all non-int/string/UUID PK types, defeating LINK existence verification"
+  },
+  {
+   "key": "GDB-1012",
+   "type": "Task",
+   "parent": "GDB-709",
+   "summary": "[Audit lead] BFS core (run_bfs, get_neighbors, reconstruct_path, pk_to_int64) duplicated verbatim across three traversal operators"
+  }
+ ],
+ "duplicates_pending_cleanup": [
+  "GDB-1112",
+  "GDB-1113",
+  "GDB-1114",
+  "GDB-1115",
+  "GDB-1116",
+  "GDB-1117",
+  "GDB-1118",
+  "GDB-1119",
+  "GDB-1120",
+  "GDB-1121",
+  "GDB-1122",
+  "GDB-1123",
+  "GDB-1124",
+  "GDB-1125",
+  "GDB-1126",
+  "GDB-1127",
+  "GDB-1128",
+  "GDB-1129",
+  "GDB-1130",
+  "GDB-1131",
+  "GDB-1132",
+  "GDB-1133",
+  "GDB-1134",
+  "GDB-1135",
+  "GDB-1136",
+  "GDB-1137",
+  "GDB-1138",
+  "GDB-1139",
+  "GDB-1140",
+  "GDB-1141",
+  "GDB-1173",
+  "GDB-1174",
+  "GDB-1175",
+  "GDB-1176",
+  "GDB-1177",
+  "GDB-1178",
+  "GDB-1179",
+  "GDB-1180",
+  "GDB-1181",
+  "GDB-1182",
+  "GDB-1183"
+ ],
+ "note": "Jira is source of truth; query labels=audit-2026-06. duplicates_pending_cleanup are extra copies of E13 leads safe to delete."
+}

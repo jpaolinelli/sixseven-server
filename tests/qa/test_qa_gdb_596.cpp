@@ -30,6 +30,8 @@
 #include <string>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -45,13 +47,15 @@ protected:
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
+        bootstrap_qa_catalog(catalog_);
+
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         graph_engine_ = std::make_unique<GraphEngine>(catalog_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_, graph_engine_.get());
 
         // Create tables for admin command and window function testing
         exec_ok("CREATE TABLE employees (id INT PRIMARY KEY, name VARCHAR, "
-                 "department VARCHAR, salary DOUBLE)");
+                "department VARCHAR, salary DOUBLE)");
         exec_ok("INSERT INTO employees VALUES (1, 'Alice', 'eng', 80000)");
         exec_ok("INSERT INTO employees VALUES (2, 'Bob', 'eng', 90000)");
         exec_ok("INSERT INTO employees VALUES (3, 'Carol', 'sales', 70000)");
@@ -68,7 +72,7 @@ protected:
         exec_ok("INSERT INTO products VALUES (20, 'Gadget')");
 
         exec_ok("CREATE EDGE TYPE rated (score DOUBLE, review VARCHAR) "
-                 "FROM users TO products");
+                "FROM users TO products");
         exec_ok("LINK users(1) TO products(10) VIA rated (score = 4.5, review = 'great')");
         exec_ok("LINK users(1) TO products(20) VIA rated (score = 2.0, review = 'poor')");
         exec_ok("LINK users(2) TO products(10) VIA rated (score = 5.0, review = 'perfect')");
@@ -228,7 +232,7 @@ TEST_F(QA_GDB596, BooleanTypeStillWorks) {
 
 TEST_F(QA_GDB596, BoolDefaultValue) {
     exec_ok("CREATE TABLE bool_default_test (id INT PRIMARY KEY, "
-             "published BOOL DEFAULT false)");
+            "published BOOL DEFAULT false)");
     exec_ok("INSERT INTO bool_default_test (id) VALUES (1)");
     auto qr = exec_ok("SELECT published FROM bool_default_test WHERE id = 1");
     ASSERT_EQ(qr.rows.size(), 1u);
@@ -241,24 +245,23 @@ TEST_F(QA_GDB596, BoolDefaultValue) {
 
 TEST_F(QA_GDB596, WindowRowNumber) {
     auto qr = exec_ok("SELECT name, ROW_NUMBER() OVER (ORDER BY salary DESC) AS rank "
-                       "FROM employees");
+                      "FROM employees");
     EXPECT_EQ(qr.rows.size(), 5u);
     EXPECT_EQ(qr.column_names.size(), 2u);
 }
 
 TEST_F(QA_GDB596, WindowRowNumberWithPartition) {
-    auto qr = exec_ok(
-        "SELECT name, department, "
-        "ROW_NUMBER() OVER (PARTITION BY department ORDER BY salary DESC) AS dept_rank "
-        "FROM employees");
+    auto qr =
+        exec_ok("SELECT name, department, "
+                "ROW_NUMBER() OVER (PARTITION BY department ORDER BY salary DESC) AS dept_rank "
+                "FROM employees");
     EXPECT_EQ(qr.rows.size(), 5u);
 }
 
 TEST_F(QA_GDB596, WindowSumOverPartition) {
-    auto qr = exec_ok(
-        "SELECT name, department, salary, "
-        "SUM(salary) OVER (PARTITION BY department) AS dept_total "
-        "FROM employees");
+    auto qr = exec_ok("SELECT name, department, salary, "
+                      "SUM(salary) OVER (PARTITION BY department) AS dept_total "
+                      "FROM employees");
     EXPECT_EQ(qr.rows.size(), 5u);
     // Verify eng total = 80000 + 90000 + 85000 = 255000
     // Find an eng row
@@ -273,28 +276,25 @@ TEST_F(QA_GDB596, WindowSumOverPartition) {
 }
 
 TEST_F(QA_GDB596, WindowLag) {
-    auto qr = exec_ok(
-        "SELECT name, salary, LAG(salary) OVER (ORDER BY salary) AS prev_salary "
-        "FROM employees");
+    auto qr = exec_ok("SELECT name, salary, LAG(salary) OVER (ORDER BY salary) AS prev_salary "
+                      "FROM employees");
     EXPECT_EQ(qr.rows.size(), 5u);
 }
 
 TEST_F(QA_GDB596, WindowCombinedExample) {
     // The exact example from the documentation
-    auto qr = exec_ok(
-        "SELECT name, salary, "
-        "ROW_NUMBER() OVER (PARTITION BY department ORDER BY salary DESC) AS rank, "
-        "LAG(salary) OVER (ORDER BY salary) AS prev_salary, "
-        "SUM(salary) OVER (PARTITION BY department) AS dept_total "
-        "FROM employees");
+    auto qr = exec_ok("SELECT name, salary, "
+                      "ROW_NUMBER() OVER (PARTITION BY department ORDER BY salary DESC) AS rank, "
+                      "LAG(salary) OVER (ORDER BY salary) AS prev_salary, "
+                      "SUM(salary) OVER (PARTITION BY department) AS dept_total "
+                      "FROM employees");
     EXPECT_EQ(qr.rows.size(), 5u);
     EXPECT_EQ(qr.column_names.size(), 5u);
 }
 
 TEST_F(QA_GDB596, WindowNoOrderBy) {
     // Window function without ORDER BY — GDB-607 fixed the default frame
-    auto qr = exec_ok(
-        "SELECT name, SUM(salary) OVER () AS grand_total FROM employees");
+    auto qr = exec_ok("SELECT name, SUM(salary) OVER () AS grand_total FROM employees");
     EXPECT_EQ(qr.rows.size(), 5u);
     // Every row should have the same grand total = 400000
     for (const auto& row : qr.rows) {
@@ -309,31 +309,28 @@ TEST_F(QA_GDB596, WindowNoOrderBy) {
 TEST_F(QA_GDB596, EdgePropertyQualifiedAccess) {
     // The exact pattern from docs/graph-queries.md:
     // SELECT name, rated.score, rated.review FROM TRAVERSE rated FROM users(1) ...
-    auto qr = exec_ok(
-        "SELECT name, rated.score, rated.review "
-        "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
+    auto qr = exec_ok("SELECT name, rated.score, rated.review "
+                      "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
     EXPECT_EQ(qr.rows.size(), 2u);
     EXPECT_EQ(qr.column_names.size(), 3u);
 }
 
 TEST_F(QA_GDB596, EdgePropertyStarExpansion) {
     // Docs say: "Star expansion includes edge properties"
-    auto qr = exec_ok(
-        "SELECT * FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH");
+    auto qr = exec_ok("SELECT * FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH");
     // Should include edge properties score, review plus product cols and meta cols
-    bool has_score = std::find(qr.column_names.begin(), qr.column_names.end(), "score")
-                     != qr.column_names.end();
-    bool has_review = std::find(qr.column_names.begin(), qr.column_names.end(), "review")
-                      != qr.column_names.end();
+    bool has_score =
+        std::find(qr.column_names.begin(), qr.column_names.end(), "score") != qr.column_names.end();
+    bool has_review = std::find(qr.column_names.begin(), qr.column_names.end(), "review") !=
+                      qr.column_names.end();
     EXPECT_TRUE(has_score) << "Star expansion should include edge property 'score'";
     EXPECT_TRUE(has_review) << "Star expansion should include edge property 'review'";
 }
 
 TEST_F(QA_GDB596, EdgePropertyInDirection) {
     // Verify edge properties work with IN direction too
-    auto qr = exec_ok(
-        "SELECT name, rated.score "
-        "FROM TRAVERSE rated FROM products(10) DIRECTION IN FETCH AS t");
+    auto qr = exec_ok("SELECT name, rated.score "
+                      "FROM TRAVERSE rated FROM products(10) DIRECTION IN FETCH AS t");
     // products(10) has edges from users(1) and users(2)
     EXPECT_EQ(qr.rows.size(), 2u);
 }
@@ -359,9 +356,8 @@ TEST_F(QA_GDB596, AdminExplainInvalidQuery) {
 // ============================================================================
 
 TEST_F(QA_GDB596, WindowFunctionEmptyResult) {
-    auto qr = exec_ok(
-        "SELECT name, ROW_NUMBER() OVER (ORDER BY salary) AS rn "
-        "FROM employees WHERE salary > 999999");
+    auto qr = exec_ok("SELECT name, ROW_NUMBER() OVER (ORDER BY salary) AS rn "
+                      "FROM employees WHERE salary > 999999");
     EXPECT_EQ(qr.rows.size(), 0u);
 }
 
@@ -370,11 +366,10 @@ TEST_F(QA_GDB596, WindowFunctionEmptyResult) {
 // ============================================================================
 
 TEST_F(QA_GDB596, WindowMultipleDifferentPartitions) {
-    auto qr = exec_ok(
-        "SELECT name, "
-        "ROW_NUMBER() OVER (PARTITION BY department ORDER BY salary) AS dept_rn, "
-        "ROW_NUMBER() OVER (ORDER BY name) AS global_rn "
-        "FROM employees");
+    auto qr = exec_ok("SELECT name, "
+                      "ROW_NUMBER() OVER (PARTITION BY department ORDER BY salary) AS dept_rn, "
+                      "ROW_NUMBER() OVER (ORDER BY name) AS global_rn "
+                      "FROM employees");
     EXPECT_EQ(qr.rows.size(), 5u);
     EXPECT_EQ(qr.column_names.size(), 3u);
 }
@@ -384,13 +379,12 @@ TEST_F(QA_GDB596, WindowMultipleDifferentPartitions) {
 // ============================================================================
 
 TEST_F(QA_GDB596, EdgePropertyWhereFilter) {
-    auto qr = exec_ok(
-        "SELECT name, rated.score "
-        "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t "
-        "WHERE score > 3.0");
+    auto qr = exec_ok("SELECT name, rated.score "
+                      "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t "
+                      "WHERE score > 3.0");
     // Only products(10) with score=4.5 should pass
     EXPECT_EQ(qr.rows.size(), 1u);
 }
 
-}  // namespace
-}  // namespace sixseven
+} // namespace
+} // namespace sixseven

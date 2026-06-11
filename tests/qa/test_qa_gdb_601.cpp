@@ -34,6 +34,8 @@
 #include <string>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -47,6 +49,8 @@ protected:
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb601";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
+
+        bootstrap_qa_catalog(catalog_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         graph_engine_ = std::make_unique<GraphEngine>(catalog_);
@@ -62,8 +66,7 @@ protected:
 
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
-        EXPECT_TRUE(result.has_value()) << "SQL failed: " << sql << "\n"
-                                        << result.error().message;
+        EXPECT_TRUE(result.has_value()) << "SQL failed: " << sql << "\n" << result.error().message;
         return std::move(*result);
     }
 
@@ -122,8 +125,7 @@ protected:
 // Repro #1: WHERE a.age > 40 but SELECT only a.name
 TEST_F(QA_GDB601, ReproWhereAgeSelectName) {
     setup_standard_graph();
-    auto qr = exec_ok(
-        "SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.age > 40");
+    auto qr = exec_ok("SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.age > 40");
     ASSERT_EQ(qr.column_names.size(), 1u);
     EXPECT_EQ(qr.column_names[0], "name");
     auto names = collect_sorted_strings(qr);
@@ -135,8 +137,8 @@ TEST_F(QA_GDB601, ReproWhereAgeSelectName) {
 // Repro #2: WHERE a.name = 'Alice' but SELECT only a.age
 TEST_F(QA_GDB601, ReproWhereNameSelectAge) {
     setup_standard_graph();
-    auto qr = exec_ok(
-        "SELECT a.age FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.name = 'Alice'");
+    auto qr =
+        exec_ok("SELECT a.age FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.name = 'Alice'");
     ASSERT_EQ(qr.column_names.size(), 1u);
     EXPECT_EQ(qr.column_names[0], "age");
     ASSERT_EQ(qr.rows.size(), 1u);
@@ -150,8 +152,8 @@ TEST_F(QA_GDB601, ReproWhereNameSelectAge) {
 // WHERE filters out ALL rows — empty result set
 TEST_F(QA_GDB601, WhereFiltersAllRows) {
     setup_standard_graph();
-    auto qr = exec_ok(
-        "SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.age > 100");
+    auto qr =
+        exec_ok("SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.age > 100");
     EXPECT_EQ(qr.rows.size(), 0u);
 }
 
@@ -179,22 +181,20 @@ TEST_F(QA_GDB601, WhereOnNullableColumn) {
 TEST_F(QA_GDB601, WhereOnTargetNodeColumn) {
     setup_standard_graph();
     // Only return rows where the target node (b) has age > 40
-    auto qr = exec_ok(
-        "SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) WHERE b.age > 40");
+    auto qr = exec_ok("SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) WHERE b.age > 40");
     auto names = collect_sorted_strings(qr);
     // Edges: 1->2(30), 2->3(60), 3->1(50)
     // b.age > 40: edge 2->3 (b=Charlie,60), edge 3->1 (b=Alice,50)
     ASSERT_EQ(names.size(), 2u);
-    EXPECT_EQ(names[0], "Bob");      // links to Charlie (60)
-    EXPECT_EQ(names[1], "Charlie");  // links to Alice (50)
+    EXPECT_EQ(names[0], "Bob");     // links to Charlie (60)
+    EXPECT_EQ(names[1], "Charlie"); // links to Alice (50)
 }
 
 // WHERE on BOTH source and target columns, neither in SELECT — only select id
 TEST_F(QA_GDB601, WhereOnBothNodesColumnsNotInSelect) {
     setup_standard_graph();
-    auto qr = exec_ok(
-        "SELECT a.id FROM MATCH (a:users)-[e:follows]->(b:users) "
-        "WHERE a.age > 25 AND b.name = 'Bob'");
+    auto qr = exec_ok("SELECT a.id FROM MATCH (a:users)-[e:follows]->(b:users) "
+                      "WHERE a.age > 25 AND b.name = 'Bob'");
     // a.age > 25 AND b.name = 'Bob'
     // Edge 1->2: a=Alice(50), b=Bob ✓
     // Edge 2->3: a=Bob(30), b=Charlie — b.name != 'Bob'
@@ -210,14 +210,13 @@ TEST_F(QA_GDB601, WhereOnBothNodesColumnsNotInSelect) {
 TEST_F(QA_GDB601, WhereMultipleNonSelectColumnsOr) {
     setup_standard_graph();
     // WHERE a.name = 'Alice' OR a.age = 30 — neither name nor age in SELECT
-    auto qr = exec_ok(
-        "SELECT a.id FROM MATCH (a:users)-[e:follows]->(b:users) "
-        "WHERE a.name = 'Alice' OR a.age = 30");
+    auto qr = exec_ok("SELECT a.id FROM MATCH (a:users)-[e:follows]->(b:users) "
+                      "WHERE a.name = 'Alice' OR a.age = 30");
     auto ids = collect_sorted_ints(qr);
     // Alice (name match) -> Bob, Bob (age=30 match) -> Charlie
     ASSERT_EQ(ids.size(), 2u);
-    EXPECT_EQ(ids[0], 1);  // Alice
-    EXPECT_EQ(ids[1], 2);  // Bob
+    EXPECT_EQ(ids[0], 1); // Alice
+    EXPECT_EQ(ids[1], 2); // Bob
 }
 
 // ============================================================================
@@ -226,8 +225,7 @@ TEST_F(QA_GDB601, WhereMultipleNonSelectColumnsOr) {
 
 TEST_F(QA_GDB601, StandaloneMatchReturnWhereNonReturnColumn) {
     setup_standard_graph();
-    auto qr = exec_ok(
-        "MATCH (a:users)-[e:follows]->(b:users) WHERE a.age > 40 RETURN a.name");
+    auto qr = exec_ok("MATCH (a:users)-[e:follows]->(b:users) WHERE a.age > 40 RETURN a.name");
     ASSERT_EQ(qr.column_names.size(), 1u);
     auto names = collect_sorted_strings(qr);
     ASSERT_EQ(names.size(), 2u);
@@ -237,8 +235,7 @@ TEST_F(QA_GDB601, StandaloneMatchReturnWhereNonReturnColumn) {
 
 TEST_F(QA_GDB601, StandaloneMatchReturnWhereOnTargetNonReturn) {
     setup_standard_graph();
-    auto qr = exec_ok(
-        "MATCH (a:users)-[e:follows]->(b:users) WHERE b.age < 40 RETURN a.name");
+    auto qr = exec_ok("MATCH (a:users)-[e:follows]->(b:users) WHERE b.age < 40 RETURN a.name");
     // b.age < 40: only Bob (30). Edge 1->2: a=Alice
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Alice");
@@ -273,8 +270,8 @@ TEST_F(QA_GDB601, DistinctWithWhereOnNonSelectColumn) {
 TEST_F(QA_GDB601, VariableLengthPathWhereNonSelectColumn) {
     setup_standard_graph();
     // Variable-length match with WHERE on a column not in SELECT
-    auto qr = exec_ok(
-        "SELECT a.name FROM MATCH (a:users)-[e:follows]->{1,2}(b:users) WHERE a.age > 40");
+    auto qr =
+        exec_ok("SELECT a.name FROM MATCH (a:users)-[e:follows]->{1,2}(b:users) WHERE a.age > 40");
     // a.age > 40: Alice(50), Charlie(60)
     // This tests that VariableLengthMatchOperator also gets the full-scope schema
     auto names = collect_sorted_strings(qr);
@@ -295,8 +292,7 @@ TEST_F(QA_GDB601, SelectFromMatchSubqueryWhereNonSelectColumn) {
     setup_standard_graph();
     // This exercises the plan_from_source code path (SELECT ... FROM MATCH ...)
     // The WHERE here is part of the outer SELECT, not inside MATCH
-    auto qr = exec_ok(
-        "SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.age > 40");
+    auto qr = exec_ok("SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.age > 40");
     auto names = collect_sorted_strings(qr);
     ASSERT_EQ(names.size(), 2u);
     EXPECT_EQ(names[0], "Alice");
@@ -308,11 +304,10 @@ TEST_F(QA_GDB601, SelectFromMatchSubqueryWhereNonSelectColumn) {
 // ============================================================================
 
 TEST_F(QA_GDB601, ManyColumnsWhereOnDistantColumn) {
-    exec_ok(
-        "CREATE TABLE wide_table ("
-        "id INT PRIMARY KEY, "
-        "col_a VARCHAR, col_b VARCHAR, col_c VARCHAR, "
-        "col_d VARCHAR, col_e VARCHAR, col_f INT)");
+    exec_ok("CREATE TABLE wide_table ("
+            "id INT PRIMARY KEY, "
+            "col_a VARCHAR, col_b VARCHAR, col_c VARCHAR, "
+            "col_d VARCHAR, col_e VARCHAR, col_f INT)");
     exec_ok("INSERT INTO wide_table VALUES (1, 'a1', 'b1', 'c1', 'd1', 'e1', 100)");
     exec_ok("INSERT INTO wide_table VALUES (2, 'a2', 'b2', 'c2', 'd2', 'e2', 200)");
     exec_ok("INSERT INTO wide_table VALUES (3, 'a3', 'b3', 'c3', 'd3', 'e3', 300)");
@@ -357,8 +352,7 @@ TEST_F(QA_GDB601, WhereEmptyStringColumn) {
     exec_ok("LINK items(2) TO items(1) VIA related");
 
     // WHERE tag = '' — only Widget matches, tag not in SELECT
-    auto qr = exec_ok(
-        "SELECT a.name FROM MATCH (a:items)-[e:related]->(b:items) WHERE a.tag = ''");
+    auto qr = exec_ok("SELECT a.name FROM MATCH (a:items)-[e:related]->(b:items) WHERE a.tag = ''");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Widget");
 }
@@ -375,18 +369,18 @@ TEST_F(QA_GDB601, StressManyRowsWhereNonSelect) {
     for (int i = 1; i <= 50; ++i) {
         std::string label = "node_" + std::to_string(i);
         int priority = i % 10; // 0-9
-        exec_ok("INSERT INTO nodes VALUES (" + std::to_string(i) + ", '" + label +
-                "', " + std::to_string(priority) + ")");
+        exec_ok("INSERT INTO nodes VALUES (" + std::to_string(i) + ", '" + label + "', " +
+                std::to_string(priority) + ")");
     }
     // Create a chain: 1->2->3->...->50
     for (int i = 1; i < 50; ++i) {
-        exec_ok("LINK nodes(" + std::to_string(i) + ") TO nodes(" +
-                std::to_string(i + 1) + ") VIA connects");
+        exec_ok("LINK nodes(" + std::to_string(i) + ") TO nodes(" + std::to_string(i + 1) +
+                ") VIA connects");
     }
 
     // WHERE priority = 0 (nodes 10, 20, 30, 40, 50) — priority not in SELECT
-    auto qr = exec_ok(
-        "SELECT a.label FROM MATCH (a:nodes)-[e:connects]->(b:nodes) WHERE a.priority = 0");
+    auto qr =
+        exec_ok("SELECT a.label FROM MATCH (a:nodes)-[e:connects]->(b:nodes) WHERE a.priority = 0");
     // Nodes with priority=0: 10,20,30,40. Node 50 has no outgoing edge.
     auto labels = collect_sorted_strings(qr);
     ASSERT_EQ(labels.size(), 4u);
@@ -404,23 +398,22 @@ TEST_F(QA_GDB601, WhereComparisonOperatorsNonSelect) {
     setup_standard_graph();
 
     // <= operator
-    auto qr1 = exec_ok(
-        "SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.age <= 30");
+    auto qr1 =
+        exec_ok("SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.age <= 30");
     ASSERT_EQ(qr1.rows.size(), 1u);
     EXPECT_EQ(qr1.rows[0][0].as_string(), "Bob");
 
     // != operator
-    auto qr2 = exec_ok(
-        "SELECT a.id FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.name != 'Alice'");
+    auto qr2 =
+        exec_ok("SELECT a.id FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.name != 'Alice'");
     auto ids = collect_sorted_ints(qr2);
     ASSERT_EQ(ids.size(), 2u);
     EXPECT_EQ(ids[0], 2); // Bob
     EXPECT_EQ(ids[1], 3); // Charlie
 
     // BETWEEN
-    auto qr3 = exec_ok(
-        "SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) "
-        "WHERE a.age BETWEEN 40 AND 55");
+    auto qr3 = exec_ok("SELECT a.name FROM MATCH (a:users)-[e:follows]->(b:users) "
+                       "WHERE a.age BETWEEN 40 AND 55");
     auto names = collect_sorted_strings(qr3);
     ASSERT_EQ(names.size(), 1u);
     EXPECT_EQ(names[0], "Alice"); // age 50
@@ -444,5 +437,5 @@ TEST_F(QA_GDB601, ThreeNodePatternWhereOnThirdNode) {
     EXPECT_EQ(names[1], "Bob");
 }
 
-}  // namespace
-}  // namespace sixseven
+} // namespace
+} // namespace sixseven
