@@ -49,7 +49,7 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     void exec_error(const std::string& sql, StatusCode expected) {
@@ -94,7 +94,7 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     void exec_error(const std::string& sql, StatusCode expected) {

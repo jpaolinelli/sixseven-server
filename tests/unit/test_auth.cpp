@@ -54,7 +54,7 @@ TEST(AuthMethodParsing, CaseInsensitive) {
 
 TEST(AuthMethodParsing, InvalidMethodReturnsError) {
     auto method = parse_auth_method("kerberos");
-    EXPECT_FALSE(method.has_value());
+    ASSERT_FALSE(method.has_value());
     EXPECT_EQ(method.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -353,7 +353,7 @@ TEST(ScramExchange, InvalidClientFirstMessage) {
     auto record = hash_password_scram("alice", "secret");
     ScramServerState state;
     auto result = scram_server_first("garbage", record, state);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::AUTH_ERROR);
 }
 
@@ -372,7 +372,7 @@ TEST(ScramExchange, WrongProofFails) {
         "c=biws,r=" + state.server_nonce + ",p=" + base64_encode(random_bytes(32));
 
     auto server_final = scram_server_final(client_final, state);
-    EXPECT_FALSE(server_final.has_value());
+    ASSERT_FALSE(server_final.has_value());
     EXPECT_EQ(server_final.error().code, StatusCode::AUTH_ERROR);
 }
 
@@ -393,7 +393,7 @@ TEST(UserManager, CreateDuplicateUserFails) {
     ASSERT_TRUE(r1.has_value());
 
     auto r2 = mgr.create_user("alice", "other", AuthMethod::MD5);
-    EXPECT_FALSE(r2.has_value());
+    ASSERT_FALSE(r2.has_value());
     EXPECT_EQ(r2.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -409,7 +409,7 @@ TEST(UserManager, DropUserSucceeds) {
 TEST(UserManager, DropNonexistentUserFails) {
     UserManager mgr;
     auto result = mgr.drop_user("bob", false);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -437,7 +437,7 @@ TEST(UserManager, AlterUserPassword) {
 TEST(UserManager, AlterNonexistentUserFails) {
     UserManager mgr;
     auto result = mgr.alter_user("ghost", "pass", AuthMethod::MD5);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -563,7 +563,7 @@ TEST_F(AuthParserTest, CreateDuplicateUserFails) {
     ASSERT_TRUE(r1.has_value()) << r1.error().message;
 
     auto r2 = engine_->execute("CREATE USER bob WITH PASSWORD 'pass2'");
-    EXPECT_FALSE(r2.has_value());
+    ASSERT_FALSE(r2.has_value());
     EXPECT_EQ(r2.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -585,7 +585,7 @@ TEST_F(AuthParserTest, DropUserIfExists) {
 
 TEST_F(AuthParserTest, DropNonexistentUserFails) {
     auto result = engine_->execute("DROP USER nonexistent");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -605,7 +605,7 @@ TEST_F(AuthParserTest, AlterUserPassword) {
 
 TEST_F(AuthParserTest, AlterNonexistentUserFails) {
     auto result = engine_->execute("ALTER USER ghost WITH PASSWORD 'pass'");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -633,7 +633,7 @@ TEST_F(AuthParserTest, NoUserManagerReturnsError) {
     engine_->set_user_manager(nullptr);
 
     auto result = engine_->execute("CREATE USER fail WITH PASSWORD 'pass'");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INTERNAL_ERROR);
 }
 
@@ -645,7 +645,7 @@ TEST_F(AuthParserTest, StandbyRejectsCreateUser) {
     engine_->set_standby_mode(true);
 
     auto result = engine_->execute("CREATE USER blocked WITH PASSWORD 'pass'");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::READ_ONLY);
 }
 
@@ -653,7 +653,7 @@ TEST_F(AuthParserTest, StandbyRejectsDropUser) {
     engine_->set_standby_mode(true);
 
     auto result = engine_->execute("DROP USER blocked");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::READ_ONLY);
 }
 
@@ -661,6 +661,6 @@ TEST_F(AuthParserTest, StandbyRejectsAlterUser) {
     engine_->set_standby_mode(true);
 
     auto result = engine_->execute("ALTER USER blocked WITH PASSWORD 'pass'");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::READ_ONLY);
 }

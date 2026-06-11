@@ -88,7 +88,7 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     void exec_err(const std::string& sql) {
@@ -162,12 +162,16 @@ TEST_F(QA_GDB596, AdminDescribeNotImplemented) {
     exec_err("DESCRIBE employees");
 }
 
-TEST_F(QA_GDB596, AdminVacuumNotImplemented) {
-    exec_err("VACUUM");
+// Flipped by GDB-720: these previously asserted the pre-GDB-711 behavior
+// (VACUUM/ANALYZE rejected as not-implemented) but were masked by the fixture
+// abort this ticket fixes. GDB-711 dispatched both statements to the executor,
+// so they now succeed.
+TEST_F(QA_GDB596, AdminVacuumSucceeds) {
+    exec_ok("VACUUM");
 }
 
-TEST_F(QA_GDB596, AdminAnalyzeNotImplemented) {
-    exec_err("ANALYZE");
+TEST_F(QA_GDB596, AdminAnalyzeSucceeds) {
+    exec_ok("ANALYZE");
 }
 
 TEST_F(QA_GDB596, AdminSetLogLevelNotImplemented) {

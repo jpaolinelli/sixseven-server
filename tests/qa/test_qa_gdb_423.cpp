@@ -156,6 +156,9 @@ protected:
         EXPECT_TRUE(tid.has_value()) << tid.error().message;
         auto schema = catalog_->get_table(default_database_id, name);
         EXPECT_TRUE(schema.has_value());
+        if (!tid.has_value() || !schema.has_value()) {
+            return table_id_t{};
+        }
         auto sr = storage_->create_table_storage(default_database_id, *tid, *schema);
         EXPECT_TRUE(sr.has_value()) << sr.error().message;
         return *tid;
@@ -391,7 +394,7 @@ TEST_F(QA_GDB423, AC4_BinderRejectsIncompatibleEdgeChain) {
     auto result = bind_sql("SELECT a.name, c.name "
                            "FROM MATCH (a:persons)-[r1:works_at]->(b:companies)"
                            "-[r2:knows]->(c:persons)");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_NE(result.error().message.find("table compatibility error"), std::string::npos)
         << "Error message: " << result.error().message;
 }
@@ -543,7 +546,7 @@ TEST_F(QA_GDB423, MaxVisitedLimitTriggersError) {
 
     // max_visited=3 should trigger before processing all BFS entries.
     auto result = run_vl_match_expect_error(std::move(config), std::move(schema), 3);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_NE(result.error().message.find("max_visited"), std::string::npos)
         << "Error: " << result.error().message;
 }

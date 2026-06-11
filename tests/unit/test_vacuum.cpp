@@ -56,6 +56,9 @@ protected:
             // Allocate a new page.
             auto new_page_result = bpm_->new_page();
             EXPECT_TRUE(new_page_result.has_value());
+            if (!new_page_result.has_value()) {
+                return {};
+            }
             page = *new_page_result;
         } else {
             page = *page_result;
@@ -63,6 +66,9 @@ protected:
 
         auto slot_result = page->insert_tuple(combined);
         EXPECT_TRUE(slot_result.has_value());
+        if (!slot_result.has_value()) {
+            return {};
+        }
         auto slot = *slot_result;
         PageId pid = page->page_id();
 
@@ -356,7 +362,7 @@ TEST_F(VacuumTest, AutoVacuumWorkerStartStop) {
 
     // Double start should fail.
     auto result = worker.start();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::ALREADY_EXISTS);
 
     worker.stop();

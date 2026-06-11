@@ -102,7 +102,7 @@ TEST(QA_GDB_129_Ollama, EmptyEmbeddingArray) {
 
     OllamaProvider provider("http://localhost:11434", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -132,7 +132,7 @@ TEST(QA_GDB_129_Ollama, TruncatedJson) {
 
     OllamaProvider provider("http://localhost:11434", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -143,7 +143,7 @@ TEST(QA_GDB_129_Ollama, ExtraDimensionInResponse) {
 
     OllamaProvider provider("http://localhost:11434", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -186,7 +186,7 @@ TEST(QA_GDB_129_Ollama, HealthCheckEmptyModelList) {
 
     OllamaProvider provider("http://localhost:11434", "test-model", 3, std::move(mock));
     auto result = provider.health_check();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 

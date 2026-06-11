@@ -212,7 +212,7 @@ TEST(QA_EmbeddingColumn, NegativeDimensionFails) {
     def.provider = "openai";
 
     auto result = mgr.register_table_embeddings(*tid, {def});
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -616,7 +616,7 @@ TEST(QA_BuiltinProvider, PunctuationOnlyText) {
 
     // Punctuation only — tokenizer should produce no words.
     auto result = provider.embed("!@#$%^&*()");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -642,7 +642,7 @@ TEST(QA_BuiltinProvider, BatchEmbedWithEmptyStringFails) {
 
     // embed_batch calls embed for each text. If one fails, the whole batch fails.
     auto result = provider.embed_batch({"hello", "", "world"});
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -684,7 +684,7 @@ TEST(QA_ProviderRegistry, ResolveEmptyNameFails) {
     ProviderRegistry registry(catalog);
 
     auto result = registry.resolve("");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -693,7 +693,7 @@ TEST(QA_ProviderRegistry, ResolveSlashOnlyFails) {
     ProviderRegistry registry(catalog);
 
     auto result = registry.resolve("/");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -702,7 +702,7 @@ TEST(QA_ProviderRegistry, ResolveLeadingSlashFails) {
     ProviderRegistry registry(catalog);
 
     auto result = registry.resolve("/model");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -711,7 +711,7 @@ TEST(QA_ProviderRegistry, ResolveTrailingSlashFails) {
     ProviderRegistry registry(catalog);
 
     auto result = registry.resolve("type/");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -749,7 +749,7 @@ TEST(QA_ProviderRegistry, OllamaWithoutBaseUrlFails) {
 
     ProviderRegistry registry(catalog);
     auto result = registry.resolve("test-ollama");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -800,7 +800,7 @@ TEST(QA_OllamaProvider, EmbedEmptyEmbeddingArray) {
     OllamaProvider provider("http://localhost:11434", "all-minilm", 3, std::move(mock));
 
     auto result = provider.embed("test");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -811,7 +811,7 @@ TEST(QA_OllamaProvider, Embed429TooManyRequests) {
     OllamaProvider provider("http://localhost:11434", "all-minilm", 3, std::move(mock));
 
     auto result = provider.embed("test");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NETWORK_ERROR);
 }
 

@@ -210,7 +210,7 @@ TEST_F(GDB617BatchInsert, OversizedTupleRejected) {
     };
 
     auto result = heap.insert_batch(spans);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 
     // No partial inserts — row count must be 0.
@@ -229,7 +229,7 @@ TEST_F(GDB617BatchInsert, AllOversizedTuplesRejected) {
     build_batch(3, kMaxTupleSize + 1, owned, spans);
 
     auto result = heap.insert_batch(spans);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
     EXPECT_EQ(heap.row_count(), 0u);
 }
@@ -254,7 +254,7 @@ TEST_F(GDB617BatchInsert, EmptyTupleInMiddleRejected) {
     };
 
     auto result = heap.insert_batch(spans);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
     // Pre-validation should prevent any partial inserts.
     EXPECT_EQ(heap.row_count(), 0u);

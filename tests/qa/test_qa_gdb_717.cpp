@@ -89,7 +89,7 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << "SQL: " << sql << "\nError: " << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     void register_embedding(table_id_t table_id,

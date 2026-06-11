@@ -256,7 +256,7 @@ TEST(QA_GDB_130_OpenAI, Http429RateLimit) {
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NETWORK_ERROR);
 }
 
@@ -266,7 +266,7 @@ TEST(QA_GDB_130_OpenAI, Http401InvalidKey) {
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::AUTH_ERROR);
 }
 
@@ -277,7 +277,7 @@ TEST(QA_GDB_130_OpenAI, Http500WithMalformedErrorBody) {
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NETWORK_ERROR);
 }
 
@@ -287,7 +287,7 @@ TEST(QA_GDB_130_OpenAI, Http500WithJsonErrorBody) {
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NETWORK_ERROR);
     EXPECT_NE(result.error().message.find("server overloaded"), std::string::npos);
 }
@@ -298,7 +298,7 @@ TEST(QA_GDB_130_OpenAI, EmptyResponseBody) {
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -308,7 +308,7 @@ TEST(QA_GDB_130_OpenAI, TruncatedJsonResponse) {
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -322,7 +322,7 @@ TEST(QA_GDB_130_OpenAI, HealthCheckNetworkError) {
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.health_check();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NETWORK_ERROR);
 }
 
@@ -393,7 +393,7 @@ TEST(QA_GDB_130_OpenAI, DataFieldIsNotArray) {
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -405,7 +405,7 @@ TEST(QA_GDB_130_OpenAI, EntryMissingEmbeddingField) {
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -417,7 +417,7 @@ TEST(QA_GDB_130_OpenAI, EmbeddingFieldIsNotArray) {
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -447,7 +447,7 @@ TEST(QA_GDB_130_Registry, OpenAIWithoutApiKeyFails) {
 
     // "openai/model" parsed from name, but no API key available.
     auto result = registry.resolve("openai/text-embedding-3-small");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::AUTH_ERROR);
 }
 
@@ -521,6 +521,6 @@ TEST(QA_GDB_130_ONNX, OnnxProviderTypeRecognizedButModelNotFound) {
     // "onnx" as a valid type but fails with IO_ERROR because "model-path"
     // does not exist as a file.
     auto result = registry.resolve("onnx/model-path");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::IO_ERROR);
 }

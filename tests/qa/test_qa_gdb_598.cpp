@@ -120,7 +120,7 @@ TEST_F(QA_GDB598, DuplicateInSameDatabaseFails) {
 
     auto e2 = graph_->create_edge_type(
         db1_id_, "follows", db1_users_, db1_users_, TypeId::INT64, TypeId::INT64, {});
-    EXPECT_FALSE(e2.has_value());
+    ASSERT_FALSE(e2.has_value());
     EXPECT_EQ(e2.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -205,7 +205,7 @@ TEST_F(QA_GDB598, DropEdgeTypeIsolation) {
 
     // db1's "follows" is gone.
     auto link_gone = graph_->link(db1_id_, "follows", pk(1), pk(2));
-    EXPECT_FALSE(link_gone.has_value());
+    ASSERT_FALSE(link_gone.has_value());
     EXPECT_EQ(link_gone.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -245,15 +245,15 @@ TEST_F(QA_GDB598, EdgeTypeNotFoundInWrongDatabase) {
 
     // Attempt to use in db2 (doesn't exist there).
     auto link = graph_->link(db2_id_, "follows", pk(1), pk(2));
-    EXPECT_FALSE(link.has_value());
+    ASSERT_FALSE(link.has_value());
     EXPECT_EQ(link.error().code, StatusCode::NOT_FOUND);
 
     auto edges = graph_->get_edges_from(db2_id_, "follows", pk(1));
-    EXPECT_FALSE(edges.has_value());
+    ASSERT_FALSE(edges.has_value());
     EXPECT_EQ(edges.error().code, StatusCode::NOT_FOUND);
 
     auto unlink = graph_->unlink(db2_id_, "follows", pk(1), pk(2));
-    EXPECT_FALSE(unlink.has_value());
+    ASSERT_FALSE(unlink.has_value());
     EXPECT_EQ(unlink.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -596,7 +596,7 @@ TEST_F(QA_GDB598, CascadePrecision) {
 /// Drop non-existent edge type in a database that has no edge types.
 TEST_F(QA_GDB598, DropNonExistentEdgeType) {
     auto drop = graph_->drop_edge_type(db1_id_, "nonexistent");
-    EXPECT_FALSE(drop.has_value());
+    ASSERT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::NOT_FOUND);
 }
 

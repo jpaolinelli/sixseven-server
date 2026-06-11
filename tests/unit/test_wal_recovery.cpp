@@ -130,7 +130,7 @@ TEST(WalReader, ReadEmptyWalDir) {
     ASSERT_TRUE(reader.open().has_value());
 
     auto result = reader.next();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 
     ASSERT_TRUE(reader.close().has_value());

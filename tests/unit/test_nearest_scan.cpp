@@ -85,9 +85,12 @@ protected:
         std::vector<Value> vals = {Value(id), Value(name), Value(embedding)};
         auto bytes = TupleSerializer::serialize(vals, storage_schema_);
         EXPECT_TRUE(bytes.has_value()) << bytes.error().message;
+        if (!bytes.has_value()) {
+            return RID{};
+        }
         auto rid = heap.insert_tuple(*bytes);
         EXPECT_TRUE(rid.has_value()) << rid.error().message;
-        return *rid;
+        return rid ? *rid : RID{};
     }
 
     /// Helper: drain all results from an opened operator.

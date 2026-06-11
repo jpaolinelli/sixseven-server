@@ -361,7 +361,7 @@ TEST(Lexer, StringLiteralMultipleEscapes) {
 TEST(Lexer, UnterminatedStringFails) {
     Lexer lexer("'unterminated");
     auto result = lexer.tokenize();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -467,7 +467,7 @@ TEST(Lexer, NestedBlockComment) {
 TEST(Lexer, UnterminatedBlockCommentFails) {
     Lexer lexer("SELECT /* unterminated");
     auto result = lexer.tokenize();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -514,14 +514,14 @@ TEST(Lexer, PositionMultipleLines) {
 TEST(Lexer, UnrecognizedCharacterFails) {
     Lexer lexer("SELECT @ FROM");
     auto result = lexer.tokenize();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
 TEST(Lexer, ErrorIncludesPosition) {
     Lexer lexer("SELECT\n  @");
     auto result = lexer.tokenize();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     // Error message should mention line 2.
     EXPECT_NE(result.error().message.find("line 2"), std::string::npos);
 }
@@ -774,7 +774,7 @@ TEST(Lexer, ValidExponentWithSign) {
 TEST(Lexer, LonePipeErrors) {
     Lexer lexer("SELECT | FROM");
     auto result = lexer.tokenize();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -793,7 +793,7 @@ TEST(Lexer, LoneColonIsToken) {
 TEST(Lexer, LoneBangErrors) {
     Lexer lexer("SELECT ! FROM");
     auto result = lexer.tokenize();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 

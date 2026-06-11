@@ -84,12 +84,15 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << sql << " => " << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     database_id_t switch_to_db(const std::string& name) {
         auto db = catalog_->get_database(name);
         EXPECT_TRUE(db.has_value()) << "database '" << name << "' not found";
+        if (!db.has_value()) {
+            return database_id_t{};
+        }
         engine_->set_current_database(db->database_id);
         return db->database_id;
     }
@@ -99,7 +102,7 @@ protected:
     table_id_t get_table_id(database_id_t db_id, const std::string& name) {
         auto tbl = catalog_->get_table(db_id, name);
         EXPECT_TRUE(tbl.has_value()) << "table '" << name << "' not found";
-        return tbl->table_id;
+        return tbl ? tbl->table_id : table_id_t{};
     }
 
     struct SysTableRow {

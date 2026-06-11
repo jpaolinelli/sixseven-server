@@ -80,7 +80,7 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     static std::optional<size_t> col_index(const QueryResult& qr, const std::string& name) {

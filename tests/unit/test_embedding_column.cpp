@@ -128,7 +128,7 @@ TEST(EmbeddingColumn, RegisterInvalidDimensionFails) {
     def.provider = "openai";
 
     auto result = mgr.register_table_embeddings(*tid, {def});
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -147,7 +147,7 @@ TEST(EmbeddingColumn, RegisterEmptySourceExprFails) {
     def.provider = "openai";
 
     auto result = mgr.register_table_embeddings(*tid, {def});
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -166,7 +166,7 @@ TEST(EmbeddingColumn, RegisterEmptyProviderFails) {
     def.provider = "";
 
     auto result = mgr.register_table_embeddings(*tid, {def});
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -182,7 +182,7 @@ TEST(EmbeddingColumn, RegisterNonexistentTableFails) {
     def.provider = "openai";
 
     auto result = mgr.register_table_embeddings(999, {def});
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -204,7 +204,7 @@ TEST(EmbeddingColumn, RegisterDuplicateColumnFails) {
     ASSERT_TRUE(first.has_value()) << first.error().message;
 
     auto second = mgr.register_table_embeddings(*tid, {def});
-    EXPECT_FALSE(second.has_value());
+    ASSERT_FALSE(second.has_value());
     EXPECT_EQ(second.error().code, StatusCode::ALREADY_EXISTS);
 }
 

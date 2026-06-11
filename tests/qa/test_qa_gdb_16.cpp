@@ -224,7 +224,7 @@ TEST(QA_WalWriter, AppendRecordLargerThanSegmentFails) {
     r.txn_id = 1;
     r.data.resize(200, 0xFF); // 200 + overhead > 100.
     auto result = writer.append(r);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 
     ASSERT_TRUE(writer.close().has_value());
@@ -448,7 +448,7 @@ TEST(QA_WalReader, ReadSegmentWithZeroBytes) {
 
     // Should return NOT_FOUND (zero record_length = end of data).
     auto result = reader.next();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 
     ASSERT_TRUE(reader.close().has_value());
@@ -462,7 +462,7 @@ TEST(QA_WalReader, ReadFromNonExistentDirectory) {
     ASSERT_TRUE(reader.open().has_value()); // Opens with no segments.
 
     auto result = reader.next();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 
     ASSERT_TRUE(reader.close().has_value());
@@ -474,7 +474,7 @@ TEST(QA_WalReader, ReadNotOpenFails) {
 
     // next() without open should fail.
     auto result = reader.next();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -484,7 +484,7 @@ TEST(QA_WalReader, DoubleOpenFails) {
     ASSERT_TRUE(reader.open().has_value());
 
     auto result = reader.open();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 
     ASSERT_TRUE(reader.close().has_value());
@@ -892,7 +892,7 @@ TEST(QA_WalCheckpoint, SerializeDeserializeMaxTxnId) {
 TEST(QA_WalCheckpoint, DeserializeEmptyBuffer) {
     std::vector<uint8_t> data;
     auto result = deserialize_checkpoint_data(data);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -905,7 +905,7 @@ TEST(QA_WalCheckpoint, DeserializeCountClaimsTooMany) {
     std::memcpy(data.data() + sizeof(uint32_t), &txn, sizeof(uint64_t));
 
     auto result = deserialize_checkpoint_data(data);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 

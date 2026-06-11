@@ -84,7 +84,7 @@ TEST_F(TableHeapTest, InsertEmptyTupleFails) {
     TableHeap heap(*bpm_, dm_, file_id_);
 
     auto result = heap.insert_tuple({});
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -132,7 +132,7 @@ TEST_F(TableHeapTest, DeleteTuple) {
     ASSERT_TRUE(del.has_value()) << del.error().message;
 
     auto get = heap.get_tuple(*rid);
-    EXPECT_FALSE(get.has_value());
+    ASSERT_FALSE(get.has_value());
     EXPECT_EQ(get.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -217,7 +217,7 @@ TEST_F(TableHeapTest, UpdateEmptyDataFails) {
     ASSERT_TRUE(rid.has_value());
 
     auto upd = heap.update_tuple(*rid, {});
-    EXPECT_FALSE(upd.has_value());
+    ASSERT_FALSE(upd.has_value());
     EXPECT_EQ(upd.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -693,7 +693,7 @@ TEST_F(TableHeapTest, BatchInsertRejectsEmptyTuple) {
     };
 
     auto result = heap.insert_batch(tuples);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 

@@ -659,7 +659,7 @@ TEST(Parser, ErrorRecovery) {
     ASSERT_TRUE(tokens.has_value());
     Parser parser(std::move(*tokens));
     auto result = parser.parse_all();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     // Error message should mention count.
     EXPECT_NE(result.error().message.find("parse error"), std::string::npos);
 }

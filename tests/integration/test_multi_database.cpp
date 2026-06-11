@@ -41,27 +41,27 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     /// Execute SQL on a specific engine and assert success.
     static QueryResult exec_ok_on(QueryEngine& eng, const std::string& sql) {
         auto result = eng.execute(sql);
         EXPECT_TRUE(result.has_value()) << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     /// Execute SQL and assert failure with the expected status code.
     void exec_error(const std::string& sql, StatusCode expected) {
         auto result = engine_->execute(sql);
-        EXPECT_FALSE(result.has_value());
+        ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().code, expected);
     }
 
     /// Execute SQL on a specific engine and assert failure.
     static void exec_error_on(QueryEngine& eng, const std::string& sql, StatusCode expected) {
         auto result = eng.execute(sql);
-        EXPECT_FALSE(result.has_value());
+        ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().code, expected);
     }
 

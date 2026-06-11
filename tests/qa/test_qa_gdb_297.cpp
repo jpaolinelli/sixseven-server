@@ -77,7 +77,7 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     bool wait_for_pool(std::chrono::milliseconds timeout = std::chrono::milliseconds{3000}) {

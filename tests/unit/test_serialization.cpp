@@ -284,14 +284,14 @@ TEST(Serialization, SerializedSizeVariable) {
 TEST(Serialization, DeserializeEmptyBuffer) {
     std::vector<uint8_t> empty;
     auto result = deserialize(empty, TypeId::INT32);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
 TEST(Serialization, DeserializeInvalidNullFlag) {
     std::vector<uint8_t> bad = {0x02};
     auto result = deserialize(bad, TypeId::INT32);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -299,7 +299,7 @@ TEST(Serialization, DeserializeTruncatedData) {
     // Not enough bytes for an INT32 (need 4 after flag, only have 2).
     std::vector<uint8_t> truncated = {0x01, 0x00, 0x00};
     auto result = deserialize(truncated, TypeId::INT32);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 

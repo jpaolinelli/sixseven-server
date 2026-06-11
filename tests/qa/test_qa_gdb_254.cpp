@@ -47,7 +47,7 @@ protected:
     /// Execute SQL, assert failure with the expected code.
     void exec_error(const std::string& sql, StatusCode expected) {
         auto result = engine_->execute(sql);
-        EXPECT_FALSE(result.has_value());
+        ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().code, expected);
     }
 

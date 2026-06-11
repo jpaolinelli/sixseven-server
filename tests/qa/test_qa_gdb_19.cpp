@@ -634,7 +634,7 @@ TEST(QA_Lexer, ErrorAfterValidTokens) {
     // Error should occur after successfully tokenizing SELECT.
     Lexer lexer("SELECT @");
     auto result = lexer.tokenize();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -803,7 +803,7 @@ TEST(QA_Lexer, TokenizeTwiceAfterError) {
 
     // Tokenize again — should fail again with same error (clean state).
     auto second = lexer.tokenize();
-    EXPECT_FALSE(second.has_value());
+    ASSERT_FALSE(second.has_value());
     EXPECT_EQ(second.error().code, StatusCode::PARSE_ERROR);
 }
 

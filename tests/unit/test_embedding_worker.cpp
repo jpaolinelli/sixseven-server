@@ -116,7 +116,7 @@ TEST(EmbeddingWorker, DoubleStartFails) {
     ASSERT_TRUE(pool.start().has_value());
 
     auto second = pool.start();
-    EXPECT_FALSE(second.has_value());
+    ASSERT_FALSE(second.has_value());
     EXPECT_EQ(second.error().code, StatusCode::INVALID_ARGUMENT);
 
     ASSERT_TRUE(pool.stop().has_value());
@@ -126,7 +126,7 @@ TEST(EmbeddingWorker, StopWithoutStartFails) {
     EmbeddingWorkerPool pool;
 
     auto stop = pool.stop();
-    EXPECT_FALSE(stop.has_value());
+    ASSERT_FALSE(stop.has_value());
     EXPECT_EQ(stop.error().code, StatusCode::INVALID_ARGUMENT);
 }
 

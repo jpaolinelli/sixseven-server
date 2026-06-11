@@ -57,7 +57,7 @@ TEST(QA_GDB655_Constructor, OnlySystemDatabaseExists) {
 TEST(QA_GDB655_Constructor, DefaultDatabaseDoesNotExist) {
     Catalog catalog;
     auto result = catalog.get_database("demo");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -95,7 +95,7 @@ TEST(QA_GDB655_DropDefault, CanDropDefaultWithCascade) {
 
     // Non-cascade should fail because tables exist.
     auto fail = catalog.drop_database(default_database_id, /*cascade=*/false);
-    EXPECT_FALSE(fail.has_value());
+    ASSERT_FALSE(fail.has_value());
     EXPECT_EQ(fail.error().code, StatusCode::CONSTRAINT_VIOLATION);
 
     // Cascade should succeed.
@@ -109,7 +109,7 @@ TEST(QA_GDB655_DropDefault, CanDropDefaultWithCascade) {
 TEST(QA_GDB655_DropDefault, SystemDatabaseStillProtected) {
     Catalog catalog;
     auto drop = catalog.drop_database(system_database_id, /*cascade=*/false);
-    EXPECT_FALSE(drop.has_value());
+    ASSERT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::CONSTRAINT_VIOLATION);
 }
 
@@ -117,7 +117,7 @@ TEST(QA_GDB655_DropDefault, DropNonExistentFails) {
     Catalog catalog;
     // default_database_id was never restored, so dropping it should fail NOT_FOUND.
     auto drop = catalog.drop_database(default_database_id, /*cascade=*/false);
-    EXPECT_FALSE(drop.has_value());
+    ASSERT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -161,7 +161,7 @@ TEST(QA_GDB655_Restore, DuplicateIdFails) {
     Catalog catalog;
     ASSERT_TRUE(catalog.restore_database(10, "first").has_value());
     auto r = catalog.restore_database(10, "second");
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -169,7 +169,7 @@ TEST(QA_GDB655_Restore, DuplicateNameFails) {
     Catalog catalog;
     ASSERT_TRUE(catalog.restore_database(10, "mydb").has_value());
     auto r = catalog.restore_database(20, "mydb");
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -177,14 +177,14 @@ TEST(QA_GDB655_Restore, RestoreSystemIdFails) {
     Catalog catalog;
     // system_database_id is already created by constructor.
     auto r = catalog.restore_database(system_database_id, "another_system");
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::ALREADY_EXISTS);
 }
 
 TEST(QA_GDB655_Restore, RestoreSystemNameFails) {
     Catalog catalog;
     auto r = catalog.restore_database(99, system_database_name);
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::ALREADY_EXISTS);
 }
 

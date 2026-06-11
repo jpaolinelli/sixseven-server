@@ -193,7 +193,7 @@ TEST_F(SecretsManagerTest, DecryptTooShort) {
     ASSERT_TRUE(mgr.has_value()) << mgr.error().message;
 
     auto result = mgr->decrypt("AQID"); // Very short base64.
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -211,7 +211,7 @@ TEST_F(SecretsManagerTest, DecryptTamperedCiphertext) {
     }
 
     auto result = mgr->decrypt(tampered);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::AUTH_ERROR);
 }
 
@@ -230,7 +230,7 @@ TEST_F(SecretsManagerTest, DecryptWithWrongKey) {
 
     // Decrypting with a different key should fail.
     auto result = mgr2->decrypt(*encrypted);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::AUTH_ERROR);
 }
 

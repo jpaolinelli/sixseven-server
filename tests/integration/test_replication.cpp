@@ -281,20 +281,20 @@ TEST_F(ReplicationIntegrationTest, WriteRejectionOnStandby) {
 
     // DML rejected.
     auto ins = engine.execute("INSERT INTO test_tbl VALUES (1, 'hello')");
-    EXPECT_FALSE(ins.has_value());
+    ASSERT_FALSE(ins.has_value());
     EXPECT_EQ(ins.error().code, StatusCode::READ_ONLY);
 
     auto upd = engine.execute("UPDATE test_tbl SET val = 'world' WHERE id = 1");
-    EXPECT_FALSE(upd.has_value());
+    ASSERT_FALSE(upd.has_value());
     EXPECT_EQ(upd.error().code, StatusCode::READ_ONLY);
 
     auto del = engine.execute("DELETE FROM test_tbl WHERE id = 1");
-    EXPECT_FALSE(del.has_value());
+    ASSERT_FALSE(del.has_value());
     EXPECT_EQ(del.error().code, StatusCode::READ_ONLY);
 
     // DDL rejected.
     auto ddl = engine.execute("CREATE TABLE test_tbl2 (id INT, PRIMARY KEY (id))");
-    EXPECT_FALSE(ddl.has_value());
+    ASSERT_FALSE(ddl.has_value());
     EXPECT_EQ(ddl.error().code, StatusCode::READ_ONLY);
 
     // SELECT works.

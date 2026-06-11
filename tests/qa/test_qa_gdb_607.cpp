@@ -52,7 +52,7 @@ protected:
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << "SQL: " << sql << "\n"
                                         << "Error: " << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     static int64_t get_int(const Value& v) {

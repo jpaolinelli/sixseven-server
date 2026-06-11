@@ -747,7 +747,7 @@ TEST_F(NegativeWeightTest, NegativeWeightProducesError) {
                                  MatchShortestPathOperator::DEFAULT_MAX_VISITED,
                                  weight_expr.get());
     auto result = op.open();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_NE(result.error().message.find("non-negative"), std::string::npos);
 }
 

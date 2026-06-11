@@ -489,7 +489,7 @@ TEST(Session, HandleDeallocateNonexistentReturnsError) {
 
     auto result = session.try_handle_command("DEALLOCATE nonexistent");
     ASSERT_TRUE(result.has_value());
-    EXPECT_FALSE(result->has_value());
+    ASSERT_FALSE(result->has_value());
     EXPECT_EQ(result->error().code, StatusCode::INVALID_ARGUMENT);
 }
 

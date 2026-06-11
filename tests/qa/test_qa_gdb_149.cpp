@@ -303,7 +303,7 @@ TEST(QA_GDB_149, PrepareNameOnlyNoAs) {
     Session s(1);
     auto r = s.try_handle_command("PREPARE my_stmt");
     ASSERT_TRUE(r.has_value());
-    EXPECT_FALSE(r->has_value());
+    ASSERT_FALSE(r->has_value());
     EXPECT_EQ(r->error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -311,7 +311,7 @@ TEST(QA_GDB_149, PrepareNameWithSpaceButNoAs) {
     Session s(1);
     auto r = s.try_handle_command("PREPARE my_stmt SELECT 1");
     ASSERT_TRUE(r.has_value());
-    EXPECT_FALSE(r->has_value());
+    ASSERT_FALSE(r->has_value());
     EXPECT_EQ(r->error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -330,7 +330,7 @@ TEST(QA_GDB_149, PrepareUnclosedParen) {
     Session s(1);
     auto r = s.try_handle_command("PREPARE my_stmt (int AS SELECT 1");
     ASSERT_TRUE(r.has_value());
-    EXPECT_FALSE(r->has_value());
+    ASSERT_FALSE(r->has_value());
     EXPECT_EQ(r->error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -353,7 +353,7 @@ TEST(QA_GDB_149, PrepareAsEmptyBody) {
     Session s(1);
     auto r = s.try_handle_command("PREPARE my_stmt AS ");
     ASSERT_TRUE(r.has_value());
-    EXPECT_FALSE(r->has_value());
+    ASSERT_FALSE(r->has_value());
     EXPECT_EQ(r->error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -448,7 +448,7 @@ TEST(QA_GDB_149, DeallocateNonexistent) {
     Session s(1);
     auto r = s.try_handle_command("DEALLOCATE ghost");
     ASSERT_TRUE(r.has_value());
-    EXPECT_FALSE(r->has_value());
+    ASSERT_FALSE(r->has_value());
     EXPECT_EQ(r->error().code, StatusCode::INVALID_ARGUMENT);
 }
 

@@ -346,7 +346,7 @@ TEST_F(QA_GDB613, Adversarial_PoolSizeOne) {
     // Unpin, then allocate again (eviction should work).
     ASSERT_TRUE((*ts)->bpm->unpin_page(pid, true).has_value());
     auto page3 = (*ts)->bpm->new_page();
-    EXPECT_TRUE(page3.has_value()) << page3.error().message;
+    ASSERT_TRUE(page3.has_value()) << page3.error().message;
     ASSERT_TRUE((*ts)->bpm->unpin_page((*page3)->page_id(), false).has_value());
 }
 

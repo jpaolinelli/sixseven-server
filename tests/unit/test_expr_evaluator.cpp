@@ -211,7 +211,7 @@ TEST(ExprEvaluator, ColumnRefNotFound) {
     auto bound = empty_bound();
 
     auto result = evaluate_expr(*col_ref("nonexistent"), tuple, schema, bound);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -305,7 +305,7 @@ TEST(ExprEvaluator, DivisionByZero) {
 
     auto expr = binary(BinaryOp::DIVIDE, lit_int("10"), lit_int("0"));
     auto result = evaluate_expr(*expr, tuple, schema, bound);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 

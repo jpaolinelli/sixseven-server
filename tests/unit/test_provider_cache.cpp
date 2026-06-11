@@ -68,7 +68,7 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     void exec_error(const std::string& sql, StatusCode expected) {
@@ -372,7 +372,7 @@ TEST_F(ProviderCacheTest, ValidateExistingProvider) {
 
 TEST_F(ProviderCacheTest, ValidateNonexistentProvider) {
     auto result = cache_->validate_provider_exists("nonexistent-provider");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -552,7 +552,7 @@ TEST_F(ProviderCacheTest, CreateTableEmbeddingWithUnknownProviderFails) {
                                    "vec EMBEDDING(384, body, 'nonexistent-provider'), "
                                    "PRIMARY KEY (id)"
                                    ")");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -595,7 +595,7 @@ TEST_F(ProviderCacheTest, DeleteInUseProviderFails) {
     // Attempting to DELETE the in-use provider should fail.
     use_database(system_database_name);
     auto result = engine_->execute("DELETE FROM sys_providers WHERE name = 'openai-prod'");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::CONSTRAINT_VIOLATION);
     use_database("demo");
 
@@ -710,7 +710,7 @@ TEST_F(ProviderCacheTest, InsertNonDefaultDoesNotAffectExistingDefault) {
 
 TEST_F(ProviderCacheTest, CannotDropSysProviders) {
     auto result = catalog_->drop_table(system_database_id, "sys_providers");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::CONSTRAINT_VIOLATION);
 }
 
@@ -778,7 +778,7 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     void use_database(const std::string& name) {

@@ -288,21 +288,21 @@ TEST_F(QA_Binder, EmptyScopeAllColumns) {
 TEST_F(QA_Binder, EmptyScopeResolveColumn) {
     Scope scope;
     auto result = scope.resolve_column("anything");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
 TEST_F(QA_Binder, EmptyScopeQualifiedResolve) {
     Scope scope;
     auto result = scope.resolve_column("table", "col");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
 TEST_F(QA_Binder, EmptyScopeColumnsFor) {
     Scope scope;
     auto result = scope.columns_for("anything");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 

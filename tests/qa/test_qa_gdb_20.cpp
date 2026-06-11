@@ -302,7 +302,7 @@ TEST(QA_ParserRecovery, MultipleErrorsReported) {
     ASSERT_TRUE(tokens.has_value());
     Parser parser(std::move(*tokens));
     auto result = parser.parse_all();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     // Error message should mention multiple errors.
     auto msg = result.error().message;
     EXPECT_NE(msg.find("3 parse error"), std::string::npos)
@@ -329,7 +329,7 @@ TEST(QA_ParserRecovery, SynchronizesToSemicolon) {
     ASSERT_TRUE(tokens.has_value());
     Parser parser(std::move(*tokens));
     auto result = parser.parse_all();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     // Should have exactly 2 errors (one per malformed statement).
     EXPECT_NE(result.error().message.find("2 parse error"), std::string::npos)
         << "Expected 2 errors, got: " << result.error().message;
@@ -1345,13 +1345,13 @@ TEST(QA_ErrorMessages, IncludesLineAndColumn) {
 
 TEST(QA_ErrorMessages, ParseErrorHasStatusCode) {
     auto r = try_parse("INVALID");
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::PARSE_ERROR);
 }
 
 TEST(QA_ErrorMessages, MissingExpectedToken) {
     auto r = try_parse("CREATE TABLE");
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     // Should mention what was expected.
     EXPECT_NE(r.error().message.find("expected"), std::string::npos)
         << "Error message: " << r.error().message;

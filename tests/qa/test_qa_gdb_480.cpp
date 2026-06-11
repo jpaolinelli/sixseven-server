@@ -487,7 +487,7 @@ TEST(QA_GDB480_Registration, DuplicateRegistrationFails) {
 
     auto dup =
         registry.register_algorithm(make_connected_components_def(), connected_components_execute);
-    EXPECT_FALSE(dup.has_value());
+    ASSERT_FALSE(dup.has_value());
     EXPECT_EQ(dup.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -537,7 +537,7 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     void exec_error(const std::string& sql, StatusCode expected_code) {
