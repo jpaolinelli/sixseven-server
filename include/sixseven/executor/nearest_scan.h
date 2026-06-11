@@ -31,7 +31,10 @@ struct NearestScanConfig {
     /// Query vector for similarity search.
     std::vector<float> query_vector;
 
-    /// Distance metric (L2, COSINE, or DOT_PRODUCT).
+    /// Distance metric. DOT_PRODUCT and INNER_PRODUCT are both treated as
+    /// dot-product similarity: candidates are ranked most-similar-first
+    /// (internally sorted by the negated dot product) and the emitted
+    /// _distance column reports the raw dot product (GDB-717).
     DistanceMetric metric = DistanceMetric::COSINE;
 
     /// Index of the EMBEDDING column in the table schema.
@@ -60,7 +63,10 @@ struct NearestScanConfig {
 ///   - Distance metric selection: `... USING L2|COSINE|DOT`
 ///
 /// The operator materializes all search results during open(), then emits
-/// them one at a time from next(), sorted by distance ASC.
+/// them one at a time from next(), most similar row first. For L2/COSINE
+/// that is _distance ascending; for dot-product metrics the emitted
+/// _distance is the raw dot product, so rows surface in descending
+/// _distance order (GDB-717).
 class NearestScanOperator : public Iterator {
 public:
     /// @param heap            The heap file to scan for row data.
@@ -105,6 +111,11 @@ private:
     /// Build the WHERE filter output schema (table columns without _distance).
     /// Called once during open() when where_expr_ is set.
     OutputSchema build_where_filter_schema() const;
+
+    /// Translate a sort-key distance into the user-visible _distance value.
+    /// For dot-product metrics the sort key is the negated dot product; the
+    /// emitted value is the raw dot product (higher = more similar).
+    [[nodiscard]] float display_distance(float sort_distance) const;
 
     /// Apply WHERE post-filter to a candidate and, if it passes, build the
     /// result tuple (table columns + _distance) and append it to results_.

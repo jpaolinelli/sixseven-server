@@ -9,6 +9,19 @@
 
 namespace sixseven {
 
+namespace {
+
+/// Metric used for the candidate sort key. NEAREST orders candidates by
+/// distance ascending, but DOT_PRODUCT is a raw similarity (higher = more
+/// similar) — sorting it ascending would return the k LEAST similar rows.
+/// Normalize it to the negated INNER_PRODUCT variant so ascending order is
+/// always "most similar first" (GDB-717).
+DistanceMetric sort_metric(DistanceMetric m) {
+    return m == DistanceMetric::DOT_PRODUCT ? DistanceMetric::INNER_PRODUCT : m;
+}
+
+} // anonymous namespace
+
 NearestScanOperator::NearestScanOperator(TableHeap& heap,
                                          const Schema& storage_schema,
                                          NearestScanConfig config,
@@ -125,13 +138,13 @@ Result<void> NearestScanOperator::execute_brute_force() {
         const auto& embedding = tuple.values[col_idx].as_embedding();
         std::span<const float> emb_span(embedding);
 
-        float dist = compute_distance(config_.metric, query_span, emb_span);
+        float dist = compute_distance(sort_metric(config_.metric), query_span, emb_span);
 
         candidates.push_back({dist, std::move(tuple)});
         ++node_ordinal;
     }
 
-    // Sort by distance ASC.
+    // Sort by distance ASC (lower sort key = more similar for every metric).
     std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
         return a.distance < b.distance;
     });
@@ -143,7 +156,7 @@ Result<void> NearestScanOperator::execute_brute_force() {
             break;
         }
 
-        auto emitted = filter_and_emit(cand.tuple, cand.distance);
+        auto emitted = filter_and_emit(cand.tuple, display_distance(cand.distance));
         if (!emitted) {
             return make_error(emitted.error().code, emitted.error().message);
         }
@@ -192,12 +205,12 @@ Result<void> NearestScanOperator::execute_prefiltered_search() {
 
         const auto& embedding = tuple.values[col_idx].as_embedding();
         std::span<const float> emb_span(embedding);
-        float dist = compute_distance(config_.metric, query_span, emb_span);
+        float dist = compute_distance(sort_metric(config_.metric), query_span, emb_span);
 
         candidates.push_back({dist, std::move(tuple)});
     }
 
-    // Sort by distance ASC.
+    // Sort by distance ASC (lower sort key = more similar for every metric).
     std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
         return a.distance < b.distance;
     });
@@ -208,7 +221,7 @@ Result<void> NearestScanOperator::execute_prefiltered_search() {
         if (count >= config_.k) {
             break;
         }
-        auto emitted = filter_and_emit(cand.tuple, cand.distance);
+        auto emitted = filter_and_emit(cand.tuple, display_distance(cand.distance));
         if (!emitted) {
             return make_error(emitted.error().code, emitted.error().message);
         }
@@ -336,7 +349,10 @@ Result<void> NearestScanOperator::execute_hnsw_search() {
             }
         }
 
-        // Sort by distance ASC.
+        // Sort by distance ASC. HNSW distances come straight from the index
+        // (which currently computes L2 regardless of the requested metric —
+        // GDB-723) and are passed through unchanged, so no display
+        // translation is applied on this path.
         std::sort(matched.begin(), matched.end(), [](const MatchedRow& a, const MatchedRow& b) {
             return a.distance < b.distance;
         });
@@ -383,6 +399,18 @@ Result<void> NearestScanOperator::execute_hnsw_search() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+float NearestScanOperator::display_distance(float sort_distance) const {
+    // For dot-product metrics the sort key is the negated dot product
+    // (INNER_PRODUCT), so ascending order means most-similar-first. The
+    // user-visible _distance column reports the raw dot product (higher =
+    // more similar), matching the documented USING DOT semantics (GDB-717).
+    if (config_.metric == DistanceMetric::DOT_PRODUCT ||
+        config_.metric == DistanceMetric::INNER_PRODUCT) {
+        return -sort_distance;
+    }
+    return sort_distance;
+}
 
 OutputSchema NearestScanOperator::build_where_filter_schema() const {
     // The output schema has table columns + _distance at the end.
