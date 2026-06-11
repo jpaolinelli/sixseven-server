@@ -1,11 +1,11 @@
-﻿/// @file tests/qa/test_qa_gdb_613.cpp
+/// @file tests/qa/test_qa_gdb_613.cpp
 /// QA adversarial tests for GDB-613: Wire buffer_pool_size_mb config to
 /// StorageManager.
 ///
 /// Acceptance Criteria verified:
 ///   AC1: StorageManager receives the configured buffer pool size from Config
 ///   AC2: With default config (256MB), each table gets 32,768 frames
-///   AC3: (benchmark â€” not tested here)
+///   AC3: (benchmark — not tested here)
 ///   AC4: Unit tests pass (verified via CI)
 ///   AC5: No regressions in QA tests (verified via CI)
 ///
@@ -98,7 +98,7 @@ TEST_F(QA_GDB613, AC1_PoolSizePassedToTables) {
     EXPECT_EQ((*ts)->bpm->pool_page_count(), pool_size);
 }
 
-/// Verify that a small pool_size (4 frames) is actually limiting â€” you can't
+/// Verify that a small pool_size (4 frames) is actually limiting — you can't
 /// pin more than 4 pages simultaneously without eviction.
 TEST_F(QA_GDB613, AC1_SmallPoolSizeIsRespected) {
     uint32_t pool_size = 4;
@@ -115,13 +115,15 @@ TEST_F(QA_GDB613, AC1_SmallPoolSizeIsRespected) {
     std::vector<PageId> pinned_pages;
     for (uint32_t i = 0; i < pool_size; ++i) {
         auto page = (*ts)->bpm->new_page();
-        ASSERT_TRUE(page.has_value()) << "Failed at page " << i << ": " << page.error().message;
+        ASSERT_TRUE(page.has_value())
+            << "Failed at page " << i << ": " << page.error().message;
         pinned_pages.push_back((*page)->page_id());
     }
 
-    // 5th allocation should fail â€” all frames pinned, none evictable.
+    // 5th allocation should fail — all frames pinned, none evictable.
     auto overflow = (*ts)->bpm->new_page();
-    EXPECT_FALSE(overflow.has_value()) << "Should fail when pool is full and all frames pinned";
+    EXPECT_FALSE(overflow.has_value())
+        << "Should fail when pool is full and all frames pinned";
 
     // Cleanup: unpin all.
     for (auto pid : pinned_pages) {
@@ -142,7 +144,7 @@ TEST_F(QA_GDB613, AC2_DefaultPoolSizeConstant) {
 /// After GDB-613, the caller (main.cpp) passes the correct value, but the
 /// StorageManager default argument remains 256 as a fallback.
 TEST_F(QA_GDB613, AC2_StorageManagerDefaultArg) {
-    // Construct without explicit pool_size â€” should use default 256.
+    // Construct without explicit pool_size — should use default 256.
     StorageManager sm(dm_, data_dir_);
 
     auto schema = make_schema(1, "default_table");
@@ -155,7 +157,8 @@ TEST_F(QA_GDB613, AC2_StorageManagerDefaultArg) {
     // The default StorageManager pool_size is 256 frames. Allocate 256 pages.
     for (uint32_t i = 0; i < 256; ++i) {
         auto page = (*ts)->bpm->new_page();
-        ASSERT_TRUE(page.has_value()) << "Failed at page " << i << ": " << page.error().message;
+        ASSERT_TRUE(page.has_value())
+            << "Failed at page " << i << ": " << page.error().message;
         ASSERT_TRUE((*ts)->bpm->unpin_page((*page)->page_id(), false).has_value());
     }
 }
@@ -232,7 +235,7 @@ TEST_F(QA_GDB613, GDB622_FetchMissIncrementsMissCounter) {
     ASSERT_TRUE(bpm.flush_page(pid).has_value());
     ASSERT_TRUE(bpm.delete_page(pid).has_value());
 
-    // Now fetch â€” this should be a miss (page read from disk).
+    // Now fetch — this should be a miss (page read from disk).
     auto fetch = bpm.fetch_page(pid);
     ASSERT_TRUE(fetch.has_value()) << fetch.error().message;
     EXPECT_EQ(bpm.miss_count(), 1u);
@@ -257,7 +260,7 @@ TEST_F(QA_GDB613, GDB622_FetchHitIncrementsHitCounter) {
     PageId pid = (*np)->page_id();
     ASSERT_TRUE(bpm.unpin_page(pid, false).has_value());
 
-    // Fetch the same page â€” it's still in the pool -> hit.
+    // Fetch the same page — it's still in the pool -> hit.
     auto fetch = bpm.fetch_page(pid);
     ASSERT_TRUE(fetch.has_value());
     EXPECT_EQ(bpm.hit_count(), 1u);
@@ -318,7 +321,7 @@ TEST_F(QA_GDB613, GDB622_MixedHitsAndMisses) {
 // Adversarial: Edge cases and boundary values
 // =============================================================================
 
-/// Pool size of 1 frame â€” minimum functional pool.
+/// Pool size of 1 frame — minimum functional pool.
 TEST_F(QA_GDB613, Adversarial_PoolSizeOne) {
     StorageManager sm(dm_, data_dir_, 1);
 
@@ -409,7 +412,8 @@ TEST_F(QA_GDB613, Adversarial_OpenTableUsesConfiguredPoolSize) {
         // Should be able to allocate pages up to pool_size.
         for (uint32_t i = 0; i < pool_size; ++i) {
             auto page = (*ts)->bpm->new_page();
-            ASSERT_TRUE(page.has_value()) << "Reopen page " << i << ": " << page.error().message;
+            ASSERT_TRUE(page.has_value())
+                << "Reopen page " << i << ": " << page.error().message;
             ASSERT_TRUE((*ts)->bpm->unpin_page((*page)->page_id(), false).has_value());
         }
     }
@@ -417,7 +421,7 @@ TEST_F(QA_GDB613, Adversarial_OpenTableUsesConfiguredPoolSize) {
 
 /// Verify the uint32_t overflow boundary. buffer_pool_size_mb of 33554432
 /// (32 TB) would overflow: 33554432 * 128 = 4294967296 = 2^32, wrapping to 0.
-/// This test documents the boundary â€” values above ~33554431 MB are unsafe.
+/// This test documents the boundary — values above ~33554431 MB are unsafe.
 TEST_F(QA_GDB613, Adversarial_Uint32OverflowBoundary) {
     // Max safe value: UINT32_MAX / 128 = 33554431 MB (~32 TB).
     size_t max_safe_mb = static_cast<size_t>(UINT32_MAX) / 128;
@@ -427,7 +431,8 @@ TEST_F(QA_GDB613, Adversarial_Uint32OverflowBoundary) {
     // Overflow case: 33554432 * 128 = 2^32, wraps to 0 in uint32_t.
     size_t overflow_mb = max_safe_mb + 1;
     uint32_t overflow_frames = static_cast<uint32_t>(overflow_mb * 128);
-    EXPECT_EQ(overflow_frames, 0u) << "Demonstrates uint32_t overflow at " << overflow_mb << " MB";
+    EXPECT_EQ(overflow_frames, 0u)
+        << "Demonstrates uint32_t overflow at " << overflow_mb << " MB";
 }
 
 /// Verify config file parsing of buffer_pool_size_mb.
@@ -475,7 +480,8 @@ TEST_F(QA_GDB613, Adversarial_ConfigZeroPoolSize) {
         ASSERT_TRUE(ts.has_value());
         auto page = (*ts)->bpm->new_page();
         // With 0 frames, no page can be allocated.
-        EXPECT_FALSE(page.has_value()) << "Pool with 0 frames should not allocate pages";
+        EXPECT_FALSE(page.has_value())
+            << "Pool with 0 frames should not allocate pages";
     }
     // If create_table_storage itself fails, that's also acceptable behavior.
 }
@@ -533,7 +539,7 @@ TEST_F(QA_GDB613, GDB622_ConcurrentCounterAccess) {
         ASSERT_TRUE(bpm.unpin_page((*np)->page_id(), true).has_value());
     }
 
-    // Hammer fetch_page from multiple threads â€” all should be hits since
+    // Hammer fetch_page from multiple threads — all should be hits since
     // pages are in the pool.
     constexpr int kThreads = 4;
     constexpr int kFetchesPerThread = 100;
@@ -560,8 +566,9 @@ TEST_F(QA_GDB613, GDB622_ConcurrentCounterAccess) {
     uint64_t total_hits = bpm.hit_count();
     uint64_t total_misses = bpm.miss_count();
     EXPECT_EQ(total_hits, kThreads * kFetchesPerThread)
-        << "Expected all " << kThreads * kFetchesPerThread << " fetches to be hits, got "
-        << total_hits << " hits and " << total_misses << " misses";
+        << "Expected all " << kThreads * kFetchesPerThread
+        << " fetches to be hits, got " << total_hits
+        << " hits and " << total_misses << " misses";
     EXPECT_EQ(total_misses, 0u);
 }
 
