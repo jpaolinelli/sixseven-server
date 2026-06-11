@@ -2928,8 +2928,11 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
         // Also include the start node itself.
         reachable_pks.insert(start_pk);
 
-        // Scan the table to build PK → node_ordinal mapping, then convert
-        // reachable PKs to node ordinals for the HNSW filter.
+        // Scan the table to convert reachable PKs to heap RIDs. The RID is
+        // the canonical id space for graph-scoped NEAREST (GDB-745): heap
+        // ordinals and HNSW node ids diverge whenever a row has a NULL
+        // embedding or rows were deleted/inserted after the index build, so
+        // the operator filters by RID on every execution path.
         auto scan_it = storage->heap->begin();
         if (!scan_it) {
             return make_error(scan_it.error().code, scan_it.error().message);
@@ -2944,7 +2947,6 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
             }
         }
 
-        uint32_t ordinal = 0;
         while (true) {
             auto row = scan_it->next();
             if (!row) {
@@ -2957,9 +2959,8 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
             }
             if (pk_col_idx >= 0 &&
                 reachable_pks.count((*values)[static_cast<size_t>(pk_col_idx)]) > 0) {
-                config.allowed_node_ids.insert(ordinal);
+                config.allowed_rids.insert(rid);
             }
-            ++ordinal;
         }
     }
 
@@ -2971,7 +2972,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
     static constexpr size_t kPrefilterThreshold = 10'000;
 
     if (where_expr != nullptr && btree_indexes_ != nullptr && !btree_indexes_->empty() &&
-        config.allowed_node_ids.empty()) {
+        config.allowed_rids.empty()) {
         auto cmp = extract_simple_comparison(where_expr);
         if (cmp) {
             auto indexes = catalog_.list_indexes(table_schema->table_id);

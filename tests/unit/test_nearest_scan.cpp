@@ -372,19 +372,19 @@ TEST_F(NearestScanTest, BruteForceWithWhereFilter) {
 TEST_F(NearestScanTest, BruteForceWithGraphScope) {
     TableHeap heap(*table_bpm_, dm_, table_file_id_);
 
-    insert_row(heap, 1, "a", {1.0F, 0.0F, 0.0F}); // node_ordinal 0
-    insert_row(heap, 2, "b", {0.9F, 0.1F, 0.0F}); // node_ordinal 1
-    insert_row(heap, 3, "c", {0.8F, 0.2F, 0.0F}); // node_ordinal 2
-    insert_row(heap, 4, "d", {0.1F, 0.9F, 0.0F}); // node_ordinal 3
-    insert_row(heap, 5, "e", {0.0F, 1.0F, 0.0F}); // node_ordinal 4
+    auto rid1 = insert_row(heap, 1, "a", {1.0F, 0.0F, 0.0F});
+    insert_row(heap, 2, "b", {0.9F, 0.1F, 0.0F});
+    auto rid3 = insert_row(heap, 3, "c", {0.8F, 0.2F, 0.0F});
+    insert_row(heap, 4, "d", {0.1F, 0.9F, 0.0F});
+    auto rid5 = insert_row(heap, 5, "e", {0.0F, 1.0F, 0.0F});
 
-    // Only allow node ordinals 0, 2, 4 (simulating graph scope).
+    // Only allow rows 1, 3, 5 by RID (simulating graph scope).
     NearestScanConfig config;
     config.k = 3;
     config.query_vector = {1.0F, 0.0F, 0.0F};
     config.metric = DistanceMetric::L2;
     config.embedding_column_index = 2;
-    config.allowed_node_ids = {0, 2, 4};
+    config.allowed_rids = {rid1, rid3, rid5};
 
     OutputSchema schema(output_cols_);
     BoundStatement bound;
@@ -550,9 +550,9 @@ TEST_F(NearestScanTest, HnswIndexFilteredSearch) {
     Embedding emb3 = {0.5F, 0.5F, 0.0F};
     Embedding emb4 = {0.0F, 1.0F, 0.0F};
 
-    insert_row(heap, 1, "a", emb1);
+    auto rid1 = insert_row(heap, 1, "a", emb1);
     insert_row(heap, 2, "b", emb2);
-    insert_row(heap, 3, "c", emb3);
+    auto rid3 = insert_row(heap, 3, "c", emb3);
     insert_row(heap, 4, "d", emb4);
 
     ASSERT_TRUE(hnsw.insert(emb1).has_value());
@@ -560,13 +560,13 @@ TEST_F(NearestScanTest, HnswIndexFilteredSearch) {
     ASSERT_TRUE(hnsw.insert(emb3).has_value());
     ASSERT_TRUE(hnsw.insert(emb4).has_value());
 
-    // Graph-scoped: only allow node ordinals 0, 2 (rows 1, 3).
+    // Graph-scoped: only allow rows 1 and 3 by RID.
     NearestScanConfig config;
     config.k = 2;
     config.query_vector = {1.0F, 0.0F, 0.0F};
     config.metric = DistanceMetric::L2;
     config.embedding_column_index = 2;
-    config.allowed_node_ids = {0, 2};
+    config.allowed_rids = {rid1, rid3};
 
     OutputSchema schema(output_cols_);
     BoundStatement bound;
