@@ -6,6 +6,8 @@
 #include "sixseven/common/value.h"
 #include "sixseven/executor/storage_manager.h"
 #include "sixseven/graph/graph_engine.h"
+#include "sixseven/planner/statistics.h"
+#include "sixseven/txn/txn_manager.h"
 
 #include <cstdint>
 #include <string>
@@ -42,6 +44,8 @@ struct ReindexStmt;
 struct SetStmt;
 struct ShowStmt;
 struct UnlinkStmt;
+struct VacuumStmt;
+struct AnalyzeStmt;
 class BackfillManager;
 class EmbeddingWorkerPool;
 class HnswIndex;
@@ -241,6 +245,16 @@ private:
     /// Execute a REINDEX statement (rebuild one or all indexes).
     [[nodiscard]] Result<QueryResult> execute_reindex(const ReindexStmt& stmt);
 
+    /// Execute a VACUUM statement (reclaim dead MVCC tuple versions).
+    /// With a table name, vacuums that table; otherwise vacuums every user
+    /// table in the current database. Dispatches to the txn module Vacuum.
+    [[nodiscard]] Result<QueryResult> execute_vacuum(const VacuumStmt& stmt);
+
+    /// Execute an ANALYZE statement (gather table/column statistics).
+    /// With a table name, analyzes that table; otherwise analyzes every user
+    /// table in the current database. Populates the StatisticsStore.
+    [[nodiscard]] Result<QueryResult> execute_analyze(const AnalyzeStmt& stmt);
+
     /// Execute an EXPLAIN or EXPLAIN ANALYZE statement.
     [[nodiscard]] Result<QueryResult> execute_explain(const ExplainStmt& stmt,
                                                       const BoundStatement& bound);
@@ -287,6 +301,16 @@ private:
     database_id_t current_database_id_ = default_database_id;
     int skip_masking_depth_ = 0;
     bool standby_mode_ = false;
+
+    /// Transaction manager used to compute the vacuum horizon for VACUUM.
+    /// Owned here because the executor runtime does not otherwise expose one;
+    /// with no active transactions its xmin_horizon makes all committed-dead
+    /// tuple versions reclaimable.
+    TransactionManager txn_manager_;
+
+    /// Statistics gathered by ANALYZE, keyed by table_id. Consumed by the
+    /// optimizer for cost-based planning decisions.
+    StatisticsStore statistics_store_;
 
     /// Per-table PK value cache for fast LINK existence checks.
     /// Maps table_id -> set of serialized PK values.

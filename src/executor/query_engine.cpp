@@ -17,6 +17,7 @@
 #include "sixseven/parser/lexer.h"
 #include "sixseven/parser/parser.h"
 #include "sixseven/planner/binder.h"
+#include "sixseven/planner/statistics.h"
 #include "sixseven/planner/type_resolver.h"
 #include "sixseven/server/auth.h"
 #include "sixseven/server/replication_slot.h"
@@ -24,6 +25,7 @@
 #include "sixseven/server/wal_sender_manager.h"
 #include "sixseven/storage/wal.h"
 #include "sixseven/table/tuple.h"
+#include "sixseven/txn/vacuum.h"
 #include "sixseven/vector/backfill_manager.h"
 #include "sixseven/vector/embedding_column.h"
 #include "sixseven/vector/embedding_worker.h"
@@ -804,6 +806,12 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
     }
     if (auto* reindex = dynamic_cast<const ReindexStmt*>(bound->stmt)) {
         return execute_reindex(*reindex);
+    }
+    if (auto* vacuum = dynamic_cast<const VacuumStmt*>(bound->stmt)) {
+        return execute_vacuum(*vacuum);
+    }
+    if (auto* analyze = dynamic_cast<const AnalyzeStmt*>(bound->stmt)) {
+        return execute_analyze(*analyze);
     }
 
     // 7. Plan + Execute.
@@ -1894,6 +1902,128 @@ Result<QueryResult> QueryEngine::execute_reindex(const ReindexStmt& stmt) {
 
     QueryResult qr;
     qr.message = "REINDEX";
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// VACUUM
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_vacuum(const VacuumStmt& stmt) {
+    // Resolve the set of tables to vacuum: the named table, or every user
+    // table in the current database when no name is given (bare VACUUM).
+    std::vector<TableSchema> targets;
+    if (!stmt.table_name.empty()) {
+        auto schema = catalog_.get_table(current_database_id_, stmt.table_name);
+        if (!schema) {
+            return make_error(schema.error().code, schema.error().message);
+        }
+        targets.push_back(std::move(*schema));
+    } else {
+        targets = catalog_.list_tables(current_database_id_);
+    }
+
+    VacuumStats totals;
+    uint32_t tables_vacuumed = 0;
+
+    for (const auto& schema : targets) {
+        // Ensure the table's storage is open before vacuuming.
+        auto ts = storage_.get_table_storage(schema.table_id);
+        if (!ts) {
+            if (storage_.table_file_exists(current_database_id_, schema.table_id)) {
+                auto opened =
+                    storage_.open_table_storage(current_database_id_, schema.table_id, schema);
+                if (!opened) {
+                    return make_error(opened.error().code, opened.error().message);
+                }
+                ts = storage_.get_table_storage(schema.table_id);
+            }
+            if (!ts) {
+                return make_error(ts.error().code, ts.error().message);
+            }
+        }
+        auto* table_storage = *ts;
+
+        Vacuum vacuum(*table_storage->bpm,
+                      table_storage->bpm->disk_manager(),
+                      table_storage->file_id,
+                      txn_manager_);
+        auto stats = vacuum.run();
+        if (!stats) {
+            return make_error(stats.error().code, stats.error().message);
+        }
+
+        totals.pages_scanned += stats->pages_scanned;
+        totals.tuples_examined += stats->tuples_examined;
+        totals.dead_tuples += stats->dead_tuples;
+        totals.pages_compacted += stats->pages_compacted;
+        totals.bytes_reclaimed += stats->bytes_reclaimed;
+        ++tables_vacuumed;
+    }
+
+    SIXSEVEN_LOG_INFO("vacuumed {} table(s): scanned {} pages, removed {} dead tuples",
+                      tables_vacuumed,
+                      totals.pages_scanned,
+                      totals.dead_tuples);
+
+    QueryResult qr;
+    qr.message = "VACUUM";
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// ANALYZE
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_analyze(const AnalyzeStmt& stmt) {
+    // Resolve the set of tables to analyze: the named table, or every user
+    // table in the current database when no name is given (bare ANALYZE).
+    std::vector<TableSchema> targets;
+    if (!stmt.table_name.empty()) {
+        auto schema = catalog_.get_table(current_database_id_, stmt.table_name);
+        if (!schema) {
+            return make_error(schema.error().code, schema.error().message);
+        }
+        targets.push_back(std::move(*schema));
+    } else {
+        targets = catalog_.list_tables(current_database_id_);
+    }
+
+    uint32_t tables_analyzed = 0;
+
+    for (const auto& schema : targets) {
+        // Ensure the table's storage is open before analyzing.
+        auto ts = storage_.get_table_storage(schema.table_id);
+        if (!ts) {
+            if (storage_.table_file_exists(current_database_id_, schema.table_id)) {
+                auto opened =
+                    storage_.open_table_storage(current_database_id_, schema.table_id, schema);
+                if (!opened) {
+                    return make_error(opened.error().code, opened.error().message);
+                }
+                ts = storage_.get_table_storage(schema.table_id);
+            }
+            if (!ts) {
+                return make_error(ts.error().code, ts.error().message);
+            }
+        }
+        auto* table_storage = *ts;
+
+        auto analyzed = analyze_table(schema.table_id,
+                                      schema,
+                                      *table_storage->heap,
+                                      table_storage->storage_schema,
+                                      statistics_store_);
+        if (!analyzed) {
+            return make_error(analyzed.error().code, analyzed.error().message);
+        }
+        ++tables_analyzed;
+    }
+
+    SIXSEVEN_LOG_INFO("analyzed {} table(s)", tables_analyzed);
+
+    QueryResult qr;
+    qr.message = "ANALYZE";
     return ok(std::move(qr));
 }
 

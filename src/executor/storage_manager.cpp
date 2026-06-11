@@ -9,6 +9,26 @@ namespace sixseven {
 StorageManager::StorageManager(DiskManager& dm, std::filesystem::path data_dir, uint32_t pool_size)
     : dm_(dm), data_dir_(std::move(data_dir)), pool_size_(pool_size) {}
 
+StorageManager::~StorageManager() {
+    std::lock_guard lock(mu_);
+
+    // Flush and close every open file, mirroring drop_table_storage /
+    // drop_index_storage (flush, close, then destroy the storage). Errors are
+    // ignored: a destructor cannot propagate them, and a failed flush must not
+    // prevent releasing the remaining file handles.
+    for (auto& [table_id, storage] : tables_) {
+        (void)storage->bpm->flush_all();
+        (void)dm_.close_file(storage->file_id);
+    }
+    tables_.clear();
+
+    for (auto& [index_id, storage] : indexes_) {
+        (void)storage->bpm->flush_all();
+        (void)dm_.close_file(storage->file_id);
+    }
+    indexes_.clear();
+}
+
 std::filesystem::path StorageManager::database_path(database_id_t db_id) const {
     return data_dir_ / "databases" / std::to_string(db_id);
 }
