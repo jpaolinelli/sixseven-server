@@ -1,6 +1,7 @@
 #include "sixseven/planner/binder.h"
 
 #include "sixseven/common/coercion.h"
+#include "sixseven/common/string_util.h"
 #include "sixseven/graph/algorithm_registry.h"
 #include "sixseven/planner/type_resolver.h"
 
@@ -11,13 +12,6 @@
 namespace sixseven {
 
 namespace {
-
-std::string to_upper(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
-        return static_cast<char>(std::toupper(c));
-    });
-    return s;
-}
 
 /// Check if two expressions are the "same" column reference (for GROUP BY validation).
 bool same_column_ref(const Expr& a, const Expr& b) {

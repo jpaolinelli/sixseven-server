@@ -1,6 +1,7 @@
 #include "sixseven/planner/type_resolver.h"
 
 #include "sixseven/common/coercion.h"
+#include "sixseven/common/string_util.h"
 
 #include <algorithm>
 #include <cctype>
@@ -67,14 +68,6 @@ const std::unordered_map<std::string, TypeId>& type_name_map() {
         {"EMBEDDING", TypeId::EMBEDDING},
     };
     return map;
-}
-
-/// Uppercase a string in-place and return it.
-std::string to_upper(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
-        return static_cast<char>(std::toupper(c));
-    });
-    return s;
 }
 
 /// Set of known aggregate function names (uppercase).
