@@ -1238,19 +1238,26 @@ TEST(HnswDelete, DoubleDeleteFails) {
 }
 
 // =============================================================================
-// Persistence Tests (load after insert)
+// Persistence Tests (true disk round-trip: flush → close → reopen → load)
 // =============================================================================
 
 TEST(HnswPersistence, LoadAndSearchAfterInsert) {
-    LargeTestFixture fix;
+    // Use a named temp file so Phase 2 can reopen it from disk.
+    TempDir tmp;
+    auto db_path = tmp.path() / "hnsw_persist_load.db";
 
     PageId meta_pid = 0;
     const uint32_t dim = 8;
     std::vector<std::vector<float>> dataset;
 
-    // Phase 1: create and populate index.
+    // Phase 1: create and populate index, then flush all dirty pages to disk.
     {
-        HnswIndex index(*fix.bpm, nullptr);
+        DiskManager dm1;
+        auto fid1 = dm1.create_file(db_path);
+        ASSERT_TRUE(fid1.has_value());
+        auto bpm1 = std::make_unique<BufferPoolManager>(dm1, *fid1, 4096);
+
+        HnswIndex index(*bpm1, nullptr);
         HnswIndexConfig config;
         config.dimension = dim;
         config.m = 8;
@@ -1267,13 +1274,27 @@ TEST(HnswPersistence, LoadAndSearchAfterInsert) {
             auto ir = index.insert(vec);
             ASSERT_TRUE(ir.has_value()) << ir.error().message;
         }
-
         EXPECT_EQ(index.node_count(), 100u);
+
+        // Persist metadata page, then flush all dirty frames to disk.
+        auto fm = index.flush_meta();
+        ASSERT_TRUE(fm.has_value()) << fm.error().message;
+        auto fa = bpm1->flush_all();
+        ASSERT_TRUE(fa.has_value()) << fa.error().message;
+
+        // Destroy BPM and close file — Phase 2 must read from disk.
+        bpm1.reset();
+        ASSERT_TRUE(dm1.close_file(*fid1).has_value());
     }
 
-    // Phase 2: load from the same meta page and verify search.
+    // Phase 2: fresh DiskManager + BPM — no shared in-memory frames with Phase 1.
     {
-        HnswIndex loaded(*fix.bpm, nullptr);
+        DiskManager dm2;
+        auto fid2 = dm2.open_file(db_path);
+        ASSERT_TRUE(fid2.has_value());
+        auto bpm2 = std::make_unique<BufferPoolManager>(dm2, *fid2, 4096);
+
+        HnswIndex loaded(*bpm2, nullptr);
         auto lr = loaded.load(meta_pid);
         ASSERT_TRUE(lr.has_value()) << lr.error().message;
 
@@ -1292,18 +1313,27 @@ TEST(HnswPersistence, LoadAndSearchAfterInsert) {
         ASSERT_TRUE(results2.has_value()) << results2.error().message;
         ASSERT_GE(results2.value().size(), 1u);
         EXPECT_EQ(results2.value()[0].node_id, 50u);
+
+        bpm2.reset();
+        ASSERT_TRUE(dm2.close_file(*fid2).has_value());
     }
 }
 
 TEST(HnswPersistence, InsertAfterLoad) {
-    LargeTestFixture fix;
+    TempDir tmp;
+    auto db_path = tmp.path() / "hnsw_persist_insert.db";
 
     PageId meta_pid = 0;
     const uint32_t dim = 4;
 
-    // Phase 1: create index and insert some vectors.
+    // Phase 1: create index and insert some vectors, then flush + close.
     {
-        HnswIndex index(*fix.bpm, nullptr);
+        DiskManager dm1;
+        auto fid1 = dm1.create_file(db_path);
+        ASSERT_TRUE(fid1.has_value());
+        auto bpm1 = std::make_unique<BufferPoolManager>(dm1, *fid1, 4096);
+
+        HnswIndex index(*bpm1, nullptr);
         HnswIndexConfig config;
         config.dimension = dim;
         config.m = 4;
@@ -1317,11 +1347,25 @@ TEST(HnswPersistence, InsertAfterLoad) {
             std::vector<float> vec = {static_cast<float>(i), 0.0F, 0.0F, 0.0F};
             ASSERT_TRUE(index.insert(vec).has_value());
         }
+        EXPECT_EQ(index.node_count(), 10u);
+
+        auto fm = index.flush_meta();
+        ASSERT_TRUE(fm.has_value()) << fm.error().message;
+        auto fa = bpm1->flush_all();
+        ASSERT_TRUE(fa.has_value()) << fa.error().message;
+
+        bpm1.reset();
+        ASSERT_TRUE(dm1.close_file(*fid1).has_value());
     }
 
-    // Phase 2: load and insert more.
+    // Phase 2: reopen, load from disk, insert more, verify search.
     {
-        HnswIndex loaded(*fix.bpm, nullptr);
+        DiskManager dm2;
+        auto fid2 = dm2.open_file(db_path);
+        ASSERT_TRUE(fid2.has_value());
+        auto bpm2 = std::make_unique<BufferPoolManager>(dm2, *fid2, 4096);
+
+        HnswIndex loaded(*bpm2, nullptr);
         auto lr = loaded.load(meta_pid);
         ASSERT_TRUE(lr.has_value()) << lr.error().message;
         EXPECT_EQ(loaded.node_count(), 10u);
@@ -1332,15 +1376,17 @@ TEST(HnswPersistence, InsertAfterLoad) {
             auto ir = loaded.insert(vec);
             ASSERT_TRUE(ir.has_value()) << ir.error().message;
         }
-
         EXPECT_EQ(loaded.node_count(), 20u);
 
-        // Search for vector 15.
+        // Search for vector 15 — must be found among the newly inserted nodes.
         std::vector<float> query = {15.0F, 0.0F, 0.0F, 0.0F};
         auto results = loaded.search(query, 1);
         ASSERT_TRUE(results.has_value()) << results.error().message;
         ASSERT_GE(results.value().size(), 1u);
         EXPECT_EQ(results.value()[0].node_id, 15u);
+
+        bpm2.reset();
+        ASSERT_TRUE(dm2.close_file(*fid2).has_value());
     }
 }
 
