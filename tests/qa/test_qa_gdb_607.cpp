@@ -12,6 +12,8 @@
 #include <memory>
 #include <string>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -31,6 +33,7 @@ protected:
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
+        bootstrap_qa_catalog(catalog_);
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
 
@@ -293,8 +296,7 @@ TEST_F(GDB607WindowFrameDefaultQA, NullPartitionKeys) {
     exec_ok("INSERT INTO nullgrp VALUES (3, NULL)");
     exec_ok("INSERT INTO nullgrp VALUES (4, 'A')");
 
-    auto qr =
-        exec_ok("SELECT id, grp, COUNT(*) OVER (PARTITION BY grp) AS total FROM nullgrp");
+    auto qr = exec_ok("SELECT id, grp, COUNT(*) OVER (PARTITION BY grp) AS total FROM nullgrp");
     ASSERT_EQ(qr.rows.size(), 4);
     for (auto& row : qr.rows) {
         auto total = get_int(row[2]);
@@ -382,11 +384,15 @@ TEST_F(GDB607WindowFrameDefaultQA, FirstValueNoOrderBy) {
     auto qr = exec_ok("SELECT id, FIRST_VALUE(val) OVER (PARTITION BY grp) AS fv FROM fv");
     ASSERT_EQ(qr.rows.size(), 3);
 
-    // All rows in the partition should see the same FIRST_VALUE.
-    int64_t first_fv = get_int(qr.rows[0][1]);
+    // FIRST_VALUE with the correct default frame (UNBOUNDED PRECEDING to
+    // UNBOUNDED FOLLOWING) returns the first row of the partition for every row.
+    // The first inserted row has val=10, so the expected concrete value is 10.
+    // Note: FIRST_VALUE is frame-default-insensitive (both buggy and fixed frames
+    // produce the same FIRST_VALUE since both include the first row). The adjacent
+    // LastValueNoOrderBy test is the actual frame-default regression guard for GDB-607.
     for (auto& row : qr.rows) {
-        EXPECT_EQ(get_int(row[1]), first_fv)
-            << "FIRST_VALUE without ORDER BY should be same for all rows";
+        EXPECT_EQ(get_int(row[1]), 10)
+            << "FIRST_VALUE without ORDER BY should be 10 (first inserted row) for all rows";
     }
 }
 
@@ -448,8 +454,8 @@ TEST_F(GDB607WindowFrameDefaultQA, StressManyPartitions) {
     exec_ok("CREATE TABLE many_parts (id INT PRIMARY KEY, grp INT, val INT)");
     const int N = 100;
     for (int i = 1; i <= N; ++i) {
-        exec_ok("INSERT INTO many_parts VALUES (" + std::to_string(i) + ", " +
-                std::to_string(i) + ", " + std::to_string(i * 10) + ")");
+        exec_ok("INSERT INTO many_parts VALUES (" + std::to_string(i) + ", " + std::to_string(i) +
+                ", " + std::to_string(i * 10) + ")");
     }
 
     auto qr = exec_ok("SELECT id, SUM(val) OVER (PARTITION BY grp) AS total FROM many_parts");
