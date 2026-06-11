@@ -163,13 +163,11 @@ TEST_F(QA_GDB613, AC2_StorageManagerDefaultArg) {
     }
 }
 
-/// Verify the conversion formula: buffer_pool_size_mb * 128 = frames.
-TEST_F(QA_GDB613, AC2_ConversionFormula) {
-    // 1 MB / 8 KB per page = 128 frames per MB.
-    EXPECT_EQ(1u * 128, 128u);
-    EXPECT_EQ(256u * 128, 32768u);
-    EXPECT_EQ(512u * 128, 65536u);
-}
+// GDB-740: AC2_ConversionFormula deleted -- it only asserted compile-time
+// constant arithmetic (1*128==128 etc.) with no production code under test.
+// The conversion plumbing (buffer_pool_size_mb * 128 -> StorageManager frames)
+// is fully covered by AC1_PoolSizePassedToTables and
+// GDB621_ConfigToStorageManagerWiring.
 
 // =============================================================================
 // GDB-621: Pass buffer_pool_size_mb to StorageManager constructor in main.cpp
