@@ -40,9 +40,18 @@ struct NearestScanConfig {
     /// Index of the EMBEDDING column in the table schema.
     int32_t embedding_column_index = -1;
 
-    /// Optional set of allowed node IDs (for graph-scoped search).
-    /// When non-empty, only rows whose ordinal is in this set are eligible.
-    std::unordered_set<uint32_t> allowed_node_ids;
+    /// Optional set of allowed row RIDs (for graph-scoped search, e.g.
+    /// NEAREST ... WITHIN TRAVERSE). When non-empty, only rows whose heap RID
+    /// is in this set are eligible.
+    ///
+    /// Contract (GDB-745): the heap RID is the ONE canonical id space for
+    /// graph scoping. Heap ordinals and HNSW node ids diverge as soon as a
+    /// row has a NULL embedding (HNSW only assigns node ids to rows with
+    /// non-null embeddings) or rows are deleted/inserted after the index
+    /// build, so neither is used for scoping. All NEAREST execution paths
+    /// (brute-force, HNSW fast path via hnsw_rid_map, HNSW slow fallback)
+    /// filter by RID.
+    std::set<RID> allowed_rids;
 
     /// Pre-filtered RIDs from a btree index lookup (for btree-accelerated
     /// filtered NEAREST). When non-empty, the operator computes distances

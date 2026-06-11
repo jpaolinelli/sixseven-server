@@ -76,21 +76,29 @@ protected:
         std::filesystem::remove(table_path_);
     }
 
-    void
+    RID
     insert_row(TableHeap& heap, int32_t id, const std::string& name, const Embedding& embedding) {
         std::vector<Value> vals = {Value(id), Value(name), Value(embedding)};
         auto bytes = TupleSerializer::serialize(vals, storage_schema_);
-        ASSERT_TRUE(bytes.has_value()) << bytes.error().message;
+        EXPECT_TRUE(bytes.has_value()) << bytes.error().message;
+        if (!bytes.has_value()) {
+            return RID{};
+        }
         auto rid = heap.insert_tuple(*bytes);
-        ASSERT_TRUE(rid.has_value()) << rid.error().message;
+        EXPECT_TRUE(rid.has_value()) << rid.error().message;
+        return rid ? *rid : RID{};
     }
 
-    void insert_row_null_embedding(TableHeap& heap, int32_t id, const std::string& name) {
+    RID insert_row_null_embedding(TableHeap& heap, int32_t id, const std::string& name) {
         std::vector<Value> vals = {Value(id), Value(name), Value()};
         auto bytes = TupleSerializer::serialize(vals, storage_schema_);
-        ASSERT_TRUE(bytes.has_value()) << bytes.error().message;
+        EXPECT_TRUE(bytes.has_value()) << bytes.error().message;
+        if (!bytes.has_value()) {
+            return RID{};
+        }
         auto rid = heap.insert_tuple(*bytes);
-        ASSERT_TRUE(rid.has_value()) << rid.error().message;
+        EXPECT_TRUE(rid.has_value()) << rid.error().message;
+        return rid ? *rid : RID{};
     }
 
     std::vector<Tuple> drain(Iterator& op) {
@@ -261,7 +269,7 @@ TEST_F(QA131NearestScanTest, GraphScopeEmptyAllowedSet) {
     config.metric = DistanceMetric::L2;
     config.embedding_column_index = 2;
     // Empty set means "no scope restriction" — all rows eligible.
-    config.allowed_node_ids = {};
+    config.allowed_rids = {};
 
     OutputSchema schema(output_cols_);
     BoundStatement bound;
@@ -284,8 +292,8 @@ TEST_F(QA131NearestScanTest, GraphScopeAllExcluded) {
     config.query_vector = {1.0F, 0.0F, 0.0F};
     config.metric = DistanceMetric::L2;
     config.embedding_column_index = 2;
-    // Only allow ordinals that don't exist.
-    config.allowed_node_ids = {99, 100};
+    // Only allow RIDs that don't exist in the heap.
+    config.allowed_rids = {RID{9999, 99}, RID{9999, 100}};
 
     OutputSchema schema(output_cols_);
     BoundStatement bound;
@@ -300,16 +308,16 @@ TEST_F(QA131NearestScanTest, GraphScopeAllExcluded) {
 
 TEST_F(QA131NearestScanTest, GraphScopeSingleNodeAllowed) {
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    insert_row(heap, 1, "a", {1.0F, 0.0F, 0.0F}); // ordinal 0
-    insert_row(heap, 2, "b", {0.0F, 1.0F, 0.0F}); // ordinal 1
-    insert_row(heap, 3, "c", {0.5F, 0.5F, 0.0F}); // ordinal 2
+    insert_row(heap, 1, "a", {1.0F, 0.0F, 0.0F});
+    auto rid_b = insert_row(heap, 2, "b", {0.0F, 1.0F, 0.0F});
+    insert_row(heap, 3, "c", {0.5F, 0.5F, 0.0F});
 
     NearestScanConfig config;
     config.k = 5;
     config.query_vector = {1.0F, 0.0F, 0.0F};
     config.metric = DistanceMetric::L2;
     config.embedding_column_index = 2;
-    config.allowed_node_ids = {1}; // Only ordinal 1 (id=2).
+    config.allowed_rids = {rid_b}; // Only row id=2.
 
     OutputSchema schema(output_cols_);
     BoundStatement bound;
@@ -492,13 +500,14 @@ TEST_F(QA131NearestScanTest, HnswGraphScopeFilteredSearch) {
         {0.0F, 1.0F},
     };
 
+    std::vector<RID> rids;
     for (int i = 0; i < 5; ++i) {
-        insert_row(heap, i + 1, (i % 2 == 0) ? "even" : "odd", embs[i]);
+        rids.push_back(insert_row(heap, i + 1, (i % 2 == 0) ? "even" : "odd", embs[i]));
         ASSERT_TRUE(hnsw.insert(embs[i]).has_value());
     }
 
-    // Graph scope allows ordinals 0, 1, 2, 3.
-    // WHERE name = 'even' → ordinals 0, 2 pass.
+    // Graph scope allows rows 1-4 (by RID).
+    // WHERE name = 'even' → ids 1 and 3 pass.
     auto where = binary_expr(BinaryOp::EQUAL, col_ref("name"), lit_string("even"));
     BoundStatement bound;
     auto* col_expr =
@@ -514,7 +523,7 @@ TEST_F(QA131NearestScanTest, HnswGraphScopeFilteredSearch) {
     config.query_vector = {1.0F, 0.0F};
     config.metric = DistanceMetric::L2;
     config.embedding_column_index = 2;
-    config.allowed_node_ids = {0, 1, 2, 3};
+    config.allowed_rids = {rids[0], rids[1], rids[2], rids[3]};
 
     OutputSchema schema(output_cols_);
     NearestScanOperator op(
@@ -613,17 +622,17 @@ TEST_F(QA131NearestScanTest, LargeDatasetBruteForce) {
 
 TEST_F(QA131NearestScanTest, GraphScopeWithNullEmbeddingNode) {
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    insert_row(heap, 1, "valid", {1.0F, 0.0F, 0.0F});  // ordinal 0
-    insert_row_null_embedding(heap, 2, "null_emb");    // ordinal 1
-    insert_row(heap, 3, "valid2", {0.0F, 1.0F, 0.0F}); // ordinal 2
+    auto rid1 = insert_row(heap, 1, "valid", {1.0F, 0.0F, 0.0F});
+    auto rid2 = insert_row_null_embedding(heap, 2, "null_emb");
+    auto rid3 = insert_row(heap, 3, "valid2", {0.0F, 1.0F, 0.0F});
 
     NearestScanConfig config;
     config.k = 5;
     config.query_vector = {1.0F, 0.0F, 0.0F};
     config.metric = DistanceMetric::L2;
     config.embedding_column_index = 2;
-    // Allow all ordinals including the null one.
-    config.allowed_node_ids = {0, 1, 2};
+    // Allow all rows including the null-embedding one.
+    config.allowed_rids = {rid1, rid2, rid3};
 
     OutputSchema schema(output_cols_);
     BoundStatement bound;

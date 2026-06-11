@@ -117,7 +117,6 @@ Result<void> NearestScanOperator::execute_brute_force() {
     std::vector<Candidate> candidates;
 
     std::span<const float> query_span(config_.query_vector);
-    uint32_t node_ordinal = 0;
 
     while (true) {
         auto row = it->next();
@@ -137,14 +136,12 @@ Result<void> NearestScanOperator::execute_brute_force() {
         // Check embedding column is valid and non-null.
         auto col_idx = static_cast<size_t>(config_.embedding_column_index);
         if (col_idx >= tuple.values.size() || tuple.values[col_idx].is_null()) {
-            ++node_ordinal;
             continue;
         }
 
-        // Check graph-scoped filter.
-        if (!config_.allowed_node_ids.empty() &&
-            config_.allowed_node_ids.count(node_ordinal) == 0) {
-            ++node_ordinal;
+        // Check graph-scoped filter. Scoping is by heap RID — the one
+        // canonical id space shared by every NEAREST path (GDB-745).
+        if (!config_.allowed_rids.empty() && config_.allowed_rids.count(rid) == 0) {
             continue;
         }
 
@@ -154,7 +151,6 @@ Result<void> NearestScanOperator::execute_brute_force() {
         float dist = compute_distance(sort_metric(config_.metric), query_span, emb_span);
 
         candidates.push_back({dist, std::move(tuple)});
-        ++node_ordinal;
     }
 
     // Sort by distance ASC (lower sort key = more similar for every metric).
@@ -251,11 +247,19 @@ Result<void> NearestScanOperator::execute_prefiltered_search() {
 // ---------------------------------------------------------------------------
 
 Result<void> NearestScanOperator::execute_hnsw_search() {
-    // Build the filter predicate for the HNSW search.
+    // Build the filter predicate for the HNSW search. The graph scope is
+    // expressed in heap RIDs (the canonical id space, GDB-745); translate
+    // each HNSW node id to its RID via hnsw_rid_map before checking. Without
+    // a rid_map we cannot translate inside the search, so we search
+    // unfiltered and apply the RID filter in the slow fallback below (the
+    // widening loop compensates for any under-fill).
     HnswFilterPredicate predicate;
-    if (!config_.allowed_node_ids.empty()) {
+    if (!config_.allowed_rids.empty() && hnsw_rid_map_ != nullptr && !hnsw_rid_map_->empty()) {
         predicate = [this](uint32_t node_id) -> bool {
-            return config_.allowed_node_ids.count(node_id) > 0;
+            if (node_id >= hnsw_rid_map_->size()) {
+                return false;
+            }
+            return config_.allowed_rids.count((*hnsw_rid_map_)[node_id]) > 0;
         };
     }
 
@@ -353,8 +357,13 @@ Result<void> NearestScanOperator::execute_hnsw_search() {
                     continue;
                 }
 
+                // Graph-scoped filter by heap RID — the canonical id space
+                // (GDB-745). When no rid_map exists, the HNSW search above
+                // ran unfiltered, so the scope is enforced here.
+                bool in_scope = config_.allowed_rids.empty() || config_.allowed_rids.count(rid) > 0;
+
                 auto dist_it = result_distances.find(node_ordinal);
-                if (dist_it != result_distances.end()) {
+                if (in_scope && dist_it != result_distances.end()) {
                     Tuple tuple{std::move(*values), rid};
                     matched.push_back({dist_it->second, std::move(tuple)});
                 }
