@@ -23,6 +23,7 @@ enum class StatusCode {
     READ_ONLY,
     LOCK_TIMEOUT,
     DEADLOCK,
+    QUERY_CANCELED,
 };
 
 /// Return a human-readable name for a StatusCode.
@@ -64,6 +65,8 @@ inline const char* status_code_name(StatusCode code) {
         return "LOCK_TIMEOUT";
     case StatusCode::DEADLOCK:
         return "DEADLOCK";
+    case StatusCode::QUERY_CANCELED:
+        return "QUERY_CANCELED";
     }
     return "UNKNOWN";
 }

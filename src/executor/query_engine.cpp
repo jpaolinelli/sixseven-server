@@ -3,6 +3,7 @@
 #include "sixseven/catalog/schema.h"
 #include "sixseven/common/coercion.h"
 #include "sixseven/common/logging.h"
+#include "sixseven/common/statement_deadline.h"
 #include "sixseven/common/types.h"
 #include "sixseven/executor/catalog_persistence.h"
 #include "sixseven/executor/explain.h"
@@ -2320,6 +2321,11 @@ Result<QueryResult> QueryEngine::execute_explain(const ExplainStmt& stmt,
 
         // Drain all rows.
         while (true) {
+            if (StatementDeadline::expired()) {
+                (*iter)->close();
+                return make_error(StatusCode::QUERY_CANCELED,
+                                  "canceling statement due to statement timeout");
+            }
             auto row = (*iter)->next();
             if (!row) {
                 (*iter)->close();
@@ -2456,8 +2462,14 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
         qr.column_types.push_back(schema.column(i).type_id);
     }
 
-    // Drain.
+    // Drain. Between tuple pulls, enforce the session statement_timeout
+    // deadline armed by the protocol layer (GDB-721).
     while (true) {
+        if (StatementDeadline::expired()) {
+            (*iter)->close();
+            return make_error(StatusCode::QUERY_CANCELED,
+                              "canceling statement due to statement timeout");
+        }
         auto row = (*iter)->next();
         if (!row) {
             (*iter)->close();

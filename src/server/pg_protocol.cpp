@@ -1,6 +1,7 @@
 #include "sixseven/server/pg_protocol.h"
 
 #include "sixseven/common/logging.h"
+#include "sixseven/common/statement_deadline.h"
 #include "sixseven/executor/query_engine.h"
 #include "sixseven/server/connection.h"
 #include "sixseven/server/session.h"
@@ -263,6 +264,8 @@ std::string_view status_to_sqlstate(StatusCode code) {
         return "55P03"; // Lock not available.
     case StatusCode::DEADLOCK:
         return "40P01"; // Deadlock detected.
+    case StatusCode::QUERY_CANCELED:
+        return "57014"; // Query canceled (statement timeout).
     }
     return "XX000"; // Fallback.
 }
@@ -1791,6 +1794,7 @@ void PgProtocolHandler::handle_simple_query(Connection& conn, std::string_view s
             return;
         }
 
+        StatementDeadlineGuard deadline_guard(session_->statement_timeout_ms());
         auto result = query_executor_(stmt, startup_database());
         if (!result) {
             // On error, send ErrorResponse and stop processing remaining statements.
@@ -1883,6 +1887,7 @@ std::optional<Result<void>> PgProtocolHandler::try_handle_execute(Connection& co
 
     SIXSEVEN_LOG_DEBUG("EXECUTE: stmt='{}', sql='{}'", stmt_name, exec_sql);
 
+    StatementDeadlineGuard deadline_guard(session_->statement_timeout_ms());
     auto result = query_executor_(exec_sql, startup_database());
     if (!result) {
         const auto& err = result.error();
@@ -2112,6 +2117,7 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
 
     SIXSEVEN_LOG_DEBUG("Execute: portal='{}', sql='{}'", portal_name, *substituted);
 
+    StatementDeadlineGuard deadline_guard(session_->statement_timeout_ms());
     auto result = query_executor_(*substituted, startup_database());
     if (!result) {
         const auto& err = result.error();

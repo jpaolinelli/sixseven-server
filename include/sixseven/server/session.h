@@ -55,6 +55,14 @@ public:
     /// Return true if the name is a known built-in session variable.
     [[nodiscard]] bool is_session_variable(const std::string& name) const;
 
+    /// Return the current statement_timeout in milliseconds (0 = disabled).
+    /// The value is validated at SET time, so parsing here cannot fail.
+    [[nodiscard]] int64_t statement_timeout_ms() const;
+
+    /// Parse a statement_timeout value ("0", "5000", "250ms", "5s", "2min")
+    /// into milliseconds. Returns an error for negative or malformed values.
+    [[nodiscard]] static Result<int64_t> parse_timeout_ms(const std::string& value);
+
     // -- Prepared statements (shared with wire protocol) ----------------------
 
     /// Store a prepared statement (SQL-level PREPARE or wire protocol Parse).
