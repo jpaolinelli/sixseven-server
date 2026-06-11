@@ -21,6 +21,17 @@ inline constexpr lsn_t invalid_lsn = 0;
 /// Invalid/unset transaction ID sentinel.
 inline constexpr txn_id_t invalid_txn_id = 0;
 
+/// "Frozen" transaction ID (GDB-714): marks a tuple as created (or deleted)
+/// by an operation that is committed and visible to every snapshot, similar
+/// to PostgreSQL's FrozenTransactionId. Used as the default xmin/xmax stamp
+/// while DML runs without an enclosing transaction (autocommit) and for
+/// bootstrap-written rows. The value is the maximum txn id so it can never
+/// collide with a real id allocated by TransactionManager (which counts up
+/// from 1); consumers (TransactionManager::get_status, MVCC visibility,
+/// WAL recovery) special-case it as COMMITTED rather than comparing it
+/// numerically against snapshot windows.
+inline constexpr txn_id_t frozen_txn_id = ~txn_id_t{0};
+
 // -- WAL Record Type ---------------------------------------------------------
 
 /// Type of WAL record, identifying the operation that was performed.

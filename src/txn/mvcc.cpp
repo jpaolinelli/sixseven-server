@@ -20,6 +20,26 @@ bool is_visible(const MvccTupleHeader& header,
         return true;
     }
 
+    // Frozen stamps (GDB-714): committed infinitely in the past / future-proof
+    // deletes. They must not be compared numerically against the snapshot
+    // window (the sentinel is the maximum txn id).
+    if (header.xmax == frozen_txn_id) {
+        return false; // Frozen delete — gone for every snapshot.
+    }
+    if (header.xmin == frozen_txn_id) {
+        // Created by a frozen (always-committed) write — visible unless a
+        // committed delete applies; fall through to the xmax rules below by
+        // skipping the xmin checks.
+        if (header.xmax == invalid_txn_id) {
+            return true;
+        }
+        auto frozen_xmax_status = txn_mgr.get_status(header.xmax);
+        if (frozen_xmax_status != TransactionStatus::COMMITTED) {
+            return true; // Deleter aborted or still in progress.
+        }
+        return header.xmax >= snapshot.xmax || snapshot.is_active(header.xmax);
+    }
+
     // Rule 1: Check xmin (the creating transaction).
     // The tuple is invisible if xmin is not committed, or was taken after
     // our snapshot, or was in-progress when we took the snapshot.
@@ -103,6 +123,13 @@ bool is_dead(const MvccTupleHeader& header,
     // Case 5: xmax active — deletion not yet finalized.
     if (xmax_status == TransactionStatus::ACTIVE) {
         return false;
+    }
+
+    // Frozen delete stamp (GDB-714): committed and visible-to-none for every
+    // snapshot — dead regardless of the numeric horizon (the sentinel is the
+    // maximum txn id and must not be compared against it).
+    if (header.xmax == frozen_txn_id) {
+        return true;
     }
 
     // Case 6: xmax committed and older than xmin_horizon.

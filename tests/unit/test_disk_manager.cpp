@@ -887,3 +887,65 @@ TEST_F(DiskManagerTest, DirectIOWithSync) {
     ASSERT_TRUE(dm_.sync_file(fid).has_value());
     ASSERT_TRUE(dm_.sync_data(fid).has_value());
 }
+
+// -- File format version gate (GDB-714 / GDB-730) -----------------------------
+
+namespace {
+
+/// Overwrite the version field (header offset 4) of an existing database file.
+/// Version validation happens before checksum verification, so the checksum
+/// does not need to be recomputed.
+void patch_file_version(const std::filesystem::path& path, uint32_t version) {
+    std::fstream f(path, std::ios::in | std::ios::out | std::ios::binary);
+    ASSERT_TRUE(f.is_open());
+    f.seekp(static_cast<std::streamoff>(fh_version_offset));
+    f.write(reinterpret_cast<const char*>(&version), sizeof(uint32_t));
+    ASSERT_TRUE(f.good());
+}
+
+} // namespace
+
+TEST_F(DiskManagerTest, CurrentFormatVersionIsTwo) {
+    // The MVCC tuple header layout (GDB-714) bumped the format version.
+    EXPECT_EQ(file_format_version, 2u);
+}
+
+TEST_F(DiskManagerTest, OlderFormatFileRejectedWithRebuildGuidance) {
+    auto create_result = dm_.create_file(test_file());
+    ASSERT_TRUE(create_result.has_value());
+    ASSERT_TRUE(dm_.close_file(*create_result).has_value());
+
+    patch_file_version(test_file(), 1);
+
+    auto open_result = dm_.open_file(test_file());
+    ASSERT_FALSE(open_result.has_value());
+    EXPECT_EQ(open_result.error().code, StatusCode::IO_ERROR);
+    EXPECT_NE(open_result.error().message.find("older"), std::string::npos)
+        << open_result.error().message;
+    EXPECT_NE(open_result.error().message.find("rebuild required"), std::string::npos)
+        << open_result.error().message;
+}
+
+TEST_F(DiskManagerTest, NewerFormatFileRejected) {
+    auto create_result = dm_.create_file(test_file());
+    ASSERT_TRUE(create_result.has_value());
+    ASSERT_TRUE(dm_.close_file(*create_result).has_value());
+
+    patch_file_version(test_file(), file_format_version + 1);
+
+    auto open_result = dm_.open_file(test_file());
+    ASSERT_FALSE(open_result.has_value());
+    EXPECT_EQ(open_result.error().code, StatusCode::IO_ERROR);
+    EXPECT_NE(open_result.error().message.find("newer"), std::string::npos)
+        << open_result.error().message;
+}
+
+TEST_F(DiskManagerTest, CurrentFormatFileReopensCleanly) {
+    auto create_result = dm_.create_file(test_file());
+    ASSERT_TRUE(create_result.has_value());
+    ASSERT_TRUE(dm_.close_file(*create_result).has_value());
+
+    auto open_result = dm_.open_file(test_file());
+    ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
+    ASSERT_TRUE(dm_.close_file(*open_result).has_value());
+}

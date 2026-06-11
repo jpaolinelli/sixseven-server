@@ -149,7 +149,9 @@ Result<RecoveryStats> WalRecovery::recover() {
         }
 
         // --- Track transaction state -----------------------------------------
-        if (record->txn_id != 0) {
+        // Frozen records (GDB-714) represent autocommit operations: they are
+        // committed by definition and never tracked as in-flight.
+        if (record->txn_id != 0 && record->txn_id != frozen_txn_id) {
             switch (record->type) {
             case WalRecordType::BEGIN:
                 active_txns.insert(record->txn_id);
@@ -209,7 +211,9 @@ Result<RecoveryStats> WalRecovery::recover() {
     // Replay data records of committed transactions in forward order.
 
     for (const auto& rec : post_checkpoint_records) {
-        if (committed_txns.find(rec.txn_id) == committed_txns.end()) {
+        // Frozen records (GDB-714) are autocommit operations: always redone.
+        if (rec.txn_id != frozen_txn_id &&
+            committed_txns.find(rec.txn_id) == committed_txns.end()) {
             continue; // Not a committed transaction.
         }
 

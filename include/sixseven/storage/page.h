@@ -156,6 +156,20 @@ public:
     /// since it is an expensive operation.
     [[nodiscard]] Result<void> update_tuple(SlotId slot_id, std::span<const uint8_t> data);
 
+    /// Restore a tuple at a *specific* slot (WAL redo/undo support, GDB-714).
+    ///
+    /// Unlike update_tuple(), this works regardless of the slot's current
+    /// state and is idempotent:
+    ///  - live slot:    the tuple bytes are overwritten (in place when the
+    ///                  new data fits, otherwise reallocated at the bottom);
+    ///  - deleted slot: the slot is revived and the data written;
+    ///  - slot beyond the directory: the directory is extended, intermediate
+    ///    slots are created as deleted ({0, 0}), and the tuple is written.
+    ///
+    /// Like update_tuple(), this does NOT compact automatically; on an
+    /// INVALID_ARGUMENT space failure the caller should compact() and retry.
+    [[nodiscard]] Result<void> restore_tuple(SlotId slot_id, std::span<const uint8_t> data);
+
     /// Return the number of bytes available for new tuples, accounting for a
     /// new slot entry. This is conservative: if deleted slots are available for
     /// reuse, the actual insertable tuple size may be up to slot_entry_size

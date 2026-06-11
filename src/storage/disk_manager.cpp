@@ -691,12 +691,24 @@ Result<void> DiskManager::read_file_header(OpenFile& file) {
                               std::to_string(magic));
     }
 
-    // Validate version.
+    // Validate version. Older files cannot be opened: the v2 format changed
+    // the on-page tuple layout (MVCC headers, GDB-714) with no in-place
+    // migration. Newer files mean this binary is out of date.
     uint32_t version = 0;
     std::memcpy(&version, &header[fh_version_offset], sizeof(uint32_t));
-    if (version != file_format_version) {
+    if (version < file_format_version) {
         return make_error(StatusCode::IO_ERROR,
-                          "unsupported file version: " + std::to_string(version));
+                          "file format version " + std::to_string(version) +
+                              " is older than this binary's version " +
+                              std::to_string(file_format_version) +
+                              " (MVCC tuple headers); rebuild required: dump and re-create "
+                              "the database (see docs/mvcc-tuple-format.md)");
+    }
+    if (version > file_format_version) {
+        return make_error(StatusCode::IO_ERROR,
+                          "file format version " + std::to_string(version) +
+                              " is newer than this binary supports (" +
+                              std::to_string(file_format_version) + "); upgrade the binary");
     }
 
     // Verify header checksum.

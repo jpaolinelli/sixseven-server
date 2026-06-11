@@ -103,6 +103,12 @@ Snapshot TransactionManager::get_statement_snapshot(txn_id_t txn_id) {
 }
 
 TransactionStatus TransactionManager::get_status(txn_id_t txn_id) const {
+    // Frozen stamps (GDB-714) mark autocommit/bootstrap writes: always
+    // committed, visible to every snapshot. Never allocated as a real id.
+    if (txn_id == frozen_txn_id) {
+        return TransactionStatus::COMMITTED;
+    }
+
     std::lock_guard lock(mu_);
 
     auto it = transactions_.find(txn_id);

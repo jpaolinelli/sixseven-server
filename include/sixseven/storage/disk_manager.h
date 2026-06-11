@@ -30,7 +30,14 @@ uint32_t compute_page_checksum(const Page& page);
 static constexpr uint32_t file_magic = 0x47444201;
 
 /// Current file format version.
-static constexpr uint32_t file_format_version = 1;
+///
+/// Version history:
+///  - 1: original format (headerless tuples on DATA pages).
+///  - 2: GDB-714 — tuples in SQL table files carry a 24-byte MvccTupleHeader
+///       (xmin/xmax/t_ctid) prefix. There is no in-place migration from v1:
+///       pre-v2 data directories must be rebuilt (dump and re-create); see
+///       docs/mvcc-tuple-format.md.
+static constexpr uint32_t file_format_version = 2;
 
 /// Pages per 1MB growth chunk: 128 x 8KB = 1MB.
 static constexpr uint32_t file_growth_pages = 128;
