@@ -45,6 +45,12 @@ public:
     /// @param pool_size  Buffer pool size (frames) per table. Default 256.
     StorageManager(DiskManager& dm, std::filesystem::path data_dir, uint32_t pool_size = 256);
 
+    /// Flushes and closes every table/index file still registered in the
+    /// shared DiskManager. Without this, a destroyed StorageManager leaks its
+    /// open file descriptors into the DiskManager (which may outlive it); on
+    /// Windows those handles block directory removal until process exit.
+    ~StorageManager();
+
     /// Create the directory structure for a new database.
     /// Creates {data_dir}/databases/{db_id}/ and {data_dir}/databases/{db_id}/tables/.
     [[nodiscard]] Result<void> create_database_storage(database_id_t db_id);

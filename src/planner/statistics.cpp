@@ -72,6 +72,7 @@ static Result<std::vector<std::vector<Value>>> sample_table(TableHeap& heap,
 
     std::mt19937_64 rng(42); // Deterministic seed for reproducibility.
     uint64_t row_index = 0;
+    uint64_t valid_rows = 0; // Rows that deserialized successfully (GDB-1232).
     total_row_bytes = 0;
 
     while (auto row = iter.next()) {
@@ -85,16 +86,22 @@ static Result<std::vector<std::vector<Value>>> sample_table(TableHeap& heap,
             continue;
         }
 
-        if (row_index < max_sample_size) {
+        // The reservoir must be driven by the count of valid rows, not
+        // row_index: skipped corrupt tuples otherwise leave the sample
+        // under-filled while the replacement branch still indexes up to
+        // max_sample_size — an out-of-bounds write (GDB-1232). Counting only
+        // valid rows also keeps every valid row's selection probability equal.
+        if (valid_rows < max_sample_size) {
             sample.push_back(std::move(*values));
         } else {
             // Reservoir sampling: replace a random element with decreasing probability.
-            std::uniform_int_distribution<uint64_t> dist(0, row_index);
+            std::uniform_int_distribution<uint64_t> dist(0, valid_rows);
             auto j = dist(rng);
             if (j < max_sample_size) {
                 sample[j] = std::move(*values);
             }
         }
+        ++valid_rows;
         ++row_index;
     }
 
