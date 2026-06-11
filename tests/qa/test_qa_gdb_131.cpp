@@ -347,12 +347,17 @@ TEST_F(QA131NearestScanTest, DotProductMetric) {
     ASSERT_TRUE(op.open().has_value());
     auto results = drain(op);
     ASSERT_EQ(results.size(), 3u);
-    // DOT_PRODUCT is raw (not negated), sorted ASC.
-    // orthogonal: dot=0.0, partial: dot=0.5, aligned: dot=1.0
-    // So order: orthogonal, partial, aligned
-    EXPECT_EQ(results[0].values[0].as_int32(), 3);
+    // GDB-717 / GDB-731: dot product is a similarity (higher = more similar),
+    // so NEAREST must rank the highest dot product first.
+    // aligned: dot=1.0, partial: dot=0.5, orthogonal: dot=0.0
+    // So order: aligned, partial, orthogonal.
+    EXPECT_EQ(results[0].values[0].as_int32(), 1);
     EXPECT_EQ(results[1].values[0].as_int32(), 2);
-    EXPECT_EQ(results[2].values[0].as_int32(), 1);
+    EXPECT_EQ(results[2].values[0].as_int32(), 3);
+    // The emitted _distance column reports the raw dot product.
+    EXPECT_NEAR(results[0].values[3].as_float64(), 1.0, 1e-5);
+    EXPECT_NEAR(results[1].values[3].as_float64(), 0.5, 1e-5);
+    EXPECT_NEAR(results[2].values[3].as_float64(), 0.0, 1e-5);
     op.close();
 }
 

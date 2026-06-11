@@ -2540,7 +2540,13 @@ DistanceMetric to_distance_metric(NearestMetric m) {
     case NearestMetric::L2:
         return DistanceMetric::L2;
     case NearestMetric::DOT:
-        return DistanceMetric::DOT_PRODUCT;
+        // GDB-717: the raw dot product is a similarity (higher = more
+        // similar), but NEAREST orders candidates by distance ascending.
+        // Use the negated INNER_PRODUCT variant so the ascending sort
+        // yields the k MOST similar rows. NearestScanOperator negates the
+        // sort key back when emitting the user-visible _distance column,
+        // so USING DOT still reports the raw dot product.
+        return DistanceMetric::INNER_PRODUCT;
     case NearestMetric::COSINE:
     default:
         return DistanceMetric::COSINE;
