@@ -784,46 +784,142 @@ TEST_F(ReplicationIntegrationTest, MultipleReplicas) {
 
 // =============================================================================
 // Health Monitor Integration
-// - Verify health monitor runs without issues
+// - Scenario A: replica fully acked -> no lag warnings, lag bytes == 0.
+// - Scenario B: replica behind primary with threshold 0 -> warning recorded,
+//               lag bytes > 0.
 // =============================================================================
 
 TEST_F(ReplicationIntegrationTest, HealthMonitorIntegration) {
-    write_txn(*primary_writer_, 1, 1, "health_data");
+    // Write a few transactions to advance the primary LSN.
+    for (txn_id_t i = 1; i <= 5; i++) {
+        write_txn(*primary_writer_, i, 1, "health_" + std::to_string(i));
+    }
     ASSERT_TRUE(primary_writer_->flush().has_value());
 
     ASSERT_TRUE(primary_slot_mgr_->create_slot("health_replica").has_value());
 
     WalSenderOptions opts;
     opts.keepalive_interval = std::chrono::milliseconds(50);
-    opts.sender_timeout = std::chrono::milliseconds(5000);
+    opts.sender_timeout = std::chrono::milliseconds(60000);
     WalSenderManager sender_mgr(
         primary_wal_dir_, nullptr, *primary_writer_, 10, opts, primary_slot_mgr_.get());
 
+    // Keep handles to the replica->primary channel so we can inject acks.
+    auto to_replica_buf = std::make_shared<std::vector<uint8_t>>();
+    auto to_primary_buf = std::make_shared<std::vector<uint8_t>>();
+    auto to_replica_mu = std::make_shared<std::mutex>();
+    auto to_primary_mu = std::make_shared<std::mutex>();
+    auto to_replica_cv = std::make_shared<std::condition_variable>();
+    auto to_primary_cv = std::make_shared<std::condition_variable>();
     auto conn = std::make_unique<LinkedConnection>("health_replica",
-                                                   std::make_shared<std::vector<uint8_t>>(),
-                                                   std::make_shared<std::vector<uint8_t>>(),
-                                                   std::make_shared<std::mutex>(),
-                                                   std::make_shared<std::mutex>(),
-                                                   std::make_shared<std::condition_variable>(),
-                                                   std::make_shared<std::condition_variable>());
+                                                   to_replica_buf,
+                                                   to_primary_buf,
+                                                   to_replica_mu,
+                                                   to_primary_mu,
+                                                   to_replica_cv,
+                                                   to_primary_cv);
     ASSERT_TRUE(sender_mgr.accept_connection(std::move(conn), 1, "health_replica").has_value());
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // Bounded wait helper.
+    auto wait_until = [](auto&& pred) {
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!pred()) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return true;
+    };
 
-    HealthMonitorConfig hm_cfg;
-    hm_cfg.lag_warning_threshold = std::chrono::milliseconds(10000);
-    hm_cfg.disconnect_warning_threshold = std::chrono::milliseconds(60000);
-    ReplicationHealthMonitor monitor(hm_cfg);
+    // Wait for the sender to reach streaming state before injecting acks.
+    ASSERT_TRUE(wait_until([&] {
+        auto statuses = sender_mgr.get_sender_statuses();
+        return statuses.size() == 1 && statuses[0].state == WalSender::State::STREAMING;
+    })) << "sender never reached streaming state";
 
-    // Run health check — should not crash.
-    monitor.check_health(sender_mgr, primary_slot_mgr_.get(), *primary_writer_);
+    // -------------------------------------------------------------------------
+    // Scenario A: replica fully acks the primary's current LSN.
+    // Expected: no lag warnings, lag bytes for the replica == 0.
+    // -------------------------------------------------------------------------
+    lsn_t primary_lsn = primary_writer_->current_lsn();
+    ASSERT_GT(primary_lsn, lsn_t{0});
 
-    // Write more data and check again.
-    for (txn_id_t i = 2; i <= 5; i++) {
-        write_txn(*primary_writer_, i, 1, "health_batch_" + std::to_string(i));
+    StandbyStatusMessage full_ack;
+    full_ack.received_lsn = primary_lsn;
+    full_ack.flushed_lsn = primary_lsn;
+    full_ack.applied_lsn = primary_lsn;
+    full_ack.timestamp_us = 1;
+    auto full_ack_bytes = serialize_standby_status(full_ack);
+    {
+        std::lock_guard lock(*to_primary_mu);
+        to_primary_buf->insert(to_primary_buf->end(), full_ack_bytes.begin(), full_ack_bytes.end());
     }
-    ASSERT_TRUE(primary_writer_->flush().has_value());
-    monitor.check_health(sender_mgr, primary_slot_mgr_.get(), *primary_writer_);
+    to_primary_cv->notify_all();
+
+    // Wait until the sender has processed the ack (applied_lsn becomes known).
+    ASSERT_TRUE(wait_until([&] {
+        auto statuses = sender_mgr.get_sender_statuses();
+        return statuses.size() == 1 && statuses[0].applied_lsn == primary_lsn;
+    })) << "sender never processed the full-ack status message";
+
+    HealthMonitorConfig hm_cfg_a;
+    hm_cfg_a.lag_warning_threshold = std::chrono::milliseconds(10000);
+    hm_cfg_a.disconnect_warning_threshold = std::chrono::milliseconds(60000);
+    ReplicationHealthMonitor monitor_a(hm_cfg_a);
+
+    monitor_a.check_health(sender_mgr, primary_slot_mgr_.get(), *primary_writer_);
+
+    {
+        auto report = monitor_a.last_report();
+        EXPECT_EQ(report.warning_count, 0u)
+            << "expected no lag warnings when replica is fully caught up";
+        ASSERT_TRUE(report.last_lag_bytes.count("health_replica") == 1)
+            << "health_replica absent from lag map after full ack";
+        EXPECT_EQ(report.last_lag_bytes.at("health_replica"), 0)
+            << "expected zero lag bytes when replica has acked primary LSN";
+    }
+
+    // -------------------------------------------------------------------------
+    // Scenario B: replica acknowledges only LSN 1; threshold set to 0 ms so
+    // any positive lag triggers a warning.
+    // Expected: warning_count > 0 and lag bytes > 0 for "health_replica".
+    // -------------------------------------------------------------------------
+    StandbyStatusMessage behind_ack;
+    behind_ack.received_lsn = 1;
+    behind_ack.flushed_lsn = 1;
+    behind_ack.applied_lsn = 1;
+    behind_ack.timestamp_us = 1;
+    auto behind_ack_bytes = serialize_standby_status(behind_ack);
+    {
+        std::lock_guard lock(*to_primary_mu);
+        to_primary_buf->insert(
+            to_primary_buf->end(), behind_ack_bytes.begin(), behind_ack_bytes.end());
+    }
+    to_primary_cv->notify_all();
+
+    // Wait until the sender has processed the behind-ack.
+    ASSERT_TRUE(wait_until([&] {
+        auto statuses = sender_mgr.get_sender_statuses();
+        return statuses.size() == 1 && statuses[0].applied_lsn == lsn_t{1};
+    })) << "sender never processed the behind-ack status message";
+
+    HealthMonitorConfig hm_cfg_b;
+    hm_cfg_b.lag_warning_threshold = std::chrono::milliseconds(0); // warn on any lag
+    hm_cfg_b.disconnect_warning_threshold = std::chrono::milliseconds(60000);
+    ReplicationHealthMonitor monitor_b(hm_cfg_b);
+
+    monitor_b.check_health(sender_mgr, primary_slot_mgr_.get(), *primary_writer_);
+
+    {
+        auto report = monitor_b.last_report();
+        EXPECT_GT(report.warning_count, 0u)
+            << "expected lag warning when replica is behind and threshold is 0";
+        ASSERT_TRUE(report.last_lag_bytes.count("health_replica") == 1)
+            << "health_replica absent from lag map in scenario B";
+        EXPECT_GT(report.last_lag_bytes.at("health_replica"), 0)
+            << "expected positive lag bytes when replica applied_lsn == 1 and primary is ahead";
+    }
 
     sender_mgr.stop_all();
 }
