@@ -75,6 +75,13 @@ Result<SlotId> Page::insert_tuple(std::span<const uint8_t> data) {
     if (data.empty()) {
         return make_error(StatusCode::INVALID_ARGUMENT, "cannot insert empty tuple");
     }
+    // Reject before the uint16_t length cast below: an image larger than the
+    // page (possible once the 24-byte MVCC header is added to a near-64KB
+    // payload) would otherwise truncate to a tiny length, pass the space
+    // check, and persist garbage while reporting success (GDB-714 review).
+    if (data.size() > page_size - page_header_size - slot_entry_size) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "tuple too large for a page");
+    }
 
     std::unique_lock lock(latch_);
 
@@ -171,6 +178,11 @@ Result<void> Page::delete_tuple(SlotId slot_id) {
 Result<void> Page::update_tuple(SlotId slot_id, std::span<const uint8_t> data) {
     if (data.empty()) {
         return make_error(StatusCode::INVALID_ARGUMENT, "cannot update with empty tuple");
+    }
+    // Same oversize guard as insert_tuple: prevent uint16_t truncation of the
+    // image length for near-64KB payloads carrying the MVCC header.
+    if (data.size() > page_size - page_header_size - slot_entry_size) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "tuple too large for a page");
     }
 
     std::unique_lock lock(latch_);

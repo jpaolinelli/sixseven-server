@@ -3,6 +3,7 @@
 /// persists xmin/xmax across reopen, and exposes recovery primitives
 /// (Page::restore_tuple, TableHeap::restore_raw_tuple / delete_raw_tuple).
 
+#include "sixseven/common/status.h"
 #include "sixseven/storage/buffer_pool.h"
 #include "sixseven/storage/disk_manager.h"
 #include "sixseven/storage/page.h"
@@ -209,6 +210,68 @@ TEST_F(TableHeapMvccTest, MaxUserPayloadShrinksByHeaderSize) {
 
     auto too_big = heap.insert_tuple(make_bytes(max_user + 1, 0x88));
     EXPECT_FALSE(too_big.has_value());
+}
+
+// GDB-714 review issue 1: a user payload near 64KB pushes the on-page image
+// (payload + 24-byte header) past UINT16_MAX; the image length then truncated
+// to a tiny value, passed the page space check, and persisted garbage while
+// reporting success. The oversize guard in Page::insert_tuple/update_tuple
+// must reject these cleanly instead.
+TEST_F(TableHeapMvccTest, NearUint16MaxPayloadRejectedCleanly) {
+    auto heap = make_mvcc_heap();
+
+    // 65530 + 24 = 65554 -> previously truncated to 18; must now fail cleanly.
+    auto oversize = heap.insert_tuple(make_bytes(65530, 0xAB));
+    ASSERT_FALSE(oversize.has_value());
+    EXPECT_EQ(oversize.error().code, StatusCode::INVALID_ARGUMENT);
+
+    // The exact wrap boundary: image == UINT16_MAX + 1.
+    auto wrap = heap.insert_tuple(make_bytes(65536 - mvcc_header_size, 0xCD));
+    ASSERT_FALSE(wrap.has_value());
+    EXPECT_EQ(wrap.error().code, StatusCode::INVALID_ARGUMENT);
+
+    // The heap must remain fully usable: no phantom rows, normal inserts work.
+    EXPECT_EQ(heap.row_count(), 0U);
+    auto ok_insert = heap.insert_tuple(make_bytes(64, 0x11));
+    ASSERT_TRUE(ok_insert.has_value()) << ok_insert.error().message;
+    auto back = heap.get_tuple(*ok_insert);
+    ASSERT_TRUE(back.has_value());
+    EXPECT_EQ(*back, make_bytes(64, 0x11));
+}
+
+TEST_F(TableHeapMvccTest, NearUint16MaxUpdateRejectedAndOriginalIntact) {
+    auto heap = make_mvcc_heap();
+
+    auto rid = heap.insert_tuple(make_bytes(32, 0x22));
+    ASSERT_TRUE(rid.has_value()) << rid.error().message;
+
+    auto grown = heap.update_tuple(*rid, make_bytes(65530, 0xEF));
+    ASSERT_FALSE(grown.has_value());
+    EXPECT_EQ(grown.error().code, StatusCode::INVALID_ARGUMENT);
+
+    // Original tuple bytes untouched by the failed update.
+    auto back = heap.get_tuple(*rid);
+    ASSERT_TRUE(back.has_value());
+    EXPECT_EQ(*back, make_bytes(32, 0x22));
+}
+
+// Page-level guard holds for raw (non-MVCC) images too.
+TEST(PageOversizeGuard, InsertAndUpdateRejectImagesBeyondUint16) {
+    Page page(1, PageType::DATA);
+
+    auto huge = page.insert_tuple(make_bytes(65536, 0x01));
+    ASSERT_FALSE(huge.has_value());
+    EXPECT_EQ(huge.error().code, StatusCode::INVALID_ARGUMENT);
+
+    auto slot = page.insert_tuple(make_bytes(16, 0x02));
+    ASSERT_TRUE(slot.has_value());
+    auto grown = page.update_tuple(*slot, make_bytes(65560, 0x03));
+    ASSERT_FALSE(grown.has_value());
+    EXPECT_EQ(grown.error().code, StatusCode::INVALID_ARGUMENT);
+
+    auto data = page.get_tuple(*slot);
+    ASSERT_TRUE(data.has_value());
+    EXPECT_EQ(*data, make_bytes(16, 0x02));
 }
 
 TEST_F(TableHeapMvccTest, HeadersPersistAcrossReopen) {
