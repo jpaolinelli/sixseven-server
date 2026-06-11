@@ -43,9 +43,40 @@ std::string_view status_to_sqlstate(StatusCode code);
 /// Convert a Value to its PostgreSQL text-format representation.
 std::string value_to_pg_text(const Value& value);
 
-/// Convert a Value to its PostgreSQL binary-format representation.
-/// Returns raw bytes for supported types (BOOL, INT8–INT64, UINT8–UINT32,
-/// FLOAT32, FLOAT64, STRING). Unsupported types fall back to text.
+/// Return true if values of this type can be sent in PostgreSQL binary
+/// result format (DataRow format code 1) with an encoding that matches the
+/// type OID advertised in RowDescription (see type_to_pg_oid).
+///
+/// The only unsupported type is DECIMAL: it is advertised as numeric, but
+/// Decimal128 carries no scale information (the scale lives in the column
+/// schema, not the Value), so a faithful PostgreSQL numeric digit-group
+/// encoding cannot be produced at the Value level. Result format code 1 is
+/// rejected for DECIMAL columns with an ErrorResponse (SQLSTATE 0A000)
+/// instead of mislabeling text bytes as binary (GDB-718).
+[[nodiscard]] bool pg_binary_result_supported(TypeId type);
+
+/// Convert a Value to its PostgreSQL binary-format representation, matching
+/// the type OID advertised in RowDescription (see type_to_pg_oid):
+/// - BOOL: 1 byte; INT8/INT16/UINT8: int2; INT32/UINT16: int4;
+///   INT64/UINT32: int8 (big-endian)
+/// - UINT64: numeric (base-10000 digit groups, sign 0, dscale 0)
+/// - FLOAT32/FLOAT64: IEEE-754 bits, big-endian
+/// - STRING / PATH (advertised as text) and JSON: raw text bytes — the
+///   PostgreSQL binary representation of text and json IS the text payload
+/// - BLOB (bytea): raw bytes
+/// - DATE: int32 days since 2000-01-01
+/// - TIME: int64 microseconds since midnight
+/// - TIMESTAMP: int64 microseconds since 2000-01-01
+/// - INTERVAL: int64 microseconds + int32 days (always 0; SixSevenDB
+///   intervals have no day component) + int32 months
+/// - POINT: two float8 (x, y), big-endian
+/// - UUID: 16 raw bytes
+/// - EMBEDDING (custom OID): pgvector wire format — int16 dimension,
+///   int16 reserved (0), then dimension float4 values, big-endian
+///
+/// DECIMAL is NOT supported (see pg_binary_result_supported); callers must
+/// check support first. As a guard, DECIMAL returns an empty buffer, which a
+/// binary client rejects loudly instead of misreading text bytes as numeric.
 std::vector<uint8_t> value_to_pg_binary(const Value& value);
 
 // -- Parameter substitution ---------------------------------------------------

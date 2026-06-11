@@ -2030,11 +2030,11 @@ TEST(PgProtocol, BinaryUnsignedTypes) {
     EXPECT_EQ(read_be64(bin_u32), 4294967295LL);
 }
 
-TEST(PgProtocol, BinaryFallbackToText) {
-    // Types without native binary support fall back to text representation.
-    // Date uses text fallback.
-    Date date{19737}; // 2024-01-15
+TEST(PgProtocol, BinaryDateIsPgBinaryNotText) {
+    // GDB-718: DATE no longer falls back to text — it uses the PostgreSQL
+    // binary encoding (int32 days since 2000-01-01, big-endian).
+    Date date{19737}; // 2024-01-15 = Unix day 19737 = PG day 8780.
     auto bin = value_to_pg_binary(Value(date));
-    std::string text(bin.begin(), bin.end());
-    EXPECT_EQ(text, "2024-01-15");
+    ASSERT_EQ(bin.size(), 4u);
+    EXPECT_EQ(read_be32(bin), 19737 - 10957);
 }

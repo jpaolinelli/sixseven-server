@@ -311,31 +311,34 @@ TEST(QA_GDB202_StringBinary, AllBinaryBytes) {
 }
 
 // =============================================================================
-// QA_GDB202_Fallback — Types that fall back to text representation
+// QA_GDB202_Fallback — Formerly asserted the text fallback for types outside
+// the binary switch. GDB-718 removed that fallback (text bytes were being
+// labeled as binary on the wire); these now pin the real PG binary encodings.
 // =============================================================================
 
-TEST(QA_GDB202_Fallback, Uint64FallsBackToText) {
-    // UINT64 is NOT in the binary switch; it should fall back to text.
+TEST(QA_GDB202_Fallback, Uint64UsesNumericBinary) {
+    // GDB-718: UINT64 is advertised as numeric and now uses the PG numeric
+    // binary format (header + base-10000 digit groups), not text.
     auto bin = value_to_pg_binary(Value(static_cast<uint64_t>(18446744073709551615ULL)));
-    // The result should be the text representation.
-    std::string text(bin.begin(), bin.end());
-    EXPECT_EQ(text, "18446744073709551615");
+    // 18446744073709551615 -> 5 digit groups: 1844 6744 0737 0955 1615.
+    ASSERT_EQ(bin.size(), 18u);
+    EXPECT_EQ(read_be16(bin), 5); // ndigits.
 }
 
-TEST(QA_GDB202_Fallback, TimeFallsBackToText) {
+TEST(QA_GDB202_Fallback, TimeUsesInt64Binary) {
+    // GDB-718: TIME binary is int64 microseconds since midnight.
     Time t{43200000000}; // 12:00:00.000000
     auto bin = value_to_pg_binary(Value(t));
-    std::string text(bin.begin(), bin.end());
-    EXPECT_FALSE(text.empty());
-    // Should contain hours:minutes format.
-    EXPECT_NE(text.find(':'), std::string::npos);
+    ASSERT_EQ(bin.size(), 8u);
+    EXPECT_EQ(read_be64(bin), 43200000000LL);
 }
 
-TEST(QA_GDB202_Fallback, TimestampFallsBackToText) {
+TEST(QA_GDB202_Fallback, TimestampUsesInt64Binary) {
+    // GDB-718: TIMESTAMP binary is int64 microseconds since 2000-01-01.
     Timestamp ts{1705334400000000}; // 2024-01-15T16:00:00 UTC.
     auto bin = value_to_pg_binary(Value(ts));
-    std::string text(bin.begin(), bin.end());
-    EXPECT_FALSE(text.empty());
+    ASSERT_EQ(bin.size(), 8u);
+    EXPECT_EQ(read_be64(bin), 1705334400000000LL - 946684800000000LL);
 }
 
 TEST(QA_GDB202_Fallback, BoolDoesNotFallback) {
