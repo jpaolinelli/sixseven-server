@@ -1,4 +1,4 @@
-#include "sixseven/common/config.h"
+﻿#include "sixseven/common/config.h"
 #include "sixseven/server/promotion_manager.h"
 #include "sixseven/server/replication_connection.h"
 #include "sixseven/server/replication_message.h"
@@ -49,7 +49,7 @@ public:
         if (!open_.load()) {
             return make_error(StatusCode::NETWORK_ERROR, "closed");
         }
-        // Block until closed or timeout — simulates waiting for data.
+        // Block until closed or timeout â€” simulates waiting for data.
         std::unique_lock lock(mu_);
         cv_.wait_for(lock, timeout, [this] { return !open_.load(); });
         if (!open_.load()) {
@@ -190,7 +190,7 @@ TEST_F(PromotionTest, CannotPromoteTwice) {
     auto result = pm.promote();
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
-    // Second promote should fail — server is now primary.
+    // Second promote should fail â€” server is now primary.
     auto result2 = pm.promote();
     ASSERT_FALSE(result2.has_value());
     EXPECT_EQ(result2.error().code, StatusCode::REPLICATION_ERROR);
@@ -238,7 +238,7 @@ TEST_F(PromotionTest, TimelinePersistence) {
 TEST_F(PromotionTest, LoadTimelineDefaultsToOne) {
     PromotionManager pm(config_, nullptr, *wal_writer_, disk_mgr_, wal_dir_->path());
 
-    // No timeline file exists — should default to 1.
+    // No timeline file exists â€” should default to 1.
     auto load_result = pm.load_timeline();
     ASSERT_TRUE(load_result.has_value()) << load_result.error().message;
     EXPECT_EQ(pm.timeline_id(), 1u);
@@ -314,7 +314,7 @@ TEST_F(PromotionTest, DeserializePromoteDataTooShort) {
 // =============================================================================
 
 TEST_F(PromotionTest, PromoteMaxLagBytesDefault) {
-    // Default is 0 (no lag limit) — promotion should succeed even with lag.
+    // Default is 0 (no lag limit) â€” promotion should succeed even with lag.
     EXPECT_EQ(config_.replication_promote_max_lag_bytes, 0);
 
     PromotionManager pm(config_, nullptr, *wal_writer_, disk_mgr_, wal_dir_->path());
@@ -334,7 +334,7 @@ TEST(PromotionConfigTest, DefaultPromoteMaxLagBytes) {
 TEST(PromotionConfigTest, ApplySettingPromoteMaxLagBytes) {
     Config config = Config::load_defaults();
 
-    config.apply_setting("replication.promote_max_lag_bytes", "1048576");
+    ASSERT_TRUE(config.apply_setting("replication.promote_max_lag_bytes", "1048576").has_value());
     EXPECT_EQ(config.replication_promote_max_lag_bytes, 1048576);
 }
 

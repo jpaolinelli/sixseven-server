@@ -1,8 +1,7 @@
-#include "sixseven/common/config.h"
+﻿#include "sixseven/common/config.h"
+#include "sixseven/common/platform.h"
 
 #include <gtest/gtest.h>
-
-#include "sixseven/common/platform.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -110,4 +109,170 @@ TEST_F(ConfigFileTest, EmptyJsonObjectUsesDefaults) {
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->port, 6767);
     EXPECT_EQ(result->data_dir, "./data");
+}
+
+// ---------------------------------------------------------------------------
+// GDB-729: apply_setting must return Result<void> and reject bad numeric input
+// ---------------------------------------------------------------------------
+
+// Helper: a fresh config so we can check mutations.
+static Config make_config() {
+    return Config::load_defaults();
+}
+
+TEST(Config, ApplySettingValidPort) {
+    auto config = make_config();
+    auto r = config.apply_setting("server.port", "8080");
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_EQ(config.port, 8080);
+}
+
+TEST(Config, ApplySettingAlphaPortReturnsError) {
+    auto config = make_config();
+    auto r = config.apply_setting("server.port", "abc");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
+    // Port must be unchanged.
+    EXPECT_EQ(config.port, 6767);
+}
+
+TEST(Config, ApplySettingEmptyStringReturnsError) {
+    auto config = make_config();
+    auto r = config.apply_setting("server.port", "");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST(Config, ApplySettingTrailingJunkRejected) {
+    // "123abc" — from_chars consumes "123" but stops at 'a', ptr != end.
+    auto config = make_config();
+    auto r = config.apply_setting("server.port", "123abc");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_EQ(config.port, 6767);
+}
+
+TEST(Config, ApplySettingPortOutOfRangeReturnsError) {
+    auto config = make_config();
+    auto r = config.apply_setting("server.port", "70000");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_EQ(config.port, 6767);
+}
+
+TEST(Config, ApplySettingNegativeIntoUnsignedReturnsError) {
+    // from_chars on an unsigned type does not accept a leading '-'.
+    auto config = make_config();
+    auto r = config.apply_setting("server.max_connections", "-1");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST(Config, ApplySettingValidI32) {
+    auto config = make_config();
+    auto r = config.apply_setting("replication.keepalive_interval_ms", "5000");
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_EQ(config.replication_keepalive_interval_ms, 5000);
+}
+
+TEST(Config, ApplySettingAlphaI32ReturnsError) {
+    auto config = make_config();
+    auto r = config.apply_setting("replication.keepalive_interval_ms", "abc");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
+    // Value must be unchanged.
+    EXPECT_EQ(config.replication_keepalive_interval_ms, 10000);
+}
+
+TEST(Config, ApplySettingTrailingJunkI32Rejected) {
+    auto config = make_config();
+    auto r = config.apply_setting("replication.keepalive_interval_ms", "5000ms");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST(Config, ApplySettingValidI64) {
+    auto config = make_config();
+    auto r = config.apply_setting("replication.promote_max_lag_bytes", "1048576");
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_EQ(config.replication_promote_max_lag_bytes, 1048576);
+}
+
+TEST(Config, ApplySettingAlphaI64ReturnsError) {
+    auto config = make_config();
+    auto r = config.apply_setting("replication.promote_max_lag_bytes", "not_a_number");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST(Config, ApplySettingStringKeyAcceptsAnyValue) {
+    // String keys (e.g. logging.level) must never error regardless of content.
+    auto config = make_config();
+    auto r = config.apply_setting("logging.level", "trace");
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_EQ(config.log_level, "trace");
+}
+
+TEST(Config, ApplySettingUnknownKeyIgnored) {
+    auto config = make_config();
+    auto r = config.apply_setting("completely.unknown.key", "anything");
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+}
+
+TEST(Config, ApplySettingValidValues_AllNumericKeys) {
+    // Smoke-test that each numeric key accepts its own default value.
+    auto config = make_config();
+    struct KV {
+        const char* key;
+        const char* value;
+    };
+    KV cases[] = {
+        {"server.port", "6767"},
+        {"server.max_connections", "100"},
+        {"storage.buffer_pool_size_mb", "256"},
+        {"storage.wal_segment_size_mb", "16"},
+        {"replication.max_wal_senders", "10"},
+        {"replication.keepalive_interval_ms", "10000"},
+        {"replication.sender_timeout_ms", "60000"},
+        {"replication.primary_port", "6767"},
+        {"replication.retry_interval_ms", "5000"},
+        {"replication.max_retry_interval_ms", "60000"},
+        {"replication.synchronous_commit_count", "1"},
+        {"replication.synchronous_timeout_ms", "30000"},
+        {"replication.promote_max_lag_bytes", "0"},
+        {"replication.lag_warning_threshold_ms", "10000"},
+        {"replication.disconnect_warning_threshold_ms", "60000"},
+        {"server.shutdown_timeout_s", "30"},
+    };
+    for (const auto& kv : cases) {
+        auto r = config.apply_setting(kv.key, kv.value);
+        EXPECT_TRUE(r.has_value())
+            << "key=" << kv.key << " value=" << kv.value << " err=" << (r ? "" : r.error().message);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GDB-729: validate_setting must catch errors without mutating config
+// ---------------------------------------------------------------------------
+
+TEST(Config, ValidateSettingAlphaPortFails) {
+    auto r = Config::validate_setting("server.port", "abc");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST(Config, ValidateSettingValidPortSucceeds) {
+    auto r = Config::validate_setting("server.port", "9090");
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+}
+
+TEST(Config, ValidateSettingUnknownKeySucceeds) {
+    auto r = Config::validate_setting("no.such.key", "whatever");
+    ASSERT_TRUE(r.has_value());
+}
+
+TEST(Config, ValidateSettingStringKeySucceeds) {
+    auto r = Config::validate_setting("logging.level", "!!!not_a_log_level");
+    // String keys accept any value — no parse check.
+    ASSERT_TRUE(r.has_value());
 }

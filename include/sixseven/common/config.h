@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "sixseven/common/result.h"
 
@@ -61,7 +61,14 @@ struct Config {
     /// Apply a single setting from sys_settings.
     /// Maps dotted setting keys (e.g., "server.port") to Config fields.
     /// Unknown keys are silently ignored.
-    void apply_setting(const std::string& key, const std::string& value);
+    /// Returns INVALID_ARGUMENT if the value cannot be parsed for a numeric key.
+    [[nodiscard]] Result<void> apply_setting(const std::string& key, const std::string& value);
+
+    /// Validate that a value is acceptable for the given key without applying it.
+    /// Returns ok() for string/bool keys (any value accepted) and for unknown keys.
+    /// Returns INVALID_ARGUMENT if the value fails numeric parsing or range checks.
+    [[nodiscard]] static Result<void> validate_setting(const std::string& key,
+                                                       const std::string& value);
 };
 
 } // namespace sixseven

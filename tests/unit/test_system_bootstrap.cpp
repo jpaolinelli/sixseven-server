@@ -1,4 +1,4 @@
-#include "sixseven/catalog/catalog.h"
+﻿#include "sixseven/catalog/catalog.h"
 #include "sixseven/common/config.h"
 #include "sixseven/common/types.h"
 #include "sixseven/common/value.h"
@@ -320,44 +320,44 @@ TEST_F(SystemBootstrapTest, ConfigPriorityChain) {
 
 TEST_F(SystemBootstrapTest, ApplySettingPort) {
     Config config = Config::load_defaults();
-    config.apply_setting("server.port", "9999");
+    ASSERT_TRUE(config.apply_setting("server.port", "9999").has_value());
     EXPECT_EQ(config.port, 9999);
 }
 
 TEST_F(SystemBootstrapTest, ApplySettingMaxConnections) {
     Config config = Config::load_defaults();
-    config.apply_setting("server.max_connections", "500");
+    ASSERT_TRUE(config.apply_setting("server.max_connections", "500").has_value());
     EXPECT_EQ(config.max_connections, 500u);
 }
 
 TEST_F(SystemBootstrapTest, ApplySettingDataDir) {
     Config config = Config::load_defaults();
-    config.apply_setting("storage.data_dir", "/var/sixseven");
+    ASSERT_TRUE(config.apply_setting("storage.data_dir", "/var/sixseven").has_value());
     EXPECT_EQ(config.data_dir, "/var/sixseven");
 }
 
 TEST_F(SystemBootstrapTest, ApplySettingBufferPool) {
     Config config = Config::load_defaults();
-    config.apply_setting("storage.buffer_pool_size_mb", "1024");
+    ASSERT_TRUE(config.apply_setting("storage.buffer_pool_size_mb", "1024").has_value());
     EXPECT_EQ(config.buffer_pool_size_mb, 1024u);
 }
 
 TEST_F(SystemBootstrapTest, ApplySettingWalSegment) {
     Config config = Config::load_defaults();
-    config.apply_setting("storage.wal_segment_size_mb", "64");
+    ASSERT_TRUE(config.apply_setting("storage.wal_segment_size_mb", "64").has_value());
     EXPECT_EQ(config.wal_segment_size_mb, 64u);
 }
 
 TEST_F(SystemBootstrapTest, ApplySettingLogLevel) {
     Config config = Config::load_defaults();
-    config.apply_setting("logging.level", "debug");
+    ASSERT_TRUE(config.apply_setting("logging.level", "debug").has_value());
     EXPECT_EQ(config.log_level, "debug");
 }
 
 TEST_F(SystemBootstrapTest, ApplySettingUnknownKeyIgnored) {
     Config config = Config::load_defaults();
     auto original_port = config.port;
-    config.apply_setting("unknown.key", "value");
+    ASSERT_TRUE(config.apply_setting("unknown.key", "value").has_value());
     EXPECT_EQ(config.port, original_port); // Unchanged.
 }
 

@@ -1,4 +1,4 @@
-#include "sixseven/catalog/catalog.h"
+﻿#include "sixseven/catalog/catalog.h"
 #include "sixseven/common/config.h"
 #include "sixseven/common/types.h"
 #include "sixseven/executor/query_engine.h"
@@ -140,7 +140,7 @@ TEST_F(StandbyModeTest, AllowsShowColumns) {
 }
 
 TEST_F(StandbyModeTest, StandbyModeToggle) {
-    // Currently in standby mode — writes should fail.
+    // Currently in standby mode â€” writes should fail.
     auto result = engine_->execute("INSERT INTO users VALUES (2, 'bob', 25)");
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::READ_ONLY);
@@ -172,26 +172,26 @@ TEST(StandbyConfigTest, ApplySettingServerMode) {
     Config config = Config::load_defaults();
     EXPECT_FALSE(config.standby_mode);
 
-    config.apply_setting("server.mode", "standby");
+    ASSERT_TRUE(config.apply_setting("server.mode", "standby").has_value());
     EXPECT_TRUE(config.standby_mode);
 
-    config.apply_setting("server.mode", "primary");
+    ASSERT_TRUE(config.apply_setting("server.mode", "primary").has_value());
     EXPECT_FALSE(config.standby_mode);
 }
 
 TEST(StandbyConfigTest, ApplySettingReplicationParams) {
     Config config = Config::load_defaults();
 
-    config.apply_setting("replication.primary_host", "192.168.1.100");
+    ASSERT_TRUE(config.apply_setting("replication.primary_host", "192.168.1.100").has_value());
     EXPECT_EQ(config.replication_primary_host, "192.168.1.100");
 
-    config.apply_setting("replication.primary_port", "5433");
+    ASSERT_TRUE(config.apply_setting("replication.primary_port", "5433").has_value());
     EXPECT_EQ(config.replication_primary_port, 5433);
 
-    config.apply_setting("replication.retry_interval_ms", "10000");
+    ASSERT_TRUE(config.apply_setting("replication.retry_interval_ms", "10000").has_value());
     EXPECT_EQ(config.replication_retry_interval_ms, 10000);
 
-    config.apply_setting("replication.max_retry_interval_ms", "120000");
+    ASSERT_TRUE(config.apply_setting("replication.max_retry_interval_ms", "120000").has_value());
     EXPECT_EQ(config.replication_max_retry_interval_ms, 120000);
 }
 

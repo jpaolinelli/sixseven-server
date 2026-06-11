@@ -1,6 +1,7 @@
-#include "sixseven/executor/settings_cache.h"
+﻿#include "sixseven/executor/settings_cache.h"
 
 #include "sixseven/catalog/schema.h"
+#include "sixseven/common/config.h"
 #include "sixseven/common/logging.h"
 #include "sixseven/executor/query_engine.h"
 
@@ -79,6 +80,11 @@ Result<void> SettingsCache::update(const std::string& key, const std::string& ne
         return make_error(StatusCode::INVALID_ARGUMENT,
                           "parameter '" + key +
                               "' cannot be changed at runtime (requires restart)");
+    }
+    // Validate that the new value is parseable for this key.
+    auto validate = Config::validate_setting(key, new_value);
+    if (!validate) {
+        return make_error(validate.error().code, validate.error().message);
     }
     it->second.value = new_value;
     return ok();

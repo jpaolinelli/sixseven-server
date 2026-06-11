@@ -1,4 +1,4 @@
-/// @file test_qa_gdb_10.cpp
+﻿/// @file test_qa_gdb_10.cpp
 /// @brief Adversarial QA tests for GDB-10: Repository & Build System Setup
 ///
 /// Tests cover: logging edge cases, Result/Error edge cases, Config boundary
@@ -6,12 +6,11 @@
 
 #include "sixseven/common/config.h"
 #include "sixseven/common/logging.h"
+#include "sixseven/common/platform.h"
 #include "sixseven/common/result.h"
 #include "sixseven/common/status.h"
 
 #include <gtest/gtest.h>
-
-#include "sixseven/common/platform.h"
 
 #include <climits>
 #include <cstdio>
@@ -23,11 +22,11 @@
 using namespace sixseven;
 
 // ============================================================================
-// QA_Logging — adversarial logging tests
+// QA_Logging â€” adversarial logging tests
 // ============================================================================
 
 TEST(QA_Logging, InitWithInvalidLevel) {
-    // Invalid level string should not crash — spdlog uses "off" as fallback.
+    // Invalid level string should not crash â€” spdlog uses "off" as fallback.
     EXPECT_NO_THROW(sixseven::init_logging("nonexistent_level"));
 }
 
@@ -60,7 +59,7 @@ TEST(QA_Logging, LogWithFormatArgs) {
 }
 
 // ============================================================================
-// QA_Result — adversarial Result<T> and Error tests
+// QA_Result â€” adversarial Result<T> and Error tests
 // ============================================================================
 
 TEST(QA_Result, VoidResultSuccess) {
@@ -134,7 +133,7 @@ TEST(QA_Result, SourceLocationCapture) {
 }
 
 // ============================================================================
-// QA_StatusCode — adversarial StatusCode tests
+// QA_StatusCode â€” adversarial StatusCode tests
 // ============================================================================
 
 TEST(QA_StatusCode, AllCodesHaveNames) {
@@ -194,7 +193,7 @@ TEST(QA_StatusCode, EveryCodeUsableInError) {
 }
 
 // ============================================================================
-// QA_Config — adversarial Config tests
+// QA_Config â€” adversarial Config tests
 // ============================================================================
 
 class QA_ConfigFile : public ::testing::Test {
@@ -307,7 +306,7 @@ TEST_F(QA_ConfigFile, JsonArray) {
     // A JSON array (instead of object) should not crash.
     write_file(R"([1, 2, 3])");
     auto result = Config::load_from_file(tmp_path_);
-    // This is valid JSON but semantically wrong — should either succeed with
+    // This is valid JSON but semantically wrong â€” should either succeed with
     // defaults (fields don't match) or fail gracefully.
     if (result.has_value()) {
         // If it defaults, port should be default.
@@ -319,7 +318,7 @@ TEST_F(QA_ConfigFile, JsonArray) {
 TEST_F(QA_ConfigFile, EmptyFile) {
     write_file("");
     auto result = Config::load_from_file(tmp_path_);
-    // Empty file is not valid JSON — should return PARSE_ERROR.
+    // Empty file is not valid JSON â€” should return PARSE_ERROR.
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
@@ -393,93 +392,95 @@ TEST_F(QA_ConfigFile, ReplicationSettings) {
 }
 
 // ============================================================================
-// QA_ApplySetting — adversarial apply_setting tests
+// QA_ApplySetting â€” adversarial apply_setting tests
 // ============================================================================
 
 TEST(QA_ApplySetting, ValidPortSetting) {
     Config config = Config::load_defaults();
-    config.apply_setting("server.port", "9999");
+    ASSERT_TRUE(config.apply_setting("server.port", "9999").has_value());
     EXPECT_EQ(config.port, 9999);
 }
 
 TEST(QA_ApplySetting, PortOverflow) {
     Config config = Config::load_defaults();
-    // Port > 65535 should be silently ignored.
-    config.apply_setting("server.port", "70000");
+    // Port > 65535 must now return INVALID_ARGUMENT (not silently ignored).
+    auto r = config.apply_setting("server.port", "70000");
+    EXPECT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
     EXPECT_EQ(config.port, 6767); // unchanged
 }
 
 TEST(QA_ApplySetting, UnknownKeyIgnored) {
     Config config = Config::load_defaults();
-    EXPECT_NO_THROW(config.apply_setting("totally.unknown.key", "value"));
+    EXPECT_TRUE(config.apply_setting("totally.unknown.key", "value").has_value());
 }
 
 TEST(QA_ApplySetting, EmptyValue) {
     Config config = Config::load_defaults();
     // Applying an empty value for a string setting.
-    config.apply_setting("storage.data_dir", "");
+    ASSERT_TRUE(config.apply_setting("storage.data_dir", "").has_value());
     EXPECT_EQ(config.data_dir, "");
 }
 
 TEST(QA_ApplySetting, BoolSettingVariants) {
     Config config = Config::load_defaults();
-    config.apply_setting("replication.archive_enabled", "TRUE");
+    ASSERT_TRUE(config.apply_setting("replication.archive_enabled", "TRUE").has_value());
     EXPECT_TRUE(config.archive_enabled);
 
-    config.apply_setting("replication.archive_enabled", "true");
+    ASSERT_TRUE(config.apply_setting("replication.archive_enabled", "TRUE").has_value());
     EXPECT_TRUE(config.archive_enabled);
 
-    config.apply_setting("replication.archive_enabled", "1");
+    ASSERT_TRUE(config.apply_setting("replication.archive_enabled", "1").has_value());
     EXPECT_TRUE(config.archive_enabled);
 
-    config.apply_setting("replication.archive_enabled", "false");
+    ASSERT_TRUE(config.apply_setting("replication.archive_enabled", "false").has_value());
     EXPECT_FALSE(config.archive_enabled);
 
-    config.apply_setting("replication.archive_enabled", "0");
+    ASSERT_TRUE(config.apply_setting("replication.archive_enabled", "0").has_value());
     EXPECT_FALSE(config.archive_enabled);
 }
 
 TEST(QA_ApplySetting, StandbyModeSetting) {
     Config config = Config::load_defaults();
     EXPECT_FALSE(config.standby_mode);
-    config.apply_setting("server.mode", "standby");
+    ASSERT_TRUE(config.apply_setting("server.mode", "standby").has_value());
     EXPECT_TRUE(config.standby_mode);
-    config.apply_setting("server.mode", "primary");
+    ASSERT_TRUE(config.apply_setting("server.mode", "primary").has_value());
     EXPECT_FALSE(config.standby_mode);
 }
 
 TEST(QA_ApplySetting, AllStringSettings) {
     Config config = Config::load_defaults();
-    config.apply_setting("logging.level", "debug");
+    ASSERT_TRUE(config.apply_setting("logging.level", "debug").has_value());
     EXPECT_EQ(config.log_level, "debug");
 
-    config.apply_setting("replication.synchronous_mode", "remote_write");
+    ASSERT_TRUE(config.apply_setting("replication.synchronous_mode", "remote_write").has_value());
     EXPECT_EQ(config.replication_synchronous_mode, "remote_write");
 
-    config.apply_setting("replication.synchronous_fallback", "warn");
+    ASSERT_TRUE(config.apply_setting("replication.synchronous_fallback", "warn").has_value());
     EXPECT_EQ(config.replication_synchronous_fallback, "warn");
 
-    config.apply_setting("server.auth_method", "scram-sha-256");
+    ASSERT_TRUE(config.apply_setting("server.auth_method", "scram-sha-256").has_value());
     EXPECT_EQ(config.auth_method, "scram-sha-256");
 }
 
 TEST(QA_ApplySetting, NumericSettings) {
     Config config = Config::load_defaults();
-    config.apply_setting("server.max_connections", "500");
+    ASSERT_TRUE(config.apply_setting("server.max_connections", "500").has_value());
     EXPECT_EQ(config.max_connections, 500u);
 
-    config.apply_setting("storage.buffer_pool_size_mb", "1024");
+    ASSERT_TRUE(config.apply_setting("storage.buffer_pool_size_mb", "1024").has_value());
     EXPECT_EQ(config.buffer_pool_size_mb, 1024u);
 
-    config.apply_setting("storage.wal_segment_size_mb", "64");
+    ASSERT_TRUE(config.apply_setting("storage.wal_segment_size_mb", "64").has_value());
     EXPECT_EQ(config.wal_segment_size_mb, 64u);
 
-    config.apply_setting("server.shutdown_timeout_s", "60");
+    ASSERT_TRUE(config.apply_setting("server.shutdown_timeout_s", "60").has_value());
     EXPECT_EQ(config.shutdown_timeout_s, 60);
 }
 
 // ============================================================================
-// QA_Defaults — verify Config defaults match acceptance criteria
+// QA_Defaults â€” verify Config defaults match acceptance criteria
 // ============================================================================
 
 TEST(QA_Defaults, AllDefaultsCorrect) {
@@ -499,7 +500,7 @@ TEST(QA_Defaults, AllDefaultsCorrect) {
 }
 
 // ============================================================================
-// QA_BuildSystem — verify build system acceptance criteria
+// QA_BuildSystem â€” verify build system acceptance criteria
 // ============================================================================
 
 TEST(QA_BuildSystem, UnitTestTargetRuns) {
