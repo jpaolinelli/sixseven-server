@@ -218,33 +218,102 @@ TEST_F(ReplicationIntegrationTest, BasicReplicationFlow) {
     WalSenderManager sender_mgr(
         primary_wal_dir_, nullptr, *primary_writer_, 10, sender_opts, primary_slot_mgr_.get());
 
-    // Connect standby.
-    auto conn = std::make_unique<LinkedConnection>("standby_1",
-                                                   std::make_shared<std::vector<uint8_t>>(),
-                                                   std::make_shared<std::vector<uint8_t>>(),
-                                                   std::make_shared<std::mutex>(),
-                                                   std::make_shared<std::mutex>(),
-                                                   std::make_shared<std::condition_variable>(),
-                                                   std::make_shared<std::condition_variable>());
-    ASSERT_TRUE(sender_mgr.accept_connection(std::move(conn), 1, "standby_1").has_value());
+    // Cross-wire two LinkedConnections so bytes sent by the WalSender actually
+    // arrive at the WalReceiver (and vice-versa for status acknowledgements).
+    //
+    //   primary_to_replica_buf : sender writes here  → receiver reads here
+    //   replica_to_primary_buf : receiver writes here → sender reads here
+    auto primary_to_replica_buf = std::make_shared<std::vector<uint8_t>>();
+    auto replica_to_primary_buf = std::make_shared<std::vector<uint8_t>>();
+    auto primary_to_replica_mu = std::make_shared<std::mutex>();
+    auto replica_to_primary_mu = std::make_shared<std::mutex>();
+    auto primary_to_replica_cv = std::make_shared<std::condition_variable>();
+    auto replica_to_primary_cv = std::make_shared<std::condition_variable>();
 
-    // Verify sender is active.
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // Sender-side connection: send → primary_to_replica, recv ← replica_to_primary.
+    auto sender_conn = std::make_unique<LinkedConnection>("standby_1",
+                                                          primary_to_replica_buf,
+                                                          replica_to_primary_buf,
+                                                          primary_to_replica_mu,
+                                                          replica_to_primary_mu,
+                                                          primary_to_replica_cv,
+                                                          replica_to_primary_cv);
+    ASSERT_TRUE(sender_mgr.accept_connection(std::move(sender_conn), 1, "standby_1").has_value());
+
+    // Bounded wait helper — no fixed sleeps.
+    auto wait_until = [](auto&& pred) {
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!pred()) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return true;
+    };
+
+    // Wait for the sender to reach STREAMING state before writing more WAL.
+    ASSERT_TRUE(wait_until([&] {
+        auto s = sender_mgr.get_sender_statuses();
+        return s.size() == 1 && s[0].state == WalSender::State::STREAMING;
+    })) << "sender never reached STREAMING state";
+
     auto statuses = sender_mgr.get_sender_statuses();
     ASSERT_EQ(statuses.size(), 1u);
     EXPECT_EQ(statuses[0].slot_name, "standby_1");
     EXPECT_EQ(statuses[0].sync_state, "async");
 
-    // Write more data on primary.
+    // Attach a real WalReceiver that uses the cross-wired receiver-side
+    // connection.  The ConnectionFactory is invoked by WalReceiver::start();
+    // we ignore host/port and return our pre-wired in-process connection.
+    // Receiver-side connection: send → replica_to_primary (status acks),
+    //                           recv ← primary_to_replica (WAL data).
+    TrackingRecoveryHandler recovery_handler;
+    WalReceiverOptions recv_opts;
+    recv_opts.receive_timeout = std::chrono::milliseconds(200);
+    WalReceiver receiver(
+        [&](const std::string& /*host*/,
+            uint16_t /*port*/) -> Result<std::unique_ptr<ReplicationConnection>> {
+            return ok(std::make_unique<LinkedConnection>("primary",
+                                                         replica_to_primary_buf,
+                                                         primary_to_replica_buf,
+                                                         replica_to_primary_mu,
+                                                         primary_to_replica_mu,
+                                                         replica_to_primary_cv,
+                                                         primary_to_replica_cv));
+        },
+        replica_wal_dir_,
+        recovery_handler,
+        recv_opts);
+    ASSERT_TRUE(receiver.start("primary", 0).has_value());
+
+    // Write more data on primary and notify senders.
     write_txn(*primary_writer_, 2, 1, "more_data");
     ASSERT_TRUE(primary_writer_->flush().has_value());
-    sender_mgr.notify_new_wal(primary_writer_->flushed_lsn());
+    const lsn_t expected_lsn = primary_writer_->flushed_lsn();
+    sender_mgr.notify_new_wal(expected_lsn);
 
-    // Verify the slot is active.
+    // Assert 1: sent_lsn must advance to the primary's flushed LSN —
+    // proving the sender actually streamed bytes across the linked pipe.
+    ASSERT_TRUE(wait_until([&] {
+        auto s = sender_mgr.get_sender_statuses();
+        return s.size() == 1 && s[0].sent_lsn == expected_lsn;
+    })) << "sent_lsn never advanced to primary flushed_lsn — no WAL bytes crossed the link";
+
+    // Assert 2: the WalReceiver must have replayed at least one WAL record —
+    // proving bytes sent by the sender were received, decoded, and replayed by
+    // the receiver's recovery handler (real data flow, not just bookkeeping).
+    ASSERT_TRUE(wait_until([&] { return recovery_handler.redo_count() > 0; }))
+        << "WalReceiver never called redo() — WAL data did not reach the receiver";
+
+    EXPECT_GT(recovery_handler.redo_count(), 0);
+
+    // Assert 3: the slot remains active (bookkeeping preserved from original).
     auto slot = primary_slot_mgr_->get_slot("standby_1");
     ASSERT_TRUE(slot.has_value());
     EXPECT_TRUE(slot->active);
 
+    receiver.stop();
     sender_mgr.stop_all();
 }
 
