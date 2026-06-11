@@ -1,4 +1,4 @@
-﻿#include "sixseven/catalog/catalog.h"
+#include "sixseven/catalog/catalog.h"
 #include "sixseven/common/types.h"
 #include "sixseven/common/value.h"
 #include "sixseven/executor/query_engine.h"
