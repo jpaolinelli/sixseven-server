@@ -15,6 +15,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -27,6 +29,8 @@ protected:
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb_26";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
+
+        bootstrap_qa_catalog(catalog_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
@@ -291,22 +295,11 @@ TEST_F(QA_Subquery, ScalarSubqueryWithAggregateSum) {
 }
 
 TEST_F(QA_Subquery, ScalarSubqueryInWhereClause) {
-    // BUG: Scalar subquery in WHERE clause fails with
-    // "scalar subquery evaluation requires SubqueryContext".
-    // The WHERE predicate is pushed to a Filter or SeqScan that lacks SubqueryContext.
-    // Expected: should return alice (user whose id matches the subquery result).
-    auto result = engine_->execute(
-        "SELECT users.name FROM users "
-        "WHERE users.id = (SELECT orders.user_id FROM orders WHERE orders.id = 100)");
-    if (result.has_value()) {
-        // If fixed, verify correctness.
-        ASSERT_EQ(result->rows.size(), 1u);
-        EXPECT_EQ(result->rows[0][0].as_string(), "alice");
-    } else {
-        // Record as known failure — scalar subquery in WHERE is broken.
-        EXPECT_EQ(result.error().code, StatusCode::NOT_IMPLEMENTED)
-            << "Unexpected error: " << result.error().message;
-    }
+    // Scalar subquery in WHERE clause: orders.id=100 has user_id=1 which is alice.
+    auto qr = exec_ok("SELECT users.name FROM users "
+                      "WHERE users.id = (SELECT orders.user_id FROM orders WHERE orders.id = 100)");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "alice");
 }
 
 // =============================================================================
