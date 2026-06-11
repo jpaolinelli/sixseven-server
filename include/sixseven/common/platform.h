@@ -57,6 +57,16 @@
 #undef DELETE
 #endif
 
+// The Windows SDK SAL headers define IN and OUT as empty annotation macros,
+// which mangle our TraverseDirection::IN/OUT enum values when platform.h is
+// included before parser/ast.h.
+#ifdef IN
+#undef IN
+#endif
+#ifdef OUT
+#undef OUT
+#endif
+
 // ── Type aliases ─────────────────────────────────────────────────────────────
 #if !defined(_SSIZE_T_DEFINED)
 #define _SSIZE_T_DEFINED

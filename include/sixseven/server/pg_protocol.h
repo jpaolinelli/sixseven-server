@@ -59,6 +59,29 @@ substitute_parameters(const std::string& sql,
                       const std::vector<std::optional<std::string>>& param_values,
                       const std::vector<uint32_t>& param_oids);
 
+// -- Bind parameter decoding --------------------------------------------------
+
+/// Decode a single binary-format (format code 1) Bind parameter value into
+/// its PostgreSQL text representation according to its type OID.
+/// Supported binary OIDs: bool, int2, int4, int8, float4, float8 (network
+/// byte order), plus text-like OIDs (text, varchar, json) whose binary
+/// representation is identical to their text form.
+/// Returns INVALID_ARGUMENT for OIDs that cannot be decoded or for values
+/// with a malformed length.
+[[nodiscard]] Result<std::string> decode_binary_parameter(const std::string& bytes, uint32_t oid);
+
+/// Resolve Bind parameter format codes (PostgreSQL semantics: zero codes =
+/// all text, one code = applies to all parameters, N codes = per-parameter)
+/// and decode every binary-format parameter into its text representation.
+/// NULL parameters are passed through unchanged. Returns INVALID_ARGUMENT
+/// when the format-code count does not match the parameter count, when a
+/// format code is neither 0 (text) nor 1 (binary), or when a binary value
+/// cannot be decoded.
+[[nodiscard]] Result<std::vector<std::optional<std::string>>>
+decode_bind_parameters(const std::vector<std::optional<std::string>>& param_values,
+                       const std::vector<int16_t>& param_format_codes,
+                       const std::vector<uint32_t>& param_oids);
+
 // -- SQL splitting ------------------------------------------------------------
 
 /// Split a SQL string on semicolons into individual statements.
@@ -160,6 +183,7 @@ struct Portal {
     std::string sql;
     std::vector<std::optional<std::string>> param_values; ///< nullopt = SQL NULL.
     std::vector<uint32_t> param_oids;                     ///< Type OIDs from Parse.
+    std::vector<int16_t> param_format_codes;              ///< From Bind: 0 = text, 1 = binary.
     std::vector<int16_t> result_format_codes;
 };
 
