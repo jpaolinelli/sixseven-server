@@ -171,7 +171,9 @@ TEST(QA_GDB_149, ShowAllCaseInsensitive) {
     auto r = s.try_handle_command("SHOW all");
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r->has_value());
-    EXPECT_EQ(r->value().rows.size(), 6u);
+    // GDB-721 expanded DEFAULT_VARIABLES to 18 entries; use >= to survive
+    // future additions rather than pinning an exact count.
+    EXPECT_GE(r->value().rows.size(), 18u);
 }
 
 TEST(QA_GDB_149, ShowAllMixedCase) {
@@ -179,7 +181,9 @@ TEST(QA_GDB_149, ShowAllMixedCase) {
     auto r = s.try_handle_command("SHOW All");
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r->has_value());
-    EXPECT_EQ(r->value().rows.size(), 6u);
+    // GDB-721 expanded DEFAULT_VARIABLES to 18 entries; use >= to survive
+    // future additions rather than pinning an exact count.
+    EXPECT_GE(r->value().rows.size(), 18u);
 }
 
 TEST(QA_GDB_149, ShowVariableCaseInsensitive) {
