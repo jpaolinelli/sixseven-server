@@ -64,7 +64,7 @@ TEST(QA_Page, InsertOneBeyondFreeSpaceFails) {
 
     auto data = make_bytes(avail + 1, 0x99);
     auto result = page.insert_tuple(data);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -876,7 +876,7 @@ TEST(QA_Overflow, FreeZeroPageIdFails) {
 
     OverflowPointer bad{0, 100};
     auto result = mgr.free_overflow(bad);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -888,7 +888,7 @@ TEST(QA_Overflow, ReadZeroLengthFails) {
 
     OverflowPointer bad{1, 0};
     auto result = mgr.read_overflow(bad);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -897,7 +897,7 @@ TEST(QA_Overflow, ReadZeroLengthFails) {
 TEST(QA_InMemoryAllocator, FreeInvalidIdZeroFails) {
     InMemoryPageAllocator alloc;
     auto result = alloc.free_page(0);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -915,7 +915,7 @@ TEST(QA_InMemoryAllocator, GetAfterDoubleFree) {
 
     // Get after free returns error.
     auto get = alloc.get_page(*id);
-    EXPECT_FALSE(get.has_value());
+    ASSERT_FALSE(get.has_value());
     EXPECT_EQ(get.error().code, StatusCode::NOT_FOUND);
 }
 

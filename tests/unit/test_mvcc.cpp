@@ -159,7 +159,7 @@ TEST(TransactionManager, CommitNonActive) {
 
     // Double commit fails.
     auto result = mgr.commit(t1->txn_id);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::TXN_ABORTED);
 }
 
@@ -170,14 +170,14 @@ TEST(TransactionManager, AbortNonActive) {
 
     // Double abort fails.
     auto result = mgr.abort(t1->txn_id);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
 TEST(TransactionManager, CommitNotFound) {
     TransactionManager mgr;
     auto result = mgr.commit(999);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -456,7 +456,7 @@ TEST(WriteConflict, DetectedUnderSnapshotIsolation) {
 
     // T2 tries to commit — should fail with TXN_CONFLICT.
     auto result = mgr.commit(t2->txn_id);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::TXN_CONFLICT);
 
     // T2 should be aborted.
@@ -753,7 +753,7 @@ TEST(SSI, WriteSkewDetected) {
     // For T2 committing: rw-out = T2 reads rid_y which T1 wrote, rw-in = T2 writes rid_x which T1
     // read.
     auto result = mgr.commit(t2->txn_id);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::TXN_CONFLICT);
 }
 
@@ -921,7 +921,7 @@ TEST(Savepoint, RollbackToMiddleDestroysLaterSavepoints) {
 
     // sp2 and sp3 no longer exist.
     auto result = mgr.rollback_to_savepoint(t1->txn_id, "sp2");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -955,7 +955,7 @@ TEST(Savepoint, ReleaseSavepoint) {
 
     // Cannot rollback to released savepoint.
     auto result = mgr.rollback_to_savepoint(t1->txn_id, "sp1");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -964,11 +964,11 @@ TEST(Savepoint, NonExistentSavepointFails) {
     auto* t1 = mgr.begin().value();
 
     auto result = mgr.rollback_to_savepoint(t1->txn_id, "nosuchsp");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 
     auto rel = mgr.release_savepoint(t1->txn_id, "nosuchsp");
-    EXPECT_FALSE(rel.has_value());
+    ASSERT_FALSE(rel.has_value());
     EXPECT_EQ(rel.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -978,7 +978,7 @@ TEST(Savepoint, SavepointInNonActiveTransaction) {
     ASSERT_TRUE(mgr.commit(t1->txn_id).has_value());
 
     auto result = mgr.savepoint(t1->txn_id, "sp1");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 

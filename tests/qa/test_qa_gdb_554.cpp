@@ -68,6 +68,9 @@ protected:
 
         auto schema = catalog_->get_table(default_database_id, name);
         EXPECT_TRUE(schema.has_value());
+        if (!tid.has_value() || !schema.has_value()) {
+            return table_id_t{};
+        }
         auto sr = storage_->create_table_storage(default_database_id, *tid, *schema);
         EXPECT_TRUE(sr.has_value()) << sr.error().message;
 

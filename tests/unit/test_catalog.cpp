@@ -57,7 +57,7 @@ TEST(Catalog, CreateTableDuplicateNameFails) {
     ASSERT_TRUE(id1.has_value());
 
     auto id2 = catalog.create_table(default_database_id, make_schema("users"));
-    EXPECT_FALSE(id2.has_value());
+    ASSERT_FALSE(id2.has_value());
     EXPECT_EQ(id2.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -119,7 +119,7 @@ TEST(Catalog, GetTableNotFoundByName) {
     Catalog catalog;
     init_test_catalog(catalog);
     auto result = catalog.get_table(default_database_id, "nonexistent");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -127,7 +127,7 @@ TEST(Catalog, GetTableNotFoundById) {
     Catalog catalog;
     init_test_catalog(catalog);
     auto result = catalog.get_table_by_id(999);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -170,7 +170,7 @@ TEST(Catalog, DropTable) {
     ASSERT_TRUE(drop.has_value()) << drop.error().message;
 
     auto get = catalog.get_table(default_database_id, "users");
-    EXPECT_FALSE(get.has_value());
+    ASSERT_FALSE(get.has_value());
     EXPECT_EQ(get.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -178,7 +178,7 @@ TEST(Catalog, DropTableNotFound) {
     Catalog catalog;
     init_test_catalog(catalog);
     auto drop = catalog.drop_table(default_database_id, "nonexistent");
-    EXPECT_FALSE(drop.has_value());
+    ASSERT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -249,7 +249,7 @@ TEST(Catalog, CreateIndexDuplicateNameFails) {
     ASSERT_TRUE(catalog.create_index(def).has_value());
 
     auto dup = catalog.create_index(def);
-    EXPECT_FALSE(dup.has_value());
+    ASSERT_FALSE(dup.has_value());
     EXPECT_EQ(dup.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -264,7 +264,7 @@ TEST(Catalog, CreateIndexNonexistentTableFails) {
     def.columns = "id";
 
     auto result = catalog.create_index(def);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -301,7 +301,7 @@ TEST(Catalog, GetIndexNotFound) {
     Catalog catalog;
     init_test_catalog(catalog);
     auto result = catalog.get_index("nonexistent");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -391,7 +391,7 @@ TEST(Catalog, DropIndexNotFound) {
     Catalog catalog;
     init_test_catalog(catalog);
     auto drop = catalog.drop_index("nonexistent");
-    EXPECT_FALSE(drop.has_value());
+    ASSERT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -509,7 +509,7 @@ TEST(Catalog, CreateEdgeTypeDuplicateNameFails) {
     ASSERT_TRUE(catalog.create_edge_type(default_database_id, def).has_value());
 
     auto dup = catalog.create_edge_type(default_database_id, def);
-    EXPECT_FALSE(dup.has_value());
+    ASSERT_FALSE(dup.has_value());
     EXPECT_EQ(dup.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -526,7 +526,7 @@ TEST(Catalog, CreateEdgeTypeSourceTableNotFoundFails) {
     def.target_table_id = *t1;
 
     auto result = catalog.create_edge_type(default_database_id, def);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -543,7 +543,7 @@ TEST(Catalog, CreateEdgeTypeTargetTableNotFoundFails) {
     def.target_table_id = 999;
 
     auto result = catalog.create_edge_type(default_database_id, def);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -578,7 +578,7 @@ TEST(Catalog, GetEdgeTypeNotFound) {
     Catalog catalog;
     init_test_catalog(catalog);
     auto result = catalog.get_edge_type(default_database_id, "nonexistent");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -607,7 +607,7 @@ TEST(Catalog, DropEdgeTypeNotFound) {
     Catalog catalog;
     init_test_catalog(catalog);
     auto drop = catalog.drop_edge_type(default_database_id, "nonexistent");
-    EXPECT_FALSE(drop.has_value());
+    ASSERT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -698,7 +698,7 @@ TEST(Catalog, RegisterEmbeddingColumnDuplicateFails) {
     ASSERT_TRUE(catalog.register_embedding_column(def).has_value());
 
     auto dup = catalog.register_embedding_column(def);
-    EXPECT_FALSE(dup.has_value());
+    ASSERT_FALSE(dup.has_value());
     EXPECT_EQ(dup.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -712,7 +712,7 @@ TEST(Catalog, RegisterEmbeddingColumnNonexistentTableFails) {
     def.dimension = 128;
 
     auto result = catalog.register_embedding_column(def);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -814,7 +814,7 @@ TEST(Catalog, DropTableCascadesToEdgeTypes) {
     EXPECT_TRUE(edges.empty());
 
     auto get_edge = catalog.get_edge_type(default_database_id, "follows");
-    EXPECT_FALSE(get_edge.has_value());
+    ASSERT_FALSE(get_edge.has_value());
     EXPECT_EQ(get_edge.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -926,7 +926,7 @@ TEST(Catalog, CreateDatabaseDuplicateNameFails) {
     ASSERT_TRUE(id1.has_value());
 
     auto id2 = catalog.create_database("mydb");
-    EXPECT_FALSE(id2.has_value());
+    ASSERT_FALSE(id2.has_value());
     EXPECT_EQ(id2.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -958,7 +958,7 @@ TEST(Catalog, GetDatabaseNotFound) {
     init_test_catalog(catalog);
 
     auto db = catalog.get_database("nonexistent");
-    EXPECT_FALSE(db.has_value());
+    ASSERT_FALSE(db.has_value());
     EXPECT_EQ(db.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -993,7 +993,7 @@ TEST(Catalog, DropEmptyDatabase) {
     ASSERT_TRUE(drop.has_value()) << drop.error().message;
 
     auto get = catalog.get_database("temp_db");
-    EXPECT_FALSE(get.has_value());
+    ASSERT_FALSE(get.has_value());
     EXPECT_EQ(get.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -1002,7 +1002,7 @@ TEST(Catalog, DropDatabaseNotFound) {
     init_test_catalog(catalog);
 
     auto drop = catalog.drop_database(999, false);
-    EXPECT_FALSE(drop.has_value());
+    ASSERT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -1027,7 +1027,7 @@ TEST(Catalog, DropDatabaseWithTablesFailsWithoutCascade) {
     ASSERT_TRUE(catalog.create_table(*db_id, make_schema("t1")).has_value());
 
     auto drop = catalog.drop_database(*db_id, false);
-    EXPECT_FALSE(drop.has_value());
+    ASSERT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::CONSTRAINT_VIOLATION);
 }
 
@@ -1167,7 +1167,7 @@ TEST(Catalog, CreateTableInNonexistentDatabaseFails) {
     init_test_catalog(catalog);
 
     auto result = catalog.create_table(999, make_schema("orphan"));
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -1196,7 +1196,7 @@ TEST(Catalog, RestoreDatabaseDuplicateIdFails) {
     ASSERT_TRUE(catalog.restore_database(5, "first").has_value());
 
     auto r = catalog.restore_database(5, "second");
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -1206,7 +1206,7 @@ TEST(Catalog, RestoreDatabaseDuplicateNameFails) {
     ASSERT_TRUE(catalog.restore_database(5, "mydb").has_value());
 
     auto r = catalog.restore_database(6, "mydb");
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::ALREADY_EXISTS);
 }
 

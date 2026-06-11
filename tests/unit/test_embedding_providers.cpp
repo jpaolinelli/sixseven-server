@@ -157,7 +157,7 @@ TEST(BuiltinProvider, EmptyTextReturnsError) {
     BuiltinProvider provider(64);
 
     auto result = provider.embed("");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -165,7 +165,7 @@ TEST(BuiltinProvider, WhitespaceOnlyReturnsError) {
     BuiltinProvider provider(64);
 
     auto result = provider.embed("   \t\n  ");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -237,7 +237,7 @@ TEST(OllamaProvider, EmbedDimensionMismatch) {
     OllamaProvider provider("http://localhost:11434", "all-minilm", 3, std::move(mock));
 
     auto result = provider.embed("test");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -248,7 +248,7 @@ TEST(OllamaProvider, EmbedHttpError) {
     OllamaProvider provider("http://localhost:11434", "all-minilm", 3, std::move(mock));
 
     auto result = provider.embed("test");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NETWORK_ERROR);
 }
 
@@ -259,7 +259,7 @@ TEST(OllamaProvider, EmbedNetworkFailure) {
     OllamaProvider provider("http://localhost:11434", "all-minilm", 3, std::move(mock));
 
     auto result = provider.embed("test");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NETWORK_ERROR);
 }
 
@@ -270,7 +270,7 @@ TEST(OllamaProvider, EmbedInvalidJson) {
     OllamaProvider provider("http://localhost:11434", "all-minilm", 3, std::move(mock));
 
     auto result = provider.embed("test");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -281,7 +281,7 @@ TEST(OllamaProvider, EmbedMissingEmbeddingField) {
     OllamaProvider provider("http://localhost:11434", "all-minilm", 3, std::move(mock));
 
     auto result = provider.embed("test");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -315,7 +315,7 @@ TEST(OllamaProvider, HealthCheckModelNotFound) {
     OllamaProvider provider("http://localhost:11434", "all-minilm", 3, std::move(mock));
 
     auto result = provider.health_check();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -326,7 +326,7 @@ TEST(OllamaProvider, HealthCheckNetworkFailure) {
     OllamaProvider provider("http://localhost:11434", "all-minilm", 3, std::move(mock));
 
     auto result = provider.health_check();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NETWORK_ERROR);
 }
 
@@ -394,7 +394,7 @@ TEST(OpenAIProvider, AuthError) {
     OpenAIProvider provider("sk-bad", "text-embedding-3-small", 3, std::move(mock));
 
     auto result = provider.embed("test");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::AUTH_ERROR);
 }
 
@@ -405,7 +405,7 @@ TEST(OpenAIProvider, RateLimitError) {
     OpenAIProvider provider("sk-test", "text-embedding-3-small", 3, std::move(mock));
 
     auto result = provider.embed("test");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NETWORK_ERROR);
 }
 
@@ -418,7 +418,7 @@ TEST(OpenAIProvider, DimensionMismatch) {
     OpenAIProvider provider("sk-test", "text-embedding-3-small", 3, std::move(mock));
 
     auto result = provider.embed("test");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -429,7 +429,7 @@ TEST(OpenAIProvider, InvalidJsonResponse) {
     OpenAIProvider provider("sk-test", "text-embedding-3-small", 3, std::move(mock));
 
     auto result = provider.embed("test");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -440,7 +440,7 @@ TEST(OpenAIProvider, MissingDataField) {
     OpenAIProvider provider("sk-test", "text-embedding-3-small", 3, std::move(mock));
 
     auto result = provider.embed("test");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
@@ -451,7 +451,7 @@ TEST(OpenAIProvider, NetworkFailure) {
     OpenAIProvider provider("sk-test", "text-embedding-3-small", 3, std::move(mock));
 
     auto result = provider.embed("test");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NETWORK_ERROR);
 }
 
@@ -462,7 +462,7 @@ TEST(OpenAIProvider, ServerError) {
     OpenAIProvider provider("sk-test", "text-embedding-3-small", 3, std::move(mock));
 
     auto result = provider.embed("test");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NETWORK_ERROR);
 }
 
@@ -557,7 +557,7 @@ TEST(ProviderRegistry, ResolveOpenAIRequiresApiKey) {
 
     // OpenAI without API key should fail.
     auto result = registry.resolve("openai/text-embedding-3-small");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::AUTH_ERROR);
 }
 
@@ -617,7 +617,7 @@ TEST(ProviderRegistry, InvalidNameFormat) {
     ProviderRegistry registry(catalog);
 
     auto result = registry.resolve("no-slash-here");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -626,7 +626,7 @@ TEST(ProviderRegistry, UnknownProviderType) {
     ProviderRegistry registry(catalog);
 
     auto result = registry.resolve("unknown/model");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -661,7 +661,7 @@ TEST(CatalogProviders, DuplicateRegistrationFails) {
 
     ASSERT_TRUE(catalog.register_embedding_provider(config).has_value());
     auto dup = catalog.register_embedding_provider(config);
-    EXPECT_FALSE(dup.has_value());
+    ASSERT_FALSE(dup.has_value());
     EXPECT_EQ(dup.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -669,7 +669,7 @@ TEST(CatalogProviders, GetNonexistent) {
     Catalog catalog;
 
     auto result = catalog.get_embedding_provider("nonexistent");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -711,6 +711,6 @@ TEST(CatalogProviders, RemoveNonexistent) {
     Catalog catalog;
 
     auto result = catalog.remove_embedding_provider("nonexistent");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }

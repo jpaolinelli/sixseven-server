@@ -372,25 +372,25 @@ TEST(QA_Compare, NullSortsBeforeAllNonNullTypes) {
 TEST(QA_Compare, BlobCompareShouldReturnError) {
     // BLOB is not comparable — compare must return an error, not crash.
     auto r = compare(Value(Blob{0x01}), Value(Blob{0x02}));
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
 }
 
 TEST(QA_Compare, EmbeddingCompareShouldReturnError) {
     auto r = compare(Value(Embedding{0.5f}), Value(Embedding{1.0f}));
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
 }
 
 TEST(QA_Compare, IncompatibleTypesStringVsInt) {
     auto r = compare(Value(std::string{"42"}), Value(int32_t{42}));
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
 }
 
 TEST(QA_Compare, IncompatibleTypesDateVsInt) {
     auto r = compare(Value(Date{100}), Value(int32_t{100}));
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
 }
 
@@ -628,7 +628,7 @@ TEST(QA_Serialization, RoundTripUuidAllBytes) {
 TEST(QA_Serialization, DeserializeEmptyBufferReturnsError) {
     std::vector<uint8_t> empty;
     auto r = deserialize(empty, TypeId::INT32);
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -636,7 +636,7 @@ TEST(QA_Serialization, DeserializeInvalidNullFlagReturnsError) {
     for (uint8_t flag : {0x02u, 0xFFu, 0x80u}) {
         std::vector<uint8_t> bad = {flag, 0x00, 0x00, 0x00, 0x00};
         auto r = deserialize(bad, TypeId::INT32);
-        EXPECT_FALSE(r.has_value())
+        ASSERT_FALSE(r.has_value())
             << "null flag 0x" << std::hex << static_cast<int>(flag) << " should be rejected";
         EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
     }
@@ -659,7 +659,7 @@ TEST(QA_Serialization, DeserializeTruncatedFixedTypes) {
         truncated[0] = 0x01; // null flag = not null
         // truncated has 1 (flag) + sz-1 (partial payload) bytes
         auto r = deserialize(truncated, t);
-        EXPECT_FALSE(r.has_value())
+        ASSERT_FALSE(r.has_value())
             << "Truncated buffer for " << type_name(t) << " should return error";
         EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
     }
@@ -679,7 +679,7 @@ TEST(QA_Serialization, DeserializeCraftedStringLengthOverflow) {
         0x43, // only 3 bytes of "ABC"
     };
     auto r = deserialize(crafted, TypeId::STRING);
-    EXPECT_FALSE(r.has_value()) << "Crafted oversized length should be rejected by deserialize";
+    ASSERT_FALSE(r.has_value()) << "Crafted oversized length should be rejected by deserialize";
     EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -697,7 +697,7 @@ TEST(QA_Serialization, DeserializeCraftedEmbeddingCountOverflow) {
         0x3F, // only 1 float (4 bytes)
     };
     auto r = deserialize(crafted, TypeId::EMBEDDING);
-    EXPECT_FALSE(r.has_value()) << "Embedding with crafted oversized count should be rejected";
+    ASSERT_FALSE(r.has_value()) << "Embedding with crafted oversized count should be rejected";
     EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
 }
 

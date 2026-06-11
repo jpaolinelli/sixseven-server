@@ -155,7 +155,7 @@ TEST_F(StorageManagerTest, CreateTableStorageDuplicate) {
     ASSERT_TRUE(result1.has_value());
 
     auto result2 = sm.create_table_storage(default_database_id, 10, schema);
-    EXPECT_FALSE(result2.has_value());
+    ASSERT_FALSE(result2.has_value());
     EXPECT_EQ(result2.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -177,7 +177,7 @@ TEST_F(StorageManagerTest, GetTableStorageNotFound) {
     StorageManager sm(dm_, data_dir_);
 
     auto get = sm.get_table_storage(999);
-    EXPECT_FALSE(get.has_value());
+    ASSERT_FALSE(get.has_value());
     EXPECT_EQ(get.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -206,7 +206,7 @@ TEST_F(StorageManagerTest, DropTableStorageNotFound) {
     StorageManager sm(dm_, data_dir_);
 
     auto drop = sm.drop_table_storage(default_database_id, 999);
-    EXPECT_FALSE(drop.has_value());
+    ASSERT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::NOT_FOUND);
 }
 

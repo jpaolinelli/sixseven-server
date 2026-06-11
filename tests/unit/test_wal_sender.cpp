@@ -370,7 +370,7 @@ TEST(WalSender, DoubleStartFails) {
     ASSERT_TRUE(sender.start_streaming(1).has_value());
 
     auto result = sender.start_streaming(1);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::REPLICATION_ERROR);
 
     sender.stop();

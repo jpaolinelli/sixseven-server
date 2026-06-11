@@ -81,12 +81,15 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     Bm25Index* find_bm25(const std::string& index_name) {
         auto def = catalog_->get_index(index_name);
         EXPECT_TRUE(def.has_value());
+        if (!def.has_value()) {
+            return nullptr;
+        }
         auto* map = index_manager_->bm25_map();
         auto it = map->find(def->index_id);
         return it == map->end() ? nullptr : it->second;

@@ -283,7 +283,7 @@ TEST_F(GDB614HeapInsertOptimization, Adversarial_EmptyTupleRejected) {
     TableHeap heap(*bpm_, dm_, file_id_);
 
     auto r = heap.insert_tuple({});
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
 }
 

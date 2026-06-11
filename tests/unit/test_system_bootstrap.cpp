@@ -49,12 +49,12 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     void exec_error(const std::string& sql, StatusCode expected) {
         auto result = engine_->execute(sql);
-        EXPECT_FALSE(result.has_value());
+        ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().code, expected);
     }
 
@@ -190,13 +190,13 @@ TEST_F(SystemBootstrapTest, DefaultSettingsSeeded) {
 
 TEST_F(SystemBootstrapTest, CannotDropSystemDatabase) {
     auto result = catalog_->drop_database(system_database_id, false);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::CONSTRAINT_VIOLATION);
 }
 
 TEST_F(SystemBootstrapTest, CannotDropSystemDatabaseWithCascade) {
     auto result = catalog_->drop_database(system_database_id, true);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::CONSTRAINT_VIOLATION);
 }
 
@@ -216,7 +216,7 @@ TEST_F(SystemBootstrapTest, CannotDropSystemTable) {
     run_bootstrap();
 
     auto result = catalog_->drop_table(system_database_id, "sys_settings");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::CONSTRAINT_VIOLATION);
 }
 
@@ -389,6 +389,6 @@ TEST_F(SystemBootstrapTest, SysSettingsSchemaDefinition) {
 
 TEST_F(SystemBootstrapTest, CannotCreateDatabaseWithSystemName) {
     auto result = catalog_->create_database(system_database_name);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::ALREADY_EXISTS);
 }

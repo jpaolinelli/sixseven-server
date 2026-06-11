@@ -136,7 +136,7 @@ TEST(Page, InsertEmptyTupleFails) {
     Page page(0, PageType::DATA);
     std::vector<uint8_t> empty;
     auto result = page.insert_tuple(empty);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -145,7 +145,7 @@ TEST(Page, InsertEmptyTupleFails) {
 TEST(Page, GetInvalidSlotId) {
     Page page(0, PageType::DATA);
     auto result = page.get_tuple(0);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -159,7 +159,7 @@ TEST(Page, GetDeletedSlot) {
     ASSERT_TRUE(del_result.has_value());
 
     auto get_result = page.get_tuple(0);
-    EXPECT_FALSE(get_result.has_value());
+    ASSERT_FALSE(get_result.has_value());
     EXPECT_EQ(get_result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -196,7 +196,7 @@ TEST(Page, DeleteTuple) {
 TEST(Page, DeleteInvalidSlotId) {
     Page page(0, PageType::DATA);
     auto result = page.delete_tuple(0);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -206,7 +206,7 @@ TEST(Page, DeleteAlreadyDeletedSlot) {
     ASSERT_TRUE(page.delete_tuple(0).has_value());
 
     auto result = page.delete_tuple(0);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -266,7 +266,7 @@ TEST(Page, UpdateDeletedSlotFails) {
     ASSERT_TRUE(page.delete_tuple(0).has_value());
 
     auto result = page.update_tuple(0, make_tuple(10));
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -275,14 +275,14 @@ TEST(Page, UpdateEmptyDataFails) {
     ASSERT_TRUE(page.insert_tuple(make_tuple(10)).has_value());
 
     auto result = page.update_tuple(0, {});
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
 TEST(Page, UpdateInvalidSlotFails) {
     Page page(0, PageType::DATA);
     auto result = page.update_tuple(0, make_tuple(10));
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 

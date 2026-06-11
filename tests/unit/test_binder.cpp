@@ -277,7 +277,7 @@ TEST(TypeResolver, UnknownTypeError) {
     TypeSpec spec;
     spec.name = "FOOBAR";
     auto result = resolve_type_spec(spec);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
 }
 
@@ -295,7 +295,7 @@ TEST(TypeResolver, CommonTypeSame) {
 
 TEST(TypeResolver, CommonTypeError) {
     auto result = common_type(TypeId::STRING, TypeId::INT32);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
 }
 
@@ -338,7 +338,7 @@ TEST(TypeResolver, ScalarFunctionReturnTypes) {
 
 TEST(TypeResolver, UnknownFunctionError) {
     auto result = function_return_type("NONEXISTENT_FUNC", {});
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
 }
 
@@ -415,14 +415,14 @@ TEST_F(BinderTest, ScopeAmbiguousColumn) {
     scope.add_table(std::move(st2));
 
     auto result = scope.resolve_column("id");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
 TEST_F(BinderTest, ScopeColumnNotFound) {
     Scope scope;
     auto result = scope.resolve_column("nonexistent");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 

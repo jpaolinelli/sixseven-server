@@ -234,7 +234,7 @@ TEST_F(QA_ExecutorOperators, SeqScanNextBeforeOpen) {
 
     // next() without open() should return an error, not crash.
     auto row = scan.next();
-    EXPECT_FALSE(row.has_value());
+    ASSERT_FALSE(row.has_value());
     EXPECT_EQ(row.error().code, StatusCode::INTERNAL_ERROR);
 }
 
@@ -490,7 +490,7 @@ TEST(QA_ExprEval, ModuloByZeroInteger) {
 
     auto expr = binary(BinaryOp::MODULO, lit_int("10"), lit_int("0"));
     auto result = evaluate_expr(*expr, tuple, schema, bound);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -503,7 +503,7 @@ TEST(QA_ExprEval, ModuloByZeroFloat) {
 
     auto expr = binary(BinaryOp::MODULO, lit_float("10.5"), lit_float("0.0"));
     auto result = evaluate_expr(*expr, tuple, schema, bound);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -516,7 +516,7 @@ TEST(QA_ExprEval, DivisionByZeroFloat) {
 
     auto expr = binary(BinaryOp::DIVIDE, lit_float("10.0"), lit_float("0.0"));
     auto result = evaluate_expr(*expr, tuple, schema, bound);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -657,7 +657,7 @@ TEST(QA_ExprEval, NegateStringErrors) {
 
     auto expr = unary(UnaryOp::NEGATE, lit_string("hello"));
     auto result = evaluate_expr(*expr, tuple, schema, bound);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
 }
 
@@ -670,7 +670,7 @@ TEST(QA_ExprEval, NotOnIntegerErrors) {
 
     auto expr = unary(UnaryOp::NOT, lit_int("1"));
     auto result = evaluate_expr(*expr, tuple, schema, bound);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
 }
 
@@ -912,7 +912,7 @@ TEST(QA_ExprEval, ColumnRefAmbiguous) {
 
     // Unqualified "id" is ambiguous — should error.
     auto result = evaluate_expr(*col_ref("id"), tuple, schema, bound);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -980,7 +980,7 @@ TEST(QA_ExprEval, PredicateNonBooleanErrors) {
 
     // Predicate evaluation with integer result (not bool).
     auto result = evaluate_predicate(*lit_int("42"), tuple, schema, bound);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
 }
 
@@ -1278,7 +1278,7 @@ protected:
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value())
             << "SQL failed: " << sql << "\nError: " << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     void exec_error(const std::string& sql, StatusCode expected) {

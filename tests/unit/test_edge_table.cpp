@@ -87,13 +87,13 @@ TEST(EdgeTable, InsertWrongPropertyCountFails) {
 
     // Too few properties.
     auto r1 = table.insert_edge(pk(1), pk(2), {Value(0.5)});
-    EXPECT_FALSE(r1.has_value());
+    ASSERT_FALSE(r1.has_value());
     EXPECT_EQ(r1.error().code, StatusCode::INVALID_ARGUMENT);
 
     // Too many properties.
     auto r2 =
         table.insert_edge(pk(1), pk(2), {Value(0.5), Value(std::string("a")), Value(int32_t(1))});
-    EXPECT_FALSE(r2.has_value());
+    ASSERT_FALSE(r2.has_value());
     EXPECT_EQ(r2.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -106,7 +106,7 @@ TEST(EdgeTable, DuplicatePreventionBlocks) {
     ASSERT_TRUE(r1.has_value()) << r1.error().message;
 
     auto r2 = table.insert_edge(pk(1), pk(2), {});
-    EXPECT_FALSE(r2.has_value());
+    ASSERT_FALSE(r2.has_value());
     EXPECT_EQ(r2.error().code, StatusCode::CONSTRAINT_VIOLATION);
     EXPECT_EQ(table.size(), 1u);
 }
@@ -237,7 +237,7 @@ TEST(EdgeTable, GetEdgeNotFound) {
     EdgeTable table(make_config("follows"));
 
     auto edge = table.get_edge(999);
-    EXPECT_FALSE(edge.has_value());
+    ASSERT_FALSE(edge.has_value());
     EXPECT_EQ(edge.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -352,7 +352,7 @@ TEST(EdgeTable, DeleteNonexistentEdgeFails) {
     EdgeTable table(make_config("follows"));
 
     auto del = table.delete_edge(999);
-    EXPECT_FALSE(del.has_value());
+    ASSERT_FALSE(del.has_value());
     EXPECT_EQ(del.error().code, StatusCode::NOT_FOUND);
 }
 

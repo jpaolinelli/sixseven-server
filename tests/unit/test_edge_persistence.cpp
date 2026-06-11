@@ -434,7 +434,7 @@ TEST(EdgeTableRestore, RestoreDuplicateRowIdFails) {
     ASSERT_TRUE(table.restore_edge(1, pk(1), pk(2), {}).has_value());
 
     auto dup = table.restore_edge(1, pk(3), pk(4), {});
-    EXPECT_FALSE(dup.has_value());
+    ASSERT_FALSE(dup.has_value());
     EXPECT_EQ(dup.error().code, StatusCode::ALREADY_EXISTS);
 }
 

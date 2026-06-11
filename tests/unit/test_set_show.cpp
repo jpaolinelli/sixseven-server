@@ -68,7 +68,7 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     void exec_error(const std::string& sql, StatusCode expected) {
@@ -476,13 +476,13 @@ TEST_F(SetShowTest, CacheUpdateMutable) {
 
 TEST_F(SetShowTest, CacheUpdateNonMutable) {
     auto result = cache_->update("server.port", "9999");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
 TEST_F(SetShowTest, CacheUpdateNonexistent) {
     auto result = cache_->update("nonexistent.key", "value");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 

@@ -28,6 +28,9 @@ protected:
         auto path = data_dir_ / (name + ".db");
         auto fid = dm_->create_file(path, false, true);
         EXPECT_TRUE(fid.has_value());
+        if (!fid.has_value()) {
+            return {FileId{}, nullptr};
+        }
         auto bpm = std::make_unique<BufferPoolManager>(*dm_, *fid, 256);
         return {*fid, std::move(bpm)};
     }
@@ -36,6 +39,9 @@ protected:
         auto path = data_dir_ / (name + ".db");
         auto fid = dm_->open_file(path);
         EXPECT_TRUE(fid.has_value());
+        if (!fid.has_value()) {
+            return {FileId{}, nullptr};
+        }
         auto bpm = std::make_unique<BufferPoolManager>(*dm_, *fid, 256);
         return {*fid, std::move(bpm)};
     }

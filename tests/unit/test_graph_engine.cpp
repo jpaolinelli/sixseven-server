@@ -77,7 +77,7 @@ TEST_F(GraphEngineTest, CreateEdgeTypeDuplicateFails) {
                                         TypeId::INT64,
                                         TypeId::INT64,
                                         {});
-    EXPECT_FALSE(dup.has_value());
+    ASSERT_FALSE(dup.has_value());
     EXPECT_EQ(dup.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -97,13 +97,13 @@ TEST_F(GraphEngineTest, DropEdgeType) {
 
     // Edge type no longer available.
     auto link = engine_.link(default_database_id, "follows", pk(1), pk(2));
-    EXPECT_FALSE(link.has_value());
+    ASSERT_FALSE(link.has_value());
     EXPECT_EQ(link.error().code, StatusCode::NOT_FOUND);
 }
 
 TEST_F(GraphEngineTest, DropEdgeTypeNotFoundFails) {
     auto drop = engine_.drop_edge_type(default_database_id, "nonexistent");
-    EXPECT_FALSE(drop.has_value());
+    ASSERT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -173,7 +173,7 @@ TEST_F(GraphEngineTest, LinkWithProperties) {
 
 TEST_F(GraphEngineTest, LinkToNonexistentEdgeTypeFails) {
     auto result = engine_.link(default_database_id, "nonexistent", pk(1), pk(2));
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -192,7 +192,7 @@ TEST_F(GraphEngineTest, LinkDuplicatePreventionBlocks) {
     ASSERT_TRUE(engine_.link(default_database_id, "follows", pk(1), pk(2)).has_value());
 
     auto dup = engine_.link(default_database_id, "follows", pk(1), pk(2));
-    EXPECT_FALSE(dup.has_value());
+    ASSERT_FALSE(dup.has_value());
     EXPECT_EQ(dup.error().code, StatusCode::CONSTRAINT_VIOLATION);
 }
 
@@ -285,13 +285,13 @@ TEST_F(GraphEngineTest, UnlinkNonexistentEdgeFails) {
                     .has_value());
 
     auto result = engine_.unlink(default_database_id, "follows", pk(1), pk(2));
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
 TEST_F(GraphEngineTest, UnlinkNonexistentEdgeTypeFails) {
     auto result = engine_.unlink(default_database_id, "nonexistent", pk(1), pk(2));
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -401,7 +401,7 @@ TEST_F(GraphEngineTest, UnlinkWhereNoMatches) {
 TEST_F(GraphEngineTest, UnlinkWhereNonexistentEdgeTypeFails) {
     auto result = engine_.unlink_where(
         default_database_id, "nonexistent", pk(1), pk(2), [](const EdgeRow&) { return true; });
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -409,13 +409,13 @@ TEST_F(GraphEngineTest, UnlinkWhereNonexistentEdgeTypeFails) {
 
 TEST_F(GraphEngineTest, GetEdgesFromNonexistentTypeFails) {
     auto result = engine_.get_edges_from(default_database_id, "nonexistent", pk(1));
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
 TEST_F(GraphEngineTest, GetEdgesToNonexistentTypeFails) {
     auto result = engine_.get_edges_to(default_database_id, "nonexistent", pk(1));
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -583,7 +583,7 @@ TEST_F(GraphEngineTest, DropEdgeTypeInOneDatabaseDoesNotAffectOther) {
 
     // db1 edge type should be gone.
     auto db1_link = engine_.link(default_database_id, "follows", pk(3), pk(4));
-    EXPECT_FALSE(db1_link.has_value());
+    ASSERT_FALSE(db1_link.has_value());
     EXPECT_EQ(db1_link.error().code, StatusCode::NOT_FOUND);
 
     // db2 edge type should still work.
@@ -624,11 +624,11 @@ TEST_F(GraphEngineTest, DropEdgeTypesForTableCleansUp) {
 
     // Both edge types should be gone.
     auto follows = engine_.link(default_database_id, "follows", pk(3), pk(4));
-    EXPECT_FALSE(follows.has_value());
+    ASSERT_FALSE(follows.has_value());
     EXPECT_EQ(follows.error().code, StatusCode::NOT_FOUND);
 
     auto authored = engine_.link(default_database_id, "authored", pk(2), pk(200));
-    EXPECT_FALSE(authored.has_value());
+    ASSERT_FALSE(authored.has_value());
     EXPECT_EQ(authored.error().code, StatusCode::NOT_FOUND);
 }
 

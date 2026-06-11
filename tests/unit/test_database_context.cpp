@@ -40,12 +40,12 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     void exec_error(const std::string& sql, StatusCode expected) {
         auto result = engine_->execute(sql);
-        EXPECT_FALSE(result.has_value());
+        ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().code, expected);
     }
 

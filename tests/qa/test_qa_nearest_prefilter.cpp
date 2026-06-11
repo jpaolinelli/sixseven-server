@@ -67,18 +67,24 @@ protected:
         std::vector<Value> vals = {Value(id), Value(cat), Value(embedding)};
         auto bytes = TupleSerializer::serialize(vals, storage_schema_);
         EXPECT_TRUE(bytes.has_value()) << bytes.error().message;
+        if (!bytes.has_value()) {
+            return RID{};
+        }
         auto rid = heap.insert_tuple(*bytes);
         EXPECT_TRUE(rid.has_value()) << rid.error().message;
-        return *rid;
+        return rid ? *rid : RID{};
     }
 
     RID insert_row_null_emb(TableHeap& heap, int32_t id, const std::string& cat) {
         std::vector<Value> vals = {Value(id), Value(cat), Value()};
         auto bytes = TupleSerializer::serialize(vals, storage_schema_);
         EXPECT_TRUE(bytes.has_value()) << bytes.error().message;
+        if (!bytes.has_value()) {
+            return RID{};
+        }
         auto rid = heap.insert_tuple(*bytes);
         EXPECT_TRUE(rid.has_value()) << rid.error().message;
-        return *rid;
+        return rid ? *rid : RID{};
     }
 
     std::vector<Tuple> drain(Iterator& op) {

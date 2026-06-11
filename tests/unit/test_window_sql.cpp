@@ -55,7 +55,7 @@ protected:
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << "SQL: " << sql << "\n"
                                         << "Error: " << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     DiskManager dm_;

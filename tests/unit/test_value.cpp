@@ -319,14 +319,14 @@ TEST(Value, TryAsSuccess) {
 TEST(Value, TryAsTypeMismatch) {
     Value v(int32_t{42});
     auto result = v.try_as_string();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
 }
 
 TEST(Value, TryAsNull) {
     Value v;
     auto result = v.try_as_int32();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
 }
 

@@ -588,7 +588,7 @@ TEST_F(QA_GDB259, RegisterNegativeDimensionFails) {
 
     EmbeddingColumnManager mgr(catalog_);
     auto result = mgr.register_table_embeddings(*tid, {def});
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 

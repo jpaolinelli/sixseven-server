@@ -430,7 +430,7 @@ TEST_F(CrossEdgeTypeTest, TableCompatibilityError) {
     Binder binder(*catalog_, default_database_id);
     auto result = binder.bind(*stmts->front());
 
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_NE(result.error().message.find("table compatibility error"), std::string::npos);
 }
 

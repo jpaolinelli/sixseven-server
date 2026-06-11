@@ -53,7 +53,7 @@ TEST(PgProtocol, OidToTypeRoundTrip) {
 
 TEST(PgProtocol, OidToTypeUnknownOid) {
     auto result = pg_oid_to_type(99999);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 

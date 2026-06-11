@@ -233,7 +233,7 @@ TEST(QA_Catalog, DropTableTwiceFails) {
     ASSERT_TRUE(drop1.has_value());
 
     auto drop2 = catalog.drop_table(default_database_id, "temp");
-    EXPECT_FALSE(drop2.has_value());
+    ASSERT_FALSE(drop2.has_value());
     EXPECT_EQ(drop2.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -253,7 +253,7 @@ TEST(QA_Catalog, DropIndexTwiceFails) {
     ASSERT_TRUE(drop1.has_value());
 
     auto drop2 = catalog.drop_index("idx");
-    EXPECT_FALSE(drop2.has_value());
+    ASSERT_FALSE(drop2.has_value());
     EXPECT_EQ(drop2.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -274,7 +274,7 @@ TEST(QA_Catalog, DropEdgeTypeTwiceFails) {
     ASSERT_TRUE(drop1.has_value());
 
     auto drop2 = catalog.drop_edge_type(default_database_id, "edge");
-    EXPECT_FALSE(drop2.has_value());
+    ASSERT_FALSE(drop2.has_value());
     EXPECT_EQ(drop2.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -287,7 +287,7 @@ TEST(QA_Catalog, DropDatabaseTwiceFails) {
     ASSERT_TRUE(drop1.has_value());
 
     auto drop2 = catalog.drop_database(*db, false);
-    EXPECT_FALSE(drop2.has_value());
+    ASSERT_FALSE(drop2.has_value());
     EXPECT_EQ(drop2.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -322,7 +322,7 @@ TEST(QA_Catalog, IndexNameGlobalNotScopedPerDatabase) {
     def2.index_type = "btree";
     def2.columns = "id";
     auto r2 = catalog.create_index(def2);
-    EXPECT_FALSE(r2.has_value());
+    ASSERT_FALSE(r2.has_value());
     EXPECT_EQ(r2.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -339,7 +339,7 @@ TEST(QA_Catalog, CreateEdgeTypeBothTablesNonexistent) {
     def.target_table_id = 999;
 
     auto result = catalog.create_edge_type(default_database_id, def);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -359,7 +359,7 @@ TEST(QA_Catalog, CreateEdgeTypeAfterSourceDropped) {
     def.target_table_id = *t2;
 
     auto result = catalog.create_edge_type(default_database_id, def);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -481,7 +481,7 @@ TEST(QA_Catalog, GetTableByIdCrossDatabase) {
 TEST(QA_Catalog, DropTableNonexistentDatabase) {
     Catalog catalog;
     auto result = catalog.drop_table(9999, "anything");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -492,14 +492,14 @@ TEST(QA_Catalog, DropTableNonexistentDatabase) {
 TEST(QA_Catalog, CannotDropSystemDatabase) {
     Catalog catalog;
     auto drop = catalog.drop_database(system_database_id, false);
-    EXPECT_FALSE(drop.has_value());
+    ASSERT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::CONSTRAINT_VIOLATION);
 }
 
 TEST(QA_Catalog, CannotDropSystemDatabaseWithCascade) {
     Catalog catalog;
     auto drop = catalog.drop_database(system_database_id, true);
-    EXPECT_FALSE(drop.has_value());
+    ASSERT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::CONSTRAINT_VIOLATION);
 }
 
@@ -511,7 +511,7 @@ TEST(QA_Catalog, CannotDropSystemTables) {
     ASSERT_TRUE(tid.has_value()) << tid.error().message;
 
     auto drop = catalog.drop_table(system_database_id, "sys_test");
-    EXPECT_FALSE(drop.has_value());
+    ASSERT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::CONSTRAINT_VIOLATION);
 }
 
@@ -538,7 +538,7 @@ TEST(QA_Catalog, RegisterEmbeddingProviderEmptyName) {
 TEST(QA_Catalog, RemoveEmbeddingProviderNotFound) {
     Catalog catalog;
     auto result = catalog.remove_embedding_provider("nonexistent");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -554,7 +554,7 @@ TEST(QA_Catalog, RemoveEmbeddingProviderTwice) {
     ASSERT_TRUE(drop1.has_value());
 
     auto drop2 = catalog.remove_embedding_provider("test_provider");
-    EXPECT_FALSE(drop2.has_value());
+    ASSERT_FALSE(drop2.has_value());
     EXPECT_EQ(drop2.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -567,7 +567,7 @@ TEST(QA_Catalog, RegisterDuplicateEmbeddingProvider) {
     ASSERT_TRUE(catalog.register_embedding_provider(config).has_value());
 
     auto dup = catalog.register_embedding_provider(config);
-    EXPECT_FALSE(dup.has_value());
+    ASSERT_FALSE(dup.has_value());
     EXPECT_EQ(dup.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -787,7 +787,7 @@ TEST_F(QA_TableHeapTest, GetDeletedTupleFails) {
     ASSERT_TRUE(heap.delete_tuple(*rid).has_value());
 
     auto get = heap.get_tuple(*rid);
-    EXPECT_FALSE(get.has_value());
+    ASSERT_FALSE(get.has_value());
     EXPECT_EQ(get.error().code, StatusCode::NOT_FOUND);
 }
 

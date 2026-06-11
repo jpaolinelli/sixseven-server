@@ -224,6 +224,11 @@ protected:
                                      weight);
         auto result = op.open();
         EXPECT_FALSE(result.has_value());
+        if (result.has_value()) {
+            // Should not reach here; return a sentinel so the caller's
+            // assertions fail loudly rather than crashing.
+            return Error{StatusCode::OK, "expected open() to fail but it succeeded"};
+        }
         return result.error();
     }
 

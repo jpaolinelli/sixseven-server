@@ -163,7 +163,7 @@ table_id_t create_users_table(Catalog& catalog) {
     ts.pk_columns = "id";
     auto r = catalog.create_table(default_database_id, std::move(ts));
     EXPECT_TRUE(r.has_value());
-    return r.value();
+    return r ? *r : table_id_t{};
 }
 
 // =========================================================================

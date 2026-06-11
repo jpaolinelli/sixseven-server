@@ -642,7 +642,7 @@ TEST(QA_GraphEngineWAL, FailedLinkDoesNotWriteWalRecord) {
 
     // Duplicate LINK should fail (constraint violation).
     auto link2 = engine.link(default_database_id, "follows", pk(1), pk(2));
-    EXPECT_FALSE(link2.has_value());
+    ASSERT_FALSE(link2.has_value());
     EXPECT_EQ(link2.error().code, StatusCode::CONSTRAINT_VIOLATION);
 
     // WAL should NOT have advanced.

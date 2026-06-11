@@ -67,9 +67,12 @@ protected:
         std::vector<Value> vals = {Value(id), Value(name), Value(age)};
         auto bytes = TupleSerializer::serialize(vals, storage_schema_);
         EXPECT_TRUE(bytes.has_value()) << bytes.error().message;
+        if (!bytes.has_value()) {
+            return RID{};
+        }
         auto rid = heap.insert_tuple(*bytes);
         EXPECT_TRUE(rid.has_value()) << rid.error().message;
-        return *rid;
+        return rid ? *rid : RID{};
     }
 
     /// Insert a row into the heap and also insert the key into the index.
@@ -587,7 +590,7 @@ TEST_F(IndexScanTest, NextBeforeOpenReturnsError) {
         index, heap, storage_schema_, output_schema_, std::nullopt, std::nullopt, {0});
 
     auto row = scan.next();
-    EXPECT_FALSE(row.has_value());
+    ASSERT_FALSE(row.has_value());
     EXPECT_EQ(row.error().code, StatusCode::INTERNAL_ERROR);
 }
 
@@ -825,7 +828,7 @@ TEST_F(IndexScanTest, BitmapScanNoScansReturnsError) {
     BitmapScanOperator scan({}, BitmapCombineMode::OR, heap, storage_schema_, output_schema_);
 
     auto open = scan.open();
-    EXPECT_FALSE(open.has_value());
+    ASSERT_FALSE(open.has_value());
     EXPECT_EQ(open.error().code, StatusCode::INTERNAL_ERROR);
 }
 

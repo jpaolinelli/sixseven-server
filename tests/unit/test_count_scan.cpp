@@ -75,14 +75,19 @@ protected:
 
         auto row = scan.next();
         EXPECT_TRUE(row.has_value()) << row.error().message;
-        EXPECT_TRUE(row->has_value());
+        if (!row.has_value() || !row->has_value()) {
+            ADD_FAILURE() << "count scan produced no row";
+            return -1;
+        }
 
         int64_t count = row->value().values[0].as_int64();
 
         // Should be exhausted after one tuple.
         auto row2 = scan.next();
         EXPECT_TRUE(row2.has_value()) << row2.error().message;
-        EXPECT_FALSE(row2->has_value());
+        if (row2.has_value()) {
+            EXPECT_FALSE(row2->has_value());
+        }
 
         scan.close();
         return count;

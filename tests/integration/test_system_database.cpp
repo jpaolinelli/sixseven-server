@@ -113,7 +113,7 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     /// Execute SQL and assert failure with the expected status code.
@@ -446,7 +446,7 @@ TEST_F(SystemDatabaseIntegrationTest, DeleteInUseProviderFails) {
     // Attempt to delete the in-use provider — should fail.
     use_database(system_database_name);
     auto result = engine_->execute("DELETE FROM sys_providers WHERE name = 'openai-prod'");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::CONSTRAINT_VIOLATION);
     use_database("demo");
 

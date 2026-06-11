@@ -217,7 +217,7 @@ TEST_F(GDB618_BufferPool, FlusherDoubleStartFails) {
 
     ASSERT_TRUE(bpm.start_flusher(std::chrono::milliseconds(100)).has_value());
     auto second = bpm.start_flusher(std::chrono::milliseconds(100));
-    EXPECT_FALSE(second.has_value());
+    ASSERT_FALSE(second.has_value());
     EXPECT_EQ(second.error().code, StatusCode::ALREADY_EXISTS);
 
     bpm.stop_flusher();

@@ -63,9 +63,12 @@ protected:
         std::vector<Value> vals = {Value(id), Value(name)};
         auto bytes = TupleSerializer::serialize(vals, storage_schema_);
         EXPECT_TRUE(bytes.has_value()) << bytes.error().message;
+        if (!bytes.has_value()) {
+            return RID{};
+        }
         auto rid = heap.insert_tuple(*bytes);
         EXPECT_TRUE(rid.has_value()) << rid.error().message;
-        return *rid;
+        return rid ? *rid : RID{};
     }
 
     static OutputSchema count_output_schema() {
@@ -79,13 +82,18 @@ protected:
 
         auto row = scan.next();
         EXPECT_TRUE(row.has_value()) << row.error().message;
-        EXPECT_TRUE(row->has_value());
+        if (!row.has_value() || !row->has_value()) {
+            ADD_FAILURE() << "count scan produced no row";
+            return -1;
+        }
 
         int64_t count = row->value().values[0].as_int64();
 
         auto row2 = scan.next();
         EXPECT_TRUE(row2.has_value()) << row2.error().message;
-        EXPECT_FALSE(row2->has_value());
+        if (row2.has_value()) {
+            EXPECT_FALSE(row2->has_value());
+        }
 
         scan.close();
         return count;

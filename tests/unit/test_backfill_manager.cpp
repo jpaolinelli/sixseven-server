@@ -96,6 +96,9 @@ protected:
 
         auto table_id = catalog_.create_table(test_db_id_, ts);
         EXPECT_TRUE(table_id.has_value()) << table_id.error().message;
+        if (!table_id.has_value()) {
+            return table_id_t{};
+        }
 
         // Register embedding column metadata.
         EmbeddingColumnDef emb_def;
@@ -113,6 +116,9 @@ protected:
 
         auto storage_ptr = storage_->get_table_storage(*table_id);
         EXPECT_TRUE(storage_ptr.has_value());
+        if (!storage_ptr.has_value()) {
+            return table_id_t{};
+        }
 
         Schema schema({
             {"id", TypeId::INT32},
@@ -133,6 +139,9 @@ protected:
 
             auto bytes = TupleSerializer::serialize(vals, schema);
             EXPECT_TRUE(bytes.has_value()) << bytes.error().message;
+            if (!bytes.has_value()) {
+                return table_id_t{};
+            }
             auto rid = (*storage_ptr)->heap->insert_tuple(*bytes);
             EXPECT_TRUE(rid.has_value()) << rid.error().message;
         }
@@ -191,7 +200,7 @@ TEST_F(BackfillManagerTest, RejectDuplicateBackfill) {
 
     // Try to start a second backfill on the same table.
     auto result2 = mgr_->start(stmt, test_db_id_);
-    EXPECT_FALSE(result2.has_value());
+    ASSERT_FALSE(result2.has_value());
     EXPECT_EQ(result2.error().code, StatusCode::ALREADY_EXISTS);
 
     // Wait for first to finish.
@@ -274,7 +283,7 @@ TEST_F(BackfillManagerTest, CancelRunningBackfill) {
 
 TEST_F(BackfillManagerTest, CancelNonExistentFails) {
     auto result = mgr_->cancel("nonexistent");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 

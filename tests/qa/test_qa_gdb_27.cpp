@@ -135,7 +135,7 @@ TEST(QA_EdgeTable, DoubleDeleteFails) {
     ASSERT_TRUE(d1.has_value()) << d1.error().message;
 
     auto d2 = table.delete_edge(*r);
-    EXPECT_FALSE(d2.has_value());
+    ASSERT_FALSE(d2.has_value());
     EXPECT_EQ(d2.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -145,7 +145,7 @@ TEST(QA_EdgeTable, DeleteRowIdZeroFails) {
     EdgeTable table(make_config("e"));
 
     auto d = table.delete_edge(0);
-    EXPECT_FALSE(d.has_value());
+    ASSERT_FALSE(d.has_value());
     EXPECT_EQ(d.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -155,7 +155,7 @@ TEST(QA_EdgeTable, GetEdgeRowIdZeroFails) {
     EdgeTable table(make_config("e"));
 
     auto e = table.get_edge(0);
-    EXPECT_FALSE(e.has_value());
+    ASSERT_FALSE(e.has_value());
     EXPECT_EQ(e.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -251,7 +251,7 @@ TEST(QA_EdgeTable, SelfEdgeDuplicatePreventionAndDeletion) {
 
     // Duplicate self-edge should be blocked.
     auto dup = table.insert_edge(pk(42), pk(42), {});
-    EXPECT_FALSE(dup.has_value());
+    ASSERT_FALSE(dup.has_value());
     EXPECT_EQ(dup.error().code, StatusCode::CONSTRAINT_VIOLATION);
 
     // Delete self-edge.
@@ -334,7 +334,7 @@ TEST(QA_EdgeTable, InsertWithPropertiesWhenSchemaExpectsNoneFails) {
     EdgeTable table(make_config("e")); // No property columns.
 
     auto r = table.insert_edge(pk(1), pk(2), {Value(42)});
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -717,7 +717,7 @@ TEST_F(QA_GraphEngine, DropEdgeTypeRemovesEdges) {
 
     // Trying to query the dropped type should fail.
     auto from = engine_.get_edges_from(default_database_id, "follows", pk(1));
-    EXPECT_FALSE(from.has_value());
+    ASSERT_FALSE(from.has_value());
     EXPECT_EQ(from.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -772,7 +772,7 @@ TEST_F(QA_GraphEngine, LinkAfterDropFails) {
     ASSERT_TRUE(engine_.drop_edge_type(default_database_id, "follows").has_value());
 
     auto link = engine_.link(default_database_id, "follows", pk(1), pk(2));
-    EXPECT_FALSE(link.has_value());
+    ASSERT_FALSE(link.has_value());
     EXPECT_EQ(link.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -871,7 +871,7 @@ TEST_F(QA_GraphEngine, ListEdgeTypesAfterCreateAndDrop) {
 
 TEST_F(QA_GraphEngine, GetEdgeTableNonexistent) {
     auto result = engine_.get_edge_table(default_database_id, "nope");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -1036,7 +1036,7 @@ TEST_F(QA_GraphEngine, UnlinkNonexistentEdgeFromExistingType) {
 
     // Edge type exists but no edges yet.
     auto result = engine_.unlink(default_database_id, "follows", pk(1), pk(2));
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -1044,7 +1044,7 @@ TEST_F(QA_GraphEngine, UnlinkNonexistentEdgeFromExistingType) {
 
 TEST_F(QA_GraphEngine, DropNonexistentEdgeType) {
     auto result = engine_.drop_edge_type(default_database_id, "imaginary");
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -1062,7 +1062,7 @@ TEST_F(QA_GraphEngine, LinkWithUnexpectedPropertiesFails) {
                     .has_value());
 
     auto result = engine_.link(default_database_id, "follows", pk(1), pk(2), {Value(int64_t(42))});
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -1127,7 +1127,7 @@ TEST_F(QA_GraphEngine, SelfEdgeViaGraphEngine) {
 
     // Duplicate self-edge blocked.
     auto dup = engine_.link(default_database_id, "follows", pk(1), pk(1));
-    EXPECT_FALSE(dup.has_value());
+    ASSERT_FALSE(dup.has_value());
     EXPECT_EQ(dup.error().code, StatusCode::CONSTRAINT_VIOLATION);
 
     // Unlink self-edge.

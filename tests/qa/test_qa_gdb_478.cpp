@@ -115,7 +115,7 @@ TEST(QA_GDB478_Registry, DuplicateCaseVariants) {
 
     // All case variants should be treated as duplicates.
     auto r1 = registry.register_algorithm(make_simple_algo("pagerank"), noop_execute);
-    EXPECT_FALSE(r1.has_value());
+    ASSERT_FALSE(r1.has_value());
     EXPECT_EQ(r1.error().code, StatusCode::ALREADY_EXISTS);
 
     auto r2 = registry.register_algorithm(make_simple_algo("PAGERANK"), noop_execute);
@@ -200,7 +200,7 @@ TEST(QA_GDB478_Params, UnknownParamOnEmptyDef) {
     provided.emplace("rogue", Value(42.0));
 
     auto result = AlgorithmRegistry::resolve_params(def, provided);
-    EXPECT_FALSE(result.has_value());
+    ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -483,7 +483,7 @@ TEST_F(QA_GDB478_ScanOperator, ExecuteErrorPropagated) {
 
     // open() should fail since the execute function returns an error.
     auto open_r = op.open();
-    EXPECT_FALSE(open_r.has_value());
+    ASSERT_FALSE(open_r.has_value());
     EXPECT_EQ(open_r.error().code, StatusCode::INTERNAL_ERROR);
 }
 
@@ -641,7 +641,7 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
-        return std::move(*result);
+        return result ? std::move(*result) : QueryResult{};
     }
 
     void exec_error(const std::string& sql, StatusCode expected_code) {

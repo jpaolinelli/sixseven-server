@@ -110,7 +110,7 @@ TEST(QA148Crypto, Base64DecodeJustPadding) {
 
 TEST(QA148AuthParsing, EmptyString) {
     auto r = parse_auth_method("");
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -197,7 +197,7 @@ TEST(QA148Scram, ServerFirstMissingGS2Header) {
     ScramServerState state;
     // No GS2 header prefix — should fail.
     auto r = scram_server_first("n=user,r=somenonce", record, state);
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::AUTH_ERROR);
 }
 
@@ -206,7 +206,7 @@ TEST(QA148Scram, ServerFirstMissingNonce) {
     ScramServerState state;
     // Valid GS2 header but no 'r=' attribute.
     auto r = scram_server_first("n,,n=user", record, state);
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::AUTH_ERROR);
 }
 
@@ -226,7 +226,7 @@ TEST(QA148Scram, ServerFinalNonceMismatch) {
 
     // Client final with wrong nonce.
     auto r = scram_server_final("c=biws,r=WRONG_NONCE,p=AAAA", state);
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::AUTH_ERROR);
 }
 
@@ -251,7 +251,7 @@ TEST(QA148Scram, CorruptedPasswordHash) {
 
     ScramServerState state;
     auto r = scram_server_first("n,,n=user,r=somenonce", record, state);
-    EXPECT_FALSE(r.has_value());
+    ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::AUTH_ERROR);
 }
 
