@@ -49,7 +49,7 @@ protected:
         std::filesystem::create_directories(data_dir_);
         init_test_catalog(catalog_);
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
-        engine_  = std::make_unique<QueryEngine>(catalog_, *storage_);
+        engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
     }
 
     void TearDown() override {
@@ -79,11 +79,11 @@ protected:
         }
     }
 
-    DiskManager             dm_;
-    Catalog                 catalog_;
-    std::filesystem::path   data_dir_;
+    DiskManager dm_;
+    Catalog catalog_;
+    std::filesystem::path data_dir_;
     std::unique_ptr<StorageManager> storage_;
-    std::unique_ptr<QueryEngine>    engine_;
+    std::unique_ptr<QueryEngine> engine_;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,13 +95,11 @@ TEST_F(QA721Adversarial, TimeoutCancelsReliably_Repeated10x) {
     make_rows_table(500);
 
     for (int attempt = 0; attempt < 10; ++attempt) {
-        StatementDeadline::clear(); // paranoid reset between attempts
+        StatementDeadline::clear();      // paranoid reset between attempts
         StatementDeadlineGuard guard(1); // 1 ms
         auto r = engine_->execute("SELECT * FROM nums a CROSS JOIN nums b");
-        ASSERT_FALSE(r.has_value())
-            << "attempt " << attempt << ": slow query not cancelled";
-        EXPECT_EQ(r.error().code, StatusCode::QUERY_CANCELED)
-            << "attempt " << attempt;
+        ASSERT_FALSE(r.has_value()) << "attempt " << attempt << ": slow query not cancelled";
+        EXPECT_EQ(r.error().code, StatusCode::QUERY_CANCELED) << "attempt " << attempt;
     }
 }
 
@@ -202,9 +200,8 @@ TEST_F(QA721Adversarial, VeryLargeTimeoutDoesNotOverflowOrCancel) {
         expired_immediately = StatementDeadline::expired();
     }
 
-    EXPECT_FALSE(expired_immediately)
-        << "INT64_MAX ms deadline wrapped and is already expired — "
-           "deadline arithmetic overflows";
+    EXPECT_FALSE(expired_immediately) << "INT64_MAX ms deadline wrapped and is already expired — "
+                                         "deadline arithmetic overflows";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -367,7 +364,7 @@ TEST(QA721Concurrency, TwoThreadsOnlyOneGetsTimeout) {
         std::filesystem::remove_all(dir);
         std::filesystem::create_directories(dir);
         init_test_catalog(cat);
-        sm  = std::make_unique<StorageManager>(dm, dir);
+        sm = std::make_unique<StorageManager>(dm, dir);
         eng = std::make_unique<QueryEngine>(cat, *sm);
     };
 
@@ -375,9 +372,9 @@ TEST(QA721Concurrency, TwoThreadsOnlyOneGetsTimeout) {
     std::filesystem::path dir_b = std::filesystem::temp_directory_path() / "qa721_thr_b";
 
     DiskManager dm_a, dm_b;
-    Catalog     cat_a, cat_b;
+    Catalog cat_a, cat_b;
     std::unique_ptr<StorageManager> sm_a, sm_b;
-    std::unique_ptr<QueryEngine>    eng_a, eng_b;
+    std::unique_ptr<QueryEngine> eng_a, eng_b;
 
     make_engine(dir_a, sm_a, eng_a, dm_a, cat_a);
     make_engine(dir_b, sm_b, eng_b, dm_b, cat_b);
@@ -391,7 +388,8 @@ TEST(QA721Concurrency, TwoThreadsOnlyOneGetsTimeout) {
             values += (batch == 0 ? "(" : ", (") + std::to_string(i) + ")";
             if (++batch == 100 || i == 499) {
                 (void)eng.execute("INSERT INTO " + tbl + " VALUES " + values);
-                values.clear(); batch = 0;
+                values.clear();
+                batch = 0;
             }
         }
     };
@@ -420,12 +418,14 @@ TEST(QA721Concurrency, TwoThreadsOnlyOneGetsTimeout) {
     th_a.join();
     th_b.join();
 
-    EXPECT_TRUE(a_cancelled)  << "thread A with 1ms timeout was NOT cancelled";
-    EXPECT_TRUE(b_succeeded)  << "thread B with no timeout was unexpectedly cancelled";
+    EXPECT_TRUE(a_cancelled) << "thread A with 1ms timeout was NOT cancelled";
+    EXPECT_TRUE(b_succeeded) << "thread B with no timeout was unexpectedly cancelled";
 
     // Cleanup
-    eng_a.reset(); sm_a.reset();
-    eng_b.reset(); sm_b.reset();
+    eng_a.reset();
+    sm_a.reset();
+    eng_b.reset();
+    sm_b.reset();
     std::filesystem::remove_all(dir_a);
     std::filesystem::remove_all(dir_b);
 }
