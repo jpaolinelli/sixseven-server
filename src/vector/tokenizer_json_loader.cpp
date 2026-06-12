@@ -115,15 +115,31 @@ Result<TokenizerConfig> load_tokenizer_config(const std::string& path) {
         const auto& merges_json = model["merges"];
         config.merges.reserve(merges_json.size());
         for (const auto& merge : merges_json) {
-            if (!merge.is_string()) {
+            if (merge.is_string()) {
+                // Common format: "a b"
+                config.merges.push_back(merge.get<std::string>());
+            } else if (merge.is_array() && merge.size() == 2 && merge[0].is_string() &&
+                       merge[1].is_string()) {
+                // Newer pair-array format: ["a", "b"] -- normalise to "a b" string.
+                config.merges.push_back(merge[0].get<std::string>() + " " +
+                                        merge[1].get<std::string>());
+            } else {
                 return make_error(StatusCode::PARSE_ERROR,
-                                  "model.merges contains non-string entry");
+                                  "model.merges contains invalid entry (expected string or "
+                                  "two-element string array)");
             }
-            config.merges.push_back(merge.get<std::string>());
         }
     }
 
     // --- added_tokens (optional) ---
+    // Tracks which special token roles were resolved from added_tokens so we can
+    // skip the vocab-fallback pass for those roles.
+    bool pad_set = false;
+    bool unk_set = false;
+    bool cls_set = false;
+    bool sep_set = false;
+    bool mask_set = false;
+
     if (doc.contains("added_tokens") && doc["added_tokens"].is_array()) {
         for (const auto& token : doc["added_tokens"]) {
             if (!token.is_object() || !token.contains("id") || !token.contains("content")) {
@@ -135,19 +151,106 @@ Result<TokenizerConfig> load_tokenizer_config(const std::string& path) {
             const auto id = token["id"].get<int64_t>();
             const auto content = token["content"].get<std::string>();
 
+            // BERT-style bracket tokens.
             if (content == "[PAD]") {
                 config.special_tokens.pad = id;
+                pad_set = true;
             } else if (content == "[UNK]") {
                 config.special_tokens.unk = id;
+                unk_set = true;
             } else if (content == "[CLS]") {
                 config.special_tokens.cls = id;
+                cls_set = true;
             } else if (content == "[SEP]") {
                 config.special_tokens.sep = id;
+                sep_set = true;
             } else if (content == "[MASK]") {
                 config.special_tokens.mask = id;
+                mask_set = true;
+            }
+            // RoBERTa/GPT-style angle-bracket tokens.
+            // Mapping: <s> = CLS/BOS, </s> = SEP/EOS, <pad> = PAD,
+            //          <unk> = UNK, <mask> = MASK.
+            else if (content == "<s>") {
+                config.special_tokens.cls = id;
+                cls_set = true;
+            } else if (content == "</s>") {
+                config.special_tokens.sep = id;
+                sep_set = true;
+            } else if (content == "<pad>") {
+                config.special_tokens.pad = id;
+                pad_set = true;
+            } else if (content == "<unk>") {
+                config.special_tokens.unk = id;
+                unk_set = true;
+            } else if (content == "<mask>") {
+                config.special_tokens.mask = id;
+                mask_set = true;
             }
         }
     }
+
+    // --- vocab-based fallback for special token IDs ---
+    // If a role was not resolved from added_tokens, look up the canonical token
+    // string in the vocab and use its ID.  This handles tokenizer.json files that
+    // omit added_tokens or use non-standard special-token layouts.
+    if (!pad_set) {
+        auto it = config.vocab.find("[PAD]");
+        if (it == config.vocab.end()) {
+            it = config.vocab.find("<pad>");
+        }
+        if (it != config.vocab.end()) {
+            config.special_tokens.pad = it->second;
+            pad_set = true;
+        }
+    }
+    if (!unk_set) {
+        auto it = config.vocab.find("[UNK]");
+        if (it == config.vocab.end()) {
+            it = config.vocab.find("<unk>");
+        }
+        if (it != config.vocab.end()) {
+            config.special_tokens.unk = it->second;
+            unk_set = true;
+        }
+    }
+    if (!cls_set) {
+        auto it = config.vocab.find("[CLS]");
+        if (it == config.vocab.end()) {
+            it = config.vocab.find("<s>");
+        }
+        if (it != config.vocab.end()) {
+            config.special_tokens.cls = it->second;
+            cls_set = true;
+        }
+    }
+    if (!sep_set) {
+        auto it = config.vocab.find("[SEP]");
+        if (it == config.vocab.end()) {
+            it = config.vocab.find("</s>");
+        }
+        if (it != config.vocab.end()) {
+            config.special_tokens.sep = it->second;
+            sep_set = true;
+        }
+    }
+    if (!mask_set) {
+        auto it = config.vocab.find("[MASK]");
+        if (it == config.vocab.end()) {
+            it = config.vocab.find("<mask>");
+        }
+        if (it != config.vocab.end()) {
+            config.special_tokens.mask = it->second;
+            mask_set = true;
+        }
+    }
+
+    // Suppress unused-variable warnings for flags in non-debug builds.
+    (void)pad_set;
+    (void)unk_set;
+    (void)cls_set;
+    (void)sep_set;
+    (void)mask_set;
 
     // --- normalizer (optional) ---
     if (doc.contains("normalizer") && doc["normalizer"].is_object()) {
@@ -182,8 +285,8 @@ Result<TokenizerConfig> load_tokenizer_config(const std::string& path) {
     }
 
     SIXSEVEN_LOG_DEBUG("loaded tokenizer config: vocab_size={}, model_type={}",
-                    config.vocab.size(),
-                    static_cast<int>(config.model_type));
+                       config.vocab.size(),
+                       static_cast<int>(config.model_type));
 
     return ok(std::move(config));
 }
