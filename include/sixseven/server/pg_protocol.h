@@ -189,9 +189,8 @@ using QueryExecutor =
 /// Callback type for describing SQL result columns without executing.
 /// Returns column metadata (names + types) for SELECT statements,
 /// or an empty vector for non-SELECT statements.
-using QueryDescriber =
-    std::function<Result<std::vector<ColumnDescription>>(const std::string& sql,
-                                                         const std::string& database)>;
+using QueryDescriber = std::function<Result<std::vector<ColumnDescription>>(
+    const std::string& sql, const std::string& database)>;
 
 /// Protocol state machine phases.
 enum class ProtocolState : uint8_t {
@@ -316,7 +315,8 @@ private:
     void send_error_response(Connection& conn,
                              std::string_view severity,
                              std::string_view sqlstate,
-                             std::string_view message);
+                             std::string_view message,
+                             std::optional<uint32_t> position = std::nullopt);
     void send_empty_query_response(Connection& conn);
     void send_parse_complete(Connection& conn);
     void send_bind_complete(Connection& conn);

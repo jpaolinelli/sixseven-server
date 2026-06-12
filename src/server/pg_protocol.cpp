@@ -1761,8 +1761,11 @@ void PgProtocolHandler::handle_simple_query(Connection& conn, std::string_view s
         if (session_result) {
             if (!*session_result) {
                 const auto& err = session_result->error();
-                send_error_response(
-                    conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+                send_error_response(conn,
+                                    "ERROR",
+                                    std::string(status_to_sqlstate(err.code)),
+                                    err.message,
+                                    err.query_pos);
                 session_->update_transaction_state(stmt, false);
                 send_ready_for_query(conn, session_->ready_for_query_status());
                 return;
@@ -1799,8 +1802,11 @@ void PgProtocolHandler::handle_simple_query(Connection& conn, std::string_view s
         if (!result) {
             // On error, send ErrorResponse and stop processing remaining statements.
             const auto& err = result.error();
-            send_error_response(
-                conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+            send_error_response(conn,
+                                "ERROR",
+                                std::string(status_to_sqlstate(err.code)),
+                                err.message,
+                                err.query_pos);
             session_->update_transaction_state(stmt, false);
             send_ready_for_query(conn, session_->ready_for_query_status());
             return;
@@ -2028,8 +2034,11 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
             auto columns = query_describer_(stmt->sql, startup_database());
             if (!columns) {
                 const auto& err = columns.error();
-                send_error_response(
-                    conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+                send_error_response(conn,
+                                    "ERROR",
+                                    std::string(status_to_sqlstate(err.code)),
+                                    err.message,
+                                    err.query_pos);
                 error_in_extended_ = true;
                 return;
             }
@@ -2053,8 +2062,11 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
             auto columns = query_describer_(portal->sql, startup_database());
             if (!columns) {
                 const auto& err = columns.error();
-                send_error_response(
-                    conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+                send_error_response(conn,
+                                    "ERROR",
+                                    std::string(status_to_sqlstate(err.code)),
+                                    err.message,
+                                    err.query_pos);
                 error_in_extended_ = true;
                 return;
             }
@@ -2121,7 +2133,8 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
     auto result = query_executor_(*substituted, startup_database());
     if (!result) {
         const auto& err = result.error();
-        send_error_response(conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+        send_error_response(
+            conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message, err.query_pos);
         error_in_extended_ = true;
         return;
     }
@@ -2331,7 +2344,8 @@ void PgProtocolHandler::send_command_complete(Connection& conn, const std::strin
 void PgProtocolHandler::send_error_response(Connection& conn,
                                             std::string_view severity,
                                             std::string_view sqlstate,
-                                            std::string_view message) {
+                                            std::string_view message,
+                                            std::optional<uint32_t> position) {
     MessageWriter w;
     w.begin_message('E');
     w.write_byte('S');
@@ -2342,7 +2356,11 @@ void PgProtocolHandler::send_error_response(Connection& conn,
     w.write_cstring(sqlstate); // SQLSTATE.
     w.write_byte('M');
     w.write_cstring(message); // Message.
-    w.write_byte(0);          // Terminator.
+    if (position.has_value()) {
+        w.write_byte('P');
+        w.write_cstring(std::to_string(*position)); // Position (1-based byte offset).
+    }
+    w.write_byte(0); // Terminator.
     auto msg = w.finish();
     conn.enqueue_write(msg.data(), msg.size());
 }

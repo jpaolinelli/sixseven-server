@@ -553,6 +553,9 @@ struct Token {
     std::string_view lexeme;
     uint32_t line = 1;
     uint32_t column = 1;
+    /// 1-based byte offset of this token's first character in the source string.
+    /// Used to populate the PostgreSQL ErrorResponse 'P' (Position) field.
+    uint32_t byte_offset = 1;
 };
 
 } // namespace sixseven

@@ -192,7 +192,8 @@ Result<std::vector<Token>> Lexer::tokenize() {
         }
 
         if (at_end()) {
-            tokens.push_back(Token{TokenType::END_OF_FILE, {}, line_, column_});
+            tokens.push_back(Token{TokenType::END_OF_FILE, {}, line_, column_,
+                                   static_cast<uint32_t>(source_.size() + 1)});
             break;
         }
 
@@ -533,8 +534,12 @@ bool Lexer::has_valid_exponent() const {
 }
 
 Token Lexer::make_token(TokenType type) const {
-    return Token{
-        type, source_.substr(start_, current_ - start_), token_start_line_, token_start_column_};
+    // byte_offset is 1-based (PostgreSQL 'P' field convention).
+    return Token{type,
+                 source_.substr(start_, current_ - start_),
+                 token_start_line_,
+                 token_start_column_,
+                 static_cast<uint32_t>(start_ + 1)};
 }
 
 } // namespace sixseven

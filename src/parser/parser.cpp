@@ -306,10 +306,10 @@ Result<Token> Parser::expect(TokenType type, const std::string& message) {
         return ok(advance());
     }
     const auto& tok = peek();
-    return make_error(StatusCode::PARSE_ERROR,
-                      message + " at line " + std::to_string(tok.line) + ", column " +
-                          std::to_string(tok.column) + " (got " +
-                          std::string(token_type_name(tok.type)) + ")");
+    return make_parse_error(message + " at line " + std::to_string(tok.line) + ", column " +
+                                std::to_string(tok.column) + " (got " +
+                                std::string(token_type_name(tok.type)) + ")",
+                            tok.byte_offset);
 }
 
 bool Parser::at_end() const {
@@ -321,10 +321,10 @@ Result<std::string> Parser::parse_name(const std::string& context) {
         return ok(std::string(advance().lexeme));
     }
     const auto& tok = peek();
-    return make_error(StatusCode::PARSE_ERROR,
-                      "expected " + context + " at line " + std::to_string(tok.line) + ", column " +
-                          std::to_string(tok.column) + " (got " +
-                          std::string(token_type_name(tok.type)) + ")");
+    return make_parse_error("expected " + context + " at line " + std::to_string(tok.line) +
+                                ", column " + std::to_string(tok.column) + " (got " +
+                                std::string(token_type_name(tok.type)) + ")",
+                            tok.byte_offset);
 }
 
 // -- Error recovery -----------------------------------------------------------
@@ -339,9 +339,9 @@ void Parser::synchronize() {
 
 Result<StmtPtr> Parser::error(const std::string& message) {
     const auto& tok = peek();
-    return make_error(StatusCode::PARSE_ERROR,
-                      message + " at line " + std::to_string(tok.line) + ", column " +
-                          std::to_string(tok.column));
+    return make_parse_error(message + " at line " + std::to_string(tok.line) + ", column " +
+                                std::to_string(tok.column),
+                            tok.byte_offset);
 }
 
 // -- Statement dispatch -------------------------------------------------------
@@ -625,9 +625,9 @@ Result<TypeSpec> Parser::parse_type_spec() {
 
     if (!is_type_keyword(peek().type)) {
         const auto& tok = peek();
-        return make_error(StatusCode::PARSE_ERROR,
-                          "expected type name at line " + std::to_string(tok.line) + ", column " +
-                              std::to_string(tok.column));
+        return make_parse_error("expected type name at line " + std::to_string(tok.line) +
+                                    ", column " + std::to_string(tok.column),
+                                tok.byte_offset);
     }
 
     ts.name = std::string(advance().lexeme);
@@ -3965,10 +3965,10 @@ Result<ExprPtr> Parser::parse_primary() {
         return ok(ExprPtr(std::move(ref)));
     }
 
-    return make_error(StatusCode::PARSE_ERROR,
-                      "expected expression at line " + std::to_string(tok.line) + ", column " +
-                          std::to_string(tok.column) + " (got " +
-                          std::string(token_type_name(tok.type)) + ")");
+    return make_parse_error("expected expression at line " + std::to_string(tok.line) +
+                                ", column " + std::to_string(tok.column) + " (got " +
+                                std::string(token_type_name(tok.type)) + ")",
+                            tok.byte_offset);
 }
 
 } // namespace sixseven
