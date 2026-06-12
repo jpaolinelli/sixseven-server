@@ -498,12 +498,3 @@ TEST(QA_Defaults, AllDefaultsCorrect) {
     EXPECT_EQ(config.auth_method, "scram-sha-256");
     EXPECT_EQ(config.shutdown_timeout_s, 30);
 }
-
-// ============================================================================
-// QA_BuildSystem â€” verify build system acceptance criteria
-// ============================================================================
-
-TEST(QA_BuildSystem, UnitTestTargetRuns) {
-    // If this test runs, the unit test target was built successfully.
-    EXPECT_TRUE(true);
-}
