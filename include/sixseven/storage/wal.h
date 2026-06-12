@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <thread>
 
 namespace sixseven {
@@ -68,6 +69,26 @@ public:
     /// written so far.
     /// Thread-safe.
     [[nodiscard]] Result<void> flush();
+
+    /// Block until all records up to and including `lsn` are durably
+    /// flushed (flushed_lsn() >= lsn).
+    ///
+    /// Group-commit aware: the caller registers `lsn` as a pending flush
+    /// watermark, wakes the background flush thread immediately, and blocks
+    /// on a condition variable until the flush thread's next fsync covers
+    /// the requested LSN. Many concurrent waiters share a single fsync.
+    ///
+    /// Fast path: returns immediately if `lsn` is already durable.
+    /// If group commit is disabled (flush thread not running), falls back
+    /// to a synchronous flush().
+    ///
+    /// Errors:
+    /// - INVALID_ARGUMENT if the writer is not open, or if `lsn` has not
+    ///   been appended yet (it could never become durable).
+    /// - IO_ERROR if the flush thread's fsync fails while waiting, or if
+    ///   the writer is shut down before `lsn` became durable.
+    /// Thread-safe. No busy-waiting.
+    [[nodiscard]] Result<void> flush_until(lsn_t lsn);
 
     /// Return the next LSN that will be assigned.
     [[nodiscard]] lsn_t current_lsn() const;
@@ -156,6 +177,20 @@ private:
     std::mutex flush_mutex_;
     std::condition_variable flush_cv_;
     std::atomic<bool> flush_running_{false};
+
+    // Durability waiters (flush_until). All guarded by flush_mutex_.
+    /// Highest LSN any waiter is currently waiting on. The flush loop wakes
+    /// early (without waiting for the timer) while this exceeds flushed_lsn_.
+    lsn_t pending_flush_lsn_ = 0;
+    /// Incremented each time the flush thread's fsync fails, so waiters can
+    /// detect failures that happened while they were blocked.
+    uint64_t flush_error_epoch_ = 0;
+    /// Details of the most recent flush thread fsync failure.
+    StatusCode last_flush_error_code_ = StatusCode::OK;
+    std::string last_flush_error_message_;
+    /// Signaled after every flush thread fsync (success or failure) and on
+    /// shutdown; waiters in flush_until() block on this.
+    std::condition_variable flushed_cv_;
 
     // Segment rotation callback.
     OnSegmentRotated on_segment_rotated_;
