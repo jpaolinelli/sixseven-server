@@ -7,6 +7,7 @@
 
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/types.h"
+#include "sixseven/executor/pg_catalog_tables.h"
 #include "sixseven/executor/virtual_catalog_scan.h"
 #include "sixseven/parser/lexer.h"
 #include "sixseven/parser/parser.h"
@@ -51,220 +52,6 @@ OutputSchema make_output_schema(const VirtualTableDef& def) {
         cols.push_back({def.name, col.name, col.type_id, col.nullable, def.table_id});
     }
     return OutputSchema(std::move(cols));
-}
-
-void register_pg_type(Catalog& catalog) {
-    static constexpr std::array<TypeId, 23> all_types = {
-        TypeId::BOOL,    TypeId::INT8,      TypeId::INT16,    TypeId::INT32,  TypeId::INT64,
-        TypeId::UINT8,   TypeId::UINT16,    TypeId::UINT32,   TypeId::UINT64, TypeId::FLOAT32,
-        TypeId::FLOAT64, TypeId::DECIMAL,   TypeId::STRING,   TypeId::BLOB,   TypeId::DATE,
-        TypeId::TIME,    TypeId::TIMESTAMP, TypeId::INTERVAL, TypeId::POINT,  TypeId::JSON,
-        TypeId::UUID,    TypeId::EMBEDDING, TypeId::PATH,
-    };
-
-    auto pg_typname = [](TypeId t) -> std::string {
-        switch (t) {
-        case TypeId::BOOL:
-            return "bool";
-        case TypeId::INT8:
-            return "int2";
-        case TypeId::INT16:
-            return "int2";
-        case TypeId::INT32:
-            return "int4";
-        case TypeId::INT64:
-            return "int8";
-        case TypeId::UINT8:
-            return "int2";
-        case TypeId::UINT16:
-            return "int4";
-        case TypeId::UINT32:
-            return "int8";
-        case TypeId::UINT64:
-            return "numeric";
-        case TypeId::FLOAT32:
-            return "float4";
-        case TypeId::FLOAT64:
-            return "float8";
-        case TypeId::DECIMAL:
-            return "numeric";
-        case TypeId::STRING:
-            return "text";
-        case TypeId::BLOB:
-            return "bytea";
-        case TypeId::DATE:
-            return "date";
-        case TypeId::TIME:
-            return "time";
-        case TypeId::TIMESTAMP:
-            return "timestamp";
-        case TypeId::INTERVAL:
-            return "interval";
-        case TypeId::POINT:
-            return "point";
-        case TypeId::JSON:
-            return "json";
-        case TypeId::UUID:
-            return "uuid";
-        case TypeId::EMBEDDING:
-            return "embedding";
-        case TypeId::PATH:
-            return "text";
-        }
-        return "text";
-    };
-
-    auto pg_typlen = [](TypeId t) -> int32_t {
-        switch (t) {
-        case TypeId::BOOL:
-            return 1;
-        case TypeId::INT8:
-            return 2;
-        case TypeId::INT16:
-            return 2;
-        case TypeId::INT32:
-            return 4;
-        case TypeId::INT64:
-            return 8;
-        case TypeId::UINT8:
-            return 2;
-        case TypeId::UINT16:
-            return 4;
-        case TypeId::UINT32:
-            return 8;
-        case TypeId::UINT64:
-            return -1;
-        case TypeId::FLOAT32:
-            return 4;
-        case TypeId::FLOAT64:
-            return 8;
-        case TypeId::DECIMAL:
-            return -1;
-        case TypeId::STRING:
-            return -1;
-        case TypeId::BLOB:
-            return -1;
-        case TypeId::DATE:
-            return 4;
-        case TypeId::TIME:
-            return 8;
-        case TypeId::TIMESTAMP:
-            return 8;
-        case TypeId::INTERVAL:
-            return 16;
-        case TypeId::POINT:
-            return 16;
-        case TypeId::JSON:
-            return -1;
-        case TypeId::UUID:
-            return 16;
-        case TypeId::EMBEDDING:
-            return -1;
-        case TypeId::PATH:
-            return -1;
-        }
-        return -1;
-    };
-
-    auto pg_oid = [](TypeId t) -> uint32_t {
-        switch (t) {
-        case TypeId::BOOL:
-            return 16;
-        case TypeId::INT8:
-            return 21;
-        case TypeId::INT16:
-            return 21;
-        case TypeId::INT32:
-            return 23;
-        case TypeId::INT64:
-            return 20;
-        case TypeId::UINT8:
-            return 21;
-        case TypeId::UINT16:
-            return 23;
-        case TypeId::UINT32:
-            return 20;
-        case TypeId::UINT64:
-            return 1700;
-        case TypeId::FLOAT32:
-            return 700;
-        case TypeId::FLOAT64:
-            return 701;
-        case TypeId::DECIMAL:
-            return 1700;
-        case TypeId::STRING:
-            return 25;
-        case TypeId::BLOB:
-            return 17;
-        case TypeId::DATE:
-            return 1082;
-        case TypeId::TIME:
-            return 1083;
-        case TypeId::TIMESTAMP:
-            return 1114;
-        case TypeId::INTERVAL:
-            return 1186;
-        case TypeId::POINT:
-            return 600;
-        case TypeId::JSON:
-            return 114;
-        case TypeId::UUID:
-            return 2950;
-        case TypeId::EMBEDDING:
-            return 100000;
-        case TypeId::PATH:
-            return 25;
-        }
-        return 25;
-    };
-
-    VirtualTableDef def;
-    def.name = "pg_type";
-    def.columns = {
-        {0, "oid", TypeId::INT32, false, ""},
-        {1, "typname", TypeId::STRING, false, ""},
-        {2, "typnamespace", TypeId::INT32, false, ""},
-        {3, "typlen", TypeId::INT32, false, ""},
-        {4, "typtype", TypeId::STRING, false, ""},
-        {5, "typelem", TypeId::INT32, false, ""},
-        {6, "typrelid", TypeId::INT32, false, ""},
-        {7, "typbasetype", TypeId::INT32, false, ""},
-    };
-    def.generator = [pg_typname, pg_typlen, pg_oid]() -> std::vector<std::vector<std::string>> {
-        std::vector<std::vector<std::string>> rows;
-        rows.reserve(all_types.size());
-        for (auto t : all_types) {
-            rows.push_back({
-                std::to_string(pg_oid(t)),
-                pg_typname(t),
-                "11",
-                std::to_string(pg_typlen(t)),
-                "b",
-                "0",
-                "0",
-                "0",
-            });
-        }
-        return rows;
-    };
-    catalog.register_virtual_table(std::move(def));
-}
-
-void register_pg_namespace(Catalog& catalog) {
-    VirtualTableDef def;
-    def.name = "pg_namespace";
-    def.columns = {
-        {0, "oid", TypeId::INT32, false, ""},
-        {1, "nspname", TypeId::STRING, false, ""},
-        {2, "nspowner", TypeId::INT32, false, ""},
-    };
-    def.generator = []() -> std::vector<std::vector<std::string>> {
-        return {
-            {"11", "pg_catalog", "10"},
-            {"2200", "public", "10"},
-        };
-    };
-    catalog.register_virtual_table(std::move(def));
 }
 
 struct TypeRow {
@@ -375,15 +162,29 @@ std::vector<NamespaceRow> scan_pg_namespace(Catalog& catalog) {
 TEST(QA_GDB565, AC1_PgTypeReturnsAllTypes) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
+    catalog.register_virtual_table(make_pg_type());
 
     auto rows = scan_pg_type(catalog);
     EXPECT_EQ(rows.size(), 23u) << "Should have one row per TypeId (22 base + PATH)";
 
     std::unordered_set<std::string> expected_names = {
-        "bool", "int2", "int4", "int8", "numeric", "float4", "float8",
-        "text", "bytea", "date", "time", "timestamp", "interval",
-        "point", "json", "uuid", "embedding",
+        "bool",
+        "int2",
+        "int4",
+        "int8",
+        "numeric",
+        "float4",
+        "float8",
+        "text",
+        "bytea",
+        "date",
+        "time",
+        "timestamp",
+        "interval",
+        "point",
+        "json",
+        "uuid",
+        "embedding",
     };
 
     std::unordered_set<std::string> found_names;
@@ -403,7 +204,7 @@ TEST(QA_GDB565, AC1_PgTypeReturnsAllTypes) {
 TEST(QA_GDB565, AC2_OidsMatchPgProtocol) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
+    catalog.register_virtual_table(make_pg_type());
 
     auto rows = scan_pg_type(catalog);
 
@@ -444,7 +245,7 @@ TEST(QA_GDB565, AC2_OidsMatchPgProtocol) {
 TEST(QA_GDB565, AC3_EmbeddingHasOid100000) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
+    catalog.register_virtual_table(make_pg_type());
 
     auto rows = scan_pg_type(catalog);
     auto it = std::find_if(
@@ -461,7 +262,7 @@ TEST(QA_GDB565, AC3_EmbeddingHasOid100000) {
 TEST(QA_GDB565, AC4_PgNamespaceReturnsExpectedRows) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_namespace(catalog);
+    catalog.register_virtual_table(make_pg_namespace());
 
     auto rows = scan_pg_namespace(catalog);
     ASSERT_EQ(rows.size(), 2u);
@@ -482,7 +283,7 @@ TEST(QA_GDB565, AC4_PgNamespaceReturnsExpectedRows) {
 TEST(QA_GDB565, AC5_WhereFilteringBindsSuccessfully) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
+    catalog.register_virtual_table(make_pg_type());
 
     auto stmt = parse_sql("SELECT oid, typname FROM pg_catalog.pg_type WHERE typname = 'int4'");
     ASSERT_NE(stmt, nullptr);
@@ -508,7 +309,7 @@ TEST(QA_GDB565, AC6_UnitTestsExist) {
 TEST(QA_GDB565, Adversarial_PgTypeAllColumnsPresent) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
+    catalog.register_virtual_table(make_pg_type());
 
     auto vt = catalog.get_virtual_table("pg_type");
     ASSERT_TRUE(vt.has_value());
@@ -536,7 +337,7 @@ TEST(QA_GDB565, Adversarial_PgTypeAllColumnsPresent) {
 TEST(QA_GDB565, Adversarial_PgTypeNoDuplicateOidTypnamePairs) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
+    catalog.register_virtual_table(make_pg_type());
 
     auto rows = scan_pg_type(catalog);
 
@@ -545,8 +346,8 @@ TEST(QA_GDB565, Adversarial_PgTypeNoDuplicateOidTypnamePairs) {
         auto it = name_to_oid.find(r.typname);
         if (it != name_to_oid.end()) {
             EXPECT_EQ(it->second, r.oid)
-                << "typname=" << r.typname << " has inconsistent OIDs: "
-                << it->second << " vs " << r.oid;
+                << "typname=" << r.typname << " has inconsistent OIDs: " << it->second << " vs "
+                << r.oid;
         } else {
             name_to_oid[r.typname] = r.oid;
         }
@@ -560,8 +361,8 @@ TEST(QA_GDB565, Adversarial_PgTypeNoDuplicateOidTypnamePairs) {
 TEST(QA_GDB565, Adversarial_PgTypeTypnamespaceRefersToValidNamespace) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
-    register_pg_namespace(catalog);
+    catalog.register_virtual_table(make_pg_type());
+    catalog.register_virtual_table(make_pg_namespace());
 
     auto type_rows = scan_pg_type(catalog);
     auto ns_rows = scan_pg_namespace(catalog);
@@ -585,7 +386,7 @@ TEST(QA_GDB565, Adversarial_PgTypeTypnamespaceRefersToValidNamespace) {
 TEST(QA_GDB565, Adversarial_PgTypeStaticFieldsCorrect) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
+    catalog.register_virtual_table(make_pg_type());
 
     auto rows = scan_pg_type(catalog);
     ASSERT_FALSE(rows.empty());
@@ -606,7 +407,7 @@ TEST(QA_GDB565, Adversarial_PgTypeStaticFieldsCorrect) {
 TEST(QA_GDB565, Adversarial_PgNamespaceOwnersAreConsistent) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_namespace(catalog);
+    catalog.register_virtual_table(make_pg_namespace());
 
     auto rows = scan_pg_namespace(catalog);
     for (const auto& r : rows) {
@@ -621,13 +422,12 @@ TEST(QA_GDB565, Adversarial_PgNamespaceOwnersAreConsistent) {
 TEST(QA_GDB565, Adversarial_PgNamespaceNoDuplicateOids) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_namespace(catalog);
+    catalog.register_virtual_table(make_pg_namespace());
 
     auto rows = scan_pg_namespace(catalog);
     std::set<int32_t> oids;
     for (const auto& r : rows) {
-        EXPECT_TRUE(oids.insert(r.oid).second)
-            << "Duplicate pg_namespace OID: " << r.oid;
+        EXPECT_TRUE(oids.insert(r.oid).second) << "Duplicate pg_namespace OID: " << r.oid;
     }
 }
 
@@ -638,7 +438,7 @@ TEST(QA_GDB565, Adversarial_PgNamespaceNoDuplicateOids) {
 TEST(QA_GDB565, Adversarial_PgTypeSpecificOidMapping) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
+    catalog.register_virtual_table(make_pg_type());
 
     auto rows = scan_pg_type(catalog);
 
@@ -694,19 +494,24 @@ TEST(QA_GDB565, Adversarial_PgTypeSpecificOidMapping) {
 TEST(QA_GDB565, Adversarial_PgTypeVariableLengthConsistency) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
+    catalog.register_virtual_table(make_pg_type());
 
     auto rows = scan_pg_type(catalog);
 
     std::unordered_set<std::string> variable_types = {
-        "text", "bytea", "json", "numeric", "embedding",
+        "text",
+        "bytea",
+        "json",
+        "numeric",
+        "embedding",
     };
 
     for (const auto& r : rows) {
         if (variable_types.count(r.typname)) {
             EXPECT_EQ(r.typlen, -1) << "typname=" << r.typname << " should be variable-length";
         } else {
-            EXPECT_GT(r.typlen, 0) << "typname=" << r.typname << " should have positive fixed length";
+            EXPECT_GT(r.typlen, 0)
+                << "typname=" << r.typname << " should have positive fixed length";
         }
     }
 }
@@ -718,7 +523,7 @@ TEST(QA_GDB565, Adversarial_PgTypeVariableLengthConsistency) {
 TEST(QA_GDB565, Adversarial_PgTypeFixedLengthBoundaries) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
+    catalog.register_virtual_table(make_pg_type());
 
     auto rows = scan_pg_type(catalog);
 
@@ -786,7 +591,7 @@ TEST(QA_GDB565, Adversarial_PgTypeFixedLengthBoundaries) {
 TEST(QA_GDB565, Adversarial_PgTypeWhereOidFilterBinds) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
+    catalog.register_virtual_table(make_pg_type());
 
     auto stmt = parse_sql("SELECT typname FROM pg_catalog.pg_type WHERE oid = 23");
     ASSERT_NE(stmt, nullptr);
@@ -805,13 +610,12 @@ TEST(QA_GDB565, Adversarial_PgTypeWhereOidFilterBinds) {
 TEST(QA_GDB565, Adversarial_PgTypeJoinPgNamespace) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
-    register_pg_namespace(catalog);
+    catalog.register_virtual_table(make_pg_type());
+    catalog.register_virtual_table(make_pg_namespace());
 
-    auto stmt = parse_sql(
-        "SELECT t.typname, n.nspname "
-        "FROM pg_catalog.pg_type t "
-        "JOIN pg_catalog.pg_namespace n ON t.typnamespace = n.oid");
+    auto stmt = parse_sql("SELECT t.typname, n.nspname "
+                          "FROM pg_catalog.pg_type t "
+                          "JOIN pg_catalog.pg_namespace n ON t.typnamespace = n.oid");
     ASSERT_NE(stmt, nullptr);
 
     Binder binder(catalog);
@@ -827,7 +631,7 @@ TEST(QA_GDB565, Adversarial_PgTypeJoinPgNamespace) {
 TEST(QA_GDB565, Adversarial_SelectStarBindsPgType) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
+    catalog.register_virtual_table(make_pg_type());
 
     auto stmt = parse_sql("SELECT * FROM pg_catalog.pg_type");
     ASSERT_NE(stmt, nullptr);
@@ -841,7 +645,7 @@ TEST(QA_GDB565, Adversarial_SelectStarBindsPgType) {
 TEST(QA_GDB565, Adversarial_SelectStarBindsPgNamespace) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_namespace(catalog);
+    catalog.register_virtual_table(make_pg_namespace());
 
     auto stmt = parse_sql("SELECT * FROM pg_catalog.pg_namespace");
     ASSERT_NE(stmt, nullptr);
@@ -859,7 +663,7 @@ TEST(QA_GDB565, Adversarial_SelectStarBindsPgNamespace) {
 TEST(QA_GDB565, Adversarial_PgTypeNoNullValues) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
+    catalog.register_virtual_table(make_pg_type());
 
     auto vt = catalog.get_virtual_table("pg_type");
     ASSERT_TRUE(vt.has_value());
@@ -880,8 +684,8 @@ TEST(QA_GDB565, Adversarial_PgTypeNoNullValues) {
 TEST(QA_GDB565, Adversarial_AllOidsPositive) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
-    register_pg_namespace(catalog);
+    catalog.register_virtual_table(make_pg_type());
+    catalog.register_virtual_table(make_pg_namespace());
 
     auto type_rows = scan_pg_type(catalog);
     for (const auto& r : type_rows) {
@@ -901,7 +705,7 @@ TEST(QA_GDB565, Adversarial_AllOidsPositive) {
 TEST(QA_GDB565, Adversarial_PgTypeWithAlias) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
+    catalog.register_virtual_table(make_pg_type());
 
     auto stmt = parse_sql("SELECT t.oid, t.typname FROM pg_catalog.pg_type AS t");
     ASSERT_NE(stmt, nullptr);
@@ -919,7 +723,7 @@ TEST(QA_GDB565, Adversarial_PgTypeWithAlias) {
 TEST(QA_GDB565, Adversarial_InvalidColumnOnPgType) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
+    catalog.register_virtual_table(make_pg_type());
 
     auto stmt = parse_sql("SELECT nonexistent_col FROM pg_catalog.pg_type");
     ASSERT_NE(stmt, nullptr);
@@ -936,7 +740,7 @@ TEST(QA_GDB565, Adversarial_InvalidColumnOnPgType) {
 TEST(QA_GDB565, Adversarial_PgNamespaceLookupSucceeds) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_namespace(catalog);
+    catalog.register_virtual_table(make_pg_namespace());
 
     auto vt = catalog.get_virtual_table("pg_namespace");
     ASSERT_TRUE(vt.has_value());
@@ -952,7 +756,7 @@ TEST(QA_GDB565, Adversarial_PgNamespaceLookupSucceeds) {
 TEST(QA_GDB565, Adversarial_PgTypeScanIteratorLifecycle) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_type(catalog);
+    catalog.register_virtual_table(make_pg_type());
 
     auto vt = catalog.get_virtual_table("pg_type");
     ASSERT_TRUE(vt.has_value());
