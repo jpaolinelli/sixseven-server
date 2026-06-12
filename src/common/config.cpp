@@ -51,7 +51,17 @@ Result<Config> Config::load_from_file(const std::string& path) {
         config.log_level = j["log_level"].get<std::string>();
     }
     if (j.contains("buffer_pool_size_mb") && j["buffer_pool_size_mb"].is_number_unsigned()) {
-        config.buffer_pool_size_mb = j["buffer_pool_size_mb"].get<size_t>();
+        auto mb = j["buffer_pool_size_mb"].get<uint64_t>();
+        // buffer_pool_size_mb * 128 must fit in uint32_t (frame count).
+        // Max safe value: UINT32_MAX / 128 = 33554431.
+        static constexpr uint64_t kMaxSafeMb = static_cast<uint64_t>(UINT32_MAX) / 128;
+        if (mb > kMaxSafeMb) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "buffer_pool_size_mb value " + std::to_string(mb) +
+                                  " would overflow uint32_t frame count (max " +
+                                  std::to_string(kMaxSafeMb) + " MB)");
+        }
+        config.buffer_pool_size_mb = static_cast<size_t>(mb);
     }
     if (j.contains("wal_segment_size_mb") && j["wal_segment_size_mb"].is_number_unsigned()) {
         config.wal_segment_size_mb = j["wal_segment_size_mb"].get<size_t>();
@@ -238,6 +248,14 @@ Result<void> Config::validate_setting(const std::string& key, const std::string&
         if (!r) {
             return make_error(r.error().code, r.error().message);
         }
+        // Ensure mb * 128 fits in uint32_t (frame count used at startup).
+        static constexpr uint64_t kMaxSafeMb = static_cast<uint64_t>(UINT32_MAX) / 128;
+        if (*r > kMaxSafeMb) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "invalid value for '" + key + "': " + value +
+                                  " MB would overflow uint32_t frame count (max " +
+                                  std::to_string(kMaxSafeMb) + " MB)");
+        }
     } else if (key == "storage.wal_segment_size_mb") {
         auto r = parse_u64(key, value);
         if (!r) {
@@ -334,6 +352,14 @@ Result<void> Config::apply_setting(const std::string& key, const std::string& va
         auto r = parse_u64(key, value);
         if (!r) {
             return make_error(r.error().code, r.error().message);
+        }
+        // Ensure mb * 128 fits in uint32_t (frame count used at startup).
+        static constexpr uint64_t kMaxSafeMb = static_cast<uint64_t>(UINT32_MAX) / 128;
+        if (*r > kMaxSafeMb) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "invalid value for '" + key + "': " + value +
+                                  " MB would overflow uint32_t frame count (max " +
+                                  std::to_string(kMaxSafeMb) + " MB)");
         }
         buffer_pool_size_mb = static_cast<size_t>(*r);
     } else if (key == "storage.wal_segment_size_mb") {
