@@ -202,6 +202,13 @@ public:
         return dirty_count_.load(std::memory_order_relaxed);
     }
 
+    /// Return the number of page-write failures observed by the background
+    /// flusher and the destructor's best-effort final flush (GDB-778). These
+    /// paths cannot propagate a Result, so failures are logged and counted.
+    [[nodiscard]] uint64_t flush_error_count() const {
+        return flush_errors_.load(std::memory_order_relaxed);
+    }
+
     /// Return the fraction of frames that are dirty (0.0 to 1.0).
     [[nodiscard]] double dirty_ratio() const {
         return static_cast<double>(dirty_count_.load(std::memory_order_relaxed)) /
@@ -311,9 +318,10 @@ private:
     int dwb_fd_ = -1;                                 ///< Double-write buffer fd (-1 = disabled).
 
     // -- Observability counters --------------------------------------------------
-    std::atomic<uint64_t> hits_{0};        ///< Pages found already in the pool.
-    std::atomic<uint64_t> misses_{0};      ///< Pages read from disk.
-    std::atomic<uint32_t> dirty_count_{0}; ///< Number of dirty frames.
+    std::atomic<uint64_t> hits_{0};         ///< Pages found already in the pool.
+    std::atomic<uint64_t> misses_{0};       ///< Pages read from disk.
+    std::atomic<uint32_t> dirty_count_{0};  ///< Number of dirty frames.
+    std::atomic<uint64_t> flush_errors_{0}; ///< Write failures in flusher/destructor (GDB-778).
 };
 
 } // namespace sixseven
