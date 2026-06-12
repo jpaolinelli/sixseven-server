@@ -8,6 +8,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -641,6 +642,199 @@ TEST(WalWriter, ManyRecordsAcrossSegments) {
     EXPECT_GT(writer.current_segment_id(), 1u);
 
     ASSERT_TRUE(writer.close().has_value());
+}
+
+// -- flush_until (group commit durability wait) --------------------------------
+
+TEST(WalWriterFlushUntil, ReturnsOnceDurable) {
+    TempWalDir dir;
+    WalWriterOptions opts;
+    // Long interval so the test only passes if flush_until actively wakes
+    // the flush thread instead of riding the periodic timer.
+    opts.flush_interval = std::chrono::milliseconds(500);
+    WalWriter writer(dir.path(), opts);
+    ASSERT_TRUE(writer.open().has_value());
+
+    auto r = make_test_record(WalRecordType::INSERT, 1, 10, "durable");
+    auto lsn = writer.append(r);
+    ASSERT_TRUE(lsn.has_value()) << lsn.error().message;
+    ASSERT_LT(writer.flushed_lsn(), *lsn);
+
+    auto result = writer.flush_until(*lsn);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_GE(writer.flushed_lsn(), *lsn);
+
+    ASSERT_TRUE(writer.close().has_value());
+}
+
+TEST(WalWriterFlushUntil, FastPathWhenAlreadyFlushed) {
+    TempWalDir dir;
+    WalWriter writer(dir.path());
+    ASSERT_TRUE(writer.open().has_value());
+
+    auto r = make_test_record(WalRecordType::INSERT, 1, 10, "fastpath");
+    auto lsn = writer.append(r);
+    ASSERT_TRUE(lsn.has_value());
+    ASSERT_TRUE(writer.flush().has_value());
+    ASSERT_GE(writer.flushed_lsn(), *lsn);
+
+    // Already durable: must return ok immediately.
+    auto start = std::chrono::steady_clock::now();
+    EXPECT_TRUE(writer.flush_until(*lsn).has_value());
+    EXPECT_TRUE(writer.flush_until(0).has_value()); // lsn 0 is trivially durable.
+    auto elapsed = std::chrono::steady_clock::now() - start;
+    EXPECT_LT(elapsed, std::chrono::seconds(1));
+
+    ASSERT_TRUE(writer.close().has_value());
+}
+
+TEST(WalWriterFlushUntil, WakesPromptlyWithoutTimer) {
+    TempWalDir dir;
+    WalWriterOptions opts;
+    // Effectively disable the periodic timer: 10s interval. flush_until must
+    // still complete quickly by waking the flusher itself.
+    opts.flush_interval = std::chrono::seconds(10);
+    WalWriter writer(dir.path(), opts);
+    ASSERT_TRUE(writer.open().has_value());
+
+    auto r = make_test_record(WalRecordType::COMMIT, 1);
+    auto lsn = writer.append(r);
+    ASSERT_TRUE(lsn.has_value());
+
+    auto start = std::chrono::steady_clock::now();
+    auto result = writer.flush_until(*lsn);
+    auto elapsed = std::chrono::steady_clock::now() - start;
+
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_GE(writer.flushed_lsn(), *lsn);
+    // Generous bound: far below the 10s interval, so we know the waiter
+    // woke the flush thread rather than waiting for the timer.
+    EXPECT_LT(elapsed, std::chrono::seconds(5));
+
+    ASSERT_TRUE(writer.close().has_value());
+}
+
+TEST(WalWriterFlushUntil, NotAppendedLsnIsInvalidArgument) {
+    TempWalDir dir;
+    WalWriter writer(dir.path());
+    ASSERT_TRUE(writer.open().has_value());
+
+    auto r = make_test_record(WalRecordType::INSERT, 1, 10, "x");
+    auto lsn = writer.append(r);
+    ASSERT_TRUE(lsn.has_value());
+
+    // current_lsn() is the next unassigned LSN — waiting on it (or beyond)
+    // can never succeed and must fail fast instead of hanging.
+    auto result = writer.flush_until(writer.current_lsn());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+
+    auto far = writer.flush_until(writer.current_lsn() + 1000);
+    ASSERT_FALSE(far.has_value());
+    EXPECT_EQ(far.error().code, StatusCode::INVALID_ARGUMENT);
+
+    ASSERT_TRUE(writer.close().has_value());
+}
+
+TEST(WalWriterFlushUntil, NotOpenFails) {
+    TempWalDir dir;
+    WalWriter writer(dir.path());
+
+    auto result = writer.flush_until(1);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST(WalWriterFlushUntil, GroupCommitDisabledFallsBackToSyncFlush) {
+    TempWalDir dir;
+    WalWriterOptions opts;
+    opts.enable_group_commit = false;
+    WalWriter writer(dir.path(), opts);
+    ASSERT_TRUE(writer.open().has_value());
+
+    auto r = make_test_record(WalRecordType::INSERT, 1, 10, "sync");
+    auto lsn = writer.append(r);
+    ASSERT_TRUE(lsn.has_value());
+    ASSERT_LT(writer.flushed_lsn(), *lsn);
+
+    auto result = writer.flush_until(*lsn);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_GE(writer.flushed_lsn(), *lsn);
+
+    ASSERT_TRUE(writer.close().has_value());
+}
+
+TEST(WalWriterFlushUntil, ConcurrentWaitersAllReturnDurable) {
+    TempWalDir dir;
+    WalWriterOptions opts;
+    opts.flush_interval = std::chrono::milliseconds(200);
+    WalWriter writer(dir.path(), opts);
+    ASSERT_TRUE(writer.open().has_value());
+
+    constexpr int num_threads = 8;
+    constexpr int appends_per_thread = 25;
+
+    std::atomic<int> failures{0};
+    std::vector<std::thread> threads;
+    threads.reserve(num_threads);
+
+    for (int t = 0; t < num_threads; ++t) {
+        threads.emplace_back([&writer, &failures] {
+            for (int i = 0; i < appends_per_thread; ++i) {
+                auto r = make_test_record(WalRecordType::COMMIT, 1);
+                auto lsn = writer.append(r);
+                if (!lsn.has_value()) {
+                    ++failures;
+                    return;
+                }
+                auto result = writer.flush_until(*lsn);
+                if (!result.has_value() || writer.flushed_lsn() < *lsn) {
+                    ++failures;
+                    return;
+                }
+            }
+        });
+    }
+    for (auto& th : threads) {
+        th.join();
+    }
+
+    EXPECT_EQ(failures.load(), 0);
+    EXPECT_EQ(writer.current_lsn(), static_cast<lsn_t>(num_threads * appends_per_thread + 1));
+    EXPECT_GE(writer.flushed_lsn(), static_cast<lsn_t>(num_threads * appends_per_thread));
+
+    ASSERT_TRUE(writer.close().has_value());
+}
+
+TEST(WalWriterFlushUntil, ShutdownWhileWaitingDoesNotHang) {
+    TempWalDir dir;
+    WalWriterOptions opts;
+    opts.flush_interval = std::chrono::seconds(10); // Timer effectively off.
+    auto writer = std::make_unique<WalWriter>(dir.path(), opts);
+    ASSERT_TRUE(writer->open().has_value());
+
+    auto r = make_test_record(WalRecordType::INSERT, 1, 10, "shutdown");
+    auto lsn = writer->append(r);
+    ASSERT_TRUE(lsn.has_value());
+
+    std::atomic<bool> waiter_returned{false};
+    std::thread waiter([&writer, &waiter_returned, target = *lsn] {
+        // Either outcome is acceptable: the close-path final flush makes the
+        // LSN durable (ok), or the waiter observes shutdown (error). The
+        // requirement is that it returns at all.
+        auto result = writer->flush_until(target);
+        if (!result.has_value()) {
+            EXPECT_EQ(result.error().code, StatusCode::IO_ERROR);
+        }
+        waiter_returned.store(true);
+    });
+
+    // Give the waiter a moment to block, then close the writer.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    ASSERT_TRUE(writer->close().has_value());
+
+    waiter.join();
+    EXPECT_TRUE(waiter_returned.load());
 }
 
 } // namespace

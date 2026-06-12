@@ -1,10 +1,9 @@
 #include "sixseven/storage/wal.h"
 
 #include "sixseven/common/logging.h"
+#include "sixseven/common/platform.h"
 #include "sixseven/storage/wal_record.h"
 #include "sixseven/storage/wal_recovery.h" // serialize_checkpoint_data()
-
-#include "sixseven/common/platform.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -135,9 +134,9 @@ Result<void> WalWriter::open() {
     is_open_ = true;
 
     SIXSEVEN_LOG_INFO("WAL writer opened: dir={}, segment={}, next_lsn={}",
-                   wal_dir_.string(),
-                   segment_id_,
-                   next_lsn_);
+                      wal_dir_.string(),
+                      segment_id_,
+                      next_lsn_);
 
     // Start group commit thread if configured.
     if (options_.enable_group_commit) {
@@ -247,6 +246,72 @@ Result<void> WalWriter::flush() {
     flushed_lsn_.store(latest, std::memory_order_release);
 
     return ok();
+}
+
+Result<void> WalWriter::flush_until(lsn_t lsn) {
+    // Fast path: already durable (also covers lsn == 0).
+    if (flushed_lsn_.load(std::memory_order_acquire) >= lsn) {
+        return ok();
+    }
+
+    {
+        // Validate under the main latch: the writer must be open and the
+        // LSN must have been appended already, otherwise it could never
+        // become durable and the caller would wait forever.
+        std::lock_guard<std::mutex> lock(latch_);
+        if (!is_open_) {
+            return make_error(StatusCode::INVALID_ARGUMENT, "WAL writer not open");
+        }
+        if (lsn >= next_lsn_) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "flush_until: lsn " + std::to_string(lsn) +
+                                  " has not been appended (next lsn is " +
+                                  std::to_string(next_lsn_) + ")");
+        }
+    }
+
+    // If group commit is not running, fall back to a synchronous flush.
+    if (!flush_running_.load(std::memory_order_acquire)) {
+        auto result = flush();
+        if (!result) {
+            return result;
+        }
+        if (flushed_lsn_.load(std::memory_order_acquire) >= lsn) {
+            return ok();
+        }
+        return make_error(StatusCode::IO_ERROR,
+                          "flush_until: lsn " + std::to_string(lsn) +
+                              " not durable after synchronous flush");
+    }
+
+    std::unique_lock<std::mutex> lock(flush_mutex_);
+
+    // Register the durability watermark and wake the flush thread now so
+    // the caller doesn't have to wait for the next timer tick. Concurrent
+    // waiters raise the same watermark and share a single fsync.
+    if (lsn > pending_flush_lsn_) {
+        pending_flush_lsn_ = lsn;
+    }
+    flush_cv_.notify_one();
+
+    const uint64_t start_error_epoch = flush_error_epoch_;
+    flushed_cv_.wait(lock, [this, lsn, start_error_epoch] {
+        return flushed_lsn_.load(std::memory_order_acquire) >= lsn ||
+               !flush_running_.load(std::memory_order_acquire) ||
+               flush_error_epoch_ != start_error_epoch;
+    });
+
+    if (flushed_lsn_.load(std::memory_order_acquire) >= lsn) {
+        return ok();
+    }
+    if (flush_error_epoch_ != start_error_epoch) {
+        return make_error(last_flush_error_code_,
+                          "flush_until: WAL flush failed while waiting: " +
+                              last_flush_error_message_);
+    }
+    return make_error(StatusCode::IO_ERROR,
+                      "flush_until: WAL writer shut down before lsn " + std::to_string(lsn) +
+                          " became durable");
 }
 
 // -- Accessors ----------------------------------------------------------------
@@ -481,6 +546,8 @@ void WalWriter::stop_group_commit() {
     {
         std::lock_guard<std::mutex> lock(flush_mutex_);
         flush_cv_.notify_all();
+        // Wake any durability waiters so they observe the shutdown.
+        flushed_cv_.notify_all();
     }
 
     if (flush_thread_.joinable()) {
@@ -492,8 +559,13 @@ void WalWriter::flush_loop() {
     while (flush_running_.load(std::memory_order_acquire)) {
         {
             std::unique_lock<std::mutex> lock(flush_mutex_);
+            // Wake early (before the timer expires) when shutting down or
+            // when a flush_until() waiter needs an LSN that is not yet
+            // durable — this is what makes group commit responsive instead
+            // of purely periodic.
             flush_cv_.wait_for(lock, options_.flush_interval, [this] {
-                return !flush_running_.load(std::memory_order_acquire);
+                return !flush_running_.load(std::memory_order_acquire) ||
+                       pending_flush_lsn_ > flushed_lsn_.load(std::memory_order_acquire);
             });
         }
 
@@ -501,24 +573,41 @@ void WalWriter::flush_loop() {
         std::lock_guard<std::mutex> lock(latch_);
         if (segment_fd_ >= 0 && is_open_) {
             auto result = fsync_fd(segment_fd_);
+
+            std::lock_guard<std::mutex> flush_lock(flush_mutex_);
             if (result) {
                 lsn_t latest = next_lsn_ > 0 ? next_lsn_ - 1 : 0;
                 flushed_lsn_.store(latest, std::memory_order_release);
             } else {
                 SIXSEVEN_LOG_ERROR("WAL group commit flush failed: {}", result.error().message);
+                // Record the failure so blocked flush_until() callers can
+                // observe it and propagate the error.
+                ++flush_error_epoch_;
+                last_flush_error_code_ = result.error().code;
+                last_flush_error_message_ = result.error().message;
             }
+            // Wake all durability waiters: one fsync serves every waiter
+            // whose LSN is now covered (group commit).
+            flushed_cv_.notify_all();
         }
     }
 
     // Final flush on shutdown.
-    std::lock_guard<std::mutex> lock(latch_);
-    if (segment_fd_ >= 0 && is_open_) {
-        auto result = fsync_fd(segment_fd_);
-        if (result) {
-            lsn_t latest = next_lsn_ > 0 ? next_lsn_ - 1 : 0;
-            flushed_lsn_.store(latest, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(latch_);
+        if (segment_fd_ >= 0 && is_open_) {
+            auto result = fsync_fd(segment_fd_);
+            if (result) {
+                lsn_t latest = next_lsn_ > 0 ? next_lsn_ - 1 : 0;
+                flushed_lsn_.store(latest, std::memory_order_release);
+            }
         }
     }
+
+    // Wake any remaining durability waiters so they re-evaluate against the
+    // final flushed LSN (or report shutdown).
+    std::lock_guard<std::mutex> flush_lock(flush_mutex_);
+    flushed_cv_.notify_all();
 }
 
 // -- WalReader ----------------------------------------------------------------
