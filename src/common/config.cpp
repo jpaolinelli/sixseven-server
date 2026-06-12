@@ -463,4 +463,8 @@ Result<void> Config::apply_setting(const std::string& key, const std::string& va
     return ok();
 }
 
+uint32_t frames_from_config(const Config& cfg) {
+    return static_cast<uint32_t>(cfg.buffer_pool_size_mb * 128);
+}
+
 } // namespace sixseven

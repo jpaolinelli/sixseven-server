@@ -71,4 +71,12 @@ struct Config {
                                                        const std::string& value);
 };
 
+/// Convert a Config's buffer_pool_size_mb into a StorageManager frame count.
+/// This is the single source of the MB->frames conversion: buffer_pool_size_mb * 128.
+/// Used by main.cpp when constructing StorageManager and by tests that need to verify
+/// the shared conversion logic.
+/// Callers must ensure buffer_pool_size_mb does not exceed UINT32_MAX/128
+/// (enforced by Config::load_from_file).
+[[nodiscard]] uint32_t frames_from_config(const Config& cfg);
+
 } // namespace sixseven
