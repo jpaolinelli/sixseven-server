@@ -310,5 +310,135 @@ TEST(GDB776, VocabFallbackResolvesRoBERTaSpecialIds) {
     EXPECT_EQ(result->special_tokens.mask, 4);
 }
 
+// ---------------------------------------------------------------------------
+// GDB776 adversarial: added_tokens IDs take precedence over vocab IDs
+// ---------------------------------------------------------------------------
+
+TEST(GDB776, AddedTokensIdsTakePrecedenceOverVocab) {
+    // Vocab has <s>=99, but added_tokens says <s>=0.
+    // The loader must use the added_tokens id (0), not the vocab id (99).
+    // This isolates the added_tokens angle-bracket code path from the vocab fallback.
+    static constexpr const char* CONFLICT_JSON = R"({
+        "model": {
+            "type": "BPE",
+            "vocab": {
+                "<s>":   99,
+                "<pad>": 98,
+                "</s>":  97
+            },
+            "merges": []
+        },
+        "added_tokens": [
+            {"id": 0, "content": "<s>",   "special": true},
+            {"id": 1, "content": "<pad>", "special": true},
+            {"id": 2, "content": "</s>",  "special": true}
+        ],
+        "normalizer":    {"type": "Lowercase", "lowercase": false},
+        "pre_tokenizer": {"type": "Whitespace"}
+    })";
+
+    TempJsonFile f(CONFLICT_JSON);
+    auto result = load_tokenizer_config(f.path());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    // added_tokens ids must win over vocab ids.
+    EXPECT_EQ(result->special_tokens.cls, 0) << "added_tokens <s>=0 must override vocab <s>=99";
+    EXPECT_EQ(result->special_tokens.pad, 1) << "added_tokens <pad>=1 must override vocab <pad>=98";
+    EXPECT_EQ(result->special_tokens.sep, 2) << "added_tokens </s>=2 must override vocab </s>=97";
+}
+
+// ---------------------------------------------------------------------------
+// GDB776 adversarial: non-integer id in added_tokens is silently skipped
+// ---------------------------------------------------------------------------
+
+TEST(GDB776, NonIntegerAddedTokenIdIsSkipped) {
+    // A malformed added_tokens entry with a string id must be silently ignored,
+    // and the loader must still succeed (falling back to vocab or defaults).
+    static constexpr const char* BAD_ID_JSON = R"({
+        "model": {
+            "type": "BPE",
+            "vocab": {"<s>": 0, "<pad>": 1, "</s>": 2},
+            "merges": []
+        },
+        "added_tokens": [
+            {"id": "not-an-int", "content": "<s>", "special": true},
+            {"id": 1, "content": "<pad>", "special": true},
+            {"id": 2, "content": "</s>",  "special": true}
+        ],
+        "normalizer":    {"type": "Lowercase", "lowercase": false},
+        "pre_tokenizer": {"type": "Whitespace"}
+    })";
+
+    TempJsonFile f(BAD_ID_JSON);
+    auto result = load_tokenizer_config(f.path());
+    // Must not error — bad entry is skipped, load succeeds.
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    // <s> was skipped (non-integer id); vocab fallback should still resolve it.
+    EXPECT_EQ(result->special_tokens.cls, 0)
+        << "vocab fallback must resolve <s>=0 after bad added_tokens entry";
+    // Others from added_tokens should be set correctly.
+    EXPECT_EQ(result->special_tokens.pad, 1);
+    EXPECT_EQ(result->special_tokens.sep, 2);
+}
+
+// ---------------------------------------------------------------------------
+// GDB776 adversarial: partial resolution — <s> set but </s> absent
+// ---------------------------------------------------------------------------
+
+TEST(GDB776, PartialAngleBracketResolutionLeavesOtherRolesAtDefault) {
+    // Only <s> is in added_tokens; </s> is absent entirely (not in vocab either).
+    // cls must be set; sep must keep the BERT default (102).
+    static constexpr const char* PARTIAL_JSON = R"({
+        "model": {
+            "type": "BPE",
+            "vocab": {"<s>": 0, "hello": 5},
+            "merges": []
+        },
+        "added_tokens": [
+            {"id": 0, "content": "<s>", "special": true}
+        ],
+        "normalizer":    {"type": "Lowercase", "lowercase": false},
+        "pre_tokenizer": {"type": "Whitespace"}
+    })";
+
+    TempJsonFile f(PARTIAL_JSON);
+    auto result = load_tokenizer_config(f.path());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    EXPECT_EQ(result->special_tokens.cls, 0) << "<s> must set cls=0";
+    // </s> not in added_tokens or vocab → stays at BERT default.
+    EXPECT_EQ(result->special_tokens.sep, 102) << "sep must remain at BERT default 102";
+}
+
+// ---------------------------------------------------------------------------
+// GDB776 adversarial: bracket style wins when file has both styles for same role
+// ---------------------------------------------------------------------------
+
+TEST(GDB776, BracketTokenBeatsAngleBracketForSameRole) {
+    // A hypothetical file with both [CLS] and <s> in added_tokens.
+    // [CLS] is processed first (listed first), so cls should be 101, not 0.
+    static constexpr const char* DUAL_JSON = R"({
+        "model": {
+            "type": "BPE",
+            "vocab": {"[CLS]": 101, "<s>": 0},
+            "merges": []
+        },
+        "added_tokens": [
+            {"id": 101, "content": "[CLS]", "special": true},
+            {"id": 0,   "content": "<s>",   "special": true}
+        ],
+        "normalizer":    {"type": "Lowercase", "lowercase": false},
+        "pre_tokenizer": {"type": "Whitespace"}
+    })";
+
+    TempJsonFile f(DUAL_JSON);
+    auto result = load_tokenizer_config(f.path());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    // [CLS]=101 is set by the bracket branch; <s>=0 is in else-if, so cls stays 101.
+    EXPECT_EQ(result->special_tokens.cls, 101)
+        << "[CLS] bracket entry must win over subsequent <s> angle-bracket entry";
+}
+
 } // namespace
 } // namespace sixseven

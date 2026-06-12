@@ -171,19 +171,21 @@ Result<TokenizerConfig> load_tokenizer_config(const std::string& path) {
             // RoBERTa/GPT-style angle-bracket tokens.
             // Mapping: <s> = CLS/BOS, </s> = SEP/EOS, <pad> = PAD,
             //          <unk> = UNK, <mask> = MASK.
-            else if (content == "<s>") {
+            // Only set a role if it has not already been resolved by a
+            // bracket-style entry earlier in the added_tokens list.
+            else if (content == "<s>" && !cls_set) {
                 config.special_tokens.cls = id;
                 cls_set = true;
-            } else if (content == "</s>") {
+            } else if (content == "</s>" && !sep_set) {
                 config.special_tokens.sep = id;
                 sep_set = true;
-            } else if (content == "<pad>") {
+            } else if (content == "<pad>" && !pad_set) {
                 config.special_tokens.pad = id;
                 pad_set = true;
-            } else if (content == "<unk>") {
+            } else if (content == "<unk>" && !unk_set) {
                 config.special_tokens.unk = id;
                 unk_set = true;
-            } else if (content == "<mask>") {
+            } else if (content == "<mask>" && !mask_set) {
                 config.special_tokens.mask = id;
                 mask_set = true;
             }
