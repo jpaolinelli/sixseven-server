@@ -292,12 +292,10 @@ TEST(QA_GDB105, GroupByWithHaving) {
 }
 
 TEST(QA_GDB105, HavingWithoutGroupBy) {
-    // HAVING without GROUP BY — parser accepts, semantics rejects.
-    // Actually in this parser, HAVING is only parsed inside GROUP BY block.
-    auto stmt = parse_one("SELECT COUNT(*) FROM t");
-    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
-    ASSERT_NE(sel, nullptr);
-    EXPECT_EQ(sel->having_expr, nullptr);
+    // HAVING is only parsed inside the GROUP BY block, so a stray HAVING
+    // clause leaves trailing tokens that cannot start a statement —
+    // parse_all must reject the input rather than silently dropping it.
+    expect_parse_error("SELECT COUNT(*) FROM t HAVING COUNT(*) > 5");
 }
 
 TEST(QA_GDB105, GroupByMissingBy) {
