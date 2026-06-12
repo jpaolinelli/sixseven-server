@@ -120,6 +120,25 @@ Result<table_id_t> Catalog::create_table(database_id_t database_id, TableSchema 
         return make_error(StatusCode::ALREADY_EXISTS, "table '" + schema.name + "' already exists");
     }
 
+    // Check for duplicate column names (case-insensitive).
+    for (size_t i = 0; i < schema.columns.size(); ++i) {
+        auto upper_i = schema.columns[i].name;
+        std::transform(upper_i.begin(), upper_i.end(), upper_i.begin(), [](unsigned char c) {
+            return static_cast<char>(std::toupper(c));
+        });
+        for (size_t j = i + 1; j < schema.columns.size(); ++j) {
+            auto upper_j = schema.columns[j].name;
+            std::transform(upper_j.begin(), upper_j.end(), upper_j.begin(), [](unsigned char c) {
+                return static_cast<char>(std::toupper(c));
+            });
+            if (upper_i == upper_j) {
+                return make_error(StatusCode::ALREADY_EXISTS,
+                                  "duplicate column name '" + schema.columns[j].name +
+                                      "' in CREATE TABLE '" + schema.name + "'");
+            }
+        }
+    }
+
     table_id_t id = next_table_id_++;
     schema.table_id = id;
 
@@ -437,9 +456,8 @@ Result<index_id_t> Catalog::create_index(IndexDef def) {
     }
 
     // Index names are unique within a database (not globally).
-    auto db_id = table_to_database_.contains(def.table_id)
-                     ? table_to_database_[def.table_id]
-                     : default_database_id;
+    auto db_id = table_to_database_.contains(def.table_id) ? table_to_database_[def.table_id]
+                                                           : default_database_id;
     auto& db_index_names = index_name_to_id_[db_id];
     if (db_index_names.contains(def.name)) {
         return make_error(StatusCode::ALREADY_EXISTS, "index '" + def.name + "' already exists");
@@ -782,9 +800,8 @@ Result<void> Catalog::restore_table(database_id_t database_id, TableSchema schem
 Result<void> Catalog::restore_index(IndexDef def) {
     std::lock_guard lock(mu_);
 
-    auto db_id = table_to_database_.contains(def.table_id)
-                     ? table_to_database_[def.table_id]
-                     : default_database_id;
+    auto db_id = table_to_database_.contains(def.table_id) ? table_to_database_[def.table_id]
+                                                           : default_database_id;
     auto& db_names = index_name_to_id_[db_id];
     if (db_names.contains(def.name)) {
         return make_error(StatusCode::ALREADY_EXISTS, "index '" + def.name + "' already exists");
