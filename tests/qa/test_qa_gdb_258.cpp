@@ -363,10 +363,13 @@ TEST_F(QA_GDB258, NearestSkipsRowsWithNullEmbedding) {
     auto rid = table_storage->heap->insert_tuple(*serialized);
     ASSERT_TRUE(rid.has_value()) << rid.error().message;
 
-    // NEAREST k=5 on 2 rows (one NULL) — should not crash.
+    // NEAREST k=5 on 2 rows (one NULL). The NULL-embedding row must be
+    // skipped, not returned or scored as garbage: with k=5 there is room for
+    // both rows, so exactly the one valid row may come back, and it must be
+    // id 1 (GDB-781).
     auto qr = exec_ok("SELECT * FROM articles WHERE NEAREST(title_vec, 5) TO [1.0, 0.0, 0.0, 0.0]");
-    // Should return at least the non-null row.
-    EXPECT_GE(qr.rows.size(), 1u);
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 1);
 }
 
 // =============================================================================
