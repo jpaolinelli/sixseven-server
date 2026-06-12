@@ -185,8 +185,8 @@ TEST_F(QA_GDB613, AC2_StorageManagerDefaultArg) {
 // GDB-740: AC2_ConversionFormula deleted -- it only asserted compile-time
 // constant arithmetic (1*128==128 etc.) with no production code under test.
 // The conversion plumbing (buffer_pool_size_mb * 128 -> StorageManager frames)
-// is fully covered by AC1_PoolSizePassedToTables and
-// GDB621_ConfigToStorageManagerWiring.
+// is now covered by GDB621_FramesFromConfigMath and
+// GDB621_FramesFromConfigSizesPool (GDB-771: replaced vacuous wiring test).
 
 // =============================================================================
 // GDB-621: Pass buffer_pool_size_mb to StorageManager constructor in main.cpp
@@ -198,23 +198,71 @@ TEST_F(QA_GDB613, GDB621_ConfigDefaultIs256MB) {
     EXPECT_EQ(cfg.buffer_pool_size_mb, 256u);
 }
 
-/// Verify the conversion from Config to StorageManager produces correct pool.
-TEST_F(QA_GDB613, GDB621_ConfigToStorageManagerWiring) {
-    Config cfg = Config::load_defaults();
-    uint32_t expected_frames = static_cast<uint32_t>(cfg.buffer_pool_size_mb * 128);
-    EXPECT_EQ(expected_frames, 32768u);
+/// Verify that frames_from_config() performs the correct MB->frames conversion.
+/// This helper is the shared production implementation used by main.cpp when
+/// constructing StorageManager; these tests verify the helper's math including
+/// boundary values.  main.cpp wiring itself is e2e-only (see GDB-771 PR notes).
+TEST_F(QA_GDB613, GDB621_FramesFromConfigMath) {
+    // Default config: 256 MB -> 256 * 128 = 32768 frames.
+    Config cfg_default = Config::load_defaults();
+    EXPECT_EQ(frames_from_config(cfg_default), 32768u);
 
-    // Construct StorageManager with the converted value.
-    StorageManager sm(dm_, data_dir_, expected_frames);
+    // 1 MB -> 128 frames.
+    Config cfg_one = cfg_default;
+    cfg_one.buffer_pool_size_mb = 1;
+    EXPECT_EQ(frames_from_config(cfg_one), 128u);
+
+    // 8 MB -> 1024 frames.
+    Config cfg_eight = cfg_default;
+    cfg_eight.buffer_pool_size_mb = 8;
+    EXPECT_EQ(frames_from_config(cfg_eight), 1024u);
+
+    // 0 MB -> 0 frames (edge case; upstream load_from_file validates range).
+    Config cfg_zero = cfg_default;
+    cfg_zero.buffer_pool_size_mb = 0;
+    EXPECT_EQ(frames_from_config(cfg_zero), 0u);
+}
+
+/// Verify that frames_from_config() output correctly sizes a StorageManager:
+/// a pool built with frames_from_config(cfg) holds exactly that many frames
+/// when all are pinned simultaneously (pin-all capacity test).
+/// Uses the same shared helper that main.cpp calls at startup.
+TEST_F(QA_GDB613, GDB621_FramesFromConfigSizesPool) {
+    // Use a small MB value so the test is fast (2 MB = 256 frames).
+    Config cfg = Config::load_defaults();
+    cfg.buffer_pool_size_mb = 2;
+    uint32_t frames = frames_from_config(cfg);
+    EXPECT_EQ(frames, 256u);
+
+    StorageManager sm(dm_, data_dir_, frames);
 
     auto schema = make_schema(1, "wired_table");
     auto create = sm.create_table_storage(default_database_id, 1, schema);
     ASSERT_TRUE(create.has_value()) << create.error().message;
 
-    // Table should be usable.
     auto ts = sm.get_table_storage(1);
     ASSERT_TRUE(ts.has_value());
-    EXPECT_NE((*ts)->bpm, nullptr);
+
+    // Pin all frames simultaneously; a pool with fewer frames would fail
+    // before completing this loop (no frames evictable while all are pinned).
+    std::vector<PageId> pinned;
+    pinned.reserve(frames);
+    for (uint32_t i = 0; i < frames; ++i) {
+        auto page = (*ts)->bpm->new_page();
+        ASSERT_TRUE(page.has_value()) << "Failed at page " << i << ": " << page.error().message;
+        pinned.push_back((*page)->page_id());
+    }
+
+    // Pool is exactly full; one more allocation must fail.
+    auto overflow = (*ts)->bpm->new_page();
+    EXPECT_FALSE(overflow.has_value()) << "Pool should be full with all frames pinned";
+
+    // Confirm pool capacity matches what frames_from_config produced.
+    EXPECT_EQ((*ts)->bpm->pool_page_count(), frames);
+
+    for (auto pid : pinned) {
+        ASSERT_TRUE((*ts)->bpm->unpin_page(pid, false).has_value());
+    }
 }
 
 // =============================================================================

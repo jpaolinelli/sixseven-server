@@ -1,4 +1,4 @@
-#include "sixseven/catalog/catalog.h"
+﻿#include "sixseven/catalog/catalog.h"
 #include "sixseven/common/config.h"
 #include "sixseven/common/crash_handler.h"
 #include "sixseven/common/logging.h"
@@ -116,8 +116,7 @@ int main(int argc, char* argv[]) {
 
     sixseven::DiskManager disk_manager;
     sixseven::Catalog catalog;
-    sixseven::StorageManager storage(disk_manager, data_dir,
-                                     static_cast<uint32_t>(config.buffer_pool_size_mb * 128));
+    sixseven::StorageManager storage(disk_manager, data_dir, sixseven::frames_from_config(config));
     sixseven::CatalogPersistence persistence(catalog, storage);
     sixseven::GraphEngine graph_engine(catalog, disk_manager, data_dir);
     sixseven::ProviderRegistry provider_registry(catalog);
@@ -130,28 +129,41 @@ int main(int argc, char* argv[]) {
     sixseven::EmbeddingWorkerConfig embedding_config;
     {
         unsigned int hw = std::thread::hardware_concurrency();
-        if (hw == 0) hw = 4;
+        if (hw == 0)
+            hw = 4;
         embedding_config.num_workers = std::max(2u, hw / 4);
     }
     sixseven::EmbeddingWorkerPool embedding_pool(embedding_config);
-    embedding_pool.register_provider("builtin/384", std::make_shared<sixseven::BuiltinProvider>(384));
+    embedding_pool.register_provider("builtin/384",
+                                     std::make_shared<sixseven::BuiltinProvider>(384));
     embedding_pool.set_provider_registry(&provider_registry);
 
     sixseven::BackfillManager backfill_manager(catalog, storage, embedding_pool);
 
     // Register all graph algorithms so FROM pagerank('follows') etc. work.
     sixseven::AlgorithmRegistry algorithm_registry;
-    (void)algorithm_registry.register_algorithm(sixseven::make_pagerank_def(), sixseven::pagerank_execute);
-    (void)algorithm_registry.register_algorithm(sixseven::make_connected_components_def(), sixseven::connected_components_execute);
-    (void)algorithm_registry.register_algorithm(sixseven::make_betweenness_centrality_def(), sixseven::betweenness_centrality_execute);
-    (void)algorithm_registry.register_algorithm(sixseven::make_closeness_centrality_def(), sixseven::closeness_centrality_execute);
-    (void)algorithm_registry.register_algorithm(sixseven::make_degree_centrality_def(), sixseven::degree_centrality_execute);
-    (void)algorithm_registry.register_algorithm(sixseven::make_eigenvector_centrality_def(), sixseven::eigenvector_centrality_execute);
-    (void)algorithm_registry.register_algorithm(sixseven::make_harmonic_centrality_def(), sixseven::harmonic_centrality_execute);
-    (void)algorithm_registry.register_algorithm(sixseven::make_clustering_coefficient_def(), sixseven::clustering_coefficient_execute);
-    (void)algorithm_registry.register_algorithm(sixseven::make_community_detect_def(), sixseven::community_detect_execute);
-    (void)algorithm_registry.register_algorithm(sixseven::make_triangle_count_def(), sixseven::triangle_count_execute);
-    (void)algorithm_registry.register_algorithm(sixseven::make_strongly_connected_components_def(), sixseven::strongly_connected_components_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_pagerank_def(),
+                                                sixseven::pagerank_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_connected_components_def(),
+                                                sixseven::connected_components_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_betweenness_centrality_def(),
+                                                sixseven::betweenness_centrality_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_closeness_centrality_def(),
+                                                sixseven::closeness_centrality_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_degree_centrality_def(),
+                                                sixseven::degree_centrality_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_eigenvector_centrality_def(),
+                                                sixseven::eigenvector_centrality_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_harmonic_centrality_def(),
+                                                sixseven::harmonic_centrality_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_clustering_coefficient_def(),
+                                                sixseven::clustering_coefficient_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_community_detect_def(),
+                                                sixseven::community_detect_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_triangle_count_def(),
+                                                sixseven::triangle_count_execute);
+    (void)algorithm_registry.register_algorithm(sixseven::make_strongly_connected_components_def(),
+                                                sixseven::strongly_connected_components_execute);
 
     sixseven::QueryEngine engine(catalog, storage, &graph_engine);
     engine.set_provider_registry(&provider_registry);
@@ -164,8 +176,8 @@ int main(int argc, char* argv[]) {
     bool first_run = !sixseven::SystemBootstrap::is_bootstrapped(data_dir);
 
     // Bootstrap system database (creates/loads system tables and catalog).
-    auto boot =
-        sixseven::SystemBootstrap::bootstrap(engine, catalog, storage, persistence, config, data_dir);
+    auto boot = sixseven::SystemBootstrap::bootstrap(
+        engine, catalog, storage, persistence, config, data_dir);
     if (!boot) {
         SIXSEVEN_LOG_ERROR("bootstrap failed: {}", boot.error().message);
         return 1;
@@ -286,15 +298,15 @@ int main(int argc, char* argv[]) {
             // be persisted populated (instead of empty).
             auto count_nulls = [&engine](const char* sql) -> int64_t {
                 auto r = engine.execute(sql);
-                if (!r || r->rows.empty() || r->rows[0].empty()) return -1;
+                if (!r || r->rows.empty() || r->rows[0].empty())
+                    return -1;
                 return r->rows[0][0].as_int64();
             };
             (void)engine.execute("BACKFILL EMBEDDINGS ON books");
             (void)engine.execute("BACKFILL EMBEDDINGS ON reviews");
             SIXSEVEN_LOG_INFO("demo: generating embeddings (one-time, on first start)...");
 
-            const auto deadline =
-                std::chrono::steady_clock::now() + std::chrono::seconds(300);
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(300);
             auto last_progress = std::chrono::steady_clock::now();
             int64_t prev_remaining = -1;
             while (std::chrono::steady_clock::now() < deadline) {
@@ -321,8 +333,8 @@ int main(int argc, char* argv[]) {
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
             }
-            if (prev_remaining != 0 && count_nulls(
-                    "SELECT COUNT(*) FROM books WHERE description_vec IS NULL") != 0) {
+            if (prev_remaining != 0 &&
+                count_nulls("SELECT COUNT(*) FROM books WHERE description_vec IS NULL") != 0) {
                 SIXSEVEN_LOG_WARN(
                     "demo: embedding generation did not fully complete within timeout");
             }
@@ -331,8 +343,7 @@ int main(int argc, char* argv[]) {
             // moved rows to their final heap slots — so the indexes point at live
             // tuples instead of deleted ones.
             if (auto r = sixseven::create_demo_indexes(engine); !r) {
-                SIXSEVEN_LOG_WARN("demo index creation failed (non-fatal): {}",
-                                  r.error().message);
+                SIXSEVEN_LOG_WARN("demo index creation failed (non-fatal): {}", r.error().message);
             }
 
             // Make the whole demo dataset durable now, so it survives a hard kill
@@ -366,8 +377,9 @@ int main(int argc, char* argv[]) {
     // Wire query executor: route SQL to the shared QueryEngine.
     // Resolves the client's startup database name to a database_id.
     server.set_query_executor(
-        [&engine, &catalog](const std::string& sql,
-                            const std::string& database) -> sixseven::Result<sixseven::QueryResult> {
+        [&engine,
+         &catalog](const std::string& sql,
+                   const std::string& database) -> sixseven::Result<sixseven::QueryResult> {
             if (!database.empty()) {
                 auto db = catalog.get_database(database);
                 if (db) {
@@ -380,9 +392,8 @@ int main(int argc, char* argv[]) {
 
     // Wire query describer: route Describe to the shared QueryEngine.
     server.set_query_describer(
-        [&engine, &catalog](
-            const std::string& sql,
-            const std::string& database) -> sixseven::Result<std::vector<sixseven::ColumnDescription>> {
+        [&engine, &catalog](const std::string& sql, const std::string& database)
+            -> sixseven::Result<std::vector<sixseven::ColumnDescription>> {
             if (!database.empty()) {
                 auto db = catalog.get_database(database);
                 if (db) {
