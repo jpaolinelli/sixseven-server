@@ -117,8 +117,9 @@ TEST_F(QA_GDB714, SqlInsertedRowsCarryMvccHeaders) {
     while (auto row = it->next()) {
         auto header = heap->get_tuple_header(row->first);
         ASSERT_TRUE(header.has_value()) << header.error().message;
-        // Autocommit DML stamps the frozen (always-committed) xmin.
-        EXPECT_EQ(header->xmin, frozen_txn_id);
+        // Since GDB-747, autocommit DML stamps a real per-statement
+        // transaction id (committed immediately), not the frozen sentinel.
+        EXPECT_NE(header->xmin, invalid_txn_id);
         EXPECT_EQ(header->xmax, invalid_txn_id);
         ++rows;
     }
@@ -156,14 +157,19 @@ TEST_F(QA_GDB714, HeadersAndDataPersistAcrossEngineRestart) {
     while (auto row = it->next()) {
         auto header = heap->get_tuple_header(row->first);
         ASSERT_TRUE(header.has_value()) << header.error().message;
-        EXPECT_EQ(header->xmin, frozen_txn_id);
+        // Real xmin stamps (GDB-747) persist across restart. Ids unknown to
+        // the fresh TransactionManager read as committed, so the rows stay
+        // visible.
+        EXPECT_NE(header->xmin, invalid_txn_id);
         EXPECT_EQ(header->xmax, invalid_txn_id);
         ++rows;
     }
     EXPECT_EQ(rows, 3u);
 }
 
-TEST_F(QA_GDB714, UpdatePreservesHeaderAndData) {
+TEST_F(QA_GDB714, UpdateCreatesNewVersionAndPreservesData) {
+    // Since GDB-747 the UPDATE path is delete+insert: the old version gets
+    // xmax (and a t_ctid chain pointer), the new version a fresh xmin.
     exec_ok("UPDATE items SET qty = 99 WHERE id = 2");
 
     auto qr = exec_ok("SELECT qty FROM items WHERE id = 2");
@@ -175,9 +181,11 @@ TEST_F(QA_GDB714, UpdatePreservesHeaderAndData) {
     auto it = heap->begin();
     ASSERT_TRUE(it.has_value());
     while (auto row = it->next()) {
+        // Visible versions are undeleted and carry a valid creator id.
         auto header = heap->get_tuple_header(row->first);
         ASSERT_TRUE(header.has_value()) << header.error().message;
-        EXPECT_EQ(header->xmin, frozen_txn_id);
+        EXPECT_NE(header->xmin, invalid_txn_id);
+        EXPECT_EQ(header->xmax, invalid_txn_id);
     }
 }
 

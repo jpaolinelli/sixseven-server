@@ -35,7 +35,11 @@ Result<std::optional<Tuple>> DeleteOperator::do_next() {
             return make_error(StatusCode::INTERNAL_ERROR, "DELETE: tuple has no RID");
         }
 
-        auto del = heap_.delete_tuple(*tuple.rid);
+        // MVCC heaps (GDB-747): logical delete — stamp xmax and leave the
+        // version on the page so an aborted transaction undeletes it.
+        // Legacy headerless heaps keep the physical delete.
+        auto del = heap_.mvcc_headers() ? heap_.mark_deleted(*tuple.rid, txn_id_)
+                                        : heap_.delete_tuple(*tuple.rid);
         if (!del) {
             return make_error(del.error().code, del.error().message);
         }

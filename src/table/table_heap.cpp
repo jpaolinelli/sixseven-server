@@ -3,6 +3,7 @@
 #include "sixseven/common/logging.h"
 #include "sixseven/storage/wal.h"
 #include "sixseven/table/table_wal.h"
+#include "sixseven/txn/txn_manager.h"
 
 #include <cstring>
 #include <unordered_map>
@@ -12,6 +13,39 @@ namespace sixseven {
 // Row count is stored in the file header extension area (page 0, bytes 16+).
 // Extension offset 0 = row_count (uint64_t).
 static constexpr size_t kRowCountExtOffset = 0;
+
+namespace {
+
+/// Resolve a transaction id's status for visibility checks (GDB-747).
+/// Frozen stamps and ids unknown to the manager (rows persisted by a previous
+/// process — there is no persistent commit log yet) are treated as COMMITTED
+/// so existing data stays readable across restarts.
+TransactionStatus effective_status(const TransactionManager* mgr, txn_id_t xid) {
+    if (xid == frozen_txn_id || mgr == nullptr) {
+        return TransactionStatus::COMMITTED;
+    }
+    const Transaction* txn = mgr->get_transaction(xid);
+    return txn != nullptr ? txn->status : TransactionStatus::COMMITTED;
+}
+
+/// Status-based tuple visibility (GDB-747): a version is visible unless its
+/// creator is known-aborted, or it has been deleted by a transaction that is
+/// not known-aborted. (Snapshot-based visibility arrives with full isolation
+/// support; status-based filtering is sufficient for single-session
+/// commit/abort semantics.)
+bool tuple_visible(const MvccTupleHeader& header, const TransactionManager* mgr) {
+    if (header.xmin != invalid_txn_id &&
+        effective_status(mgr, header.xmin) == TransactionStatus::ABORTED) {
+        return false;
+    }
+    if (header.xmax != invalid_txn_id &&
+        effective_status(mgr, header.xmax) != TransactionStatus::ABORTED) {
+        return false;
+    }
+    return true;
+}
+
+} // namespace
 
 // -- TableHeap ----------------------------------------------------------------
 
@@ -26,6 +60,10 @@ TableHeap::TableHeap(BufferPoolManager& bpm,
 void TableHeap::attach_wal(WalWriter* wal, uint32_t table_id) {
     wal_ = wal;
     wal_table_id_ = table_id;
+}
+
+void TableHeap::attach_txn_manager(const TransactionManager* txn_mgr) {
+    txn_mgr_ = txn_mgr;
 }
 
 std::vector<uint8_t> TableHeap::make_on_page_image(std::span<const uint8_t> user_data,
@@ -330,6 +368,15 @@ Result<std::vector<uint8_t>> TableHeap::get_tuple(RID rid) {
             return make_error(StatusCode::INTERNAL_ERROR,
                               "tuple smaller than MVCC header (corrupt page or wrong heap mode)");
         }
+        // Visibility filter (GDB-747): a version created by a known-aborted
+        // transaction, or logically deleted (xmax stamped, deleter not
+        // known-aborted), reads as NOT_FOUND — the same observable result a
+        // physical delete produced before logical deletes existed.
+        if (!tuple_visible(read_mvcc_header(*tuple), txn_mgr_)) {
+            return make_error(StatusCode::NOT_FOUND,
+                              "tuple version not visible (page " + std::to_string(rid.page_id) +
+                                  ", slot " + std::to_string(rid.slot_id) + ")");
+        }
         tuple->erase(tuple->begin(),
                      tuple->begin() + static_cast<std::ptrdiff_t>(mvcc_header_size));
     }
@@ -435,8 +482,7 @@ Result<void> TableHeap::update_tuple(RID rid, std::span<const uint8_t> data) {
     return ok();
 }
 
-Result<std::vector<RID>> TableHeap::update_tuples_batch(
-    const std::vector<TupleUpdate>& updates) {
+Result<std::vector<RID>> TableHeap::update_tuples_batch(const std::vector<TupleUpdate>& updates) {
     if (updates.empty()) {
         return ok(std::vector<RID>{});
     }
@@ -513,8 +559,8 @@ Result<std::vector<RID>> TableHeap::update_tuples_batch(
 
         auto unpin = bpm_.unpin_page(page_id, any_dirty);
         if (!unpin) {
-            SIXSEVEN_LOG_WARN("unpin failed after batch update on page {}: {}",
-                              page_id, unpin.error().message);
+            SIXSEVEN_LOG_WARN(
+                "unpin failed after batch update on page {}: {}", page_id, unpin.error().message);
         }
     }
 
@@ -571,6 +617,79 @@ Result<void> TableHeap::delete_tuple(RID rid, txn_id_t xmax) {
     }
 
     return ok();
+}
+
+Result<void> TableHeap::mark_deleted(RID rid, txn_id_t xmax, RID next_version) {
+    if (!options_.mvcc_headers) {
+        return make_error(StatusCode::NOT_IMPLEMENTED, "mark_deleted requires MVCC tuple headers");
+    }
+
+    auto page_result = bpm_.fetch_page(rid.page_id);
+    if (!page_result) {
+        return tl::unexpected(page_result.error());
+    }
+    Page* page = *page_result;
+
+    auto fail_unpin = [&]() {
+        auto unpin = bpm_.unpin_page(rid.page_id, false);
+        if (!unpin) {
+            SIXSEVEN_LOG_WARN("unpin failed after mark_deleted error on page {}: {}",
+                              rid.page_id,
+                              unpin.error().message);
+        }
+    };
+
+    auto old = page->get_tuple(rid.slot_id);
+    if (!old) {
+        fail_unpin();
+        return tl::unexpected(old.error());
+    }
+    if (old->size() < mvcc_header_size) {
+        fail_unpin();
+        return make_error(StatusCode::INTERNAL_ERROR,
+                          "tuple smaller than MVCC header (corrupt page or wrong heap mode)");
+    }
+
+    std::vector<uint8_t> before = *old;
+    std::vector<uint8_t> after = std::move(*old);
+    write_mvcc_xmax(after.data(), xmax);
+    if (next_version != RID::invalid()) {
+        write_mvcc_ctid(after.data(), next_version);
+    }
+
+    // Same-size image: rewriting the slot in place always fits.
+    auto result = page->update_tuple(rid.slot_id, after);
+    if (!result) {
+        fail_unpin();
+        return tl::unexpected(result.error());
+    }
+
+    // Header mutation is logged as an UPDATE record carrying full before /
+    // after images, so existing redo reproduces the stamped header (GDB-714
+    // recovery path).
+    log_wal(WalRecordType::UPDATE, rid, xmax, before, after);
+
+    if (row_count_.load(std::memory_order_relaxed) > 0) {
+        --row_count_;
+    }
+    persist_row_count();
+
+    auto unpin = bpm_.unpin_page(rid.page_id, true);
+    if (!unpin) {
+        return tl::unexpected(unpin.error());
+    }
+    return ok();
+}
+
+void TableHeap::adjust_row_count(int64_t delta) {
+    if (delta >= 0) {
+        row_count_.fetch_add(static_cast<uint64_t>(delta), std::memory_order_relaxed);
+    } else {
+        uint64_t dec = static_cast<uint64_t>(-delta);
+        uint64_t current = row_count_.load(std::memory_order_relaxed);
+        row_count_.store(current >= dec ? current - dec : 0, std::memory_order_relaxed);
+    }
+    persist_row_count();
 }
 
 // -- WAL recovery primitives (GDB-714) -----------------------------------------
@@ -692,7 +811,7 @@ Result<TableIterator> TableHeap::begin() {
     if (!pc) {
         return tl::unexpected(pc.error());
     }
-    return ok(TableIterator(bpm_, 1, *pc, options_.mvcc_headers));
+    return ok(TableIterator(bpm_, 1, *pc, options_.mvcc_headers, txn_mgr_));
 }
 
 Result<uint32_t> TableHeap::page_count() const {
@@ -728,9 +847,10 @@ void TableHeap::persist_row_count() {
 TableIterator::TableIterator(BufferPoolManager& bpm,
                              PageId start_page,
                              uint32_t total_pages,
-                             bool strip_mvcc_headers)
+                             bool strip_mvcc_headers,
+                             const TransactionManager* txn_mgr)
     : bpm_(bpm), current_page_(start_page), total_pages_(total_pages),
-      strip_mvcc_headers_(strip_mvcc_headers) {}
+      strip_mvcc_headers_(strip_mvcc_headers), txn_mgr_(txn_mgr) {}
 
 std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
     while (!exhausted_ && current_page_ < total_pages_) {
@@ -753,6 +873,15 @@ std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
             // callback rewriting the same slot in place).
             auto tuple = page->get_tuple(current_slot_);
             if (tuple) {
+                // Visibility filter (GDB-747): skip versions created by a
+                // known-aborted transaction or logically deleted by a
+                // transaction that is not known-aborted.
+                if (strip_mvcc_headers_ && tuple->size() >= mvcc_header_size &&
+                    !tuple_visible(read_mvcc_header(*tuple), txn_mgr_)) {
+                    current_slot_++;
+                    continue;
+                }
+
                 RID rid{current_page_, current_slot_};
                 current_slot_++;
 
@@ -791,6 +920,18 @@ std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
 }
 
 void TableIterator::skip(size_t count) {
+    // MVCC heaps must honor version visibility (GDB-747): logically deleted
+    // slots are still live in the slot directory, so the fast slot-count path
+    // would over-skip. Fall back to next(), which applies the filter.
+    if (strip_mvcc_headers_) {
+        for (size_t i = 0; i < count; ++i) {
+            if (!next().has_value()) {
+                break;
+            }
+        }
+        return;
+    }
+
     size_t skipped = 0;
 
     while (skipped < count && !exhausted_ && current_page_ < total_pages_) {

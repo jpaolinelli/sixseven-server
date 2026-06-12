@@ -7,4 +7,4 @@ add_library(sixseven_table STATIC
 )
 
 target_include_directories(sixseven_table PUBLIC ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(sixseven_table PUBLIC sixseven_common sixseven_storage)
+target_link_libraries(sixseven_table PUBLIC sixseven_common sixseven_storage sixseven_txn)

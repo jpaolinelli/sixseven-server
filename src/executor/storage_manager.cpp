@@ -29,6 +29,14 @@ StorageManager::~StorageManager() {
     indexes_.clear();
 }
 
+void StorageManager::set_txn_manager(const TransactionManager* txn_mgr) {
+    std::lock_guard lock(mu_);
+    txn_mgr_ = txn_mgr;
+    for (auto& [table_id, storage] : tables_) {
+        storage->heap->attach_txn_manager(txn_mgr_);
+    }
+}
+
 std::filesystem::path StorageManager::database_path(database_id_t db_id) const {
     return data_dir_ / "databases" / std::to_string(db_id);
 }
@@ -101,6 +109,7 @@ Result<void> StorageManager::create_table_storage(database_id_t db_id,
     // SQL table files store MVCC tuple headers (v2 file format, GDB-714).
     storage->heap = std::make_unique<TableHeap>(
         *storage->bpm, dm_, *fid, TableHeapOptions{.mvcc_headers = true});
+    storage->heap->attach_txn_manager(txn_mgr_);
     storage->storage_schema = build_storage_schema(table_schema);
 
     tables_[table_id] = std::move(storage);
@@ -132,6 +141,7 @@ Result<void> StorageManager::open_table_storage(database_id_t db_id,
     // SQL table files store MVCC tuple headers (v2 file format, GDB-714).
     storage->heap = std::make_unique<TableHeap>(
         *storage->bpm, dm_, *fid, TableHeapOptions{.mvcc_headers = true});
+    storage->heap->attach_txn_manager(txn_mgr_);
     storage->storage_schema = build_storage_schema(table_schema);
 
     tables_[table_id] = std::move(storage);
@@ -252,8 +262,7 @@ Result<IndexStorage*> StorageManager::create_index_storage(database_id_t db_id,
     return ok(ptr);
 }
 
-Result<IndexStorage*> StorageManager::open_index_storage(database_id_t db_id,
-                                                         index_id_t index_id) {
+Result<IndexStorage*> StorageManager::open_index_storage(database_id_t db_id, index_id_t index_id) {
     std::lock_guard lock(mu_);
 
     if (auto it = indexes_.find(index_id); it != indexes_.end()) {
@@ -350,17 +359,21 @@ Result<void> StorageManager::flush_all() {
     for (auto& [id, ts] : tables_) {
         if (ts && ts->bpm) {
             auto r = ts->bpm->flush_all();
-            if (!r) return r;
+            if (!r)
+                return r;
             auto s = dm_.sync_file(ts->file_id);
-            if (!s) return s;
+            if (!s)
+                return s;
         }
     }
     for (auto& [id, is] : indexes_) {
         if (is && is->bpm) {
             auto r = is->bpm->flush_all();
-            if (!r) return r;
+            if (!r)
+                return r;
             auto s = dm_.sync_file(is->file_id);
-            if (!s) return s;
+            if (!s)
+                return s;
         }
     }
     return ok();
