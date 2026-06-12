@@ -1,9 +1,8 @@
 #include "sixseven/storage/wal_archive.h"
 
 #include "sixseven/common/logging.h"
-#include "sixseven/storage/disk_manager.h" // crc32c()
-
 #include "sixseven/common/platform.h"
+#include "sixseven/storage/disk_manager.h" // crc32c()
 
 #include <algorithm>
 #include <cstring>
@@ -89,7 +88,8 @@ WalArchiveManager::~WalArchiveManager() {
     if (running_.load(std::memory_order_acquire)) {
         auto result = stop();
         if (!result) {
-            SIXSEVEN_LOG_ERROR("WalArchiveManager destructor stop failed: {}", result.error().message);
+            SIXSEVEN_LOG_ERROR("WalArchiveManager destructor stop failed: {}",
+                               result.error().message);
         }
     }
 }
@@ -112,8 +112,8 @@ Result<void> WalArchiveManager::start() {
     archive_thread_ = std::thread([this] { archive_loop(); });
 
     SIXSEVEN_LOG_INFO("WAL archive manager started: wal_dir={}, archive_dir={}",
-                   wal_dir_.string(),
-                   archive_dir_.string());
+                      wal_dir_.string(),
+                      archive_dir_.string());
 
     return ok();
 }
@@ -155,8 +155,18 @@ Result<void> WalArchiveManager::archive_segment(uint64_t segment_id, lsn_t last_
     auto meta_path = archive_segment_path(segment_id);
     meta_path += ".meta";
     std::ofstream meta_file(meta_path);
-    if (meta_file.is_open()) {
-        meta_file << last_lsn;
+    meta_file << last_lsn;
+    meta_file.flush();
+    if (!meta_file.good()) {
+        // Without the sidecar, cleanup_before() would skip this segment
+        // forever (unbounded archive growth). Undo the copy and surface the
+        // failure so the segment is re-archived on a later attempt (GDB-782).
+        meta_file.close();
+        std::error_code ec;
+        std::filesystem::remove(meta_path, ec);
+        std::filesystem::remove(archive_segment_path(segment_id), ec);
+        return make_error(StatusCode::IO_ERROR,
+                          "failed to write archive metadata sidecar: " + meta_path.string());
     }
 
     // Update last archived LSN.
@@ -196,9 +206,9 @@ Result<void> WalArchiveManager::cleanup_before(lsn_t lsn) {
         lsn_t min_slot_lsn = retention_lsn_provider_();
         if (min_slot_lsn != invalid_lsn && min_slot_lsn < lsn) {
             SIXSEVEN_LOG_INFO("WAL archive cleanup: clamping cleanup LSN from {} to {} "
-                           "(replication slot retention)",
-                           lsn,
-                           min_slot_lsn);
+                              "(replication slot retention)",
+                              lsn,
+                              min_slot_lsn);
             lsn = min_slot_lsn;
         }
     }
@@ -241,9 +251,9 @@ Result<void> WalArchiveManager::cleanup_before(lsn_t lsn) {
             // Ignore error on metadata removal — non-critical.
 
             SIXSEVEN_LOG_INFO("WAL archive cleanup: removed segment {} (last_lsn={} < {})",
-                           seg_id,
-                           seg_last_lsn,
-                           lsn);
+                              seg_id,
+                              seg_last_lsn,
+                              lsn);
         }
     }
 
@@ -312,8 +322,8 @@ void WalArchiveManager::archive_loop() {
             auto result = archive_segment(item.segment_id, item.last_lsn);
             if (!result) {
                 SIXSEVEN_LOG_ERROR("WAL archive failed for segment {}: {}",
-                                item.segment_id,
-                                result.error().message);
+                                   item.segment_id,
+                                   result.error().message);
             }
         }
     }
@@ -327,8 +337,8 @@ void WalArchiveManager::archive_loop() {
         auto result = archive_segment(item.segment_id, item.last_lsn);
         if (!result) {
             SIXSEVEN_LOG_ERROR("WAL archive (shutdown drain) failed for segment {}: {}",
-                            item.segment_id,
-                            result.error().message);
+                               item.segment_id,
+                               result.error().message);
         }
     }
 }
