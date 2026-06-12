@@ -415,5 +415,150 @@ TEST(TokenizerJsonLoader, NormalizerNoTypeFieldDefaultsToLowercase) {
     EXPECT_TRUE(result->normalizer_lowercase);
 }
 
+// ===================================================================
+// GDB-776: RoBERTa/GPT-style angle-bracket special tokens
+// ===================================================================
+
+TEST(TokenizerJsonLoader, BPEAngleBracketAddedTokensPopulateSpecialIds) {
+    TempJsonFile file(R"({
+        "model": {"type": "BPE", "vocab": {"<s>": 0, "<pad>": 1, "</s>": 2, "<unk>": 3, "<mask>": 4}},
+        "added_tokens": [
+            {"id": 0, "content": "<s>",    "special": true},
+            {"id": 1, "content": "<pad>",  "special": true},
+            {"id": 2, "content": "</s>",   "special": true},
+            {"id": 3, "content": "<unk>",  "special": true},
+            {"id": 4, "content": "<mask>", "special": true}
+        ]
+    })");
+    auto result = load_tokenizer_config(file.path());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    // <s>    -> cls
+    EXPECT_EQ(result->special_tokens.cls, 0);
+    // <pad>  -> pad
+    EXPECT_EQ(result->special_tokens.pad, 1);
+    // </s>   -> sep
+    EXPECT_EQ(result->special_tokens.sep, 2);
+    // <unk>  -> unk
+    EXPECT_EQ(result->special_tokens.unk, 3);
+    // <mask> -> mask
+    EXPECT_EQ(result->special_tokens.mask, 4);
+}
+
+TEST(TokenizerJsonLoader, BPEAngleBracketTokensNotDefaultBERTValues) {
+    // Regression: a vocab with only angle-bracket names must NOT keep BERT
+    // defaults (pad=0, unk=100, cls=101, sep=102).
+    TempJsonFile file(R"({
+        "model": {"type": "BPE", "vocab": {"<s>": 0, "<pad>": 1, "</s>": 2, "<unk>": 3}},
+        "added_tokens": [
+            {"id": 0, "content": "<s>",   "special": true},
+            {"id": 1, "content": "<pad>", "special": true},
+            {"id": 2, "content": "</s>",  "special": true},
+            {"id": 3, "content": "<unk>", "special": true}
+        ]
+    })");
+    auto result = load_tokenizer_config(file.path());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_NE(result->special_tokens.cls, 101);
+    EXPECT_NE(result->special_tokens.sep, 102);
+    EXPECT_NE(result->special_tokens.pad, 0); // pad=1 now, not the BERT default 0
+    EXPECT_EQ(result->special_tokens.pad, 1);
+}
+
+TEST(TokenizerJsonLoader, BPEAngleBracketVocabFallbackNoAddedTokens) {
+    // Fallback: no added_tokens section, but vocab contains RoBERTa names.
+    TempJsonFile file(R"({
+        "model": {
+            "type": "BPE",
+            "vocab": {"<s>": 10, "<pad>": 11, "</s>": 12, "<unk>": 13, "<mask>": 14, "hello": 20}
+        }
+    })");
+    auto result = load_tokenizer_config(file.path());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->special_tokens.cls, 10);
+    EXPECT_EQ(result->special_tokens.pad, 11);
+    EXPECT_EQ(result->special_tokens.sep, 12);
+    EXPECT_EQ(result->special_tokens.unk, 13);
+    EXPECT_EQ(result->special_tokens.mask, 14);
+}
+
+TEST(TokenizerJsonLoader, BERTVocabFallbackNoAddedTokens) {
+    // Fallback: no added_tokens section, vocab contains BERT bracket names.
+    TempJsonFile file(R"({
+        "model": {
+            "type": "WordPiece",
+            "vocab": {"[PAD]": 0, "[UNK]": 100, "[CLS]": 101, "[SEP]": 102, "[MASK]": 103, "hello": 200}
+        }
+    })");
+    auto result = load_tokenizer_config(file.path());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->special_tokens.pad, 0);
+    EXPECT_EQ(result->special_tokens.unk, 100);
+    EXPECT_EQ(result->special_tokens.cls, 101);
+    EXPECT_EQ(result->special_tokens.sep, 102);
+    EXPECT_EQ(result->special_tokens.mask, 103);
+}
+
+// ===================================================================
+// GDB-776: merges pair-array format
+// ===================================================================
+
+TEST(TokenizerJsonLoader, MergesPairArrayFormatAccepted) {
+    TempJsonFile file(R"({
+        "model": {
+            "type": "BPE",
+            "vocab": {"a": 0, "b": 1, "ab": 2, "c": 3},
+            "merges": [["a", "b"], ["ab", "c"]]
+        }
+    })");
+    auto result = load_tokenizer_config(file.path());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->merges.size(), 2u);
+    // Pair arrays are normalised to "a b" string form internally.
+    EXPECT_EQ(result->merges[0], "a b");
+    EXPECT_EQ(result->merges[1], "ab c");
+}
+
+TEST(TokenizerJsonLoader, MergesMixedStringAndPairArrayAccepted) {
+    TempJsonFile file(R"({
+        "model": {
+            "type": "BPE",
+            "vocab": {"a": 0, "b": 1, "ab": 2, "c": 3},
+            "merges": ["a b", ["ab", "c"]]
+        }
+    })");
+    auto result = load_tokenizer_config(file.path());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->merges.size(), 2u);
+    EXPECT_EQ(result->merges[0], "a b");
+    EXPECT_EQ(result->merges[1], "ab c");
+}
+
+TEST(TokenizerJsonLoader, MergesInvalidEntryStillErrors) {
+    // An integer entry is still invalid even after the pair-array fix.
+    TempJsonFile file(R"({
+        "model": {
+            "type": "BPE",
+            "vocab": {"a": 0},
+            "merges": [42]
+        }
+    })");
+    auto result = load_tokenizer_config(file.path());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
+}
+
+TEST(TokenizerJsonLoader, MergesSingleElementArrayErrors) {
+    TempJsonFile file(R"({
+        "model": {
+            "type": "BPE",
+            "vocab": {"a": 0},
+            "merges": [["a"]]
+        }
+    })");
+    auto result = load_tokenizer_config(file.path());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
+}
+
 } // namespace
 } // namespace sixseven
