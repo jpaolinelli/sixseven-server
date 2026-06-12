@@ -269,8 +269,8 @@ public:
                     const float* row_data = output_data + i * row_floats;
                     // Use the per-row unpadded attention_mask so mean_pool counts only
                     // the real tokens of row i — identical semantics to single-row run().
-                    results.push_back(mean_pool(row_data, attention_mask[i], out_seq_len,
-                                                hidden_dim));
+                    results.push_back(
+                        mean_pool(row_data, attention_mask[i], out_seq_len, hidden_dim));
                 }
             } else if (output_shape.size() == 2) {
                 // [batch, dim] — direct per-row embedding.
@@ -400,9 +400,9 @@ Result<std::unique_ptr<OnnxSession>> create_onnx_session(const std::string& mode
         }
 
         SIXSEVEN_LOG_INFO("loaded ONNX model '{}': {} inputs, {} outputs",
-                       model_path,
-                       input_names.size(),
-                       output_names.size());
+                          model_path,
+                          input_names.size(),
+                          output_names.size());
 
         return ok(std::unique_ptr<OnnxSession>(std::make_unique<RealOnnxSession>(
             std::move(env), std::move(session), std::move(input_names), std::move(output_names))));
@@ -471,42 +471,44 @@ Result<std::unique_ptr<OnnxProvider>> create_onnx_provider(const std::string& pa
         return tl::unexpected(paths.error());
     }
 
-    auto session = create_onnx_session(paths->model_path);
-    if (!session.has_value()) {
-        return tl::unexpected(session.error());
-    }
-
+    // Validate and build the tokenizer BEFORE loading the ONNX session.
+    // Tokenizer loading is cheap (JSON file read) and depends only on paths->tokenizer_path,
+    // which is already resolved.  Failing fast here means a misconfigured tokenizer produces
+    // an actionable INVALID_ARGUMENT without paying the cost of an ONNX session load, and
+    // makes regression tests for this error path exercise the actual production branch even
+    // when no real model file is present.
     std::unique_ptr<Tokenizer> tokenizer;
 
     if (!paths->tokenizer_path.empty()) {
         auto config = load_tokenizer_config(paths->tokenizer_path);
         if (!config.has_value()) {
-            SIXSEVEN_LOG_WARN("failed to load tokenizer from '{}': {}; falling back to hash tokenizer",
-                           paths->tokenizer_path,
-                           config.error().message);
-            tokenizer = std::make_unique<HashTokenizer>(OnnxProvider::MAX_SEQ_LENGTH);
-        } else {
-            switch (config->model_type) {
-            case TokenizerModelType::WORDPIECE:
-                tokenizer = std::make_unique<WordPieceTokenizer>(*config);
-                SIXSEVEN_LOG_INFO("loaded WordPiece tokenizer from '{}'", paths->tokenizer_path);
-                break;
-            case TokenizerModelType::BPE:
-                tokenizer = std::make_unique<BPETokenizer>(*config);
-                SIXSEVEN_LOG_INFO("loaded BPE tokenizer from '{}'", paths->tokenizer_path);
-                break;
-            default:
-                SIXSEVEN_LOG_WARN("unsupported tokenizer model type in '{}'; "
-                               "falling back to hash tokenizer",
-                               paths->tokenizer_path);
-                tokenizer = std::make_unique<HashTokenizer>(OnnxProvider::MAX_SEQ_LENGTH);
-                break;
-            }
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "failed to load tokenizer from '" + paths->tokenizer_path +
+                                  "': " + config.error().message);
+        }
+        switch (config->model_type) {
+        case TokenizerModelType::WORDPIECE:
+            tokenizer = std::make_unique<WordPieceTokenizer>(*config);
+            SIXSEVEN_LOG_INFO("loaded WordPiece tokenizer from '{}'", paths->tokenizer_path);
+            break;
+        case TokenizerModelType::BPE:
+            tokenizer = std::make_unique<BPETokenizer>(*config);
+            SIXSEVEN_LOG_INFO("loaded BPE tokenizer from '{}'", paths->tokenizer_path);
+            break;
+        default:
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "unsupported tokenizer model type in '" + paths->tokenizer_path +
+                                  "': only WordPiece and BPE are supported");
         }
     } else {
-        SIXSEVEN_LOG_WARN("no tokenizer.json found for model '{}'; using hash tokenizer",
-                       paths->model_path);
-        tokenizer = std::make_unique<HashTokenizer>(OnnxProvider::MAX_SEQ_LENGTH);
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "no tokenizer.json found for ONNX model '" + paths->model_path +
+                              "': a tokenizer.json file is required alongside the model");
+    }
+
+    auto session = create_onnx_session(paths->model_path);
+    if (!session.has_value()) {
+        return tl::unexpected(session.error());
     }
 
     return ok(std::make_unique<OnnxProvider>(path, dim, std::move(*session), std::move(tokenizer)));

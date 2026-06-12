@@ -157,9 +157,10 @@ private:
 
 /// Create an OnnxProvider from a model path (directory or .onnx file).
 ///
-/// Resolves paths, creates the ONNX session, loads the tokenizer from
-/// tokenizer.json if present (falling back to HashTokenizer), and
-/// assembles the provider.
+/// Resolves paths, creates the ONNX session, and loads the tokenizer from
+/// tokenizer.json. Fails with INVALID_ARGUMENT if tokenizer.json is absent,
+/// cannot be parsed, or uses an unsupported model type (only WordPiece and
+/// BPE are supported). Never silently falls back to a hash tokenizer.
 ///
 /// @param path  Directory containing the model or path to a .onnx file.
 /// @param dim   Expected embedding dimension.
