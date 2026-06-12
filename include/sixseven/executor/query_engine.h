@@ -182,6 +182,11 @@ public:
     /// Set the backfill manager for BACKFILL EMBEDDINGS command.
     void set_backfill_manager(BackfillManager* mgr);
 
+    /// Read-only access to the ANALYZE statistics store (GDB-754). The
+    /// planner consults this store for cost-based access path and join
+    /// method selection; tests use it to verify ANALYZE populated stats.
+    [[nodiscard]] const StatisticsStore& statistics() const { return statistics_store_; }
+
     /// Shared transaction manager (GDB-747). DML statements stamp tuple
     /// versions with ids allocated here; VACUUM integration (GDB-1230) reads
     /// its horizon from the same instance.

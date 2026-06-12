@@ -1323,6 +1323,9 @@ Result<QueryResult> QueryEngine::execute_drop_table(const DropTableStmt& stmt) {
         return make_error(drop_catalog.error().code, drop_catalog.error().message);
     }
 
+    // Drop any ANALYZE statistics gathered for the table.
+    statistics_store_.remove_table(table_id);
+
     QueryResult qr;
     qr.message = "DROP TABLE";
     return ok(std::move(qr));
@@ -2324,6 +2327,7 @@ Result<QueryResult> QueryEngine::execute_explain(const ExplainStmt& stmt,
                     algorithm_registry_,
                     index_manager_ ? index_manager_->hnsw_rid_maps() : nullptr,
                     index_manager_ ? index_manager_->bm25_map() : nullptr);
+    planner.set_statistics(&statistics_store_);
     std::vector<ExprPtr> owned_exprs;
     auto iter = planner.plan(*inner_bound, owned_exprs);
     if (!iter) {
@@ -2523,6 +2527,7 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                     algorithm_registry_,
                     index_manager_ ? index_manager_->hnsw_rid_maps() : nullptr,
                     index_manager_ ? index_manager_->bm25_map() : nullptr);
+    planner.set_statistics(&statistics_store_);
     std::vector<ExprPtr> owned_exprs;
     auto iter = planner.plan(bound, owned_exprs);
     if (!iter) {

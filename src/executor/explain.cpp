@@ -2,8 +2,23 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cmath>
+#include <iomanip>
 #include <sstream>
 #include <string>
+
+namespace {
+
+/// Format an optimizer cost estimate as "cost=0.00..12.34 rows=42".
+std::string format_cost_estimate(const sixseven::PlanCostEstimate& cost) {
+    std::ostringstream os;
+    os << std::fixed << std::setprecision(2);
+    os << "cost=" << cost.startup_cost << ".." << cost.total_cost;
+    os << " rows=" << static_cast<long long>(std::llround(cost.estimated_rows));
+    return os.str();
+}
+
+} // anonymous namespace
 
 namespace sixseven {
 
@@ -31,8 +46,11 @@ void ExplainFormatter::format_text_node(const Iterator& node,
         out += "  (" + detail + ")";
     }
 
-    // Show estimated row count from output schema column count (informational).
-    // In a full implementation with a cost model, we'd show startup_cost..total_cost rows=N.
+    // Show optimizer cost estimates when the planner attached them
+    // (i.e. when table statistics were available via ANALYZE).
+    if (node.estimated_cost().has_value()) {
+        out += "  (" + format_cost_estimate(*node.estimated_cost()) + ")";
+    }
 
     if (analyze) {
         out += "  (actual rows=" + std::to_string(node.rows_produced());
@@ -84,6 +102,13 @@ nlohmann::json node_to_json(const Iterator& node, bool analyze) {
     auto detail = node.plan_node_detail();
     if (!detail.empty()) {
         obj["Detail"] = detail;
+    }
+
+    if (node.estimated_cost().has_value()) {
+        const auto& cost = *node.estimated_cost();
+        obj["Startup Cost"] = cost.startup_cost;
+        obj["Total Cost"] = cost.total_cost;
+        obj["Plan Rows"] = static_cast<long long>(std::llround(cost.estimated_rows));
     }
 
     if (analyze) {

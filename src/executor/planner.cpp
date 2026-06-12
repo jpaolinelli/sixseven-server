@@ -34,7 +34,10 @@
 #include "sixseven/executor/window_function.h"
 #include "sixseven/parser/lexer.h"
 #include "sixseven/parser/parser.h"
+#include "sixseven/planner/cost_model.h"
+#include "sixseven/planner/optimizer.h"
 #include "sixseven/planner/rewrite_rules.h"
+#include "sixseven/planner/statistics.h"
 #include "sixseven/planner/type_resolver.h"
 #include "sixseven/vector/embedding_column.h"
 
@@ -57,6 +60,41 @@ std::string to_upper(std::string s) {
         return static_cast<char>(std::toupper(c));
     });
     return s;
+}
+
+/// Walk down a single-child operator chain (e.g. Filter -> Seq Scan) looking
+/// for the first node that carries an optimizer cost estimate. Returns
+/// nullptr when no estimate is found.
+const PlanCostEstimate* find_cost_in_chain(const Iterator* iter) {
+    while (iter != nullptr) {
+        if (iter->estimated_cost().has_value()) {
+            return &*iter->estimated_cost();
+        }
+        auto children = iter->plan_children();
+        if (children.size() != 1) {
+            return nullptr;
+        }
+        iter = children[0];
+    }
+    return nullptr;
+}
+
+/// Convert an executor cost annotation to the optimizer's PlanCost.
+PlanCost to_plan_cost(const PlanCostEstimate& e) {
+    PlanCost c;
+    c.startup_cost = e.startup_cost;
+    c.total_cost = e.total_cost;
+    c.estimated_rows = e.estimated_rows;
+    return c;
+}
+
+/// Convert an optimizer PlanCost to the executor cost annotation.
+PlanCostEstimate to_cost_estimate(const PlanCost& c) {
+    PlanCostEstimate e;
+    e.startup_cost = c.startup_cost;
+    e.total_cost = c.total_cost;
+    e.estimated_rows = c.estimated_rows;
+    return e;
 }
 
 /// Recursively collect all aggregate FunctionCallExpr nodes in an expression tree.
@@ -883,6 +921,7 @@ Planner::plan_from_source(const TableRef& table_ref,
     auto table_output = build_table_output_schema(*table_schema, alias);
     auto scan = std::make_unique<SeqScanOperator>(
         *storage->heap, storage->storage_schema, table_output, nullptr, &bound);
+    annotate_seq_scan_cost(*table_schema, *scan);
 
     return ok(PlannedSource{std::move(scan), std::move(table_output)});
 }
@@ -1241,24 +1280,39 @@ Planner::plan_select(const SelectStmt& stmt,
                         source->schema = std::move(score_output);
                         pushed_where = true;
                     } else {
-                        // Try to use an index scan if a suitable B+ tree index exists.
-                        auto idx_scan = try_plan_index_scan(
-                            *table_schema, *ts, table_output, stmt.where_expr.get(), bound);
-                        if (idx_scan && *idx_scan) {
-                            source->iter = std::move(*idx_scan);
-                            source->schema = std::move(table_output);
-                            pushed_where = true;
-                        } else {
-                            // Fall back to sequential scan with predicate pushdown.
-                            source->iter =
-                                std::make_unique<SeqScanOperator>(*storage->heap,
-                                                                  storage->storage_schema,
-                                                                  table_output,
-                                                                  stmt.where_expr.get(),
-                                                                  &bound);
-                            source->schema = std::move(table_output);
-                            pushed_where = true;
+                        // Cost-based access path selection (GDB-754): when
+                        // ANALYZE statistics exist for this table, let the
+                        // optimizer decide between index scan and seq scan.
+                        // Without statistics this preserves the default
+                        // behavior (use a matching index when available).
+                        auto decision = decide_access_path(*table_schema, stmt.where_expr.get());
+
+                        std::unique_ptr<Iterator> chosen;
+                        if (decision.try_index) {
+                            auto idx_scan = try_plan_index_scan(
+                                *table_schema, *ts, table_output, stmt.where_expr.get(), bound);
+                            if (idx_scan && *idx_scan) {
+                                chosen = std::move(*idx_scan);
+                                if (decision.cost.has_value()) {
+                                    chosen->set_estimated_cost(*decision.cost);
+                                }
+                            }
                         }
+                        if (!chosen) {
+                            // Sequential scan with predicate pushdown — either
+                            // the optimizer chose it, or no usable index exists.
+                            chosen = std::make_unique<SeqScanOperator>(*storage->heap,
+                                                                       storage->storage_schema,
+                                                                       table_output,
+                                                                       stmt.where_expr.get(),
+                                                                       &bound);
+                            if (decision.seq_cost.has_value()) {
+                                chosen->set_estimated_cost(*decision.seq_cost);
+                            }
+                        }
+                        source->iter = std::move(chosen);
+                        source->schema = std::move(table_output);
+                        pushed_where = true;
                     }
                 }
             }
@@ -1340,9 +1394,32 @@ Planner::plan_select(const SelectStmt& stmt,
 
             const Expr* on_expr = join_clause.on_expr ? join_clause.on_expr.get() : nullptr;
 
-            // ── Choose join method: HashJoin for equi-joins, NestedLoop otherwise
+            // ── Choose join method: HashJoin for equi-joins, NestedLoop otherwise.
+            // When both inputs carry optimizer cost estimates (i.e. ANALYZE
+            // statistics exist), the cost-based optimizer picks the method
+            // instead (GDB-754).
             bool used_hash_join = false;
-            if (on_expr) {
+            bool stats_prefer_nested_loop = false;
+            std::optional<PlanCostEstimate> join_cost;
+            {
+                const PlanCostEstimate* lcost = find_cost_in_chain(child.get());
+                const PlanCostEstimate* rcost = find_cost_in_chain(join_source->iter.get());
+                if (lcost != nullptr && rcost != nullptr) {
+                    const CostModel cost_model;
+                    auto [method, jc] = choose_join_method(to_plan_cost(*lcost),
+                                                           to_plan_cost(*rcost),
+                                                           kDefaultSelectivity,
+                                                           false,
+                                                           false,
+                                                           cost_model);
+                    join_cost = to_cost_estimate(jc);
+                    // SORT_MERGE maps onto hash join here: the live executor
+                    // feeds joins unsorted inputs, so hash join is the
+                    // equivalent pipelined choice (follow-up: sort-merge).
+                    stats_prefer_nested_loop = (method == JoinMethod::NESTED_LOOP);
+                }
+            }
+            if (on_expr && !stats_prefer_nested_loop) {
                 auto* bin = dynamic_cast<const BinaryExpr*>(on_expr);
                 if (bin && bin->op == BinaryOp::EQUAL) {
                     auto* lhs_col = dynamic_cast<const ColumnRefExpr*>(bin->lhs.get());
@@ -1386,6 +1463,9 @@ Planner::plan_select(const SelectStmt& stmt,
                                                                  on_expr,
                                                                  bound,
                                                                  std::move(combined));
+            }
+            if (join_cost.has_value()) {
+                child->set_estimated_cost(*join_cost);
             }
         }
 
@@ -3455,6 +3535,118 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema
 
     // No suitable index found.
     return ok(std::unique_ptr<Iterator>(nullptr));
+}
+
+// ---------------------------------------------------------------------------
+// Cost-based access path selection (GDB-754)
+// ---------------------------------------------------------------------------
+
+Planner::AccessPathDecision Planner::decide_access_path(const TableSchema& table_schema,
+                                                        const Expr* where_expr) const {
+    AccessPathDecision decision; // Default: try index, no cost annotations.
+    if (stats_ == nullptr) {
+        return decision;
+    }
+    const TableStats* table_stats = stats_->get_table_stats(table_schema.table_id);
+    if (table_stats == nullptr) {
+        return decision;
+    }
+
+    const CostModel cost_model;
+
+    // Estimate the filter selectivity from column statistics.
+    double selectivity = kDefaultSelectivity;
+    std::string predicate_column;
+    auto cmp = extract_simple_comparison(where_expr);
+    if (cmp.has_value()) {
+        predicate_column = cmp->column_name;
+        const ColumnStats* col_stats = nullptr;
+        for (size_t ci = 0; ci < table_schema.columns.size(); ++ci) {
+            if (table_schema.columns[ci].name == cmp->column_name) {
+                col_stats =
+                    stats_->get_column_stats(table_schema.table_id, static_cast<int32_t>(ci));
+                break;
+            }
+        }
+        if (col_stats != nullptr) {
+            switch (cmp->op) {
+            case BinaryOp::EQUAL:
+                selectivity = estimate_equality_selectivity(*col_stats, cmp->literal_value);
+                break;
+            case BinaryOp::LESS:
+            case BinaryOp::LESS_EQUAL:
+            case BinaryOp::GREATER:
+            case BinaryOp::GREATER_EQUAL:
+                selectivity = estimate_range_selectivity(*col_stats, cmp->op, cmp->literal_value);
+                break;
+            default:
+                selectivity = kDefaultSelectivity;
+                break;
+            }
+        } else if (cmp->op == BinaryOp::EQUAL) {
+            selectivity = kDefaultEqualitySelectivity;
+        }
+    }
+
+    // Only indexes whose leading column matches the predicate column are
+    // usable by try_plan_index_scan; restrict the optimizer to those.
+    std::vector<IndexDef> usable_indexes;
+    if (!predicate_column.empty()) {
+        for (const auto& idx_def : catalog_.list_indexes(table_schema.table_id)) {
+            auto idx_columns = parse_index_columns(idx_def.columns);
+            if (idx_columns.empty() || idx_columns[0] != predicate_column) {
+                continue;
+            }
+            const bool btree_loaded = idx_def.index_type == "btree" && btree_indexes_ != nullptr &&
+                                      btree_indexes_->count(idx_def.index_id) > 0;
+            const bool hash_loaded = idx_def.index_type == "hash" && cmp.has_value() &&
+                                     cmp->op == BinaryOp::EQUAL && hash_indexes_ != nullptr &&
+                                     hash_indexes_->count(idx_def.index_id) > 0;
+            if (btree_loaded || hash_loaded) {
+                usable_indexes.push_back(idx_def);
+            }
+        }
+    }
+
+    auto path = choose_access_path(
+        table_schema.table_id, *table_stats, usable_indexes, selectivity, cost_model);
+
+    decision.try_index = (path.method == AccessMethod::INDEX_SCAN);
+    decision.cost = to_cost_estimate(path.cost);
+
+    // Always compute the seq-scan fallback cost so the chosen plan is
+    // annotated even when no index is usable or the index path falls through.
+    auto seq = cost_model.seq_scan_cost(table_stats->page_count, table_stats->row_count);
+    seq.estimated_rows = static_cast<double>(table_stats->row_count) * selectivity;
+    decision.seq_cost = to_cost_estimate(seq);
+
+    if (decision.try_index) {
+        // The index scan returns only the matching fraction of rows.
+        decision.cost->estimated_rows = static_cast<double>(table_stats->row_count) * selectivity;
+    } else {
+        decision.cost = decision.seq_cost;
+    }
+
+    SIXSEVEN_LOG_DEBUG("access path for table {} ({}): {} (selectivity={:.4f}, cost={:.2f})",
+                       table_schema.name,
+                       table_schema.table_id,
+                       decision.try_index ? "index scan" : "seq scan",
+                       selectivity,
+                       decision.cost->total_cost);
+    return decision;
+}
+
+void Planner::annotate_seq_scan_cost(const TableSchema& table_schema, Iterator& iter) const {
+    if (stats_ == nullptr) {
+        return;
+    }
+    const TableStats* table_stats = stats_->get_table_stats(table_schema.table_id);
+    if (table_stats == nullptr) {
+        return;
+    }
+    const CostModel cost_model;
+    auto cost = cost_model.seq_scan_cost(table_stats->page_count, table_stats->row_count);
+    iter.set_estimated_cost(to_cost_estimate(cost));
 }
 
 } // namespace sixseven

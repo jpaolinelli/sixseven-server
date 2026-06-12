@@ -10,6 +10,15 @@
 
 namespace sixseven {
 
+/// Optimizer cost estimate attached to a plan node for EXPLAIN output.
+/// Mirrors PlanCost from the planner cost model without creating a header
+/// dependency from the executor's core iterator interface.
+struct PlanCostEstimate {
+    double startup_cost = 0.0;   ///< Cost before the first row is produced.
+    double total_cost = 0.0;     ///< Total cost to produce all rows.
+    double estimated_rows = 0.0; ///< Estimated output cardinality.
+};
+
 /// Abstract base class for all Volcano-model executor operators.
 ///
 /// The pull-based interface:
@@ -80,6 +89,15 @@ public:
     /// Child iterators for tree-walking during EXPLAIN formatting.
     [[nodiscard]] virtual std::vector<const Iterator*> plan_children() const { return {}; }
 
+    /// Attach an optimizer cost estimate (set by the planner when table
+    /// statistics are available). Shown by EXPLAIN as "(cost=.. rows=..)".
+    void set_estimated_cost(const PlanCostEstimate& cost) { estimated_cost_ = cost; }
+
+    /// The optimizer cost estimate for this node, if statistics were available.
+    [[nodiscard]] const std::optional<PlanCostEstimate>& estimated_cost() const {
+        return estimated_cost_;
+    }
+
     // -- Instrumentation (for EXPLAIN ANALYZE) --------------------------------
 
     /// Enable timing and row counting. Must be called before open().
@@ -112,6 +130,7 @@ protected:
     [[nodiscard]] virtual std::vector<Iterator*> plan_children_mutable() { return {}; }
 
     bool instrumented_ = false;
+    std::optional<PlanCostEstimate> estimated_cost_;
     int64_t rows_produced_ = 0;
     int64_t loops_ = 0;
     std::chrono::nanoseconds total_time_{0};
