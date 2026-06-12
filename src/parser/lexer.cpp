@@ -533,8 +533,12 @@ bool Lexer::has_valid_exponent() const {
 }
 
 Token Lexer::make_token(TokenType type) const {
-    return Token{
-        type, source_.substr(start_, current_ - start_), token_start_line_, token_start_column_};
+    // byte_offset is 1-based (PostgreSQL 'P' field convention).
+    return Token{type,
+                 source_.substr(start_, current_ - start_),
+                 token_start_line_,
+                 token_start_column_,
+                 static_cast<uint32_t>(start_ + 1)};
 }
 
 } // namespace sixseven
