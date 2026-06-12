@@ -28,6 +28,14 @@ TEST(Logging, AllLevelsDoNotCrash) {
     });
 }
 
+// Helper: detach the capturing logger so the spdlog default no longer
+// references a test-local ostringstream after the test returns. A sinkless
+// logger makes subsequent SIXSEVEN_LOG_* calls harmless no-ops.
+static void restore_default_logger() {
+    sixseven::init_logging(std::make_shared<spdlog::logger>("test_restored_default"));
+    sixseven::init_logging("info");
+}
+
 // Helper: build a logger that writes to a string stream at the given level.
 static std::shared_ptr<spdlog::logger> make_capturing_logger(const std::string& name,
                                                              std::ostringstream& oss,
@@ -58,7 +66,7 @@ TEST(Logging, LevelFilteringWorks) {
     EXPECT_EQ(captured.find("warn-msg"), std::string::npos)
         << "WARN message must be suppressed when level=error; captured: " << captured;
 
-    sixseven::init_logging("info");
+    restore_default_logger();
 }
 
 // Verify that setting level=warn allows WARN and ERROR but suppresses INFO.
@@ -79,7 +87,7 @@ TEST(Logging, WarnLevelSuppressesInfo) {
     EXPECT_NE(captured.find("error-only"), std::string::npos)
         << "ERROR must appear at level=warn; captured: " << captured;
 
-    sixseven::init_logging("info");
+    restore_default_logger();
 }
 
 // Verify that level=info captures INFO, WARN, and ERROR.
@@ -100,5 +108,5 @@ TEST(Logging, InfoLevelCapturesInfoAndAbove) {
     EXPECT_NE(captured.find("error-check"), std::string::npos)
         << "ERROR must appear at level=info; captured: " << captured;
 
-    sixseven::init_logging("info");
+    restore_default_logger();
 }
