@@ -471,11 +471,12 @@ Result<std::unique_ptr<OnnxProvider>> create_onnx_provider(const std::string& pa
         return tl::unexpected(paths.error());
     }
 
-    auto session = create_onnx_session(paths->model_path);
-    if (!session.has_value()) {
-        return tl::unexpected(session.error());
-    }
-
+    // Validate and build the tokenizer BEFORE loading the ONNX session.
+    // Tokenizer loading is cheap (JSON file read) and depends only on paths->tokenizer_path,
+    // which is already resolved.  Failing fast here means a misconfigured tokenizer produces
+    // an actionable INVALID_ARGUMENT without paying the cost of an ONNX session load, and
+    // makes regression tests for this error path exercise the actual production branch even
+    // when no real model file is present.
     std::unique_ptr<Tokenizer> tokenizer;
 
     if (!paths->tokenizer_path.empty()) {
@@ -503,6 +504,11 @@ Result<std::unique_ptr<OnnxProvider>> create_onnx_provider(const std::string& pa
         return make_error(StatusCode::INVALID_ARGUMENT,
                           "no tokenizer.json found for ONNX model '" + paths->model_path +
                               "': a tokenizer.json file is required alongside the model");
+    }
+
+    auto session = create_onnx_session(paths->model_path);
+    if (!session.has_value()) {
+        return tl::unexpected(session.error());
     }
 
     return ok(std::make_unique<OnnxProvider>(path, dim, std::move(*session), std::move(tokenizer)));

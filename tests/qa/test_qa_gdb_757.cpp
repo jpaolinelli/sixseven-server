@@ -178,8 +178,9 @@ TEST_F(GDB757Fixture, GDB757_BPETokenizerJsonLoadsSuccessfully) {
 
 // ---------------------------------------------------------------------------
 // create_onnx_provider with model dir + no tokenizer.json must return an
-// error (not success with a hash tokenizer).  Session load fails first on
-// garbage bytes (IO_ERROR), which still proves no silent hash fallback occurred.
+// INVALID_ARGUMENT error from the tokenizer branch.  Because tokenizer
+// validation now runs BEFORE session creation, a real model file is not
+// required for this test — the tokenizer check fires first.
 // ---------------------------------------------------------------------------
 
 TEST_F(GDB757Fixture, GDB757_CreateProviderWithoutTokenizerJsonReturnsError) {
@@ -193,7 +194,64 @@ TEST_F(GDB757Fixture, GDB757_CreateProviderWithoutTokenizerJsonReturnsError) {
     auto result = create_onnx_provider(model_dir.string(), 384);
     ASSERT_FALSE(result.has_value())
         << "REGRESSION: create_onnx_provider succeeded with no tokenizer.json";
-    EXPECT_NE(result.error().code, StatusCode::OK);
+    // Tokenizer validation fires before session load, so the error is INVALID_ARGUMENT
+    // (not IO_ERROR from a failed ONNX session).
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT)
+        << "error: " << result.error().message;
+}
+
+// ---------------------------------------------------------------------------
+// create_onnx_provider with a corrupt tokenizer.json must return an error from
+// the tokenizer branch (INVALID_ARGUMENT wrapping the PARSE_ERROR).  Session
+// load is never attempted because tokenizer validation runs first.
+// ---------------------------------------------------------------------------
+
+TEST_F(GDB757Fixture, GDB757_CreateProviderWithCorruptTokenizerReturnsError) {
+    auto model_dir = tmp_dir_ / "model_corrupt_tok";
+    std::filesystem::create_directories(model_dir);
+    {
+        std::ofstream out(model_dir / "model.onnx");
+        out << "not a real model";
+    }
+    // Write a corrupt tokenizer.json alongside.
+    write_file("model_corrupt_tok/tokenizer.json", "{{{ not valid json");
+
+    auto result = create_onnx_provider(model_dir.string(), 384);
+    ASSERT_FALSE(result.has_value())
+        << "REGRESSION: create_onnx_provider succeeded with corrupt tokenizer.json";
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT)
+        << "error: " << result.error().message;
+    // The message must mention the tokenizer path.
+    EXPECT_NE(result.error().message.find("tokenizer"), std::string::npos)
+        << "error message does not mention 'tokenizer': " << result.error().message;
+}
+
+// ---------------------------------------------------------------------------
+// create_onnx_provider with a Unigram tokenizer.json must return
+// INVALID_ARGUMENT (unsupported model type).  Session load is never attempted.
+// ---------------------------------------------------------------------------
+
+TEST_F(GDB757Fixture, GDB757_CreateProviderWithUnigramTokenizerReturnsError) {
+    auto model_dir = tmp_dir_ / "model_unigram_tok";
+    std::filesystem::create_directories(model_dir);
+    {
+        std::ofstream out(model_dir / "model.onnx");
+        out << "not a real model";
+    }
+
+    nlohmann::json doc;
+    doc["model"]["type"] = "Unigram";
+    doc["model"]["vocab"] = {{"hello", 1}};
+    doc["added_tokens"] = nlohmann::json::array();
+    write_file("model_unigram_tok/tokenizer.json", doc.dump());
+
+    auto result = create_onnx_provider(model_dir.string(), 384);
+    ASSERT_FALSE(result.has_value())
+        << "REGRESSION: create_onnx_provider succeeded with Unigram tokenizer";
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT)
+        << "error: " << result.error().message;
+    EXPECT_NE(result.error().message.find("unsupported"), std::string::npos)
+        << "error message does not mention 'unsupported': " << result.error().message;
 }
 
 // ---------------------------------------------------------------------------
