@@ -688,12 +688,21 @@ TEST_F(QA_GDB478_E2E, SelectQualifiedColumnSucceeds) {
 
 TEST_F(QA_GDB478_E2E, WhereOnAlgorithmColumnSucceeds) {
     auto result = exec_ok("SELECT * FROM pagerank('knows') WHERE node_id = 1");
-    EXPECT_EQ(result.column_names.size(), 2);
+    ASSERT_EQ(result.column_names.size(), 2u);
+    // WHERE node_id = 1 must yield exactly 1 row (the lambda emits node_id 1 and 2).
+    ASSERT_EQ(result.rows.size(), 1u);
+    EXPECT_EQ(std::get<int64_t>(result.rows[0][0].data()), int64_t{1});
 }
 
 TEST_F(QA_GDB478_E2E, OrderByOnAlgorithmColumnSucceeds) {
     auto result = exec_ok("SELECT * FROM pagerank('knows') ORDER BY rank DESC");
-    EXPECT_EQ(result.column_names.size(), 2);
+    ASSERT_EQ(result.column_names.size(), 2u);
+    // Lambda emits rank=0.85 for node 1 and rank=0.425 for node 2 (default damping=0.85).
+    // ORDER BY rank DESC -> first row has higher rank.
+    ASSERT_GE(result.rows.size(), 2u);
+    auto first_rank = std::get<double>(result.rows[0][1].data());
+    auto second_rank = std::get<double>(result.rows[1][1].data());
+    EXPECT_GE(first_rank, second_rank) << "rows should be ordered by rank descending";
 }
 
 // =========================================================================
@@ -745,23 +754,39 @@ TEST_F(QA_GDB478_E2E, AlgorithmFunctionCaseInsensitive) {
 }
 
 TEST_F(QA_GDB478_E2E, NamedParamsAccepted) {
+    // damping := 0.5 -> row0.rank == 0.5, row1.rank == 0.25 (0.5 * 0.5)
     auto result = exec_ok("SELECT * FROM pagerank('knows', damping := 0.5)");
-    EXPECT_EQ(result.column_names.size(), 2);
+    ASSERT_EQ(result.column_names.size(), 2u);
+    ASSERT_EQ(result.rows.size(), 2u);
+    EXPECT_DOUBLE_EQ(std::get<double>(result.rows[0][1].data()), 0.5);
+    EXPECT_DOUBLE_EQ(std::get<double>(result.rows[1][1].data()), 0.25);
 }
 
 TEST_F(QA_GDB478_E2E, NamedParamsMultipleAccepted) {
+    // damping := 0.9 -> row0.rank == 0.9, row1.rank == 0.45 (0.9 * 0.5)
     auto result = exec_ok("SELECT * FROM pagerank('knows', damping := 0.9, iterations := 10)");
-    EXPECT_EQ(result.column_names.size(), 2);
+    ASSERT_EQ(result.column_names.size(), 2u);
+    ASSERT_EQ(result.rows.size(), 2u);
+    EXPECT_DOUBLE_EQ(std::get<double>(result.rows[0][1].data()), 0.9);
+    EXPECT_DOUBLE_EQ(std::get<double>(result.rows[1][1].data()), 0.45);
 }
 
 TEST_F(QA_GDB478_E2E, NamedParamsCaseInsensitive) {
+    // DAMPING := 0.3 (case-insensitive) -> row0.rank == 0.3, row1.rank == 0.15
     auto result = exec_ok("SELECT * FROM pagerank('knows', DAMPING := 0.3)");
-    EXPECT_EQ(result.column_names.size(), 2);
+    ASSERT_EQ(result.column_names.size(), 2u);
+    ASSERT_EQ(result.rows.size(), 2u);
+    EXPECT_DOUBLE_EQ(std::get<double>(result.rows[0][1].data()), 0.3);
+    EXPECT_DOUBLE_EQ(std::get<double>(result.rows[1][1].data()), 0.15);
 }
 
 TEST_F(QA_GDB478_E2E, NamedParamWithExpression) {
+    // damping := 1.0 - 0.15 = 0.85 -> row0.rank == 0.85, row1.rank == 0.425
     auto result = exec_ok("SELECT * FROM pagerank('knows', damping := 1.0 - 0.15)");
-    EXPECT_EQ(result.column_names.size(), 2);
+    ASSERT_EQ(result.column_names.size(), 2u);
+    ASSERT_EQ(result.rows.size(), 2u);
+    EXPECT_DOUBLE_EQ(std::get<double>(result.rows[0][1].data()), 0.85);
+    EXPECT_DOUBLE_EQ(std::get<double>(result.rows[1][1].data()), 0.425);
 }
 
 TEST_F(QA_GDB478_E2E, NonexistentEdgeTypeAccepted) {
