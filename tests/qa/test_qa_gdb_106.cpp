@@ -224,12 +224,17 @@ TEST(QA_GDB_106_Traverse, MaxDepthNonInteger) {
 }
 
 TEST(QA_GDB_106_Traverse, DirectionAfterMaxDepth) {
-    // DIRECTION must come before MAX_DEPTH — reversed order should leave
-    // DIRECTION unparsed and possibly error or be leftover.
-    // Actually the parser checks DIRECTION first, then MAX_DEPTH, so
-    // reversing should leave MAX_DEPTH as unparsed trailing tokens.
-    // With parse() (single statement), trailing tokens are not validated.
-    // Let's just verify the correct order works.
+    // The grammar is fixed-order: DIRECTION must come before MAX_DEPTH
+    // (parse_traverse checks DIRECTION first, then MAX_DEPTH). With the
+    // clauses reversed, the trailing "DIRECTION IN" tokens cannot start a
+    // new statement, so parse_all must reject the input rather than
+    // silently dropping the direction.
+    expect_parse_error("TRAVERSE follows FROM users(1) MAX_DEPTH 3 DIRECTION IN");
+}
+
+TEST(QA_GDB_106_Traverse, DirectionBeforeMaxDepthParses) {
+    // Companion to DirectionAfterMaxDepth: the documented order parses and
+    // both options land on the statement.
     auto stmt = parse_one("TRAVERSE follows FROM users(1) DIRECTION IN MAX_DEPTH 3");
     auto* t = dynamic_cast<TraverseStmt*>(stmt.get());
     ASSERT_NE(t, nullptr);
