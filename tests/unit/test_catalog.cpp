@@ -1224,3 +1224,82 @@ TEST(Catalog, SysDatabasesSchemaDefinition) {
     EXPECT_FALSE(schema.columns[1].nullable);
     EXPECT_EQ(schema.pk_columns, "database_id");
 }
+
+// -- GDB-752: Duplicate column name rejection in create_table -----------------
+
+TEST(Catalog, CreateTableRejectsDuplicateColumnExactCase) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+
+    TableSchema schema;
+    schema.name = "dup_exact";
+    schema.columns = {
+        {0, "id", TypeId::INT32, false, ""},
+        {1, "name", TypeId::STRING, true, ""},
+        {2, "id", TypeId::INT64, true, ""}, // duplicate of columns[0]
+    };
+
+    auto result = catalog.create_table(default_database_id, schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::ALREADY_EXISTS);
+    EXPECT_NE(result.error().message.find("id"), std::string::npos);
+}
+
+TEST(Catalog, CreateTableRejectsDuplicateColumnDifferingCase) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+
+    TableSchema schema;
+    schema.name = "dup_case";
+    schema.columns = {
+        {0, "a", TypeId::INT32, false, ""},
+        {1, "A", TypeId::STRING, true, ""}, // case-insensitive duplicate
+    };
+
+    auto result = catalog.create_table(default_database_id, schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::ALREADY_EXISTS);
+}
+
+TEST(Catalog, CreateTableAcceptsNonDuplicateColumns) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+
+    TableSchema schema;
+    schema.name = "no_dup";
+    schema.columns = {
+        {0, "id", TypeId::INT32, false, ""},
+        {1, "name", TypeId::STRING, true, ""},
+        {2, "active", TypeId::BOOL, true, ""},
+    };
+
+    auto result = catalog.create_table(default_database_id, schema);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+}
+
+TEST(Catalog, CreateTableDuplicateColumnDoesNotLeavePartialState) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+
+    TableSchema bad_schema;
+    bad_schema.name = "t";
+    bad_schema.columns = {
+        {0, "x", TypeId::INT32, false, ""},
+        {1, "x", TypeId::INT64, true, ""},
+    };
+
+    // Failed create should leave no trace.
+    auto bad = catalog.create_table(default_database_id, bad_schema);
+    ASSERT_FALSE(bad.has_value());
+
+    // A valid create with the same table name should succeed.
+    TableSchema good_schema;
+    good_schema.name = "t";
+    good_schema.columns = {
+        {0, "x", TypeId::INT32, false, ""},
+        {1, "y", TypeId::INT64, true, ""},
+    };
+
+    auto good = catalog.create_table(default_database_id, good_schema);
+    ASSERT_TRUE(good.has_value()) << good.error().message;
+}
