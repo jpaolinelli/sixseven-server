@@ -19,6 +19,8 @@
 #include <string>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -51,6 +53,7 @@ protected:
         std::filesystem::create_directories(data_dir_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
+        bootstrap_qa_catalog(catalog_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
     }
 
@@ -467,16 +470,9 @@ TEST_F(QA_GDB250, StringDefaultWithSingleQuote) {
             "  label TEXT DEFAULT 'it''s a test'"
             ")");
 
-    auto result = engine_->execute("INSERT INTO quoted (id) VALUES (1)");
-    if (!result.has_value()) {
-        // This is the expected bug: expr_to_sql doesn't escape single quotes.
-        // The re-parsing of the default expression will fail.
-        // Record this as a finding but don't assert failure — it IS a bug.
-        GTEST_LOG_(INFO) << "BUG: string default with single quote fails: "
-                         << result.error().message;
-        return;
-    }
-
+    // GDB-758 fixed: expr_to_sql now escapes single quotes so the round-trip
+    // through catalog storage and re-parsing succeeds.
+    exec_ok("INSERT INTO quoted (id) VALUES (1)");
     auto qr = exec_ok("SELECT id, label FROM quoted");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][1].as_string(), "it's a test");

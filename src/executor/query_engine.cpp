@@ -1015,8 +1015,19 @@ Result<QueryResult> QueryEngine::execute_drop_database(const DropDatabaseStmt& s
 static std::string expr_to_sql(const Expr& expr) {
     if (auto* lit = dynamic_cast<const LiteralExpr*>(&expr)) {
         switch (lit->kind) {
-        case LiteralKind::STRING:
-            return "'" + lit->value + "'";
+        case LiteralKind::STRING: {
+            // Escape embedded single quotes by doubling them so the output
+            // can be re-lexed as a valid SQL string literal.
+            std::string escaped;
+            escaped.reserve(lit->value.size());
+            for (char c : lit->value) {
+                if (c == '\'')
+                    escaped += "''";
+                else
+                    escaped += c;
+            }
+            return "'" + escaped + "'";
+        }
         case LiteralKind::NULL_LITERAL:
             return "NULL";
         default:
