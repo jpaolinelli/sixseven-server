@@ -20,6 +20,12 @@ bool is_visible(const MvccTupleHeader& header,
         return true;
     }
 
+    // Rule 0b (GDB-777): a transaction never sees rows it deleted itself,
+    // even when the row was created by another (committed/frozen) transaction.
+    if (viewer_txn_id != invalid_txn_id && header.xmax == viewer_txn_id) {
+        return false;
+    }
+
     // Frozen stamps (GDB-714): committed infinitely in the past / future-proof
     // deletes. They must not be compared numerically against the snapshot
     // window (the sentinel is the maximum txn id).

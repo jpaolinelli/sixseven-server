@@ -3,6 +3,8 @@
 #include "sixseven/common/logging.h"
 #include "sixseven/storage/wal.h"
 #include "sixseven/table/table_wal.h"
+#include "sixseven/txn/mvcc.h"
+#include "sixseven/txn/read_view.h"
 #include "sixseven/txn/txn_manager.h"
 
 #include <cstring>
@@ -43,6 +45,35 @@ bool tuple_visible(const MvccTupleHeader& header, const TransactionManager* mgr)
         return false;
     }
     return true;
+}
+
+/// Map transaction ids unknown to the manager to frozen_txn_id so that
+/// snapshot-based is_visible() treats them as always-committed — the same
+/// restart-durability semantics effective_status() gives the status-based
+/// path (TransactionManager::get_status treats unknown ids as ABORTED, which
+/// would make rows persisted by a previous process vanish).
+txn_id_t normalize_xid(const TransactionManager& mgr, txn_id_t xid) {
+    if (xid == invalid_txn_id || xid == frozen_txn_id) {
+        return xid;
+    }
+    return mgr.get_transaction(xid) != nullptr ? xid : frozen_txn_id;
+}
+
+/// Tuple version visibility (GDB-777): when the executor has installed a
+/// per-statement MVCC read view, filter through the snapshot-based
+/// is_visible() in src/txn/mvcc.cpp (single source of truth). Otherwise fall
+/// back to the status-based GDB-747 check — recovery, vacuum, and direct heap
+/// usage without a read view behave exactly as before.
+bool version_visible(const MvccTupleHeader& header, const TransactionManager* mgr) {
+    if (mgr != nullptr) {
+        if (const MvccReadView* view = current_mvcc_read_view()) {
+            MvccTupleHeader h = header;
+            h.xmin = normalize_xid(*mgr, h.xmin);
+            h.xmax = normalize_xid(*mgr, h.xmax);
+            return is_visible(h, view->snapshot, *mgr, view->viewer_txn_id);
+        }
+    }
+    return tuple_visible(header, mgr);
 }
 
 } // namespace
@@ -372,7 +403,7 @@ Result<std::vector<uint8_t>> TableHeap::get_tuple(RID rid) {
         // transaction, or logically deleted (xmax stamped, deleter not
         // known-aborted), reads as NOT_FOUND — the same observable result a
         // physical delete produced before logical deletes existed.
-        if (!tuple_visible(read_mvcc_header(*tuple), txn_mgr_)) {
+        if (!version_visible(read_mvcc_header(*tuple), txn_mgr_)) {
             return make_error(StatusCode::NOT_FOUND,
                               "tuple version not visible (page " + std::to_string(rid.page_id) +
                                   ", slot " + std::to_string(rid.slot_id) + ")");
@@ -877,7 +908,7 @@ std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
                 // known-aborted transaction or logically deleted by a
                 // transaction that is not known-aborted.
                 if (strip_mvcc_headers_ && tuple->size() >= mvcc_header_size &&
-                    !tuple_visible(read_mvcc_header(*tuple), txn_mgr_)) {
+                    !version_visible(read_mvcc_header(*tuple), txn_mgr_)) {
                     current_slot_++;
                     continue;
                 }

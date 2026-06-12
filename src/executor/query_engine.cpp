@@ -29,6 +29,7 @@
 #include "sixseven/server/wal_sender_manager.h"
 #include "sixseven/storage/wal.h"
 #include "sixseven/table/tuple.h"
+#include "sixseven/txn/read_view.h"
 #include "sixseven/vector/backfill_manager.h"
 #include "sixseven/vector/embedding_column.h"
 #include "sixseven/vector/embedding_worker.h"
@@ -2592,6 +2593,18 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
             }
         }
     };
+
+    // Snapshot read view (GDB-777): every statement reads under a snapshot.
+    // Inside a transaction the viewer is that transaction (it sees its own
+    // uncommitted changes via is_visible's self-visibility rule); autocommit
+    // SELECTs read under a fresh snapshot with no viewer, so uncommitted
+    // changes from in-flight transactions are invisible. TableHeap reads and
+    // the scan operators consult this thread-local view.
+    const txn_id_t viewer_txn_id = stmt_txn_id != invalid_txn_id ? stmt_txn_id : active_txn_id_;
+    MvccReadViewGuard read_view_guard(MvccReadView{
+        viewer_txn_id != invalid_txn_id ? txn_mgr_.get_statement_snapshot(viewer_txn_id)
+                                        : txn_mgr_.take_snapshot(),
+        viewer_txn_id});
 
     // Open.
     auto open_result = (*iter)->open();
