@@ -103,6 +103,9 @@ public:
     /// Whether this heap stores MVCC tuple headers.
     [[nodiscard]] bool mvcc_headers() const { return options_.mvcc_headers; }
 
+    /// Whether a transaction manager is attached (visibility filtering active).
+    [[nodiscard]] bool has_txn_manager() const { return txn_mgr_ != nullptr; }
+
     /// Insert a tuple into the heap. Finds the first page with sufficient
     /// free space, or allocates a new page if none has room.
     /// @param data Tuple bytes (must be non-empty and fit in a single page).

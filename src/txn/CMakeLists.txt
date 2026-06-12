@@ -3,6 +3,7 @@
 add_library(sixseven_txn STATIC
     txn_manager.cpp
     mvcc.cpp
+    read_view.cpp
     vacuum.cpp
     lock_manager.cpp
     deadlock_detector.cpp

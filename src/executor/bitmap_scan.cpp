@@ -60,6 +60,11 @@ Result<std::optional<Tuple>> BitmapScanOperator::do_next() {
 
         auto data = heap_.get_tuple(rid);
         if (!data) {
+            // NOT_FOUND means the version at this RID is not visible to the
+            // current snapshot (GDB-777) — skip it like SeqScan does.
+            if (data.error().code == StatusCode::NOT_FOUND) {
+                continue;
+            }
             return make_error(data.error().code, data.error().message);
         }
 
