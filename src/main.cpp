@@ -1,4 +1,4 @@
-﻿#include "sixseven/catalog/catalog.h"
+#include "sixseven/catalog/catalog.h"
 #include "sixseven/common/config.h"
 #include "sixseven/common/crash_handler.h"
 #include "sixseven/common/logging.h"

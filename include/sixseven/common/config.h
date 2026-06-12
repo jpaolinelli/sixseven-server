@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "sixseven/common/result.h"
 

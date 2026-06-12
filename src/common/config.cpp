@@ -1,4 +1,4 @@
-﻿#include "sixseven/common/config.h"
+#include "sixseven/common/config.h"
 
 #include <nlohmann/json.hpp>
 
