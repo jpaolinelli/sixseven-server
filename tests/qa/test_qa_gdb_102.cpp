@@ -1,14 +1,42 @@
 /// QA adversarial tests for GDB-102: AST node types for all statement categories.
 /// Tests visitor dispatch, default values, deep nesting, and edge cases.
+/// GDB-756: vacuous assign-then-assert tests converted to parser round-trips.
 
 #include "sixseven/parser/ast.h"
+#include "sixseven/parser/lexer.h"
+#include "sixseven/parser/parser.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace sixseven;
+
+// =============================================================================
+// Parser round-trip helpers (GDB-756)
+// =============================================================================
+
+static StmtPtr parse_one_102(std::string_view sql) {
+    Lexer lexer(sql);
+    auto tokens = lexer.tokenize();
+    if (!tokens) {
+        ADD_FAILURE() << "Lex error: " << tokens.error().message;
+        return nullptr;
+    }
+    Parser parser(std::move(*tokens));
+    auto stmts = parser.parse_all();
+    if (!stmts) {
+        ADD_FAILURE() << "Parse error: " << stmts.error().message;
+        return nullptr;
+    }
+    if (stmts->size() != 1u) {
+        ADD_FAILURE() << "Expected 1 statement, got " << stmts->size();
+        return nullptr;
+    }
+    return std::move((*stmts)[0]);
+}
 
 // =============================================================================
 // Helper factories
@@ -955,119 +983,58 @@ TEST(QA_GDB102, DeeplyNestedBinaryExprTree) {
 }
 
 TEST(QA_GDB102, SelectWithAllClauses) {
-    // Build a maximal SELECT: WITH cte AS (...) SELECT DISTINCT items
-    //   FROM t1 JOIN t2 ON ... WHERE ... GROUP BY ... HAVING ...
-    //   ORDER BY ... LIMIT 10 OFFSET 5 UNION ALL (SELECT ...)
-    auto stmt = std::make_unique<SelectStmt>();
-    stmt->distinct = true;
+    // Round-trip: WITH base AS (SELECT 1) SELECT DISTINCT a AS col_a FROM t1 x
+    //   LEFT JOIN t2 ON x.id = t2.fk WHERE 1 GROUP BY a HAVING 1
+    //   ORDER BY a DESC LIMIT 10 OFFSET 5 UNION ALL SELECT 1
+    auto stmt_ptr = parse_one_102("WITH base AS (SELECT 1) "
+                                  "SELECT DISTINCT a AS col_a FROM t1 x "
+                                  "LEFT JOIN t2 ON x.id = t2.fk WHERE 1 GROUP BY a HAVING 1 "
+                                  "ORDER BY a DESC LIMIT 10 OFFSET 5 UNION ALL SELECT 1");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* sel = dynamic_cast<SelectStmt*>(stmt_ptr.get());
+    ASSERT_NE(sel, nullptr);
 
-    // CTE
-    SelectStmt::CTE cte;
-    cte.name = "base";
-    cte.query = std::make_unique<SelectStmt>();
-    stmt->ctes.push_back(std::move(cte));
-
-    // Items
-    SelectItem si;
-    si.expr = make_col("a");
-    si.alias = "col_a";
-    stmt->items.push_back(std::move(si));
-
-    // FROM
-    TableRef tr;
-    tr.name = "t1";
-    tr.alias = "x";
-    stmt->from.push_back(std::move(tr));
-
-    // JOIN
-    JoinClause jc;
-    jc.type = JoinType::LEFT;
-    jc.table.name = "t2";
-    auto on_expr = std::make_unique<BinaryExpr>();
-    on_expr->op = BinaryOp::EQUAL;
-    on_expr->lhs = make_col("id", "x");
-    on_expr->rhs = make_col("fk", "t2");
-    jc.on_expr = std::move(on_expr);
-    stmt->joins.push_back(std::move(jc));
-
-    // WHERE
-    stmt->where_expr = make_int("1"); // WHERE 1 (always true)
-
-    // GROUP BY
-    stmt->group_by.push_back(make_col("a"));
-
-    // HAVING
-    stmt->having_expr = make_int("1");
-
-    // ORDER BY
-    OrderByItem obi;
-    obi.expr = make_col("a");
-    obi.direction = SortDirection::DESC;
-    stmt->order_by.push_back(std::move(obi));
-
-    // LIMIT / OFFSET
-    stmt->limit = make_int("10");
-    stmt->offset = make_int("5");
-
-    // UNION ALL
-    stmt->set_op = SelectStmt::SetOp::UNION_ALL;
-    stmt->set_rhs = std::make_unique<SelectStmt>();
-
-    // Verify everything through visitor
-    CountingVisitor v;
-    stmt->accept(v);
-    EXPECT_EQ(v.last_type, "SelectStmt");
-
-    // Verify fields
-    EXPECT_TRUE(stmt->distinct);
-    EXPECT_EQ(stmt->ctes.size(), 1u);
-    EXPECT_EQ(stmt->ctes[0].name, "base");
-    EXPECT_EQ(stmt->items.size(), 1u);
-    EXPECT_EQ(stmt->items[0].alias, "col_a");
-    EXPECT_EQ(stmt->from.size(), 1u);
-    EXPECT_EQ(stmt->from[0].alias, "x");
-    EXPECT_EQ(stmt->joins.size(), 1u);
-    EXPECT_EQ(stmt->joins[0].type, JoinType::LEFT);
-    EXPECT_NE(stmt->where_expr, nullptr);
-    EXPECT_EQ(stmt->group_by.size(), 1u);
-    EXPECT_NE(stmt->having_expr, nullptr);
-    EXPECT_EQ(stmt->order_by.size(), 1u);
-    EXPECT_EQ(stmt->order_by[0].direction, SortDirection::DESC);
-    EXPECT_NE(stmt->limit, nullptr);
-    EXPECT_NE(stmt->offset, nullptr);
-    EXPECT_EQ(stmt->set_op, SelectStmt::SetOp::UNION_ALL);
-    EXPECT_NE(stmt->set_rhs, nullptr);
+    EXPECT_TRUE(sel->distinct);
+    ASSERT_EQ(sel->ctes.size(), 1u);
+    EXPECT_EQ(sel->ctes[0].name, "base");
+    ASSERT_EQ(sel->items.size(), 1u);
+    EXPECT_EQ(sel->items[0].alias, "col_a");
+    ASSERT_EQ(sel->from.size(), 1u);
+    EXPECT_EQ(sel->from[0].alias, "x");
+    ASSERT_EQ(sel->joins.size(), 1u);
+    EXPECT_EQ(sel->joins[0].type, JoinType::LEFT);
+    EXPECT_NE(sel->where_expr, nullptr);
+    EXPECT_EQ(sel->group_by.size(), 1u);
+    EXPECT_NE(sel->having_expr, nullptr);
+    ASSERT_EQ(sel->order_by.size(), 1u);
+    EXPECT_EQ(sel->order_by[0].direction, SortDirection::DESC);
+    EXPECT_NE(sel->limit, nullptr);
+    EXPECT_NE(sel->offset, nullptr);
+    EXPECT_EQ(sel->set_op, SelectStmt::SetOp::UNION_ALL);
+    EXPECT_NE(sel->set_rhs, nullptr);
 }
 
 TEST(QA_GDB102, MultipleCTEs) {
-    auto stmt = std::make_unique<SelectStmt>();
-
+    // Round-trip: WITH cte_0 AS (..), cte_1 AS (..), ... SELECT * FROM cte_0
+    auto stmt_ptr =
+        parse_one_102("WITH cte_0 AS (SELECT 1), cte_1 AS (SELECT 2), cte_2 AS (SELECT 3), "
+                      "cte_3 AS (SELECT 4), cte_4 AS (SELECT 5) SELECT * FROM cte_0");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* sel = dynamic_cast<SelectStmt*>(stmt_ptr.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->ctes.size(), 5u);
     for (int i = 0; i < 5; ++i) {
-        SelectStmt::CTE cte;
-        cte.name = "cte_" + std::to_string(i);
-        cte.query = std::make_unique<SelectStmt>();
-        stmt->ctes.push_back(std::move(cte));
-    }
-
-    EXPECT_EQ(stmt->ctes.size(), 5u);
-    for (int i = 0; i < 5; ++i) {
-        EXPECT_EQ(stmt->ctes[i].name, "cte_" + std::to_string(i));
-        EXPECT_NE(stmt->ctes[i].query, nullptr);
+        EXPECT_EQ(sel->ctes[static_cast<size_t>(i)].name, "cte_" + std::to_string(i));
+        EXPECT_NE(sel->ctes[static_cast<size_t>(i)].query, nullptr);
     }
 }
 
 TEST(QA_GDB102, ChainedSetOperations) {
-    // SELECT ... UNION SELECT ... EXCEPT SELECT ...
-    auto s1 = std::make_unique<SelectStmt>();
-    auto s2 = std::make_unique<SelectStmt>();
-    auto s3 = std::make_unique<SelectStmt>();
-
-    s2->set_op = SelectStmt::SetOp::EXCEPT;
-    s2->set_rhs = std::move(s3);
-
-    s1->set_op = SelectStmt::SetOp::UNION;
-    s1->set_rhs = std::move(s2);
-
+    // Round-trip: SELECT 1 UNION SELECT 2 EXCEPT SELECT 3
+    auto stmt_ptr = parse_one_102("SELECT 1 UNION SELECT 2 EXCEPT SELECT 3");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* s1 = dynamic_cast<SelectStmt*>(stmt_ptr.get());
+    ASSERT_NE(s1, nullptr);
     EXPECT_EQ(s1->set_op, SelectStmt::SetOp::UNION);
     auto* rhs = dynamic_cast<SelectStmt*>(s1->set_rhs.get());
     ASSERT_NE(rhs, nullptr);
@@ -1076,359 +1043,273 @@ TEST(QA_GDB102, ChainedSetOperations) {
 }
 
 TEST(QA_GDB102, CreateTableAllConstraintTypes) {
-    auto stmt = std::make_unique<CreateTableStmt>();
-    stmt->name = "full_table";
-    stmt->if_not_exists = true;
-
-    // Columns with all constraint variants
-    AstColumnDef col1;
-    col1.name = "id";
-    col1.type.name = "INT";
-    col1.nullable = false;
-    col1.is_unique = true;
-    stmt->columns.push_back(std::move(col1));
-
-    AstColumnDef col2;
-    col2.name = "data";
-    col2.type.name = "VARCHAR";
-    col2.type.param1 = 255;
-    col2.default_expr = make_str("default");
-    col2.check_expr = make_int("1"); // dummy check
-    stmt->columns.push_back(std::move(col2));
-
-    AstColumnDef col3;
-    col3.name = "ref_id";
-    col3.type.name = "INT";
-    col3.fk_table = "other";
-    col3.fk_column = "id";
-    col3.fk_on_delete = ReferentialAction::CASCADE;
-    stmt->columns.push_back(std::move(col3));
-
-    // Table-level constraints
-    TableConstraint pk;
-    pk.kind = TableConstraint::Kind::PRIMARY_KEY;
-    pk.columns = {"id"};
-    stmt->constraints.push_back(std::move(pk));
-
-    TableConstraint uq;
-    uq.kind = TableConstraint::Kind::UNIQUE;
-    uq.name = "uq_data";
-    uq.columns = {"data"};
-    stmt->constraints.push_back(std::move(uq));
-
-    TableConstraint chk;
-    chk.kind = TableConstraint::Kind::CHECK;
-    chk.name = "chk_data";
-    chk.check_expr = make_int("1");
-    stmt->constraints.push_back(std::move(chk));
-
-    TableConstraint fk;
-    fk.kind = TableConstraint::Kind::FOREIGN_KEY;
-    fk.name = "fk_ref";
-    fk.columns = {"ref_id"};
-    fk.fk_table = "other";
-    fk.fk_columns = {"id"};
-    fk.on_delete = ReferentialAction::CASCADE;
-    stmt->constraints.push_back(std::move(fk));
-
-    EXPECT_EQ(stmt->columns.size(), 3u);
-    EXPECT_EQ(stmt->constraints.size(), 4u);
-    EXPECT_EQ(stmt->constraints[3].fk_columns.size(), 1u);
-    EXPECT_EQ(stmt->constraints[3].fk_columns[0], "id");
+    // Round-trip: CREATE TABLE IF NOT EXISTS with inline column constraints and
+    // table-level PRIMARY KEY, UNIQUE, CHECK, FOREIGN KEY constraints.
+    auto stmt_ptr = parse_one_102(
+        "CREATE TABLE IF NOT EXISTS full_table ("
+        "  id INT NOT NULL UNIQUE, "
+        "  data VARCHAR(255) DEFAULT 'default' CHECK (1), "
+        "  ref_id INT REFERENCES other(id) ON DELETE CASCADE, "
+        "  PRIMARY KEY (id), "
+        "  CONSTRAINT uq_data UNIQUE (data), "
+        "  CONSTRAINT chk_data CHECK (1), "
+        "  CONSTRAINT fk_ref FOREIGN KEY (ref_id) REFERENCES other(id) ON DELETE CASCADE"
+        ")");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* ct = dynamic_cast<CreateTableStmt*>(stmt_ptr.get());
+    ASSERT_NE(ct, nullptr);
+    EXPECT_TRUE(ct->if_not_exists);
+    EXPECT_EQ(ct->name, "full_table");
+    EXPECT_EQ(ct->columns.size(), 3u);
+    EXPECT_EQ(ct->constraints.size(), 4u);
+    // Find the FOREIGN KEY constraint and verify fk_columns
+    bool found_fk = false;
+    for (const auto& c : ct->constraints) {
+        if (c.kind == TableConstraint::Kind::FOREIGN_KEY) {
+            EXPECT_EQ(c.fk_columns.size(), 1u);
+            EXPECT_EQ(c.fk_columns[0], "id");
+            EXPECT_EQ(c.on_delete, ReferentialAction::CASCADE);
+            found_fk = true;
+        }
+    }
+    EXPECT_TRUE(found_fk);
 }
 
 TEST(QA_GDB102, InsertWithSelectSubquery) {
-    // INSERT INTO t (col) SELECT id FROM other
-    auto stmt = std::make_unique<InsertStmt>();
-    stmt->table_name = "target";
-    stmt->columns = {"col"};
-
-    auto sel = std::make_unique<SelectStmt>();
-    SelectItem si;
-    si.expr = make_col("id");
-    sel->items.push_back(std::move(si));
-    TableRef tr;
-    tr.name = "source";
-    sel->from.push_back(std::move(tr));
-
-    stmt->select = std::move(sel);
-
-    EXPECT_TRUE(stmt->values.empty());
-    EXPECT_NE(stmt->select, nullptr);
+    // Round-trip: INSERT INTO target (col) SELECT id FROM source
+    auto stmt_ptr = parse_one_102("INSERT INTO target (col) SELECT id FROM source");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* ins = dynamic_cast<InsertStmt*>(stmt_ptr.get());
+    ASSERT_NE(ins, nullptr);
+    EXPECT_EQ(ins->table_name, "target");
+    ASSERT_EQ(ins->columns.size(), 1u);
+    EXPECT_EQ(ins->columns[0], "col");
+    EXPECT_TRUE(ins->values.empty());
+    ASSERT_NE(ins->select, nullptr);
+    auto* sel = dynamic_cast<SelectStmt*>(ins->select.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->from.size(), 1u);
+    EXPECT_EQ(sel->from[0].name, "source");
 }
 
 TEST(QA_GDB102, UpdateWithMultipleAssignmentsAndReturning) {
-    auto stmt = std::make_unique<UpdateStmt>();
-    stmt->table_name = "t";
-
-    for (int i = 0; i < 5; ++i) {
-        Assignment a;
-        a.column = "col_" + std::to_string(i);
-        a.value = make_int(std::to_string(i));
-        stmt->assignments.push_back(std::move(a));
-    }
-
-    stmt->where_expr = make_int("1");
-
-    SelectItem ret;
-    ret.is_star = true;
-    stmt->returning.push_back(std::move(ret));
-
-    EXPECT_EQ(stmt->assignments.size(), 5u);
-    EXPECT_EQ(stmt->returning.size(), 1u);
+    // Round-trip: UPDATE t SET col_0=0, col_1=1, col_2=2, col_3=3, col_4=4
+    //   WHERE 1 RETURNING *
+    auto stmt_ptr =
+        parse_one_102("UPDATE t SET col_0 = 0, col_1 = 1, col_2 = 2, col_3 = 3, col_4 = 4 "
+                      "WHERE 1 RETURNING *");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* upd = dynamic_cast<UpdateStmt*>(stmt_ptr.get());
+    ASSERT_NE(upd, nullptr);
+    EXPECT_EQ(upd->table_name, "t");
+    EXPECT_EQ(upd->assignments.size(), 5u);
+    EXPECT_NE(upd->where_expr, nullptr);
+    ASSERT_EQ(upd->returning.size(), 1u);
+    EXPECT_TRUE(upd->returning[0].is_star);
 }
 
 TEST(QA_GDB102, CaseExprMultipleWhens) {
-    auto c = std::make_unique<CaseExpr>();
-    c->operand = make_col("status");
-
-    for (int i = 0; i < 10; ++i) {
-        CaseWhen w;
-        w.condition = make_int(std::to_string(i));
-        w.result = make_str("label_" + std::to_string(i));
-        c->whens.push_back(std::move(w));
-    }
-    c->else_expr = make_str("unknown");
-
+    // Round-trip: CASE status WHEN 0 THEN 'label_0' ... WHEN 9 THEN 'label_9' ELSE 'unknown' END
+    auto stmt_ptr =
+        parse_one_102("SELECT CASE status "
+                      "WHEN 0 THEN 'label_0' WHEN 1 THEN 'label_1' WHEN 2 THEN 'label_2' "
+                      "WHEN 3 THEN 'label_3' WHEN 4 THEN 'label_4' WHEN 5 THEN 'label_5' "
+                      "WHEN 6 THEN 'label_6' WHEN 7 THEN 'label_7' WHEN 8 THEN 'label_8' "
+                      "WHEN 9 THEN 'label_9' ELSE 'unknown' END FROM t");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* sel = dynamic_cast<SelectStmt*>(stmt_ptr.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->items.size(), 1u);
+    auto* c = dynamic_cast<CaseExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(c, nullptr);
+    EXPECT_NE(c->operand, nullptr);
     EXPECT_EQ(c->whens.size(), 10u);
     EXPECT_NE(c->else_expr, nullptr);
-    EXPECT_NE(c->operand, nullptr);
 }
 
 TEST(QA_GDB102, MatchStmtComplexPattern) {
-    auto stmt = std::make_unique<MatchStmt>();
-
-    // (a:User)-[r1:FOLLOWS]->(b:User)-[r2:LIKES]->(c:Post)
-    PathElement pe1;
-    pe1.node.variable = "a";
-    pe1.node.label = "User";
-    pe1.outgoing_edge = EdgePatternDef{"r1", "FOLLOWS", TraverseDirection::OUT};
-    stmt->pattern.push_back(std::move(pe1));
-
-    PathElement pe2;
-    pe2.node.variable = "b";
-    pe2.node.label = "User";
-    pe2.outgoing_edge = EdgePatternDef{"r2", "LIKES", TraverseDirection::OUT};
-    stmt->pattern.push_back(std::move(pe2));
-
-    PathElement pe3;
-    pe3.node.variable = "c";
-    pe3.node.label = "Post";
-    // No outgoing edge on last node
-    stmt->pattern.push_back(std::move(pe3));
-
-    // WHERE a.age > 18
-    auto where = std::make_unique<BinaryExpr>();
-    where->op = BinaryOp::GREATER;
-    where->lhs = make_col("age", "a");
-    where->rhs = make_int("18");
-    stmt->where_expr = std::move(where);
-
-    // RETURN a.name, c.title
-    SelectItem r1;
-    r1.expr = make_col("name", "a");
-    stmt->return_items.push_back(std::move(r1));
-    SelectItem r2;
-    r2.expr = make_col("title", "c");
-    stmt->return_items.push_back(std::move(r2));
-
-    EXPECT_EQ(stmt->pattern.size(), 3u);
-    EXPECT_TRUE(stmt->pattern[0].outgoing_edge.has_value());
-    EXPECT_EQ(stmt->pattern[0].outgoing_edge->edge_type, "FOLLOWS");
-    EXPECT_TRUE(stmt->pattern[1].outgoing_edge.has_value());
-    EXPECT_EQ(stmt->pattern[1].outgoing_edge->edge_type, "LIKES");
-    EXPECT_FALSE(stmt->pattern[2].outgoing_edge.has_value());
-    EXPECT_NE(stmt->where_expr, nullptr);
-    EXPECT_EQ(stmt->return_items.size(), 2u);
+    // Round-trip: (a:User)-[r1:FOLLOWS]->(b:User)-[r2:LIKES]->(c:Post)
+    //   WHERE a.age > 18 RETURN a.name, c.title
+    auto stmt_ptr = parse_one_102("MATCH (a:User)-[r1:FOLLOWS]->(b:User)-[r2:LIKES]->(c:Post) "
+                                  "WHERE a.age > 18 RETURN a.name, c.title");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* m = dynamic_cast<MatchStmt*>(stmt_ptr.get());
+    ASSERT_NE(m, nullptr);
+    ASSERT_EQ(m->pattern.size(), 3u);
+    ASSERT_TRUE(m->pattern[0].outgoing_edge.has_value());
+    EXPECT_EQ(m->pattern[0].outgoing_edge->edge_type, "FOLLOWS");
+    ASSERT_TRUE(m->pattern[1].outgoing_edge.has_value());
+    EXPECT_EQ(m->pattern[1].outgoing_edge->edge_type, "LIKES");
+    EXPECT_FALSE(m->pattern[2].outgoing_edge.has_value());
+    EXPECT_NE(m->where_expr, nullptr);
+    EXPECT_EQ(m->return_items.size(), 2u);
 }
 
 TEST(QA_GDB102, NearestWithinTraverse) {
-    // NEAREST(embedding, 5) TO [1,2,3] WITHIN TRAVERSE ...
-    auto expr = std::make_unique<NearestExpr>();
-    expr->k = make_int("5");
-    expr->column = make_col("embedding", "products");
-    expr->metric = NearestMetric::L2;
-
-    auto arr = std::make_unique<ArrayExpr>();
-    arr->elements.push_back(make_int("1"));
-    arr->elements.push_back(make_int("2"));
-    arr->elements.push_back(make_int("3"));
-    expr->target = std::move(arr);
-
-    auto traverse = std::make_unique<TraverseStmt>();
-    traverse->edge_type = "belongs_to";
-    traverse->from_table = "categories";
-    traverse->from_key = make_int("42");
-    traverse->direction = TraverseDirection::IN;
-    traverse->max_depth = 2;
-    expr->within_traverse = std::move(traverse);
-
-    EXPECT_EQ(expr->metric, NearestMetric::L2);
-    EXPECT_NE(expr->within_traverse, nullptr);
-
-    // The inner traverse should be correctly accessible
-    auto* inner = dynamic_cast<TraverseStmt*>(expr->within_traverse.get());
+    // Round-trip: NEAREST ... WITHIN TRAVERSE ... USING L2
+    // Parser order: TO target [WITHIN TRAVERSE ...] [USING metric]
+    auto stmt_ptr =
+        parse_one_102("SELECT * FROM products "
+                      "WHERE NEAREST(embedding, 5) TO [1, 2, 3] "
+                      "WITHIN TRAVERSE belongs_to FROM categories(42) DIRECTION IN MAX_DEPTH 2 "
+                      "USING L2");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* sel = dynamic_cast<SelectStmt*>(stmt_ptr.get());
+    ASSERT_NE(sel, nullptr);
+    // Locate the NearestExpr in the WHERE predicate
+    auto* n = dynamic_cast<NearestExpr*>(sel->where_expr.get());
+    ASSERT_NE(n, nullptr);
+    EXPECT_EQ(n->metric, NearestMetric::L2);
+    ASSERT_NE(n->within_traverse, nullptr);
+    auto* inner = dynamic_cast<TraverseStmt*>(n->within_traverse.get());
     ASSERT_NE(inner, nullptr);
     EXPECT_EQ(inner->direction, TraverseDirection::IN);
+    ASSERT_TRUE(inner->max_depth.has_value());
     EXPECT_EQ(inner->max_depth.value(), 2);
 }
 
 TEST(QA_GDB102, ExplainAnalyzeJsonFormat) {
-    auto explain = std::make_unique<ExplainStmt>();
-    explain->analyze = true;
-    explain->format = ExplainFormat::JSON;
-
-    auto inner = std::make_unique<SelectStmt>();
-    SelectItem si;
-    si.is_star = true;
-    inner->items.push_back(std::move(si));
-    explain->statement = std::move(inner);
-
+    // Round-trip: EXPLAIN ANALYZE FORMAT JSON SELECT * FROM t
+    auto stmt_ptr = parse_one_102("EXPLAIN ANALYZE FORMAT JSON SELECT * FROM t");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* explain = dynamic_cast<ExplainStmt*>(stmt_ptr.get());
+    ASSERT_NE(explain, nullptr);
     EXPECT_TRUE(explain->analyze);
     EXPECT_EQ(explain->format, ExplainFormat::JSON);
-    EXPECT_NE(explain->statement, nullptr);
+    ASSERT_NE(explain->statement, nullptr);
+    EXPECT_NE(dynamic_cast<SelectStmt*>(explain->statement.get()), nullptr);
 }
 
 TEST(QA_GDB102, MultipleJoinsOnSelect) {
-    auto stmt = std::make_unique<SelectStmt>();
-
-    TableRef tr;
-    tr.name = "a";
-    stmt->from.push_back(std::move(tr));
-
-    // Add 5 joins of different types
-    JoinType types[] = {
-        JoinType::INNER,
-        JoinType::LEFT,
-        JoinType::RIGHT,
-        JoinType::FULL,
-        JoinType::CROSS,
-    };
-
-    for (int i = 0; i < 5; ++i) {
-        JoinClause jc;
-        jc.type = types[i];
-        jc.table.name = "t_" + std::to_string(i);
-        if (types[i] != JoinType::CROSS) {
-            auto on = std::make_unique<BinaryExpr>();
-            on->op = BinaryOp::EQUAL;
-            on->lhs = make_col("id", "a");
-            on->rhs = make_col("fk", "t_" + std::to_string(i));
-            jc.on_expr = std::move(on);
-        }
-        stmt->joins.push_back(std::move(jc));
-    }
-
-    EXPECT_EQ(stmt->joins.size(), 5u);
-    EXPECT_EQ(stmt->joins[0].type, JoinType::INNER);
-    EXPECT_EQ(stmt->joins[4].type, JoinType::CROSS);
-    EXPECT_EQ(stmt->joins[4].on_expr, nullptr); // CROSS JOIN has no ON
+    // Round-trip: SELECT with INNER, LEFT, RIGHT, FULL, CROSS joins
+    auto stmt_ptr = parse_one_102("SELECT * FROM a "
+                                  "INNER JOIN t_0 ON a.id = t_0.fk "
+                                  "LEFT JOIN t_1 ON a.id = t_1.fk "
+                                  "RIGHT JOIN t_2 ON a.id = t_2.fk "
+                                  "FULL JOIN t_3 ON a.id = t_3.fk "
+                                  "CROSS JOIN t_4");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* sel = dynamic_cast<SelectStmt*>(stmt_ptr.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->joins.size(), 5u);
+    EXPECT_EQ(sel->joins[0].type, JoinType::INNER);
+    EXPECT_EQ(sel->joins[1].type, JoinType::LEFT);
+    EXPECT_EQ(sel->joins[2].type, JoinType::RIGHT);
+    EXPECT_EQ(sel->joins[3].type, JoinType::FULL);
+    EXPECT_EQ(sel->joins[4].type, JoinType::CROSS);
+    EXPECT_EQ(sel->joins[4].on_expr, nullptr); // CROSS JOIN has no ON
 }
 
 TEST(QA_GDB102, FromSubquery) {
-    // SELECT * FROM (SELECT id FROM users) AS sub
-    auto stmt = std::make_unique<SelectStmt>();
-    SelectItem si;
-    si.is_star = true;
-    stmt->items.push_back(std::move(si));
-
-    auto sub = std::make_unique<SelectStmt>();
-    SelectItem inner_si;
-    inner_si.expr = make_col("id");
-    sub->items.push_back(std::move(inner_si));
-    TableRef inner_tr;
-    inner_tr.name = "users";
-    sub->from.push_back(std::move(inner_tr));
-
-    TableRef from;
-    from.alias = "sub";
-    from.subquery = std::move(sub);
-    stmt->from.push_back(std::move(from));
-
-    EXPECT_TRUE(stmt->from[0].name.empty());
-    EXPECT_EQ(stmt->from[0].alias, "sub");
-    EXPECT_NE(stmt->from[0].subquery, nullptr);
+    // Round-trip: SELECT * FROM (SELECT id FROM users) AS sub
+    auto stmt_ptr = parse_one_102("SELECT * FROM (SELECT id FROM users) AS sub");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* sel = dynamic_cast<SelectStmt*>(stmt_ptr.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->from.size(), 1u);
+    EXPECT_TRUE(sel->from[0].name.empty());
+    EXPECT_EQ(sel->from[0].alias, "sub");
+    ASSERT_NE(sel->from[0].subquery, nullptr);
+    auto* inner = dynamic_cast<SelectStmt*>(sel->from[0].subquery.get());
+    ASSERT_NE(inner, nullptr);
+    ASSERT_EQ(inner->from.size(), 1u);
+    EXPECT_EQ(inner->from[0].name, "users");
 }
 
 TEST(QA_GDB102, InExprSubqueryVsValues) {
-    // With values
-    auto in1 = std::make_unique<InExpr>();
-    in1->expr = make_col("id");
-    in1->values.push_back(make_int("1"));
-    in1->values.push_back(make_int("2"));
-    EXPECT_FALSE(in1->values.empty());
-    EXPECT_EQ(in1->subquery, nullptr);
-
-    // With subquery
-    auto in2 = std::make_unique<InExpr>();
-    in2->expr = make_col("id");
-    in2->subquery = std::make_unique<SelectStmt>();
-    EXPECT_TRUE(in2->values.empty());
-    EXPECT_NE(in2->subquery, nullptr);
+    // Round-trip values form: SELECT * FROM t WHERE id IN (1, 2)
+    {
+        auto stmt_ptr = parse_one_102("SELECT * FROM t WHERE id IN (1, 2)");
+        ASSERT_NE(stmt_ptr, nullptr);
+        auto* sel = dynamic_cast<SelectStmt*>(stmt_ptr.get());
+        ASSERT_NE(sel, nullptr);
+        auto* in_expr = dynamic_cast<InExpr*>(sel->where_expr.get());
+        ASSERT_NE(in_expr, nullptr);
+        EXPECT_EQ(in_expr->values.size(), 2u);
+        EXPECT_EQ(in_expr->subquery, nullptr);
+    }
+    // Round-trip subquery form: SELECT * FROM t WHERE id IN (SELECT id FROM u)
+    {
+        auto stmt_ptr = parse_one_102("SELECT * FROM t WHERE id IN (SELECT id FROM u)");
+        ASSERT_NE(stmt_ptr, nullptr);
+        auto* sel = dynamic_cast<SelectStmt*>(stmt_ptr.get());
+        ASSERT_NE(sel, nullptr);
+        auto* in_expr = dynamic_cast<InExpr*>(sel->where_expr.get());
+        ASSERT_NE(in_expr, nullptr);
+        EXPECT_TRUE(in_expr->values.empty());
+        EXPECT_NE(in_expr->subquery, nullptr);
+    }
 }
 
 TEST(QA_GDB102, EdgePropertyTypes) {
-    CreateEdgeTypeStmt stmt;
-    stmt.name = "weighted_follows";
-    stmt.from_table = "users";
-    stmt.to_table = "users";
-
-    EdgeProperty p1;
-    p1.name = "weight";
-    p1.type.name = "FLOAT64";
-    stmt.properties.push_back(std::move(p1));
-
-    EdgeProperty p2;
-    p2.name = "created_at";
-    p2.type.name = "TIMESTAMP";
-    stmt.properties.push_back(std::move(p2));
-
-    EdgeProperty p3;
-    p3.name = "metadata";
-    p3.type.name = "JSON";
-    stmt.properties.push_back(std::move(p3));
-
-    EXPECT_EQ(stmt.properties.size(), 3u);
-    EXPECT_EQ(stmt.properties[0].type.name, "FLOAT64");
-    EXPECT_EQ(stmt.properties[1].type.name, "TIMESTAMP");
-    EXPECT_EQ(stmt.properties[2].type.name, "JSON");
+    // Round-trip: CREATE EDGE TYPE name (props...) FROM table TO table
+    // Use parser-recognized type keywords: DOUBLE, TIMESTAMP, JSON
+    auto stmt_ptr = parse_one_102("CREATE EDGE TYPE weighted_follows "
+                                  "(weight DOUBLE, created_at TIMESTAMP, metadata JSON) "
+                                  "FROM users TO users");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* et = dynamic_cast<CreateEdgeTypeStmt*>(stmt_ptr.get());
+    ASSERT_NE(et, nullptr);
+    EXPECT_EQ(et->name, "weighted_follows");
+    EXPECT_EQ(et->from_table, "users");
+    EXPECT_EQ(et->to_table, "users");
+    ASSERT_EQ(et->properties.size(), 3u);
+    EXPECT_EQ(et->properties[0].type.name, "DOUBLE");
+    EXPECT_EQ(et->properties[1].type.name, "TIMESTAMP");
+    EXPECT_EQ(et->properties[2].type.name, "JSON");
 }
 
 TEST(QA_GDB102, TypeSpecEmbeddingFullParams) {
-    TypeSpec ts;
-    ts.name = "EMBEDDING";
-    ts.param1 = 768;
-    ts.source = "description";
-    ts.provider = "openai";
-
+    // Round-trip: CREATE TABLE with EMBEDDING(dim, source_col, 'provider') column
+    // Positional syntax requires source as identifier, provider as string literal
+    auto stmt_ptr =
+        parse_one_102("CREATE TABLE docs (id INT, vec EMBEDDING(768, description, 'openai'))");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* ct = dynamic_cast<CreateTableStmt*>(stmt_ptr.get());
+    ASSERT_NE(ct, nullptr);
+    ASSERT_EQ(ct->columns.size(), 2u);
+    const auto& ts = ct->columns[1].type;
+    EXPECT_EQ(ts.name, "EMBEDDING");
+    ASSERT_TRUE(ts.param1.has_value());
     EXPECT_EQ(ts.param1.value(), 768);
     EXPECT_EQ(ts.source, "description");
     EXPECT_EQ(ts.provider, "openai");
-    EXPECT_FALSE(ts.param2.has_value()); // EMBEDDING doesn't use param2
+    EXPECT_FALSE(ts.param2.has_value());
 }
 
 TEST(QA_GDB102, ShortestPathWithAllFields) {
-    ShortestPathStmt stmt;
-    stmt.from_table = "cities";
-    stmt.from_key = make_int("1");
-    stmt.to_table = "cities";
-    stmt.to_key = make_int("100");
-    stmt.edge_type = "road";
-    stmt.direction = TraverseDirection::BOTH;
-    stmt.max_depth = 10;
-
-    EXPECT_EQ(stmt.from_table, "cities");
-    EXPECT_EQ(stmt.to_table, "cities");
-    EXPECT_EQ(stmt.edge_type, "road");
-    EXPECT_EQ(stmt.direction, TraverseDirection::BOTH);
-    EXPECT_EQ(stmt.max_depth.value(), 10);
+    // Round-trip: SHORTEST PATH FROM cities(1) TO cities(100) VIA road
+    //   DIRECTION BOTH MAX_DEPTH 10
+    auto stmt_ptr = parse_one_102("SHORTEST PATH FROM cities(1) TO cities(100) VIA road "
+                                  "DIRECTION BOTH MAX_DEPTH 10");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* sp = dynamic_cast<ShortestPathStmt*>(stmt_ptr.get());
+    ASSERT_NE(sp, nullptr);
+    EXPECT_EQ(sp->from_table, "cities");
+    EXPECT_EQ(sp->to_table, "cities");
+    EXPECT_EQ(sp->edge_type, "road");
+    EXPECT_EQ(sp->direction, TraverseDirection::BOTH);
+    ASSERT_TRUE(sp->max_depth.has_value());
+    EXPECT_EQ(sp->max_depth.value(), 10);
 }
 
 TEST(QA_GDB102, TraverseAllDirections) {
-    for (auto dir : {TraverseDirection::IN, TraverseDirection::OUT, TraverseDirection::BOTH}) {
-        TraverseStmt stmt;
-        stmt.direction = dir;
-        EXPECT_EQ(stmt.direction, dir);
+    // Round-trip: parse TRAVERSE with each of IN, OUT, BOTH direction keywords
+    struct Case {
+        const char* sql;
+        TraverseDirection expected;
+    };
+    const Case cases[] = {
+        {"TRAVERSE follows FROM users(1) DIRECTION IN", TraverseDirection::IN},
+        {"TRAVERSE follows FROM users(1) DIRECTION OUT", TraverseDirection::OUT},
+        {"TRAVERSE follows FROM users(1) DIRECTION BOTH", TraverseDirection::BOTH},
+    };
+    for (const auto& tc : cases) {
+        auto stmt_ptr = parse_one_102(tc.sql);
+        ASSERT_NE(stmt_ptr, nullptr) << tc.sql;
+        auto* t = dynamic_cast<TraverseStmt*>(stmt_ptr.get());
+        ASSERT_NE(t, nullptr) << tc.sql;
+        EXPECT_EQ(t->direction, tc.expected) << tc.sql;
     }
 }
 
@@ -1462,108 +1343,80 @@ TEST(QA_GDB102, ShowTargetAllVariants) {
     }
 }
 
-// =============================================================================
-// Move semantics for unique_ptr ownership
-// =============================================================================
-
-TEST(QA_GDB102, MoveExprOwnership) {
-    auto lit = std::make_unique<LiteralExpr>();
-    lit->kind = LiteralKind::INTEGER;
-    lit->value = "99";
-
-    ExprPtr base = std::move(lit);
-    EXPECT_EQ(lit, nullptr); // NOLINT: testing moved-from state
-
-    auto* restored = dynamic_cast<LiteralExpr*>(base.get());
-    ASSERT_NE(restored, nullptr);
-    EXPECT_EQ(restored->value, "99");
-}
-
-TEST(QA_GDB102, MoveStmtIntoExplain) {
-    auto sel = std::make_unique<SelectStmt>();
-    SelectItem si;
-    si.is_star = true;
-    sel->items.push_back(std::move(si));
-
-    auto explain = std::make_unique<ExplainStmt>();
-    explain->statement = std::move(sel);
-
-    EXPECT_EQ(sel, nullptr); // NOLINT: testing moved-from state
-    auto* inner = dynamic_cast<SelectStmt*>(explain->statement.get());
-    ASSERT_NE(inner, nullptr);
-    EXPECT_EQ(inner->items.size(), 1u);
-}
-
 TEST(QA_GDB102, AlterTableDropColumn) {
-    AlterTableStmt stmt;
-    stmt.table_name = "users";
-    stmt.action = AlterAction::DROP_COLUMN;
-    stmt.column_name = "old_col";
-
-    EXPECT_EQ(stmt.action, AlterAction::DROP_COLUMN);
-    EXPECT_EQ(stmt.column_name, "old_col");
+    // Round-trip: ALTER TABLE users DROP COLUMN old_col
+    auto stmt_ptr = parse_one_102("ALTER TABLE users DROP COLUMN old_col");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* alt = dynamic_cast<AlterTableStmt*>(stmt_ptr.get());
+    ASSERT_NE(alt, nullptr);
+    EXPECT_EQ(alt->table_name, "users");
+    EXPECT_EQ(alt->action, AlterAction::DROP_COLUMN);
+    EXPECT_EQ(alt->column_name, "old_col");
 }
 
 TEST(QA_GDB102, LinkWithMultipleProperties) {
-    LinkStmt stmt;
-    stmt.source_table = "users";
-    stmt.source_key = make_int("1");
-    stmt.target_table = "posts";
-    stmt.target_key = make_int("42");
-    stmt.edge_type = "authored";
-
-    for (int i = 0; i < 3; ++i) {
-        Assignment a;
-        a.column = "prop_" + std::to_string(i);
-        a.value = make_str("val_" + std::to_string(i));
-        stmt.properties.push_back(std::move(a));
-    }
-
-    EXPECT_EQ(stmt.properties.size(), 3u);
-    EXPECT_EQ(stmt.properties[0].column, "prop_0");
+    // Round-trip: LINK users(1) TO posts(42) VIA authored (prop_0='val_0', ...)
+    auto stmt_ptr = parse_one_102("LINK users(1) TO posts(42) VIA authored "
+                                  "(prop_0 = 'val_0', prop_1 = 'val_1', prop_2 = 'val_2')");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* lnk = dynamic_cast<LinkStmt*>(stmt_ptr.get());
+    ASSERT_NE(lnk, nullptr);
+    EXPECT_EQ(lnk->source_table, "users");
+    EXPECT_EQ(lnk->target_table, "posts");
+    EXPECT_EQ(lnk->edge_type, "authored");
+    ASSERT_EQ(lnk->properties.size(), 3u);
+    EXPECT_EQ(lnk->properties[0].column, "prop_0");
 }
 
 TEST(QA_GDB102, UnlinkWithWhere) {
-    UnlinkStmt stmt;
-    stmt.source_table = "users";
-    stmt.source_key = make_int("1");
-    stmt.target_table = "users";
-    stmt.target_key = make_int("2");
-    stmt.edge_type = "follows";
-    stmt.where_expr = make_int("1");
-
-    EXPECT_NE(stmt.where_expr, nullptr);
+    // Round-trip: UNLINK users(1) FROM users(2) VIA follows WHERE 1
+    auto stmt_ptr = parse_one_102("UNLINK users(1) FROM users(2) VIA follows WHERE 1");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* ul = dynamic_cast<UnlinkStmt*>(stmt_ptr.get());
+    ASSERT_NE(ul, nullptr);
+    EXPECT_EQ(ul->source_table, "users");
+    EXPECT_EQ(ul->target_table, "users");
+    EXPECT_EQ(ul->edge_type, "follows");
+    EXPECT_NE(ul->where_expr, nullptr);
 }
 
 TEST(QA_GDB102, CreateUserAndAlterUser) {
-    CreateUserStmt create;
-    create.username = "admin";
-    create.password = "secret123";
-
-    AlterUserStmt alter;
-    alter.username = "admin";
-    alter.password = "newpass456";
-
-    EXPECT_EQ(create.username, alter.username);
-    EXPECT_NE(create.password, alter.password);
+    // Round-trip: CREATE USER and ALTER USER both set username/password
+    {
+        auto stmt_ptr = parse_one_102("CREATE USER admin WITH PASSWORD 'secret123'");
+        ASSERT_NE(stmt_ptr, nullptr);
+        auto* cu = dynamic_cast<CreateUserStmt*>(stmt_ptr.get());
+        ASSERT_NE(cu, nullptr);
+        EXPECT_EQ(cu->username, "admin");
+        EXPECT_EQ(cu->password, "secret123");
+    }
+    {
+        auto stmt_ptr = parse_one_102("ALTER USER admin WITH PASSWORD 'newpass456'");
+        ASSERT_NE(stmt_ptr, nullptr);
+        auto* au = dynamic_cast<AlterUserStmt*>(stmt_ptr.get());
+        ASSERT_NE(au, nullptr);
+        EXPECT_EQ(au->username, "admin");
+        EXPECT_EQ(au->password, "newpass456");
+        // Passwords are different — the ALTER changed the credential
+        EXPECT_NE(au->password, "secret123");
+    }
 }
 
 TEST(QA_GDB102, InsertMultipleRowsMultipleColumns) {
-    InsertStmt stmt;
-    stmt.table_name = "data";
-    stmt.columns = {"a", "b", "c"};
-
-    for (int row = 0; row < 100; ++row) {
-        std::vector<ExprPtr> vals;
-        for (int col = 0; col < 3; ++col) {
-            vals.push_back(make_int(std::to_string(row * 3 + col)));
-        }
-        stmt.values.push_back(std::move(vals));
-    }
-
-    EXPECT_EQ(stmt.values.size(), 100u);
-    EXPECT_EQ(stmt.values[0].size(), 3u);
-    EXPECT_EQ(stmt.values[99].size(), 3u);
+    // Round-trip: INSERT with multiple rows and multiple columns
+    auto stmt_ptr = parse_one_102("INSERT INTO data (a, b, c) VALUES "
+                                  "(0, 1, 2), (3, 4, 5), (6, 7, 8), (9, 10, 11), (12, 13, 14)");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* ins = dynamic_cast<InsertStmt*>(stmt_ptr.get());
+    ASSERT_NE(ins, nullptr);
+    EXPECT_EQ(ins->table_name, "data");
+    ASSERT_EQ(ins->columns.size(), 3u);
+    EXPECT_EQ(ins->columns[0], "a");
+    EXPECT_EQ(ins->columns[1], "b");
+    EXPECT_EQ(ins->columns[2], "c");
+    EXPECT_EQ(ins->values.size(), 5u);
+    EXPECT_EQ(ins->values[0].size(), 3u);
+    EXPECT_EQ(ins->values[4].size(), 3u);
 }
 
 TEST(QA_GDB102, ArrayExprEmpty) {
@@ -1575,57 +1428,50 @@ TEST(QA_GDB102, ArrayExprEmpty) {
     EXPECT_EQ(v.last_type, "ArrayExpr");
 }
 
-TEST(QA_GDB102, ArrayExprLargeVector) {
-    ArrayExpr arr;
-    for (int i = 0; i < 384; ++i) {
-        arr.elements.push_back(make_int(std::to_string(i)));
-    }
-    EXPECT_EQ(arr.elements.size(), 384u); // typical embedding dimension
-}
+// ArrayExprLargeVector deleted (GDB-756): only tested std::vector::push_back
+// with no parser or semantic content. The ArrayExprEmpty test above covers
+// the visitor dispatch path; NEAREST/EMBEDDING tests exercise real array parsing.
 
 TEST(QA_GDB102, DeleteWithReturningMultipleItems) {
-    DeleteStmt stmt;
-    stmt.table_name = "users";
-    stmt.where_expr = make_int("1");
-
-    SelectItem r1;
-    r1.expr = make_col("id");
-    stmt.returning.push_back(std::move(r1));
-
-    SelectItem r2;
-    r2.expr = make_col("name");
-    r2.alias = "deleted_name";
-    stmt.returning.push_back(std::move(r2));
-
-    EXPECT_EQ(stmt.returning.size(), 2u);
-    EXPECT_EQ(stmt.returning[1].alias, "deleted_name");
+    // Round-trip: DELETE FROM users WHERE 1 RETURNING id, name AS deleted_name
+    auto stmt_ptr = parse_one_102("DELETE FROM users WHERE 1 RETURNING id, name AS deleted_name");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* del = dynamic_cast<DeleteStmt*>(stmt_ptr.get());
+    ASSERT_NE(del, nullptr);
+    EXPECT_EQ(del->table_name, "users");
+    EXPECT_NE(del->where_expr, nullptr);
+    ASSERT_EQ(del->returning.size(), 2u);
+    EXPECT_EQ(del->returning[1].alias, "deleted_name");
 }
 
 TEST(QA_GDB102, SelectMultipleFromTables) {
-    SelectStmt stmt;
+    // Round-trip: SELECT with comma-separated FROM tables (implicit cross join)
+    auto stmt_ptr = parse_one_102("SELECT * FROM t0 a0, t1 a1, t2 a2, t3 a3, t4 a4");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* sel = dynamic_cast<SelectStmt*>(stmt_ptr.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->from.size(), 5u);
     for (int i = 0; i < 5; ++i) {
-        TableRef tr;
-        tr.name = "t" + std::to_string(i);
-        tr.alias = "a" + std::to_string(i);
-        stmt.from.push_back(std::move(tr));
+        EXPECT_EQ(sel->from[static_cast<size_t>(i)].name, "t" + std::to_string(i));
+        EXPECT_EQ(sel->from[static_cast<size_t>(i)].alias, "a" + std::to_string(i));
     }
-    EXPECT_EQ(stmt.from.size(), 5u);
 }
 
 TEST(QA_GDB102, SourceLocationOnExpr) {
-    LiteralExpr e;
-    e.line = 42;
-    e.col = 10;
-    EXPECT_EQ(e.line, 42u);
-    EXPECT_EQ(e.col, 10u);
-
-    // Set on a subexpression
-    auto bin = std::make_unique<BinaryExpr>();
-    bin->line = 100;
-    bin->col = 200;
-    bin->lhs = make_int("1");
-    bin->rhs = make_int("2");
-
-    EXPECT_EQ(bin->line, 100u);
-    EXPECT_EQ(bin->col, 200u);
+    // Round-trip: the parser propagates source location from tokens into AST nodes.
+    // For a single-line query the first literal should have line=1, col>=1.
+    auto stmt_ptr = parse_one_102("SELECT 42 FROM t WHERE a + b > 0");
+    ASSERT_NE(stmt_ptr, nullptr);
+    auto* sel = dynamic_cast<SelectStmt*>(stmt_ptr.get());
+    ASSERT_NE(sel, nullptr);
+    // The SELECT item literal '42' should carry a parser-set location.
+    ASSERT_EQ(sel->items.size(), 1u);
+    auto* lit = dynamic_cast<LiteralExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(lit, nullptr);
+    EXPECT_EQ(lit->line, 1u); // first line
+    EXPECT_GE(lit->col, 1u);  // some non-zero column
+    // The WHERE BinaryExpr should also carry a location.
+    ASSERT_NE(sel->where_expr, nullptr);
+    EXPECT_EQ(sel->where_expr->line, 1u);
+    EXPECT_GE(sel->where_expr->col, 1u);
 }
