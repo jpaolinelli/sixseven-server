@@ -226,8 +226,15 @@ public:
     /// Set the dirty ratio threshold that triggers the background flusher.
     /// When the fraction of dirty frames exceeds this threshold, the flusher
     /// is woken immediately rather than waiting for the timer.
-    /// @param threshold Dirty ratio threshold (0.0 to 1.0, default 0.75).
+    /// Values outside [0.0, 1.0] are clamped: negative values become 0.0
+    /// (always wake), values above 1.0 become 1.0 (never wake on threshold).
+    /// @param threshold Dirty ratio threshold, clamped to [0.0, 1.0].
     void set_dirty_flush_threshold(double threshold) {
+        if (threshold < 0.0) {
+            threshold = 0.0;
+        } else if (threshold > 1.0) {
+            threshold = 1.0;
+        }
         dirty_flush_threshold_.store(threshold, std::memory_order_relaxed);
     }
 

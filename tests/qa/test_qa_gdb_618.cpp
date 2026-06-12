@@ -8,11 +8,10 @@
 ///   5. Data integrity after eviction
 ///   6. Concurrency stress tests
 
+#include "sixseven/common/platform.h"
 #include "sixseven/storage/buffer_pool.h"
 
 #include <gtest/gtest.h>
-
-#include "sixseven/common/platform.h"
 
 #include <fcntl.h>
 
@@ -33,9 +32,9 @@ class GDB618_BufferPool : public ::testing::Test {
 protected:
     void SetUp() override {
         const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
-        temp_dir_ = std::filesystem::temp_directory_path() /
-                    ("sixseven_qa_gdb618_" + std::string(info->test_suite_name()) + "_" +
-                     info->name());
+        temp_dir_ =
+            std::filesystem::temp_directory_path() /
+            ("sixseven_qa_gdb618_" + std::string(info->test_suite_name()) + "_" + info->name());
         std::filesystem::create_directories(temp_dir_);
 
         auto create_result = dm_.create_file(temp_dir_ / "test.gdb");
@@ -197,8 +196,7 @@ TEST_F(GDB618_BufferPool, FlusherThresholdOneRequiresAllDirty) {
 
     // Flusher should NOT have woken (75% < 100%).
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    EXPECT_EQ(bpm.dirty_count(), pool_size - 1)
-        << "Flusher should not wake below threshold=1.0";
+    EXPECT_EQ(bpm.dirty_count(), pool_size - 1) << "Flusher should not wake below threshold=1.0";
 
     // Dirty the last frame -> 100% = threshold.
     auto p4 = bpm.new_page();
@@ -276,8 +274,7 @@ TEST_F(GDB618_BufferPool, FlusherWakesOnRepeatedThresholdCrossings) {
 
         // Wait for flusher.
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        EXPECT_EQ(bpm.dirty_count(), 0u)
-            << "Round " << round << ": flusher should have flushed";
+        EXPECT_EQ(bpm.dirty_count(), 0u) << "Round " << round << ": flusher should have flushed";
 
         // Delete pages to make room for next round.
         ASSERT_TRUE(bpm.flush_all().has_value());
@@ -667,23 +664,33 @@ TEST_F(GDB618_BufferPool, FlusherStartStopStress) {
 // Section 7: Threshold setter/getter edge cases
 // =============================================================================
 
-/// Threshold values at floating-point boundaries.
+/// Threshold values at floating-point boundaries — verifies clamping to [0.0, 1.0].
 TEST_F(GDB618_BufferPool, ThresholdEdgeValues) {
     BufferPoolManager bpm(dm_, file_id_, 4);
 
+    // In-range values pass through unchanged.
     bpm.set_dirty_flush_threshold(0.0);
     EXPECT_DOUBLE_EQ(bpm.dirty_flush_threshold(), 0.0);
 
     bpm.set_dirty_flush_threshold(1.0);
     EXPECT_DOUBLE_EQ(bpm.dirty_flush_threshold(), 1.0);
 
-    // Values > 1.0 effectively disable threshold-based waking.
-    bpm.set_dirty_flush_threshold(2.0);
-    EXPECT_DOUBLE_EQ(bpm.dirty_flush_threshold(), 2.0);
+    bpm.set_dirty_flush_threshold(0.5);
+    EXPECT_DOUBLE_EQ(bpm.dirty_flush_threshold(), 0.5);
 
-    // Negative value — dirty_ratio() is always >= 0.0, so this would always trigger.
+    // Values > 1.0 are clamped to 1.0 (never wake on threshold).
+    bpm.set_dirty_flush_threshold(2.0);
+    EXPECT_DOUBLE_EQ(bpm.dirty_flush_threshold(), 1.0);
+
+    bpm.set_dirty_flush_threshold(1.0001);
+    EXPECT_DOUBLE_EQ(bpm.dirty_flush_threshold(), 1.0);
+
+    // Negative values are clamped to 0.0 (always wake on threshold).
     bpm.set_dirty_flush_threshold(-1.0);
-    EXPECT_DOUBLE_EQ(bpm.dirty_flush_threshold(), -1.0);
+    EXPECT_DOUBLE_EQ(bpm.dirty_flush_threshold(), 0.0);
+
+    bpm.set_dirty_flush_threshold(-0.0001);
+    EXPECT_DOUBLE_EQ(bpm.dirty_flush_threshold(), 0.0);
 }
 
 /// AC: fsync never occurs while holding the buffer pool latch (or duration is minimized).
@@ -720,8 +727,7 @@ TEST_F(GDB618_BufferPool, CleanEvictionAvoidsFlushUnderLatch) {
     ASSERT_TRUE(bpm.unpin_page((*p4)->page_id(), false).has_value());
 
     // Dirty count should not decrease (no dirty page was evicted).
-    EXPECT_EQ(bpm.dirty_count(), dirty_before)
-        << "Clean eviction should not change dirty count";
+    EXPECT_EQ(bpm.dirty_count(), dirty_before) << "Clean eviction should not change dirty count";
 
     // Dirty pages 1 and 3 should still be in pool (cache hits).
     uint64_t hits_before = bpm.hit_count();
