@@ -83,7 +83,7 @@ TEST(HnswNodeSerialization, NodeWithNeighborsRoundTrip) {
     EXPECT_FLOAT_EQ(decoded.neighbors[1][0].distance, 0.25F);
 
     // Verify layer 2.
-    ASSERT_EQ(decoded.neighbors[1].size(), 2u);
+    ASSERT_EQ(decoded.neighbors[2].size(), 1u);
     EXPECT_EQ(decoded.neighbors[2][0].node_id, 50u);
     EXPECT_FLOAT_EQ(decoded.neighbors[2][0].distance, 0.1F);
 }
