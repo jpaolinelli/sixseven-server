@@ -7,9 +7,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "test_helpers.h"
@@ -259,13 +261,21 @@ TEST_F(HashJoinTest, GraceHashJoinInner) {
     auto rows = collect_all(join);
     ASSERT_EQ(rows.size(), 2u);
 
+    // Verify probe AND build column values for every matched row.
     bool found_alice = false;
     bool found_bob = false;
     for (auto& r : rows) {
+        ASSERT_EQ(r.values.size(), 4u);
         if (r.values[0].as_int32() == 1) {
+            EXPECT_EQ(r.values[1].as_string(), "alice");
+            EXPECT_EQ(r.values[2].as_int32(), 1);
+            EXPECT_EQ(r.values[3].as_string(), "eng");
             found_alice = true;
         }
         if (r.values[0].as_int32() == 2) {
+            EXPECT_EQ(r.values[1].as_string(), "bob");
+            EXPECT_EQ(r.values[2].as_int32(), 2);
+            EXPECT_EQ(r.values[3].as_string(), "sales");
             found_bob = true;
         }
     }
@@ -291,6 +301,34 @@ TEST_F(HashJoinTest, GraceHashJoinLeft) {
     auto rows = collect_all(join);
     // All 3 probe rows should appear (charlie with NULLs).
     ASSERT_EQ(rows.size(), 3u);
+
+    // Verify build-side values: alice gets 'eng', bob gets 'sales', charlie gets NULLs.
+    bool found_alice = false;
+    bool found_bob = false;
+    bool found_charlie_null = false;
+    for (auto& r : rows) {
+        ASSERT_EQ(r.values.size(), 4u);
+        int32_t probe_id = r.values[0].as_int32();
+        if (probe_id == 1) {
+            EXPECT_EQ(r.values[1].as_string(), "alice");
+            EXPECT_EQ(r.values[2].as_int32(), 1);
+            EXPECT_EQ(r.values[3].as_string(), "eng");
+            found_alice = true;
+        } else if (probe_id == 2) {
+            EXPECT_EQ(r.values[1].as_string(), "bob");
+            EXPECT_EQ(r.values[2].as_int32(), 2);
+            EXPECT_EQ(r.values[3].as_string(), "sales");
+            found_bob = true;
+        } else if (probe_id == 3) {
+            EXPECT_EQ(r.values[1].as_string(), "charlie");
+            EXPECT_TRUE(r.values[2].is_null());
+            EXPECT_TRUE(r.values[3].is_null());
+            found_charlie_null = true;
+        }
+    }
+    EXPECT_TRUE(found_alice);
+    EXPECT_TRUE(found_bob);
+    EXPECT_TRUE(found_charlie_null);
 }
 
 TEST_F(HashJoinTest, GraceHashJoinSkewedData) {
@@ -321,9 +359,22 @@ TEST_F(HashJoinTest, GraceHashJoinSkewedData) {
     auto rows = collect_all(join);
     // probe id=1 matches all 5 build tuples.
     ASSERT_EQ(rows.size(), 5u);
+
+    // Collect the build-side dept values to verify they all come from the build side.
+    std::vector<std::string> build_depts;
     for (auto& r : rows) {
+        ASSERT_EQ(r.values.size(), 4u);
+        // Probe side: id=1, name="p1"
         EXPECT_EQ(r.values[0].as_int32(), 1);
+        EXPECT_EQ(r.values[1].as_string(), "p1");
+        // Build side: id=1, dept="b0".."b4"
+        EXPECT_EQ(r.values[2].as_int32(), 1);
+        EXPECT_FALSE(r.values[3].is_null());
+        build_depts.push_back(r.values[3].as_string());
     }
+    // All five build dept values must be present exactly once.
+    std::sort(build_depts.begin(), build_depts.end());
+    EXPECT_EQ(build_depts, (std::vector<std::string>{"b0", "b1", "b2", "b3", "b4"}));
 }
 
 TEST_F(HashJoinTest, GraceHashJoinLargeDataset) {
@@ -351,6 +402,23 @@ TEST_F(HashJoinTest, GraceHashJoinLargeDataset) {
     auto rows = collect_all(join);
     // All 100 should match (same keys on both sides).
     ASSERT_EQ(rows.size(), 100u);
+
+    // Verify that every row carries the correct build-side values, not zeros or garbage.
+    // Build a map from probe_id -> build dept string that we expect.
+    std::unordered_map<int32_t, std::string> expected_dept;
+    for (int32_t i = 0; i < 100; ++i) {
+        expected_dept[i] = "b" + std::to_string(i);
+    }
+    for (auto& r : rows) {
+        ASSERT_EQ(r.values.size(), 4u);
+        int32_t probe_id = r.values[0].as_int32();
+        std::string probe_name = r.values[1].as_string();
+        int32_t build_id = r.values[2].as_int32();
+        std::string build_dept = r.values[3].as_string();
+        EXPECT_EQ(probe_name, "p" + std::to_string(probe_id));
+        EXPECT_EQ(build_id, probe_id);
+        EXPECT_EQ(build_dept, expected_dept[probe_id]);
+    }
 }
 
 // ===========================================================================
