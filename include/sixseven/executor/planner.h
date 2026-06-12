@@ -26,6 +26,7 @@ namespace sixseven {
 
 class EmbeddingWorkerPool;
 struct MatchConfig;
+class StatisticsStore;
 
 /// Translates a BoundStatement into a physical operator (Iterator) tree.
 ///
@@ -76,6 +77,14 @@ public:
     /// configuration expressions that reference outer columns — a NEAREST target
     /// vector or a TRAVERSE start key — evaluate against it. Pass nullptrs to
     /// clear. The pointed-to objects must outlive planning.
+    /// Provide table/column statistics gathered by ANALYZE. When set, the
+    /// planner uses the cost-based optimizer (choose_access_path /
+    /// choose_join_method) for tables that have statistics, and annotates
+    /// plan nodes with cost estimates for EXPLAIN. Tables without statistics
+    /// keep the default (pre-statistics) planning behavior. The store must
+    /// outlive planning. Pass nullptr to clear.
+    void set_statistics(const StatisticsStore* stats) { stats_ = stats; }
+
     void
     set_outer_context(const Tuple* tuple, const OutputSchema* schema, const BoundStatement* bound) {
         outer_tuple_ = tuple;
@@ -159,6 +168,24 @@ private:
                         const Expr* where_expr,
                         const BoundStatement& bound);
 
+    /// Cost-based access path decision for a single-table scan, driven by
+    /// ANALYZE statistics. When no statistics exist for the table, the
+    /// decision preserves the default behavior (try index scan, no costs).
+    struct AccessPathDecision {
+        bool try_index = true;                    ///< Whether to attempt an index scan.
+        std::optional<PlanCostEstimate> cost;     ///< Cost estimate, if stats exist.
+        std::optional<PlanCostEstimate> seq_cost; ///< Seq-scan fallback cost estimate.
+    };
+
+    /// Decide seq scan vs index scan for @p table_schema given @p where_expr,
+    /// using the statistics store (if set) and the cost-based optimizer.
+    [[nodiscard]] AccessPathDecision decide_access_path(const TableSchema& table_schema,
+                                                        const Expr* where_expr) const;
+
+    /// Attach a sequential-scan cost estimate to @p iter when statistics
+    /// exist for @p table_schema. No-op otherwise.
+    void annotate_seq_scan_cost(const TableSchema& table_schema, Iterator& iter) const;
+
     /// Try to create a Bm25ScanOperator for a `MATCH(col) TO 'q'` WHERE
     /// predicate. @p score_output must already include the trailing _score
     /// column. Returns an error if MATCH appears in an unsupported position or
@@ -226,6 +253,7 @@ private:
     std::unordered_map<index_id_t, Bm25Index*>* bm25_indexes_;
     EmbeddingWorkerPool* embedding_pool_;
     AlgorithmRegistry* algorithm_registry_;
+    const StatisticsStore* stats_ = nullptr;
     SubqueryContext subquery_ctx_;
 
     // Outer row for correlated-subquery planning (see set_outer_context).
