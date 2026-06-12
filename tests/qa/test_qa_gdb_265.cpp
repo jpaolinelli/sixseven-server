@@ -440,18 +440,17 @@ TEST_F(QA_GDB265, SourceMetaColumnCorrectness) {
 }
 
 // ============================================================================
-// Dangling edges: multiple dangling edges produce NULL table columns
+// LINK PK validation: linking to a non-existent row fails with NOT_FOUND
 // ============================================================================
 
-TEST_F(QA_GDB265, MultipleDanglingEdges) {
+TEST_F(QA_GDB265, LinkToNonExistentPkFails) {
     // GDB-315 added PK validation to LINK — dangling edges (pointing to
-    // non-existent rows) are now rejected.  Verify LINK fails for
-    // non-existent target PKs.
-    auto r1 = engine_->execute("LINK users(5) TO users(998) VIA follows");
-    EXPECT_FALSE(r1.has_value()) << "LINK to non-existent PK should fail";
-
-    auto r2 = engine_->execute("LINK users(5) TO users(999) VIA follows");
-    EXPECT_FALSE(r2.has_value()) << "LINK to non-existent PK should fail";
+    // non-existent rows) can no longer be created. This is the single
+    // surviving test for that behavior (GDB-784 removed two hollowed-out
+    // duplicates that carried stale IS NULL / IS NOT NULL names).
+    auto r = engine_->execute("LINK users(5) TO users(999) VIA follows");
+    ASSERT_FALSE(r.has_value()) << "LINK to non-existent PK should fail";
+    EXPECT_EQ(r.error().code, StatusCode::NOT_FOUND);
 }
 
 // ============================================================================
@@ -732,23 +731,6 @@ TEST_F(QA_GDB265, SchemaColumnTypesCorrect) {
 
     // __source should be non-null for depth > 0 nodes.
     EXPECT_FALSE(row[4].is_null());
-}
-
-// ============================================================================
-// WHERE on dangling edge: table column IS NULL works
-// ============================================================================
-
-TEST_F(QA_GDB265, WhereOnDanglingEdgeIsNull) {
-    // GDB-315 added PK validation — dangling edges can no longer be created.
-    // Verify that LINK to non-existent PK fails.
-    auto r = engine_->execute("LINK users(5) TO users(999) VIA follows");
-    EXPECT_FALSE(r.has_value()) << "LINK to non-existent PK should fail";
-}
-
-TEST_F(QA_GDB265, WhereOnDanglingEdgeIsNotNull) {
-    // GDB-315 added PK validation — dangling edges can no longer be created.
-    auto r = engine_->execute("LINK users(5) TO users(999) VIA follows");
-    EXPECT_FALSE(r.has_value()) << "LINK to non-existent PK should fail";
 }
 
 // ============================================================================
