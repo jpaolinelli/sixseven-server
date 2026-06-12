@@ -83,6 +83,14 @@ public:
     /// BM25 indexes on this table to maintain on insert. Set by the planner.
     std::vector<Bm25MaintenanceTarget> bm25_targets_;
 
+    /// Set the transaction id stamped as xmin on inserted versions (GDB-747).
+    /// Defaults to frozen_txn_id (always-committed) when no transaction
+    /// context is provided.
+    void set_txn_id(txn_id_t txn_id) { txn_id_ = txn_id; }
+
+    /// The heap this operator writes to (for executor-side bookkeeping).
+    [[nodiscard]] TableHeap& target_heap() { return heap_; }
+
 protected:
     Result<void> do_open() override;
     Result<std::optional<Tuple>> do_next() override;
@@ -108,6 +116,8 @@ private:
     std::unique_ptr<Iterator> child_;
     OutputSchema schema_;
     bool executed_ = false;
+    /// Transaction id stamped as xmin on inserted tuple versions (GDB-747).
+    txn_id_t txn_id_ = frozen_txn_id;
 };
 
 } // namespace sixseven

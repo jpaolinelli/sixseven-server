@@ -7,6 +7,7 @@
 #include "sixseven/executor/storage_manager.h"
 #include "sixseven/graph/graph_engine.h"
 #include "sixseven/planner/statistics.h"
+#include "sixseven/txn/txn_manager.h"
 
 #include <cstdint>
 #include <string>
@@ -181,7 +182,25 @@ public:
     /// Set the backfill manager for BACKFILL EMBEDDINGS command.
     void set_backfill_manager(BackfillManager* mgr);
 
+    /// Shared transaction manager (GDB-747). DML statements stamp tuple
+    /// versions with ids allocated here; VACUUM integration (GDB-1230) reads
+    /// its horizon from the same instance.
+    [[nodiscard]] TransactionManager& transaction_manager() { return txn_mgr_; }
+
+    /// The id of the explicit transaction opened by BEGIN, or invalid_txn_id
+    /// when the engine is in autocommit mode.
+    [[nodiscard]] txn_id_t active_transaction_id() const { return active_txn_id_; }
+
 private:
+    /// Execute BEGIN: open an explicit transaction (GDB-747).
+    [[nodiscard]] Result<QueryResult> execute_begin();
+
+    /// Execute COMMIT: commit the explicit transaction, if any (GDB-747).
+    [[nodiscard]] Result<QueryResult> execute_commit();
+
+    /// Execute ROLLBACK: abort the explicit transaction, if any, and
+    /// compensate row counters for its logical inserts/deletes (GDB-747).
+    [[nodiscard]] Result<QueryResult> execute_rollback();
     /// Execute a CREATE USER statement.
     [[nodiscard]] Result<QueryResult> execute_create_user(const CreateUserStmt& stmt);
 
@@ -299,6 +318,18 @@ private:
     BackfillManager* backfill_manager_ = nullptr;
     CatalogPersistence* catalog_persistence_ = nullptr;
     AuthMethod auth_method_{};
+
+    /// Transaction manager for MVCC stamping and visibility (GDB-747).
+    TransactionManager txn_mgr_;
+
+    /// Explicit transaction opened by BEGIN (invalid_txn_id = autocommit).
+    txn_id_t active_txn_id_ = invalid_txn_id;
+
+    /// Per-heap live-row-count deltas accumulated by the explicit transaction
+    /// (+inserts, -deletes). Applied in reverse on ROLLBACK so COUNT(*) stays
+    /// accurate after aborted logical inserts/deletes.
+    std::unordered_map<TableHeap*, int64_t> active_txn_row_deltas_;
+
     database_id_t current_database_id_ = default_database_id;
     int skip_masking_depth_ = 0;
     bool standby_mode_ = false;

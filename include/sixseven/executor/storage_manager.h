@@ -72,6 +72,13 @@ public:
     /// Check whether a table storage file exists on disk.
     [[nodiscard]] bool table_file_exists(database_id_t db_id, table_id_t table_id) const;
 
+    /// Attach a transaction manager used for MVCC visibility filtering
+    /// (GDB-747). Applied to all currently open table heaps and to every heap
+    /// opened or created afterwards. Pass nullptr to detach.
+    /// @param txn_mgr Transaction manager (not owned; must outlive this
+    ///                StorageManager or be detached).
+    void set_txn_manager(const TransactionManager* txn_mgr);
+
     /// Get the storage for an existing table.
     [[nodiscard]] Result<TableStorage*> get_table_storage(table_id_t table_id);
 
@@ -95,12 +102,12 @@ public:
     // -- Index file management ---------------------------------------------------
 
     /// Create physical storage for a new index file.
-    [[nodiscard]] Result<IndexStorage*>
-    create_index_storage(database_id_t db_id, index_id_t index_id);
+    [[nodiscard]] Result<IndexStorage*> create_index_storage(database_id_t db_id,
+                                                             index_id_t index_id);
 
     /// Open physical storage for an existing index file.
-    [[nodiscard]] Result<IndexStorage*>
-    open_index_storage(database_id_t db_id, index_id_t index_id);
+    [[nodiscard]] Result<IndexStorage*> open_index_storage(database_id_t db_id,
+                                                           index_id_t index_id);
 
     /// Get the storage for an already-opened index.
     [[nodiscard]] Result<IndexStorage*> get_index_storage(index_id_t index_id);
@@ -131,6 +138,10 @@ private:
     DiskManager& dm_;
     std::filesystem::path data_dir_;
     uint32_t pool_size_;
+
+    /// Transaction manager attached to table heaps for MVCC visibility
+    /// filtering (GDB-747, not owned; may be null).
+    const TransactionManager* txn_mgr_ = nullptr;
 
     static constexpr uint32_t index_pool_size_ = 64;
 

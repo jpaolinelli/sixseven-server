@@ -19,6 +19,7 @@ namespace sixseven {
 
 /// Forward declarations.
 class TableIterator;
+class TransactionManager;
 class WalWriter;
 
 /// Configuration options for a TableHeap (GDB-714).
@@ -87,6 +88,18 @@ public:
     /// @param table_id Table identifier stamped into each record.
     void attach_wal(WalWriter* wal, uint32_t table_id);
 
+    /// Attach a transaction manager (GDB-747). When attached, reads through
+    /// this heap (get_tuple / begin scans) filter tuple versions by
+    /// transaction status: versions created by a known-aborted transaction,
+    /// or deleted by a transaction that is not known-aborted, are invisible.
+    /// Transaction ids unknown to the manager (e.g. rows persisted by a
+    /// previous process — there is no persistent commit log yet) are treated
+    /// as committed so existing data stays readable across restarts.
+    /// Pass nullptr to detach.
+    /// @param txn_mgr Transaction manager (not owned; must outlive this heap
+    ///                or be detached).
+    void attach_txn_manager(const TransactionManager* txn_mgr);
+
     /// Whether this heap stores MVCC tuple headers.
     [[nodiscard]] bool mvcc_headers() const { return options_.mvcc_headers; }
 
@@ -132,6 +145,25 @@ public:
     ///             deleted — see class documentation). Defaults to
     ///             frozen_txn_id (autocommit).
     [[nodiscard]] Result<void> delete_tuple(RID rid, txn_id_t xmax = frozen_txn_id);
+
+    /// Logically delete a tuple (GDB-747, MVCC mode only): stamp xmax (and
+    /// optionally the version-chain pointer t_ctid) into the on-page MVCC
+    /// header without removing the slot. The old version stays on the page so
+    /// an aborted deleting transaction leaves the tuple visible again; VACUUM
+    /// (GDB-1230) reclaims dead versions later. Logged as a WAL UPDATE record
+    /// with full before/after images so redo reproduces the stamped header.
+    /// Decrements the live row count.
+    /// @param rid          Tuple to mark deleted.
+    /// @param xmax         Deleting transaction id.
+    /// @param next_version RID of the replacing version (UPDATE chains), or
+    ///                     RID::invalid() for plain DELETE.
+    [[nodiscard]] Result<void>
+    mark_deleted(RID rid, txn_id_t xmax, RID next_version = RID::invalid());
+
+    /// Adjust the live row count by a signed delta (GDB-747). Used by the
+    /// executor to compensate counters when a transaction rolls back (its
+    /// logical inserts/deletes already moved the counter).
+    void adjust_row_count(int64_t delta);
 
     /// A single in-page tuple update request for batch processing.
     struct TupleUpdate {
@@ -182,6 +214,8 @@ private:
 
     /// Optional WAL writer for logging tuple mutations (not owned).
     WalWriter* wal_ = nullptr;
+    /// Optional transaction manager for visibility filtering (not owned).
+    const TransactionManager* txn_mgr_ = nullptr;
     /// Table id stamped into WAL records when wal_ is attached.
     uint32_t wal_table_id_ = 0;
 
@@ -228,7 +262,8 @@ public:
     TableIterator(BufferPoolManager& bpm,
                   PageId start_page,
                   uint32_t total_pages,
-                  bool strip_mvcc_headers = false);
+                  bool strip_mvcc_headers = false,
+                  const TransactionManager* txn_mgr = nullptr);
 
     /// Advance to the next live tuple.
     /// @return A pair of (RID, tuple data copy), or nullopt if scan is exhausted.
@@ -249,6 +284,8 @@ private:
     bool exhausted_ = false;
     /// Strip the 24-byte MvccTupleHeader from returned tuples (GDB-714).
     bool strip_mvcc_headers_ = false;
+    /// Transaction manager for visibility filtering (GDB-747, may be null).
+    const TransactionManager* txn_mgr_ = nullptr;
 };
 
 } // namespace sixseven

@@ -6,13 +6,16 @@
 #include "sixseven/common/statement_deadline.h"
 #include "sixseven/common/types.h"
 #include "sixseven/executor/catalog_persistence.h"
+#include "sixseven/executor/delete.h"
 #include "sixseven/executor/explain.h"
 #include "sixseven/executor/expr_evaluator.h"
 #include "sixseven/executor/index_manager.h"
+#include "sixseven/executor/insert.h"
 #include "sixseven/executor/pk_value_string.h"
 #include "sixseven/executor/planner.h"
 #include "sixseven/executor/provider_cache.h"
 #include "sixseven/executor/settings_cache.h"
+#include "sixseven/executor/update.h"
 #include "sixseven/index/rid.h"
 #include "sixseven/parser/ast.h"
 #include "sixseven/parser/lexer.h"
@@ -172,7 +175,12 @@ std::optional<ConstFoldResult> try_fold_const_expr(const Expr& expr) {
 } // namespace
 
 QueryEngine::QueryEngine(Catalog& catalog, StorageManager& storage, GraphEngine* graph_engine)
-    : catalog_(catalog), storage_(storage), graph_engine_(graph_engine) {}
+    : catalog_(catalog), storage_(storage), graph_engine_(graph_engine) {
+    // Table heaps filter tuple versions through this engine's transaction
+    // manager (GDB-747): DML stamps real xmin/xmax ids and scans hide
+    // versions from aborted transactions.
+    storage_.set_txn_manager(&txn_mgr_);
+}
 
 void QueryEngine::set_current_database(database_id_t database_id) {
     current_database_id_ = database_id;
@@ -655,6 +663,18 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
     }
     if (auto* set = dynamic_cast<const SetStmt*>(stmt_ptr->get())) {
         return execute_set(*set);
+    }
+    // TCL (GDB-747): explicit transaction control. ROLLBACK TO <savepoint>
+    // keeps its existing session-level handling and is not intercepted here.
+    if (dynamic_cast<const BeginStmt*>(stmt_ptr->get()) != nullptr) {
+        return execute_begin();
+    }
+    if (dynamic_cast<const CommitStmt*>(stmt_ptr->get()) != nullptr) {
+        return execute_commit();
+    }
+    if (auto* rollback = dynamic_cast<const RollbackStmt*>(stmt_ptr->get());
+        rollback != nullptr && rollback->savepoint.empty()) {
+        return execute_rollback();
     }
     if (auto* show = dynamic_cast<const ShowStmt*>(stmt_ptr->get())) {
         return execute_show(*show);
@@ -2343,6 +2363,67 @@ Result<QueryResult> QueryEngine::execute_explain(const ExplainStmt& stmt,
 }
 
 // ---------------------------------------------------------------------------
+// Transaction control (GDB-747)
+// ---------------------------------------------------------------------------
+
+Result<QueryResult> QueryEngine::execute_begin() {
+    QueryResult qr;
+    qr.message = "BEGIN";
+    if (active_txn_id_ != invalid_txn_id) {
+        // PostgreSQL warns and keeps the current transaction.
+        SIXSEVEN_LOG_WARN("BEGIN: there is already a transaction in progress (txn {})",
+                          active_txn_id_);
+        return ok(std::move(qr));
+    }
+    auto txn = txn_mgr_.begin();
+    if (!txn) {
+        return make_error(txn.error().code, txn.error().message);
+    }
+    active_txn_id_ = (*txn)->txn_id;
+    active_txn_row_deltas_.clear();
+    return ok(std::move(qr));
+}
+
+Result<QueryResult> QueryEngine::execute_commit() {
+    QueryResult qr;
+    qr.message = "COMMIT";
+    if (active_txn_id_ == invalid_txn_id) {
+        // PostgreSQL warns; committing outside a transaction is a no-op.
+        return ok(std::move(qr));
+    }
+    auto committed = txn_mgr_.commit(active_txn_id_);
+    active_txn_id_ = invalid_txn_id;
+    active_txn_row_deltas_.clear();
+    if (!committed) {
+        return make_error(committed.error().code, committed.error().message);
+    }
+    return ok(std::move(qr));
+}
+
+Result<QueryResult> QueryEngine::execute_rollback() {
+    QueryResult qr;
+    qr.message = "ROLLBACK";
+    if (active_txn_id_ == invalid_txn_id) {
+        return ok(std::move(qr));
+    }
+    auto aborted = txn_mgr_.abort(active_txn_id_);
+    if (!aborted) {
+        SIXSEVEN_LOG_WARN(
+            "ROLLBACK: abort of txn {} failed: {}", active_txn_id_, aborted.error().message);
+    }
+    // Compensate live-row counters: the transaction's logical inserts and
+    // deletes moved the per-heap counters, but its versions are now invisible.
+    for (auto& [heap, delta] : active_txn_row_deltas_) {
+        if (heap != nullptr && delta != 0) {
+            heap->adjust_row_count(-delta);
+        }
+    }
+    active_txn_id_ = invalid_txn_id;
+    active_txn_row_deltas_.clear();
+    return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
 // DML / Query execution via Planner
 // ---------------------------------------------------------------------------
 
@@ -2448,9 +2529,58 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
         return make_error(iter.error().code, iter.error().message);
     }
 
+    // Transaction stamping (GDB-747): DML statements run under the explicit
+    // transaction opened by BEGIN, or under an implicit single-statement
+    // transaction (begin → execute → commit on success / abort on failure).
+    txn_id_t stmt_txn_id = invalid_txn_id;
+    bool implicit_txn = false;
+    TableHeap* dml_heap = nullptr;
+    int64_t dml_row_delta_sign = 0; // +1 INSERT, -1 DELETE, 0 UPDATE/queries.
+
+    InsertOperator* insert_op = dynamic_cast<InsertOperator*>(iter->get());
+    UpdateOperator* update_op = dynamic_cast<UpdateOperator*>(iter->get());
+    DeleteOperator* delete_op = dynamic_cast<DeleteOperator*>(iter->get());
+    if (insert_op != nullptr || update_op != nullptr || delete_op != nullptr) {
+        if (active_txn_id_ != invalid_txn_id) {
+            stmt_txn_id = active_txn_id_;
+        } else {
+            auto txn = txn_mgr_.begin();
+            if (!txn) {
+                return make_error(txn.error().code, txn.error().message);
+            }
+            stmt_txn_id = (*txn)->txn_id;
+            implicit_txn = true;
+        }
+        if (insert_op != nullptr) {
+            insert_op->set_txn_id(stmt_txn_id);
+            dml_heap = &insert_op->target_heap();
+            dml_row_delta_sign = 1;
+        } else if (update_op != nullptr) {
+            update_op->set_txn_id(stmt_txn_id);
+            dml_heap = &update_op->target_heap();
+        } else {
+            delete_op->set_txn_id(stmt_txn_id);
+            dml_heap = &delete_op->target_heap();
+            dml_row_delta_sign = -1;
+        }
+    }
+
+    // Abort the implicit statement transaction when execution fails so its
+    // partial writes become invisible (xmin aborted / xmax aborted).
+    auto abort_implicit_txn = [&]() {
+        if (implicit_txn) {
+            auto aborted = txn_mgr_.abort(stmt_txn_id);
+            if (!aborted) {
+                SIXSEVEN_LOG_WARN(
+                    "abort of implicit txn {} failed: {}", stmt_txn_id, aborted.error().message);
+            }
+        }
+    };
+
     // Open.
     auto open_result = (*iter)->open();
     if (!open_result) {
+        abort_implicit_txn();
         return make_error(open_result.error().code, open_result.error().message);
     }
 
@@ -2467,12 +2597,14 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
     while (true) {
         if (StatementDeadline::expired()) {
             (*iter)->close();
+            abort_implicit_txn();
             return make_error(StatusCode::QUERY_CANCELED,
                               "canceling statement due to statement timeout");
         }
         auto row = (*iter)->next();
         if (!row) {
             (*iter)->close();
+            abort_implicit_txn();
             return make_error(row.error().code, row.error().message);
         }
         if (!row->has_value()) {
@@ -2483,6 +2615,27 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
 
     // Close.
     (*iter)->close();
+
+    // Finish the statement transaction (GDB-747).
+    if (stmt_txn_id != invalid_txn_id) {
+        if (implicit_txn) {
+            auto committed = txn_mgr_.commit(stmt_txn_id);
+            if (!committed) {
+                auto aborted = txn_mgr_.abort(stmt_txn_id);
+                if (!aborted) {
+                    SIXSEVEN_LOG_WARN("abort after failed commit of txn {} failed: {}",
+                                      stmt_txn_id,
+                                      aborted.error().message);
+                }
+                return make_error(committed.error().code, committed.error().message);
+            }
+        } else if (dml_heap != nullptr && dml_row_delta_sign != 0 && qr.rows.size() == 1 &&
+                   !qr.rows[0].empty()) {
+            // Explicit transaction: remember the live-row-count delta so
+            // ROLLBACK can compensate the heap counter.
+            active_txn_row_deltas_[dml_heap] += dml_row_delta_sign * qr.rows[0][0].as_int64();
+        }
+    }
 
     // Detect DML results (single "count" column).
     if (qr.column_names.size() == 1 && qr.column_names[0] == "count" && qr.rows.size() == 1) {

@@ -119,7 +119,7 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
             if (!bytes) {
                 return make_error(bytes.error().code, bytes.error().message);
             }
-            auto rid = heap_.insert_tuple(*bytes);
+            auto rid = heap_.insert_tuple(*bytes, txn_id_);
             if (!rid) {
                 return make_error(rid.error().code, rid.error().message);
             }
@@ -202,7 +202,7 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
             tuple_spans.emplace_back(row);
         }
 
-        auto rids = heap_.insert_batch(tuple_spans);
+        auto rids = heap_.insert_batch(tuple_spans, txn_id_);
         if (!rids) {
             return make_error(rids.error().code, rids.error().message);
         }

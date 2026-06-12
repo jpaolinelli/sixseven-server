@@ -421,15 +421,18 @@ TEST_F(QA_GDB714_StorageAdversarial, MvccHeapOverRawFileDoesNotCrash) {
     ASSERT_FALSE(too_small.has_value());
     EXPECT_EQ(too_small.error().code, StatusCode::INTERNAL_ERROR);
 
-    // A longer raw tuple is silently mis-split: 24 bytes eaten as "header",
-    // remainder returned as payload. Documented hazard — the heap mode is not
-    // persisted in the file (accepted follow-up). Must not crash.
+    // A longer raw tuple is mis-split: 24 garbage bytes are read as the
+    // "header". Since GDB-747 the visibility filter sees the garbage xmax
+    // (0x2020...) as a deleted version, so the read degrades to NOT_FOUND
+    // instead of returning a mis-split payload. Documented hazard — the heap
+    // mode is not persisted in the file (accepted follow-up). Must not crash.
     auto missplit = mvcc_view.get_tuple(*large);
-    ASSERT_TRUE(missplit.has_value());
-    EXPECT_EQ(missplit->size(), 40u - mvcc_header_size);
+    ASSERT_FALSE(missplit.has_value());
+    EXPECT_EQ(missplit.error().code, StatusCode::NOT_FOUND);
 
     // Scanning through the MVCC view must not crash either: the short tuple
-    // degrades to an empty payload, the long one to a 16-byte payload.
+    // degrades to an empty payload; the long one is filtered out by the
+    // garbage-xmax visibility check.
     auto it = mvcc_view.begin();
     ASSERT_TRUE(it.has_value());
     size_t rows = 0;
@@ -437,7 +440,7 @@ TEST_F(QA_GDB714_StorageAdversarial, MvccHeapOverRawFileDoesNotCrash) {
         EXPECT_LE(row->second.size(), 40u - mvcc_header_size);
         ++rows;
     }
-    EXPECT_EQ(rows, 2u);
+    EXPECT_EQ(rows, 1u);
 }
 
 // -----------------------------------------------------------------------------

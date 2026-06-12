@@ -192,19 +192,26 @@ TEST_F(QA_GDB596, AdminShowProvidersNotImplemented) {
 }
 
 // ============================================================================
-// Section 3: Transactions not implemented (docs say so)
+// Section 3: Transactions — BEGIN/COMMIT/ROLLBACK are implemented since
+// GDB-747 (MVCC DML stamping); savepoints remain session-level only.
 // ============================================================================
 
-TEST_F(QA_GDB596, TransactionBeginNotImplemented) {
-    exec_err("BEGIN");
+TEST_F(QA_GDB596, TransactionBeginImplemented) {
+    auto qr = exec_ok("BEGIN");
+    EXPECT_EQ(qr.message, "BEGIN");
+    exec_ok("ROLLBACK");
 }
 
-TEST_F(QA_GDB596, TransactionCommitNotImplemented) {
-    exec_err("COMMIT");
+TEST_F(QA_GDB596, TransactionCommitImplemented) {
+    exec_ok("BEGIN");
+    auto qr = exec_ok("COMMIT");
+    EXPECT_EQ(qr.message, "COMMIT");
 }
 
-TEST_F(QA_GDB596, TransactionRollbackNotImplemented) {
-    exec_err("ROLLBACK");
+TEST_F(QA_GDB596, TransactionRollbackImplemented) {
+    exec_ok("BEGIN");
+    auto qr = exec_ok("ROLLBACK");
+    EXPECT_EQ(qr.message, "ROLLBACK");
 }
 
 TEST_F(QA_GDB596, TransactionSavepointNotImplemented) {

@@ -29,6 +29,17 @@ Result<std::optional<Tuple>> UpdateOperator::do_next() {
 
     int64_t count = 0;
 
+    // Materialize all target rows before mutating the heap (GDB-747). UPDATE
+    // now inserts new tuple versions; draining the child first prevents the
+    // scan from encountering — and re-updating — versions this statement just
+    // created (the Halloween problem).
+    struct PendingUpdate {
+        RID old_rid;
+        std::vector<Value> new_values;
+        std::vector<uint8_t> new_bytes;
+    };
+    std::vector<PendingUpdate> pending;
+
     while (true) {
         auto row = child_->next();
         if (!row) {
@@ -68,31 +79,66 @@ Result<std::optional<Tuple>> UpdateOperator::do_next() {
             }
         }
 
-        // Serialise and update in heap.
         auto bytes = TupleSerializer::serialize(new_values, storage_schema_);
         if (!bytes) {
             return make_error(bytes.error().code, bytes.error().message);
         }
-        auto update_result = heap_.update_tuple(*tuple.rid, *bytes);
-        if (!update_result) {
-            return make_error(update_result.error().code, update_result.error().message);
+        pending.push_back(PendingUpdate{*tuple.rid, std::move(new_values), std::move(*bytes)});
+    }
+
+    for (auto& upd : pending) {
+        RID bm25_rid = upd.old_rid;
+
+        if (heap_.mvcc_headers()) {
+            // MVCC update (GDB-747): insert a new version stamped with this
+            // transaction's xmin, then mark the old version deleted (xmax +
+            // version-chain pointer to the new RID). No in-place overwrite —
+            // an aborted transaction leaves the old version visible and the
+            // new version invisible.
+            auto new_rid = heap_.insert_tuple(upd.new_bytes, txn_id_);
+            if (!new_rid) {
+                return make_error(new_rid.error().code, new_rid.error().message);
+            }
+            auto marked = heap_.mark_deleted(upd.old_rid, txn_id_, *new_rid);
+            if (!marked) {
+                return make_error(marked.error().code, marked.error().message);
+            }
+            bm25_rid = *new_rid;
+
+            // Maintain BM25 indexes: the row moved to a new RID, so drop the
+            // old version's postings before indexing the new version.
+            for (const auto& target : bm25_targets_) {
+                if (target.index == nullptr) {
+                    continue;
+                }
+                auto removed = target.index->remove_document(upd.old_rid);
+                if (!removed) {
+                    SIXSEVEN_LOG_WARN("BM25 update maintenance failed for rid=({},{}): {}",
+                                      upd.old_rid.page_id,
+                                      upd.old_rid.slot_id,
+                                      removed.error().message);
+                }
+            }
+        } else {
+            // Legacy headerless heaps: in-place update (RID stable).
+            auto update_result = heap_.update_tuple(upd.old_rid, upd.new_bytes);
+            if (!update_result) {
+                return make_error(update_result.error().code, update_result.error().message);
+            }
         }
 
-        // Maintain BM25 indexes: re-index the row's (possibly changed) text.
-        // update_tuple keeps the same RID, and add_document replaces the prior
-        // postings for that RID, so this is correct whether or not the text
-        // column changed.
+        // Index the (possibly changed) text under the row's current RID.
         for (const auto& target : bm25_targets_) {
-            if (target.index == nullptr || target.text_column_index >= new_values.size()) {
+            if (target.index == nullptr || target.text_column_index >= upd.new_values.size()) {
                 continue;
             }
-            const auto& v = new_values[target.text_column_index];
-            Result<void> r = v.is_null() ? target.index->remove_document(*tuple.rid)
-                                         : target.index->add_document(*tuple.rid, v.as_string());
+            const auto& v = upd.new_values[target.text_column_index];
+            Result<void> r = v.is_null() ? target.index->remove_document(bm25_rid)
+                                         : target.index->add_document(bm25_rid, v.as_string());
             if (!r) {
                 SIXSEVEN_LOG_WARN("BM25 update maintenance failed for rid=({},{}): {}",
-                                  tuple.rid->page_id,
-                                  tuple.rid->slot_id,
+                                  bm25_rid.page_id,
+                                  bm25_rid.slot_id,
                                   r.error().message);
             }
         }
