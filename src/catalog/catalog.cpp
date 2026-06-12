@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <limits>
 #include <sstream>
+#include <unordered_set>
 
 namespace sixseven {
 
@@ -45,6 +46,18 @@ Result<void> Catalog::drop_database(database_id_t database_id, bool cascade) {
                           "database with id " + std::to_string(database_id) + " not found");
     }
 
+    // Collect all table IDs that belong to this database before any drops,
+    // so we can clean up cross-database edge type references afterward.
+    std::vector<table_id_t> dropped_table_ids;
+    {
+        auto name_map_it = table_name_to_id_.find(database_id);
+        if (name_map_it != table_name_to_id_.end()) {
+            for (auto& [tname, tid] : name_map_it->second) {
+                dropped_table_ids.push_back(tid);
+            }
+        }
+    }
+
     // Check if database contains tables.
     auto& name_map = table_name_to_id_[database_id];
     if (!name_map.empty()) {
@@ -65,6 +78,47 @@ Result<void> Catalog::drop_database(database_id_t database_id, bool cascade) {
             if (!result.has_value()) {
                 return result;
             }
+        }
+    }
+
+    // Remove any edge types still owned by this database (e.g. those whose
+    // source/target tables belonged to a foreign database and were therefore
+    // not touched by the cascade table drops above).
+    {
+        std::vector<edge_id_t> owned_edge_ids;
+        for (auto& [eid, edef] : edge_types_by_id_) {
+            if (edef.database_id == database_id) {
+                owned_edge_ids.push_back(eid);
+            }
+        }
+        for (auto eid : owned_edge_ids) {
+            edge_types_by_id_.erase(eid);
+        }
+        // The name map for this database is fully erased below.
+    }
+
+    // Remove edge types in OTHER databases that reference tables which belonged
+    // to the dropped database (dangling cross-database references).
+    if (!dropped_table_ids.empty()) {
+        std::unordered_set<table_id_t> dropped_set(dropped_table_ids.begin(),
+                                                   dropped_table_ids.end());
+
+        std::vector<edge_id_t> dangling_edge_ids;
+        for (auto& [eid, edef] : edge_types_by_id_) {
+            if (dropped_set.count(edef.source_table_id) != 0 ||
+                dropped_set.count(edef.target_table_id) != 0) {
+                dangling_edge_ids.push_back(eid);
+            }
+        }
+
+        for (auto eid : dangling_edge_ids) {
+            auto& edef = edge_types_by_id_.at(eid);
+            // Remove from the owning database's name map.
+            auto owner_it = edge_name_to_id_.find(edef.database_id);
+            if (owner_it != edge_name_to_id_.end()) {
+                owner_it->second.erase(edef.name);
+            }
+            edge_types_by_id_.erase(eid);
         }
     }
 
