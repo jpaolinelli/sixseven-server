@@ -184,6 +184,40 @@ TEST(WalArchiveManager, ArchiveSegmentCopiesFile) {
     ASSERT_TRUE(writer.close().has_value());
 }
 
+// GDB-782: a failed metadata sidecar write must fail archive_segment and undo
+// the copy, instead of silently leaving a segment that cleanup_before() will
+// skip forever.
+TEST(WalArchiveManager, ArchiveSegmentFailsWhenMetaSidecarUnwritable) {
+    TempWalDir wal_dir;
+    TempArchiveDir archive_dir;
+
+    WalWriterOptions opts;
+    opts.segment_size = 256;
+    opts.enable_group_commit = false;
+    WalWriter writer(wal_dir.path(), opts);
+    ASSERT_TRUE(writer.open().has_value());
+
+    auto completed = write_and_rotate(writer);
+    ASSERT_TRUE(writer.flush().has_value());
+
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path());
+
+    // Occupy the sidecar path with a directory so the ofstream open fails.
+    auto seg_name = "wal_" + std::string(6 - std::to_string(completed.segment_id).length(), '0') +
+                    std::to_string(completed.segment_id);
+    auto meta_path = archive_dir.path() / (seg_name + ".meta");
+    std::filesystem::create_directories(meta_path);
+
+    auto result = mgr.archive_segment(completed.segment_id, completed.last_lsn);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::IO_ERROR);
+
+    // The copied segment must have been removed so a retry can re-archive it.
+    EXPECT_FALSE(mgr.get_archived_segment(completed.segment_id).has_value());
+
+    ASSERT_TRUE(writer.close().has_value());
+}
+
 TEST(WalArchiveManager, ArchiveSegmentVerifiesChecksum) {
     TempWalDir wal_dir;
     TempArchiveDir archive_dir;
