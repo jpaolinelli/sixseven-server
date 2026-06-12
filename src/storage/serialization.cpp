@@ -301,7 +301,7 @@ Result<Value> deserialize(std::span<const uint8_t> data, TypeId type_id) {
             break;
         }
         uint32_t len = read_le<uint32_t>(p);
-        if (!check_size(4 + len)) {
+        if (!check_size(size_t{4} + len)) {
             break;
         }
         return ok(Value(std::string(reinterpret_cast<const char*>(p + 4), len)));
@@ -311,7 +311,7 @@ Result<Value> deserialize(std::span<const uint8_t> data, TypeId type_id) {
             break;
         }
         uint32_t len = read_le<uint32_t>(p);
-        if (!check_size(4 + len)) {
+        if (!check_size(size_t{4} + len)) {
             break;
         }
         return ok(Value(Blob(p + 4, p + 4 + len)));
@@ -357,7 +357,7 @@ Result<Value> deserialize(std::span<const uint8_t> data, TypeId type_id) {
             break;
         }
         uint32_t len = read_le<uint32_t>(p);
-        if (!check_size(4 + len)) {
+        if (!check_size(size_t{4} + len)) {
             break;
         }
         return ok(Value(JsonString{std::string(reinterpret_cast<const char*>(p + 4), len)}));

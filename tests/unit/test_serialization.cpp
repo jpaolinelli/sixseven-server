@@ -303,6 +303,120 @@ TEST(Serialization, DeserializeTruncatedData) {
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
+// -- GDB-760: Integer overflow in length checks --------------------------------
+// These tests craft malicious byte buffers with length prefixes that would
+// cause uint32 wraparound in the pre-fix "4 + len" expression.  Post-fix the
+// check must be performed in size_t, so all three cases must return a clean
+// INVALID_ARGUMENT error rather than crash / OOB read.
+
+// Helper: build a buffer with null-flag=0x01, 4-byte LE length prefix, and
+// 'payload_bytes' of actual data following.
+static std::vector<uint8_t> make_var_buf(uint32_t len_prefix, size_t payload_bytes) {
+    std::vector<uint8_t> buf;
+    buf.push_back(0x01); // non-null flag
+    // Write len_prefix in little-endian
+    buf.push_back(static_cast<uint8_t>(len_prefix & 0xFF));
+    buf.push_back(static_cast<uint8_t>((len_prefix >> 8) & 0xFF));
+    buf.push_back(static_cast<uint8_t>((len_prefix >> 16) & 0xFF));
+    buf.push_back(static_cast<uint8_t>((len_prefix >> 24) & 0xFF));
+    for (size_t i = 0; i < payload_bytes; ++i) {
+        buf.push_back(static_cast<uint8_t>(i & 0xFF));
+    }
+    return buf;
+}
+
+// STRING: len = 0xFFFFFFFD (would wrap to 1 with 4+len in uint32)
+TEST(Serialization, GDB760_StringOverflowLenReturnsError) {
+    auto buf = make_var_buf(0xFFFFFFFDU, 4); // only 4 real bytes, not ~4GB
+    auto result = deserialize(buf, TypeId::STRING);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+// STRING: len = 0xFFFFFFFC (4 + 0xFFFFFFFC == 0 in uint32, wraps to 0)
+TEST(Serialization, GDB760_StringOverflowLenFffc_ReturnsError) {
+    auto buf = make_var_buf(0xFFFFFFFCU, 4);
+    auto result = deserialize(buf, TypeId::STRING);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+// BLOB: len = 0xFFFFFFFD
+TEST(Serialization, GDB760_BlobOverflowLenReturnsError) {
+    auto buf = make_var_buf(0xFFFFFFFDU, 4);
+    auto result = deserialize(buf, TypeId::BLOB);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+// BLOB: len = 0xFFFFFFFC
+TEST(Serialization, GDB760_BlobOverflowLenFffc_ReturnsError) {
+    auto buf = make_var_buf(0xFFFFFFFCU, 4);
+    auto result = deserialize(buf, TypeId::BLOB);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+// JSON: len = 0xFFFFFFFD
+TEST(Serialization, GDB760_JsonOverflowLenReturnsError) {
+    auto buf = make_var_buf(0xFFFFFFFDU, 4);
+    auto result = deserialize(buf, TypeId::JSON);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+// JSON: len = 0xFFFFFFFC
+TEST(Serialization, GDB760_JsonOverflowLenFffc_ReturnsError) {
+    auto buf = make_var_buf(0xFFFFFFFCU, 4);
+    auto result = deserialize(buf, TypeId::JSON);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+// Plain too-large (no overflow): len = buffer_remaining + 1 (e.g., len=10 but only 3 bytes follow)
+TEST(Serialization, GDB760_StringPlainTooLargeReturnsError) {
+    auto buf = make_var_buf(10U, 3); // claims 10 bytes, only 3 present
+    auto result = deserialize(buf, TypeId::STRING);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST(Serialization, GDB760_BlobPlainTooLargeReturnsError) {
+    auto buf = make_var_buf(10U, 3);
+    auto result = deserialize(buf, TypeId::BLOB);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST(Serialization, GDB760_JsonPlainTooLargeReturnsError) {
+    auto buf = make_var_buf(10U, 3);
+    auto result = deserialize(buf, TypeId::JSON);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+// Exactly fitting: len matches payload bytes — valid round-trips still work.
+TEST(Serialization, GDB760_StringExactFitRoundTrip) {
+    auto buf = make_var_buf(5U, 5); // exactly 5 bytes
+    auto result = deserialize(buf, TypeId::STRING);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->as_string().size(), 5u);
+}
+
+TEST(Serialization, GDB760_BlobExactFitRoundTrip) {
+    auto buf = make_var_buf(5U, 5);
+    auto result = deserialize(buf, TypeId::BLOB);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->as_blob().size(), 5u);
+}
+
+TEST(Serialization, GDB760_JsonExactFitRoundTrip) {
+    auto buf = make_var_buf(2U, 2); // "{}" – 2 bytes, valid JSON content size-wise
+    auto result = deserialize(buf, TypeId::JSON);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->as_json().data.size(), 2u);
+}
+
 // -- Little-endian encoding verification --------------------------------------
 
 TEST(Serialization, LittleEndianEncoding) {
