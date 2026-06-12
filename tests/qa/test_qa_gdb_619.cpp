@@ -31,9 +31,9 @@ class GDB619_BufferPool : public ::testing::Test {
 protected:
     void SetUp() override {
         const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
-        temp_dir_ = std::filesystem::temp_directory_path() /
-                    ("sixseven_qa_gdb619_" + std::string(info->test_suite_name()) + "_" +
-                     info->name());
+        temp_dir_ =
+            std::filesystem::temp_directory_path() /
+            ("sixseven_qa_gdb619_" + std::string(info->test_suite_name()) + "_" + info->name());
         std::filesystem::create_directories(temp_dir_);
 
         auto create_result = dm_.create_file(temp_dir_ / "test.gdb");
@@ -110,16 +110,15 @@ TEST_F(GDB619_BufferPool, ConcurrentAccessDifferentPagesNotSerialized) {
     // With fine-grained locking, parallel should not take 2x as long as single-threaded.
     // If fully serialized, parallel would take roughly the same time as single (same total work).
     // We use a very generous threshold to avoid flake from thread overhead / scheduling.
-    auto single_us =
-        std::chrono::duration_cast<std::chrono::microseconds>(single_elapsed).count();
+    auto single_us = std::chrono::duration_cast<std::chrono::microseconds>(single_elapsed).count();
     auto parallel_us =
         std::chrono::duration_cast<std::chrono::microseconds>(parallel_elapsed).count();
 
     // Only assert if single_us is meaningful (> 5ms) to avoid noise on fast machines.
     if (single_us > 5000) {
         EXPECT_LT(parallel_us, single_us * 2)
-            << "Parallel (" << parallel_us << "us) took more than 2x single-threaded ("
-            << single_us << "us) — severe serialization";
+            << "Parallel (" << parallel_us << "us) took more than 2x single-threaded (" << single_us
+            << "us) — severe serialization";
     }
 }
 
@@ -213,8 +212,8 @@ TEST_F(GDB619_BufferPool, NoDeadlockConcurrentInsertSelect) {
     // SELECT threads: fetch existing page, read, unpin clean.
     auto selector = [&](uint32_t seed) {
         std::mt19937 rng(seed);
-        std::uniform_int_distribution<uint32_t> dist(0,
-                                                     static_cast<uint32_t>(existing_pages.size()) - 1);
+        std::uniform_int_distribution<uint32_t> dist(
+            0, static_cast<uint32_t>(existing_pages.size()) - 1);
         while (!done.load(std::memory_order_relaxed)) {
             PageId pid = existing_pages[dist(rng)];
             auto page = bpm.fetch_page(pid);
@@ -277,7 +276,8 @@ TEST_F(GDB619_BufferPool, NoDeadlockConcurrentFetchDeleteNew) {
                 PageId pid;
                 {
                     std::lock_guard<std::mutex> lock(pages_mutex);
-                    if (pages.empty()) continue;
+                    if (pages.empty())
+                        continue;
                     pid = pages[rng() % pages.size()];
                 }
                 auto page = bpm.fetch_page(pid);
@@ -289,7 +289,8 @@ TEST_F(GDB619_BufferPool, NoDeadlockConcurrentFetchDeleteNew) {
                 PageId pid;
                 {
                     std::lock_guard<std::mutex> lock(pages_mutex);
-                    if (pages.empty()) continue;
+                    if (pages.empty())
+                        continue;
                     auto idx = rng() % pages.size();
                     pid = pages[idx];
                     pages.erase(pages.begin() + static_cast<long>(idx));
@@ -700,66 +701,111 @@ TEST_F(GDB619_BufferPool, StickyDirtyFlagNoDuplicateCount) {
 // =============================================================================
 
 /// Multiple writers and readers on the same page. Readers should always see
-/// a consistent state (not torn writes).
+/// a consistent state -- every byte of the tuple must carry the same fill value
+/// (either 0xAA or 0xBB). A mix of the two fill values within a single read
+/// would indicate a torn write, meaning the page latch failed to serialise
+/// concurrent mutations against reads.
+///
+/// Pattern mirrors ConcurrentEvictionDataIntegrity: writers update slot 0
+/// via Page::update_tuple() (which holds the page latch exclusively), readers
+/// call Page::get_tuple() (shared latch) and validate the payload. An
+/// errors counter accumulates any mismatch; the assertion at the end requires
+/// errors == 0.
 TEST_F(GDB619_BufferPool, ConcurrentReadWriteSamePage) {
     constexpr uint32_t pool_size = 8;
+    constexpr uint32_t tuple_len = 64;
     BufferPoolManager bpm(dm_, file_id_, pool_size);
 
     auto p = bpm.new_page();
     ASSERT_TRUE(p.has_value());
     PageId pid = (*p)->page_id();
-    // Insert initial tuple.
-    auto init_tuple = std::vector<uint8_t>(64, 0x00);
+
+    // Insert the initial tuple filled with 0xAA (the first legal state).
+    auto init_tuple = std::vector<uint8_t>(tuple_len, 0xAA);
     ASSERT_TRUE((*p)->insert_tuple(init_tuple).has_value());
     ASSERT_TRUE(bpm.unpin_page(pid, true).has_value());
 
     std::atomic<bool> done{false};
     std::atomic<uint64_t> reads{0};
     std::atomic<uint64_t> writes{0};
+    std::atomic<uint64_t> errors{0};
 
-    // Writer thread: fetch, modify, unpin dirty.
-    auto writer = [&]() {
+    // Writer: alternates the tuple between two self-consistent patterns.
+    // Page::update_tuple() holds the page latch exclusively so no reader can
+    // see a partially-written buffer.
+    auto writer = [&](uint8_t start_fill) {
+        uint8_t fill = start_fill;
         while (!done.load(std::memory_order_relaxed)) {
             auto page = bpm.fetch_page(pid);
             if (page.has_value()) {
-                // Touch the page to simulate a write — the fetch/unpin cycle
-                // is the concurrency-relevant operation under test.
-                (void)bpm.unpin_page(pid, true);
+                auto new_data = std::vector<uint8_t>(tuple_len, fill);
+                // update_tuple takes the page latch exclusively.
+                (void)(*page)->update_tuple(0, new_data);
+                (void)bpm.unpin_page(pid, /*is_dirty=*/true);
                 writes.fetch_add(1, std::memory_order_relaxed);
             }
+            // Alternate between 0xAA and 0xBB so readers always see one of
+            // the two legal states, never a partial mix.
+            fill = (fill == 0xAA) ? 0xBB : 0xAA;
         }
     };
 
-    // Reader thread: fetch, read, unpin.
+    // Reader: verifies every byte in the tuple is the same fill value.
+    // get_tuple() holds the page latch in shared mode so the returned copy
+    // is a stable snapshot. A mix of 0xAA and 0xBB bytes within one snapshot
+    // is proof of a torn write.
     auto reader = [&]() {
         while (!done.load(std::memory_order_relaxed)) {
             auto page = bpm.fetch_page(pid);
             if (page.has_value()) {
-                // Just verify the page_id is correct — basic sanity.
-                EXPECT_EQ((*page)->page_id(), pid);
-                (void)bpm.unpin_page(pid, false);
+                auto tuple = (*page)->get_tuple(0);
+                (void)bpm.unpin_page(pid, /*is_dirty=*/false);
                 reads.fetch_add(1, std::memory_order_relaxed);
+                if (tuple.has_value() && !tuple->empty()) {
+                    uint8_t expected = (*tuple)[0];
+                    bool valid_fill = (expected == 0xAA || expected == 0xBB);
+                    bool all_same = true;
+                    for (uint8_t byte : *tuple) {
+                        if (byte != expected) {
+                            all_same = false;
+                            break;
+                        }
+                    }
+                    if (!valid_fill || !all_same) {
+                        errors.fetch_add(1, std::memory_order_relaxed);
+                    }
+                }
             }
         }
     };
 
     std::vector<std::thread> threads;
-    threads.emplace_back(writer);
-    for (uint32_t i = 0; i < 3; ++i) {
+    // Two writers alternating between 0xAA and 0xBB to maximise write
+    // pressure while keeping the set of legal states bounded.
+    threads.emplace_back(writer, uint8_t{0xAA});
+    threads.emplace_back(writer, uint8_t{0xBB});
+    for (uint32_t i = 0; i < 4; ++i) {
         threads.emplace_back(reader);
     }
 
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    // Drive by iteration count rather than wall-clock time for determinism.
+    while (writes.load(std::memory_order_relaxed) < 200 &&
+           reads.load(std::memory_order_relaxed) < 1000) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
     done.store(true, std::memory_order_relaxed);
 
     for (auto& th : threads) {
         th.join();
     }
 
-    EXPECT_GT(reads.load(), 0u);
-    EXPECT_GT(writes.load(), 0u);
+    EXPECT_GT(reads.load(), 0u) << "No reads completed -- possible deadlock";
+    EXPECT_GT(writes.load(), 0u) << "No writes completed -- possible deadlock";
+    EXPECT_EQ(errors.load(), 0u)
+        << "Torn write detected: reader saw mixed fill bytes within a single "
+           "tuple read, meaning the page latch did not serialise reads against "
+           "concurrent updates";
 }
-
 /// Concurrent flush_all from multiple threads should not corrupt data or crash.
 TEST_F(GDB619_BufferPool, ConcurrentFlushAll) {
     constexpr uint32_t pool_size = 16;
