@@ -141,6 +141,12 @@ TEST_F(QA_GDB613, AC2_DefaultPoolSizeConstant) {
 /// Verify StorageManager default pool_size parameter is 256 (the old default).
 /// After GDB-613, the caller (main.cpp) passes the correct value, but the
 /// StorageManager default argument remains 256 as a fallback.
+///
+/// Strengthened (GDB-766): keep all 256 pages pinned simultaneously so the
+/// test fails if the default were smaller than 256. A pool of N < 256 frames
+/// would exhaust frames before the loop reaches 256 (no frames are evictable
+/// while all are pinned), causing an allocation failure. pool_page_count()
+/// then confirms the full 256-frame capacity is present.
 TEST_F(QA_GDB613, AC2_StorageManagerDefaultArg) {
     // Construct without explicit pool_size — should use default 256.
     StorageManager sm(dm_, data_dir_);
@@ -152,11 +158,27 @@ TEST_F(QA_GDB613, AC2_StorageManagerDefaultArg) {
     auto ts = sm.get_table_storage(1);
     ASSERT_TRUE(ts.has_value());
 
-    // The default StorageManager pool_size is 256 frames. Allocate 256 pages.
+    // Allocate all 256 pages and keep them PINNED (no unpin in the loop).
+    // A pool with fewer than 256 frames would fail before completing 256
+    // allocations because no frame is evictable while all are pinned.
+    std::vector<PageId> pinned;
+    pinned.reserve(256);
     for (uint32_t i = 0; i < 256; ++i) {
         auto page = (*ts)->bpm->new_page();
         ASSERT_TRUE(page.has_value()) << "Failed at page " << i << ": " << page.error().message;
-        ASSERT_TRUE((*ts)->bpm->unpin_page((*page)->page_id(), false).has_value());
+        pinned.push_back((*page)->page_id());
+    }
+
+    // All 256 frames occupied — pool_page_count must equal the default.
+    EXPECT_EQ((*ts)->bpm->pool_page_count(), 256u);
+
+    // A 257th allocation must fail: all frames are pinned, none evictable.
+    auto overflow = (*ts)->bpm->new_page();
+    EXPECT_FALSE(overflow.has_value()) << "Pool should be full with 256 pinned pages";
+
+    // Cleanup: unpin all pages.
+    for (auto pid : pinned) {
+        ASSERT_TRUE((*ts)->bpm->unpin_page(pid, false).has_value());
     }
 }
 
