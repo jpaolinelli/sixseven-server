@@ -625,9 +625,9 @@ Result<TypeSpec> Parser::parse_type_spec() {
 
     if (!is_type_keyword(peek().type)) {
         const auto& tok = peek();
-        return make_error(StatusCode::PARSE_ERROR,
-                          "expected type name at line " + std::to_string(tok.line) + ", column " +
-                              std::to_string(tok.column));
+        return make_parse_error("expected type name at line " + std::to_string(tok.line) +
+                                    ", column " + std::to_string(tok.column),
+                                tok.byte_offset);
     }
 
     ts.name = std::string(advance().lexeme);

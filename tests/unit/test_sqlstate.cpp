@@ -161,7 +161,8 @@ TEST(ParseErrorPosition, ParserErrorMidQuery) {
 }
 
 TEST(ParseErrorPosition, ParserErrorNearEnd) {
-    // "SELECT id FROM" — missing table name at EOF (offset = len+1 or last token).
+    // "SELECT id FROM" — missing table name at EOF.
+    // sql.size() = 14, so EOF byte_offset must equal 15 (one past last byte, 1-based).
     std::string sql = "SELECT id FROM";
     Lexer lex(sql);
     auto tokens_result = lex.tokenize();
@@ -173,9 +174,8 @@ TEST(ParseErrorPosition, ParserErrorNearEnd) {
     EXPECT_EQ(stmt.error().code, StatusCode::PARSE_ERROR);
     ASSERT_TRUE(stmt.error().query_pos.has_value());
     uint32_t pos = *stmt.error().query_pos;
-    EXPECT_GE(pos, 1u);
-    // Position must be within or just past query string.
-    EXPECT_LE(pos, static_cast<uint32_t>(sql.size() + 1));
+    // EOF token byte_offset = source_.size()+1 = 15. Exact match required.
+    EXPECT_EQ(pos, static_cast<uint32_t>(sql.size() + 1));
 }
 
 // ---------------------------------------------------------------------------
@@ -194,4 +194,31 @@ TEST(MakeParseError, SetsQueryPos) {
 TEST(MakeParseError, MakeErrorDoesNotSetQueryPos) {
     auto unexpected = make_error(StatusCode::PARSE_ERROR, "plain error");
     EXPECT_FALSE(unexpected.value().query_pos.has_value());
+}
+
+// ---------------------------------------------------------------------------
+// Test: parse_type_spec error carries position of the bad type token
+// ---------------------------------------------------------------------------
+
+TEST(ParseErrorPosition, TypeSpecErrorCarriesPosition) {
+    // "CREATE TABLE t (c BOGUSTYPE)" — BOGUSTYPE is not a valid type keyword.
+    // Byte offsets (1-based):
+    // C(1)R(2)E(3)A(4)T(5)E(6) (7)T(8)A(9)B(10)L(11)E(12) (13)t(14) (15)((16)c(17) (18)B(19)...
+    // "BOGUSTYPE" starts at byte 19.
+    std::string sql = "CREATE TABLE t (c BOGUSTYPE)";
+    Lexer lex(sql);
+    auto tokens_result = lex.tokenize();
+    ASSERT_TRUE(tokens_result.has_value()) << tokens_result.error().message;
+
+    Parser parser(std::move(*tokens_result));
+    auto stmt = parser.parse();
+    ASSERT_FALSE(stmt.has_value());
+    EXPECT_EQ(stmt.error().code, StatusCode::PARSE_ERROR);
+    ASSERT_TRUE(stmt.error().query_pos.has_value())
+        << "parse_type_spec PARSE_ERROR must carry a query_pos";
+    uint32_t pos = *stmt.error().query_pos;
+    EXPECT_GE(pos, 1u);
+    EXPECT_LE(pos, static_cast<uint32_t>(sql.size()));
+    // "BOGUSTYPE" starts at byte 19 in the query string.
+    EXPECT_EQ(pos, 19u);
 }

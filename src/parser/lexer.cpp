@@ -192,7 +192,8 @@ Result<std::vector<Token>> Lexer::tokenize() {
         }
 
         if (at_end()) {
-            tokens.push_back(Token{TokenType::END_OF_FILE, {}, line_, column_});
+            tokens.push_back(Token{TokenType::END_OF_FILE, {}, line_, column_,
+                                   static_cast<uint32_t>(source_.size() + 1)});
             break;
         }
 
