@@ -778,41 +778,102 @@ TEST_F(QA_GDB422_Executor, AC9_NonQuantifiedSingleHop) {
 
 // ============================================================================
 // Binder validation tests
+//
+// Each test builds a minimal Catalog (one database + node tables + edge type)
+// so that the Binder reaches the quantifier-validation block at
+// binder.cpp:619-638 and returns the expected INVALID_ARGUMENT error.
 // ============================================================================
 
-TEST(QA_GDB422_Binder, RejectsZeroZero) {
-    // {0,0} should be rejected by the binder.
-    Lexer lexer("SELECT a.name FROM MATCH (a:persons)-[r:knows]->{0}(b:persons)");
-    auto tokens = lexer.tokenize();
-    ASSERT_TRUE(tokens.has_value());
+/// Register one table with a single INT64 'id' column.
+static table_id_t
+register_node_table_422(Catalog& cat, database_id_t db_id, const std::string& name) {
+    TableSchema ts;
+    ts.name = name;
+    CatalogColumnDef col;
+    col.ordinal = 0;
+    col.name = "id";
+    col.type_id = TypeId::INT64;
+    col.nullable = false;
+    ts.columns.push_back(col);
+    ts.pk_columns = "id";
+    auto tid = cat.create_table(db_id, std::move(ts));
+    if (!tid)
+        return table_id_t{};
+    return *tid;
+}
 
+/// Register an edge type between two node tables.
+static void register_edge_422(
+    Catalog& cat, database_id_t db_id, const std::string& name, table_id_t src, table_id_t tgt) {
+    EdgeTypeDef def;
+    def.name = name;
+    def.database_id = db_id;
+    def.source_table_id = src;
+    def.target_table_id = tgt;
+    (void)cat.create_edge_type(db_id, std::move(def));
+}
+
+TEST(QA_GDB422_Binder, RejectsZeroZero) {
+    // {0,0} must be rejected by the Binder with INVALID_ARGUMENT.
+    // Previously this test only exercised the parser and never called the Binder.
+    Catalog cat;
+    auto db_id_result = cat.create_database("testdb_gdb422_zz");
+    ASSERT_TRUE(db_id_result.has_value()) << db_id_result.error().message;
+    database_id_t db_id = *db_id_result;
+
+    auto persons_id = register_node_table_422(cat, db_id, "persons");
+    ASSERT_NE(persons_id, table_id_t{});
+    register_edge_422(cat, db_id, "knows", persons_id, persons_id);
+
+    // {0} sets min_hops=0, max_hops=0 in the parser output.
+    const std::string sql = "SELECT a.name FROM MATCH (a:persons)-[r:knows]->{0}(b:persons)";
+    Lexer lexer(sql);
+    auto tokens = lexer.tokenize();
+    ASSERT_TRUE(tokens.has_value()) << tokens.error().message;
     Parser parser(std::move(*tokens));
     auto stmts = parser.parse_all();
-    ASSERT_TRUE(stmts.has_value());
+    ASSERT_TRUE(stmts.has_value()) << stmts.error().message;
     ASSERT_EQ(stmts->size(), 1u);
 
-    auto* sel = dynamic_cast<SelectStmt*>((*stmts)[0].get());
-    ASSERT_NE(sel, nullptr);
-    auto* match = dynamic_cast<MatchStmt*>(sel->from[0].match_source.get());
-    ASSERT_NE(match, nullptr);
+    Binder binder(cat, db_id);
+    auto bound = binder.bind(*stmts->front());
 
-    // Verify the parser set {0,0}.
-    const auto& edge = match->pattern[0].outgoing_edge;
-    ASSERT_TRUE(edge.has_value());
-    EXPECT_EQ(*edge->min_hops, 0);
-    EXPECT_EQ(*edge->max_hops, 0);
+    ASSERT_FALSE(bound.has_value()) << "Binder should have rejected {0,0} but returned success";
+    EXPECT_EQ(bound.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_NE(bound.error().message.find("zero hops"), std::string::npos)
+        << "Expected 'zero hops' in error message, got: " << bound.error().message;
 }
 
 TEST(QA_GDB422_Binder, RejectsMaxLessThanMin) {
-    // The parser allows {5,2} but the binder should reject it.
-    auto stmt = parse_one("SELECT a.name FROM MATCH (a:p)-[r:e]->{5,2}(b:p)");
-    auto* m = match_from_select(stmt);
-    ASSERT_NE(m, nullptr);
-    const auto& edge = m->pattern[0].outgoing_edge;
-    ASSERT_TRUE(edge.has_value());
-    EXPECT_EQ(*edge->min_hops, 5);
-    EXPECT_EQ(*edge->max_hops, 2);
-    // Parser accepts it; binder would reject at bind time.
+    // {5,2} must be rejected by the Binder (max_hops < min_hops).
+    // Previously this test only exercised the parser and never called the Binder.
+    Catalog cat;
+    auto db_id_result = cat.create_database("testdb_gdb422_mm");
+    ASSERT_TRUE(db_id_result.has_value()) << db_id_result.error().message;
+    database_id_t db_id = *db_id_result;
+
+    auto p_id = register_node_table_422(cat, db_id, "p");
+    ASSERT_NE(p_id, table_id_t{});
+    register_edge_422(cat, db_id, "e", p_id, p_id);
+
+    const std::string sql = "SELECT a.name FROM MATCH (a:p)-[r:e]->{5,2}(b:p)";
+    Lexer lexer(sql);
+    auto tokens = lexer.tokenize();
+    ASSERT_TRUE(tokens.has_value()) << tokens.error().message;
+    Parser parser(std::move(*tokens));
+    auto stmts = parser.parse_all();
+    ASSERT_TRUE(stmts.has_value()) << stmts.error().message;
+    ASSERT_EQ(stmts->size(), 1u);
+
+    Binder binder(cat, db_id);
+    auto bound = binder.bind(*stmts->front());
+
+    ASSERT_FALSE(bound.has_value()) << "Binder should have rejected {5,2} but returned success";
+    EXPECT_EQ(bound.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_NE(bound.error().message.find("max_hops"), std::string::npos)
+        << "Expected 'max_hops' in error message, got: " << bound.error().message;
+    EXPECT_NE(bound.error().message.find("min_hops"), std::string::npos)
+        << "Expected 'min_hops' in error message, got: " << bound.error().message;
 }
 
 // ============================================================================
