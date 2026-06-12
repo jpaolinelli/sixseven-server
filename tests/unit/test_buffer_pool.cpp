@@ -1,8 +1,7 @@
+#include "sixseven/common/platform.h"
 #include "sixseven/storage/buffer_pool.h"
 
 #include <gtest/gtest.h>
-
-#include "sixseven/common/platform.h"
 
 #include <fcntl.h>
 
@@ -1402,9 +1401,7 @@ struct RefReplacer {
         }
     }
 
-    void set_evictable(FrameId frame_id, bool evictable) {
-        frames[frame_id].evictable = evictable;
-    }
+    void set_evictable(FrameId frame_id, bool evictable) { frames[frame_id].evictable = evictable; }
 
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     std::optional<FrameId> evict() {
@@ -1786,4 +1783,36 @@ TEST_F(BufferPoolTest, ConcurrentStressWithFlusher) {
 
     EXPECT_FALSE(failed.load());
     EXPECT_EQ(completed.load(), num_threads);
+}
+
+// GDB-778: page-write failures in flush_dirty_pages and the destructor are
+// logged and counted instead of silently swallowed.
+TEST_F(BufferPoolTest, FlushDirtyPagesCountsWriteFailures) {
+    BufferPoolManager bpm(dm_, file_id_, 4);
+
+    auto page = bpm.new_page();
+    ASSERT_TRUE(page.has_value());
+    ASSERT_TRUE(bpm.unpin_page((*page)->page_id(), true).has_value());
+    EXPECT_EQ(bpm.flush_error_count(), 0u);
+
+    // Close the backing file out from under the pool so the next write fails.
+    ASSERT_TRUE(dm_.close_file(file_id_).has_value());
+
+    // Drive the real background flusher and wait (bounded) for it to hit the
+    // write failure at least once.
+    ASSERT_TRUE(bpm.start_flusher(std::chrono::milliseconds(1)).has_value());
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (bpm.flush_error_count() == 0 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    bpm.stop_flusher();
+
+    EXPECT_GE(bpm.flush_error_count(), 1u);
+    // The page must stay dirty so a later (healthy) flush can retry it.
+    EXPECT_EQ(bpm.dirty_count(), 1u);
+
+    // Reopen so the destructor flush and TearDown behave.
+    auto reopened = dm_.open_file(test_file());
+    ASSERT_TRUE(reopened.has_value());
+    file_id_ = *reopened;
 }

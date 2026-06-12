@@ -1,5 +1,6 @@
 #include "sixseven/storage/buffer_pool.h"
 
+#include "sixseven/common/logging.h"
 #include "sixseven/common/platform.h"
 
 #include <algorithm>
@@ -144,7 +145,13 @@ BufferPoolManager::~BufferPoolManager() {
         for (auto& [page_id, frame_id] : shard.map) {
             Frame& frame = frames_[frame_id];
             if (frame.is_dirty.load(std::memory_order_relaxed)) {
-                (void)write_page_impl(frame.page_id, frame.page);
+                auto result = write_page_impl(frame.page_id, frame.page);
+                if (!result) {
+                    flush_errors_.fetch_add(1, std::memory_order_relaxed);
+                    SIXSEVEN_LOG_ERROR("final flush failed for page {}: {}",
+                                       frame.page_id,
+                                       result.error().message);
+                }
             }
         }
     }
@@ -631,6 +638,11 @@ void BufferPoolManager::flush_dirty_pages(bool include_pinned) {
                 if (result) {
                     frame.is_dirty.store(false, std::memory_order_relaxed);
                     dirty_count_.fetch_sub(1, std::memory_order_relaxed);
+                } else {
+                    flush_errors_.fetch_add(1, std::memory_order_relaxed);
+                    SIXSEVEN_LOG_ERROR("background flush failed for page {}: {}",
+                                       frame.page_id,
+                                       result.error().message);
                 }
             }
         }
