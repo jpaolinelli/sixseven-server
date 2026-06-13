@@ -6,7 +6,9 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <future>
 #include <memory>
+#include <thread>
 
 using namespace sixseven;
 
@@ -212,4 +214,81 @@ TEST_F(HashPersistenceTest, InsertAfterLoad) {
     auto s = (*loaded)->search({Value(int32_t(6))});
     ASSERT_TRUE(s.has_value());
     ASSERT_TRUE(s->has_value());
+}
+
+// =============================================================================
+// GDB-794: Thread safety - persist while inserting does not cause data races
+// =============================================================================
+
+TEST_F(HashPersistenceTest, ConcurrentPersistWhileInserting) {
+    HashIndexConfig config;
+    config.key_types = {TypeId::INT32};
+    config.is_unique = true;
+    config.bucket_capacity = 64; // Larger to prevent meta page overflow.
+    auto index = std::make_shared<HashIndex>(std::move(config));
+
+    // Pre-populate with modest data.
+    for (int32_t i = 1; i <= 20; ++i) {
+        auto r = index->insert({Value(i)}, RID{static_cast<PageId>(i), 0});
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+    }
+
+    auto [fid, bpm] = create_bpm("concurrent_hash");
+
+    std::atomic<bool> stop{false};
+    std::atomic<int> insert_count{0};
+    std::atomic<int> persist_count{0};
+    std::atomic<bool> error_flag{false};
+
+    // Writer thread: insert new keys only (not duplicates since is_unique=true).
+    auto writer = std::async(std::launch::async, [&]() {
+        int32_t idx = 100;
+        while (!stop.load() && idx < 200) { // Limit total insertions.
+            auto r = index->insert({Value(idx)}, RID{static_cast<PageId>(idx), 0});
+            if (r.has_value()) {
+                ++insert_count;
+            } else if (r.error().code != StatusCode::CONSTRAINT_VIOLATION) {
+                error_flag = true;
+            }
+            ++idx;
+        }
+    });
+
+    // Persist thread: periodically persists.
+    auto persister = std::async(std::launch::async, [&]() {
+        int count = 0;
+        while (!stop.load() && count < 5) { // Limit persist calls.
+            auto meta = HashPersistence::persist(*bpm, *index);
+            if (meta.has_value()) {
+                ++persist_count;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            ++count;
+        }
+    });
+
+    // Run for bounded time.
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    stop = true;
+
+    writer.get();
+    persister.get();
+
+    EXPECT_FALSE(error_flag) << "Insert encountered unexpected error";
+    EXPECT_GT(insert_count, 0) << "Writer should have made progress";
+    EXPECT_GT(persist_count, 0) << "Persister should have made progress";
+
+    // Final persist - should succeed with smaller index.
+    auto final_meta = HashPersistence::persist(*bpm, *index);
+    ASSERT_TRUE(final_meta.has_value()) << final_meta.error().message;
+
+    bpm.reset();
+    (void)dm_->close_file(fid);
+
+    // Load and verify.
+    auto [fid2, bpm2] = open_bpm("concurrent_hash");
+    auto loaded = HashPersistence::load(*bpm2, *final_meta);
+    ASSERT_TRUE(loaded.has_value()) << loaded.error().message;
+
+    EXPECT_GE((*loaded)->size(), 20u) << "Should have at least pre-populated entries";
 }
