@@ -1273,22 +1273,45 @@ Planner::plan_select(const SelectStmt& stmt,
             std::string table_name;
             bool is_base;
             JoinType join_type; ///< INNER for the base table.
+            bool is_nullable;   ///< EFFECTIVE nullability of this input's rows.
             TableSchema schema; ///< owned copy — catalog returns by value.
         };
         std::vector<CandidateTable> candidates;
         {
+            // The base (left-most) input is NULL-padded — and therefore nullable —
+            // when any join in the statement is RIGHT or FULL, since those preserve
+            // the right side and null-fill unmatched base rows. INNER/LEFT/CROSS all
+            // preserve the base side. This is what makes `books b RIGHT JOIN reviews r`
+            // expose the base table `books` as the nullable side (GDB-1254): gating on
+            // is_base alone wrongly assumed the base was always preserved.
+            bool base_is_nullable = false;
+            for (const auto& jc : stmt.joins) {
+                if (jc.type == JoinType::RIGHT || jc.type == JoinType::FULL) {
+                    base_is_nullable = true;
+                    break;
+                }
+            }
             auto base_schema = catalog_.get_table(database_id_, table_ref.name);
             if (base_schema && !table_ref.subquery && !table_ref.traverse_source &&
                 !table_ref.match_source) {
-                candidates.push_back(
-                    {alias, table_ref.name, true, JoinType::INNER, std::move(*base_schema)});
+                candidates.push_back({alias,
+                                      table_ref.name,
+                                      true,
+                                      JoinType::INNER,
+                                      base_is_nullable,
+                                      std::move(*base_schema)});
             }
             for (const auto& jc : stmt.joins) {
                 const auto& jtref = jc.table;
                 const auto& jalias = jtref.alias.empty() ? jtref.name : jtref.alias;
                 auto js = catalog_.get_table(database_id_, jtref.name);
                 if (js && !jtref.subquery && !jtref.traverse_source && !jtref.match_source) {
-                    candidates.push_back({jalias, jtref.name, false, jc.type, std::move(*js)});
+                    // A joined (right) input is NULL-padded when its own join is LEFT
+                    // or FULL; RIGHT and INNER preserve it.
+                    const bool joined_is_nullable =
+                        (jc.type == JoinType::LEFT || jc.type == JoinType::FULL);
+                    candidates.push_back(
+                        {jalias, jtref.name, false, jc.type, joined_is_nullable, std::move(*js)});
                 }
             }
         }
@@ -1339,10 +1362,11 @@ Planner::plan_select(const SelectStmt& stmt,
 
         // v1: NEAREST on the nullable side of an OUTER join is rejected — the
         // scan would produce padding NULL rows that have no meaningful distance.
-        // The preserved (left) side and any INNER position are allowed. The base
-        // table is the preserved side of every LEFT join, so only a right-side
-        // owner under a non-INNER join is nullable here.
-        if (!owner->is_base && owner->join_type != JoinType::INNER) {
+        // Any preserved position (the base under INNER/LEFT, a joined table under
+        // RIGHT, etc.) is allowed. We gate on the EFFECTIVE nullability of the
+        // owning input rather than on is_base, because under a RIGHT/FULL join the
+        // base table is itself the nullable side (GDB-1254).
+        if (owner->is_nullable) {
             return make_error(
                 StatusCode::INVALID_ARGUMENT,
                 "NEAREST(...) on the nullable side of an OUTER JOIN is not supported");

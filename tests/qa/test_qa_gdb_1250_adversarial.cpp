@@ -129,9 +129,10 @@ TEST_F(QA_GDB1250_Adversarial, AliasedSelfJoinOnVectorTable) {
 // The inner derived table has the only NEAREST; the outer join must not be
 // rejected and must return the 2 nearest joined to their reviews.
 TEST_F(QA_GDB1250_Adversarial, NearestDerivedTableJoinedToOuter) {
-    auto qr = run_ok(std::string("SELECT sub.id, r.stars FROM "
-                                 "(SELECT id, _distance FROM books WHERE NEAREST(description_vec, 2) TO ") +
-                     kVec + ") sub JOIN reviews r ON sub.id = r.book_id");
+    auto qr = run_ok(
+        std::string("SELECT sub.id, r.stars FROM "
+                    "(SELECT id, _distance FROM books WHERE NEAREST(description_vec, 2) TO ") +
+        kVec + ") sub JOIN reviews r ON sub.id = r.book_id");
     EXPECT_EQ(sorted_int_col(qr, 0), (std::vector<int32_t>{1, 2}));
 }
 
@@ -196,8 +197,7 @@ TEST_F(QA_GDB1250_Adversarial, PlainJoinRejectsUnqualifiedOtherTableColumn) {
     auto result = engine_->execute("SELECT b.id FROM books b "
                                    "INNER JOIN reviews r ON r.book_id = b.id "
                                    "WHERE stars >= 4");
-    EXPECT_FALSE(result.has_value())
-        << "unexpectedly resolved unqualified cross-table column";
+    EXPECT_FALSE(result.has_value()) << "unexpectedly resolved unqualified cross-table column";
 }
 
 // ── Unqualified sibling predicate on the OTHER table under NEAREST pushdown ──
@@ -257,11 +257,9 @@ TEST_F(QA_GDB1250_Adversarial, JoinFiltersAllNearestRows) {
 // The nullable-side guard in plan_select only fires for a JOIN (right) source
 // (`!owner->is_base && join_type != INNER`); it short-circuits on the base
 // table, so a base-table owner under a RIGHT join slips through and the query
-// is accepted. This test asserts the CORRECT behavior (rejection) and is
-// expected to FAIL against the current implementation, documenting the gap.
-// DISABLED: documents open bug GDB-1254 (nullable base side of RIGHT/FULL join
-// not rejected). Re-enable when GDB-1254 is fixed.
-TEST_F(QA_GDB1250_Adversarial, DISABLED_NearestOnNullableBaseSideOfRightJoinRejected) {
+// is accepted. This test asserts the CORRECT behavior (rejection). Fixed by
+// GDB-1254, which gates on the effective nullability of the owning input.
+TEST_F(QA_GDB1250_Adversarial, NearestOnNullableBaseSideOfRightJoinRejected) {
     auto result = engine_->execute(std::string("SELECT b.id FROM books b "
                                                "RIGHT JOIN reviews r ON r.book_id = b.id "
                                                "WHERE NEAREST(b.description_vec, 2) TO ") +
@@ -282,8 +280,8 @@ TEST_F(QA_GDB1250_Adversarial, DISABLED_NearestOnNullableBaseSideOfRightJoinReje
 // NULL row that has no defined `_distance`, which is precisely why the v1
 // restriction forbids this shape. We assert the query is rejected; if it is
 // accepted, the NULL-padded orphan row is observable proof of the defect.
-// DISABLED: documents open bug GDB-1254. Re-enable when GDB-1254 is fixed.
-TEST_F(QA_GDB1250_Adversarial, DISABLED_RightJoinOrphanReviewExposesNullableSideDefect) {
+// Fixed by GDB-1254: the query is now rejected before any rows are produced.
+TEST_F(QA_GDB1250_Adversarial, RightJoinOrphanReviewExposesNullableSideDefect) {
     exec_ok("INSERT INTO reviews VALUES (60, 999, 5)");
     auto result = engine_->execute(std::string("SELECT b.id FROM books b "
                                                "RIGHT JOIN reviews r ON r.book_id = b.id "
