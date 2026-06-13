@@ -5,44 +5,7 @@
 /// Tests cover: all SELECT clauses, JOIN types, aliases, subqueries, CTEs,
 /// set operations, DISTINCT, and error paths.
 
-#include "sixseven/parser/lexer.h"
-#include "sixseven/parser/parser.h"
-
-#include <gtest/gtest.h>
-
-using namespace sixseven;
-
-// -- Helpers ------------------------------------------------------------------
-
-static std::vector<StmtPtr> parse_ok(std::string_view sql) {
-    Lexer lexer(sql);
-    auto tokens = lexer.tokenize();
-    EXPECT_TRUE(tokens.has_value()) << tokens.error().message;
-    if (!tokens)
-        return {};
-    Parser parser(std::move(*tokens));
-    auto stmts = parser.parse_all();
-    EXPECT_TRUE(stmts.has_value()) << stmts.error().message;
-    return stmts ? std::move(*stmts) : std::vector<StmtPtr>{};
-}
-
-static StmtPtr parse_one(std::string_view sql) {
-    auto stmts = parse_ok(sql);
-    EXPECT_EQ(stmts.size(), 1u);
-    if (stmts.size() != 1)
-        return nullptr;
-    return std::move(stmts[0]);
-}
-
-static void expect_parse_error(std::string_view sql) {
-    Lexer lexer(sql);
-    auto tokens = lexer.tokenize();
-    if (!tokens)
-        return;
-    Parser parser(std::move(*tokens));
-    auto stmts = parser.parse_all();
-    EXPECT_FALSE(stmts.has_value()) << "expected parse error for: " << sql;
-}
+#include "parser_qa_helpers.h"
 
 // =============================================================================
 // Basic SELECT
