@@ -14,7 +14,9 @@ namespace sixseven {
 
 namespace {
 
-void write_u8(std::vector<uint8_t>& buf, uint8_t v) { buf.push_back(v); }
+void write_u8(std::vector<uint8_t>& buf, uint8_t v) {
+    buf.push_back(v);
+}
 
 void write_u16(std::vector<uint8_t>& buf, uint16_t v) {
     buf.push_back(static_cast<uint8_t>(v));
@@ -70,8 +72,8 @@ void serialize_key(std::vector<uint8_t>& buf, const KeyType& key) {
 }
 
 /// Deserialize a composite key from bytes.
-Result<KeyType> deserialize_key(const uint8_t*& p, const uint8_t* end,
-                                const std::vector<TypeId>& key_types) {
+Result<KeyType>
+deserialize_key(const uint8_t*& p, const uint8_t* end, const std::vector<TypeId>& key_types) {
     KeyType key;
     key.reserve(key_types.size());
     for (auto type_id : key_types) {
@@ -93,8 +95,12 @@ Result<KeyType> deserialize_key(const uint8_t*& p, const uint8_t* end,
 // persist
 // ---------------------------------------------------------------------------
 
-Result<PageId> BTreePersistence::persist(BufferPoolManager& bpm,
-                                         const BTreeIndex& index) {
+Result<PageId> BTreePersistence::persist(BufferPoolManager& bpm, const BTreeIndex& index) {
+    // Acquire shared lock to ensure consistent snapshot while iterating.
+    // The index's public methods guarantee thread safety via this latch,
+    // and persist reads index internals directly as a friend class.
+    std::shared_lock lock(index.tree_latch());
+
     // Collect all leaf and internal node page IDs from the in-memory tree.
     // We store each node as a tuple on its own page in the index file.
 
@@ -161,14 +167,16 @@ Result<PageId> BTreePersistence::persist(BufferPoolManager& bpm,
         auto page_r = bpm.new_page();
         if (!page_r) {
             return make_error(page_r.error().code,
-                              "btree persist: failed to allocate leaf page: " + page_r.error().message);
+                              "btree persist: failed to allocate leaf page: " +
+                                  page_r.error().message);
         }
         auto* page = *page_r;
         page->reset(page->page_id(), PageType::BTREE_LEAF);
         auto slot = page->insert_tuple(std::span<const uint8_t>(rec.data));
         if (!slot) {
             return make_error(slot.error().code,
-                              "btree persist: leaf data too large for page: " + slot.error().message);
+                              "btree persist: leaf data too large for page: " +
+                                  slot.error().message);
         }
         leaf_disk_pages.push_back(page->page_id());
         (void)bpm.unpin_page(page->page_id(), /*is_dirty=*/true);
@@ -218,8 +226,8 @@ Result<PageId> BTreePersistence::persist(BufferPoolManager& bpm,
         header_buf.clear();
         if (!include_directory) {
             // Version 2 sentinel: first byte 0 signals multi-page format.
-            write_u8(header_buf, 0);    // sentinel
-            write_u8(header_buf, 2);    // version
+            write_u8(header_buf, 0); // sentinel
+            write_u8(header_buf, 2); // version
         }
         write_u32(header_buf, index.root_page_id_);
         write_u64(header_buf, index.size_);
@@ -328,7 +336,9 @@ Result<PageId> BTreePersistence::persist(BufferPoolManager& bpm,
     // Actually, we always write meta page last, so just return the ID.
 
     SIXSEVEN_LOG_DEBUG("btree persist: wrote {} leaf + {} internal nodes, meta page {}",
-                       leaf_records.size(), internal_records.size(), meta_page_id);
+                       leaf_records.size(),
+                       internal_records.size(),
+                       meta_page_id);
 
     return ok(meta_page_id);
 }
@@ -338,7 +348,7 @@ Result<PageId> BTreePersistence::persist(BufferPoolManager& bpm,
 // ---------------------------------------------------------------------------
 
 Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bpm,
-                                                            PageId meta_page_id) {
+                                                           PageId meta_page_id) {
     // Read meta page.
     auto meta_page_r = bpm.fetch_page(meta_page_id);
     if (!meta_page_r) {
@@ -475,7 +485,8 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
         if (!tuple_data) {
             (void)bpm.unpin_page(mapping.disk_page_id, false);
             return make_error(tuple_data.error().code,
-                              "btree load: failed to read leaf tuple: " + tuple_data.error().message);
+                              "btree load: failed to read leaf tuple: " +
+                                  tuple_data.error().message);
         }
 
         const uint8_t* lp = tuple_data->data();
@@ -558,7 +569,9 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
     }
 
     SIXSEVEN_LOG_DEBUG("btree load: restored {} leaf + {} internal nodes, size {}",
-                       leaf_count, internal_count, tree_size);
+                       leaf_count,
+                       internal_count,
+                       tree_size);
 
     return ok(std::move(index));
 }

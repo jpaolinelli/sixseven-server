@@ -6,7 +6,9 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <future>
 #include <memory>
+#include <thread>
 
 using namespace sixseven;
 
@@ -230,4 +232,92 @@ TEST_F(BTreePersistenceTest, InsertAfterLoad) {
     auto s = (*loaded)->search({Value(int32_t(6))});
     ASSERT_TRUE(s.has_value());
     ASSERT_TRUE(s->has_value());
+}
+
+// =============================================================================
+// GDB-794: Thread safety - persist while inserting does not cause data races
+// =============================================================================
+
+TEST_F(BTreePersistenceTest, ConcurrentPersistWhileInserting) {
+    BTreeConfig config;
+    config.key_types = {TypeId::INT32};
+    config.is_unique = true;
+    // Use small leaf_max_keys to encourage splits during concurrent access.
+    config.leaf_max_keys = 4;
+    config.internal_max_keys = 4;
+    auto index = std::make_shared<BTreeIndex>(std::move(config));
+
+    // Pre-populate with some data.
+    for (int32_t i = 1; i <= 50; ++i) {
+        auto r = index->insert({Value(i)}, RID{static_cast<PageId>(i), 0});
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+    }
+
+    // Set up storage.
+    auto [fid, bpm] = create_bpm("concurrent_btree");
+
+    std::atomic<bool> stop{false};
+    std::atomic<int> insert_count{0};
+    std::atomic<int> persist_count{0};
+    std::atomic<bool> error_flag{false};
+
+    // Writer thread: continuously inserts.
+    auto writer = std::async(std::launch::async, [&]() {
+        int32_t idx = 100;
+        while (!stop.load()) {
+            auto r = index->insert({Value(idx)}, RID{static_cast<PageId>(idx), 0});
+            if (r.has_value()) {
+                ++insert_count;
+            } else if (r.error().code != StatusCode::CONSTRAINT_VIOLATION) {
+                // Ignore duplicates (is_unique=false would be different).
+                error_flag = true;
+            }
+            ++idx;
+        }
+    });
+
+    // Persist thread: continuously persists.
+    auto persister = std::async(std::launch::async, [&]() {
+        while (!stop.load()) {
+            auto meta = BTreePersistence::persist(*bpm, *index);
+            if (!meta.has_value()) {
+                // Persist can fail if the buffer pool fails, but it shouldn't
+                // crash or encounter data races.
+                // We just track that we tried.
+            }
+            ++persist_count;
+            // Small sleep to allow writer to make progress.
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+
+    // Run for a bounded time.
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    stop = true;
+
+    writer.get();
+    persister.get();
+
+    // If there were data races, we would likely see ASan violations or crashes.
+    // The test passes if we reach here without crashing.
+    EXPECT_FALSE(error_flag) << "Insert encountered unexpected error";
+    EXPECT_GT(insert_count, 0) << "Writer should have made some progress";
+    EXPECT_GT(persist_count, 0) << "Persister should have made some progress";
+
+    // Final persist to verify index is still consistent.
+    auto final_meta = BTreePersistence::persist(*bpm, *index);
+    ASSERT_TRUE(final_meta.has_value()) << final_meta.error().message;
+
+    bpm.reset();
+    (void)dm_->close_file(fid);
+
+    // Load and verify data integrity.
+    auto [fid2, bpm2] = open_bpm("concurrent_btree");
+    auto loaded = BTreePersistence::load(*bpm2, *final_meta);
+    ASSERT_TRUE(loaded.has_value()) << loaded.error().message;
+
+    // All entries that were inserted should be retrievable.
+    // Note: exact count may vary due to concurrent inserts, but loaded tree
+    // should be in a consistent state (no corruption).
+    EXPECT_GE((*loaded)->size(), 50u) << "Should have at least pre-populated entries";
 }

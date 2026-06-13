@@ -15,7 +15,9 @@ namespace sixseven {
 
 namespace {
 
-void write_u8(std::vector<uint8_t>& buf, uint8_t v) { buf.push_back(v); }
+void write_u8(std::vector<uint8_t>& buf, uint8_t v) {
+    buf.push_back(v);
+}
 
 void write_u16(std::vector<uint8_t>& buf, uint16_t v) {
     buf.push_back(static_cast<uint8_t>(v));
@@ -69,8 +71,8 @@ void serialize_key(std::vector<uint8_t>& buf, const KeyType& key) {
     }
 }
 
-Result<KeyType> deserialize_key(const uint8_t*& p, const uint8_t* end,
-                                const std::vector<TypeId>& key_types) {
+Result<KeyType>
+deserialize_key(const uint8_t*& p, const uint8_t* end, const std::vector<TypeId>& key_types) {
     KeyType key;
     key.reserve(key_types.size());
     for (auto type_id : key_types) {
@@ -93,6 +95,11 @@ Result<KeyType> deserialize_key(const uint8_t*& p, const uint8_t* end,
 // ---------------------------------------------------------------------------
 
 Result<PageId> HashPersistence::persist(BufferPoolManager& bpm, const HashIndex& index) {
+    // Acquire shared lock to ensure consistent snapshot while iterating.
+    // The index's public methods guarantee thread safety via this latch,
+    // and persist reads index internals directly as a friend class.
+    std::shared_lock lock(index.index_latch_);
+
     // Deduplicate buckets: multiple directory slots can point to the same bucket.
     // Map unique bucket pointer → sequential ID.
     std::unordered_map<const HashBucket*, uint32_t> bucket_ids;
@@ -184,7 +191,9 @@ Result<PageId> HashPersistence::persist(BufferPoolManager& bpm, const HashIndex&
     }
 
     SIXSEVEN_LOG_DEBUG("hash persist: wrote {} unique buckets, directory size {}, meta page {}",
-                       unique_buckets.size(), index.directory_.size(), meta_page_id);
+                       unique_buckets.size(),
+                       index.directory_.size(),
+                       meta_page_id);
 
     return ok(meta_page_id);
 }
@@ -194,7 +203,7 @@ Result<PageId> HashPersistence::persist(BufferPoolManager& bpm, const HashIndex&
 // ---------------------------------------------------------------------------
 
 Result<std::unique_ptr<HashIndex>> HashPersistence::load(BufferPoolManager& bpm,
-                                                          PageId meta_page_id) {
+                                                         PageId meta_page_id) {
     auto meta_page_r = bpm.fetch_page(meta_page_id);
     if (!meta_page_r) {
         return make_error(meta_page_r.error().code,
@@ -242,8 +251,7 @@ Result<std::unique_ptr<HashIndex>> HashPersistence::load(BufferPoolManager& bpm,
         auto page_r = bpm.fetch_page(disk_page_id);
         if (!page_r) {
             return make_error(page_r.error().code,
-                              "hash load: failed to fetch bucket page: " +
-                                  page_r.error().message);
+                              "hash load: failed to fetch bucket page: " + page_r.error().message);
         }
         auto* page = *page_r;
         auto tuple_data = page->get_tuple(0);
@@ -271,8 +279,7 @@ Result<std::unique_ptr<HashIndex>> HashPersistence::load(BufferPoolManager& bpm,
             if (!key) {
                 (void)bpm.unpin_page(disk_page_id, false);
                 return make_error(key.error().code,
-                                  "hash load: failed to deserialize key: " +
-                                      key.error().message);
+                                  "hash load: failed to deserialize key: " + key.error().message);
             }
             entry.key = std::move(*key);
             entry.rid.page_id = read_u32(bp);
@@ -301,7 +308,9 @@ Result<std::unique_ptr<HashIndex>> HashPersistence::load(BufferPoolManager& bpm,
     }
 
     SIXSEVEN_LOG_DEBUG("hash load: restored {} unique buckets, directory size {}, size {}",
-                       loaded_buckets.size(), dir_size, total_size);
+                       loaded_buckets.size(),
+                       dir_size,
+                       total_size);
 
     return ok(std::move(index));
 }
