@@ -723,14 +723,25 @@ TEST_F(QA_GDB265, SchemaColumnTypesCorrect) {
     auto& row = qr.rows[0];
 
     // id should be INT32 (users PK is INT).
-    EXPECT_FALSE(row[0].is_null());
+    ASSERT_FALSE(row[0].is_null());
+    EXPECT_EQ(row[0].type_id(), TypeId::INT32);
+
+    // name is VARCHAR (STRING).
+    ASSERT_FALSE(row[1].is_null());
+    EXPECT_EQ(row[1].type_id(), TypeId::STRING);
+
+    // __node type should match the PK type (INT32).
+    ASSERT_FALSE(row[2].is_null());
+    EXPECT_EQ(row[2].type_id(), TypeId::INT32);
 
     // __depth should be INT64.
-    auto depth = row[3].as_int64();
-    EXPECT_GE(depth, 1);
+    ASSERT_FALSE(row[3].is_null());
+    EXPECT_EQ(row[3].type_id(), TypeId::INT64);
+    EXPECT_GE(row[3].as_int64(), 1);
 
-    // __source should be non-null for depth > 0 nodes.
-    EXPECT_FALSE(row[4].is_null());
+    // __source should be non-null for depth > 0 nodes and match the PK type.
+    ASSERT_FALSE(row[4].is_null());
+    EXPECT_EQ(row[4].type_id(), TypeId::INT32);
 }
 
 // ============================================================================
