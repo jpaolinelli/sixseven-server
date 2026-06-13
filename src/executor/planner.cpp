@@ -54,6 +54,22 @@ namespace {
 // Defined further below; forward-declared for use in plan_select.
 bool expr_contains_match(const Expr* e);
 bool expr_contains_nearest(const Expr* e);
+const NearestExpr* extract_nearest_predicate(const Expr* e);
+size_t count_nearest_conjuncts(const std::vector<const Expr*>& conjuncts);
+const Expr* build_owned_and_chain(const std::vector<const Expr*>& conjuncts,
+                                  std::vector<ExprPtr>& owned);
+
+/// Resolved plan for a NEAREST predicate that must be pushed through a JOIN.
+/// Computed once up front (validating all v1 restrictions) and then consumed
+/// when planning the owning table's scan, whether it is the base (left) source
+/// or a join (right) source (GDB-1250).
+struct NearestJoinPlan {
+    bool active = false; ///< true once a NEAREST+JOIN query is validated.
+    const NearestExpr* nearest = nullptr;
+    std::string owner_alias;        ///< query alias of the table owning the EMBEDDING column.
+    std::string owner_table;        ///< physical table name of that owner.
+    const Expr* residual = nullptr; ///< owned AND-chain: NEAREST + owner's sibling conjuncts.
+};
 
 std::string to_upper(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
@@ -1204,26 +1220,155 @@ Planner::plan_select(const SelectStmt& stmt,
 
     const bool has_joins = !stmt.joins.empty();
 
-    // -- 1b. Reject NEAREST combined with JOIN (stopgap). ------------------------
-    // NEAREST pushdown through joins is not yet implemented; without an explicit
-    // rejection such queries silently become a no-op (the vector search is
-    // dropped and the full join output is returned). Reject with a clear error
-    // pointing at the derived-table workaround. NEAREST inside a derived table /
-    // subquery is correctly NOT rejected here: expr_contains_nearest only
-    // recurses through BinaryExpr/UnaryExpr, and derived tables are planned by
-    // their own plan_select with no joins.
+    // -- 1b. Analyze NEAREST pushdown through JOINs (GDB-1250). ------------------
+    // A NEAREST predicate in a query with JOINs is planned by pushing the vector
+    // scan down to the table that owns the searched EMBEDDING column; that scan
+    // becomes the owning side's source so the join consumes its k nearest rows
+    // (and the synthetic `_distance` column lands in the combined schema). All v1
+    // restrictions are validated here, before any operator is built.
+    NearestJoinPlan nearest_plan;
     if (has_joins) {
-        static constexpr const char* kNearestJoinError =
-            "NEAREST(...) is not yet supported in queries with JOIN; wrap the NEAREST query in a "
-            "derived table (FROM (SELECT ..., _distance FROM t WHERE NEAREST(...)) sub JOIN ...)";
-        if (expr_contains_nearest(stmt.where_expr.get())) {
-            return make_error(StatusCode::INVALID_ARGUMENT, kNearestJoinError);
-        }
+        // NEAREST inside a join ON clause is not supported, regardless of
+        // whether the WHERE clause also contains a NEAREST predicate.
         for (const auto& join_clause : stmt.joins) {
             if (expr_contains_nearest(join_clause.on_expr.get())) {
-                return make_error(StatusCode::INVALID_ARGUMENT, kNearestJoinError);
+                return make_error(StatusCode::INVALID_ARGUMENT,
+                                  "NEAREST(...) is not supported inside a JOIN ON clause");
             }
         }
+    }
+    if (has_joins && expr_contains_nearest(stmt.where_expr.get())) {
+        auto nearest_conjuncts = extract_conjuncts(*stmt.where_expr);
+
+        // v1: exactly one NEAREST conjunct keeps the single `_distance` column
+        // unambiguous.
+        if (count_nearest_conjuncts(nearest_conjuncts) > 1) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "only one NEAREST(...) predicate is supported per query with a JOIN");
+        }
+
+        // NEAREST and MATCH cannot drive the same scan.
+        if (expr_contains_match(stmt.where_expr.get())) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "cannot combine NEAREST and MATCH in the same WHERE clause");
+        }
+
+        // The NEAREST must sit in a usable position (top-level / AND conjunct).
+        const NearestExpr* nearest = extract_nearest_predicate(stmt.where_expr.get());
+        if (nearest == nullptr) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "NEAREST(...) is only supported as a top-level AND predicate");
+        }
+        auto* nearest_col = dynamic_cast<const ColumnRefExpr*>(nearest->column.get());
+        if (nearest_col == nullptr) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "NEAREST(...) requires a column reference");
+        }
+
+        // Resolve which FROM/JOIN entry owns the searched column. The column's
+        // qualifier (if any) names a query alias; an unqualified column resolves
+        // against whichever table actually has it.
+        struct CandidateTable {
+            std::string alias;
+            std::string table_name;
+            bool is_base;
+            JoinType join_type; ///< INNER for the base table.
+            TableSchema schema; ///< owned copy — catalog returns by value.
+        };
+        std::vector<CandidateTable> candidates;
+        {
+            auto base_schema = catalog_.get_table(database_id_, table_ref.name);
+            if (base_schema && !table_ref.subquery && !table_ref.traverse_source &&
+                !table_ref.match_source) {
+                candidates.push_back(
+                    {alias, table_ref.name, true, JoinType::INNER, std::move(*base_schema)});
+            }
+            for (const auto& jc : stmt.joins) {
+                const auto& jtref = jc.table;
+                const auto& jalias = jtref.alias.empty() ? jtref.name : jtref.alias;
+                auto js = catalog_.get_table(database_id_, jtref.name);
+                if (js && !jtref.subquery && !jtref.traverse_source && !jtref.match_source) {
+                    candidates.push_back({jalias, jtref.name, false, jc.type, std::move(*js)});
+                }
+            }
+        }
+
+        const CandidateTable* owner = nullptr;
+        for (const auto& cand : candidates) {
+            bool matches = false;
+            if (!nearest_col->table.empty()) {
+                matches = (cand.alias == nearest_col->table);
+            } else {
+                // Unqualified: the owner is the table that has the column.
+                for (const auto& col : cand.schema.columns) {
+                    if (to_upper(col.name) == to_upper(nearest_col->column)) {
+                        matches = true;
+                        break;
+                    }
+                }
+            }
+            if (matches) {
+                owner = &cand;
+                break;
+            }
+        }
+        if (owner == nullptr) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "NEAREST(...) references a column on a table that is not a base or "
+                              "joined physical table");
+        }
+
+        // The searched column must be an EMBEDDING column on the owner table.
+        const CatalogColumnDef* emb_col = nullptr;
+        for (const auto& col : owner->schema.columns) {
+            if (to_upper(col.name) == to_upper(nearest_col->column)) {
+                emb_col = &col;
+                break;
+            }
+        }
+        if (emb_col == nullptr) {
+            return make_error(StatusCode::NOT_FOUND,
+                              "column " + nearest_col->column + " not found in table " +
+                                  owner->table_name);
+        }
+        if (emb_col->type_id != TypeId::EMBEDDING) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              "NEAREST(...) requires an EMBEDDING column; " + nearest_col->column +
+                                  " is not an embedding");
+        }
+
+        // v1: NEAREST on the nullable side of an OUTER join is rejected — the
+        // scan would produce padding NULL rows that have no meaningful distance.
+        // The preserved (left) side and any INNER position are allowed. The base
+        // table is the preserved side of every LEFT join, so only a right-side
+        // owner under a non-INNER join is nullable here.
+        if (!owner->is_base && owner->join_type != JoinType::INNER) {
+            return make_error(
+                StatusCode::INVALID_ARGUMENT,
+                "NEAREST(...) on the nullable side of an OUTER JOIN is not supported");
+        }
+
+        // Synthesize the residual: the NEAREST conjunct (evaluates TRUE; the scan
+        // already produced the k nearest rows) plus the owner's own sibling
+        // conjuncts, so filtered-kNN semantics (filter BEFORE top-k) are
+        // preserved inside the scan rather than applied above it.
+        std::vector<const Expr*> residual_conjuncts;
+        for (const Expr* c : nearest_conjuncts) {
+            if (expr_contains_nearest(c) || is_single_table_predicate(*c, owner->alias)) {
+                residual_conjuncts.push_back(c);
+            }
+        }
+        const Expr* residual = build_owned_and_chain(residual_conjuncts, owned_exprs);
+        if (residual == nullptr) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "failed to synthesize NEAREST residual predicate for JOIN pushdown");
+        }
+
+        nearest_plan.active = true;
+        nearest_plan.nearest = nearest;
+        nearest_plan.owner_alias = owner->alias;
+        nearest_plan.owner_table = owner->table_name;
+        nearest_plan.residual = residual;
     }
 
     // -- 2. Optionally push WHERE into scan (only for physical tables with no joins).
@@ -1357,19 +1502,53 @@ Planner::plan_select(const SelectStmt& stmt,
             where_conjuncts = extract_conjuncts(*stmt.where_expr);
             conjunct_consumed.resize(where_conjuncts.size(), false);
 
-            // Push predicates that belong to the base table.
-            auto base_preds = extract_table_predicates(where_conjuncts, alias);
-            if (!base_preds.empty()) {
-                // Wrap the base scan with a filter for each pushed predicate.
-                for (const Expr* pred : base_preds) {
-                    child = std::make_unique<FilterOperator>(
-                        std::move(child), *pred, bound, &subquery_ctx_);
+            // ── NEAREST pushdown: base table owns the EMBEDDING column ───────
+            // Replace the base scan with a NearestScanOperator carrying the
+            // synthesized residual (NEAREST + the base table's sibling
+            // conjuncts, applied BEFORE top-k). Mark every residual conjunct
+            // consumed so the generic pushdown below does not also wrap them in
+            // plain FilterOperators (which would re-apply or no-op them).
+            if (nearest_plan.active && nearest_plan.owner_alias == alias) {
+                auto* owner_col =
+                    dynamic_cast<const ColumnRefExpr*>(nearest_plan.nearest->column.get());
+                // Validated during analysis; defensive only.
+                if (owner_col == nullptr) {
+                    return make_error(StatusCode::INVALID_ARGUMENT,
+                                      "NEAREST(...) requires a column reference");
                 }
-                // Mark these conjuncts as consumed.
+                // Plan directly from the original NEAREST node so the graph
+                // scope (WITHIN TRAVERSE) is preserved; the synthesized residual
+                // (NEAREST + owner siblings) is the filter applied BEFORE top-k.
+                auto vec_scan = plan_nearest_impl(nearest_plan.owner_table,
+                                                  owner_col->column,
+                                                  nearest_plan.nearest->k.get(),
+                                                  nearest_plan.nearest->target.get(),
+                                                  nearest_plan.nearest->metric,
+                                                  nearest_plan.nearest->within_traverse.get(),
+                                                  nearest_plan.residual,
+                                                  bound,
+                                                  nearest_plan.owner_alias);
+                if (!vec_scan) {
+                    return make_error(vec_scan.error().code, vec_scan.error().message);
+                }
+                child = std::move(*vec_scan);
                 for (size_t i = 0; i < where_conjuncts.size(); ++i) {
-                    if (is_single_table_predicate(*where_conjuncts[i], alias)) {
+                    if (expr_contains_nearest(where_conjuncts[i]) ||
+                        is_single_table_predicate(*where_conjuncts[i], alias)) {
                         conjunct_consumed[i] = true;
                     }
+                }
+            }
+
+            // Push predicates that belong to the base table. Skip conjuncts
+            // already consumed by a NEAREST base scan above (they travelled into
+            // the scan's residual and must not be re-applied here).
+            for (size_t i = 0; i < where_conjuncts.size(); ++i) {
+                if (!conjunct_consumed[i] &&
+                    is_single_table_predicate(*where_conjuncts[i], alias)) {
+                    child = std::make_unique<FilterOperator>(
+                        std::move(child), *where_conjuncts[i], bound, &subquery_ctx_);
+                    conjunct_consumed[i] = true;
                 }
             }
         }
@@ -1381,6 +1560,44 @@ Planner::plan_select(const SelectStmt& stmt,
             auto join_source = plan_from_source(jtref, join_alias, cte_map, bound, owned_exprs);
             if (!join_source) {
                 return make_error(join_source.error().code, join_source.error().message);
+            }
+
+            // ── NEAREST pushdown: this join source owns the EMBEDDING column ──
+            // Replace the join source with a NearestScanOperator carrying the
+            // synthesized residual (applied BEFORE top-k). Its output schema
+            // (table columns aliased + `_distance`) is adopted so `_distance`
+            // lands in the join's combined schema, and the residual conjuncts
+            // are marked consumed so the generic pushdown below skips them.
+            if (nearest_plan.active && nearest_plan.owner_alias == join_alias) {
+                auto* owner_col =
+                    dynamic_cast<const ColumnRefExpr*>(nearest_plan.nearest->column.get());
+                if (owner_col == nullptr) {
+                    return make_error(StatusCode::INVALID_ARGUMENT,
+                                      "NEAREST(...) requires a column reference");
+                }
+                // Plan directly from the original NEAREST node so the graph
+                // scope (WITHIN TRAVERSE) is preserved; the synthesized residual
+                // is applied BEFORE top-k inside the scan.
+                auto vec_scan = plan_nearest_impl(nearest_plan.owner_table,
+                                                  owner_col->column,
+                                                  nearest_plan.nearest->k.get(),
+                                                  nearest_plan.nearest->target.get(),
+                                                  nearest_plan.nearest->metric,
+                                                  nearest_plan.nearest->within_traverse.get(),
+                                                  nearest_plan.residual,
+                                                  bound,
+                                                  nearest_plan.owner_alias);
+                if (!vec_scan) {
+                    return make_error(vec_scan.error().code, vec_scan.error().message);
+                }
+                join_source->schema = (*vec_scan)->output_schema();
+                join_source->iter = std::move(*vec_scan);
+                for (size_t i = 0; i < where_conjuncts.size(); ++i) {
+                    if (expr_contains_nearest(where_conjuncts[i]) ||
+                        is_single_table_predicate(*where_conjuncts[i], join_alias)) {
+                        conjunct_consumed[i] = true;
+                    }
+                }
             }
 
             // ── Push single-table predicates into the join source ─────────
@@ -2759,6 +2976,63 @@ const NearestExpr* extract_nearest_predicate(const Expr* e) {
     return nullptr;
 }
 
+/// Count how many distinct NEAREST(...) predicates appear in a conjunct list.
+/// Used to enforce the v1 "exactly one NEAREST per query" restriction so that
+/// the synthetic `_distance` column stays unambiguous (GDB-1250).
+size_t count_nearest_conjuncts(const std::vector<const Expr*>& conjuncts) {
+    size_t count = 0;
+    for (const Expr* c : conjuncts) {
+        if (expr_contains_nearest(c)) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+/// Synthesize an owned right-associated AND-chain from a list of borrowed
+/// conjuncts: {a, b, c} -> (a AND (b AND c)). Every node (the AND nodes and the
+/// deep-cloned leaves) is appended to `owned`, which retains ownership; the
+/// returned pointer is borrowed from it. Returns nullptr on an empty list or if
+/// any leaf cannot be cloned (e.g. it holds a subquery). For a single conjunct
+/// the cloned leaf is returned directly with no enclosing AND. Cloning the
+/// leaves keeps the synthesized residual independent of the source AST's
+/// structure so it can be passed as one `const Expr*` (GDB-1250).
+const Expr* build_owned_and_chain(const std::vector<const Expr*>& conjuncts,
+                                  std::vector<ExprPtr>& owned) {
+    if (conjuncts.empty()) {
+        return nullptr;
+    }
+
+    // Deep-clone every leaf once into local owned storage.
+    std::vector<ExprPtr> leaves;
+    leaves.reserve(conjuncts.size());
+    for (const Expr* c : conjuncts) {
+        if (c == nullptr) {
+            return nullptr;
+        }
+        auto cloned = clone_expr_public(*c);
+        if (!cloned) {
+            return nullptr;
+        }
+        leaves.push_back(std::move(cloned));
+    }
+
+    // Assemble right-to-left so evaluation order matches the original WHERE:
+    // {a, b, c} -> a AND (b AND c). `chain` owns the accumulated subtree until
+    // it is finally transferred into `owned`.
+    ExprPtr chain = std::move(leaves.back());
+    for (int i = static_cast<int>(leaves.size()) - 2; i >= 0; --i) {
+        auto and_node = std::make_unique<BinaryExpr>();
+        and_node->op = BinaryOp::AND;
+        and_node->lhs = std::move(leaves[static_cast<size_t>(i)]);
+        and_node->rhs = std::move(chain);
+        chain = std::move(and_node);
+    }
+    const Expr* result = chain.get();
+    owned.push_back(std::move(chain));
+    return result;
+}
+
 /// Check if a binary predicate is a simple comparison between a column and a
 /// literal (e.g., `col = 42` or `col > 10`). Returns the column name, the
 /// literal Value, and the operator.
@@ -2857,7 +3131,8 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
                                                              NearestMetric metric,
                                                              const Stmt* within_traverse,
                                                              const Expr* where_expr,
-                                                             const BoundStatement& bound) {
+                                                             const BoundStatement& bound,
+                                                             const std::string& table_alias) {
     // Resolve the table.
     auto table_schema = catalog_.get_table(database_id_, table_name);
     if (!table_schema) {
@@ -3212,10 +3487,15 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
                            rid_map != nullptr ? "found" : "miss");
     }
 
-    // Build output schema: all table columns + _distance.
-    auto table_output = build_table_output_schema(*table_schema);
+    // Build output schema: all table columns + _distance. When the scan feeds a
+    // JOIN the columns must carry the query alias (e.g. `b`) so that qualified
+    // references like `b.id` resolve unambiguously against the join's combined
+    // schema; an empty alias falls back to the raw table name (GDB-1250).
+    const std::string& output_qualifier = table_alias.empty() ? table_name : table_alias;
+    auto table_output = build_table_output_schema(*table_schema, table_alias);
     std::vector<OutputColumn> out_cols = table_output.columns();
-    out_cols.push_back({table_name, "_distance", TypeId::FLOAT64, false, table_schema->table_id});
+    out_cols.push_back(
+        {output_qualifier, "_distance", TypeId::FLOAT64, false, table_schema->table_id});
     auto schema = OutputSchema(std::move(out_cols));
 
     auto iter = std::make_unique<NearestScanOperator>(*storage->heap,
@@ -3312,7 +3592,8 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_bm25_scan(const TableSchema&
 
 Result<std::unique_ptr<Iterator>> Planner::try_plan_vector_scan(const TableSchema& table_schema,
                                                                 const Expr* where_expr,
-                                                                const BoundStatement& bound) {
+                                                                const BoundStatement& bound,
+                                                                const std::string& table_alias) {
     if (!expr_contains_nearest(where_expr)) {
         return ok(std::unique_ptr<Iterator>(nullptr));
     }
@@ -3340,7 +3621,8 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_vector_scan(const TableSchem
                              nearest->metric,
                              nearest->within_traverse.get(),
                              where_expr,
-                             bound);
+                             bound,
+                             table_alias);
 }
 
 std::vector<Bm25MaintenanceTarget> Planner::collect_bm25_targets(const TableSchema& schema) const {

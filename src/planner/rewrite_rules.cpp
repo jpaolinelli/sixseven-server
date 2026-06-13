@@ -286,8 +286,56 @@ static ExprPtr clone_expr(const Expr& expr) {
         }
         return c;
     }
+    if (const auto* nearest = dynamic_cast<const NearestExpr*>(&expr)) {
+        // Clone everything except within_traverse: a residual NEAREST conjunct
+        // only needs to evaluate to TRUE (the scan already produced the k
+        // nearest rows), and the TraverseStmt cannot be trivially deep-copied.
+        // The graph scope is consumed separately by plan_nearest_impl from the
+        // original AST node (GDB-1250).
+        auto c = std::make_unique<NearestExpr>();
+        if (nearest->column) {
+            c->column = clone_expr(*nearest->column);
+            if (!c->column) {
+                return nullptr;
+            }
+        }
+        if (nearest->k) {
+            c->k = clone_expr(*nearest->k);
+            if (!c->k) {
+                return nullptr;
+            }
+        }
+        if (nearest->target) {
+            c->target = clone_expr(*nearest->target);
+            if (!c->target) {
+                return nullptr;
+            }
+        }
+        c->metric = nearest->metric;
+        return c;
+    }
+    if (const auto* match = dynamic_cast<const MatchExpr*>(&expr)) {
+        auto c = std::make_unique<MatchExpr>();
+        if (match->column) {
+            c->column = clone_expr(*match->column);
+            if (!c->column) {
+                return nullptr;
+            }
+        }
+        if (match->query) {
+            c->query = clone_expr(*match->query);
+            if (!c->query) {
+                return nullptr;
+            }
+        }
+        return c;
+    }
     // ExistsExpr, SubqueryExpr contain StmtPtr — cannot trivially clone.
     return nullptr;
+}
+
+ExprPtr clone_expr_public(const Expr& expr) {
+    return clone_expr(expr);
 }
 
 ExprPtr fold_constants(const Expr& expr) {
@@ -514,6 +562,29 @@ static void collect_table_refs(const Expr& expr, std::unordered_set<std::string>
         }
         if (case_expr->else_expr) {
             collect_table_refs(*case_expr->else_expr, tables);
+        }
+        return;
+    }
+
+    // NEAREST(col, k) TO target — attribute the predicate to the table owning
+    // the searched EMBEDDING column. Without this, NearestExpr falls through to
+    // the empty-set short-circuit in is_single_table_predicate, which reports
+    // TRUE for *any* alias and lets the predicate be mis-pushed during JOIN
+    // planning (GDB-1250). The k/target sub-expressions are intentionally NOT
+    // walked: they are scan configuration (a count and a query vector/string),
+    // not row predicates, and walking them would over-attribute the conjunct.
+    if (const auto* nearest = dynamic_cast<const NearestExpr*>(&expr)) {
+        if (nearest->column) {
+            collect_table_refs(*nearest->column, tables);
+        }
+        return;
+    }
+
+    // MATCH(col) TO query — attribute to the table owning the searched text
+    // column. The query string is scan configuration, not a row predicate.
+    if (const auto* match = dynamic_cast<const MatchExpr*>(&expr)) {
+        if (match->column) {
+            collect_table_refs(*match->column, tables);
         }
         return;
     }

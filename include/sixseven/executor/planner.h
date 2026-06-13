@@ -225,6 +225,10 @@ private:
 
     /// Build a NearestScanOperator from the individual NEAREST parameters
     /// (borrowed from a NearestExpr). Output schema is table columns + _distance.
+    /// `table_alias` qualifies the output columns (including `_distance`); pass
+    /// the empty string to qualify with the raw table name. A non-empty alias is
+    /// required when the scan feeds a JOIN so that qualified references such as
+    /// `b.id` resolve unambiguously against shared column names (GDB-1250).
     [[nodiscard]] Result<std::unique_ptr<Iterator>>
     plan_nearest_impl(const std::string& table_name,
                       const std::string& column_name,
@@ -233,13 +237,18 @@ private:
                       NearestMetric metric,
                       const Stmt* within_traverse,
                       const Expr* where_expr,
-                      const BoundStatement& bound);
+                      const BoundStatement& bound,
+                      const std::string& table_alias = "");
 
     /// Try to build a vector scan for a `NEAREST(col, k) TO ...` WHERE predicate.
     /// Returns nullptr if there is no NEAREST predicate; errors if it appears in
-    /// an unsupported position.
-    [[nodiscard]] Result<std::unique_ptr<Iterator>> try_plan_vector_scan(
-        const TableSchema& table_schema, const Expr* where_expr, const BoundStatement& bound);
+    /// an unsupported position. `table_alias` qualifies the output columns; pass
+    /// the empty string to qualify with the raw table name (GDB-1250).
+    [[nodiscard]] Result<std::unique_ptr<Iterator>>
+    try_plan_vector_scan(const TableSchema& table_schema,
+                         const Expr* where_expr,
+                         const BoundStatement& bound,
+                         const std::string& table_alias = "");
 
     Catalog& catalog_;
     StorageManager& storage_;
