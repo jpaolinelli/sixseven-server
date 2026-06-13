@@ -3263,13 +3263,87 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
             return make_error(StatusCode::INTERNAL_ERROR, "expected TraverseStmt in WITHIN clause");
         }
 
+        // GDB-1251: Validate that the traversal's REACHED node table is the
+        // table that owns the EMBEDDING column. Otherwise the reachable PKs are
+        // intersected with the vector table's PKs by raw numeric equality,
+        // producing a silent garbage scope built from cross-table PK collisions.
+        auto edge_def = catalog_.get_edge_type(database_id_, trav_stmt->edge_type);
+        if (!edge_def) {
+            return make_error(edge_def.error().code, edge_def.error().message);
+        }
+
+        // Resolve the reached side(s) per direction.
+        //   OUT  → reached = target_table_id
+        //   IN   → reached = source_table_id
+        //   BOTH → both endpoints must equal the vector table (a heterogeneous
+        //          BOTH would mix two PK id-spaces into a single scope set).
+        const table_id_t vector_table_id = table_schema->table_id;
+        std::vector<table_id_t> reached_ids;
+        if (trav_stmt->direction == TraverseDirection::OUT) {
+            reached_ids.push_back(edge_def->target_table_id);
+        } else if (trav_stmt->direction == TraverseDirection::IN) {
+            reached_ids.push_back(edge_def->source_table_id);
+        } else { // BOTH
+            reached_ids.push_back(edge_def->source_table_id);
+            reached_ids.push_back(edge_def->target_table_id);
+        }
+
+        auto direction_name = [](TraverseDirection d) -> const char* {
+            switch (d) {
+            case TraverseDirection::OUT:
+                return "OUT";
+            case TraverseDirection::IN:
+                return "IN";
+            case TraverseDirection::BOTH:
+            default:
+                return "BOTH";
+            }
+        };
+
+        for (table_id_t reached_id : reached_ids) {
+            if (reached_id != vector_table_id) {
+                std::string reached_name = std::to_string(reached_id);
+                if (auto reached_schema = catalog_.get_table_by_id(reached_id)) {
+                    reached_name = reached_schema->name;
+                }
+                return make_error(
+                    StatusCode::INVALID_ARGUMENT,
+                    "WITHIN TRAVERSE '" + trav_stmt->edge_type + "' DIRECTION " +
+                        direction_name(trav_stmt->direction) + " reaches table '" + reached_name +
+                        "', but NEAREST column '" + table_name + "." + column_name +
+                        "' belongs to table '" + table_name +
+                        "'; the traversal must end at the table that owns the embedding column");
+            }
+        }
+
+        // Resolve the START table (the side the start key is keyed against).
+        // The start key must be coerced against the START table's PK type, not
+        // the vector table's (GDB-1251: these differ for heterogeneous edges).
+        auto start_schema = catalog_.get_table(database_id_, trav_stmt->from_table);
+        if (!start_schema) {
+            return make_error(start_schema.error().code, start_schema.error().message);
+        }
+        const bool start_is_vector_table = start_schema->table_id == vector_table_id;
+
         // Evaluate the start key.
         auto start_key = evaluate_expr(*trav_stmt->from_key, empty_tuple, empty_schema, bound);
         if (!start_key) {
             return make_error(start_key.error().code, start_key.error().message);
         }
 
-        // Determine the PK type for the target table.
+        // Determine the PK type for the START table.
+        TypeId start_pk_type = TypeId::INT64;
+        if (!start_schema->pk_columns.empty()) {
+            for (const auto& col : start_schema->columns) {
+                if (col.name == start_schema->pk_columns) {
+                    start_pk_type = col.type_id;
+                    break;
+                }
+            }
+        }
+
+        // Determine the PK type for the vector table (used to type the traversal
+        // node-id column, which holds reached-node PKs == vector-table PKs).
         TypeId pk_type = TypeId::INT64;
         if (!table_schema->pk_columns.empty()) {
             for (const auto& col : table_schema->columns) {
@@ -3280,10 +3354,10 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
             }
         }
 
-        // Coerce the start key to match the table's PK type (e.g. STRING → UUID,
-        // INT64 literal → INT32 column).
-        if (start_key->type_id() != pk_type) {
-            auto coerced = fit_to_storage(*start_key, pk_type);
+        // Coerce the start key to match the START table's PK type (e.g. STRING →
+        // UUID, INT64 literal → INT32 column).
+        if (start_key->type_id() != start_pk_type) {
+            auto coerced = fit_to_storage(*start_key, start_pk_type);
             if (!coerced) {
                 return make_error(coerced.error().code, coerced.error().message);
             }
@@ -3326,8 +3400,13 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
         }
         trav_op.close();
 
-        // Also include the start node itself.
-        reachable_pks.insert(start_pk);
+        // Also include the start node itself — but only when the start table IS
+        // the vector table. For heterogeneous edges (start table ≠ vector table)
+        // the start PK lives in a different id-space; seeding it here would admit
+        // an unrelated vector-table row by accidental PK collision (GDB-1251).
+        if (start_is_vector_table) {
+            reachable_pks.insert(start_pk);
+        }
 
         // Scan the table to convert reachable PKs to heap RIDs. The RID is
         // the canonical id space for graph-scoped NEAREST (GDB-745): heap
