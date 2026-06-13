@@ -15,9 +15,6 @@
 
 namespace sixseven {
 
-// Forward declaration.
-class WalWriter;
-
 /// Configuration for creating a hash index.
 struct HashIndexConfig {
     /// Column types in the composite key.
@@ -59,8 +56,7 @@ class HashIndex {
 public:
     /// Construct a hash index.
     /// @param config Index configuration.
-    /// @param wal Optional WAL writer for logging structural changes.
-    explicit HashIndex(HashIndexConfig config, WalWriter* wal = nullptr);
+    explicit HashIndex(HashIndexConfig config);
 
     /// Insert a (key, rid) pair into the index.
     /// Returns CONSTRAINT_VIOLATION if is_unique and key already exists.
@@ -109,17 +105,10 @@ private:
     /// Split a bucket that has overflowed, doubling the directory if needed.
     [[nodiscard]] Result<void> split_bucket(uint32_t bucket_idx);
 
-    /// Log a bucket split WAL record if a WAL writer is configured.
-    void log_split(uint32_t original_bucket_idx, uint32_t new_bucket_idx);
-
-    /// Log a directory growth WAL record if a WAL writer is configured.
-    void log_directory_growth(uint32_t old_depth, uint32_t new_depth);
-
     friend class HashPersistence;
 
     // -- State ---
     HashIndexConfig config_;
-    WalWriter* wal_;
     uint32_t global_depth_ = 0;
     uint64_t size_ = 0;
 

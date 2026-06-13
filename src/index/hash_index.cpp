@@ -1,10 +1,8 @@
 #include "sixseven/index/hash_index.h"
 
 #include "sixseven/common/logging.h"
-#include "sixseven/storage/wal.h"
 
 #include <algorithm>
-#include <cstring>
 #include <functional>
 
 namespace sixseven {
@@ -13,8 +11,8 @@ namespace sixseven {
 // Construction
 // ---------------------------------------------------------------------------
 
-HashIndex::HashIndex(HashIndexConfig config, WalWriter* wal)
-    : config_(std::move(config)), wal_(wal), global_depth_(0), size_(0) {
+HashIndex::HashIndex(HashIndexConfig config)
+    : config_(std::move(config)), global_depth_(0), size_(0) {
     // Start with a single bucket (directory size = 2^0 = 1).
     auto bucket = std::make_shared<HashBucket>();
     bucket->local_depth = 0;
@@ -216,7 +214,6 @@ Result<void> HashIndex::split_bucket(uint32_t bucket_idx) {
 
     // If local depth would exceed global depth, double the directory first.
     if (new_local_depth > global_depth_) {
-        auto old_global_depth = global_depth_;
         global_depth_ = new_local_depth;
         auto old_size = directory_.size();
         directory_.resize(1U << global_depth_);
@@ -226,7 +223,6 @@ Result<void> HashIndex::split_bucket(uint32_t bucket_idx) {
             directory_[i + old_size] = directory_[i];
         }
 
-        log_directory_growth(old_global_depth, global_depth_);
     }
 
     // Create the new sibling bucket.
@@ -257,7 +253,6 @@ Result<void> HashIndex::split_bucket(uint32_t bucket_idx) {
         }
     }
 
-    log_split(bucket_idx, bucket_idx | split_bit);
 
     // If either bucket is still over capacity, continue splitting.
     // This handles the pathological case where all entries hash to the same value.
@@ -291,37 +286,6 @@ Result<void> HashIndex::split_bucket(uint32_t bucket_idx) {
     return ok();
 }
 
-void HashIndex::log_split(uint32_t original_bucket_idx, uint32_t new_bucket_idx) {
-    if (wal_ == nullptr) {
-        return;
-    }
 
-    WalRecord record;
-    record.type = WalRecordType::PAGE_SPLIT;
-    record.page_id = original_bucket_idx;
-
-    // Store the new bucket index in the data payload.
-    record.data.resize(sizeof(uint32_t));
-    std::memcpy(record.data.data(), &new_bucket_idx, sizeof(uint32_t));
-
-    (void)wal_->append(record); // Best-effort WAL logging.
-}
-
-void HashIndex::log_directory_growth(uint32_t old_depth, uint32_t new_depth) {
-    if (wal_ == nullptr) {
-        return;
-    }
-
-    WalRecord record;
-    record.type = WalRecordType::PAGE_SPLIT;
-    record.page_id = 0; // Directory growth marker.
-
-    // Store old and new depths in the payload.
-    record.data.resize(2 * sizeof(uint32_t));
-    std::memcpy(record.data.data(), &old_depth, sizeof(uint32_t));
-    std::memcpy(record.data.data() + sizeof(uint32_t), &new_depth, sizeof(uint32_t));
-
-    (void)wal_->append(record); // Best-effort WAL logging.
-}
 
 } // namespace sixseven

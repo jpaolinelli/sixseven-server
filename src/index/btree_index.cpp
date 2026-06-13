@@ -1,10 +1,7 @@
 #include "sixseven/index/btree_index.h"
 
 #include "sixseven/index/btree_iterator.h"
-#include "sixseven/storage/wal.h"
-#include "sixseven/storage/wal_record.h"
 
-#include <cstring>
 #include <shared_mutex>
 
 namespace sixseven {
@@ -23,8 +20,8 @@ uint16_t BTreeIndex::effective_leaf_max_keys() const {
 
 // -- Construction -------------------------------------------------------------
 
-BTreeIndex::BTreeIndex(BTreeConfig config, WalWriter* wal)
-    : config_(std::move(config)), wal_(wal) {}
+BTreeIndex::BTreeIndex(BTreeConfig config)
+    : config_(std::move(config)) {}
 
 // -- Node creation ------------------------------------------------------------
 
@@ -143,18 +140,6 @@ Result<void> BTreeIndex::handle_post_merge(BTreeInternalNode* parent) {
     return ok();
 }
 
-void BTreeIndex::log_split(PageId original_page_id, PageId new_page_id) {
-    if (wal_ == nullptr) {
-        return;
-    }
-    WalRecord record;
-    record.type = WalRecordType::PAGE_SPLIT;
-    record.page_id = original_page_id;
-    record.data.resize(sizeof(PageId));
-    std::memcpy(record.data.data(), &new_page_id, sizeof(PageId));
-    // Best-effort: split already completed in-memory.
-    (void)wal_->append(record);
-}
 
 // -- Traversal ----------------------------------------------------------------
 
@@ -294,8 +279,6 @@ Result<std::pair<KeyType, PageId>> BTreeIndex::split_leaf(BTreeLeafNode* leaf) {
     // Separator = first key of new leaf (copy up).
     KeyType separator = new_leaf->key_at(0);
 
-    log_split(leaf->page_id(), new_leaf->page_id());
-
     return ok(std::make_pair(std::move(separator), new_leaf->page_id()));
 }
 
@@ -328,8 +311,6 @@ Result<std::pair<KeyType, PageId>> BTreeIndex::split_internal(BTreeInternalNode*
 
     // Set parent for new node.
     new_node->set_parent_page_id(node->parent_page_id());
-
-    log_split(node->page_id(), new_node->page_id());
 
     return ok(std::make_pair(std::move(push_up_key), new_node->page_id()));
 }
