@@ -8,6 +8,7 @@
 
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/types.h"
+#include "sixseven/executor/pg_catalog_tables.h"
 #include "sixseven/executor/virtual_catalog_scan.h"
 
 #include <gtest/gtest.h>
@@ -111,79 +112,6 @@ int32_t test_pg_typlen(TypeId t) {
     default:
         return -1;
     }
-}
-
-void register_pg_class(Catalog& catalog) {
-    VirtualTableDef def;
-    def.name = "pg_class";
-    def.columns = {
-        {0, "oid", TypeId::INT32, false, ""},
-        {1, "relname", TypeId::STRING, false, ""},
-        {2, "relnamespace", TypeId::INT32, false, ""},
-        {3, "relkind", TypeId::STRING, false, ""},
-        {4, "reltuples", TypeId::FLOAT64, false, ""},
-        {5, "relhasindex", TypeId::BOOL, false, ""},
-        {6, "relnatts", TypeId::INT32, false, ""},
-    };
-    def.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
-        std::vector<std::vector<std::string>> rows;
-        for (const auto& db : catalog.list_databases()) {
-            for (const auto& table : catalog.list_tables(db.database_id)) {
-                if (table.table_id < first_user_table_id) {
-                    continue;
-                }
-                bool has_index = !catalog.list_indexes(table.table_id).empty();
-                rows.push_back({
-                    std::to_string(table.table_id),
-                    table.name,
-                    "2200",
-                    "r",
-                    "-1",
-                    has_index ? "true" : "false",
-                    std::to_string(static_cast<int32_t>(table.columns.size())),
-                });
-            }
-        }
-        return rows;
-    };
-    catalog.register_virtual_table(std::move(def));
-}
-
-void register_pg_attribute(Catalog& catalog) {
-    VirtualTableDef def;
-    def.name = "pg_attribute";
-    def.columns = {
-        {0, "attrelid", TypeId::INT32, false, ""},
-        {1, "attname", TypeId::STRING, false, ""},
-        {2, "atttypid", TypeId::INT32, false, ""},
-        {3, "attlen", TypeId::INT32, false, ""},
-        {4, "attnum", TypeId::INT32, false, ""},
-        {5, "attnotnull", TypeId::BOOL, false, ""},
-        {6, "attisdropped", TypeId::BOOL, false, ""},
-    };
-    def.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
-        std::vector<std::vector<std::string>> rows;
-        for (const auto& db : catalog.list_databases()) {
-            for (const auto& table : catalog.list_tables(db.database_id)) {
-                if (table.table_id < first_user_table_id) {
-                    continue;
-                }
-                for (const auto& col : table.columns) {
-                    rows.push_back({
-                        std::to_string(table.table_id),
-                        col.name,
-                        std::to_string(test_pg_oid(col.type_id)),
-                        std::to_string(test_pg_typlen(col.type_id)),
-                        std::to_string(col.ordinal + 1),
-                        col.nullable ? "false" : "true",
-                        "false",
-                    });
-                }
-            }
-        }
-        return rows;
-    };
-    catalog.register_virtual_table(std::move(def));
 }
 
 // Scan helpers
@@ -305,7 +233,7 @@ TEST(GDB566_PgClass, AC_OneRowPerUserTable) {
     t3.pk_columns = "id";
     ASSERT_TRUE(catalog.create_table(default_database_id, std::move(t3)).has_value());
 
-    register_pg_class(catalog);
+    catalog.register_virtual_table(make_pg_class(catalog));
     auto rows = scan_pg_class(catalog);
     EXPECT_EQ(rows.size(), 3u);
 
@@ -348,8 +276,8 @@ TEST(GDB566_PgAttribute, AC_FilterByAttrelid) {
     t2.pk_columns = "cat_id";
     ASSERT_TRUE(catalog.create_table(default_database_id, std::move(t2)).has_value());
 
-    register_pg_class(catalog);
-    register_pg_attribute(catalog);
+    catalog.register_virtual_table(make_pg_class(catalog));
+    catalog.register_virtual_table(make_pg_attribute(catalog));
 
     auto attr_rows = scan_pg_attribute(catalog);
     int products_count = 0;
@@ -388,7 +316,7 @@ TEST(GDB566_PgAttribute, AC_AllTypeOidsCovered) {
     ts.pk_columns = "col_0";
     ASSERT_TRUE(catalog.create_table(default_database_id, std::move(ts)).has_value());
 
-    register_pg_attribute(catalog);
+    catalog.register_virtual_table(make_pg_attribute(catalog));
     auto attr_rows = scan_pg_attribute(catalog);
 
     ASSERT_EQ(attr_rows.size(), static_cast<size_t>(all_types.size()));
@@ -416,12 +344,11 @@ TEST(GDB566_PgClass, AC_SystemTablesExcluded) {
     t1.pk_columns = "id";
     ASSERT_TRUE(catalog.create_table(default_database_id, std::move(t1)).has_value());
 
-    register_pg_class(catalog);
+    catalog.register_virtual_table(make_pg_class(catalog));
     auto rows = scan_pg_class(catalog);
 
     for (const auto& r : rows) {
-        EXPECT_GE(r.oid, first_user_table_id)
-            << "System table leaked into pg_class: " << r.relname;
+        EXPECT_GE(r.oid, first_user_table_id) << "System table leaked into pg_class: " << r.relname;
         EXPECT_NE(r.relname, "sys_tables") << "sys_tables should not appear";
         EXPECT_NE(r.relname, "sys_columns") << "sys_columns should not appear";
         EXPECT_NE(r.relname, "sys_indexes") << "sys_indexes should not appear";
@@ -459,8 +386,8 @@ TEST(GDB566_CrossTable, AC_JoinIntegrity) {
     t2.pk_columns = "dept_id";
     ASSERT_TRUE(catalog.create_table(default_database_id, std::move(t2)).has_value());
 
-    register_pg_class(catalog);
-    register_pg_attribute(catalog);
+    catalog.register_virtual_table(make_pg_class(catalog));
+    catalog.register_virtual_table(make_pg_attribute(catalog));
 
     auto class_rows = scan_pg_class(catalog);
     auto attr_rows = scan_pg_attribute(catalog);
@@ -498,8 +425,8 @@ TEST(GDB566_PgClass, Edge_SingleColumnTable) {
     ts.pk_columns = "only_col";
     ASSERT_TRUE(catalog.create_table(default_database_id, std::move(ts)).has_value());
 
-    register_pg_class(catalog);
-    register_pg_attribute(catalog);
+    catalog.register_virtual_table(make_pg_class(catalog));
+    catalog.register_virtual_table(make_pg_attribute(catalog));
 
     auto class_rows = scan_pg_class(catalog);
     ASSERT_EQ(class_rows.size(), 1u);
@@ -518,8 +445,8 @@ TEST(GDB566_PgClass, Edge_SingleColumnTable) {
 TEST(GDB566_PgClass, Edge_NoCatalogTablesInEmptyCatalog) {
     Catalog catalog;
     init_test_catalog(catalog);
-    register_pg_class(catalog);
-    register_pg_attribute(catalog);
+    catalog.register_virtual_table(make_pg_class(catalog));
+    catalog.register_virtual_table(make_pg_attribute(catalog));
 
     auto class_rows = scan_pg_class(catalog);
     EXPECT_TRUE(class_rows.empty());
@@ -543,14 +470,13 @@ TEST(GDB566_PgClass, Edge_VirtualTablesNotExposed) {
     ts.pk_columns = "id";
     ASSERT_TRUE(catalog.create_table(default_database_id, std::move(ts)).has_value());
 
-    register_pg_class(catalog);
-    register_pg_attribute(catalog);
+    catalog.register_virtual_table(make_pg_class(catalog));
+    catalog.register_virtual_table(make_pg_attribute(catalog));
 
     auto class_rows = scan_pg_class(catalog);
     for (const auto& r : class_rows) {
         EXPECT_NE(r.relname, "pg_class") << "pg_class virtual table should not list itself";
-        EXPECT_NE(r.relname, "pg_attribute")
-            << "pg_attribute should not appear in pg_class";
+        EXPECT_NE(r.relname, "pg_attribute") << "pg_attribute should not appear in pg_class";
         EXPECT_NE(r.relname, "pg_type") << "pg_type should not appear in pg_class";
         EXPECT_NE(r.relname, "pg_namespace") << "pg_namespace should not appear in pg_class";
     }
@@ -576,8 +502,8 @@ TEST(GDB566_PgClass, Edge_ManyColumnsRelnatts) {
     ts.pk_columns = "col_0";
     ASSERT_TRUE(catalog.create_table(default_database_id, std::move(ts)).has_value());
 
-    register_pg_class(catalog);
-    register_pg_attribute(catalog);
+    catalog.register_virtual_table(make_pg_class(catalog));
+    catalog.register_virtual_table(make_pg_attribute(catalog));
 
     auto class_rows = scan_pg_class(catalog);
     ASSERT_EQ(class_rows.size(), 1u);
@@ -620,13 +546,12 @@ TEST(GDB566_PgAttribute, Edge_DuplicateColumnNamesAcrossTables) {
     auto r2 = catalog.create_table(default_database_id, std::move(t2));
     ASSERT_TRUE(r2.has_value());
 
-    register_pg_attribute(catalog);
+    catalog.register_virtual_table(make_pg_attribute(catalog));
     auto attr_rows = scan_pg_attribute(catalog);
 
     ASSERT_EQ(attr_rows.size(), 4u);
 
-    auto find_by_relid_name = [&](int32_t relid,
-                                  const std::string& name) -> const AttributeRow* {
+    auto find_by_relid_name = [&](int32_t relid, const std::string& name) -> const AttributeRow* {
         for (const auto& r : attr_rows) {
             if (r.attrelid == relid && r.attname == name)
                 return &r;
@@ -663,7 +588,7 @@ TEST(GDB566_PgAttribute, Edge_AttnotnullInversion) {
     ts.pk_columns = "not_null_col";
     ASSERT_TRUE(catalog.create_table(default_database_id, std::move(ts)).has_value());
 
-    register_pg_attribute(catalog);
+    catalog.register_virtual_table(make_pg_attribute(catalog));
     auto attr_rows = scan_pg_attribute(catalog);
     ASSERT_EQ(attr_rows.size(), 4u);
 
@@ -698,7 +623,7 @@ TEST(GDB566_PgClass, Edge_ConstantFieldValues) {
         ASSERT_TRUE(catalog.create_table(default_database_id, std::move(ts)).has_value());
     }
 
-    register_pg_class(catalog);
+    catalog.register_virtual_table(make_pg_class(catalog));
     auto rows = scan_pg_class(catalog);
     ASSERT_EQ(rows.size(), 5u);
 
@@ -726,7 +651,7 @@ TEST(GDB566_PgClass, Edge_OidUniqueness) {
         ASSERT_TRUE(catalog.create_table(default_database_id, std::move(ts)).has_value());
     }
 
-    register_pg_class(catalog);
+    catalog.register_virtual_table(make_pg_class(catalog));
     auto rows = scan_pg_class(catalog);
     ASSERT_EQ(rows.size(), 20u);
 
@@ -753,7 +678,7 @@ TEST(GDB566_PgAttribute, Edge_AttisdroppedAlwaysFalse) {
     ts.pk_columns = "c0";
     ASSERT_TRUE(catalog.create_table(default_database_id, std::move(ts)).has_value());
 
-    register_pg_attribute(catalog);
+    catalog.register_virtual_table(make_pg_attribute(catalog));
     auto attr_rows = scan_pg_attribute(catalog);
     ASSERT_EQ(attr_rows.size(), 10u);
 
@@ -778,15 +703,14 @@ TEST(GDB566_Stress, ManyTables) {
         TableSchema ts;
         ts.name = "stress_" + std::to_string(i);
         for (int j = 0; j < cols_per_table; ++j) {
-            ts.columns.push_back(
-                {j, "col_" + std::to_string(j), TypeId::INT32, j > 0, ""});
+            ts.columns.push_back({j, "col_" + std::to_string(j), TypeId::INT32, j > 0, ""});
         }
         ts.pk_columns = "col_0";
         ASSERT_TRUE(catalog.create_table(default_database_id, std::move(ts)).has_value());
     }
 
-    register_pg_class(catalog);
-    register_pg_attribute(catalog);
+    catalog.register_virtual_table(make_pg_class(catalog));
+    catalog.register_virtual_table(make_pg_attribute(catalog));
 
     auto class_rows = scan_pg_class(catalog);
     EXPECT_EQ(class_rows.size(), static_cast<size_t>(num_tables));
@@ -814,7 +738,7 @@ TEST(GDB566_PgClass, Edge_ScanReopenProducesSameResults) {
     ts.pk_columns = "id";
     ASSERT_TRUE(catalog.create_table(default_database_id, std::move(ts)).has_value());
 
-    register_pg_class(catalog);
+    catalog.register_virtual_table(make_pg_class(catalog));
 
     auto rows1 = scan_pg_class(catalog);
     auto rows2 = scan_pg_class(catalog);
@@ -844,7 +768,7 @@ TEST(GDB566_PgAttribute, Edge_AttNumMonotonicallyIncreases) {
     auto r = catalog.create_table(default_database_id, std::move(ts));
     ASSERT_TRUE(r.has_value());
 
-    register_pg_attribute(catalog);
+    catalog.register_virtual_table(make_pg_attribute(catalog));
     auto attr_rows = scan_pg_attribute(catalog);
 
     int32_t prev_attnum = 0;
@@ -876,7 +800,7 @@ TEST(GDB566_PgClass, Edge_RelhasindexFalseWithNoIndexes) {
     ts.pk_columns = "id";
     ASSERT_TRUE(catalog.create_table(default_database_id, std::move(ts)).has_value());
 
-    register_pg_class(catalog);
+    catalog.register_virtual_table(make_pg_class(catalog));
     auto rows = scan_pg_class(catalog);
     ASSERT_EQ(rows.size(), 1u);
     EXPECT_FALSE(rows[0].relhasindex);
