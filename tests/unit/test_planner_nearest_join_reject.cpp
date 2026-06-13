@@ -1,7 +1,11 @@
-// GDB-1249: NEAREST(...) combined with a JOIN is a silent no-op; the planner
-// must reject such queries with INVALID_ARGUMENT and a message that names
-// NEAREST, JOIN, and the derived-table workaround. The derived-table form
-// (NEAREST inside a subquery) must still plan and execute.
+// GDB-1249 / GDB-1250: NEAREST(...) combined with a JOIN.
+//
+// GDB-1249 originally rejected every NEAREST+JOIN query as a silent-no-op
+// stopgap. GDB-1250 implements real pushdown: NEAREST in a WHERE with a JOIN now
+// succeeds (the vector scan is pushed to the table owning the EMBEDDING column).
+// NEAREST inside a JOIN ON clause remains unsupported and still errors. The
+// derived-table workaround (NEAREST inside a subquery) continues to plan and
+// execute unchanged.
 
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/status.h"
@@ -75,13 +79,12 @@ protected:
         exec_ok("INSERT INTO reviews VALUES (30, 3, 3)");
     }
 
-    static void assert_rejected(const Result<QueryResult>& result) {
+    static void assert_rejected(const Result<QueryResult>& result, const std::string& needle) {
         ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
         const std::string& m = result.error().message;
         EXPECT_NE(m.find("NEAREST"), std::string::npos) << m;
-        EXPECT_NE(m.find("JOIN"), std::string::npos) << m;
-        EXPECT_NE(m.find("derived table"), std::string::npos) << m;
+        EXPECT_NE(m.find(needle), std::string::npos) << m;
     }
 
     DiskManager dm_;
@@ -92,16 +95,28 @@ protected:
     std::unique_ptr<QueryEngine> engine_;
 };
 
-TEST_F(NearestJoinRejectTest, NearestInWhereWithJoinRejected) {
-    assert_rejected(
+// GDB-1250: NEAREST in a WHERE with a JOIN now succeeds (was rejected by the
+// GDB-1249 stopgap). It returns the reviews of the 2 nearest books {1, 2}.
+TEST_F(NearestJoinRejectTest, NearestInWhereWithJoinNowSucceeds) {
+    auto result =
         engine_->execute("SELECT b.id FROM books b INNER JOIN reviews r ON r.book_id = b.id "
-                         "WHERE NEAREST(vec, 2) TO [1.0, 0.0, 0.0, 0.0]"));
+                         "WHERE NEAREST(vec, 2) TO [1.0, 0.0, 0.0, 0.0]");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    std::vector<int32_t> ids;
+    for (const auto& row : result->rows) {
+        ASSERT_FALSE(row.empty());
+        ids.push_back(row[0].as_int32());
+    }
+    std::sort(ids.begin(), ids.end());
+    EXPECT_EQ(ids, (std::vector<int32_t>{1, 2}));
 }
 
+// NEAREST inside a JOIN ON clause remains unsupported (GDB-1250 v1 restriction).
 TEST_F(NearestJoinRejectTest, NearestInJoinOnClauseRejected) {
     assert_rejected(
         engine_->execute("SELECT b.id FROM books b INNER JOIN reviews r ON r.book_id = b.id "
-                         "AND NEAREST(vec, 2) TO [1.0, 0.0, 0.0, 0.0]"));
+                         "AND NEAREST(vec, 2) TO [1.0, 0.0, 0.0, 0.0]"),
+        "ON clause");
 }
 
 TEST_F(NearestJoinRejectTest, DerivedTableNearestNotOverRejected) {

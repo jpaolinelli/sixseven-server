@@ -14,6 +14,13 @@ namespace sixseven {
 // Constant folding
 // =============================================================================
 
+/// Deep-clone an expression tree into freshly owned nodes. Returns nullptr for
+/// expressions that cannot be trivially copied (those holding a StmtPtr, e.g.
+/// EXISTS / scalar subqueries; a NEAREST node's WITHIN TRAVERSE scope is dropped
+/// from the clone since a cloned NEAREST is only used as a residual that
+/// evaluates to TRUE). Used to synthesize owned predicate trees during planning.
+[[nodiscard]] ExprPtr clone_expr_public(const Expr& expr);
+
 /// Fold constant expressions at plan time.
 /// Examples: 1 + 2 -> 3, true AND x -> x, false OR x -> x
 /// Returns a new expression if folded, or nullptr if no change.
