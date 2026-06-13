@@ -19,6 +19,8 @@
 #include <string>
 #include <vector>
 
+#include "test_catalog_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -33,6 +35,7 @@ protected:
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
+        init_test_catalog(catalog_);
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         graph_engine_ = std::make_unique<GraphEngine>(catalog_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_, graph_engine_.get());
@@ -124,8 +127,10 @@ TEST_F(GDB605_UUIDtoINT, AC2_InFromINTTarget_EnrichedTraversal) {
 }
 
 TEST_F(GDB605_UUIDtoINT, AC2_InFromINTTarget_StandaloneTraverse) {
+    // Article 1 was written by Alice - exact 1 result.
     auto qr = exec_ok("TRAVERSE wrote FROM articles(1) DIRECTION IN FETCH");
-    EXPECT_GE(qr.rows.size(), 1u);
+    // Exact count instead of weak >= 1 assertion (audit fix).
+    ASSERT_EQ(qr.rows.size(), 1u);
 }
 
 // ============================================================================
@@ -271,11 +276,13 @@ TEST_F(GDB605_UUIDtoINT, NonExistentINT_EmptyResult) {
 
 TEST_F(GDB605_UUIDtoINT, ShortestPath_UUIDtoINT) {
     // SHORTEST PATH from UUID source to INT target.
+    // Alice (uuid aaaa...) wrote article 1 - this is a 1-hop path.
     auto qr = exec_ok("SHORTEST PATH "
                       "FROM authors('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') "
                       "TO articles(1) VIA wrote");
-    // Should find a 1-hop path.
-    EXPECT_GE(qr.rows.size(), 1u);
+    // The query returns both source and target nodes (2 rows for 1-hop path).
+    // Exact count instead of weak >= 1 assertion (audit fix).
+    ASSERT_EQ(qr.rows.size(), 2u);
 }
 
 TEST_F(GDB605_UUIDtoINT, ShortestPath_NonExistentTarget) {
@@ -297,6 +304,7 @@ protected:
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
+        init_test_catalog(catalog_);
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         graph_engine_ = std::make_unique<GraphEngine>(catalog_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_, graph_engine_.get());
@@ -311,9 +319,12 @@ protected:
         exec_ok("INSERT INTO employees VALUES ('fedcba98-7654-3210-fedc-ba9876543210', 'Frank')");
 
         exec_ok("CREATE EDGE TYPE employs FROM departments TO employees");
-        exec_ok("LINK departments(100) TO employees('abcdef01-2345-6789-abcd-ef0123456789') VIA employs");
-        exec_ok("LINK departments(100) TO employees('fedcba98-7654-3210-fedc-ba9876543210') VIA employs");
-        exec_ok("LINK departments(200) TO employees('fedcba98-7654-3210-fedc-ba9876543210') VIA employs");
+        exec_ok("LINK departments(100) TO employees('abcdef01-2345-6789-abcd-ef0123456789') VIA "
+                "employs");
+        exec_ok("LINK departments(100) TO employees('fedcba98-7654-3210-fedc-ba9876543210') VIA "
+                "employs");
+        exec_ok("LINK departments(200) TO employees('fedcba98-7654-3210-fedc-ba9876543210') VIA "
+                "employs");
     }
 
     void TearDown() override {
@@ -376,11 +387,14 @@ TEST_F(GDB605_INTtoUUID, Standalone_OutFromINT) {
 }
 
 // Standalone TRAVERSE IN from UUID target
+// Eve (uuid abcdef01...) is employed by department 100 - exact 1 result.
 TEST_F(GDB605_INTtoUUID, Standalone_InFromUUID) {
     auto qr = exec_ok("TRAVERSE employs "
                       "FROM employees('abcdef01-2345-6789-abcd-ef0123456789') "
                       "DIRECTION IN FETCH");
-    EXPECT_GE(qr.rows.size(), 1u);
+    ASSERT_EQ(qr.rows.size(), 1u);
+    // Verify the department id is 100.
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 100);
 }
 
 // Wrong type errors
@@ -394,11 +408,14 @@ TEST_F(GDB605_INTtoUUID, Error_IntKeyForUUIDTarget) {
 }
 
 // SHORTEST PATH with INT→UUID
+// Department 100 employs Eve (uuid abcdef01...) - this is a 1-hop path.
 TEST_F(GDB605_INTtoUUID, ShortestPath_INTtoUUID) {
     auto qr = exec_ok("SHORTEST PATH "
                       "FROM departments(100) "
                       "TO employees('abcdef01-2345-6789-abcd-ef0123456789') VIA employs");
-    EXPECT_GE(qr.rows.size(), 1u);
+    // The query returns both source and target nodes (2 rows for 1-hop path).
+    // Exact count instead of weak >= 1 assertion (audit fix).
+    ASSERT_EQ(qr.rows.size(), 2u);
 }
 
 // ============================================================================
@@ -412,6 +429,7 @@ protected:
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
+        init_test_catalog(catalog_);
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         graph_engine_ = std::make_unique<GraphEngine>(catalog_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_, graph_engine_.get());
@@ -497,10 +515,10 @@ protected:
 
         // Insert 100 target nodes and link them.
         for (int i = 0; i < 100; ++i) {
-            exec_ok("INSERT INTO tgt VALUES (" + std::to_string(i) + ", 'V" +
-                    std::to_string(i) + "')");
-            exec_ok("LINK src('ffffffff-ffff-ffff-ffff-ffffffffffff') TO tgt(" +
-                    std::to_string(i) + ") VIA connects");
+            exec_ok("INSERT INTO tgt VALUES (" + std::to_string(i) + ", 'V" + std::to_string(i) +
+                    "')");
+            exec_ok("LINK src('ffffffff-ffff-ffff-ffff-ffffffffffff') TO tgt(" + std::to_string(i) +
+                    ") VIA connects");
         }
     }
 
