@@ -219,3 +219,138 @@ TEST_F(QA_GDB1249, JoinWithoutNearestUnaffected) {
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->rows.size(), 4u);
 }
+
+// =============================================================================
+// Adversarial: the guard must hold across join variants, boolean nesting, and
+// multiple NEAREST predicates, and must reject (not silently no-op) every WHERE
+// / ON position. It must NOT over-reject derived-table workarounds.
+// =============================================================================
+
+namespace {
+constexpr const char* kVec = "[1.0, 0.0, 0.0, 0.0]";
+}
+
+// --- Boolean nesting of NEAREST under a join -------------------------------
+
+TEST_F(QA_GDB1249, NearestUnderNotWithJoinRejected) {
+    const std::string sql = std::string("SELECT b.id FROM books b "
+                                        "JOIN reviews r ON r.book_id = b.id "
+                                        "WHERE NOT NEAREST(description_vec, 2) TO ") +
+                            kVec;
+    expect_nearest_join_rejection(engine_->execute(sql), sql);
+}
+
+TEST_F(QA_GDB1249, NearestUnderOrWithJoinRejected) {
+    const std::string sql = std::string("SELECT b.id FROM books b "
+                                        "JOIN reviews r ON r.book_id = b.id "
+                                        "WHERE NEAREST(description_vec, 2) TO ") +
+                            kVec + " OR r.stars > 3";
+    expect_nearest_join_rejection(engine_->execute(sql), sql);
+}
+
+TEST_F(QA_GDB1249, NearestInParensWithJoinRejected) {
+    const std::string sql = std::string("SELECT b.id FROM books b "
+                                        "JOIN reviews r ON r.book_id = b.id "
+                                        "WHERE (NEAREST(description_vec, 2) TO ") +
+                            kVec + ")";
+    expect_nearest_join_rejection(engine_->execute(sql), sql);
+}
+
+// Two NEAREST predicates AND-ed together under a join must still be rejected.
+TEST_F(QA_GDB1249, MultipleNearestWithJoinRejected) {
+    const std::string sql = std::string("SELECT b.id FROM books b "
+                                        "JOIN reviews r ON r.book_id = b.id "
+                                        "WHERE NEAREST(description_vec, 2) TO ") +
+                            kVec + " AND NEAREST(description_vec, 3) TO " + kVec;
+    expect_nearest_join_rejection(engine_->execute(sql), sql);
+}
+
+// NEAREST in the ON clause AND in WHERE simultaneously.
+TEST_F(QA_GDB1249, NearestInOnAndWhereRejected) {
+    const std::string sql =
+        std::string("SELECT b.id FROM books b "
+                    "JOIN reviews r ON r.book_id = b.id AND NEAREST(description_vec, 2) TO ") +
+        kVec + " WHERE NEAREST(description_vec, 3) TO " + kVec;
+    expect_nearest_join_rejection(engine_->execute(sql), sql);
+}
+
+// --- Outer / cross join variants -------------------------------------------
+
+TEST_F(QA_GDB1249, NearestWithLeftJoinRejected) {
+    const std::string sql = std::string("SELECT b.id FROM books b "
+                                        "LEFT JOIN reviews r ON r.book_id = b.id "
+                                        "WHERE NEAREST(description_vec, 2) TO ") +
+                            kVec;
+    expect_nearest_join_rejection(engine_->execute(sql), sql);
+}
+
+TEST_F(QA_GDB1249, NearestWithRightJoinRejected) {
+    const std::string sql = std::string("SELECT b.id FROM books b "
+                                        "RIGHT JOIN reviews r ON r.book_id = b.id "
+                                        "WHERE NEAREST(description_vec, 2) TO ") +
+                            kVec;
+    expect_nearest_join_rejection(engine_->execute(sql), sql);
+}
+
+TEST_F(QA_GDB1249, NearestWithFullJoinRejected) {
+    const std::string sql = std::string("SELECT b.id FROM books b "
+                                        "FULL JOIN reviews r ON r.book_id = b.id "
+                                        "WHERE NEAREST(description_vec, 2) TO ") +
+                            kVec;
+    expect_nearest_join_rejection(engine_->execute(sql), sql);
+}
+
+TEST_F(QA_GDB1249, NearestWithCrossJoinRejected) {
+    const std::string sql = std::string("SELECT b.id FROM books b "
+                                        "CROSS JOIN reviews r "
+                                        "WHERE NEAREST(description_vec, 2) TO ") +
+                            kVec;
+    expect_nearest_join_rejection(engine_->execute(sql), sql);
+}
+
+// --- Not over-rejected: more complex derived-table shapes -------------------
+
+// A derived table joined to ANOTHER derived table must still plan and return
+// only the nearest rows' joined output.
+TEST_F(QA_GDB1249, DerivedTableJoinedToDerivedTableSucceeds) {
+    const std::string sql =
+        std::string("SELECT x.id FROM "
+                    "(SELECT id, _distance FROM books WHERE NEAREST(description_vec, 2) TO ") +
+        kVec +
+        ") x JOIN (SELECT book_id FROM reviews) y ON x.id = y.book_id";
+    auto result = engine_->execute(sql);
+    ASSERT_TRUE(result.has_value()) << sql << " failed: " << result.error().message;
+    auto ids = sorted_first_col(*result);
+    std::vector<int32_t> expected = {1, 2};
+    EXPECT_EQ(ids, expected);
+}
+
+// A doubly-nested derived table (NEAREST two levels down) must not be rejected.
+TEST_F(QA_GDB1249, DoublyNestedDerivedTableNearestSucceeds) {
+    const std::string sql =
+        std::string("SELECT z.id FROM "
+                    "(SELECT id FROM (SELECT id, _distance FROM books WHERE "
+                    "NEAREST(description_vec, 2) TO ") +
+        kVec + ") inner1) z JOIN reviews r ON z.id = r.book_id";
+    auto result = engine_->execute(sql);
+    ASSERT_TRUE(result.has_value()) << sql << " failed: " << result.error().message;
+    auto ids = sorted_first_col(*result);
+    std::vector<int32_t> expected = {1, 2};
+    EXPECT_EQ(ids, expected);
+}
+
+// A correlated/uncorrelated subquery in WHERE whose own body contains NEAREST
+// (the outer join has no NEAREST of its own) must NOT be rejected: the subquery
+// is planned by its own join-free plan_select and gets a real NearestScan.
+TEST_F(QA_GDB1249, NearestInsideWhereSubqueryNotOverRejected) {
+    const std::string sql =
+        std::string("SELECT b.id FROM books b JOIN reviews r ON r.book_id = b.id "
+                    "WHERE b.id IN (SELECT id FROM books b2 WHERE "
+                    "NEAREST(description_vec, 2) TO ") +
+        kVec + ")";
+    auto result = engine_->execute(sql);
+    ASSERT_TRUE(result.has_value()) << sql << " failed: " << result.error().message;
+    auto ids = sorted_first_col(*result);
+    std::vector<int32_t> expected = {1, 2};
+    EXPECT_EQ(ids, expected);
+}
