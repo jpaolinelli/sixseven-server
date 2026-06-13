@@ -338,6 +338,25 @@ Result<std::vector<uint8_t>> serialize(const std::vector<Value>& values, const S
 
     size_t n = schema.column_count();
 
+    // Validate that each non-NULL value's type matches the schema column type.
+    // NULL values are skipped: Value::type_id() returns INT8 as a placeholder
+    // for NULL (see value.h), so checking type_id() on a NULL value is meaningless.
+    // This check catches caller bugs (e.g., a coercion miss in INSERT/UPDATE) before
+    // they silently corrupt the heap by memcpy-ing the wrong number of bytes into a
+    // fixed-size slot sized by the schema, not the value.
+    for (size_t i = 0; i < n; ++i) {
+        if (values[i].is_null()) {
+            continue;
+        }
+        if (values[i].type_id() != schema.column(i).type) {
+            return make_error(
+                StatusCode::TYPE_ERROR,
+                "column \"" + schema.column(i).name + "\" (index " + std::to_string(i) +
+                    "): schema type is " + std::string(type_name(schema.column(i).type)) +
+                    " but value type is " + std::string(type_name(values[i].type_id())));
+        }
+    }
+
     // Compute sizes for each region.
     size_t bitmap_size = schema.null_bitmap_size();
     size_t fixed_size_total = schema.fixed_region_size();
