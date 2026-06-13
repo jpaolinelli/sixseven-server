@@ -4,6 +4,7 @@
 /// We test at the pg_protocol layer by encoding an ErrorResponse and inspecting
 /// the raw bytes, avoiding the need for a full network round-trip.
 
+#include "sixseven/common/platform.h"
 #include "sixseven/common/result.h"
 #include "sixseven/common/status.h"
 #include "sixseven/executor/query_engine.h"
@@ -14,7 +15,15 @@
 
 #include <gtest/gtest.h>
 
-#include "sixseven/common/platform.h"
+// Portable socket-handle type: on Windows the socket APIs (send/recv/closesocket)
+// take a SOCKET; on POSIX they take a plain int file descriptor. SOCKET is only
+// defined when <winsock2.h> is pulled in (i.e. on _WIN32), so guard the alias to
+// keep this QA test compiling on macOS/Linux. See GDB-1255.
+#if defined(_WIN32)
+using gdb750_socket_handle = SOCKET;
+#else
+using gdb750_socket_handle = int;
+#endif
 
 #include <cstdint>
 #include <optional>
@@ -150,7 +159,7 @@ int gdb750_create_socketpair(int& client_fd_out) {
 void gdb750_write_fd(int fd, const std::vector<uint8_t>& data) {
     size_t written = 0;
     while (written < data.size()) {
-        auto n = ::send(static_cast<SOCKET>(fd),
+        auto n = ::send(static_cast<gdb750_socket_handle>(fd),
                         reinterpret_cast<const char*>(data.data() + written),
                         static_cast<int>(data.size() - written),
                         0);
@@ -161,7 +170,7 @@ void gdb750_write_fd(int fd, const std::vector<uint8_t>& data) {
 
 std::vector<uint8_t> gdb750_read_fd(int fd) {
     std::vector<uint8_t> buf(16384);
-    auto n = ::recv(static_cast<SOCKET>(fd),
+    auto n = ::recv(static_cast<gdb750_socket_handle>(fd),
                     reinterpret_cast<char*>(buf.data()),
                     static_cast<int>(buf.size()),
                     0);
@@ -188,7 +197,7 @@ bool gdb750_find_message(const std::vector<uint8_t>& data,
         if (pos + total > data.size())
             return false;
         if (msg_type == type) {
-            payload     = data.data() + pos + 5;
+            payload = data.data() + pos + 5;
             payload_len = length - 4;
             pos += total;
             return true;
@@ -199,9 +208,8 @@ bool gdb750_find_message(const std::vector<uint8_t>& data,
 }
 
 // Scan an ErrorResponse payload for a field tag and return its cstring value.
-std::optional<std::string> gdb750_error_field(const uint8_t* payload,
-                                               size_t payload_len,
-                                               uint8_t field_tag) {
+std::optional<std::string>
+gdb750_error_field(const uint8_t* payload, size_t payload_len, uint8_t field_tag) {
     size_t i = 0;
     while (i < payload_len) {
         uint8_t tag = payload[i];
@@ -273,7 +281,8 @@ TEST(GDB750, WireErrorResponsePFieldExact) {
     // Minimal executor: parses the SQL and forwards parse errors, so that
     // send_error_response is called with the correct query_pos.
     handler.set_query_executor(
-        [](const std::string& sql, const std::string& /*database*/) -> sixseven::Result<sixseven::QueryResult> {
+        [](const std::string& sql,
+           const std::string& /*database*/) -> sixseven::Result<sixseven::QueryResult> {
             sixseven::Lexer lex(sql);
             auto tokens = lex.tokenize();
             if (!tokens.has_value()) {
@@ -309,7 +318,7 @@ TEST(GDB750, WireErrorResponsePFieldExact) {
     // Find the ErrorResponse ('E') message.
     size_t pos = 0;
     const uint8_t* payload = nullptr;
-    size_t payload_len    = 0;
+    size_t payload_len = 0;
     ASSERT_TRUE(gdb750_find_message(response, pos, 'E', payload, payload_len))
         << "ErrorResponse must be present in wire response";
 
