@@ -199,20 +199,18 @@ TEST_F(QA_NearestTraverseScope, GDB1251_ReadsDepthOneReachesDirectNeighborOnly) 
 
 // --- Empty reachable set: valid edge, no links ------------------------------
 //
-// BUG (GDB-1257, pre-existing in src/executor/nearest_scan.cpp): an empty graph
-// scope is indistinguishable from "no scope applied". The NearestScan operator
-// gates on `!allowed_rids.empty()` (nearest_scan.cpp:144,257,363), so when a
-// valid WITHIN TRAVERSE resolves to ZERO reachable rows, the filter is bypassed
-// and NEAREST returns the GLOBAL nearest neighbors instead of nothing.
+// FIXED (GDB-1257, in src/executor/nearest_scan.cpp): previously an empty graph
+// scope was indistinguishable from "no scope applied". The NearestScan operator
+// gated on `!allowed_rids.empty()`, so when a valid WITHIN TRAVERSE resolved to
+// ZERO reachable rows, the filter was bypassed and NEAREST returned the GLOBAL
+// nearest neighbors instead of nothing.
 //
 // GDB-1251 makes heterogeneous `reads` traversals legal, which is exactly how a
-// legitimately-empty scope arises (a reader who reads no books), so the latent
-// bug is now reachable for a newly-valid query shape. nearest_scan.cpp is
-// unchanged by this branch — the root cause is pre-existing.
+// legitimately-empty scope arises (a reader who reads no books). GDB-1257 fixes
+// the root cause so an empty-but-applied scope now correctly emits zero rows.
 //
-// This test pins the CURRENT (buggy) behavior so the QA suite stays green and
-// CI tracks it; flip the assertion to `== 0u` once GDB-1257 is fixed.
-TEST_F(QA_NearestTraverseScope, GDB1251_EmptyScopeLeaksGlobalResults_GDB1257) {
+// This test pins the FIXED behavior: an empty graph scope emits exactly 0 rows.
+TEST_F(QA_NearestTraverseScope, GDB1257_EmptyScopeEmitsZeroRows) {
     setup_schema();
     exec_ok("INSERT INTO readers VALUES (1, 'alice')");
     exec_ok("INSERT INTO books VALUES (1, 'collide', [1.0, 0.0, 0.0, 0.0])");
@@ -222,10 +220,9 @@ TEST_F(QA_NearestTraverseScope, GDB1251_EmptyScopeLeaksGlobalResults_GDB1257) {
                               "WHERE NEAREST(description_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
                               "WITHIN TRAVERSE reads FROM readers(1) DIRECTION OUT MAX_DEPTH 2");
     ASSERT_TRUE(r.has_value()) << r.error().message;
-    // CORRECT behavior would be 0 rows. Actual (buggy) behavior leaks all books.
-    EXPECT_EQ(r->rows.size(), 2u)
-        << "DOCUMENTS GDB-1257: empty graph scope leaks global NEAREST results. "
-           "Expected 0 once fixed.";
+    // An applied-but-empty graph scope must emit zero rows (no global leak).
+    EXPECT_EQ(r->rows.size(), 0u)
+        << "GDB-1257: empty graph scope must emit 0 rows, not leak global NEAREST results.";
 }
 
 // --- Homogeneous self-reaching edge: similar_to OUT keeps start in scope -----
