@@ -182,7 +182,10 @@ bool expr_contains_match(const Expr* expr) {
 }
 
 /// Recursively search an expression tree for a NEAREST(...) TO ... predicate.
-/// Used by bind_select to expose the synthetic `_distance` column.
+/// Used by bind_select to expose the synthetic `_distance` column and to reject
+/// NEAREST in disallowed clause positions (ORDER BY / SELECT / GROUP BY /
+/// HAVING). Recurses exhaustively through every AST expression node type that
+/// carries child expressions so NEAREST is detected wherever it is nested.
 bool expr_contains_nearest(const Expr* expr) {
     if (expr == nullptr) {
         return false;
@@ -195,6 +198,80 @@ bool expr_contains_nearest(const Expr* expr) {
     }
     if (auto* u = dynamic_cast<const UnaryExpr*>(expr)) {
         return expr_contains_nearest(u->operand.get());
+    }
+    if (auto* f = dynamic_cast<const FunctionCallExpr*>(expr)) {
+        for (const auto& arg : f->args) {
+            if (expr_contains_nearest(arg.get())) {
+                return true;
+            }
+        }
+        for (const auto& na : f->named_args) {
+            if (expr_contains_nearest(na.value.get())) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if (auto* c = dynamic_cast<const CastExpr*>(expr)) {
+        return expr_contains_nearest(c->expr.get());
+    }
+    if (auto* c = dynamic_cast<const CaseExpr*>(expr)) {
+        if (expr_contains_nearest(c->operand.get()) || expr_contains_nearest(c->else_expr.get())) {
+            return true;
+        }
+        for (const auto& w : c->whens) {
+            if (expr_contains_nearest(w.condition.get()) || expr_contains_nearest(w.result.get())) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if (auto* in = dynamic_cast<const InExpr*>(expr)) {
+        if (expr_contains_nearest(in->expr.get())) {
+            return true;
+        }
+        for (const auto& v : in->values) {
+            if (expr_contains_nearest(v.get())) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if (auto* bt = dynamic_cast<const BetweenExpr*>(expr)) {
+        return expr_contains_nearest(bt->expr.get()) || expr_contains_nearest(bt->low.get()) ||
+               expr_contains_nearest(bt->high.get());
+    }
+    if (auto* n = dynamic_cast<const IsNullExpr*>(expr)) {
+        return expr_contains_nearest(n->expr.get());
+    }
+    if (auto* l = dynamic_cast<const LikeExpr*>(expr)) {
+        return expr_contains_nearest(l->expr.get()) || expr_contains_nearest(l->pattern.get());
+    }
+    if (auto* a = dynamic_cast<const ArrayExpr*>(expr)) {
+        for (const auto& el : a->elements) {
+            if (expr_contains_nearest(el.get())) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if (auto* w = dynamic_cast<const WindowFunctionExpr*>(expr)) {
+        for (const auto& arg : w->args) {
+            if (expr_contains_nearest(arg.get())) {
+                return true;
+            }
+        }
+        for (const auto& pb : w->partition_by) {
+            if (expr_contains_nearest(pb.get())) {
+                return true;
+            }
+        }
+        for (const auto& ob : w->order_by) {
+            if (expr_contains_nearest(ob.expr.get())) {
+                return true;
+            }
+        }
+        return false;
     }
     return false;
 }

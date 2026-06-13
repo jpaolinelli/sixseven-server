@@ -125,8 +125,8 @@ TEST_F(QaGdb1253, GDB1253_OrderBy_Direct_Rejected) {
 }
 
 TEST_F(QaGdb1253, GDB1253_SelectList_Direct_Rejected) {
-    assert_nearest_rejected(
-        "SELECT id, (NEAREST(vec, 2) TO [1.0,0.0,0.0,0.0]) AS n FROM books", "SELECT list");
+    assert_nearest_rejected("SELECT id, (NEAREST(vec, 2) TO [1.0,0.0,0.0,0.0]) AS n FROM books",
+                            "SELECT list");
 }
 
 TEST_F(QaGdb1253, GDB1253_GroupBy_Direct_Rejected) {
@@ -146,10 +146,11 @@ TEST_F(QaGdb1253, GDB1253_Join_OrderBy_Direct_Rejected) {
 }
 
 // ---------------------------------------------------------------------------
-// ADVERSARIAL: NEAREST wrapped in node types the guard does not recurse into.
-// expr_contains_nearest only descends BinaryExpr and UnaryExpr. If NEAREST is
-// nested under a function call / cast / CASE / IN / BETWEEN / LIKE / IS NULL,
-// the guard returns false and the silent no-op resurfaces.
+// ADVERSARIAL: NEAREST wrapped in non-Binary/Unary expression node types.
+// Before GDB-1258, expr_contains_nearest only descended BinaryExpr and
+// UnaryExpr, so NEAREST nested under a function call / cast / CASE / IN /
+// BETWEEN / LIKE / IS NULL bypassed the reject and produced a silent no-op.
+// The guard now recurses through every expression node type with children.
 // ---------------------------------------------------------------------------
 
 // NEAREST as a function-call argument in ORDER BY.
@@ -159,42 +160,32 @@ TEST_F(QaGdb1253, GDB1253_OrderBy_NearestInsideFunctionArg_NotSilentNoOp) {
 }
 
 // NEAREST inside a CAST in ORDER BY.
-// DISABLED: reproduces the GDB-1253 guard-bypass bug (tracked as GDB-1258).
-// expr_contains_nearest does not recurse into CastExpr, so the reject is
-// skipped and the silent no-op (full unranked 4-row result) returns.
-TEST_F(QaGdb1253, DISABLED_GDB1253_OrderBy_NearestInsideCast_NotSilentNoOp) {
+TEST_F(QaGdb1253, GDB1253_OrderBy_NearestInsideCast_NotSilentNoOp) {
     assert_not_silent_noop(
         "SELECT id FROM books ORDER BY CAST((NEAREST(vec, 2) TO [1.0,0.0,0.0,0.0]) AS INT)");
 }
 
 // NEAREST inside a CASE in the SELECT list.
-// DISABLED: reproduces the GDB-1253 guard-bypass bug (tracked as GDB-1258).
-// expr_contains_nearest does not recurse into CaseExpr.
-TEST_F(QaGdb1253, DISABLED_GDB1253_SelectList_NearestInsideCase_NotSilentNoOp) {
+TEST_F(QaGdb1253, GDB1253_SelectList_NearestInsideCase_NotSilentNoOp) {
     assert_not_silent_noop(
         "SELECT id, CASE WHEN NEAREST(vec, 2) TO [1.0,0.0,0.0,0.0] THEN 1 ELSE 0 END AS n "
         "FROM books");
 }
 
 // NEAREST inside an IN list in ORDER BY.
-// DISABLED: reproduces the GDB-1253 guard-bypass bug (tracked as GDB-1258).
-// expr_contains_nearest does not recurse into InExpr.
-TEST_F(QaGdb1253, DISABLED_GDB1253_OrderBy_NearestInsideInList_NotSilentNoOp) {
+TEST_F(QaGdb1253, GDB1253_OrderBy_NearestInsideInList_NotSilentNoOp) {
     assert_not_silent_noop(
         "SELECT id FROM books ORDER BY id IN ((NEAREST(vec, 2) TO [1.0,0.0,0.0,0.0]))");
 }
 
 // NEAREST inside a BETWEEN in HAVING.
 TEST_F(QaGdb1253, GDB1253_Having_NearestInsideBetween_NotSilentNoOp) {
-    assert_not_silent_noop(
-        "SELECT id FROM books GROUP BY id "
-        "HAVING id BETWEEN (NEAREST(vec, 2) TO [1.0,0.0,0.0,0.0]) AND 100");
+    assert_not_silent_noop("SELECT id FROM books GROUP BY id "
+                           "HAVING id BETWEEN (NEAREST(vec, 2) TO [1.0,0.0,0.0,0.0]) AND 100");
 }
 
 // NEAREST inside IS NULL in the SELECT list.
-// DISABLED: reproduces the GDB-1253 guard-bypass bug (tracked as GDB-1258).
-// expr_contains_nearest does not recurse into IsNullExpr.
-TEST_F(QaGdb1253, DISABLED_GDB1253_SelectList_NearestInsideIsNull_NotSilentNoOp) {
+TEST_F(QaGdb1253, GDB1253_SelectList_NearestInsideIsNull_NotSilentNoOp) {
     assert_not_silent_noop(
         "SELECT id, ((NEAREST(vec, 2) TO [1.0,0.0,0.0,0.0]) IS NULL) AS n FROM books");
 }
@@ -205,9 +196,8 @@ TEST_F(QaGdb1253, DISABLED_GDB1253_SelectList_NearestInsideIsNull_NotSilentNoOp)
 
 // NEAREST in the ORDER BY of a derived-table subquery.
 TEST_F(QaGdb1253, GDB1253_Subquery_OrderBy_NotSilentNoOp) {
-    assert_not_silent_noop(
-        "SELECT id FROM (SELECT id, vec FROM books "
-        "ORDER BY NEAREST(vec, 2) TO [1.0,0.0,0.0,0.0]) AS t");
+    assert_not_silent_noop("SELECT id FROM (SELECT id, vec FROM books "
+                           "ORDER BY NEAREST(vec, 2) TO [1.0,0.0,0.0,0.0]) AS t");
 }
 
 // NEAREST in the SELECT list of a CTE.
@@ -238,9 +228,8 @@ TEST_F(QaGdb1253, GDB1253_Where_SingleTable_StillRanked) {
 }
 
 TEST_F(QaGdb1253, GDB1253_Where_JoinPushdown_StillWorks) {
-    auto result = engine_->execute(
-        "SELECT b.id FROM books b JOIN reviews r ON r.book_id = b.id "
-        "WHERE NEAREST(vec, 2) TO [1.0,0.0,0.0,0.0]");
+    auto result = engine_->execute("SELECT b.id FROM books b JOIN reviews r ON r.book_id = b.id "
+                                   "WHERE NEAREST(vec, 2) TO [1.0,0.0,0.0,0.0]");
     ASSERT_TRUE(result.has_value()) << result.error().message;
     // top-2 books are ids 1,2 which both have matching reviews -> 2 joined rows.
     EXPECT_EQ(result->rows.size(), 2u);
