@@ -3253,6 +3253,11 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
 
     // Handle WITHIN TRAVERSE (graph-scoped search).
     if (within_traverse != nullptr) {
+        // Mark the scan as graph-scoped up front. Even if the traversal below
+        // resolves to zero reachable rows, the operator must emit an empty
+        // result rather than fall back to a global search (GDB-1257).
+        config.graph_scoped = true;
+
         if (!graph_engine_) {
             return make_error(StatusCode::INTERNAL_ERROR,
                               "graph engine not available for WITHIN TRAVERSE");

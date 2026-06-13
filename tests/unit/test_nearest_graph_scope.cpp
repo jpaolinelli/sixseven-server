@@ -475,6 +475,80 @@ TEST_F(NearestTraverseScopeValidationTest, SimilarToDirectionBothAllowed) {
     EXPECT_GE(result->rows.size(), 1u);
 }
 
+// =============================================================================
+// GDB-1257: a WITHIN TRAVERSE scope that resolves to ZERO reachable rows must
+// emit zero rows, not fall back to the global nearest neighbors. The empty
+// reachable set is an explicit scope, not an absent scope.
+// =============================================================================
+
+// Brute-force path: reader 1 reads no books, so the scope is empty.
+TEST_F(NearestTraverseScopeValidationTest, EmptyScopeEmitsZeroRowsBruteForce) {
+    setup_schema();
+    exec_ok("INSERT INTO readers VALUES (1, 'alice')");
+    exec_ok("INSERT INTO books VALUES (1, 'collide', [1.0, 0.0, 0.0, 0.0])");
+    exec_ok("INSERT INTO books VALUES (2, 'other', [0.0, 1.0, 0.0, 0.0])");
+    // Deliberately do NOT link reader 1 to any book.
+
+    auto result =
+        engine_->execute("SELECT id FROM books "
+                         "WHERE NEAREST(description_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE reads FROM readers(1) DIRECTION OUT MAX_DEPTH 2");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->rows.size(), 0u) << "empty graph scope leaked global NEAREST results";
+}
+
+// HNSW path: same empty scope, but with an HNSW index built so the operator
+// takes the index search path rather than brute-force. The early-out must
+// still suppress the global results.
+TEST_F(NearestTraverseScopeValidationTest, EmptyScopeEmitsZeroRowsHnsw) {
+    setup_schema();
+    exec_ok("INSERT INTO readers VALUES (1, 'alice')");
+    exec_ok("INSERT INTO books VALUES (1, 'collide', [1.0, 0.0, 0.0, 0.0])");
+    exec_ok("INSERT INTO books VALUES (2, 'other', [0.0, 1.0, 0.0, 0.0])");
+    enable_hnsw("books", "description_vec");
+    // No reads edge from reader 1.
+
+    auto result =
+        engine_->execute("SELECT id FROM books "
+                         "WHERE NEAREST(description_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE reads FROM readers(1) DIRECTION OUT MAX_DEPTH 2");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->rows.size(), 0u)
+        << "empty graph scope leaked global NEAREST results via HNSW path";
+}
+
+// Guard against over-correction: a NEAREST with NO WITHIN TRAVERSE clause is
+// unscoped and must still return the global nearest neighbors.
+TEST_F(NearestTraverseScopeValidationTest, UnscopedNearestStillReturnsGlobalResults) {
+    setup_schema();
+    exec_ok("INSERT INTO books VALUES (1, 'a', [1.0, 0.0, 0.0, 0.0])");
+    exec_ok("INSERT INTO books VALUES (2, 'b', [0.0, 1.0, 0.0, 0.0])");
+
+    auto result = engine_->execute("SELECT id FROM books "
+                                   "WHERE NEAREST(description_vec, 5) TO [1.0, 0.0, 0.0, 0.0]");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->rows.size(), 2u)
+        << "unscoped NEAREST must not be suppressed by the empty-scope guard";
+}
+
+// A non-empty scope must still return exactly the reached rows (the fix must
+// not regress the populated-scope case).
+TEST_F(NearestTraverseScopeValidationTest, NonEmptyScopeStillReturnsReachedRows) {
+    setup_schema();
+    exec_ok("INSERT INTO readers VALUES (1, 'alice')");
+    exec_ok("INSERT INTO books VALUES (10, 'reached', [1.0, 0.0, 0.0, 0.0])");
+    exec_ok("INSERT INTO books VALUES (11, 'unreached', [0.0, 1.0, 0.0, 0.0])");
+    exec_ok("LINK readers(1) TO books(10) VIA reads");
+
+    auto result =
+        engine_->execute("SELECT id FROM books "
+                         "WHERE NEAREST(description_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE reads FROM readers(1) DIRECTION OUT MAX_DEPTH 1");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->rows.size(), 1u);
+    EXPECT_EQ(result->rows[0][0].as_int32(), 10);
+}
+
 // AC4: heterogeneous start key typed by the START table. A STRING-PK readers
 // variant: TRAVERSE reads FROM readers('alice') must coerce against readers'
 // PK type (STRING), not books' PK type (INT).

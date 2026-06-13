@@ -53,6 +53,14 @@ struct NearestScanConfig {
     /// filter by RID.
     std::set<RID> allowed_rids;
 
+    /// True when a graph scope (WITHIN TRAVERSE) was applied by the planner,
+    /// regardless of how many rows it resolved to. This distinguishes "a scope
+    /// was applied and resolved to ZERO rows" (emit nothing) from "no scope was
+    /// applied" (search globally). Gating filtering on allowed_rids.empty()
+    /// alone conflates the two and leaks global results when the reachable set
+    /// is legitimately empty (GDB-1257).
+    bool graph_scoped = false;
+
     /// Pre-filtered RIDs from a btree index lookup (for btree-accelerated
     /// filtered NEAREST). When non-empty, the operator computes distances
     /// only for these specific rows via brute-force, skipping HNSW entirely.

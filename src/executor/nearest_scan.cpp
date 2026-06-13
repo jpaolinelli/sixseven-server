@@ -51,6 +51,16 @@ Result<void> NearestScanOperator::do_open() {
         where_filter_schema_ = build_where_filter_schema();
     }
 
+    // A graph scope (WITHIN TRAVERSE) that resolved to ZERO reachable rows is
+    // an explicitly empty candidate set, not an absent scope. The per-row
+    // filters below treat an empty allowed_rids as "unscoped" (search
+    // globally), so short-circuit here to emit zero rows instead of leaking
+    // the global nearest neighbors (GDB-1257).
+    if (config_.graph_scoped && config_.allowed_rids.empty()) {
+        SIXSEVEN_LOG_DEBUG("NEAREST: graph scope resolved to empty set — emitting zero rows");
+        return ok();
+    }
+
     // Pre-filtered path: btree already identified candidate RIDs — compute
     // distances only for those rows (brute-force on a small set).
     if (!config_.prefiltered_rids.empty()) {
