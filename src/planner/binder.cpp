@@ -1725,6 +1725,39 @@ Result<BoundStatement> Binder::bind_select(const SelectStmt& stmt, Scope* parent
     BoundStatement bound;
     bound.stmt = &stmt;
 
+    // 0. Reject NEAREST(...) in unsupported clause positions (GDB-1253).
+    //    NEAREST is only honored in WHERE (single-table / pushed-through-JOIN)
+    //    and JOIN ON clauses. Placing it in the SELECT list, ORDER BY, GROUP BY,
+    //    or HAVING was previously a silent no-op that dropped the vector search
+    //    and returned the full, unranked result set. Consistent with the
+    //    GDB-1249 stopgap, surface a clear INVALID_ARGUMENT instead.
+    for (const auto& item : stmt.items) {
+        if (expr_contains_nearest(item.expr.get())) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "NEAREST(...) is only supported in a WHERE clause; "
+                              "it is not supported in the SELECT list");
+        }
+    }
+    for (const auto& ob : stmt.order_by) {
+        if (expr_contains_nearest(ob.expr.get())) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "NEAREST(...) is only supported in a WHERE clause; "
+                              "it is not supported in ORDER BY");
+        }
+    }
+    for (const auto& gb : stmt.group_by) {
+        if (expr_contains_nearest(gb.get())) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "NEAREST(...) is only supported in a WHERE clause; "
+                              "it is not supported in GROUP BY");
+        }
+    }
+    if (expr_contains_nearest(stmt.having_expr.get())) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "NEAREST(...) is only supported in a WHERE clause; "
+                          "it is not supported in HAVING");
+    }
+
     // 1. Build FROM scope (includes CTEs).
     auto scope_result = build_from_scope(stmt, parent_scope, bound);
     if (!scope_result) {
