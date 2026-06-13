@@ -1204,6 +1204,28 @@ Planner::plan_select(const SelectStmt& stmt,
 
     const bool has_joins = !stmt.joins.empty();
 
+    // -- 1b. Reject NEAREST combined with JOIN (stopgap). ------------------------
+    // NEAREST pushdown through joins is not yet implemented; without an explicit
+    // rejection such queries silently become a no-op (the vector search is
+    // dropped and the full join output is returned). Reject with a clear error
+    // pointing at the derived-table workaround. NEAREST inside a derived table /
+    // subquery is correctly NOT rejected here: expr_contains_nearest only
+    // recurses through BinaryExpr/UnaryExpr, and derived tables are planned by
+    // their own plan_select with no joins.
+    if (has_joins) {
+        static constexpr const char* kNearestJoinError =
+            "NEAREST(...) is not yet supported in queries with JOIN; wrap the NEAREST query in a "
+            "derived table (FROM (SELECT ..., _distance FROM t WHERE NEAREST(...)) sub JOIN ...)";
+        if (expr_contains_nearest(stmt.where_expr.get())) {
+            return make_error(StatusCode::INVALID_ARGUMENT, kNearestJoinError);
+        }
+        for (const auto& join_clause : stmt.joins) {
+            if (expr_contains_nearest(join_clause.on_expr.get())) {
+                return make_error(StatusCode::INVALID_ARGUMENT, kNearestJoinError);
+            }
+        }
+    }
+
     // -- 2. Optionally push WHERE into scan (only for physical tables with no joins).
     // For subquery/CTE sources or when joins are present, don't push WHERE.
     bool pushed_where = false;
