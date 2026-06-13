@@ -20,6 +20,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -332,4 +333,179 @@ TEST_F(NearestGraphScopeTest, HnswGraphScopeWithDeletedRow) {
     ASSERT_EQ(ids.size(), 2u) << "scope filter selected the wrong rows";
     EXPECT_EQ(ids[0], 1);
     EXPECT_EQ(ids[1], 3);
+}
+
+// =============================================================================
+// GDB-1251: WITHIN TRAVERSE must validate the traversal reaches the table that
+// owns the EMBEDDING column. Otherwise reachable PKs are intersected with the
+// vector table's PKs by raw numeric equality — a silent garbage scope.
+// =============================================================================
+
+class NearestTraverseScopeValidationTest : public NearestGraphScopeTest {
+protected:
+    /// books(id INT64 PK, title, description_vec EMBEDDING),
+    /// readers(id INT64 PK, name STRING),
+    /// edges: reads(readers→books), follows(readers→readers),
+    /// similar_to(books→books).
+    void setup_schema() {
+        exec_ok(
+            "CREATE TABLE books (id INT PRIMARY KEY, title VARCHAR, description_vec EMBEDDING)");
+        exec_ok("CREATE TABLE readers (id INT PRIMARY KEY, name VARCHAR)");
+
+        auto books = catalog_.get_table(default_database_id, "books");
+        ASSERT_TRUE(books.has_value());
+        register_embedding(books->table_id, 2, 4, "title", "builtin/4");
+        engine_->set_provider_registry(provider_registry_.get());
+
+        exec_ok("CREATE EDGE TYPE reads FROM readers TO books");
+        exec_ok("CREATE EDGE TYPE follows FROM readers TO readers");
+        exec_ok("CREATE EDGE TYPE similar_to FROM books TO books");
+    }
+};
+
+// AC1: the canonical repro — follows reaches readers, NEAREST is on books.
+TEST_F(NearestTraverseScopeValidationTest, ReproFollowsReachesWrongTableErrors) {
+    setup_schema();
+    exec_ok("INSERT INTO readers VALUES (1, 'alice')");
+
+    auto result =
+        engine_->execute("SELECT title FROM books "
+                         "WHERE NEAREST(description_vec, 3) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE follows FROM readers(1) DIRECTION OUT MAX_DEPTH 2");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    const std::string& msg = result.error().message;
+    EXPECT_NE(msg.find("follows"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("readers"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("books"), std::string::npos) << msg;
+}
+
+// AC2: heterogeneous edge ENDING at the vector table is allowed, and the
+// start-seed fix means a book whose id equals reader 1's id is NOT admitted
+// unless actually reached.
+TEST_F(NearestTraverseScopeValidationTest, ReadsHeterogeneousEndingAtBooksAllowed) {
+    setup_schema();
+    exec_ok("INSERT INTO readers VALUES (1, 'alice')");
+    // Book id 1 numerically collides with reader 1's id but is NOT reached.
+    exec_ok("INSERT INTO books VALUES (1, 'collision', [1.0, 0.0, 0.0, 0.0])");
+    exec_ok("INSERT INTO books VALUES (10, 'reached_a', [0.9, 0.1, 0.0, 0.0])");
+    exec_ok("INSERT INTO books VALUES (11, 'reached_b', [0.0, 1.0, 0.0, 0.0])");
+    exec_ok("INSERT INTO books VALUES (12, 'unreached', [0.0, 0.0, 1.0, 0.0])");
+
+    // reader 1 reads books 10 and 11 only.
+    exec_ok("LINK readers(1) TO books(10) VIA reads");
+    exec_ok("LINK readers(1) TO books(11) VIA reads");
+
+    auto result =
+        engine_->execute("SELECT id FROM books "
+                         "WHERE NEAREST(description_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE reads FROM readers(1) DIRECTION OUT MAX_DEPTH 1");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    std::vector<int32_t> ids;
+    for (const auto& row : result->rows) {
+        ASSERT_FALSE(row.empty());
+        ids.push_back(row[0].as_int32());
+    }
+    std::sort(ids.begin(), ids.end());
+    ASSERT_EQ(ids.size(), 2u) << "expected exactly the reached books {10, 11}";
+    EXPECT_EQ(ids[0], 10);
+    EXPECT_EQ(ids[1], 11);
+    // The PK-collision book (id 1) and the unreached book (id 12) are excluded.
+    EXPECT_EQ(std::count(ids.begin(), ids.end(), 1), 0)
+        << "start-node PK collision leaked into scope";
+    EXPECT_EQ(std::count(ids.begin(), ids.end(), 12), 0);
+}
+
+// AC3 direction matrix: reads DIRECTION IN from a book reaches readers → error.
+TEST_F(NearestTraverseScopeValidationTest, ReadsDirectionInReachesReadersErrors) {
+    setup_schema();
+    exec_ok("INSERT INTO books VALUES (1, 'b', [1.0, 0.0, 0.0, 0.0])");
+
+    auto result = engine_->execute("SELECT title FROM books "
+                                   "WHERE NEAREST(description_vec, 3) TO [1.0, 0.0, 0.0, 0.0] "
+                                   "WITHIN TRAVERSE reads FROM books(1) DIRECTION IN MAX_DEPTH 2");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_NE(result.error().message.find("readers"), std::string::npos) << result.error().message;
+}
+
+// AC3: similar_to DIRECTION IN (books→books) reaches books → allowed.
+TEST_F(NearestTraverseScopeValidationTest, SimilarToDirectionInAllowed) {
+    setup_schema();
+    exec_ok("INSERT INTO books VALUES (1, 'a', [1.0, 0.0, 0.0, 0.0])");
+    exec_ok("INSERT INTO books VALUES (2, 'b', [0.9, 0.1, 0.0, 0.0])");
+    exec_ok("LINK books(1) TO books(2) VIA similar_to");
+
+    // DIRECTION IN from book 2 reaches book 1 (the source side).
+    auto result =
+        engine_->execute("SELECT id FROM books "
+                         "WHERE NEAREST(description_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE similar_to FROM books(2) DIRECTION IN MAX_DEPTH 1");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    // Scope is {2 (start, same table), 1 (reached)}.
+    EXPECT_GE(result->rows.size(), 1u);
+}
+
+// AC3: DIRECTION BOTH on a heterogeneous edge (reads) → error.
+TEST_F(NearestTraverseScopeValidationTest, ReadsDirectionBothErrors) {
+    setup_schema();
+    exec_ok("INSERT INTO books VALUES (1, 'b', [1.0, 0.0, 0.0, 0.0])");
+
+    auto result =
+        engine_->execute("SELECT title FROM books "
+                         "WHERE NEAREST(description_vec, 3) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE reads FROM books(1) DIRECTION BOTH MAX_DEPTH 2");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+// AC3: DIRECTION BOTH on a homogeneous edge (similar_to) → allowed.
+TEST_F(NearestTraverseScopeValidationTest, SimilarToDirectionBothAllowed) {
+    setup_schema();
+    exec_ok("INSERT INTO books VALUES (1, 'a', [1.0, 0.0, 0.0, 0.0])");
+    exec_ok("INSERT INTO books VALUES (2, 'b', [0.9, 0.1, 0.0, 0.0])");
+    exec_ok("LINK books(1) TO books(2) VIA similar_to");
+
+    auto result =
+        engine_->execute("SELECT id FROM books "
+                         "WHERE NEAREST(description_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE similar_to FROM books(1) DIRECTION BOTH MAX_DEPTH 1");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_GE(result->rows.size(), 1u);
+}
+
+// AC4: heterogeneous start key typed by the START table. A STRING-PK readers
+// variant: TRAVERSE reads FROM readers('alice') must coerce against readers'
+// PK type (STRING), not books' PK type (INT).
+TEST_F(NearestGraphScopeTest, HeterogeneousStartKeyTypedByStartTable) {
+    exec_ok("CREATE TABLE books2 (id INT PRIMARY KEY, title VARCHAR, description_vec EMBEDDING)");
+    exec_ok("CREATE TABLE readers2 (id VARCHAR PRIMARY KEY, name VARCHAR)");
+
+    auto books = catalog_.get_table(default_database_id, "books2");
+    ASSERT_TRUE(books.has_value());
+    register_embedding(books->table_id, 2, 4, "title", "builtin/4");
+    engine_->set_provider_registry(provider_registry_.get());
+
+    exec_ok("CREATE EDGE TYPE reads2 FROM readers2 TO books2");
+    exec_ok("INSERT INTO readers2 VALUES ('alice', 'Alice')");
+    exec_ok("INSERT INTO books2 VALUES (10, 'reached', [1.0, 0.0, 0.0, 0.0])");
+    exec_ok("INSERT INTO books2 VALUES (11, 'unreached', [0.0, 1.0, 0.0, 0.0])");
+    exec_ok("LINK readers2('alice') TO books2(10) VIA reads2");
+
+    // Start key 'alice' is a STRING; coercion must target readers2's STRING PK,
+    // not books2's INT PK (which would fail or produce garbage).
+    auto result =
+        engine_->execute("SELECT id FROM books2 "
+                         "WHERE NEAREST(description_vec, 5) TO [1.0, 0.0, 0.0, 0.0] "
+                         "WITHIN TRAVERSE reads2 FROM readers2('alice') DIRECTION OUT MAX_DEPTH 1");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    std::vector<int32_t> ids;
+    for (const auto& row : result->rows) {
+        ASSERT_FALSE(row.empty());
+        ids.push_back(row[0].as_int32());
+    }
+    ASSERT_EQ(ids.size(), 1u) << "expected exactly the reached book {10}";
+    EXPECT_EQ(ids[0], 10);
 }
