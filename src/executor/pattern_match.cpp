@@ -352,14 +352,20 @@ Result<void> PatternMatchOperator::execute_multi_hop() {
 
             const Value& src_pk = it->second;
 
-            // Get full edge rows for edge predicate evaluation.
-            std::vector<EdgeRow> edge_rows;
+            // Carry the resolved neighbor alongside each EdgeRow at fetch time,
+            // exactly like execute_single_hop.  For BOTH direction, rows from
+            // get_edges_to() have target_pk == src (current node); deriving the
+            // neighbor later from edge_def.direction alone would bind src to itself.
+            // Resolving at collection time (target_pk for OUT rows, source_pk for
+            // IN rows) is always correct regardless of the overall direction value.
+            std::vector<std::pair<EdgeRow, Value>> edges_with_neighbor;
             if (edge_def.direction == TraverseDirection::OUT ||
                 edge_def.direction == TraverseDirection::BOTH) {
                 auto fwd = graph_engine_.get_edges_from(database_id_, edge_def.edge_type, src_pk);
                 if (fwd) {
                     for (auto& e : *fwd) {
-                        edge_rows.push_back(std::move(e));
+                        Value nbr = e.target_pk;
+                        edges_with_neighbor.emplace_back(std::move(e), std::move(nbr));
                     }
                 }
             }
@@ -368,14 +374,13 @@ Result<void> PatternMatchOperator::execute_multi_hop() {
                 auto rev = graph_engine_.get_edges_to(database_id_, edge_def.edge_type, src_pk);
                 if (rev) {
                     for (auto& e : *rev) {
-                        edge_rows.push_back(std::move(e));
+                        Value nbr = e.source_pk;
+                        edges_with_neighbor.emplace_back(std::move(e), std::move(nbr));
                     }
                 }
             }
 
-            for (auto& edge_row : edge_rows) {
-                Value tgt_pk = (edge_def.direction == TraverseDirection::IN) ? edge_row.source_pk
-                                                                             : edge_row.target_pk;
+            for (auto& [edge_row, tgt_pk] : edges_with_neighbor) {
 
                 // Apply edge inline predicate.
                 if (edge_def.filter_expr) {
