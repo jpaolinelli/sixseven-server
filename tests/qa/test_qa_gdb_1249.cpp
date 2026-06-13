@@ -1,0 +1,221 @@
+/// @file test_qa_gdb_1249.cpp
+/// @brief QA regression tests for GDB-1249: NEAREST(...) combined with a JOIN
+/// was a silent no-op (the vector search was dropped and the full join output
+/// returned). The stopgap fix rejects such queries with INVALID_ARGUMENT and a
+/// message naming NEAREST, JOIN, and the derived-table workaround.
+///
+/// The documented workaround — wrapping the NEAREST query in a derived table —
+/// must still succeed and return only the nearest rows' joined output, because
+/// the derived table is planned by its own join-free plan_select and gets a
+/// real NearestScanOperator.
+
+#include "sixseven/catalog/catalog.h"
+#include "sixseven/common/status.h"
+#include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/storage_manager.h"
+#include "sixseven/graph/graph_engine.h"
+#include "sixseven/storage/disk_manager.h"
+#include "sixseven/vector/embedding_column.h"
+
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "test_qa_helpers.h"
+
+using namespace sixseven;
+
+// =============================================================================
+// Fixture: books(id, title, description_vec EMBEDDING), reviews(id, book_id,
+// stars), readers(id, name), with edges follows(readers->readers) so the
+// WITHIN TRAVERSE variant parses.
+// =============================================================================
+
+class QA_GDB1249 : public ::testing::Test {
+protected:
+    void SetUp() override {
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb1249";
+        std::filesystem::remove_all(data_dir_);
+        std::filesystem::create_directories(data_dir_);
+
+        bootstrap_qa_catalog(catalog_);
+        storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
+        graph_engine_ = std::make_unique<GraphEngine>(catalog_);
+        engine_ = std::make_unique<QueryEngine>(catalog_, *storage_, graph_engine_.get());
+
+        seed_fixture();
+    }
+
+    void TearDown() override {
+        engine_.reset();
+        graph_engine_.reset();
+        storage_.reset();
+        std::filesystem::remove_all(data_dir_);
+    }
+
+    QueryResult exec_ok(const std::string& sql) {
+        auto result = engine_->execute(sql);
+        EXPECT_TRUE(result.has_value()) << sql << " failed: " << result.error().message;
+        return result ? std::move(*result) : QueryResult{};
+    }
+
+    void register_embedding(table_id_t table_id, int32_t col_id, int32_t dim) {
+        EmbeddingColumnDef emb_def;
+        emb_def.table_id = table_id;
+        emb_def.column_id = col_id;
+        emb_def.dimension = dim;
+        emb_def.source_expr = "title";
+        emb_def.provider = "builtin/4";
+        auto reg = catalog_.register_embedding_column(emb_def);
+        ASSERT_TRUE(reg.has_value()) << reg.error().message;
+    }
+
+    void seed_fixture() {
+        exec_ok(
+            "CREATE TABLE books (id INT PRIMARY KEY, title VARCHAR, description_vec EMBEDDING)");
+        auto books = catalog_.get_table(default_database_id, "books");
+        ASSERT_TRUE(books.has_value());
+        register_embedding(books->table_id, 2, 4);
+
+        // Vectors chosen so the query [1,0,0,0] orders books 1, 2, 3, 4 by
+        // increasing distance. The 2 nearest are ids 1 and 2.
+        exec_ok("INSERT INTO books VALUES (1, 'alpha', [1.0, 0.0, 0.0, 0.0])");
+        exec_ok("INSERT INTO books VALUES (2, 'beta',  [0.9, 0.1, 0.0, 0.0])");
+        exec_ok("INSERT INTO books VALUES (3, 'gamma', [0.2, 0.8, 0.0, 0.0])");
+        exec_ok("INSERT INTO books VALUES (4, 'delta', [0.0, 1.0, 0.0, 0.0])");
+
+        exec_ok("CREATE TABLE reviews (id INT PRIMARY KEY, book_id INT, stars INT)");
+        // One review per book so a join of the 2 nearest yields exactly 2 rows.
+        exec_ok("INSERT INTO reviews VALUES (10, 1, 5)");
+        exec_ok("INSERT INTO reviews VALUES (20, 2, 4)");
+        exec_ok("INSERT INTO reviews VALUES (30, 3, 3)");
+        exec_ok("INSERT INTO reviews VALUES (40, 4, 2)");
+
+        exec_ok("CREATE TABLE readers (id INT PRIMARY KEY, name VARCHAR)");
+        exec_ok("INSERT INTO readers VALUES (1, 'reader-one')");
+        exec_ok("CREATE EDGE TYPE follows FROM readers TO readers");
+    }
+
+    static std::vector<int32_t> sorted_first_col(const QueryResult& qr) {
+        std::vector<int32_t> ids;
+        for (const auto& row : qr.rows) {
+            EXPECT_FALSE(row.empty());
+            if (!row.empty()) {
+                ids.push_back(row[0].as_int32());
+            }
+        }
+        std::sort(ids.begin(), ids.end());
+        return ids;
+    }
+
+    static void expect_nearest_join_rejection(const Result<QueryResult>& result,
+                                              const std::string& sql) {
+        ASSERT_FALSE(result.has_value()) << "expected rejection for: " << sql;
+        EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT) << sql;
+        const std::string& msg = result.error().message;
+        EXPECT_NE(msg.find("NEAREST"), std::string::npos) << "message must name NEAREST: " << msg;
+        EXPECT_NE(msg.find("JOIN"), std::string::npos) << "message must name JOIN: " << msg;
+        EXPECT_NE(msg.find("derived table"), std::string::npos)
+            << "message must name the derived-table workaround: " << msg;
+    }
+
+    DiskManager dm_;
+    Catalog catalog_;
+    std::filesystem::path data_dir_;
+    std::unique_ptr<StorageManager> storage_;
+    std::unique_ptr<GraphEngine> graph_engine_;
+    std::unique_ptr<QueryEngine> engine_;
+};
+
+// =============================================================================
+// AC1: NEAREST in WHERE with a JOIN is rejected with INVALID_ARGUMENT.
+// =============================================================================
+
+TEST_F(QA_GDB1249, NearestInWhereWithSingleJoinRejected) {
+    const std::string sql = "SELECT b.id, r.stars FROM books b "
+                            "INNER JOIN reviews r ON r.book_id = b.id "
+                            "WHERE NEAREST(description_vec, 2) TO [1.0, 0.0, 0.0, 0.0]";
+    expect_nearest_join_rejection(engine_->execute(sql), sql);
+}
+
+TEST_F(QA_GDB1249, NearestInWhereWithMultipleJoinsRejected) {
+    const std::string sql = "SELECT b.id FROM books b "
+                            "INNER JOIN reviews r ON r.book_id = b.id "
+                            "INNER JOIN reviews r2 ON r2.book_id = b.id "
+                            "WHERE NEAREST(description_vec, 2) TO [1.0, 0.0, 0.0, 0.0]";
+    expect_nearest_join_rejection(engine_->execute(sql), sql);
+}
+
+TEST_F(QA_GDB1249, NearestAndedWithOtherPredicateRejected) {
+    const std::string sql =
+        "SELECT b.id FROM books b "
+        "INNER JOIN reviews r ON r.book_id = b.id "
+        "WHERE NEAREST(description_vec, 2) TO [1.0, 0.0, 0.0, 0.0] AND r.stars > 3";
+    expect_nearest_join_rejection(engine_->execute(sql), sql);
+}
+
+TEST_F(QA_GDB1249, NearestWithWithinTraverseAndJoinRejected) {
+    const std::string sql = "SELECT b.id FROM books b "
+                            "INNER JOIN reviews r ON r.book_id = b.id "
+                            "WHERE NEAREST(description_vec, 2) TO [1.0, 0.0, 0.0, 0.0] "
+                            "WITHIN TRAVERSE follows FROM readers(1) DIRECTION OUT MAX_DEPTH 2";
+    expect_nearest_join_rejection(engine_->execute(sql), sql);
+}
+
+// =============================================================================
+// AC2: NEAREST in a JOIN ON clause is rejected with the same error.
+// =============================================================================
+
+TEST_F(QA_GDB1249, NearestInJoinOnClauseRejected) {
+    const std::string sql = "SELECT b.id FROM books b "
+                            "INNER JOIN reviews r ON r.book_id = b.id "
+                            "AND NEAREST(description_vec, 2) TO [1.0, 0.0, 0.0, 0.0]";
+    expect_nearest_join_rejection(engine_->execute(sql), sql);
+}
+
+// =============================================================================
+// AC3: derived-table workaround is NOT over-rejected and returns only the
+// nearest books' joined reviews (exact ids asserted against fixture vectors).
+// =============================================================================
+
+TEST_F(QA_GDB1249, DerivedTableNearestWithJoinSucceeds) {
+    const std::string sql = "SELECT nb.id, r.stars FROM "
+                            "(SELECT id, title, _distance FROM books "
+                            " WHERE NEAREST(description_vec, 2) TO [1.0, 0.0, 0.0, 0.0]) nb "
+                            "JOIN reviews r ON nb.id = r.book_id";
+    auto result = engine_->execute(sql);
+    ASSERT_TRUE(result.has_value()) << sql << " failed: " << result.error().message;
+
+    // The 2 nearest books to [1,0,0,0] are ids 1 and 2; each has one review.
+    auto ids = sorted_first_col(*result);
+    std::vector<int32_t> expected = {1, 2};
+    EXPECT_EQ(ids, expected) << "derived-table NEAREST returned the wrong books";
+}
+
+// =============================================================================
+// AC4: single-table NEAREST is unaffected by the join guard.
+// =============================================================================
+
+TEST_F(QA_GDB1249, SingleTableNearestStillWorks) {
+    const std::string sql =
+        "SELECT id FROM books WHERE NEAREST(description_vec, 2) TO [1.0, 0.0, 0.0, 0.0]";
+    auto result = engine_->execute(sql);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto ids = sorted_first_col(*result);
+    std::vector<int32_t> expected = {1, 2};
+    EXPECT_EQ(ids, expected);
+}
+
+// A join query with NO nearest predicate must remain unaffected.
+TEST_F(QA_GDB1249, JoinWithoutNearestUnaffected) {
+    const std::string sql =
+        "SELECT b.id, r.stars FROM books b INNER JOIN reviews r ON r.book_id = b.id";
+    auto result = engine_->execute(sql);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->rows.size(), 4u);
+}
