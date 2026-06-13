@@ -2,7 +2,6 @@
 /// Tests split correctness, cascading splits, sibling pointer integrity,
 /// boundary capacities, and various insert orderings.
 
-#include "sixseven/storage/wal.h"
 
 #include <gtest/gtest.h>
 
@@ -516,29 +515,26 @@ TEST(QA_GDB93_SplitPoint, OddKeyCount) {
 // WAL Logging
 // =============================================================================
 
-TEST(QA_GDB93_WAL, InsertWithWalDoesNotCrash) {
-    // Create a WAL writer and ensure it doesn't crash during splits
-    auto temp_dir = std::filesystem::temp_directory_path() / "qa_gdb93_wal";
-    std::filesystem::create_directories(temp_dir);
-
-    sixseven::WalWriter wal(temp_dir / "wal");
-    auto open_result = wal.open();
-    ASSERT_TRUE(open_result.has_value());
-
+TEST(QA_GDB93_WAL, InsertCausingSplitsPreservesSize) {
+    // GDB-787: WAL plumbing removed; verify split-heavy inserts still produce
+    // the correct tree size and all keys remain searchable.
     BTreeConfig config;
     config.key_types = {TypeId::INT64};
     config.leaf_max_keys = 3;
     config.internal_max_keys = 3;
-    BTreeIndex tree(std::move(config), &wal);
+    BTreeIndex tree(std::move(config));
 
-    // Insert enough to cause multiple splits
     for (int i = 1; i <= 15; ++i) {
         auto ins = tree.insert(make_key(i), make_rid(static_cast<uint32_t>(i)));
         ASSERT_TRUE(ins.has_value()) << "insert failed at key " << i;
     }
     EXPECT_EQ(tree.size(), 15u);
 
-    std::filesystem::remove_all(temp_dir);
+    for (int i = 1; i <= 15; ++i) {
+        auto s = tree.search(make_key(i));
+        ASSERT_TRUE(s.has_value());
+        ASSERT_TRUE(s->has_value()) << "key " << i << " not found after splits";
+    }
 }
 
 // =============================================================================

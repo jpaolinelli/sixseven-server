@@ -16,7 +16,6 @@
 namespace sixseven {
 
 // Forward declaration.
-class WalWriter;
 class BTreeIterator;
 
 /// Configuration for creating a B+ tree index.
@@ -43,8 +42,7 @@ class BTreeIndex {
 public:
     /// Construct a B+ tree index.
     /// @param config Index configuration.
-    /// @param wal Optional WAL writer for logging structural changes.
-    explicit BTreeIndex(BTreeConfig config, WalWriter* wal = nullptr);
+    explicit BTreeIndex(BTreeConfig config);
 
     /// Insert a (key, rid) pair into the index.
     /// Returns CONSTRAINT_VIOLATION if is_unique and key already exists.
@@ -134,9 +132,6 @@ private:
     /// Also checks for underfull non-root internal nodes and recurses.
     [[nodiscard]] Result<void> handle_post_merge(BTreeInternalNode* parent);
 
-    /// Log a PAGE_SPLIT WAL record if a WAL writer is configured.
-    void log_split(PageId original_page_id, PageId new_page_id);
-
     // -- Internal max key getters ---
     [[nodiscard]] uint16_t effective_internal_max_keys() const;
     [[nodiscard]] uint16_t effective_leaf_max_keys() const;
@@ -145,7 +140,6 @@ private:
 
     // -- State ---
     BTreeConfig config_;
-    WalWriter* wal_;
     PageId root_page_id_ = invalid_page_id;
     uint64_t size_ = 0;
     PageId next_page_id_ = 1; // Page ID allocator (0 is invalid).
