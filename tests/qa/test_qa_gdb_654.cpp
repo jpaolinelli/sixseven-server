@@ -151,8 +151,11 @@ TEST_F(QA_GDB654, AC2_AllSystemTableIdsUnique) {
         sys_embedding_columns_table_id,
         sys_embedding_jobs_table_id,
         sys_databases_table_id,
+        sys_users_table_id,
     };
-    EXPECT_EQ(ids.size(), 9u) << "Duplicate system table IDs detected";
+    EXPECT_EQ(ids.size(), 10u) << "Duplicate system table IDs detected";
+    EXPECT_LT(*ids.rbegin(), first_user_table_id)
+        << "System table ID leaked into the user table ID range";
 }
 
 // ============================================================================
