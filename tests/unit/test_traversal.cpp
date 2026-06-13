@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -513,6 +514,94 @@ TEST_F(TraversalTest, NoTraceEmitsNoPathColumn) {
     // Only 2 columns: no trailing __path value appended.
     EXPECT_EQ(row->value().values.size(), 2u);
     op.close();
+}
+
+/// Helper to run BFS with FETCH mode and return (node, depth, source) tuples.
+/// This mirrors the QA test's run_bfs helper but properly verifies the source column.
+std::vector<std::tuple<int64_t, int64_t, int64_t>>
+run_bfs_with_fetch(GraphEngine& graph,
+                   int64_t start,
+                   TraverseDirection dir = TraverseDirection::OUT,
+                   int32_t max_depth = 100,
+                   size_t max_visited = 100000) {
+    TraversalConfig config;
+    config.edge_type = "follows";
+    config.start_key = Value(start);
+    config.direction = dir;
+    config.max_depth = max_depth;
+    config.max_visited = max_visited;
+    config.fetch = true;
+
+    std::vector<OutputColumn> cols;
+    cols.push_back({"", "node", TypeId::INT64, false, 0});
+    cols.push_back({"", "depth", TypeId::INT64, false, 0});
+    cols.push_back({"", "source", TypeId::INT64, true, 0});
+    OutputSchema schema(std::move(cols));
+
+    BoundStatement bound;
+    TraversalOperator op(graph, std::move(config), std::move(schema), nullptr, bound);
+
+    auto open_result = op.open();
+    EXPECT_TRUE(open_result.has_value()) << open_result.error().message;
+
+    std::vector<std::tuple<int64_t, int64_t, int64_t>> results;
+    while (true) {
+        auto row = op.next();
+        EXPECT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value()) {
+            break;
+        }
+        auto& vals = row->value().values;
+        EXPECT_EQ(vals.size(), 3U);
+        if (vals.size() == 3U) {
+            results.emplace_back(vals[0].as_int64(), vals[1].as_int64(), vals[2].as_int64());
+        }
+    }
+    op.close();
+    return results;
+}
+
+// Test for GDB-796: QA test AC_FetchEnrichesResultsWithRowData was vacuous because
+// it called run_bfs with fetch=true but didn't verify the source column.
+// This test verifies the fix: FETCH mode includes source_pk as the 3rd column.
+TEST_F(TraversalTest, FetchModeOutputsThreeColumnsIncludingSource) {
+    // Use isolated nodes to avoid interference from the fixture's default graph.
+    // Graph: 100 -> 101 (single edge)
+    link(100, 101);
+
+    // BFS from 100 with fetch=true should return node 101 with depth 1 and source 100.
+    auto results = run_bfs_with_fetch(*graph_, 100, TraverseDirection::OUT, 100, 100000);
+
+    ASSERT_EQ(results.size(), 1U);
+    auto& [node, depth, source] = results[0];
+
+    // Node 101 reached at depth 1 from source node 100.
+    EXPECT_EQ(node, 101);
+    EXPECT_EQ(depth, 1);
+    EXPECT_EQ(source, 100);
+}
+
+// Test multi-hop BFS to verify source column tracks the immediate predecessor.
+TEST_F(TraversalTest, FetchModeSourceColumnTracksPredecessor) {
+    // Use isolated nodes to avoid interference from the fixture's default graph.
+    // Graph: 200 -> 201 -> 202
+    link(200, 201);
+    link(201, 202);
+
+    auto results = run_bfs_with_fetch(*graph_, 200, TraverseDirection::OUT, 100, 100000);
+
+    // Should have 2 results: node 201 (depth 1, source 200), node 202 (depth 2, source 201)
+    ASSERT_EQ(results.size(), 2U);
+
+    // Node 201: depth 1, source 200 (came from node 200)
+    EXPECT_EQ(std::get<0>(results[0]), 201);
+    EXPECT_EQ(std::get<1>(results[0]), 1);
+    EXPECT_EQ(std::get<2>(results[0]), 200);
+
+    // Node 202: depth 2, source 201 (came from node 201)
+    EXPECT_EQ(std::get<0>(results[1]), 202);
+    EXPECT_EQ(std::get<1>(results[1]), 2);
+    EXPECT_EQ(std::get<2>(results[1]), 201);
 }
 
 } // namespace
