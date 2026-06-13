@@ -5,49 +5,14 @@
 /// Covers edge cases, boundary values, error paths, and stress tests for
 /// graph/vector queries and administrative commands.
 
-#include "sixseven/parser/lexer.h"
-#include "sixseven/parser/parser.h"
-
-#include <gtest/gtest.h>
+#include "parser_qa_helpers.h"
 
 #include <string>
 
-using namespace sixseven;
-
 // ---------------------------------------------------------------------------
-// Helpers
+// File-specific helpers
 // ---------------------------------------------------------------------------
 
-static std::vector<StmtPtr> parse_ok(std::string_view sql) {
-    Lexer lexer(sql);
-    auto tokens = lexer.tokenize();
-    EXPECT_TRUE(tokens.has_value()) << tokens.error().message;
-    if (!tokens)
-        return {};
-
-    Parser parser(std::move(*tokens));
-    auto stmts = parser.parse_all();
-    EXPECT_TRUE(stmts.has_value()) << stmts.error().message;
-    return stmts ? std::move(*stmts) : std::vector<StmtPtr>{};
-}
-
-static StmtPtr parse_one(std::string_view sql) {
-    auto stmts = parse_ok(sql);
-    EXPECT_EQ(stmts.size(), 1u);
-    if (stmts.size() != 1)
-        return nullptr;
-    return std::move(stmts[0]);
-}
-
-static void expect_parse_error(std::string_view sql) {
-    Lexer lexer(sql);
-    auto tokens = lexer.tokenize();
-    if (!tokens)
-        return; // lexer error is also acceptable
-    Parser parser(std::move(*tokens));
-    auto stmts = parser.parse_all();
-    EXPECT_FALSE(stmts.has_value()) << "expected parse error for: " << sql;
-}
 
 /// Recursively locate the NearestExpr embedded in a WHERE expression tree,
 /// descending through AND/OR (BinaryExpr) and NOT (UnaryExpr) nodes.
