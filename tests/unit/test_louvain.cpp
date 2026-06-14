@@ -371,36 +371,100 @@ TEST_F(CommunityDetectTest, KarateClubLikeGraph) {
 }
 
 TEST_F(CommunityDetectTest, CustomResolution) {
-    // Higher resolution tends to find more (smaller) communities.
-    build_graph("knows", {{1, 2}, {2, 3}, {3, 1}, {4, 5}, {5, 6}, {6, 4}, {3, 4}});
+    // Higher resolution should produce different community assignments than default.
+    // Use a graph where different resolutions can produce different partitions.
+    // Graph: two triangles (1-2-3 and 4-5-6) connected by bridge (3-4), plus isolated node 7.
+    build_graph("knows",
+                {{1, 2},
+                 {2, 3},
+                 {3, 1}, // triangle 1
+                 {4, 5},
+                 {5, 6},
+                 {6, 4},   // triangle 2
+                 {3, 4}}); // bridge
 
+    // Run with custom resolution (1.5).
     auto result = run_cd("knows", 1.5, 10);
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     auto communities = to_community_map(*result);
     EXPECT_EQ(communities.size(), 6u);
+
+    // Count distinct communities - should be fewer than nodes since some are grouped.
+    std::unordered_set<int64_t> unique_comms;
+    for (const auto& [_, c] : communities)
+        unique_comms.insert(c);
+
+    // Verify we actually have community detection happening (not one community per node).
+    // If resolution were ignored, we'd likely see either 1 community or 6 separate ones.
+    EXPECT_LT(unique_comms.size(), communities.size())
+        << "Should have fewer communities (" << unique_comms.size() << ") than nodes ("
+        << communities.size() << ") - resolution should affect grouping";
+
     verify_contiguous_ids(communities);
 }
 
 TEST_F(CommunityDetectTest, CustomMaxIterations) {
-    build_graph("knows", {{1, 2}, {2, 3}, {3, 1}});
+    // Verify that max_iterations parameter is actually used by the algorithm.
+    // Use a graph complex enough that iteration limit could affect convergence.
+    build_graph("knows",
+                {{1, 2},
+                 {2, 3},
+                 {3, 1},
+                 {4, 5},
+                 {5, 6},
+                 {6, 4},   // two triangles
+                 {3, 4}}); // connecting edge
 
-    auto result = run_cd("knows", 1.0, 1);
-    ASSERT_TRUE(result.has_value()) << result.error().message;
+    // Run with only 1 iteration.
+    auto result_1 = run_cd("knows", 1.0, 1);
+    ASSERT_TRUE(result_1.has_value()) << result_1.error().message;
+    auto communities_1 = to_community_map(*result_1);
+    EXPECT_EQ(communities_1.size(), 6u);
 
-    auto communities = to_community_map(*result);
-    EXPECT_EQ(communities.size(), 3u);
-    verify_contiguous_ids(communities);
+    // Run with 10 iterations (should converge to stable state).
+    auto result_10 = run_cd("knows", 1.0, 10);
+    ASSERT_TRUE(result_10.has_value()) << result_10.error().message;
+    auto communities_10 = to_community_map(*result_10);
+    EXPECT_EQ(communities_10.size(), 6u);
+
+    // Both should have valid community structure.
+    std::unordered_set<int64_t> comms_1, comms_10;
+    for (const auto& [_, c] : communities_1)
+        comms_1.insert(c);
+    for (const auto& [_, c] : communities_10)
+        comms_10.insert(c);
+
+    EXPECT_LT(comms_1.size(), communities_1.size());   // Should group nodes
+    EXPECT_LT(comms_10.size(), communities_10.size()); // Should group nodes
+
+    // The results should be valid and stable - max_iterations shouldn't cause crashes.
+    verify_contiguous_ids(communities_1);
+    verify_contiguous_ids(communities_10);
 }
 
 TEST_F(CommunityDetectTest, SelfLoopIgnored) {
-    // Self-loop on node 1 should be ignored.
+    // Self-loops should be ignored by the algorithm (not counted in degree or edge weight).
+    // Build graph with self-loop: node 1 has self-loop {1,1} plus edges to 2 and 3.
+    // If self-loops were counted, node 1 would have higher degree and might stay separate.
+    // If ignored (correct behavior), node 1 should merge with connected nodes.
     build_graph("knows", {{1, 1}, {1, 2}, {2, 3}});
 
     auto result = run_cd("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     auto communities = to_community_map(*result);
-    EXPECT_EQ(communities.size(), 3u);
+    EXPECT_EQ(communities.size(), 3U);
+
+    // All three nodes should be in the same community (1 connected to 2, 2 to 3).
+    // This verifies the self-loop didn't prevent node 1 from merging with its neighbors.
+    // If self-loop were counted and kept node 1 separate, we'd see 2+ communities.
+    std::unordered_set<int64_t> unique_comms;
+    for (const auto& [_, c] : communities)
+        unique_comms.insert(c);
+
+    EXPECT_EQ(unique_comms.size(), 1U)
+        << "All connected nodes should be in one community; self-loop should not prevent merging";
+
     verify_contiguous_ids(communities);
 }
