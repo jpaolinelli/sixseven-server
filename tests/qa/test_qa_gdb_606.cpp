@@ -30,6 +30,8 @@
 #include <string>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -55,6 +57,8 @@ protected:
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
+        bootstrap_qa_catalog(catalog_);
+
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         graph_engine_ = std::make_unique<GraphEngine>(catalog_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_, graph_engine_.get());
@@ -70,7 +74,7 @@ protected:
         exec_ok("INSERT INTO products VALUES (30, 'Gizmo')");
 
         exec_ok("CREATE EDGE TYPE rated (score DOUBLE, review VARCHAR) "
-                 "FROM users TO products");
+                "FROM users TO products");
 
         exec_ok("LINK users(1) TO products(10) VIA rated (score = 4.5, review = 'excellent')");
         exec_ok("LINK users(1) TO products(20) VIA rated (score = 1.5, review = 'terrible')");
@@ -114,7 +118,7 @@ TEST_F(QA_GDB606, TraverseSelectEdgePropertyWithAlias) {
     // The original bug: rated.score fails with "table not found: rated" when
     // the TRAVERSE has an explicit alias (AS t).
     auto qr = exec_ok("SELECT name, rated.score, rated.review "
-                       "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
+                      "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
 
     ASSERT_EQ(qr.column_names.size(), 3u);
     EXPECT_EQ(qr.column_names[0], "name");
@@ -139,7 +143,7 @@ TEST_F(QA_GDB606, TraverseSelectEdgePropertyWithAlias) {
 TEST_F(QA_GDB606, TraverseSelectEdgePropertyWithoutAlias) {
     // Without alias: should also work (regression guard).
     auto qr = exec_ok("SELECT name, rated.score "
-                       "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH");
+                      "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH");
 
     ASSERT_EQ(qr.rows.size(), 3u);
 
@@ -165,7 +169,7 @@ TEST_F(QA_GDB606, UnlinkWhereNumericProperty) {
 
     // Verify only 2 edges remain for user 1.
     auto edges = exec_ok("SELECT rated.score FROM TRAVERSE rated "
-                          "FROM users(1) DIRECTION OUT FETCH AS t");
+                         "FROM users(1) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(edges.rows.size(), 2u);
 
     std::vector<double> remaining;
@@ -179,11 +183,11 @@ TEST_F(QA_GDB606, UnlinkWhereNumericProperty) {
 
 TEST_F(QA_GDB606, UnlinkWhereStringProperty) {
     auto qr = exec_ok("UNLINK users(1) FROM products(20) VIA rated "
-                       "WHERE review = 'terrible'");
+                      "WHERE review = 'terrible'");
     EXPECT_EQ(qr.affected_rows, 1);
 
     auto edges = exec_ok("SELECT rated.review FROM TRAVERSE rated "
-                          "FROM users(1) DIRECTION OUT FETCH AS t");
+                         "FROM users(1) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(edges.rows.size(), 2u);
 }
 
@@ -196,7 +200,7 @@ TEST_F(QA_GDB606, UnlinkWithoutWhereStillWorks) {
     EXPECT_EQ(qr.affected_rows, 1);
 
     auto edges = exec_ok("SELECT rated.score FROM TRAVERSE rated "
-                          "FROM users(3) DIRECTION OUT FETCH AS t");
+                         "FROM users(3) DIRECTION OUT FETCH AS t");
     EXPECT_EQ(edges.rows.size(), 0u);
 }
 
@@ -207,7 +211,7 @@ TEST_F(QA_GDB606, UnlinkWithoutWhereStillWorks) {
 TEST_F(QA_GDB606, TraverseEdgePropertyDirectionIn) {
     // Traverse incoming edges to product 10 (rated by users 1, 2, 3).
     auto qr = exec_ok("SELECT name, rated.score "
-                       "FROM TRAVERSE rated FROM products(10) DIRECTION IN FETCH AS t");
+                      "FROM TRAVERSE rated FROM products(10) DIRECTION IN FETCH AS t");
 
     ASSERT_EQ(qr.rows.size(), 3u);
 
@@ -229,19 +233,19 @@ TEST_F(QA_GDB606, TraverseEdgePropertyDirectionIn) {
 TEST_F(QA_GDB606, UnlinkWhereCompoundPredicate) {
     // AND predicate: only delete edges with score < 2.0 AND review = 'terrible'.
     auto qr = exec_ok("UNLINK users(1) FROM products(20) VIA rated "
-                       "WHERE score < 2.0 AND review = 'terrible'");
+                      "WHERE score < 2.0 AND review = 'terrible'");
     EXPECT_EQ(qr.affected_rows, 1);
 }
 
 TEST_F(QA_GDB606, UnlinkWhereCompoundNoMatch) {
     // AND predicate where score matches but review doesn't.
     auto qr = exec_ok("UNLINK users(1) FROM products(20) VIA rated "
-                       "WHERE score < 2.0 AND review = 'nonexistent'");
+                      "WHERE score < 2.0 AND review = 'nonexistent'");
     EXPECT_EQ(qr.affected_rows, 0);
 
     // Edge should still exist.
     auto edges = exec_ok("SELECT rated.score FROM TRAVERSE rated "
-                          "FROM users(1) DIRECTION OUT FETCH AS t");
+                         "FROM users(1) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(edges.rows.size(), 3u);
 }
 
@@ -276,30 +280,20 @@ TEST_F(QA_GDB606, UnlinkWhereBoundaryExclusion) {
 // ============================================================================
 
 TEST_F(QA_GDB606, TraverseEdgePropertyCaseInsensitive) {
-    // BUG FINDING: OutputSchema::find_column uses case-sensitive comparison,
-    // so rated.SCORE fails at runtime even though the binder resolves it
-    // case-insensitively. This is a pre-existing issue amplified by GDB-606.
-    auto result = engine_->execute(
-        "SELECT rated.SCORE FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
-
-    // Currently fails — documenting the behavior.
-    // If this starts passing, the case sensitivity bug has been fixed.
-    if (result.has_value()) {
-        EXPECT_EQ(result->rows.size(), 3u);
-    }
+    // GDB-807: GDB-610 fixed OutputSchema::find_column to use case-insensitive
+    // iequals comparison. rated.SCORE (uppercase property) must resolve to the
+    // 'score' edge property — if the feature regresses this assertion must fail.
+    auto qr =
+        exec_ok("SELECT rated.SCORE FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
+    ASSERT_EQ(qr.rows.size(), 3u);
 }
 
 TEST_F(QA_GDB606, UnlinkWhereCaseInsensitiveColumn) {
-    // Bare column name SCORE (uppercase) in UNLINK WHERE.
-    // The binder resolves case-insensitively, but evaluate_predicate uses
-    // OutputSchema::find_column which is case-sensitive.
-    auto result = engine_->execute(
-        "UNLINK users(1) FROM products(20) VIA rated WHERE SCORE < 2.0");
-
-    // Currently fails — documenting the behavior.
-    if (result.has_value()) {
-        EXPECT_EQ(result->affected_rows, 1);
-    }
+    // GDB-807: Bare column name SCORE (uppercase) in UNLINK WHERE must resolve
+    // case-insensitively to the 'score' edge property after GDB-610.
+    // users(1)->products(20) has score=1.5, which satisfies SCORE < 2.0.
+    auto qr = exec_ok("UNLINK users(1) FROM products(20) VIA rated WHERE SCORE < 2.0");
+    EXPECT_EQ(qr.affected_rows, 1);
 }
 
 // ============================================================================
@@ -307,14 +301,11 @@ TEST_F(QA_GDB606, UnlinkWhereCaseInsensitiveColumn) {
 // ============================================================================
 
 TEST_F(QA_GDB606, TraverseEdgeTypeCaseInsensitive) {
-    // RATED.score (uppercase edge type name) — same case sensitivity issue.
-    auto result = engine_->execute(
-        "SELECT RATED.score FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
-
-    // Documenting behavior — currently fails due to case-sensitive find_column.
-    if (result.has_value()) {
-        EXPECT_EQ(result->rows.size(), 3u);
-    }
+    // GDB-807: RATED.score (uppercase edge type name) must resolve to the 'score'
+    // property of the 'rated' edge type after GDB-610's case-insensitive fix.
+    auto qr =
+        exec_ok("SELECT RATED.score FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
+    ASSERT_EQ(qr.rows.size(), 3u);
 }
 
 // ============================================================================
@@ -329,8 +320,10 @@ TEST_F(QA_GDB606, SelectStarIncludesEdgePropertiesWithAlias) {
     bool has_score = false;
     bool has_review = false;
     for (const auto& col : qr.column_names) {
-        if (col == "score") has_score = true;
-        if (col == "review") has_review = true;
+        if (col == "score")
+            has_score = true;
+        if (col == "review")
+            has_review = true;
     }
     EXPECT_TRUE(has_score) << "SELECT * should include edge property 'score'";
     EXPECT_TRUE(has_review) << "SELECT * should include edge property 'review'";
@@ -350,12 +343,12 @@ TEST_F(QA_GDB606, MultipleEdgeTypesScopeIsolation) {
 
     // Traverse rated — should NOT see purchased properties.
     auto qr = exec_ok("SELECT rated.score "
-                       "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
+                      "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(qr.rows.size(), 3u);
 
     // Traverse purchased — should NOT see rated properties.
     auto qr2 = exec_ok("SELECT purchased.quantity "
-                        "FROM TRAVERSE purchased FROM users(1) DIRECTION OUT FETCH AS p");
+                       "FROM TRAVERSE purchased FROM users(1) DIRECTION OUT FETCH AS p");
     ASSERT_EQ(qr2.rows.size(), 1u);
     EXPECT_EQ(qr2.rows[0][0].as_int64(), 2);
 }
@@ -391,7 +384,7 @@ TEST_F(QA_GDB606, UnlinkWhereDeletesAllMatchingFromSource) {
 
     // Only the 4.5-score edge should remain.
     auto edges = exec_ok("SELECT rated.score FROM TRAVERSE rated "
-                          "FROM users(1) DIRECTION OUT FETCH AS t");
+                         "FROM users(1) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(edges.rows.size(), 1u);
     EXPECT_DOUBLE_EQ(edges.rows[0][0].as_float64(), 4.5);
 }
@@ -418,8 +411,8 @@ TEST_F(QA_GDB606, EdgeWithNoPropertiesUnlinkWhere) {
 TEST_F(QA_GDB606, TraverseWhereOnEdgeProperty) {
     // Filter traversal results by edge property in WHERE.
     auto qr = exec_ok("SELECT name, rated.score "
-                       "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t "
-                       "WHERE rated.score > 3.0");
+                      "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t "
+                      "WHERE rated.score > 3.0");
 
     // Only products with score > 3.0: Widget (4.5).
     ASSERT_EQ(qr.rows.size(), 1u);
@@ -432,8 +425,8 @@ TEST_F(QA_GDB606, TraverseWhereOnEdgeProperty) {
 
 TEST_F(QA_GDB606, TraverseOrderByEdgeProperty) {
     auto qr = exec_ok("SELECT name, rated.score "
-                       "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t "
-                       "ORDER BY rated.score ASC");
+                      "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t "
+                      "ORDER BY rated.score ASC");
 
     ASSERT_EQ(qr.rows.size(), 3u);
     EXPECT_DOUBLE_EQ(qr.rows[0][1].as_float64(), 1.5);
@@ -449,7 +442,7 @@ TEST_F(QA_GDB606, UnlinkWhereOrPredicate) {
     // Delete edges to product 20 where score < 2.0 OR review = 'terrible'.
     // Both conditions match the same edge, should still delete only 1.
     auto qr = exec_ok("UNLINK users(1) FROM products(20) VIA rated "
-                       "WHERE score < 2.0 OR review = 'terrible'");
+                      "WHERE score < 2.0 OR review = 'terrible'");
     EXPECT_EQ(qr.affected_rows, 1);
 }
 
@@ -463,11 +456,11 @@ TEST_F(QA_GDB606, UnlinkWhereIsolation) {
 
     // User 2 and 3's edges to product 10 should be unaffected.
     auto edges2 = exec_ok("SELECT rated.score FROM TRAVERSE rated "
-                           "FROM users(2) DIRECTION OUT FETCH AS t");
+                          "FROM users(2) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(edges2.rows.size(), 2u); // user 2 still has edges to 10 and 20
 
     auto edges3 = exec_ok("SELECT rated.score FROM TRAVERSE rated "
-                           "FROM users(3) DIRECTION OUT FETCH AS t");
+                          "FROM users(3) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(edges3.rows.size(), 1u); // user 3 still has edge to 10
 }
 
@@ -482,7 +475,7 @@ TEST_F(QA_GDB606, SelfReferentialEdgeProperties) {
 
     // TRAVERSE with edge property and alias.
     auto qr = exec_ok("SELECT name, follows.weight "
-                       "FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH AS f");
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH AS f");
 
     ASSERT_EQ(qr.rows.size(), 2u);
 
@@ -491,7 +484,7 @@ TEST_F(QA_GDB606, SelfReferentialEdgeProperties) {
     EXPECT_EQ(ur.affected_rows, 1);
 
     auto remaining = exec_ok("SELECT follows.weight "
-                              "FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH AS f");
+                             "FROM TRAVERSE follows FROM users(1) DIRECTION OUT FETCH AS f");
     ASSERT_EQ(remaining.rows.size(), 1u);
     EXPECT_DOUBLE_EQ(remaining.rows[0][0].as_float64(), 0.8);
 }
@@ -506,10 +499,10 @@ TEST_F(QA_GDB606, StressManyEdgesUnlinkWhere) {
 
     // Create 50 items and link user 1 to all with varying ratings.
     for (int i = 1; i <= 50; ++i) {
-        exec_ok("INSERT INTO items VALUES (" + std::to_string(i) + ", 'item" +
-                std::to_string(i) + "')");
-        exec_ok("LINK users(1) TO items(" + std::to_string(i) + ") VIA likes (rating = " +
-                std::to_string(i % 5) + ")");
+        exec_ok("INSERT INTO items VALUES (" + std::to_string(i) + ", 'item" + std::to_string(i) +
+                "')");
+        exec_ok("LINK users(1) TO items(" + std::to_string(i) +
+                ") VIA likes (rating = " + std::to_string(i % 5) + ")");
     }
 
     // Delete edges where rating = 0 (items 5, 10, 15, 20, 25, 30, 35, 40, 45, 50).
@@ -519,7 +512,7 @@ TEST_F(QA_GDB606, StressManyEdgesUnlinkWhere) {
 
     // Verify the other edges remain.
     auto edges = exec_ok("SELECT likes.rating FROM TRAVERSE likes "
-                          "FROM users(1) DIRECTION OUT FETCH AS l");
+                         "FROM users(1) DIRECTION OUT FETCH AS l");
     ASSERT_EQ(edges.rows.size(), 49u);
 }
 
@@ -530,8 +523,8 @@ TEST_F(QA_GDB606, StressManyEdgesUnlinkWhere) {
 TEST_F(QA_GDB606, UnlinkWhereQualifiedProperty) {
     // Use rated.score (qualified) in UNLINK WHERE — may or may not be supported.
     // If supported, should work. If not, should give clear error.
-    auto result = engine_->execute(
-        "UNLINK users(1) FROM products(20) VIA rated WHERE rated.score < 2.0");
+    auto result =
+        engine_->execute("UNLINK users(1) FROM products(20) VIA rated WHERE rated.score < 2.0");
 
     if (result.has_value()) {
         EXPECT_EQ(result->affected_rows, 1);
@@ -550,7 +543,7 @@ TEST_F(QA_GDB606, EdgePropertySameNameAsTableColumn) {
 
     // Traverse with tagged.name — should return edge property, not table column.
     auto qr = exec_ok("SELECT tagged.name "
-                       "FROM TRAVERSE tagged FROM users(1) DIRECTION OUT FETCH AS tg");
+                      "FROM TRAVERSE tagged FROM users(1) DIRECTION OUT FETCH AS tg");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "favorite");
 }
