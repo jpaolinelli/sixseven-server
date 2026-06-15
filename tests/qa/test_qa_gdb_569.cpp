@@ -257,11 +257,10 @@ TEST_F(QA_GDB569_Engine, SelectLiteralWithoutAlias) {
 }
 
 TEST_F(QA_GDB569_Engine, SelectNegativeInteger) {
-    // BUG: SELECT -5 fails because unary minus wraps LiteralExpr in a
-    // UnaryExpr, which the all_literals fast-path doesn't handle.
-    auto result = engine_->execute("SELECT -5 AS neg");
-    EXPECT_FALSE(result.has_value())
-        << "Expected failure: unary expr not handled in SELECT-without-FROM fast path";
+    // GDB-661 fixed the unary-minus fast path; SELECT -5 must now succeed.
+    auto qr = exec_ok("SELECT -5 AS neg");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_int32(), -5);
 }
 
 TEST_F(QA_GDB569_Engine, SelectEmptyString) {
