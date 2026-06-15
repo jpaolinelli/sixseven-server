@@ -102,24 +102,26 @@ protected:
     std::vector<std::pair<database_id_t, std::string>> scan_sys_databases() {
         std::vector<std::pair<database_id_t, std::string>> entries;
         auto ts = storage_->get_table_storage(sys_databases_table_id);
-        if (!ts) return entries;
+        if (!ts)
+            return entries;
         auto schema = StorageManager::build_storage_schema(sys_databases_schema());
         auto it = (*ts)->heap->begin();
-        if (!it) return entries;
+        if (!it)
+            return entries;
         while (auto row = it->next()) {
             auto values = TupleSerializer::deserialize(row->second, schema);
-            if (!values) continue;
-            entries.emplace_back(
-                static_cast<database_id_t>((*values)[0].as_int32()),
-                (*values)[1].as_string());
+            if (!values)
+                continue;
+            entries.emplace_back(static_cast<database_id_t>((*values)[0].as_int32()),
+                                 (*values)[1].as_string());
         }
         return entries;
     }
 
     bool sys_databases_contains(const std::string& name) {
         auto entries = scan_sys_databases();
-        return std::any_of(entries.begin(), entries.end(),
-                           [&](const auto& e) { return e.second == name; });
+        return std::any_of(
+            entries.begin(), entries.end(), [&](const auto& e) { return e.second == name; });
     }
 
     std::filesystem::path data_dir_;
@@ -159,8 +161,7 @@ TEST_F(QA_GDB657, CreateDatabasePersistsCorrectId) {
     auto entries = scan_sys_databases();
     for (const auto& [id, name] : entries) {
         if (name == "id_check_db") {
-            EXPECT_EQ(id, db->database_id)
-                << "persisted id should match catalog id";
+            EXPECT_EQ(id, db->database_id) << "persisted id should match catalog id";
         }
     }
 }
@@ -214,8 +215,7 @@ TEST_F(QA_GDB657, CreateDatabaseWithNullPersistenceDoesNotCrash) {
     engine_->set_catalog_persistence(nullptr);
     auto result = engine_->execute("CREATE DATABASE null_persist_db");
     EXPECT_TRUE(result.has_value())
-        << "CREATE DATABASE should succeed even with null persistence: "
-        << result.error().message;
+        << "CREATE DATABASE should succeed even with null persistence: " << result.error().message;
 
     // Database should exist in-memory but not in sys_databases.
     auto db = catalog_->get_database("null_persist_db");
@@ -230,8 +230,7 @@ TEST_F(QA_GDB657, DropDatabaseWithNullPersistenceDoesNotCrash) {
     engine_->set_catalog_persistence(nullptr);
     auto result = engine_->execute("DROP DATABASE null_drop_db");
     EXPECT_TRUE(result.has_value())
-        << "DROP DATABASE should succeed even with null persistence: "
-        << result.error().message;
+        << "DROP DATABASE should succeed even with null persistence: " << result.error().message;
 
     // Database should be gone from catalog.
     auto db = catalog_->get_database("null_drop_db");
@@ -251,9 +250,8 @@ TEST_F(QA_GDB657, CreatedDatabaseSurvivesRestart) {
     run_bootstrap();
 
     auto db = catalog_->get_database("survive_db");
-    ASSERT_TRUE(db.has_value())
-        << "database created via CREATE DATABASE should survive restart: "
-        << db.error().message;
+    ASSERT_TRUE(db.has_value()) << "database created via CREATE DATABASE should survive restart: "
+                                << db.error().message;
 }
 
 TEST_F(QA_GDB657, DroppedDatabaseStaysGoneAfterRestart) {
@@ -265,8 +263,7 @@ TEST_F(QA_GDB657, DroppedDatabaseStaysGoneAfterRestart) {
     run_bootstrap();
 
     auto db = catalog_->get_database("gone_db");
-    EXPECT_FALSE(db.has_value())
-        << "dropped database should not reappear after restart";
+    EXPECT_FALSE(db.has_value()) << "dropped database should not reappear after restart";
 }
 
 TEST_F(QA_GDB657, CreateDropCreateSameName) {
@@ -281,8 +278,7 @@ TEST_F(QA_GDB657, CreateDropCreateSameName) {
     run_bootstrap();
 
     auto db = catalog_->get_database("recycled_db");
-    ASSERT_TRUE(db.has_value())
-        << "re-created database should survive restart";
+    ASSERT_TRUE(db.has_value()) << "re-created database should survive restart";
 }
 
 // ============================================================================
@@ -298,7 +294,8 @@ TEST_F(QA_GDB657, CreateIfNotExistsDoesNotDuplicate) {
     auto entries = scan_sys_databases();
     int count = 0;
     for (const auto& [id, name] : entries) {
-        if (name == "dup_db") ++count;
+        if (name == "dup_db")
+            ++count;
     }
     EXPECT_EQ(count, 1) << "IF NOT EXISTS should not add a duplicate row";
 }
@@ -306,8 +303,7 @@ TEST_F(QA_GDB657, CreateIfNotExistsDoesNotDuplicate) {
 TEST_F(QA_GDB657, DropIfExistsNonexistentDoesNotError) {
     run_bootstrap();
     auto result = engine_->execute("DROP DATABASE IF EXISTS nonexistent_db");
-    EXPECT_TRUE(result.has_value())
-        << "DROP DATABASE IF EXISTS on nonexistent db should succeed";
+    EXPECT_TRUE(result.has_value()) << "DROP DATABASE IF EXISTS on nonexistent db should succeed";
 }
 
 // ============================================================================
@@ -387,7 +383,8 @@ TEST_F(QA_GDB657, CreateExistingDatabaseReturnsError) {
     auto entries = scan_sys_databases();
     int count = 0;
     for (const auto& [id, name] : entries) {
-        if (name == "already_db") ++count;
+        if (name == "already_db")
+            ++count;
     }
     EXPECT_EQ(count, 1) << "failed CREATE should not leave extra sys_databases rows";
 }
@@ -458,8 +455,7 @@ TEST_F(QA_GDB657, StressManyDatabasesSurviveRestart) {
     for (int i = 0; i < N; ++i) {
         std::string name = "restart_db_" + std::to_string(i);
         auto db = catalog_->get_database(name);
-        ASSERT_TRUE(db.has_value())
-            << name << " should survive restart: " << db.error().message;
+        ASSERT_TRUE(db.has_value()) << name << " should survive restart: " << db.error().message;
     }
 }
 
@@ -494,16 +490,23 @@ TEST_F(QA_GDB657, DropCascadeWithTablesSurvivesRestart) {
 TEST_F(QA_GDB657, DropSixsevenDatabaseBehavior) {
     run_bootstrap();
 
+    // The default "demo" database must exist in sys_databases after bootstrap.
+    ASSERT_TRUE(sys_databases_contains(default_database_name))
+        << "default database must be present in sys_databases after bootstrap";
+
     // Attempt to drop the default database — this may be disallowed or allowed.
     // Either way, the system should not crash.
-    auto result = engine_->execute("DROP DATABASE sixseven CASCADE");
-    // We just verify no crash. If it's allowed, check persistence is cleaned up.
-    // If it's disallowed, that's also valid.
+    auto result =
+        engine_->execute(std::string("DROP DATABASE ") + default_database_name + " CASCADE");
     if (result.has_value()) {
-        EXPECT_FALSE(sys_databases_contains("demo"))
-            << "if drop succeeds, sixseven should be removed from sys_databases";
+        // Drop succeeded: the entry must be gone from sys_databases.
+        EXPECT_FALSE(sys_databases_contains(default_database_name))
+            << "if drop succeeds, default database should be removed from sys_databases";
+    } else {
+        // Drop was rejected: the default database must still be present.
+        EXPECT_TRUE(sys_databases_contains(default_database_name))
+            << "if drop is rejected, default database should remain in sys_databases";
     }
-    // No crash is the main assertion here.
 }
 
 } // namespace
