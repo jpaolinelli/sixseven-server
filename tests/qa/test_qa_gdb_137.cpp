@@ -458,10 +458,10 @@ TEST(QA137_SelectivityTest, EqualityZeroNdistinct) {
     stats.ndistinct = 0;
     stats.null_fraction = 1.0;
 
-    // All-null column — equality on a value should return remaining/1 = 0.
+    // All-null column: remaining_fraction = (1 - null_fraction) * (1 - mcv_fraction) = 0.
+    // Result must be exactly 0, not merely in [0,1].  A stub returning 0.5 would fail this.
     double sel = estimate_equality_selectivity(stats, Value(int32_t{42}));
-    EXPECT_GE(sel, 0.0);
-    EXPECT_LE(sel, 1.0);
+    EXPECT_DOUBLE_EQ(sel, 0.0);
 }
 
 TEST(QA137_SelectivityTest, EqualityAllMcv) {
@@ -503,10 +503,10 @@ TEST(QA137_SelectivityTest, RangeBelowAllHistogram) {
         {Value(int32_t{21}), Value(int32_t{30}), 50, 10},
     };
 
-    // col < 5: below all histogram values.
+    // col < 5: below all histogram values — histogram_le_fraction returns 0,
+    // so selectivity = hist_portion * 0 = 0.  A stub returning 0.5 would fail.
     double sel = estimate_range_selectivity(stats, BinaryOp::LESS, Value(int32_t{5}));
-    EXPECT_GE(sel, 0.0);
-    EXPECT_LE(sel, 1.0);
+    EXPECT_DOUBLE_EQ(sel, 0.0);
 }
 
 TEST(QA137_SelectivityTest, RangeAboveAllHistogram) {
@@ -518,10 +518,11 @@ TEST(QA137_SelectivityTest, RangeAboveAllHistogram) {
         {Value(int32_t{21}), Value(int32_t{30}), 50, 10},
     };
 
-    // col > 100: above all histogram values.
+    // col > 100: above all histogram values — histogram_le_fraction returns 1.0
+    // (value >= upper of every bucket), so GREATER selectivity = 1 - 1 = 0.
+    // A stub returning 0.5 would fail.
     double sel = estimate_range_selectivity(stats, BinaryOp::GREATER, Value(int32_t{100}));
-    EXPECT_GE(sel, 0.0);
-    EXPECT_LE(sel, 1.0);
+    EXPECT_DOUBLE_EQ(sel, 0.0);
 }
 
 TEST(QA137_SelectivityTest, RangeEmptyHistogramAndMcv) {
@@ -555,9 +556,12 @@ TEST(QA137_SelectivityTest, BetweenSameValue) {
     };
 
     // BETWEEN 50 AND 50: single point.
+    // sel_ge(50) = hist_portion*(1-hist_le(50)) = 1.0*(1-0.5) = 0.5
+    // sel_le(50) = hist_portion*hist_le(50)     = 1.0*0.5     = 0.5
+    // BETWEEN = sel_ge + sel_le - (1-null_fraction) = 0.5 + 0.5 - 1.0 = 0.0 (clamped)
+    // A stub returning 0.5 would fail.
     double sel = estimate_between_selectivity(stats, Value(int32_t{50}), Value(int32_t{50}));
-    EXPECT_GE(sel, 0.0);
-    EXPECT_LE(sel, 1.0);
+    EXPECT_DOUBLE_EQ(sel, 0.0);
 }
 
 TEST(QA137_SelectivityTest, BetweenReversedBounds) {
@@ -655,9 +659,12 @@ TEST(QA137_SelectivityTest, StringRangeSelectivity) {
         {Value(std::string("n")), Value(std::string("z")), 50, 50},
     };
 
+    // "m" equals the upper bound of bucket 1 → bucket 1 contributes fully (count=50).
+    // Bucket 2: "m" < lower "n" → contributes 0.
+    // histogram_le_fraction = 50/100 = 0.5 → LESS selectivity = 1.0 * 0.5 = 0.5.
+    // A stub returning 0.0 or 1.0 would fail.
     double sel = estimate_range_selectivity(stats, BinaryOp::LESS, Value(std::string("m")));
-    EXPECT_GE(sel, 0.0);
-    EXPECT_LE(sel, 1.0);
+    EXPECT_NEAR(sel, 0.5, 1e-9);
 }
 
 // -- Analyze determinism (reservoir sampling with fixed seed) ------------------
