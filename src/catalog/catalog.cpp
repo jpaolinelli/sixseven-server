@@ -272,6 +272,9 @@ Result<void> Catalog::drop_table_locked(database_id_t database_id, const std::st
     std::erase_if(embedding_columns_,
                   [tid](const EmbeddingColumnDef& e) { return e.table_id == tid; });
 
+    // Remove the auto-increment counter for this table (if any).
+    autoincrement_counters_.erase(tid);
+
     tables_by_id_.erase(tid);
     table_to_database_.erase(tid);
     name_map.erase(name_it);
