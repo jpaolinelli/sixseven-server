@@ -28,6 +28,8 @@
 #include <string>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -44,6 +46,7 @@ protected:
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
+        bootstrap_qa_catalog(catalog_);
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         graph_engine_ = std::make_unique<GraphEngine>(catalog_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_, graph_engine_.get());
@@ -582,17 +585,19 @@ TEST_F(QA_GDB267_HeteroTraversal, Bug_PKCollisionInVisitedSet) {
     // User 1 authored posts: 10, 20, AND 1 (the new one).
     auto qr = exec_ok("SELECT id, title FROM TRAVERSE authored FROM users(1) DIRECTION OUT");
 
-    // Expected: 3 posts (10, 20, 1). But the BFS visited set already contains
-    // Value(1) from the start node (users(1)), so posts(1) is skipped.
-    // KNOWN BUG: This returns 2 instead of 3 due to PK collision.
+    // Regression test for heterogeneous BFS visited-set PK collision (fixed in
+    // enriched_traversal.cpp via GDB-694/696): for heterogeneous edges the start
+    // node lives in a different table than the target nodes, so its PK must NOT
+    // be seeded into the visited set — doing so would suppress any target node
+    // whose PK happens to equal the start node's PK.
+    // Fix: `if (!heterogeneous_) { visited.insert(config_.start_key); }`.
+    // Expected: all 3 posts (10, 20, 1) are returned.
     std::vector<int32_t> ids;
     for (const auto& row : qr.rows) {
         ids.push_back(row[0].as_int32());
     }
     std::sort(ids.begin(), ids.end());
 
-    // Assert what SHOULD happen (3 rows including post 1):
-    // This currently FAILS due to the PK collision bug.
     EXPECT_EQ(qr.rows.size(), 3u) << "BFS visited set PK collision: post(1) skipped because "
                                      "user(1) has the same PK value in visited set";
 }
@@ -604,12 +609,13 @@ TEST_F(QA_GDB267_HeteroTraversal, Bug_PKCollisionInDirection) {
     exec_ok("INSERT INTO posts VALUES (1, 'Collision Post', 'body_collision')");
     exec_ok("LINK users(1) TO posts(1) VIA authored");
 
-    // From posts(1) IN: should find user 1. Start key = Value(1).
-    // BFS: visited = {Value(1)}. Neighbor = user(1) with PK=Value(1).
-    // user(1) is skipped because Value(1) is already visited.
+    // Regression test for heterogeneous BFS PK collision in IN direction (fixed
+    // by the same heterogeneous-guard in enriched_traversal.cpp). Start key is
+    // Value(1) for posts(1); without the fix the visited set would contain
+    // Value(1) and then skip user(1) whose PK is also Value(1).
+    // Expected: user 1 ("Alice") is returned.
     auto qr = exec_ok("SELECT name FROM TRAVERSE authored FROM posts(1) DIRECTION IN");
 
-    // KNOWN BUG: Returns 0 rows instead of 1 because user(1)'s PK collides.
     EXPECT_EQ(qr.rows.size(), 1u) << "BFS visited set PK collision: user(1) skipped because "
                                      "start node posts(1) has the same PK value";
 }
