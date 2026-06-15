@@ -4,11 +4,13 @@
 #include "sixseven/common/logging.h"
 #include "sixseven/common/value_hash.h"
 #include "sixseven/executor/algorithm_scan.h"
+#include "sixseven/executor/bitmap_scan.h"
 #include "sixseven/executor/bm25_scan.h"
 #include "sixseven/executor/count_scan.h"
 #include "sixseven/executor/delete.h"
 #include "sixseven/executor/edge_traversal.h"
 #include "sixseven/executor/enriched_traversal.h"
+#include "sixseven/executor/external_sort.h"
 #include "sixseven/executor/filter.h"
 #include "sixseven/executor/hash_aggregate.h"
 #include "sixseven/executor/hash_index_scan.h"
@@ -26,6 +28,7 @@
 #include "sixseven/executor/seq_scan.h"
 #include "sixseven/executor/shortest_path.h"
 #include "sixseven/executor/sort.h"
+#include "sixseven/executor/sort_merge_join.h"
 #include "sixseven/executor/subquery_source.h"
 #include "sixseven/executor/traversal.h"
 #include "sixseven/executor/update.h"
@@ -1657,12 +1660,15 @@ Planner::plan_select(const SelectStmt& stmt,
 
             const Expr* on_expr = join_clause.on_expr ? join_clause.on_expr.get() : nullptr;
 
-            // ── Choose join method: HashJoin for equi-joins, NestedLoop otherwise.
+            // ── Choose join method: HashJoin or SortMergeJoin for equi-joins,
+            // NestedLoop otherwise.
             // When both inputs carry optimizer cost estimates (i.e. ANALYZE
             // statistics exist), the cost-based optimizer picks the method
-            // instead (GDB-754).
-            bool used_hash_join = false;
+            // instead (GDB-754). GDB-803: SORT_MERGE is now wired directly to
+            // SortMergeJoinOperator instead of falling back to HashJoin.
+            bool used_equi_join = false;
             bool stats_prefer_nested_loop = false;
+            bool stats_prefer_sort_merge = false;
             std::optional<PlanCostEstimate> join_cost;
             {
                 const PlanCostEstimate* lcost = find_cost_in_chain(child.get());
@@ -1676,10 +1682,8 @@ Planner::plan_select(const SelectStmt& stmt,
                                                            false,
                                                            cost_model);
                     join_cost = to_cost_estimate(jc);
-                    // SORT_MERGE maps onto hash join here: the live executor
-                    // feeds joins unsorted inputs, so hash join is the
-                    // equivalent pipelined choice (follow-up: sort-merge).
                     stats_prefer_nested_loop = (method == JoinMethod::NESTED_LOOP);
+                    stats_prefer_sort_merge = (method == JoinMethod::SORT_MERGE);
                 }
             }
             if (on_expr && !stats_prefer_nested_loop) {
@@ -1691,11 +1695,11 @@ Planner::plan_select(const SelectStmt& stmt,
                         // Equi-join detected. Determine which key belongs to which side.
                         // The left child's schema contains columns from previously joined
                         // tables; the right child is the current join source.
-                        const Expr* probe_key = bin->lhs.get();
-                        const Expr* build_key = bin->rhs.get();
+                        const Expr* left_key = bin->lhs.get();
+                        const Expr* right_key = bin->rhs.get();
 
                         // Check if lhs belongs to the right side (join source).
-                        // If so, swap probe/build keys.
+                        // If so, swap left/right keys.
                         bool lhs_is_right = false;
                         for (size_t c = 0; c < right_schema_ref.column_count(); ++c) {
                             if (right_schema_ref.column(c).table_name == lhs_col->table) {
@@ -1704,22 +1708,35 @@ Planner::plan_select(const SelectStmt& stmt,
                             }
                         }
                         if (lhs_is_right) {
-                            std::swap(probe_key, build_key);
+                            std::swap(left_key, right_key);
                         }
 
-                        child = std::make_unique<HashJoinOperator>(std::move(child),
-                                                                   std::move(join_source->iter),
-                                                                   join_clause.type,
-                                                                   probe_key,
-                                                                   build_key,
-                                                                   bound,
-                                                                   std::move(combined));
-                        used_hash_join = true;
+                        if (stats_prefer_sort_merge) {
+                            // Cost model chose sort-merge: use SortMergeJoinOperator.
+                            child = std::make_unique<SortMergeJoinOperator>(
+                                std::move(child),
+                                std::move(join_source->iter),
+                                join_clause.type,
+                                left_key,
+                                right_key,
+                                bound,
+                                std::move(combined));
+                        } else {
+                            // Default equi-join: HashJoin.
+                            child = std::make_unique<HashJoinOperator>(std::move(child),
+                                                                       std::move(join_source->iter),
+                                                                       join_clause.type,
+                                                                       left_key,
+                                                                       right_key,
+                                                                       bound,
+                                                                       std::move(combined));
+                        }
+                        used_equi_join = true;
                     }
                 }
             }
 
-            if (!used_hash_join) {
+            if (!used_equi_join) {
                 child = std::make_unique<NestedLoopJoinOperator>(std::move(child),
                                                                  std::move(join_source->iter),
                                                                  join_clause.type,
@@ -2113,7 +2130,11 @@ Planner::plan_select(const SelectStmt& stmt,
                         keys.push_back({effective_expr, ob.direction});
                     }
                 }
-                child = std::make_unique<SortOperator>(std::move(child), std::move(keys), bound);
+                // GDB-803: Use ExternalSortOperator so large sorts spill to disk
+                // rather than running out of memory. It degrades gracefully to
+                // an in-memory sort when the input fits in work_mem.
+                child = std::make_unique<ExternalSortOperator>(
+                    std::move(child), std::move(keys), bound);
             }
 
             // -- 3g. Build rewritten projections ----------------------------------
@@ -2210,7 +2231,11 @@ Planner::plan_select(const SelectStmt& stmt,
                 }
                 keys.push_back({effective_expr, ob.direction});
             }
-            child = std::make_unique<SortOperator>(std::move(child), std::move(keys), bound);
+            // GDB-803: Use ExternalSortOperator so large sorts spill to disk
+            // rather than running out of memory. It degrades gracefully to
+            // an in-memory sort when the input fits in work_mem.
+            child =
+                std::make_unique<ExternalSortOperator>(std::move(child), std::move(keys), bound);
         }
 
         std::vector<ProjectionExpr> projections;
@@ -3770,13 +3795,80 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema
         return ok(std::unique_ptr<Iterator>(nullptr));
     }
 
+    auto indexes = catalog_.list_indexes(table_schema.table_id);
+
+    // -- GDB-803: BitmapScan for OR-of-predicates on different indexed columns --
+    // When the WHERE is a top-level OR of two simple comparisons, each on a
+    // different B+ tree-indexed column, build a BitmapScanOperator (OR mode)
+    // that collects RIDs from both indexes and fetches heap pages in order.
+    if (btree_indexes_ != nullptr && !btree_indexes_->empty()) {
+        auto* or_bin = dynamic_cast<const BinaryExpr*>(where_expr);
+        if (or_bin && or_bin->op == BinaryOp::OR) {
+            auto cmp_l = extract_simple_comparison(or_bin->lhs.get());
+            auto cmp_r = extract_simple_comparison(or_bin->rhs.get());
+            if (cmp_l && cmp_r && cmp_l->column_name != cmp_r->column_name) {
+                // Try to resolve a B+ tree index for each side.
+                auto find_btree = [&](const SimpleComparison& sc)
+                    -> std::pair<const BTreeIndex*, std::optional<KeyType>> {
+                    for (const auto& idx_def : indexes) {
+                        if (idx_def.index_type != "btree")
+                            continue;
+                        auto it = btree_indexes_->find(idx_def.index_id);
+                        if (it == btree_indexes_->end())
+                            continue;
+                        auto idx_cols = parse_index_columns(idx_def.columns);
+                        if (idx_cols.empty() || idx_cols[0] != sc.column_name)
+                            continue;
+                        Value v = sc.literal_value;
+                        for (const auto& col : table_schema.columns) {
+                            if (col.name == sc.column_name && v.type_id() != col.type_id &&
+                                can_coerce(v.type_id(), col.type_id)) {
+                                auto cv = coerce(v, col.type_id);
+                                if (cv)
+                                    v = std::move(*cv);
+                                break;
+                            }
+                        }
+                        KeyType key = {v};
+                        return {it->second, std::move(key)};
+                    }
+                    return {nullptr, std::nullopt};
+                };
+
+                auto [btree_l, key_l] = find_btree(*cmp_l);
+                auto [btree_r, key_r] = find_btree(*cmp_r);
+
+                if (btree_l != nullptr && btree_r != nullptr) {
+                    // Build BitmapScan with OR combine mode.
+                    std::vector<BitmapIndexScan> scans;
+                    BitmapIndexScan s_l;
+                    s_l.index = btree_l;
+                    s_l.begin_key = key_l;
+                    scans.push_back(std::move(s_l));
+
+                    BitmapIndexScan s_r;
+                    s_r.index = btree_r;
+                    s_r.begin_key = key_r;
+                    scans.push_back(std::move(s_r));
+
+                    auto bitmap_scan = std::make_unique<BitmapScanOperator>(std::move(scans),
+                                                                            BitmapCombineMode::OR,
+                                                                            *storage->heap,
+                                                                            storage->storage_schema,
+                                                                            table_output,
+                                                                            where_expr,
+                                                                            &bound);
+                    return ok(std::unique_ptr<Iterator>(std::move(bitmap_scan)));
+                }
+            }
+        }
+    }
+
     // Extract simple comparison from the WHERE clause.
     auto cmp = extract_simple_comparison(where_expr);
     if (!cmp) {
         return ok(std::unique_ptr<Iterator>(nullptr));
     }
-
-    auto indexes = catalog_.list_indexes(table_schema.table_id);
 
     // --- Try hash index first (preferred for equality predicates) ---
     if (cmp->op == BinaryOp::EQUAL && hash_indexes_ != nullptr && !hash_indexes_->empty()) {
