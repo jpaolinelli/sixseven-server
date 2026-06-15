@@ -10,7 +10,25 @@ user-invocable: false
 
 The Atlassian cloud ID for the SixSevenDB project is: `d1c81655-b174-4ffc-9c84-3c76752eb094`
 
-Use this for all Jira API calls.
+Use this for all Jira API calls. It is constant — never call `getAccessibleAtlassianResources` to rediscover it.
+
+## Do trivial Jira ops inline — do not spawn a subagent for them
+
+A status read or a transition is two or three MCP calls. Spawning a separate agent to do it costs far more in fixed overhead (system prompt, tool-schema loading, skill text) than the work itself. If you already have the Jira MCP tools available in your context (e.g. the `/start` orchestrator), make these calls directly. Only delegate to a subagent when the task also needs code reasoning.
+
+## Standard queue / search JQL (copy verbatim)
+
+- Next To Do ticket in the queue:
+  `project = GDB AND assignee = currentUser() AND status = "To Do" AND issuetype NOT IN (Epic, Subtask) ORDER BY rank ASC`
+- My In-Progress tickets (resume check):
+  `project = GDB AND assignee = currentUser() AND status = "In Progress" AND issuetype NOT IN (Epic, Subtask) ORDER BY rank ASC`
+- Tickets awaiting QA:
+  `project = GDB AND status = "QA" ORDER BY key ASC`
+
+## Known transition IDs (verify with getTransitionsForJiraIssue if a call fails)
+
+These have been stable for the GDB workflow; use them to skip a lookup, but fall back to `getTransitionsForJiraIssue` if a transition errors (board config can change):
+- To "In Progress": transition ID `21`
 
 ## Fetching a Ticket
 
@@ -36,6 +54,8 @@ Extract every criterion as a discrete checkable item. Never skip or summarize cr
 3. Execute the transition: `transitionJiraIssue` with the issue key and transition ID.
 
 Common status flow: `To Do` → `In Progress` → `In Review` → `Done`
+
+**A ticket must not move to `Done` until its PR is merged.** "Done" means merged-to-main, not just QA-passed. Only the merge step (the `/start` orchestrator after a successful squash-merge) transitions a ticket to `Done`. Subagents in the pipeline (implementer, reviewer, QA) must never set `Done` themselves.
 
 ## Displaying Ticket Information
 

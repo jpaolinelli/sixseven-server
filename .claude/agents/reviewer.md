@@ -33,8 +33,8 @@ The module map and SQL pipeline live in `CLAUDE.md` (always loaded). For a deepe
 
 ## Workflow
 
-1. **Fetch the ticket** → Read all acceptance criteria for parent + subtasks.
-2. **Read the changed files** → Only the files in the PR diff (`git diff --name-only main...HEAD`), each completely. Do not read unrelated files.
+1. **Fetch the ticket** → Read all acceptance criteria for parent + subtasks. If the orchestrator passed an implementation handoff (files, key functions, diff summary), use it as your map instead of re-deriving it.
+2. **Read the changed files** → Only the files in the PR diff (`git diff --name-only main...HEAD`), each completely. Do not read unrelated files. Build incrementally; do not wipe or re-configure `build/` (see the `quality-checks` skill, "Build reuse").
 3. **Run quality checks** → Build, tests, clang-format, clang-tidy.
 4. **Cross-check criteria** → Map every criterion to ✅ / ⚠️ / ❌ with evidence.
 5. **Evaluate quality** → Code correctness, test quality, patterns, duplication.
@@ -42,7 +42,14 @@ The module map and SQL pipeline live in `CLAUDE.md` (always loaded). For a deepe
 
 ## Review Numbering
 
-First review is **v1**. On re-review after fixes, increment to **v2**, **v3**, etc. Verify fixes and check for regressions.
+First review is **v1**. On re-review after fixes, increment to **v2**, **v3**, etc.
+
+**Scoped re-review (v2+).** A re-review is not a from-scratch re-review. Trust your v1 verdict on everything the fix did not touch. For v2+:
+- Read only the delta since the last review (`git diff <prev-reviewed-sha>...HEAD`) plus the specific code the v1 blocking issues named.
+- Re-run the full test suite and lint (cheap once the build dir is warm) to catch regressions, but do not re-read or re-analyze unchanged files.
+- Confirm each prior blocking issue is resolved and scan the delta for new problems. That is the whole job.
+
+This is where re-reviews historically burned more tokens than the original review — keep them tight.
 
 ## Two Outputs: Detailed vs Compact
 

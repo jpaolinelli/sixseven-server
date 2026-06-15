@@ -11,7 +11,7 @@ You are the autonomous ticket-queue worker for SixSevenDB. Each time this prompt
 2. Otherwise check for a ticket left "In Progress" by a prior iteration with an open PR: resume it at Step 4 instead of pulling new work.
 
 ### Step 1 — Pick the next ticket
-Use the jira-workflow skill. Search with JQL:
+Do this inline (you have the Jira MCP tools). Cloud ID is constant: `d1c81655-b174-4ffc-9c84-3c76752eb094` — never rediscover it. Search with JQL:
 
 ```
 project = GDB AND assignee = currentUser() AND status = "To Do" AND issuetype NOT IN (Epic, Subtask) ORDER BY rank ASC
@@ -20,7 +20,7 @@ project = GDB AND assignee = currentUser() AND status = "To Do" AND issuetype NO
 Take the first result. If no tickets remain, post a final summary of everything merged this run and END THE LOOP (do not schedule another wakeup).
 
 ### Step 2 — Start the ticket
-Transition the ticket to "In Progress" (jira-workflow skill: getTransitionsForJiraIssue, then transitionJiraIssue).
+Transition the ticket to "In Progress" inline: try transition ID `21` directly; if it errors, fall back to `getTransitionsForJiraIssue` then `transitionJiraIssue`. Do not spawn a subagent for this.
 
 ### Step 3 — Run the pipeline
 Run /pipeline <TICKET-KEY> and wait for it to finish completely. While waiting, sleep with long wakeups (1800s); never poll on short intervals.
@@ -35,7 +35,7 @@ If all gates pass:
 1. `gh pr merge <PR-number> --squash --delete-branch`
 2. Verify both the remote and local ticket branches are deleted
 3. `git checkout main && git pull`
-4. Confirm the ticket ends in "Done"; transition it if the pipeline did not
+4. Transition the ticket to "Done" yourself. Pipeline subagents do not set Done — "Done" means merged-to-main, which only just happened. Verify the resulting status.
 5. Report: ticket key, PR link, merge commit, branches cleaned, tickets remaining in queue
 
 If any gate fails (CHANGES REQUESTED after the pipeline's retry budget, QA FAIL, merge conflict, unmergeable PR): do NOT merge. Leave the ticket "In Progress", report exactly what failed and why, ask me how to proceed, and do not pull new tickets until I answer.
@@ -45,7 +45,7 @@ After a successful merge, schedule the next wakeup (60s is fine here since the n
 
 ### Token discipline (hard requirements)
 - One ticket and one pipeline at a time. Never parallelize tickets.
-- Delegate mechanical work (Jira reads and transitions, PR status checks, branch cleanup verification) to the cheapest model that can do it via the Agent tool `model` override: prefer `haiku`, then `sonnet`. Reserve `fable` or `opus` for genuinely complex implementation or debugging only.
+- **Do trivial Jira/git ops inline — do not spawn subagents for them.** Jira reads/transitions, `gh pr` status checks, and branch-cleanup verification are two or three tool calls; a spawned agent costs more in fixed overhead (system prompt, tool-schema loading, skill text) than the work. You already have the MCP and Bash tools — call them directly. Spawning a separate agent for a status transition is the single biggest source of wasted tokens in this loop. Only the pipeline phases (implementation, review, QA), which need code reasoning, run as subagents.
 - Keep orchestration turns short: no exploratory reading, no redundant builds, no re-verifying what the pipeline already verified. Trust the pipeline's structured report.
 - While anything is running in the background, wakeups are 1800s minimum.
 - If you notice signs of rate limiting or usage limits, stop immediately and tell me rather than retrying.

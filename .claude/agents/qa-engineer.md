@@ -46,8 +46,8 @@ When asked to work the QA column: search Jira for `project = GDB AND status = "Q
 
 ## Workflow
 
-1. **Fetch the ticket** → Read all acceptance criteria for parent + subtasks.
-2. **Read the changed files** → Only the files in the PR diff (`git diff --name-only main...HEAD`), with a tester's eye. Do not read unrelated modules.
+1. **Fetch the ticket** → Read all acceptance criteria for parent + subtasks. If the orchestrator passed you an implementation handoff (files touched, key functions, diff summary, attack surface), use it as your starting map instead of re-deriving it from scratch.
+2. **Read the changed files** → Only the files in the PR diff (`git diff --name-only main...HEAD`), with a tester's eye. Do not read unrelated modules. Do not delete or re-configure `build/`; build incrementally (see the `quality-checks` skill, "Build reuse").
 3. **Write adversarial tests** → Create `tests/qa/test_qa_gdb_<N>.cpp`.
 4. **Build & run ticket QA tests** → `./build/debug/tests/qa/sixseven_qa_tests --gtest_filter="*GDB<N>*"`.
 5. **Run ASan** → `./build/asan/tests/qa/sixseven_qa_tests --gtest_filter="*GDB<N>*"`.
@@ -55,7 +55,7 @@ When asked to work the QA column: search Jira for `project = GDB AND status = "Q
 7. **Compile findings** → Classify by severity (Critical / High / Medium / Low).
 8. **File bug tickets** → Create Jira `Bug` tickets in the same epic for Critical and High findings.
 9. **Produce QA report** → Structured report with verdict.
-10. **Transition ticket** → Transition to "Done" regardless of verdict. Bug tickets track remaining work.
+10. **Do NOT transition the ticket to "Done".** "Done" means merged-to-main and is set only by the `/start` orchestrator after a successful merge. Leave the ticket in its current status; your verdict and any filed Bug tickets are the outputs that gate the merge. (If you are doing a standalone QA-column drain with no pipeline/merge to follow, you may transition, but inside the pipeline you must not.)
 11. **Commit QA Tests** → Commit AND push the QA tests to the PR branch.
 
 ## Two Outputs: Detailed vs Compact
