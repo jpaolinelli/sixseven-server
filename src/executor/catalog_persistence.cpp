@@ -78,10 +78,33 @@ Result<void> CatalogPersistence::open_sys_table_public(const TableSchema& schema
 // ---------------------------------------------------------------------------
 
 Result<void> CatalogPersistence::open_sys_table(const TableSchema& schema) {
-    auto restore = catalog_.restore_table(system_database_id, schema);
-    if (!restore) {
-        return make_error(restore.error().code,
-                          "failed to register " + schema.name + ": " + restore.error().message);
+    // Check the backing file exists BEFORE touching the catalog.  If the file
+    // is absent (e.g. sys_databases missing on an old deployment), we must
+    // return an error WITHOUT registering the table so that the migration
+    // branch can call create_sys_table_public and succeed.  drop_table is
+    // blocked for system tables, so the only safe way to keep the catalog
+    // clean is to guard the registration behind the file-existence check.
+    if (!storage_.table_file_exists(system_database_id, schema.table_id)) {
+        return make_error(StatusCode::IO_ERROR,
+                          "storage file missing for system table '" + schema.name + "'");
+    }
+
+    // Idempotency: if the table was already registered (e.g. by a prior call
+    // inside migrate_databases_from_sys_tables), skip restore_table to avoid
+    // the "already exists" error.
+    auto existing = catalog_.get_table(system_database_id, schema.name);
+    if (!existing) {
+        auto restore = catalog_.restore_table(system_database_id, schema);
+        if (!restore) {
+            return make_error(restore.error().code,
+                              "failed to register " + schema.name + ": " + restore.error().message);
+        }
+    }
+
+    // Similarly, if storage is already open, skip re-opening it.
+    auto already_open = storage_.get_table_storage(schema.table_id);
+    if (already_open) {
+        return ok();
     }
 
     auto storage = storage_.open_table_storage(system_database_id, schema.table_id, schema);
@@ -153,7 +176,8 @@ Result<void> CatalogPersistence::load_catalog() {
             auto r = catalog_.restore_database(db_id, db_name);
             if (!r) {
                 SIXSEVEN_LOG_WARN("catalog persistence: failed to restore database '{}': {}",
-                               db_name, r.error().message);
+                                  db_name,
+                                  r.error().message);
             }
         }
     }
@@ -240,7 +264,7 @@ Result<void> CatalogPersistence::load_catalog() {
         auto dir_result = storage_.create_database_storage(info.database_id);
         if (!dir_result) {
             SIXSEVEN_LOG_WARN("catalog persistence: failed to create db storage for db {}",
-                           info.database_id);
+                              info.database_id);
         }
 
         TableSchema schema;
@@ -252,8 +276,8 @@ Result<void> CatalogPersistence::load_catalog() {
         auto restore = catalog_.restore_table(info.database_id, schema);
         if (!restore) {
             SIXSEVEN_LOG_WARN("catalog persistence: failed to restore table '{}': {}",
-                           info.name,
-                           restore.error().message);
+                              info.name,
+                              restore.error().message);
             continue;
         }
 
@@ -261,8 +285,8 @@ Result<void> CatalogPersistence::load_catalog() {
         auto open = storage_.open_table_storage(info.database_id, info.table_id, schema);
         if (!open) {
             SIXSEVEN_LOG_WARN("catalog persistence: failed to open storage for table '{}': {}",
-                           info.name,
-                           open.error().message);
+                              info.name,
+                              open.error().message);
             continue;
         }
 
@@ -299,7 +323,7 @@ Result<void> CatalogPersistence::load_catalog() {
             auto r = catalog_.restore_index(std::move(def));
             if (!r) {
                 SIXSEVEN_LOG_WARN("catalog persistence: failed to restore index: {}",
-                               r.error().message);
+                                  r.error().message);
             }
         }
     }
@@ -332,7 +356,7 @@ Result<void> CatalogPersistence::load_catalog() {
             auto r = catalog_.restore_edge_type(db_id, std::move(def));
             if (!r) {
                 SIXSEVEN_LOG_WARN("catalog persistence: failed to restore edge type: {}",
-                               r.error().message);
+                                  r.error().message);
             }
         }
     }
@@ -466,9 +490,8 @@ Result<void> CatalogPersistence::persist_database(database_id_t db_id, const std
 }
 
 Result<void> CatalogPersistence::remove_database(database_id_t db_id) {
-    return delete_rows(sys_databases_table_id, [db_id](const std::vector<Value>& v) {
-        return v[0].as_int32() == db_id;
-    });
+    return delete_rows(sys_databases_table_id,
+                       [db_id](const std::vector<Value>& v) { return v[0].as_int32() == db_id; });
 }
 
 Result<void> CatalogPersistence::persist_table(database_id_t db_id, const TableSchema& schema) {
@@ -669,8 +692,8 @@ Result<void> CatalogPersistence::migrate_databases_from_sys_tables() {
                                                           : "database_" + std::to_string(db_id);
         auto r = insert_row(sys_databases_table_id, {Value(db_id), Value(name)});
         if (!r) {
-            SIXSEVEN_LOG_WARN("migration: failed to insert database {}: {}", db_id,
-                           r.error().message);
+            SIXSEVEN_LOG_WARN(
+                "migration: failed to insert database {}: {}", db_id, r.error().message);
         }
     }
 
@@ -690,8 +713,8 @@ Result<void> CatalogPersistence::persist_embedding_job(const EmbeddingJob& job) 
                        Value(job.retry_count)});
 }
 
-Result<void> CatalogPersistence::persist_embedding_jobs_batch(
-    const std::vector<EmbeddingJob>& jobs) {
+Result<void>
+CatalogPersistence::persist_embedding_jobs_batch(const std::vector<EmbeddingJob>& jobs) {
     if (jobs.empty()) {
         return ok();
     }
@@ -712,15 +735,14 @@ Result<void> CatalogPersistence::persist_embedding_jobs_batch(
     std::vector<std::vector<uint8_t>> serialized;
     serialized.reserve(jobs.size());
     for (const auto& job : jobs) {
-        std::vector<Value> values = {
-            Value(job.table_id),
-            Value(job.row_id),
-            Value(job.column_id),
-            Value(job.source_text),
-            Value(job.provider),
-            Value(job.dimension),
-            Value(static_cast<int32_t>(job.type)),
-            Value(job.retry_count)};
+        std::vector<Value> values = {Value(job.table_id),
+                                     Value(job.row_id),
+                                     Value(job.column_id),
+                                     Value(job.source_text),
+                                     Value(job.provider),
+                                     Value(job.dimension),
+                                     Value(static_cast<int32_t>(job.type)),
+                                     Value(job.retry_count)};
         auto data = TupleSerializer::serialize(values, storage_schema);
         if (!data) {
             return make_error(data.error().code, data.error().message);
@@ -749,13 +771,11 @@ Result<void> CatalogPersistence::persist_embedding_jobs_batch(
     return ok();
 }
 
-Result<void> CatalogPersistence::remove_embedding_job(table_id_t table_id,
-                                                       int64_t row_id,
-                                                       int32_t column_id) {
+Result<void>
+CatalogPersistence::remove_embedding_job(table_id_t table_id, int64_t row_id, int32_t column_id) {
     return delete_rows(sys_embedding_jobs_table_id,
                        [table_id, row_id, column_id](const std::vector<Value>& v) {
-                           return v[0].as_int32() == table_id &&
-                                  v[1].as_int64() == row_id &&
+                           return v[0].as_int32() == table_id && v[1].as_int64() == row_id &&
                                   v[2].as_int32() == column_id;
                        });
 }

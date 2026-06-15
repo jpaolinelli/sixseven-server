@@ -96,16 +96,18 @@ protected:
     std::vector<std::pair<database_id_t, std::string>> scan_sys_databases() {
         std::vector<std::pair<database_id_t, std::string>> entries;
         auto ts = storage_->get_table_storage(sys_databases_table_id);
-        if (!ts) return entries;
+        if (!ts)
+            return entries;
         auto schema = StorageManager::build_storage_schema(sys_databases_schema());
         auto it = (*ts)->heap->begin();
-        if (!it) return entries;
+        if (!it)
+            return entries;
         while (auto row = it->next()) {
             auto values = TupleSerializer::deserialize(row->second, schema);
-            if (!values) continue;
-            entries.emplace_back(
-                static_cast<database_id_t>((*values)[0].as_int32()),
-                (*values)[1].as_string());
+            if (!values)
+                continue;
+            entries.emplace_back(static_cast<database_id_t>((*values)[0].as_int32()),
+                                 (*values)[1].as_string());
         }
         return entries;
     }
@@ -159,8 +161,7 @@ TEST_F(QA_GDB656, FirstBootstrapSixsevenIdIsOne) {
 
     auto db = catalog_->get_database("demo");
     ASSERT_TRUE(db.has_value());
-    EXPECT_EQ(db->database_id, 1)
-        << "sixseven must have database_id=1 (default_database_id)";
+    EXPECT_EQ(db->database_id, 1) << "sixseven must have database_id=1 (default_database_id)";
 }
 
 TEST_F(QA_GDB656, SysDatabasesTableExistsAfterFirstBootstrap) {
@@ -302,21 +303,25 @@ TEST_F(QA_GDB656, MigrationCreatesAndBackfillsSysDatabases) {
     engine_->set_current_database(default_database_id);
     exec_ok("CREATE TABLE migration_test (id INT)");
 
-    // Find and delete the sys_databases file on disk.
+    // Find the sys_databases file on disk.
     // StorageManager::table_path writes to:
     //   <data_dir>/databases/<db_id>/tables/table_<table_id>.db
     // GDB-812: the previous path was wrong (missing "tables/" and "table_" prefix),
     // so the delete was a no-op and migration was never triggered.
-    auto sys_db_file = data_dir_ / "databases" / std::to_string(system_database_id) /
-                       "tables" / ("table_" + std::to_string(sys_databases_table_id) + ".db");
+    auto sys_db_file = data_dir_ / "databases" / std::to_string(system_database_id) / "tables" /
+                       ("table_" + std::to_string(sys_databases_table_id) + ".db");
     ASSERT_TRUE(std::filesystem::exists(sys_db_file))
         << "sys_databases file must exist before deletion at: " << sys_db_file;
+
+    // GDB-1264 / Windows ordering: destroy components first (closes file handles),
+    // then delete, then recreate — avoids "file in use" error on Windows.
+    destroy_components();
     std::filesystem::remove(sys_db_file);
     ASSERT_FALSE(std::filesystem::exists(sys_db_file))
         << "sys_databases file must be absent before restart to trigger migration";
+    create_components();
 
-    // Restart — the migration path should trigger.
-    restart();
+    // Bootstrap on the fresh components — the migration path should trigger.
     run_bootstrap();
 
     // sixseven database should still be accessible.
@@ -344,17 +349,21 @@ TEST_F(QA_GDB656, MigrationAlwaysIncludesSixseven) {
     // Even if there are no user tables, migration should still include sixseven.
     run_bootstrap();
 
-    // Delete sys_databases file at the correct StorageManager path.
+    // Find the sys_databases file at the correct StorageManager path.
     // GDB-812: the previous path was wrong (missing "tables/" and "table_" prefix).
-    auto sys_db_file = data_dir_ / "databases" / std::to_string(system_database_id) /
-                       "tables" / ("table_" + std::to_string(sys_databases_table_id) + ".db");
+    auto sys_db_file = data_dir_ / "databases" / std::to_string(system_database_id) / "tables" /
+                       ("table_" + std::to_string(sys_databases_table_id) + ".db");
     ASSERT_TRUE(std::filesystem::exists(sys_db_file))
         << "sys_databases file must exist before deletion at: " << sys_db_file;
+
+    // GDB-1264 / Windows ordering: destroy components first (closes file handles),
+    // then delete, then recreate — avoids "file in use" error on Windows.
+    destroy_components();
     std::filesystem::remove(sys_db_file);
     ASSERT_FALSE(std::filesystem::exists(sys_db_file))
         << "sys_databases file must be absent before restart to trigger migration";
+    create_components();
 
-    restart();
     run_bootstrap();
 
     auto db = catalog_->get_database("demo");
@@ -384,7 +393,8 @@ TEST_F(QA_GDB656, DoubleBootstrapDoesNotDuplicateSixseven) {
     auto entries_before = scan_sys_databases();
     int count_before = 0;
     for (const auto& [id, name] : entries_before) {
-        if (id == default_database_id) ++count_before;
+        if (id == default_database_id)
+            ++count_before;
     }
     EXPECT_EQ(count_before, 1) << "sixseven should appear exactly once in sys_databases";
 }
@@ -517,8 +527,7 @@ TEST_F(QA_GDB656, StressManyRestartsWithGrowingCatalog) {
         for (int j = 0; j <= i; ++j) {
             std::string check_name = "stress_t" + std::to_string(j);
             auto tbl = catalog_->get_table(default_database_id, check_name);
-            ASSERT_TRUE(tbl.has_value())
-                << check_name << " missing at iteration " << i;
+            ASSERT_TRUE(tbl.has_value()) << check_name << " missing at iteration " << i;
         }
     }
 }
@@ -534,7 +543,8 @@ TEST_F(QA_GDB656, EmptyDatabasePersists) {
     auto entries_before = scan_sys_databases();
     bool found = false;
     for (const auto& [id, name] : entries_before) {
-        if (id == default_database_id && name == "demo") found = true;
+        if (id == default_database_id && name == "demo")
+            found = true;
     }
     ASSERT_TRUE(found);
 
