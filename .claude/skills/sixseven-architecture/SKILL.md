@@ -1,29 +1,12 @@
 ---
 name: sixseven-architecture
-description: Use when you need to understand the SixSevenDB project structure, module layout, or system architecture. Provides the module map, dependency graph, and key abstractions.
+description: Use when you need to understand the SixSevenDB project structure, module layout, or system architecture. Provides the module→path map, SQL pipeline stages, dependency graph, and key abstractions.
 user-invocable: false
 ---
 
 # SixSevenDB Architecture
 
-## System Overview
-
-SixSevenDB is a C++20 hybrid relational/graph/vector database with PostgreSQL wire protocol compatibility.
-
-```
-PostgreSQL Wire Protocol (v3)
-        |
-Server (Event-Driven, Connection Pool)
-        |
-+-------+-------+
-Parser  Planner  Executor (Volcano Iterator)
-        |
-+-------+-----------+
-Table   Graph       Vector
-Engine  Engine      Engine (HNSW)
-        |
-Storage Engine (Buffer Pool, WAL, B+ Trees)
-```
+> The high-level diagram, module list, directory layout, and 22-type list are in the project `CLAUDE.md`, which is always loaded. This skill carries only the detail `CLAUDE.md` does not: the SQL pipeline stages with file paths, the Iterator contract, the build-order dependency graph, and the module→path map. Read it when you need to trace a query path or locate a module's files.
 
 ## SQL Pipeline
 
@@ -31,16 +14,16 @@ A SQL query flows through these stages in order:
 
 ```
 SQL string
-  -> Lexer     (src/parser/lexer.cpp)       -> token stream
-  -> Parser    (src/parser/parser.cpp)       -> AST (ast.h)
-  -> Binder    (src/planner/binder.cpp)      -> BoundStatement (semantic validation)
-  -> Planner   (src/executor/planner.cpp)    -> Iterator tree (physical plan)
+  -> Lexer     (src/parser/lexer.cpp)         -> token stream
+  -> Parser    (src/parser/parser.cpp)         -> AST (ast.h)
+  -> Binder    (src/planner/binder.cpp)        -> BoundStatement (semantic validation)
+  -> Planner   (src/executor/planner.cpp)      -> Iterator tree (physical plan)
   -> Executor  (src/executor/query_engine.cpp) -> open/next/close drain -> QueryResult
 ```
 
 DDL statements (CREATE TABLE, DROP TABLE) are dispatched before binding — the table must exist in the catalog before the binder can validate references to it.
 
-## Module Map
+## Module → Path Map
 
 | Module | Headers | Source | Purpose |
 |--------|---------|--------|---------|
@@ -97,20 +80,3 @@ Operators compose into a pull-based tree: `SeqScan -> Project -> Sort -> Limit`.
 
 - **Catalog**: In-memory registry of table schemas (table_id -> TableSchema).
 - **TableSchema**: Table name, columns (name, type, nullable), auto-increment table IDs.
-
-### Type System
-
-22 types: INT8, INT16, INT32, INT64, UINT8, UINT16, UINT32, UINT64, FLOAT32, FLOAT64, DECIMAL, BOOL, STRING, BLOB, DATE, TIME, TIMESTAMP, INTERVAL, POINT, JSON, UUID, EMBEDDING.
-
-## Directory Layout
-
-```
-include/sixseven/<module>/   — Public headers
-src/<module>/             — Implementation files
-tests/unit/               — Dev unit tests (Google Test)
-tests/qa/                 — QA regression tests (test_qa_*.cpp)
-tests/integration/        — Integration tests
-tests/e2e/                — End-to-end tests
-tests/fuzz/               — Fuzz tests
-tests/benchmark/          — Benchmarks (Google Benchmark)
-```

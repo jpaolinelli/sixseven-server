@@ -8,14 +8,20 @@ user-invocable: false
 
 ## Step 1: Read All Source Files
 
-Find and read every file added or modified for the ticket:
+Get the exact list of files the ticket changed, then read only those:
+
+```bash
+git diff --name-only main...HEAD
+```
+
+The changed files will be among:
 
 - **Headers**: `include/sixseven/<module>/*.h`
 - **Implementations**: `src/<module>/*.cpp`
 - **Tests**: `tests/unit/test_*.cpp`
 - **Build files**: `CMakeLists.txt`
 
-Read every file completely. Do not skim or skip.
+Read every changed file completely. Do not skim or skip. Do not read files outside the diff to "get context"; the diff is the review scope.
 
 ## Step 2: Acceptance Criteria Cross-Check
 
@@ -55,40 +61,9 @@ Check for:
 - **Integration**: At least one end-to-end test through the full SQL pipeline.
 - **Tests** DO NOT RUN TESTS, just verify they exist and are of high quality.
 
-## Step 5: Review Output Format
+## Step 5: Review Output Format (detailed, post to the PR)
 
-```
-# <TICKET-ID> — <Summary> — v<N> Review
-
-## Build & Test Status
-✅, formatting/tidy status
-
-## Files Reviewed
-| Category | Files | Lines |
-|----------|-------|-------|
-| Headers  | N     | N     |
-| Implementation | N | N   |
-| Tests    | N     | N     |
-| Total    | N     | N     |
-
-## Acceptance Criteria Cross-Check
-
-### <TICKET-ID> (Parent)
-| Criterion | Status | Evidence |
-
-### <SUBTASK-ID> — <Summary>
-| Criterion | Status | Evidence |
-
-## Architecture Assessment
-Separation of concerns, extensibility, consistency with existing patterns.
-
-## Issues Found
-### 1. <Title> — **Severity**
-Description, file/line location, suggested fix.
-
-## Verdict: ✅ APPROVED / ❌ CHANGES REQUESTED
-Summary justification.
-```
+The detailed review goes in a PR comment (and a Jira comment on approval). Read the output template in [`review-template.md`](review-template.md) when you write it. The pipeline receives only the compact one-line block defined in the reviewer agent, never this table.
 
 ## Verdict Rules
 

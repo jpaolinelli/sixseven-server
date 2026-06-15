@@ -54,5 +54,5 @@ Present a consolidated summary to the user:
 ## Notes
 
 - Run phases sequentially by default. The user may request `--parallel` to run review and QA simultaneously after implementation.
-- Each subagent operates in its own context window; only their structured summaries flow back here.
+- Each subagent operates in its own context window; only its compact return line flows back here. Detailed reviews and QA reports are posted to the PR and Jira, never surfaced into this conversation. Do not re-read PRs, diffs, or files a subagent already summarized; trust the compact block.
 - If any subagent asks a clarifying question, surface it to the user immediately and pause the pipeline.

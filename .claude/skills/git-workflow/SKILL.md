@@ -28,7 +28,7 @@ Use this format for commit messages:
 - <SUBTASK-ID>: What was implemented
 ...
 
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 Always pass the commit message via a HEREDOC:
@@ -42,7 +42,7 @@ GDB-22: Implement Volcano iterator model executor
 - GDB-110: Insert, Update, and Delete DML operators
 - GDB-111: Query planner and end-to-end QueryEngine pipeline
 
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```

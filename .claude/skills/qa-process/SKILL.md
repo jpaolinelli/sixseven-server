@@ -45,7 +45,13 @@ cmake --build build/debug --target sixseven_qa_tests
 
 ## Step 3: Read the Implementation
 
-Read every file added or modified for the ticket:
+Get the exact list of changed files, then read only those:
+
+```bash
+git diff --name-only main...HEAD
+```
+
+The changed files will be among:
 
 - **Headers**: `include/sixseven/<module>/*.h`
 - **Implementations**: `src/<module>/*.cpp`
@@ -170,40 +176,11 @@ Classify every finding by severity:
 
 ## Step 9: File Bug Tickets
 
-For every finding, create a Jira `Bug` ticket in the **same epic as the ticket under review**:
-
-```
-Project: GDB
-Type: Bug
-Epic: <same epic as the ticket under review>
-Summary: [BUG][<Severity>] <Component>: <Short description of the bug>
-Description:
-  ## Found During
-  QA of <TICKET-UNDER-REVIEW>
-
-  ## Description
-  <Clear description of the bug>
-
-  ## Steps to Reproduce
-  1. <step>
-  2. <step>
-
-  ## Expected Behavior
-  <what should happen>
-
-  ## Actual Behavior
-  <what actually happens>
-
-  ## Severity
-  Critical / High / Medium
-
-  ## Test Case
-  <test name in test_qa_<ticket>.cpp that demonstrates the bug>
-```
+For every Critical/High finding, create a Jira `Bug` ticket in the **same epic as the ticket under review**. Read the bug-ticket template in [`templates.md`](templates.md) when you file.
 
 For Medium findings, include them in the QA report and let the user decide whether to file tickets.
 
-## Step 11: Run all QA tests and Commit tests to the current PR Branch
+## Step 10: Run All QA Tests and Commit Tests to the PR Branch
 
 1) Run all QA tests
 2) Check for regressions
@@ -212,40 +189,7 @@ For Medium findings, include them in the QA report and let the user decide wheth
 
 ## Step 11: QA Report Format
 
-```
-# <TICKET-ID> — <Summary> — QA Report
-
-## Build & Test Status
-- Build: PASS / FAIL
-- Existing tests: X/Y pass
-- ASan: CLEAN / <N> findings
-
-## Adversarial Tests Written
-| Test Suite | Test Name | Result | Category |
-|------------|-----------|--------|----------|
-| QA_Component | BoundaryZeroInput | PASS | boundary |
-| QA_Component | NullInEveryColumn | FAIL | null handling |
-
-## Acceptance Criteria Verification
-| Criterion | Test(s) | Status | Notes |
-|-----------|---------|--------|-------|
-| ... | ... | PASS/FAIL/UNTESTED | ... |
-
-## Findings
-### 1. <Title> — **Critical/High/Medium/Low**
-- **File**: `path/to/file.cpp:line`
-- **Description**: What is wrong.
-- **Reproduction**: Test name or steps.
-- **Bug ticket**: GDB-XXX (if filed)
-
-## Verdict: QA PASS / QA FAIL
-- **QA PASS**: All acceptance criteria verified, no Critical/High findings, ASan clean.
-- **QA FAIL**: Any Critical or High finding, or unverified acceptance criteria.
-
-## Bug Tickets Filed
-- GDB-XXX: <summary>
-- GDB-YYY: <summary>
-```
+The detailed QA report goes to the PR and the Jira ticket. Read the report template in [`templates.md`](templates.md) when you write it. The pipeline receives only the compact one-line `QA …` block defined in the qa-engineer agent, never this report.
 
 ## Verdict Rules
 
