@@ -19,8 +19,6 @@
 #include "sixseven/graph/graph_engine.h"
 #include "sixseven/storage/disk_manager.h"
 
-#include "test_qa_helpers.h"
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -29,6 +27,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "test_qa_helpers.h"
 
 namespace sixseven {
 namespace {
