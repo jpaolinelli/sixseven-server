@@ -569,8 +569,8 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
     }
 
     SIXSEVEN_LOG_DEBUG("btree load: restored {} leaf + {} internal nodes, size {}",
-                       leaf_count,
-                       internal_count,
+                       leaf_mappings.size(),
+                       internal_mappings.size(),
                        tree_size);
 
     return ok(std::move(index));
