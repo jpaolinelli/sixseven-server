@@ -276,30 +276,20 @@ TEST_F(QA_GDB606, UnlinkWhereBoundaryExclusion) {
 // ============================================================================
 
 TEST_F(QA_GDB606, TraverseEdgePropertyCaseInsensitive) {
-    // BUG FINDING: OutputSchema::find_column uses case-sensitive comparison,
-    // so rated.SCORE fails at runtime even though the binder resolves it
-    // case-insensitively. This is a pre-existing issue amplified by GDB-606.
-    auto result = engine_->execute(
+    // GDB-807: GDB-610 fixed OutputSchema::find_column to use case-insensitive
+    // iequals comparison. rated.SCORE (uppercase property) must resolve to the
+    // 'score' edge property — if the feature regresses this assertion must fail.
+    auto qr = exec_ok(
         "SELECT rated.SCORE FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
-
-    // Currently fails — documenting the behavior.
-    // If this starts passing, the case sensitivity bug has been fixed.
-    if (result.has_value()) {
-        EXPECT_EQ(result->rows.size(), 3u);
-    }
+    ASSERT_EQ(qr.rows.size(), 3u);
 }
 
 TEST_F(QA_GDB606, UnlinkWhereCaseInsensitiveColumn) {
-    // Bare column name SCORE (uppercase) in UNLINK WHERE.
-    // The binder resolves case-insensitively, but evaluate_predicate uses
-    // OutputSchema::find_column which is case-sensitive.
-    auto result = engine_->execute(
-        "UNLINK users(1) FROM products(20) VIA rated WHERE SCORE < 2.0");
-
-    // Currently fails — documenting the behavior.
-    if (result.has_value()) {
-        EXPECT_EQ(result->affected_rows, 1);
-    }
+    // GDB-807: Bare column name SCORE (uppercase) in UNLINK WHERE must resolve
+    // case-insensitively to the 'score' edge property after GDB-610.
+    // users(1)->products(20) has score=1.5, which satisfies SCORE < 2.0.
+    auto qr = exec_ok("UNLINK users(1) FROM products(20) VIA rated WHERE SCORE < 2.0");
+    EXPECT_EQ(qr.affected_rows, 1);
 }
 
 // ============================================================================
@@ -307,14 +297,11 @@ TEST_F(QA_GDB606, UnlinkWhereCaseInsensitiveColumn) {
 // ============================================================================
 
 TEST_F(QA_GDB606, TraverseEdgeTypeCaseInsensitive) {
-    // RATED.score (uppercase edge type name) — same case sensitivity issue.
-    auto result = engine_->execute(
+    // GDB-807: RATED.score (uppercase edge type name) must resolve to the 'score'
+    // property of the 'rated' edge type after GDB-610's case-insensitive fix.
+    auto qr = exec_ok(
         "SELECT RATED.score FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
-
-    // Documenting behavior — currently fails due to case-sensitive find_column.
-    if (result.has_value()) {
-        EXPECT_EQ(result->rows.size(), 3u);
-    }
+    ASSERT_EQ(qr.rows.size(), 3u);
 }
 
 // ============================================================================
