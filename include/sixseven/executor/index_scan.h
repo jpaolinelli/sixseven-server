@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "sixseven/executor/iterator.h"
 #include "sixseven/executor/tuple.h"
@@ -59,6 +59,12 @@ public:
     // Plan inspection
     std::string plan_node_name() const override;
     std::string plan_node_detail() const override;
+
+    /// Column indexes in the output schema covered by this index (first position
+    /// is the leading key — used for sortedness analysis).
+    [[nodiscard]] const std::vector<size_t>& index_col_indexes() const {
+        return index_col_indexes_;
+    }
 
 protected:
     Result<void> do_open() override;

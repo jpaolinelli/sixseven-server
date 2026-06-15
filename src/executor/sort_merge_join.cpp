@@ -264,7 +264,7 @@ const OutputSchema& SortMergeJoinOperator::output_schema() const {
 // ---------------------------------------------------------------------------
 
 std::string SortMergeJoinOperator::plan_node_name() const {
-    return "Merge Join";
+    return "Sort Merge Join";
 }
 
 std::string SortMergeJoinOperator::plan_node_detail() const {

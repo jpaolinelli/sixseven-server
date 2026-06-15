@@ -4,11 +4,13 @@
 #include "sixseven/common/logging.h"
 #include "sixseven/common/value_hash.h"
 #include "sixseven/executor/algorithm_scan.h"
+#include "sixseven/executor/bitmap_scan.h"
 #include "sixseven/executor/bm25_scan.h"
 #include "sixseven/executor/count_scan.h"
 #include "sixseven/executor/delete.h"
 #include "sixseven/executor/edge_traversal.h"
 #include "sixseven/executor/enriched_traversal.h"
+#include "sixseven/executor/external_sort.h"
 #include "sixseven/executor/filter.h"
 #include "sixseven/executor/hash_aggregate.h"
 #include "sixseven/executor/hash_index_scan.h"
@@ -26,6 +28,7 @@
 #include "sixseven/executor/seq_scan.h"
 #include "sixseven/executor/shortest_path.h"
 #include "sixseven/executor/sort.h"
+#include "sixseven/executor/sort_merge_join.h"
 #include "sixseven/executor/subquery_source.h"
 #include "sixseven/executor/traversal.h"
 #include "sixseven/executor/update.h"
@@ -111,6 +114,68 @@ PlanCostEstimate to_cost_estimate(const PlanCost& c) {
     e.total_cost = c.total_cost;
     e.estimated_rows = c.estimated_rows;
     return e;
+}
+/// Return true when the operator chain rooted at \p iter produces rows already
+/// ordered by the column named in \p join_key.
+///
+/// An input is considered sorted on the join key when the topmost significant
+/// node (skipping transparent wrappers that preserve row order such as Filter
+/// and Projection) is:
+///   - An ExternalSortOperator whose leading sort key is the same column as
+///     \p join_key (SortMergeJoin can leverage this without an extra sort pass).
+///   - An IndexScanOperator whose leading indexed column is the same column as
+///     \p join_key (B+ tree scans always deliver rows in index key order).
+///
+/// All other operator types (SeqScan, HashJoin, etc.) return false.
+bool is_sorted_on_join_key(const Iterator* iter, const Expr* join_key) {
+    if (iter == nullptr || join_key == nullptr) {
+        return false;
+    }
+    const auto* key_col = dynamic_cast<const ColumnRefExpr*>(join_key);
+    if (key_col == nullptr) {
+        return false;
+    }
+
+    while (iter != nullptr) {
+        const std::string name = iter->plan_node_name();
+
+        // ExternalSortOperator: rows are sorted on the leading ORDER BY key.
+        if (name == "External Sort") {
+            const auto* es = dynamic_cast<const ExternalSortOperator*>(iter);
+            if (es != nullptr && !es->sort_keys().empty()) {
+                const auto* sk = dynamic_cast<const ColumnRefExpr*>(es->sort_keys()[0].expr);
+                return sk != nullptr && sk->column == key_col->column;
+            }
+            return false;
+        }
+
+        // IndexScanOperator: rows come out in B+ tree key (ascending) order.
+        if (name == "Index Scan") {
+            const auto* is_op = dynamic_cast<const IndexScanOperator*>(iter);
+            if (is_op == nullptr) {
+                return false;
+            }
+            const auto& col_idxs = is_op->index_col_indexes();
+            const auto& schema = is_op->output_schema();
+            if (col_idxs.empty() || col_idxs[0] >= schema.column_count()) {
+                return false;
+            }
+            return schema.column(col_idxs[0]).name == key_col->column;
+        }
+
+        // Transparent single-child operators that preserve row order.
+        if (name == "Filter" || name == "Project" || name == "Subquery Scan") {
+            auto children = iter->plan_children();
+            if (children.size() == 1) {
+                iter = children[0];
+                continue;
+            }
+        }
+
+        // Any other operator is not ordered on the join key.
+        break;
+    }
+    return false;
 }
 
 /// Recursively collect all aggregate FunctionCallExpr nodes in an expression tree.
@@ -310,7 +375,7 @@ ExprPtr rewrite_expr(const Expr& expr,
         return n;
     }
     if (auto* fn = dynamic_cast<const FunctionCallExpr*>(&expr)) {
-        // Non-aggregate function call — clone it and rewrite args.
+        // Non-aggregate function call â€” clone it and rewrite args.
         auto n = std::make_unique<FunctionCallExpr>();
         n->name = fn->name;
         n->distinct = fn->distinct;
@@ -808,7 +873,7 @@ Planner::plan_from_source(const TableRef& table_ref,
             out_cols.push_back({trav_alias, "__path", TypeId::PATH, false, 0});
         }
 
-        // Append edge property columns (nullable — start node has no incoming edge).
+        // Append edge property columns (nullable â€” start node has no incoming edge).
         // Qualified by edge type name for edge_type.property access syntax.
         auto edge_table = graph_engine_->get_edge_table(database_id_, trav->edge_type);
         if (edge_table) {
@@ -952,7 +1017,7 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
     const BoundStatement& bound,
     const std::unordered_map<std::string, const SelectStmt*>& cte_map,
     std::vector<ExprPtr>& owned_exprs) {
-    // --- EXISTS (subquery) → SEMI join ---
+    // --- EXISTS (subquery) â†’ SEMI join ---
     if (auto* exists = dynamic_cast<const ExistsExpr*>(&where_expr)) {
         auto* sub_sel = dynamic_cast<const SelectStmt*>(exists->subquery.get());
         if (sub_sel && !sub_sel->from.empty()) {
@@ -993,7 +1058,7 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
         }
     }
 
-    // --- NOT EXISTS (subquery) → ANTI join ---
+    // --- NOT EXISTS (subquery) â†’ ANTI join ---
     // NOT EXISTS is represented as UnaryExpr(NOT, ExistsExpr).
     if (auto* unary = dynamic_cast<const UnaryExpr*>(&where_expr)) {
         if (unary->op == UnaryOp::NOT) {
@@ -1037,7 +1102,7 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
         }
     }
 
-    // --- IN (subquery) → SEMI join ---
+    // --- IN (subquery) â†’ SEMI join ---
     if (auto* in_expr = dynamic_cast<const InExpr*>(&where_expr)) {
         if (in_expr->subquery) {
             auto* sub_sel = dynamic_cast<const SelectStmt*>(in_expr->subquery.get());
@@ -1054,7 +1119,7 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
                 inject_cte_bindings(binder, cte_map);
                 auto sub_bound = binder.bind(*in_expr->subquery);
                 if (!sub_bound) {
-                    // The subquery does not bind standalone — most likely it is
+                    // The subquery does not bind standalone â€” most likely it is
                     // correlated (references the outer row). Decorrelation into a
                     // join is not possible; leave the predicate to be applied as a
                     // filter, where eval_in re-executes it per outer row.
@@ -1109,7 +1174,7 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
                     eq->lhs = std::move(lhs);
                 } else {
                     // For non-column expressions, we still create the equality.
-                    // Use the original expression pointer — it outlives the plan.
+                    // Use the original expression pointer â€” it outlives the plan.
                     // We need to wrap it in an owned clone.
                     auto lhs = std::make_unique<ColumnRefExpr>();
                     lhs->column = "__in_lhs__";
@@ -1168,14 +1233,14 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
                 return ok(left_remaining);
             }
 
-            // Both sides have remaining conditions — recombine with AND.
+            // Both sides have remaining conditions â€” recombine with AND.
             // We need to return the original expression since both sub-parts
             // are still the original AST nodes connected by the AND.
             return ok(static_cast<const Expr*>(&where_expr));
         }
     }
 
-    // No subquery found — return the expression as-is for filter.
+    // No subquery found â€” return the expression as-is for filter.
     return ok(static_cast<const Expr*>(&where_expr));
 }
 
@@ -1274,11 +1339,11 @@ Planner::plan_select(const SelectStmt& stmt,
             bool is_base;
             JoinType join_type; ///< INNER for the base table.
             bool is_nullable;   ///< EFFECTIVE nullability of this input's rows.
-            TableSchema schema; ///< owned copy — catalog returns by value.
+            TableSchema schema; ///< owned copy â€” catalog returns by value.
         };
         std::vector<CandidateTable> candidates;
         {
-            // The base (left-most) input is NULL-padded — and therefore nullable —
+            // The base (left-most) input is NULL-padded â€” and therefore nullable â€”
             // when any join in the statement is RIGHT or FULL, since those preserve
             // the right side and null-fill unmatched base rows. INNER/LEFT/CROSS all
             // preserve the base side. This is what makes `books b RIGHT JOIN reviews r`
@@ -1360,7 +1425,7 @@ Planner::plan_select(const SelectStmt& stmt,
                                   " is not an embedding");
         }
 
-        // v1: NEAREST on the nullable side of an OUTER join is rejected — the
+        // v1: NEAREST on the nullable side of an OUTER join is rejected â€” the
         // scan would produce padding NULL rows that have no meaningful distance.
         // Any preserved position (the base under INNER/LEFT, a joined table under
         // RIGHT, etc.) is allowed. We gate on the EFFECTIVE nullability of the
@@ -1490,7 +1555,7 @@ Planner::plan_select(const SelectStmt& stmt,
                             }
                         }
                         if (!chosen) {
-                            // Sequential scan with predicate pushdown — either
+                            // Sequential scan with predicate pushdown â€” either
                             // the optimizer chose it, or no usable index exists.
                             chosen = std::make_unique<SeqScanOperator>(*storage->heap,
                                                                        storage->storage_schema,
@@ -1512,21 +1577,21 @@ Planner::plan_select(const SelectStmt& stmt,
 
     std::unique_ptr<Iterator> child = std::move(source->iter);
 
-    // Predicate pushdown state — declared here so the post-join filter
+    // Predicate pushdown state â€” declared here so the post-join filter
     // logic can access which conjuncts were consumed.
     std::vector<const Expr*> where_conjuncts;
     std::vector<bool> conjunct_consumed;
 
     // -- 2b. JOIN operators ---------------------------------------------------
     if (has_joins) {
-        // ── Predicate pushdown: decompose WHERE into per-table filters ────
+        // â”€â”€ Predicate pushdown: decompose WHERE into per-table filters â”€â”€â”€â”€
         // For INNER joins, single-table predicates can be pushed down to
         // the individual table scans, dramatically reducing join input size.
         if (stmt.where_expr) {
             where_conjuncts = extract_conjuncts(*stmt.where_expr);
             conjunct_consumed.resize(where_conjuncts.size(), false);
 
-            // ── NEAREST pushdown: base table owns the EMBEDDING column ───────
+            // â”€â”€ NEAREST pushdown: base table owns the EMBEDDING column â”€â”€â”€â”€â”€â”€â”€
             // Replace the base scan with a NearestScanOperator carrying the
             // synthesized residual (NEAREST + the base table's sibling
             // conjuncts, applied BEFORE top-k). Mark every residual conjunct
@@ -1586,7 +1651,7 @@ Planner::plan_select(const SelectStmt& stmt,
                 return make_error(join_source.error().code, join_source.error().message);
             }
 
-            // ── NEAREST pushdown: this join source owns the EMBEDDING column ──
+            // â”€â”€ NEAREST pushdown: this join source owns the EMBEDDING column â”€â”€
             // Replace the join source with a NearestScanOperator carrying the
             // synthesized residual (applied BEFORE top-k). Its output schema
             // (table columns aliased + `_distance`) is adopted so `_distance`
@@ -1624,8 +1689,8 @@ Planner::plan_select(const SelectStmt& stmt,
                 }
             }
 
-            // ── Push single-table predicates into the join source ─────────
-            // Only safe for INNER joins — outer join nullable-side predicates
+            // â”€â”€ Push single-table predicates into the join source â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // Only safe for INNER joins â€” outer join nullable-side predicates
             // must remain in the post-join filter.
             if (join_clause.type == JoinType::INNER && !where_conjuncts.empty()) {
                 for (size_t i = 0; i < where_conjuncts.size(); ++i) {
@@ -1657,29 +1722,64 @@ Planner::plan_select(const SelectStmt& stmt,
 
             const Expr* on_expr = join_clause.on_expr ? join_clause.on_expr.get() : nullptr;
 
-            // ── Choose join method: HashJoin for equi-joins, NestedLoop otherwise.
+            // â”€â”€ Choose join method: HashJoin or SortMergeJoin for equi-joins,
+            // NestedLoop otherwise.
             // When both inputs carry optimizer cost estimates (i.e. ANALYZE
             // statistics exist), the cost-based optimizer picks the method
-            // instead (GDB-754).
-            bool used_hash_join = false;
+            // instead (GDB-754). GDB-803: SORT_MERGE is now wired directly to
+            // SortMergeJoinOperator instead of falling back to HashJoin.
+            bool used_equi_join = false;
             bool stats_prefer_nested_loop = false;
+            bool stats_prefer_sort_merge = false;
             std::optional<PlanCostEstimate> join_cost;
             {
                 const PlanCostEstimate* lcost = find_cost_in_chain(child.get());
                 const PlanCostEstimate* rcost = find_cost_in_chain(join_source->iter.get());
                 if (lcost != nullptr && rcost != nullptr) {
                     const CostModel cost_model;
+                    // Compute ACTUAL sortedness of each join input on the join key.
+                    // An input is considered pre-sorted only when it genuinely
+                    // produces rows ordered by the equi-join key — i.e. the child
+                    // is an IndexScanOperator on that column (B+ tree key order),
+                    // or an ExternalSortOperator whose leading key matches.
+                    // This prevents SMJ from winning the cost comparison when
+                    // inputs are NOT actually ordered (e.g. SeqScan + HashJoin
+                    // is cheaper for small unsorted tables). SMJ remains reachable
+                    // when inputs ARE genuinely pre-sorted on the join key.
+                    const Expr* lkey_hint = nullptr;
+                    const Expr* rkey_hint = nullptr;
+                    if (on_expr != nullptr) {
+                        const auto* bin = dynamic_cast<const BinaryExpr*>(on_expr);
+                        if (bin != nullptr && bin->op == BinaryOp::EQUAL) {
+                            // Determine which side of the binary expr belongs to
+                            // the left vs. right child (same logic as below).
+                            const auto* lhs_col =
+                                dynamic_cast<const ColumnRefExpr*>(bin->lhs.get());
+                            bool lhs_is_right = false;
+                            if (lhs_col != nullptr) {
+                                for (size_t c = 0; c < right_schema_ref.column_count(); ++c) {
+                                    if (right_schema_ref.column(c).table_name == lhs_col->table) {
+                                        lhs_is_right = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            lkey_hint = lhs_is_right ? bin->rhs.get() : bin->lhs.get();
+                            rkey_hint = lhs_is_right ? bin->lhs.get() : bin->rhs.get();
+                        }
+                    }
+                    const bool left_sorted = is_sorted_on_join_key(child.get(), lkey_hint);
+                    const bool right_sorted =
+                        is_sorted_on_join_key(join_source->iter.get(), rkey_hint);
                     auto [method, jc] = choose_join_method(to_plan_cost(*lcost),
                                                            to_plan_cost(*rcost),
                                                            kDefaultSelectivity,
-                                                           false,
-                                                           false,
+                                                           left_sorted,
+                                                           right_sorted,
                                                            cost_model);
                     join_cost = to_cost_estimate(jc);
-                    // SORT_MERGE maps onto hash join here: the live executor
-                    // feeds joins unsorted inputs, so hash join is the
-                    // equivalent pipelined choice (follow-up: sort-merge).
                     stats_prefer_nested_loop = (method == JoinMethod::NESTED_LOOP);
+                    stats_prefer_sort_merge = (method == JoinMethod::SORT_MERGE);
                 }
             }
             if (on_expr && !stats_prefer_nested_loop) {
@@ -1691,11 +1791,11 @@ Planner::plan_select(const SelectStmt& stmt,
                         // Equi-join detected. Determine which key belongs to which side.
                         // The left child's schema contains columns from previously joined
                         // tables; the right child is the current join source.
-                        const Expr* probe_key = bin->lhs.get();
-                        const Expr* build_key = bin->rhs.get();
+                        const Expr* left_key = bin->lhs.get();
+                        const Expr* right_key = bin->rhs.get();
 
                         // Check if lhs belongs to the right side (join source).
-                        // If so, swap probe/build keys.
+                        // If so, swap left/right keys.
                         bool lhs_is_right = false;
                         for (size_t c = 0; c < right_schema_ref.column_count(); ++c) {
                             if (right_schema_ref.column(c).table_name == lhs_col->table) {
@@ -1704,22 +1804,35 @@ Planner::plan_select(const SelectStmt& stmt,
                             }
                         }
                         if (lhs_is_right) {
-                            std::swap(probe_key, build_key);
+                            std::swap(left_key, right_key);
                         }
 
-                        child = std::make_unique<HashJoinOperator>(std::move(child),
-                                                                   std::move(join_source->iter),
-                                                                   join_clause.type,
-                                                                   probe_key,
-                                                                   build_key,
-                                                                   bound,
-                                                                   std::move(combined));
-                        used_hash_join = true;
+                        if (stats_prefer_sort_merge) {
+                            // Cost model chose sort-merge: use SortMergeJoinOperator.
+                            child = std::make_unique<SortMergeJoinOperator>(
+                                std::move(child),
+                                std::move(join_source->iter),
+                                join_clause.type,
+                                left_key,
+                                right_key,
+                                bound,
+                                std::move(combined));
+                        } else {
+                            // Default equi-join: HashJoin.
+                            child = std::make_unique<HashJoinOperator>(std::move(child),
+                                                                       std::move(join_source->iter),
+                                                                       join_clause.type,
+                                                                       left_key,
+                                                                       right_key,
+                                                                       bound,
+                                                                       std::move(combined));
+                        }
+                        used_equi_join = true;
                     }
                 }
             }
 
-            if (!used_hash_join) {
+            if (!used_equi_join) {
                 child = std::make_unique<NestedLoopJoinOperator>(std::move(child),
                                                                  std::move(join_source->iter),
                                                                  join_clause.type,
@@ -1760,7 +1873,7 @@ Planner::plan_select(const SelectStmt& stmt,
                 }
             }
             if (remaining.empty()) {
-                // All pushed — nothing to apply.
+                // All pushed â€” nothing to apply.
                 pushed_where = true;
             } else if (remaining.size() == 1) {
                 remaining_where = remaining[0];
@@ -1814,7 +1927,7 @@ Planner::plan_select(const SelectStmt& stmt,
         }
     }
 
-    // Map from WindowFunctionExpr* → synthesised column name in WindowOperator output.
+    // Map from WindowFunctionExpr* â†’ synthesised column name in WindowOperator output.
     std::unordered_map<const Expr*, std::string> win_map;
 
     if (!win_exprs.empty()) {
@@ -1960,7 +2073,8 @@ Planner::plan_select(const SelectStmt& stmt,
 
         // -- 3b. Build AggregateDescriptors and agg_map ----------------------
         std::vector<AggregateDescriptor> agg_descs;
-        std::unordered_map<const Expr*, std::string> agg_map; // FunctionCallExpr* → output col name
+        std::unordered_map<const Expr*, std::string>
+            agg_map; // FunctionCallExpr* â†’ output col name
 
         for (size_t i = 0; i < unique_aggs.size(); ++i) {
             auto* fn = unique_aggs[i];
@@ -2113,14 +2227,18 @@ Planner::plan_select(const SelectStmt& stmt,
                         keys.push_back({effective_expr, ob.direction});
                     }
                 }
-                child = std::make_unique<SortOperator>(std::move(child), std::move(keys), bound);
+                // GDB-803: Use ExternalSortOperator so large sorts spill to disk
+                // rather than running out of memory. It degrades gracefully to
+                // an in-memory sort when the input fits in work_mem.
+                child = std::make_unique<ExternalSortOperator>(
+                    std::move(child), std::move(keys), bound);
             }
 
             // -- 3g. Build rewritten projections ----------------------------------
             std::vector<ProjectionExpr> projections;
             for (const auto& item : stmt.items) {
                 if (item.is_star || !item.table_star.empty()) {
-                    // SELECT * with GROUP BY — handled by binder validation (error).
+                    // SELECT * with GROUP BY â€” handled by binder validation (error).
                     continue;
                 }
                 if (!item.expr) {
@@ -2145,7 +2263,7 @@ Planner::plan_select(const SelectStmt& stmt,
                     owned_exprs.push_back(std::move(rewritten));
                     projections.push_back({ptr, col_alias});
                 } else {
-                    // Pure column reference or literal — use as-is.
+                    // Pure column reference or literal â€” use as-is.
                     projections.push_back({item.expr.get(), col_alias});
                 }
             }
@@ -2159,7 +2277,7 @@ Planner::plan_select(const SelectStmt& stmt,
         } // end if (!used_count_fast_path)
 
         // For the fast path, we still need projection to produce the final
-        // output schema (e.g. renaming __agg_0 → count).
+        // output schema (e.g. renaming __agg_0 â†’ count).
         if (used_count_fast_path) {
             std::vector<ProjectionExpr> projections;
             for (const auto& item : stmt.items) {
@@ -2210,7 +2328,11 @@ Planner::plan_select(const SelectStmt& stmt,
                 }
                 keys.push_back({effective_expr, ob.direction});
             }
-            child = std::make_unique<SortOperator>(std::move(child), std::move(keys), bound);
+            // GDB-803: Use ExternalSortOperator so large sorts spill to disk
+            // rather than running out of memory. It degrades gracefully to
+            // an in-memory sort when the input fits in work_mem.
+            child =
+                std::make_unique<ExternalSortOperator>(std::move(child), std::move(keys), bound);
         }
 
         std::vector<ProjectionExpr> projections;
@@ -2298,7 +2420,7 @@ Planner::plan_select(const SelectStmt& stmt,
         if (offset_val > 0) {
             auto* seq_scan = dynamic_cast<SeqScanOperator*>(child.get());
             if (!seq_scan) {
-                // Check for Project → SeqScan (the common SELECT * case).
+                // Check for Project â†’ SeqScan (the common SELECT * case).
                 auto children = child->plan_children();
                 if (children.size() == 1) {
                     // Safe: we own the full operator tree, so the const_cast
@@ -2410,7 +2532,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
                 default_ptrs[j] = expr->get();
                 owned_defaults.push_back(std::move(*expr));
             } else if (table_schema->columns[j].is_autoincrement) {
-                // Auto-increment column omitted — use NULL placeholder.
+                // Auto-increment column omitted â€” use NULL placeholder.
                 // The InsertOperator will replace it with the next counter value.
                 auto null_expr = std::make_unique<LiteralExpr>();
                 null_expr->kind = LiteralKind::NULL_LITERAL;
@@ -2418,7 +2540,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
                 default_ptrs[j] = null_expr.get();
                 owned_defaults.push_back(std::move(null_expr));
             } else if (table_schema->columns[j].nullable) {
-                // No default, but nullable — use NULL.
+                // No default, but nullable â€” use NULL.
                 auto null_expr = std::make_unique<LiteralExpr>();
                 null_expr->kind = LiteralKind::NULL_LITERAL;
                 null_expr->value = "NULL";
@@ -2942,7 +3064,7 @@ bool expr_contains_match(const Expr* e) {
 /// Find a BM25 MATCH(...) predicate that sits in a "usable" position: either the
 /// whole WHERE predicate, or a conjunct of a top-level AND chain. MATCH under
 /// OR / NOT is not usable (the index scan cannot represent those semantics in
-/// v1), so this returns nullptr for those cases — the caller distinguishes
+/// v1), so this returns nullptr for those cases â€” the caller distinguishes
 /// "no match" from "unusable match" via expr_contains_match().
 const MatchExpr* extract_match_predicate(const Expr* e) {
     if (e == nullptr) {
@@ -3210,7 +3332,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
         // Target is a literal vector.
         query_vector = target_val->as_embedding();
     } else if (!target_val->is_null() && target_val->type_id() == TypeId::STRING) {
-        // Target is a text string — auto-embed via the column's provider.
+        // Target is a text string â€” auto-embed via the column's provider.
         if (provider_registry_ == nullptr) {
             return make_error(StatusCode::NOT_IMPLEMENTED,
                               "text auto-embedding requires a ProviderRegistry");
@@ -3278,9 +3400,9 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
         }
 
         // Resolve the reached side(s) per direction.
-        //   OUT  → reached = target_table_id
-        //   IN   → reached = source_table_id
-        //   BOTH → both endpoints must equal the vector table (a heterogeneous
+        //   OUT  â†’ reached = target_table_id
+        //   IN   â†’ reached = source_table_id
+        //   BOTH â†’ both endpoints must equal the vector table (a heterogeneous
         //          BOTH would mix two PK id-spaces into a single scope set).
         const table_id_t vector_table_id = table_schema->table_id;
         std::vector<table_id_t> reached_ids;
@@ -3359,8 +3481,8 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
             }
         }
 
-        // Coerce the start key to match the START table's PK type (e.g. STRING →
-        // UUID, INT64 literal → INT32 column).
+        // Coerce the start key to match the START table's PK type (e.g. STRING â†’
+        // UUID, INT64 literal â†’ INT32 column).
         if (start_key->type_id() != start_pk_type) {
             auto coerced = fit_to_storage(*start_key, start_pk_type);
             if (!coerced) {
@@ -3405,8 +3527,8 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
         }
         trav_op.close();
 
-        // Also include the start node itself — but only when the start table IS
-        // the vector table. For heterogeneous edges (start table ≠ vector table)
+        // Also include the start node itself â€” but only when the start table IS
+        // the vector table. For heterogeneous edges (start table â‰  vector table)
         // the start PK lives in a different id-space; seeding it here would admit
         // an unrelated vector-table row by accidental PK collision (GDB-1251).
         if (start_is_vector_table) {
@@ -3451,7 +3573,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
 
     // --- Btree-accelerated pre-filtering ---
     // When the WHERE clause matches a btree index and the filter is selective
-    // (≤ 10,000 candidates), collect RIDs from the btree and compute distances
+    // (â‰¤ 10,000 candidates), collect RIDs from the btree and compute distances
     // only for those rows via brute-force. This avoids searching the entire
     // HNSW index for highly selective predicates.
     static constexpr size_t kPrefilterThreshold = 10'000;
@@ -3770,13 +3892,109 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema
         return ok(std::unique_ptr<Iterator>(nullptr));
     }
 
+    auto indexes = catalog_.list_indexes(table_schema.table_id);
+
+    // -- GDB-803: BitmapScan for OR-of-predicates on different indexed columns --
+    // When the WHERE is a top-level OR of two simple comparisons, each on a
+    // different B+ tree-indexed column, build a BitmapScanOperator (OR mode)
+    // that collects RIDs from both indexes and fetches heap pages in order.
+    if (btree_indexes_ != nullptr && !btree_indexes_->empty()) {
+        auto* or_bin = dynamic_cast<const BinaryExpr*>(where_expr);
+        if (or_bin && or_bin->op == BinaryOp::OR) {
+            auto cmp_l = extract_simple_comparison(or_bin->lhs.get());
+            auto cmp_r = extract_simple_comparison(or_bin->rhs.get());
+            if (cmp_l && cmp_r && cmp_l->column_name != cmp_r->column_name) {
+                // Try to resolve a B+ tree index for each side.
+                auto find_btree = [&](const SimpleComparison& sc)
+                    -> std::pair<const BTreeIndex*, std::optional<KeyType>> {
+                    for (const auto& idx_def : indexes) {
+                        if (idx_def.index_type != "btree")
+                            continue;
+                        auto it = btree_indexes_->find(idx_def.index_id);
+                        if (it == btree_indexes_->end())
+                            continue;
+                        auto idx_cols = parse_index_columns(idx_def.columns);
+                        if (idx_cols.empty() || idx_cols[0] != sc.column_name)
+                            continue;
+                        Value v = sc.literal_value;
+                        for (const auto& col : table_schema.columns) {
+                            if (col.name == sc.column_name && v.type_id() != col.type_id &&
+                                can_coerce(v.type_id(), col.type_id)) {
+                                auto cv = coerce(v, col.type_id);
+                                if (cv)
+                                    v = std::move(*cv);
+                                break;
+                            }
+                        }
+                        KeyType key = {v};
+                        return {it->second, std::move(key)};
+                    }
+                    return {nullptr, std::nullopt};
+                };
+
+                auto [btree_l, key_l] = find_btree(*cmp_l);
+                auto [btree_r, key_r] = find_btree(*cmp_r);
+
+                if (btree_l != nullptr && btree_r != nullptr) {
+                    // Build BitmapScan with OR combine mode.
+                    std::vector<BitmapIndexScan> scans;
+                    BitmapIndexScan s_l;
+                    s_l.index = btree_l;
+                    // Assign begin_key/end_key for the scan direction implied by
+                    // the comparison operator.
+                    //
+                    // The BTreeIterator ends when current_key >= end_key (exclusive).
+                    // For LESS (strict): end_key = boundary is correct.
+                    // For LESS_EQUAL (inclusive): passing end_key = boundary would
+                    //   exclude the boundary row; use end_key = nullopt (scan to +inf)
+                    //   and rely on the OR-expression residual applied by
+                    //   BitmapScanOperator to filter correctly.
+                    // For EQUAL / GREATER / GREATER_EQUAL: begin_key = boundary.
+                    auto assign_scan_range =
+                        [](BitmapIndexScan& s, BinaryOp op, std::optional<KeyType> key) {
+                            if (op == BinaryOp::LESS) {
+                                // Strict upper bound: stop before boundary.
+                                s.begin_key = std::nullopt;
+                                s.end_key = std::move(key);
+                            } else if (op == BinaryOp::LESS_EQUAL) {
+                                // Inclusive upper bound: BTreeIterator end_key is
+                                // exclusive so the boundary row would be missed.
+                                // Scan the full index; the WHERE residual handles
+                                // boundary inclusion correctly.
+                                s.begin_key = std::nullopt;
+                                s.end_key = std::nullopt;
+                            } else {
+                                // EQUAL / GREATER / GREATER_EQUAL: scan [key, +inf).
+                                s.begin_key = std::move(key);
+                                s.end_key = std::nullopt;
+                            }
+                        };
+                    assign_scan_range(s_l, cmp_l->op, std::move(key_l));
+                    scans.push_back(std::move(s_l));
+
+                    BitmapIndexScan s_r;
+                    s_r.index = btree_r;
+                    assign_scan_range(s_r, cmp_r->op, std::move(key_r));
+                    scans.push_back(std::move(s_r));
+
+                    auto bitmap_scan = std::make_unique<BitmapScanOperator>(std::move(scans),
+                                                                            BitmapCombineMode::OR,
+                                                                            *storage->heap,
+                                                                            storage->storage_schema,
+                                                                            table_output,
+                                                                            where_expr,
+                                                                            &bound);
+                    return ok(std::unique_ptr<Iterator>(std::move(bitmap_scan)));
+                }
+            }
+        }
+    }
+
     // Extract simple comparison from the WHERE clause.
     auto cmp = extract_simple_comparison(where_expr);
     if (!cmp) {
         return ok(std::unique_ptr<Iterator>(nullptr));
     }
-
-    auto indexes = catalog_.list_indexes(table_schema.table_id);
 
     // --- Try hash index first (preferred for equality predicates) ---
     if (cmp->op == BinaryOp::EQUAL && hash_indexes_ != nullptr && !hash_indexes_->empty()) {
@@ -3798,7 +4016,7 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema
             // Found a matching hash index for an equality predicate.
             auto* hash_idx = it->second;
 
-            // Coerce the literal to the column's actual type (e.g. STRING → UUID).
+            // Coerce the literal to the column's actual type (e.g. STRING â†’ UUID).
             Value coerced_value = cmp->literal_value;
             for (const auto& col : table_schema.columns) {
                 if (col.name == cmp->column_name && coerced_value.type_id() != col.type_id &&
@@ -3864,7 +4082,7 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema
         // Found a matching index. Build scan bounds.
         auto* btree = it->second;
 
-        // Coerce the literal to the column's actual type (e.g. STRING → UUID).
+        // Coerce the literal to the column's actual type (e.g. STRING â†’ UUID).
         Value coerced_value = cmp->literal_value;
         for (const auto& col : table_schema.columns) {
             if (col.name == cmp->column_name && coerced_value.type_id() != col.type_id &&
