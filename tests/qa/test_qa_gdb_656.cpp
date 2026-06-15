@@ -303,11 +303,17 @@ TEST_F(QA_GDB656, MigrationCreatesAndBackfillsSysDatabases) {
     exec_ok("CREATE TABLE migration_test (id INT)");
 
     // Find and delete the sys_databases file on disk.
+    // StorageManager::table_path writes to:
+    //   <data_dir>/databases/<db_id>/tables/table_<table_id>.db
+    // GDB-812: the previous path was wrong (missing "tables/" and "table_" prefix),
+    // so the delete was a no-op and migration was never triggered.
     auto sys_db_file = data_dir_ / "databases" / std::to_string(system_database_id) /
-                       (std::to_string(sys_databases_table_id) + ".db");
-    if (std::filesystem::exists(sys_db_file)) {
-        std::filesystem::remove(sys_db_file);
-    }
+                       "tables" / ("table_" + std::to_string(sys_databases_table_id) + ".db");
+    ASSERT_TRUE(std::filesystem::exists(sys_db_file))
+        << "sys_databases file must exist before deletion at: " << sys_db_file;
+    std::filesystem::remove(sys_db_file);
+    ASSERT_FALSE(std::filesystem::exists(sys_db_file))
+        << "sys_databases file must be absent before restart to trigger migration";
 
     // Restart — the migration path should trigger.
     restart();
@@ -321,24 +327,49 @@ TEST_F(QA_GDB656, MigrationCreatesAndBackfillsSysDatabases) {
     // The table should also be restored.
     auto tbl = catalog_->get_table(default_database_id, "migration_test");
     ASSERT_TRUE(tbl.has_value()) << "table should survive migration";
+
+    // Migration must have backfilled at least the sixseven database entry into
+    // sys_databases (proves the migration code path actually ran).
+    auto entries = scan_sys_databases();
+    bool found_sixseven = false;
+    for (const auto& [id, name] : entries) {
+        if (id == default_database_id) {
+            found_sixseven = true;
+        }
+    }
+    EXPECT_TRUE(found_sixseven) << "migration must backfill sixseven into sys_databases";
 }
 
 TEST_F(QA_GDB656, MigrationAlwaysIncludesSixseven) {
     // Even if there are no user tables, migration should still include sixseven.
     run_bootstrap();
 
-    // Delete sys_databases file.
+    // Delete sys_databases file at the correct StorageManager path.
+    // GDB-812: the previous path was wrong (missing "tables/" and "table_" prefix).
     auto sys_db_file = data_dir_ / "databases" / std::to_string(system_database_id) /
-                       (std::to_string(sys_databases_table_id) + ".db");
-    if (std::filesystem::exists(sys_db_file)) {
-        std::filesystem::remove(sys_db_file);
-    }
+                       "tables" / ("table_" + std::to_string(sys_databases_table_id) + ".db");
+    ASSERT_TRUE(std::filesystem::exists(sys_db_file))
+        << "sys_databases file must exist before deletion at: " << sys_db_file;
+    std::filesystem::remove(sys_db_file);
+    ASSERT_FALSE(std::filesystem::exists(sys_db_file))
+        << "sys_databases file must be absent before restart to trigger migration";
 
     restart();
     run_bootstrap();
 
     auto db = catalog_->get_database("demo");
     ASSERT_TRUE(db.has_value()) << "migration should include sixseven even with no user tables";
+
+    // Prove migration ran: sys_databases must now contain sixseven.
+    auto entries = scan_sys_databases();
+    bool found_sixseven = false;
+    for (const auto& [id, name] : entries) {
+        if (id == default_database_id) {
+            found_sixseven = true;
+        }
+    }
+    EXPECT_TRUE(found_sixseven)
+        << "migration must include sixseven in sys_databases even with no user tables";
 }
 
 // ============================================================================
