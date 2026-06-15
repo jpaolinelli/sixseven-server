@@ -45,7 +45,13 @@ cmake --build build/debug --target sixseven_qa_tests
 
 ## Step 3: Read the Implementation
 
-Read every file added or modified for the ticket:
+Get the exact list of changed files, then read only those:
+
+```bash
+git diff --name-only main...HEAD
+```
+
+The changed files will be among:
 
 - **Headers**: `include/sixseven/<module>/*.h`
 - **Implementations**: `src/<module>/*.cpp`
@@ -203,7 +209,7 @@ Description:
 
 For Medium findings, include them in the QA report and let the user decide whether to file tickets.
 
-## Step 11: Run all QA tests and Commit tests to the current PR Branch
+## Step 10: Run All QA Tests and Commit Tests to the PR Branch
 
 1) Run all QA tests
 2) Check for regressions
