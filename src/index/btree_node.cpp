@@ -115,10 +115,6 @@ std::vector<PageId>& BTreeInternalNode::children() {
     return children_;
 }
 
-std::shared_mutex& BTreeInternalNode::latch() {
-    return latch_;
-}
-
 // =============================================================================
 // BTreeLeafNode
 // =============================================================================
@@ -290,10 +286,6 @@ std::vector<KeyType>& BTreeLeafNode::keys() {
 
 std::vector<RID>& BTreeLeafNode::rids() {
     return rids_;
-}
-
-std::shared_mutex& BTreeLeafNode::latch() {
-    return latch_;
 }
 
 } // namespace sixseven

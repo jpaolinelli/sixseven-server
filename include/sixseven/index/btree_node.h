@@ -7,7 +7,6 @@
 
 #include <cstdint>
 #include <optional>
-#include <shared_mutex>
 #include <stdexcept>
 #include <vector>
 
@@ -77,16 +76,12 @@ public:
     [[nodiscard]] std::vector<KeyType>& keys();
     [[nodiscard]] std::vector<PageId>& children();
 
-    /// Latch for concurrency (GDB-96).
-    [[nodiscard]] std::shared_mutex& latch();
-
 private:
     PageId page_id_;
     PageId parent_page_id_ = invalid_page_id;
     uint16_t max_keys_;
     std::vector<KeyType> keys_;
     std::vector<PageId> children_;
-    mutable std::shared_mutex latch_;
 };
 
 // -- Leaf Node ---------------------------------------------------------------
@@ -156,9 +151,6 @@ public:
     [[nodiscard]] std::vector<KeyType>& keys();
     [[nodiscard]] std::vector<RID>& rids();
 
-    /// Latch for concurrency (GDB-96).
-    [[nodiscard]] std::shared_mutex& latch();
-
 private:
     PageId page_id_;
     PageId parent_page_id_ = invalid_page_id;
@@ -167,7 +159,6 @@ private:
     uint16_t max_keys_;
     std::vector<KeyType> keys_;
     std::vector<RID> rids_;
-    mutable std::shared_mutex latch_;
 };
 
 } // namespace sixseven
