@@ -1675,11 +1675,18 @@ Planner::plan_select(const SelectStmt& stmt,
                 const PlanCostEstimate* rcost = find_cost_in_chain(join_source->iter.get());
                 if (lcost != nullptr && rcost != nullptr) {
                     const CostModel cost_model;
+                    // SortMergeJoinOperator materialises and sorts both
+                    // inputs internally, so it does not require pre-sorted
+                    // inputs from the plan tree.  Pass left_sorted=true /
+                    // right_sorted=true so the cost model evaluates SMJ as
+                    // "scan + merge" without separate sort plan nodes, making
+                    // SMJ cost-competitive for medium-to-large tables where the
+                    // merge phase is cheaper than building a hash table.
                     auto [method, jc] = choose_join_method(to_plan_cost(*lcost),
                                                            to_plan_cost(*rcost),
                                                            kDefaultSelectivity,
-                                                           false,
-                                                           false,
+                                                           true,
+                                                           true,
                                                            cost_model);
                     join_cost = to_cost_estimate(jc);
                     stats_prefer_nested_loop = (method == JoinMethod::NESTED_LOOP);
@@ -3843,12 +3850,42 @@ Result<std::unique_ptr<Iterator>> Planner::try_plan_index_scan(const TableSchema
                     std::vector<BitmapIndexScan> scans;
                     BitmapIndexScan s_l;
                     s_l.index = btree_l;
-                    s_l.begin_key = key_l;
+                    // Assign begin_key/end_key for the scan direction implied by
+                    // the comparison operator.
+                    //
+                    // The BTreeIterator ends when current_key >= end_key (exclusive).
+                    // For LESS (strict): end_key = boundary is correct.
+                    // For LESS_EQUAL (inclusive): passing end_key = boundary would
+                    //   exclude the boundary row; use end_key = nullopt (scan to +inf)
+                    //   and rely on the OR-expression residual applied by
+                    //   BitmapScanOperator to filter correctly.
+                    // For EQUAL / GREATER / GREATER_EQUAL: begin_key = boundary.
+                    auto assign_scan_range = [](BitmapIndexScan& s,
+                                                BinaryOp op,
+                                                std::optional<KeyType> key) {
+                        if (op == BinaryOp::LESS) {
+                            // Strict upper bound: stop before boundary.
+                            s.begin_key = std::nullopt;
+                            s.end_key   = std::move(key);
+                        } else if (op == BinaryOp::LESS_EQUAL) {
+                            // Inclusive upper bound: BTreeIterator end_key is
+                            // exclusive so the boundary row would be missed.
+                            // Scan the full index; the WHERE residual handles
+                            // boundary inclusion correctly.
+                            s.begin_key = std::nullopt;
+                            s.end_key   = std::nullopt;
+                        } else {
+                            // EQUAL / GREATER / GREATER_EQUAL: scan [key, +inf).
+                            s.begin_key = std::move(key);
+                            s.end_key   = std::nullopt;
+                        }
+                    };
+                    assign_scan_range(s_l, cmp_l->op, std::move(key_l));
                     scans.push_back(std::move(s_l));
 
                     BitmapIndexScan s_r;
                     s_r.index = btree_r;
-                    s_r.begin_key = key_r;
+                    assign_scan_range(s_r, cmp_r->op, std::move(key_r));
                     scans.push_back(std::move(s_r));
 
                     auto bitmap_scan = std::make_unique<BitmapScanOperator>(std::move(scans),
