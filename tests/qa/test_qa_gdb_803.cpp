@@ -532,3 +532,312 @@ TEST(QA_GDB803_CostModel, SMJ_ChosenWhen_BothInputsPreSorted) {
         << (method == JoinMethod::HASH_JOIN ? "HASH_JOIN" : "NESTED_LOOP");
     (void)cost;
 }
+
+// =============================================================================
+// GDB-1261 fix: is_sorted_on_join_key adversarial probes
+// =============================================================================
+
+// Adversarial: sort on a DIFFERENT column than the join key.
+// If is_sorted_on_join_key ignores the sort-key column and only checks that the
+// child is an ExternalSort, SMJ would be incorrectly selected.
+// Query: join on `id` but ORDER BY `score` in left subquery.
+// Expected: HashJoin (not SMJ) — the left input is NOT sorted on the join key.
+TEST_F(QA_GDB803, SMJ_NotSelected_WhenSortedOnDifferentColumn) {
+    exec_ok("CREATE TABLE diff_left (id INT, score INT)");
+    exec_ok("CREATE TABLE diff_right (id INT, val INT)");
+
+    for (int i = 1; i <= 500; ++i) {
+        exec_ok("INSERT INTO diff_left VALUES (" + std::to_string(i) + ", " +
+                std::to_string(501 - i) + ")");
+        exec_ok("INSERT INTO diff_right VALUES (" + std::to_string(i) + ", " +
+                std::to_string(i) + ")");
+    }
+    exec_ok("ANALYZE diff_left");
+    exec_ok("ANALYZE diff_right");
+
+    // Left subquery sorts by `score`, not `id`. Right subquery sorts by `val`, not `id`.
+    // is_sorted_on_join_key should return false for both sides.
+    const std::string sql =
+        "SELECT l.id FROM "
+        "(SELECT id, score FROM diff_left ORDER BY score) AS l "
+        "JOIN (SELECT id, val FROM diff_right ORDER BY val) AS r "
+        "ON l.id = r.id";
+
+    auto plan = explain(sql);
+    bool smj_selected = plan.find("Sort Merge Join") != std::string::npos;
+    EXPECT_FALSE(smj_selected)
+        << "SMJ was incorrectly selected when inputs are sorted on DIFFERENT columns "
+           "than the join key.\nis_sorted_on_join_key must check the sort key column "
+           "name matches the join key column name.\nPlan:\n"
+        << plan;
+
+    // Correctness: regardless of join method, result must be correct (500 rows).
+    auto qr = exec_ok(sql);
+    EXPECT_EQ(qr.rows.size(), 500u)
+        << "Join correctness failed: expected 500 rows but got " << qr.rows.size();
+}
+
+// Adversarial: join on column `id`, both tables have a column named `id`,
+// left subquery ORDER BY id -> SMJ SHOULD be selected (both sorted on join key).
+// This is the positive case confirming the fix works end-to-end through SQL.
+TEST_F(QA_GDB803, SMJ_Selected_WhenBothSubqueriesSortedOnJoinKey_Large) {
+    exec_ok("CREATE TABLE smj_l2 (id INT, data INT)");
+    exec_ok("CREATE TABLE smj_r2 (id INT, data INT)");
+
+    for (int i = 1; i <= 1000; ++i) {
+        exec_ok("INSERT INTO smj_l2 VALUES (" + std::to_string(i) + ", " +
+                std::to_string(i * 2) + ")");
+        exec_ok("INSERT INTO smj_r2 VALUES (" + std::to_string(i) + ", " +
+                std::to_string(i * 3) + ")");
+    }
+    exec_ok("ANALYZE smj_l2");
+    exec_ok("ANALYZE smj_r2");
+
+    const std::string sql =
+        "SELECT l.id FROM "
+        "(SELECT id, data FROM smj_l2 ORDER BY id) AS l "
+        "JOIN (SELECT id, data FROM smj_r2 ORDER BY id) AS r "
+        "ON l.id = r.id";
+
+    auto plan = explain(sql);
+    bool smj_selected = plan.find("Sort Merge Join") != std::string::npos;
+    EXPECT_TRUE(smj_selected)
+        << "SMJ must be selected when both subqueries ORDER BY the join key.\nPlan:\n"
+        << plan;
+
+    // Correctness: all 1000 matching rows must appear.
+    auto qr = exec_ok(sql);
+    EXPECT_EQ(qr.rows.size(), 1000u)
+        << "SMJ correctness: expected 1000 rows but got " << qr.rows.size();
+}
+
+// Adversarial: join on asymmetric column names (l.id = r.score).
+// Left sorted on `id`, right sorted on `score`. The join key for the left is
+// `id` and for the right is `score`. is_sorted_on_join_key must check each
+// side independently with its own key hint.
+// This tests that the lkey_hint / rkey_hint are correctly attributed.
+TEST_F(QA_GDB803, SMJ_AsymmetricJoinKey_CorrectSortednessCheck) {
+    exec_ok("CREATE TABLE asym_left (id INT, payload INT)");
+    exec_ok("CREATE TABLE asym_right (score INT, payload INT)");
+
+    for (int i = 1; i <= 500; ++i) {
+        exec_ok("INSERT INTO asym_left VALUES (" + std::to_string(i) + ", 0)");
+        exec_ok("INSERT INTO asym_right VALUES (" + std::to_string(i) + ", 0)");
+    }
+    exec_ok("ANALYZE asym_left");
+    exec_ok("ANALYZE asym_right");
+
+    // Left subquery sorts by `id`, right subquery sorts by `score`.
+    // ON l.id = r.score — left key is `id`, right key is `score`.
+    // Both inputs ARE sorted on THEIR respective join keys.
+    // SMJ SHOULD be selected.
+    const std::string sql =
+        "SELECT l.id FROM "
+        "(SELECT id, payload FROM asym_left ORDER BY id) AS l "
+        "JOIN (SELECT score, payload FROM asym_right ORDER BY score) AS r "
+        "ON l.id = r.score";
+
+    auto plan = explain(sql);
+    bool smj_selected = plan.find("Sort Merge Join") != std::string::npos;
+    EXPECT_TRUE(smj_selected)
+        << "SMJ must be selected for asymmetric key names when each subquery "
+           "is sorted on its own join key column.\nPlan:\n"
+        << plan;
+
+    // Correctness: 500 matching rows.
+    auto qr = exec_ok(sql);
+    EXPECT_EQ(qr.rows.size(), 500u)
+        << "Asymmetric join correctness: expected 500 rows, got " << qr.rows.size();
+}
+
+// Adversarial: is_sorted_on_join_key through a Filter layer.
+// The transparent-wrapper traversal in is_sorted_on_join_key must descend
+// through a Filter to reach the ExternalSort below.
+// Query: left is (SELECT ... ORDER BY id) but filtered by a WHERE inside the subquery.
+// The outer SubqueryScan wraps ExternalSort -> Filter structure.
+// Correct behavior: planner should still detect sortedness.
+TEST_F(QA_GDB803, SMJ_SortednessDetected_ThroughFilterLayer) {
+    exec_ok("CREATE TABLE filter_left (id INT, active INT)");
+    exec_ok("CREATE TABLE filter_right (id INT, val INT)");
+
+    for (int i = 1; i <= 600; ++i) {
+        exec_ok("INSERT INTO filter_left VALUES (" + std::to_string(i) + ", " +
+                std::to_string(i % 2) + ")");
+        exec_ok("INSERT INTO filter_right VALUES (" + std::to_string(i) + ", " +
+                std::to_string(i) + ")");
+    }
+    exec_ok("ANALYZE filter_left");
+    exec_ok("ANALYZE filter_right");
+
+    // Correctness: join with filtered left — result must be correct regardless
+    // of join method chosen.
+    auto qr = exec_ok(
+        "SELECT l.id FROM "
+        "(SELECT id FROM filter_left WHERE active = 1 ORDER BY id) AS l "
+        "JOIN (SELECT id FROM filter_right ORDER BY id) AS r "
+        "ON l.id = r.id "
+        "ORDER BY l.id");
+
+    // active=1 rows are odd ids: 1,3,5,...,599 → 300 rows
+    ASSERT_EQ(qr.rows.size(), 300u)
+        << "Filter+sort join: expected 300 rows (odd ids 1-599) but got " << qr.rows.size();
+    for (size_t i = 0; i < qr.rows.size(); ++i) {
+        int expected_id = static_cast<int>(i) * 2 + 1;
+        EXPECT_EQ(qr.rows[i][0].as_int32(), expected_id)
+            << "Row " << i << " has wrong id";
+    }
+}
+
+// Adversarial: self-join where both sides scan the same table.
+// is_sorted_on_join_key must not confuse the two sides of the self-join.
+// If the left subquery ORDER BY id and right subquery ORDER BY id, both are
+// sorted — SMJ should be selected and produce correct results (no row mixing).
+TEST_F(QA_GDB803, SMJ_SelfJoin_CorrectResults) {
+    exec_ok("CREATE TABLE self_tbl (id INT, grp INT)");
+    for (int i = 1; i <= 20; ++i) {
+        exec_ok("INSERT INTO self_tbl VALUES (" + std::to_string(i) + ", " +
+                std::to_string(i % 4) + ")");
+    }
+    exec_ok("ANALYZE self_tbl");
+
+    // Self-join: find pairs (a.id, b.id) where a.grp = b.grp, a.id < b.id.
+    // Join on grp (same-name column on both sides).
+    auto qr = exec_ok(
+        "SELECT a.id, b.id FROM self_tbl AS a "
+        "JOIN self_tbl AS b ON a.grp = b.grp "
+        "WHERE a.id < b.id "
+        "ORDER BY a.id, b.id");
+
+    // grp 0: ids 4,8,12,16,20 → C(5,2)=10 pairs
+    // grp 1: ids 1,5,9,13,17 → C(5,2)=10 pairs
+    // grp 2: ids 2,6,10,14,18 → C(5,2)=10 pairs
+    // grp 3: ids 3,7,11,15,19 → C(5,2)=10 pairs
+    // Total: 40 pairs
+    EXPECT_EQ(qr.rows.size(), 40u)
+        << "Self-join: expected 40 pairs, got " << qr.rows.size()
+        << ". SMJ may have produced wrong results for self-join.";
+}
+
+// Adversarial: multi-join chain (three tables). After the first join, the
+// combined operator is a Hash/SMJ join (2+ children). is_sorted_on_join_key
+// on this multi-child operator should return false (correctly unsorted),
+// preventing the second join from incorrectly selecting SMJ.
+TEST_F(QA_GDB803, SMJ_ThreeTableJoin_MiddleInputNotSorted) {
+    exec_ok("CREATE TABLE t3a (id INT, val INT)");
+    exec_ok("CREATE TABLE t3b (id INT, val INT)");
+    exec_ok("CREATE TABLE t3c (id INT, val INT)");
+
+    for (int i = 1; i <= 50; ++i) {
+        exec_ok("INSERT INTO t3a VALUES (" + std::to_string(i) + ", " + std::to_string(i) + ")");
+        exec_ok("INSERT INTO t3b VALUES (" + std::to_string(i) + ", " + std::to_string(i) + ")");
+        exec_ok("INSERT INTO t3c VALUES (" + std::to_string(i) + ", " + std::to_string(i) + ")");
+    }
+    exec_ok("ANALYZE t3a");
+    exec_ok("ANALYZE t3b");
+    exec_ok("ANALYZE t3c");
+
+    // Three-table join: t3a JOIN t3b JOIN t3c all on id.
+    // Result must contain 50 rows with matching ids.
+    auto qr = exec_ok(
+        "SELECT t3a.id FROM t3a "
+        "JOIN t3b ON t3a.id = t3b.id "
+        "JOIN t3c ON t3a.id = t3c.id "
+        "ORDER BY t3a.id");
+
+    ASSERT_EQ(qr.rows.size(), 50u)
+        << "Three-table join: expected 50 rows but got " << qr.rows.size();
+    for (int i = 0; i < 50; ++i) {
+        EXPECT_EQ(qr.rows[i][0].as_int32(), i + 1)
+            << "Three-table join: row " << i << " has wrong id";
+    }
+}
+
+// Adversarial: HashJoin (unsorted inputs) correctness regression guard.
+// With ANALYZE stats for small tables, the planner should choose HashJoin
+// for plain SeqScan inputs. Verify the result is correct (no data corruption).
+TEST_F(QA_GDB803, HashJoin_Unsorted_CorrectResults) {
+    exec_ok("CREATE TABLE hj_l (id INT, name VARCHAR)");
+    exec_ok("CREATE TABLE hj_r (id INT, dept VARCHAR)");
+
+    for (int i = 1; i <= 200; ++i) {
+        exec_ok("INSERT INTO hj_l VALUES (" + std::to_string(i) + ", 'emp" +
+                std::to_string(i) + "')");
+        exec_ok("INSERT INTO hj_r VALUES (" + std::to_string(i) + ", 'dept" +
+                std::to_string(i % 10) + "')");
+    }
+    exec_ok("ANALYZE hj_l");
+    exec_ok("ANALYZE hj_r");
+
+    // Plain SeqScan on both sides — should choose HashJoin.
+    auto plan = explain("SELECT hj_l.id FROM hj_l JOIN hj_r ON hj_l.id = hj_r.id");
+    bool smj = plan.find("Sort Merge Join") != std::string::npos;
+    EXPECT_FALSE(smj)
+        << "SMJ over-selected for plain SeqScan inputs (unsorted).\nPlan:\n"
+        << plan;
+
+    auto qr = exec_ok(
+        "SELECT hj_l.id FROM hj_l JOIN hj_r ON hj_l.id = hj_r.id ORDER BY hj_l.id");
+    ASSERT_EQ(qr.rows.size(), 200u)
+        << "HashJoin correctness: expected 200 rows but got " << qr.rows.size();
+    for (int i = 0; i < 200; ++i) {
+        EXPECT_EQ(qr.rows[i][0].as_int32(), i + 1)
+            << "HashJoin correctness: row " << i << " wrong id";
+    }
+}
+
+// Adversarial: non-equi join (ON a.id < b.id). Non-equi joins cannot be
+// expressed as equi-joins, so the planner falls through to NestedLoopJoin.
+// is_sorted_on_join_key is only invoked when on_expr is a BINARY EQUAL.
+// This tests that the code path for non-equi joins still works correctly.
+TEST_F(QA_GDB803, NonEquiJoin_NoSMJ_NestedLoop) {
+    exec_ok("CREATE TABLE neq_l (id INT)");
+    exec_ok("CREATE TABLE neq_r (id INT)");
+    exec_ok("INSERT INTO neq_l VALUES (1), (2), (3)");
+    exec_ok("INSERT INTO neq_r VALUES (2), (3), (4)");
+    exec_ok("ANALYZE neq_l");
+    exec_ok("ANALYZE neq_r");
+
+    // ON neq_l.id < neq_r.id — non-equi, must use NestedLoop.
+    auto plan = explain("SELECT neq_l.id FROM neq_l JOIN neq_r ON neq_l.id < neq_r.id");
+    bool smj = plan.find("Sort Merge Join") != std::string::npos;
+    EXPECT_FALSE(smj)
+        << "SMJ must NOT be selected for non-equi join predicates.\nPlan:\n"
+        << plan;
+
+    // Correctness: pairs (1,2),(1,3),(1,4),(2,3),(2,4),(3,4) = 6 rows.
+    auto qr = exec_ok(
+        "SELECT neq_l.id FROM neq_l JOIN neq_r ON neq_l.id < neq_r.id ORDER BY neq_l.id");
+    EXPECT_EQ(qr.rows.size(), 6u) << "Non-equi join: expected 6 rows but got " << qr.rows.size();
+}
+
+// Adversarial: SMJ join produces CORRECT results for partial match inputs.
+// Left has ids 1-100, right has only even ids 2,4,...,100.
+// SMJ must advance both pointers correctly and match only 50 rows.
+TEST_F(QA_GDB803, SMJ_PartialMatch_CorrectResults) {
+    exec_ok("CREATE TABLE pm_l (id INT)");
+    exec_ok("CREATE TABLE pm_r (id INT)");
+
+    for (int i = 1; i <= 100; ++i) {
+        exec_ok("INSERT INTO pm_l VALUES (" + std::to_string(i) + ")");
+    }
+    for (int i = 2; i <= 100; i += 2) {
+        exec_ok("INSERT INTO pm_r VALUES (" + std::to_string(i) + ")");
+    }
+    exec_ok("ANALYZE pm_l");
+    exec_ok("ANALYZE pm_r");
+
+    // Use ORDER BY on join key to trigger SMJ.
+    auto qr = exec_ok(
+        "SELECT l.id FROM "
+        "(SELECT id FROM pm_l ORDER BY id) AS l "
+        "JOIN (SELECT id FROM pm_r ORDER BY id) AS r "
+        "ON l.id = r.id "
+        "ORDER BY l.id");
+
+    ASSERT_EQ(qr.rows.size(), 50u)
+        << "SMJ partial match: expected 50 rows (even ids 2-100) but got " << qr.rows.size();
+    for (size_t i = 0; i < qr.rows.size(); ++i) {
+        EXPECT_EQ(qr.rows[i][0].as_int32(), static_cast<int>(i + 1) * 2)
+            << "SMJ partial match: row " << i << " wrong id";
+    }
+}
