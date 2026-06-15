@@ -637,6 +637,7 @@ Result<void> ExternalSortOperator::write_tuple(std::ofstream& out, const Tuple& 
         }
         case TypeId::PATH: {
             const auto& p = v.as_path();
+            write_pod(out, p.total_weight);
             auto count = static_cast<uint32_t>(p.steps.size());
             write_pod(out, count);
             for (const auto& step : p.steps) {
@@ -797,8 +798,10 @@ Result<std::optional<Tuple>> ExternalSortOperator::read_tuple(std::ifstream& in)
             break;
         }
         case 23: { // PATH
+            auto total_weight = read_pod<double>(in);
             auto count = read_pod<uint32_t>(in);
             Path p;
+            p.total_weight = total_weight;
             p.steps.resize(count);
             for (uint32_t s = 0; s < count; ++s) {
                 p.steps[s].node_pk = read_pod<int64_t>(in);

@@ -735,3 +735,59 @@ TEST_F(ExternalSortTest, OutputSchemaPassthrough) {
     EXPECT_EQ(sort.output_schema().column(1).name, "name");
     EXPECT_EQ(sort.output_schema().column(2).name, "age");
 }
+
+// =============================================================================
+// PATH round-trip with total_weight (regression test for GDB-799)
+// =============================================================================
+
+TEST_F(ExternalSortTest, PathRoundTripWithTotalWeight) {
+    // Verify that Path::total_weight survives an external sort spill/reload.
+    // Uses a two-column schema (sort_key INT32, path PATH) so we can sort on
+    // the int column for deterministic output ordering while exercising the
+    // PATH serialization path under spill.
+    OutputSchema schema{
+        {{"", "sort_key", TypeId::INT32, false, 0}, {"", "path", TypeId::PATH, false, 0}}};
+
+    Path p1;
+    p1.total_weight = 10.5;
+    p1.steps = {{1, 100}, {2, -1}};
+    Tuple t1{{Value(int32_t{1}), Value(std::move(p1))}, std::nullopt};
+
+    Path p2;
+    p2.total_weight = 5.25;
+    p2.steps = {{3, 200}, {4, 201}, {5, -1}};
+    Tuple t2{{Value(int32_t{2}), Value(std::move(p2))}, std::nullopt};
+
+    auto source = std::make_unique<VectorSource>(std::vector<Tuple>{t2, t1}, schema);
+
+    BoundStatement bound;
+    auto key_expr = col_ref("sort_key");
+    std::vector<SortKey> keys = {{key_expr.get(), SortDirection::ASC}};
+
+    // Use a tiny work_mem_bytes (1024) to guarantee at least one spill run.
+    ExternalSortOperator sort(std::move(source), std::move(keys), bound, 1024, 128, temp_dir_);
+
+    auto results = drain(sort);
+
+    ASSERT_EQ(results.size(), 2u);
+
+    // sort_key=1 comes first after ascending sort
+    const auto& restored1 = results[0].values[1].as_path();
+    EXPECT_EQ(restored1.total_weight, 10.5) << "total_weight for path 1 must survive spill";
+    ASSERT_EQ(restored1.steps.size(), 2u);
+    EXPECT_EQ(restored1.steps[0].node_pk, 1);
+    EXPECT_EQ(restored1.steps[0].edge_id, 100);
+    EXPECT_EQ(restored1.steps[1].node_pk, 2);
+    EXPECT_EQ(restored1.steps[1].edge_id, -1);
+
+    // sort_key=2 comes second
+    const auto& restored2 = results[1].values[1].as_path();
+    EXPECT_EQ(restored2.total_weight, 5.25) << "total_weight for path 2 must survive spill";
+    ASSERT_EQ(restored2.steps.size(), 3u);
+    EXPECT_EQ(restored2.steps[0].node_pk, 3);
+    EXPECT_EQ(restored2.steps[0].edge_id, 200);
+    EXPECT_EQ(restored2.steps[1].node_pk, 4);
+    EXPECT_EQ(restored2.steps[1].edge_id, 201);
+    EXPECT_EQ(restored2.steps[2].node_pk, 5);
+    EXPECT_EQ(restored2.steps[2].edge_id, -1);
+}
