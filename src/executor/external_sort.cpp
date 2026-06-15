@@ -19,7 +19,7 @@ ExternalSortOperator::ExternalSortOperator(std::unique_ptr<Iterator> child,
                                            size_t max_merge_width,
                                            std::filesystem::path temp_dir)
     : child_(std::move(child)), keys_(std::move(keys)), bound_(bound),
-      work_mem_bytes_(work_mem_bytes), max_merge_width_(max_merge_width),
+      work_mem_bytes_(work_mem_bytes), max_merge_width_(std::max<size_t>(2, max_merge_width)),
       temp_dir_(std::move(temp_dir)) {
     if (temp_dir_.empty()) {
         temp_dir_ = std::filesystem::temp_directory_path() / "sixseven_sort";

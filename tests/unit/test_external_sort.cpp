@@ -796,3 +796,64 @@ TEST_F(ExternalSortTest, PathRoundTripWithTotalWeight) {
     EXPECT_EQ(restored2.steps[2].node_pk, 5);
     EXPECT_EQ(restored2.steps[2].edge_id, -1);
 }
+
+// =============================================================================
+// GDB-800 regression: merge_width <= 1 must be clamped to 2 (not infinite-loop)
+// =============================================================================
+
+// Helper: build 20 tuples with age descending (0..19 reversed) so spilling is
+// forced with a tiny work_mem, then confirm the output is sorted ascending.
+static std::vector<Tuple> make_spill_tuples() {
+    std::vector<Tuple> tuples;
+    tuples.reserve(20);
+    for (int32_t i = 0; i < 20; ++i) {
+        // age = 19 - i so the tuples arrive in descending order
+        tuples.push_back(
+            Tuple{{Value(i), Value(std::string("n") + std::to_string(i)), Value(int32_t{19 - i})},
+                  std::nullopt});
+    }
+    return tuples;
+}
+
+// merge_width=1 must be silently clamped to 2; sort must complete and produce
+// correctly ordered output rather than looping forever.
+TEST_F(ExternalSortTest, MergeWidth1ClampsTo2AndSortsCorrectly) {
+    auto tuples = make_spill_tuples();
+    auto source = std::make_unique<VectorSource>(std::move(tuples), output_schema_);
+
+    BoundStatement bound;
+    auto age_expr = col_ref("age");
+    std::vector<SortKey> keys = {{age_expr.get(), SortDirection::ASC}};
+
+    // Tiny work_mem forces multiple spill runs; merge_width=1 is the value
+    // the original bug report identifies as causing an infinite loop.
+    ExternalSortOperator sort(std::move(source), std::move(keys), bound, 256, 1, temp_dir_);
+
+    auto results = drain(sort);
+
+    ASSERT_EQ(results.size(), 20u);
+    for (size_t i = 1; i < results.size(); ++i) {
+        EXPECT_LE(results[i - 1].values[2].as_int32(), results[i].values[2].as_int32())
+            << "output not sorted at index " << i;
+    }
+}
+
+// merge_width=0 must also be clamped to 2 without hanging or crashing.
+TEST_F(ExternalSortTest, MergeWidth0ClampsTo2AndSortsCorrectly) {
+    auto tuples = make_spill_tuples();
+    auto source = std::make_unique<VectorSource>(std::move(tuples), output_schema_);
+
+    BoundStatement bound;
+    auto age_expr = col_ref("age");
+    std::vector<SortKey> keys = {{age_expr.get(), SortDirection::ASC}};
+
+    ExternalSortOperator sort(std::move(source), std::move(keys), bound, 256, 0, temp_dir_);
+
+    auto results = drain(sort);
+
+    ASSERT_EQ(results.size(), 20u);
+    for (size_t i = 1; i < results.size(); ++i) {
+        EXPECT_LE(results[i - 1].values[2].as_int32(), results[i].values[2].as_int32())
+            << "output not sorted at index " << i;
+    }
+}
