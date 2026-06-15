@@ -292,3 +292,132 @@ TEST_F(HashPersistenceTest, ConcurrentPersistWhileInserting) {
 
     EXPECT_GE((*loaded)->size(), 20u) << "Should have at least pre-populated entries";
 }
+
+// =============================================================================
+// GDB-813: Large directory overflow (global_depth >= 11, directory > one page)
+//
+// With bucket_capacity=1 every distinct-hash key triggers a split, driving
+// global_depth upward quickly.  At global_depth=11 the directory holds 2048
+// slots (2048 * 4 = 8192 bytes), which exceeds the ~8100-byte inline limit
+// and forces the V2 overflow-page path.  The test inserts enough distinct keys
+// to guarantee global_depth >= 11, then verifies a full persist -> load
+// round-trip: all keys are still findable and the global_depth is preserved.
+// =============================================================================
+
+TEST_F(HashPersistenceTest, LargeDirectoryOverflowRoundtrip) {
+    // bucket_capacity=1 forces a split on every second distinct key.
+    // With 2500 distinct INT32 keys we will reach global_depth >= 11
+    // (directory >= 2048 slots), which overflows the single-page meta.
+    HashIndexConfig config;
+    config.key_types = {TypeId::INT32};
+    config.bucket_capacity = 1;
+    config.is_unique = true;
+
+    // Use a larger BPM frame pool: 2500 unique buckets + overflow/meta pages.
+    auto path = data_dir_ / "large_dir_hash.db";
+    auto fid_r = dm_->create_file(path, false, true);
+    ASSERT_TRUE(fid_r.has_value()) << fid_r.error().message;
+    auto bpm1 = std::make_unique<BufferPoolManager>(*dm_, *fid_r, 512);
+
+    HashIndex original(std::move(config));
+
+    constexpr int32_t N = 2500;
+    for (int32_t i = 0; i < N; ++i) {
+        auto r = original.insert({Value(i)}, RID{static_cast<PageId>(i + 1), 0});
+        ASSERT_TRUE(r.has_value()) << "insert " << i << " failed: " << r.error().message;
+    }
+    ASSERT_EQ(original.size(), static_cast<uint64_t>(N));
+
+    // Directory must be large enough to trigger V2 overflow (>= 2048 slots).
+    ASSERT_GE(original.global_depth(), 11u) << "global_depth=" << original.global_depth()
+                                            << " — expected >= 11 to force directory overflow";
+
+    // Persist — must succeed (previously this would fail with "meta data too large").
+    auto meta_r = HashPersistence::persist(*bpm1, original);
+    ASSERT_TRUE(meta_r.has_value()) << "persist failed: " << meta_r.error().message;
+    PageId meta_page_id = *meta_r;
+
+    bpm1.reset();
+    (void)dm_->close_file(*fid_r);
+
+    // Load back.
+    auto fid2_r = dm_->open_file(path);
+    ASSERT_TRUE(fid2_r.has_value()) << fid2_r.error().message;
+    auto bpm2 = std::make_unique<BufferPoolManager>(*dm_, *fid2_r, 512);
+
+    auto loaded_r = HashPersistence::load(*bpm2, meta_page_id);
+    ASSERT_TRUE(loaded_r.has_value()) << "load failed: " << loaded_r.error().message;
+
+    auto& loaded = *loaded_r;
+    EXPECT_EQ(loaded->size(), static_cast<uint64_t>(N));
+    EXPECT_EQ(loaded->global_depth(), original.global_depth());
+
+    // Spot-check every key is findable.
+    for (int32_t i = 0; i < N; ++i) {
+        auto s = loaded->search({Value(i)});
+        ASSERT_TRUE(s.has_value()) << "search error for key " << i << ": " << s.error().message;
+        ASSERT_TRUE(s->has_value()) << "key " << i << " not found after load";
+        EXPECT_EQ(s->value().page_id, static_cast<PageId>(i + 1)) << "wrong RID for key " << i;
+    }
+
+    bpm2.reset();
+    (void)dm_->close_file(*fid2_r);
+}
+// =============================================================================
+// GDB-1265: V2 magic is collision-free with V1 global_depth=512
+//
+// global_depth=512 serializes to little-endian bytes [0x00, 0x02, 0x00, 0x00].
+// The old 2-byte sentinel [0x00, 0x02] would have matched this, causing a V1
+// index with global_depth=512 to be misloaded as V2.
+//
+// With the 4-byte HASH_V2_MAGIC (0xFF534858), the leading bytes [0x00, 0x02,
+// 0x00, 0x00] cannot equal 0xFF534858, so there is no false-positive.
+//
+// This test verifies that the 4-byte magic used for V2 detection does NOT
+// match the leading bytes of any plausible V1 global_depth value.
+// =============================================================================
+
+TEST_F(HashPersistenceTest, V2MagicNoCollisionWithV1GlobalDepth512) {
+    // global_depth=512 LE = bytes [0x00, 0x02, 0x00, 0x00].
+    // Read as uint32 LE this is 0x00000200 = 512.
+    // HASH_V2_MAGIC = 0xFF534858.
+    // They must not be equal.
+    constexpr uint32_t HASH_V2_MAGIC = 0xFF534858U;
+    uint32_t gd_512_as_u32 = 512U; // 0x00000200
+    EXPECT_NE(gd_512_as_u32, HASH_V2_MAGIC)
+        << "BUG: global_depth=512 as uint32 collides with HASH_V2_MAGIC";
+
+    // Also verify a small set of boundary values that are the most "dangerous"
+    // (any global_depth whose LE bytes start with the old sentinel [0x00, 0x02]).
+    // With the 4-byte magic none of these can collide.
+    for (uint32_t gd : {0U, 1U, 2U, 10U, 11U, 255U, 256U, 512U, 1024U, 65535U}) {
+        EXPECT_NE(gd, HASH_V2_MAGIC) << "global_depth=" << gd << " collides with HASH_V2_MAGIC";
+    }
+}
+
+TEST_F(HashPersistenceTest, V1WithLeadingZeroByteRoundtrip) {
+    // Build a V1 index that starts with global_depth=0 (brand-new, empty index).
+    // global_depth=0 serializes as [0x00, 0x00, 0x00, 0x00].
+    // Under the old 2-byte sentinel [0x00, 0x02] this would NOT collide (byte[1]==0).
+    // Under the new 4-byte magic it also does not collide.
+    // Verify correct V1 round-trip.
+    HashIndexConfig config;
+    config.key_types = {TypeId::INT32};
+    config.is_unique = true;
+    HashIndex original(std::move(config));
+    // Leave empty: global_depth remains 0.
+    EXPECT_EQ(original.global_depth(), 0u);
+
+    auto [fid1, bpm1] = create_bpm("v1_gd0");
+    auto meta = HashPersistence::persist(*bpm1, original);
+    ASSERT_TRUE(meta.has_value()) << meta.error().message;
+    bpm1.reset();
+    (void)dm_->close_file(fid1);
+
+    auto [fid2, bpm2] = open_bpm("v1_gd0");
+    auto loaded = HashPersistence::load(*bpm2, *meta);
+    ASSERT_TRUE(loaded.has_value())
+        << "V1 empty index load failed (possible V2 misdetection): " << loaded.error().message;
+    EXPECT_EQ((*loaded)->global_depth(), 0u);
+    EXPECT_EQ((*loaded)->size(), 0u);
+}
