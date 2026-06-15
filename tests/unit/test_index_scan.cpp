@@ -8,6 +8,7 @@
 #include "sixseven/index/rid.h"
 #include "sixseven/parser/ast.h"
 #include "sixseven/planner/binder.h"
+#include "sixseven/planner/optimizer.h"
 #include "sixseven/storage/buffer_pool.h"
 #include "sixseven/storage/disk_manager.h"
 #include "sixseven/table/table_heap.h"
@@ -891,38 +892,53 @@ TEST_F(IndexScanTest, ManyRowsWithSplits) {
 }
 
 // =============================================================================
-// IndexScan: performance comparison vs SeqScan (selective query)
+// IndexScan: planner chooses index scan for selective queries
+//
+// Verifies that choose_access_path (the cost-model entry point used by the
+// live planner) selects INDEX_SCAN for a highly selective predicate and
+// SEQ_SCAN for a non-selective (full-table) predicate.  This is what the
+// test name has always implied but previously failed to assert.
 // =============================================================================
 
-TEST_F(IndexScanTest, IndexScanFasterThanSeqScanForSelectiveQuery) {
-    // This test verifies that IndexScan correctly narrows results for
-    // a selective query on a large dataset, which would require SeqScan
-    // to read all rows.
-    TableHeap heap(*bpm_, dm_, file_id_);
-    auto index = make_id_index(false);
+TEST(IndexScanPlanChoice, SelectivePredicateChoosesIndexScan) {
+    // A large table with an available B+ tree index on the predicate column.
+    CostModel cm;
+    TableStats ts;
+    ts.page_count = 200;
+    ts.row_count = 10000;
 
-    // Insert 50 rows.
-    for (int64_t i = 1; i <= 50; ++i) {
-        insert_indexed_row(heap, index, i, "user" + std::to_string(i), static_cast<int32_t>(i));
-    }
+    IndexDef idx;
+    idx.index_id = 1;
+    idx.table_id = 1;
+    idx.name = "idx_id";
+    idx.index_type = "btree";
+    idx.columns = "id";
+    idx.is_unique = true;
 
-    // Point lookup: id = 25 (1 out of 50 = 2% selectivity).
-    auto pred = binary_expr(BinaryOp::EQUAL, col_ref("id"), lit_int("25"));
-    BoundStatement bound;
+    // 1 matching row out of 10 000 = 0.01% selectivity — should choose index.
+    auto path = choose_access_path(1, ts, {idx}, 0.0001, cm);
+    EXPECT_EQ(path.method, AccessMethod::INDEX_SCAN)
+        << "Expected INDEX_SCAN for a highly selective predicate";
+    EXPECT_EQ(path.index_id, 1);
+}
 
-    IndexScanOperator scan(index,
-                           heap,
-                           storage_schema_,
-                           output_schema_,
-                           KeyType{Value(static_cast<int64_t>(25))},
-                           std::nullopt,
-                           {0},
-                           false,
-                           pred.get(),
-                           &bound);
+TEST(IndexScanPlanChoice, NonSelectivePredicateChoosesSeqScan) {
+    // Same table and index, but the predicate matches almost every row.
+    CostModel cm;
+    TableStats ts;
+    ts.page_count = 200;
+    ts.row_count = 10000;
 
-    auto results = collect_all(scan);
-    ASSERT_EQ(results.size(), 1u);
-    EXPECT_EQ(std::get<int64_t>(results[0][0].data()), 25);
-    EXPECT_EQ(std::get<std::string>(results[0][1].data()), "user25");
+    IndexDef idx;
+    idx.index_id = 1;
+    idx.table_id = 1;
+    idx.name = "idx_id";
+    idx.index_type = "btree";
+    idx.columns = "id";
+    idx.is_unique = true;
+
+    // 90% selectivity — random-access index overhead exceeds a seq scan.
+    auto path = choose_access_path(1, ts, {idx}, 0.9, cm);
+    EXPECT_EQ(path.method, AccessMethod::SEQ_SCAN)
+        << "Expected SEQ_SCAN for a non-selective (broad) predicate";
 }
