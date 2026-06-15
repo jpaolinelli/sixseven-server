@@ -764,8 +764,13 @@ TEST_F(ExternalSortTest, PathRoundTripWithTotalWeight) {
     auto key_expr = col_ref("sort_key");
     std::vector<SortKey> keys = {{key_expr.get(), SortDirection::ASC}};
 
-    // Use a tiny work_mem_bytes (1024) to guarantee at least one spill run.
-    ExternalSortOperator sort(std::move(source), std::move(keys), bound, 1024, 128, temp_dir_);
+    // Use a work_mem_bytes smaller than a single tuple's estimated size (~152 bytes
+    // or more on a 64-bit build) so that the mem_used >= work_mem_bytes_ condition
+    // fires as soon as the second tuple enters the buffer (buffer.size() > 1).
+    // This forces generate_runs() to flush both tuples into a run file via
+    // write_tuple, and the merge path reads them back via read_tuple — exercising
+    // the exact code that was fixed for PATH total_weight serialization.
+    ExternalSortOperator sort(std::move(source), std::move(keys), bound, 64, 128, temp_dir_);
 
     auto results = drain(sort);
 
