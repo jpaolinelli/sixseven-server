@@ -395,6 +395,51 @@ TEST(Catalog, DropIndexNotFound) {
     EXPECT_EQ(drop.error().code, StatusCode::NOT_FOUND);
 }
 
+// -- Drop table cleans up auto-increment counter (GDB-806) --------------------
+
+TEST(Catalog, DropTableClearsAutoincrementCounter) {
+    // After DROP TABLE the counter entry must be gone.
+    Catalog catalog;
+    init_test_catalog(catalog);
+
+    auto tid = catalog.create_table(default_database_id, make_schema("t"));
+    ASSERT_TRUE(tid.has_value());
+
+    catalog.init_autoincrement(*tid, 1);
+    EXPECT_EQ(catalog.get_autoincrement_counter(*tid), 1);
+
+    ASSERT_TRUE(catalog.drop_table(default_database_id, "t").has_value());
+
+    // Counter must be absent (get_autoincrement_counter returns 0 when not found).
+    EXPECT_EQ(catalog.get_autoincrement_counter(*tid), 0);
+}
+
+TEST(Catalog, DropAndRecreateTableStartsAutoincrementFresh) {
+    // A new table with the same name must start its counter from 1,
+    // not inherit the stale counter from the dropped table.
+    Catalog catalog;
+    init_test_catalog(catalog);
+
+    auto tid1 = catalog.create_table(default_database_id, make_schema("items"));
+    ASSERT_TRUE(tid1.has_value());
+    catalog.init_autoincrement(*tid1, 1);
+    // Simulate several inserts bumping the counter.
+    catalog.advance_autoincrement(*tid1, 42);
+    EXPECT_EQ(catalog.get_autoincrement_counter(*tid1), 43);
+
+    ASSERT_TRUE(catalog.drop_table(default_database_id, "items").has_value());
+
+    // Recreate with the same name — gets a new table_id.
+    auto tid2 = catalog.create_table(default_database_id, make_schema("items"));
+    ASSERT_TRUE(tid2.has_value());
+    EXPECT_NE(*tid1, *tid2);
+
+    // The new table has no counter yet; init fresh from 1.
+    EXPECT_EQ(catalog.get_autoincrement_counter(*tid2), 0);
+    catalog.init_autoincrement(*tid2, 1);
+    EXPECT_EQ(catalog.get_autoincrement_counter(*tid2), 1);
+}
+
 // -- Drop table cascades to indexes -------------------------------------------
 
 TEST(Catalog, DropTableCascadesToIndexes) {
