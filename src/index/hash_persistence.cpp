@@ -3,6 +3,7 @@
 #include "sixseven/common/logging.h"
 #include "sixseven/storage/serialization.h"
 
+#include <algorithm>
 #include <cstring>
 #include <unordered_map>
 #include <vector>
@@ -88,11 +89,47 @@ deserialize_key(const uint8_t*& p, const uint8_t* end, const std::vector<TypeId>
     return ok(std::move(key));
 }
 
+/// Approximate usable bytes per 8KB slotted page
+/// (8192 - page header ~24 - one slot entry ~4).
+constexpr size_t MAX_INLINE_SIZE = 8100;
+
 } // namespace
 
 // ---------------------------------------------------------------------------
 // persist
 // ---------------------------------------------------------------------------
+//
+// Meta page format (two variants):
+//
+// V1 (inline, backward-compatible) — directory fits in one page:
+//   global_depth (u32)
+//   size         (u64)
+//   bucket_cap   (u32)
+//   is_unique    (u8)
+//   key_type_cnt (u8)
+//   key_types    (key_type_cnt × u8)
+//   dir_size     (u32)
+//   dir_entries  (dir_size × u32  — one disk PageId per slot)
+//
+// V2 (overflow) — directory spans one or more overflow pages:
+//   sentinel     (u8  = 0)
+//   version      (u8  = 2)
+//   global_depth (u32)
+//   size         (u64)
+//   bucket_cap   (u32)
+//   is_unique    (u8)
+//   key_type_cnt (u8)
+//   key_types    (key_type_cnt × u8)
+//   ovf_count    (u32)
+//   ovf_pages    (ovf_count × u32 — PageIds of overflow pages)
+//
+// Overflow pages each hold a raw chunk of the directory bytes.  Concatenating
+// all chunks and parsing the result gives the same dir_size + dir_entries as
+// the V1 inline layout.
+//
+// Detection on load: if the first byte is 0 AND the second byte is 2, it is V2.
+// (V1 first-4 bytes are global_depth which can be 0 only when the index is
+//  brand-new, but then the second byte would be 0 too, not 2.)
 
 Result<PageId> HashPersistence::persist(BufferPoolManager& bpm, const HashIndex& index) {
     // Acquire shared lock to ensure consistent snapshot while iterating.
@@ -101,13 +138,13 @@ Result<PageId> HashPersistence::persist(BufferPoolManager& bpm, const HashIndex&
     std::shared_lock lock(index.index_latch_);
 
     // Deduplicate buckets: multiple directory slots can point to the same bucket.
-    // Map unique bucket pointer → sequential ID.
+    // Map unique bucket pointer -> sequential ID.
     std::unordered_map<const HashBucket*, uint32_t> bucket_ids;
     std::vector<const HashBucket*> unique_buckets;
 
     for (const auto& bucket_ptr : index.directory_) {
         auto* raw = bucket_ptr.get();
-        if (bucket_ids.find(raw) == bucket_ids.end()) {
+        if (!bucket_ids.contains(raw)) {
             bucket_ids[raw] = static_cast<uint32_t>(unique_buckets.size());
             unique_buckets.push_back(raw);
         }
@@ -147,42 +184,111 @@ Result<PageId> HashPersistence::persist(BufferPoolManager& bpm, const HashIndex&
         (void)bpm.unpin_page(page->page_id(), /*is_dirty=*/true);
     }
 
-    // Build meta page.
-    std::vector<uint8_t> meta_buf;
-    write_u32(meta_buf, index.global_depth_);
-    write_u64(meta_buf, index.size_);
-    write_u32(meta_buf, index.config_.bucket_capacity);
-    write_u8(meta_buf, index.config_.is_unique ? 1 : 0);
+    // Build the fixed header (config + key types, no directory).
+    auto build_header = [&](std::vector<uint8_t>& hdr, bool include_sentinel) {
+        hdr.clear();
+        if (include_sentinel) {
+            // V2 prefix: sentinel byte 0 + version byte 2.
+            write_u8(hdr, 0);
+            write_u8(hdr, 2);
+        }
+        write_u32(hdr, index.global_depth_);
+        write_u64(hdr, index.size_);
+        write_u32(hdr, index.config_.bucket_capacity);
+        write_u8(hdr, index.config_.is_unique ? 1 : 0);
+        write_u8(hdr, static_cast<uint8_t>(index.config_.key_types.size()));
+        for (auto t : index.config_.key_types) {
+            write_u8(hdr, static_cast<uint8_t>(t));
+        }
+    };
 
-    // Key types
-    write_u8(meta_buf, static_cast<uint8_t>(index.config_.key_types.size()));
-    for (auto t : index.config_.key_types) {
-        write_u8(meta_buf, static_cast<uint8_t>(t));
-    }
-
-    // Directory: for each slot, store the bucket's disk page ID.
-    write_u32(meta_buf, static_cast<uint32_t>(index.directory_.size()));
+    // Build directory bytes: count + one uint32 disk PageId per slot.
+    std::vector<uint8_t> dir_buf;
+    dir_buf.reserve(4 + (index.directory_.size() * 4));
+    write_u32(dir_buf, static_cast<uint32_t>(index.directory_.size()));
     for (const auto& bucket_ptr : index.directory_) {
         uint32_t bid = bucket_ids[bucket_ptr.get()];
-        write_u32(meta_buf, bucket_disk_pages[bid]);
+        write_u32(dir_buf, bucket_disk_pages[bid]);
     }
 
-    // Write meta page.
-    auto meta_page_r = bpm.new_page();
-    if (!meta_page_r) {
-        return make_error(meta_page_r.error().code,
-                          "hash persist: failed to allocate meta page: " +
-                              meta_page_r.error().message);
+    // Try inline format first (V1, backward-compatible).
+    std::vector<uint8_t> header_buf;
+    build_header(header_buf, /*include_sentinel=*/false);
+    std::vector<uint8_t> inline_buf;
+    inline_buf.reserve(header_buf.size() + dir_buf.size());
+    inline_buf.insert(inline_buf.end(), header_buf.begin(), header_buf.end());
+    inline_buf.insert(inline_buf.end(), dir_buf.begin(), dir_buf.end());
+
+    PageId meta_page_id = 0;
+
+    if (inline_buf.size() <= MAX_INLINE_SIZE) {
+        // Small directory — write everything inline (V1).
+        auto meta_page_r = bpm.new_page();
+        if (!meta_page_r) {
+            return make_error(meta_page_r.error().code,
+                              "hash persist: failed to allocate meta page: " +
+                                  meta_page_r.error().message);
+        }
+        auto* meta_page = *meta_page_r;
+        meta_page_id = meta_page->page_id();
+        meta_page->reset(meta_page_id, PageType::HASH_META);
+        auto slot = meta_page->insert_tuple(std::span<const uint8_t>(inline_buf));
+        if (!slot) {
+            return make_error(slot.error().code,
+                              "hash persist: meta data too large for page: " +
+                                  slot.error().message);
+        }
+        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/true);
+    } else {
+        // Large directory — chunk directory bytes into overflow pages, meta page
+        // holds a compact V2 header + list of overflow PageIds.
+        std::vector<PageId> overflow_page_ids;
+        size_t offset = 0;
+        while (offset < dir_buf.size()) {
+            size_t chunk_size = std::min(MAX_INLINE_SIZE, dir_buf.size() - offset);
+            auto ovf_page_r = bpm.new_page();
+            if (!ovf_page_r) {
+                return make_error(ovf_page_r.error().code,
+                                  "hash persist: failed to allocate overflow page: " +
+                                      ovf_page_r.error().message);
+            }
+            auto* ovf_page = *ovf_page_r;
+            ovf_page->reset(ovf_page->page_id(), PageType::HASH_META);
+            auto ovf_slot = ovf_page->insert_tuple(
+                std::span<const uint8_t>(dir_buf.data() + offset, chunk_size));
+            if (!ovf_slot) {
+                return make_error(ovf_slot.error().code,
+                                  "hash persist: overflow chunk too large: " +
+                                      ovf_slot.error().message);
+            }
+            overflow_page_ids.push_back(ovf_page->page_id());
+            (void)bpm.unpin_page(ovf_page->page_id(), /*is_dirty=*/true);
+            offset += chunk_size;
+        }
+
+        // Build V2 meta header + overflow page references.
+        build_header(header_buf, /*include_sentinel=*/true);
+        write_u32(header_buf, static_cast<uint32_t>(overflow_page_ids.size()));
+        for (auto ovf_id : overflow_page_ids) {
+            write_u32(header_buf, ovf_id);
+        }
+
+        auto meta_page_r = bpm.new_page();
+        if (!meta_page_r) {
+            return make_error(meta_page_r.error().code,
+                              "hash persist: failed to allocate meta page: " +
+                                  meta_page_r.error().message);
+        }
+        auto* meta_page = *meta_page_r;
+        meta_page_id = meta_page->page_id();
+        meta_page->reset(meta_page_id, PageType::HASH_META);
+        auto slot = meta_page->insert_tuple(std::span<const uint8_t>(header_buf));
+        if (!slot) {
+            return make_error(slot.error().code,
+                              "hash persist: v2 meta header too large: " + slot.error().message);
+        }
+        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/true);
     }
-    auto* meta_page = *meta_page_r;
-    PageId meta_page_id = meta_page->page_id();
-    meta_page->reset(meta_page_id, PageType::HASH_META);
-    auto slot = meta_page->insert_tuple(std::span<const uint8_t>(meta_buf));
-    if (!slot) {
-        return make_error(slot.error().code,
-                          "hash persist: meta data too large for page: " + slot.error().message);
-    }
-    (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/true);
 
     auto flush = bpm.flush_all();
     if (!flush) {
@@ -219,6 +325,15 @@ Result<std::unique_ptr<HashIndex>> HashPersistence::load(BufferPoolManager& bpm,
 
     const uint8_t* p = meta_data->data();
 
+    // Detect format version.
+    // V2 starts with sentinel byte 0 followed by version byte 2.
+    // V1 starts with global_depth (u32 LE); when global_depth > 0 the first
+    // byte is non-zero, and when it is 0 the second byte is also 0 (not 2).
+    bool is_v2 = (meta_data->size() >= 2 && p[0] == 0 && p[1] == 2);
+    if (is_v2) {
+        p += 2; // skip sentinel + version
+    }
+
     uint32_t global_depth = read_u32(p);
     uint64_t total_size = read_u64(p);
     uint32_t bucket_capacity = read_u32(p);
@@ -231,11 +346,53 @@ Result<std::unique_ptr<HashIndex>> HashPersistence::load(BufferPoolManager& bpm,
         key_types.push_back(static_cast<TypeId>(read_u8(p)));
     }
 
-    // Read directory: disk page IDs for each directory slot.
-    uint32_t dir_size = read_u32(p);
-    std::vector<PageId> dir_disk_pages(dir_size);
-    for (uint32_t i = 0; i < dir_size; ++i) {
-        dir_disk_pages[i] = read_u32(p);
+    // Read directory: either inline (V1) or via overflow pages (V2).
+    std::vector<PageId> dir_disk_pages;
+
+    if (!is_v2) {
+        // V1: directory is inlined after the header.
+        uint32_t dir_size = read_u32(p);
+        dir_disk_pages.resize(dir_size);
+        for (uint32_t i = 0; i < dir_size; ++i) {
+            dir_disk_pages[i] = read_u32(p);
+        }
+    } else {
+        // V2: read overflow page IDs, concatenate their tuples, then parse.
+        uint32_t overflow_count = read_u32(p);
+        std::vector<PageId> overflow_ids(overflow_count);
+        for (uint32_t i = 0; i < overflow_count; ++i) {
+            overflow_ids[i] = read_u32(p);
+        }
+
+        // Concatenate all overflow page tuples into one directory buffer.
+        std::vector<uint8_t> dir_buf;
+        for (auto ovf_id : overflow_ids) {
+            auto ovf_page_r = bpm.fetch_page(ovf_id);
+            if (!ovf_page_r) {
+                (void)bpm.unpin_page(meta_page_id, false);
+                return make_error(ovf_page_r.error().code,
+                                  "hash load: failed to fetch overflow page: " +
+                                      ovf_page_r.error().message);
+            }
+            auto ovf_tuple = (*ovf_page_r)->get_tuple(0);
+            if (!ovf_tuple) {
+                (void)bpm.unpin_page(ovf_id, false);
+                (void)bpm.unpin_page(meta_page_id, false);
+                return make_error(ovf_tuple.error().code,
+                                  "hash load: failed to read overflow tuple: " +
+                                      ovf_tuple.error().message);
+            }
+            dir_buf.insert(dir_buf.end(), ovf_tuple->begin(), ovf_tuple->end());
+            (void)bpm.unpin_page(ovf_id, false);
+        }
+
+        // Parse directory from concatenated buffer.
+        const uint8_t* dp = dir_buf.data();
+        uint32_t dir_size = read_u32(dp);
+        dir_disk_pages.resize(dir_size);
+        for (uint32_t i = 0; i < dir_size; ++i) {
+            dir_disk_pages[i] = read_u32(dp);
+        }
     }
 
     (void)bpm.unpin_page(meta_page_id, false);
@@ -244,7 +401,7 @@ Result<std::unique_ptr<HashIndex>> HashPersistence::load(BufferPoolManager& bpm,
     std::unordered_map<PageId, std::shared_ptr<HashBucket>> loaded_buckets;
 
     for (auto disk_page_id : dir_disk_pages) {
-        if (loaded_buckets.count(disk_page_id) != 0) {
+        if (loaded_buckets.contains(disk_page_id)) {
             continue;
         }
 
@@ -302,6 +459,7 @@ Result<std::unique_ptr<HashIndex>> HashPersistence::load(BufferPoolManager& bpm,
     index->size_ = total_size;
 
     // Rebuild directory from disk page mappings.
+    auto dir_size = static_cast<uint32_t>(dir_disk_pages.size());
     index->directory_.resize(dir_size);
     for (uint32_t i = 0; i < dir_size; ++i) {
         index->directory_[i] = loaded_buckets[dir_disk_pages[i]];
