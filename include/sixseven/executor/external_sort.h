@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "sixseven/executor/iterator.h"
 #include "sixseven/executor/sort.h"
@@ -19,15 +19,15 @@ namespace sixseven {
 /// When the input fits in work_mem, sorts entirely in memory (identical to
 /// SortOperator).  When the input exceeds work_mem the operator:
 ///
-///   Phase 1 — Run Generation:
+///   Phase 1 â€” Run Generation:
 ///     Read tuples into memory up to work_mem, sort, write to a temp file.
 ///     Repeat until all input is consumed, producing N sorted run files.
 ///
-///   Phase 1.5 — Multi-pass Merge (if N > max_merge_width):
+///   Phase 1.5 â€” Multi-pass Merge (if N > max_merge_width):
 ///     Merge groups of max_merge_width runs into new temp files until the
 ///     total run count is <= max_merge_width.
 ///
-///   Phase 2 — K-way Merge:
+///   Phase 2 â€” K-way Merge:
 ///     Lazily merge the remaining runs via a min-heap, returning one sorted
 ///     tuple per next() call.
 ///
@@ -58,6 +58,9 @@ public:
     std::string plan_node_name() const override;
     std::string plan_node_detail() const override;
     std::vector<const Iterator*> plan_children() const override;
+
+    /// The ORDER BY keys this operator sorts on (for sortedness analysis).
+    [[nodiscard]] const std::vector<SortKey>& sort_keys() const { return keys_; }
 
 protected:
     Result<void> do_open() override;

@@ -298,7 +298,7 @@ TEST(SortMergeJoinOperatorDirect, InnerJoinMergesPreSortedInputs) {
     EXPECT_EQ(ids[1], 4);
 }
 
-// Integration test: SortMergeJoin via SQL query, verifying correct results.
+// Correctness test: join result is correct regardless of join method chosen.
 TEST_F(PlannerReachabilityTest, SortMergeJoinQueryProducesCorrectResults) {
     exec_ok("CREATE TABLE emp (id INT, name VARCHAR)");
     exec_ok("CREATE TABLE dept (emp_id INT, dept_name VARCHAR)");
@@ -316,4 +316,62 @@ TEST_F(PlannerReachabilityTest, SortMergeJoinQueryProducesCorrectResults) {
     for (int i = 0; i < 5; ++i) {
         EXPECT_EQ(qr.rows[i][0].as_int32(), i + 1);
     }
+}
+
+// SMJ reachability via pre-sorted subquery inputs.
+// When both sides of the join are subqueries with ORDER BY on the join key,
+// the planner detects ExternalSort children as pre-sorted on the join key.
+// After ANALYZE populates cost estimates, the cost model should prefer
+// SortMergeJoin (zero sort overhead on both sides vs. HashJoin build cost).
+TEST_F(PlannerReachabilityTest, SMJ_ReachableViaSQL_PreSortedSubqueries) {
+    exec_ok("CREATE TABLE smj_a (id INT, x INT)");
+    exec_ok("CREATE TABLE smj_b (id INT, y INT)");
+    for (int i = 1; i <= 200; ++i) {
+        exec_ok("INSERT INTO smj_a VALUES (" + std::to_string(i) + ", " + std::to_string(i * 2) +
+                ")");
+        exec_ok("INSERT INTO smj_b VALUES (" + std::to_string(i) + ", " + std::to_string(i * 3) +
+                ")");
+    }
+    exec_ok("ANALYZE smj_a");
+    exec_ok("ANALYZE smj_b");
+
+    // Both subqueries ORDER BY the join key — inputs are pre-sorted on id.
+    const std::string join_sql = "SELECT a.id FROM "
+                                 "(SELECT id, x FROM smj_a ORDER BY id) AS a "
+                                 "JOIN (SELECT id, y FROM smj_b ORDER BY id) AS b "
+                                 "ON a.id = b.id";
+
+    auto plan = explain(join_sql);
+    bool smj_selected = plan.find("Sort Merge Join") != std::string::npos ||
+                        plan.find("SortMerge") != std::string::npos;
+    EXPECT_TRUE(smj_selected) << "Expected 'Sort Merge Join' with pre-sorted subquery inputs.\n"
+                              << "EXPLAIN:\n"
+                              << plan;
+}
+
+// HashJoin must still win for unsorted plain-table inputs (no over-selection).
+// Without any ORDER BY or index-scan on the join key, both inputs are unsorted;
+// the cost model should choose HashJoin (sort overhead makes SMJ more expensive).
+TEST_F(PlannerReachabilityTest, HashJoin_ChosenForUnsortedInputs_NoOverSelection) {
+    exec_ok("CREATE TABLE hj_a (id INT, x INT)");
+    exec_ok("CREATE TABLE hj_b (id INT, y INT)");
+    for (int i = 1; i <= 200; ++i) {
+        exec_ok("INSERT INTO hj_a VALUES (" + std::to_string(i) + ", " + std::to_string(i) + ")");
+        exec_ok("INSERT INTO hj_b VALUES (" + std::to_string(i) + ", " + std::to_string(i) + ")");
+    }
+    exec_ok("ANALYZE hj_a");
+    exec_ok("ANALYZE hj_b");
+
+    // Plain join on unsorted SeqScan inputs — no ORDER BY, no index.
+    auto plan = explain("SELECT hj_a.id FROM hj_a JOIN hj_b ON hj_a.id = hj_b.id");
+    bool smj_selected = plan.find("Sort Merge Join") != std::string::npos ||
+                        plan.find("SortMerge") != std::string::npos;
+    EXPECT_FALSE(smj_selected)
+        << "SMJ was chosen for UNSORTED inputs (over-selection regression).\n"
+        << "HashJoin should be preferred when both inputs are plain SeqScans.\n"
+        << "EXPLAIN:\n"
+        << plan;
+    bool hash_selected =
+        plan.find("Hash Join") != std::string::npos || plan.find("HashJoin") != std::string::npos;
+    EXPECT_TRUE(hash_selected) << "Expected 'Hash Join' for unsorted inputs.\nEXPLAIN:\n" << plan;
 }

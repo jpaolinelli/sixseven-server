@@ -42,14 +42,13 @@ using namespace sixseven;
 class QA_GDB803 : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ =
-            std::filesystem::temp_directory_path() / "sixseven_qa_gdb803";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb803";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
         init_test_catalog(catalog_);
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
-        engine_  = std::make_unique<QueryEngine>(catalog_, *storage_);
+        engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
     }
 
     void TearDown() override {
@@ -62,8 +61,7 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value())
-            << "[SQL] " << sql << "\n[ERR] "
-            << (result ? "" : result.error().message);
+            << "[SQL] " << sql << "\n[ERR] " << (result ? "" : result.error().message);
         return result ? std::move(*result) : QueryResult{};
     }
 
@@ -84,71 +82,62 @@ protected:
 
     void rebuild_indexes() {
         index_manager_ = std::make_unique<IndexManager>(catalog_, *storage_);
-        auto r         = index_manager_->rebuild_all_indexes();
+        auto r = index_manager_->rebuild_all_indexes();
         ASSERT_TRUE(r.has_value()) << r.error().message;
         engine_->set_index_manager(index_manager_.get());
     }
 
-    DiskManager                  dm_;
-    Catalog                      catalog_;
-    std::filesystem::path        data_dir_;
+    DiskManager dm_;
+    Catalog catalog_;
+    std::filesystem::path data_dir_;
     std::unique_ptr<StorageManager> storage_;
-    std::unique_ptr<QueryEngine>    engine_;
-    std::unique_ptr<IndexManager>   index_manager_;
+    std::unique_ptr<QueryEngine> engine_;
+    std::unique_ptr<IndexManager> index_manager_;
 };
 
 // =============================================================================
-// SMJ Reachability — Priority Investigation
+// SMJ Reachability
 // =============================================================================
 
-// The planner wires SMJ when choose_join_method returns SORT_MERGE.
-// However, choose_join_method is called with left_sorted=false and
-// right_sorted=false unconditionally in the planner (line ~1672 of planner.cpp).
-// This test verifies whether, after ANALYZE (which populates cost estimates),
-// the cost model CAN in fact return SORT_MERGE and the planner CAN in fact
-// select SortMergeJoinOperator.
-//
-// Approach: use a very large row count so the sort overhead in SMJ is
-// amortized. After ANALYZE, cost estimates are present, activating the
-// cost-based path. EXPLAIN output must contain "Sort Merge Join".
-//
-// If this test fails: the planner never reaches SMJ via SQL — Critical defect.
+// SMJ is chosen when inputs are LEGITIMATELY sorted on the join key.
+// This test uses subqueries with ORDER BY so each child is an ExternalSort
+// node sorted on the join key column. The cost model then detects pre-sorted
+// inputs, eliminates the sort overhead from SMJ's cost, and should choose
+// SortMergeJoin over HashJoin when ANALYZE statistics are present.
 TEST_F(QA_GDB803, SMJ_ReachableViaSQL_AfterANALYZE) {
     exec_ok("CREATE TABLE smj_left (id INT, val INT)");
     exec_ok("CREATE TABLE smj_right (id INT, score INT)");
 
-    // Insert enough rows that SMJ may be cost-competitive even with sort cost.
-    // 500 rows each — small but enough to give cost estimates non-trivial weight.
+    // Insert enough rows for ANALYZE to produce meaningful cost estimates.
     for (int i = 1; i <= 500; ++i) {
-        exec_ok("INSERT INTO smj_left VALUES (" + std::to_string(i) + ", " +
-                std::to_string(i * 2) + ")");
+        exec_ok("INSERT INTO smj_left VALUES (" + std::to_string(i) + ", " + std::to_string(i * 2) +
+                ")");
         exec_ok("INSERT INTO smj_right VALUES (" + std::to_string(i) + ", " +
                 std::to_string(i * 3) + ")");
     }
 
-    // Run ANALYZE to populate table statistics.
+    // Run ANALYZE to populate table statistics (required for cost-based path).
     exec_ok("ANALYZE smj_left");
     exec_ok("ANALYZE smj_right");
 
-    // Issue join and check EXPLAIN output.
-    const std::string join_sql =
-        "SELECT smj_left.id FROM smj_left "
-        "JOIN smj_right ON smj_left.id = smj_right.id";
+    // Join via subqueries with ORDER BY on the join key. This produces
+    // ExternalSort children sorted on `id`, so is_sorted_on_join_key returns
+    // true for both sides. The cost model should then prefer SortMergeJoin.
+    const std::string join_sql = "SELECT l.id FROM "
+                                 "(SELECT id, val FROM smj_left ORDER BY id) AS l "
+                                 "JOIN (SELECT id, score FROM smj_right ORDER BY id) AS r "
+                                 "ON l.id = r.id";
 
     auto plan = explain(join_sql);
 
-    // This test documents whether SMJ is actually selected.
-    // If "Sort Merge Join" does NOT appear, SMJ is unreachable end-to-end.
     bool smj_selected = plan.find("Sort Merge Join") != std::string::npos ||
                         plan.find("SortMerge") != std::string::npos;
 
-    // EXPECT (not ASSERT) so we still run correctness checks below.
-    EXPECT_TRUE(smj_selected)
-        << "CRITICAL: SortMergeJoin was NOT selected even after ANALYZE.\n"
-        << "Planner passes left_sorted=false, right_sorted=false to "
-           "choose_join_method unconditionally, preventing SMJ from winning "
-           "the cost competition.\nEXPLAIN output:\n"
-        << plan;
+    EXPECT_TRUE(smj_selected) << "SortMergeJoin was NOT selected even with pre-sorted inputs.\n"
+                              << "Both subqueries ORDER BY the join key so is_sorted_on_join_key\n"
+                              << "should return true, making SMJ cost-competitive.\n"
+                              << "EXPLAIN output:\n"
+                              << plan;
 }
 
 // Adversarial: verify the planner produces correct join results regardless of
@@ -158,8 +147,8 @@ TEST_F(QA_GDB803, SMJ_JoinCorrectnessWithANALYZE_AllRowsPresent) {
     exec_ok("CREATE TABLE right_t (id INT, dept VARCHAR)");
 
     for (int i = 1; i <= 100; ++i) {
-        exec_ok("INSERT INTO left_t VALUES (" + std::to_string(i) + ", 'L" +
-                std::to_string(i) + "')");
+        exec_ok("INSERT INTO left_t VALUES (" + std::to_string(i) + ", 'L" + std::to_string(i) +
+                "')");
         exec_ok("INSERT INTO right_t VALUES (" + std::to_string(i) + ", 'D" +
                 std::to_string(i % 5) + "')");
     }
@@ -167,17 +156,15 @@ TEST_F(QA_GDB803, SMJ_JoinCorrectnessWithANALYZE_AllRowsPresent) {
     exec_ok("ANALYZE left_t");
     exec_ok("ANALYZE right_t");
 
-    auto qr = exec_ok(
-        "SELECT left_t.id FROM left_t "
-        "JOIN right_t ON left_t.id = right_t.id "
-        "ORDER BY left_t.id");
+    auto qr = exec_ok("SELECT left_t.id FROM left_t "
+                      "JOIN right_t ON left_t.id = right_t.id "
+                      "ORDER BY left_t.id");
 
     // All 100 rows must be present — no silent row loss from SMJ merge.
     ASSERT_EQ(qr.rows.size(), 100u)
         << "Join result has wrong number of rows — possible SMJ merge bug";
     for (int i = 0; i < 100; ++i) {
-        EXPECT_EQ(qr.rows[i][0].as_int32(), i + 1)
-            << "Row " << i << " has wrong id value";
+        EXPECT_EQ(qr.rows[i][0].as_int32(), i + 1) << "Row " << i << " has wrong id value";
     }
 }
 
@@ -189,9 +176,8 @@ TEST_F(QA_GDB803, SMJ_EmptyTableAfterANALYZE_NoCrash) {
     exec_ok("ANALYZE empty_l");
     exec_ok("ANALYZE empty_r");
 
-    auto qr = exec_ok(
-        "SELECT empty_l.id FROM empty_l "
-        "JOIN empty_r ON empty_l.id = empty_r.id");
+    auto qr = exec_ok("SELECT empty_l.id FROM empty_l "
+                      "JOIN empty_r ON empty_l.id = empty_r.id");
     EXPECT_EQ(qr.rows.size(), 0u);
 }
 
@@ -218,8 +204,7 @@ TEST_F(QA_GDB803, BitmapScan_LESS_OR_Arm_ReturnsCorrectRows) {
     // Query: id = 3 OR price < 20
     // Expected: id=3 (price=100) PLUS rows with price < 20: id=1(price=10), id=4(price=5)
     // Total = 3 rows: ids 1, 3, 4.
-    auto qr = exec_ok(
-        "SELECT id FROM products2 WHERE id = 3 OR price < 20 ORDER BY id");
+    auto qr = exec_ok("SELECT id FROM products2 WHERE id = 3 OR price < 20 ORDER BY id");
 
     ASSERT_EQ(qr.rows.size(), 3u)
         << "LESS OR arm: expected 3 rows (id=1,3,4) but got " << qr.rows.size()
@@ -239,11 +224,9 @@ TEST_F(QA_GDB803, BitmapScan_GREATER_OR_Arm_ReturnsCorrectRows) {
     exec_ok("CREATE INDEX idx_p3_price ON products3(price)");
     rebuild_indexes();
 
-    auto qr = exec_ok(
-        "SELECT id FROM products3 WHERE id > 3 OR price = 10 ORDER BY id");
+    auto qr = exec_ok("SELECT id FROM products3 WHERE id > 3 OR price = 10 ORDER BY id");
     ASSERT_EQ(qr.rows.size(), 3u)
-        << "GREATER OR arm: expected 3 rows (id=1,4,5) but got "
-        << qr.rows.size()
+        << "GREATER OR arm: expected 3 rows (id=1,4,5) but got " << qr.rows.size()
         << ". BitmapScan may incorrectly set begin_key for GREATER predicate.";
     EXPECT_EQ(qr.rows[0][0].as_int32(), 1);
     EXPECT_EQ(qr.rows[1][0].as_int32(), 4);
@@ -261,10 +244,9 @@ TEST_F(QA_GDB803, BitmapScan_LESS_EQUAL_OR_Arm_ReturnsCorrectRows) {
     exec_ok("CREATE INDEX idx_p4_price ON products4(price)");
     rebuild_indexes();
 
-    auto qr = exec_ok(
-        "SELECT id FROM products4 WHERE id <= 2 OR price > 100 ORDER BY id");
-    ASSERT_EQ(qr.rows.size(), 3u)
-        << "LESS_EQUAL OR arm: expected ids 1,2,5 but got " << qr.rows.size();
+    auto qr = exec_ok("SELECT id FROM products4 WHERE id <= 2 OR price > 100 ORDER BY id");
+    ASSERT_EQ(qr.rows.size(), 3u) << "LESS_EQUAL OR arm: expected ids 1,2,5 but got "
+                                  << qr.rows.size();
     EXPECT_EQ(qr.rows[0][0].as_int32(), 1);
     EXPECT_EQ(qr.rows[1][0].as_int32(), 2);
     EXPECT_EQ(qr.rows[2][0].as_int32(), 5);
@@ -280,10 +262,8 @@ TEST_F(QA_GDB803, BitmapScan_BothArmsRange_ReturnsCorrectRows) {
     exec_ok("CREATE INDEX idx_p5_price ON products5(price)");
     rebuild_indexes();
 
-    auto qr = exec_ok(
-        "SELECT id FROM products5 WHERE id < 2 OR price > 150 ORDER BY id");
-    ASSERT_EQ(qr.rows.size(), 2u)
-        << "Both range arms: expected ids 1,5 but got " << qr.rows.size();
+    auto qr = exec_ok("SELECT id FROM products5 WHERE id < 2 OR price > 150 ORDER BY id");
+    ASSERT_EQ(qr.rows.size(), 2u) << "Both range arms: expected ids 1,5 but got " << qr.rows.size();
     EXPECT_EQ(qr.rows[0][0].as_int32(), 1);
     EXPECT_EQ(qr.rows[1][0].as_int32(), 5);
 }
@@ -299,11 +279,9 @@ TEST_F(QA_GDB803, BitmapScan_NoFalsePositives_ExactUnion) {
     rebuild_indexes();
 
     // id=2 OR price=40 → exactly rows 2 and 4
-    auto qr = exec_ok(
-        "SELECT id FROM products6 WHERE id = 2 OR price = 40 ORDER BY id");
-    ASSERT_EQ(qr.rows.size(), 2u)
-        << "Expected exactly 2 rows but got " << qr.rows.size()
-        << " — BitmapScan may return false positives";
+    auto qr = exec_ok("SELECT id FROM products6 WHERE id = 2 OR price = 40 ORDER BY id");
+    ASSERT_EQ(qr.rows.size(), 2u) << "Expected exactly 2 rows but got " << qr.rows.size()
+                                  << " — BitmapScan may return false positives";
     EXPECT_EQ(qr.rows[0][0].as_int32(), 2);
     EXPECT_EQ(qr.rows[1][0].as_int32(), 4);
 }
@@ -317,11 +295,9 @@ TEST_F(QA_GDB803, BitmapScan_OverlapDeduplication) {
     rebuild_indexes();
 
     // id=1 OR price=10 — both conditions match row (id=1, price=10)
-    auto qr = exec_ok(
-        "SELECT id FROM products7 WHERE id = 1 OR price = 10 ORDER BY id");
-    ASSERT_EQ(qr.rows.size(), 1u)
-        << "Expected exactly 1 row (duplicate from overlap), got "
-        << qr.rows.size();
+    auto qr = exec_ok("SELECT id FROM products7 WHERE id = 1 OR price = 10 ORDER BY id");
+    ASSERT_EQ(qr.rows.size(), 1u) << "Expected exactly 1 row (duplicate from overlap), got "
+                                  << qr.rows.size();
     EXPECT_EQ(qr.rows[0][0].as_int32(), 1);
 }
 
@@ -344,13 +320,11 @@ TEST_F(QA_GDB803, BitmapScan_UUIDColumn_LiteralCoercion_NoCrash) {
 
     // This may or may not trigger BitmapScan — but it must not crash and must
     // return correct results.
-    auto qr = exec_ok(
-        "SELECT score FROM uuid_items "
-        "WHERE uid = '00000000-0000-0000-0000-000000000001' OR score = 30 "
-        "ORDER BY score");
+    auto qr = exec_ok("SELECT score FROM uuid_items "
+                      "WHERE uid = '00000000-0000-0000-0000-000000000001' OR score = 30 "
+                      "ORDER BY score");
 
-    ASSERT_EQ(qr.rows.size(), 2u)
-        << "UUID OR scan: expected 2 rows but got " << qr.rows.size();
+    ASSERT_EQ(qr.rows.size(), 2u) << "UUID OR scan: expected 2 rows but got " << qr.rows.size();
     EXPECT_EQ(qr.rows[0][0].as_int32(), 10);
     EXPECT_EQ(qr.rows[1][0].as_int32(), 30);
 }
@@ -366,13 +340,12 @@ TEST_F(QA_GDB803, BitmapScan_TimestampColumn_LiteralCoercion_NoCrash) {
     exec_ok("CREATE INDEX idx_ts_val ON ts_events(val)");
     rebuild_indexes();
 
-    auto qr = exec_ok(
-        "SELECT val FROM ts_events "
-        "WHERE ts = '2024-01-01 00:00:00' OR val = 3 "
-        "ORDER BY val");
+    auto qr = exec_ok("SELECT val FROM ts_events "
+                      "WHERE ts = '2024-01-01 00:00:00' OR val = 3 "
+                      "ORDER BY val");
 
-    ASSERT_EQ(qr.rows.size(), 2u)
-        << "TIMESTAMP OR scan: expected 2 rows but got " << qr.rows.size();
+    ASSERT_EQ(qr.rows.size(), 2u) << "TIMESTAMP OR scan: expected 2 rows but got "
+                                  << qr.rows.size();
     EXPECT_EQ(qr.rows[0][0].as_int32(), 1);
     EXPECT_EQ(qr.rows[1][0].as_int32(), 3);
 }
@@ -391,11 +364,9 @@ TEST_F(QA_GDB803, ExternalSort_LargeTable_CorrectOrder) {
 
     auto qr = exec_ok("SELECT n FROM big_nums ORDER BY n");
 
-    ASSERT_EQ(qr.rows.size(), 1000u)
-        << "ExternalSort: expected 1000 rows";
+    ASSERT_EQ(qr.rows.size(), 1000u) << "ExternalSort: expected 1000 rows";
     for (int i = 0; i < 1000; ++i) {
-        EXPECT_EQ(qr.rows[i][0].as_int32(), i + 1)
-            << "ExternalSort: row " << i << " out of order";
+        EXPECT_EQ(qr.rows[i][0].as_int32(), i + 1) << "ExternalSort: row " << i << " out of order";
     }
 }
 
@@ -500,7 +471,8 @@ TEST_F(QA_GDB803, ExternalSort_EXPLAIN_ShowsExternalSortNode) {
 
     auto plan = explain("SELECT n FROM explain_sort ORDER BY n");
     EXPECT_NE(plan.find("External Sort"), std::string::npos)
-        << "EXPLAIN must show 'External Sort' not 'Sort'.\nPlan:\n" << plan;
+        << "EXPLAIN must show 'External Sort' not 'Sort'.\nPlan:\n"
+        << plan;
     // Must NOT show the old SortOperator node name.
     EXPECT_EQ(plan.find("-> Sort"), std::string::npos)
         << "EXPLAIN shows old Sort node. ExternalSort should replace it.\nPlan:\n"
@@ -508,47 +480,34 @@ TEST_F(QA_GDB803, ExternalSort_EXPLAIN_ShowsExternalSortNode) {
 }
 
 // =============================================================================
-// Cost model unit test: SMJ with both inputs unsorted (planner scenario)
+// Cost model: HashJoin wins for unsorted inputs (no over-selection of SMJ)
 // =============================================================================
 
-// Verify what the cost model returns when called the same way the planner
-// calls it: left_sorted=false, right_sorted=false. This documents whether
-// SMJ can EVER win via the planner's actual call path.
+// Verify that the cost model does NOT pick SortMergeJoin when both inputs are
+// unsorted. This is the regression guard: after GDB-1261 fixed the sortedness
+// detection, the planner should pass left_sorted=false, right_sorted=false for
+// plain SeqScan inputs, and the cost model should choose HashJoin (cheaper
+// because SMJ needs to sort both inputs first).
 TEST(QA_GDB803_CostModel, SMJ_NeverWins_WithUnsortedInputs_DocumentBehavior) {
-    // Simulate ANALYZE stats for two medium-sized tables.
+    // Simulate ANALYZE stats for two medium-sized tables (typical SeqScan cost).
     PlanCost left;
-    left.total_cost    = 500.0; // seq_scan of 500-row table
+    left.total_cost = 500.0; // seq_scan of 500-row table
     left.estimated_rows = 500.0;
 
     PlanCost right;
-    right.total_cost    = 500.0;
+    right.total_cost = 500.0;
     right.estimated_rows = 500.0;
 
     const CostModel cost_model;
-    // Planner always passes false, false.
-    auto [method, cost] =
-        choose_join_method(left, right, 0.1, false, false, cost_model);
+    // Unsorted inputs: the planner now correctly passes false, false.
+    auto [method, cost] = choose_join_method(left, right, 0.1, false, false, cost_model);
 
-    // Document the actual result. If method == SORT_MERGE here,
-    // SMJ is potentially reachable. If not, it is unreachable.
-    if (method != JoinMethod::SORT_MERGE) {
-        // This is the expected failure: SMJ cannot be reached via SQL because
-        // the planner never passes pre-sorted hints to choose_join_method.
-        // A follow-up ticket should wire pre-sorted detection.
-        GTEST_LOG_(WARNING)
-            << "CostModel with left_sorted=false, right_sorted=false chose "
-            << (method == JoinMethod::HASH_JOIN ? "HASH_JOIN" : "NESTED_LOOP")
-            << " (NOT SORT_MERGE). "
-            << "This confirms SMJ is unreachable via the planner's SQL path. "
-            << "Expected cost: " << cost.total_cost;
-    } else {
-        GTEST_LOG_(INFO)
-            << "CostModel chose SORT_MERGE even with unsorted=false inputs. "
-            << "SMJ may be reachable via SQL for this row count.";
-    }
-    // Not asserting — this is a documentation test.
-    // The Critical defect is filed separately as a Bug ticket.
-    (void)method;
+    // HashJoin must win for unsorted inputs — SMJ sort overhead makes it
+    // more expensive than building a hash table for this row count.
+    EXPECT_NE(method, JoinMethod::SORT_MERGE)
+        << "Cost model chose SORT_MERGE for UNSORTED inputs (over-selection).\n"
+        << "HashJoin should be preferred when sort cost must be paid.\n"
+        << "Total cost: " << cost.total_cost;
     (void)cost;
 }
 
@@ -557,16 +516,15 @@ TEST(QA_GDB803_CostModel, SMJ_NeverWins_WithUnsortedInputs_DocumentBehavior) {
 // If this fails, the cost model itself is broken.
 TEST(QA_GDB803_CostModel, SMJ_ChosenWhen_BothInputsPreSorted) {
     PlanCost left;
-    left.total_cost     = 100.0;
+    left.total_cost = 100.0;
     left.estimated_rows = 10000.0;
 
     PlanCost right;
-    right.total_cost     = 100.0;
+    right.total_cost = 100.0;
     right.estimated_rows = 10000.0;
 
     const CostModel cost_model;
-    auto [method, cost] =
-        choose_join_method(left, right, 0.1, true, true, cost_model);
+    auto [method, cost] = choose_join_method(left, right, 0.1, true, true, cost_model);
 
     EXPECT_EQ(method, JoinMethod::SORT_MERGE)
         << "Cost model must pick SORT_MERGE when both inputs are pre-sorted "
