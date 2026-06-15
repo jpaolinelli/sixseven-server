@@ -906,16 +906,6 @@ void Catalog::set_next_table_id(table_id_t id) {
     next_table_id_ = id;
 }
 
-void Catalog::set_next_index_id(index_id_t id) {
-    std::lock_guard lock(mu_);
-    next_index_id_ = id;
-}
-
-void Catalog::set_next_edge_id(edge_id_t id) {
-    std::lock_guard lock(mu_);
-    next_edge_id_ = id;
-}
-
 table_id_t Catalog::next_table_id() const {
     std::lock_guard lock(mu_);
     return next_table_id_;
