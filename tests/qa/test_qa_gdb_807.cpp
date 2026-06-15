@@ -109,8 +109,8 @@ protected:
 // If OutputSchema::find_column ever regresses to case-sensitive, exec_ok() will
 // fail because execute() returns an error and qr.rows.size() == 0 != 3.
 TEST_F(QA_GDB807, GDB807_TraverseEdgePropertyCaseInsensitive) {
-    auto qr = exec_ok(
-        "SELECT rated.SCORE FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
+    auto qr =
+        exec_ok("SELECT rated.SCORE FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(qr.rows.size(), 3u);
 
     std::vector<double> scores;
@@ -132,7 +132,7 @@ TEST_F(QA_GDB807, GDB807_UnlinkWhereCaseInsensitiveColumn) {
 
     // Confirm the edge is actually gone.
     auto edges = exec_ok("SELECT rated.score FROM TRAVERSE rated "
-                          "FROM users(1) DIRECTION OUT FETCH AS t");
+                         "FROM users(1) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(edges.rows.size(), 2u);
 
     std::vector<double> remaining;
@@ -148,8 +148,8 @@ TEST_F(QA_GDB807, GDB807_UnlinkWhereCaseInsensitiveColumn) {
 // This is the exact scenario from TraverseEdgeTypeCaseInsensitive.
 // Regression: if case-sensitive type lookup fails, exec_ok() fires.
 TEST_F(QA_GDB807, GDB807_TraverseEdgeTypeCaseInsensitive) {
-    auto qr = exec_ok(
-        "SELECT RATED.score FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
+    auto qr =
+        exec_ok("SELECT RATED.score FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(qr.rows.size(), 3u);
 
     std::vector<double> scores;
@@ -168,29 +168,29 @@ TEST_F(QA_GDB807, GDB807_TraverseEdgeTypeCaseInsensitive) {
 
 // Both edge type AND property in ALL CAPS.
 TEST_F(QA_GDB807, GDB807_BothEdgeTypeAndPropertyAllCaps) {
-    auto qr = exec_ok(
-        "SELECT RATED.SCORE FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
+    auto qr =
+        exec_ok("SELECT RATED.SCORE FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(qr.rows.size(), 3u);
 }
 
 // Mixed case on property: rated.Score (title case).
 TEST_F(QA_GDB807, GDB807_TraverseEdgePropertyTitleCase) {
-    auto qr = exec_ok(
-        "SELECT rated.Score FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
+    auto qr =
+        exec_ok("SELECT rated.Score FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(qr.rows.size(), 3u);
 }
 
 // Mixed case on edge type: Rated.score.
 TEST_F(QA_GDB807, GDB807_TraverseEdgeTypeTitleCase) {
-    auto qr = exec_ok(
-        "SELECT Rated.score FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
+    auto qr =
+        exec_ok("SELECT Rated.score FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(qr.rows.size(), 3u);
 }
 
 // Mixed case on string property.
 TEST_F(QA_GDB807, GDB807_TraverseEdgePropertyStringFieldCaseInsensitive) {
-    auto qr = exec_ok(
-        "SELECT rated.REVIEW FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
+    auto qr =
+        exec_ok("SELECT rated.REVIEW FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(qr.rows.size(), 3u);
 
     // Verify the actual values returned are the edge property values.
@@ -213,7 +213,7 @@ TEST_F(QA_GDB807, GDB807_UnlinkWhereMixedCaseProperty) {
 // UNLINK WHERE with uppercase string property comparison.
 TEST_F(QA_GDB807, GDB807_UnlinkWhereUppercaseStringProperty) {
     auto qr = exec_ok("UNLINK users(1) FROM products(20) VIA rated "
-                       "WHERE REVIEW = 'terrible'");
+                      "WHERE REVIEW = 'terrible'");
     EXPECT_EQ(qr.affected_rows, 1);
 }
 
@@ -221,7 +221,7 @@ TEST_F(QA_GDB807, GDB807_UnlinkWhereUppercaseStringProperty) {
 TEST_F(QA_GDB807, GDB807_TraverseDirectionInCaseInsensitiveProperty) {
     // Product 10 has 3 incoming rated edges from users 1, 2, 3.
     auto qr = exec_ok("SELECT name, rated.SCORE "
-                       "FROM TRAVERSE rated FROM products(10) DIRECTION IN FETCH AS t");
+                      "FROM TRAVERSE rated FROM products(10) DIRECTION IN FETCH AS t");
     ASSERT_EQ(qr.rows.size(), 3u);
 }
 
@@ -235,14 +235,14 @@ TEST_F(QA_GDB807, GDB807_TraverseDirectionBothCaseInsensitiveProperty) {
 
     // From user 1 BOTH — should see outgoing (to user 2) and incoming (from user 2).
     auto qr = exec_ok("SELECT follows.WEIGHT "
-                       "FROM TRAVERSE follows FROM users(1) DIRECTION BOTH FETCH AS f");
+                      "FROM TRAVERSE follows FROM users(1) DIRECTION BOTH FETCH AS f");
     ASSERT_GE(qr.rows.size(), 1u); // At minimum one edge.
 }
 
 // Multiple uppercase properties in single SELECT.
 TEST_F(QA_GDB807, GDB807_TraverseMultipleUppercaseProperties) {
     auto qr = exec_ok("SELECT rated.SCORE, rated.REVIEW "
-                       "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
+                      "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(qr.rows.size(), 3u);
     ASSERT_EQ(qr.column_names.size(), 2u);
 }
@@ -250,8 +250,8 @@ TEST_F(QA_GDB807, GDB807_TraverseMultipleUppercaseProperties) {
 // Case-insensitive property in WHERE clause of TRAVERSE (not just SELECT).
 TEST_F(QA_GDB807, GDB807_TraverseWhereClauseCaseInsensitiveProperty) {
     auto qr = exec_ok("SELECT name, rated.score "
-                       "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t "
-                       "WHERE rated.SCORE > 3.0");
+                      "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t "
+                      "WHERE rated.SCORE > 3.0");
     // Only product 10 (score=4.5).
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_DOUBLE_EQ(qr.rows[0][1].as_float64(), 4.5);
@@ -260,8 +260,8 @@ TEST_F(QA_GDB807, GDB807_TraverseWhereClauseCaseInsensitiveProperty) {
 // Case-insensitive edge type in ORDER BY clause.
 TEST_F(QA_GDB807, GDB807_TraverseOrderByCaseInsensitiveProperty) {
     auto qr = exec_ok("SELECT name, rated.score "
-                       "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t "
-                       "ORDER BY rated.SCORE ASC");
+                      "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t "
+                      "ORDER BY rated.SCORE ASC");
     ASSERT_EQ(qr.rows.size(), 3u);
     EXPECT_DOUBLE_EQ(qr.rows[0][1].as_float64(), 1.5);
     EXPECT_DOUBLE_EQ(qr.rows[1][1].as_float64(), 3.0);
@@ -293,16 +293,16 @@ TEST_F(QA_GDB807, GDB807_TraverseFromUppercaseEdgeTypeName_KnownBug) {
 
 TEST_F(QA_GDB807, GDB807_RegressionBaseline_LowercaseProperty) {
     // Baseline: lowercase rated.score always worked.
-    auto qr = exec_ok(
-        "SELECT rated.score FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
+    auto qr =
+        exec_ok("SELECT rated.score FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(qr.rows.size(), 3u);
 }
 
 TEST_F(QA_GDB807, GDB807_RegressionAdversarial_UppercaseProperty) {
     // Adversarial: rated.SCORE must also return 3 rows.
     // In a regression, this would return 0 rows (or error). ASSERT catches it.
-    auto qr = exec_ok(
-        "SELECT rated.SCORE FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
+    auto qr =
+        exec_ok("SELECT rated.SCORE FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
     ASSERT_EQ(qr.rows.size(), 3u);
 }
 
