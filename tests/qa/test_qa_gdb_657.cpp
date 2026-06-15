@@ -509,5 +509,257 @@ TEST_F(QA_GDB657, DropSixsevenDatabaseBehavior) {
     }
 }
 
+// ============================================================================
+// GDB-804 adversarial: drop nonexistent database (no IF EXISTS) returns error
+// ============================================================================
+
+TEST_F(QA_GDB657, GDB804_DropNonexistentNoIfExistsReturnsNotFound) {
+    run_bootstrap();
+    // "ghost_db" was never created; must return NOT_FOUND, not crash.
+    exec_error("DROP DATABASE ghost_db", StatusCode::NOT_FOUND);
+}
+
+TEST_F(QA_GDB657, GDB804_DropNonexistentEmptyNameReturnsError) {
+    run_bootstrap();
+    // Empty name should be rejected at parse or execution time, never crash.
+    auto result = engine_->execute("DROP DATABASE \"\"");
+    EXPECT_FALSE(result.has_value())
+        << "DROP DATABASE with empty name should fail";
+}
+
+// ============================================================================
+// GDB-804 adversarial: dropping the default / current database
+// ============================================================================
+
+TEST_F(QA_GDB657, GDB804_DropDefaultDatabaseConsistency) {
+    run_bootstrap();
+    ASSERT_TRUE(sys_databases_contains(default_database_name));
+
+    auto result = engine_->execute(
+        std::string("DROP DATABASE ") + default_database_name + " CASCADE");
+    if (result.has_value()) {
+        // Drop allowed: persistence must be cleaned up and catalog consistent.
+        EXPECT_FALSE(sys_databases_contains(default_database_name))
+            << "successful drop of default DB must remove it from sys_databases";
+        auto db = catalog_->get_database(default_database_name);
+        EXPECT_FALSE(db.has_value())
+            << "successful drop of default DB must remove it from catalog";
+    } else {
+        // Drop rejected: catalog must be untouched.
+        EXPECT_TRUE(sys_databases_contains(default_database_name))
+            << "rejected drop of default DB must leave sys_databases intact";
+        auto db = catalog_->get_database(default_database_name);
+        EXPECT_TRUE(db.has_value())
+            << "rejected drop of default DB must leave catalog intact";
+    }
+}
+
+TEST_F(QA_GDB657, GDB804_DropDefaultDatabaseSurvivesRestart) {
+    // If the default database can be dropped, verify drop persists across restart.
+    run_bootstrap();
+    auto result = engine_->execute(
+        std::string("DROP DATABASE ") + default_database_name + " CASCADE");
+    if (!result.has_value()) {
+        // Protected — nothing to verify about persistence.
+        SUCCEED() << "default database is protected from drop; skip restart check";
+        return;
+    }
+
+    restart();
+    run_bootstrap();
+
+    auto db = catalog_->get_database(default_database_name);
+    EXPECT_FALSE(db.has_value())
+        << "default database dropped before restart must not reappear after restart";
+}
+
+// ============================================================================
+// GDB-804 adversarial: drop then re-create
+// ============================================================================
+
+TEST_F(QA_GDB657, GDB804_DropThenRecreateRestores) {
+    run_bootstrap();
+    exec_ok("CREATE DATABASE revive_db");
+    ASSERT_TRUE(sys_databases_contains("revive_db"));
+
+    exec_ok("DROP DATABASE revive_db");
+    ASSERT_FALSE(sys_databases_contains("revive_db"));
+
+    // Re-create should succeed and persist.
+    exec_ok("CREATE DATABASE revive_db");
+    EXPECT_TRUE(sys_databases_contains("revive_db"));
+
+    restart();
+    run_bootstrap();
+
+    EXPECT_TRUE(catalog_->get_database("revive_db").has_value())
+        << "re-created database must survive restart";
+}
+
+// ============================================================================
+// GDB-804 adversarial: drop database that has tables and data
+// ============================================================================
+
+TEST_F(QA_GDB657, GDB804_DropDatabaseWithTablesAndData) {
+    run_bootstrap();
+    exec_ok("CREATE DATABASE data_db");
+
+    auto db = catalog_->get_database("data_db");
+    ASSERT_TRUE(db.has_value());
+    engine_->set_current_database(db->database_id);
+
+    exec_ok("CREATE TABLE employees (id INT, name VARCHAR, salary INT)");
+    exec_ok("INSERT INTO employees VALUES (1, 'alice', 100)");
+    exec_ok("INSERT INTO employees VALUES (2, 'bob',   200)");
+    exec_ok("INSERT INTO employees VALUES (3, 'carol', 300)");
+
+    // Switch away from the database before dropping.
+    engine_->set_current_database(default_database_id);
+
+    exec_ok("DROP DATABASE data_db CASCADE");
+
+    EXPECT_FALSE(sys_databases_contains("data_db"))
+        << "database with tables and data must be removed from sys_databases";
+    EXPECT_FALSE(catalog_->get_database("data_db").has_value())
+        << "database with tables and data must be removed from catalog";
+}
+
+TEST_F(QA_GDB657, GDB804_DropDatabaseWithTablesStaysGoneAfterRestart) {
+    run_bootstrap();
+    exec_ok("CREATE DATABASE persist_drop_db");
+
+    auto db = catalog_->get_database("persist_drop_db");
+    ASSERT_TRUE(db.has_value());
+    engine_->set_current_database(db->database_id);
+    exec_ok("CREATE TABLE t (id INT)");
+    exec_ok("INSERT INTO t VALUES (42)");
+
+    engine_->set_current_database(default_database_id);
+    exec_ok("DROP DATABASE persist_drop_db CASCADE");
+
+    restart();
+    run_bootstrap();
+
+    EXPECT_FALSE(catalog_->get_database("persist_drop_db").has_value())
+        << "database dropped with tables must not reappear after restart";
+}
+
+// ============================================================================
+// GDB-804 adversarial: double-drop (drop the same database twice)
+// ============================================================================
+
+TEST_F(QA_GDB657, GDB804_DoubleDrop) {
+    run_bootstrap();
+    exec_ok("CREATE DATABASE double_drop_db");
+    exec_ok("DROP DATABASE double_drop_db");
+
+    // Second drop must return NOT_FOUND, not crash or corrupt state.
+    exec_error("DROP DATABASE double_drop_db", StatusCode::NOT_FOUND);
+
+    // sys_databases must not have a stale entry.
+    EXPECT_FALSE(sys_databases_contains("double_drop_db"))
+        << "double-drop must not leave a stale entry in sys_databases";
+}
+
+TEST_F(QA_GDB657, GDB804_DoubleDropIfExists) {
+    run_bootstrap();
+    exec_ok("CREATE DATABASE dd_ifex_db");
+    exec_ok("DROP DATABASE dd_ifex_db");
+
+    // IF EXISTS form should succeed (no-op) on second drop.
+    auto result = engine_->execute("DROP DATABASE IF EXISTS dd_ifex_db");
+    EXPECT_TRUE(result.has_value())
+        << "DROP DATABASE IF EXISTS on already-dropped DB must succeed";
+}
+
+// ============================================================================
+// GDB-804 adversarial: case sensitivity of database names
+// ============================================================================
+
+TEST_F(QA_GDB657, GDB804_CaseSensitiveDatabaseNames) {
+    run_bootstrap();
+    exec_ok("CREATE DATABASE CaseDB");
+
+    // Dropping with a different case should fail (names are case-sensitive).
+    auto lower_result = engine_->execute("DROP DATABASE casedb");
+    auto upper_result = engine_->execute("DROP DATABASE CASEDB");
+
+    if (!lower_result.has_value() && !upper_result.has_value()) {
+        // Both failed — names are case-sensitive, as expected.
+        EXPECT_EQ(lower_result.error().code, StatusCode::NOT_FOUND);
+        EXPECT_EQ(upper_result.error().code, StatusCode::NOT_FOUND);
+        // Original casing must still exist.
+        EXPECT_TRUE(sys_databases_contains("CaseDB"))
+            << "original-cased database must still be present";
+    } else {
+        // Case-insensitive: at most one match, verify no duplicate drop.
+        EXPECT_FALSE(sys_databases_contains("CaseDB") &&
+                     sys_databases_contains("casedb"))
+            << "only one variant of the name may survive";
+    }
+}
+
+TEST_F(QA_GDB657, GDB804_CaseSensitiveDatabaseNamesExactDrop) {
+    run_bootstrap();
+    exec_ok("CREATE DATABASE ExactCase");
+    // Drop with exactly matching case must succeed.
+    exec_ok("DROP DATABASE ExactCase");
+    EXPECT_FALSE(sys_databases_contains("ExactCase"));
+}
+
+// ============================================================================
+// GDB-804 adversarial: DROP DATABASE IF EXISTS semantics
+// ============================================================================
+
+TEST_F(QA_GDB657, GDB804_DropIfExistsExistingDatabase) {
+    run_bootstrap();
+    exec_ok("CREATE DATABASE ifex_db");
+    ASSERT_TRUE(sys_databases_contains("ifex_db"));
+
+    // IF EXISTS on existing db must drop it successfully.
+    exec_ok("DROP DATABASE IF EXISTS ifex_db");
+    EXPECT_FALSE(sys_databases_contains("ifex_db"))
+        << "DROP DATABASE IF EXISTS must remove existing database";
+}
+
+TEST_F(QA_GDB657, GDB804_DropIfExistsNonexistentIsNoop) {
+    run_bootstrap();
+    // IF EXISTS on nonexistent db must not error.
+    auto result = engine_->execute("DROP DATABASE IF EXISTS absolutely_not_here_db");
+    EXPECT_TRUE(result.has_value())
+        << "DROP DATABASE IF EXISTS on nonexistent db must succeed (no-op)";
+}
+
+TEST_F(QA_GDB657, GDB804_DropIfExistsPersistenceCleanup) {
+    run_bootstrap();
+    exec_ok("CREATE DATABASE ifex_persist_db");
+    exec_ok("DROP DATABASE IF EXISTS ifex_persist_db");
+    EXPECT_FALSE(sys_databases_contains("ifex_persist_db"))
+        << "DROP DATABASE IF EXISTS must clean up sys_databases entry";
+
+    restart();
+    run_bootstrap();
+
+    EXPECT_FALSE(catalog_->get_database("ifex_persist_db").has_value())
+        << "IF EXISTS drop must persist across restart";
+}
+
+// ============================================================================
+// GDB-804 adversarial: assertions are actually exercised in DropSixsevenDatabaseBehavior
+// (meta-test: verify the ASSERT_TRUE precondition fires, not just the comment)
+// ============================================================================
+
+TEST_F(QA_GDB657, GDB804_DefaultDatabasePresentAfterBootstrap) {
+    // This is the precondition that the original vacuous test lacked.
+    // It must pass unconditionally for every test in this suite to be meaningful.
+    run_bootstrap();
+    ASSERT_TRUE(sys_databases_contains(default_database_name))
+        << "bootstrap must create the default database '"
+        << default_database_name << "' in sys_databases";
+    auto db = catalog_->get_database(default_database_name);
+    ASSERT_TRUE(db.has_value())
+        << "bootstrap must register the default database in the catalog";
+}
+
 } // namespace
 } // namespace sixseven
