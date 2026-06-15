@@ -93,6 +93,17 @@ deserialize_key(const uint8_t*& p, const uint8_t* end, const std::vector<TypeId>
 /// (8192 - page header ~24 - one slot entry ~4).
 constexpr size_t MAX_INLINE_SIZE = 8100;
 
+// Magic number written at the start of a V2 meta page (little-endian uint32).
+//
+// Value: 0xFF534858 => LE bytes [0x58, 0x48, 0x53, 0xFF].
+//
+// Collision-free with V1: a V1 page begins with global_depth as a uint32 LE.
+// The most-significant byte of 0xFF534858 is 0xFF, so for this to match a V1
+// global_depth the depth would have to be >= 0xFF000000 = 4,278,190,080.
+// That would require 2^4,278,190,080 directory slots -- physically impossible.
+// No realistic V1 page can ever produce these leading bytes.
+constexpr uint32_t HASH_V2_MAGIC = 0xFF534858U;
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -112,8 +123,8 @@ constexpr size_t MAX_INLINE_SIZE = 8100;
 //   dir_entries  (dir_size × u32  — one disk PageId per slot)
 //
 // V2 (overflow) — directory spans one or more overflow pages:
-//   sentinel     (u8  = 0)
-//   version      (u8  = 2)
+//   magic        (u32 = HASH_V2_MAGIC = 0xFF534858,
+//                 i.e. LE bytes [0x58, 0x48, 0x53, 0xFF])
 //   global_depth (u32)
 //   size         (u64)
 //   bucket_cap   (u32)
@@ -127,9 +138,16 @@ constexpr size_t MAX_INLINE_SIZE = 8100;
 // all chunks and parsing the result gives the same dir_size + dir_entries as
 // the V1 inline layout.
 //
-// Detection on load: if the first byte is 0 AND the second byte is 2, it is V2.
-// (V1 first-4 bytes are global_depth which can be 0 only when the index is
-//  brand-new, but then the second byte would be 0 too, not 2.)
+// Detection on load: read the first 4 bytes as a little-endian uint32; if it
+// equals HASH_V2_MAGIC (0xFF534858) then this is a V2 page.
+//
+// Why HASH_V2_MAGIC is collision-free with V1:
+//   V1 begins with global_depth as a little-endian uint32.  In little-endian
+//   byte order, 0xFF534858 has its most-significant byte equal to 0xFF (byte[3]
+//   of the 4-byte field).  For that byte to equal 0xFF the global_depth would
+//   have to be >= 0xFF000000 = 4,278,190,080, which requires 2^4,278,190,080
+//   directory slots — physically impossible.  Therefore no V1 serialization can
+//   ever start with this magic value.
 
 Result<PageId> HashPersistence::persist(BufferPoolManager& bpm, const HashIndex& index) {
     // Acquire shared lock to ensure consistent snapshot while iterating.
@@ -185,12 +203,11 @@ Result<PageId> HashPersistence::persist(BufferPoolManager& bpm, const HashIndex&
     }
 
     // Build the fixed header (config + key types, no directory).
-    auto build_header = [&](std::vector<uint8_t>& hdr, bool include_sentinel) {
+    auto build_header = [&](std::vector<uint8_t>& hdr, bool include_magic) {
         hdr.clear();
-        if (include_sentinel) {
-            // V2 prefix: sentinel byte 0 + version byte 2.
-            write_u8(hdr, 0);
-            write_u8(hdr, 2);
+        if (include_magic) {
+            // V2 prefix: 4-byte magic 0xFF534858.
+            write_u32(hdr, HASH_V2_MAGIC);
         }
         write_u32(hdr, index.global_depth_);
         write_u64(hdr, index.size_);
@@ -213,7 +230,7 @@ Result<PageId> HashPersistence::persist(BufferPoolManager& bpm, const HashIndex&
 
     // Try inline format first (V1, backward-compatible).
     std::vector<uint8_t> header_buf;
-    build_header(header_buf, /*include_sentinel=*/false);
+    build_header(header_buf, /*include_magic=*/false);
     std::vector<uint8_t> inline_buf;
     inline_buf.reserve(header_buf.size() + dir_buf.size());
     inline_buf.insert(inline_buf.end(), header_buf.begin(), header_buf.end());
@@ -267,7 +284,7 @@ Result<PageId> HashPersistence::persist(BufferPoolManager& bpm, const HashIndex&
         }
 
         // Build V2 meta header + overflow page references.
-        build_header(header_buf, /*include_sentinel=*/true);
+        build_header(header_buf, /*include_magic=*/true);
         write_u32(header_buf, static_cast<uint32_t>(overflow_page_ids.size()));
         for (auto ovf_id : overflow_page_ids) {
             write_u32(header_buf, ovf_id);
@@ -325,13 +342,22 @@ Result<std::unique_ptr<HashIndex>> HashPersistence::load(BufferPoolManager& bpm,
 
     const uint8_t* p = meta_data->data();
 
-    // Detect format version.
-    // V2 starts with sentinel byte 0 followed by version byte 2.
-    // V1 starts with global_depth (u32 LE); when global_depth > 0 the first
-    // byte is non-zero, and when it is 0 the second byte is also 0 (not 2).
-    bool is_v2 = (meta_data->size() >= 2 && p[0] == 0 && p[1] == 2);
+    // Detect format version by reading the first 4 bytes as a little-endian
+    // uint32 and comparing against HASH_V2_MAGIC (0xFF534858).
+    //
+    // This is guaranteed collision-free with V1: a V1 page starts with
+    // global_depth as a uint32 LE. For that to equal 0xFF534858 the index
+    // would need 2^4,278,190,080 directory slots -- physically impossible.
+    // V1 indexes with any reachable global_depth will never produce these
+    // leading bytes, so there is no false-positive V2 detection.
+    bool is_v2 = false;
+    if (meta_data->size() >= 4) {
+        uint32_t leading = 0;
+        std::memcpy(&leading, p, 4);
+        is_v2 = (leading == HASH_V2_MAGIC);
+    }
     if (is_v2) {
-        p += 2; // skip sentinel + version
+        p += 4; // skip magic
     }
 
     uint32_t global_depth = read_u32(p);

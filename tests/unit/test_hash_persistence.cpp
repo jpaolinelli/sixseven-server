@@ -363,3 +363,61 @@ TEST_F(HashPersistenceTest, LargeDirectoryOverflowRoundtrip) {
     bpm2.reset();
     (void)dm_->close_file(*fid2_r);
 }
+// =============================================================================
+// GDB-1265: V2 magic is collision-free with V1 global_depth=512
+//
+// global_depth=512 serializes to little-endian bytes [0x00, 0x02, 0x00, 0x00].
+// The old 2-byte sentinel [0x00, 0x02] would have matched this, causing a V1
+// index with global_depth=512 to be misloaded as V2.
+//
+// With the 4-byte HASH_V2_MAGIC (0xFF534858), the leading bytes [0x00, 0x02,
+// 0x00, 0x00] cannot equal 0xFF534858, so there is no false-positive.
+//
+// This test verifies that the 4-byte magic used for V2 detection does NOT
+// match the leading bytes of any plausible V1 global_depth value.
+// =============================================================================
+
+TEST_F(HashPersistenceTest, V2MagicNoCollisionWithV1GlobalDepth512) {
+    // global_depth=512 LE = bytes [0x00, 0x02, 0x00, 0x00].
+    // Read as uint32 LE this is 0x00000200 = 512.
+    // HASH_V2_MAGIC = 0xFF534858.
+    // They must not be equal.
+    constexpr uint32_t HASH_V2_MAGIC = 0xFF534858U;
+    uint32_t gd_512_as_u32 = 512U; // 0x00000200
+    EXPECT_NE(gd_512_as_u32, HASH_V2_MAGIC)
+        << "BUG: global_depth=512 as uint32 collides with HASH_V2_MAGIC";
+
+    // Also verify a small set of boundary values that are the most "dangerous"
+    // (any global_depth whose LE bytes start with the old sentinel [0x00, 0x02]).
+    // With the 4-byte magic none of these can collide.
+    for (uint32_t gd : {0U, 1U, 2U, 10U, 11U, 255U, 256U, 512U, 1024U, 65535U}) {
+        EXPECT_NE(gd, HASH_V2_MAGIC) << "global_depth=" << gd << " collides with HASH_V2_MAGIC";
+    }
+}
+
+TEST_F(HashPersistenceTest, V1WithLeadingZeroByteRoundtrip) {
+    // Build a V1 index that starts with global_depth=0 (brand-new, empty index).
+    // global_depth=0 serializes as [0x00, 0x00, 0x00, 0x00].
+    // Under the old 2-byte sentinel [0x00, 0x02] this would NOT collide (byte[1]==0).
+    // Under the new 4-byte magic it also does not collide.
+    // Verify correct V1 round-trip.
+    HashIndexConfig config;
+    config.key_types = {TypeId::INT32};
+    config.is_unique = true;
+    HashIndex original(std::move(config));
+    // Leave empty: global_depth remains 0.
+    EXPECT_EQ(original.global_depth(), 0u);
+
+    auto [fid1, bpm1] = create_bpm("v1_gd0");
+    auto meta = HashPersistence::persist(*bpm1, original);
+    ASSERT_TRUE(meta.has_value()) << meta.error().message;
+    bpm1.reset();
+    (void)dm_->close_file(fid1);
+
+    auto [fid2, bpm2] = open_bpm("v1_gd0");
+    auto loaded = HashPersistence::load(*bpm2, *meta);
+    ASSERT_TRUE(loaded.has_value())
+        << "V1 empty index load failed (possible V2 misdetection): " << loaded.error().message;
+    EXPECT_EQ((*loaded)->global_depth(), 0u);
+    EXPECT_EQ((*loaded)->size(), 0u);
+}

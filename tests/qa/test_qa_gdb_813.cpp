@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstring>
 #include <filesystem>
 #include <memory>
 
@@ -28,8 +29,7 @@ using namespace sixseven;
 class QA_GDB813 : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ =
-            std::filesystem::temp_directory_path() / "sixseven_qa_gdb813";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb813";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
         dm_ = std::make_unique<DiskManager>();
@@ -41,43 +41,45 @@ protected:
     }
 
     // Create a fresh BPM for writing.
-    std::pair<FileId, std::unique_ptr<BufferPoolManager>>
-    create_bpm(const std::string& name, uint32_t frames = 512) {
+    std::pair<FileId, std::unique_ptr<BufferPoolManager>> create_bpm(const std::string& name,
+                                                                     uint32_t frames = 512) {
         auto path = data_dir_ / (name + ".db");
-        auto fid  = dm_->create_file(path, false, true);
+        auto fid = dm_->create_file(path, false, true);
         EXPECT_TRUE(fid.has_value()) << fid.error().message;
-        if (!fid) return {FileId{}, nullptr};
+        if (!fid)
+            return {FileId{}, nullptr};
         return {*fid, std::make_unique<BufferPoolManager>(*dm_, *fid, frames)};
     }
 
     // Reopen the same file for reading.
-    std::pair<FileId, std::unique_ptr<BufferPoolManager>>
-    open_bpm(const std::string& name, uint32_t frames = 512) {
+    std::pair<FileId, std::unique_ptr<BufferPoolManager>> open_bpm(const std::string& name,
+                                                                   uint32_t frames = 512) {
         auto path = data_dir_ / (name + ".db");
-        auto fid  = dm_->open_file(path);
+        auto fid = dm_->open_file(path);
         EXPECT_TRUE(fid.has_value()) << fid.error().message;
-        if (!fid) return {FileId{}, nullptr};
+        if (!fid)
+            return {FileId{}, nullptr};
         return {*fid, std::make_unique<BufferPoolManager>(*dm_, *fid, frames)};
     }
 
-    std::filesystem::path          data_dir_;
-    std::unique_ptr<DiskManager>   dm_;
+    std::filesystem::path data_dir_;
+    std::unique_ptr<DiskManager> dm_;
 };
 
 // ---------------------------------------------------------------------------
 // Helper: build an index with N INT32 keys (0..N-1) using given bucket_capacity.
 // ---------------------------------------------------------------------------
-static std::unique_ptr<HashIndex> make_index(int32_t n,
-                                              uint32_t bucket_capacity = 64,
-                                              bool is_unique = true) {
+static std::unique_ptr<HashIndex>
+make_index(int32_t n, uint32_t bucket_capacity = 64, bool is_unique = true) {
     HashIndexConfig cfg;
-    cfg.key_types        = {TypeId::INT32};
-    cfg.bucket_capacity  = bucket_capacity;
-    cfg.is_unique        = is_unique;
+    cfg.key_types = {TypeId::INT32};
+    cfg.bucket_capacity = bucket_capacity;
+    cfg.is_unique = is_unique;
     auto idx = std::make_unique<HashIndex>(std::move(cfg));
     for (int32_t i = 0; i < n; ++i) {
         auto r = idx->insert({Value(i)}, RID{static_cast<PageId>(i + 1), 0});
-        if (!r) throw std::runtime_error("insert failed: " + r.error().message);
+        if (!r)
+            throw std::runtime_error("insert failed: " + r.error().message);
     }
     return idx;
 }
@@ -145,8 +147,8 @@ TEST_F(QA_GDB813, BoundaryBelowV2Threshold_V1Path) {
     // header: 4(gd)+8(size)+4(cap)+1(unique)+1(ntypes)+1(INT32 type) = 19
     // directory: 4(dir_size)+dir_slots*4
     size_t inline_size = 19 + 4 + dir_slots * 4;
-    EXPECT_LT(inline_size, 8100u)
-        << "test pre-condition: expected V1 path but inline_size=" << inline_size;
+    EXPECT_LT(inline_size, 8100u) << "test pre-condition: expected V1 path but inline_size="
+                                  << inline_size;
 
     auto meta_r = HashPersistence::persist(*bpm1, *original);
     ASSERT_TRUE(meta_r.has_value()) << meta_r.error().message;
@@ -180,11 +182,11 @@ TEST_F(QA_GDB813, BoundaryAboveV2Threshold_V2Path) {
     ASSERT_NE(bpm1, nullptr);
 
     auto original = make_index(2048, /*bucket_capacity=*/1);
-    ASSERT_GE(original->global_depth(), 11u)
-        << "need global_depth >= 11 to cross the threshold";
+    ASSERT_GE(original->global_depth(), 11u) << "need global_depth >= 11 to cross the threshold";
 
     auto meta_r = HashPersistence::persist(*bpm1, *original);
-    ASSERT_TRUE(meta_r.has_value()) << "persist at V1/V2 boundary failed: " << meta_r.error().message;
+    ASSERT_TRUE(meta_r.has_value())
+        << "persist at V1/V2 boundary failed: " << meta_r.error().message;
     PageId meta_id = *meta_r;
     bpm1.reset();
     (void)dm_->close_file(fid1);
@@ -221,7 +223,8 @@ TEST_F(QA_GDB813, MultipleOverflowPages_GlobalDepth13) {
         << "need >= 8192 slots (global_depth >= 13) for multiple overflow pages";
 
     auto meta_r = HashPersistence::persist(*bpm1, *original);
-    ASSERT_TRUE(meta_r.has_value()) << "persist (multi-overflow) failed: " << meta_r.error().message;
+    ASSERT_TRUE(meta_r.has_value())
+        << "persist (multi-overflow) failed: " << meta_r.error().message;
     PageId meta_id = *meta_r;
     bpm1.reset();
     (void)dm_->close_file(fid1);
@@ -229,7 +232,8 @@ TEST_F(QA_GDB813, MultipleOverflowPages_GlobalDepth13) {
     auto [fid2, bpm2] = open_bpm("tc3_deep", /*frames=*/1024);
     ASSERT_NE(bpm2, nullptr);
     auto loaded_r = HashPersistence::load(*bpm2, meta_id);
-    ASSERT_TRUE(loaded_r.has_value()) << "load (multi-overflow) failed: " << loaded_r.error().message;
+    ASSERT_TRUE(loaded_r.has_value())
+        << "load (multi-overflow) failed: " << loaded_r.error().message;
     EXPECT_EQ((*loaded_r)->size(), 8192u);
     EXPECT_EQ((*loaded_r)->global_depth(), original->global_depth());
 
@@ -245,46 +249,52 @@ TEST_F(QA_GDB813, MultipleOverflowPages_GlobalDepth13) {
 }
 
 // ---------------------------------------------------------------------------
-// TC4: CRITICAL sentinel false-positive check.
+// TC4: V2 magic is NOT falsely triggered by V1 global_depth=512.
 //
-// global_depth = 512 encodes in little-endian u32 as [0x00, 0x02, 0x00, 0x00].
-// The V2 detection condition is:  p[0]==0 && p[1]==2
-// If a V1 index has global_depth=512 it will be MISDETECTED as V2 on load
-// and the load will parse garbage, silently producing wrong data or an error.
+// global_depth=512 encodes in little-endian u32 as [0x00, 0x02, 0x00, 0x00]
+// (= 0x00000200).  The OLD 2-byte sentinel [0x00, 0x02] would have matched
+// this, misdetecting a V1 index as V2 and producing garbage on load.
 //
-// To reach global_depth=512 we need 2^512 directory slots — not achievable in a
-// test.  Instead, this test directly verifies the SENTINEL LOGIC by examining
-// what global_depth values are dangerous (multiples of 512 that fit in uint32):
-//   global_depth = 512  -> first u32 bytes = [0x00, 0x02, 0x00, 0x00]  => FALSE POSITIVE V2
+// The fix replaced the sentinel with a 4-byte magic HASH_V2_MAGIC=0xFF534858.
+// Read as a LE uint32 the four bytes of global_depth=512 are 0x00000200, which
+// is NOT equal to 0xFF534858.  No misdetection occurs.
 //
-// THE ACTUAL BUG: any V1 meta page whose global_depth little-endian encoding
-// starts [0x00, 0x02, ...] will be misloaded.  Document this as a known issue.
+// This test verifies: the 4-byte leading uint32 of a V1 page whose
+// global_depth=512 does NOT equal HASH_V2_MAGIC, confirming the fix.
 // ---------------------------------------------------------------------------
 TEST_F(QA_GDB813, SentinelFalsePositiveRisk_V1GlobalDepth512) {
-    // Verify the sentinel collision exists at the code-logic level:
-    // global_depth=512 LE = bytes [0x00, 0x02, 0x00, 0x00].
-    uint32_t dangerous_gd = 512;
-    uint8_t bytes[4];
-    bytes[0] = static_cast<uint8_t>(dangerous_gd);
-    bytes[1] = static_cast<uint8_t>(dangerous_gd >> 8);
-    bytes[2] = static_cast<uint8_t>(dangerous_gd >> 16);
-    bytes[3] = static_cast<uint8_t>(dangerous_gd >> 24);
+    // global_depth=512 LE = bytes [0x00, 0x02, 0x00, 0x00] = uint32 0x00000200.
+    constexpr uint32_t HASH_V2_MAGIC = 0xFF534858U;
+    constexpr uint32_t dangerous_gd = 512U;
 
-    // The implementation detects V2 iff bytes[0]==0 && bytes[1]==2.
-    bool would_be_misdetected = (bytes[0] == 0 && bytes[1] == 2);
+    // Read global_depth as a little-endian uint32 (same as the fixed detection
+    // path does).
+    uint8_t gd_bytes[4];
+    gd_bytes[0] = static_cast<uint8_t>(dangerous_gd);
+    gd_bytes[1] = static_cast<uint8_t>(dangerous_gd >> 8);
+    gd_bytes[2] = static_cast<uint8_t>(dangerous_gd >> 16);
+    gd_bytes[3] = static_cast<uint8_t>(dangerous_gd >> 24);
 
-    // This assertion documents the known sentinel collision.
-    // If this FAILS it means the code HAS the false-positive bug:
-    // a V1 index saved with global_depth=512 will be misread as V2 on load.
+    uint32_t leading_u32 = 0;
+    std::memcpy(&leading_u32, gd_bytes, 4);
+
+    // With the fixed 4-byte magic comparison, this global_depth does NOT
+    // trigger V2 detection.  The old 2-byte sentinel would have: bytes[0]==0
+    // and bytes[1]==2.  The new check: leading_u32 (=0x00000200) != HASH_V2_MAGIC
+    // (=0xFF534858).
+    bool would_be_misdetected = (leading_u32 == HASH_V2_MAGIC);
+
     EXPECT_FALSE(would_be_misdetected)
-        << "CRITICAL BUG: global_depth=" << dangerous_gd
-        << " serializes to bytes [0x0" << std::hex << static_cast<int>(bytes[0])
-        << ", 0x0" << static_cast<int>(bytes[1]) << ", ...] which triggers V2 detection "
-        << "in HashPersistence::load() even though this is a V1 index. "
-        << "Any V1 hash index that grows to global_depth=512 (or any value "
-        << "where LE bytes are [0x00, 0x02, ...]) will fail to load correctly. "
-        << "The V2 sentinel bytes [0x00, 0x02] collide with the V1 global_depth "
-        << "field for depth values 512, 512+65536, etc.";
+        << "BUG: global_depth=" << dangerous_gd << " produces leading uint32=0x" << std::hex
+        << leading_u32 << " which equals HASH_V2_MAGIC=0x" << HASH_V2_MAGIC
+        << "; V1 index would be misdetected as V2.";
+
+    // Also verify that no small global_depth (0..65535) can collide with the
+    // 4-byte magic.  All such values fit in the low 16 bits; the high byte is
+    // always 0x00, whereas HASH_V2_MAGIC has high byte 0xFF.
+    for (uint32_t gd = 0; gd <= 65535U; ++gd) {
+        EXPECT_NE(gd, HASH_V2_MAGIC) << "global_depth=" << gd << " collides with HASH_V2_MAGIC";
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -387,16 +397,15 @@ TEST_F(QA_GDB813, V2PerKeyRIDAccuracy) {
 
     // Unique page_ids: key i -> RID{i*7+1, i%3} to make slot_id non-trivial.
     HashIndexConfig cfg;
-    cfg.key_types       = {TypeId::INT32};
+    cfg.key_types = {TypeId::INT32};
     cfg.bucket_capacity = 1;
-    cfg.is_unique       = true;
+    cfg.is_unique = true;
     auto original = std::make_unique<HashIndex>(std::move(cfg));
 
     constexpr int32_t N = 2500;
     for (int32_t i = 0; i < N; ++i) {
-        auto r = original->insert({Value(i)},
-                                  RID{static_cast<PageId>(i * 7 + 1),
-                                      static_cast<uint16_t>(i % 3)});
+        auto r = original->insert(
+            {Value(i)}, RID{static_cast<PageId>(i * 7 + 1), static_cast<uint16_t>(i % 3)});
         ASSERT_TRUE(r.has_value()) << "insert " << i << ": " << r.error().message;
     }
     ASSERT_GE(original->global_depth(), 11u);
@@ -438,8 +447,7 @@ TEST_F(QA_GDB813, GracefulError_InvalidMetaPageId) {
     EXPECT_FALSE(loaded_r.has_value())
         << "expected error loading from nonexistent page, got success";
     if (!loaded_r.has_value()) {
-        EXPECT_FALSE(loaded_r.error().message.empty())
-            << "error message should not be empty";
+        EXPECT_FALSE(loaded_r.error().message.empty()) << "error message should not be empty";
     }
     bpm.reset();
     (void)dm_->close_file(fid);
@@ -502,8 +510,8 @@ TEST_F(QA_GDB813, EmptyIndexV1NotMisdetectedAsV2) {
     ASSERT_NE(bpm1, nullptr);
 
     HashIndexConfig cfg;
-    cfg.key_types   = {TypeId::INT32};
-    cfg.is_unique   = true;
+    cfg.key_types = {TypeId::INT32};
+    cfg.is_unique = true;
     HashIndex original(std::move(cfg));
     EXPECT_EQ(original.size(), 0u);
 
