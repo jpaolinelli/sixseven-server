@@ -48,32 +48,7 @@ createJiraIssue:
 
 ### Epic Description Template
 
-```markdown
-## Summary
-<One paragraph describing the feature and its purpose.>
-
-## Requirements
-- Requirement 1
-- Requirement 2
-- ...
-
-## Non-Goals
-- What this does NOT include.
-
-## Technical Approach
-<Brief description of the architecture and design decisions.>
-
-## Acceptance Criteria
-- [ ] Criterion 1
-- [ ] Criterion 2
-- [ ] All stories completed and passing tests
-- [ ] No regressions in existing tests
-
-## Stories
-- <STORY-1-SUMMARY>
-- <STORY-2-SUMMARY>
-- ...
-```
+Read the Epic template in [`templates.md`](templates.md) when writing the description.
 
 ## Creating Stories
 
@@ -91,28 +66,7 @@ createJiraIssue:
 
 ### Story Description Template
 
-```markdown
-## Summary
-<What this story delivers. Should be independently testable.>
-
-## Context
-Part of [<EPIC-KEY>](https://undiscoveredtech.atlassian.net/browse/<EPIC-KEY>).
-
-## Implementation Details
-- What files/modules are affected
-- Key design decisions for this story
-- Dependencies on other stories (if any)
-
-## Acceptance Criteria
-- [ ] Criterion 1
-- [ ] Criterion 2
-- [ ] Unit tests written and passing
-- [ ] No regressions
-
-## Subtasks
-- <Subtask 1 summary>
-- <Subtask 2 summary>
-```
+Read the Story template in [`templates.md`](templates.md) when writing the description.
 
 ## Creating Subtasks
 
@@ -130,14 +84,7 @@ createJiraIssue:
 
 ### Subtask Description Template
 
-```markdown
-## Summary
-<Specific implementation step.>
-
-## Acceptance Criteria
-- [ ] Criterion 1
-- [ ] Criterion 2
-```
+Read the Subtask template in [`templates.md`](templates.md) when writing the description.
 
 ## Naming Conventions
 

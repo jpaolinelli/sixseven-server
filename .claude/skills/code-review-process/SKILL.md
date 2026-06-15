@@ -63,40 +63,7 @@ Check for:
 
 ## Step 5: Review Output Format (detailed, post to the PR)
 
-This detailed review goes in a PR comment (and a Jira comment on approval). The pipeline receives only the compact one-line block defined in the reviewer agent, never this table.
-
-```
-# <TICKET-ID> — <Summary> — v<N> Review
-
-## Build & Test Status
-✅, formatting/tidy status
-
-## Files Reviewed
-| Category | Files | Lines |
-|----------|-------|-------|
-| Headers  | N     | N     |
-| Implementation | N | N   |
-| Tests    | N     | N     |
-| Total    | N     | N     |
-
-## Acceptance Criteria Cross-Check
-
-### <TICKET-ID> (Parent)
-| Criterion | Status | Evidence |
-
-### <SUBTASK-ID> — <Summary>
-| Criterion | Status | Evidence |
-
-## Architecture Assessment
-Separation of concerns, extensibility, consistency with existing patterns.
-
-## Issues Found
-### 1. <Title> — **Severity**
-Description, file/line location, suggested fix.
-
-## Verdict: ✅ APPROVED / ❌ CHANGES REQUESTED
-Summary justification.
-```
+The detailed review goes in a PR comment (and a Jira comment on approval). Read the output template in [`review-template.md`](review-template.md) when you write it. The pipeline receives only the compact one-line block defined in the reviewer agent, never this table.
 
 ## Verdict Rules
 

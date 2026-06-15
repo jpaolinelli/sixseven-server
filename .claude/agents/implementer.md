@@ -8,7 +8,6 @@ skills:
   - git-workflow
   - sixseven-conventions
   - sixseven-testing
-  - sixseven-architecture
 isolation: worktree
 model: sonnet
 color: blue
