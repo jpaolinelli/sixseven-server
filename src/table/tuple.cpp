@@ -65,6 +65,10 @@ uint16_t read_u16(const uint8_t* src) {
     return value;
 }
 
+// Thread-local buffer for PATH serialization (avoids heap allocation per call).
+// var_value_bytes returns a span so the backing storage must outlive the call.
+static thread_local std::vector<uint8_t> g_path_serialize_buffer;
+
 // Serialize a fixed-size Value's raw bytes into dest. Returns bytes written.
 size_t write_fixed_value(uint8_t* dest, const Value& value) {
     switch (value.type_id()) {
@@ -287,8 +291,12 @@ std::span<const uint8_t> var_value_bytes(const Value& value) {
     }
     case TypeId::PATH: {
         const auto& p = value.as_path();
-        return {reinterpret_cast<const uint8_t*>(p.steps.data()),
-                p.steps.size() * sizeof(PathStep)};
+        // Layout: [total_weight: 8 bytes][steps: variable]
+        const size_t steps_size = p.steps.size() * sizeof(PathStep);
+        g_path_serialize_buffer.resize(sizeof(double) + steps_size);
+        std::memcpy(g_path_serialize_buffer.data(), &p.total_weight, sizeof(double));
+        std::memcpy(g_path_serialize_buffer.data() + sizeof(double), p.steps.data(), steps_size);
+        return g_path_serialize_buffer;
     }
     default:
         return {};
@@ -311,10 +319,16 @@ Value read_var_value(const uint8_t* src, size_t length, TypeId type) {
         return Value(std::move(emb));
     }
     case TypeId::PATH: {
-        size_t count = length / sizeof(PathStep);
+        // Layout: [total_weight: 8 bytes][steps: variable]
+        if (length < sizeof(double)) {
+            return Value::make_null();
+        }
         Path path;
+        std::memcpy(&path.total_weight, src, sizeof(double));
+        const size_t steps_size = length - sizeof(double);
+        size_t count = steps_size / sizeof(PathStep);
         path.steps.resize(count);
-        std::memcpy(path.steps.data(), src, length);
+        std::memcpy(path.steps.data(), src + sizeof(double), steps_size);
         return Value(std::move(path));
     }
     default:

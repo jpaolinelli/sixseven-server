@@ -670,3 +670,60 @@ TEST(TupleSerializer, StringWithNullBytes) {
     EXPECT_EQ((*result)[0].as_string().size(), 11u);
     EXPECT_EQ((*result)[0].as_string(), data);
 }
+
+// -- PATH round-trip with total_weight -----------------------------------------
+
+TEST(TupleSerializer, PathRoundTripWithTotalWeight) {
+    // Regression test for GDB-799: Path with total_weight must survive
+    // serialization/deserialization through TupleSerializer.
+    Schema schema({{"path", TypeId::PATH}});
+
+    Path original;
+    original.total_weight = 42.5;
+    original.steps = {
+        {1, 100},
+        {2, 101},
+        {3, -1},
+    };
+
+    std::vector<Value> values = {Value(std::move(original))};
+
+    auto buf = TupleSerializer::serialize(values, schema);
+    ASSERT_TRUE(buf.has_value()) << "Serialization should succeed";
+
+    auto result = TupleSerializer::deserialize(*buf, schema);
+    ASSERT_TRUE(result.has_value()) << "Deserialization should succeed";
+    ASSERT_EQ(result->size(), 1u);
+
+    const auto& restored = (*result)[0].as_path();
+    EXPECT_EQ(restored.total_weight, 42.5) << "total_weight should be preserved";
+    ASSERT_EQ(restored.steps.size(), 3u);
+    EXPECT_EQ(restored.steps[0].node_pk, 1);
+    EXPECT_EQ(restored.steps[0].edge_id, 100);
+    EXPECT_EQ(restored.steps[1].node_pk, 2);
+    EXPECT_EQ(restored.steps[1].edge_id, 101);
+    EXPECT_EQ(restored.steps[2].node_pk, 3);
+    EXPECT_EQ(restored.steps[2].edge_id, -1);
+}
+
+TEST(TupleSerializer, PathRoundTripEmptyPath) {
+    // Empty path with zero weight round-trips correctly.
+    Schema schema({{"path", TypeId::PATH}});
+
+    Path original;
+    original.total_weight = 0.0;
+    original.steps = {};
+
+    std::vector<Value> values = {Value(std::move(original))};
+
+    auto buf = TupleSerializer::serialize(values, schema);
+    ASSERT_TRUE(buf.has_value());
+
+    auto result = TupleSerializer::deserialize(*buf, schema);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result->size(), 1u);
+
+    const auto& restored = (*result)[0].as_path();
+    EXPECT_EQ(restored.total_weight, 0.0);
+    EXPECT_TRUE(restored.steps.empty());
+}
