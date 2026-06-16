@@ -63,6 +63,13 @@ public:
     /// Returns true if the key was found and deleted.
     [[nodiscard]] Result<bool> remove(const KeyType& key);
 
+    /// Delete the entry matching BOTH key and rid (RID-qualified delete).
+    /// For non-unique trees with duplicate keys, this removes exactly the entry
+    /// whose RID equals @p rid rather than an arbitrary duplicate.
+    /// Walks the duplicate run across sibling leaf pages if needed.
+    /// Returns true if found and deleted, false if not found.
+    [[nodiscard]] Result<bool> remove(const KeyType& key, const RID& rid);
+
     /// Bulk load from pre-sorted entries. Tree must be empty.
     /// Validates sort order and uniqueness (if configured).
     [[nodiscard]] Result<void> bulk_load(std::vector<std::pair<KeyType, RID>>& sorted_entries);

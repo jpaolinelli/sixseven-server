@@ -20,8 +20,7 @@ uint16_t BTreeIndex::effective_leaf_max_keys() const {
 
 // -- Construction -------------------------------------------------------------
 
-BTreeIndex::BTreeIndex(BTreeConfig config)
-    : config_(std::move(config)) {}
+BTreeIndex::BTreeIndex(BTreeConfig config) : config_(std::move(config)) {}
 
 // -- Node creation ------------------------------------------------------------
 
@@ -139,7 +138,6 @@ Result<void> BTreeIndex::handle_post_merge(BTreeInternalNode* parent) {
 
     return ok();
 }
-
 
 // -- Traversal ----------------------------------------------------------------
 
@@ -544,6 +542,81 @@ Result<bool> BTreeIndex::remove(const KeyType& key) {
     }
 
     return ok(true);
+}
+
+// -- RID-qualified delete (GDB-833) ------------------------------------------
+
+Result<bool> BTreeIndex::remove(const KeyType& key, const RID& rid) {
+    std::unique_lock lock(tree_latch_);
+
+    if (root_page_id_ == invalid_page_id) {
+        return ok(false);
+    }
+
+    // Navigate to the leaf that would contain this key.
+    auto leaf_id_result = find_leaf(key);
+    if (!leaf_id_result.has_value()) {
+        return tl::unexpected(leaf_id_result.error());
+    }
+
+    // Walk forward through sibling leaves as long as the key matches.
+    // Duplicates may span page boundaries, so we scan right until the key
+    // changes or we find the target (key, rid) pair.
+    PageId current_id = *leaf_id_result;
+    while (current_id != invalid_page_id) {
+        auto* leaf = get_leaf_node(current_id);
+        if (leaf == nullptr) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "leaf page not found during rid-qualified remove");
+        }
+
+        // Try to remove the exact (key, rid) pair from this leaf.
+        auto remove_result = leaf->remove(key, rid);
+        if (!remove_result.has_value()) {
+            return tl::unexpected(remove_result.error());
+        }
+        if (*remove_result) {
+            --size_;
+
+            // Handle empty root leaf.
+            if (leaf->page_id() == root_page_id_ && leaf->key_count() == 0) {
+                leaf_nodes_.erase(root_page_id_);
+                root_page_id_ = invalid_page_id;
+                return ok(true);
+            }
+
+            // Fix underflow.
+            if (leaf->page_id() != root_page_id_ && leaf->is_underfull(false)) {
+                auto fix = fix_underfull_leaf(leaf);
+                if (!fix.has_value()) {
+                    return tl::unexpected(fix.error());
+                }
+            }
+
+            return ok(true);
+        }
+
+        // Check if the first key on the next leaf still matches; if not, stop.
+        PageId next_id = leaf->next_leaf_id();
+        if (next_id == invalid_page_id) {
+            break;
+        }
+        auto* next_leaf = get_leaf_node(next_id);
+        if (next_leaf == nullptr || next_leaf->key_count() == 0) {
+            break;
+        }
+        auto first_cmp = compare_keys(key, next_leaf->key_at(0));
+        if (!first_cmp.has_value()) {
+            return tl::unexpected(first_cmp.error());
+        }
+        if (*first_cmp != std::strong_ordering::equal) {
+            break; // Next leaf starts a different key; (key, rid) not found.
+        }
+
+        current_id = next_id;
+    }
+
+    return ok(false); // (key, rid) pair not found.
 }
 
 Result<void> BTreeIndex::fix_underfull_leaf(BTreeLeafNode* leaf) {

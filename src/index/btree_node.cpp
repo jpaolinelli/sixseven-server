@@ -260,6 +260,56 @@ Result<bool> BTreeLeafNode::remove(const KeyType& key) {
     return ok(false);
 }
 
+Result<bool> BTreeLeafNode::remove(const KeyType& key, const RID& rid) {
+    // Find the lower bound of the key range via binary search.
+    uint16_t lo = 0;
+    uint16_t hi = key_count();
+
+    while (lo < hi) {
+        uint16_t mid = lo + (hi - lo) / 2;
+        auto cmp = compare_keys(key, keys_[mid]);
+        if (!cmp.has_value()) {
+            return tl::unexpected(cmp.error());
+        }
+        if (*cmp == std::strong_ordering::less) {
+            hi = mid;
+        } else if (*cmp == std::strong_ordering::greater) {
+            lo = mid + 1;
+        } else {
+            // Found a match at mid. Back up to the first entry with this key.
+            uint16_t start = mid;
+            while (start > 0) {
+                auto back_cmp = compare_keys(key, keys_[start - 1]);
+                if (!back_cmp.has_value()) {
+                    return tl::unexpected(back_cmp.error());
+                }
+                if (*back_cmp != std::strong_ordering::equal) {
+                    break;
+                }
+                --start;
+            }
+            // Linear scan through all entries with this key on this leaf.
+            for (uint16_t i = start; i < key_count(); ++i) {
+                auto scan_cmp = compare_keys(key, keys_[i]);
+                if (!scan_cmp.has_value()) {
+                    return tl::unexpected(scan_cmp.error());
+                }
+                if (*scan_cmp != std::strong_ordering::equal) {
+                    break; // Moved past the key run.
+                }
+                if (rids_[i] == rid) {
+                    keys_.erase(keys_.begin() + i);
+                    rids_.erase(rids_.begin() + i);
+                    return ok(true);
+                }
+            }
+            return ok(false); // Key found but rid not matched on this leaf.
+        }
+    }
+
+    return ok(false);
+}
+
 bool BTreeLeafNode::is_full() const {
     return key_count() >= max_keys_;
 }
