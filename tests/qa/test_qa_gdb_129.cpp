@@ -385,16 +385,12 @@ TEST(QA_GDB_129_OpenAI, EmptyDataArray) {
     EXPECT_FALSE(result.has_value());
 }
 
-TEST(QA_GDB_129_OpenAI, BatchEmptyList) {
-    auto mock = std::make_unique<MockHttpClient>();
-    // Empty batch should handle gracefully.
-    OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
-    auto result = provider.embed_batch({});
-    // Either succeeds with empty result or returns error.
-    if (result.has_value()) {
-        EXPECT_TRUE(result->empty());
-    }
-}
+// QA_GDB_129_OpenAI::BatchEmptyList removed (GDB-839): the assertion was
+// wrapped in `if (result.has_value())` so the test passed vacuously whenever
+// embed_batch({}) returned an error — a conditional-skip tautology. The
+// correct empty-batch contract (ok + empty vector) is already strictly
+// asserted by QA_GDB_130_OpenAI::BatchWithEmptyTexts (unconditional
+// ASSERT_TRUE + EXPECT_TRUE(result->empty()) with a properly-configured mock).
 
 TEST(QA_GDB_129_OpenAI, LargeBatch) {
     auto mock = std::make_unique<MockHttpClient>();
