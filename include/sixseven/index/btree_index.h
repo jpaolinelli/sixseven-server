@@ -160,4 +160,14 @@ private:
     mutable std::shared_mutex tree_latch_;
 };
 
+/// A B-tree index that DML operators must maintain on INSERT, paired with the
+/// ordered column ordinals that form the composite key. Populated by the
+/// planner for INSERT.
+struct BtreeMaintenanceTarget {
+    BTreeIndex* index = nullptr;
+    /// Ordinals (into the storage schema) of the columns that form the key,
+    /// in the same order as the index was built.
+    std::vector<size_t> key_column_ordinals;
+};
+
 } // namespace sixseven

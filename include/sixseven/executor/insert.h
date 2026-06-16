@@ -5,6 +5,8 @@
 #include "sixseven/executor/iterator.h"
 #include "sixseven/executor/tuple.h"
 #include "sixseven/index/bm25_index.h"
+#include "sixseven/index/btree_index.h"
+#include "sixseven/index/hash_index.h"
 #include "sixseven/index/rid.h"
 #include "sixseven/parser/ast.h"
 #include "sixseven/planner/binder.h"
@@ -33,7 +35,7 @@ struct AutoIncrementCol {
 /// for INSERT...SELECT), serialises them, and inserts into a TableHeap.
 ///
 /// The output is a single-row tuple containing the affected row count.
-/// Note: WAL logging and index updates are deferred to a later integration ticket.
+/// Note: WAL logging is deferred to a later integration ticket.
 class InsertOperator : public Iterator {
 public:
     /// Construct for INSERT INTO ... VALUES (...), (...).
@@ -83,6 +85,12 @@ public:
     /// BM25 indexes on this table to maintain on insert. Set by the planner.
     std::vector<Bm25MaintenanceTarget> bm25_targets_;
 
+    /// B-tree indexes on this table to maintain on insert. Set by the planner.
+    std::vector<BtreeMaintenanceTarget> btree_targets_;
+
+    /// Hash indexes on this table to maintain on insert. Set by the planner.
+    std::vector<HashMaintenanceTarget> hash_targets_;
+
     /// Set the transaction id stamped as xmin on inserted versions (GDB-747).
     /// Defaults to frozen_txn_id (always-committed) when no transaction
     /// context is provided.
@@ -108,6 +116,10 @@ private:
     /// Synchronously index the row's text into any BM25 indexes on the table.
     /// Best-effort: logs warnings on failure but does not propagate errors.
     void maintain_bm25(const RID& rid, const std::vector<Value>& values);
+
+    /// Synchronously insert the row's key into all B-tree and hash indexes.
+    /// Best-effort: logs warnings on failure but does not propagate errors.
+    void maintain_secondary_indexes(const RID& rid, const std::vector<Value>& values);
 
     TableHeap& heap_;
     const Schema& storage_schema_;

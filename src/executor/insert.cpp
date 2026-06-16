@@ -125,6 +125,7 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
             }
             enqueue_embedding_jobs(*rid, values);
             maintain_bm25(*rid, values);
+            maintain_secondary_indexes(*rid, values);
             ++count;
         }
     } else {
@@ -211,6 +212,7 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
         for (size_t i = 0; i < rids->size(); ++i) {
             enqueue_embedding_jobs((*rids)[i], all_values[i]);
             maintain_bm25((*rids)[i], all_values[i]);
+            maintain_secondary_indexes((*rids)[i], all_values[i]);
         }
         count = static_cast<int64_t>(rids->size());
     }
@@ -302,6 +304,48 @@ void InsertOperator::enqueue_embedding_jobs(const RID& rid, const std::vector<Va
             // avoid log spam during bulk inserts.
             SIXSEVEN_LOG_DEBUG("embedding enqueue deferred (persisted to disk): {}",
                                result.error().message);
+        }
+    }
+}
+
+void InsertOperator::maintain_secondary_indexes(const RID& rid, const std::vector<Value>& values) {
+    for (const auto& target : btree_targets_) {
+        if (target.index == nullptr) {
+            continue;
+        }
+        KeyType key;
+        key.reserve(target.key_column_ordinals.size());
+        for (size_t ordinal : target.key_column_ordinals) {
+            if (ordinal < values.size()) {
+                key.push_back(values[ordinal]);
+            }
+        }
+        auto r = target.index->insert(key, rid);
+        if (!r) {
+            SIXSEVEN_LOG_WARN("btree index insert maintenance failed for rid=({},{}): {}",
+                              rid.page_id,
+                              rid.slot_id,
+                              r.error().message);
+        }
+    }
+
+    for (const auto& target : hash_targets_) {
+        if (target.index == nullptr) {
+            continue;
+        }
+        KeyType key;
+        key.reserve(target.key_column_ordinals.size());
+        for (size_t ordinal : target.key_column_ordinals) {
+            if (ordinal < values.size()) {
+                key.push_back(values[ordinal]);
+            }
+        }
+        auto r = target.index->insert(key, rid);
+        if (!r) {
+            SIXSEVEN_LOG_WARN("hash index insert maintenance failed for rid=({},{}): {}",
+                              rid.page_id,
+                              rid.slot_id,
+                              r.error().message);
         }
     }
 }

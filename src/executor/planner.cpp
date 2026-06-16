@@ -2605,6 +2605,8 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
             }
         }
         iter->bm25_targets_ = collect_bm25_targets(*table_schema);
+        iter->btree_targets_ = collect_btree_targets(*table_schema);
+        iter->hash_targets_ = collect_hash_targets(*table_schema);
 
         return ok(std::unique_ptr<Iterator>(std::move(iter)));
     }
@@ -2629,6 +2631,8 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
         }
     }
     iter->bm25_targets_ = collect_bm25_targets(*table_schema);
+    iter->btree_targets_ = collect_btree_targets(*table_schema);
+    iter->hash_targets_ = collect_hash_targets(*table_schema);
 
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
 }
@@ -3895,6 +3899,114 @@ std::vector<Bm25MaintenanceTarget> Planner::collect_bm25_targets(const TableSche
                 targets.push_back({it->second, static_cast<size_t>(col.ordinal)});
                 break;
             }
+        }
+    }
+    return targets;
+}
+
+std::vector<BtreeMaintenanceTarget>
+Planner::collect_btree_targets(const TableSchema& schema) const {
+    std::vector<BtreeMaintenanceTarget> targets;
+    if (btree_indexes_ == nullptr) {
+        return targets;
+    }
+    auto indexes = catalog_.list_indexes(schema.table_id);
+    for (const auto& idx : indexes) {
+        if (idx.index_type != "btree") {
+            continue;
+        }
+        auto it = btree_indexes_->find(idx.index_id);
+        if (it == btree_indexes_->end() || it->second == nullptr) {
+            continue;
+        }
+
+        // Resolve each comma-separated column name to its storage-schema ordinal.
+        BtreeMaintenanceTarget target;
+        target.index = it->second;
+
+        // Split idx.columns on commas.
+        std::string col_str = idx.columns;
+        size_t start = 0;
+        while (start <= col_str.size()) {
+            size_t end = col_str.find(',', start);
+            if (end == std::string::npos) {
+                end = col_str.size();
+            }
+            // Trim whitespace.
+            size_t s = start;
+            while (s < end && col_str[s] == ' ') {
+                ++s;
+            }
+            size_t e = end;
+            while (e > s && col_str[e - 1] == ' ') {
+                --e;
+            }
+            std::string col_name = col_str.substr(s, e - s);
+            if (!col_name.empty()) {
+                for (const auto& col : schema.columns) {
+                    if (col.name == col_name) {
+                        target.key_column_ordinals.push_back(static_cast<size_t>(col.ordinal));
+                        break;
+                    }
+                }
+            }
+            start = end + 1;
+        }
+
+        if (!target.key_column_ordinals.empty()) {
+            targets.push_back(std::move(target));
+        }
+    }
+    return targets;
+}
+
+std::vector<HashMaintenanceTarget> Planner::collect_hash_targets(const TableSchema& schema) const {
+    std::vector<HashMaintenanceTarget> targets;
+    if (hash_indexes_ == nullptr) {
+        return targets;
+    }
+    auto indexes = catalog_.list_indexes(schema.table_id);
+    for (const auto& idx : indexes) {
+        if (idx.index_type != "hash") {
+            continue;
+        }
+        auto it = hash_indexes_->find(idx.index_id);
+        if (it == hash_indexes_->end() || it->second == nullptr) {
+            continue;
+        }
+
+        HashMaintenanceTarget target;
+        target.index = it->second;
+
+        std::string col_str = idx.columns;
+        size_t start = 0;
+        while (start <= col_str.size()) {
+            size_t end = col_str.find(',', start);
+            if (end == std::string::npos) {
+                end = col_str.size();
+            }
+            size_t s = start;
+            while (s < end && col_str[s] == ' ') {
+                ++s;
+            }
+            size_t e = end;
+            while (e > s && col_str[e - 1] == ' ') {
+                --e;
+            }
+            std::string col_name = col_str.substr(s, e - s);
+            if (!col_name.empty()) {
+                for (const auto& col : schema.columns) {
+                    if (col.name == col_name) {
+                        target.key_column_ordinals.push_back(static_cast<size_t>(col.ordinal));
+                        break;
+                    }
+                }
+            }
+            start = end + 1;
+        }
+
+        if (!target.key_column_ordinals.empty()) {
+            targets.push_back(std::move(target));
         }
     }
     return targets;
