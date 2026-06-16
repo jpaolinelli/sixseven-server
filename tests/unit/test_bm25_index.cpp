@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <filesystem>
 #include <memory>
 
@@ -240,4 +241,143 @@ TEST_F(Bm25IndexTest, MultiPageRoundtrip) {
     EXPECT_EQ((*loaded)->doc_count(), 200u);
     EXPECT_EQ((*loaded)->search("shared", 0).size(), 200u);
     EXPECT_EQ((*loaded)->search("t5x3", 10).size(), 1u);
+}
+
+// ===================================================================
+// GDB-841: term-less doc survives persist→reload and is fully removable
+// ===================================================================
+
+// Helper: build a config whose analyzer strips ALL tokens so any text becomes
+// term-less.  We do this by setting min_token_length to a very high value so
+// normal words are all filtered out.
+static Bm25Config termless_doc_config() {
+    Bm25Config cfg;
+    // Disable stop-word removal and stemming so the only filter is min length.
+    cfg.analyzer.remove_stopwords = false;
+    cfg.analyzer.stem = false;
+    cfg.analyzer.lowercase = true;
+    // Any token shorter than 100 characters is discarded → every realistic word
+    // produces zero indexed terms.
+    cfg.analyzer.min_token_length = 100;
+    return cfg;
+}
+
+// GDB-841 regression: after persist→reload, doc_terms_ must contain an entry
+// for a term-less document.  Without the fix, the entry is absent and
+// remove_document() silently skips the doc.
+TEST_F(Bm25IndexTest, GDB841_TermlessDocDocTermsReconstructedAfterReload) {
+    Bm25Config cfg = termless_doc_config();
+    Bm25Index idx;
+    idx.create(cfg);
+
+    // rid(10,0) is term-less (all tokens < 100 chars are discarded).
+    // rid(10,1) has a real term so we can verify ordinary docs still work.
+    ASSERT_TRUE(idx.add_document(rid(10, 0), "hello world").has_value()); // term-less
+    ASSERT_TRUE(idx.add_document(rid(10, 1),
+                                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1")
+                    .has_value()); // term-ful (101 chars)
+    EXPECT_EQ(idx.doc_count(), 2u);
+
+    auto [fid1, bpm1] = create_bpm("gdb841_docterms");
+    auto meta = Bm25Index::persist(*bpm1, idx);
+    ASSERT_TRUE(meta.has_value()) << meta.error().message;
+    bpm1.reset();
+    (void)dm_->close_file(fid1);
+
+    auto [fid2, bpm2] = open_bpm("gdb841_docterms");
+    auto loaded = Bm25Index::load(*bpm2, *meta);
+    ASSERT_TRUE(loaded.has_value()) << loaded.error().message;
+
+    // Both documents must be present in doc_terms_ (doc_count uses doc_lengths_,
+    // which is always rebuilt; doc_terms_ is the one that was missing before fix).
+    EXPECT_EQ((*loaded)->doc_count(), 2u);
+
+    // The term-less doc must be removable (not a no-op).
+    ASSERT_TRUE((*loaded)->remove_document(rid(10, 0)).has_value());
+    EXPECT_EQ((*loaded)->doc_count(), 1u);
+
+    // The term-ful doc must still be present.
+    EXPECT_EQ((*loaded)->doc_count(), 1u);
+}
+
+// GDB-841 regression: removing a term-less doc after reload must actually
+// decrement the document count and correct avgdl / N used in BM25 scoring.
+// The independently-derived expected score is computed using N=1 (only the
+// term-ful doc remains) and verified against the actual search result.
+TEST_F(Bm25IndexTest, GDB841_RemoveTermlessDocDecrementsBm25Stats) {
+    // Use default analyzer so rid(11,1) actually has real postings.
+    Bm25Config cfg;
+    cfg.k1 = 1.2;
+    cfg.b = 0.75;
+    // analyzer defaults: lowercase=true, remove_stopwords=true, stem=true,
+    // min_token_length=2 (standard English analyzer)
+    Bm25Index idx;
+    idx.create(cfg);
+
+    // "is an a" are all English stopwords → zero indexed terms → term-less doc.
+    ASSERT_TRUE(idx.add_document(rid(11, 0), "is an a").has_value());
+    // "database" → real term.
+    ASSERT_TRUE(idx.add_document(rid(11, 1), "database").has_value());
+    EXPECT_EQ(idx.doc_count(), 2u);
+
+    auto [fid1, bpm1] = create_bpm("gdb841_stats");
+    auto meta = Bm25Index::persist(*bpm1, idx);
+    ASSERT_TRUE(meta.has_value()) << meta.error().message;
+    bpm1.reset();
+    (void)dm_->close_file(fid1);
+
+    auto [fid2, bpm2] = open_bpm("gdb841_stats");
+    auto loaded = Bm25Index::load(*bpm2, *meta);
+    ASSERT_TRUE(loaded.has_value()) << loaded.error().message;
+    EXPECT_EQ((*loaded)->doc_count(), 2u);
+
+    // Remove the term-less doc; this must be a real removal, not a no-op.
+    ASSERT_TRUE((*loaded)->remove_document(rid(11, 0)).has_value());
+    EXPECT_EQ((*loaded)->doc_count(), 1u);
+
+    // After removal N=1, df=1, dl=1 (one term), avgdl=1.
+    // BM25 score = idf * (tf*(k1+1)) / (tf + k1*(1-b+b*dl/avgdl))
+    //   idf  = ln(1 + (1 - 1 + 0.5)/(1 + 0.5)) = ln(1 + 0.5/1.5) = ln(1.333...)
+    //   tf   = 1
+    //   denom= 1 + 1.2*(1 - 0.75 + 0.75*1) = 1 + 1.2*1 = 2.2
+    //   score= ln(4/3) * (1*2.2) / 2.2 = ln(4/3) ≈ 0.28768
+    const double expected_score = std::log(1.0 + 0.5 / 1.5);
+
+    auto hits = (*loaded)->search("database", 10);
+    ASSERT_EQ(hits.size(), 1u);
+    EXPECT_EQ(hits[0].rid, rid(11, 1));
+    EXPECT_NEAR(static_cast<double>(hits[0].score), expected_score, 1e-4);
+}
+
+// GDB-841 regression: without the fix, a term-less doc is never removed from
+// doc_lengths_, so doc_count() stays 2 and avgdl is inflated, corrupting BM25
+// scores even when the caller explicitly deletes the doc.
+TEST_F(Bm25IndexTest, GDB841_PhantomTermlessDocNotCountedAfterRemoval) {
+    Bm25Config cfg = termless_doc_config();
+    Bm25Index idx;
+    idx.create(cfg);
+
+    ASSERT_TRUE(idx.add_document(rid(12, 0), "short words here").has_value()); // term-less
+    EXPECT_EQ(idx.doc_count(), 1u);
+
+    auto [fid1, bpm1] = create_bpm("gdb841_phantom");
+    auto meta = Bm25Index::persist(*bpm1, idx);
+    ASSERT_TRUE(meta.has_value()) << meta.error().message;
+    bpm1.reset();
+    (void)dm_->close_file(fid1);
+
+    auto [fid2, bpm2] = open_bpm("gdb841_phantom");
+    auto loaded = Bm25Index::load(*bpm2, *meta);
+    ASSERT_TRUE(loaded.has_value()) << loaded.error().message;
+
+    // Pre-condition: doc_count must be 1 immediately after reload.
+    EXPECT_EQ((*loaded)->doc_count(), 1u);
+
+    // Remove: must go from 1 → 0, not be a no-op.
+    ASSERT_TRUE((*loaded)->remove_document(rid(12, 0)).has_value());
+    EXPECT_EQ((*loaded)->doc_count(), 0u);
+
+    // Index is now empty; avg_doc_length must also be 0.
+    EXPECT_DOUBLE_EQ((*loaded)->avg_doc_length(), 0.0);
 }
