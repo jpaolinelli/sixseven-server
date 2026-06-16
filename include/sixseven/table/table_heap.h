@@ -224,7 +224,10 @@ private:
 
     /// Hint: last page we successfully inserted into.
     /// Speeds up sequential inserts by avoiding full scans.
-    PageId last_insert_page_ = 0;
+    /// Accessed by concurrent insert() callers; atomic with relaxed ordering
+    /// is sufficient because this is only a placement hint — a stale or torn
+    /// read produces a wrong-but-validated page id, not corruption.
+    std::atomic<PageId> last_insert_page_{0};
 
     /// Live row count, incremented on insert, decremented on delete.
     /// TODO(GDB-616): When txn integration is done, rollback must compensate
