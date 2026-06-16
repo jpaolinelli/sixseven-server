@@ -259,6 +259,10 @@ Result<std::string> SecretsManager::decrypt(const std::string& encrypted) const 
 
     EVP_CIPHER_CTX_free(ctx);
 
+    if (!success) {
+        return make_error(StatusCode::INTERNAL_ERROR, "AES-256-GCM decryption failed");
+    }
+
     plaintext.resize(static_cast<size_t>(plaintext_len));
     return ok(std::move(plaintext));
 }
