@@ -154,11 +154,14 @@ TEST(QA_Distance, CosineWithInfinityInput) {
     std::vector<float> a = {inf, 0.0F};
     std::vector<float> b = {1.0F, 1.0F};
     float d = compute_distance(DistanceMetric::COSINE, a, b);
-    // norm_a = inf, norm_b = finite, denom = inf*finite = inf, sqrt(inf) = inf
-    // dot = inf*1 + 0*1 = inf, similarity = inf/inf = NaN
-    // Result should be NaN (mathematically undefined).
-    EXPECT_FALSE(std::isnan(d) && std::isinf(d))
-        << "Cosine with Inf: expect NaN or valid float, got " << d;
+    // Math trace: dot = inf*1 + 0*1 = inf; norm_a = inf^2 + 0 = inf;
+    // norm_b = 1 + 1 = 2; denom = sqrt(inf * 2) = inf;
+    // similarity = inf / inf = NaN (IEEE 754 indeterminate form).
+    // The implementation detects isnan(similarity) and returns it directly.
+    // This test MUST fail if the implementation changes to return a finite
+    // value (which would be silently wrong) — no tautology guard here.
+    EXPECT_TRUE(std::isnan(d))
+        << "Cosine with Inf input: expected NaN (inf/inf is indeterminate), got " << d;
 }
 
 // =============================================================================
