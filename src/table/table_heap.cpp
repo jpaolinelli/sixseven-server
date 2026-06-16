@@ -214,39 +214,68 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data, txn_id_t xmin
         }
     }
 
-    // No existing page has room — allocate a new one.
-    auto new_page_result = bpm_.new_page();
-    if (!new_page_result) {
-        return tl::unexpected(new_page_result.error());
-    }
-
-    Page* new_page = *new_page_result;
-    PageId new_pid = new_page->page_id();
-
-    auto slot = new_page->insert_tuple(on_page);
-    if (!slot) {
-        // Tuple too large for an empty page.
-        auto unpin = bpm_.unpin_page(new_pid, false);
-        if (!unpin) {
-            SIXSEVEN_LOG_WARN("unpin failed after insert_tuple error on page {}: {}",
-                              new_pid,
-                              unpin.error().message);
+    // No existing page has room — allocate a new one and retry in a bounded
+    // loop.  Under concurrency, a newly allocated page may be filled by another
+    // thread before we pin it (GDB-1267: the "not enough free space" race that
+    // silently dropped rows).  If that happens we simply allocate another fresh
+    // page and try again.  The loop is bounded by kMaxAllocRetries; genuine
+    // IO/capacity errors still propagate immediately.
+    static constexpr int kMaxAllocRetries = 64;
+    for (int retry = 0; retry < kMaxAllocRetries; ++retry) {
+        auto new_page_result = bpm_.new_page();
+        if (!new_page_result) {
+            return tl::unexpected(new_page_result.error());
         }
-        return tl::unexpected(slot.error());
+
+        Page* new_page = *new_page_result;
+        PageId new_pid = new_page->page_id();
+
+        auto slot = new_page->insert_tuple(on_page);
+        if (!slot) {
+            // Distinguish "tuple too large for an empty page" (unrecoverable)
+            // from "another thread won the race and filled this page" (retry).
+            // A newly allocated page should be empty, so any failure here means
+            // the tuple is physically too large.  However, under concurrency
+            // another thread may have fetched the same page (via hint or its
+            // own new_page race) and inserted before us.  We detect this by
+            // checking whether the error is INVALID_ARGUMENT (space); all other
+            // errors are propagated immediately.
+            bool space_error = (slot.error().code == StatusCode::INVALID_ARGUMENT);
+            auto unpin = bpm_.unpin_page(new_pid, false);
+            if (!unpin) {
+                SIXSEVEN_LOG_WARN("unpin failed after insert_tuple error on page {}: {}",
+                                  new_pid,
+                                  unpin.error().message);
+            }
+            if (!space_error) {
+                return tl::unexpected(slot.error());
+            }
+            // Space error on a supposedly-fresh page: another thread raced us.
+            // Loop and allocate yet another page.
+            SIXSEVEN_LOG_DEBUG(
+                "GDB-1267: insert_tuple page {} filled by concurrent thread, retrying (attempt "
+                "{})",
+                new_pid,
+                retry + 1);
+            continue;
+        }
+
+        ++row_count_;
+        persist_row_count();
+        last_insert_page_.store(new_pid, std::memory_order_relaxed);
+        RID rid{new_pid, *slot};
+        log_wal(WalRecordType::INSERT, rid, xmin, {}, on_page);
+
+        auto unpin = bpm_.unpin_page(new_pid, true);
+        if (!unpin) {
+            return tl::unexpected(unpin.error());
+        }
+
+        return ok(rid);
     }
 
-    ++row_count_;
-    persist_row_count();
-    last_insert_page_.store(new_pid, std::memory_order_relaxed);
-    RID rid{new_pid, *slot};
-    log_wal(WalRecordType::INSERT, rid, xmin, {}, on_page);
-
-    auto unpin = bpm_.unpin_page(new_pid, true);
-    if (!unpin) {
-        return tl::unexpected(unpin.error());
-    }
-
-    return ok(rid);
+    return make_error(StatusCode::INTERNAL_ERROR,
+                      "insert_tuple: exceeded retry limit — concurrent page contention");
 }
 
 Result<std::vector<RID>>
@@ -724,9 +753,16 @@ void TableHeap::adjust_row_count(int64_t delta) {
     if (delta >= 0) {
         row_count_.fetch_add(static_cast<uint64_t>(delta), std::memory_order_relaxed);
     } else {
+        // Negative delta: clamp at zero without going below.  A simple
+        // load-compute-store would race with concurrent callers (GDB-1267).
+        // Use a CAS loop so every decrement is applied atomically.
         uint64_t dec = static_cast<uint64_t>(-delta);
         uint64_t current = row_count_.load(std::memory_order_relaxed);
-        row_count_.store(current >= dec ? current - dec : 0, std::memory_order_relaxed);
+        uint64_t desired;
+        do {
+            desired = current >= dec ? current - dec : 0;
+        } while (!row_count_.compare_exchange_weak(
+            current, desired, std::memory_order_relaxed, std::memory_order_relaxed));
     }
     persist_row_count();
 }
