@@ -1060,7 +1060,7 @@ bool Catalog::is_virtual_schema(const std::string& schema_name) {
 
 bool Catalog::is_virtual_table(table_id_t id) const {
     std::lock_guard lock(mu_);
-    return virtual_table_id_set_.count(id) > 0;
+    return virtual_table_id_set_.contains(id);
 }
 
 } // namespace sixseven
