@@ -35,10 +35,8 @@ static TableSchema make_schema_836(const std::string& name,
     return schema;
 }
 
-static CatalogColumnDef make_col_836(int32_t ordinal,
-                                     const std::string& name,
-                                     TypeId type,
-                                     bool nullable = true) {
+static CatalogColumnDef
+make_col_836(int32_t ordinal, const std::string& name, TypeId type, bool nullable = true) {
     return {ordinal, name, type, nullable, ""};
 }
 
@@ -111,8 +109,7 @@ TEST(QA_GDB836_DupColValidation, RejectedCreateLeavesNoDanglingTableId) {
 
     // "orphan_test" must not be discoverable by name.
     auto by_name = catalog.get_table(default_database_id, "orphan_test");
-    EXPECT_FALSE(by_name.has_value())
-        << "Rejected table must not appear in get_table lookup";
+    EXPECT_FALSE(by_name.has_value()) << "Rejected table must not appear in get_table lookup";
 }
 
 /// Duplicate of the FIRST and LAST column (wide schema, dup at position 0 and N-1).
@@ -121,15 +118,15 @@ TEST(QA_GDB836_DupColValidation, DuplicateFirstAndLastColumn) {
     bootstrap_qa_catalog(catalog);
 
     std::vector<CatalogColumnDef> cols;
-    cols.push_back(make_col_836(0, "anchor", TypeId::INT32));  // first
+    cols.push_back(make_col_836(0, "anchor", TypeId::INT32)); // first
     cols.push_back(make_col_836(1, "mid1", TypeId::STRING));
     cols.push_back(make_col_836(2, "mid2", TypeId::FLOAT64));
     cols.push_back(make_col_836(3, "mid3", TypeId::BOOL));
-    cols.push_back(make_col_836(4, "anchor", TypeId::INT64));  // last = dup of first
+    cols.push_back(make_col_836(4, "anchor", TypeId::INT64)); // last = dup of first
 
-    auto result = catalog.create_table(default_database_id, make_schema_836("first_last_dup", cols));
-    ASSERT_FALSE(result.has_value())
-        << "Duplicate of first and last column must be rejected";
+    auto result =
+        catalog.create_table(default_database_id, make_schema_836("first_last_dup", cols));
+    ASSERT_FALSE(result.has_value()) << "Duplicate of first and last column must be rejected";
     EXPECT_EQ(result.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -143,10 +140,8 @@ TEST(QA_GDB836_DupColValidation, AllColumnsIdenticalNames) {
         cols.push_back(make_col_836(i, "same", TypeId::INT32));
     }
 
-    auto result =
-        catalog.create_table(default_database_id, make_schema_836("all_same", cols));
-    ASSERT_FALSE(result.has_value())
-        << "Five columns all named 'same' must be rejected";
+    auto result = catalog.create_table(default_database_id, make_schema_836("all_same", cols));
+    ASSERT_FALSE(result.has_value()) << "Five columns all named 'same' must be rejected";
     EXPECT_EQ(result.error().code, StatusCode::ALREADY_EXISTS);
 }
 
@@ -179,11 +174,9 @@ TEST(QA_GDB836_DupColValidation, GenuinelyDistinctColumnNamesAccepted) {
     cols.push_back(make_col_836(2, "col_c", TypeId::FLOAT64));
     cols.push_back(make_col_836(3, "col_d", TypeId::BOOL));
 
-    auto result =
-        catalog.create_table(default_database_id, make_schema_836("valid_table", cols));
-    ASSERT_TRUE(result.has_value())
-        << "Distinct column names must be accepted; error: "
-        << (result.has_value() ? "" : result.error().message);
+    auto result = catalog.create_table(default_database_id, make_schema_836("valid_table", cols));
+    ASSERT_TRUE(result.has_value()) << "Distinct column names must be accepted; error: "
+                                    << (result.has_value() ? "" : result.error().message);
 
     // Table should be findable.
     auto t = catalog.get_table(default_database_id, "valid_table");
@@ -200,10 +193,9 @@ TEST(QA_GDB836_DupColValidation, ErrorMessageNamesTheDuplicateColumn) {
     std::vector<CatalogColumnDef> cols;
     cols.push_back(make_col_836(0, "alpha", TypeId::INT32));
     cols.push_back(make_col_836(1, "beta", TypeId::STRING));
-    cols.push_back(make_col_836(2, "alpha", TypeId::FLOAT64));  // dup
+    cols.push_back(make_col_836(2, "alpha", TypeId::FLOAT64)); // dup
 
-    auto result =
-        catalog.create_table(default_database_id, make_schema_836("err_msg_table", cols));
+    auto result = catalog.create_table(default_database_id, make_schema_836("err_msg_table", cols));
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::ALREADY_EXISTS);
 
@@ -222,10 +214,8 @@ TEST(QA_GDB836_DupColValidation, SingleColumnNoDuplicate) {
     std::vector<CatalogColumnDef> cols;
     cols.push_back(make_col_836(0, "id", TypeId::INT32));
 
-    auto result =
-        catalog.create_table(default_database_id, make_schema_836("single_col", cols));
-    ASSERT_TRUE(result.has_value())
-        << "Single-column table must be accepted";
+    auto result = catalog.create_table(default_database_id, make_schema_836("single_col", cols));
+    ASSERT_TRUE(result.has_value()) << "Single-column table must be accepted";
 }
 
 /// Zero-column table: no columns => no possible duplicate; must succeed
@@ -235,8 +225,7 @@ TEST(QA_GDB836_DupColValidation, ZeroColumnNoDuplicate) {
     bootstrap_qa_catalog(catalog);
 
     // No columns at all.
-    auto result =
-        catalog.create_table(default_database_id, make_schema_836("zero_col"));
+    auto result = catalog.create_table(default_database_id, make_schema_836("zero_col"));
     // The duplicate check must not crash or spuriously reject a zero-column schema.
     // We do not prescribe success vs. failure (no-column tables may be illegal),
     // but the error code must NOT be ALREADY_EXISTS.
@@ -258,10 +247,9 @@ TEST(QA_GDB836_DupColValidation, DuplicateDeepInLargeColumnList) {
         cols.push_back(make_col_836(i, "col_" + std::to_string(i), TypeId::INT32));
     }
     // Two more with the same name as the very first one.
-    cols.push_back(make_col_836(98, "col_0", TypeId::STRING));  // dup of index 0
+    cols.push_back(make_col_836(98, "col_0", TypeId::STRING)); // dup of index 0
 
-    auto result =
-        catalog.create_table(default_database_id, make_schema_836("deep_dup", cols));
+    auto result = catalog.create_table(default_database_id, make_schema_836("deep_dup", cols));
     ASSERT_FALSE(result.has_value())
         << "Duplicate at column index 98 (matching index 0) must be caught";
     EXPECT_EQ(result.error().code, StatusCode::ALREADY_EXISTS);
