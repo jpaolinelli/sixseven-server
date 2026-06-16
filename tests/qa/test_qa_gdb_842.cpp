@@ -363,5 +363,261 @@ TEST_F(QA_GDB842_ShortestPath, StressNoPathAmongCollidingPairs) {
         << "no edge users(1)->posts(1) — fabricated path via pk collision must not appear";
 }
 
+// ---------------------------------------------------------------------------
+// Adversarial: DIRECTION BOTH on HOMOGENEOUS edge must NOT be rejected
+// ---------------------------------------------------------------------------
+
+// DIRECTION BOTH is only banned for heterogeneous edges. Homogeneous edges
+// (same source and target table) must still accept DIRECTION BOTH.
+TEST_F(QA_GDB842_ShortestPath, DirectionBothHomogeneousIsAccepted) {
+    // users(1) -follows-> users(2)
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+
+    // DIRECTION BOTH on a homogeneous edge: must succeed and return a path.
+    auto result =
+        engine_->execute("SHORTEST PATH FROM users(1) TO users(2) VIA follows DIRECTION BOTH");
+    EXPECT_TRUE(result.has_value())
+        << "DIRECTION BOTH on homogeneous edge must be accepted, got error: "
+        << (result.has_value() ? "" : result.error().message);
+    if (result.has_value()) {
+        auto nodes = path_nodes(*result);
+        ASSERT_EQ(nodes.size(), 2u) << "1-hop BOTH homogeneous path must return 2 rows";
+        EXPECT_EQ(nodes[0], 1);
+        EXPECT_EQ(nodes[1], 2);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial: max_depth = 1 cuts off longer paths
+// ---------------------------------------------------------------------------
+
+// Graph: users(1) -follows-> users(2) -follows-> users(3).
+// With MAX_DEPTH 1 only direct 1-hop neighbours are in range, so users(1) to
+// users(3) should return empty (2 hops needed).
+TEST_F(QA_GDB842_ShortestPath, MaxDepthOneCutsLongerPath) {
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(2) TO users(3) VIA follows");
+
+    // MAX_DEPTH 1 means only nodes reachable in 1 hop -- users(3) needs 2.
+    auto qr = exec_ok("SHORTEST PATH FROM users(1) TO users(3) VIA follows MAX_DEPTH 1");
+    EXPECT_TRUE(qr.rows.empty()) << "with MAX_DEPTH 1, a 2-hop path must not be returned";
+}
+
+// max_depth exactly at the path length must succeed.
+TEST_F(QA_GDB842_ShortestPath, MaxDepthExactlyAtPathLength) {
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(2) TO users(3) VIA follows");
+
+    // MAX_DEPTH 2: the 2-hop path is within budget.
+    auto qr = exec_ok("SHORTEST PATH FROM users(1) TO users(3) VIA follows MAX_DEPTH 2");
+    auto nodes = path_nodes(qr);
+    ASSERT_EQ(nodes.size(), 3u) << "MAX_DEPTH 2 must return the 2-hop path";
+    EXPECT_EQ(nodes[0], 1);
+    EXPECT_EQ(nodes[1], 2);
+    EXPECT_EQ(nodes[2], 3);
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial: multiple edges between the same pair
+// ---------------------------------------------------------------------------
+
+// Two edges users(1)->users(2) must not produce duplicate rows or crash.
+TEST_F(QA_GDB842_ShortestPath, MultipleEdgesSamePairNoDuplicatePathRows) {
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+
+    auto qr = exec_ok("SHORTEST PATH FROM users(1) TO users(2) VIA follows");
+    auto nodes = path_nodes(qr);
+    // Must be exactly a 1-hop path, not two paths or a zero-hop path.
+    ASSERT_EQ(nodes.size(), 2u) << "duplicate edge must not produce duplicated path rows; got "
+                                << nodes.size();
+    EXPECT_EQ(nodes[0], 1);
+    EXPECT_EQ(nodes[1], 2);
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial: cycles in homogeneous graph
+// ---------------------------------------------------------------------------
+
+// Graph with a cycle: users(1)->users(2)->users(3)->users(1).
+// Shortest path from users(1) to users(3) should be 2 hops (not loop
+// forever or stack overflow).
+TEST_F(QA_GDB842_ShortestPath, CycleInHomogeneousGraphNoInfiniteLoop) {
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(2) TO users(3) VIA follows");
+    exec_ok("LINK users(3) TO users(1) VIA follows");
+
+    auto qr = exec_ok("SHORTEST PATH FROM users(1) TO users(3) VIA follows");
+    auto nodes = path_nodes(qr);
+    ASSERT_EQ(nodes.size(), 3u) << "cycle graph: expect 2-hop path (3 nodes)";
+    EXPECT_EQ(nodes[0], 1);
+    EXPECT_EQ(nodes[1], 2);
+    EXPECT_EQ(nodes[2], 3);
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial: chains where EVERY node shares the same PK across tables
+// ---------------------------------------------------------------------------
+
+// The hardest NodeId discrimination stress: every user and post shares the
+// SAME pk value (pk=1) across tables. Only one edge exists: users(1)->posts(1).
+// The trivial-case check must NOT fire (different tables), and the single
+// direct 1-hop path must be returned.
+TEST_F(QA_GDB842_ShortestPath, EveryNodeSamePkAcrossTablesStress) {
+    exec_ok("INSERT INTO posts VALUES (1, 'Post One')");
+    exec_ok("LINK users(1) TO posts(1) VIA authored");
+
+    // After the fix: NodeId{users,1} != NodeId{posts,1} → correct 1-hop path.
+    auto qr = exec_ok("SHORTEST PATH FROM users(1) TO posts(1) VIA authored");
+    auto nodes = path_nodes(qr);
+    ASSERT_EQ(nodes.size(), 2u)
+        << "same-pk across tables: must return 1-hop path (2 rows), not zero-hop (1 row) "
+           "or empty; got "
+        << nodes.size();
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 0) << "hop of first row must be 0";
+    EXPECT_EQ(val_to_int64(qr.rows[1][1]), 1) << "hop of second row must be 1";
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial: heterogeneous no-path with colliding PKs at every position
+// ---------------------------------------------------------------------------
+
+// users(1..5) and posts(1..5) all exist with matching PKs.
+// edges: users(i)->posts(i+1) only (shifted). So users(1)->posts(1) has no
+// direct edge AND no indirect path (posts nodes have no outgoing authored edges).
+// The BFS must not fabricate a meeting point through any pk collision.
+TEST_F(QA_GDB842_ShortestPath, ShiftedEdgesNoPathWithPervasiveCollisions) {
+    for (int64_t i = 1; i <= 5; ++i) {
+        exec_ok("INSERT INTO posts VALUES (" + std::to_string(i) + ", 'P" + std::to_string(i) +
+                "')");
+    }
+    for (int64_t i = 4; i <= 5; ++i) {
+        exec_ok("INSERT INTO users VALUES (" + std::to_string(i) + ", 'U" + std::to_string(i) +
+                "')");
+    }
+    // users(i) -> posts(i+1), so no user links to the post with the same pk.
+    for (int64_t i = 1; i <= 4; ++i) {
+        exec_ok("LINK users(" + std::to_string(i) + ") TO posts(" + std::to_string(i + 1) +
+                ") VIA authored");
+    }
+
+    // No path from users(1) to posts(1): the only edge from users(1) leads to
+    // posts(2), and posts(2) has no further authored edges.
+    auto qr = exec_ok("SHORTEST PATH FROM users(1) TO posts(1) VIA authored");
+    EXPECT_TRUE(qr.rows.empty())
+        << "shifted edges: no path to posts(1), pk collisions must not fabricate one";
+
+    // Verify that users(1)->posts(2) IS reachable (sanity check the graph setup).
+    auto qr2 = exec_ok("SHORTEST PATH FROM users(1) TO posts(2) VIA authored");
+    ASSERT_EQ(path_nodes(qr2).size(), 2u) << "users(1)->posts(2) must be 1-hop reachable";
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial: path reconstruction correctness — exact node sequence
+// ---------------------------------------------------------------------------
+
+// 3-node homogeneous chain: verify the node sequence IS [1,2,3] and not
+// reversed, not [1,3] (skipped), not [2] (off-by-one in hop numbering).
+TEST_F(QA_GDB842_ShortestPath, PathReconstructionExactSequenceHomogeneous) {
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(2) TO users(3) VIA follows");
+
+    auto qr = exec_ok("SHORTEST PATH FROM users(1) TO users(3) VIA follows");
+    ASSERT_EQ(qr.rows.size(), 3u) << "2-hop chain must emit exactly 3 rows";
+
+    // Hop column (col 1) must be monotonically increasing 0,1,2.
+    for (size_t i = 0; i < qr.rows.size(); ++i) {
+        EXPECT_EQ(val_to_int64(qr.rows[i][1]), static_cast<int64_t>(i))
+            << "hop value at row " << i << " must be " << i;
+    }
+    auto nodes = path_nodes(qr);
+    EXPECT_EQ(nodes[0], 1) << "first node in path";
+    EXPECT_EQ(nodes[1], 2) << "intermediate node in path";
+    EXPECT_EQ(nodes[2], 3) << "last node in path";
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial: empty graph (no edges at all) returns empty, not crash
+// ---------------------------------------------------------------------------
+
+TEST_F(QA_GDB842_ShortestPath, EmptyGraphNoEdgesReturnsEmpty) {
+    // No LINK statements — graph has nodes but zero edges.
+    auto qr = exec_ok("SHORTEST PATH FROM users(1) TO users(2) VIA follows");
+    EXPECT_TRUE(qr.rows.empty()) << "empty graph with no edges must return empty result, not crash";
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial: from == to on heterogeneous edge where both tables have pk=5
+// ---------------------------------------------------------------------------
+
+// Asking for SHORTEST PATH FROM users(5) TO users(5) VIA follows (homogeneous):
+// same table AND same pk — valid 0-hop. Must return 1 row at hop=0.
+TEST_F(QA_GDB842_ShortestPath, HomogeneousSameNodePk5TrivialCase) {
+    exec_ok("INSERT INTO users VALUES (5, 'Eve')");
+    auto qr = exec_ok("SHORTEST PATH FROM users(5) TO users(5) VIA follows");
+    ASSERT_EQ(qr.rows.size(), 1u) << "same-node trivial case must return exactly 1 row";
+    EXPECT_EQ(val_to_int64(qr.rows[0][0]), 5) << "node pk must be 5";
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 0) << "hop must be 0";
+}
+
+// Asking for SHORTEST PATH FROM users(5) TO posts(5) VIA authored (heterogeneous):
+// different tables, same pk — must NOT be treated as trivial zero-hop.
+TEST_F(QA_GDB842_ShortestPath, HeterogeneousDifferentTableSamePkNotTrivial) {
+    exec_ok("INSERT INTO users VALUES (5, 'Eve')");
+    exec_ok("INSERT INTO posts VALUES (5, 'Post Five')");
+    // No edge between them.
+    auto qr = exec_ok("SHORTEST PATH FROM users(5) TO posts(5) VIA authored");
+    EXPECT_TRUE(qr.rows.empty())
+        << "users(5) != posts(5): different tables, so no trivial zero-hop path";
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial: unreachable target returns empty (not crash or wrong path)
+// ---------------------------------------------------------------------------
+
+TEST_F(QA_GDB842_ShortestPath, UnreachableTargetInHomogeneousGraph) {
+    // users(1)->users(2) but users(3) is isolated.
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    auto qr = exec_ok("SHORTEST PATH FROM users(1) TO users(3) VIA follows");
+    EXPECT_TRUE(qr.rows.empty()) << "isolated target must yield empty result";
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial: IN direction with PK collision stress
+// ---------------------------------------------------------------------------
+
+// users(1) authored posts(1). Reverse direction: SHORTEST PATH FROM posts(1)
+// TO users(1) VIA authored DIRECTION IN — must give 1-hop path, not zero-hop.
+TEST_F(QA_GDB842_ShortestPath, InDirectionSamePkCollisionNotTrivial) {
+    exec_ok("INSERT INTO posts VALUES (1, 'Post One')");
+    exec_ok("LINK users(1) TO posts(1) VIA authored");
+
+    auto qr = exec_ok("SHORTEST PATH FROM posts(1) TO users(1) VIA authored DIRECTION IN");
+    auto nodes = path_nodes(qr);
+    // posts(1) and users(1) share pk=1 but are different tables: must be 1-hop.
+    ASSERT_EQ(nodes.size(), 2u)
+        << "DIRECTION IN same-pk collision: must be 1-hop path, not zero-hop; got " << nodes.size();
+    EXPECT_EQ(nodes[0], 1) << "start: posts(1)";
+    EXPECT_EQ(nodes[1], 1) << "end: users(1)";
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 0) << "first hop must be 0";
+    EXPECT_EQ(val_to_int64(qr.rows[1][1]), 1) << "second hop must be 1";
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial: verify DIRECTION BOTH error message is meaningful (not empty)
+// ---------------------------------------------------------------------------
+
+TEST_F(QA_GDB842_ShortestPath, DirectionBothHeterogeneousErrorMessageNotEmpty) {
+    exec_ok("INSERT INTO posts VALUES (1, 'Post One')");
+    auto result =
+        engine_->execute("SHORTEST PATH FROM users(1) TO posts(1) VIA authored DIRECTION BOTH");
+    ASSERT_FALSE(result.has_value()) << "DIRECTION BOTH on heterogeneous edge must be rejected";
+    EXPECT_FALSE(result.error().message.empty()) << "error message must not be empty";
+    // The message should mention the edge type or the problem.
+    // We don't hardcode the exact text, but verify it is informative.
+    EXPECT_GT(result.error().message.size(), 5u)
+        << "error message is suspiciously short: '" << result.error().message << "'";
+}
+
 } // namespace
 } // namespace sixseven
