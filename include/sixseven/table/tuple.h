@@ -108,8 +108,9 @@ Result<std::vector<Value>> deserialize(std::span<const uint8_t> data, const Sche
 /// Returns the Value at col_index.
 Result<Value> get_field(std::span<const uint8_t> data, const Schema& schema, size_t col_index);
 
-/// Compute the serialized size of a row of Values for the given schema.
-/// Does NOT include a null flag byte per value (unlike the standalone serialization functions).
+/// Compute the serialized byte count for a row of Values under the given schema.
+/// Returns the same total that serialize() uses to allocate its output buffer.
+/// Useful for overflow-routing decisions before calling serialize().
 size_t compute_tuple_size(const std::vector<Value>& values, const Schema& schema);
 
 } // namespace TupleSerializer

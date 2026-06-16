@@ -336,6 +336,30 @@ Value read_var_value(const uint8_t* src, size_t length, TypeId type) {
     }
 }
 
+// Shared sizing helper: computes the total byte count of a serialized tuple.
+// Used by both TupleSerializer::serialize() (to reserve the output buffer) and
+// TupleSerializer::compute_tuple_size() (the public sizing API).  Keeping the
+// math in one place ensures the two callers cannot drift apart.
+size_t tuple_byte_count(const std::vector<Value>& values, const Schema& schema) {
+    size_t n = schema.column_count();
+    size_t bitmap_sz = schema.null_bitmap_size();
+    size_t fixed_sz = schema.fixed_region_size();
+    size_t var_table_sz = schema.variable_column_count() * var_entry_size;
+
+    size_t var_data_sz = 0;
+    for (size_t i = 0; i < n && i < values.size(); ++i) {
+        if (values[i].is_null()) {
+            continue;
+        }
+        auto vi = schema.var_field_index(i);
+        if (vi.has_value()) {
+            var_data_sz += var_value_bytes(values[i]).size();
+        }
+    }
+
+    return bitmap_sz + fixed_sz + var_table_sz + var_data_sz;
+}
+
 } // namespace
 
 // -- TupleSerializer ----------------------------------------------------------
@@ -371,24 +395,15 @@ Result<std::vector<uint8_t>> serialize(const std::vector<Value>& values, const S
         }
     }
 
-    // Compute sizes for each region.
+    // Region boundaries — kept as named locals so the write loops below can
+    // compute offsets without re-querying schema methods.
     size_t bitmap_size = schema.null_bitmap_size();
     size_t fixed_size_total = schema.fixed_region_size();
     size_t var_offset_table_size = schema.variable_column_count() * var_entry_size;
 
-    // Compute total variable data size.
-    size_t var_data_size = 0;
-    for (size_t i = 0; i < n; ++i) {
-        if (values[i].is_null()) {
-            continue;
-        }
-        auto vi = schema.var_field_index(i);
-        if (vi.has_value()) {
-            var_data_size += var_value_bytes(values[i]).size();
-        }
-    }
-
-    size_t total = bitmap_size + fixed_size_total + var_offset_table_size + var_data_size;
+    // Delegate total-size calculation to the shared helper so serialize() and
+    // compute_tuple_size() always use the same arithmetic.
+    size_t total = tuple_byte_count(values, schema);
 
     // Guard against uint16_t offset overflow. Variable-length offsets and lengths
     // are stored as uint16_t, so the total tuple size cannot exceed 65,535 bytes.
@@ -594,23 +609,7 @@ Result<Value> get_field(std::span<const uint8_t> data, const Schema& schema, siz
 }
 
 size_t compute_tuple_size(const std::vector<Value>& values, const Schema& schema) {
-    size_t n = schema.column_count();
-    size_t bitmap_size = schema.null_bitmap_size();
-    size_t fixed_total = schema.fixed_region_size();
-    size_t var_table = schema.variable_column_count() * var_entry_size;
-
-    size_t var_data = 0;
-    for (size_t i = 0; i < n && i < values.size(); ++i) {
-        if (values[i].is_null()) {
-            continue;
-        }
-        auto vi = schema.var_field_index(i);
-        if (vi.has_value()) {
-            var_data += var_value_bytes(values[i]).size();
-        }
-    }
-
-    return bitmap_size + fixed_total + var_table + var_data;
+    return tuple_byte_count(values, schema);
 }
 
 } // namespace TupleSerializer
