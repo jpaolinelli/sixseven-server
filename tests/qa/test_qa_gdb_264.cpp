@@ -10,6 +10,7 @@
 #include "sixseven/parser/parser.h"
 #include "sixseven/planner/binder.h"
 #include "sixseven/planner/type_resolver.h"
+#include "test_qa_helpers.h"
 
 #include <gtest/gtest.h>
 
@@ -28,6 +29,8 @@ protected:
     std::unique_ptr<Binder> binder;
 
     void SetUp() override {
+        bootstrap_qa_catalog(catalog);
+
         // Table: users(id INT32 PK, name STRING, email STRING, age INT32, active BOOL)
         {
             TableSchema s;
@@ -663,12 +666,12 @@ TEST_F(QA_GDB264, CombineTargetMetaAndEdgeProperty) {
 }
 
 // =============================================================================
-// WHERE clause: non-meta column should fail in TRAVERSE WHERE
+// WHERE clause: non-meta column is allowed in TRAVERSE WHERE (enriched scope)
 // =============================================================================
 
-TEST_F(QA_GDB264, WhereExprWithNonMetaColumnFails) {
+TEST_F(QA_GDB264, WhereExprWithNonMetaColumnSucceeds) {
     // GDB-265 changed the WHERE scope to include enriched target table columns
-    // (not just meta-columns).  "name" is a users column, so it now binds
+    // (not just meta-columns).  "name" is a users column, so it binds
     // successfully in the enriched scope.
     auto bound =
         bind_ok("SELECT id FROM TRAVERSE follows FROM users(1) DIRECTION OUT WHERE name = 'alice'");
