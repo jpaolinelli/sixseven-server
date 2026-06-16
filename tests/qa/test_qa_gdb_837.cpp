@@ -45,7 +45,7 @@ protected:
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
-        engine_  = std::make_unique<QueryEngine>(catalog_, *storage_);
+        engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
     }
 
     void TearDown() override {
@@ -56,8 +56,8 @@ protected:
 
     QueryResult exec_ok(const std::string& sql) {
         auto r = engine_->execute(sql);
-        EXPECT_TRUE(r.has_value()) << "[exec_ok] SQL: " << sql
-                                   << "\n  error: " << (r ? "" : r.error().message);
+        EXPECT_TRUE(r.has_value())
+            << "[exec_ok] SQL: " << sql << "\n  error: " << (r ? "" : r.error().message);
         return r ? std::move(*r) : QueryResult{};
     }
 
@@ -103,7 +103,8 @@ TEST_F(QA_GDB837, OuterNullInNonNullSet_IsFiltered) {
     // 5 IN (5, 10) → TRUE → row passes.
     auto qr = exec_ok("SELECT id FROM outer_null_in WHERE id IN (SELECT v FROM values_set)");
     // Only id=5 should be returned; the NULL row is UNKNOWN → filtered.
-    ASSERT_EQ(qr.rows.size(), 1u) << "NULL outer IN non-null subquery must yield UNKNOWN (filtered)";
+    ASSERT_EQ(qr.rows.size(), 1u)
+        << "NULL outer IN non-null subquery must yield UNKNOWN (filtered)";
     EXPECT_EQ(qr.rows[0][0].as_int32(), 5);
 }
 
@@ -122,7 +123,8 @@ TEST_F(QA_GDB837, OuterNullNotInNonNullSet_IsFiltered) {
     // 7 NOT IN (99) → TRUE → passes.
     auto qr = exec_ok("SELECT id FROM outer_null_notin WHERE id NOT IN (SELECT v FROM excl_set)");
     // Only ids 3 and 7 should appear.
-    ASSERT_EQ(qr.rows.size(), 2u) << "NULL outer NOT IN non-null subquery must yield UNKNOWN (filtered)";
+    ASSERT_EQ(qr.rows.size(), 2u)
+        << "NULL outer NOT IN non-null subquery must yield UNKNOWN (filtered)";
     auto ids = col0_sorted(qr);
     EXPECT_EQ(ids[0], 3);
     EXPECT_EQ(ids[1], 7);
@@ -140,7 +142,8 @@ TEST_F(QA_GDB837, OuterNullNotInEmptySet_Passes) {
     // NULL NOT IN () → TRUE (empty set, vacuously not in).
     // 42 NOT IN () → TRUE.
     // Both rows should pass.
-    auto qr = exec_ok("SELECT id FROM outer_null_notin_empty WHERE id NOT IN (SELECT v FROM empty_excl)");
+    auto qr =
+        exec_ok("SELECT id FROM outer_null_notin_empty WHERE id NOT IN (SELECT v FROM empty_excl)");
     EXPECT_EQ(qr.rows.size(), 2u) << "NOT IN empty set must return all rows including NULLs";
 }
 
@@ -206,8 +209,8 @@ TEST_F(QA_GDB837, InSubqueryWithDuplicatesNoDoubleCounting) {
 
     exec_ok("CREATE TABLE dup_sub (v INT)");
     exec_ok("INSERT INTO dup_sub VALUES (2)");
-    exec_ok("INSERT INTO dup_sub VALUES (2)");  // duplicate
-    exec_ok("INSERT INTO dup_sub VALUES (2)");  // triple
+    exec_ok("INSERT INTO dup_sub VALUES (2)"); // duplicate
+    exec_ok("INSERT INTO dup_sub VALUES (2)"); // triple
     exec_ok("INSERT INTO dup_sub VALUES (3)");
 
     // id=2 appears once in outer, subquery has 2 three times. Outer should yield 2 rows: {2, 3}.
@@ -227,11 +230,12 @@ TEST_F(QA_GDB837, NotInSubqueryWithDuplicatesNoDoubleCounting) {
 
     exec_ok("CREATE TABLE dup_excl (v INT)");
     exec_ok("INSERT INTO dup_excl VALUES (20)");
-    exec_ok("INSERT INTO dup_excl VALUES (20)");  // duplicate
+    exec_ok("INSERT INTO dup_excl VALUES (20)"); // duplicate
 
     // 10 NOT IN (20, 20) → TRUE, 20 → FALSE, 30 → TRUE.
     auto qr = exec_ok("SELECT id FROM outer_dup2 WHERE id NOT IN (SELECT v FROM dup_excl)");
-    ASSERT_EQ(qr.rows.size(), 2u) << "Duplicates in NOT IN subquery must not multiply outer result rows";
+    ASSERT_EQ(qr.rows.size(), 2u)
+        << "Duplicates in NOT IN subquery must not multiply outer result rows";
     auto ids = col0_sorted(qr);
     EXPECT_EQ(ids[0], 10);
     EXPECT_EQ(ids[1], 30);
@@ -305,14 +309,13 @@ TEST_F(QA_GDB837, InSubqueryWithWhereClause) {
     exec_ok("INSERT INTO filtered_outer VALUES (3)");
 
     exec_ok("CREATE TABLE filtered_inner (v INT, active INT)");
-    exec_ok("INSERT INTO filtered_inner VALUES (1, 0)");  // inactive
-    exec_ok("INSERT INTO filtered_inner VALUES (2, 1)");  // active
-    exec_ok("INSERT INTO filtered_inner VALUES (3, 0)");  // inactive
+    exec_ok("INSERT INTO filtered_inner VALUES (1, 0)"); // inactive
+    exec_ok("INSERT INTO filtered_inner VALUES (2, 1)"); // active
+    exec_ok("INSERT INTO filtered_inner VALUES (3, 0)"); // inactive
 
     // Subquery: SELECT v FROM filtered_inner WHERE active = 1 → {2}
-    auto qr = exec_ok(
-        "SELECT id FROM filtered_outer "
-        "WHERE id IN (SELECT v FROM filtered_inner WHERE active = 1)");
+    auto qr = exec_ok("SELECT id FROM filtered_outer "
+                      "WHERE id IN (SELECT v FROM filtered_inner WHERE active = 1)");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_int32(), 2);
 }
@@ -329,9 +332,8 @@ TEST_F(QA_GDB837, InSubqueryWithOrderBy) {
     exec_ok("INSERT INTO ord_inner VALUES (1)");
     exec_ok("INSERT INTO ord_inner VALUES (2)");
 
-    auto qr = exec_ok(
-        "SELECT id FROM ord_outer "
-        "WHERE id IN (SELECT v FROM ord_inner ORDER BY v DESC)");
+    auto qr = exec_ok("SELECT id FROM ord_outer "
+                      "WHERE id IN (SELECT v FROM ord_inner ORDER BY v DESC)");
     ASSERT_EQ(qr.rows.size(), 3u) << "ORDER BY in subquery must not affect IN membership";
 }
 
@@ -348,9 +350,8 @@ TEST_F(QA_GDB837, InSubqueryWithLimit) {
     exec_ok("INSERT INTO lim_inner VALUES (3)");
 
     // LIMIT 2 on inner — only 2 values in the set; at most 2 outer rows match.
-    auto qr = exec_ok(
-        "SELECT id FROM lim_outer "
-        "WHERE id IN (SELECT v FROM lim_inner ORDER BY v ASC LIMIT 2)");
+    auto qr = exec_ok("SELECT id FROM lim_outer "
+                      "WHERE id IN (SELECT v FROM lim_inner ORDER BY v ASC LIMIT 2)");
     // Only ids 1 and 2 are in the limited set.
     ASSERT_EQ(qr.rows.size(), 2u) << "LIMIT in subquery must restrict the membership set";
     auto ids = col0_sorted(qr);
@@ -438,11 +439,10 @@ TEST_F(QA_GDB837, NestedInSubquery) {
     // outer IN (inner IN (innermost)):
     //   level1 WHERE v IN (SELECT w FROM level2) → {3}
     //   level0 WHERE id IN ({3}) → {3}
-    auto qr = exec_ok(
-        "SELECT id FROM level0 "
-        "WHERE id IN ("
-        "  SELECT v FROM level1 WHERE v IN (SELECT w FROM level2)"
-        ")");
+    auto qr = exec_ok("SELECT id FROM level0 "
+                      "WHERE id IN ("
+                      "  SELECT v FROM level1 WHERE v IN (SELECT w FROM level2)"
+                      ")");
     // Should return exactly id=3.
     ASSERT_EQ(qr.rows.size(), 1u) << "Nested IN subquery must evaluate correctly";
     EXPECT_EQ(qr.rows[0][0].as_int32(), 3);
@@ -482,8 +482,7 @@ TEST_F(QA_GDB837, CorrelatedInSubquery_DocumentedBehavior) {
         EXPECT_NE(r.error().code, StatusCode::INTERNAL_ERROR)
             << "Correlated IN subquery must not produce INTERNAL_ERROR";
         // Log the actual error for the QA report.
-        GTEST_SKIP() << "Correlated IN subquery returned error (acceptable): "
-                     << r.error().message;
+        GTEST_SKIP() << "Correlated IN subquery returned error (acceptable): " << r.error().message;
     }
 
     // If it returned a result, verify it's not silently wrong.
@@ -521,8 +520,8 @@ TEST_F(QA_GDB837, NotInMixedNullSubquery_Detailed3VL) {
     exec_ok("INSERT INTO three_vl_inner VALUES (5)");
     exec_ok("INSERT INTO three_vl_inner (v) VALUES (NULL)");
 
-    auto qr = exec_ok(
-        "SELECT id FROM three_vl_outer WHERE id NOT IN (SELECT v FROM three_vl_inner)");
+    auto qr =
+        exec_ok("SELECT id FROM three_vl_outer WHERE id NOT IN (SELECT v FROM three_vl_inner)");
     EXPECT_EQ(qr.rows.size(), 0u)
         << "NOT IN with NULL in subquery: 5→FALSE, others→UNKNOWN, result must be 0 rows";
 }
@@ -542,10 +541,8 @@ TEST_F(QA_GDB837, InMixedNullSubquery_Detailed3VL) {
     exec_ok("INSERT INTO in3vl_inner VALUES (5)");
     exec_ok("INSERT INTO in3vl_inner (v) VALUES (NULL)");
 
-    auto qr = exec_ok(
-        "SELECT id FROM in3vl_outer WHERE id IN (SELECT v FROM in3vl_inner)");
-    ASSERT_EQ(qr.rows.size(), 1u)
-        << "IN with NULL in subquery: only the TRUE case (5) should pass";
+    auto qr = exec_ok("SELECT id FROM in3vl_outer WHERE id IN (SELECT v FROM in3vl_inner)");
+    ASSERT_EQ(qr.rows.size(), 1u) << "IN with NULL in subquery: only the TRUE case (5) should pass";
     EXPECT_EQ(qr.rows[0][0].as_int32(), 5);
 }
 
@@ -561,10 +558,10 @@ TEST_F(QA_GDB837, NotInPreciseBoundary_ExactMatchExcluded) {
     }
 
     exec_ok("CREATE TABLE boundary_inner (v INT)");
-    exec_ok("INSERT INTO boundary_inner VALUES (5)");  // only id=5 should be excluded
+    exec_ok("INSERT INTO boundary_inner VALUES (5)"); // only id=5 should be excluded
 
-    auto qr = exec_ok(
-        "SELECT id FROM boundary_outer WHERE id NOT IN (SELECT v FROM boundary_inner)");
+    auto qr =
+        exec_ok("SELECT id FROM boundary_outer WHERE id NOT IN (SELECT v FROM boundary_inner)");
     ASSERT_EQ(qr.rows.size(), 9u) << "NOT IN: exactly one row (id=5) must be excluded";
     auto ids = col0_sorted(qr);
     for (int i = 0; i < 9; ++i) {
