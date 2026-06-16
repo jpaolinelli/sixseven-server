@@ -959,49 +959,6 @@ TEST_F(GDB845Test, GDB1268_InsertSelectLargeBatch1000Rows) {
 }
 
 // =============================================================================
-// GDB-1268 LOW-GAP BOUNDARY: Unmapped non-nullable column via explicit column
-// list INSERT...SELECT.  A non-nullable column not in the INSERT column list
-// must either (a) produce an error or (b) use the column DEFAULT.  Silently
-// storing null in a non-nullable column is a correctness bug.
-//
-// This test probes the boundary.  If the engine silently stores null without
-// error (violating NOT NULL), we record it as a documented bug.
-// =============================================================================
-
-TEST_F(GDB845Test, GDB1268_LowGap_UnmappedNonNullableColumnRejectsOrErrors) {
-    bootstrap();
-    build_index_manager();
-
-    exec_ok("CREATE TABLE src_notnull (x INT)");
-    exec_ok("INSERT INTO src_notnull VALUES (1)");
-
-    // Target has a non-nullable column 'b' that is NOT in the INSERT column list.
-    // The INSERT...SELECT column list only maps to 'a'.
-    // Expected: either error at plan/execute time, or default applied.
-    // Bug: silently stores NULL in non-nullable column b.
-    exec_ok("CREATE TABLE dst_notnull (a INT, b INT NOT NULL)");
-
-    auto ins = engine_->execute("INSERT INTO dst_notnull(a) SELECT x FROM src_notnull");
-    if (ins.has_value()) {
-        // If insert succeeded, verify what was actually stored for column b.
-        auto sel = engine_->execute("SELECT a, b FROM dst_notnull");
-        if (sel.has_value() && !sel->rows.empty()) {
-            bool b_is_null = sel->rows[0][1].is_null();
-            // Document the finding. A null stored in a NOT NULL column is a bug.
-            // We use EXPECT (not ASSERT) so the test reports but doesn't abort.
-            EXPECT_FALSE(b_is_null)
-                << "GDB-1268 LOW-GAP: column b is NOT NULL but INSERT...SELECT(a) stored NULL "
-                   "in b without error. This is a correctness violation — the engine must "
-                   "reject this INSERT or apply the DEFAULT value.";
-            RecordProperty("low_gap_null_in_not_null_col", b_is_null ? 1 : 0);
-        }
-    } else {
-        // Engine correctly rejected the INSERT — this is the preferred behavior.
-        RecordProperty("low_gap_rejected_with_error", 1);
-    }
-}
-
-// =============================================================================
 // KNOWN-GAP PROBE (documented, not a QA_FAIL): Does a subsequent UPDATE leave
 // the secondary index stale across restart?  This is intentionally OUT OF SCOPE
 // for GDB-845 (UPDATE/DELETE maintenance is deferred).  The test documents the

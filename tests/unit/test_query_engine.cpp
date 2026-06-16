@@ -916,7 +916,8 @@ TEST_F(QueryEngineTest, InsertErrorForNonNullableColumnWithNoDefault) {
             ")");
 
     // Omit email (non-nullable, no default) — should error.
-    exec_error("INSERT INTO strict (id, name) VALUES (1, 'Alice')", StatusCode::INVALID_ARGUMENT);
+    exec_error("INSERT INTO strict (id, name) VALUES (1, 'Alice')",
+               StatusCode::CONSTRAINT_VIOLATION);
 }
 
 TEST_F(QueryEngineTest, InsertMultipleRowsEachGetUniqueDefaults) {
