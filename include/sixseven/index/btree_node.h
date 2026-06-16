@@ -136,6 +136,12 @@ public:
     /// Delete the entry with the given key. Returns true if found and deleted.
     [[nodiscard]] Result<bool> remove(const KeyType& key);
 
+    /// Delete the entry matching BOTH key and rid (RID-qualified delete).
+    /// For non-unique trees with duplicate keys, removes only the entry whose
+    /// RID equals @p rid. Scans the full run of matching keys on this leaf.
+    /// Returns true if found and deleted, false if not found.
+    [[nodiscard]] Result<bool> remove(const KeyType& key, const RID& rid);
+
     /// True if the node is full (key_count == max_keys).
     [[nodiscard]] bool is_full() const;
 
