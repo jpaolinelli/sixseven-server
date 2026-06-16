@@ -9,6 +9,12 @@
 // length were read from different points in time because the writer
 // rewrote the slot directory under it. The new page-level shared_mutex
 // serializes the read against the writer so each snapshot is consistent.
+//
+// Design: writer-bounded, NO wall-clock dependence.
+//   - Writer does exactly k_writer_ops state transitions then signals done.
+//   - Reader loops while (!done), asserts every sample is untorn.
+//   - Non-vacuity: EXPECT_EQ(writes, k_writer_ops) + EXPECT_GT(samples, 0).
+//   - No per-state count requirement — that was the racy part removed.
 
 #include "sixseven/storage/page.h"
 
@@ -25,12 +31,17 @@ using namespace std::chrono_literals;
 
 namespace {
 
-// Fill helper — produces a recognizable byte pattern with known length so
-// readers can verify the copy is internally self-consistent.
+// The writer performs exactly this many state transitions per test.
+// 20 000 ops with yield() between each gives the reader ample scheduling
+// opportunities without depending on any wall-clock window.
+constexpr size_t k_writer_ops = 20000;
+
+// Fill helper — produces a self-describing byte pattern: bytes[0] encodes
+// the length so every sample the reader takes can verify it is untorn via
+//   ASSERT_EQ(static_cast<size_t>(bytes[0]), bytes.size())
+// Only meaningful for len < 256; all test lengths are well under that.
 std::vector<uint8_t> patterned_tuple(size_t len, uint8_t tag) {
     std::vector<uint8_t> out(len, tag);
-    // Encode the length in the first byte so readers can double-check.
-    // (Only meaningful for len < 256; the test uses small lengths.)
     out[0] = static_cast<uint8_t>(len & 0xFF);
     return out;
 }
@@ -42,49 +53,64 @@ std::vector<uint8_t> patterned_tuple(size_t len, uint8_t tag) {
 TEST(PageConcurrentLatch, GetTupleReadsStableSnapshotWhileWriterShrinks) {
     Page page(1, PageType::DATA);
 
-    // Seed with a known tuple.
-    auto initial = patterned_tuple(100, 0xAA);
+    // Two valid states the writer alternates between.
+    constexpr size_t size_a = 80;
+    constexpr size_t size_b = 100;
+
+    auto initial = patterned_tuple(size_a, 0xAA);
     auto slot_r = page.insert_tuple(initial);
     ASSERT_TRUE(slot_r.has_value());
     SlotId slot = *slot_r;
 
-    std::atomic<bool> stop{false};
-    std::atomic<size_t> reads{0};
+    std::atomic<bool> done{false};
     std::atomic<size_t> writes{0};
+    std::atomic<size_t> total_samples{0};
 
-    // Writer alternates between two sizes so the in-place path and the
-    // shrink-then-zero path both get exercised.
+    // Writer: exactly k_writer_ops transitions, alternating size_a / size_b.
     std::thread writer([&]() {
-        uint8_t tag = 0x00;
-        while (!stop.load(std::memory_order_relaxed)) {
-            auto t = patterned_tuple(80, tag++);
+        for (size_t i = 0; i < k_writer_ops; ++i) {
+            size_t len = (i % 2 == 0) ? size_a : size_b;
+            auto t = patterned_tuple(len, static_cast<uint8_t>(i));
             (void)page.update_tuple(slot, t);
             writes.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
         }
+        done.store(true, std::memory_order_release);
     });
 
+    // Reader: sample until writer is done; every sample must be untorn.
+    // Generous 60-s hang-guard — should never fire given bounded writer ops.
     std::thread reader([&]() {
-        while (!stop.load(std::memory_order_relaxed)) {
+        auto deadline = std::chrono::steady_clock::now() + 60s;
+        while (!done.load(std::memory_order_acquire)) {
+            if (std::chrono::steady_clock::now() > deadline) {
+                ADD_FAILURE() << "hang-guard fired: writer did not finish";
+                break;
+            }
             auto r = page.get_tuple(slot);
             if (r.has_value()) {
                 const auto& bytes = *r;
-                // Under the latch the copy must match one of the two sizes
-                // the writer is alternating between, never a torn mix.
                 ASSERT_FALSE(bytes.empty());
+                // Self-describing sentinel: bytes[0] must equal the vector
+                // length.  A torn read (offset/length from different writer
+                // states) produces a mismatch here.
                 ASSERT_EQ(static_cast<size_t>(bytes[0]), bytes.size())
                     << "torn read: length byte does not match vector size";
-                reads.fetch_add(1, std::memory_order_relaxed);
+                // Value must be one of the two valid sizes.
+                ASSERT_TRUE(bytes.size() == size_a || bytes.size() == size_b)
+                    << "read unexpected size: " << bytes.size();
+                total_samples.fetch_add(1, std::memory_order_relaxed);
             }
         }
     });
 
-    std::this_thread::sleep_for(300ms);
-    stop.store(true, std::memory_order_relaxed);
     writer.join();
     reader.join();
 
-    EXPECT_GT(reads.load(), 0u);
-    EXPECT_GT(writes.load(), 0u);
+    // Non-vacuity: writer completed all ops (mutation path was exercised).
+    EXPECT_EQ(writes.load(), k_writer_ops);
+    // Reader must have observed at least one sample.
+    EXPECT_GT(total_samples.load(), 0u);
 }
 
 // -- 2. Read races write growing a tuple (reallocates in the page) ----------
@@ -92,72 +118,108 @@ TEST(PageConcurrentLatch, GetTupleReadsStableSnapshotWhileWriterShrinks) {
 TEST(PageConcurrentLatch, GetTupleReadsStableSnapshotWhileWriterGrows) {
     Page page(2, PageType::DATA);
 
-    auto initial = patterned_tuple(40, 0xCC);
+    // Four valid sizes; all <= 255 so bytes[0] encodes length reliably.
+    const std::array<size_t, 4> sizes{40, 60, 80, 50};
+
+    auto initial = patterned_tuple(sizes[0], 0xCC);
     auto slot_r = page.insert_tuple(initial);
     ASSERT_TRUE(slot_r.has_value());
     SlotId slot = *slot_r;
 
-    std::atomic<bool> stop{false};
-    std::atomic<size_t> reads{0};
+    std::atomic<bool> done{false};
+    std::atomic<size_t> writes{0};
+    std::atomic<size_t> total_samples{0};
 
+    // Writer: exactly k_writer_ops transitions, cycling through the 4 sizes.
     std::thread writer([&]() {
-        size_t i = 0;
-        while (!stop.load(std::memory_order_relaxed)) {
-            // Grow the tuple: forces reallocation at the bottom of the page
-            // and rewrites the slot entry. This is the specific scenario
-            // the embedding store callback hits.
-            auto sizes = std::array<size_t, 4>{40, 60, 80, 50};
-            auto len = sizes[i++ % sizes.size()];
+        for (size_t i = 0; i < k_writer_ops; ++i) {
+            size_t len = sizes[i % sizes.size()];
             auto t = patterned_tuple(len, static_cast<uint8_t>(i));
             (void)page.update_tuple(slot, t);
+            writes.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
         }
+        done.store(true, std::memory_order_release);
     });
 
     std::thread reader([&]() {
-        while (!stop.load(std::memory_order_relaxed)) {
+        auto deadline = std::chrono::steady_clock::now() + 60s;
+        while (!done.load(std::memory_order_acquire)) {
+            if (std::chrono::steady_clock::now() > deadline) {
+                ADD_FAILURE() << "hang-guard fired: writer did not finish";
+                break;
+            }
             auto r = page.get_tuple(slot);
             if (r.has_value()) {
                 const auto& bytes = *r;
                 ASSERT_FALSE(bytes.empty());
                 ASSERT_EQ(static_cast<size_t>(bytes[0]), bytes.size())
                     << "torn read: length byte mismatches vector size";
-                reads.fetch_add(1, std::memory_order_relaxed);
+                // Value must be one of the four valid sizes.
+                bool valid = false;
+                for (size_t s : sizes) {
+                    if (bytes.size() == s) {
+                        valid = true;
+                        break;
+                    }
+                }
+                ASSERT_TRUE(valid) << "read unexpected size: " << bytes.size();
+                total_samples.fetch_add(1, std::memory_order_relaxed);
             }
         }
     });
 
-    std::this_thread::sleep_for(300ms);
-    stop.store(true, std::memory_order_relaxed);
     writer.join();
     reader.join();
 
-    EXPECT_GT(reads.load(), 0u);
+    EXPECT_EQ(writes.load(), k_writer_ops);
+    EXPECT_GT(total_samples.load(), 0u);
 }
 
-// -- 3. Two readers and a writer -- multiple readers must coexist safely ----
+// -- 3. Two readers and a writer -- multiple readers must coexist safely -----
 
 TEST(PageConcurrentLatch, MultipleReadersDoNotBlockEachOther) {
     Page page(3, PageType::DATA);
 
+    // Fixed size so any torn read shows up as a size mismatch.
+    constexpr size_t tuple_size = 32;
+
     // Insert 8 tuples so readers have multiple slots to exercise.
     std::vector<SlotId> slots;
     for (int i = 0; i < 8; ++i) {
-        auto s = page.insert_tuple(patterned_tuple(32, static_cast<uint8_t>(i)));
+        auto s = page.insert_tuple(patterned_tuple(tuple_size, static_cast<uint8_t>(i)));
         ASSERT_TRUE(s.has_value());
         slots.push_back(*s);
     }
 
-    std::atomic<bool> stop{false};
-    std::atomic<size_t> reads{0};
+    std::atomic<bool> done{false};
+    std::atomic<size_t> writes{0};
+    std::atomic<size_t> total_samples{0};
+
+    // Writer: exactly k_writer_ops updates, cycling through slots at fixed size.
+    std::thread writer([&]() {
+        for (size_t i = 0; i < k_writer_ops; ++i) {
+            SlotId s = slots[i % slots.size()];
+            (void)page.update_tuple(s, patterned_tuple(tuple_size, static_cast<uint8_t>(i + 1)));
+            writes.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
+        }
+        done.store(true, std::memory_order_release);
+    });
 
     auto reader_loop = [&]() {
-        while (!stop.load(std::memory_order_relaxed)) {
+        auto deadline = std::chrono::steady_clock::now() + 60s;
+        while (!done.load(std::memory_order_acquire)) {
+            if (std::chrono::steady_clock::now() > deadline) {
+                ADD_FAILURE() << "hang-guard fired: writer did not finish";
+                break;
+            }
             for (SlotId s : slots) {
                 auto r = page.get_tuple(s);
                 if (r.has_value()) {
                     const auto& bytes = *r;
-                    ASSERT_EQ(bytes.size(), 32u);
-                    reads.fetch_add(1, std::memory_order_relaxed);
+                    ASSERT_EQ(bytes.size(), tuple_size) << "torn read: unexpected tuple size";
+                    total_samples.fetch_add(1, std::memory_order_relaxed);
                 }
             }
         }
@@ -165,31 +227,25 @@ TEST(PageConcurrentLatch, MultipleReadersDoNotBlockEachOther) {
 
     std::thread r1(reader_loop);
     std::thread r2(reader_loop);
-    std::thread writer([&]() {
-        size_t i = 0;
-        while (!stop.load(std::memory_order_relaxed)) {
-            SlotId s = slots[i % slots.size()];
-            (void)page.update_tuple(s, patterned_tuple(32, static_cast<uint8_t>(++i)));
-        }
-    });
 
-    std::this_thread::sleep_for(200ms);
-    stop.store(true, std::memory_order_relaxed);
+    writer.join();
     r1.join();
     r2.join();
-    writer.join();
 
-    EXPECT_GT(reads.load(), 0u);
+    EXPECT_EQ(writes.load(), k_writer_ops);
+    EXPECT_GT(total_samples.load(), 0u);
 }
 
-// -- 4. Compact races with get_tuple — compact rewrites every slot entry ----
+// -- 4. Compact races with get_tuple -- compact rewrites every slot entry ----
 
 TEST(PageConcurrentLatch, CompactDoesNotTearConcurrentReaders) {
     Page page(4, PageType::DATA);
 
+    constexpr size_t tuple_size = 50;
+
     std::vector<SlotId> slots;
     for (int i = 0; i < 10; ++i) {
-        auto s = page.insert_tuple(patterned_tuple(50, 0x55));
+        auto s = page.insert_tuple(patterned_tuple(tuple_size, 0x55));
         ASSERT_TRUE(s.has_value());
         slots.push_back(*s);
     }
@@ -199,32 +255,41 @@ TEST(PageConcurrentLatch, CompactDoesNotTearConcurrentReaders) {
         (void)page.delete_tuple(slots[i]);
     }
 
-    std::atomic<bool> stop{false};
-    std::atomic<size_t> reads{0};
+    std::atomic<bool> done{false};
+    std::atomic<size_t> compactions{0};
+    std::atomic<size_t> total_samples{0};
 
+    // Compactor: exactly k_writer_ops compact() calls.
     std::thread compactor([&]() {
-        while (!stop.load(std::memory_order_relaxed)) {
+        for (size_t i = 0; i < k_writer_ops; ++i) {
             page.compact();
+            compactions.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
         }
+        done.store(true, std::memory_order_release);
     });
 
+    // Reader: read the live (odd-indexed) slots until compactor is done.
     std::thread reader([&]() {
-        while (!stop.load(std::memory_order_relaxed)) {
-            // Read the live (odd-indexed) slots.
+        auto deadline = std::chrono::steady_clock::now() + 60s;
+        while (!done.load(std::memory_order_acquire)) {
+            if (std::chrono::steady_clock::now() > deadline) {
+                ADD_FAILURE() << "hang-guard fired: compactor did not finish";
+                break;
+            }
             for (size_t i = 1; i < slots.size(); i += 2) {
                 auto r = page.get_tuple(slots[i]);
                 if (r.has_value()) {
-                    ASSERT_EQ(r->size(), 50u) << "compact torn read";
-                    reads.fetch_add(1, std::memory_order_relaxed);
+                    ASSERT_EQ(r->size(), tuple_size) << "compact torn read";
+                    total_samples.fetch_add(1, std::memory_order_relaxed);
                 }
             }
         }
     });
 
-    std::this_thread::sleep_for(200ms);
-    stop.store(true, std::memory_order_relaxed);
     compactor.join();
     reader.join();
 
-    EXPECT_GT(reads.load(), 0u);
+    EXPECT_EQ(compactions.load(), k_writer_ops);
+    EXPECT_GT(total_samples.load(), 0u);
 }
