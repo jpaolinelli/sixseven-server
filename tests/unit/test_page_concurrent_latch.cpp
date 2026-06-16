@@ -183,57 +183,59 @@ TEST(PageConcurrentLatch, GetTupleReadsStableSnapshotWhileWriterShrinks) {
 
 // -- 2. Read races write GROWING a tuple (reallocates in the page) ----------
 //
-// Valid-state set: {40, 60, 80, 50}. Both the length-byte invariant and the
-// set-membership check are asserted on every reader sample. The reader runs
-// until it has seen at least TARGET_SAMPLES_PER_SIZE samples in total AND
-// observed at least 2 distinct sizes, then sets stop.
+// The writer alternates between two distinct sizes (SIZE_A=40 and SIZE_B=80)
+// so that the grow path (new_len > entry.length -> relocate in page free space)
+// fires on every other write.
+//
+// Valid-state set for any reader snapshot: {SIZE_A, SIZE_B}.
+// Any other size means the reader observed a half-committed slot update.
+//
+// Termination: READER collects TARGET_SAMPLES_PER_SIZE samples of each size
+// (guaranteed by looping until met), then sets stop. The writer yields between
+// updates so the reader gets scheduling opportunities. Non-vacuity is guaranteed
+// by construction: both sizes are required before the reader exits.
 
 TEST(PageConcurrentLatch, GetTupleReadsStableSnapshotWhileWriterGrows) {
-    static constexpr std::array<size_t, 4> VALID_SIZES = {40, 60, 80, 50};
-    static constexpr size_t TARGET_TOTAL_SAMPLES = 500U;
+    static constexpr size_t SIZE_A = 40;
+    static constexpr size_t SIZE_B = 80;
+    // Require this many samples of EACH size before terminating.
+    static constexpr size_t TARGET_SAMPLES_PER_SIZE = 200U;
 
     Page page(2, PageType::DATA);
 
-    auto initial = patterned_tuple(40, 0xCC);
+    // Seed with SIZE_A so the first writer iteration is a grow (SIZE_A->SIZE_B).
+    auto initial = patterned_tuple(SIZE_A, 0xCC);
     auto slot_r = page.insert_tuple(initial);
     ASSERT_TRUE(slot_r.has_value());
     SlotId slot = *slot_r;
 
     std::atomic<bool> stop{false};
-    std::array<std::atomic<size_t>, 4> obs{};
-    for (auto& a : obs) {
-        a.store(0);
-    }
+    std::atomic<size_t> writes{0};
+    std::atomic<size_t> obs_a{0};
+    std::atomic<size_t> obs_b{0};
     std::atomic<size_t> torn{0};
-    std::atomic<size_t> total_samples{0};
 
-    // Writer: spins until reader sets stop, cycling through VALID_SIZES.
+    // Writer: spins until the reader sets stop, alternating SIZE_A <-> SIZE_B.
+    // Yields between updates so the reader gets scheduling opportunities.
     std::thread writer([&]() {
-        size_t i = 0;
+        uint8_t tag = 0x01;
+        bool use_b = true; // first write is SIZE_B (grow)
         while (!stop.load(std::memory_order_relaxed)) {
-            auto len = VALID_SIZES[i % VALID_SIZES.size()];
-            ++i;
-            auto t = patterned_tuple(len, static_cast<uint8_t>(i));
+            size_t len = use_b ? SIZE_B : SIZE_A;
+            use_b = !use_b;
+            auto t = patterned_tuple(len, tag++);
             (void)page.update_tuple(slot, t);
+            writes.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
         }
     });
 
-    // Reader: loop until TARGET_TOTAL_SAMPLES collected and at least 2 distinct
-    // sizes observed, or safety timeout. Then set stop.
+    // Reader: loop until TARGET_SAMPLES_PER_SIZE of EACH size collected, or
+    // safety timeout expires. Then set stop to unblock the writer.
     std::thread reader([&]() {
         const auto deadline = std::chrono::steady_clock::now() + READER_SAFETY_TIMEOUT;
-        auto distinct_seen = [&]() {
-            size_t d = 0;
-            for (const auto& a : obs) {
-                if (a.load(std::memory_order_relaxed) > 0) {
-                    ++d;
-                }
-            }
-            return d;
-        };
-
-        while ((total_samples.load(std::memory_order_relaxed) < TARGET_TOTAL_SAMPLES ||
-                distinct_seen() < 2U) &&
+        while ((obs_a.load(std::memory_order_relaxed) < TARGET_SAMPLES_PER_SIZE ||
+                obs_b.load(std::memory_order_relaxed) < TARGET_SAMPLES_PER_SIZE) &&
                std::chrono::steady_clock::now() < deadline) {
             auto r = page.get_tuple(slot);
             if (!r.has_value()) {
@@ -243,22 +245,20 @@ TEST(PageConcurrentLatch, GetTupleReadsStableSnapshotWhileWriterGrows) {
             ASSERT_FALSE(bytes.empty());
 
             ASSERT_EQ(static_cast<size_t>(bytes[0]), bytes.size())
-                << "torn read: length byte mismatches vector size";
+                << "torn read: length byte (" << static_cast<int>(bytes[0])
+                << ") does not match vector size (" << bytes.size() << ")";
 
-            bool found = false;
-            for (size_t idx = 0; idx < VALID_SIZES.size(); ++idx) {
-                if (bytes.size() == VALID_SIZES[idx]) {
-                    obs[idx].fetch_add(1, std::memory_order_relaxed);
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
+            const bool is_a = (bytes.size() == SIZE_A);
+            const bool is_b = (bytes.size() == SIZE_B);
+            if (is_a) {
+                obs_a.fetch_add(1, std::memory_order_relaxed);
+            } else if (is_b) {
+                obs_b.fetch_add(1, std::memory_order_relaxed);
+            } else {
                 torn.fetch_add(1, std::memory_order_relaxed);
                 FAIL() << "observer saw invalid size " << bytes.size()
-                       << " -- not in valid-state set; torn read detected";
-            } else {
-                total_samples.fetch_add(1, std::memory_order_relaxed);
+                       << " -- not in valid-state set {" << SIZE_A << ", " << SIZE_B
+                       << "}; torn read detected";
             }
         }
         stop.store(true, std::memory_order_relaxed);
@@ -269,14 +269,15 @@ TEST(PageConcurrentLatch, GetTupleReadsStableSnapshotWhileWriterGrows) {
 
     EXPECT_EQ(torn.load(), 0U);
 
-    size_t distinct_seen = 0;
-    for (const auto& a : obs) {
-        if (a.load() > 0) {
-            ++distinct_seen;
-        }
-    }
-    EXPECT_GE(distinct_seen, 2U) << "reader observed fewer than 2 distinct sizes; grow path "
-                                    "may not have been exercised under contention";
+    // Non-vacuity: the reader loop exits only once BOTH counters reached the
+    // target (or safety timeout). On a non-broken machine the timeout is never
+    // hit and both are guaranteed to be >= TARGET_SAMPLES_PER_SIZE.
+    EXPECT_GE(obs_a.load(), TARGET_SAMPLES_PER_SIZE)
+        << "reader never observed SIZE_A=" << SIZE_A << "; grow path may not have been exercised";
+    EXPECT_GE(obs_b.load(), TARGET_SAMPLES_PER_SIZE)
+        << "reader never observed SIZE_B=" << SIZE_B << "; grow path may not have been exercised";
+
+    EXPECT_GT(writes.load(), 0U);
 }
 
 // -- 3. Two readers and a writer -- multiple readers must coexist safely -----
@@ -338,6 +339,7 @@ TEST(PageConcurrentLatch, MultipleReadersDoNotBlockEachOther) {
         while (!stop.load(std::memory_order_relaxed)) {
             SlotId s = slots[i % slots.size()];
             (void)page.update_tuple(s, patterned_tuple(TUPLE_SIZE, static_cast<uint8_t>(++i)));
+            std::this_thread::yield();
         }
     });
 
