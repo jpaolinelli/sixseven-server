@@ -769,21 +769,21 @@ TEST_F(NearestScanTest, PrefilteredBasicNearest) {
     op.close();
 }
 
-TEST_F(NearestScanTest, PrefilteredEmptyRIDs) {
+// A non-empty prefiltered_rids set containing only invalid/nonexistent RIDs must
+// return zero rows.  The executor takes the prefiltered branch (because the set is
+// non-empty) and finds nothing, so the result is empty.  If a regression causes the
+// executor to ignore the filter and return all rows this test will fail.
+TEST_F(NearestScanTest, PrefilteredInvalidRidYieldsNoRows) {
     TableHeap heap(*table_bpm_, dm_, table_file_id_);
 
     insert_row(heap, 1, "a", {1.0F, 0.0F, 0.0F});
 
-    // Empty prefiltered set should return no results (but NOT fall through
-    // to brute-force — empty means "no candidates matched the btree filter").
-    // Actually, empty prefiltered_rids means "no prefilter", so it falls through.
-    // A non-empty prefiltered_rids with no valid rows is the real test.
     NearestScanConfig config;
     config.k = 5;
     config.query_vector = {1.0F, 0.0F, 0.0F};
     config.metric = DistanceMetric::L2;
     config.embedding_column_index = 2;
-    // Use an invalid RID that won't match any real tuple.
+    // Non-empty set, but the RID does not exist in the heap → zero candidates.
     config.prefiltered_rids = {RID{9999, 9999}};
 
     OutputSchema schema(output_cols_);
@@ -794,7 +794,47 @@ TEST_F(NearestScanTest, PrefilteredEmptyRIDs) {
 
     ASSERT_TRUE(op.open().has_value());
     auto results = drain(op);
-    EXPECT_TRUE(results.empty());
+    EXPECT_EQ(results.size(), 0u); // non-empty set with no valid candidates → empty result
+    op.close();
+}
+
+// An EMPTY prefiltered_rids vector means "no prefilter" — the executor must fall
+// through to the brute-force / normal scan and return rows from the heap.
+// This is the semantic distinction: empty ≠ "zero candidates"; it means "all rows
+// are candidates".  If the dispatch ever changes so that an empty set is treated as
+// zero candidates (returns nothing) this test will fail.
+TEST_F(NearestScanTest, PrefilteredEmptyVectorFallsThroughToScan) {
+    TableHeap heap(*table_bpm_, dm_, table_file_id_);
+
+    insert_row(heap, 1, "alpha", {1.0F, 0.0F, 0.0F});
+    insert_row(heap, 2, "beta", {0.0F, 1.0F, 0.0F});
+    insert_row(heap, 3, "gamma", {0.0F, 0.0F, 1.0F});
+
+    NearestScanConfig config;
+    config.k = 2;
+    config.query_vector = {1.0F, 0.0F, 0.0F};
+    config.metric = DistanceMetric::L2;
+    config.embedding_column_index = 2;
+    // Intentionally empty — must NOT take the prefiltered branch.
+    config.prefiltered_rids = {};
+
+    OutputSchema schema(output_cols_);
+    BoundStatement bound;
+
+    NearestScanOperator op(
+        heap, storage_schema_, std::move(config), std::move(schema), nullptr, bound);
+
+    ASSERT_TRUE(op.open().has_value());
+    auto results = drain(op);
+    // Falls through to normal scan: k=2 from 3 rows → exactly 2 results.
+    // Nearest to [1,0,0] via L2:
+    //   alpha [1,0,0]: distance 0.0  (closest)
+    //   beta  [0,1,0]: distance 2.0
+    //   gamma [0,0,1]: distance 2.0
+    // Top-2: alpha (0.0), then either beta or gamma (both 2.0 — implementation-defined
+    // tiebreak); assert count=2 and that the closest is alpha.
+    ASSERT_EQ(results.size(), 2u);
+    EXPECT_EQ(results[0].values[0].as_int32(), 1); // alpha is unambiguously closest
     op.close();
 }
 
