@@ -1,4 +1,4 @@
-#include "sixseven/vector/provider_registry.h"
+﻿#include "sixseven/vector/provider_registry.h"
 
 #include "sixseven/common/logging.h"
 #include "sixseven/vector/builtin_provider.h"
@@ -93,7 +93,8 @@ ProviderRegistry::create_provider(const EmbeddingProviderConfig& config) {
             config.model,
             config.dimension > 0 ? static_cast<size_t>(config.dimension) : 384,
             std::move(client));
-        SIXSEVEN_LOG_INFO("created Ollama provider: model={}, url={}", config.model, config.base_url);
+        SIXSEVEN_LOG_INFO(
+            "created Ollama provider: model={}, url={}", config.model, config.base_url);
         return ok(std::shared_ptr<EmbeddingProvider>(std::move(provider)));
     }
 
@@ -115,11 +116,29 @@ ProviderRegistry::create_provider(const EmbeddingProviderConfig& config) {
     if (config.type == "builtin") {
         size_t dim = config.dimension > 0 ? static_cast<size_t>(config.dimension) : 384;
         // If model field looks like a number, use it as dimension.
+        // Reject any leading sign or whitespace — dimension must be a plain
+        // non-negative decimal integer with no prefix characters.
         if (!config.model.empty()) {
+            if (config.model[0] == '-' || config.model[0] == '+' || config.model[0] == ' ' ||
+                config.model[0] == '\t') {
+                return make_error(StatusCode::INVALID_ARGUMENT,
+                                  "builtin provider dimension must be a positive integer, got: '" +
+                                      config.model + "'");
+            }
             try {
-                dim = std::stoul(config.model);
+                size_t pos = 0;
+                unsigned long parsed = std::stoul(config.model, &pos);
+                if (pos != config.model.size()) {
+                    return make_error(
+                        StatusCode::INVALID_ARGUMENT,
+                        "builtin provider dimension must be a positive integer, got: '" +
+                            config.model + "'");
+                }
+                dim = parsed;
             } catch (...) {
-                // Not a number — use default.
+                return make_error(StatusCode::INVALID_ARGUMENT,
+                                  "builtin provider dimension must be a positive integer, got: '" +
+                                      config.model + "'");
             }
         }
         auto provider = std::make_shared<BuiltinProvider>(dim);

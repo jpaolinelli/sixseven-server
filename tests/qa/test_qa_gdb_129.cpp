@@ -1,4 +1,4 @@
-/// @file test_qa_gdb_129.cpp
+﻿/// @file test_qa_gdb_129.cpp
 /// @brief QA adversarial tests for GDB-129: EmbeddingProvider interface and
 ///        OllamaProvider.
 ///
@@ -319,12 +319,31 @@ TEST(QA_GDB_129_Registry, BuiltinWithNonNumericDimension) {
     Catalog catalog;
     ProviderRegistry registry(catalog);
 
-    // "builtin/abc" — registry can't parse "abc" as a dimension, so it falls
-    // back to a catalog lookup.  With an empty catalog it should fail.
+    // "builtin/abc" — the model field "abc" is not a valid positive integer,
+    // so the registry must reject it with INVALID_ARGUMENT.
     auto result = registry.resolve("builtin/abc");
-    // The registry falls back to catalog lookup; on an empty catalog this may
-    // succeed with a default or fail — either way, exercise the path.
-    (void)result;
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST(QA_GDB_129_Registry, BuiltinWithFloatDimension) {
+    Catalog catalog;
+    ProviderRegistry registry(catalog);
+
+    // "builtin/3.14" — a float string is not a valid dimension; must fail.
+    auto result = registry.resolve("builtin/3.14");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST(QA_GDB_129_Registry, BuiltinWithAlphanumericDimension) {
+    Catalog catalog;
+    ProviderRegistry registry(catalog);
+
+    // "builtin/128abc" — partially numeric but not a clean integer; must fail.
+    auto result = registry.resolve("builtin/128abc");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
 TEST(QA_GDB_129_Registry, DifferentBuiltinDimensionsDifferentInstances) {
@@ -339,6 +358,18 @@ TEST(QA_GDB_129_Registry, DifferentBuiltinDimensionsDifferentInstances) {
     EXPECT_EQ((*r1)->dimension(), 64u);
     EXPECT_EQ((*r2)->dimension(), 128u);
     EXPECT_NE(r1->get(), r2->get()); // Different instances.
+}
+
+TEST(QA_GDB_129_Registry, BuiltinWithNegativeDimension) {
+    Catalog catalog;
+    ProviderRegistry registry(catalog);
+
+    // "builtin/-5" — stoul("-5") wraps to ULONG_MAX-4 with pos==size on
+    // some platforms, silently creating a huge-dimension provider.  The
+    // leading-'-' guard must catch this before stoul is even called.
+    auto result = registry.resolve("builtin/-5");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
 // ---------------------------------------------------------------------------
