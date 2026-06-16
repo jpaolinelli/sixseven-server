@@ -1,4 +1,4 @@
-#include "sixseven/catalog/catalog.h"
+﻿#include "sixseven/catalog/catalog.h"
 #include "sixseven/common/types.h"
 #include "sixseven/vector/builtin_provider.h"
 #include "sixseven/vector/embedding_column.h"
@@ -715,26 +715,27 @@ TEST(QA_ProviderRegistry, ResolveTrailingSlashFails) {
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
-TEST(QA_ProviderRegistry, ResolveMultipleSlashesUsesFirst) {
+TEST(QA_ProviderRegistry, ResolveMultipleSlashesRejected) {
     Catalog catalog;
     ProviderRegistry registry(catalog);
 
     // "builtin/128/extra" → type="builtin", model="128/extra".
+    // The pos-check detects that "128/extra" is not a plain integer (pos stops
+    // at '/'), so the corrected impl rejects it with INVALID_ARGUMENT.
     auto result = registry.resolve("builtin/128/extra");
-    // The builtin provider parses "128/extra" as model, tries stoul on it.
-    // stoul("128/extra") → 128 (stops at '/').
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ((*result)->dimension(), 128u);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
-TEST(QA_ProviderRegistry, ResolveBuiltinNonNumericModelUsesDefault) {
+TEST(QA_ProviderRegistry, ResolveBuiltinNonNumericModelRejected) {
     Catalog catalog;
     ProviderRegistry registry(catalog);
 
-    // "builtin/abc" → model="abc", stoul fails, uses default dim 384.
+    // "builtin/abc" → model="abc", stoul fails; the corrected impl returns
+    // INVALID_ARGUMENT instead of silently defaulting to 384.
     auto result = registry.resolve("builtin/abc");
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ((*result)->dimension(), 384u);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
 TEST(QA_ProviderRegistry, OllamaWithoutBaseUrlFails) {

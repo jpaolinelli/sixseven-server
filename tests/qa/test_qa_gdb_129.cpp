@@ -1,4 +1,4 @@
-/// @file test_qa_gdb_129.cpp
+﻿/// @file test_qa_gdb_129.cpp
 /// @brief QA adversarial tests for GDB-129: EmbeddingProvider interface and
 ///        OllamaProvider.
 ///
@@ -358,6 +358,18 @@ TEST(QA_GDB_129_Registry, DifferentBuiltinDimensionsDifferentInstances) {
     EXPECT_EQ((*r1)->dimension(), 64u);
     EXPECT_EQ((*r2)->dimension(), 128u);
     EXPECT_NE(r1->get(), r2->get()); // Different instances.
+}
+
+TEST(QA_GDB_129_Registry, BuiltinWithNegativeDimension) {
+    Catalog catalog;
+    ProviderRegistry registry(catalog);
+
+    // "builtin/-5" — stoul("-5") wraps to ULONG_MAX-4 with pos==size on
+    // some platforms, silently creating a huge-dimension provider.  The
+    // leading-'-' guard must catch this before stoul is even called.
+    auto result = registry.resolve("builtin/-5");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
 // ---------------------------------------------------------------------------

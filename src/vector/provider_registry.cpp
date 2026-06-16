@@ -1,4 +1,4 @@
-#include "sixseven/vector/provider_registry.h"
+﻿#include "sixseven/vector/provider_registry.h"
 
 #include "sixseven/common/logging.h"
 #include "sixseven/vector/builtin_provider.h"
@@ -116,7 +116,15 @@ ProviderRegistry::create_provider(const EmbeddingProviderConfig& config) {
     if (config.type == "builtin") {
         size_t dim = config.dimension > 0 ? static_cast<size_t>(config.dimension) : 384;
         // If model field looks like a number, use it as dimension.
+        // Reject any leading sign or whitespace — dimension must be a plain
+        // non-negative decimal integer with no prefix characters.
         if (!config.model.empty()) {
+            if (config.model[0] == '-' || config.model[0] == '+' || config.model[0] == ' ' ||
+                config.model[0] == '\t') {
+                return make_error(StatusCode::INVALID_ARGUMENT,
+                                  "builtin provider dimension must be a positive integer, got: '" +
+                                      config.model + "'");
+            }
             try {
                 size_t pos = 0;
                 unsigned long parsed = std::stoul(config.model, &pos);
