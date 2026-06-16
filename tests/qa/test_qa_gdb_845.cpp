@@ -572,6 +572,436 @@ TEST_F(GDB845Test, GDB845_Adv_CorruptFileRebuildFallback) {
 }
 
 // =============================================================================
+// GDB-1268 FIX VERIFICATION: INSERT...SELECT with WHERE filter inserts exactly
+// the rows matching the predicate — not all rows, not zero.
+// =============================================================================
+
+TEST_F(GDB845Test, GDB1268_InsertSelectWithWhereFilter) {
+    bootstrap();
+    build_index_manager();
+
+    exec_ok("CREATE TABLE src_filter (id INT, val VARCHAR)");
+    exec_ok("INSERT INTO src_filter VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e')");
+
+    exec_ok("CREATE TABLE dst_filter (id INT, val VARCHAR)");
+    exec_ok("CREATE INDEX idx_dst_filter ON dst_filter(id)");
+
+    // Only ids > 2 should be inserted (3 rows: 3, 4, 5).
+    auto ins =
+        engine_->execute("INSERT INTO dst_filter SELECT id, val FROM src_filter WHERE id > 2");
+    ASSERT_TRUE(ins.has_value()) << ins.error().message;
+    ASSERT_EQ(ins->affected_rows, int64_t(3))
+        << "INSERT...SELECT WHERE id>2 must insert exactly 3 rows, got " << ins->affected_rows;
+
+    // Verify via SELECT COUNT.
+    auto cnt = engine_->execute("SELECT COUNT(*) FROM dst_filter");
+    ASSERT_TRUE(cnt.has_value()) << cnt.error().message;
+    ASSERT_EQ(cnt->rows.size(), 1u);
+    ASSERT_EQ(cnt->rows[0][0].as_int64(), int64_t(3))
+        << "dst_filter must have exactly 3 rows after filtered INSERT...SELECT";
+
+    // Index must reflect the 3 inserted rows.
+    auto idx = catalog_->get_index("idx_dst_filter");
+    ASSERT_TRUE(idx.has_value());
+    auto it = index_manager_->btree_map()->find(idx->index_id);
+    ASSERT_NE(it, index_manager_->btree_map()->end());
+    ASSERT_EQ(it->second->size(), 3u)
+        << "BTree index must have exactly 3 entries after INSERT...SELECT WHERE";
+
+    // Keys 3,4,5 must be present; keys 1,2 must NOT be present.
+    for (int32_t key : {3, 4, 5}) {
+        auto r = it->second->search({Value(key)});
+        ASSERT_TRUE(r.has_value());
+        EXPECT_TRUE(r->has_value())
+            << "key " << key << " missing from index after INSERT...SELECT WHERE";
+    }
+    for (int32_t key : {1, 2}) {
+        auto r = it->second->search({Value(key)});
+        ASSERT_TRUE(r.has_value());
+        EXPECT_FALSE(r->has_value())
+            << "key " << key << " must NOT be in index (was filtered by WHERE id>2)";
+    }
+}
+
+// =============================================================================
+// GDB-1268 FIX VERIFICATION: INSERT...SELECT with empty result (no rows match
+// WHERE) — must insert exactly 0 rows, not error, not silently corrupt state.
+// =============================================================================
+
+TEST_F(GDB845Test, GDB1268_InsertSelectEmptyResult) {
+    bootstrap();
+    build_index_manager();
+
+    exec_ok("CREATE TABLE src_empty (id INT, val VARCHAR)");
+    exec_ok("INSERT INTO src_empty VALUES (1, 'a'), (2, 'b')");
+
+    exec_ok("CREATE TABLE dst_empty (id INT, val VARCHAR)");
+    exec_ok("CREATE INDEX idx_dst_empty ON dst_empty(id)");
+
+    // WHERE 1=0 guarantees zero rows from SELECT.
+    auto ins =
+        engine_->execute("INSERT INTO dst_empty SELECT id, val FROM src_empty WHERE id > 100");
+    ASSERT_TRUE(ins.has_value()) << "INSERT...SELECT with empty result must succeed (not error): "
+                                 << (ins.has_value() ? "" : ins.error().message);
+    ASSERT_EQ(ins->affected_rows, int64_t(0))
+        << "INSERT...SELECT with zero matching rows must report affected_rows=0";
+
+    // Table must remain empty.
+    auto cnt = engine_->execute("SELECT COUNT(*) FROM dst_empty");
+    ASSERT_TRUE(cnt.has_value());
+    ASSERT_EQ(cnt->rows[0][0].as_int64(), int64_t(0)) << "dst_empty must have 0 rows";
+
+    // Index must also be empty.
+    auto idx = catalog_->get_index("idx_dst_empty");
+    ASSERT_TRUE(idx.has_value());
+    auto it = index_manager_->btree_map()->find(idx->index_id);
+    ASSERT_NE(it, index_manager_->btree_map()->end());
+    ASSERT_EQ(it->second->size(), 0u) << "Index must be empty after zero-row INSERT...SELECT";
+}
+
+// =============================================================================
+// GDB-1268 FIX VERIFICATION: INSERT INTO t(b, a) SELECT x, y — permuted/reversed
+// column list maps SELECT output to the CORRECT storage columns.  Asserts actual
+// stored values per column, not just row count.
+// =============================================================================
+
+TEST_F(GDB845Test, GDB1268_InsertSelectPermutedColumnList) {
+    bootstrap();
+    build_index_manager();
+
+    // Source has columns (x INT, y VARCHAR).
+    exec_ok("CREATE TABLE src_perm (x INT, y VARCHAR)");
+    exec_ok("INSERT INTO src_perm VALUES (42, 'hello')");
+
+    // Target has columns (a VARCHAR, b INT) — reversed from SELECT output.
+    // INSERT INTO dst_perm(b, a) SELECT x, y — so b<-x=42, a<-y='hello'.
+    exec_ok("CREATE TABLE dst_perm (a VARCHAR, b INT)");
+
+    auto ins = engine_->execute("INSERT INTO dst_perm(b, a) SELECT x, y FROM src_perm");
+    ASSERT_TRUE(ins.has_value()) << ins.error().message;
+    ASSERT_EQ(ins->affected_rows, int64_t(1))
+        << "INSERT INTO dst_perm(b,a) SELECT must insert 1 row";
+
+    // Read back and verify the actual stored values.
+    auto sel = engine_->execute("SELECT a, b FROM dst_perm");
+    ASSERT_TRUE(sel.has_value()) << sel.error().message;
+    ASSERT_EQ(sel->rows.size(), 1u) << "dst_perm must have exactly 1 row";
+    // a should be 'hello' (mapped from SELECT y)
+    EXPECT_EQ(sel->rows[0][0].as_string(), std::string("hello"))
+        << "Column a must contain 'hello' (mapped from SELECT y via column list b,a)";
+    // b should be 42 (mapped from SELECT x)
+    EXPECT_EQ(sel->rows[0][1].as_int32(), int32_t(42))
+        << "Column b must contain 42 (mapped from SELECT x via column list b,a)";
+}
+
+// =============================================================================
+// GDB-1268 FIX VERIFICATION: Secondary index maintained via SELECT path.
+// After INSERT...SELECT, point-lookups for inserted keys return correct RIDs;
+// index entry count matches row count exactly.  Persists across restart.
+// =============================================================================
+
+TEST_F(GDB845Test, GDB1268_InsertSelectMaintainsIndexPersistsAcrossRestart) {
+    bootstrap();
+    build_index_manager();
+
+    exec_ok("CREATE TABLE src_idx (id INT, name VARCHAR)");
+    exec_ok("INSERT INTO src_idx VALUES (10, 'ten'), (20, 'twenty'), (30, 'thirty')");
+
+    exec_ok("CREATE TABLE dst_idx (id INT, name VARCHAR)");
+    exec_ok("CREATE INDEX idx_dst_id ON dst_idx(id)");
+    exec_ok("CREATE INDEX idx_dst_id_hash ON dst_idx(id) USING hash");
+
+    auto ins = engine_->execute("INSERT INTO dst_idx SELECT id, name FROM src_idx");
+    ASSERT_TRUE(ins.has_value()) << ins.error().message;
+    ASSERT_EQ(ins->affected_rows, int64_t(3));
+
+    // Check btree index in-memory.
+    auto btree_idx = catalog_->get_index("idx_dst_id");
+    ASSERT_TRUE(btree_idx.has_value());
+    auto bt = index_manager_->btree_map()->find(btree_idx->index_id);
+    ASSERT_NE(bt, index_manager_->btree_map()->end());
+    ASSERT_EQ(bt->second->size(), 3u)
+        << "BTree index must have 3 entries immediately after INSERT...SELECT";
+    for (int32_t key : {10, 20, 30}) {
+        auto r = bt->second->search({Value(key)});
+        ASSERT_TRUE(r.has_value());
+        EXPECT_TRUE(r->has_value()) << "BTree: key " << key << " not found after INSERT...SELECT";
+    }
+
+    // Check hash index in-memory.
+    auto hash_idx = catalog_->get_index("idx_dst_id_hash");
+    ASSERT_TRUE(hash_idx.has_value());
+    auto ht = index_manager_->hash_map()->find(hash_idx->index_id);
+    ASSERT_NE(ht, index_manager_->hash_map()->end());
+    ASSERT_EQ(ht->second->size(), 3u)
+        << "Hash index must have 3 entries immediately after INSERT...SELECT";
+    for (int32_t key : {10, 20, 30}) {
+        auto r = ht->second->search({Value(key)});
+        ASSERT_TRUE(r.has_value());
+        EXPECT_TRUE(r->has_value()) << "Hash: key " << key << " not found after INSERT...SELECT";
+    }
+
+    // Flush + restart — both indexes must survive with exact count.
+    auto flush = index_manager_->flush_all_indexes();
+    ASSERT_TRUE(flush.has_value()) << flush.error().message;
+    simulate_restart();
+    bootstrap();
+    build_index_manager();
+
+    auto btree_idx2 = catalog_->get_index("idx_dst_id");
+    ASSERT_TRUE(btree_idx2.has_value());
+    auto bt2 = index_manager_->btree_map()->find(btree_idx2->index_id);
+    ASSERT_NE(bt2, index_manager_->btree_map()->end());
+    ASSERT_EQ(bt2->second->size(), 3u)
+        << "BTree index must have 3 entries after flush+restart (INSERT...SELECT path)";
+
+    auto hash_idx2 = catalog_->get_index("idx_dst_id_hash");
+    ASSERT_TRUE(hash_idx2.has_value());
+    auto ht2 = index_manager_->hash_map()->find(hash_idx2->index_id);
+    ASSERT_NE(ht2, index_manager_->hash_map()->end());
+    ASSERT_EQ(ht2->second->size(), 3u)
+        << "Hash index must have 3 entries after flush+restart (INSERT...SELECT path)";
+}
+
+// =============================================================================
+// GDB-1268: INSERT...SELECT from a table that itself has indexes (source table
+// has a btree index).  Only the DESTINATION indexes are maintained; the source
+// index must remain unchanged.
+// =============================================================================
+
+TEST_F(GDB845Test, GDB1268_InsertSelectFromIndexedSourceTable) {
+    bootstrap();
+    build_index_manager();
+
+    exec_ok("CREATE TABLE src_with_idx (id INT, val VARCHAR)");
+    exec_ok("CREATE INDEX idx_src ON src_with_idx(id)");
+    exec_ok("INSERT INTO src_with_idx VALUES (1, 'x'), (2, 'y'), (3, 'z')");
+
+    exec_ok("CREATE TABLE dst_from_indexed (id INT, val VARCHAR)");
+    exec_ok("CREATE INDEX idx_dst_from_indexed ON dst_from_indexed(id)");
+
+    auto ins = engine_->execute("INSERT INTO dst_from_indexed SELECT id, val FROM src_with_idx");
+    ASSERT_TRUE(ins.has_value()) << ins.error().message;
+    ASSERT_EQ(ins->affected_rows, int64_t(3));
+
+    // Source index must still have exactly 3 entries (unaffected).
+    auto src_idx = catalog_->get_index("idx_src");
+    ASSERT_TRUE(src_idx.has_value());
+    auto src_bt = index_manager_->btree_map()->find(src_idx->index_id);
+    ASSERT_NE(src_bt, index_manager_->btree_map()->end());
+    ASSERT_EQ(src_bt->second->size(), 3u) << "Source index must be unaffected by INSERT...SELECT";
+
+    // Destination index must have 3 entries.
+    auto dst_idx = catalog_->get_index("idx_dst_from_indexed");
+    ASSERT_TRUE(dst_idx.has_value());
+    auto dst_bt = index_manager_->btree_map()->find(dst_idx->index_id);
+    ASSERT_NE(dst_bt, index_manager_->btree_map()->end());
+    ASSERT_EQ(dst_bt->second->size(), 3u)
+        << "Destination index must have 3 entries after INSERT...SELECT from indexed source";
+}
+
+// =============================================================================
+// GDB-1268: INSERT...SELECT with duplicate keys into a non-unique destination
+// index — correct multiplicity (both rows indexed, search returns a hit).
+// =============================================================================
+
+TEST_F(GDB845Test, GDB1268_InsertSelectDuplicateKeysNonUniqueTargetIndex) {
+    bootstrap();
+    build_index_manager();
+
+    exec_ok("CREATE TABLE src_dup (id INT, val VARCHAR)");
+    // Two rows with the same id.
+    exec_ok("INSERT INTO src_dup VALUES (7, 'first'), (7, 'second'), (8, 'third')");
+
+    exec_ok("CREATE TABLE dst_dup (id INT, val VARCHAR)");
+    exec_ok("CREATE INDEX idx_dst_dup ON dst_dup(id)");
+
+    auto ins = engine_->execute("INSERT INTO dst_dup SELECT id, val FROM src_dup");
+    ASSERT_TRUE(ins.has_value()) << ins.error().message;
+    ASSERT_EQ(ins->affected_rows, int64_t(3));
+
+    // Non-unique BTree must hold 3 entries: 2 for key=7, 1 for key=8.
+    auto idx = catalog_->get_index("idx_dst_dup");
+    ASSERT_TRUE(idx.has_value());
+    auto it = index_manager_->btree_map()->find(idx->index_id);
+    ASSERT_NE(it, index_manager_->btree_map()->end());
+    ASSERT_EQ(it->second->size(), 3u)
+        << "Non-unique BTree must hold 3 entries (2×key=7 + 1×key=8) after INSERT...SELECT";
+
+    // Both duplicate-key search results must return a valid entry.
+    auto r7 = it->second->search({Value(int32_t(7))});
+    ASSERT_TRUE(r7.has_value());
+    EXPECT_TRUE(r7->has_value()) << "key=7 must be found in non-unique index (INSERT...SELECT)";
+    auto r8 = it->second->search({Value(int32_t(8))});
+    ASSERT_TRUE(r8.has_value());
+    EXPECT_TRUE(r8->has_value()) << "key=8 must be found in non-unique index (INSERT...SELECT)";
+}
+
+// =============================================================================
+// GDB-1268: Column-count mismatch — SELECT yields fewer columns than the target
+// column list expects → planner must return a proper error, NOT crash or silently
+// insert wrong data.
+// =============================================================================
+
+TEST_F(GDB845Test, GDB1268_InsertSelectColumnCountMismatchFewerCols) {
+    bootstrap();
+    build_index_manager();
+
+    exec_ok("CREATE TABLE src_mismatch (id INT)");
+    exec_ok("INSERT INTO src_mismatch VALUES (1), (2)");
+
+    exec_ok("CREATE TABLE dst_mismatch (a INT, b VARCHAR)");
+
+    // SELECT produces 1 column but target (no explicit list) expects 2.
+    auto ins = engine_->execute("INSERT INTO dst_mismatch SELECT id FROM src_mismatch");
+    // Must error — column count mismatch.
+    EXPECT_FALSE(ins.has_value())
+        << "INSERT INTO dst_mismatch (2 cols) SELECT id (1 col) must fail with column-count error";
+    if (!ins.has_value()) {
+        EXPECT_NE(ins.error().message.size(), 0u) << "Error message must not be empty";
+    }
+}
+
+// =============================================================================
+// GDB-1268: NULL values in SELECT output inserted into indexed column — must not
+// crash or corrupt the index; non-NULL rows remain findable.
+// =============================================================================
+
+TEST_F(GDB845Test, GDB1268_InsertSelectNullValueInIndexedColumn) {
+    bootstrap();
+    build_index_manager();
+
+    exec_ok("CREATE TABLE src_null_sel (id INT, val VARCHAR)");
+    exec_ok("INSERT INTO src_null_sel VALUES (1, 'good'), (NULL, 'null_id'), (2, 'also_good')");
+
+    exec_ok("CREATE TABLE dst_null_sel (id INT, val VARCHAR)");
+    exec_ok("CREATE INDEX idx_dst_null_sel ON dst_null_sel(id)");
+
+    auto ins = engine_->execute("INSERT INTO dst_null_sel SELECT id, val FROM src_null_sel");
+    ASSERT_TRUE(ins.has_value()) << "INSERT...SELECT with NULL in indexed column must not error: "
+                                 << (ins.has_value() ? "" : ins.error().message);
+    ASSERT_EQ(ins->affected_rows, int64_t(3)) << "All 3 rows must be inserted including NULL row";
+
+    // Non-NULL keys must be findable.
+    auto idx = catalog_->get_index("idx_dst_null_sel");
+    ASSERT_TRUE(idx.has_value());
+    auto it = index_manager_->btree_map()->find(idx->index_id);
+    ASSERT_NE(it, index_manager_->btree_map()->end());
+
+    auto r1 = it->second->search({Value(int32_t(1))});
+    ASSERT_TRUE(r1.has_value());
+    EXPECT_TRUE(r1->has_value()) << "key=1 must be in index after INSERT...SELECT with a NULL row";
+    auto r2 = it->second->search({Value(int32_t(2))});
+    ASSERT_TRUE(r2.has_value());
+    EXPECT_TRUE(r2->has_value()) << "key=2 must be in index after INSERT...SELECT with a NULL row";
+}
+
+// =============================================================================
+// GDB-1268: Large batch (1000 rows) via INSERT...SELECT — all rows inserted,
+// all indexed, no pin/latch leak observable (exact index count).
+// =============================================================================
+
+TEST_F(GDB845Test, GDB1268_InsertSelectLargeBatch1000Rows) {
+    bootstrap();
+    build_index_manager();
+
+    exec_ok("CREATE TABLE src_large_sel (id INT, val INT)");
+
+    // Insert 1000 rows into the source table (50 per statement).
+    const int total = 1000;
+    const int batch = 50;
+    for (int start = 0; start < total; start += batch) {
+        std::string sql = "INSERT INTO src_large_sel VALUES ";
+        for (int i = start; i < start + batch; ++i) {
+            if (i > start)
+                sql += ", ";
+            sql += "(" + std::to_string(i) + ", " + std::to_string(i * 3) + ")";
+        }
+        exec_ok(sql);
+    }
+
+    exec_ok("CREATE TABLE dst_large_sel (id INT, val INT)");
+    exec_ok("CREATE INDEX idx_dst_large_sel ON dst_large_sel(id)");
+
+    auto ins = engine_->execute("INSERT INTO dst_large_sel SELECT id, val FROM src_large_sel");
+    ASSERT_TRUE(ins.has_value()) << ins.error().message;
+    ASSERT_EQ(ins->affected_rows, int64_t(total))
+        << "INSERT...SELECT must insert all " << total << " rows, got " << ins->affected_rows;
+
+    // Index must have exactly 1000 entries.
+    auto idx = catalog_->get_index("idx_dst_large_sel");
+    ASSERT_TRUE(idx.has_value());
+    auto it = index_manager_->btree_map()->find(idx->index_id);
+    ASSERT_NE(it, index_manager_->btree_map()->end());
+    ASSERT_EQ(it->second->size(), static_cast<size_t>(total))
+        << "Index must have exactly " << total << " entries after large INSERT...SELECT";
+
+    // Spot-check boundary keys.
+    for (int32_t key : {0, 499, 999}) {
+        auto r = it->second->search({Value(key)});
+        ASSERT_TRUE(r.has_value());
+        EXPECT_TRUE(r->has_value()) << "key " << key << " missing after 1000-row INSERT...SELECT";
+    }
+
+    // Flush + restart — exact count must survive.
+    auto flush = index_manager_->flush_all_indexes();
+    ASSERT_TRUE(flush.has_value()) << flush.error().message;
+    simulate_restart();
+    bootstrap();
+    build_index_manager();
+
+    auto idx2 = catalog_->get_index("idx_dst_large_sel");
+    ASSERT_TRUE(idx2.has_value());
+    auto it2 = index_manager_->btree_map()->find(idx2->index_id);
+    ASSERT_NE(it2, index_manager_->btree_map()->end());
+    ASSERT_EQ(it2->second->size(), static_cast<size_t>(total))
+        << "1000-row INSERT...SELECT index must survive flush+restart with exact count";
+}
+
+// =============================================================================
+// GDB-1268 LOW-GAP BOUNDARY: Unmapped non-nullable column via explicit column
+// list INSERT...SELECT.  A non-nullable column not in the INSERT column list
+// must either (a) produce an error or (b) use the column DEFAULT.  Silently
+// storing null in a non-nullable column is a correctness bug.
+//
+// This test probes the boundary.  If the engine silently stores null without
+// error (violating NOT NULL), we record it as a documented bug.
+// =============================================================================
+
+TEST_F(GDB845Test, GDB1268_LowGap_UnmappedNonNullableColumnRejectsOrErrors) {
+    bootstrap();
+    build_index_manager();
+
+    exec_ok("CREATE TABLE src_notnull (x INT)");
+    exec_ok("INSERT INTO src_notnull VALUES (1)");
+
+    // Target has a non-nullable column 'b' that is NOT in the INSERT column list.
+    // The INSERT...SELECT column list only maps to 'a'.
+    // Expected: either error at plan/execute time, or default applied.
+    // Bug: silently stores NULL in non-nullable column b.
+    exec_ok("CREATE TABLE dst_notnull (a INT, b INT NOT NULL)");
+
+    auto ins = engine_->execute("INSERT INTO dst_notnull(a) SELECT x FROM src_notnull");
+    if (ins.has_value()) {
+        // If insert succeeded, verify what was actually stored for column b.
+        auto sel = engine_->execute("SELECT a, b FROM dst_notnull");
+        if (sel.has_value() && !sel->rows.empty()) {
+            bool b_is_null = sel->rows[0][1].is_null();
+            // Document the finding. A null stored in a NOT NULL column is a bug.
+            // We use EXPECT (not ASSERT) so the test reports but doesn't abort.
+            EXPECT_FALSE(b_is_null)
+                << "GDB-1268 LOW-GAP: column b is NOT NULL but INSERT...SELECT(a) stored NULL "
+                   "in b without error. This is a correctness violation — the engine must "
+                   "reject this INSERT or apply the DEFAULT value.";
+            RecordProperty("low_gap_null_in_not_null_col", b_is_null ? 1 : 0);
+        }
+    } else {
+        // Engine correctly rejected the INSERT — this is the preferred behavior.
+        RecordProperty("low_gap_rejected_with_error", 1);
+    }
+}
+
+// =============================================================================
 // KNOWN-GAP PROBE (documented, not a QA_FAIL): Does a subsequent UPDATE leave
 // the secondary index stale across restart?  This is intentionally OUT OF SCOPE
 // for GDB-845 (UPDATE/DELETE maintenance is deferred).  The test documents the
