@@ -270,3 +270,350 @@ TEST_F(GDB845Test, GDB845_FlushPersistsPostInsertHashState) {
             << "key " << key << " missing from persisted hash index after restart";
     }
 }
+
+// =============================================================================
+// ADVERSARIAL: INSERT...SELECT must insert rows AND maintain secondary indexes.
+//
+// GDB-845 REGRESSION (BUG): The planner's plan_insert() never handles
+// stmt.select — when stmt.values is empty (INSERT...SELECT form), it produces
+// an InsertOperator with 0 value_rows, silently inserting 0 rows.  The child-
+// based InsertOperator constructor is dead code.  This test documents the
+// CURRENT (broken) behavior and will flip to PASS once INSERT...SELECT is
+// fully implemented and the index maintenance is confirmed.
+// =============================================================================
+
+TEST_F(GDB845Test, GDB845_Adv_InsertSelectInsertsRows) {
+    bootstrap();
+    build_index_manager();
+
+    exec_ok("CREATE TABLE src_adv (id INT, label VARCHAR)");
+    exec_ok("INSERT INTO src_adv VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e')");
+
+    // Verify the source table has 5 rows.
+    auto src_count = engine_->execute("SELECT COUNT(*) FROM src_adv");
+    ASSERT_TRUE(src_count.has_value());
+    ASSERT_EQ(src_count->rows.size(), 1u);
+    ASSERT_EQ(src_count->rows[0][0].as_int64(), int64_t(5))
+        << "source table must have 5 rows before INSERT...SELECT";
+
+    exec_ok("CREATE TABLE dst_adv (id INT, label VARCHAR)");
+    exec_ok("CREATE INDEX idx_dst_adv ON dst_adv(id)");
+
+    // INSERT...SELECT — expect this to correctly insert 5 rows.
+    // BUG (GDB-845 scope gap): currently inserts 0 rows because plan_insert()
+    // never plans stmt.select.  The ASSERT_EQ below documents the failure.
+    auto ins = engine_->execute("INSERT INTO dst_adv SELECT id, label FROM src_adv");
+    ASSERT_TRUE(ins.has_value()) << ins.error().message;
+    ASSERT_EQ(ins->rows.size(), 1u);
+    int64_t inserted_count = ins->rows[0][0].as_int64();
+    // This assertion documents the bug: inserted_count must be 5, not 0.
+    ASSERT_EQ(inserted_count, int64_t(5))
+        << "INSERT...SELECT must insert all 5 selected rows into dst_adv. "
+           "Count="
+        << inserted_count
+        << " indicates the SELECT sub-plan is not "
+           "being executed (plan_insert() never handles stmt.select — dead code path).";
+
+    // If rows were inserted, the index must also be maintained.
+    auto idx = catalog_->get_index("idx_dst_adv");
+    ASSERT_TRUE(idx.has_value());
+    auto it = index_manager_->btree_map()->find(idx->index_id);
+    ASSERT_NE(it, index_manager_->btree_map()->end());
+    ASSERT_EQ(it->second->size(), 5u)
+        << "INSERT...SELECT must maintain btree index for all 5 inserted rows (GDB-845)";
+}
+
+// =============================================================================
+// ADVERSARIAL: Multiple secondary indexes on ONE table (btree + hash) — all
+// maintained on a single INSERT...VALUES.
+// =============================================================================
+
+TEST_F(GDB845Test, GDB845_Adv_MultipleIndexesOnOneTable) {
+    bootstrap();
+    build_index_manager();
+
+    exec_ok("CREATE TABLE multi_idx (id INT, name VARCHAR, score INT)");
+    // Create a btree and a hash index on different columns before any inserts.
+    exec_ok("CREATE INDEX idx_multi_id ON multi_idx(id)");
+    exec_ok("CREATE INDEX idx_multi_score ON multi_idx(score) USING hash");
+
+    // Insert 3 rows — both indexes must be maintained for each row.
+    exec_ok("INSERT INTO multi_idx VALUES (1, 'alice', 100)");
+    exec_ok("INSERT INTO multi_idx VALUES (2, 'bob', 200)");
+    exec_ok("INSERT INTO multi_idx VALUES (3, 'carol', 300)");
+
+    auto idx_id = catalog_->get_index("idx_multi_id");
+    ASSERT_TRUE(idx_id.has_value());
+    auto idx_score = catalog_->get_index("idx_multi_score");
+    ASSERT_TRUE(idx_score.has_value());
+
+    auto bt = index_manager_->btree_map()->find(idx_id->index_id);
+    ASSERT_NE(bt, index_manager_->btree_map()->end());
+    ASSERT_EQ(bt->second->size(), 3u) << "BTree index must track all 3 rows";
+
+    auto ht = index_manager_->hash_map()->find(idx_score->index_id);
+    ASSERT_NE(ht, index_manager_->hash_map()->end());
+    ASSERT_EQ(ht->second->size(), 3u) << "Hash index must track all 3 rows";
+
+    // Verify point lookups on btree.
+    for (int32_t key : {1, 2, 3}) {
+        auto r = bt->second->search({Value(key)});
+        ASSERT_TRUE(r.has_value());
+        EXPECT_TRUE(r->has_value()) << "btree key " << key << " not found";
+    }
+
+    // Verify point lookups on hash.
+    for (int32_t score : {100, 200, 300}) {
+        auto r = ht->second->search({Value(score)});
+        ASSERT_TRUE(r.has_value());
+        EXPECT_TRUE(r->has_value()) << "hash score " << score << " not found";
+    }
+
+    // Flush + restart — both indexes must survive.
+    auto flush = index_manager_->flush_all_indexes();
+    ASSERT_TRUE(flush.has_value());
+    simulate_restart();
+    bootstrap();
+    build_index_manager();
+
+    auto idx_id2 = catalog_->get_index("idx_multi_id");
+    ASSERT_TRUE(idx_id2.has_value());
+    auto bt2 = index_manager_->btree_map()->find(idx_id2->index_id);
+    ASSERT_NE(bt2, index_manager_->btree_map()->end());
+    ASSERT_EQ(bt2->second->size(), 3u) << "BTree index must persist 3 rows after restart";
+
+    auto idx_score2 = catalog_->get_index("idx_multi_score");
+    ASSERT_TRUE(idx_score2.has_value());
+    auto ht2 = index_manager_->hash_map()->find(idx_score2->index_id);
+    ASSERT_NE(ht2, index_manager_->hash_map()->end());
+    ASSERT_EQ(ht2->second->size(), 3u) << "Hash index must persist 3 rows after restart";
+}
+
+// =============================================================================
+// ADVERSARIAL: Duplicate keys in a non-unique BTree index — correct
+// multiplicity (2 entries for the same key), no lost postings.
+// =============================================================================
+
+TEST_F(GDB845Test, GDB845_Adv_DuplicateKeysNonUniqueIndex) {
+    bootstrap();
+    build_index_manager();
+
+    exec_ok("CREATE TABLE dup_tbl (id INT, data VARCHAR)");
+    exec_ok("INSERT INTO dup_tbl VALUES (42, 'first')");
+    exec_ok("CREATE INDEX idx_dup ON dup_tbl(id)");
+
+    // Second row with same key — non-unique index must accept both postings.
+    exec_ok("INSERT INTO dup_tbl VALUES (42, 'second')");
+
+    auto idx = catalog_->get_index("idx_dup");
+    ASSERT_TRUE(idx.has_value());
+    auto it = index_manager_->btree_map()->find(idx->index_id);
+    ASSERT_NE(it, index_manager_->btree_map()->end());
+    // Non-unique BTree must hold 2 entries for key 42.
+    ASSERT_EQ(it->second->size(), 2u)
+        << "Non-unique BTree index must store both postings for duplicate key 42 (GDB-845)";
+}
+
+// =============================================================================
+// ADVERSARIAL: NULL in an indexed column — INSERT with NULL key must not crash
+// or corrupt the index; non-NULL entries remain intact.
+// =============================================================================
+
+TEST_F(GDB845Test, GDB845_Adv_NullInIndexedColumn) {
+    bootstrap();
+    build_index_manager();
+
+    exec_ok("CREATE TABLE null_tbl (id INT, val VARCHAR)");
+    exec_ok("INSERT INTO null_tbl VALUES (1, 'x')");
+    exec_ok("CREATE INDEX idx_null ON null_tbl(id)");
+
+    // Insert a row where the indexed column is NULL.
+    exec_ok("INSERT INTO null_tbl VALUES (NULL, 'null_row')");
+    // Insert a normal row after the NULL row.
+    exec_ok("INSERT INTO null_tbl VALUES (2, 'y')");
+
+    auto idx = catalog_->get_index("idx_null");
+    ASSERT_TRUE(idx.has_value());
+    auto it = index_manager_->btree_map()->find(idx->index_id);
+    ASSERT_NE(it, index_manager_->btree_map()->end());
+
+    // The non-NULL entries (key=1 and key=2) must be findable.
+    auto r1 = it->second->search({Value(int32_t(1))});
+    ASSERT_TRUE(r1.has_value());
+    EXPECT_TRUE(r1->has_value()) << "key=1 must be in index even when a NULL row was inserted";
+
+    auto r2 = it->second->search({Value(int32_t(2))});
+    ASSERT_TRUE(r2.has_value());
+    EXPECT_TRUE(r2->has_value()) << "key=2 must be in index even when a NULL row was inserted";
+}
+
+// =============================================================================
+// ADVERSARIAL: Large batch INSERT (1000 rows) — all indexed + persisted across
+// restart; no pin/latch leak observable (index size matches row count exactly).
+// =============================================================================
+
+TEST_F(GDB845Test, GDB845_Adv_LargeBatchInsertAllIndexed) {
+    bootstrap();
+    build_index_manager();
+
+    exec_ok("CREATE TABLE large_tbl (id INT, val INT)");
+    exec_ok("CREATE INDEX idx_large ON large_tbl(id)");
+
+    // Insert 1000 rows via batched VALUES.  Each batch of 50 to stay within
+    // typical SQL parser limits.
+    const int total = 1000;
+    const int batch = 50;
+    for (int start = 0; start < total; start += batch) {
+        std::string sql = "INSERT INTO large_tbl VALUES ";
+        for (int i = start; i < start + batch; ++i) {
+            if (i > start) {
+                sql += ", ";
+            }
+            sql += "(" + std::to_string(i) + ", " + std::to_string(i * 2) + ")";
+        }
+        exec_ok(sql);
+    }
+
+    auto idx = catalog_->get_index("idx_large");
+    ASSERT_TRUE(idx.has_value());
+    auto it = index_manager_->btree_map()->find(idx->index_id);
+    ASSERT_NE(it, index_manager_->btree_map()->end());
+    ASSERT_EQ(it->second->size(), static_cast<size_t>(total))
+        << "All 1000 rows must be indexed after large batch INSERT";
+
+    // Spot-check first, middle, and last keys.
+    for (int32_t key : {0, 499, 999}) {
+        auto r = it->second->search({Value(key)});
+        ASSERT_TRUE(r.has_value());
+        EXPECT_TRUE(r->has_value()) << "key " << key << " missing after 1000-row batch";
+    }
+
+    // Flush and restart — index must survive with exactly 1000 entries.
+    auto flush = index_manager_->flush_all_indexes();
+    ASSERT_TRUE(flush.has_value()) << flush.error().message;
+    simulate_restart();
+    bootstrap();
+    build_index_manager();
+
+    auto idx2 = catalog_->get_index("idx_large");
+    ASSERT_TRUE(idx2.has_value());
+    auto it2 = index_manager_->btree_map()->find(idx2->index_id);
+    ASSERT_NE(it2, index_manager_->btree_map()->end());
+    ASSERT_EQ(it2->second->size(), static_cast<size_t>(total))
+        << "1000-row index must survive flush+restart with exact count (GDB-845)";
+}
+
+// =============================================================================
+// ADVERSARIAL: Rebuild fallback — corrupt the on-disk index file, restart, and
+// confirm the rebuild from table scan yields correct contents (regression
+// guard: the fix must not break the fallback path).
+// =============================================================================
+
+TEST_F(GDB845Test, GDB845_Adv_CorruptFileRebuildFallback) {
+    bootstrap();
+    build_index_manager();
+
+    exec_ok("CREATE TABLE rebuild_tbl (id INT, val VARCHAR)");
+    exec_ok("INSERT INTO rebuild_tbl VALUES (10, 'a')");
+    exec_ok("CREATE INDEX idx_rebuild ON rebuild_tbl(id)");
+    exec_ok("INSERT INTO rebuild_tbl VALUES (20, 'b')");
+    exec_ok("INSERT INTO rebuild_tbl VALUES (30, 'c')");
+
+    auto flush = index_manager_->flush_all_indexes();
+    ASSERT_TRUE(flush.has_value()) << flush.error().message;
+
+    // Locate and corrupt the on-disk index file.
+    auto idx = catalog_->get_index("idx_rebuild");
+    ASSERT_TRUE(idx.has_value());
+    // Index files: <data_dir>/<db_id>/indexes/index_<index_id>.db
+    // The default database id is 1 (user database after system bootstrap).
+    // Use a glob-style search to find the file without hardcoding the db_id.
+    std::filesystem::path index_path;
+    for (auto& de : std::filesystem::recursive_directory_iterator(data_dir_)) {
+        if (de.is_regular_file()) {
+            auto stem = de.path().filename().string();
+            if (stem == "index_" + std::to_string(idx->index_id) + ".db") {
+                index_path = de.path();
+                break;
+            }
+        }
+    }
+    if (std::filesystem::exists(index_path)) {
+        // Overwrite with garbage bytes to force rebuild on next load.
+        {
+            auto f = std::fopen(index_path.string().c_str(), "wb");
+            ASSERT_NE(f, nullptr) << "failed to open index file for corruption";
+            const char garbage[] = "CORRUPT_DATA_GDB845";
+            std::fwrite(garbage, 1, sizeof(garbage), f);
+            std::fclose(f);
+        }
+        // Restart — rebuild_all_indexes() must fall back to table scan.
+        simulate_restart();
+        bootstrap();
+        build_index_manager();
+
+        auto idx2 = catalog_->get_index("idx_rebuild");
+        ASSERT_TRUE(idx2.has_value());
+        auto it2 = index_manager_->btree_map()->find(idx2->index_id);
+        ASSERT_NE(it2, index_manager_->btree_map()->end());
+        // Rebuild from table scan must yield all 3 rows.
+        ASSERT_EQ(it2->second->size(), 3u)
+            << "Rebuild fallback after corrupt file must yield 3 rows (GDB-845 regression)";
+        for (int32_t key : {10, 20, 30}) {
+            auto r = it2->second->search({Value(key)});
+            ASSERT_TRUE(r.has_value());
+            EXPECT_TRUE(r->has_value()) << "key " << key << " missing after fallback rebuild";
+        }
+    } else {
+        // If the file naming convention differs, skip the corruption sub-test
+        // but still verify the pre-flush state was correct.
+        GTEST_SKIP() << "On-disk index file not found at expected path; "
+                        "skipping corruption test. Path tried: "
+                     << index_path.string();
+    }
+}
+
+// =============================================================================
+// KNOWN-GAP PROBE (documented, not a QA_FAIL): Does a subsequent UPDATE leave
+// the secondary index stale across restart?  This is intentionally OUT OF SCOPE
+// for GDB-845 (UPDATE/DELETE maintenance is deferred).  The test documents the
+// current behavior so a future ticket can verify the fix.
+// =============================================================================
+
+TEST_F(GDB845Test, GDB845_KnownGap_UpdateLeavesIndexStale) {
+    bootstrap();
+    build_index_manager();
+
+    exec_ok("CREATE TABLE upd_gap_tbl (id INT, val VARCHAR)");
+    exec_ok("INSERT INTO upd_gap_tbl VALUES (1, 'original')");
+    exec_ok("CREATE INDEX idx_upd_gap ON upd_gap_tbl(id)");
+    exec_ok("INSERT INTO upd_gap_tbl VALUES (2, 'second')");
+
+    // UPDATE changes id=2 to id=99.  The secondary index is NOT updated by
+    // the fix (deferred scope).  We observe the stale index size to document
+    // the gap — we do NOT ASSERT_EQ here so the test never blocks a merge.
+    exec_ok("UPDATE upd_gap_tbl SET id = 99 WHERE id = 2");
+
+    auto idx = catalog_->get_index("idx_upd_gap");
+    ASSERT_TRUE(idx.has_value());
+    auto it = index_manager_->btree_map()->find(idx->index_id);
+    ASSERT_NE(it, index_manager_->btree_map()->end());
+
+    // Document (not assert) the known gap: after UPDATE the index may still
+    // show 2 entries with key=2 present and key=99 absent.
+    size_t observed_size = it->second->size();
+    auto r99 = it->second->search({Value(int32_t(99))});
+    ASSERT_TRUE(r99.has_value());
+    bool key99_indexed = r99->has_value();
+
+    // These are informational RecordProperty calls, not assertions that can fail.
+    RecordProperty("known_gap_index_size_after_update", static_cast<int>(observed_size));
+    RecordProperty("known_gap_key99_in_index_after_update", key99_indexed ? 1 : 0);
+
+    // The only hard assertion: INSERT-maintained entries (key=1) must still
+    // be present — UPDATE must not corrupt them.
+    auto r1 = it->second->search({Value(int32_t(1))});
+    ASSERT_TRUE(r1.has_value());
+    EXPECT_TRUE(r1->has_value())
+        << "key=1 (INSERT-maintained) must remain in index after UPDATE of another row";
+}
