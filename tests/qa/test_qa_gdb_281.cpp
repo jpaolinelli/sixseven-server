@@ -745,3 +745,296 @@ TEST_F(QA_GDB281_E2E, UuidColumnDoesNotAffectOtherColumns) {
     EXPECT_EQ(qr.rows[0][1].as_int32(), 42);
     EXPECT_EQ(qr.rows[0][2].as_string(), "hello");
 }
+
+// =============================================================================
+// GDB-835 adversarial: UUID WHERE-equality edge cases
+// =============================================================================
+
+// --- Case sensitivity in WHERE predicate ---
+
+TEST_F(QA_GDB281_E2E, GDB835_WhereUuidUppercaseLiteralMatchesLowercaseInserted) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'lower')");
+
+    auto qr = exec_ok("SELECT name FROM t "
+                      "WHERE id = 'AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA'");
+    ASSERT_EQ(qr.rows.size(), 1u)
+        << "uppercase WHERE literal did not match lowercase-inserted UUID "
+           "(possible string comparison instead of byte comparison)";
+    EXPECT_EQ(qr.rows[0][0].as_string(), "lower");
+}
+
+TEST_F(QA_GDB281_E2E, GDB835_WhereUuidLowercaseLiteralMatchesUppercaseInserted) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB', 'upper')");
+
+    auto qr = exec_ok("SELECT name FROM t "
+                      "WHERE id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'");
+    ASSERT_EQ(qr.rows.size(), 1u)
+        << "lowercase WHERE literal did not match uppercase-inserted UUID";
+    EXPECT_EQ(qr.rows[0][0].as_string(), "upper");
+}
+
+TEST_F(QA_GDB281_E2E, GDB835_WhereUuidMixedCaseLiteralMatchesStoredBytes) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('aAbBcCdD-eEfF-0011-2233-445566778899', 'mixed')");
+
+    auto qr = exec_ok("SELECT name FROM t "
+                      "WHERE id = 'AaBbCcDd-EeFf-0011-2233-445566778899'");
+    ASSERT_EQ(qr.rows.size(), 1u)
+        << "mixed-case WHERE literal did not match stored bytes";
+    EXPECT_EQ(qr.rows[0][0].as_string(), "mixed");
+}
+
+// --- No-hyphens format in WHERE (must not match canonical-form row) ---
+
+TEST_F(QA_GDB281_E2E, GDB835_WhereUuidWithoutHyphensDoesNotMatchCanonical) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('d1458b55-f0bf-44d4-b191-e52f1ef1f60a', 'row')");
+
+    auto result = engine_->execute(
+        "SELECT name FROM t WHERE id = 'd1458b55f0bf44d4b191e52f1ef1f60a'");
+    if (result.has_value()) {
+        EXPECT_EQ(result->rows.size(), 0u)
+            << "no-hyphens UUID literal matched canonical row";
+    } else {
+        EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
+    }
+}
+
+// --- Leading/trailing whitespace in WHERE literal ---
+
+TEST_F(QA_GDB281_E2E, GDB835_WhereUuidLeadingSpaceDoesNotMatch) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('cccccccc-cccc-cccc-cccc-cccccccccccc', 'row')");
+
+    auto result = engine_->execute(
+        "SELECT name FROM t WHERE id = ' cccccccc-cccc-cccc-cccc-cccccccccccc'");
+    if (result.has_value()) {
+        EXPECT_EQ(result->rows.size(), 0u)
+            << "leading-space UUID matched stored row";
+    } else {
+        EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
+    }
+}
+
+TEST_F(QA_GDB281_E2E, GDB835_WhereUuidTrailingSpaceDoesNotMatch) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('cccccccc-cccc-cccc-cccc-cccccccccccc', 'row')");
+
+    auto result = engine_->execute(
+        "SELECT name FROM t WHERE id = 'cccccccc-cccc-cccc-cccc-cccccccccccc '");
+    if (result.has_value()) {
+        EXPECT_EQ(result->rows.size(), 0u)
+            << "trailing-space UUID matched stored row";
+    } else {
+        EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
+    }
+}
+
+// --- Malformed UUID literal in WHERE ---
+
+TEST_F(QA_GDB281_E2E, GDB835_WhereMalformedUuidLiteralDoesNotMatchAny) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('11111111-1111-1111-1111-111111111111', 'one')");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('22222222-2222-2222-2222-222222222222', 'two')");
+
+    auto result = engine_->execute("SELECT name FROM t WHERE id = 'not-a-uuid-at-all'");
+    if (result.has_value()) {
+        EXPECT_EQ(result->rows.size(), 0u)
+            << "malformed UUID literal matched rows";
+    } else {
+        EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
+    }
+}
+
+TEST_F(QA_GDB281_E2E, GDB835_WhereTruncatedUuidLiteralDoesNotMatch) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('11111111-1111-1111-1111-111111111111', 'one')");
+
+    auto result = engine_->execute(
+        "SELECT name FROM t WHERE id = '11111111-1111-1111-1111-11111111111'");
+    if (result.has_value()) {
+        EXPECT_EQ(result->rows.size(), 0u)
+            << "truncated UUID literal matched row";
+    } else {
+        EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
+    }
+}
+
+// --- All-zeros (nil) UUID in WHERE ---
+
+TEST_F(QA_GDB281_E2E, GDB835_WhereNilUuidMatchesNilRow) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('00000000-0000-0000-0000-000000000000', 'nil')");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('11111111-1111-1111-1111-111111111111', 'one')");
+
+    auto qr = exec_ok(
+        "SELECT name FROM t WHERE id = '00000000-0000-0000-0000-000000000000'");
+    ASSERT_EQ(qr.rows.size(), 1u)
+        << "nil UUID WHERE predicate did not return exactly 1 row";
+    EXPECT_EQ(qr.rows[0][0].as_string(), "nil");
+}
+
+TEST_F(QA_GDB281_E2E, GDB835_WhereNilUuidDoesNotMatchNonNil) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('11111111-1111-1111-1111-111111111111', 'one')");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('22222222-2222-2222-2222-222222222222', 'two')");
+
+    auto qr = exec_ok(
+        "SELECT name FROM t WHERE id = '00000000-0000-0000-0000-000000000000'");
+    ASSERT_EQ(qr.rows.size(), 0u)
+        << "nil UUID WHERE predicate matched non-nil rows";
+}
+
+// --- UUID column vs non-UUID literal type ---
+
+TEST_F(QA_GDB281_E2E, GDB835_WhereUuidColumnVsIntegerLiteralErrors) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'row')");
+
+    auto result = engine_->execute("SELECT name FROM t WHERE id = 42");
+    if (result.has_value()) {
+        EXPECT_EQ(result->rows.size(), 0u)
+            << "UUID column compared to integer literal returned rows";
+    } else {
+        EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
+    }
+}
+
+// --- Filter correctness: 5 rows, each WHERE returns exactly its one row ---
+
+TEST_F(QA_GDB281_E2E, GDB835_WhereSelectsExactlyOneRowFromMany) {
+    exec_ok("CREATE TABLE t (id UUID, seq INT)");
+    exec_ok("INSERT INTO t (id, seq) VALUES "
+            "('aaaaaaaa-0000-0000-0000-000000000001', 1)");
+    exec_ok("INSERT INTO t (id, seq) VALUES "
+            "('bbbbbbbb-0000-0000-0000-000000000002', 2)");
+    exec_ok("INSERT INTO t (id, seq) VALUES "
+            "('cccccccc-0000-0000-0000-000000000003', 3)");
+    exec_ok("INSERT INTO t (id, seq) VALUES "
+            "('dddddddd-0000-0000-0000-000000000004', 4)");
+    exec_ok("INSERT INTO t (id, seq) VALUES "
+            "('eeeeeeee-0000-0000-0000-000000000005', 5)");
+
+    struct Case { const char* uuid; int seq; };
+    Case cases[] = {
+        {"aaaaaaaa-0000-0000-0000-000000000001", 1},
+        {"bbbbbbbb-0000-0000-0000-000000000002", 2},
+        {"cccccccc-0000-0000-0000-000000000003", 3},
+        {"dddddddd-0000-0000-0000-000000000004", 4},
+        {"eeeeeeee-0000-0000-0000-000000000005", 5},
+    };
+
+    for (auto& c : cases) {
+        std::string sql = std::string("SELECT seq FROM t WHERE id = '") + c.uuid + "'";
+        auto qr = exec_ok(sql);
+        ASSERT_EQ(qr.rows.size(), 1u)
+            << "WHERE id = '" << c.uuid << "' returned " << qr.rows.size()
+            << " rows instead of 1";
+        EXPECT_EQ(qr.rows[0][0].as_int32(), c.seq);
+    }
+}
+
+TEST_F(QA_GDB281_E2E, GDB835_WhereUninsertedUuidReturnsZeroRows) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('11111111-1111-1111-1111-111111111111', 'one')");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('22222222-2222-2222-2222-222222222222', 'two')");
+
+    auto qr = exec_ok(
+        "SELECT name FROM t WHERE id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'");
+    ASSERT_EQ(qr.rows.size(), 0u)
+        << "WHERE uuid = <not-inserted> returned rows";
+}
+
+// --- WHERE uuid != X ---
+
+TEST_F(QA_GDB281_E2E, GDB835_WhereUuidNotEqualReturnsCorrectRows) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('11111111-1111-1111-1111-111111111111', 'one')");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('22222222-2222-2222-2222-222222222222', 'two')");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('33333333-3333-3333-3333-333333333333', 'three')");
+
+    auto qr = exec_ok(
+        "SELECT name FROM t WHERE id != '22222222-2222-2222-2222-222222222222'");
+    ASSERT_EQ(qr.rows.size(), 2u)
+        << "WHERE id != <uuid> should return 2 of 3 rows";
+    for (auto& row : qr.rows) {
+        EXPECT_NE(row[0].as_string(), "two")
+            << "excluded UUID still appeared in != result";
+    }
+}
+
+// --- Canonicalization: upper/lower same bytes must match; 1-nibble diff must not ---
+
+TEST_F(QA_GDB281_E2E, GDB835_CanonicalRiskUpperAndLowerSameBytesMatchSameRow) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('aabbccdd-eeff-0011-2233-445566778899', 'target')");
+
+    auto qr_up = exec_ok(
+        "SELECT name FROM t WHERE id = 'AABBCCDD-EEFF-0011-2233-445566778899'");
+    ASSERT_EQ(qr_up.rows.size(), 1u)
+        << "uppercase literal did not match lowercase-stored UUID bytes";
+    EXPECT_EQ(qr_up.rows[0][0].as_string(), "target");
+
+    auto qr_mix = exec_ok(
+        "SELECT name FROM t WHERE id = 'AaBbCcDd-EeFf-0011-2233-445566778899'");
+    ASSERT_EQ(qr_mix.rows.size(), 1u)
+        << "mixed-case literal did not match stored UUID";
+    EXPECT_EQ(qr_mix.rows[0][0].as_string(), "target");
+}
+
+TEST_F(QA_GDB281_E2E, GDB835_CanonicalRiskOneNibbleDifferenceDoesNotMatch) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('00000000-0000-0000-0000-000000000001', 'one')");
+
+    auto qr = exec_ok(
+        "SELECT name FROM t WHERE id = '00000000-0000-0000-0000-000000000002'");
+    ASSERT_EQ(qr.rows.size(), 0u)
+        << "UUID differing by one nibble matched a different row";
+}
+
+// --- NULL rows: WHERE uuid = value must not match NULL ---
+
+TEST_F(QA_GDB281_E2E, GDB835_WhereUuidEqualDoesNotMatchNullRows) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES (NULL, 'nullrow')");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('11111111-1111-1111-1111-111111111111', 'realrow')");
+
+    auto qr = exec_ok(
+        "SELECT name FROM t WHERE id = '11111111-1111-1111-1111-111111111111'");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "realrow");
+}
+
+TEST_F(QA_GDB281_E2E, GDB835_WhereUuidEqualNullOnlyTableReturnsZero) {
+    exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    exec_ok("INSERT INTO t (id, name) VALUES (NULL, 'nullrow')");
+
+    auto qr = exec_ok(
+        "SELECT name FROM t WHERE id = '11111111-1111-1111-1111-111111111111'");
+    ASSERT_EQ(qr.rows.size(), 0u)
+        << "NULL UUID row matched a non-NULL WHERE predicate";
+}
