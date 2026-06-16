@@ -275,8 +275,7 @@ TEST_F(QA_GDB661, DefaultNameForNotTrue) {
     // Default is "NOT " + inner.default_name. Inner is "true" or "TRUE"
     // depending on lexer casing. Accept either.
     const auto& n = r->column_names[0];
-    EXPECT_TRUE(n == "NOT true" || n == "NOT TRUE")
-        << "got default name: " << n;
+    EXPECT_TRUE(n == "NOT true" || n == "NOT TRUE") << "got default name: " << n;
 }
 
 TEST_F(QA_GDB661, DefaultNameForDoubleNeg) {
@@ -356,8 +355,7 @@ TEST_F(QA_GDB661, GDB814_NotZeroIntIsAlsoRejected) {
 
 TEST_F(QA_GDB661, GDB814_NotNegativeIntIsRejected) {
     auto r = engine_->execute("SELECT NOT -1 AS x");
-    EXPECT_FALSE(r.has_value())
-        << "NOT applied to negative int must not fold; expected error";
+    EXPECT_FALSE(r.has_value()) << "NOT applied to negative int must not fold; expected error";
 }
 
 TEST_F(QA_GDB661, GDB814_NegateFalseIsRejected) {
