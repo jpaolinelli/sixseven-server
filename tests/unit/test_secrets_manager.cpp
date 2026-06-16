@@ -3,9 +3,12 @@
 
 #include <gtest/gtest.h>
 
+#include <openssl/evp.h>
+
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 using namespace sixseven;
 
@@ -232,6 +235,120 @@ TEST_F(SecretsManagerTest, DecryptWithWrongKey) {
     auto result = mgr2->decrypt(*encrypted);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::AUTH_ERROR);
+}
+
+// ---------------------------------------------------------------------------
+// GDB-846 regression: decrypt() must not return ok() with empty/garbage
+// plaintext when EVP operations fail or authentication tag is bad.
+// Before the fix: if success==false after Init/Update, execution would
+// fall through to return ok(plaintext) with unverified content.
+// ---------------------------------------------------------------------------
+
+TEST_F(SecretsManagerTest, GDB846_CorruptedCiphertextBodyReturnsError) {
+    // Encrypt a non-empty secret so the ciphertext body is non-empty.
+    auto mgr = SecretsManager::create(key_path_);
+    ASSERT_TRUE(mgr.has_value()) << mgr.error().message;
+
+    const std::string secret = "api-key-1234567890";
+    auto encrypted = mgr->encrypt(secret);
+    ASSERT_TRUE(encrypted.has_value()) << encrypted.error().message;
+
+    // Base64-decode to get raw binary: nonce(12) + ciphertext(N) + tag(16).
+    // Corrupt byte 12 (first byte of ciphertext body, not the tag).
+    // Re-encode and assert decrypt returns an error, NOT ok() with any value.
+    std::vector<uint8_t> raw(encrypted->size());
+    int raw_len = EVP_DecodeBlock(raw.data(),
+                                  reinterpret_cast<const unsigned char*>(encrypted->data()),
+                                  static_cast<int>(encrypted->size()));
+    ASSERT_GT(raw_len, 28) << "encoded blob too short to have a ciphertext body";
+
+    // Flip a bit in the ciphertext body (byte 12 = first byte after nonce).
+    raw[12] ^= 0xFF;
+
+    // Re-encode.
+    size_t enc_len = 4 * ((static_cast<size_t>(raw_len) + 2) / 3) + 1;
+    std::string reencoded(enc_len, '\0');
+    int written =
+        EVP_EncodeBlock(reinterpret_cast<unsigned char*>(reencoded.data()), raw.data(), raw_len);
+    reencoded.resize(static_cast<size_t>(written));
+
+    auto result = mgr->decrypt(reencoded);
+    // Must be an error — NOT ok() with empty or garbage plaintext.
+    ASSERT_FALSE(result.has_value())
+        << "decrypt() returned ok() with value '" << result.value_or("")
+        << "' for corrupted ciphertext body; bug GDB-846 regression";
+}
+
+TEST_F(SecretsManagerTest, GDB846_TamperedGCMTagReturnsAuthError) {
+    // Encrypt a non-empty secret.
+    auto mgr = SecretsManager::create(key_path_);
+    ASSERT_TRUE(mgr.has_value()) << mgr.error().message;
+
+    const std::string secret = "super-secret-value";
+    auto encrypted = mgr->encrypt(secret);
+    ASSERT_TRUE(encrypted.has_value()) << encrypted.error().message;
+
+    // Base64-decode, corrupt the last byte of the tag, re-encode.
+    std::vector<uint8_t> raw(encrypted->size());
+    int raw_len = EVP_DecodeBlock(raw.data(),
+                                  reinterpret_cast<const unsigned char*>(encrypted->data()),
+                                  static_cast<int>(encrypted->size()));
+    ASSERT_GT(raw_len, 28) << "encoded blob too short";
+
+    // Last 16 bytes are the GCM tag; flip the last byte.
+    raw[static_cast<size_t>(raw_len) - 1] ^= 0xFF;
+
+    size_t enc_len = 4 * ((static_cast<size_t>(raw_len) + 2) / 3) + 1;
+    std::string reencoded(enc_len, '\0');
+    int written =
+        EVP_EncodeBlock(reinterpret_cast<unsigned char*>(reencoded.data()), raw.data(), raw_len);
+    reencoded.resize(static_cast<size_t>(written));
+
+    auto result = mgr->decrypt(reencoded);
+    // GCM authentication tag mismatch must surface as AUTH_ERROR.
+    ASSERT_FALSE(result.has_value())
+        << "decrypt() returned ok() for tampered GCM tag; bug GDB-846 regression";
+    EXPECT_EQ(result.error().code, StatusCode::AUTH_ERROR);
+}
+
+TEST_F(SecretsManagerTest, GDB846_WrongKeyReturnsErrorNotEmptyOk) {
+    // Encrypt with key1, decrypt with key2 — must return error, not ok("").
+    auto key1_path = (test_dir_ / "key_gdb846_1.key").string();
+    auto key2_path = (test_dir_ / "key_gdb846_2.key").string();
+
+    auto mgr1 = SecretsManager::create(key1_path);
+    auto mgr2 = SecretsManager::create(key2_path);
+    ASSERT_TRUE(mgr1.has_value());
+    ASSERT_TRUE(mgr2.has_value());
+
+    const std::string secret = "plaintext-that-must-not-leak";
+    auto encrypted = mgr1->encrypt(secret);
+    ASSERT_TRUE(encrypted.has_value());
+
+    // Sanity: correct key decrypts successfully to the exact original.
+    auto correct = mgr1->decrypt(*encrypted);
+    ASSERT_TRUE(correct.has_value()) << correct.error().message;
+    ASSERT_EQ(*correct, secret);
+
+    // Wrong key must NOT return ok() — certainly not ok("") silently.
+    auto result = mgr2->decrypt(*encrypted);
+    ASSERT_FALSE(result.has_value()) << "decrypt() with wrong key returned ok() with value '"
+                                     << result.value_or("") << "'; bug GDB-846 regression";
+    EXPECT_EQ(result.error().code, StatusCode::AUTH_ERROR);
+}
+
+TEST_F(SecretsManagerTest, GDB846_RoundTripUnchangedAfterFix) {
+    // Positive regression: the fix must not break successful decryption.
+    auto mgr = SecretsManager::create(key_path_);
+    ASSERT_TRUE(mgr.has_value()) << mgr.error().message;
+
+    const std::string plaintext = "the-original-api-key-must-survive";
+    auto encrypted = mgr->encrypt(plaintext);
+    ASSERT_TRUE(encrypted.has_value()) << encrypted.error().message;
+
+    auto decrypted = mgr->decrypt(*encrypted);
+    ASSERT_TRUE(decrypted.has_value()) << decrypted.error().message;
+    ASSERT_EQ(*decrypted, plaintext) << "round-trip changed the plaintext after GDB-846 fix";
 }
 
 // ---------------------------------------------------------------------------
