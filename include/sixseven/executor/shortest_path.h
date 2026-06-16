@@ -23,6 +23,18 @@ struct ShortestPathConfig {
     TraverseDirection direction = TraverseDirection::OUT;
     int32_t max_depth = 100;
     size_t max_visited = 100000;
+
+    /// True when source and target nodes live in different tables (heterogeneous
+    /// edge). When true the BFS visited/parent maps must be keyed by
+    /// (table_id, pk) rather than bare pk to avoid conflating nodes from
+    /// different tables that happen to share a PK value (GDB-842, mirroring
+    /// GDB-696 for TRAVERSE).
+    bool heterogeneous = false;
+
+    /// Table ID of the source-side node table (from_key lives here).
+    table_id_t source_table_id = 0;
+    /// Table ID of the target-side node table (to_key lives here).
+    table_id_t target_table_id = 0;
 };
 
 /// Shortest path executor operator.

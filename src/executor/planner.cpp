@@ -2857,6 +2857,24 @@ Result<std::unique_ptr<Iterator>> Planner::plan_shortest_path(const ShortestPath
                           "SHORTEST PATH to key: " + coerced_to.error().message);
     }
 
+    // Resolve the edge type to determine source/target table IDs and whether
+    // the edge is heterogeneous (GDB-842: needed to correctly key the BFS
+    // visited/parent maps by (table_id, pk) rather than bare pk).
+    auto edge_def = catalog_.get_edge_type(database_id_, stmt.edge_type);
+    if (!edge_def) {
+        return make_error(edge_def.error().code, edge_def.error().message);
+    }
+    const bool heterogeneous = edge_def->source_table_id != edge_def->target_table_id;
+
+    // Reject DIRECTION BOTH on heterogeneous edges, mirroring the TRAVERSE
+    // restriction: per-hop table identity is ambiguous when source and target
+    // tables differ and the BFS can expand in both directions (GDB-842).
+    if (heterogeneous && stmt.direction == TraverseDirection::BOTH) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "DIRECTION BOTH not supported for heterogeneous edge type '" +
+                              stmt.edge_type + "'");
+    }
+
     ShortestPathConfig sp_config;
     sp_config.database_id = database_id_;
     sp_config.edge_type = stmt.edge_type;
@@ -2864,6 +2882,9 @@ Result<std::unique_ptr<Iterator>> Planner::plan_shortest_path(const ShortestPath
     sp_config.to_key = std::move(*coerced_to);
     sp_config.direction = stmt.direction;
     sp_config.max_depth = stmt.max_depth.value_or(100);
+    sp_config.heterogeneous = heterogeneous;
+    sp_config.source_table_id = edge_def->source_table_id;
+    sp_config.target_table_id = edge_def->target_table_id;
 
     std::vector<OutputColumn> out_cols;
     out_cols.push_back({"", "node", from_pk_type, false, 0});
