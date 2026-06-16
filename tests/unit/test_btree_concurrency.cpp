@@ -18,29 +18,49 @@ using namespace sixseven::test;
 // =============================================================================
 
 TEST(BTreeConcurrency, SequentialMultiThreadInsert) {
-    // Insert from multiple threads sequentially (non-overlapping ranges).
-    // This tests basic thread safety.
+    // Each thread owns a disjoint key range and is started then fully joined
+    // before the next thread begins.  This validates that the tree correctly
+    // serialises acquisitions of its reader-writer latch across thread
+    // boundaries: every insert made by thread N-1 must be visible (via search)
+    // to thread N without any data races.
     auto tree = make_test_index(10, 10);
     constexpr int keys_per_thread = 100;
     constexpr int num_threads = 4;
+    constexpr int total_keys = num_threads * keys_per_thread;
 
-    // Sequential insert per thread (non-overlapping).
+    std::atomic<int> failures{0};
+
     for (int t = 0; t < num_threads; ++t) {
+        std::thread th([&tree, &failures, t]() {
+            int start = t * keys_per_thread;
+            for (int i = 0; i < keys_per_thread; ++i) {
+                int key = start + i;
+                auto ins = tree.insert(make_key(key), make_rid(static_cast<uint32_t>(key)));
+                if (!ins.has_value()) {
+                    failures.fetch_add(1);
+                }
+            }
+        });
+        th.join(); // join before launching the next thread (sequential)
+
+        // After each thread completes, every key it inserted must be present.
         int start = t * keys_per_thread;
-        for (int i = 0; i < keys_per_thread; ++i) {
-            int key = start + i;
-            auto ins = tree.insert(make_key(key), make_rid(static_cast<uint32_t>(key)));
-            ASSERT_TRUE(ins.has_value()) << "Failed to insert key " << key;
+        for (int i = start; i < start + keys_per_thread; ++i) {
+            auto result = tree.search(make_key(i));
+            ASSERT_TRUE(result.has_value());
+            EXPECT_TRUE(result->has_value())
+                << "Key " << i << " not found after thread " << t << " joined";
         }
     }
 
-    EXPECT_EQ(tree.size(), static_cast<uint64_t>(num_threads * keys_per_thread));
+    EXPECT_EQ(failures.load(), 0) << "Some inserts failed";
+    EXPECT_EQ(tree.size(), static_cast<uint64_t>(total_keys));
 
-    // Verify all keys present.
-    for (int i = 0; i < num_threads * keys_per_thread; ++i) {
+    // Verify every key across all threads is present and maps to the correct RID.
+    for (int i = 0; i < total_keys; ++i) {
         auto result = tree.search(make_key(i));
         ASSERT_TRUE(result.has_value());
-        EXPECT_TRUE(result->has_value()) << "Key " << i << " not found";
+        EXPECT_TRUE(result->has_value()) << "Key " << i << " not found in final scan";
     }
 }
 
