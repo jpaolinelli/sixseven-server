@@ -321,3 +321,106 @@ TEST_F(BTreePersistenceTest, ConcurrentPersistWhileInserting) {
     // should be in a consistent state (no corruption).
     EXPECT_GE((*loaded)->size(), 50u) << "Should have at least pre-populated entries";
 }
+
+// =============================================================================
+// GDB-816: Large string keys that cause a single node to exceed one page
+//          must round-trip correctly via per-node overflow pages.
+// =============================================================================
+
+TEST_F(BTreePersistenceTest, LargeStringKeySingleNodeOverflow) {
+    // A single STRING key of 4096 bytes. The serialised leaf node header is
+    // 18 bytes (4+4+4+4+2) and each entry adds 4096+overhead+6 bytes for the
+    // RID.  Even a leaf with leaf_max_keys=1 will produce a node that exceeds
+    // the 8100-byte NODE_MAX_INLINE_SIZE threshold once we insert a few such
+    // keys (we use leaf_max_keys=2 so a split occurs and each leaf holds one
+    // huge key, which still individually exceeds 8100 bytes).
+    BTreeConfig config;
+    config.key_types = {TypeId::STRING};
+    config.is_unique = true;
+    // Small cap forces a split so we exercise both leaf and internal nodes
+    // when keys are large.
+    config.leaf_max_keys = 2;
+    config.internal_max_keys = 2;
+    BTreeIndex original(std::move(config));
+
+    // Each key is ~4 KB — three such entries require node overflow on persist.
+    constexpr size_t KEY_LEN = 4096;
+    constexpr int N = 3;
+    for (int i = 0; i < N; ++i) {
+        // Make keys unique and sortable by prefixing with an index character.
+        std::string k(KEY_LEN, static_cast<char>('a' + i));
+        auto r = original.insert({Value(k)}, RID{static_cast<PageId>(i + 1), 0});
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+    }
+    EXPECT_EQ(original.size(), static_cast<size_t>(N));
+
+    // Persist — this triggered the original bug ("leaf data too large for page").
+    auto [fid1, bpm1] = create_bpm("large_key_overflow");
+    auto meta = BTreePersistence::persist(*bpm1, original);
+    ASSERT_TRUE(meta.has_value()) << meta.error().message;
+    bpm1.reset();
+    (void)dm_->close_file(fid1);
+
+    // Load and verify every key is found with the correct RID.
+    auto [fid2, bpm2] = open_bpm("large_key_overflow");
+    auto loaded = BTreePersistence::load(*bpm2, *meta);
+    ASSERT_TRUE(loaded.has_value()) << loaded.error().message;
+    EXPECT_EQ((*loaded)->size(), static_cast<size_t>(N));
+
+    for (int i = 0; i < N; ++i) {
+        std::string k(KEY_LEN, static_cast<char>('a' + i));
+        auto s = (*loaded)->search({Value(k)});
+        ASSERT_TRUE(s.has_value()) << s.error().message;
+        ASSERT_TRUE(s->has_value()) << "large key " << i << " not found after load";
+        EXPECT_EQ(s->value().page_id, static_cast<PageId>(i + 1));
+    }
+}
+
+TEST_F(BTreePersistenceTest, VeryLargeStringKeyExceedsMultiplePages) {
+    // A single key of 16 KB forces the node data to span 3 overflow pages.
+    BTreeConfig config;
+    config.key_types = {TypeId::STRING};
+    config.is_unique = true;
+    config.leaf_max_keys = 1; // Each leaf holds exactly one huge key.
+    config.internal_max_keys = 4;
+    BTreeIndex original(std::move(config));
+
+    constexpr size_t KEY_LEN = 16384; // 16 KB key
+    constexpr int N = 4;
+    for (int i = 0; i < N; ++i) {
+        std::string k(KEY_LEN, static_cast<char>('A' + i));
+        auto r = original.insert({Value(k)}, RID{static_cast<PageId>(10 + i), 1});
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+    }
+    EXPECT_EQ(original.size(), static_cast<size_t>(N));
+
+    // Use a larger buffer pool since we have many overflow pages.
+    auto path = data_dir_ / "very_large_key_overflow.db";
+    auto fid_w = dm_->create_file(path, false, true);
+    ASSERT_TRUE(fid_w.has_value());
+    auto bpm_w = std::make_unique<BufferPoolManager>(*dm_, *fid_w, 1024);
+
+    auto meta = BTreePersistence::persist(*bpm_w, original);
+    ASSERT_TRUE(meta.has_value()) << meta.error().message;
+    bpm_w.reset();
+    (void)dm_->close_file(*fid_w);
+
+    auto fid_r = dm_->open_file(path);
+    ASSERT_TRUE(fid_r.has_value());
+    auto bpm_r = std::make_unique<BufferPoolManager>(*dm_, *fid_r, 1024);
+
+    auto loaded = BTreePersistence::load(*bpm_r, *meta);
+    ASSERT_TRUE(loaded.has_value()) << loaded.error().message;
+    EXPECT_EQ((*loaded)->size(), static_cast<size_t>(N));
+
+    for (int i = 0; i < N; ++i) {
+        std::string k(KEY_LEN, static_cast<char>('A' + i));
+        auto s = (*loaded)->search({Value(k)});
+        ASSERT_TRUE(s.has_value()) << s.error().message;
+        ASSERT_TRUE(s->has_value()) << "16KB key " << i << " not found after load";
+        EXPECT_EQ(s->value().page_id, static_cast<PageId>(10 + i));
+    }
+
+    bpm_r.reset();
+    (void)dm_->close_file(*fid_r);
+}
