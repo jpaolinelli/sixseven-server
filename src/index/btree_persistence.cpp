@@ -245,6 +245,41 @@ read_node_page(BufferPoolManager& bpm, PageId primary_id, const std::string& ctx
     return ok(std::move(data));
 }
 
+/// RAII guard that unpins a buffer-pool page when it goes out of scope.
+///
+/// Prevents pin leaks on early-return error paths without requiring a manual
+/// unpin before each return.  Call dismiss() when the pin is intentionally
+/// transferred (e.g. the page pointer is handed off and the caller will unpin).
+///
+/// The dirty flag defaults to false; call mark_dirty() before destruction (or
+/// before dismiss()) to unpin with is_dirty=true.
+struct PinGuard {
+    PinGuard(BufferPoolManager& bpm, PageId pid, bool dirty = false)
+        : bpm_(&bpm), page_id_(pid), is_dirty_(dirty) {}
+
+    ~PinGuard() {
+        if (bpm_ != nullptr) {
+            (void)bpm_->unpin_page(page_id_, is_dirty_);
+        }
+    }
+
+    /// Mark the page dirty before destruction.
+    void mark_dirty() { is_dirty_ = true; }
+
+    /// Release ownership — the destructor will NOT unpin.
+    void dismiss() { bpm_ = nullptr; }
+
+    PinGuard(const PinGuard&) = delete;
+    PinGuard& operator=(const PinGuard&) = delete;
+    PinGuard(PinGuard&&) = delete;
+    PinGuard& operator=(PinGuard&&) = delete;
+
+private:
+    BufferPoolManager* bpm_;
+    PageId page_id_;
+    bool is_dirty_;
+};
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -399,13 +434,16 @@ Result<PageId> BTreePersistence::persist(BufferPoolManager& bpm, const BTreeInde
         auto* meta_page = *meta_page_r;
         meta_page_id = meta_page->page_id();
         meta_page->reset(meta_page_id, PageType::BTREE_META);
+        // PinGuard ensures the page is unpinned on every exit path (error or success).
+        PinGuard meta_guard(bpm, meta_page_id, /*dirty=*/false);
         auto slot = meta_page->insert_tuple(std::span<const uint8_t>(inline_buf));
         if (!slot) {
             return make_error(slot.error().code,
                               "btree persist: meta data too large for page: " +
                                   slot.error().message);
         }
-        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/true);
+        meta_guard.mark_dirty();
+        // Guard destructs here, unpinning with is_dirty=true.
     } else {
         // Large tree — write directory to overflow pages, meta page gets compact header.
         // Chunk directory into pages (~8100 bytes per page).
@@ -420,6 +458,8 @@ Result<PageId> BTreePersistence::persist(BufferPoolManager& bpm, const BTreeInde
                                       ovf_page_r.error().message);
             }
             auto* ovf_page = *ovf_page_r;
+            // PinGuard ensures the overflow page is unpinned on every exit path.
+            PinGuard ovf_guard(bpm, ovf_page->page_id(), /*dirty=*/false);
             ovf_page->reset(ovf_page->page_id(), PageType::BTREE_META);
             auto ovf_slot = ovf_page->insert_tuple(
                 std::span<const uint8_t>(dir_buf.data() + offset, chunk_size));
@@ -429,7 +469,8 @@ Result<PageId> BTreePersistence::persist(BufferPoolManager& bpm, const BTreeInde
                                       ovf_slot.error().message);
             }
             overflow_page_ids.push_back(ovf_page->page_id());
-            (void)bpm.unpin_page(ovf_page->page_id(), /*is_dirty=*/true);
+            ovf_guard.mark_dirty();
+            // ovf_guard destructs here at end of loop iteration, unpinning dirty.
             offset += chunk_size;
         }
 
@@ -449,12 +490,15 @@ Result<PageId> BTreePersistence::persist(BufferPoolManager& bpm, const BTreeInde
         auto* meta_page = *meta_page_r;
         meta_page_id = meta_page->page_id();
         meta_page->reset(meta_page_id, PageType::BTREE_META);
+        // PinGuard ensures the meta page is unpinned on every exit path.
+        PinGuard meta_guard(bpm, meta_page_id, /*dirty=*/false);
         auto slot = meta_page->insert_tuple(std::span<const uint8_t>(header_buf));
         if (!slot) {
             return make_error(slot.error().code,
                               "btree persist: v2 meta header too large: " + slot.error().message);
         }
-        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/true);
+        meta_guard.mark_dirty();
+        // Guard destructs here, unpinning with is_dirty=true.
     }
 
     // Flush all pages to disk.

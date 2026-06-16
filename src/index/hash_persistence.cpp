@@ -104,6 +104,41 @@ constexpr size_t MAX_INLINE_SIZE = 8100;
 // No realistic V1 page can ever produce these leading bytes.
 constexpr uint32_t HASH_V2_MAGIC = 0xFF534858U;
 
+/// RAII guard that unpins a buffer-pool page when it goes out of scope.
+///
+/// Prevents pin leaks on early-return error paths without requiring a manual
+/// unpin before each return.  Call dismiss() when the pin is intentionally
+/// transferred (e.g. the page pointer is handed off and the caller will unpin).
+///
+/// The dirty flag defaults to false; call mark_dirty() before destruction (or
+/// before dismiss()) to unpin with is_dirty=true.
+struct PinGuard {
+    PinGuard(BufferPoolManager& bpm, PageId pid, bool dirty = false)
+        : bpm_(&bpm), page_id_(pid), is_dirty_(dirty) {}
+
+    ~PinGuard() {
+        if (bpm_ != nullptr) {
+            (void)bpm_->unpin_page(page_id_, is_dirty_);
+        }
+    }
+
+    /// Mark the page dirty before destruction.
+    void mark_dirty() { is_dirty_ = true; }
+
+    /// Release ownership — the destructor will NOT unpin.
+    void dismiss() { bpm_ = nullptr; }
+
+    PinGuard(const PinGuard&) = delete;
+    PinGuard& operator=(const PinGuard&) = delete;
+    PinGuard(PinGuard&&) = delete;
+    PinGuard& operator=(PinGuard&&) = delete;
+
+private:
+    BufferPoolManager* bpm_;
+    PageId page_id_;
+    bool is_dirty_;
+};
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -191,6 +226,8 @@ Result<PageId> HashPersistence::persist(BufferPoolManager& bpm, const HashIndex&
                                   page_r.error().message);
         }
         auto* page = *page_r;
+        // PinGuard ensures the bucket page is unpinned on every exit path.
+        PinGuard bucket_guard(bpm, page->page_id(), /*dirty=*/false);
         page->reset(page->page_id(), PageType::HASH_BUCKET);
         auto slot = page->insert_tuple(std::span<const uint8_t>(buf));
         if (!slot) {
@@ -199,7 +236,8 @@ Result<PageId> HashPersistence::persist(BufferPoolManager& bpm, const HashIndex&
                                   slot.error().message);
         }
         bucket_disk_pages.push_back(page->page_id());
-        (void)bpm.unpin_page(page->page_id(), /*is_dirty=*/true);
+        bucket_guard.mark_dirty();
+        // bucket_guard destructs here, unpinning dirty.
     }
 
     // Build the fixed header (config + key types, no directory).
@@ -249,13 +287,16 @@ Result<PageId> HashPersistence::persist(BufferPoolManager& bpm, const HashIndex&
         auto* meta_page = *meta_page_r;
         meta_page_id = meta_page->page_id();
         meta_page->reset(meta_page_id, PageType::HASH_META);
+        // PinGuard ensures the meta page is unpinned on every exit path.
+        PinGuard meta_guard(bpm, meta_page_id, /*dirty=*/false);
         auto slot = meta_page->insert_tuple(std::span<const uint8_t>(inline_buf));
         if (!slot) {
             return make_error(slot.error().code,
                               "hash persist: meta data too large for page: " +
                                   slot.error().message);
         }
-        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/true);
+        meta_guard.mark_dirty();
+        // meta_guard destructs here, unpinning dirty.
     } else {
         // Large directory — chunk directory bytes into overflow pages, meta page
         // holds a compact V2 header + list of overflow PageIds.
@@ -270,6 +311,8 @@ Result<PageId> HashPersistence::persist(BufferPoolManager& bpm, const HashIndex&
                                       ovf_page_r.error().message);
             }
             auto* ovf_page = *ovf_page_r;
+            // PinGuard ensures the overflow page is unpinned on every exit path.
+            PinGuard ovf_guard(bpm, ovf_page->page_id(), /*dirty=*/false);
             ovf_page->reset(ovf_page->page_id(), PageType::HASH_META);
             auto ovf_slot = ovf_page->insert_tuple(
                 std::span<const uint8_t>(dir_buf.data() + offset, chunk_size));
@@ -279,7 +322,8 @@ Result<PageId> HashPersistence::persist(BufferPoolManager& bpm, const HashIndex&
                                       ovf_slot.error().message);
             }
             overflow_page_ids.push_back(ovf_page->page_id());
-            (void)bpm.unpin_page(ovf_page->page_id(), /*is_dirty=*/true);
+            ovf_guard.mark_dirty();
+            // ovf_guard destructs here at end of loop iteration, unpinning dirty.
             offset += chunk_size;
         }
 
@@ -299,12 +343,15 @@ Result<PageId> HashPersistence::persist(BufferPoolManager& bpm, const HashIndex&
         auto* meta_page = *meta_page_r;
         meta_page_id = meta_page->page_id();
         meta_page->reset(meta_page_id, PageType::HASH_META);
+        // PinGuard ensures the meta page is unpinned on every exit path.
+        PinGuard meta_guard(bpm, meta_page_id, /*dirty=*/false);
         auto slot = meta_page->insert_tuple(std::span<const uint8_t>(header_buf));
         if (!slot) {
             return make_error(slot.error().code,
                               "hash persist: v2 meta header too large: " + slot.error().message);
         }
-        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/true);
+        meta_guard.mark_dirty();
+        // meta_guard destructs here, unpinning dirty.
     }
 
     auto flush = bpm.flush_all();

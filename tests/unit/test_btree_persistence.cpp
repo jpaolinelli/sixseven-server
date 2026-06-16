@@ -424,3 +424,68 @@ TEST_F(BTreePersistenceTest, VeryLargeStringKeyExceedsMultiplePages) {
     bpm_r.reset();
     (void)dm_->close_file(*fid_r);
 }
+
+// =============================================================================
+// GDB-826: Success path is pin-balanced — RAII guard does not double-unpin
+//
+// Before this fix the persist() function called bpm.unpin_page() explicitly on
+// the success path.  The fix replaces those explicit calls with a PinGuard that
+// fires on ALL exit paths (including error).  This test verifies that the guard
+// does NOT introduce a double-unpin on the success path by checking that the
+// buffer pool ends up with all frames free (evictable) after a successful
+// persist.  If a double-unpin had corrupted the pin count or eviction state,
+// subsequent new_page() calls would fail or return stale data.
+// =============================================================================
+
+TEST_F(BTreePersistenceTest, SuccessPathPinBalanced) {
+    BTreeConfig config;
+    config.key_types = {TypeId::INT32};
+    config.is_unique = true;
+    BTreeIndex index(std::move(config));
+
+    for (int32_t i = 1; i <= 10; ++i) {
+        auto r = index.insert({Value(i)}, RID{static_cast<PageId>(i), 0});
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+    }
+    EXPECT_EQ(index.size(), 10u);
+
+    // Tight pool: 4 frames.  A 10-entry btree should persist into a small
+    // number of pages; write_node_page() pins+unpins each node page before
+    // moving on, so the pool only needs to hold one node at a time plus the
+    // meta page.
+    auto path = data_dir_ / "success_pin_balanced.db";
+    auto fid_r = dm_->create_file(path, false, true);
+    ASSERT_TRUE(fid_r.has_value()) << fid_r.error().message;
+    auto bpm = std::make_unique<BufferPoolManager>(*dm_, *fid_r, /*pool_size=*/4);
+
+    auto meta = BTreePersistence::persist(*bpm, index);
+    ASSERT_TRUE(meta.has_value()) << "persist failed: " << meta.error().message;
+
+    // After a successful persist every pinned frame should be unpinned.
+    // Allocate all 4 frames — if any is stuck pinned (due to a leak or
+    // a double-unpin corrupting evictable tracking), new_page will fail.
+    auto p1 = bpm->new_page();
+    auto p2 = bpm->new_page();
+    auto p3 = bpm->new_page();
+    auto p4 = bpm->new_page();
+    EXPECT_TRUE(p1.has_value()) << "frame 1 unavailable after persist";
+    EXPECT_TRUE(p2.has_value()) << "frame 2 unavailable after persist";
+    EXPECT_TRUE(p3.has_value()) << "frame 3 unavailable after persist";
+    EXPECT_TRUE(p4.has_value()) << "frame 4 unavailable after persist";
+
+    if (p1.has_value()) {
+        (void)bpm->unpin_page((*p1)->page_id(), false);
+    }
+    if (p2.has_value()) {
+        (void)bpm->unpin_page((*p2)->page_id(), false);
+    }
+    if (p3.has_value()) {
+        (void)bpm->unpin_page((*p3)->page_id(), false);
+    }
+    if (p4.has_value()) {
+        (void)bpm->unpin_page((*p4)->page_id(), false);
+    }
+
+    bpm.reset();
+    (void)dm_->close_file(*fid_r);
+}

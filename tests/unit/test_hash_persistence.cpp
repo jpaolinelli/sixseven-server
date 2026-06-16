@@ -421,3 +421,134 @@ TEST_F(HashPersistenceTest, V1WithLeadingZeroByteRoundtrip) {
     EXPECT_EQ((*loaded)->global_depth(), 0u);
     EXPECT_EQ((*loaded)->size(), 0u);
 }
+
+// =============================================================================
+// GDB-826: Pin leak regression — no pin leak when bucket insert_tuple fails
+//
+// A hash bucket with many entries serialises to more bytes than a slotted page
+// can hold (~8164 bytes usable).  Before this fix, hash_persistence.cpp called
+// bpm.new_page(), got a frame, called insert_tuple (which fails because the
+// bucket payload exceeds the page capacity), and returned an error WITHOUT
+// calling bpm.unpin_page() — leaving the frame permanently pinned.
+//
+// This test:
+//  1. Builds a hash index whose single bucket serialises to > 8164 bytes.
+//  2. Calls HashPersistence::persist() — which must fail (bucket too large).
+//  3. Verifies that AFTER the failure the buffer pool still has a free frame
+//     (i.e. no frame was leaked by the failed persist).
+//  4. Also verifies that a successful persist on a fresh pool leaves all
+//     frames unpinned (RAII guard does not double-unpin on the success path).
+// =============================================================================
+
+TEST_F(HashPersistenceTest, PinNotLeakedOnBucketInsertFailure) {
+    // bucket_capacity=600 so no splits happen for 500 entries.
+    // All 500 entries land in a single bucket (global_depth stays 0).
+    //
+    // Per-entry serialized size:
+    //   hash(8) + INT32 key (1 null flag + 4 payload = 5) + page_id(4) + slot_id(2) = 19 bytes
+    // Bucket data: local_depth(4) + entry_count(4) + 500*19 = 9508 bytes.
+    // Slotted-page capacity: 8192 - 24 (header) - 4 (slot entry) = 8164 bytes.
+    // 9508 > 8164 → insert_tuple MUST fail for this bucket.
+    HashIndexConfig config;
+    config.key_types = {TypeId::INT32};
+    config.bucket_capacity = 600;
+    config.is_unique = true;
+    HashIndex index(std::move(config));
+
+    for (int32_t i = 0; i < 500; ++i) {
+        auto r = index.insert({Value(i)}, RID{static_cast<PageId>(i + 1), 0});
+        ASSERT_TRUE(r.has_value()) << "insert " << i << " failed: " << r.error().message;
+    }
+    EXPECT_EQ(index.size(), 500u);
+    // Confirm all 500 entries are in one bucket (global_depth == 0, directory size == 1).
+    EXPECT_EQ(index.global_depth(), 0u);
+
+    // Use a pool of 2 frames so that if one frame leaks the pool still has 1 free.
+    // After the (expected) persist failure, we verify we can still allocate both frames.
+    auto path = data_dir_ / "pin_leak_hash.db";
+    auto fid_r = dm_->create_file(path, false, true);
+    ASSERT_TRUE(fid_r.has_value()) << fid_r.error().message;
+    auto bpm = std::make_unique<BufferPoolManager>(*dm_, *fid_r, /*pool_size=*/2);
+
+    // Persist MUST fail: the bucket payload (9508 bytes) cannot fit in one page.
+    auto persist_result = HashPersistence::persist(*bpm, index);
+    ASSERT_FALSE(persist_result.has_value())
+        << "Expected persist to fail for over-sized bucket, but it succeeded";
+
+    // GDB-826 regression: verify no frame was leaked.
+    // If the PinGuard is absent (old code), the bucket-page frame is permanently
+    // pinned after the failed insert_tuple, leaving only 1 free frame.  With
+    // pool_size=2 we should be able to allocate BOTH frames after the failure.
+    auto page1_r = bpm->new_page();
+    ASSERT_TRUE(page1_r.has_value())
+        << "new_page #1 failed — frame leaked by failed persist: " << page1_r.error().message;
+    auto page2_r = bpm->new_page();
+    ASSERT_TRUE(page2_r.has_value())
+        << "new_page #2 failed — frame leaked by failed persist: " << page2_r.error().message;
+
+    // Clean up: unpin both frames we just allocated.
+    (void)bpm->unpin_page((*page1_r)->page_id(), false);
+    (void)bpm->unpin_page((*page2_r)->page_id(), false);
+
+    bpm.reset();
+    (void)dm_->close_file(*fid_r);
+}
+
+// =============================================================================
+// GDB-826: Success path is still correct — RAII guard does not double-unpin
+//
+// Verify that for a normal (successful) persist the buffer pool ends up with
+// all frames unpinned.  A double-unpin (introduced by a buggy guard that fires
+// AFTER an explicit unpin on the success path) would cause unpin_page to
+// return INVALID_ARGUMENT the second time; the test detects this by checking
+// that the pool accepts a new_page allocation after persist.
+// =============================================================================
+
+TEST_F(HashPersistenceTest, SuccessPathPinBalanced) {
+    HashIndexConfig config;
+    config.key_types = {TypeId::INT32};
+    config.is_unique = true;
+    HashIndex index(std::move(config));
+
+    for (int32_t i = 0; i < 10; ++i) {
+        auto r = index.insert({Value(i)}, RID{static_cast<PageId>(i + 1), 0});
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+    }
+
+    // Pool of 4 frames — tight but enough for a 10-entry index.
+    auto path = data_dir_ / "success_pin_balanced.db";
+    auto fid_r = dm_->create_file(path, false, true);
+    ASSERT_TRUE(fid_r.has_value()) << fid_r.error().message;
+    auto bpm = std::make_unique<BufferPoolManager>(*dm_, *fid_r, /*pool_size=*/4);
+
+    auto meta = HashPersistence::persist(*bpm, index);
+    ASSERT_TRUE(meta.has_value()) << "persist failed: " << meta.error().message;
+
+    // After a successful persist every pinned frame should have been unpinned.
+    // Allocate all 4 frames — if any frame is stuck pinned, eviction is blocked
+    // and new_page will fail once the free list and evictable set are exhausted.
+    auto p1 = bpm->new_page();
+    auto p2 = bpm->new_page();
+    auto p3 = bpm->new_page();
+    auto p4 = bpm->new_page();
+    EXPECT_TRUE(p1.has_value()) << "frame 1 unavailable after persist";
+    EXPECT_TRUE(p2.has_value()) << "frame 2 unavailable after persist";
+    EXPECT_TRUE(p3.has_value()) << "frame 3 unavailable after persist";
+    EXPECT_TRUE(p4.has_value()) << "frame 4 unavailable after persist";
+
+    if (p1.has_value()) {
+        (void)bpm->unpin_page((*p1)->page_id(), false);
+    }
+    if (p2.has_value()) {
+        (void)bpm->unpin_page((*p2)->page_id(), false);
+    }
+    if (p3.has_value()) {
+        (void)bpm->unpin_page((*p3)->page_id(), false);
+    }
+    if (p4.has_value()) {
+        (void)bpm->unpin_page((*p4)->page_id(), false);
+    }
+
+    bpm.reset();
+    (void)dm_->close_file(*fid_r);
+}
