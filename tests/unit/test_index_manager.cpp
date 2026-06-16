@@ -474,16 +474,50 @@ TEST_F(IndexManagerTest, FlushPersistsLatestState) {
     exec_ok("INSERT INTO flush_tbl VALUES (1, 'a')");
     exec_ok("CREATE INDEX idx_flush ON flush_tbl(id)");
 
+    // Verify the in-memory index has 1 entry after CREATE INDEX (only row 1
+    // was present at index-creation time).
+    {
+        auto idx_pre = catalog_->get_index("idx_flush");
+        ASSERT_TRUE(idx_pre.has_value());
+        auto it_pre = index_manager_->btree_map()->find(idx_pre->index_id);
+        ASSERT_NE(it_pre, index_manager_->btree_map()->end());
+        EXPECT_EQ(it_pre->second->size(), 1u);
+    }
+
     // Insert more data after index creation.
+    // INSERT must maintain the live in-memory btree so the index
+    // immediately reflects all 3 rows.
     exec_ok("INSERT INTO flush_tbl VALUES (2, 'b')");
     exec_ok("INSERT INTO flush_tbl VALUES (3, 'c')");
 
-    // The in-memory index should have 3 entries (insert updates it).
-    // Flush to persist the latest state.
+    // Verify the in-memory index now has 3 entries (INSERT maintained it).
+    {
+        auto idx_live = catalog_->get_index("idx_flush");
+        ASSERT_TRUE(idx_live.has_value());
+        auto it_live = index_manager_->btree_map()->find(idx_live->index_id);
+        ASSERT_NE(it_live, index_manager_->btree_map()->end());
+        ASSERT_EQ(it_live->second->size(), 3u)
+            << "INSERT must maintain secondary indexes immediately";
+        // Spot-check that keys 2 and 3 are reachable.
+        auto r2 = it_live->second->search({Value(int32_t(2))});
+        ASSERT_TRUE(r2.has_value()) << r2.error().message;
+        EXPECT_TRUE(r2->has_value()) << "key 2 missing from in-memory index";
+        auto r3 = it_live->second->search({Value(int32_t(3))});
+        ASSERT_TRUE(r3.has_value()) << r3.error().message;
+        EXPECT_TRUE(r3->has_value()) << "key 3 missing from in-memory index";
+    }
+
+    // Flush to persist the 3-entry state to disk.
     auto flush = index_manager_->flush_all_indexes();
     ASSERT_TRUE(flush.has_value()) << flush.error().message;
 
-    // Restart and verify.
+    // Simulate a clean restart.  The only source of truth after restart is the
+    // on-disk index file written by flush_all_indexes().  rebuild_all_indexes()
+    // loads from disk when the file exists and succeeds; it falls back to a
+    // table scan ONLY if the load fails.  Because our flush wrote a valid file,
+    // the post-restart count comes exclusively from the persisted file.
+    // If flush had been a no-op (persisting the CREATE INDEX state of 1 entry),
+    // the count below would be 1 and the EXPECT_EQ would catch it.
     restart();
     run_bootstrap();
     rebuild_indexes();
@@ -492,11 +526,31 @@ TEST_F(IndexManagerTest, FlushPersistsLatestState) {
     ASSERT_TRUE(idx_def.has_value());
     auto it = index_manager_->btree_map()->find(idx_def->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
-    // Note: the index was persisted during CREATE INDEX (with 1 entry).
-    // The flush should update it with the latest state (3 entries if INSERT
-    // updates the index, or 1 if not). Actual count depends on whether
-    // INSERT goes through the index manager.
-    EXPECT_GE(it->second->size(), 1u);
+
+    // Exact assertion: flush must have persisted all 3 entries.
+    ASSERT_EQ(it->second->size(), 3u)
+        << "flush_all_indexes() must persist the post-INSERT state (3 entries); "
+           "if this fails, flush persisted only the CREATE INDEX snapshot";
+
+    // Verify that keys inserted after CREATE INDEX are actually present.
+    auto r1 = it->second->search({Value(int32_t(1))});
+    ASSERT_TRUE(r1.has_value()) << r1.error().message;
+    EXPECT_TRUE(r1->has_value()) << "key 1 missing after flush+restart";
+
+    auto r2 = it->second->search({Value(int32_t(2))});
+    ASSERT_TRUE(r2.has_value()) << r2.error().message;
+    EXPECT_TRUE(r2->has_value())
+        << "key 2 (inserted after CREATE INDEX) missing after flush+restart";
+
+    auto r3 = it->second->search({Value(int32_t(3))});
+    ASSERT_TRUE(r3.has_value()) << r3.error().message;
+    EXPECT_TRUE(r3->has_value())
+        << "key 3 (inserted after CREATE INDEX) missing after flush+restart";
+
+    // Key 4 must NOT be present.
+    auto r4 = it->second->search({Value(int32_t(4))});
+    ASSERT_TRUE(r4.has_value()) << r4.error().message;
+    EXPECT_FALSE(r4->has_value()) << "key 4 should not be in the index";
 }
 
 // =============================================================================
@@ -722,7 +776,8 @@ TEST_F(HnswIndexManagerTest, ReindexByIndexName) {
     run_bootstrap();
     rebuild_indexes();
 
-    exec_ok("CREATE TABLE items (id INT, description VARCHAR, desc_vec EMBEDDING(4, description, 'builtin/4'))");
+    exec_ok("CREATE TABLE items (id INT, description VARCHAR, desc_vec EMBEDDING(4, description, "
+            "'builtin/4'))");
     exec_ok("INSERT INTO items (id, description) VALUES (1, 'red widget')");
 
     ASSERT_TRUE(wait_for_pool());

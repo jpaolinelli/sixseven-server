@@ -47,6 +47,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <limits>
 #include <string>
 #include <unordered_map>
 
@@ -2482,6 +2483,110 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
         }
     }
 
+    // -------------------------------------------------------------------------
+    // INSERT ... SELECT path
+    // -------------------------------------------------------------------------
+    if (stmt.select) {
+        const auto* sel = dynamic_cast<const SelectStmt*>(stmt.select.get());
+        if (sel == nullptr) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "INSERT...SELECT: select sub-statement is not a SelectStmt");
+        }
+
+        // Re-bind the SELECT sub-query to get a proper BoundStatement.
+        // The binder already validated column counts; this re-bind is cheap
+        // and gives the planner the expr_types map needed for plan_select().
+        Binder sel_binder(catalog_, database_id_, algorithm_registry_);
+        auto sel_bound = sel_binder.bind(*sel);
+        if (!sel_bound) {
+            return make_error(sel_bound.error().code, sel_bound.error().message);
+        }
+
+        // Validate column count against target (binder already did this for
+        // the VALUES path; mirror it here for safety).
+        size_t target_col_count =
+            stmt.columns.empty() ? table_schema->columns.size() : stmt.columns.size();
+        if (sel_bound->output_columns.size() != target_col_count) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "INSERT...SELECT column count mismatch: target expects " +
+                                  std::to_string(target_col_count) +
+                                  " column(s), SELECT produces " +
+                                  std::to_string(sel_bound->output_columns.size()));
+        }
+
+        std::vector<ExprPtr> select_owned_exprs;
+        auto child_result = plan_select(*sel, *sel_bound, select_owned_exprs);
+        if (!child_result) {
+            return make_error(child_result.error().code, child_result.error().message);
+        }
+        auto child_iter = std::move(*child_result);
+
+        // If an explicit column list was given (INSERT INTO t(b, a) SELECT ...),
+        // build a column map: storage_col_idx -> child_output_idx.
+        // Applied in InsertOperator::do_next() via child_col_map_.
+        std::vector<size_t> col_map;
+        if (!stmt.columns.empty()) {
+            size_t ncols = table_schema->columns.size();
+            col_map.reserve(ncols);
+            const size_t unmapped = std::numeric_limits<size_t>::max();
+            for (size_t storage_idx = 0; storage_idx < ncols; ++storage_idx) {
+                const auto& storage_col_name = table_schema->columns[storage_idx].name;
+                bool found = false;
+                for (size_t ci = 0; ci < stmt.columns.size(); ++ci) {
+                    if (stmt.columns[ci] == storage_col_name) {
+                        col_map.push_back(ci);
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    col_map.push_back(unmapped);
+                }
+            }
+        }
+
+        auto iter = std::make_unique<InsertOperator>(
+            *storage->heap, storage->storage_schema, std::move(child_iter));
+        // Transfer ownership of planner-created expressions into the operator.
+        iter->owned_default_exprs_ = std::move(select_owned_exprs);
+        if (!col_map.empty()) {
+            // Also populate nullability metadata so InsertOperator can reject
+            // unmapped NOT NULL columns (GDB-1269).
+            std::vector<bool> col_nullable;
+            std::vector<std::string> col_names;
+            col_nullable.reserve(table_schema->columns.size());
+            col_names.reserve(table_schema->columns.size());
+            for (const auto& col : table_schema->columns) {
+                col_nullable.push_back(col.nullable);
+                col_names.push_back(col.name);
+            }
+            iter->child_col_map_ = std::move(col_map);
+            iter->col_nullable_ = std::move(col_nullable);
+            iter->col_names_for_null_check_ = std::move(col_names);
+        }
+        if (!ai_cols.empty()) {
+            iter->autoincrement_cols_ = std::move(ai_cols);
+            iter->catalog_ = &catalog_;
+        }
+
+        if (embedding_pool_ != nullptr) {
+            auto emb_cols = catalog_.list_embedding_columns(table_schema->table_id);
+            if (!emb_cols.empty()) {
+                iter->embedding_table_id_ = table_schema->table_id;
+                iter->embedding_pool_ = embedding_pool_;
+                iter->embedding_cols_ = std::move(emb_cols);
+                for (const auto& col : table_schema->columns) {
+                    iter->column_names_.push_back(col.name);
+                }
+            }
+        }
+        iter->bm25_targets_ = collect_bm25_targets(*table_schema);
+        iter->btree_targets_ = collect_btree_targets(*table_schema);
+        iter->hash_targets_ = collect_hash_targets(*table_schema);
+
+        return ok(std::unique_ptr<Iterator>(std::move(iter)));
+    }
+
     if (stmt.columns.empty()) {
         // All columns in schema order.
         for (const auto& row : stmt.values) {
@@ -2574,10 +2679,9 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
                     if (default_ptrs[j] != nullptr) {
                         reordered[j] = default_ptrs[j];
                     } else {
-                        return make_error(
-                            StatusCode::INVALID_ARGUMENT,
-                            "missing value for non-nullable column without default: " +
-                                table_schema->columns[j].name);
+                        return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                                          "NOT NULL constraint violated: column '" +
+                                              table_schema->columns[j].name + "' cannot be NULL");
                     }
                 }
             }
@@ -2605,6 +2709,8 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
             }
         }
         iter->bm25_targets_ = collect_bm25_targets(*table_schema);
+        iter->btree_targets_ = collect_btree_targets(*table_schema);
+        iter->hash_targets_ = collect_hash_targets(*table_schema);
 
         return ok(std::unique_ptr<Iterator>(std::move(iter)));
     }
@@ -2629,6 +2735,8 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
         }
     }
     iter->bm25_targets_ = collect_bm25_targets(*table_schema);
+    iter->btree_targets_ = collect_btree_targets(*table_schema);
+    iter->hash_targets_ = collect_hash_targets(*table_schema);
 
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
 }
@@ -3895,6 +4003,114 @@ std::vector<Bm25MaintenanceTarget> Planner::collect_bm25_targets(const TableSche
                 targets.push_back({it->second, static_cast<size_t>(col.ordinal)});
                 break;
             }
+        }
+    }
+    return targets;
+}
+
+std::vector<BtreeMaintenanceTarget>
+Planner::collect_btree_targets(const TableSchema& schema) const {
+    std::vector<BtreeMaintenanceTarget> targets;
+    if (btree_indexes_ == nullptr) {
+        return targets;
+    }
+    auto indexes = catalog_.list_indexes(schema.table_id);
+    for (const auto& idx : indexes) {
+        if (idx.index_type != "btree") {
+            continue;
+        }
+        auto it = btree_indexes_->find(idx.index_id);
+        if (it == btree_indexes_->end() || it->second == nullptr) {
+            continue;
+        }
+
+        // Resolve each comma-separated column name to its storage-schema ordinal.
+        BtreeMaintenanceTarget target;
+        target.index = it->second;
+
+        // Split idx.columns on commas.
+        std::string col_str = idx.columns;
+        size_t start = 0;
+        while (start <= col_str.size()) {
+            size_t end = col_str.find(',', start);
+            if (end == std::string::npos) {
+                end = col_str.size();
+            }
+            // Trim whitespace.
+            size_t s = start;
+            while (s < end && col_str[s] == ' ') {
+                ++s;
+            }
+            size_t e = end;
+            while (e > s && col_str[e - 1] == ' ') {
+                --e;
+            }
+            std::string col_name = col_str.substr(s, e - s);
+            if (!col_name.empty()) {
+                for (const auto& col : schema.columns) {
+                    if (col.name == col_name) {
+                        target.key_column_ordinals.push_back(static_cast<size_t>(col.ordinal));
+                        break;
+                    }
+                }
+            }
+            start = end + 1;
+        }
+
+        if (!target.key_column_ordinals.empty()) {
+            targets.push_back(std::move(target));
+        }
+    }
+    return targets;
+}
+
+std::vector<HashMaintenanceTarget> Planner::collect_hash_targets(const TableSchema& schema) const {
+    std::vector<HashMaintenanceTarget> targets;
+    if (hash_indexes_ == nullptr) {
+        return targets;
+    }
+    auto indexes = catalog_.list_indexes(schema.table_id);
+    for (const auto& idx : indexes) {
+        if (idx.index_type != "hash") {
+            continue;
+        }
+        auto it = hash_indexes_->find(idx.index_id);
+        if (it == hash_indexes_->end() || it->second == nullptr) {
+            continue;
+        }
+
+        HashMaintenanceTarget target;
+        target.index = it->second;
+
+        std::string col_str = idx.columns;
+        size_t start = 0;
+        while (start <= col_str.size()) {
+            size_t end = col_str.find(',', start);
+            if (end == std::string::npos) {
+                end = col_str.size();
+            }
+            size_t s = start;
+            while (s < end && col_str[s] == ' ') {
+                ++s;
+            }
+            size_t e = end;
+            while (e > s && col_str[e - 1] == ' ') {
+                --e;
+            }
+            std::string col_name = col_str.substr(s, e - s);
+            if (!col_name.empty()) {
+                for (const auto& col : schema.columns) {
+                    if (col.name == col_name) {
+                        target.key_column_ordinals.push_back(static_cast<size_t>(col.ordinal));
+                        break;
+                    }
+                }
+            }
+            start = end + 1;
+        }
+
+        if (!target.key_column_ordinals.empty()) {
+            targets.push_back(std::move(target));
         }
     }
     return targets;

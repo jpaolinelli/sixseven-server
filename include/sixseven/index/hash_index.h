@@ -124,4 +124,14 @@ private:
     ValueEqual value_equal_;
 };
 
+/// A hash index that DML operators must maintain on INSERT, paired with the
+/// ordered column ordinals that form the composite key. Populated by the
+/// planner for INSERT.
+struct HashMaintenanceTarget {
+    HashIndex* index = nullptr;
+    /// Ordinals (into the storage schema) of the columns that form the key,
+    /// in the same order as the index was built.
+    std::vector<size_t> key_column_ordinals;
+};
+
 } // namespace sixseven

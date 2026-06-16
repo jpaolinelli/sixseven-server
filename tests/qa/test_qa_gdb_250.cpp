@@ -442,7 +442,8 @@ TEST_F(QA_GDB250, ErrorOnMissingNonNullableWithNoDefault) {
             ")");
 
     // Omit email — non-nullable, no default → must error.
-    exec_error("INSERT INTO strict (id, name) VALUES (1, 'Alice')", StatusCode::INVALID_ARGUMENT);
+    exec_error("INSERT INTO strict (id, name) VALUES (1, 'Alice')",
+               StatusCode::CONSTRAINT_VIOLATION);
 }
 
 TEST_F(QA_GDB250, ErrorOnMissingMultipleNonNullableColumns) {
@@ -454,7 +455,7 @@ TEST_F(QA_GDB250, ErrorOnMissingMultipleNonNullableColumns) {
             ")");
 
     // Only provide id — all of a, b, c are missing.
-    exec_error("INSERT INTO multi_strict (id) VALUES (1)", StatusCode::INVALID_ARGUMENT);
+    exec_error("INSERT INTO multi_strict (id) VALUES (1)", StatusCode::CONSTRAINT_VIOLATION);
 }
 
 // =============================================================================

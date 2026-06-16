@@ -204,6 +204,16 @@ private:
     [[nodiscard]] std::vector<Bm25MaintenanceTarget>
     collect_bm25_targets(const TableSchema& schema) const;
 
+    /// Collect the B-tree indexes on a table so INSERT can maintain them.
+    /// Returns one BtreeMaintenanceTarget per btree index on the table.
+    [[nodiscard]] std::vector<BtreeMaintenanceTarget>
+    collect_btree_targets(const TableSchema& schema) const;
+
+    /// Collect the hash indexes on a table so INSERT can maintain them.
+    /// Returns one HashMaintenanceTarget per hash index on the table.
+    [[nodiscard]] std::vector<HashMaintenanceTarget>
+    collect_hash_targets(const TableSchema& schema) const;
+
     /// Build a full-scope OutputSchema from all node tables in a MATCH pattern.
     /// Includes all columns from every node variable's label table so that
     /// WHERE clauses can reference columns not in the SELECT list.

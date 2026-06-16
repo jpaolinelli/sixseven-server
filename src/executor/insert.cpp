@@ -104,6 +104,31 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
             }
 
             auto values = row->value().values;
+            // If a column map was set (INSERT...SELECT with explicit column list),
+            // reorder child values to storage schema order.
+            if (!child_col_map_.empty()) {
+                std::vector<Value> reordered(child_col_map_.size());
+                for (size_t i = 0; i < child_col_map_.size(); ++i) {
+                    if (child_col_map_[i] < values.size()) {
+                        reordered[i] = values[child_col_map_[i]];
+                    } else {
+                        // Column is unmapped (child_col_map_[i] == SIZE_MAX).
+                        // reordered[i] stays a default-constructed null Value.
+                        // Reject if the target column is NOT NULL (no default applied here).
+                        const bool is_nullable =
+                            (i < col_nullable_.size()) ? col_nullable_[i] : true;
+                        if (!is_nullable) {
+                            const std::string col_name = (i < col_names_for_null_check_.size())
+                                                             ? col_names_for_null_check_[i]
+                                                             : std::to_string(i);
+                            return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                                              "NOT NULL constraint violated: column '" + col_name +
+                                                  "' cannot be NULL");
+                        }
+                    }
+                }
+                values = std::move(reordered);
+            }
             // Coerce to storage types when needed.
             for (size_t i = 0; i < values.size() && i < storage_schema_.column_count(); ++i) {
                 auto target = storage_schema_.column(i).type;
@@ -125,6 +150,7 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
             }
             enqueue_embedding_jobs(*rid, values);
             maintain_bm25(*rid, values);
+            maintain_secondary_indexes(*rid, values);
             ++count;
         }
     } else {
@@ -211,6 +237,7 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
         for (size_t i = 0; i < rids->size(); ++i) {
             enqueue_embedding_jobs((*rids)[i], all_values[i]);
             maintain_bm25((*rids)[i], all_values[i]);
+            maintain_secondary_indexes((*rids)[i], all_values[i]);
         }
         count = static_cast<int64_t>(rids->size());
     }
@@ -302,6 +329,48 @@ void InsertOperator::enqueue_embedding_jobs(const RID& rid, const std::vector<Va
             // avoid log spam during bulk inserts.
             SIXSEVEN_LOG_DEBUG("embedding enqueue deferred (persisted to disk): {}",
                                result.error().message);
+        }
+    }
+}
+
+void InsertOperator::maintain_secondary_indexes(const RID& rid, const std::vector<Value>& values) {
+    for (const auto& target : btree_targets_) {
+        if (target.index == nullptr) {
+            continue;
+        }
+        KeyType key;
+        key.reserve(target.key_column_ordinals.size());
+        for (size_t ordinal : target.key_column_ordinals) {
+            if (ordinal < values.size()) {
+                key.push_back(values[ordinal]);
+            }
+        }
+        auto r = target.index->insert(key, rid);
+        if (!r) {
+            SIXSEVEN_LOG_WARN("btree index insert maintenance failed for rid=({},{}): {}",
+                              rid.page_id,
+                              rid.slot_id,
+                              r.error().message);
+        }
+    }
+
+    for (const auto& target : hash_targets_) {
+        if (target.index == nullptr) {
+            continue;
+        }
+        KeyType key;
+        key.reserve(target.key_column_ordinals.size());
+        for (size_t ordinal : target.key_column_ordinals) {
+            if (ordinal < values.size()) {
+                key.push_back(values[ordinal]);
+            }
+        }
+        auto r = target.index->insert(key, rid);
+        if (!r) {
+            SIXSEVEN_LOG_WARN("hash index insert maintenance failed for rid=({},{}): {}",
+                              rid.page_id,
+                              rid.slot_id,
+                              r.error().message);
         }
     }
 }
