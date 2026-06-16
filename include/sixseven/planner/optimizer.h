@@ -114,8 +114,18 @@ struct JoinEdge {
     double selectivity = 0.1; ///< Estimated join selectivity.
 };
 
+/// Which join-enumeration strategy was chosen by optimize_join_order.
+enum class JoinEnumStrategy : uint8_t {
+    DYNAMIC_PROGRAMMING, ///< Exhaustive DP (used when relation count <= threshold).
+    GREEDY,              ///< Greedy heuristic (used when relation count > threshold).
+};
+
+/// The DP/greedy threshold used by optimize_join_order.
+/// Relation count <= this value → DP; > this value → greedy.
+inline constexpr size_t JOIN_ENUM_DP_THRESHOLD = 10;
+
 /// Choose the best join order and algorithm for a set of tables.
-/// Uses dynamic programming for <= 10 tables, greedy heuristic otherwise.
+/// Uses dynamic programming for <= JOIN_ENUM_DP_THRESHOLD tables, greedy heuristic otherwise.
 ///
 /// @param base_relations  Best access paths for each individual table.
 /// @param join_edges      Available join predicates between tables.
@@ -125,6 +135,15 @@ struct JoinEdge {
 optimize_join_order(std::vector<JoinRelation>& base_relations,
                     const std::vector<JoinEdge>& join_edges,
                     const CostModel& cost_model);
+
+/// Overload that also reports which enumeration strategy was selected.
+///
+/// @param strategy_out  Set to DYNAMIC_PROGRAMMING or GREEDY on return.
+[[nodiscard]] std::unique_ptr<PhysicalPlanNode>
+optimize_join_order(std::vector<JoinRelation>& base_relations,
+                    const std::vector<JoinEdge>& join_edges,
+                    const CostModel& cost_model,
+                    JoinEnumStrategy& strategy_out);
 
 /// Choose the best join algorithm for joining two relations.
 [[nodiscard]] std::pair<JoinMethod, PlanCost> choose_join_method(const PlanCost& left,

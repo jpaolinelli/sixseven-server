@@ -236,6 +236,79 @@ TEST(JoinOrderTest, PrefersSmallerBuildSide) {
 }
 
 // =============================================================================
+// GDB-817: DP/greedy threshold strategy assertions
+// =============================================================================
+
+/// Build a chain of N relations with uniform edge selectivity and return the
+/// chosen JoinEnumStrategy alongside the plan.
+static std::pair<std::unique_ptr<PhysicalPlanNode>, JoinEnumStrategy> build_chain_plan(int n) {
+    CostModel cm;
+    std::vector<JoinRelation> rels;
+    std::vector<JoinEdge> edges;
+    for (int i = 0; i < n; ++i) {
+        double rows = 100.0 * (i + 1);
+        double cost = 10.0 * (i + 1);
+        rels.push_back({1ULL << i, {0.0, cost, rows}, make_test_scan(i, rows, cost)});
+        if (i > 0) {
+            edges.push_back({static_cast<table_id_t>(i - 1), static_cast<table_id_t>(i), 0.01});
+        }
+    }
+    JoinEnumStrategy strategy = JoinEnumStrategy::DYNAMIC_PROGRAMMING;
+    auto plan = optimize_join_order(rels, edges, cm, strategy);
+    return {std::move(plan), strategy};
+}
+
+// Threshold - 1 (9 tables) must use DP.
+TEST(JoinOrderStrategyTest, NineTablesUsesDP) {
+    auto [plan, strategy] = build_chain_plan(9);
+    ASSERT_NE(plan, nullptr);
+    EXPECT_EQ(plan->type, PhysicalPlanNode::Type::JOIN);
+    EXPECT_EQ(strategy, JoinEnumStrategy::DYNAMIC_PROGRAMMING)
+        << "9 relations (< threshold=" << JOIN_ENUM_DP_THRESHOLD << ") must use DP";
+}
+
+// Exactly at threshold (10 tables) must use DP.
+TEST(JoinOrderStrategyTest, TenTablesUsesDP) {
+    auto [plan, strategy] = build_chain_plan(10);
+    ASSERT_NE(plan, nullptr);
+    EXPECT_EQ(plan->type, PhysicalPlanNode::Type::JOIN);
+    EXPECT_EQ(strategy, JoinEnumStrategy::DYNAMIC_PROGRAMMING)
+        << "10 relations (== threshold=" << JOIN_ENUM_DP_THRESHOLD << ") must use DP";
+}
+
+// Threshold + 1 (11 tables) must use greedy.
+TEST(JoinOrderStrategyTest, ElevenTablesUsesGreedy) {
+    auto [plan, strategy] = build_chain_plan(11);
+    ASSERT_NE(plan, nullptr);
+    EXPECT_EQ(plan->type, PhysicalPlanNode::Type::JOIN);
+    EXPECT_EQ(strategy, JoinEnumStrategy::GREEDY)
+        << "11 relations (> threshold=" << JOIN_ENUM_DP_THRESHOLD << ") must use greedy";
+}
+
+// Well above threshold (20 tables) must use greedy.
+TEST(JoinOrderStrategyTest, TwentyTablesUsesGreedy) {
+    auto [plan, strategy] = build_chain_plan(20);
+    ASSERT_NE(plan, nullptr);
+    EXPECT_EQ(plan->type, PhysicalPlanNode::Type::JOIN);
+    EXPECT_EQ(strategy, JoinEnumStrategy::GREEDY)
+        << "20 relations (> threshold=" << JOIN_ENUM_DP_THRESHOLD << ") must use greedy";
+}
+
+// Single table always returns without running any enumeration; strategy should
+// still be reported as DP (the branch taken in optimize_join_order is the DP
+// branch, which then delegates to dp_join_order whose n==1 fast-path fires).
+TEST(JoinOrderStrategyTest, SingleTableReportsDPStrategy) {
+    CostModel cm;
+    std::vector<JoinRelation> rels;
+    rels.push_back({1ULL << 0, {0.0, 10.0, 100.0}, make_test_scan(0, 100.0, 10.0)});
+    std::vector<JoinEdge> edges;
+    JoinEnumStrategy strategy = JoinEnumStrategy::GREEDY; // pre-set to wrong value
+    auto plan = optimize_join_order(rels, edges, cm, strategy);
+    ASSERT_NE(plan, nullptr);
+    EXPECT_EQ(strategy, JoinEnumStrategy::DYNAMIC_PROGRAMMING);
+}
+
+// =============================================================================
 // GDB-741 regression tests: dense remapping of sparse / large table IDs
 // =============================================================================
 

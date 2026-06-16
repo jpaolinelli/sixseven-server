@@ -437,6 +437,7 @@ TEST(QA138_JoinOrder, DisconnectedJoinGraph) {
 }
 
 TEST(QA138_JoinOrder, TenTablesUsesDp) {
+    // 10 == JOIN_ENUM_DP_THRESHOLD: must use exhaustive DP, not greedy.
     CostModel cm;
     std::vector<JoinRelation> rels;
     std::vector<JoinEdge> edges;
@@ -450,13 +451,17 @@ TEST(QA138_JoinOrder, TenTablesUsesDp) {
         }
     }
 
-    auto plan = optimize_join_order(rels, edges, cm);
+    JoinEnumStrategy strategy = JoinEnumStrategy::GREEDY; // pre-set to wrong value
+    auto plan = optimize_join_order(rels, edges, cm, strategy);
     ASSERT_NE(plan, nullptr);
     EXPECT_EQ(plan->type, PhysicalPlanNode::Type::JOIN);
     EXPECT_GT(plan->cost.total_cost, 0.0);
+    EXPECT_EQ(strategy, JoinEnumStrategy::DYNAMIC_PROGRAMMING)
+        << "10 relations (== JOIN_ENUM_DP_THRESHOLD) must use DP";
 }
 
 TEST(QA138_JoinOrder, ElevenTablesUsesGreedy) {
+    // 11 == JOIN_ENUM_DP_THRESHOLD + 1: must use greedy heuristic, not DP.
     CostModel cm;
     std::vector<JoinRelation> rels;
     std::vector<JoinEdge> edges;
@@ -470,17 +475,21 @@ TEST(QA138_JoinOrder, ElevenTablesUsesGreedy) {
         }
     }
 
-    auto plan = optimize_join_order(rels, edges, cm);
+    JoinEnumStrategy strategy = JoinEnumStrategy::DYNAMIC_PROGRAMMING; // pre-set to wrong value
+    auto plan = optimize_join_order(rels, edges, cm, strategy);
     ASSERT_NE(plan, nullptr);
     EXPECT_EQ(plan->type, PhysicalPlanNode::Type::JOIN);
+    EXPECT_EQ(strategy, JoinEnumStrategy::GREEDY)
+        << "11 relations (> JOIN_ENUM_DP_THRESHOLD) must use greedy";
 }
 
 TEST(QA138_JoinOrder, GreedyStartsWithSmallestRelation) {
+    // 12 tables (> JOIN_ENUM_DP_THRESHOLD): must use greedy strategy.
+    // Greedy should start with the smallest relation (table 5, 1 row).
     CostModel cm;
     std::vector<JoinRelation> rels;
     std::vector<JoinEdge> edges;
 
-    // 12 tables: table 5 is smallest.
     for (int i = 0; i < 12; ++i) {
         double rows = (i == 5) ? 1.0 : 1000.0 * (i + 1);
         double cost = rows * 0.01;
@@ -490,9 +499,12 @@ TEST(QA138_JoinOrder, GreedyStartsWithSmallestRelation) {
         }
     }
 
-    auto plan = optimize_join_order(rels, edges, cm);
+    JoinEnumStrategy strategy = JoinEnumStrategy::DYNAMIC_PROGRAMMING; // pre-set to wrong value
+    auto plan = optimize_join_order(rels, edges, cm, strategy);
     ASSERT_NE(plan, nullptr);
     EXPECT_EQ(plan->type, PhysicalPlanNode::Type::JOIN);
+    EXPECT_EQ(strategy, JoinEnumStrategy::GREEDY)
+        << "12 relations (> JOIN_ENUM_DP_THRESHOLD) must use greedy";
 }
 
 TEST(QA138_JoinOrder, TwoTablesEqualSize) {

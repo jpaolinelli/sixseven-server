@@ -364,11 +364,11 @@ greedy_join_order(std::vector<JoinRelation>& base_relations,
 
 std::unique_ptr<PhysicalPlanNode> optimize_join_order(std::vector<JoinRelation>& base_relations,
                                                       const std::vector<JoinEdge>& join_edges,
-                                                      const CostModel& cost_model) {
-    // DP is O(3^n) in the number of relations; cap at 10 to keep planning fast.
-    // For more than 64 relations the bitmask would overflow uint64_t -- enforce
-    // that hard limit regardless of the DP/greedy split.
-    static constexpr size_t kDpThreshold = 10;
+                                                      const CostModel& cost_model,
+                                                      JoinEnumStrategy& strategy_out) {
+    // DP is O(3^n) in the number of relations; cap at JOIN_ENUM_DP_THRESHOLD to keep planning
+    // fast.  For more than 64 relations the bitmask would overflow uint64_t -- enforce that hard
+    // limit regardless of the DP/greedy split.
     static constexpr size_t kMaxRelations = 64;
 
     if (base_relations.size() > kMaxRelations) {
@@ -379,10 +379,19 @@ std::unique_ptr<PhysicalPlanNode> optimize_join_order(std::vector<JoinRelation>&
         // Fall through to greedy -- greedy does not use bitmask shifts.
     }
 
-    if (base_relations.size() <= kDpThreshold) {
+    if (base_relations.size() <= JOIN_ENUM_DP_THRESHOLD) {
+        strategy_out = JoinEnumStrategy::DYNAMIC_PROGRAMMING;
         return dp_join_order(base_relations, join_edges, cost_model);
     }
+    strategy_out = JoinEnumStrategy::GREEDY;
     return greedy_join_order(base_relations, join_edges, cost_model);
+}
+
+std::unique_ptr<PhysicalPlanNode> optimize_join_order(std::vector<JoinRelation>& base_relations,
+                                                      const std::vector<JoinEdge>& join_edges,
+                                                      const CostModel& cost_model) {
+    JoinEnumStrategy unused = JoinEnumStrategy::DYNAMIC_PROGRAMMING;
+    return optimize_join_order(base_relations, join_edges, cost_model, unused);
 }
 
 } // namespace sixseven
