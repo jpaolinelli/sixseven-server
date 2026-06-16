@@ -374,8 +374,10 @@ TEST_F(QA_GDB821, IfNotExistsPreservesMultipleTables) {
     auto tables = catalog_.list_tables(db_id);
     bool t1_found = false, t2_found = false;
     for (const auto& t : tables) {
-        if (t.name == "t1") t1_found = true;
-        if (t.name == "t2") t2_found = true;
+        if (t.name == "t1")
+            t1_found = true;
+        if (t.name == "t2")
+            t2_found = true;
     }
     EXPECT_TRUE(t1_found) << "t1 was lost after CREATE DATABASE IF NOT EXISTS";
     EXPECT_TRUE(t2_found) << "t2 was lost after CREATE DATABASE IF NOT EXISTS";
