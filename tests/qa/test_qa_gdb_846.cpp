@@ -16,6 +16,7 @@
 #include "sixseven/common/status.h"
 
 #include <gtest/gtest.h>
+
 #include <openssl/evp.h>
 
 #include <algorithm>
@@ -38,7 +39,8 @@ namespace {
 std::string b64_encode(const std::vector<uint8_t>& data) {
     size_t out_len = 4 * ((data.size() + 2) / 3) + 1;
     std::string result(out_len, '\0');
-    int written = EVP_EncodeBlock(reinterpret_cast<unsigned char*>(result.data()), data.data(),
+    int written = EVP_EncodeBlock(reinterpret_cast<unsigned char*>(result.data()),
+                                  data.data(),
                                   static_cast<int>(data.size()));
     result.resize(static_cast<size_t>(written));
     return result;
@@ -260,7 +262,8 @@ TEST_F(QA_GDB846_SecretsManagerAdversarial, GDB846_BitFlipInCiphertextBody_Retur
     EXPECT_EQ(result.error().code, StatusCode::AUTH_ERROR);
 }
 
-TEST_F(QA_GDB846_SecretsManagerAdversarial, GDB846_BitFlipInCiphertextBodyMidpoint_ReturnsAuthError) {
+TEST_F(QA_GDB846_SecretsManagerAdversarial,
+       GDB846_BitFlipInCiphertextBodyMidpoint_ReturnsAuthError) {
     auto enc = mgr_->encrypt("midpoint-flip-test-secret");
     ASSERT_TRUE(enc.has_value());
 
@@ -443,8 +446,8 @@ TEST_F(QA_GDB846_SecretsManagerAdversarial, GDB846_CrossMessageTagSwap_ReturnsAu
     ASSERT_GE(raw_b.size(), SecretsManager::kNonceSize + SecretsManager::kTagSize);
 
     // Take message A's nonce + ciphertext body, but attach message B's tag.
-    std::vector<uint8_t> tampered(raw_a.begin(),
-                                  raw_a.end() - static_cast<std::ptrdiff_t>(SecretsManager::kTagSize));
+    std::vector<uint8_t> tampered(
+        raw_a.begin(), raw_a.end() - static_cast<std::ptrdiff_t>(SecretsManager::kTagSize));
     // Append B's tag.
     tampered.insert(tampered.end(),
                     raw_b.end() - static_cast<std::ptrdiff_t>(SecretsManager::kTagSize),
@@ -465,8 +468,8 @@ TEST_F(QA_GDB846_SecretsManagerAdversarial, GDB846_CrossMessageNonceSwap_Returns
     auto raw_b = get_raw_bytes(*enc_b);
 
     // Use message A's nonce, but message B's body + tag.
-    std::vector<uint8_t> tampered(raw_a.begin(),
-                                  raw_a.begin() + static_cast<std::ptrdiff_t>(SecretsManager::kNonceSize));
+    std::vector<uint8_t> tampered(
+        raw_a.begin(), raw_a.begin() + static_cast<std::ptrdiff_t>(SecretsManager::kNonceSize));
     tampered.insert(tampered.end(),
                     raw_b.begin() + static_cast<std::ptrdiff_t>(SecretsManager::kNonceSize),
                     raw_b.end());
@@ -614,7 +617,8 @@ TEST_F(QA_GDB846_SecretsManagerAdversarial, GDB846_MultipleRoundTripsExact) {
 // This test MUST fail when the guard is removed.
 // ---------------------------------------------------------------------------
 
-TEST_F(QA_GDB846_SecretsManagerAdversarial, GDB846_Regression_WrongKeyMustNotReturnOkWithEmptyString) {
+TEST_F(QA_GDB846_SecretsManagerAdversarial,
+       GDB846_Regression_WrongKeyMustNotReturnOkWithEmptyString) {
     // Encrypt a 10-byte plaintext with key1.
     auto enc = mgr_->encrypt("0123456789");
     ASSERT_TRUE(enc.has_value());
@@ -625,7 +629,8 @@ TEST_F(QA_GDB846_SecretsManagerAdversarial, GDB846_Regression_WrongKeyMustNotRet
     // Asserting BOTH: result must be an error AND must NOT be ok().
     EXPECT_FALSE(result.has_value())
         << "REGRESSION: decrypt() returned ok() with wrong key — pre-fix behavior detected. "
-           "Value was: '" << (result.has_value() ? *result : "<error>") << "'";
+           "Value was: '"
+        << (result.has_value() ? *result : "<error>") << "'";
 
     if (!result.has_value()) {
         // If it errored (correct), verify it's AUTH_ERROR specifically.
