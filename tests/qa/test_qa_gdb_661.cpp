@@ -96,13 +96,27 @@ TEST_F(QA_GDB661, IntMaxLiteralFoldsCleanly) {
 }
 
 // Folding INT32_MIN itself by negating: `-(-2147483648)` is UB if computed in
-// int32. The current fold path negates only after std::stoi succeeds, so this
-// chain falls through. Verify no crash.
+// int32. The current fold path negates only after std::stoi succeeds; since
+// "2147483648" overflows std::stoi, the inner fold returns nullopt, the outer
+// NEGATE never runs, and the whole expression falls through to the planner
+// which returns an error.  We must NOT get back a silently-wrong constant
+// (e.g. 0 or INT32_MIN from wrapping).
 TEST_F(QA_GDB661, DoubleNegateIntMinDoesNotCrash) {
     auto r = engine_->execute("SELECT - -2147483648 AS x");
-    // Should not crash. Result either succeeds via planner or returns error.
-    (void)r;
-    SUCCEED();
+    // Fold cannot handle the inner literal (stoi overflow) → planner error.
+    // If a future change lets this succeed it MUST return 2147483648 as INT64
+    // (or be rejected), never an INT32 wrap-around value.
+    if (r.has_value()) {
+        // Succeeding is only acceptable if the value is the mathematically
+        // correct result: - (-2147483648) = +2147483648, which requires INT64.
+        ASSERT_EQ(r->rows.size(), 1u);
+        EXPECT_NE(r->column_types[0], TypeId::INT32)
+            << "INT32 cannot hold +2147483648; must not silently wrap";
+        EXPECT_EQ(r->rows[0][0].as_int64(), static_cast<int64_t>(2147483648LL));
+    } else {
+        // Currently expected: planner rejects the unfolded expression.
+        EXPECT_FALSE(r.has_value());
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -180,23 +194,28 @@ TEST_F(QA_GDB661, TripleNotBoolean) {
 // -----------------------------------------------------------------------------
 
 TEST_F(QA_GDB661, NotIntegerNotFolded) {
-    // NOT 1: parser may parse, fold rejects (inner type INT32). Falls through,
-    // planner returns error. Must NOT crash or produce wrong result.
+    // NOT 1: try_fold_const_expr sees NOT on an INT32 inner result and returns
+    // nullopt (line: `if (inner->type_id != TypeId::BOOL) return std::nullopt`).
+    // The expression must NOT be silently folded to a bool constant (e.g. false
+    // because 1 is truthy in C++) — that would be a type-coercion bug.
+    // The planner currently returns an error for SELECT-without-FROM on a
+    // non-constant select list; either outcome is correct, but a successful
+    // result MUST NOT carry a wrong constant value.
     auto r = engine_->execute("SELECT NOT 1 AS x");
-    if (r.has_value()) {
-        // If planner ever supports it, result must be a bool (PG: NOT 1 →
-        // false because 1 is truthy). For now we accept either error or bool.
-        EXPECT_EQ(r->column_types[0], TypeId::BOOL);
-    } else {
-        SUCCEED();
-    }
+    EXPECT_FALSE(r.has_value())
+        << "NOT applied to an integer literal must not be silently folded to a "
+           "bool constant; expected a planner/type error";
 }
 
 TEST_F(QA_GDB661, NotStringNotFolded) {
+    // NOT 'hello': try_fold_const_expr sees NOT on a STRING inner result and
+    // returns nullopt.  The fold must NOT coerce the string to bool (e.g. by
+    // treating any non-empty string as truthy) and silently produce `false`.
+    // The correct outcome is a hard error.
     auto r = engine_->execute("SELECT NOT 'hello' AS x");
-    // String NOT is nonsense — error or planner rejection, not crash.
-    (void)r;
-    SUCCEED();
+    EXPECT_FALSE(r.has_value())
+        << "NOT applied to a string literal must not be silently folded; "
+           "expected a type/planner error";
 }
 
 // -----------------------------------------------------------------------------
@@ -209,11 +228,15 @@ TEST_F(QA_GDB661, NegateStringNotFolded) {
 }
 
 TEST_F(QA_GDB661, NegateBoolNotFolded) {
+    // -TRUE: try_fold_const_expr hits the NEGATE default branch which returns
+    // nullopt for non-numeric types (BOOL is not INT32/INT64/FLOAT64).
+    // The fold must NOT silently cast TRUE to 1 and produce -1, which would be
+    // a type-coercion bug masquerading as a correct result.
+    // The correct outcome is a hard error from the planner.
     auto r = engine_->execute("SELECT -TRUE AS x");
-    // Numeric negation of bool isn't folded (default branch returns nullopt).
-    // Planner falls through with an error.
-    (void)r;
-    SUCCEED();
+    EXPECT_FALSE(r.has_value())
+        << "Unary minus applied to a bool literal must not be silently folded "
+           "to a numeric constant; expected a type/planner error";
 }
 
 // -----------------------------------------------------------------------------
