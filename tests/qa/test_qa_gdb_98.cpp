@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -99,17 +101,80 @@ TEST(QA_GDB98_Tables, CreateTableManyColumns) {
     EXPECT_EQ(t->columns.size(), 100u);
 }
 
-TEST(QA_GDB98_Tables, CreateTableDuplicateColumnNames) {
+// Identifiers in SixSevenDB are case-insensitive (matching PostgreSQL behaviour
+// and the ALTER TABLE ADD COLUMN duplicate check in catalog.cpp). "a" and "A"
+// are therefore the same column name and must be rejected.
+TEST(QA_GDB98_Tables, CreateTableDuplicateColumnNamesRejected) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     std::vector<CatalogColumnDef> cols;
     cols.push_back(make_col(0, "dup_col", TypeId::INT32));
     cols.push_back(make_col(1, "dup_col", TypeId::STRING));
     auto schema = make_schema("dup_cols", cols);
 
-    // The catalog might not validate duplicate column names itself
     auto result = catalog.create_table(default_database_id, schema);
-    // Whether it succeeds or fails, it shouldn't crash
-    (void)result;
+    ASSERT_FALSE(result.has_value()) << "CREATE TABLE with duplicate column names must be rejected";
+    EXPECT_EQ(result.error().code, StatusCode::ALREADY_EXISTS);
+    EXPECT_NE(result.error().message.find("dup_col"), std::string::npos)
+        << "Error message must name the duplicate column; got: " << result.error().message;
+}
+
+TEST(QA_GDB98_Tables, CreateTableDuplicateColumnNamesCaseInsensitive) {
+    // "a" and "A" are the same identifier — must be rejected.
+    Catalog catalog;
+    bootstrap_qa_catalog(catalog);
+    std::vector<CatalogColumnDef> cols;
+    cols.push_back(make_col(0, "a", TypeId::INT32));
+    cols.push_back(make_col(1, "A", TypeId::INT64));
+    auto schema = make_schema("case_dup", cols);
+
+    auto result = catalog.create_table(default_database_id, schema);
+    ASSERT_FALSE(result.has_value()) << "Case-variant duplicate column names must be rejected";
+    EXPECT_EQ(result.error().code, StatusCode::ALREADY_EXISTS);
+}
+
+TEST(QA_GDB98_Tables, CreateTableDuplicateColumnNamesNonAdjacent) {
+    // Duplicates that are not adjacent (x, y, x) must also be caught.
+    Catalog catalog;
+    bootstrap_qa_catalog(catalog);
+    std::vector<CatalogColumnDef> cols;
+    cols.push_back(make_col(0, "x", TypeId::INT32));
+    cols.push_back(make_col(1, "y", TypeId::STRING));
+    cols.push_back(make_col(2, "x", TypeId::FLOAT64));
+    auto schema = make_schema("nonadj_dup", cols);
+
+    auto result = catalog.create_table(default_database_id, schema);
+    ASSERT_FALSE(result.has_value()) << "Non-adjacent duplicate column names must be rejected";
+    EXPECT_EQ(result.error().code, StatusCode::ALREADY_EXISTS);
+}
+
+TEST(QA_GDB98_Tables, CreateTableThreeDuplicateColumns) {
+    // Three columns with the same name — must be rejected.
+    Catalog catalog;
+    bootstrap_qa_catalog(catalog);
+    std::vector<CatalogColumnDef> cols;
+    cols.push_back(make_col(0, "id", TypeId::INT32));
+    cols.push_back(make_col(1, "id", TypeId::INT64));
+    cols.push_back(make_col(2, "id", TypeId::STRING));
+    auto schema = make_schema("three_dup", cols);
+
+    auto result = catalog.create_table(default_database_id, schema);
+    ASSERT_FALSE(result.has_value()) << "Three duplicate column names must be rejected";
+    EXPECT_EQ(result.error().code, StatusCode::ALREADY_EXISTS);
+}
+
+TEST(QA_GDB98_Tables, CreateTableDistinctColumnsSucceeds) {
+    // Positive guard: distinct column names must still be accepted.
+    Catalog catalog;
+    bootstrap_qa_catalog(catalog);
+    std::vector<CatalogColumnDef> cols;
+    cols.push_back(make_col(0, "col_a", TypeId::INT32));
+    cols.push_back(make_col(1, "col_b", TypeId::STRING));
+    cols.push_back(make_col(2, "col_c", TypeId::FLOAT64));
+    auto schema = make_schema("distinct_cols", cols);
+
+    auto result = catalog.create_table(default_database_id, schema);
+    ASSERT_TRUE(result.has_value()) << "Distinct column names must be accepted";
 }
 
 TEST(QA_GDB98_Tables, CreateTableInvalidDatabaseId) {
