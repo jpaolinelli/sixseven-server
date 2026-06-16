@@ -110,8 +110,7 @@ TEST(QA_GDB_839_OpenAI, BatchContainingEmptyStringSucceedsWhenApiResponds) {
     // whatever text the caller supplies.  If the mock returns a valid 1-entry
     // response, embed_batch({""}) must succeed with size 1.
     auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200,
-                            R"({"data": [{"embedding": [0.1, 0.2, 0.3], "index": 0}]})");
+    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, 0.2, 0.3], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed_batch({""});
@@ -145,8 +144,7 @@ TEST(QA_GDB_839_OpenAI, BatchContainingOnlyEmptyStringsApiReturnsError) {
     // If the API rejects "" inputs (e.g. 400 Bad Request), the error must
     // propagate correctly rather than being swallowed.
     auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(400,
-                            R"({"error": {"message": "input cannot be empty"}})");
+    mock->set_post_response(400, R"({"error": {"message": "input cannot be empty"}})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed_batch({""});
@@ -161,8 +159,7 @@ TEST(QA_GDB_839_OpenAI, BatchContainingOnlyEmptyStringsApiReturnsError) {
 
 TEST(QA_GDB_839_OpenAI, SingleElementBatchSucceeds) {
     auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200,
-                            R"({"data": [{"embedding": [1.0, 0.0, 0.0], "index": 0}]})");
+    mock->set_post_response(200, R"({"data": [{"embedding": [1.0, 0.0, 0.0], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed_batch({"only one"});
@@ -269,8 +266,7 @@ TEST(QA_GDB_839_OpenAI, LargeBatchAllDeliveredSucceeds) {
 
     for (int i = 0; i < N; ++i) {
         ASSERT_EQ((*result)[i].size(), 3u);
-        EXPECT_FLOAT_EQ((*result)[i][0], static_cast<float>(i))
-            << "wrong embedding at index " << i;
+        EXPECT_FLOAT_EQ((*result)[i][0], static_cast<float>(i)) << "wrong embedding at index " << i;
     }
 }
 
@@ -312,8 +308,7 @@ TEST(QA_GDB_839_OpenAI, LargeBatchDeliveredInReverseOrderSucceeds) {
 TEST(QA_GDB_839_OpenAI, EmbedWithEmptyStringApiRespondsWithEmbedding) {
     // embed("") should succeed if the API returns a valid embedding.
     auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200,
-                            R"({"data": [{"embedding": [0.5, 0.5, 0.5], "index": 0}]})");
+    mock->set_post_response(200, R"({"data": [{"embedding": [0.5, 0.5, 0.5], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("");
