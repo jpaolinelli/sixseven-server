@@ -12,36 +12,18 @@
 /// Adversarial categories: edge cases, boundary values, null persistence,
 /// restart survival, ordering, cascade, stress.
 
-#include "sixseven/catalog/catalog.h"
-#include "sixseven/catalog/schema.h"
-#include "sixseven/common/config.h"
-#include "sixseven/common/result.h"
-#include "sixseven/common/status.h"
-#include "sixseven/common/types.h"
-#include "sixseven/common/value.h"
-#include "sixseven/executor/catalog_persistence.h"
-#include "sixseven/executor/query_engine.h"
-#include "sixseven/executor/storage_manager.h"
-#include "sixseven/executor/system_bootstrap.h"
-#include "sixseven/storage/disk_manager.h"
-#include "sixseven/table/tuple.h"
-
-#include <gtest/gtest.h>
-
-#include <algorithm>
-#include <filesystem>
-#include <memory>
-#include <string>
-#include <vector>
+#include "test_qa_gdb_656_657_660_fixture.h"
 
 namespace sixseven {
 namespace {
 
 // ============================================================================
-// Test fixture
+// Test fixture.
+// Inherits all shared members and helpers from QA_GDB_Bootstrap_Base.
+// GDB-657-specific additions: exec_error() and sys_databases_contains().
 // ============================================================================
 
-class QA_GDB657 : public ::testing::Test {
+class QA_GDB657 : public QA_GDB_Bootstrap_Base {
 protected:
     void SetUp() override {
         data_dir_ = std::filesystem::temp_directory_path() / "qa_gdb657";
@@ -55,41 +37,6 @@ protected:
         std::filesystem::remove_all(data_dir_);
     }
 
-    void create_components() {
-        dm_ = std::make_unique<DiskManager>();
-        catalog_ = std::make_unique<Catalog>();
-        storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
-        persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
-        engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
-        engine_->set_catalog_persistence(persistence_.get());
-        config_ = Config::load_defaults();
-    }
-
-    void destroy_components() {
-        engine_.reset();
-        persistence_.reset();
-        storage_.reset();
-        catalog_.reset();
-        dm_.reset();
-    }
-
-    void run_bootstrap() {
-        auto result = SystemBootstrap::bootstrap(
-            *engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
-        ASSERT_TRUE(result.has_value()) << result.error().message;
-    }
-
-    void restart() {
-        destroy_components();
-        create_components();
-    }
-
-    QueryResult exec_ok(const std::string& sql) {
-        auto result = engine_->execute(sql);
-        EXPECT_TRUE(result.has_value()) << sql << " => " << result.error().message;
-        return result ? std::move(*result) : QueryResult{};
-    }
-
     void exec_error(const std::string& sql, StatusCode expected) {
         auto result = engine_->execute(sql);
         EXPECT_FALSE(result.has_value()) << sql << " should have failed";
@@ -98,39 +45,11 @@ protected:
         }
     }
 
-    /// Scan sys_databases heap and return all (id, name) pairs.
-    std::vector<std::pair<database_id_t, std::string>> scan_sys_databases() {
-        std::vector<std::pair<database_id_t, std::string>> entries;
-        auto ts = storage_->get_table_storage(sys_databases_table_id);
-        if (!ts)
-            return entries;
-        auto schema = StorageManager::build_storage_schema(sys_databases_schema());
-        auto it = (*ts)->heap->begin();
-        if (!it)
-            return entries;
-        while (auto row = it->next()) {
-            auto values = TupleSerializer::deserialize(row->second, schema);
-            if (!values)
-                continue;
-            entries.emplace_back(static_cast<database_id_t>((*values)[0].as_int32()),
-                                 (*values)[1].as_string());
-        }
-        return entries;
-    }
-
     bool sys_databases_contains(const std::string& name) {
         auto entries = scan_sys_databases();
         return std::any_of(
             entries.begin(), entries.end(), [&](const auto& e) { return e.second == name; });
     }
-
-    std::filesystem::path data_dir_;
-    std::unique_ptr<DiskManager> dm_;
-    std::unique_ptr<Catalog> catalog_;
-    std::unique_ptr<StorageManager> storage_;
-    std::unique_ptr<CatalogPersistence> persistence_;
-    std::unique_ptr<QueryEngine> engine_;
-    Config config_;
 };
 
 // ============================================================================
@@ -523,8 +442,7 @@ TEST_F(QA_GDB657, GDB804_DropNonexistentEmptyNameReturnsError) {
     run_bootstrap();
     // Empty name should be rejected at parse or execution time, never crash.
     auto result = engine_->execute("DROP DATABASE \"\"");
-    EXPECT_FALSE(result.has_value())
-        << "DROP DATABASE with empty name should fail";
+    EXPECT_FALSE(result.has_value()) << "DROP DATABASE with empty name should fail";
 }
 
 // ============================================================================
@@ -535,30 +453,28 @@ TEST_F(QA_GDB657, GDB804_DropDefaultDatabaseConsistency) {
     run_bootstrap();
     ASSERT_TRUE(sys_databases_contains(default_database_name));
 
-    auto result = engine_->execute(
-        std::string("DROP DATABASE ") + default_database_name + " CASCADE");
+    auto result =
+        engine_->execute(std::string("DROP DATABASE ") + default_database_name + " CASCADE");
     if (result.has_value()) {
         // Drop allowed: persistence must be cleaned up and catalog consistent.
         EXPECT_FALSE(sys_databases_contains(default_database_name))
             << "successful drop of default DB must remove it from sys_databases";
         auto db = catalog_->get_database(default_database_name);
-        EXPECT_FALSE(db.has_value())
-            << "successful drop of default DB must remove it from catalog";
+        EXPECT_FALSE(db.has_value()) << "successful drop of default DB must remove it from catalog";
     } else {
         // Drop rejected: catalog must be untouched.
         EXPECT_TRUE(sys_databases_contains(default_database_name))
             << "rejected drop of default DB must leave sys_databases intact";
         auto db = catalog_->get_database(default_database_name);
-        EXPECT_TRUE(db.has_value())
-            << "rejected drop of default DB must leave catalog intact";
+        EXPECT_TRUE(db.has_value()) << "rejected drop of default DB must leave catalog intact";
     }
 }
 
 TEST_F(QA_GDB657, GDB804_DropDefaultDatabaseSurvivesRestart) {
     // If the default database can be dropped, verify drop persists across restart.
     run_bootstrap();
-    auto result = engine_->execute(
-        std::string("DROP DATABASE ") + default_database_name + " CASCADE");
+    auto result =
+        engine_->execute(std::string("DROP DATABASE ") + default_database_name + " CASCADE");
     if (!result.has_value()) {
         // Protected — nothing to verify about persistence.
         SUCCEED() << "default database is protected from drop; skip restart check";
@@ -668,8 +584,7 @@ TEST_F(QA_GDB657, GDB804_DoubleDropIfExists) {
 
     // IF EXISTS form should succeed (no-op) on second drop.
     auto result = engine_->execute("DROP DATABASE IF EXISTS dd_ifex_db");
-    EXPECT_TRUE(result.has_value())
-        << "DROP DATABASE IF EXISTS on already-dropped DB must succeed";
+    EXPECT_TRUE(result.has_value()) << "DROP DATABASE IF EXISTS on already-dropped DB must succeed";
 }
 
 // ============================================================================
@@ -693,8 +608,7 @@ TEST_F(QA_GDB657, GDB804_CaseSensitiveDatabaseNames) {
             << "original-cased database must still be present";
     } else {
         // Case-insensitive: at most one match, verify no duplicate drop.
-        EXPECT_FALSE(sys_databases_contains("CaseDB") &&
-                     sys_databases_contains("casedb"))
+        EXPECT_FALSE(sys_databases_contains("CaseDB") && sys_databases_contains("casedb"))
             << "only one variant of the name may survive";
     }
 }
@@ -754,11 +668,10 @@ TEST_F(QA_GDB657, GDB804_DefaultDatabasePresentAfterBootstrap) {
     // It must pass unconditionally for every test in this suite to be meaningful.
     run_bootstrap();
     ASSERT_TRUE(sys_databases_contains(default_database_name))
-        << "bootstrap must create the default database '"
-        << default_database_name << "' in sys_databases";
+        << "bootstrap must create the default database '" << default_database_name
+        << "' in sys_databases";
     auto db = catalog_->get_database(default_database_name);
-    ASSERT_TRUE(db.has_value())
-        << "bootstrap must register the default database in the catalog";
+    ASSERT_TRUE(db.has_value()) << "bootstrap must register the default database in the catalog";
 }
 
 } // namespace
