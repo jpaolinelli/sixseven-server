@@ -7,6 +7,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace sixseven {
@@ -289,6 +290,9 @@ private:
 
     /// Virtual catalog tables (pg_catalog), keyed by name.
     std::unordered_map<std::string, VirtualTableDef> virtual_tables_;
+
+    /// Set of registered virtual table IDs for O(1) is_virtual_table() lookup.
+    std::unordered_set<table_id_t> virtual_table_id_set_;
 
     /// Next virtual table ID (decrements from first_virtual_table_id).
     table_id_t next_virtual_table_id_ = first_virtual_table_id;

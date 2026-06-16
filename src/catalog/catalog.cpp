@@ -1030,6 +1030,7 @@ void Catalog::register_virtual_table(VirtualTableDef def) {
     if (def.table_id == 0) {
         def.table_id = next_virtual_table_id_--;
     }
+    virtual_table_id_set_.insert(def.table_id);
     virtual_tables_.emplace(def.name, std::move(def));
 }
 
@@ -1059,12 +1060,7 @@ bool Catalog::is_virtual_schema(const std::string& schema_name) {
 
 bool Catalog::is_virtual_table(table_id_t id) const {
     std::lock_guard lock(mu_);
-    for (const auto& [_, def] : virtual_tables_) {
-        if (def.table_id == id) {
-            return true;
-        }
-    }
-    return false;
+    return virtual_table_id_set_.count(id) > 0;
 }
 
 } // namespace sixseven

@@ -86,6 +86,41 @@ TEST(VirtualCatalog, IsVirtualTable) {
     EXPECT_FALSE(catalog.is_virtual_table(999));
 }
 
+TEST(VirtualCatalog, IsVirtualTableIdSetStaysInSync) {
+    // Verify that each registered virtual table's ID is tracked in the O(1) set,
+    // and that IDs not registered are absent — guarding against staleness bugs.
+    Catalog catalog;
+    init_test_catalog(catalog);
+
+    VirtualTableDef def1;
+    def1.name = "pg_tables";
+    def1.columns = {{0, "oid", TypeId::INT32, false, ""}};
+    def1.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    catalog.register_virtual_table(std::move(def1));
+
+    VirtualTableDef def2;
+    def2.name = "pg_indexes";
+    def2.columns = {{0, "oid", TypeId::INT32, false, ""}};
+    def2.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    catalog.register_virtual_table(std::move(def2));
+
+    auto vt1 = catalog.get_virtual_table("pg_tables");
+    auto vt2 = catalog.get_virtual_table("pg_indexes");
+    ASSERT_TRUE(vt1.has_value());
+    ASSERT_TRUE(vt2.has_value());
+
+    // Both registered IDs must be found.
+    EXPECT_TRUE(catalog.is_virtual_table(vt1->table_id));
+    EXPECT_TRUE(catalog.is_virtual_table(vt2->table_id));
+
+    // Unregistered or physical IDs must not be found.
+    EXPECT_FALSE(catalog.is_virtual_table(0));
+    EXPECT_FALSE(catalog.is_virtual_table(1));
+    EXPECT_FALSE(catalog.is_virtual_table(42));
+    // IDs in the virtual range but not registered must also be absent.
+    EXPECT_FALSE(catalog.is_virtual_table(vt2->table_id - 1));
+}
+
 TEST(VirtualCatalog, ListVirtualTables) {
     Catalog catalog;
     init_test_catalog(catalog);
@@ -223,9 +258,7 @@ protected:
             {0, "oid", TypeId::INT32, false, ""},
             {1, "datname", TypeId::STRING, false, ""},
         };
-        def.generator = []() -> std::vector<std::vector<std::string>> {
-            return {{"1", "demo"}};
-        };
+        def.generator = []() -> std::vector<std::vector<std::string>> { return {{"1", "demo"}}; };
         catalog.register_virtual_table(std::move(def));
     }
 };
