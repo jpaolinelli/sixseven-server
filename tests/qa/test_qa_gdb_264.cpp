@@ -10,12 +10,13 @@
 #include "sixseven/parser/parser.h"
 #include "sixseven/planner/binder.h"
 #include "sixseven/planner/type_resolver.h"
-#include "test_qa_helpers.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 #include <vector>
+
+#include "test_qa_helpers.h"
 
 namespace sixseven {
 
@@ -694,9 +695,8 @@ TEST_F(QA_GDB264, GDB825_WhereNonMetaColumnDoesNotPolluteSELECTOutput) {
 
 // GDB-825 adversarial: non-existent column in WHERE must still error.
 TEST_F(QA_GDB264, GDB825_WhereNonExistentColumnErrors) {
-    bind_error(
-        "SELECT id FROM TRAVERSE follows FROM users(1) DIRECTION OUT WHERE no_such_col = 42",
-        StatusCode::NOT_FOUND);
+    bind_error("SELECT id FROM TRAVERSE follows FROM users(1) DIRECTION OUT WHERE no_such_col = 42",
+               StatusCode::NOT_FOUND);
 }
 
 // GDB-825 adversarial: meta column still works in WHERE after the rename.
@@ -708,9 +708,8 @@ TEST_F(QA_GDB264, GDB825_WhereMetaColumnStillBinds) {
 
 // GDB-825 adversarial: mixed meta + non-meta in WHERE must both resolve.
 TEST_F(QA_GDB264, GDB825_WhereMixedMetaAndNonMetaBinds) {
-    auto bound = bind_ok(
-        "SELECT id FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "WHERE __depth < 5 AND name = 'bob'");
+    auto bound = bind_ok("SELECT id FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                         "WHERE __depth < 5 AND name = 'bob'");
     ASSERT_EQ(bound.output_columns.size(), 1u);
     EXPECT_EQ(bound.output_columns[0].column_name, "id");
 }
@@ -719,16 +718,14 @@ TEST_F(QA_GDB264, GDB825_WhereMixedMetaAndNonMetaBinds) {
 // enriched scope (heterogeneous OUT: authored users→posts, so "email" is a
 // users column and must NOT bind in WHERE because the scope is posts).
 TEST_F(QA_GDB264, GDB825_WhereSourceColumnNotInScopeErrors) {
-    bind_error(
-        "SELECT title FROM TRAVERSE authored FROM users(1) DIRECTION OUT WHERE email = 'x'",
-        StatusCode::NOT_FOUND);
+    bind_error("SELECT title FROM TRAVERSE authored FROM users(1) DIRECTION OUT WHERE email = 'x'",
+               StatusCode::NOT_FOUND);
 }
 
 // GDB-825 adversarial: an edge property column should be accessible in WHERE.
 TEST_F(QA_GDB264, GDB825_WhereEdgePropertyBinds) {
-    auto bound = bind_ok(
-        "SELECT name FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
-        "WHERE follows.weight > 0.5");
+    auto bound = bind_ok("SELECT name FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+                         "WHERE follows.weight > 0.5");
     ASSERT_EQ(bound.output_columns.size(), 1u);
 }
 
