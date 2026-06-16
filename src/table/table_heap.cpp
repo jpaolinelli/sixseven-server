@@ -152,25 +152,29 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data, txn_id_t xmin
     }
     uint32_t total_pages = *pc;
 
+    // Snapshot the hint once; relaxed load is fine — it is just a hint and the
+    // insert path validates the page has room before trusting it.
+    const PageId hint = last_insert_page_.load(std::memory_order_relaxed);
+
     // Try the last-insert-page hint first.
-    if (last_insert_page_ >= 1 && last_insert_page_ < total_pages) {
-        auto page_result = bpm_.fetch_page(last_insert_page_);
+    if (hint >= 1 && hint < total_pages) {
+        auto page_result = bpm_.fetch_page(hint);
         if (page_result) {
             Page* page = *page_result;
             auto slot = page->insert_tuple(on_page);
             if (slot) {
                 ++row_count_;
                 persist_row_count();
-                RID rid{last_insert_page_, *slot};
+                RID rid{hint, *slot};
                 log_wal(WalRecordType::INSERT, rid, xmin, {}, on_page);
-                auto unpin = bpm_.unpin_page(last_insert_page_, true);
+                auto unpin = bpm_.unpin_page(hint, true);
                 if (!unpin) {
                     return tl::unexpected(unpin.error());
                 }
                 return ok(rid);
             }
             // Page full, unpin and try others.
-            auto unpin = bpm_.unpin_page(last_insert_page_, false);
+            auto unpin = bpm_.unpin_page(hint, false);
             if (!unpin) {
                 return tl::unexpected(unpin.error());
             }
@@ -183,8 +187,8 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data, txn_id_t xmin
     // pages are always full so scanning them is pure waste.
     // TODO(GDB-626): For mixed insert/delete workloads, a free-space map (FSM)
     // would allow efficient reuse of space on fragmented pages without scanning.
-    if (last_insert_page_ >= 1) {
-        PageId next_pid = last_insert_page_ + 1;
+    if (hint >= 1) {
+        PageId next_pid = hint + 1;
         if (next_pid < total_pages) {
             auto page_result = bpm_.fetch_page(next_pid);
             if (page_result) {
@@ -193,7 +197,7 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data, txn_id_t xmin
                 if (slot) {
                     ++row_count_;
                     persist_row_count();
-                    last_insert_page_ = next_pid;
+                    last_insert_page_.store(next_pid, std::memory_order_relaxed);
                     RID rid{next_pid, *slot};
                     log_wal(WalRecordType::INSERT, rid, xmin, {}, on_page);
                     auto unpin = bpm_.unpin_page(next_pid, true);
@@ -233,7 +237,7 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data, txn_id_t xmin
 
     ++row_count_;
     persist_row_count();
-    last_insert_page_ = new_pid;
+    last_insert_page_.store(new_pid, std::memory_order_relaxed);
     RID rid{new_pid, *slot};
     log_wal(WalRecordType::INSERT, rid, xmin, {}, on_page);
 
@@ -301,14 +305,17 @@ TableHeap::insert_batch(const std::vector<std::span<const uint8_t>>& tuples, txn
         }
     };
 
+    // Snapshot the hint for this batch; relaxed load is fine (hint only).
+    PageId hint = last_insert_page_.load(std::memory_order_relaxed);
+
     // Try the hint page first.
-    if (last_insert_page_ >= 1 && last_insert_page_ < total_pages) {
-        auto page_result = bpm_.fetch_page(last_insert_page_);
+    if (hint >= 1 && hint < total_pages) {
+        auto page_result = bpm_.fetch_page(hint);
         if (page_result) {
             Page* page = *page_result;
-            fill_page(page, last_insert_page_);
+            fill_page(page, hint);
             bool dirty = (idx > 0);
-            auto unpin = bpm_.unpin_page(last_insert_page_, dirty);
+            auto unpin = bpm_.unpin_page(hint, dirty);
             if (!unpin) {
                 return tl::unexpected(unpin.error());
             }
@@ -316,8 +323,8 @@ TableHeap::insert_batch(const std::vector<std::span<const uint8_t>>& tuples, txn
     }
 
     // Try the next page after the hint.
-    if (idx < spans.size() && last_insert_page_ >= 1) {
-        PageId next_pid = last_insert_page_ + 1;
+    if (idx < spans.size() && hint >= 1) {
+        PageId next_pid = hint + 1;
         if (next_pid < total_pages) {
             auto page_result = bpm_.fetch_page(next_pid);
             if (page_result) {
@@ -326,7 +333,8 @@ TableHeap::insert_batch(const std::vector<std::span<const uint8_t>>& tuples, txn
                 fill_page(page, next_pid);
                 bool dirty = (idx > before);
                 if (dirty) {
-                    last_insert_page_ = next_pid;
+                    hint = next_pid;
+                    last_insert_page_.store(hint, std::memory_order_relaxed);
                 }
                 auto unpin = bpm_.unpin_page(next_pid, dirty);
                 if (!unpin) {
@@ -347,7 +355,7 @@ TableHeap::insert_batch(const std::vector<std::span<const uint8_t>>& tuples, txn
         PageId new_pid = new_page->page_id();
 
         fill_page(new_page, new_pid);
-        last_insert_page_ = new_pid;
+        last_insert_page_.store(new_pid, std::memory_order_relaxed);
         auto unpin = bpm_.unpin_page(new_pid, true);
         if (!unpin) {
             return tl::unexpected(unpin.error());

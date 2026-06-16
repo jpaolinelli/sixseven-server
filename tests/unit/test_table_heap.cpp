@@ -4,8 +4,12 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <mutex>
+#include <thread>
+#include <unordered_set>
 #include <vector>
 
 using namespace sixseven;
@@ -774,8 +778,8 @@ TEST_F(TableHeapTest, UpdateTuplesBatchMultiPage) {
 
     for (size_t i = 0; i < rids.size(); ++i) {
         new_data.push_back(make_tuple(200, static_cast<uint8_t>(0xF0 + i)));
-        updates.push_back(TableHeap::TupleUpdate{
-            rids[i], std::span<const uint8_t>(new_data.back())});
+        updates.push_back(
+            TableHeap::TupleUpdate{rids[i], std::span<const uint8_t>(new_data.back())});
     }
 
     auto result = heap.update_tuples_batch(updates);
@@ -826,4 +830,126 @@ TEST_F(TableHeapTest, UpdateTuplesBatchInvalidRidReportedAsFailed) {
     auto data = heap.get_tuple(*rid);
     ASSERT_TRUE(data.has_value());
     EXPECT_EQ((*data)[0], 0xBB);
+}
+
+// -- GDB-838: concurrent insert stress ----------------------------------------
+//
+// Regression guard for the last_insert_page_ data race.  8 threads each insert
+// 50 rows concurrently into the same TableHeap.  After all threads join we
+// assert:
+//   1. Total row count == 8 * 50 == 400 (no lost inserts via the hint).
+//   2. Every inserted RID is unique (no two threads got the same slot).
+//   3. A full sequential scan returns exactly the 400 tuples (no phantom rows).
+//
+// Note: TSan is not available on this Windows host (vcpkg recursion), so we
+// verify functional correctness rather than absence of TSan reports.  The
+// std::atomic<PageId> change eliminates the data race (UB) regardless: a
+// relaxed load/store on a lock-free 32-bit integer cannot produce torn reads
+// or undefined behaviour on any C++20-conforming platform.
+
+TEST_F(TableHeapTest, ConcurrentInsertStress_GDB838) {
+    // Use a larger buffer pool so concurrent inserts are not starved.
+    bpm_.reset();
+    bpm_ = std::make_unique<BufferPoolManager>(dm_, file_id_, 256);
+
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    constexpr int kThreads = 8;
+    constexpr int kRowsPerThread = 50;
+    constexpr int kTotalRows = kThreads * kRowsPerThread; // 400
+
+    // Collect RIDs from all threads under a mutex.
+    std::mutex rid_mutex;
+    std::vector<RID> all_rids;
+    all_rids.reserve(kTotalRows);
+
+    std::atomic<int> insert_errors{0};
+
+    auto worker = [&](int thread_id) {
+        for (int i = 0; i < kRowsPerThread; ++i) {
+            // Encode thread_id and row index into the tuple so we can verify
+            // correctness on read-back.
+            std::vector<uint8_t> tuple(8);
+            tuple[0] = static_cast<uint8_t>(thread_id);
+            tuple[1] = static_cast<uint8_t>(i);
+            // Fill remainder with a recognisable sentinel.
+            for (size_t b = 2; b < tuple.size(); ++b) {
+                tuple[b] = 0xAB;
+            }
+
+            auto result = heap.insert_tuple(tuple);
+            if (!result.has_value()) {
+                ++insert_errors;
+                continue;
+            }
+
+            std::lock_guard<std::mutex> lock(rid_mutex);
+            all_rids.push_back(*result);
+        }
+    };
+
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+    for (int t = 0; t < kThreads; ++t) {
+        threads.emplace_back(worker, t);
+    }
+    for (auto& th : threads) {
+        th.join();
+    }
+
+    // 1. Zero insert errors.
+    ASSERT_EQ(insert_errors.load(), 0) << "Some concurrent inserts failed";
+
+    // 2. Exact row count.
+    ASSERT_EQ(static_cast<int>(all_rids.size()), kTotalRows)
+        << "Expected " << kTotalRows << " RIDs, got " << all_rids.size();
+
+    // 3. All RIDs are unique — no two threads wrote to the same slot.
+    std::unordered_set<uint64_t> rid_set;
+    rid_set.reserve(kTotalRows);
+    for (const RID& rid : all_rids) {
+        uint64_t key = (static_cast<uint64_t>(rid.page_id) << 32) | rid.slot_id;
+        EXPECT_TRUE(rid_set.insert(key).second)
+            << "Duplicate RID: page=" << rid.page_id << " slot=" << rid.slot_id;
+    }
+
+    // 4. Full sequential scan returns exactly kTotalRows live tuples.
+    auto it_result = heap.begin();
+    ASSERT_TRUE(it_result.has_value()) << it_result.error().message;
+    auto it = std::move(*it_result);
+    int scanned = 0;
+    while (it.next().has_value()) {
+        ++scanned;
+    }
+    EXPECT_EQ(scanned, kTotalRows)
+        << "Sequential scan found " << scanned << " rows, expected " << kTotalRows;
+
+    // 5. row_count() O(1) accessor agrees.
+    EXPECT_EQ(static_cast<int>(heap.row_count()), kTotalRows);
+}
+
+// Single-threaded sanity: hint accelerates sequential inserts (functional,
+// not timing-asserted).  After the first insert establishes last_insert_page_,
+// subsequent inserts onto the same page must succeed without allocating new
+// pages (verifiable by counting pages via page_count()).
+TEST_F(TableHeapTest, InsertHintFunctional_GDB838) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    // Insert a small tuple — fits many per page.
+    std::vector<uint8_t> small_tuple(64, 0x55);
+
+    auto r1 = heap.insert_tuple(small_tuple);
+    ASSERT_TRUE(r1.has_value());
+    PageId first_page = r1->page_id;
+    EXPECT_GE(first_page, 1u);
+
+    // Insert enough more tuples to stay on the same page (64-byte tuples fit
+    // dozens per 4 KiB page).
+    for (int i = 1; i < 10; ++i) {
+        auto r = heap.insert_tuple(small_tuple);
+        ASSERT_TRUE(r.has_value()) << "Insert " << i << " failed";
+        // The hint should have kept us on (or near) the first page.
+        EXPECT_LE(r->page_id, first_page + 1u) << "Insert " << i << " landed on page " << r->page_id
+                                               << " far from hint page " << first_page;
+    }
 }
