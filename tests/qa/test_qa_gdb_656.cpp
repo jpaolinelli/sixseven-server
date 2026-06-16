@@ -13,41 +13,23 @@
 /// Adversarial categories: edge cases, boundary values, migration, restart
 /// survival, ordering, stress.
 
-#include "sixseven/catalog/catalog.h"
-#include "sixseven/catalog/schema.h"
-#include "sixseven/common/config.h"
-#include "sixseven/common/result.h"
-#include "sixseven/common/status.h"
-#include "sixseven/common/types.h"
-#include "sixseven/common/value.h"
-#include "sixseven/executor/catalog_persistence.h"
-#include "sixseven/executor/query_engine.h"
-#include "sixseven/executor/storage_manager.h"
-#include "sixseven/executor/system_bootstrap.h"
-#include "sixseven/storage/disk_manager.h"
-#include "sixseven/table/tuple.h"
-
-#include <gtest/gtest.h>
-
-#include <algorithm>
-#include <filesystem>
-#include <memory>
-#include <string>
-#include <vector>
+#include "test_qa_gdb_656_657_660_fixture.h"
 
 namespace sixseven {
 namespace {
 
 // ============================================================================
 // Test fixture — mirrors CatalogPersistenceTest but scoped to QA naming.
+// Inherits all shared members and helpers from QA_GDB_Bootstrap_Base.
 // ============================================================================
 
-class QA_GDB656 : public ::testing::Test {
+class QA_GDB656 : public QA_GDB_Bootstrap_Base {
 protected:
     void SetUp() override {
         data_dir_ = std::filesystem::temp_directory_path() / "qa_gdb656";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
+        // Do NOT call init_test_catalog — bootstrap should handle sixseven creation.
         create_components();
     }
 
@@ -55,70 +37,6 @@ protected:
         destroy_components();
         std::filesystem::remove_all(data_dir_);
     }
-
-    void create_components() {
-        dm_ = std::make_unique<DiskManager>();
-        catalog_ = std::make_unique<Catalog>();
-        // Do NOT call init_test_catalog — bootstrap should handle sixseven creation.
-        storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
-        persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
-        engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
-        engine_->set_catalog_persistence(persistence_.get());
-        config_ = Config::load_defaults();
-    }
-
-    void destroy_components() {
-        engine_.reset();
-        persistence_.reset();
-        storage_.reset();
-        catalog_.reset();
-        dm_.reset();
-    }
-
-    void run_bootstrap() {
-        auto result = SystemBootstrap::bootstrap(
-            *engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
-        ASSERT_TRUE(result.has_value()) << result.error().message;
-    }
-
-    void restart() {
-        destroy_components();
-        create_components();
-    }
-
-    QueryResult exec_ok(const std::string& sql) {
-        auto result = engine_->execute(sql);
-        EXPECT_TRUE(result.has_value()) << sql << " => " << result.error().message;
-        return result ? std::move(*result) : QueryResult{};
-    }
-
-    /// Scan sys_databases heap and return all (id, name) pairs.
-    std::vector<std::pair<database_id_t, std::string>> scan_sys_databases() {
-        std::vector<std::pair<database_id_t, std::string>> entries;
-        auto ts = storage_->get_table_storage(sys_databases_table_id);
-        if (!ts)
-            return entries;
-        auto schema = StorageManager::build_storage_schema(sys_databases_schema());
-        auto it = (*ts)->heap->begin();
-        if (!it)
-            return entries;
-        while (auto row = it->next()) {
-            auto values = TupleSerializer::deserialize(row->second, schema);
-            if (!values)
-                continue;
-            entries.emplace_back(static_cast<database_id_t>((*values)[0].as_int32()),
-                                 (*values)[1].as_string());
-        }
-        return entries;
-    }
-
-    std::filesystem::path data_dir_;
-    std::unique_ptr<DiskManager> dm_;
-    std::unique_ptr<Catalog> catalog_;
-    std::unique_ptr<StorageManager> storage_;
-    std::unique_ptr<CatalogPersistence> persistence_;
-    std::unique_ptr<QueryEngine> engine_;
-    Config config_;
 };
 
 // ============================================================================

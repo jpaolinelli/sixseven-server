@@ -14,31 +14,19 @@
 /// Adversarial: multiple tables, multiple databases, tables with indexes,
 /// restart survival, empty database cascade, stress (many tables).
 
-#include "sixseven/catalog/catalog.h"
-#include "sixseven/catalog/schema.h"
-#include "sixseven/common/config.h"
-#include "sixseven/common/result.h"
-#include "sixseven/common/status.h"
-#include "sixseven/common/types.h"
-#include "sixseven/common/value.h"
-#include "sixseven/executor/catalog_persistence.h"
-#include "sixseven/executor/query_engine.h"
-#include "sixseven/executor/storage_manager.h"
-#include "sixseven/executor/system_bootstrap.h"
-#include "sixseven/storage/disk_manager.h"
-#include "sixseven/table/tuple.h"
-
-#include <gtest/gtest.h>
-
-#include <algorithm>
-#include <filesystem>
-#include <string>
-#include <vector>
+#include "test_qa_gdb_656_657_660_fixture.h"
 
 namespace sixseven {
 namespace {
 
-class QA_GDB660 : public ::testing::Test {
+// ============================================================================
+// Test fixture.
+// Inherits all shared members and helpers from QA_GDB_Bootstrap_Base.
+// GDB-660-specific additions: switch_to_db(), switch_to_default(),
+// get_table_id(), and the sys_tables/sys_columns/sys_indexes scan helpers.
+// ============================================================================
+
+class QA_GDB660 : public QA_GDB_Bootstrap_Base {
 protected:
     void SetUp() override {
         data_dir_ = std::filesystem::temp_directory_path() / "qa_gdb660";
@@ -50,41 +38,6 @@ protected:
     void TearDown() override {
         destroy_components();
         std::filesystem::remove_all(data_dir_);
-    }
-
-    void create_components() {
-        dm_ = std::make_unique<DiskManager>();
-        catalog_ = std::make_unique<Catalog>();
-        storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
-        persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
-        engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
-        engine_->set_catalog_persistence(persistence_.get());
-        config_ = Config::load_defaults();
-    }
-
-    void destroy_components() {
-        engine_.reset();
-        persistence_.reset();
-        storage_.reset();
-        catalog_.reset();
-        dm_.reset();
-    }
-
-    void run_bootstrap() {
-        auto result = SystemBootstrap::bootstrap(
-            *engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
-        ASSERT_TRUE(result.has_value()) << result.error().message;
-    }
-
-    void restart() {
-        destroy_components();
-        create_components();
-    }
-
-    QueryResult exec_ok(const std::string& sql) {
-        auto result = engine_->execute(sql);
-        EXPECT_TRUE(result.has_value()) << sql << " => " << result.error().message;
-        return result ? std::move(*result) : QueryResult{};
     }
 
     database_id_t switch_to_db(const std::string& name) {
@@ -114,13 +67,16 @@ protected:
     std::vector<SysTableRow> scan_sys_tables() {
         std::vector<SysTableRow> rows;
         auto ts = storage_->get_table_storage(sys_tables_table_id);
-        if (!ts) return rows;
+        if (!ts)
+            return rows;
         auto schema = StorageManager::build_storage_schema(sys_tables_schema());
         auto it = (*ts)->heap->begin();
-        if (!it) return rows;
+        if (!it)
+            return rows;
         while (auto row = it->next()) {
             auto values = TupleSerializer::deserialize(row->second, schema);
-            if (!values) continue;
+            if (!values)
+                continue;
             rows.push_back({static_cast<table_id_t>((*values)[0].as_int32()),
                             static_cast<database_id_t>((*values)[1].as_int32()),
                             (*values)[2].as_string()});
@@ -137,13 +93,16 @@ protected:
     std::vector<SysColumnRow> scan_sys_columns() {
         std::vector<SysColumnRow> rows;
         auto ts = storage_->get_table_storage(sys_columns_table_id);
-        if (!ts) return rows;
+        if (!ts)
+            return rows;
         auto schema = StorageManager::build_storage_schema(sys_columns_schema());
         auto it = (*ts)->heap->begin();
-        if (!it) return rows;
+        if (!it)
+            return rows;
         while (auto row = it->next()) {
             auto values = TupleSerializer::deserialize(row->second, schema);
-            if (!values) continue;
+            if (!values)
+                continue;
             rows.push_back({static_cast<table_id_t>((*values)[0].as_int32()),
                             (*values)[1].as_int32(),
                             (*values)[2].as_string()});
@@ -160,13 +119,16 @@ protected:
     std::vector<SysIndexRow> scan_sys_indexes() {
         std::vector<SysIndexRow> rows;
         auto ts = storage_->get_table_storage(sys_indexes_table_id);
-        if (!ts) return rows;
+        if (!ts)
+            return rows;
         auto schema = StorageManager::build_storage_schema(sys_indexes_schema());
         auto it = (*ts)->heap->begin();
-        if (!it) return rows;
+        if (!it)
+            return rows;
         while (auto row = it->next()) {
             auto values = TupleSerializer::deserialize(row->second, schema);
-            if (!values) continue;
+            if (!values)
+                continue;
             rows.push_back({(*values)[0].as_int32(),
                             static_cast<table_id_t>((*values)[1].as_int32()),
                             (*values)[2].as_string()});
@@ -191,14 +153,6 @@ protected:
         return std::any_of(
             rows.begin(), rows.end(), [tid](const auto& r) { return r.table_id == tid; });
     }
-
-    std::filesystem::path data_dir_;
-    std::unique_ptr<DiskManager> dm_;
-    std::unique_ptr<Catalog> catalog_;
-    std::unique_ptr<StorageManager> storage_;
-    std::unique_ptr<CatalogPersistence> persistence_;
-    std::unique_ptr<QueryEngine> engine_;
-    Config config_;
 };
 
 // ============================================================================
@@ -511,5 +465,5 @@ TEST_F(QA_GDB660, SequentialCascadeDrops) {
     EXPECT_FALSE(sys_tables_contains(b_id));
 }
 
-}  // namespace
-}  // namespace sixseven
+} // namespace
+} // namespace sixseven
