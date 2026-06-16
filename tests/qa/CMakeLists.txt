@@ -36,6 +36,6 @@ gtest_discover_tests(sixseven_qa_tests PROPERTIES LABELS "qa")
 add_test(
     NAME QA_BinaryRunsToCompletion
     COMMAND sixseven_qa_tests
-        --gtest_filter=QA_AggregateE2E.*:QA_GDB258.*:GDB258ProviderRegistryTest.*:QA_GDB596.*:QA_GDB597.*:QA_GDB598.*:GDB599WindowFunctionQA.*:QA_GDB601.*:QA_GDB602.IfExistsAfterName_NonexistentDB_Succeeds:QA_GDB602.IfExistsAfterName_NonexistentDB_Cascade_Succeeds:QA_GDB602.IfExistsBeforeName_NonexistentDB_StillWorks:QA_GDB602.IfExistsBeforeName_NonexistentDB_Cascade_StillWorks:QA_GDB602.NoIfExists_NonexistentDB_Errors:QA_GDB602.IfExistsAfterName_NonexistentDB_Restrict_Succeeds:QA_GDB602.IfExistsAfterName_ExistingDB_StillDrops:QA_GDB602.IfExistsAfterName_ExistingDB_Cascade_StillDrops:QA_GDB602_Parser.*:QA_GDB602.MultipleDropIfExists_NoStateLeak:QA_GDB603.*
+        --gtest_filter=QA_AggregateE2E.*:QA_GDB258.*:GDB258ProviderRegistryTest.*:QA_GDB261.*:QA_GDB596.*:QA_GDB597.*:QA_GDB598.*:GDB599WindowFunctionQA.*:QA_GDB601.*:QA_GDB602.IfExistsAfterName_NonexistentDB_Succeeds:QA_GDB602.IfExistsAfterName_NonexistentDB_Cascade_Succeeds:QA_GDB602.IfExistsBeforeName_NonexistentDB_StillWorks:QA_GDB602.IfExistsBeforeName_NonexistentDB_Cascade_StillWorks:QA_GDB602.NoIfExists_NonexistentDB_Errors:QA_GDB602.IfExistsAfterName_NonexistentDB_Restrict_Succeeds:QA_GDB602.IfExistsAfterName_ExistingDB_StillDrops:QA_GDB602.IfExistsAfterName_ExistingDB_Cascade_StillDrops:QA_GDB602_Parser.*:QA_GDB602.MultipleDropIfExists_NoStateLeak:QA_GDB603.*
 )
 set_tests_properties(QA_BinaryRunsToCompletion PROPERTIES LABELS "qa")
