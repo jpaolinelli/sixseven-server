@@ -559,10 +559,36 @@ Result<bool> BTreeIndex::remove(const KeyType& key, const RID& rid) {
         return tl::unexpected(leaf_id_result.error());
     }
 
-    // Walk forward through sibling leaves as long as the key matches.
-    // Duplicates may span page boundaries, so we scan right until the key
-    // changes or we find the target (key, rid) pair.
+    // find_leaf() uses upper-bound routing: duplicate-key runs spanning
+    // multiple leaves land on the RIGHTMOST leaf.  Walk LEFT via prev_leaf_id
+    // to find the true leftmost leaf whose last key >= target key (mirroring
+    // the same pattern used in range_scan).
     PageId current_id = *leaf_id_result;
+    while (true) {
+        const auto* cur = get_leaf_node(current_id);
+        if (cur == nullptr) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "leaf page not found walking left in rid-qualified remove");
+        }
+        PageId prev_id = cur->prev_leaf_id();
+        if (prev_id == invalid_page_id) {
+            break;
+        }
+        const auto* prev = get_leaf_node(prev_id);
+        if (prev == nullptr || prev->key_count() == 0) {
+            break;
+        }
+        auto cmp = compare_keys(prev->key_at(prev->key_count() - 1), key);
+        if (!cmp.has_value()) {
+            return tl::unexpected(cmp.error());
+        }
+        if (*cmp == std::strong_ordering::less) {
+            break; // Previous leaf's last key < target key; stop.
+        }
+        current_id = prev_id;
+    }
+
+    // Now scan forward through sibling leaves as long as the key matches.
     while (current_id != invalid_page_id) {
         auto* leaf = get_leaf_node(current_id);
         if (leaf == nullptr) {

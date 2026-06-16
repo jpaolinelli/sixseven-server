@@ -199,6 +199,73 @@ TEST(BTreeRidRemove, DuplicatesSpanningLeafBoundary) {
     }
 }
 
+/// Regression for GDB-833 reviewer fix: find_leaf() routes key>=separator to
+/// the RIGHT child, so for a duplicate-key run spanning multiple leaves it
+/// always lands on the RIGHTMOST leaf.  A right-only walk then silently misses
+/// entries on LEFT sibling leaves.
+///
+/// BTreeLeafNode::insert uses lower_bound (strict-less comparison), so equal
+/// keys are inserted at position 0 (prepend semantics).
+/// With leaf_max=4 and 8 same-key inserts {page=1..8, slot=0}, two splits:
+///   after 5th insert: leaf0=[{5,0},{4,0}]  leaf1=[{3,0},{2,0},{1,0}]
+///   after 7th insert: leaf1=[{7,0},{6,0}]  leaf2=[{3,0},{2,0},{1,0}]
+///   8th insert -> leaf2=[{8,0},{3,0},{2,0},{1,0}]
+/// Final: leaf0=[{5,0},{4,0}]  leaf1=[{7,0},{6,0}]  leaf2=[{8,0},{3,0},{2,0},{1,0}]
+/// find_leaf(key) -> leaf2 (rightmost).
+/// RIDs {4,0} and {5,0} sit on leaf0 (leftmost) - unreachable by right-only walk.
+///
+/// This test removes {4,0} (on the leftmost leaf) and asserts:
+///   - remove returns true  (found + deleted)
+///   - {4,0} is gone from a full scan
+///   - all 7 hardcoded surviving RIDs {1,2,3,5,6,7,8} are still present
+/// This test MUST fail against right-only-walk code and pass with the left-walk fix.
+TEST(BTreeRidRemove, RemoveFromLeftmostLeafInDuplicateRun) {
+    // leaf_max=4 so 8 same-key entries span exactly 3 leaves after two splits.
+    auto tree = make_test_index(/*leaf_max=*/4, /*internal_max=*/4, /*is_unique=*/false);
+
+    KeyType key = make_key(50);
+    // Insert pages 1..8 in order.  Due to lower_bound prepend semantics,
+    // {4,0} and {5,0} end up on leaf0 (leftmost) after two splits.
+    const uint32_t N = 8;
+    for (uint32_t i = 1; i <= N; ++i) {
+        ASSERT_TRUE(tree.insert(key, make_rid(i, 0)).has_value()) << "insert i=" << i;
+    }
+    ASSERT_EQ(tree.size(), static_cast<uint64_t>(N));
+
+    // {4,0} sits on leaf0 (the leftmost leaf).
+    // Right-only code returns false here; the left-walk fix must return true.
+    RID target = make_rid(4, 0);
+    auto rm = tree.remove(key, target);
+    ASSERT_TRUE(rm.has_value()) << rm.error().message;
+    EXPECT_TRUE(*rm) << "remove(key, {4,0}) must return true; entry is on the leftmost leaf";
+    EXPECT_EQ(tree.size(), static_cast<uint64_t>(N - 1));
+
+    // Full scan: collect all surviving entries.
+    auto scan_result = tree.range_scan(std::nullopt, std::nullopt);
+    ASSERT_TRUE(scan_result.has_value()) << scan_result.error().message;
+    auto entries = collect_scan(*scan_result);
+    ASSERT_TRUE(entries.has_value()) << entries.error().message;
+    ASSERT_EQ(entries->size(), static_cast<size_t>(N - 1));
+
+    // {4,0} must be absent.
+    for (auto& [k, r] : *entries) {
+        EXPECT_FALSE(r.page_id == 4u && r.slot_id == 0u)
+            << "Removed RID {4,0} must not appear in scan";
+    }
+
+    // Each of the 7 surviving RIDs must appear exactly once (hardcoded values).
+    const uint32_t survivors[] = {1u, 2u, 3u, 5u, 6u, 7u, 8u};
+    for (uint32_t p : survivors) {
+        int count = 0;
+        for (auto& [k, r] : *entries) {
+            if (r.page_id == p && r.slot_id == 0u) {
+                ++count;
+            }
+        }
+        EXPECT_EQ(count, 1) << "RID {" << p << ",0} must survive exactly once";
+    }
+}
+
 /// Unique-tree callers: key-only remove(key) still works correctly.
 /// This guards against accidentally breaking the existing unique-tree path.
 TEST(BTreeRidRemove, UniqueTreeKeyOnlyRemoveStillWorks) {
