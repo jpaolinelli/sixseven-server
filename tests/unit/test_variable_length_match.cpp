@@ -690,5 +690,155 @@ TEST(PathLengthSqlFunction, WrongArgCountFails) {
     EXPECT_FALSE(result.has_value());
 }
 
+// ============================================================================
+// GDB-827: BOTH/undirected direction correctness for fixed and variable-length
+// ============================================================================
+
+TEST_F(VarLenMatchTest, BothDirectionFixedHopReachesIncomingEdge) {
+    // Fixed single-hop BOTH across the whole graph should include neighbors via
+    // INCOMING edges. E.g. from node 3: outgoing->4, incoming<-2.
+    // Bug: before fix, BOTH was treated as OUT-only.
+    MatchConfig config;
+    config.nodes.push_back({"a", "persons"});
+    config.nodes.push_back({"b", "persons"});
+    MatchEdgeDef edge("r", "knows", TraverseDirection::BOTH, std::nullopt, std::nullopt);
+    config.edges.push_back(std::move(edge));
+
+    std::vector<OutputColumn> out_cols;
+    out_cols.push_back({"a", "id", TypeId::INT64, false, persons_id_});
+    out_cols.push_back({"b", "id", TypeId::INT64, false, persons_id_});
+    OutputSchema schema(std::move(out_cols));
+
+    auto results = run_vl_match(std::move(config), std::move(schema));
+
+    // Chain 1->2->3->4->5 with BOTH direction = 8 pairs.
+    ASSERT_EQ(results.size(), 8u);
+
+    bool found_charlie_bob = false;   // (3,2) via incoming edge 2->3
+    bool found_charlie_diana = false; // (3,4) via outgoing edge 3->4
+    for (const auto& t : results) {
+        ASSERT_GE(t.values.size(), 2u);
+        int64_t src = t.values[0].as_int64();
+        int64_t tgt = t.values[1].as_int64();
+        if (src == 3 && tgt == 2)
+            found_charlie_bob = true;
+        if (src == 3 && tgt == 4)
+            found_charlie_diana = true;
+    }
+    EXPECT_TRUE(found_charlie_bob)
+        << "BOTH fixed hop must reach node 2 from node 3 via incoming edge";
+    EXPECT_TRUE(found_charlie_diana)
+        << "BOTH fixed hop must reach node 4 from node 3 via outgoing edge";
+}
+
+TEST_F(VarLenMatchTest, BothDirectionVarLenReachesIncomingEdge) {
+    // Variable-length BOTH {1,2} from node 3 must reach:
+    //   depth 1: node 2 (incoming 2->3), node 4 (outgoing 3->4).
+    //   depth 2: node 1 (3<-2<-1), node 5 (3->4->5).
+    // Bug: BFS BOTH was OUT-only; Bob/Alice unreachable from Charlie.
+    MatchConfig config;
+    config.nodes.push_back({"a", "persons"});
+    config.nodes.push_back({"b", "persons"});
+    config.edges.push_back(MatchEdgeDef("r", "knows", TraverseDirection::BOTH, 1, 2));
+
+    std::vector<OutputColumn> out_cols;
+    out_cols.push_back({"a", "id", TypeId::INT64, false, persons_id_});
+    out_cols.push_back({"b", "id", TypeId::INT64, false, persons_id_});
+    OutputSchema schema(std::move(out_cols));
+
+    auto results = run_vl_match(std::move(config), std::move(schema));
+
+    std::unordered_set<int64_t> reachable_from_3;
+    for (const auto& t : results) {
+        ASSERT_GE(t.values.size(), 2u);
+        if (t.values[0].as_int64() == 3) {
+            reachable_from_3.insert(t.values[1].as_int64());
+        }
+    }
+
+    EXPECT_TRUE(reachable_from_3.count(2) > 0)
+        << "BOTH var-len must reach node 2 from node 3 (incoming edge at depth 1)";
+    EXPECT_TRUE(reachable_from_3.count(4) > 0)
+        << "BOTH var-len must reach node 4 from node 3 (outgoing edge at depth 1)";
+    EXPECT_TRUE(reachable_from_3.count(1) > 0)
+        << "BOTH var-len must reach node 1 from node 3 at depth 2";
+    EXPECT_TRUE(reachable_from_3.count(5) > 0)
+        << "BOTH var-len must reach node 5 from node 3 at depth 2";
+}
+
+TEST_F(VarLenMatchTest, BothDirectionVarLenTerminatesOnCycle) {
+    // BOTH {1,5} on a cyclic graph must terminate without infinite loop.
+    // Per-path visited set prevents revisiting nodes on the same path.
+    MatchConfig config;
+    config.nodes.push_back({"a", "persons"});
+    config.nodes.push_back({"b", "persons"});
+    config.edges.push_back(MatchEdgeDef("r", "cycle", TraverseDirection::BOTH, 1, 5));
+
+    std::vector<OutputColumn> out_cols;
+    out_cols.push_back({"a", "id", TypeId::INT64, false, persons_id_});
+    out_cols.push_back({"b", "id", TypeId::INT64, false, persons_id_});
+    OutputSchema schema(std::move(out_cols));
+
+    BoundStatement bound;
+    VariableLengthMatchOperator op(*graph_,
+                                   *catalog_,
+                                   *storage_,
+                                   default_database_id,
+                                   std::move(config),
+                                   std::move(schema),
+                                   nullptr,
+                                   bound,
+                                   100000);
+    auto open_result = op.open();
+    ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
+
+    size_t count = 0;
+    while (true) {
+        auto row = op.next();
+        ASSERT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value())
+            break;
+        ++count;
+        ASSERT_LT(count, 1000u) << "Too many results -- possible infinite expansion";
+    }
+    op.close();
+    EXPECT_GT(count, 0u);
+}
+
+TEST_F(VarLenMatchTest, BothDirectionFixedHopCorrectRowBindings) {
+    // Every emitted (src, tgt) pair must correspond to a real edge in some direction.
+    // Before the fix, incoming edges incorrectly emitted target_pk (== src itself)
+    // as the neighbor, producing wrong self-loop rows.
+    MatchConfig config;
+    config.nodes.push_back({"a", "persons"});
+    config.nodes.push_back({"b", "persons"});
+    MatchEdgeDef edge("r", "knows", TraverseDirection::BOTH, std::nullopt, std::nullopt);
+    config.edges.push_back(std::move(edge));
+
+    std::vector<OutputColumn> out_cols;
+    out_cols.push_back({"a", "id", TypeId::INT64, false, persons_id_});
+    out_cols.push_back({"b", "id", TypeId::INT64, false, persons_id_});
+    OutputSchema schema(std::move(out_cols));
+
+    auto results = run_vl_match(std::move(config), std::move(schema));
+
+    std::unordered_set<std::string> valid_pairs = {
+        "1->2", "2->1", "2->3", "3->2", "3->4", "4->3", "4->5", "5->4"};
+    std::unordered_set<std::string> found_pairs;
+
+    for (const auto& t : results) {
+        ASSERT_GE(t.values.size(), 2u);
+        int64_t src = t.values[0].as_int64();
+        int64_t tgt = t.values[1].as_int64();
+        EXPECT_NE(src, tgt) << "Self-loop row: src == tgt == " << src
+                            << " (wrong pk resolution for incoming edge)";
+        std::string pair = std::to_string(src) + "->" + std::to_string(tgt);
+        EXPECT_TRUE(valid_pairs.count(pair) > 0) << "Emitted invalid pair: " << pair;
+        found_pairs.insert(pair);
+    }
+    for (const auto& p : valid_pairs) {
+        EXPECT_TRUE(found_pairs.count(p) > 0) << "Missing expected pair: " << p;
+    }
+}
 } // namespace
 } // namespace sixseven
