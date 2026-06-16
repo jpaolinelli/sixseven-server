@@ -13,6 +13,8 @@
 #include <memory>
 #include <string>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -419,6 +421,8 @@ TEST(QA_GDB281_FitToStorage, UuidToUuidIdentity) {
 class QA_GDB281_E2E : public ::testing::Test {
 protected:
     void SetUp() override {
+        bootstrap_qa_catalog(catalog_);
+
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_qa_gdb281";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
@@ -694,20 +698,38 @@ TEST_F(QA_GDB281_E2E, StressInsertManyUuidStringLiterals) {
     }
 }
 
-// -- WHERE clause with UUID string comparison (if supported) --
+// -- WHERE clause with UUID string comparison --
+//
+// TAUTOLOGY GUARD: a regression that ignores the WHERE predicate (returns all
+// rows) will fail the row-count == 1 assertion and/or the zero-row assertion.
 
 TEST_F(QA_GDB281_E2E, SelectWhereUuidMatchesInserted) {
     exec_ok("CREATE TABLE t (id UUID, name TEXT)");
+    // Insert three rows with distinct, hardcoded UUIDs so the expected values
+    // in assertions below are fully deterministic.
     exec_ok("INSERT INTO t (id, name) VALUES "
             "('11111111-1111-1111-1111-111111111111', 'one')");
     exec_ok("INSERT INTO t (id, name) VALUES "
             "('22222222-2222-2222-2222-222222222222', 'two')");
+    exec_ok("INSERT INTO t (id, name) VALUES "
+            "('33333333-3333-3333-3333-333333333333', 'three')");
 
-    // Query all rows — the inserted UUIDs should be retrievable.
-    auto qr = exec_ok("SELECT id, name FROM t");
-    ASSERT_EQ(qr.rows.size(), 2u);
-    EXPECT_EQ(qr.rows[0][1].as_string(), "one");
-    EXPECT_EQ(qr.rows[1][1].as_string(), "two");
+    // AC1: WHERE uuid = <one specific UUID> returns EXACTLY that one row.
+    // Hardcoded expected: id = 22222222-..., name = 'two'.
+    auto qr_match = exec_ok("SELECT id, name FROM t "
+                            "WHERE id = '22222222-2222-2222-2222-222222222222'");
+    ASSERT_EQ(qr_match.rows.size(), 1u)
+        << "expected exactly 1 row; WHERE predicate may not be applied";
+    EXPECT_EQ(qr_match.rows[0][1].as_string(), "two")
+        << "returned row does not match the filtered UUID";
+
+    // AC2: WHERE uuid = <valid-but-not-inserted UUID> returns ZERO rows.
+    // 'ffffffff-...' was never inserted.
+    auto qr_miss = exec_ok("SELECT id, name FROM t "
+                           "WHERE id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'");
+    ASSERT_EQ(qr_miss.rows.size(), 0u)
+        << "expected 0 rows for an uninserted UUID; WHERE predicate may not be "
+           "applied";
 }
 
 // -- INSERT with wrong type for non-UUID columns still works --
