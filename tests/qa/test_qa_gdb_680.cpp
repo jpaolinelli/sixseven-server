@@ -448,7 +448,11 @@ TEST_F(QA_GDB680_Trace, HeterogeneousEnrichedTraceDistinctPks) {
 // edges) and reconstruct_path() used to loop forever, growing the steps
 // vector until OOM. GDB-694's depth-bounded reconstruction fixes this:
 // one row with a two-step path [1, 1].
-TEST_F(QA_GDB680_Trace, HeterogeneousEnrichedTraceSamePkHangs) {
+//
+// Anti-hang guard: the ASSERT on steps.size() == 2 is a deterministic bound.
+// If the infinite-loop regresses, reconstruct_path() will grow the steps
+// vector unboundedly until OOM/crash — the test aborts before hanging forever.
+TEST_F(QA_GDB680_Trace, HeterogeneousEnrichedTraceSamePkCompletesWithCorrectPath) {
     exec_ok("CREATE TABLE posts (id INT PRIMARY KEY, title VARCHAR)");
     exec_ok("INSERT INTO posts VALUES (1, 'Hello')");
     exec_ok("CREATE EDGE TYPE authored FROM users TO posts");
@@ -458,16 +462,29 @@ TEST_F(QA_GDB680_Trace, HeterogeneousEnrichedTraceSamePkHangs) {
                       "FROM TRAVERSE authored FROM users(1) DIRECTION OUT WITH TRACE");
 
     ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "Hello");
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 1); // __node == posts.id == 1
+    EXPECT_EQ(val_to_int64(qr.rows[0][2]), 1); // __depth == 1
     ASSERT_EQ(qr.rows[0][3].type_id(), TypeId::PATH);
     const Path& p = qr.rows[0][3].as_path();
-    EXPECT_EQ(p.steps.size(), 2u) << "path must be start -> target, not an infinite self-chain";
+    // Exactly two steps: start (users.id=1) -> target (posts.id=1).
+    // A regressed infinite-loop would grow steps unboundedly; the ASSERT
+    // terminates the test before OOM.
+    ASSERT_EQ(p.steps.size(), 2u) << "path must be start -> target, not an infinite self-chain";
+    EXPECT_EQ(p.steps[0].node_pk, 1) << "first step must be the start node (users.id=1)";
+    EXPECT_EQ(p.steps[1].node_pk, 1) << "second step must be the target node (posts.id=1)";
+    EXPECT_EQ(p.length(), 1);
 }
 
 // Regression for GDB-694: same root cause as above, MODE EDGES flavor —
 // collect_edges() calls reconstruct_path(edge.source_pk) and used to hang
 // when source PK == start PK has a self-referential parent_map entry.
 // Fixed in GDB-694: one edge row whose path is the trivial [1].
-TEST_F(QA_GDB680_Trace, HeterogeneousEdgeModeTraceSamePkHangs) {
+//
+// Anti-hang guard: the ASSERT on steps.size() == 1 is a deterministic bound.
+// If the infinite-loop regresses, reconstruct_path() will grow unboundedly;
+// the ASSERT terminates the test before OOM.
+TEST_F(QA_GDB680_Trace, HeterogeneousEdgeModeTraceSamePkCompletesWithTrivialPath) {
     exec_ok("CREATE TABLE posts (id INT PRIMARY KEY, title VARCHAR)");
     exec_ok("INSERT INTO posts VALUES (1, 'Hello')");
     exec_ok("CREATE EDGE TYPE authored FROM users TO posts");
@@ -477,9 +494,14 @@ TEST_F(QA_GDB680_Trace, HeterogeneousEdgeModeTraceSamePkHangs) {
                       "FROM TRAVERSE authored FROM users(1) DIRECTION OUT MODE EDGES WITH TRACE");
 
     ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(val_to_int64(qr.rows[0][0]), 1); // __from == users.id == 1
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 1); // __to == posts.id == 1
     ASSERT_EQ(qr.rows[0][2].type_id(), TypeId::PATH);
     const Path& p = qr.rows[0][2].as_path();
-    EXPECT_EQ(p.steps.size(), 1u) << "path to the start node must be the trivial single step";
+    // Exactly one step: the trivial path to the start/source node.
+    // A regressed infinite-loop would grow steps unboundedly; the ASSERT
+    // terminates the test before OOM.
+    ASSERT_EQ(p.steps.size(), 1u) << "path to the start node must be the trivial single step";
     EXPECT_EQ(p.steps[0].node_pk, 1);
 }
 
