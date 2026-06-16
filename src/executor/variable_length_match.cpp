@@ -439,14 +439,16 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                 }
 
                 // Use graph engine directly to access edge properties for filtering.
-                std::vector<EdgeRow> edge_rows;
+                // Each entry is (edge_row, nbr_is_source): true means neighbor = source_pk
+                // (incoming edge), false means neighbor = target_pk (outgoing edge).
+                std::vector<std::pair<EdgeRow, bool>> tagged_edge_rows;
                 if (edge_def.direction == TraverseDirection::OUT ||
                     edge_def.direction == TraverseDirection::BOTH) {
                     auto fwd =
                         graph_engine_.get_edges_from(database_id_, edge_def.edge_type, it->second);
                     if (fwd) {
                         for (auto& e : *fwd) {
-                            edge_rows.push_back(std::move(e));
+                            tagged_edge_rows.emplace_back(std::move(e), false);
                         }
                     }
                 }
@@ -456,16 +458,14 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                         graph_engine_.get_edges_to(database_id_, edge_def.edge_type, it->second);
                     if (rev) {
                         for (auto& e : *rev) {
-                            edge_rows.push_back(std::move(e));
+                            tagged_edge_rows.emplace_back(std::move(e), true);
                         }
                     }
                 }
 
-                for (auto& edge_row : edge_rows) {
-                    // Determine neighbor PK based on direction.
-                    Value& nbr_pk = (edge_def.direction == TraverseDirection::IN)
-                                        ? edge_row.source_pk
-                                        : edge_row.target_pk;
+                for (auto& [edge_row, nbr_is_source] : tagged_edge_rows) {
+                    // Determine neighbor PK: source_pk for incoming edges, target_pk for outgoing.
+                    Value& nbr_pk = nbr_is_source ? edge_row.source_pk : edge_row.target_pk;
 
                     // Apply edge inline predicate.
                     if (edge_def.filter_expr) {
@@ -489,8 +489,7 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                         if (hop_path.steps.empty()) {
                             hop_path.steps.push_back({*src_int, -1});
                         }
-                        hop_path.steps.back().edge_id =
-                            static_cast<int64_t>(edge_row.edge_row_id);
+                        hop_path.steps.back().edge_id = static_cast<int64_t>(edge_row.edge_row_id);
                     }
                     if (auto nbr_int = pk_to_int64(nbr_pk)) {
                         hop_path.steps.push_back({*nbr_int, -1});
@@ -561,14 +560,16 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                     // Expand if we haven't reached max depth.
                     if (entry.depth < max_hops) {
                         // Get full edge rows for edge predicate evaluation.
-                        std::vector<EdgeRow> edge_rows;
+                        // Tagged: true = incoming (neighbor = source_pk), false = outgoing
+                        // (neighbor = target_pk).
+                        std::vector<std::pair<EdgeRow, bool>> tagged_bfs_rows;
                         if (edge_def.direction == TraverseDirection::OUT ||
                             edge_def.direction == TraverseDirection::BOTH) {
                             auto fwd = graph_engine_.get_edges_from(
                                 database_id_, edge_def.edge_type, entry.current_pk);
                             if (fwd) {
                                 for (auto& e : *fwd) {
-                                    edge_rows.push_back(std::move(e));
+                                    tagged_bfs_rows.emplace_back(std::move(e), false);
                                 }
                             }
                         }
@@ -578,15 +579,14 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                                 database_id_, edge_def.edge_type, entry.current_pk);
                             if (rev) {
                                 for (auto& e : *rev) {
-                                    edge_rows.push_back(std::move(e));
+                                    tagged_bfs_rows.emplace_back(std::move(e), true);
                                 }
                             }
                         }
 
-                        for (auto& edge_row : edge_rows) {
-                            Value nbr_pk = (edge_def.direction == TraverseDirection::IN)
-                                               ? edge_row.source_pk
-                                               : edge_row.target_pk;
+                        for (auto& [edge_row, nbr_is_source] : tagged_bfs_rows) {
+                            // source_pk for incoming edges, target_pk for outgoing.
+                            Value nbr_pk = nbr_is_source ? edge_row.source_pk : edge_row.target_pk;
                             if (entry.visited.count(nbr_pk) > 0) {
                                 continue;
                             }
