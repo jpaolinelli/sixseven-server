@@ -679,6 +679,68 @@ TEST_F(QA_GDB264, WhereExprWithNonMetaColumnSucceeds) {
     EXPECT_EQ(bound.output_columns[0].column_name, "id");
 }
 
+// GDB-825 adversarial: the renamed test must be non-vacuous — a bind_error
+// on a WHERE non-meta column would trip it.  Confirm the output is exactly
+// the SELECT column list, not something that hides a silent failure.
+TEST_F(QA_GDB264, GDB825_WhereNonMetaColumnDoesNotPolluteSELECTOutput) {
+    // WHERE name = 'alice' should NOT add "name" to the SELECT output list.
+    // The SELECT only asks for id, so output_columns must have exactly 1 entry.
+    auto bound =
+        bind_ok("SELECT id FROM TRAVERSE follows FROM users(1) DIRECTION OUT WHERE name = 'alice'");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+    EXPECT_EQ(bound.output_columns[0].column_name, "id");
+    EXPECT_EQ(bound.output_columns[0].type_id, TypeId::INT32);
+}
+
+// GDB-825 adversarial: non-existent column in WHERE must still error.
+TEST_F(QA_GDB264, GDB825_WhereNonExistentColumnErrors) {
+    bind_error(
+        "SELECT id FROM TRAVERSE follows FROM users(1) DIRECTION OUT WHERE no_such_col = 42",
+        StatusCode::NOT_FOUND);
+}
+
+// GDB-825 adversarial: meta column still works in WHERE after the rename.
+TEST_F(QA_GDB264, GDB825_WhereMetaColumnStillBinds) {
+    auto bound =
+        bind_ok("SELECT id FROM TRAVERSE follows FROM users(1) DIRECTION OUT WHERE __depth < 3");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+}
+
+// GDB-825 adversarial: mixed meta + non-meta in WHERE must both resolve.
+TEST_F(QA_GDB264, GDB825_WhereMixedMetaAndNonMetaBinds) {
+    auto bound = bind_ok(
+        "SELECT id FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+        "WHERE __depth < 5 AND name = 'bob'");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+    EXPECT_EQ(bound.output_columns[0].column_name, "id");
+}
+
+// GDB-825 adversarial: a source-table column that does NOT appear in the
+// enriched scope (heterogeneous OUT: authored users→posts, so "email" is a
+// users column and must NOT bind in WHERE because the scope is posts).
+TEST_F(QA_GDB264, GDB825_WhereSourceColumnNotInScopeErrors) {
+    bind_error(
+        "SELECT title FROM TRAVERSE authored FROM users(1) DIRECTION OUT WHERE email = 'x'",
+        StatusCode::NOT_FOUND);
+}
+
+// GDB-825 adversarial: an edge property column should be accessible in WHERE.
+TEST_F(QA_GDB264, GDB825_WhereEdgePropertyBinds) {
+    auto bound = bind_ok(
+        "SELECT name FROM TRAVERSE follows FROM users(1) DIRECTION OUT "
+        "WHERE follows.weight > 0.5");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+}
+
+// GDB-825 adversarial: WHERE on a non-meta column in the heterogeneous target
+// scope (posts column) should succeed.
+TEST_F(QA_GDB264, GDB825_WhereTargetColumnHeterogeneousBinds) {
+    auto bound = bind_ok(
+        "SELECT title FROM TRAVERSE authored FROM users(1) DIRECTION OUT WHERE title = 'hello'");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+    EXPECT_EQ(bound.output_columns[0].column_name, "title");
+}
+
 TEST_F(QA_GDB264, WhereExprDepthComparisonBinds) {
     bind_ok("SELECT id FROM TRAVERSE follows FROM users(1) DIRECTION OUT WHERE __depth <= 5");
 }
