@@ -459,6 +459,144 @@ TEST(TupleSerializer, ComputeTupleSizeWithNulls) {
 
     size_t computed = TupleSerializer::compute_tuple_size(values, schema);
     EXPECT_EQ(computed, expected_size);
+
+    // Cross-check: serialize() must produce exactly expected_size bytes.
+    auto buf = TupleSerializer::serialize(values, schema);
+    ASSERT_TRUE(buf.has_value()) << buf.error().message;
+    EXPECT_EQ(buf->size(), expected_size);
+}
+
+// All fixed-width columns: no var table, no var data.
+// Schema: INT8(1) + INT16(2) + INT32(4) + INT64(8) + FLOAT32(4) + FLOAT64(8) + BOOL(1) = 28 bytes
+// fixed. 7 columns -> null bitmap = ceil(7/8) = 1 byte. Total = 1 + 28 + 0 + 0 = 29 bytes.
+TEST(TupleSerializer, ComputeTupleSizeAllFixedWidth) {
+    Schema schema({
+        {"a", TypeId::INT8},
+        {"b", TypeId::INT16},
+        {"c", TypeId::INT32},
+        {"d", TypeId::INT64},
+        {"e", TypeId::FLOAT32},
+        {"f", TypeId::FLOAT64},
+        {"g", TypeId::BOOL},
+    });
+
+    std::vector<Value> values = {
+        Value(int8_t{1}),
+        Value(int16_t{2}),
+        Value(int32_t{3}),
+        Value(int64_t{4}),
+        Value(1.0f),
+        Value(2.0),
+        Value(true),
+    };
+
+    // fixed region: 1+2+4+8+4+8+1 = 28 bytes
+    // null bitmap: ceil(7/8) = 1 byte
+    // var table: 0 bytes (no variable columns)
+    // var data: 0 bytes
+    constexpr size_t expected = 1u + 28u;
+    static_assert(expected == 29u, "expected size mismatch");
+
+    EXPECT_EQ(TupleSerializer::compute_tuple_size(values, schema), expected);
+
+    auto buf = TupleSerializer::serialize(values, schema);
+    ASSERT_TRUE(buf.has_value()) << buf.error().message;
+    EXPECT_EQ(buf->size(), expected);
+}
+
+// Empty tuple: zero columns -> null bitmap = 0 bytes, no fixed, no var.
+// Total = 0 bytes.
+TEST(TupleSerializer, ComputeTupleSizeEmptySchema) {
+    Schema schema(std::vector<ColumnDef>{});
+    std::vector<Value> values = {};
+
+    constexpr size_t expected = 0u;
+
+    EXPECT_EQ(TupleSerializer::compute_tuple_size(values, schema), expected);
+
+    auto buf = TupleSerializer::serialize(values, schema);
+    ASSERT_TRUE(buf.has_value()) << buf.error().message;
+    EXPECT_EQ(buf->size(), expected);
+}
+
+// BLOB column: var table entry (4 bytes) + blob payload.
+// Schema: INT32(4) + BLOB(var).
+// Blob = {0xDE, 0xAD, 0xBE, 0xEF} = 4 bytes.
+// null bitmap: ceil(2/8) = 1 byte.
+// fixed region: 4 bytes (INT32).
+// var table: 1 * 4 = 4 bytes.
+// var data: 4 bytes (blob payload).
+// Total = 1 + 4 + 4 + 4 = 13 bytes.
+TEST(TupleSerializer, ComputeTupleSizeBlobColumn) {
+    Schema schema({
+        {"id", TypeId::INT32},
+        {"data", TypeId::BLOB},
+    });
+
+    Blob blob = {0xDE, 0xAD, 0xBE, 0xEF};
+    std::vector<Value> values = {Value(int32_t{7}), Value(blob)};
+
+    constexpr size_t expected = 1u + 4u + 4u + 4u;
+    static_assert(expected == 13u, "expected size mismatch");
+
+    EXPECT_EQ(TupleSerializer::compute_tuple_size(values, schema), expected);
+
+    auto buf = TupleSerializer::serialize(values, schema);
+    ASSERT_TRUE(buf.has_value()) << buf.error().message;
+    EXPECT_EQ(buf->size(), expected);
+}
+
+// EMBEDDING column (3 floats = 12 bytes payload).
+// Schema: INT32(4) + EMBEDDING(var).
+// null bitmap: ceil(2/8) = 1 byte.
+// fixed region: 4 bytes.
+// var table: 1 * 4 = 4 bytes.
+// var data: 3 * sizeof(float) = 12 bytes.
+// Total = 1 + 4 + 4 + 12 = 21 bytes.
+TEST(TupleSerializer, ComputeTupleSizeEmbeddingColumn) {
+    Schema schema({
+        {"id", TypeId::INT32},
+        {"vec", TypeId::EMBEDDING},
+    });
+
+    Embedding emb = {1.0f, 2.0f, 3.0f};
+    std::vector<Value> values = {Value(int32_t{1}), Value(emb)};
+
+    constexpr size_t expected = 1u + 4u + 4u + 3u * sizeof(float);
+    static_assert(expected == 21u, "expected size mismatch");
+
+    EXPECT_EQ(TupleSerializer::compute_tuple_size(values, schema), expected);
+
+    auto buf = TupleSerializer::serialize(values, schema);
+    ASSERT_TRUE(buf.has_value()) << buf.error().message;
+    EXPECT_EQ(buf->size(), expected);
+}
+
+// Wide NULL bitmap: 9 columns -> bitmap = ceil(9/8) = 2 bytes.
+// All fixed INT32. Total = 2 + 9*4 + 0 + 0 = 38 bytes.
+TEST(TupleSerializer, ComputeTupleSizeWideNullBitmap) {
+    std::vector<ColumnDef> cols;
+    cols.reserve(9);
+    for (int i = 0; i < 9; ++i) {
+        cols.push_back({"c" + std::to_string(i), TypeId::INT32});
+    }
+    Schema schema(std::move(cols));
+
+    std::vector<Value> values;
+    values.reserve(9);
+    for (int i = 0; i < 9; ++i) {
+        values.emplace_back(int32_t{i});
+    }
+
+    // null bitmap: 2 bytes; fixed: 9*4=36; var: 0; var_data: 0
+    constexpr size_t expected = 2u + 36u;
+    static_assert(expected == 38u, "expected size mismatch");
+
+    EXPECT_EQ(TupleSerializer::compute_tuple_size(values, schema), expected);
+
+    auto buf = TupleSerializer::serialize(values, schema);
+    ASSERT_TRUE(buf.has_value()) << buf.error().message;
+    EXPECT_EQ(buf->size(), expected);
 }
 
 // -- NullBitmap more than 8 columns -------------------------------------------
