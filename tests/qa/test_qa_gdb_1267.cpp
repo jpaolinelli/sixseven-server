@@ -133,8 +133,7 @@ static void verify_insert_results(TableHeap& heap,
                                   const std::string& label) {
     ASSERT_EQ(errors, 0) << label << ": insert errors";
     ASSERT_EQ(static_cast<int>(all_rids.size()), expected_total)
-        << label << ": lost " << (expected_total - static_cast<int>(all_rids.size()))
-        << " inserts";
+        << label << ": lost " << (expected_total - static_cast<int>(all_rids.size())) << " inserts";
 
     // Unique RIDs — no two threads shared a slot.
     std::unordered_set<uint64_t> rid_set;
@@ -184,11 +183,11 @@ TEST_F(QA_GDB1267, NearPageSize_8Threads_40Rows_3Iters_GDB1267) {
     for (int iter = 0; iter < 3; ++iter) {
         std::vector<RID> all_rids;
         std::string first_err;
-        int errors = run_concurrent_inserts(heap, kThreads, kRows, kTupleSize, all_rids, &first_err);
+        int errors =
+            run_concurrent_inserts(heap, kThreads, kRows, kTupleSize, all_rids, &first_err);
         std::string label = "iter=" + std::to_string(iter);
 
-        ASSERT_EQ(errors, 0)
-            << label << ": near-page-size 8-thread insert failed: " << first_err;
+        ASSERT_EQ(errors, 0) << label << ": near-page-size 8-thread insert failed: " << first_err;
         ASSERT_EQ(static_cast<int>(all_rids.size()), kPerIter)
             << label << ": lost " << (kPerIter - static_cast<int>(all_rids.size())) << " rows";
 
@@ -241,8 +240,7 @@ TEST_F(QA_GDB1267, NearPageSize_16Threads_30Rows_GDB1267) {
     std::string first_err;
     int errors = run_concurrent_inserts(heap, kThreads, kRows, kTupleSize, all_rids, &first_err);
 
-    verify_insert_results(heap, all_rids, kTotal, errors,
-                          "NearPageSize_16Threads: " + first_err);
+    verify_insert_results(heap, all_rids, kTotal, errors, "NearPageSize_16Threads: " + first_err);
 }
 
 // ---------------------------------------------------------------------------
@@ -264,8 +262,7 @@ TEST_F(QA_GDB1267, NearPageSize_32Threads_20Rows_GDB1267) {
     std::string first_err;
     int errors = run_concurrent_inserts(heap, kThreads, kRows, kTupleSize, all_rids, &first_err);
 
-    verify_insert_results(heap, all_rids, kTotal, errors,
-                          "NearPageSize_32Threads: " + first_err);
+    verify_insert_results(heap, all_rids, kTotal, errors, "NearPageSize_32Threads: " + first_err);
 }
 
 // ---------------------------------------------------------------------------
@@ -288,8 +285,7 @@ TEST_F(QA_GDB1267, NearPageSize_64Threads_10Rows_GDB1267) {
     std::string first_err;
     int errors = run_concurrent_inserts(heap, kThreads, kRows, kTupleSize, all_rids, &first_err);
 
-    verify_insert_results(heap, all_rids, kTotal, errors,
-                          "NearPageSize_64Threads: " + first_err);
+    verify_insert_results(heap, all_rids, kTotal, errors, "NearPageSize_64Threads: " + first_err);
 }
 
 // ---------------------------------------------------------------------------
@@ -438,8 +434,7 @@ TEST_F(QA_GDB1267, AdjustRowCount_NeverUnderflows_ExactAfterMixed_GDB1267) {
 
     // Net delta is 0 → final count must still equal kBase.
     EXPECT_EQ(heap.row_count(), kBase)
-        << "adjust_row_count lost updates: final=" << heap.row_count()
-        << " expected=" << kBase;
+        << "adjust_row_count lost updates: final=" << heap.row_count() << " expected=" << kBase;
 }
 
 // ---------------------------------------------------------------------------
