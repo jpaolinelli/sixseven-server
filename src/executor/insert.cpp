@@ -111,6 +111,20 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
                 for (size_t i = 0; i < child_col_map_.size(); ++i) {
                     if (child_col_map_[i] < values.size()) {
                         reordered[i] = values[child_col_map_[i]];
+                    } else {
+                        // Column is unmapped (child_col_map_[i] == SIZE_MAX).
+                        // reordered[i] stays a default-constructed null Value.
+                        // Reject if the target column is NOT NULL (no default applied here).
+                        const bool is_nullable =
+                            (i < col_nullable_.size()) ? col_nullable_[i] : true;
+                        if (!is_nullable) {
+                            const std::string col_name = (i < col_names_for_null_check_.size())
+                                                             ? col_names_for_null_check_[i]
+                                                             : std::to_string(i);
+                            return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                                              "NOT NULL constraint violated: column '" + col_name +
+                                                  "' cannot be NULL");
+                        }
                     }
                 }
                 values = std::move(reordered);

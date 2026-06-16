@@ -1045,3 +1045,40 @@ TEST_F(GDB845Test, GDB845_KnownGap_UpdateLeavesIndexStale) {
     EXPECT_TRUE(r1->has_value())
         << "key=1 (INSERT-maintained) must remain in index after UPDATE of another row";
 }
+
+// GDB-1269: INSERT...SELECT with explicit column list must reject rows where
+// an unmapped column is NOT NULL (no default).  Silently storing NULL was a
+// constraint-violation bypass.
+TEST_F(GDB845Test, GDB1268_LowGap_UnmappedNonNullableColumnRejectsOrErrors) {
+    bootstrap();
+    build_index_manager();
+
+    // dst has two columns: a nullable, b NOT NULL.
+    exec_ok("CREATE TABLE dst_notnull (a INT, b INT NOT NULL)");
+    exec_ok("CREATE TABLE src_notnull (x INT)");
+    exec_ok("INSERT INTO src_notnull VALUES (42)");
+
+    // INSERT INTO dst_notnull(a) SELECT x FROM src_notnull
+    // maps x -> a but leaves b (NOT NULL) unmapped.
+    // Must fail with CONSTRAINT_VIOLATION, not silently store NULL in b.
+    auto result = engine_->execute("INSERT INTO dst_notnull(a) SELECT x FROM src_notnull");
+
+    ASSERT_FALSE(result.has_value())
+        << "INSERT...SELECT that leaves a NOT NULL column unmapped must be rejected";
+    EXPECT_EQ(result.error().code, StatusCode::CONSTRAINT_VIOLATION)
+        << "Expected CONSTRAINT_VIOLATION for NOT NULL violation, got: " << result.error().message;
+
+    // Positive control: dst2 has b as nullable — unmapped b should succeed and store NULL.
+    exec_ok("CREATE TABLE dst_nullable (a INT, b INT)");
+    auto ok_result = engine_->execute("INSERT INTO dst_nullable(a) SELECT x FROM src_notnull");
+    ASSERT_TRUE(ok_result.has_value())
+        << "INSERT...SELECT with unmapped nullable column must succeed, got: "
+        << (ok_result ? "ok" : ok_result.error().message);
+
+    auto sel = engine_->execute("SELECT a, b FROM dst_nullable");
+    ASSERT_TRUE(sel.has_value());
+    ASSERT_EQ(sel->rows.size(), 1u);
+    EXPECT_EQ(sel->rows[0][0].as_int32(), 42);
+    EXPECT_TRUE(sel->rows[0][1].is_null())
+        << "Unmapped nullable column must be NULL after INSERT...SELECT";
+}

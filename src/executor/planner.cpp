@@ -2550,7 +2550,19 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
         // Transfer ownership of planner-created expressions into the operator.
         iter->owned_default_exprs_ = std::move(select_owned_exprs);
         if (!col_map.empty()) {
+            // Also populate nullability metadata so InsertOperator can reject
+            // unmapped NOT NULL columns (GDB-1269).
+            std::vector<bool> col_nullable;
+            std::vector<std::string> col_names;
+            col_nullable.reserve(table_schema->columns.size());
+            col_names.reserve(table_schema->columns.size());
+            for (const auto& col : table_schema->columns) {
+                col_nullable.push_back(col.nullable);
+                col_names.push_back(col.name);
+            }
             iter->child_col_map_ = std::move(col_map);
+            iter->col_nullable_ = std::move(col_nullable);
+            iter->col_names_for_null_check_ = std::move(col_names);
         }
         if (!ai_cols.empty()) {
             iter->autoincrement_cols_ = std::move(ai_cols);
@@ -2667,10 +2679,9 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
                     if (default_ptrs[j] != nullptr) {
                         reordered[j] = default_ptrs[j];
                     } else {
-                        return make_error(
-                            StatusCode::INVALID_ARGUMENT,
-                            "missing value for non-nullable column without default: " +
-                                table_schema->columns[j].name);
+                        return make_error(StatusCode::CONSTRAINT_VIOLATION,
+                                          "NOT NULL constraint violated: column '" +
+                                              table_schema->columns[j].name + "' cannot be NULL");
                     }
                 }
             }

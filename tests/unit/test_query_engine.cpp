@@ -1510,3 +1510,39 @@ TEST_F(QueryEngineTest, InsertSelectCorrectRowCount) {
     EXPECT_EQ(ins.affected_rows, int64_t(7))
         << "INSERT...SELECT returned count must equal exactly 7 (one per source row)";
 }
+
+// GDB-1269: INSERT...SELECT with explicit column list must reject NOT NULL violations.
+TEST_F(QueryEngineTest, InsertSelectUnmappedNotNullColumnRejectsWithConstraintViolation) {
+    // b is NOT NULL — leaving it unmapped must fail with CONSTRAINT_VIOLATION.
+    exec_ok("CREATE TABLE src_nn_unit (x INT)");
+    exec_ok("INSERT INTO src_nn_unit VALUES (10)");
+    exec_ok("CREATE TABLE dst_nn_unit (a INT, b INT NOT NULL)");
+
+    auto result = engine_->execute("INSERT INTO dst_nn_unit(a) SELECT x FROM src_nn_unit");
+
+    ASSERT_FALSE(result.has_value())
+        << "Unmapped NOT NULL column must cause an error, not silent null insert";
+    EXPECT_EQ(result.error().code, StatusCode::CONSTRAINT_VIOLATION)
+        << "Wrong error code; expected CONSTRAINT_VIOLATION, got: " << result.error().message;
+    // Verify the error message names the column.
+    EXPECT_NE(result.error().message.find('b'), std::string::npos)
+        << "Error message should name the offending column 'b': " << result.error().message;
+}
+
+TEST_F(QueryEngineTest, InsertSelectUnmappedNullableColumnSucceedsWithNull) {
+    // b is nullable — leaving it unmapped must succeed and store NULL.
+    exec_ok("CREATE TABLE src_null_unit (x INT)");
+    exec_ok("INSERT INTO src_null_unit VALUES (55)");
+    exec_ok("CREATE TABLE dst_null_unit (a INT, b INT)");
+
+    auto ins = engine_->execute("INSERT INTO dst_null_unit(a) SELECT x FROM src_null_unit");
+    ASSERT_TRUE(ins.has_value()) << "Unmapped nullable column must not error: "
+                                 << (ins ? "ok" : ins.error().message);
+    EXPECT_EQ(ins->affected_rows, int64_t(1));
+
+    auto sel = exec_ok("SELECT a, b FROM dst_null_unit");
+    ASSERT_EQ(sel.rows.size(), 1u);
+    EXPECT_EQ(sel.rows[0][0].as_int32(), 55);
+    EXPECT_TRUE(sel.rows[0][1].is_null())
+        << "Unmapped nullable column must be NULL after INSERT...SELECT";
+}

@@ -97,6 +97,16 @@ public:
     /// Set by the planner after construction.
     std::vector<size_t> child_col_map_;
 
+    /// Nullability of each storage column, parallel to child_col_map_.
+    /// True means the column accepts NULL; false means NOT NULL.
+    /// Used to reject unmapped columns that are NOT NULL (no default).
+    /// Set by the planner alongside child_col_map_.
+    std::vector<bool> col_nullable_;
+
+    /// Names of storage columns, parallel to child_col_map_, for error messages.
+    /// Set by the planner alongside child_col_map_.
+    std::vector<std::string> col_names_for_null_check_;
+
     /// Set the transaction id stamped as xmin on inserted versions (GDB-747).
     /// Defaults to frozen_txn_id (always-committed) when no transaction
     /// context is provided.
