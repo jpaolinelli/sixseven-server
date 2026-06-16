@@ -89,6 +89,162 @@ deserialize_key(const uint8_t*& p, const uint8_t* end, const std::vector<TypeId>
     return ok(std::move(key));
 }
 
+// ---------------------------------------------------------------------------
+// Per-node overflow helpers
+// ---------------------------------------------------------------------------
+
+// Sentinel written as the first u32 of a node page tuple to signal that the
+// actual node data spans multiple overflow pages.  The value 0xFFFFFFFF is
+// collision-free as a real node page_id: that page number would require
+// ~32 TB of 8 KB pages — well beyond any practical database size.
+constexpr uint32_t NODE_OVERFLOW_SENTINEL = 0xFFFFFFFFu;
+
+// Maximum bytes of node payload that fit in one page tuple.
+// 8192-byte page, 24-byte page header, 4-byte slot entry → ~8164 bytes usable.
+constexpr size_t NODE_MAX_INLINE_SIZE = 8100;
+
+/// Write node data to the buffer pool, chunking across overflow pages when
+/// the serialised size exceeds NODE_MAX_INLINE_SIZE.
+///
+/// Primary page layout:
+///   Inline path  (size <= NODE_MAX_INLINE_SIZE):
+///     [ node data bytes … ]
+///   Overflow path (size > NODE_MAX_INLINE_SIZE):
+///     u32  NODE_OVERFLOW_SENTINEL  (0xFFFFFFFF)
+///     u16  overflow_page_count
+///     u32  overflow_page_id[0 … count-1]
+///     (actual node data is stored split across the overflow pages)
+///
+[[nodiscard]] Result<PageId> write_node_page(BufferPoolManager& bpm,
+                                             PageType page_type,
+                                             const std::vector<uint8_t>& data,
+                                             const std::string& ctx) {
+    auto page_r = bpm.new_page();
+    if (!page_r) {
+        return make_error(page_r.error().code,
+                          ctx + ": failed to allocate node page: " + page_r.error().message);
+    }
+    auto* page = *page_r;
+    const PageId primary_id = page->page_id();
+    page->reset(primary_id, page_type);
+
+    if (data.size() <= NODE_MAX_INLINE_SIZE) {
+        // Inline path — fits in a single tuple.
+        auto slot = page->insert_tuple(std::span<const uint8_t>(data));
+        if (!slot) {
+            (void)bpm.unpin_page(primary_id, false);
+            return make_error(slot.error().code,
+                              ctx + ": node data too large for page: " + slot.error().message);
+        }
+        (void)bpm.unpin_page(primary_id, true);
+        return ok(primary_id);
+    }
+
+    // Overflow path: write data chunks to overflow pages first, then write
+    // the overflow descriptor on the (already-allocated) primary page.
+    std::vector<PageId> overflow_ids;
+    size_t offset = 0;
+    while (offset < data.size()) {
+        size_t chunk = std::min(NODE_MAX_INLINE_SIZE, data.size() - offset);
+        auto ovf_r = bpm.new_page();
+        if (!ovf_r) {
+            (void)bpm.unpin_page(primary_id, false);
+            return make_error(
+                ovf_r.error().code,
+                ctx + ": failed to allocate node overflow page: " + ovf_r.error().message);
+        }
+        auto* ovf_page = *ovf_r;
+        ovf_page->reset(ovf_page->page_id(), page_type);
+        auto ovf_slot =
+            ovf_page->insert_tuple(std::span<const uint8_t>(data.data() + offset, chunk));
+        if (!ovf_slot) {
+            (void)bpm.unpin_page(ovf_page->page_id(), false);
+            (void)bpm.unpin_page(primary_id, false);
+            return make_error(ovf_slot.error().code,
+                              ctx + ": node overflow chunk too large: " + ovf_slot.error().message);
+        }
+        overflow_ids.push_back(ovf_page->page_id());
+        (void)bpm.unpin_page(ovf_page->page_id(), true);
+        offset += chunk;
+    }
+
+    // Build overflow descriptor and write to primary page.
+    std::vector<uint8_t> desc;
+    desc.reserve(4 + 2 + overflow_ids.size() * 4);
+    write_u32(desc, NODE_OVERFLOW_SENTINEL);
+    write_u16(desc, static_cast<uint16_t>(overflow_ids.size()));
+    for (auto oid : overflow_ids) {
+        write_u32(desc, oid);
+    }
+
+    auto slot = page->insert_tuple(std::span<const uint8_t>(desc));
+    if (!slot) {
+        (void)bpm.unpin_page(primary_id, false);
+        return make_error(slot.error().code,
+                          ctx + ": node overflow descriptor too large: " + slot.error().message);
+    }
+    (void)bpm.unpin_page(primary_id, true);
+    return ok(primary_id);
+}
+
+/// Read node data from a primary page, reassembling overflow pages if needed.
+[[nodiscard]] Result<std::vector<uint8_t>>
+read_node_page(BufferPoolManager& bpm, PageId primary_id, const std::string& ctx) {
+    auto page_r = bpm.fetch_page(primary_id);
+    if (!page_r) {
+        return make_error(page_r.error().code,
+                          ctx + ": failed to fetch node page: " + page_r.error().message);
+    }
+    auto tuple = (*page_r)->get_tuple(0);
+    (void)bpm.unpin_page(primary_id, false);
+    if (!tuple) {
+        return make_error(tuple.error().code,
+                          ctx + ": failed to read node tuple: " + tuple.error().message);
+    }
+
+    // Detect overflow: first 4 bytes == NODE_OVERFLOW_SENTINEL (0xFFFFFFFF).
+    // A real inline node begins with page_id (u32); page 0xFFFFFFFF would
+    // require ~32 TB of pages and is not a valid node page_id in practice.
+    const bool is_overflow = (tuple->size() >= 6 && (*tuple)[0] == 0xFF && (*tuple)[1] == 0xFF &&
+                              (*tuple)[2] == 0xFF && (*tuple)[3] == 0xFF);
+
+    if (!is_overflow) {
+        return ok(std::vector<uint8_t>(tuple->begin(), tuple->end()));
+    }
+
+    // Overflow: parse descriptor.
+    const uint8_t* dp = tuple->data() + 4; // skip sentinel
+    uint16_t ovf_count = 0;
+    std::memcpy(&ovf_count, dp, 2);
+    dp += 2;
+
+    std::vector<PageId> overflow_ids(ovf_count);
+    for (uint16_t i = 0; i < ovf_count; ++i) {
+        std::memcpy(&overflow_ids[i], dp, 4);
+        dp += 4;
+    }
+
+    // Reassemble from overflow pages.
+    std::vector<uint8_t> data;
+    for (auto oid : overflow_ids) {
+        auto ovf_r = bpm.fetch_page(oid);
+        if (!ovf_r) {
+            return make_error(ovf_r.error().code,
+                              ctx +
+                                  ": failed to fetch node overflow page: " + ovf_r.error().message);
+        }
+        auto ovf_tuple = (*ovf_r)->get_tuple(0);
+        (void)bpm.unpin_page(oid, false);
+        if (!ovf_tuple) {
+            return make_error(
+                ovf_tuple.error().code,
+                ctx + ": failed to read node overflow tuple: " + ovf_tuple.error().message);
+        }
+        data.insert(data.end(), ovf_tuple->begin(), ovf_tuple->end());
+    }
+    return ok(std::move(data));
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -160,48 +316,27 @@ Result<PageId> BTreePersistence::persist(BufferPoolManager& bpm, const BTreeInde
         internal_records.push_back({pid, std::move(buf)});
     }
 
-    // Write leaf node pages.
+    // Write leaf node pages (with overflow support for large-key nodes).
     std::vector<PageId> leaf_disk_pages;
     leaf_disk_pages.reserve(leaf_records.size());
     for (auto& rec : leaf_records) {
-        auto page_r = bpm.new_page();
-        if (!page_r) {
-            return make_error(page_r.error().code,
-                              "btree persist: failed to allocate leaf page: " +
-                                  page_r.error().message);
+        auto pid_r = write_node_page(bpm, PageType::BTREE_LEAF, rec.data, "btree persist leaf");
+        if (!pid_r) {
+            return make_error(pid_r.error().code, pid_r.error().message);
         }
-        auto* page = *page_r;
-        page->reset(page->page_id(), PageType::BTREE_LEAF);
-        auto slot = page->insert_tuple(std::span<const uint8_t>(rec.data));
-        if (!slot) {
-            return make_error(slot.error().code,
-                              "btree persist: leaf data too large for page: " +
-                                  slot.error().message);
-        }
-        leaf_disk_pages.push_back(page->page_id());
-        (void)bpm.unpin_page(page->page_id(), /*is_dirty=*/true);
+        leaf_disk_pages.push_back(*pid_r);
     }
 
-    // Write internal node pages.
+    // Write internal node pages (with overflow support for large-key nodes).
     std::vector<PageId> internal_disk_pages;
     internal_disk_pages.reserve(internal_records.size());
     for (auto& rec : internal_records) {
-        auto page_r = bpm.new_page();
-        if (!page_r) {
-            return make_error(page_r.error().code,
-                              "btree persist: failed to allocate internal page: " +
-                                  page_r.error().message);
+        auto pid_r =
+            write_node_page(bpm, PageType::BTREE_INTERNAL, rec.data, "btree persist internal");
+        if (!pid_r) {
+            return make_error(pid_r.error().code, pid_r.error().message);
         }
-        auto* page = *page_r;
-        page->reset(page->page_id(), PageType::BTREE_INTERNAL);
-        auto slot = page->insert_tuple(std::span<const uint8_t>(rec.data));
-        if (!slot) {
-            return make_error(slot.error().code,
-                              "btree persist: internal data too large for page: " +
-                                  slot.error().message);
-        }
-        internal_disk_pages.push_back(page->page_id());
-        (void)bpm.unpin_page(page->page_id(), /*is_dirty=*/true);
+        internal_disk_pages.push_back(*pid_r);
     }
 
     // Build the page directory bytes: leaf mappings followed by internal mappings.
@@ -473,24 +608,15 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
     uint16_t eff_leaf_max = index->effective_leaf_max_keys();
     uint16_t eff_internal_max = index->effective_internal_max_keys();
 
-    // Load leaf nodes.
+    // Load leaf nodes (with overflow reassembly for large-key nodes).
     for (const auto& mapping : leaf_mappings) {
-        auto page_r = bpm.fetch_page(mapping.disk_page_id);
-        if (!page_r) {
-            return make_error(page_r.error().code,
-                              "btree load: failed to fetch leaf page: " + page_r.error().message);
+        auto data_r = read_node_page(bpm, mapping.disk_page_id, "btree load leaf");
+        if (!data_r) {
+            return make_error(data_r.error().code, data_r.error().message);
         }
-        auto* page = *page_r;
-        auto tuple_data = page->get_tuple(0);
-        if (!tuple_data) {
-            (void)bpm.unpin_page(mapping.disk_page_id, false);
-            return make_error(tuple_data.error().code,
-                              "btree load: failed to read leaf tuple: " +
-                                  tuple_data.error().message);
-        }
-
-        const uint8_t* lp = tuple_data->data();
-        const uint8_t* lend = lp + tuple_data->size();
+        const std::vector<uint8_t>& node_data = *data_r;
+        const uint8_t* lp = node_data.data();
+        const uint8_t* lend = lp + node_data.size();
 
         PageId page_id = read_u32(lp);
         PageId parent = read_u32(lp);
@@ -506,7 +632,6 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
         for (uint16_t i = 0; i < key_count; ++i) {
             auto key = deserialize_key(lp, lend, index->config_.key_types);
             if (!key) {
-                (void)bpm.unpin_page(mapping.disk_page_id, false);
                 return make_error(key.error().code,
                                   "btree load: failed to deserialize leaf key: " +
                                       key.error().message);
@@ -518,28 +643,17 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
         }
 
         index->leaf_nodes_[page_id] = std::move(leaf);
-        (void)bpm.unpin_page(mapping.disk_page_id, false);
     }
 
-    // Load internal nodes.
+    // Load internal nodes (with overflow reassembly for large-key nodes).
     for (const auto& mapping : internal_mappings) {
-        auto page_r = bpm.fetch_page(mapping.disk_page_id);
-        if (!page_r) {
-            return make_error(page_r.error().code,
-                              "btree load: failed to fetch internal page: " +
-                                  page_r.error().message);
+        auto data_r = read_node_page(bpm, mapping.disk_page_id, "btree load internal");
+        if (!data_r) {
+            return make_error(data_r.error().code, data_r.error().message);
         }
-        auto* page = *page_r;
-        auto tuple_data = page->get_tuple(0);
-        if (!tuple_data) {
-            (void)bpm.unpin_page(mapping.disk_page_id, false);
-            return make_error(tuple_data.error().code,
-                              "btree load: failed to read internal tuple: " +
-                                  tuple_data.error().message);
-        }
-
-        const uint8_t* ip = tuple_data->data();
-        const uint8_t* iend = ip + tuple_data->size();
+        const std::vector<uint8_t>& node_data = *data_r;
+        const uint8_t* ip = node_data.data();
+        const uint8_t* iend = ip + node_data.size();
 
         PageId page_id = read_u32(ip);
         PageId parent = read_u32(ip);
@@ -551,7 +665,6 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
         for (uint16_t i = 0; i < key_count; ++i) {
             auto key = deserialize_key(ip, iend, index->config_.key_types);
             if (!key) {
-                (void)bpm.unpin_page(mapping.disk_page_id, false);
                 return make_error(key.error().code,
                                   "btree load: failed to deserialize internal key: " +
                                       key.error().message);
@@ -565,7 +678,6 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
         }
 
         index->internal_nodes_[page_id] = std::move(node);
-        (void)bpm.unpin_page(mapping.disk_page_id, false);
     }
 
     SIXSEVEN_LOG_DEBUG("btree load: restored {} leaf + {} internal nodes, size {}",
