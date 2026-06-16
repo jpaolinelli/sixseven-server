@@ -524,6 +524,15 @@ Result<std::unique_ptr<Bm25Index>> Bm25Index::load(BufferPoolManager& bpm, PageI
         index->doc_terms_[pp.rid].push_back(pp.term);
     }
 
+    // Ensure every document that was persisted has a doc_terms_ entry, even if
+    // it contributed zero terms (e.g. empty/all-stopword text).  Without this,
+    // remove_document() would find no doc_terms_ entry for a term-less doc and
+    // return early as a no-op, leaving doc_lengths_ / total_doc_len_ stale and
+    // inflating N (the corpus document count) permanently after a reload.
+    for (const auto& [doc_rid, unused_dl] : index->doc_lengths_) {
+        index->doc_terms_.try_emplace(doc_rid); // inserts empty vector if absent
+    }
+
     (void)total_doc_len; // recomputed from DOC records for robustness.
     return ok(std::move(index));
 }
