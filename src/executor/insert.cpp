@@ -104,6 +104,17 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
             }
 
             auto values = row->value().values;
+            // If a column map was set (INSERT...SELECT with explicit column list),
+            // reorder child values to storage schema order.
+            if (!child_col_map_.empty()) {
+                std::vector<Value> reordered(child_col_map_.size());
+                for (size_t i = 0; i < child_col_map_.size(); ++i) {
+                    if (child_col_map_[i] < values.size()) {
+                        reordered[i] = values[child_col_map_[i]];
+                    }
+                }
+                values = std::move(reordered);
+            }
             // Coerce to storage types when needed.
             for (size_t i = 0; i < values.size() && i < storage_schema_.column_count(); ++i) {
                 auto target = storage_schema_.column(i).type;

@@ -91,6 +91,12 @@ public:
     /// Hash indexes on this table to maintain on insert. Set by the planner.
     std::vector<HashMaintenanceTarget> hash_targets_;
 
+    /// Optional column mapping for INSERT...SELECT with explicit column list.
+    /// Maps storage column index -> child tuple value index.
+    /// When empty, child columns are consumed in position order (1-to-1).
+    /// Set by the planner after construction.
+    std::vector<size_t> child_col_map_;
+
     /// Set the transaction id stamped as xmin on inserted versions (GDB-747).
     /// Defaults to frozen_txn_id (always-committed) when no transaction
     /// context is provided.

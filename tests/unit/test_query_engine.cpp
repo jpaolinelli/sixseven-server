@@ -1443,3 +1443,70 @@ TEST_F(QueryEngineTest, SelectMixedNegativeAndPositiveLiterals) {
     EXPECT_EQ(qr.rows[0][1].as_int32(), 2);
     EXPECT_DOUBLE_EQ(qr.rows[0][2].as_float64(), -3.5);
 }
+
+// =============================================================================
+// INSERT ... SELECT tests (GDB-1268 fix)
+// =============================================================================
+
+TEST_F(QueryEngineTest, InsertSelectBasicAllRows) {
+    // INSERT...SELECT copies all rows from source to target.
+    exec_ok("CREATE TABLE src_is (id INT, name VARCHAR)");
+    exec_ok("INSERT INTO src_is VALUES (1, 'alice')");
+    exec_ok("INSERT INTO src_is VALUES (2, 'bob')");
+    exec_ok("INSERT INTO src_is VALUES (3, 'charlie')");
+
+    exec_ok("CREATE TABLE dst_is (id INT, name VARCHAR)");
+    auto ins = exec_ok("INSERT INTO dst_is SELECT id, name FROM src_is");
+    EXPECT_EQ(ins.affected_rows, int64_t(3)) << "INSERT...SELECT must insert all 3 rows";
+
+    auto sel = exec_ok("SELECT id, name FROM dst_is ORDER BY id");
+    ASSERT_EQ(sel.rows.size(), 3u);
+    EXPECT_EQ(sel.rows[0][0].as_int32(), 1);
+    EXPECT_EQ(sel.rows[0][1].as_string(), "alice");
+    EXPECT_EQ(sel.rows[1][0].as_int32(), 2);
+    EXPECT_EQ(sel.rows[2][0].as_int32(), 3);
+    EXPECT_EQ(sel.rows[2][1].as_string(), "charlie");
+}
+
+TEST_F(QueryEngineTest, InsertSelectWithWhereFilter) {
+    // INSERT...SELECT with WHERE must only insert matching rows.
+    exec_ok("CREATE TABLE src_where (id INT, val INT)");
+    exec_ok("INSERT INTO src_where VALUES (1, 10)");
+    exec_ok("INSERT INTO src_where VALUES (2, 20)");
+    exec_ok("INSERT INTO src_where VALUES (3, 30)");
+
+    exec_ok("CREATE TABLE dst_where (id INT, val INT)");
+    auto ins = exec_ok("INSERT INTO dst_where SELECT id, val FROM src_where WHERE val > 15");
+    EXPECT_EQ(ins.affected_rows, int64_t(2))
+        << "INSERT...SELECT WHERE must insert only 2 rows (val > 15)";
+
+    auto sel = exec_ok("SELECT id FROM dst_where ORDER BY id");
+    ASSERT_EQ(sel.rows.size(), 2u);
+    EXPECT_EQ(sel.rows[0][0].as_int32(), 2);
+    EXPECT_EQ(sel.rows[1][0].as_int32(), 3);
+}
+
+TEST_F(QueryEngineTest, InsertSelectEmptySourceInsertsZero) {
+    // INSERT...SELECT from empty table must insert 0 rows — not error.
+    exec_ok("CREATE TABLE src_empty (id INT, name VARCHAR)");
+    exec_ok("CREATE TABLE dst_empty (id INT, name VARCHAR)");
+    auto ins = exec_ok("INSERT INTO dst_empty SELECT id, name FROM src_empty");
+    EXPECT_EQ(ins.affected_rows, int64_t(0))
+        << "INSERT...SELECT from empty source must correctly insert 0 rows";
+
+    auto sel = exec_ok("SELECT COUNT(*) FROM dst_empty");
+    ASSERT_EQ(sel.rows.size(), 1u);
+    EXPECT_EQ(sel.rows[0][0].as_int64(), int64_t(0));
+}
+
+TEST_F(QueryEngineTest, InsertSelectCorrectRowCount) {
+    // Returned count must match the number of rows actually inserted.
+    exec_ok("CREATE TABLE src_cnt (x INT)");
+    for (int i = 1; i <= 7; ++i) {
+        exec_ok("INSERT INTO src_cnt VALUES (" + std::to_string(i) + ")");
+    }
+    exec_ok("CREATE TABLE dst_cnt (x INT)");
+    auto ins = exec_ok("INSERT INTO dst_cnt SELECT x FROM src_cnt");
+    EXPECT_EQ(ins.affected_rows, int64_t(7))
+        << "INSERT...SELECT returned count must equal exactly 7 (one per source row)";
+}

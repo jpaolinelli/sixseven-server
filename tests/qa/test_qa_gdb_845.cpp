@@ -304,15 +304,13 @@ TEST_F(GDB845Test, GDB845_Adv_InsertSelectInsertsRows) {
     // never plans stmt.select.  The ASSERT_EQ below documents the failure.
     auto ins = engine_->execute("INSERT INTO dst_adv SELECT id, label FROM src_adv");
     ASSERT_TRUE(ins.has_value()) << ins.error().message;
-    ASSERT_EQ(ins->rows.size(), 1u);
-    int64_t inserted_count = ins->rows[0][0].as_int64();
-    // This assertion documents the bug: inserted_count must be 5, not 0.
-    ASSERT_EQ(inserted_count, int64_t(5))
-        << "INSERT...SELECT must insert all 5 selected rows into dst_adv. "
-           "Count="
-        << inserted_count
-        << " indicates the SELECT sub-plan is not "
-           "being executed (plan_insert() never handles stmt.select — dead code path).";
+    // DML results: QueryEngine clears rows and sets affected_rows for INSERT/UPDATE/DELETE.
+    ASSERT_EQ(ins->affected_rows, int64_t(5))
+        << "INSERT...SELECT must insert all 5 selected rows into dst_adv (GDB-845). "
+           "affected_rows="
+        << ins->affected_rows
+        << " indicates the SELECT sub-plan was "
+           "not executed (plan_insert() never handled stmt.select).";
 
     // If rows were inserted, the index must also be maintained.
     auto idx = catalog_->get_index("idx_dst_adv");
