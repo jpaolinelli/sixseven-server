@@ -1318,6 +1318,12 @@ Result<ExprType> Binder::bind_in(const InExpr& expr, Scope& scope, BoundStatemen
             if (!sub) {
                 return tl::unexpected(sub.error());
             }
+            // SQL requires exactly one column from an IN subquery.
+            if (sub->output_columns.size() != 1) {
+                return make_error(StatusCode::INVALID_ARGUMENT,
+                                  "IN subquery must return exactly one column, got " +
+                                      std::to_string(sub->output_columns.size()));
+            }
         } else {
             // TRAVERSE / NEAREST / MATCH — bind with the parent scope so a
             // correlated start key / target vector can resolve outer columns.
