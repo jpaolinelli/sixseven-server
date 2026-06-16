@@ -4,10 +4,39 @@
 #include "sixseven/common/value_hash.h"
 
 #include <deque>
+#include <functional>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace sixseven {
+
+namespace {
+
+/// A table-aware node identity: (table_id, pk).
+///
+/// Used as the map/set key in the bidirectional BFS when the edge is
+/// heterogeneous — i.e. source and target nodes live in different tables.
+/// Without the table discriminant, two nodes from different tables with the
+/// same PK value would collide in the visited/parent maps, either fabricating
+/// a meeting point or silently dropping valid nodes (GDB-842).
+struct NodeId {
+    table_id_t table_id = 0;
+    Value pk;
+
+    bool operator==(const NodeId& other) const {
+        return table_id == other.table_id && ValueEqual{}(pk, other.pk);
+    }
+};
+
+struct NodeIdHash {
+    size_t operator()(const NodeId& n) const {
+        size_t h = std::hash<table_id_t>{}(n.table_id);
+        h ^= ValueHash{}(n.pk) + 0x9e3779b9U + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+
+} // namespace
 
 ShortestPathOperator::ShortestPathOperator(GraphEngine& graph_engine,
                                            ShortestPathConfig config,
@@ -44,11 +73,37 @@ const OutputSchema& ShortestPathOperator::output_schema() const {
 }
 
 Result<void> ShortestPathOperator::run_bidirectional_bfs() {
-    using ParentMap = std::unordered_map<Value, Value, ValueHash, ValueEqual>;
-    using VisitedSet = std::unordered_set<Value, ValueHash, ValueEqual>;
+    // For heterogeneous edges (different source/target tables) we key the
+    // visited/parent maps by (table_id, pk) to avoid conflating nodes from
+    // different tables that share a PK value (GDB-842).  For homogeneous edges
+    // the table_id is the same on both sides and the distinction is
+    // irrelevant — bare-pk keying would be equivalent — so we unify on the
+    // table-aware key in all cases.  The only observable difference vs. the
+    // old code is the trivial-case check and the seeding below.
 
-    // Check trivial case: source == target.
-    if (ValueEqual{}(config_.from_key, config_.to_key)) {
+    using ParentMap = std::unordered_map<NodeId, NodeId, NodeIdHash>; // node -> its parent NodeId
+    using VisitedSet = std::unordered_set<NodeId, NodeIdHash>;
+
+    // For homogeneous edges source_table_id == target_table_id == the single
+    // shared table.  For heterogeneous edges the table of from_key / to_key
+    // depends on the query direction:
+    //   OUT:  from_key lives in source_table, to_key lives in target_table.
+    //   IN:   from_key lives in target_table, to_key lives in source_table.
+    // BOTH on heterogeneous edges is rejected by the planner (GDB-842), so
+    // we only need to handle OUT and IN here.
+    const bool is_in = config_.direction == TraverseDirection::IN;
+    const table_id_t fwd_table = is_in ? config_.target_table_id : config_.source_table_id;
+    const table_id_t bwd_table = is_in ? config_.source_table_id : config_.target_table_id;
+
+    NodeId from_node{fwd_table, config_.from_key};
+    NodeId to_node{bwd_table, config_.to_key};
+
+    // Trivial case: source == target.
+    // For heterogeneous edges this is ONLY a zero-hop path when both the table
+    // AND the pk match (GDB-842 defect 1).  For homogeneous edges
+    // source_table_id == target_table_id so the table check is satisfied
+    // automatically — the behaviour is unchanged.
+    if (from_node == to_node) {
         Tuple t;
         t.values = {config_.from_key, Value(static_cast<int64_t>(0))};
         results_.push_back(std::move(t));
@@ -56,22 +111,22 @@ Result<void> ShortestPathOperator::run_bidirectional_bfs() {
     }
 
     // Forward BFS from source.
-    std::deque<Value> fwd_queue;
+    std::deque<NodeId> fwd_queue;
     ParentMap fwd_parent;
     VisitedSet fwd_visited;
 
-    fwd_queue.push_back(config_.from_key);
-    fwd_visited.insert(config_.from_key);
-    fwd_parent[config_.from_key] = Value(); // Sentinel: null parent.
+    fwd_queue.push_back(from_node);
+    fwd_visited.insert(from_node);
+    fwd_parent[from_node] = NodeId{0, Value()}; // Sentinel: null parent.
 
     // Backward BFS from target.
-    std::deque<Value> bwd_queue;
+    std::deque<NodeId> bwd_queue;
     ParentMap bwd_parent;
     VisitedSet bwd_visited;
 
-    bwd_queue.push_back(config_.to_key);
-    bwd_visited.insert(config_.to_key);
-    bwd_parent[config_.to_key] = Value(); // Sentinel.
+    bwd_queue.push_back(to_node);
+    bwd_visited.insert(to_node);
+    bwd_parent[to_node] = NodeId{0, Value()}; // Sentinel.
 
     // Determine directions for forward and backward BFS.
     // Forward BFS follows the configured direction.
@@ -84,7 +139,7 @@ Result<void> ShortestPathOperator::run_bidirectional_bfs() {
         bwd_dir = TraverseDirection::BOTH;
     }
 
-    Value meeting_node;
+    NodeId meeting_node;
     bool found = false;
     int32_t depth = 0;
 
@@ -100,17 +155,27 @@ Result<void> ShortestPathOperator::run_bidirectional_bfs() {
         auto& other_visited = expand_forward ? bwd_visited : fwd_visited;
         TraverseDirection dir = expand_forward ? fwd_dir : bwd_dir;
 
+        // For heterogeneous edges the "other side" table is the opposite
+        // table; for homogeneous it's the same table throughout.
+        const table_id_t nbr_table = expand_forward ? bwd_table : fwd_table;
+
         size_t level_size = queue.size();
         for (size_t i = 0; i < level_size && !found; ++i) {
             auto current = std::move(queue.front());
             queue.pop_front();
 
-            auto neighbors = get_neighbors(current, dir);
+            auto neighbors = get_neighbors(current.pk, dir);
             if (!neighbors) {
                 return tl::unexpected(neighbors.error());
             }
 
-            for (auto& nbr : *neighbors) {
+            for (auto& nbr_pk : *neighbors) {
+                // Neighbors discovered from the forward frontier live in
+                // bwd_table (target table), and vice-versa, for heterogeneous
+                // edges.  For homogeneous edges both sides share the same
+                // table so nbr_table == current.table_id throughout.
+                NodeId nbr{nbr_table, nbr_pk};
+
                 if (visited.count(nbr) > 0) {
                     continue;
                 }
@@ -119,6 +184,10 @@ Result<void> ShortestPathOperator::run_bidirectional_bfs() {
                 parent[nbr] = current;
 
                 // Check if this node was visited by the other BFS.
+                // GDB-842 defect 2: with bare-pk keying a node from one table
+                // could falsely match a node from the other table with the
+                // same pk.  The NodeId comparison includes table_id so this
+                // is now safe.
                 if (other_visited.count(nbr) > 0) {
                     meeting_node = nbr;
                     found = true;
@@ -138,9 +207,9 @@ Result<void> ShortestPathOperator::run_bidirectional_bfs() {
     // Reconstruct path: forward half (source → meeting).
     std::vector<Value> fwd_path;
     {
-        Value node = meeting_node;
-        while (!node.is_null()) {
-            fwd_path.push_back(node);
+        NodeId node = meeting_node;
+        while (!node.pk.is_null()) {
+            fwd_path.push_back(node.pk);
             auto it = fwd_parent.find(node);
             if (it == fwd_parent.end()) {
                 break;
@@ -155,9 +224,9 @@ Result<void> ShortestPathOperator::run_bidirectional_bfs() {
     {
         auto it = bwd_parent.find(meeting_node);
         if (it != bwd_parent.end()) {
-            Value node = it->second;
-            while (!node.is_null()) {
-                bwd_path.push_back(node);
+            NodeId node = it->second;
+            while (!node.pk.is_null()) {
+                bwd_path.push_back(node.pk);
                 auto pit = bwd_parent.find(node);
                 if (pit == bwd_parent.end()) {
                     break;
