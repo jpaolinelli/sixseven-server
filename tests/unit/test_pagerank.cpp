@@ -246,25 +246,87 @@ TEST_F(PageRankTest, ResultsOrderedByNodeId) {
 }
 
 TEST_F(PageRankTest, CustomDamping) {
-    // 1 -> 2 -> 3 -> 1
-    build_graph("knows", {{1, 2}, {2, 3}, {3, 1}});
+    // Linear chain 1 -> 2 -> 3 (node 3 is a dangling node).
+    // With damping=0.5 the steady-state scores differ substantially from the
+    // default damping=0.85 scores.  We assert against hardcoded expected values
+    // (computed analytically) so the test FAILS if the damping parameter is
+    // silently ignored.
+    //
+    // Hardcoded expected (d=0.5, iters=20, converged to steady-state):
+    //   node 1 ≈ 0.23529412   node 2 ≈ 0.35294118   node 3 ≈ 0.41176471
+    // Hardcoded expected (d=0.85, iters=20, converged to steady-state):
+    //   node 1 ≈ 0.18441688   node 2 ≈ 0.34117101   node 3 ≈ 0.47441212
+    build_graph("knows", {{1, 2}, {2, 3}});
 
-    auto result = run_pagerank("knows", 0.5, 20);
-    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto result_custom = run_pagerank("knows", 0.5, 20);
+    ASSERT_TRUE(result_custom.has_value()) << result_custom.error().message;
+    auto scores_custom = to_score_map(*result_custom);
 
-    auto scores = to_score_map(*result);
-    verify_scores_sum_to_one(scores);
+    auto result_default = run_pagerank("knows");
+    ASSERT_TRUE(result_default.has_value()) << result_default.error().message;
+    auto scores_default = to_score_map(*result_default);
+
+    ASSERT_EQ(scores_custom.size(), 3u);
+    verify_scores_sum_to_one(scores_custom);
+
+    // Assert hardcoded expected values for damping=0.5.
+    // These will NOT match the damping=0.85 run, so if the engine silently
+    // ignores the damping parameter this test fails.
+    EXPECT_NEAR(scores_custom[1], 0.23529412, 1e-5)
+        << "node 1 score with damping=0.5 should be ~0.2353";
+    EXPECT_NEAR(scores_custom[2], 0.35294118, 1e-5)
+        << "node 2 score with damping=0.5 should be ~0.3529";
+    EXPECT_NEAR(scores_custom[3], 0.41176471, 1e-5)
+        << "node 3 score with damping=0.5 should be ~0.4118";
+
+    // Explicitly confirm that the custom-damping run differs from the
+    // default-damping run by a meaningful amount.
+    EXPECT_GT(std::abs(scores_custom[1] - scores_default[1]), 0.04)
+        << "node 1 score must differ between damping=0.5 and damping=0.85 by >0.04";
+    EXPECT_GT(std::abs(scores_custom[3] - scores_default[3]), 0.05)
+        << "node 3 score must differ between damping=0.5 and damping=0.85 by >0.05";
 }
 
 TEST_F(PageRankTest, CustomIterations) {
+    // Linear chain 1 -> 2 -> 3 (node 3 is a dangling node).
+    // With iterations=1 the scores have not yet converged and differ
+    // substantially from the fully-converged default (iterations=20) run.
+    // We assert against hardcoded expected values so the test FAILS if the
+    // iterations parameter is silently ignored.
+    //
+    // Hardcoded expected (d=0.85, iters=1):
+    //   node 1 ≈ 0.14444444   node 2 ≈ 0.42777778   node 3 ≈ 0.42777778
+    // Hardcoded expected (d=0.85, iters=20, converged):
+    //   node 1 ≈ 0.18441688   node 2 ≈ 0.34117101   node 3 ≈ 0.47441212
     build_graph("knows", {{1, 2}, {2, 3}});
 
-    auto result = run_pagerank("knows", 0.85, 5);
-    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto result_1iter = run_pagerank("knows", 0.85, 1);
+    ASSERT_TRUE(result_1iter.has_value()) << result_1iter.error().message;
+    auto scores_1iter = to_score_map(*result_1iter);
 
-    auto scores = to_score_map(*result);
-    EXPECT_EQ(scores.size(), 3u);
-    verify_scores_sum_to_one(scores);
+    auto result_default = run_pagerank("knows");
+    ASSERT_TRUE(result_default.has_value()) << result_default.error().message;
+    auto scores_default = to_score_map(*result_default);
+
+    ASSERT_EQ(scores_1iter.size(), 3u);
+    verify_scores_sum_to_one(scores_1iter);
+
+    // Assert hardcoded expected values for iterations=1.
+    // These will NOT match the iterations=20 run, so if the engine silently
+    // ignores the iterations parameter this test fails.
+    EXPECT_NEAR(scores_1iter[1], 0.14444444, 1e-5)
+        << "node 1 score after 1 iteration should be ~0.1444";
+    EXPECT_NEAR(scores_1iter[2], 0.42777778, 1e-5)
+        << "node 2 score after 1 iteration should be ~0.4278";
+    EXPECT_NEAR(scores_1iter[3], 0.42777778, 1e-5)
+        << "node 3 score after 1 iteration should be ~0.4278";
+
+    // Explicitly confirm that the 1-iteration run differs from the
+    // fully-converged run by a meaningful amount.
+    EXPECT_GT(std::abs(scores_1iter[2] - scores_default[2]), 0.08)
+        << "node 2 score must differ between 1 and 20 iterations by >0.08";
+    EXPECT_GT(std::abs(scores_1iter[3] - scores_default[3]), 0.04)
+        << "node 3 score must differ between 1 and 20 iterations by >0.04";
 }
 
 TEST_F(PageRankTest, DanglingNodes) {
