@@ -1,9 +1,11 @@
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/result.h"
 #include "sixseven/common/value.h"
+#include "sixseven/executor/expr_evaluator.h"
 #include "sixseven/executor/match_shortest_path.h"
 #include "sixseven/executor/shortest_path.h"
 #include "sixseven/executor/storage_manager.h"
+#include "sixseven/executor/tuple.h"
 #include "sixseven/graph/graph_engine.h"
 #include "sixseven/parser/ast.h"
 #include "sixseven/parser/lexer.h"
@@ -15,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -366,35 +369,100 @@ TEST(PathFunctions, PathLengthSingleNode) {
     EXPECT_EQ(p.length(), 0);
 }
 
-TEST(PathFunctions, NodesReturnsCorrectNodeList) {
-    Path p;
-    p.steps.push_back({1, 100});
-    p.steps.push_back({2, 101});
-    p.steps.push_back({3, -1});
-
-    // Verify node PKs.
-    ASSERT_EQ(p.steps.size(), 3u);
-    EXPECT_EQ(p.steps[0].node_pk, 1);
-    EXPECT_EQ(p.steps[1].node_pk, 2);
-    EXPECT_EQ(p.steps[2].node_pk, 3);
+// Helper: build a FunctionCallExpr(name, col_ref("p")) for evaluating
+// SQL builtin functions that take a PATH column argument.
+namespace {
+ExprPtr make_path_func(const std::string& func_name) {
+    auto col = std::make_unique<ColumnRefExpr>();
+    col->column = "p";
+    auto call = std::make_unique<FunctionCallExpr>();
+    call->name = func_name;
+    call->args.push_back(std::move(col));
+    return call;
 }
 
-TEST(PathFunctions, EdgesReturnsCorrectEdgeList) {
+// Build a one-column OutputSchema for a PATH column named "p".
+OutputSchema make_path_schema() {
+    OutputColumn col;
+    col.name = "p";
+    col.type_id = TypeId::PATH;
+    return OutputSchema({col});
+}
+
+// Build a tuple carrying the given Path as a single PATH-typed value.
+Tuple make_path_tuple(Path path) {
+    return Tuple{{Value(std::move(path))}, std::nullopt};
+}
+} // namespace
+
+// nodes(path) must call the production expr_evaluator handler and return a
+// JSON array of every node PK in path order (including the terminal node).
+TEST(PathFunctions, NodesReturnsCorrectNodeList) {
+    // 3-node, 2-hop path: 1 --100--> 2 --101--> 3
     Path p;
     p.steps.push_back({1, 100});
     p.steps.push_back({2, 101});
     p.steps.push_back({3, -1});
 
-    // Verify edge IDs: edges are in steps with edge_id >= 0.
-    std::vector<int64_t> edge_ids;
-    for (const auto& step : p.steps) {
-        if (step.edge_id >= 0) {
-            edge_ids.push_back(step.edge_id);
-        }
-    }
-    ASSERT_EQ(edge_ids.size(), 2u);
-    EXPECT_EQ(edge_ids[0], 100);
-    EXPECT_EQ(edge_ids[1], 101);
+    auto schema = make_path_schema();
+    auto tuple = make_path_tuple(std::move(p));
+    BoundStatement bound{};
+
+    auto expr = make_path_func("NODES");
+    auto result = evaluate_expr(*expr, tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    // Production nodes() returns a JSON array of all node PKs (including terminal).
+    EXPECT_EQ(result->as_json().data, "[1,2,3]");
+}
+
+// nodes() on a single-node path (no edges) must return a one-element array.
+TEST(PathFunctions, NodesReturnsSingleNodePath) {
+    Path p;
+    p.steps.push_back({42, -1});
+
+    auto schema = make_path_schema();
+    auto tuple = make_path_tuple(std::move(p));
+    BoundStatement bound{};
+
+    auto expr = make_path_func("NODES");
+    auto result = evaluate_expr(*expr, tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->as_json().data, "[42]");
+}
+
+// edges(path) must call the production expr_evaluator handler and return a
+// JSON array of only the edge IDs (steps where edge_id >= 0), in order.
+TEST(PathFunctions, EdgesReturnsCorrectEdgeList) {
+    // 3-node, 2-hop path: 1 --100--> 2 --101--> 3
+    Path p;
+    p.steps.push_back({1, 100});
+    p.steps.push_back({2, 101});
+    p.steps.push_back({3, -1});
+
+    auto schema = make_path_schema();
+    auto tuple = make_path_tuple(std::move(p));
+    BoundStatement bound{};
+
+    auto expr = make_path_func("EDGES");
+    auto result = evaluate_expr(*expr, tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    // Production edges() returns only steps with edge_id >= 0.
+    EXPECT_EQ(result->as_json().data, "[100,101]");
+}
+
+// edges() on a single-node path must return an empty JSON array (no edges).
+TEST(PathFunctions, EdgesEmptyForSingleNodePath) {
+    Path p;
+    p.steps.push_back({42, -1});
+
+    auto schema = make_path_schema();
+    auto tuple = make_path_tuple(std::move(p));
+    BoundStatement bound{};
+
+    auto expr = make_path_func("EDGES");
+    auto result = evaluate_expr(*expr, tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->as_json().data, "[]");
 }
 
 TEST(PathFunctions, PathValueInVariant) {
