@@ -13,6 +13,17 @@ Result<void> AlgorithmRegistry::register_algorithm(AlgorithmDef def,
                                                    AlgorithmExecuteFn execute_fn) {
     std::lock_guard lock(mu_);
 
+    // Enforce the output schema convention: every algorithm must expose node_id
+    // (INT64, non-nullable) as its first output column.  Algorithms that violate
+    // this cannot be correctly consumed by NearestScanOperator or the graph
+    // result-projection code, which assumes column 0 is always the node identity.
+    if (def.output_columns.empty() || def.output_columns[0].name != "node_id" ||
+        def.output_columns[0].type_id != TypeId::INT64) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "algorithm '" + def.name +
+                              "': output schema must have node_id INT64 as the first column");
+    }
+
     auto key = to_upper(def.name);
     if (algorithms_.count(key)) {
         return make_error(StatusCode::ALREADY_EXISTS,
