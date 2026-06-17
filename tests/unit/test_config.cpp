@@ -276,3 +276,156 @@ TEST(Config, ValidateSettingStringKeySucceeds) {
     // String keys accept any value — no parse check.
     ASSERT_TRUE(r.has_value());
 }
+
+// ---------------------------------------------------------------------------
+// GDB-853: Five previously-ignored Config fields are now wired in load_from_file,
+// and wrong-typed known keys now return INVALID_ARGUMENT instead of silently
+// defaulting.
+// ---------------------------------------------------------------------------
+
+TEST_F(ConfigFileTest, GDB853_ArchiveEnabledLoaded) {
+    write_file(R"({"archive_enabled": true})");
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_TRUE(result->archive_enabled);
+}
+
+TEST_F(ConfigFileTest, GDB853_ArchiveEnabledFalseLoaded) {
+    write_file(R"({"archive_enabled": false})");
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_FALSE(result->archive_enabled);
+}
+
+TEST_F(ConfigFileTest, GDB853_ArchiveCleanupPolicyLoaded) {
+    write_file(R"({"archive_cleanup_policy": "delete_old"})");
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->archive_cleanup_policy, "delete_old");
+}
+
+TEST_F(ConfigFileTest, GDB853_MaxWalSendersLoaded) {
+    write_file(R"({"replication": {"max_wal_senders": 20}})");
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->replication_max_wal_senders, 20);
+}
+
+TEST_F(ConfigFileTest, GDB853_KeepaliveIntervalMsLoaded) {
+    write_file(R"({"replication": {"keepalive_interval_ms": 5000}})");
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->replication_keepalive_interval_ms, 5000);
+}
+
+TEST_F(ConfigFileTest, GDB853_SenderTimeoutMsLoaded) {
+    write_file(R"({"replication": {"sender_timeout_ms": 30000}})");
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->replication_sender_timeout_ms, 30000);
+}
+
+TEST_F(ConfigFileTest, GDB853_AllFiveMissingFieldsLoadedTogether) {
+    write_file(R"({
+        "archive_enabled": true,
+        "archive_cleanup_policy": "delete_old",
+        "replication": {
+            "max_wal_senders": 20,
+            "keepalive_interval_ms": 5000,
+            "sender_timeout_ms": 30000
+        }
+    })");
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_TRUE(result->archive_enabled);
+    EXPECT_EQ(result->archive_cleanup_policy, "delete_old");
+    EXPECT_EQ(result->replication_max_wal_senders, 20);
+    EXPECT_EQ(result->replication_keepalive_interval_ms, 5000);
+    EXPECT_EQ(result->replication_sender_timeout_ms, 30000);
+}
+
+TEST_F(ConfigFileTest, GDB853_WrongTypedPortReturnsError) {
+    // "port" as a string should now be an error, not a silent default.
+    write_file(R"({"port": "6767"})");
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST_F(ConfigFileTest, GDB853_WrongTypedMaxWalSendersReturnsError) {
+    // max_wal_senders as a string should error.
+    write_file(R"({"replication": {"max_wal_senders": "x"}})");
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST_F(ConfigFileTest, GDB853_WrongTypedArchiveEnabledReturnsError) {
+    // archive_enabled as an integer should error (must be boolean).
+    write_file(R"({"archive_enabled": 123})");
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST_F(ConfigFileTest, GDB853_ReplicationPrimaryPortOutOfRangeReturnsError) {
+    // primary_port > 65535 used to be silently dropped; now it must error.
+    write_file(R"({"replication": {"primary_port": 70000}})");
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST_F(ConfigFileTest, GDB853_FullValidConfigLoadsAllFields) {
+    // Regression: a complete valid config must still load without error.
+    write_file(R"({
+        "data_dir": "/var/sixseven",
+        "port": 5432,
+        "log_level": "warn",
+        "buffer_pool_size_mb": 512,
+        "wal_segment_size_mb": 32,
+        "max_connections": 50,
+        "shutdown_timeout_s": 60,
+        "auth_method": "trust",
+        "archive_enabled": true,
+        "archive_cleanup_policy": "delete_old",
+        "server": {"mode": "primary"},
+        "replication": {
+            "primary_host": "db-primary",
+            "primary_port": 5432,
+            "max_wal_senders": 20,
+            "keepalive_interval_ms": 5000,
+            "sender_timeout_ms": 30000,
+            "retry_interval_ms": 3000,
+            "max_retry_interval_ms": 30000,
+            "promote_max_lag_bytes": 1048576,
+            "synchronous_mode": "remote_write",
+            "synchronous_standby_names": "standby1",
+            "synchronous_commit_count": 2,
+            "synchronous_timeout_ms": 10000,
+            "synchronous_fallback": "warn",
+            "lag_warning_threshold_ms": 5000,
+            "disconnect_warning_threshold_ms": 30000
+        }
+    })");
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->data_dir, "/var/sixseven");
+    EXPECT_EQ(result->port, 5432);
+    EXPECT_TRUE(result->archive_enabled);
+    EXPECT_EQ(result->archive_cleanup_policy, "delete_old");
+    EXPECT_EQ(result->replication_max_wal_senders, 20);
+    EXPECT_EQ(result->replication_keepalive_interval_ms, 5000);
+    EXPECT_EQ(result->replication_sender_timeout_ms, 30000);
+    EXPECT_EQ(result->replication_primary_host, "db-primary");
+    EXPECT_EQ(result->replication_primary_port, 5432);
+    EXPECT_FALSE(result->standby_mode);
+}
+
+TEST_F(ConfigFileTest, GDB853_UnknownExtraKeysAreIgnored) {
+    // Extra unknown keys must NOT cause an error (forward-compatibility).
+    write_file(R"({"port": 8080, "future_feature_x": "anything", "replication": {"new_key": 42}})");
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->port, 8080);
+}
