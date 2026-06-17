@@ -214,13 +214,21 @@ Result<std::vector<AlgorithmRow>> closeness_centrality_execute(const AlgorithmCo
         }
 
         if (variant == "wasserman_faust") {
-            // C_WF(v) = [(n_c - 1)/(N - 1)] * [(n_c - 1)/sum_farness]
+            // C_WF(v) = [r/(N-1)] * [r/sum_farness]
+            // where r = number of OTHER nodes reachable from v following directed edges
+            // (i.e. reachable_count - 1, excluding v itself).
+            // Both factors use the same directed-reachable count r — NOT the
+            // weak-component size nc — so that the product is always in [0, 1].
+            // Using nc here instead of r causes scores > 1.0 when directed reachability
+            // is narrower than the weak component (bug GDB-862).
             double wf_closeness = 0.0;
             double wf_normalized = 0.0;
 
-            if (nc > 1 && sum_dist > 0) {
-                wf_normalized = static_cast<double>(nc - 1) / static_cast<double>(sum_dist);
-                double scaling = static_cast<double>(nc - 1) / static_cast<double>(total_nodes - 1);
+            // r = directed-reachable nodes excluding source itself
+            int64_t r = reachable_count - 1;
+            if (r > 0 && sum_dist > 0) {
+                wf_normalized = static_cast<double>(r) / static_cast<double>(sum_dist);
+                double scaling = static_cast<double>(r) / static_cast<double>(total_nodes - 1);
                 wf_closeness = scaling * wf_normalized;
             }
 
