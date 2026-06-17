@@ -1,6 +1,7 @@
 #include "sixseven/index/btree_persistence.h"
 
 #include "sixseven/common/logging.h"
+#include "sixseven/index/index_encoding.h"
 #include "sixseven/storage/serialization.h"
 
 #include <cstring>
@@ -8,60 +9,9 @@
 
 namespace sixseven {
 
-// ---------------------------------------------------------------------------
-// Binary encoding helpers (little-endian)
-// ---------------------------------------------------------------------------
+using namespace index_encoding;
 
 namespace {
-
-void write_u8(std::vector<uint8_t>& buf, uint8_t v) {
-    buf.push_back(v);
-}
-
-void write_u16(std::vector<uint8_t>& buf, uint16_t v) {
-    buf.push_back(static_cast<uint8_t>(v));
-    buf.push_back(static_cast<uint8_t>(v >> 8));
-}
-
-void write_u32(std::vector<uint8_t>& buf, uint32_t v) {
-    buf.push_back(static_cast<uint8_t>(v));
-    buf.push_back(static_cast<uint8_t>(v >> 8));
-    buf.push_back(static_cast<uint8_t>(v >> 16));
-    buf.push_back(static_cast<uint8_t>(v >> 24));
-}
-
-void write_u64(std::vector<uint8_t>& buf, uint64_t v) {
-    for (int i = 0; i < 8; ++i) {
-        buf.push_back(static_cast<uint8_t>(v >> (i * 8)));
-    }
-}
-
-uint8_t read_u8(const uint8_t*& p) {
-    uint8_t v = *p;
-    ++p;
-    return v;
-}
-
-uint16_t read_u16(const uint8_t*& p) {
-    uint16_t v = 0;
-    std::memcpy(&v, p, 2);
-    p += 2;
-    return v;
-}
-
-uint32_t read_u32(const uint8_t*& p) {
-    uint32_t v = 0;
-    std::memcpy(&v, p, 4);
-    p += 4;
-    return v;
-}
-
-uint64_t read_u64(const uint8_t*& p) {
-    uint64_t v = 0;
-    std::memcpy(&v, p, 8);
-    p += 8;
-    return v;
-}
 
 /// Serialize a composite key (vector<Value>) to bytes.
 void serialize_key(std::vector<uint8_t>& buf, const KeyType& key) {
@@ -212,16 +162,26 @@ read_node_page(BufferPoolManager& bpm, PageId primary_id, const std::string& ctx
         return ok(std::vector<uint8_t>(tuple->begin(), tuple->end()));
     }
 
-    // Overflow: parse descriptor.
-    const uint8_t* dp = tuple->data() + 4; // skip sentinel
-    uint16_t ovf_count = 0;
-    std::memcpy(&ovf_count, dp, 2);
-    dp += 2;
+    // Overflow: parse descriptor using a Reader.
+    index_encoding::Reader desc_r(std::span<const uint8_t>(tuple->data(), tuple->size()));
+    // Skip the 4-byte sentinel already confirmed above.
+    auto skip_r = desc_r.skip(4);
+    if (!skip_r) {
+        return make_error(skip_r.error().code, ctx + ": truncated overflow descriptor sentinel");
+    }
+    auto ovf_count_r = desc_r.read_u16();
+    if (!ovf_count_r) {
+        return make_error(ovf_count_r.error().code, ctx + ": truncated overflow descriptor count");
+    }
+    uint16_t ovf_count = *ovf_count_r;
 
     std::vector<PageId> overflow_ids(ovf_count);
     for (uint16_t i = 0; i < ovf_count; ++i) {
-        std::memcpy(&overflow_ids[i], dp, 4);
-        dp += 4;
+        auto oid_r = desc_r.read_u32();
+        if (!oid_r) {
+            return make_error(oid_r.error().code, ctx + ": truncated overflow descriptor page id");
+        }
+        overflow_ids[i] = *oid_r;
     }
 
     // Reassemble from overflow pages.
@@ -542,29 +502,82 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
                           "btree load: failed to read meta tuple: " + meta_data.error().message);
     }
 
-    const uint8_t* p = meta_data->data();
-
     // Detect format version. Version 2 starts with sentinel byte 0 + version byte 2.
     // Legacy format starts with root_page_id (u32 LE). When root_page_id is 0 (empty tree),
     // the first two bytes are [0x00, 0x00], which differs from v2's [0x00, 0x02].
-    bool is_v2 = (meta_data->size() >= 2 && p[0] == 0 && p[1] == 2);
+    index_encoding::Reader meta_r(std::span<const uint8_t>(meta_data->data(), meta_data->size()));
+    bool is_v2 = (meta_data->size() >= 2 && (*meta_data)[0] == 0 && (*meta_data)[1] == 2);
     if (is_v2) {
-        p += 1; // skip sentinel
-        p += 1; // skip version byte
+        auto skip_r = meta_r.skip(2);
+        if (!skip_r) {
+            (void)bpm.unpin_page(meta_page_id, false);
+            return make_error(skip_r.error().code, "btree load: truncated meta header");
+        }
     }
 
-    PageId root_page_id = read_u32(p);
-    uint64_t tree_size = read_u64(p);
-    PageId next_page_id = read_u32(p);
-    uint16_t internal_max_keys = read_u16(p);
-    uint16_t leaf_max_keys = read_u16(p);
-    bool is_unique = read_u8(p) != 0;
+    auto root_page_id_r = meta_r.read_u32();
+    if (!root_page_id_r) {
+        (void)bpm.unpin_page(meta_page_id, false);
+        return make_error(root_page_id_r.error().code,
+                          "btree load: " + root_page_id_r.error().message);
+    }
+    PageId root_page_id = *root_page_id_r;
 
-    uint8_t key_type_count = read_u8(p);
+    auto tree_size_r = meta_r.read_u64();
+    if (!tree_size_r) {
+        (void)bpm.unpin_page(meta_page_id, false);
+        return make_error(tree_size_r.error().code, "btree load: " + tree_size_r.error().message);
+    }
+    uint64_t tree_size = *tree_size_r;
+
+    auto next_page_id_r = meta_r.read_u32();
+    if (!next_page_id_r) {
+        (void)bpm.unpin_page(meta_page_id, false);
+        return make_error(next_page_id_r.error().code,
+                          "btree load: " + next_page_id_r.error().message);
+    }
+    PageId next_page_id = *next_page_id_r;
+
+    auto internal_max_keys_r = meta_r.read_u16();
+    if (!internal_max_keys_r) {
+        (void)bpm.unpin_page(meta_page_id, false);
+        return make_error(internal_max_keys_r.error().code,
+                          "btree load: " + internal_max_keys_r.error().message);
+    }
+    uint16_t internal_max_keys = *internal_max_keys_r;
+
+    auto leaf_max_keys_r = meta_r.read_u16();
+    if (!leaf_max_keys_r) {
+        (void)bpm.unpin_page(meta_page_id, false);
+        return make_error(leaf_max_keys_r.error().code,
+                          "btree load: " + leaf_max_keys_r.error().message);
+    }
+    uint16_t leaf_max_keys = *leaf_max_keys_r;
+
+    auto is_unique_r = meta_r.read_u8();
+    if (!is_unique_r) {
+        (void)bpm.unpin_page(meta_page_id, false);
+        return make_error(is_unique_r.error().code, "btree load: " + is_unique_r.error().message);
+    }
+    bool is_unique = (*is_unique_r) != 0;
+
+    auto key_type_count_r = meta_r.read_u8();
+    if (!key_type_count_r) {
+        (void)bpm.unpin_page(meta_page_id, false);
+        return make_error(key_type_count_r.error().code,
+                          "btree load: " + key_type_count_r.error().message);
+    }
+    uint8_t key_type_count = *key_type_count_r;
+
     std::vector<TypeId> key_types;
     key_types.reserve(key_type_count);
     for (uint8_t i = 0; i < key_type_count; ++i) {
-        key_types.push_back(static_cast<TypeId>(read_u8(p)));
+        auto kt_r = meta_r.read_u8();
+        if (!kt_r) {
+            (void)bpm.unpin_page(meta_page_id, false);
+            return make_error(kt_r.error().code, "btree load: " + kt_r.error().message);
+        }
+        key_types.push_back(static_cast<TypeId>(*kt_r));
     }
 
     // Read page directory — either inline (legacy) or from overflow pages (v2).
@@ -576,25 +589,69 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
     std::vector<PageMapping> internal_mappings;
 
     if (!is_v2) {
-        // Legacy inline directory.
-        uint32_t leaf_count = read_u32(p);
+        // Legacy inline directory — continue reading from meta_r.
+        auto leaf_count_r = meta_r.read_u32();
+        if (!leaf_count_r) {
+            (void)bpm.unpin_page(meta_page_id, false);
+            return make_error(leaf_count_r.error().code,
+                              "btree load: " + leaf_count_r.error().message);
+        }
+        uint32_t leaf_count = *leaf_count_r;
         leaf_mappings.resize(leaf_count);
         for (uint32_t i = 0; i < leaf_count; ++i) {
-            leaf_mappings[i].mem_page_id = read_u32(p);
-            leaf_mappings[i].disk_page_id = read_u32(p);
+            auto mem_r = meta_r.read_u32();
+            if (!mem_r) {
+                (void)bpm.unpin_page(meta_page_id, false);
+                return make_error(mem_r.error().code, "btree load: " + mem_r.error().message);
+            }
+            auto disk_r = meta_r.read_u32();
+            if (!disk_r) {
+                (void)bpm.unpin_page(meta_page_id, false);
+                return make_error(disk_r.error().code, "btree load: " + disk_r.error().message);
+            }
+            leaf_mappings[i].mem_page_id = *mem_r;
+            leaf_mappings[i].disk_page_id = *disk_r;
         }
-        uint32_t internal_count = read_u32(p);
+
+        auto internal_count_r = meta_r.read_u32();
+        if (!internal_count_r) {
+            (void)bpm.unpin_page(meta_page_id, false);
+            return make_error(internal_count_r.error().code,
+                              "btree load: " + internal_count_r.error().message);
+        }
+        uint32_t internal_count = *internal_count_r;
         internal_mappings.resize(internal_count);
         for (uint32_t i = 0; i < internal_count; ++i) {
-            internal_mappings[i].mem_page_id = read_u32(p);
-            internal_mappings[i].disk_page_id = read_u32(p);
+            auto mem_r = meta_r.read_u32();
+            if (!mem_r) {
+                (void)bpm.unpin_page(meta_page_id, false);
+                return make_error(mem_r.error().code, "btree load: " + mem_r.error().message);
+            }
+            auto disk_r = meta_r.read_u32();
+            if (!disk_r) {
+                (void)bpm.unpin_page(meta_page_id, false);
+                return make_error(disk_r.error().code, "btree load: " + disk_r.error().message);
+            }
+            internal_mappings[i].mem_page_id = *mem_r;
+            internal_mappings[i].disk_page_id = *disk_r;
         }
     } else {
         // Version 2: read overflow page IDs, then reassemble directory from those pages.
-        uint32_t overflow_count = read_u32(p);
+        auto overflow_count_r = meta_r.read_u32();
+        if (!overflow_count_r) {
+            (void)bpm.unpin_page(meta_page_id, false);
+            return make_error(overflow_count_r.error().code,
+                              "btree load: " + overflow_count_r.error().message);
+        }
+        uint32_t overflow_count = *overflow_count_r;
         std::vector<PageId> overflow_ids(overflow_count);
         for (uint32_t i = 0; i < overflow_count; ++i) {
-            overflow_ids[i] = read_u32(p);
+            auto oid_r = meta_r.read_u32();
+            if (!oid_r) {
+                (void)bpm.unpin_page(meta_page_id, false);
+                return make_error(oid_r.error().code, "btree load: " + oid_r.error().message);
+            }
+            overflow_ids[i] = *oid_r;
         }
 
         // Concatenate all overflow page tuples into one directory buffer.
@@ -619,19 +676,53 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
             (void)bpm.unpin_page(ovf_id, false);
         }
 
-        // Parse directory from concatenated buffer.
-        const uint8_t* dp = dir_buf.data();
-        uint32_t leaf_count = read_u32(dp);
+        // Parse directory from concatenated buffer using a Reader.
+        index_encoding::Reader dir_r(std::span<const uint8_t>(dir_buf.data(), dir_buf.size()));
+
+        auto leaf_count_r = dir_r.read_u32();
+        if (!leaf_count_r) {
+            (void)bpm.unpin_page(meta_page_id, false);
+            return make_error(leaf_count_r.error().code,
+                              "btree load: " + leaf_count_r.error().message);
+        }
+        uint32_t leaf_count = *leaf_count_r;
         leaf_mappings.resize(leaf_count);
         for (uint32_t i = 0; i < leaf_count; ++i) {
-            leaf_mappings[i].mem_page_id = read_u32(dp);
-            leaf_mappings[i].disk_page_id = read_u32(dp);
+            auto mem_r = dir_r.read_u32();
+            if (!mem_r) {
+                (void)bpm.unpin_page(meta_page_id, false);
+                return make_error(mem_r.error().code, "btree load: " + mem_r.error().message);
+            }
+            auto disk_r = dir_r.read_u32();
+            if (!disk_r) {
+                (void)bpm.unpin_page(meta_page_id, false);
+                return make_error(disk_r.error().code, "btree load: " + disk_r.error().message);
+            }
+            leaf_mappings[i].mem_page_id = *mem_r;
+            leaf_mappings[i].disk_page_id = *disk_r;
         }
-        uint32_t internal_count = read_u32(dp);
+
+        auto internal_count_r = dir_r.read_u32();
+        if (!internal_count_r) {
+            (void)bpm.unpin_page(meta_page_id, false);
+            return make_error(internal_count_r.error().code,
+                              "btree load: " + internal_count_r.error().message);
+        }
+        uint32_t internal_count = *internal_count_r;
         internal_mappings.resize(internal_count);
         for (uint32_t i = 0; i < internal_count; ++i) {
-            internal_mappings[i].mem_page_id = read_u32(dp);
-            internal_mappings[i].disk_page_id = read_u32(dp);
+            auto mem_r = dir_r.read_u32();
+            if (!mem_r) {
+                (void)bpm.unpin_page(meta_page_id, false);
+                return make_error(mem_r.error().code, "btree load: " + mem_r.error().message);
+            }
+            auto disk_r = dir_r.read_u32();
+            if (!disk_r) {
+                (void)bpm.unpin_page(meta_page_id, false);
+                return make_error(disk_r.error().code, "btree load: " + disk_r.error().message);
+            }
+            internal_mappings[i].mem_page_id = *mem_r;
+            internal_mappings[i].disk_page_id = *disk_r;
         }
     }
 
@@ -659,14 +750,40 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
             return make_error(data_r.error().code, data_r.error().message);
         }
         const std::vector<uint8_t>& node_data = *data_r;
-        const uint8_t* lp = node_data.data();
-        const uint8_t* lend = lp + node_data.size();
+        index_encoding::Reader leaf_r(std::span<const uint8_t>(node_data.data(), node_data.size()));
 
-        PageId page_id = read_u32(lp);
-        PageId parent = read_u32(lp);
-        PageId next_leaf = read_u32(lp);
-        PageId prev_leaf = read_u32(lp);
-        uint16_t key_count = read_u16(lp);
+        auto page_id_r = leaf_r.read_u32();
+        if (!page_id_r) {
+            return make_error(page_id_r.error().code, "btree load: " + page_id_r.error().message);
+        }
+        PageId page_id = *page_id_r;
+
+        auto parent_r = leaf_r.read_u32();
+        if (!parent_r) {
+            return make_error(parent_r.error().code, "btree load: " + parent_r.error().message);
+        }
+        PageId parent = *parent_r;
+
+        auto next_leaf_r = leaf_r.read_u32();
+        if (!next_leaf_r) {
+            return make_error(next_leaf_r.error().code,
+                              "btree load: " + next_leaf_r.error().message);
+        }
+        PageId next_leaf = *next_leaf_r;
+
+        auto prev_leaf_r = leaf_r.read_u32();
+        if (!prev_leaf_r) {
+            return make_error(prev_leaf_r.error().code,
+                              "btree load: " + prev_leaf_r.error().message);
+        }
+        PageId prev_leaf = *prev_leaf_r;
+
+        auto key_count_r = leaf_r.read_u16();
+        if (!key_count_r) {
+            return make_error(key_count_r.error().code,
+                              "btree load: " + key_count_r.error().message);
+        }
+        uint16_t key_count = *key_count_r;
 
         auto leaf = std::make_unique<BTreeLeafNode>(page_id, eff_leaf_max);
         leaf->set_parent_page_id(parent);
@@ -674,14 +791,31 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
         leaf->set_prev_leaf_id(prev_leaf);
 
         for (uint16_t i = 0; i < key_count; ++i) {
-            auto key = deserialize_key(lp, lend, index->config_.key_types);
+            size_t key_start = leaf_r.pos;
+            const uint8_t* kp = leaf_r.data.data() + key_start;
+            const uint8_t* kend = leaf_r.end_ptr();
+            auto key = deserialize_key(kp, kend, index->config_.key_types);
             if (!key) {
                 return make_error(key.error().code,
                                   "btree load: failed to deserialize leaf key: " +
                                       key.error().message);
             }
-            PageId rid_page = read_u32(lp);
-            SlotId rid_slot = read_u16(lp);
+            leaf_r.advance(static_cast<size_t>(kp - (leaf_r.data.data() + key_start)));
+
+            auto rid_page_r = leaf_r.read_u32();
+            if (!rid_page_r) {
+                return make_error(rid_page_r.error().code,
+                                  "btree load: " + rid_page_r.error().message);
+            }
+            PageId rid_page = *rid_page_r;
+
+            auto rid_slot_r = leaf_r.read_u16();
+            if (!rid_slot_r) {
+                return make_error(rid_slot_r.error().code,
+                                  "btree load: " + rid_slot_r.error().message);
+            }
+            SlotId rid_slot = *rid_slot_r;
+
             leaf->keys().push_back(std::move(*key));
             leaf->rids().push_back(RID{rid_page, rid_slot});
         }
@@ -696,29 +830,56 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
             return make_error(data_r.error().code, data_r.error().message);
         }
         const std::vector<uint8_t>& node_data = *data_r;
-        const uint8_t* ip = node_data.data();
-        const uint8_t* iend = ip + node_data.size();
+        index_encoding::Reader int_r(std::span<const uint8_t>(node_data.data(), node_data.size()));
 
-        PageId page_id = read_u32(ip);
-        PageId parent = read_u32(ip);
-        uint16_t key_count = read_u16(ip);
+        auto page_id_r = int_r.read_u32();
+        if (!page_id_r) {
+            return make_error(page_id_r.error().code, "btree load: " + page_id_r.error().message);
+        }
+        PageId page_id = *page_id_r;
+
+        auto parent_r = int_r.read_u32();
+        if (!parent_r) {
+            return make_error(parent_r.error().code, "btree load: " + parent_r.error().message);
+        }
+        PageId parent = *parent_r;
+
+        auto key_count_r = int_r.read_u16();
+        if (!key_count_r) {
+            return make_error(key_count_r.error().code,
+                              "btree load: " + key_count_r.error().message);
+        }
+        uint16_t key_count = *key_count_r;
 
         auto node = std::make_unique<BTreeInternalNode>(page_id, eff_internal_max);
         node->set_parent_page_id(parent);
 
         for (uint16_t i = 0; i < key_count; ++i) {
-            auto key = deserialize_key(ip, iend, index->config_.key_types);
+            size_t key_start = int_r.pos;
+            const uint8_t* kp = int_r.data.data() + key_start;
+            const uint8_t* kend = int_r.end_ptr();
+            auto key = deserialize_key(kp, kend, index->config_.key_types);
             if (!key) {
                 return make_error(key.error().code,
                                   "btree load: failed to deserialize internal key: " +
                                       key.error().message);
             }
+            int_r.advance(static_cast<size_t>(kp - (int_r.data.data() + key_start)));
             node->keys().push_back(std::move(*key));
         }
 
-        uint16_t child_count = read_u16(ip);
+        auto child_count_r = int_r.read_u16();
+        if (!child_count_r) {
+            return make_error(child_count_r.error().code,
+                              "btree load: " + child_count_r.error().message);
+        }
+        uint16_t child_count = *child_count_r;
         for (uint16_t i = 0; i < child_count; ++i) {
-            node->children().push_back(read_u32(ip));
+            auto child_r = int_r.read_u32();
+            if (!child_r) {
+                return make_error(child_r.error().code, "btree load: " + child_r.error().message);
+            }
+            node->children().push_back(*child_r);
         }
 
         index->internal_nodes_[page_id] = std::move(node);

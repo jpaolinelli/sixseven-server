@@ -1,6 +1,7 @@
 #include "sixseven/index/hash_persistence.h"
 
 #include "sixseven/common/logging.h"
+#include "sixseven/index/index_encoding.h"
 #include "sixseven/storage/serialization.h"
 
 #include <algorithm>
@@ -10,60 +11,13 @@
 
 namespace sixseven {
 
+using namespace index_encoding;
+
 // ---------------------------------------------------------------------------
 // Binary encoding helpers (little-endian)
 // ---------------------------------------------------------------------------
 
 namespace {
-
-void write_u8(std::vector<uint8_t>& buf, uint8_t v) {
-    buf.push_back(v);
-}
-
-void write_u16(std::vector<uint8_t>& buf, uint16_t v) {
-    buf.push_back(static_cast<uint8_t>(v));
-    buf.push_back(static_cast<uint8_t>(v >> 8));
-}
-
-void write_u32(std::vector<uint8_t>& buf, uint32_t v) {
-    buf.push_back(static_cast<uint8_t>(v));
-    buf.push_back(static_cast<uint8_t>(v >> 8));
-    buf.push_back(static_cast<uint8_t>(v >> 16));
-    buf.push_back(static_cast<uint8_t>(v >> 24));
-}
-
-void write_u64(std::vector<uint8_t>& buf, uint64_t v) {
-    for (int i = 0; i < 8; ++i) {
-        buf.push_back(static_cast<uint8_t>(v >> (i * 8)));
-    }
-}
-
-uint8_t read_u8(const uint8_t*& p) {
-    uint8_t v = *p;
-    ++p;
-    return v;
-}
-
-uint16_t read_u16(const uint8_t*& p) {
-    uint16_t v = 0;
-    std::memcpy(&v, p, 2);
-    p += 2;
-    return v;
-}
-
-uint32_t read_u32(const uint8_t*& p) {
-    uint32_t v = 0;
-    std::memcpy(&v, p, 4);
-    p += 4;
-    return v;
-}
-
-uint64_t read_u64(const uint8_t*& p) {
-    uint64_t v = 0;
-    std::memcpy(&v, p, 8);
-    p += 8;
-    return v;
-}
 
 void serialize_key(std::vector<uint8_t>& buf, const KeyType& key) {
     for (const auto& val : key) {
@@ -387,8 +341,6 @@ Result<std::unique_ptr<HashIndex>> HashPersistence::load(BufferPoolManager& bpm,
                           "hash load: failed to read meta tuple: " + meta_data.error().message);
     }
 
-    const uint8_t* p = meta_data->data();
-
     // Detect format version by reading the first 4 bytes as a little-endian
     // uint32 and comparing against HASH_V2_MAGIC (0xFF534858).
     //
@@ -400,23 +352,75 @@ Result<std::unique_ptr<HashIndex>> HashPersistence::load(BufferPoolManager& bpm,
     bool is_v2 = false;
     if (meta_data->size() >= 4) {
         uint32_t leading = 0;
-        std::memcpy(&leading, p, 4);
+        std::memcpy(&leading, meta_data->data(), 4);
         is_v2 = (leading == HASH_V2_MAGIC);
     }
+
+    auto meta_span_ = std::span<const uint8_t>(*meta_data);
+    Reader meta_reader{meta_span_};
     if (is_v2) {
-        p += 4; // skip magic
+        // Skip magic (already read via memcpy above).
+        auto skip_r = meta_reader.skip(4);
+        if (!skip_r) {
+            (void)bpm.unpin_page(meta_page_id, false);
+            return make_error(skip_r.error().code,
+                              "hash load: failed to skip magic: " + skip_r.error().message);
+        }
     }
 
-    uint32_t global_depth = read_u32(p);
-    uint64_t total_size = read_u64(p);
-    uint32_t bucket_capacity = read_u32(p);
-    bool is_unique = read_u8(p) != 0;
+    auto r_global_depth = meta_reader.read_u32();
+    if (!r_global_depth) {
+        (void)bpm.unpin_page(meta_page_id, false);
+        return make_error(r_global_depth.error().code,
+                          "hash load: failed to read global_depth: " +
+                              r_global_depth.error().message);
+    }
+    uint32_t global_depth = *r_global_depth;
 
-    uint8_t key_type_count = read_u8(p);
+    auto r_total_size = meta_reader.read_u64();
+    if (!r_total_size) {
+        (void)bpm.unpin_page(meta_page_id, false);
+        return make_error(r_total_size.error().code,
+                          "hash load: failed to read size: " + r_total_size.error().message);
+    }
+    uint64_t total_size = *r_total_size;
+
+    auto r_bucket_capacity = meta_reader.read_u32();
+    if (!r_bucket_capacity) {
+        (void)bpm.unpin_page(meta_page_id, false);
+        return make_error(r_bucket_capacity.error().code,
+                          "hash load: failed to read bucket_capacity: " +
+                              r_bucket_capacity.error().message);
+    }
+    uint32_t bucket_capacity = *r_bucket_capacity;
+
+    auto r_is_unique = meta_reader.read_u8();
+    if (!r_is_unique) {
+        (void)bpm.unpin_page(meta_page_id, false);
+        return make_error(r_is_unique.error().code,
+                          "hash load: failed to read is_unique: " + r_is_unique.error().message);
+    }
+    bool is_unique = (*r_is_unique) != 0;
+
+    auto r_key_type_count = meta_reader.read_u8();
+    if (!r_key_type_count) {
+        (void)bpm.unpin_page(meta_page_id, false);
+        return make_error(r_key_type_count.error().code,
+                          "hash load: failed to read key_type_count: " +
+                              r_key_type_count.error().message);
+    }
+    uint8_t key_type_count = *r_key_type_count;
+
     std::vector<TypeId> key_types;
     key_types.reserve(key_type_count);
     for (uint8_t i = 0; i < key_type_count; ++i) {
-        key_types.push_back(static_cast<TypeId>(read_u8(p)));
+        auto r_kt = meta_reader.read_u8();
+        if (!r_kt) {
+            (void)bpm.unpin_page(meta_page_id, false);
+            return make_error(r_kt.error().code,
+                              "hash load: failed to read key_type: " + r_kt.error().message);
+        }
+        key_types.push_back(static_cast<TypeId>(*r_kt));
     }
 
     // Read directory: either inline (V1) or via overflow pages (V2).
@@ -424,17 +428,45 @@ Result<std::unique_ptr<HashIndex>> HashPersistence::load(BufferPoolManager& bpm,
 
     if (!is_v2) {
         // V1: directory is inlined after the header.
-        uint32_t dir_size = read_u32(p);
+        auto r_dir_size = meta_reader.read_u32();
+        if (!r_dir_size) {
+            (void)bpm.unpin_page(meta_page_id, false);
+            return make_error(r_dir_size.error().code,
+                              "hash load: failed to read dir_size: " + r_dir_size.error().message);
+        }
+        uint32_t dir_size = *r_dir_size;
         dir_disk_pages.resize(dir_size);
         for (uint32_t i = 0; i < dir_size; ++i) {
-            dir_disk_pages[i] = read_u32(p);
+            auto r_pid = meta_reader.read_u32();
+            if (!r_pid) {
+                (void)bpm.unpin_page(meta_page_id, false);
+                return make_error(r_pid.error().code,
+                                  "hash load: failed to read directory entry: " +
+                                      r_pid.error().message);
+            }
+            dir_disk_pages[i] = *r_pid;
         }
     } else {
         // V2: read overflow page IDs, concatenate their tuples, then parse.
-        uint32_t overflow_count = read_u32(p);
+        auto r_overflow_count = meta_reader.read_u32();
+        if (!r_overflow_count) {
+            (void)bpm.unpin_page(meta_page_id, false);
+            return make_error(r_overflow_count.error().code,
+                              "hash load: failed to read overflow_count: " +
+                                  r_overflow_count.error().message);
+        }
+        uint32_t overflow_count = *r_overflow_count;
+
         std::vector<PageId> overflow_ids(overflow_count);
         for (uint32_t i = 0; i < overflow_count; ++i) {
-            overflow_ids[i] = read_u32(p);
+            auto r_oid = meta_reader.read_u32();
+            if (!r_oid) {
+                (void)bpm.unpin_page(meta_page_id, false);
+                return make_error(r_oid.error().code,
+                                  "hash load: failed to read overflow page id: " +
+                                      r_oid.error().message);
+            }
+            overflow_ids[i] = *r_oid;
         }
 
         // Concatenate all overflow page tuples into one directory buffer.
@@ -460,11 +492,26 @@ Result<std::unique_ptr<HashIndex>> HashPersistence::load(BufferPoolManager& bpm,
         }
 
         // Parse directory from concatenated buffer.
-        const uint8_t* dp = dir_buf.data();
-        uint32_t dir_size = read_u32(dp);
+        auto dir_span_ = std::span<const uint8_t>(dir_buf);
+        Reader dir_reader{dir_span_};
+        auto r_dir_size = dir_reader.read_u32();
+        if (!r_dir_size) {
+            (void)bpm.unpin_page(meta_page_id, false);
+            return make_error(r_dir_size.error().code,
+                              "hash load: failed to read dir_size from overflow: " +
+                                  r_dir_size.error().message);
+        }
+        uint32_t dir_size = *r_dir_size;
         dir_disk_pages.resize(dir_size);
         for (uint32_t i = 0; i < dir_size; ++i) {
-            dir_disk_pages[i] = read_u32(dp);
+            auto r_pid = dir_reader.read_u32();
+            if (!r_pid) {
+                (void)bpm.unpin_page(meta_page_id, false);
+                return make_error(r_pid.error().code,
+                                  "hash load: failed to read directory entry from overflow: " +
+                                      r_pid.error().message);
+            }
+            dir_disk_pages[i] = *r_pid;
         }
     }
 
@@ -492,11 +539,26 @@ Result<std::unique_ptr<HashIndex>> HashPersistence::load(BufferPoolManager& bpm,
                                   tuple_data.error().message);
         }
 
-        const uint8_t* bp = tuple_data->data();
-        const uint8_t* bend = bp + tuple_data->size();
+        auto bp_span_ = std::span<const uint8_t>(*tuple_data);
+        Reader bp{bp_span_};
 
-        uint32_t local_depth = read_u32(bp);
-        uint32_t entry_count = read_u32(bp);
+        auto r_local_depth = bp.read_u32();
+        if (!r_local_depth) {
+            (void)bpm.unpin_page(disk_page_id, false);
+            return make_error(r_local_depth.error().code,
+                              "hash load: failed to read local_depth: " +
+                                  r_local_depth.error().message);
+        }
+        uint32_t local_depth = *r_local_depth;
+
+        auto r_entry_count = bp.read_u32();
+        if (!r_entry_count) {
+            (void)bpm.unpin_page(disk_page_id, false);
+            return make_error(r_entry_count.error().code,
+                              "hash load: failed to read entry_count: " +
+                                  r_entry_count.error().message);
+        }
+        uint32_t entry_count = *r_entry_count;
 
         auto bucket = std::make_shared<HashBucket>();
         bucket->local_depth = local_depth;
@@ -504,16 +566,47 @@ Result<std::unique_ptr<HashIndex>> HashPersistence::load(BufferPoolManager& bpm,
 
         for (uint32_t i = 0; i < entry_count; ++i) {
             HashBucketEntry entry;
-            entry.hash = static_cast<size_t>(read_u64(bp));
-            auto key = deserialize_key(bp, bend, key_types);
+
+            auto r_hash = bp.read_u64();
+            if (!r_hash) {
+                (void)bpm.unpin_page(disk_page_id, false);
+                return make_error(r_hash.error().code,
+                                  "hash load: failed to read entry hash: " +
+                                      r_hash.error().message);
+            }
+            entry.hash = static_cast<size_t>(*r_hash);
+
+            // Interop with deserialize_key which takes raw const uint8_t* pointers.
+            size_t key_start = bp.pos;
+            const uint8_t* kp = bp.data.data() + key_start;
+            const uint8_t* kend = bp.end_ptr();
+            auto key = deserialize_key(kp, kend, key_types);
             if (!key) {
                 (void)bpm.unpin_page(disk_page_id, false);
                 return make_error(key.error().code,
                                   "hash load: failed to deserialize key: " + key.error().message);
             }
+            bp.advance(static_cast<size_t>(kp - (bp.data.data() + key_start)));
             entry.key = std::move(*key);
-            entry.rid.page_id = read_u32(bp);
-            entry.rid.slot_id = read_u16(bp);
+
+            auto r_page_id = bp.read_u32();
+            if (!r_page_id) {
+                (void)bpm.unpin_page(disk_page_id, false);
+                return make_error(r_page_id.error().code,
+                                  "hash load: failed to read rid.page_id: " +
+                                      r_page_id.error().message);
+            }
+            entry.rid.page_id = *r_page_id;
+
+            auto r_slot_id = bp.read_u16();
+            if (!r_slot_id) {
+                (void)bpm.unpin_page(disk_page_id, false);
+                return make_error(r_slot_id.error().code,
+                                  "hash load: failed to read rid.slot_id: " +
+                                      r_slot_id.error().message);
+            }
+            entry.rid.slot_id = *r_slot_id;
+
             bucket->entries.push_back(std::move(entry));
         }
 
