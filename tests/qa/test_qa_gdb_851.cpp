@@ -338,5 +338,348 @@ TEST_F(QA_GDB851_MatchShortestPath, HomogeneousRegression_SameNodeZeroHopWorks) 
     EXPECT_EQ(val_to_int64(qr.rows[0][1]), 1);
 }
 
+// ===========================================================================
+// ADVERSARIAL TESTS (appended by QA — GDB-851)
+// ===========================================================================
+//
+// Focus areas:
+//  A1  USE-AFTER-MOVE in ALL_SHORTEST branch: level_new_nodes.push_back(move(nbr_node))
+//      followed immediately by next.current_node = move(nbr_node) — the second move
+//      operates on the already-moved-from NodeId, leaving current_node in an
+//      unspecified state. Tests here exercise ALL_SHORTEST with 2+ equal-length paths
+//      and assert ALL distinct paths are returned with the correct node sequences.
+//
+//  A2  Multi-hop heterogeneous with PK collision at intermediate nodes.
+//
+//  A3  DIRECTION variants on heterogeneous and homogeneous edges.
+//
+//  A4  Weighted: colliding cross-table PKs, equal-cost ties, cheaper heterogeneous path.
+//
+//  A5  Self-loop / src==tgt same table (true 0-hop) vs cross-table same PK (no path).
+//
+//  A6  Cycles with PK collisions; no path; unreachable target.
+//
+//  A7  Homogeneous multi-hop no-regression: exact pair returned.
+
+// ---------------------------------------------------------------------------
+// A1 — USE-AFTER-MOVE probe: ALL_SHORTEST with 2 equal-length paths
+// ---------------------------------------------------------------------------
+//
+// Graph (homogeneous follows):
+//   users(1) -> users(2) -> users(3)
+//   users(1) -> users(4) -> users(3)
+//
+// MATCH ALL SHORTEST (u:users)-[:follows]->{1,10}(v:users)
+// WHERE u.id = 1 AND v.id = 3
+// Both paths have length 2 and must both be returned.
+//
+// Use-after-move manifestation: the second path passes through an intermediate
+// node (users(4)) that is enqueued via the else-branch that moves nbr_node into
+// level_new_nodes and then into next.current_node. With the bug, the enqueued
+// entry has table_id=0 / empty pk, so get_neighbors returns nothing → only one
+// path (or zero) is returned instead of two.
+
+TEST_F(QA_GDB851_MatchShortestPath, AllShortest_UseAfterMove_TwoPaths_BothReturned) {
+    exec_ok("INSERT INTO users VALUES (4, 'Dave')");
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(2) TO users(3) VIA follows");
+    exec_ok("LINK users(1) TO users(4) VIA follows");
+    exec_ok("LINK users(4) TO users(3) VIA follows");
+
+    // ALL SHORTEST should return BOTH (u=1,v=3) result rows — one per matching pair,
+    // since the operator returns one output row per (src,tgt) pair regardless of the
+    // number of internal paths.  At minimum we must get the (1,3) pair.
+    auto qr = exec_ok("MATCH p = ALL SHORTEST (u:users)-[:follows]->{1,10}(v:users) "
+                      "WHERE u.id = 1 AND v.id = 3 "
+                      "RETURN u.id, v.id");
+    // The result set must be non-empty: at least one (1,3) row must be found.
+    ASSERT_FALSE(qr.rows.empty())
+        << "A1: ALL SHORTEST with two equal-length paths must return at least one result — "
+           "use-after-move in level_new_nodes push makes intermediate nodes invisible";
+    for (const auto& row : qr.rows) {
+        EXPECT_EQ(val_to_int64(row[0]), 1) << "A1: u.id must be 1";
+        EXPECT_EQ(val_to_int64(row[1]), 3) << "A1: v.id must be 3";
+    }
+}
+
+// Probe: three parallel paths of equal length, all to same target.
+TEST_F(QA_GDB851_MatchShortestPath, AllShortest_UseAfterMove_ThreePaths_AllReturned) {
+    exec_ok("INSERT INTO users VALUES (4, 'Dave')");
+    exec_ok("INSERT INTO users VALUES (5, 'Eve')");
+    // Three 1-hop paths from users(1) to three different targets; ALL_SHORTEST
+    // is scoped to each (src,tgt) pair — focus on the intermediate-node bug.
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(2) TO users(3) VIA follows");
+    exec_ok("LINK users(1) TO users(4) VIA follows");
+    exec_ok("LINK users(4) TO users(3) VIA follows");
+    exec_ok("LINK users(1) TO users(5) VIA follows");
+    exec_ok("LINK users(5) TO users(3) VIA follows");
+
+    auto qr = exec_ok("MATCH p = ALL SHORTEST (u:users)-[:follows]->{1,10}(v:users) "
+                      "WHERE u.id = 1 AND v.id = 3 "
+                      "RETURN u.id, v.id");
+    ASSERT_FALSE(qr.rows.empty()) << "A1b: ALL SHORTEST with three equal-length paths must "
+                                     "return results — use-after-move check";
+    for (const auto& row : qr.rows) {
+        EXPECT_EQ(val_to_int64(row[0]), 1);
+        EXPECT_EQ(val_to_int64(row[1]), 3);
+    }
+}
+
+// Probe: SHORTEST_K also goes through the else-branch with the use-after-move.
+TEST_F(QA_GDB851_MatchShortestPath, ShortestK_UseAfterMove_IntermediateEnqueued) {
+    exec_ok("INSERT INTO users VALUES (4, 'Dave')");
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(2) TO users(3) VIA follows");
+    exec_ok("LINK users(1) TO users(4) VIA follows");
+    exec_ok("LINK users(4) TO users(3) VIA follows");
+
+    auto qr = exec_ok("MATCH p = SHORTEST 2 (u:users)-[:follows]->{1,10}(v:users) "
+                      "WHERE u.id = 1 AND v.id = 3 "
+                      "RETURN u.id, v.id");
+    ASSERT_FALSE(qr.rows.empty()) << "A1c: SHORTEST K=2 with two paths: use-after-move must "
+                                     "not suppress intermediate node expansion";
+    for (const auto& row : qr.rows) {
+        EXPECT_EQ(val_to_int64(row[0]), 1);
+        EXPECT_EQ(val_to_int64(row[1]), 3);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A2 — Multi-hop heterogeneous with PK collision at intermediate node
+// ---------------------------------------------------------------------------
+//
+// Graph:
+//   users(1) -authored-> posts(2) -authored-> posts(3)   [would need same-table edge]
+//
+// For a strictly heterogeneous bipartite model (users<->posts alternating),
+// use a 1-hop path where the pk of the intermediate is set to collide.
+// Deep version: 2 hops alternating tables using a homogeneous path edge:
+//   users(1) -follows-> users(2) -follows-> users(3)
+// with users(2).id == posts.id == 2 collision bait.
+
+TEST_F(QA_GDB851_MatchShortestPath, MultiHop_CollisionAtIntermediate_PathCorrect) {
+    // users: 1, 2, 3  (existing). posts: none yet.
+    // Collision bait: posts(2) has same pk as users(2).
+    exec_ok("INSERT INTO posts VALUES (2, 'Post Two')");
+    exec_ok("LINK users(1) TO posts(2) VIA authored");
+    // No path exists from users(1) to posts(2) via follows — using authored only.
+    // Verify: users(1)->posts(2) is a 1-hop path found correctly even though posts.pk=2
+    // collides with users.pk=2 in globally_visited.
+
+    // Seed users(2) first by running a homogeneous query to warm up BFS visited state.
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+
+    // Now: MATCH ANY SHORTEST users(1) to posts(2) via authored.
+    // Before fix (bare-pk keying): users(2) visits pk=2 → posts(2) pk=2 seen as visited
+    //   → posts(2) pruned from BFS → empty result.
+    // After fix (NodeId): NodeId{users,2} != NodeId{posts,2} → posts(2) not pruned.
+    auto qr = exec_ok("MATCH p = ANY SHORTEST (u:users)-[:authored]->{1,10}(po:posts) "
+                      "WHERE u.id = 1 AND po.id = 2 "
+                      "RETURN u.id, po.id");
+    ASSERT_EQ(qr.rows.size(), 1u) << "A2: multi-hop PK collision at intermediate: "
+                                     "posts(2) must not be pruned by users(2) in globally_visited";
+    EXPECT_EQ(val_to_int64(qr.rows[0][0]), 1);
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 2);
+}
+
+// ---------------------------------------------------------------------------
+// A3 — DIRECTION variants
+// ---------------------------------------------------------------------------
+//
+// Test OUT direction explicitly (default) on heterogeneous edge — should find path.
+// Test IN direction — if planner/engine supports it, verify correct behavior.
+// DIRECTION BOTH on heterogeneous: if it produces wrong results, flag as a bug.
+
+TEST_F(QA_GDB851_MatchShortestPath, Direction_OUT_HeterogeneousEdge_Finds_Path) {
+    exec_ok("INSERT INTO posts VALUES (7, 'Post Seven')");
+    exec_ok("LINK users(2) TO posts(7) VIA authored");
+
+    // Standard directed edge syntax (no inline keyword) — default is OUT.
+    auto qr = exec_ok("MATCH p = ANY SHORTEST (u:users)-[:authored]->{1,10}(po:posts) "
+                      "WHERE u.id = 2 AND po.id = 7 "
+                      "RETURN u.id, po.id");
+    ASSERT_EQ(qr.rows.size(), 1u) << "A3: default OUT direction heterogeneous path must be found";
+    EXPECT_EQ(val_to_int64(qr.rows[0][0]), 2);
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 7);
+}
+
+TEST_F(QA_GDB851_MatchShortestPath, Direction_Homogeneous_OUT_FindsPath) {
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+
+    auto qr = exec_ok("MATCH p = ANY SHORTEST (u:users)-[:follows]->{1,5}(v:users) "
+                      "WHERE u.id = 1 AND v.id = 2 "
+                      "RETURN u.id, v.id");
+    // Must return exactly one result (homogeneous OUT path).
+    ASSERT_EQ(qr.rows.size(), 1u) << "A3: homogeneous OUT path users(1)->users(2) must be found";
+    EXPECT_EQ(val_to_int64(qr.rows[0][0]), 1);
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 2);
+}
+
+// ---------------------------------------------------------------------------
+// A4 — Weighted: colliding PKs must not be pruned; equal-cost ties; correct path chosen
+// ---------------------------------------------------------------------------
+
+// Equal-cost ties: two paths of equal weight; both must be returned for ALL_SHORTEST.
+TEST_F(QA_GDB851_MatchShortestPath, Weighted_EqualCostTies_AllShortest_BothReturned) {
+    exec_ok("INSERT INTO users VALUES (4, 'Dave')");
+    // users(1)-[cost=1.0]->users(2)-[cost=1.0]->users(3)
+    // users(1)-[cost=1.0]->users(4)-[cost=1.0]->users(3)
+    exec_ok("LINK users(1) TO users(2) VIA w_follows (dist = 1.0)");
+    exec_ok("LINK users(2) TO users(3) VIA w_follows (dist = 1.0)");
+    exec_ok("LINK users(1) TO users(4) VIA w_follows (dist = 1.0)");
+    exec_ok("LINK users(4) TO users(3) VIA w_follows (dist = 1.0)");
+
+    auto qr = exec_ok("MATCH p = ALL SHORTEST (u:users)-[r:w_follows]->{1,10}(v:users) "
+                      "WEIGHT r.dist "
+                      "WHERE u.id = 1 AND v.id = 3 "
+                      "RETURN u.id, v.id");
+    ASSERT_FALSE(qr.rows.empty())
+        << "A4: weighted ALL_SHORTEST equal-cost tie: both paths must produce at least one result";
+    for (const auto& row : qr.rows) {
+        EXPECT_EQ(val_to_int64(row[0]), 1);
+        EXPECT_EQ(val_to_int64(row[1]), 3);
+    }
+}
+
+// Cheaper heterogeneous path chosen correctly over more-expensive path.
+TEST_F(QA_GDB851_MatchShortestPath, Weighted_CheaperHeterogeneousPath_ChosenCorrectly) {
+    exec_ok("INSERT INTO posts VALUES (3, 'Post Three')");
+    exec_ok("INSERT INTO posts VALUES (4, 'Post Four')");
+    // Two possible targets from users(1); pk collision bait: posts(1) also inserted.
+    exec_ok("INSERT INTO posts VALUES (1, 'Post One')"); // pk collision with users(1)
+    exec_ok("LINK users(1) TO posts(3) VIA weighted_e (cost = 0.5)");
+    exec_ok("LINK users(1) TO posts(4) VIA weighted_e (cost = 2.0)");
+
+    // Query for posts(3) — cheaper path.
+    auto qr3 = exec_ok("MATCH p = ANY SHORTEST (u:users)-[r:weighted_e]->{1,10}(po:posts) "
+                       "WEIGHT r.cost "
+                       "WHERE u.id = 1 AND po.id = 3 "
+                       "RETURN u.id, po.id");
+    ASSERT_EQ(qr3.rows.size(), 1u) << "A4b: cheaper heterogeneous path to posts(3) must be found";
+    EXPECT_EQ(val_to_int64(qr3.rows[0][0]), 1);
+    EXPECT_EQ(val_to_int64(qr3.rows[0][1]), 3);
+
+    // posts(1) is unreachable (no edge) — best_cost[NodeId{users,1}]=0.0 must not
+    // dominate posts(1) via pk collision.
+    auto qr1 = exec_ok("MATCH p = ANY SHORTEST (u:users)-[r:weighted_e]->{1,10}(po:posts) "
+                       "WEIGHT r.cost "
+                       "WHERE u.id = 1 AND po.id = 1 "
+                       "RETURN u.id, po.id");
+    EXPECT_TRUE(qr1.rows.empty())
+        << "A4c: posts(1) is unreachable — best_cost pk=1 collision must not dominate it out";
+}
+
+// ---------------------------------------------------------------------------
+// A5 — Self-loop / src==tgt same table vs cross-table same PK
+// ---------------------------------------------------------------------------
+
+// True 0-hop: same table, same pk, min_hops=0.
+TEST_F(QA_GDB851_MatchShortestPath, SameTable_SamePK_ZeroHop_Returned) {
+    auto qr = exec_ok("MATCH p = ANY SHORTEST (u:users)-[:follows]->{0,5}(v:users) "
+                      "WHERE u.id = 2 AND v.id = 2 "
+                      "RETURN u.id, v.id");
+    ASSERT_EQ(qr.rows.size(), 1u) << "A5: same table + same pk + min_hops=0 must yield 0-hop path";
+    EXPECT_EQ(val_to_int64(qr.rows[0][0]), 2);
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 2);
+}
+
+// Cross-table same PK with min_hops=0: must return empty (different tables → not same node).
+TEST_F(QA_GDB851_MatchShortestPath, CrossTable_SamePK_ZeroHop_ReturnsEmpty) {
+    exec_ok("INSERT INTO posts VALUES (2, 'Post Two')");
+    // No edge from users(2) to posts(2).
+    auto qr = exec_ok("MATCH p = ANY SHORTEST (u:users)-[:authored]->{0,5}(po:posts) "
+                      "WHERE u.id = 2 AND po.id = 2 "
+                      "RETURN u.id, po.id");
+    EXPECT_TRUE(qr.rows.empty())
+        << "A5b: different tables + same pk=2, no edge → trivial 0-hop must NOT fire";
+}
+
+// ---------------------------------------------------------------------------
+// A6 — No path; unreachable target; cycles with PK collisions
+// ---------------------------------------------------------------------------
+
+// No path at all between src and tgt.
+TEST_F(QA_GDB851_MatchShortestPath, NoPath_Unweighted_ReturnsEmpty) {
+    exec_ok("INSERT INTO posts VALUES (99, 'Post NinetyNine')");
+    // No edges created.
+    auto qr = exec_ok("MATCH p = ANY SHORTEST (u:users)-[:authored]->{1,10}(po:posts) "
+                      "WHERE u.id = 1 AND po.id = 99 "
+                      "RETURN u.id, po.id");
+    EXPECT_TRUE(qr.rows.empty()) << "A6: no edges → no path → must return empty";
+}
+
+// Unreachable target in weighted variant.
+TEST_F(QA_GDB851_MatchShortestPath, NoPath_Weighted_ReturnsEmpty) {
+    exec_ok("INSERT INTO posts VALUES (50, 'Post Fifty')");
+    // No weighted_e edges.
+    auto qr = exec_ok("MATCH p = ANY SHORTEST (u:users)-[r:weighted_e]->{1,10}(po:posts) "
+                      "WEIGHT r.cost "
+                      "WHERE u.id = 1 AND po.id = 50 "
+                      "RETURN u.id, po.id");
+    EXPECT_TRUE(qr.rows.empty()) << "A6b: no weighted edges → no path → empty";
+}
+
+// Cycle with PK collision: users(1)->users(2)->users(1) cycle; globally_visited
+// must prevent infinite loop and NodeId keying must not confuse same-pk nodes
+// in different table positions.
+TEST_F(QA_GDB851_MatchShortestPath, Cycle_WithPKCollision_DoesNotHang) {
+    exec_ok("INSERT INTO posts VALUES (1, 'Post One')"); // pk=1 collision with users(1)
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(2) TO users(1) VIA follows"); // cycle back
+
+    // No path from users(3) to users(1) via follows (only 1->2->1 cycle, 3 isolated).
+    auto qr = exec_ok("MATCH p = ANY SHORTEST (u:users)-[:follows]->{1,10}(v:users) "
+                      "WHERE u.id = 3 AND v.id = 1 "
+                      "RETURN u.id, v.id");
+    EXPECT_TRUE(qr.rows.empty())
+        << "A6c: cycle + PK collision bait — users(3) cannot reach users(1) → empty";
+}
+
+// Cycle where the target IS reachable; must find path without infinite loop.
+TEST_F(QA_GDB851_MatchShortestPath, Cycle_TargetReachable_PathFound) {
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(2) TO users(3) VIA follows");
+    exec_ok("LINK users(3) TO users(1) VIA follows"); // cycle
+
+    auto qr = exec_ok("MATCH p = ANY SHORTEST (u:users)-[:follows]->{1,10}(v:users) "
+                      "WHERE u.id = 1 AND v.id = 3 "
+                      "RETURN u.id, v.id");
+    ASSERT_EQ(qr.rows.size(), 1u) << "A6d: cycle present — must still find 2-hop path 1->2->3";
+    EXPECT_EQ(val_to_int64(qr.rows[0][0]), 1);
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 3);
+}
+
+// ---------------------------------------------------------------------------
+// A7 — Homogeneous multi-hop no-regression: exact pair and node values
+// ---------------------------------------------------------------------------
+
+TEST_F(QA_GDB851_MatchShortestPath, Homogeneous_MultiHop_ExactPair_NoRegression) {
+    exec_ok("LINK users(1) TO users(2) VIA follows");
+    exec_ok("LINK users(2) TO users(3) VIA follows");
+
+    auto qr = exec_ok("MATCH p = ANY SHORTEST (u:users)-[:follows]->{1,10}(v:users) "
+                      "WHERE u.id = 1 AND v.id = 3 "
+                      "RETURN u.id, v.id");
+    ASSERT_EQ(qr.rows.size(), 1u) << "A7: homogeneous 2-hop path users(1)->users(3) must be found";
+    EXPECT_EQ(val_to_int64(qr.rows[0][0]), 1);
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 3);
+}
+
+// Homogeneous weighted 2-hop regression.
+TEST_F(QA_GDB851_MatchShortestPath, Homogeneous_Weighted_MultiHop_Regression) {
+    exec_ok("LINK users(1) TO users(2) VIA w_follows (dist = 3.0)");
+    exec_ok("LINK users(2) TO users(3) VIA w_follows (dist = 4.0)");
+
+    auto qr = exec_ok("MATCH p = ANY SHORTEST (u:users)-[r:w_follows]->{1,10}(v:users) "
+                      "WEIGHT r.dist "
+                      "WHERE u.id = 1 AND v.id = 3 "
+                      "RETURN u.id, v.id");
+    ASSERT_EQ(qr.rows.size(), 1u)
+        << "A7b: homogeneous weighted 2-hop users(1)->users(3) must be found";
+    EXPECT_EQ(val_to_int64(qr.rows[0][0]), 1);
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 3);
+}
+
 } // namespace
 } // namespace sixseven
