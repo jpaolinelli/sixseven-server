@@ -490,10 +490,43 @@ TEST(PathSelectorEnum, DefaultIsNone) {
     EXPECT_EQ(stmt.shortest_k, 0);
 }
 
-TEST(PathSelectorEnum, AllValues) {
-    EXPECT_NE(PathSelector::NONE, PathSelector::ANY_SHORTEST);
-    EXPECT_NE(PathSelector::ANY_SHORTEST, PathSelector::ALL_SHORTEST);
-    EXPECT_NE(PathSelector::ALL_SHORTEST, PathSelector::SHORTEST_K);
+// Each PathSelector must map to a distinct plan_node_name() string.  This
+// test constructs a real MatchShortestPathOperator for each selector and
+// asserts the exact string produced by the production switch — a mutation
+// that swaps two cases (e.g. ANY_SHORTEST <-> ALL_SHORTEST) will fail here.
+TEST_F(MatchShortestPathTest, PlanNodeNamePerSelector) {
+    BoundStatement bound;
+
+    auto make_op = [&](PathSelector sel, int32_t k = 0) {
+        return MatchShortestPathOperator(*graph_,
+                                         *catalog_,
+                                         *storage_,
+                                         default_database_id,
+                                         make_config(),
+                                         make_schema(),
+                                         nullptr,
+                                         bound,
+                                         sel,
+                                         "p",
+                                         k);
+    };
+
+    {
+        auto op = make_op(PathSelector::NONE);
+        EXPECT_EQ(op.plan_node_name(), "Shortest Path Match");
+    }
+    {
+        auto op = make_op(PathSelector::ANY_SHORTEST);
+        EXPECT_EQ(op.plan_node_name(), "Any Shortest Path Match");
+    }
+    {
+        auto op = make_op(PathSelector::ALL_SHORTEST);
+        EXPECT_EQ(op.plan_node_name(), "All Shortest Path Match");
+    }
+    {
+        auto op = make_op(PathSelector::SHORTEST_K, 3);
+        EXPECT_EQ(op.plan_node_name(), "Shortest 3 Path Match");
+    }
 }
 
 // ===========================================================================
