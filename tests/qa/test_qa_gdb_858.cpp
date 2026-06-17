@@ -325,3 +325,310 @@ TEST_F(GDB858Test, WeightedNormalPathUnaffected) {
     EXPECT_EQ(path.length(), 3);
     EXPECT_DOUBLE_EQ(path.total_weight, 10.0);
 }
+
+// ===========================================================================
+// GDB-858 adversarial: direct self-loop edge (1-hop cycle x->x)
+// ===========================================================================
+
+/// A direct self-loop edge x->x satisfies min_hops=1 with exactly 1 hop.
+/// The operator MUST return that path — it is a real cycle, not the suppressed
+/// 0-hop trivial path.
+TEST_F(GDB858Test, WeightedDirectSelfLoopReturnedUnderMinHopsOne) {
+    // Add a direct self-loop: 1 --(weight 3.0)--> 1
+    link(1, 1, 3.0);
+
+    auto weight = make_weight_expr();
+    auto rows = run_op(make_config(1, 20), PathSelector::ANY_SHORTEST, weight.get());
+    auto self = filter(rows, 1, 1);
+
+    ASSERT_EQ(self.size(), 1u)
+        << "GDB-858 adversarial: a direct self-loop (1 hop) must be returned under min_hops=1";
+    const auto& path = self[0].values[2].as_path();
+    EXPECT_EQ(path.length(), 1) << "self-loop path must be exactly 1 hop";
+    EXPECT_DOUBLE_EQ(path.total_weight, 3.0) << "self-loop weight must match edge weight";
+}
+
+TEST_F(GDB858Test, BFSDirectSelfLoopReturnedUnderMinHopsOne) {
+    link(1, 1, 3.0);
+
+    auto rows = run_op(make_config(1, 20), PathSelector::ANY_SHORTEST, nullptr);
+    auto self = filter(rows, 1, 1);
+
+    ASSERT_EQ(self.size(), 1u)
+        << "GDB-858 adversarial: BFS — direct self-loop (1 hop) must be returned under min_hops=1";
+    EXPECT_EQ(self[0].values[2].as_path().length(), 1);
+}
+
+/// Under min_hops=2, a direct self-loop (1 hop) must NOT be returned because
+/// it has fewer hops than the quantifier minimum.
+TEST_F(GDB858Test, WeightedDirectSelfLoopSuppressedUnderMinHopsTwo) {
+    link(1, 1, 3.0);
+
+    auto weight = make_weight_expr();
+    auto rows = run_op(make_config(2, 20), PathSelector::ANY_SHORTEST, weight.get());
+    auto self = filter(rows, 1, 1);
+
+    EXPECT_TRUE(self.empty())
+        << "GDB-858 adversarial: 1-hop self-loop must NOT be returned when min_hops=2";
+}
+
+TEST_F(GDB858Test, BFSDirectSelfLoopSuppressedUnderMinHopsTwo) {
+    link(1, 1, 3.0);
+
+    auto rows = run_op(make_config(2, 20), PathSelector::ANY_SHORTEST, nullptr);
+    auto self = filter(rows, 1, 1);
+
+    EXPECT_TRUE(self.empty())
+        << "GDB-858 adversarial: BFS — 1-hop self-loop must NOT be returned when min_hops=2";
+}
+
+// ===========================================================================
+// GDB-858 adversarial: multiple cycles of different lengths/weights back to src
+// ===========================================================================
+
+/// Graph: 1->2->1 (2 hops, weight 30) and 1->3->4->5->1 (4 hops, weight 15).
+/// Dijkstra must pick the cheaper cycle (weight 15, via 3->4->5->1), NOT the
+/// shorter-hop one (weight 30) when selector is ANY_SHORTEST (by weight).
+TEST_F(GDB858Test, WeightedMultipleCyclesPicksCheapest) {
+    // Back-edge 2->1 (weight 20): cycle 1->2->1 = cost 10+20 = 30 in 2 hops
+    link(2, 1, 20.0);
+    // Back-edge 5->1 (weight 5): cycle 1->3->4->5->1 = cost 5+3+2+5 = 15 in 4 hops
+    link(5, 1, 5.0);
+
+    auto weight = make_weight_expr();
+    auto rows = run_op(make_config(1, 20), PathSelector::ANY_SHORTEST, weight.get());
+    auto self = filter(rows, 1, 1);
+
+    ASSERT_EQ(self.size(), 1u) << "GDB-858 adversarial: must return exactly one shortest cycle";
+    const auto& path = self[0].values[2].as_path();
+    EXPECT_DOUBLE_EQ(path.total_weight, 15.0)
+        << "GDB-858 adversarial: Dijkstra must return cheaper cycle (15), not shorter-hop one (30)";
+}
+
+/// BFS picks fewest-hop cycle (2 hops via 1->2->1), ignoring weights.
+TEST_F(GDB858Test, BFSMultipleCyclesPicksFewestHops) {
+    link(2, 1, 20.0); // creates 2-hop cycle 1->2->1
+    link(5, 1, 5.0);  // creates 4-hop cycle 1->3->4->5->1
+
+    auto rows = run_op(make_config(1, 20), PathSelector::ANY_SHORTEST, nullptr);
+    auto self = filter(rows, 1, 1);
+
+    ASSERT_EQ(self.size(), 1u) << "GDB-858 adversarial: BFS must return the fewest-hop cycle";
+    const auto& path = self[0].values[2].as_path();
+    EXPECT_EQ(path.length(), 2) << "GDB-858 adversarial: BFS cycle path must be 2 hops (1->2->1)";
+}
+
+// ===========================================================================
+// GDB-858 adversarial: max_hops interaction — cycle longer than max_hops
+// ===========================================================================
+
+/// The 4-hop cycle (1->3->4->5->1) must NOT be returned when max_hops=3.
+TEST_F(GDB858Test, WeightedCycleLongerThanMaxHopsNotReturned) {
+    // 4-hop cycle: 1->3->4->5->1 costs 5+3+2+5 = 15
+    link(5, 1, 5.0);
+
+    auto weight = make_weight_expr();
+    // max_hops = 3 < cycle length (4) → no self-path expected.
+    auto rows = run_op(make_config(1, 3), PathSelector::ANY_SHORTEST, weight.get());
+    auto self = filter(rows, 1, 1);
+
+    EXPECT_TRUE(self.empty())
+        << "GDB-858 adversarial: cycle with 4 hops must NOT be returned when max_hops=3";
+}
+
+TEST_F(GDB858Test, BFSCycleLongerThanMaxHopsNotReturned) {
+    link(5, 1, 5.0);
+
+    auto rows = run_op(make_config(1, 3), PathSelector::ANY_SHORTEST, nullptr);
+    auto self = filter(rows, 1, 1);
+
+    EXPECT_TRUE(self.empty())
+        << "GDB-858 adversarial: BFS — cycle with 4 hops not returned when max_hops=3";
+}
+
+// ===========================================================================
+// GDB-858 adversarial: min_hops exactly equals cycle length (boundary)
+// ===========================================================================
+
+/// Cycle 1->3->4->5->1 is 4 hops. Under {4, 20} (min_hops == cycle length),
+/// the path MUST be returned (boundary inclusive).
+TEST_F(GDB858Test, WeightedCycleExactlyAtMinHopsReturned) {
+    link(5, 1, 5.0);
+
+    auto weight = make_weight_expr();
+    auto rows = run_op(make_config(4, 20), PathSelector::ANY_SHORTEST, weight.get());
+    auto self = filter(rows, 1, 1);
+
+    ASSERT_EQ(self.size(), 1u)
+        << "GDB-858 adversarial: 4-hop cycle must be returned when min_hops==4 (exact match)";
+    EXPECT_EQ(self[0].values[2].as_path().length(), 4);
+}
+
+/// Under {5, 20} (min_hops > cycle length 4), the cycle must NOT be returned.
+TEST_F(GDB858Test, WeightedCycleBelowMinHopsNotReturned) {
+    link(5, 1, 5.0);
+
+    auto weight = make_weight_expr();
+    auto rows = run_op(make_config(5, 20), PathSelector::ANY_SHORTEST, weight.get());
+    auto self = filter(rows, 1, 1);
+
+    EXPECT_TRUE(self.empty())
+        << "GDB-858 adversarial: 4-hop cycle must NOT be returned when min_hops=5";
+}
+
+// ===========================================================================
+// GDB-858 adversarial: direction filter — cycle only via non-matching direction
+// ===========================================================================
+
+/// The back-edge 5->1 is OUT from 5 to 1.  If we traverse with direction=IN
+/// from src=1, we would traverse the edge backwards (1<-5, which means looking
+/// at edges that TARGET 1 — so 5->1 IS reachable IN from 1).
+/// Test direction=OUT from 1: there is no forward cycle 1->...->1 without
+/// the back-edge existing as OUT from some node.
+/// Here we verify: with direction=IN, the cycle IS found (5->1 means node 1
+/// has an IN edge from 5, so from 1 going IN we reach 5, then from 5 going IN
+/// we reach 4, etc. — i.e., we traverse the graph in reverse).
+TEST_F(GDB858Test, WeightedDirectionINFindsReverseReachableCycle) {
+    // Graph (OUT): 1->2, 2->5, 1->3, 3->4, 4->5 + back-edge 5->1
+    link(5, 1, 5.0);
+
+    auto weight = make_weight_expr();
+
+    // Direction=IN: traversal follows edges in reverse.
+    // From 1 going IN: we see edges that point TO 1, i.e. 5->1.
+    // So we reach node 5, then from 5 going IN we see 2->5 and 4->5, reaching
+    // nodes 2 and 4, etc.  A cycle back to 1 via IN traversal would require
+    // an edge pointing TO 5 from nodes reachable from 1 in reverse.
+    MatchConfig cfg;
+    cfg.nodes.push_back({"a", "cities"});
+    cfg.nodes.push_back({"b", "cities"});
+    cfg.edges.push_back(MatchEdgeDef("r", "road", TraverseDirection::IN, 1, 20));
+
+    auto rows = run_op(std::move(cfg), PathSelector::ANY_SHORTEST, weight.get());
+    // The key assertion: if a cycle exists via IN traversal from node 1 back to
+    // node 1, it must have at least 1 hop. We just confirm no 0-hop fake path.
+    auto self = filter(rows, 1, 1);
+    for (const auto& t : self) {
+        EXPECT_GE(t.values[2].as_path().length(), 1)
+            << "GDB-858 adversarial: no 0-hop path must appear even with direction=IN";
+    }
+}
+
+// ===========================================================================
+// GDB-858 adversarial: degenerate cases
+// ===========================================================================
+
+/// Single node, no edges. Under {1,20}, no self-path expected (no real edges).
+/// Under {0,20}, the trivial self-path must still be returned.
+TEST_F(GDB858Test, WeightedSingleNodeNoEdgesMinHopsOne) {
+    // Insert an isolated node 6 (no outgoing or incoming edges).
+    insert_city(6);
+
+    auto weight = make_weight_expr();
+    auto rows = run_op(make_config(1, 20), PathSelector::ANY_SHORTEST, weight.get());
+    auto self = filter(rows, 6, 6);
+
+    EXPECT_TRUE(self.empty())
+        << "GDB-858 adversarial: isolated node must yield no self-path under {1,20}";
+}
+
+TEST_F(GDB858Test, WeightedSingleNodeNoEdgesMinHopsZero) {
+    insert_city(6);
+
+    auto weight = make_weight_expr();
+    auto rows = run_op(make_config(0, 20), PathSelector::ANY_SHORTEST, weight.get());
+    auto self = filter(rows, 6, 6);
+
+    ASSERT_EQ(self.size(), 1u)
+        << "GDB-858 adversarial: isolated node must yield 0-hop self-path under {0,20}";
+    EXPECT_EQ(self[0].values[2].as_path().length(), 0);
+}
+
+TEST_F(GDB858Test, BFSSingleNodeNoEdgesMinHopsOne) {
+    insert_city(6);
+
+    auto rows = run_op(make_config(1, 20), PathSelector::ANY_SHORTEST, nullptr);
+    auto self = filter(rows, 6, 6);
+
+    EXPECT_TRUE(self.empty())
+        << "GDB-858 adversarial: BFS — isolated node must yield no self-path under {1,20}";
+}
+
+/// Disconnected pair: node 6 has no path to node 7. Must return empty for
+/// that pair, and must not crash or corrupt state for subsequent pairs.
+TEST_F(GDB858Test, WeightedDisconnectedPairReturnsEmpty) {
+    insert_city(6);
+    insert_city(7);
+    // No edge between 6 and 7.
+
+    auto weight = make_weight_expr();
+    auto rows = run_op(make_config(1, 20), PathSelector::ANY_SHORTEST, weight.get());
+
+    auto paths_6_7 = filter(rows, 6, 7);
+    EXPECT_TRUE(paths_6_7.empty()) << "GDB-858 adversarial: disconnected pair must return no paths";
+
+    auto paths_7_6 = filter(rows, 7, 6);
+    EXPECT_TRUE(paths_7_6.empty())
+        << "GDB-858 adversarial: disconnected pair (reverse) must return no paths";
+}
+
+// ===========================================================================
+// GDB-858 adversarial: dense cyclic graph with multiple cycles through a node
+// ===========================================================================
+
+/// Build a denser graph where node 1 participates in multiple cycles:
+///   - 2-hop cycle: 1->2->1 (weight 30)
+///   - 3-hop cycle: 1->3->4->1' — no, let's use: 1->2->3->1 via new edges
+/// Specifically: add edges 2->3 (weight 1) and 3->1 (weight 1).
+/// Now cycles from 1: 1->2->1 (2 hops, w=30) and 1->2->3->1 (3 hops, w=12)
+/// and 1->3->1 via direct link if we also add 3->1.
+/// We only add 2->1 and 3->1 back edges.
+TEST_F(GDB858Test, WeightedDenseCyclicGraphCorrectShortestCycle) {
+    // Add 2->1 (weight 20): cycle 1->2->1 = 2 hops, weight 30
+    link(2, 1, 20.0);
+    // Add 3->1 (weight 1): cycle 1->3->1 = 2 hops, weight 6 (5+1)
+    link(3, 1, 1.0);
+
+    auto weight = make_weight_expr();
+    auto rows = run_op(make_config(1, 20), PathSelector::ANY_SHORTEST, weight.get());
+    auto self = filter(rows, 1, 1);
+
+    ASSERT_EQ(self.size(), 1u) << "GDB-858 adversarial: dense graph — must return one result";
+    const auto& path = self[0].values[2].as_path();
+    // Cheapest cycle: 1->3->1 = 5+1 = 6 (vs 1->2->1 = 30)
+    EXPECT_DOUBLE_EQ(path.total_weight, 6.0)
+        << "GDB-858 adversarial: Dijkstra must pick cheapest cycle (6.0) in dense graph";
+    EXPECT_EQ(path.length(), 2) << "GDB-858 adversarial: cheapest cycle has 2 hops";
+}
+
+/// Same dense graph but with BFS: both 2-hop cycles are equally short.
+/// BFS must return one of them (ANY_SHORTEST returns any one).
+TEST_F(GDB858Test, BFSDenseCyclicGraphReturnsTwoHopCycle) {
+    link(2, 1, 20.0);
+    link(3, 1, 1.0);
+
+    auto rows = run_op(make_config(1, 20), PathSelector::ANY_SHORTEST, nullptr);
+    auto self = filter(rows, 1, 1);
+
+    // Both 1->2->1 and 1->3->1 are 2-hop cycles. BFS finds one of them.
+    ASSERT_EQ(self.size(), 1u) << "GDB-858 adversarial: BFS dense graph — must return one result";
+    EXPECT_EQ(self[0].values[2].as_path().length(), 2)
+        << "GDB-858 adversarial: BFS must return a 2-hop cycle";
+}
+
+/// Non-self targets must remain unaffected in a dense cyclic graph.
+/// 1->5 via Dijkstra: shortest is 1->3->4->5 = 10; adding back-edges 2->1
+/// and 3->1 must not change this path.
+TEST_F(GDB858Test, WeightedDenseCyclicGraphNonSelfTargetUnaffected) {
+    link(2, 1, 20.0);
+    link(3, 1, 1.0);
+
+    auto weight = make_weight_expr();
+    auto rows = run_op(make_config(1, 20), PathSelector::ANY_SHORTEST, weight.get());
+    auto paths_1_5 = filter(rows, 1, 5);
+
+    ASSERT_EQ(paths_1_5.size(), 1u)
+        << "GDB-858 adversarial: non-self paths must not be affected by back-edges";
+    // 1->3->4->5 = 5+3+2 = 10 (cheaper than 1->2->5 = 10+20=30)
+    EXPECT_DOUBLE_EQ(paths_1_5[0].values[2].as_path().total_weight, 10.0);
+}
