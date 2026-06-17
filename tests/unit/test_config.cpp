@@ -305,21 +305,21 @@ TEST_F(ConfigFileTest, GDB853_ArchiveCleanupPolicyLoaded) {
 }
 
 TEST_F(ConfigFileTest, GDB853_MaxWalSendersLoaded) {
-    write_file(R"({"replication": {"max_wal_senders": 20}})");
+    write_file(R"({"replication_max_wal_senders": 20})");
     auto result = Config::load_from_file(tmp_path_);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->replication_max_wal_senders, 20);
 }
 
 TEST_F(ConfigFileTest, GDB853_KeepaliveIntervalMsLoaded) {
-    write_file(R"({"replication": {"keepalive_interval_ms": 5000}})");
+    write_file(R"({"replication_keepalive_interval_ms": 5000})");
     auto result = Config::load_from_file(tmp_path_);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->replication_keepalive_interval_ms, 5000);
 }
 
 TEST_F(ConfigFileTest, GDB853_SenderTimeoutMsLoaded) {
-    write_file(R"({"replication": {"sender_timeout_ms": 30000}})");
+    write_file(R"({"replication_sender_timeout_ms": 30000})");
     auto result = Config::load_from_file(tmp_path_);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->replication_sender_timeout_ms, 30000);
@@ -329,11 +329,9 @@ TEST_F(ConfigFileTest, GDB853_AllFiveMissingFieldsLoadedTogether) {
     write_file(R"({
         "archive_enabled": true,
         "archive_cleanup_policy": "delete_old",
-        "replication": {
-            "max_wal_senders": 20,
-            "keepalive_interval_ms": 5000,
-            "sender_timeout_ms": 30000
-        }
+        "replication_max_wal_senders": 20,
+        "replication_keepalive_interval_ms": 5000,
+        "replication_sender_timeout_ms": 30000
     })");
     auto result = Config::load_from_file(tmp_path_);
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -354,7 +352,7 @@ TEST_F(ConfigFileTest, GDB853_WrongTypedPortReturnsError) {
 
 TEST_F(ConfigFileTest, GDB853_WrongTypedMaxWalSendersReturnsError) {
     // max_wal_senders as a string should error.
-    write_file(R"({"replication": {"max_wal_senders": "x"}})");
+    write_file(R"({"replication_max_wal_senders": "x"})");
     auto result = Config::load_from_file(tmp_path_);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
@@ -389,13 +387,13 @@ TEST_F(ConfigFileTest, GDB853_FullValidConfigLoadsAllFields) {
         "auth_method": "trust",
         "archive_enabled": true,
         "archive_cleanup_policy": "delete_old",
+        "replication_max_wal_senders": 20,
+        "replication_keepalive_interval_ms": 5000,
+        "replication_sender_timeout_ms": 30000,
         "server": {"mode": "primary"},
         "replication": {
             "primary_host": "db-primary",
             "primary_port": 5432,
-            "max_wal_senders": 20,
-            "keepalive_interval_ms": 5000,
-            "sender_timeout_ms": 30000,
             "retry_interval_ms": 3000,
             "max_retry_interval_ms": 30000,
             "promote_max_lag_bytes": 1048576,
@@ -428,4 +426,26 @@ TEST_F(ConfigFileTest, GDB853_UnknownExtraKeysAreIgnored) {
     auto result = Config::load_from_file(tmp_path_);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->port, 8080);
+}
+
+TEST_F(ConfigFileTest, GDB853_NegativeMaxWalSendersReturnsError) {
+    // Negative integer must be rejected (range guard: >= 0 required).
+    write_file(R"({"replication_max_wal_senders": -1})");
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST_F(ConfigFileTest, GDB853_NegativeKeepaliveIntervalMsReturnsError) {
+    write_file(R"({"replication_keepalive_interval_ms": -500})");
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST_F(ConfigFileTest, GDB853_NegativeSenderTimeoutMsReturnsError) {
+    write_file(R"({"replication_sender_timeout_ms": -1})");
+    auto result = Config::load_from_file(tmp_path_);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }

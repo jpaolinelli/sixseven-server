@@ -111,6 +111,50 @@ Result<Config> Config::load_from_file(const std::string& path) {
         return make_error(StatusCode::INVALID_ARGUMENT,
                           "archive_cleanup_policy must be a string, got wrong type");
     }
+    // NOTE: JSON key names replication_max_wal_senders, replication_keepalive_interval_ms,
+    // replication_sender_timeout_ms are flat top-level as documented in docs/configuration.md.
+    // apply_setting uses dotted sys_settings keys (replication.max_wal_senders etc.) - a
+    // pre-existing namespace mismatch between the two pathways; kept as-is to match the doc
+    // contract.
+    if (j.contains("replication_max_wal_senders") &&
+        j["replication_max_wal_senders"].is_number_integer()) {
+        auto v = j["replication_max_wal_senders"].get<int32_t>();
+        if (v < 0) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "replication_max_wal_senders must be >= 0, got: " +
+                                  std::to_string(v));
+        }
+        config.replication_max_wal_senders = v;
+    } else if (j.contains("replication_max_wal_senders")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "replication_max_wal_senders must be an integer, got wrong type");
+    }
+    if (j.contains("replication_keepalive_interval_ms") &&
+        j["replication_keepalive_interval_ms"].is_number_integer()) {
+        auto v = j["replication_keepalive_interval_ms"].get<int32_t>();
+        if (v < 0) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "replication_keepalive_interval_ms must be >= 0, got: " +
+                                  std::to_string(v));
+        }
+        config.replication_keepalive_interval_ms = v;
+    } else if (j.contains("replication_keepalive_interval_ms")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "replication_keepalive_interval_ms must be an integer, got wrong type");
+    }
+    if (j.contains("replication_sender_timeout_ms") &&
+        j["replication_sender_timeout_ms"].is_number_integer()) {
+        auto v = j["replication_sender_timeout_ms"].get<int32_t>();
+        if (v < 0) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "replication_sender_timeout_ms must be >= 0, got: " +
+                                  std::to_string(v));
+        }
+        config.replication_sender_timeout_ms = v;
+    } else if (j.contains("replication_sender_timeout_ms")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "replication_sender_timeout_ms must be an integer, got wrong type");
+    }
     if (j.contains("master_key_path") && j["master_key_path"].is_string()) {
         config.master_key_path = j["master_key_path"].get<std::string>();
     } else if (j.contains("master_key_path")) {
@@ -153,26 +197,6 @@ Result<Config> Config::load_from_file(const std::string& path) {
             return make_error(
                 StatusCode::INVALID_ARGUMENT,
                 "replication.primary_port must be an unsigned integer, got wrong type");
-        }
-        if (repl.contains("max_wal_senders") && repl["max_wal_senders"].is_number_integer()) {
-            config.replication_max_wal_senders = repl["max_wal_senders"].get<int32_t>();
-        } else if (repl.contains("max_wal_senders")) {
-            return make_error(StatusCode::INVALID_ARGUMENT,
-                              "replication.max_wal_senders must be an integer, got wrong type");
-        }
-        if (repl.contains("keepalive_interval_ms") &&
-            repl["keepalive_interval_ms"].is_number_integer()) {
-            config.replication_keepalive_interval_ms = repl["keepalive_interval_ms"].get<int32_t>();
-        } else if (repl.contains("keepalive_interval_ms")) {
-            return make_error(
-                StatusCode::INVALID_ARGUMENT,
-                "replication.keepalive_interval_ms must be an integer, got wrong type");
-        }
-        if (repl.contains("sender_timeout_ms") && repl["sender_timeout_ms"].is_number_integer()) {
-            config.replication_sender_timeout_ms = repl["sender_timeout_ms"].get<int32_t>();
-        } else if (repl.contains("sender_timeout_ms")) {
-            return make_error(StatusCode::INVALID_ARGUMENT,
-                              "replication.sender_timeout_ms must be an integer, got wrong type");
         }
         if (repl.contains("retry_interval_ms") && repl["retry_interval_ms"].is_number()) {
             config.replication_retry_interval_ms = repl["retry_interval_ms"].get<int32_t>();
