@@ -1,4 +1,4 @@
-﻿#include "sixseven/common/status.h"
+#include "sixseven/common/status.h"
 #include "sixseven/common/value.h"
 #include "sixseven/index/btree_key.h"
 
