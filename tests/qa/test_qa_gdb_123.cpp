@@ -5,53 +5,29 @@
 /// search with k=0, k > dataset, duplicate vectors, M=0, identical vectors,
 /// insert-after-reset, and filtered search edge cases.
 
+#include "sixseven/common/platform.h"
 #include "sixseven/storage/buffer_pool.h"
-#include "sixseven/common/platform.h"
 #include "sixseven/storage/disk_manager.h"
-#include "sixseven/common/platform.h"
 #include "sixseven/vector/hnsw_index.h"
-#include "sixseven/common/platform.h"
 #include "sixseven/vector/hnsw_page.h"
-#include "sixseven/common/platform.h"
 
 #include <gtest/gtest.h>
-#include "sixseven/common/platform.h"
 
 #include <cmath>
-#include "sixseven/common/platform.h"
 #include <filesystem>
-#include "sixseven/common/platform.h"
 #include <numeric>
-#include "sixseven/common/platform.h"
 #include <random>
-#include "sixseven/common/platform.h"
 #include <set>
-#include "sixseven/common/platform.h"
 #include <vector>
-#include "sixseven/common/platform.h"
+
+#include "qa_hnsw_test_helpers.h"
 
 using namespace sixseven;
 
 namespace {
 
-class TempDir {
-public:
-    TempDir() {
-        path_ = std::filesystem::temp_directory_path() / "sixseven_qa123_XXXXXX";
-        std::string tmpl = path_.string();
-        char* result = sixseven_platform::mkdtemp(tmpl.data());
-        EXPECT_NE(result, nullptr);
-        path_ = result;
-    }
-    ~TempDir() { std::filesystem::remove_all(path_); }
-    [[nodiscard]] const std::filesystem::path& path() const { return path_; }
-
-private:
-    std::filesystem::path path_;
-};
-
 struct Fixture {
-    TempDir tmp;
+    sixseven::QaTempDir tmp{"sixseven_qa123"};
     DiskManager disk_manager;
     FileId file_id = 0;
     std::unique_ptr<BufferPoolManager> bpm;
