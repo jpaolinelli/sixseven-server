@@ -1139,7 +1139,8 @@ TEST(QA_EmbeddingWorker, GDB859_AllJobsFail) {
 
     constexpr int kJobs = 5;
     for (int i = 0; i < kJobs; ++i) {
-        ASSERT_TRUE(pool.enqueue(make_qa31_insert_job(1, i, 0, "fail_" + std::to_string(i))).has_value());
+        ASSERT_TRUE(
+            pool.enqueue(make_qa31_insert_job(1, i, 0, "fail_" + std::to_string(i))).has_value());
     }
 
     for (int i = 0; i < 200 && static_cast<int>(pool.stats().jobs_failed) < kJobs; ++i) {
