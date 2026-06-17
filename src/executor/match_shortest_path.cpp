@@ -16,6 +16,29 @@ namespace sixseven {
 
 namespace {
 
+/// A table-aware node identity: (table_id, pk).
+///
+/// Keying BFS visited/cost maps by bare PK Value causes cross-table PK
+/// collisions when src and tgt nodes belong to different tables (GDB-851).
+/// Using NodeId prevents two nodes from different tables with the same PK
+/// from being treated as the same node.
+struct NodeId {
+    table_id_t table_id = 0;
+    Value pk;
+
+    bool operator==(const NodeId& other) const {
+        return table_id == other.table_id && ValueEqual{}(pk, other.pk);
+    }
+};
+
+struct NodeIdHash {
+    size_t operator()(const NodeId& n) const {
+        size_t h = std::hash<table_id_t>{}(n.table_id);
+        h ^= ValueHash{}(n.pk) + 0x9e3779b9U + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+
 /// Convert a Value PK to int64_t for PathStep storage.
 /// Returns an error if the PK is not an integer type.
 Result<int64_t> pk_to_int64(const Value& pk) {
@@ -289,6 +312,8 @@ MatchShortestPathOperator::binding_to_tuple(const std::unordered_map<std::string
 Result<std::vector<Path>>
 MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
                                                const Value& tgt_pk,
+                                               table_id_t src_table_id,
+                                               table_id_t tgt_table_id,
                                                const std::string& edge_type,
                                                TraverseDirection direction,
                                                int32_t max_depth) {
@@ -302,7 +327,11 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
     }
 
     // Check trivial case: source == target.
-    if (ValueEqual{}(src_pk, tgt_pk)) {
+    // Requires BOTH the same table AND the same PK — GDB-851.
+    // For homogeneous edges src_table_id == tgt_table_id so the check is
+    // equivalent to the old bare-pk comparison; for heterogeneous edges it
+    // correctly rejects the bogus 0-hop path.
+    if (src_table_id == tgt_table_id && ValueEqual{}(src_pk, tgt_pk)) {
         Path p;
         p.steps.push_back({*src_int, -1});
         result_paths.push_back(std::move(p));
@@ -310,23 +339,25 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
     }
 
     // BFS with path tracking.
-    // Each entry tracks: current node PK, the full path so far.
+    // Each entry tracks: current node identity (table+pk), the full path so far.
     struct BfsEntry {
-        Value current_pk;
+        NodeId current_node;
         Path path_so_far;
     };
 
     std::deque<BfsEntry> queue;
-    // Use Value-based visited set to correctly handle all PK types.
-    std::unordered_set<Value, ValueHash, ValueEqual> globally_visited;
+    // Key visited set by (table_id, pk) to prevent cross-table PK collisions
+    // from pruning real paths or fabricating meeting points (GDB-851).
+    std::unordered_set<NodeId, NodeIdHash> globally_visited;
     size_t total_visited = 0;
 
     // Seed BFS from source.
+    NodeId src_node{src_table_id, src_pk};
     BfsEntry start;
-    start.current_pk = src_pk;
+    start.current_node = src_node;
     start.path_so_far.steps.push_back({*src_int, -1});
     queue.push_back(std::move(start));
-    globally_visited.insert(src_pk);
+    globally_visited.insert(src_node);
 
     int32_t depth = 0;
     bool found_at_this_depth = false;
@@ -337,7 +368,7 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
 
         // For ALL_SHORTEST: nodes discovered at this level should not block
         // other paths at the same level from reaching the same node.
-        std::vector<Value> level_new_nodes;
+        std::vector<NodeId> level_new_nodes;
 
         for (size_t i = 0; i < level_size; ++i) {
             auto entry = std::move(queue.front());
@@ -348,16 +379,24 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
                 return ok(std::move(result_paths));
             }
 
-            auto neighbors = get_neighbors(edge_type, entry.current_pk, direction);
+            auto neighbors = get_neighbors(edge_type, entry.current_node.pk, direction);
             if (!neighbors) {
                 continue;
             }
+
+            // Neighbors of a src-table node arrive in the tgt table (OUT), and vice
+            // versa.  For homogeneous edges src_table_id == tgt_table_id so this is
+            // a no-op; for heterogeneous it picks the correct table per hop.
+            table_id_t nbr_table_id =
+                (entry.current_node.table_id == src_table_id) ? tgt_table_id : src_table_id;
 
             for (auto& [nbr_pk, edge_id] : *neighbors) {
                 auto nbr_int = pk_to_int64(nbr_pk);
                 if (!nbr_int) {
                     return tl::unexpected(nbr_int.error());
                 }
+
+                NodeId nbr_node{nbr_table_id, nbr_pk};
 
                 // Build new path.
                 Path new_path = entry.path_so_far;
@@ -366,8 +405,8 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
                 // Add the new node.
                 new_path.steps.push_back({*nbr_int, -1});
 
-                // Check if we've reached the target.
-                if (ValueEqual{}(nbr_pk, tgt_pk)) {
+                // Check if we've reached the target (table AND pk must match).
+                if (nbr_node == NodeId{tgt_table_id, tgt_pk}) {
                     found_at_this_depth = true;
                     result_paths.push_back(std::move(new_path));
 
@@ -382,22 +421,26 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
                 }
 
                 // For ALL_SHORTEST/SHORTEST_K: allow multiple paths through same node at same
-                // level.
+                // level.  Key by NodeId to prevent cross-table PK collisions (GDB-851).
                 if (path_selector_ == PathSelector::ANY_SHORTEST) {
-                    if (globally_visited.count(nbr_pk) > 0) {
+                    if (globally_visited.count(nbr_node) > 0) {
                         continue;
                     }
-                    globally_visited.insert(nbr_pk);
+                    globally_visited.insert(nbr_node);
                 } else {
                     // Don't revisit nodes from previous levels, but allow same-level visits.
-                    if (globally_visited.count(nbr_pk) > 0) {
+                    if (globally_visited.count(nbr_node) > 0) {
                         continue;
                     }
-                    level_new_nodes.push_back(nbr_pk);
+                    // Copy (not move) here: nbr_node is still consumed below to build
+                    // the next BfsEntry. Moving twice (GDB-1270) leaves a moved-from
+                    // NodeId whose pk is empty for non-trivially-copyable PKs (e.g.
+                    // string PKs), silently dropping path expansions.
+                    level_new_nodes.push_back(nbr_node);
                 }
 
                 BfsEntry next;
-                next.current_pk = std::move(nbr_pk);
+                next.current_node = std::move(nbr_node);
                 next.path_so_far = std::move(new_path);
                 queue.push_back(std::move(next));
             }
@@ -439,6 +482,21 @@ Result<void> MatchShortestPathOperator::execute_shortest_paths() {
 
     int32_t max_depth = edge_def.max_hops.value_or(100);
 
+    // Look up table IDs so we can key BFS state by (table_id, pk) and avoid
+    // cross-table PK collisions when src and tgt belong to different tables
+    // (heterogeneous edges — GDB-851).
+    auto src_schema = catalog_.get_table(database_id_, src_node.label);
+    if (!src_schema) {
+        return tl::unexpected(src_schema.error());
+    }
+    const table_id_t src_table_id = src_schema->table_id;
+
+    auto tgt_schema = catalog_.get_table(database_id_, tgt_node.label);
+    if (!tgt_schema) {
+        return tl::unexpected(tgt_schema.error());
+    }
+    const table_id_t tgt_table_id = tgt_schema->table_id;
+
     // Get all source and target PKs.
     auto src_pks = get_all_pks(src_node.label);
     if (!src_pks) {
@@ -453,12 +511,20 @@ Result<void> MatchShortestPathOperator::execute_shortest_paths() {
     // For each source-target pair, find shortest path(s).
     for (const auto& src_pk : *src_pks) {
         for (const auto& tgt_pk : *tgt_pks) {
-            auto paths =
-                weight_expr_
-                    ? find_weighted_shortest_paths(
-                          src_pk, tgt_pk, edge_def.edge_type, edge_def.direction, max_depth)
-                    : find_shortest_paths(
-                          src_pk, tgt_pk, edge_def.edge_type, edge_def.direction, max_depth);
+            auto paths = weight_expr_ ? find_weighted_shortest_paths(src_pk,
+                                                                     tgt_pk,
+                                                                     src_table_id,
+                                                                     tgt_table_id,
+                                                                     edge_def.edge_type,
+                                                                     edge_def.direction,
+                                                                     max_depth)
+                                      : find_shortest_paths(src_pk,
+                                                            tgt_pk,
+                                                            src_table_id,
+                                                            tgt_table_id,
+                                                            edge_def.edge_type,
+                                                            edge_def.direction,
+                                                            max_depth);
             if (!paths) {
                 // For weighted paths, propagate errors (e.g., negative weight).
                 // For unweighted BFS, continue on failure (legacy behavior).
@@ -597,6 +663,8 @@ MatchShortestPathOperator::get_neighbors_with_weight(const std::string& edge_typ
 Result<std::vector<Path>>
 MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
                                                         const Value& tgt_pk,
+                                                        table_id_t src_table_id,
+                                                        table_id_t tgt_table_id,
                                                         const std::string& edge_type,
                                                         TraverseDirection direction,
                                                         int32_t max_depth) {
@@ -607,8 +675,8 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
         return tl::unexpected(src_int.error());
     }
 
-    // Trivial case: source == target.
-    if (ValueEqual{}(src_pk, tgt_pk)) {
+    // Trivial case: source == target — requires same table AND same pk (GDB-851).
+    if (src_table_id == tgt_table_id && ValueEqual{}(src_pk, tgt_pk)) {
         Path p;
         p.steps.push_back({*src_int, -1});
         p.total_weight = 0.0;
@@ -619,25 +687,29 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
     // Dijkstra's algorithm with priority queue.
     struct DijkstraEntry {
         double cost;
-        Value current_pk;
+        NodeId current_node;
         Path path_so_far;
 
         bool operator>(const DijkstraEntry& other) const { return cost > other.cost; }
     };
 
     std::priority_queue<DijkstraEntry, std::vector<DijkstraEntry>, std::greater<>> pq;
-    std::unordered_map<Value, double, ValueHash, ValueEqual> best_cost;
+    // Key best_cost by NodeId (table_id, pk) to avoid cross-table PK collisions
+    // that would make Dijkstra believe it has already found a cheaper path to an
+    // unrelated node in the other table (GDB-851).
+    std::unordered_map<NodeId, double, NodeIdHash> best_cost;
     double best_dest_cost = std::numeric_limits<double>::infinity();
     size_t total_visited = 0;
 
     // Seed from source.
+    NodeId src_node{src_table_id, src_pk};
     DijkstraEntry start;
     start.cost = 0.0;
-    start.current_pk = src_pk;
+    start.current_node = src_node;
     start.path_so_far.steps.push_back({*src_int, -1});
     start.path_so_far.total_weight = 0.0;
     pq.push(std::move(start));
-    best_cost[src_pk] = 0.0;
+    best_cost[src_node] = 0.0;
 
     while (!pq.empty()) {
         auto entry = std::move(const_cast<DijkstraEntry&>(pq.top()));
@@ -684,8 +756,8 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
             return ok(std::move(result_paths));
         }
 
-        // Skip if we've already found a better path to this node.
-        auto it = best_cost.find(entry.current_pk);
+        // Skip if we've already found a better path to this node (keyed by NodeId).
+        auto it = best_cost.find(entry.current_node);
         if (it != best_cost.end() && entry.cost > it->second) {
             continue;
         }
@@ -695,10 +767,14 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
             continue;
         }
 
-        auto neighbors = get_neighbors_with_weight(edge_type, entry.current_pk, direction);
+        auto neighbors = get_neighbors_with_weight(edge_type, entry.current_node.pk, direction);
         if (!neighbors) {
             return tl::unexpected(neighbors.error());
         }
+
+        // Neighbors of a src-table node arrive in the tgt table (OUT), and vice versa.
+        table_id_t nbr_table_id =
+            (entry.current_node.table_id == src_table_id) ? tgt_table_id : src_table_id;
 
         for (auto& [nbr_pk, edge_id, weight] : *neighbors) {
             double new_cost = entry.cost + weight;
@@ -708,14 +784,16 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
                 return tl::unexpected(nbr_int.error());
             }
 
+            NodeId nbr_node{nbr_table_id, nbr_pk};
+
             // Build new path.
             Path new_path = entry.path_so_far;
             new_path.steps.back().edge_id = edge_id;
             new_path.steps.push_back({*nbr_int, -1});
             new_path.total_weight = new_cost;
 
-            // Check if we've reached the target.
-            if (ValueEqual{}(nbr_pk, tgt_pk)) {
+            // Check if we've reached the target (table AND pk must match — GDB-851).
+            if (nbr_node == NodeId{tgt_table_id, tgt_pk}) {
                 if (path_selector_ == PathSelector::SHORTEST_K) {
                     // For SHORTEST_K, accept all paths — we sort and trim later.
                     if (new_cost < best_dest_cost) {
@@ -738,7 +816,8 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
 
             // Only visit if we found a better (or equal, for ALL_SHORTEST) cost.
             // For SHORTEST_K, allow revisits at higher costs to find K paths.
-            auto cost_it = best_cost.find(nbr_pk);
+            // Key by NodeId to prevent cross-table PK collisions (GDB-851).
+            auto cost_it = best_cost.find(nbr_node);
             bool dominated = false;
             if (cost_it != best_cost.end()) {
                 if (path_selector_ == PathSelector::ALL_SHORTEST) {
@@ -752,12 +831,12 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
             }
             if (!dominated) {
                 if (cost_it == best_cost.end() || new_cost < cost_it->second) {
-                    best_cost[nbr_pk] = new_cost;
+                    best_cost[nbr_node] = new_cost;
                 }
 
                 DijkstraEntry next;
                 next.cost = new_cost;
-                next.current_pk = std::move(nbr_pk);
+                next.current_node = std::move(nbr_node);
                 next.path_so_far = std::move(new_path);
                 pq.push(std::move(next));
             }
@@ -769,8 +848,9 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
     } else if (path_selector_ == PathSelector::SHORTEST_K &&
                static_cast<int32_t>(result_paths.size()) > shortest_k_) {
         // Sort by total weight so we keep the K cheapest paths.
-        std::sort(result_paths.begin(), result_paths.end(),
-                  [](const Path& a, const Path& b) { return a.total_weight < b.total_weight; });
+        std::sort(result_paths.begin(), result_paths.end(), [](const Path& a, const Path& b) {
+            return a.total_weight < b.total_weight;
+        });
         result_paths.resize(shortest_k_);
     }
     return ok(std::move(result_paths));

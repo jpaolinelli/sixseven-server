@@ -64,6 +64,8 @@ private:
     /// targets. Returns paths grouped by target node.
     Result<std::vector<Path>> find_shortest_paths(const Value& src_pk,
                                                   const Value& tgt_pk,
+                                                  table_id_t src_table_id,
+                                                  table_id_t tgt_table_id,
                                                   const std::string& edge_type,
                                                   TraverseDirection direction,
                                                   int32_t max_depth);
@@ -71,6 +73,8 @@ private:
     /// Dijkstra-based weighted shortest path finding.
     Result<std::vector<Path>> find_weighted_shortest_paths(const Value& src_pk,
                                                            const Value& tgt_pk,
+                                                           table_id_t src_table_id,
+                                                           table_id_t tgt_table_id,
                                                            const std::string& edge_type,
                                                            TraverseDirection direction,
                                                            int32_t max_depth);
