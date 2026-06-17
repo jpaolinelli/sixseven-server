@@ -1,5 +1,7 @@
 #include "sixseven/index/bm25_index.h"
 
+#include "sixseven/index/index_encoding.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -9,6 +11,8 @@
 
 namespace sixseven {
 
+using namespace index_encoding;
+
 namespace {
 
 constexpr uint32_t kBm25Magic = 0x424D3235; // "BM25"
@@ -17,111 +21,6 @@ constexpr uint32_t kBm25Version = 1;
 // Record tags for data-page tuples.
 constexpr uint8_t kRecordDoc = 0;
 constexpr uint8_t kRecordPosting = 1;
-
-// --- Little-endian byte packing helpers -------------------------------------
-
-void put_u8(std::vector<uint8_t>& buf, uint8_t v) {
-    buf.push_back(v);
-}
-
-void put_u16(std::vector<uint8_t>& buf, uint16_t v) {
-    buf.push_back(static_cast<uint8_t>(v & 0xFF));
-    buf.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
-}
-
-void put_u32(std::vector<uint8_t>& buf, uint32_t v) {
-    for (int i = 0; i < 4; ++i) {
-        buf.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xFF));
-    }
-}
-
-void put_u64(std::vector<uint8_t>& buf, uint64_t v) {
-    for (int i = 0; i < 8; ++i) {
-        buf.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xFF));
-    }
-}
-
-void put_double(std::vector<uint8_t>& buf, double v) {
-    uint64_t bits = 0;
-    std::memcpy(&bits, &v, sizeof(bits));
-    put_u64(buf, bits);
-}
-
-void put_bytes(std::vector<uint8_t>& buf, const std::string& s) {
-    buf.insert(buf.end(), s.begin(), s.end());
-}
-
-/// Cursor-based reader over a byte span. Tracks an offset and an `ok` flag that
-/// trips on any out-of-bounds read so callers can validate after the fact.
-struct Reader {
-    std::span<const uint8_t> data;
-    size_t pos = 0;
-    bool ok = true;
-
-    bool ensure(size_t n) {
-        if (pos + n > data.size()) {
-            ok = false;
-            return false;
-        }
-        return true;
-    }
-
-    uint8_t u8() {
-        if (!ensure(1)) {
-            return 0;
-        }
-        return data[pos++];
-    }
-
-    uint16_t u16() {
-        if (!ensure(2)) {
-            return 0;
-        }
-        uint16_t v = static_cast<uint16_t>(data[pos]) | (static_cast<uint16_t>(data[pos + 1]) << 8);
-        pos += 2;
-        return v;
-    }
-
-    uint32_t u32() {
-        if (!ensure(4)) {
-            return 0;
-        }
-        uint32_t v = 0;
-        for (int i = 0; i < 4; ++i) {
-            v |= static_cast<uint32_t>(data[pos + static_cast<size_t>(i)]) << (8 * i);
-        }
-        pos += 4;
-        return v;
-    }
-
-    uint64_t u64() {
-        if (!ensure(8)) {
-            return 0;
-        }
-        uint64_t v = 0;
-        for (int i = 0; i < 8; ++i) {
-            v |= static_cast<uint64_t>(data[pos + static_cast<size_t>(i)]) << (8 * i);
-        }
-        pos += 8;
-        return v;
-    }
-
-    double dbl() {
-        uint64_t bits = u64();
-        double v = 0.0;
-        std::memcpy(&v, &bits, sizeof(v));
-        return v;
-    }
-
-    std::string str(size_t n) {
-        if (!ensure(n)) {
-            return {};
-        }
-        std::string s(reinterpret_cast<const char*>(data.data() + pos), n);
-        pos += n;
-        return s;
-    }
-};
 
 } // namespace
 
@@ -297,21 +196,21 @@ Result<PageId> Bm25Index::persist(BufferPoolManager& bpm, const Bm25Index& index
 
     for (const auto& [rid, dl] : index.doc_lengths_) {
         std::vector<uint8_t> rec;
-        put_u8(rec, kRecordDoc);
-        put_u32(rec, rid.page_id);
-        put_u16(rec, rid.slot_id);
-        put_u32(rec, dl);
+        write_u8(rec, kRecordDoc);
+        write_u32(rec, rid.page_id);
+        write_u16(rec, rid.slot_id);
+        write_u32(rec, dl);
         records.push_back(std::move(rec));
     }
     for (const auto& [term, list] : index.postings_) {
         for (const auto& p : list) {
             std::vector<uint8_t> rec;
-            put_u8(rec, kRecordPosting);
-            put_u32(rec, p.rid.page_id);
-            put_u16(rec, p.rid.slot_id);
-            put_u32(rec, p.tf);
-            put_u16(rec, static_cast<uint16_t>(term.size()));
-            put_bytes(rec, term);
+            write_u8(rec, kRecordPosting);
+            write_u32(rec, p.rid.page_id);
+            write_u16(rec, p.rid.slot_id);
+            write_u32(rec, p.tf);
+            write_u16(rec, static_cast<uint16_t>(term.size()));
+            rec.insert(rec.end(), term.begin(), term.end());
             records.push_back(std::move(rec));
         }
     }
@@ -375,23 +274,23 @@ Result<PageId> Bm25Index::persist(BufferPoolManager& bpm, const Bm25Index& index
 
     // Serialize and write the metadata tuple.
     std::vector<uint8_t> meta;
-    put_u32(meta, kBm25Magic);
-    put_u32(meta, kBm25Version);
-    put_double(meta, index.config_.k1);
-    put_double(meta, index.config_.b);
-    put_u8(meta, index.config_.analyzer.lowercase ? 1 : 0);
-    put_u8(meta, index.config_.analyzer.remove_stopwords ? 1 : 0);
-    put_u8(meta, index.config_.analyzer.stem ? 1 : 0);
-    put_u32(meta, index.config_.analyzer.min_token_length);
-    put_u32(meta, static_cast<uint32_t>(index.doc_lengths_.size()));
-    put_u64(meta, index.total_doc_len_);
-    put_u32(meta, first_data_page_id);
-    put_u32(meta, data_page_count);
+    write_u32(meta, kBm25Magic);
+    write_u32(meta, kBm25Version);
+    write_double(meta, index.config_.k1);
+    write_double(meta, index.config_.b);
+    write_u8(meta, index.config_.analyzer.lowercase ? 1 : 0);
+    write_u8(meta, index.config_.analyzer.remove_stopwords ? 1 : 0);
+    write_u8(meta, index.config_.analyzer.stem ? 1 : 0);
+    write_u32(meta, index.config_.analyzer.min_token_length);
+    write_u32(meta, static_cast<uint32_t>(index.doc_lengths_.size()));
+    write_u64(meta, index.total_doc_len_);
+    write_u32(meta, first_data_page_id);
+    write_u32(meta, data_page_count);
     // Custom stop-word set (empty means "use the default English list").
-    put_u32(meta, static_cast<uint32_t>(index.config_.analyzer.stopwords.size()));
+    write_u32(meta, static_cast<uint32_t>(index.config_.analyzer.stopwords.size()));
     for (const auto& sw : index.config_.analyzer.stopwords) {
-        put_u16(meta, static_cast<uint16_t>(sw.size()));
-        put_bytes(meta, sw);
+        write_u16(meta, static_cast<uint16_t>(sw.size()));
+        meta.insert(meta.end(), sw.begin(), sw.end());
     }
 
     (*meta_page)->set_page_type(PageType::BM25_META);
@@ -423,35 +322,122 @@ Result<std::unique_ptr<Bm25Index>> Bm25Index::load(BufferPoolManager& bpm, PageI
         return make_error(meta_tuple.error().code, "BM25 meta tuple missing");
     }
 
-    Reader r{std::span<const uint8_t>(meta_tuple->data(), meta_tuple->size())};
-    const uint32_t magic = r.u32();
-    const uint32_t version = r.u32();
-    if (magic != kBm25Magic || version != kBm25Version) {
+    Reader r(std::span<const uint8_t>(meta_tuple->data(), meta_tuple->size()));
+
+    auto magic_r = r.read_u32();
+    if (!magic_r) {
+        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/false);
+        return make_error(magic_r.error().code, "bm25 load: " + magic_r.error().message);
+    }
+    auto version_r = r.read_u32();
+    if (!version_r) {
+        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/false);
+        return make_error(version_r.error().code, "bm25 load: " + version_r.error().message);
+    }
+    if (*magic_r != kBm25Magic || *version_r != kBm25Version) {
         (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/false);
         return make_error(StatusCode::INVALID_ARGUMENT, "BM25 meta page: bad magic/version");
     }
 
     auto index = std::make_unique<Bm25Index>();
     Bm25Config cfg;
-    cfg.k1 = r.dbl();
-    cfg.b = r.dbl();
-    cfg.analyzer.lowercase = r.u8() != 0;
-    cfg.analyzer.remove_stopwords = r.u8() != 0;
-    cfg.analyzer.stem = r.u8() != 0;
-    cfg.analyzer.min_token_length = r.u32();
-    const uint32_t doc_count = r.u32();
-    const uint64_t total_doc_len = r.u64();
-    const PageId first_data_page_id = r.u32();
-    const uint32_t data_page_count = r.u32();
-    const uint32_t stopword_count = r.u32();
-    for (uint32_t i = 0; i < stopword_count; ++i) {
-        const uint16_t len = r.u16();
-        cfg.analyzer.stopwords.insert(r.str(len));
-    }
-    if (!r.ok) {
+
+    auto k1_r = r.read_double();
+    if (!k1_r) {
         (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/false);
-        return make_error(StatusCode::INVALID_ARGUMENT, "BM25 meta page truncated");
+        return make_error(k1_r.error().code, "bm25 load: " + k1_r.error().message);
     }
+    cfg.k1 = *k1_r;
+
+    auto b_r = r.read_double();
+    if (!b_r) {
+        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/false);
+        return make_error(b_r.error().code, "bm25 load: " + b_r.error().message);
+    }
+    cfg.b = *b_r;
+
+    auto lowercase_r = r.read_u8();
+    if (!lowercase_r) {
+        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/false);
+        return make_error(lowercase_r.error().code, "bm25 load: " + lowercase_r.error().message);
+    }
+    cfg.analyzer.lowercase = *lowercase_r != 0;
+
+    auto stopwords_flag_r = r.read_u8();
+    if (!stopwords_flag_r) {
+        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/false);
+        return make_error(stopwords_flag_r.error().code,
+                          "bm25 load: " + stopwords_flag_r.error().message);
+    }
+    cfg.analyzer.remove_stopwords = *stopwords_flag_r != 0;
+
+    auto stem_r = r.read_u8();
+    if (!stem_r) {
+        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/false);
+        return make_error(stem_r.error().code, "bm25 load: " + stem_r.error().message);
+    }
+    cfg.analyzer.stem = *stem_r != 0;
+
+    auto min_token_r = r.read_u32();
+    if (!min_token_r) {
+        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/false);
+        return make_error(min_token_r.error().code, "bm25 load: " + min_token_r.error().message);
+    }
+    cfg.analyzer.min_token_length = *min_token_r;
+
+    auto doc_count_r = r.read_u32();
+    if (!doc_count_r) {
+        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/false);
+        return make_error(doc_count_r.error().code, "bm25 load: " + doc_count_r.error().message);
+    }
+    const uint32_t doc_count = *doc_count_r;
+
+    auto total_doc_len_r = r.read_u64();
+    if (!total_doc_len_r) {
+        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/false);
+        return make_error(total_doc_len_r.error().code,
+                          "bm25 load: " + total_doc_len_r.error().message);
+    }
+    const uint64_t total_doc_len = *total_doc_len_r;
+
+    auto first_data_page_r = r.read_u32();
+    if (!first_data_page_r) {
+        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/false);
+        return make_error(first_data_page_r.error().code,
+                          "bm25 load: " + first_data_page_r.error().message);
+    }
+    const PageId first_data_page_id = *first_data_page_r;
+
+    auto data_page_count_r = r.read_u32();
+    if (!data_page_count_r) {
+        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/false);
+        return make_error(data_page_count_r.error().code,
+                          "bm25 load: " + data_page_count_r.error().message);
+    }
+    const uint32_t data_page_count = *data_page_count_r;
+
+    auto stopword_count_r = r.read_u32();
+    if (!stopword_count_r) {
+        (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/false);
+        return make_error(stopword_count_r.error().code,
+                          "bm25 load: " + stopword_count_r.error().message);
+    }
+    const uint32_t stopword_count = *stopword_count_r;
+
+    for (uint32_t i = 0; i < stopword_count; ++i) {
+        auto len_r = r.read_u16();
+        if (!len_r) {
+            (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/false);
+            return make_error(len_r.error().code, "bm25 load: " + len_r.error().message);
+        }
+        auto sw_r = r.read_bytes(*len_r);
+        if (!sw_r) {
+            (void)bpm.unpin_page(meta_page_id, /*is_dirty=*/false);
+            return make_error(sw_r.error().code, "bm25 load: " + sw_r.error().message);
+        }
+        cfg.analyzer.stopwords.insert(std::move(*sw_r));
+    }
+
     (void)doc_count; // doc_count is recomputed from DOC records below.
 
     index->create(cfg);
@@ -490,27 +476,41 @@ Result<std::unique_ptr<Bm25Index>> Bm25Index::load(BufferPoolManager& bpm, PageI
             if (!tuple) {
                 continue;
             }
-            Reader rr{std::span<const uint8_t>(tuple->data(), tuple->size())};
-            const uint8_t tag = rr.u8();
+            Reader rr(std::span<const uint8_t>(tuple->data(), tuple->size()));
+            auto tag_r = rr.read_u8();
+            if (!tag_r) {
+                continue;
+            }
+            const uint8_t tag = *tag_r;
             if (tag == kRecordDoc) {
-                RID rid;
-                rid.page_id = rr.u32();
-                rid.slot_id = rr.u16();
-                const uint32_t dl = rr.u32();
-                if (rr.ok) {
-                    index->doc_lengths_[rid] = dl;
-                    index->total_doc_len_ += dl;
+                auto page_id_r = rr.read_u32();
+                auto slot_id_r = rr.read_u16();
+                auto dl_r = rr.read_u32();
+                if (!page_id_r || !slot_id_r || !dl_r) {
+                    continue;
                 }
+                RID rid;
+                rid.page_id = *page_id_r;
+                rid.slot_id = *slot_id_r;
+                const uint32_t dl = *dl_r;
+                index->doc_lengths_[rid] = dl;
+                index->total_doc_len_ += dl;
             } else if (tag == kRecordPosting) {
-                RID rid;
-                rid.page_id = rr.u32();
-                rid.slot_id = rr.u16();
-                const uint32_t tf = rr.u32();
-                const uint16_t term_len = rr.u16();
-                std::string term = rr.str(term_len);
-                if (rr.ok) {
-                    pending.push_back(PendingPosting{std::move(term), rid, tf});
+                auto page_id_r = rr.read_u32();
+                auto slot_id_r = rr.read_u16();
+                auto tf_r = rr.read_u32();
+                auto term_len_r = rr.read_u16();
+                if (!page_id_r || !slot_id_r || !tf_r || !term_len_r) {
+                    continue;
                 }
+                auto term_r = rr.read_bytes(*term_len_r);
+                if (!term_r) {
+                    continue;
+                }
+                RID rid;
+                rid.page_id = *page_id_r;
+                rid.slot_id = *slot_id_r;
+                pending.push_back(PendingPosting{std::move(*term_r), rid, *tf_r});
             }
         }
         auto un = bpm.unpin_page(pid, /*is_dirty=*/false);
