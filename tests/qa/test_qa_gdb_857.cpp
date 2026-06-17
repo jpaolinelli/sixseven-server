@@ -49,6 +49,7 @@ struct SimpleTempDir {
     }
     ~SimpleTempDir() { std::filesystem::remove_all(path_); }
     [[nodiscard]] const std::filesystem::path& path() const { return path_; }
+
 private:
     std::filesystem::path path_;
 };
@@ -65,19 +66,17 @@ TEST(QA_GDB857_MockHttpClient, PostCapturesUrlBodyAndHeaders) {
     QaMockHttpClient mock;
     mock.set_post_response(200, R"({"ok": true})");
 
-    std::vector<std::pair<std::string, std::string>> hdrs = {
-        {"Authorization", "Bearer tok"},
-        {"Content-Type", "application/json"}
-    };
+    std::vector<std::pair<std::string, std::string>> hdrs = {{"Authorization", "Bearer tok"},
+                                                             {"Content-Type", "application/json"}};
     auto result = mock.post("https://example.com/api", "request-body", hdrs);
 
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ(mock.last_post_url_,  "https://example.com/api");
+    EXPECT_EQ(mock.last_post_url_, "https://example.com/api");
     EXPECT_EQ(mock.last_post_body_, "request-body");
     ASSERT_EQ(mock.last_post_headers_.size(), 2u);
-    EXPECT_EQ(mock.last_post_headers_[0].first,  "Authorization");
+    EXPECT_EQ(mock.last_post_headers_[0].first, "Authorization");
     EXPECT_EQ(mock.last_post_headers_[0].second, "Bearer tok");
-    EXPECT_EQ(mock.last_post_headers_[1].first,  "Content-Type");
+    EXPECT_EQ(mock.last_post_headers_[1].first, "Content-Type");
     EXPECT_EQ(mock.post_call_count_, 1);
 }
 
@@ -107,11 +106,11 @@ TEST(QA_GDB857_MockHttpClient, PostCallCountIncrements) {
     mock.set_post_response(200, "{}");
 
     EXPECT_EQ(mock.post_call_count_, 0);
-    mock.post("u", "b", {});
+    (void)mock.post("u", "b", {});
     EXPECT_EQ(mock.post_call_count_, 1);
-    mock.post("u", "b", {});
+    (void)mock.post("u", "b", {});
     EXPECT_EQ(mock.post_call_count_, 2);
-    mock.post("u", "b", {});
+    (void)mock.post("u", "b", {});
     EXPECT_EQ(mock.post_call_count_, 3);
 }
 
@@ -159,19 +158,19 @@ TEST(QA_GDB857_MockHttpClient, TwoInstancesHaveIndependentState) {
     a.set_post_response(200, "A-body");
     b.set_post_response(201, "B-body");
 
-    a.post("url-A", "body-A", {{"X-Hdr", "a"}});
-    b.post("url-B", "body-B", {{"X-Hdr", "b"}});
-    b.post("url-B2", "body-B2", {});
+    (void)a.post("url-A", "body-A", {{"X-Hdr", "a"}});
+    (void)b.post("url-B", "body-B", {{"X-Hdr", "b"}});
+    (void)b.post("url-B2", "body-B2", {});
 
     // Instance A is unaffected by B's calls.
-    EXPECT_EQ(a.last_post_url_,  "url-A");
+    EXPECT_EQ(a.last_post_url_, "url-A");
     EXPECT_EQ(a.last_post_body_, "body-A");
     EXPECT_EQ(a.post_call_count_, 1);
     ASSERT_EQ(a.last_post_headers_.size(), 1u);
     EXPECT_EQ(a.last_post_headers_[0].second, "a");
 
     // Instance B reflects only its own calls.
-    EXPECT_EQ(b.last_post_url_,  "url-B2");
+    EXPECT_EQ(b.last_post_url_, "url-B2");
     EXPECT_EQ(b.last_post_body_, "body-B2");
     EXPECT_EQ(b.post_call_count_, 2);
     EXPECT_TRUE(b.last_post_headers_.empty()); // last call had no headers
@@ -197,9 +196,7 @@ TEST(QA_GDB857_Equivalence, HeaderCaptureDoesNotAffectOtherCapturedState) {
 
     // Simulate GDB-129 usage: call post with headers but only read url/body/count.
     std::vector<std::pair<std::string, std::string>> auth_hdrs = {
-        {"Authorization", "Bearer sk-key"},
-        {"Content-Type", "application/json"}
-    };
+        {"Authorization", "Bearer sk-key"}, {"Content-Type", "application/json"}};
     auto r = mock.post("https://api.openai.com/v1/embeddings", R"({"input":["hi"]})", auth_hdrs);
 
     ASSERT_TRUE(r.has_value());
@@ -265,8 +262,7 @@ TEST(QA_GDB857_QaTempDir, RaiiCleansUpOnDestruction) {
         std::filesystem::create_directories(captured / "sub");
     }
     // After destruction, directory should be gone.
-    EXPECT_FALSE(std::filesystem::exists(captured))
-        << "TempDir did not clean up: " << captured;
+    EXPECT_FALSE(std::filesystem::exists(captured)) << "TempDir did not clean up: " << captured;
 }
 
 TEST(QA_GDB857_QaTempDir, Qa123AndQa124PrefixesAreDifferent) {
