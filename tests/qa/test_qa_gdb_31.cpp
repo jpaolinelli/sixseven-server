@@ -1041,3 +1041,89 @@ TEST(QA_EmbeddingColumnE2E, UpdateThenInsertPriority) {
     EXPECT_EQ(drained[0].type, EmbeddingJob::Type::INSERT);
     EXPECT_EQ(drained[1].type, EmbeddingJob::Type::UPDATE);
 }
+
+// =============================================================================
+// GDB-859: exercise previously-dead QA31TestProvider helpers
+//          call_count() and set_should_fail()
+// =============================================================================
+
+// Verifies that the EmbeddingProvider::embed() single-text path increments
+// call_count() correctly.  The worker pool exclusively uses embed_batch(), so
+// this test calls embed() directly — the path taken by callers that use the
+// provider outside the worker pool (e.g. ad-hoc embedding, health probes).
+// A regression that accidentally short-circuits embed() (e.g. always returns
+// a cached result without incrementing) would leave call_count() at 0.
+TEST(QA_EmbeddingWorker, SingleEmbedCallCountIsTracked) {
+    auto provider = std::make_shared<QA31TestProvider>(4);
+
+    // call_count() starts at 0 before any embed() call.
+    EXPECT_EQ(provider->call_count(), 0);
+
+    // Each embed() call on a healthy provider must increment call_count_.
+    auto r1 = provider->embed("hello");
+    ASSERT_TRUE(r1.has_value());
+    ASSERT_EQ(static_cast<int>(r1->size()), 4);
+    EXPECT_EQ(provider->call_count(), 1);
+
+    auto r2 = provider->embed("world");
+    ASSERT_TRUE(r2.has_value());
+    EXPECT_EQ(provider->call_count(), 2);
+
+    // A failing embed() must NOT increment call_count_.
+    provider->set_should_fail(true);
+    auto r3 = provider->embed("fail");
+    ASSERT_FALSE(r3.has_value());
+    EXPECT_EQ(provider->call_count(), 2) << "failed embed must not increment call_count_";
+}
+
+// Verifies that when a provider transitions from healthy to failing mid-run
+// (via set_should_fail), the worker pool correctly surfaces the failure in
+// stats.jobs_failed rather than silently discarding or misclassifying it.
+// This exercises the dynamic-failure path that set_should_fail() was scaffolded
+// for but was never tested.
+TEST(QA_EmbeddingWorker, ProviderDynamicFailureIsSurfaced) {
+    auto provider = std::make_shared<QA31TestProvider>(32);
+    std::atomic<int> store_count{0};
+
+    EmbeddingWorkerConfig config;
+    config.num_workers = 1;
+    config.max_batch_size = 1;
+    config.max_retries = 0; // No retries — fail immediately.
+    config.base_backoff = std::chrono::milliseconds(1);
+
+    EmbeddingWorkerPool pool(config);
+    pool.register_provider("qa31_test", provider);
+    pool.set_store_callback(
+        [&](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> {
+            store_count.fetch_add(1);
+            return ok();
+        });
+
+    ASSERT_TRUE(pool.start().has_value());
+
+    // First job succeeds — provider is healthy.
+    ASSERT_TRUE(pool.enqueue(make_qa31_insert_job(1, 1, 0, "ok_before_fail")).has_value());
+
+    for (int i = 0; i < 100 && store_count.load() < 1; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_EQ(store_count.load(), 1) << "first job must succeed before flipping to fail";
+
+    // Flip the provider to failing mid-run.
+    provider->set_should_fail(true);
+
+    // Second job should now fail.
+    ASSERT_TRUE(pool.enqueue(make_qa31_insert_job(1, 2, 0, "fails_after_flip")).has_value());
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    ASSERT_TRUE(pool.stop().has_value());
+
+    // The first job was stored; the second was not.
+    EXPECT_EQ(store_count.load(), 1);
+    auto s = pool.stats();
+    EXPECT_EQ(s.jobs_processed, 1u);
+    // The failed job must appear in jobs_failed.  A regression that swallows
+    // the error (e.g. counting it as processed) would leave jobs_failed at 0.
+    EXPECT_GE(s.jobs_failed, 1u);
+}
