@@ -399,6 +399,7 @@ public:
 
     Result<std::vector<std::vector<float>>>
     embed_batch(const std::vector<std::string>& texts) override {
+        batch_count_.fetch_add(1, std::memory_order_relaxed);
         std::vector<std::vector<float>> results;
         results.reserve(texts.size());
         for (const auto& t : texts) {
@@ -634,4 +635,51 @@ TEST_F(QA_GDB297, WhitespaceOnlyDoesNotPoisonValidEmbeddings) {
 
     // Row 3: valid source → embedding exists
     EXPECT_FALSE(qr.rows[2][1].is_null()) << "row 3 poisoned by whitespace-only row";
+}
+
+// =============================================================================
+// GDB-854: batch_count_ is incremented by embed_batch (regression guard)
+// =============================================================================
+
+// Verify that TrackingProvider::batch_count() accurately reflects the number
+// of embed_batch() invocations. Enqueue 3 valid jobs in a single enqueue_batch
+// call; the worker pool collects them and issues exactly one embed_batch call,
+// so batch_count() must equal 1 after the pool drains.
+TEST(QA_GDB297_Worker, BatchCountTracksEmbedBatchInvocations) {
+    auto provider = std::make_shared<TrackingProvider>(4);
+
+    std::atomic<int> store_count{0};
+
+    EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = 32});
+    pool.register_provider("tracking", provider);
+    pool.set_store_callback(
+        [&](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> {
+            store_count.fetch_add(1, std::memory_order_relaxed);
+            return ok();
+        });
+
+    // Enqueue 3 valid jobs in a single call — the pool should service them in
+    // one embed_batch invocation (max_batch_size = 32, so no chunking).
+    std::vector<EmbeddingJob> jobs;
+    jobs.push_back(make_job(1, 1, 0, "alpha"));
+    jobs.push_back(make_job(1, 2, 0, "beta"));
+    jobs.push_back(make_job(1, 3, 0, "gamma"));
+
+    ASSERT_TRUE(pool.start().has_value());
+    ASSERT_TRUE(pool.enqueue_batch(std::move(jobs)).has_value());
+
+    // Wait until all 3 jobs have been stored.
+    for (int i = 0; i < 100 && store_count.load() < 3; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    ASSERT_TRUE(pool.stop().has_value());
+
+    EXPECT_EQ(store_count.load(), 3);
+
+    // batch_count() must equal 1: the 3 jobs arrived together and were
+    // dispatched to embed_batch in a single call.  If batch_count_ were still
+    // never incremented this assertion would see 0 and fail — mutation guard.
+    EXPECT_EQ(provider->batch_count(), 1)
+        << "embed_batch was not counted; batch_count_ is still dead code";
 }
