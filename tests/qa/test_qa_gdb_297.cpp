@@ -399,6 +399,7 @@ public:
 
     Result<std::vector<std::vector<float>>>
     embed_batch(const std::vector<std::string>& texts) override {
+        batch_count_.fetch_add(1, std::memory_order_relaxed);
         std::vector<std::vector<float>> results;
         results.reserve(texts.size());
         for (const auto& t : texts) {
@@ -634,4 +635,434 @@ TEST_F(QA_GDB297, WhitespaceOnlyDoesNotPoisonValidEmbeddings) {
 
     // Row 3: valid source → embedding exists
     EXPECT_FALSE(qr.rows[2][1].is_null()) << "row 3 poisoned by whitespace-only row";
+}
+
+// =============================================================================
+// GDB-854: batch_count_ is incremented by embed_batch (regression guard)
+// =============================================================================
+
+// Verify that TrackingProvider::batch_count() accurately reflects the number
+// of embed_batch() invocations. Enqueue 3 valid jobs in a single enqueue_batch
+// call; the worker pool collects them and issues exactly one embed_batch call,
+// so batch_count() must equal 1 after the pool drains.
+TEST(QA_GDB297_Worker, BatchCountTracksEmbedBatchInvocations) {
+    auto provider = std::make_shared<TrackingProvider>(4);
+
+    std::atomic<int> store_count{0};
+
+    EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = 32});
+    pool.register_provider("tracking", provider);
+    pool.set_store_callback(
+        [&](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> {
+            store_count.fetch_add(1, std::memory_order_relaxed);
+            return ok();
+        });
+
+    // Enqueue 3 valid jobs in a single call — the pool should service them in
+    // one embed_batch invocation (max_batch_size = 32, so no chunking).
+    std::vector<EmbeddingJob> jobs;
+    jobs.push_back(make_job(1, 1, 0, "alpha"));
+    jobs.push_back(make_job(1, 2, 0, "beta"));
+    jobs.push_back(make_job(1, 3, 0, "gamma"));
+
+    ASSERT_TRUE(pool.start().has_value());
+    ASSERT_TRUE(pool.enqueue_batch(std::move(jobs)).has_value());
+
+    // Wait until all 3 jobs have been stored.
+    for (int i = 0; i < 100 && store_count.load() < 3; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    ASSERT_TRUE(pool.stop().has_value());
+
+    EXPECT_EQ(store_count.load(), 3);
+
+    // batch_count() must equal 1: the 3 jobs arrived together and were
+    // dispatched to embed_batch in a single call.  If batch_count_ were still
+    // never incremented this assertion would see 0 and fail — mutation guard.
+    EXPECT_EQ(provider->batch_count(), 1)
+        << "embed_batch was not counted; batch_count_ is still dead code";
+}
+
+// =============================================================================
+// GDB-854 adversarial: batch_count tracks REAL embed_batch invocations
+// =============================================================================
+
+// AC: N jobs fitting in ONE batch (N <= max_batch_size) → batch_count==1,
+//     jobs_processed==N.  Mutation guard: removing fetch_add makes this see 0.
+TEST(QA_GDB297_Worker, GDB854_SingleBatch_NJobsFitInOne) {
+    auto provider = std::make_shared<TrackingProvider>(4);
+    std::atomic<int> store_count{0};
+
+    // max_batch_size=8, enqueue 8 valid jobs → exactly 1 embed_batch call.
+    constexpr int N = 8;
+    EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = static_cast<uint32_t>(N)});
+    pool.register_provider("tracking", provider);
+    pool.set_store_callback(
+        [&](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> {
+            store_count.fetch_add(1, std::memory_order_relaxed);
+            return ok();
+        });
+
+    std::vector<EmbeddingJob> jobs;
+    for (int i = 0; i < N; ++i) {
+        jobs.push_back(make_job(1, i + 1, 0, "text" + std::to_string(i)));
+    }
+
+    ASSERT_TRUE(pool.start().has_value());
+    ASSERT_TRUE(pool.enqueue_batch(std::move(jobs)).has_value());
+
+    for (int i = 0; i < 200 && store_count.load() < N; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_TRUE(pool.stop().has_value());
+
+    EXPECT_EQ(store_count.load(), N) << "not all jobs were processed";
+    EXPECT_EQ(pool.stats().jobs_processed, static_cast<uint64_t>(N));
+    // All N jobs fit in one dequeue → exactly 1 embed_batch invocation.
+    EXPECT_EQ(provider->batch_count(), 1)
+        << "expected exactly 1 embed_batch call for " << N << " jobs with max_batch_size=" << N;
+}
+
+// AC: N jobs EXCEEDING max_batch_size → batch_count==ceil(N/max_batch_size).
+// The worker dequeues at most max_batch_size jobs per iteration; each dequeue
+// produces one process_batch call → one embed_batch call per provider group.
+// With 1 worker and a small max_batch_size we can derive the exact count.
+TEST(QA_GDB297_Worker, GDB854_MultipleBatches_ExceedsMaxBatchSize) {
+    auto provider = std::make_shared<TrackingProvider>(4);
+    std::atomic<int> store_count{0};
+
+    constexpr uint32_t MAX_BATCH = 3;
+    constexpr int N = 7; // ceil(7/3) == 3 embed_batch calls
+    constexpr int EXPECTED_BATCHES =
+        (N + static_cast<int>(MAX_BATCH) - 1) / static_cast<int>(MAX_BATCH); // == 3
+
+    EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = MAX_BATCH});
+    pool.register_provider("tracking", provider);
+    pool.set_store_callback(
+        [&](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> {
+            store_count.fetch_add(1, std::memory_order_relaxed);
+            return ok();
+        });
+
+    std::vector<EmbeddingJob> jobs;
+    for (int i = 0; i < N; ++i) {
+        jobs.push_back(make_job(1, i + 1, 0, "word" + std::to_string(i)));
+    }
+
+    ASSERT_TRUE(pool.start().has_value());
+    ASSERT_TRUE(pool.enqueue_batch(std::move(jobs)).has_value());
+
+    for (int i = 0; i < 300 && store_count.load() < N; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_TRUE(pool.stop().has_value());
+
+    EXPECT_EQ(store_count.load(), N);
+    EXPECT_EQ(pool.stats().jobs_processed, static_cast<uint64_t>(N));
+    // batch_count must equal ceil(N / MAX_BATCH) — one embed_batch per dequeue.
+    EXPECT_EQ(provider->batch_count(), EXPECTED_BATCHES)
+        << "expected " << EXPECTED_BATCHES << " embed_batch calls for N=" << N
+        << " with max_batch_size=" << MAX_BATCH;
+}
+
+// AC: Multiple separate enqueue_batch calls → batch_count increments
+//     cumulatively per embed_batch invocation (not per enqueue call).
+// We serialize the calls: enqueue first batch, drain, then enqueue second.
+// This guarantees each batch of 3 goes through its own embed_batch, giving
+// a total of 2 embed_batch calls regardless of timing.
+TEST(QA_GDB297_Worker, GDB854_MultipleEnqueueCalls_CumulativeBatchCount) {
+    auto provider = std::make_shared<TrackingProvider>(4);
+    std::atomic<int> store_count{0};
+
+    // max_batch_size=32 — all jobs in each enqueue fit in one batch.
+    EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = 32});
+    pool.register_provider("tracking", provider);
+    pool.set_store_callback(
+        [&](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> {
+            store_count.fetch_add(1, std::memory_order_relaxed);
+            return ok();
+        });
+
+    ASSERT_TRUE(pool.start().has_value());
+
+    // First batch: 3 jobs.
+    {
+        std::vector<EmbeddingJob> jobs;
+        jobs.push_back(make_job(1, 1, 0, "first-a"));
+        jobs.push_back(make_job(1, 2, 0, "first-b"));
+        jobs.push_back(make_job(1, 3, 0, "first-c"));
+        ASSERT_TRUE(pool.enqueue_batch(std::move(jobs)).has_value());
+        // Wait for all 3 to complete before the second enqueue.
+        for (int i = 0; i < 200 && store_count.load() < 3; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        ASSERT_EQ(store_count.load(), 3) << "first batch not fully processed";
+    }
+
+    // At this point batch_count must be at least 1 (first batch done).
+    EXPECT_GE(provider->batch_count(), 1);
+
+    // Second batch: 2 jobs.
+    {
+        std::vector<EmbeddingJob> jobs;
+        jobs.push_back(make_job(1, 4, 0, "second-a"));
+        jobs.push_back(make_job(1, 5, 0, "second-b"));
+        ASSERT_TRUE(pool.enqueue_batch(std::move(jobs)).has_value());
+        for (int i = 0; i < 200 && store_count.load() < 5; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        ASSERT_EQ(store_count.load(), 5) << "second batch not fully processed";
+    }
+
+    ASSERT_TRUE(pool.stop().has_value());
+
+    EXPECT_EQ(pool.stats().jobs_processed, 5u);
+    // Each enqueue+drain cycle is one embed_batch call → cumulative total == 2.
+    EXPECT_GE(provider->batch_count(), 2)
+        << "batch_count must accumulate across separate enqueue calls";
+}
+
+// AC: Zero jobs / empty enqueue → batch_count unchanged (stays 0).
+// enqueue_batch([]) is a no-op; the worker never calls embed_batch.
+TEST(QA_GDB297_Worker, GDB854_EmptyEnqueue_BatchCountUnchanged) {
+    auto provider = std::make_shared<TrackingProvider>(4);
+
+    EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = 32});
+    pool.register_provider("tracking", provider);
+    pool.set_store_callback(
+        [](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> { return ok(); });
+
+    ASSERT_TRUE(pool.start().has_value());
+
+    // Enqueue an empty batch — must be a no-op.
+    ASSERT_TRUE(pool.enqueue_batch({}).has_value());
+
+    // Give the worker a moment to run (it should idle with nothing to do).
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    ASSERT_TRUE(pool.stop().has_value());
+
+    // No jobs, no embed_batch calls.
+    EXPECT_EQ(provider->batch_count(), 0)
+        << "embed_batch was called despite empty enqueue — batch_count must stay 0";
+    EXPECT_EQ(pool.stats().jobs_processed, 0u);
+    EXPECT_EQ(pool.stats().jobs_failed, 0u);
+}
+
+// AC: Cross-check batch_count vs jobs_processed — sum of batch sizes ==
+//     jobs embedded.  With all-valid jobs and max_batch_size=4, processing
+//     12 jobs must yield batch_count==3 and jobs_processed==12.
+// batch_count * max_batch_size >= jobs_processed (last batch may be partial).
+TEST(QA_GDB297_Worker, GDB854_CrossCheck_BatchCountVsJobsProcessed) {
+    auto provider = std::make_shared<TrackingProvider>(4);
+    std::atomic<int> store_count{0};
+
+    constexpr uint32_t MAX_BATCH = 4;
+    constexpr int N = 12;                                             // exactly 3 full batches
+    constexpr int EXPECTED_BATCHES = N / static_cast<int>(MAX_BATCH); // == 3
+
+    EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = MAX_BATCH});
+    pool.register_provider("tracking", provider);
+    pool.set_store_callback(
+        [&](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> {
+            store_count.fetch_add(1, std::memory_order_relaxed);
+            return ok();
+        });
+
+    std::vector<EmbeddingJob> jobs;
+    for (int i = 0; i < N; ++i) {
+        jobs.push_back(make_job(1, i + 1, 0, "item" + std::to_string(i)));
+    }
+
+    ASSERT_TRUE(pool.start().has_value());
+    ASSERT_TRUE(pool.enqueue_batch(std::move(jobs)).has_value());
+
+    for (int i = 0; i < 400 && store_count.load() < N; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_TRUE(pool.stop().has_value());
+
+    const int bc = provider->batch_count();
+    const uint64_t jp = pool.stats().jobs_processed;
+
+    EXPECT_EQ(store_count.load(), N);
+    EXPECT_EQ(jp, static_cast<uint64_t>(N));
+    // Exact: 12 jobs / max_batch_size 4 == 3 embed_batch calls.
+    EXPECT_EQ(bc, EXPECTED_BATCHES) << "batch_count=" << bc << " expected=" << EXPECTED_BATCHES;
+    // Consistency: batch_count * max_batch_size must be >= jobs_processed
+    // (the last batch may be partial, so batch_count * max_batch_size >= N).
+    EXPECT_GE(static_cast<uint64_t>(bc) * static_cast<uint64_t>(MAX_BATCH), jp)
+        << "batch sizes do not account for all processed jobs";
+}
+
+// AC: Concurrency — multiple workers calling embed_batch concurrently must
+//     not lose atomic updates to batch_count.  With num_workers=4 and enough
+//     jobs for each worker to get its own batch, batch_count must equal the
+//     total number of embed_batch calls with no lost updates.
+// Strategy: enqueue N*max_batch_size jobs so every worker gets at least N
+// batches; drain completely; assert batch_count == jobs_processed / max_batch_size
+// (since all batches are full).
+TEST(QA_GDB297_Worker, GDB854_Concurrency_AtomicBatchCountNoLostUpdates) {
+    auto provider = std::make_shared<TrackingProvider>(4);
+    std::atomic<int> store_count{0};
+
+    constexpr uint32_t NUM_WORKERS = 4;
+    constexpr uint32_t MAX_BATCH = 5;
+    // 60 jobs: 3 full batches per worker (with 4 workers).
+    constexpr int N = static_cast<int>(NUM_WORKERS * MAX_BATCH * 3);
+
+    EmbeddingWorkerPool pool({.num_workers = NUM_WORKERS, .max_batch_size = MAX_BATCH});
+    pool.register_provider("tracking", provider);
+    pool.set_store_callback(
+        [&](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> {
+            store_count.fetch_add(1, std::memory_order_relaxed);
+            return ok();
+        });
+
+    std::vector<EmbeddingJob> jobs;
+    for (int i = 0; i < N; ++i) {
+        jobs.push_back(make_job(1, i + 1, 0, "concurrent" + std::to_string(i)));
+    }
+
+    ASSERT_TRUE(pool.start().has_value());
+    ASSERT_TRUE(pool.enqueue_batch(std::move(jobs)).has_value());
+
+    // Bounded drain: wait for all N jobs (generous timeout for slow CI).
+    for (int i = 0; i < 600 && store_count.load() < N; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_TRUE(pool.stop().has_value());
+
+    EXPECT_EQ(store_count.load(), N) << "not all concurrent jobs processed";
+
+    const int bc = provider->batch_count();
+    const uint64_t jp = pool.stats().jobs_processed;
+
+    EXPECT_EQ(jp, static_cast<uint64_t>(N));
+
+    // batch_count must account for every job: bc * MAX_BATCH >= N.
+    // (Workers race, so some batches may be smaller than MAX_BATCH —
+    //  batch_count could be slightly above N/MAX_BATCH, but never below.)
+    EXPECT_GE(bc, 1) << "batch_count must be positive — atomic lost updates?";
+    EXPECT_GE(static_cast<uint64_t>(bc) * static_cast<uint64_t>(MAX_BATCH),
+              static_cast<uint64_t>(N))
+        << "batch_count=" << bc << " does not account for N=" << N
+        << " jobs at max_batch_size=" << MAX_BATCH << " — lost atomic update?";
+    // Upper bound: bc <= N (each call handles at least 1 job).
+    EXPECT_LE(bc, N) << "batch_count exceeds total job count — miscounting";
+}
+
+// AC: Mixed empty+valid jobs across multiple workers — batch_count counts
+//     only REAL embed_batch invocations, not filtered-empty groups.
+// Empty jobs are filtered before embed_batch is called; they must NOT inflate
+// batch_count.
+TEST(QA_GDB297_Worker, GDB854_MixedEmptyValid_BatchCountOnlyCountsRealCalls) {
+    auto provider = std::make_shared<TrackingProvider>(4);
+    std::atomic<int> store_count{0};
+
+    // 3 valid + 3 empty, max_batch_size=6 → all arrive in one dequeue.
+    // Only 1 embed_batch call (for the 3 valid jobs). Empty jobs are filtered.
+    EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = 6});
+    pool.register_provider("tracking", provider);
+    pool.set_store_callback(
+        [&](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> {
+            store_count.fetch_add(1, std::memory_order_relaxed);
+            return ok();
+        });
+
+    std::vector<EmbeddingJob> jobs;
+    jobs.push_back(make_job(1, 1, 0, "real-a"));
+    jobs.push_back(make_job(1, 2, 0, "")); // empty — filtered
+    jobs.push_back(make_job(1, 3, 0, "real-b"));
+    jobs.push_back(make_job(1, 4, 0, "")); // empty — filtered
+    jobs.push_back(make_job(1, 5, 0, "real-c"));
+    jobs.push_back(make_job(1, 6, 0, "")); // empty — filtered
+
+    ASSERT_TRUE(pool.start().has_value());
+    ASSERT_TRUE(pool.enqueue_batch(std::move(jobs)).has_value());
+
+    // Wait for the 3 valid store callbacks.
+    for (int i = 0; i < 200 && store_count.load() < 3; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    // Give a moment for the empty jobs to be counted as processed.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    ASSERT_TRUE(pool.stop().has_value());
+
+    EXPECT_EQ(store_count.load(), 3) << "only 3 valid jobs should be stored";
+    EXPECT_EQ(pool.stats().jobs_processed, 6u) << "all 6 counted as processed";
+
+    // Exactly 1 embed_batch call — empty jobs must not produce an extra call.
+    EXPECT_EQ(provider->batch_count(), 1)
+        << "batch_count must be 1 (empty jobs are filtered, not batched separately)";
+}
+
+// AC: All-empty batch → batch_count stays 0. The worker filters all jobs
+//     before calling embed_batch; the provider must never be invoked.
+TEST(QA_GDB297_Worker, GDB854_AllEmptyJobs_BatchCountStaysZero) {
+    auto provider = std::make_shared<TrackingProvider>(4);
+
+    EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = 32});
+    pool.register_provider("tracking", provider);
+    pool.set_store_callback(
+        [](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> { return ok(); });
+
+    std::vector<EmbeddingJob> jobs;
+    for (int i = 0; i < 5; ++i) {
+        jobs.push_back(make_job(1, i + 1, 0, "")); // all empty
+    }
+
+    ASSERT_TRUE(pool.start().has_value());
+    ASSERT_TRUE(pool.enqueue_batch(std::move(jobs)).has_value());
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    ASSERT_TRUE(pool.stop().has_value());
+
+    // Provider never called when all source texts are empty.
+    EXPECT_EQ(provider->batch_count(), 0) << "embed_batch must not be called for all-empty jobs";
+    EXPECT_EQ(pool.stats().jobs_processed, 5u);
+    EXPECT_EQ(pool.stats().jobs_failed, 0u);
+}
+
+// AC: Two providers in the same dequeued batch → two embed_batch calls
+//     (one per provider), so batch_count on each provider == 1.
+// This validates that batch_count tracks per-provider embed_batch calls, not
+// per-batch-dequeue calls.
+TEST(QA_GDB297_Worker, GDB854_TwoProviders_EachGetsSeparateEmbedBatchCall) {
+    auto provider_a = std::make_shared<TrackingProvider>(4);
+    auto provider_b = std::make_shared<TrackingProvider>(4);
+    std::atomic<int> store_count{0};
+
+    EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = 32});
+    pool.register_provider("tracking-a", provider_a);
+    pool.register_provider("tracking-b", provider_b);
+    pool.set_store_callback(
+        [&](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> {
+            store_count.fetch_add(1, std::memory_order_relaxed);
+            return ok();
+        });
+
+    // 2 jobs for provider-a, 3 jobs for provider-b — all fit in one dequeue.
+    std::vector<EmbeddingJob> jobs;
+    jobs.push_back(make_job(1, 1, 0, "a-one", "tracking-a"));
+    jobs.push_back(make_job(1, 2, 0, "a-two", "tracking-a"));
+    jobs.push_back(make_job(1, 3, 0, "b-one", "tracking-b"));
+    jobs.push_back(make_job(1, 4, 0, "b-two", "tracking-b"));
+    jobs.push_back(make_job(1, 5, 0, "b-three", "tracking-b"));
+
+    ASSERT_TRUE(pool.start().has_value());
+    ASSERT_TRUE(pool.enqueue_batch(std::move(jobs)).has_value());
+
+    for (int i = 0; i < 200 && store_count.load() < 5; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_TRUE(pool.stop().has_value());
+
+    EXPECT_EQ(store_count.load(), 5);
+    // Each provider is called exactly once (all 5 jobs fit in one dequeue).
+    EXPECT_EQ(provider_a->batch_count(), 1)
+        << "provider-a should have received exactly 1 embed_batch call";
+    EXPECT_EQ(provider_b->batch_count(), 1)
+        << "provider-b should have received exactly 1 embed_batch call";
 }
