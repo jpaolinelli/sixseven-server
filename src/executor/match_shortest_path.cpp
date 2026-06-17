@@ -1,4 +1,4 @@
-﻿#include "sixseven/executor/match_shortest_path.h"
+#include "sixseven/executor/match_shortest_path.h"
 
 #include "sixseven/common/coercion.h"
 #include "sixseven/common/value_hash.h"
@@ -413,17 +413,18 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
                 new_path.steps.push_back({*nbr_int, -1});
 
                 // Check if we've reached the target (table AND pk must match).
-                // Enforce quantifier bounds: only accept paths where
-                //   min_hops <= length < max_depth
-                // The strict upper bound corrects a BFS off-by-one (GDB-1273): the
-                // loop runs while depth < max_depth, so after ++depth, depth reaches
-                // max_depth and processes level-(max_depth-1) nodes whose neighbours
-                // land at max_depth hops — one step past the quantifier ceiling.
+                // Enforce quantifier bounds inclusively (matching VariableLengthMatch
+                // and Dijkstra): only accept paths where
+                //   min_hops <= length <= max_depth   (max_depth == max_hops)
+                // The upper bound corrects a BFS off-by-one (GDB-1273): the loop body
+                // can expand neighbours that land one hop past the quantifier ceiling,
+                // so a path of length max_hops+1 must be rejected here — but a path of
+                // length exactly max_hops is valid and must be kept.
                 // The lower bound ensures real discovered paths satisfy min_hops
                 // (GDB-1272): e.g. a direct self-loop under {2,N} has length 1 < 2.
                 if (nbr_node == NodeId{tgt_table_id, tgt_pk}) {
                     if (new_path.length() >= static_cast<int64_t>(min_hops) &&
-                        new_path.length() < static_cast<int64_t>(max_depth)) {
+                        new_path.length() <= static_cast<int64_t>(max_depth)) {
                         found_at_this_depth = true;
                         result_paths.push_back(std::move(new_path));
 

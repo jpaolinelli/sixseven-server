@@ -326,6 +326,33 @@ TEST_F(GDB858Test, WeightedNormalPathUnaffected) {
     EXPECT_DOUBLE_EQ(path.total_weight, 10.0);
 }
 
+/// GDB-1273 regression: a legitimate (src!=tgt) BFS path whose length is
+/// EXACTLY max_hops must be RETURNED.  The shortest 1->4 path (1->3->4) is
+/// 2 hops; under {1,2} it sits exactly at the quantifier ceiling.  The
+/// pre-fix BFS used a strict `length < max_depth` bound (max_depth==max_hops)
+/// and wrongly DROPPED it, returning zero rows.  The inclusive `<=` bound,
+/// consistent with Dijkstra and VariableLengthMatchOperator, must keep it.
+TEST_F(GDB858Test, BFSPathExactlyAtMaxHopsReturned) {
+    auto rows = run_op(make_config(1, 2), PathSelector::ANY_SHORTEST, nullptr);
+    auto paths = filter(rows, 1, 4);
+
+    ASSERT_EQ(paths.size(), 1u)
+        << "GDB-1273: BFS path of length exactly max_hops (2) must be returned";
+    EXPECT_EQ(paths[0].values[2].as_path().length(), 2);
+}
+
+/// Consistency companion: the Dijkstra variant (already inclusive) must also
+/// return the same length==max_hops path, so both operators agree.
+TEST_F(GDB858Test, WeightedPathExactlyAtMaxHopsReturned) {
+    auto weight = make_weight_expr();
+    auto rows = run_op(make_config(1, 2), PathSelector::ANY_SHORTEST, weight.get());
+    auto paths = filter(rows, 1, 4);
+
+    ASSERT_EQ(paths.size(), 1u)
+        << "GDB-1273: Dijkstra path of length exactly max_hops (2) must be returned";
+    EXPECT_EQ(paths[0].values[2].as_path().length(), 2);
+}
+
 // ===========================================================================
 // GDB-858 adversarial: direct self-loop edge (1-hop cycle x->x)
 // ===========================================================================
@@ -422,28 +449,45 @@ TEST_F(GDB858Test, BFSMultipleCyclesPicksFewestHops) {
 // GDB-858 adversarial: max_hops interaction — cycle longer than max_hops
 // ===========================================================================
 
-/// The 4-hop cycle (1->3->4->5->1) must NOT be returned when max_hops=3.
+/// No self-cycle may be returned when every cycle is longer than max_hops.
+/// With the 5->1 back-edge the graph has two cycles back to 1: 1->2->5->1
+/// (3 hops) and 1->3->4->5->1 (4 hops).  Under max_hops=2 BOTH exceed the
+/// ceiling, so no self-path is valid.  (max_hops=3 would NOT test this intent:
+/// the 3-hop cycle 1->2->5->1 is then legitimately in-bounds and must be
+/// returned — exactly the inclusive-bound behavior fixed in GDB-1273.)
 TEST_F(GDB858Test, WeightedCycleLongerThanMaxHopsNotReturned) {
-    // 4-hop cycle: 1->3->4->5->1 costs 5+3+2+5 = 15
     link(5, 1, 5.0);
 
     auto weight = make_weight_expr();
-    // max_hops = 3 < cycle length (4) → no self-path expected.
-    auto rows = run_op(make_config(1, 3), PathSelector::ANY_SHORTEST, weight.get());
+    auto rows = run_op(make_config(1, 2), PathSelector::ANY_SHORTEST, weight.get());
     auto self = filter(rows, 1, 1);
 
     EXPECT_TRUE(self.empty())
-        << "GDB-858 adversarial: cycle with 4 hops must NOT be returned when max_hops=3";
+        << "GDB-858 adversarial: every cycle (>=3 hops) exceeds max_hops=2 → none returned";
 }
 
 TEST_F(GDB858Test, BFSCycleLongerThanMaxHopsNotReturned) {
     link(5, 1, 5.0);
 
-    auto rows = run_op(make_config(1, 3), PathSelector::ANY_SHORTEST, nullptr);
+    auto rows = run_op(make_config(1, 2), PathSelector::ANY_SHORTEST, nullptr);
     auto self = filter(rows, 1, 1);
 
     EXPECT_TRUE(self.empty())
-        << "GDB-858 adversarial: BFS — cycle with 4 hops not returned when max_hops=3";
+        << "GDB-858 adversarial: BFS — every cycle (>=3 hops) exceeds max_hops=2 → none returned";
+}
+
+/// Inclusive-bound counterpart (GDB-1273): under max_hops=3 the 3-hop cycle
+/// 1->2->5->1 IS valid and BFS (fewest hops) must return it.  This would FAIL
+/// on the pre-fix exclusive `length < max_hops` bound, which dropped it.
+TEST_F(GDB858Test, BFSCycleExactlyAtMaxHopsReturned) {
+    link(5, 1, 5.0);
+
+    auto rows = run_op(make_config(1, 3), PathSelector::ANY_SHORTEST, nullptr);
+    auto self = filter(rows, 1, 1);
+
+    ASSERT_EQ(self.size(), 1u)
+        << "GDB-1273: the 3-hop cycle 1->2->5->1 is in-bounds under max_hops=3";
+    EXPECT_EQ(self[0].values[2].as_path().length(), 3);
 }
 
 // ===========================================================================
