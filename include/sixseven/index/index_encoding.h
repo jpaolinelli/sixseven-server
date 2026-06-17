@@ -134,7 +134,7 @@ struct Reader {
 
     /// Read exactly `n` bytes as a std::string.
     [[nodiscard]] Result<std::string> read_bytes(size_t n) {
-        if (pos + n > data.size()) {
+        if (n > remaining()) {
             return make_error(StatusCode::IO_ERROR,
                               "index_encoding: truncated buffer reading " + std::to_string(n) +
                                   " bytes at offset " + std::to_string(pos));
@@ -163,7 +163,7 @@ struct Reader {
 
     /// Advance by `n` bytes — fails if there are not enough bytes remaining.
     [[nodiscard]] Result<void> skip(size_t n) {
-        if (pos + n > data.size()) {
+        if (n > remaining()) {
             return make_error(StatusCode::IO_ERROR,
                               "index_encoding: truncated buffer skipping " + std::to_string(n) +
                                   " bytes at offset " + std::to_string(pos));
