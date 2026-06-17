@@ -68,6 +68,7 @@ private:
                                                   table_id_t tgt_table_id,
                                                   const std::string& edge_type,
                                                   TraverseDirection direction,
+                                                  int32_t min_hops,
                                                   int32_t max_depth);
 
     /// Dijkstra-based weighted shortest path finding.
@@ -77,6 +78,7 @@ private:
                                                            table_id_t tgt_table_id,
                                                            const std::string& edge_type,
                                                            TraverseDirection direction,
+                                                           int32_t min_hops,
                                                            int32_t max_depth);
 
     /// Get neighbors with edge weight extracted from the weight expression.

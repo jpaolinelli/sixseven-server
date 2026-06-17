@@ -374,7 +374,12 @@ TEST_F(WeightedShortestPathTest, DisconnectedGraphReturnsEmpty) {
     EXPECT_TRUE(from_1_to_99.empty());
 }
 
-TEST_F(WeightedShortestPathTest, SameNodeReturnsZeroCostPath) {
+// GDB-858: Under {1,20} (min_hops=1) a same-node query must return NO results
+// because the acyclic graph has no real cycle from 1 back to 1.  The old
+// "SameNodeReturnsZeroCostPath" test enshrined the bug; corrected semantics here.
+TEST_F(WeightedShortestPathTest, SameNodeUnderMinHopsOneReturnsNoPath) {
+    // make_config() uses MatchEdgeDef("r", "road", OUT, 1, 20) → min_hops=1.
+    // The road graph (1->2->5, 1->3->4->5) has no cycle back to 1.
     auto weight = make_weight_expr();
     auto results =
         run_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST, weight.get());
@@ -386,7 +391,32 @@ TEST_F(WeightedShortestPathTest, SameNodeReturnsZeroCostPath) {
         }
     }
 
-    ASSERT_EQ(from_1_to_1.size(), 1u);
+    // With min_hops=1 and no cycle in the graph, 1->1 should produce ZERO paths.
+    EXPECT_TRUE(from_1_to_1.empty())
+        << "Under {1,20} a same-node query on an acyclic graph must return no path (GDB-858)";
+}
+
+// GDB-858: Under {0,20} (min_hops=0) the trivial 0-hop self-path IS correct.
+TEST_F(WeightedShortestPathTest, SameNodeUnderMinHopsZeroReturnsSelfPath) {
+    // Build a config with min_hops=0 (i.e. {0,20}).
+    MatchConfig config;
+    config.nodes.push_back({"a", "cities"});
+    config.nodes.push_back({"b", "cities"});
+    config.edges.push_back(MatchEdgeDef("r", "road", TraverseDirection::OUT, 0, 20));
+
+    auto weight = make_weight_expr();
+    auto results = run_match(config, make_schema(), PathSelector::ANY_SHORTEST, weight.get());
+
+    std::vector<Tuple> from_1_to_1;
+    for (auto& t : results) {
+        if (t.values[0].as_int64() == 1 && t.values[1].as_int64() == 1) {
+            from_1_to_1.push_back(std::move(t));
+        }
+    }
+
+    // With min_hops=0, the 0-hop self-path is a valid match.
+    ASSERT_EQ(from_1_to_1.size(), 1u)
+        << "Under {0,20} a same-node query must return the 0-hop self-path (GDB-858)";
     const auto& path = from_1_to_1[0].values[2].as_path();
     EXPECT_EQ(path.length(), 0);
     EXPECT_DOUBLE_EQ(path.total_weight, 0.0);

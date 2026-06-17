@@ -311,8 +311,11 @@ TEST_F(MatchShortestPathTest, ShortestKReturnsKPaths) {
     EXPECT_EQ(from_1_to_6[0].values[2].as_path().length(), 3);
 }
 
-TEST_F(MatchShortestPathTest, SameNodeReturnsZeroLengthPath) {
-    // ANY SHORTEST from 1 to 1 should return a path of length 0.
+// GDB-858: Under {1,10} (min_hops=1) the acyclic 'knows' graph produces no
+// cycle, so a same-node query must return ZERO paths.
+TEST_F(MatchShortestPathTest, SameNodeUnderMinHopsOneReturnsNoPath) {
+    // make_config() uses MatchEdgeDef("", "knows", OUT, 1, 10) → min_hops=1.
+    // The knows graph (1→2→3→6, 1→4→5→6) is acyclic, so no path 1→…→1 exists.
     auto results = run_shortest_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST);
 
     std::vector<Tuple> from_1_to_1;
@@ -322,8 +325,8 @@ TEST_F(MatchShortestPathTest, SameNodeReturnsZeroLengthPath) {
         }
     }
 
-    ASSERT_EQ(from_1_to_1.size(), 1u);
-    EXPECT_EQ(from_1_to_1[0].values[2].as_path().length(), 0);
+    EXPECT_TRUE(from_1_to_1.empty())
+        << "Under {1,10} a same-node query on an acyclic graph must return no path (GDB-858)";
 }
 
 TEST_F(MatchShortestPathTest, PathContainsCorrectNodes) {

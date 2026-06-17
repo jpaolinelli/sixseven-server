@@ -316,6 +316,7 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
                                                table_id_t tgt_table_id,
                                                const std::string& edge_type,
                                                TraverseDirection direction,
+                                               int32_t min_hops,
                                                int32_t max_depth) {
 
     std::vector<Path> result_paths;
@@ -331,7 +332,13 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
     // For homogeneous edges src_table_id == tgt_table_id so the check is
     // equivalent to the old bare-pk comparison; for heterogeneous edges it
     // correctly rejects the bogus 0-hop path.
-    if (src_table_id == tgt_table_id && ValueEqual{}(src_pk, tgt_pk)) {
+    //
+    // Only emit the 0-hop self-path when min_hops == 0.  If min_hops >= 1 the
+    // quantifier requires at least one real edge traversal, so (x,x) may only
+    // appear via a genuine cycle — returning an empty vector here lets BFS find
+    // that cycle (or correctly produce no result, consistent with
+    // VariableLengthMatchOperator — GDB-858).
+    if (src_table_id == tgt_table_id && ValueEqual{}(src_pk, tgt_pk) && min_hops == 0) {
         Path p;
         p.steps.push_back({*src_int, -1});
         result_paths.push_back(std::move(p));
@@ -406,16 +413,28 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
                 new_path.steps.push_back({*nbr_int, -1});
 
                 // Check if we've reached the target (table AND pk must match).
+                // Enforce quantifier bounds inclusively (matching VariableLengthMatch
+                // and Dijkstra): only accept paths where
+                //   min_hops <= length <= max_depth   (max_depth == max_hops)
+                // The upper bound corrects a BFS off-by-one (GDB-1273): the loop body
+                // can expand neighbours that land one hop past the quantifier ceiling,
+                // so a path of length max_hops+1 must be rejected here — but a path of
+                // length exactly max_hops is valid and must be kept.
+                // The lower bound ensures real discovered paths satisfy min_hops
+                // (GDB-1272): e.g. a direct self-loop under {2,N} has length 1 < 2.
                 if (nbr_node == NodeId{tgt_table_id, tgt_pk}) {
-                    found_at_this_depth = true;
-                    result_paths.push_back(std::move(new_path));
+                    if (new_path.length() >= static_cast<int64_t>(min_hops) &&
+                        new_path.length() <= static_cast<int64_t>(max_depth)) {
+                        found_at_this_depth = true;
+                        result_paths.push_back(std::move(new_path));
 
-                    if (path_selector_ == PathSelector::ANY_SHORTEST) {
-                        return ok(std::move(result_paths));
-                    }
-                    if (path_selector_ == PathSelector::SHORTEST_K &&
-                        static_cast<int32_t>(result_paths.size()) >= shortest_k_) {
-                        return ok(std::move(result_paths));
+                        if (path_selector_ == PathSelector::ANY_SHORTEST) {
+                            return ok(std::move(result_paths));
+                        }
+                        if (path_selector_ == PathSelector::SHORTEST_K &&
+                            static_cast<int32_t>(result_paths.size()) >= shortest_k_) {
+                            return ok(std::move(result_paths));
+                        }
                     }
                     continue;
                 }
@@ -480,6 +499,7 @@ Result<void> MatchShortestPathOperator::execute_shortest_paths() {
                           "MATCH shortest path nodes must have labels");
     }
 
+    int32_t min_hops = edge_def.min_hops.value_or(0);
     int32_t max_depth = edge_def.max_hops.value_or(100);
 
     // Look up table IDs so we can key BFS state by (table_id, pk) and avoid
@@ -517,6 +537,7 @@ Result<void> MatchShortestPathOperator::execute_shortest_paths() {
                                                                      tgt_table_id,
                                                                      edge_def.edge_type,
                                                                      edge_def.direction,
+                                                                     min_hops,
                                                                      max_depth)
                                       : find_shortest_paths(src_pk,
                                                             tgt_pk,
@@ -524,6 +545,7 @@ Result<void> MatchShortestPathOperator::execute_shortest_paths() {
                                                             tgt_table_id,
                                                             edge_def.edge_type,
                                                             edge_def.direction,
+                                                            min_hops,
                                                             max_depth);
             if (!paths) {
                 // For weighted paths, propagate errors (e.g., negative weight).
@@ -667,6 +689,7 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
                                                         table_id_t tgt_table_id,
                                                         const std::string& edge_type,
                                                         TraverseDirection direction,
+                                                        int32_t min_hops,
                                                         int32_t max_depth) {
     std::vector<Path> result_paths;
 
@@ -676,7 +699,10 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
     }
 
     // Trivial case: source == target — requires same table AND same pk (GDB-851).
-    if (src_table_id == tgt_table_id && ValueEqual{}(src_pk, tgt_pk)) {
+    // Only emit the 0-hop self-path when min_hops == 0; if min_hops >= 1 the
+    // quantifier requires at least one edge traversal and the self-path is
+    // only valid if reached via a real cycle (GDB-858).
+    if (src_table_id == tgt_table_id && ValueEqual{}(src_pk, tgt_pk) && min_hops == 0) {
         Path p;
         p.steps.push_back({*src_int, -1});
         p.total_weight = 0.0;
@@ -793,23 +819,28 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
             new_path.total_weight = new_cost;
 
             // Check if we've reached the target (table AND pk must match — GDB-851).
+            // Also enforce quantifier lower bound: only accept paths with length >=
+            // min_hops.  A direct self-loop under {1,N} must pass (length 1 >=
+            // min_hops 1); under {2,N} it must be rejected (GDB-1272).
             if (nbr_node == NodeId{tgt_table_id, tgt_pk}) {
-                if (path_selector_ == PathSelector::SHORTEST_K) {
-                    // For SHORTEST_K, accept all paths — we sort and trim later.
-                    if (new_cost < best_dest_cost) {
-                        best_dest_cost = new_cost;
+                if (new_path.length() >= static_cast<int64_t>(min_hops)) {
+                    if (path_selector_ == PathSelector::SHORTEST_K) {
+                        // For SHORTEST_K, accept all paths — we sort and trim later.
+                        if (new_cost < best_dest_cost) {
+                            best_dest_cost = new_cost;
+                        }
+                        result_paths.push_back(std::move(new_path));
+                    } else {
+                        // Skip paths that exceed the best known destination cost.
+                        if (new_cost > best_dest_cost) {
+                            continue;
+                        }
+                        if (new_cost < best_dest_cost) {
+                            best_dest_cost = new_cost;
+                            result_paths.clear();
+                        }
+                        result_paths.push_back(std::move(new_path));
                     }
-                    result_paths.push_back(std::move(new_path));
-                } else {
-                    // Skip paths that exceed the best known destination cost.
-                    if (new_cost > best_dest_cost) {
-                        continue;
-                    }
-                    if (new_cost < best_dest_cost) {
-                        best_dest_cost = new_cost;
-                        result_paths.clear();
-                    }
-                    result_paths.push_back(std::move(new_path));
                 }
                 continue;
             }
