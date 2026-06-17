@@ -432,7 +432,11 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
                     if (globally_visited.count(nbr_node) > 0) {
                         continue;
                     }
-                    level_new_nodes.push_back(std::move(nbr_node));
+                    // Copy (not move) here: nbr_node is still consumed below to build
+                    // the next BfsEntry. Moving twice (GDB-1270) leaves a moved-from
+                    // NodeId whose pk is empty for non-trivially-copyable PKs (e.g.
+                    // string PKs), silently dropping path expansions.
+                    level_new_nodes.push_back(nbr_node);
                 }
 
                 BfsEntry next;
