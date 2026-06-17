@@ -730,40 +730,7 @@ TEST_F(QA_GDB282, PoolNotStartedStillInsertsSuccessfully) {
     pool2.reset();
 }
 
-// =============================================================================
-// BUG REPRODUCTION: Batch poisoning — one null source text in a multi-row
-// INSERT causes ALL embedding jobs in the batch to fail, losing valid ones.
-//
-// Root cause: EmbeddingWorkerPool::process_batch groups jobs by provider and
-// calls embed_batch. BuiltinProvider::embed_batch fails on the first empty
-// text and returns an error for the entire batch. All jobs (including valid
-// ones) are retried and eventually permanently failed.
-//
-// The fix should either:
-// (a) Skip creating embedding jobs for null/empty source texts, or
-// (b) Process individual job failures without failing the whole batch.
-// =============================================================================
-
-TEST_F(QA_GDB282, BUG_BatchPoisoningNullSourceLosesValidEmbeddings) {
-    exec_ok("CREATE TABLE t_poison (id INT, title TEXT, vec EMBEDDING(4, title, 'builtin/4'))");
-
-    // Single multi-row INSERT: rows 1 and 3 have text, rows 2 and 4 are NULL.
-    // All 4 jobs get batched together. The NULL-sourced jobs have empty
-    // source_text which causes embed_batch to fail, poisoning the entire batch.
-    exec_ok("INSERT INTO t_poison (id, title) VALUES "
-            "(1, 'valid text one'), (2, NULL), (3, 'valid text two'), (4, NULL)");
-
-    ASSERT_TRUE(wait_for_pool());
-
-    auto qr = exec_ok("SELECT id, vec FROM t_poison ORDER BY id");
-    ASSERT_EQ(qr.rows.size(), 4u);
-
-    // BUG: rows 1 and 3 SHOULD have embeddings but they are null because
-    // the batch was poisoned by rows 2 and 4.
-    ASSERT_FALSE(qr.rows[0][1].is_null()) << "BUG: row 1 embedding lost due to batch poisoning";
-    EXPECT_EQ(qr.rows[0][1].as_embedding().size(), 4u);
-    EXPECT_TRUE(qr.rows[1][1].is_null()) << "row 2 correctly null";
-    ASSERT_FALSE(qr.rows[2][1].is_null()) << "BUG: row 3 embedding lost due to batch poisoning";
-    EXPECT_EQ(qr.rows[2][1].as_embedding().size(), 4u);
-    EXPECT_TRUE(qr.rows[3][1].is_null()) << "row 4 correctly null";
-}
+// NOTE: The batch-poisoning repro (mixed NULL/valid multi-row INSERT) is
+// covered canonically by TEST_F(QA_GDB297, MixedNullValidBatchDoesNotPoisonValidEmbeddings)
+// in test_qa_gdb_297.cpp — that file is the regression suite for the GDB-297
+// fix and expands on the scenario extensively. Duplicate removed per GDB-864.
