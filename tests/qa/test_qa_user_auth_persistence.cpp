@@ -103,11 +103,45 @@ protected:
     std::unique_ptr<UserManager> users_;
 };
 
-// The default admin is seeded on first boot and survives restart.
+// The default admin is seeded on first boot and its mutations survive restart.
+// A bare user_exists check after restart cannot distinguish a persisted record
+// from a fresh re-seed (boot() re-seeds when load returns empty).  Instead we
+// alter the admin's password before restarting so the stored hash differs from
+// the seed-default; if persistence is broken the re-seed would restore the
+// default hash and the comparison below would fail.
 TEST_F(QAUserAuthPersistence, DefaultAdminPresentAndPersistent) {
-    EXPECT_TRUE(users_->user_exists("demo"));
+    ASSERT_TRUE(users_->user_exists("demo"));
+
+    // Capture the hash BEFORE any alteration so we know what the seed produces.
+    auto seed_record = users_->get_user("demo");
+    ASSERT_TRUE(seed_record.has_value());
+    const std::string seed_hash = seed_record->password_hash;
+
+    // Mutate the admin's password so the stored record becomes distinguishable
+    // from a fresh seed.
+    auto alter_result =
+        engine_->execute("ALTER USER demo WITH PASSWORD 'changed_for_persistence_test'");
+    ASSERT_TRUE(alter_result.has_value()) << alter_result.error().message;
+
+    auto altered_record = users_->get_user("demo");
+    ASSERT_TRUE(altered_record.has_value());
+    const std::string altered_hash = altered_record->password_hash;
+    // Sanity: the new hash must differ from the seed hash.
+    ASSERT_NE(altered_hash, seed_hash);
+
+    // Simulate a server restart (teardown + re-boot from the same data dir).
     restart();
+
+    // The admin must still be present.
     EXPECT_TRUE(users_->user_exists("demo"));
+
+    // The persisted hash must match the altered value, NOT the original seed.
+    // If persistence were broken, boot() would re-seed "demo" with seed_hash,
+    // and this assertion would fail -- making the test mutation-grade.
+    auto reloaded = users_->get_user("demo");
+    ASSERT_TRUE(reloaded.has_value());
+    EXPECT_EQ(reloaded->password_hash, altered_hash);
+    EXPECT_NE(reloaded->password_hash, seed_hash);
 }
 
 // CREATE USER via SQL no longer errors with "user manager not initialized".
