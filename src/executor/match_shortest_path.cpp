@@ -316,6 +316,7 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
                                                table_id_t tgt_table_id,
                                                const std::string& edge_type,
                                                TraverseDirection direction,
+                                               int32_t min_hops,
                                                int32_t max_depth) {
 
     std::vector<Path> result_paths;
@@ -331,7 +332,13 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
     // For homogeneous edges src_table_id == tgt_table_id so the check is
     // equivalent to the old bare-pk comparison; for heterogeneous edges it
     // correctly rejects the bogus 0-hop path.
-    if (src_table_id == tgt_table_id && ValueEqual{}(src_pk, tgt_pk)) {
+    //
+    // Only emit the 0-hop self-path when min_hops == 0.  If min_hops >= 1 the
+    // quantifier requires at least one real edge traversal, so (x,x) may only
+    // appear via a genuine cycle — returning an empty vector here lets BFS find
+    // that cycle (or correctly produce no result, consistent with
+    // VariableLengthMatchOperator — GDB-858).
+    if (src_table_id == tgt_table_id && ValueEqual{}(src_pk, tgt_pk) && min_hops == 0) {
         Path p;
         p.steps.push_back({*src_int, -1});
         result_paths.push_back(std::move(p));
@@ -480,6 +487,7 @@ Result<void> MatchShortestPathOperator::execute_shortest_paths() {
                           "MATCH shortest path nodes must have labels");
     }
 
+    int32_t min_hops = edge_def.min_hops.value_or(0);
     int32_t max_depth = edge_def.max_hops.value_or(100);
 
     // Look up table IDs so we can key BFS state by (table_id, pk) and avoid
@@ -517,6 +525,7 @@ Result<void> MatchShortestPathOperator::execute_shortest_paths() {
                                                                      tgt_table_id,
                                                                      edge_def.edge_type,
                                                                      edge_def.direction,
+                                                                     min_hops,
                                                                      max_depth)
                                       : find_shortest_paths(src_pk,
                                                             tgt_pk,
@@ -524,6 +533,7 @@ Result<void> MatchShortestPathOperator::execute_shortest_paths() {
                                                             tgt_table_id,
                                                             edge_def.edge_type,
                                                             edge_def.direction,
+                                                            min_hops,
                                                             max_depth);
             if (!paths) {
                 // For weighted paths, propagate errors (e.g., negative weight).
@@ -667,6 +677,7 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
                                                         table_id_t tgt_table_id,
                                                         const std::string& edge_type,
                                                         TraverseDirection direction,
+                                                        int32_t min_hops,
                                                         int32_t max_depth) {
     std::vector<Path> result_paths;
 
@@ -676,7 +687,10 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
     }
 
     // Trivial case: source == target — requires same table AND same pk (GDB-851).
-    if (src_table_id == tgt_table_id && ValueEqual{}(src_pk, tgt_pk)) {
+    // Only emit the 0-hop self-path when min_hops == 0; if min_hops >= 1 the
+    // quantifier requires at least one edge traversal and the self-path is
+    // only valid if reached via a real cycle (GDB-858).
+    if (src_table_id == tgt_table_id && ValueEqual{}(src_pk, tgt_pk) && min_hops == 0) {
         Path p;
         p.steps.push_back({*src_int, -1});
         p.total_weight = 0.0;
