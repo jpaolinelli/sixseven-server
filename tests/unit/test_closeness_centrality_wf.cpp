@@ -1,4 +1,4 @@
-﻿#include "sixseven/catalog/catalog.h"
+#include "sixseven/catalog/catalog.h"
 #include "sixseven/graph/algorithm_registry.h"
 #include "sixseven/graph/closeness_centrality.h"
 #include "sixseven/graph/graph_engine.h"
