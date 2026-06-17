@@ -8,7 +8,6 @@
 
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/vector/builtin_provider.h"
-#include "sixseven/vector/http_client.h"
 #include "sixseven/vector/ollama_provider.h"
 #include "sixseven/vector/openai_provider.h"
 #include "sixseven/vector/provider_registry.h"
@@ -19,69 +18,14 @@
 #include <string>
 #include <vector>
 
+#include "qa_mock_http_client.h"
+
 using namespace sixseven;
 
 namespace {
 
-class MockHttpClient : public HttpClient {
-public:
-    void set_post_response(int status, const std::string& body) {
-        post_status_ = status;
-        post_body_ = body;
-    }
-    void set_get_response(int status, const std::string& body) {
-        get_status_ = status;
-        get_body_ = body;
-    }
-    void set_network_error(const std::string& msg) { network_error_ = msg; }
-
-    Result<HttpResponse>
-    post(const std::string& url,
-         const std::string& body,
-         const std::vector<std::pair<std::string, std::string>>& headers) override {
-        last_post_url_ = url;
-        last_post_body_ = body;
-        last_post_headers_ = headers;
-        post_call_count_++;
-        if (!network_error_.empty()) {
-            auto err = network_error_;
-            network_error_.clear();
-            return make_error(StatusCode::NETWORK_ERROR, err);
-        }
-        HttpResponse r;
-        r.status_code = post_status_;
-        r.body = post_body_;
-        r.content_type = "application/json";
-        return ok(std::move(r));
-    }
-
-    Result<HttpResponse>
-    get(const std::string& /*url*/,
-        const std::vector<std::pair<std::string, std::string>>& /*headers*/) override {
-        if (!network_error_.empty()) {
-            auto err = network_error_;
-            network_error_.clear();
-            return make_error(StatusCode::NETWORK_ERROR, err);
-        }
-        HttpResponse r;
-        r.status_code = get_status_;
-        r.body = get_body_;
-        r.content_type = "application/json";
-        return ok(std::move(r));
-    }
-
-    std::string last_post_url_;
-    std::string last_post_body_;
-    std::vector<std::pair<std::string, std::string>> last_post_headers_;
-    int post_call_count_ = 0;
-
-private:
-    int post_status_ = 200;
-    std::string post_body_;
-    int get_status_ = 200;
-    std::string get_body_;
-    std::string network_error_;
-};
+// Alias so existing test code is unchanged.
+using MockHttpClient = sixseven::QaMockHttpClient;
 
 } // namespace
 
