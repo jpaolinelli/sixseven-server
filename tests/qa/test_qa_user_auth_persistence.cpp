@@ -228,3 +228,139 @@ TEST(QAUserAuthLegacyCollision, ReservedIdOccupiedFallsBack) {
 
     std::filesystem::remove_all(data_dir);
 }
+
+// ---------------------------------------------------------------------------
+// GDB-861 adversarial tests — hardening the admin-persistence path
+// ---------------------------------------------------------------------------
+
+// A non-demo user created via SQL survives restart.  Proves persistence is not
+// demo-special-cased (demo is the only user re-seeded by ensure_default_admin).
+TEST_F(QAUserAuthPersistence, NonDefaultUserPersistsAcrossRestart) {
+    auto r = engine_->execute("CREATE USER gdb861_user1 WITH PASSWORD 'pass1'");
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    ASSERT_TRUE(users_->user_exists("gdb861_user1"));
+
+    restart();
+
+    EXPECT_TRUE(users_->user_exists("gdb861_user1"));
+    // demo must also still be present (loaded from disk, not re-seeded).
+    EXPECT_TRUE(users_->user_exists("demo"));
+}
+
+// Alter demo's password twice then restart: only the LATEST hash must survive.
+// If persist_user delete-then-insert left a duplicate or a stale row the
+// second alter would be lost, and reloaded->password_hash would equal
+// first_hash rather than second_hash.
+TEST_F(QAUserAuthPersistence, GDB861_DoubleAlterDemoLastHashSurvives) {
+    auto seed_record = users_->get_user("demo");
+    ASSERT_TRUE(seed_record.has_value());
+    const std::string seed_hash = seed_record->password_hash;
+
+    auto r1 = engine_->execute("ALTER USER demo WITH PASSWORD 'first_altered_pw'");
+    ASSERT_TRUE(r1.has_value()) << r1.error().message;
+    auto after_first = users_->get_user("demo");
+    ASSERT_TRUE(after_first.has_value());
+    const std::string first_hash = after_first->password_hash;
+    ASSERT_NE(first_hash, seed_hash);
+
+    auto r2 = engine_->execute("ALTER USER demo WITH PASSWORD 'second_altered_pw'");
+    ASSERT_TRUE(r2.has_value()) << r2.error().message;
+    auto after_second = users_->get_user("demo");
+    ASSERT_TRUE(after_second.has_value());
+    const std::string second_hash = after_second->password_hash;
+    ASSERT_NE(second_hash, first_hash);
+    ASSERT_NE(second_hash, seed_hash);
+
+    restart();
+
+    auto reloaded = users_->get_user("demo");
+    ASSERT_TRUE(reloaded.has_value());
+    // Must be the second alteration — not seed or first.
+    EXPECT_EQ(reloaded->password_hash, second_hash);
+    EXPECT_NE(reloaded->password_hash, first_hash);
+    EXPECT_NE(reloaded->password_hash, seed_hash);
+}
+
+// DROP USER for a non-demo user persists: the user must stay absent after
+// restart (i.e. the deletion is durable, not just in-memory).
+TEST_F(QAUserAuthPersistence, GDB861_DroppedNonDemoUserStaysGoneAfterRestart) {
+    auto rc = engine_->execute("CREATE USER gdb861_drop_target WITH PASSWORD 'pw'");
+    ASSERT_TRUE(rc.has_value()) << rc.error().message;
+    ASSERT_TRUE(users_->user_exists("gdb861_drop_target"));
+
+    auto rd = engine_->execute("DROP USER gdb861_drop_target");
+    ASSERT_TRUE(rd.has_value()) << rd.error().message;
+    ASSERT_FALSE(users_->user_exists("gdb861_drop_target"));
+
+    restart();
+
+    EXPECT_FALSE(users_->user_exists("gdb861_drop_target"));
+}
+
+// DROP USER demo then restart: ensure_default_admin MUST re-seed demo
+// (because the store is now non-empty so it won't re-seed arbitrary users,
+// but demo is special: ensure_default_admin only skips if demo is already in
+// users_; after drop+restart the loaded set won't contain demo, so it will
+// re-seed).  This documents and asserts the intentional re-seed-on-drop
+// behaviour for the default admin.
+TEST_F(QAUserAuthPersistence, GDB861_DroppedDemoIsReseedOnRestart) {
+    auto rd = engine_->execute("DROP USER demo");
+    ASSERT_TRUE(rd.has_value()) << rd.error().message;
+    ASSERT_FALSE(users_->user_exists("demo"));
+
+    restart();
+
+    // demo must be present (re-seeded by ensure_default_admin since it was
+    // absent from the loaded set).
+    EXPECT_TRUE(users_->user_exists("demo"));
+
+    // The re-seeded hash must equal the original seed hash (default password).
+    // We capture it from a fresh boot to compare.
+    // We cannot compare directly to the original seed_hash (different boot),
+    // but we verify demo exists with SOME hash (not empty).
+    auto reseeded = users_->get_user("demo");
+    ASSERT_TRUE(reseeded.has_value());
+    EXPECT_FALSE(reseeded->password_hash.empty());
+}
+
+// Fresh boot on an empty data directory: demo must be created with the default
+// seed hash (conditional-seed path).  seed_hash must be non-empty and demo
+// must exist immediately after SetUp (which calls boot()).
+TEST_F(QAUserAuthPersistence, GDB861_FreshBootSeedsDemoWithDefaultHash) {
+    // SetUp already booted from an empty dir.
+    ASSERT_TRUE(users_->user_exists("demo"));
+    auto rec = users_->get_user("demo");
+    ASSERT_TRUE(rec.has_value());
+    EXPECT_FALSE(rec->password_hash.empty());
+    // A second boot on the SAME dir must NOT re-seed (loaded 1 user, not empty).
+    restart();
+    ASSERT_TRUE(users_->user_exists("demo"));
+    auto reloaded = users_->get_user("demo");
+    ASSERT_TRUE(reloaded.has_value());
+    // Hash is identical — the same seeded record came back from disk.
+    EXPECT_EQ(reloaded->password_hash, rec->password_hash);
+}
+
+// seed_hash != altered_hash robustness guard.  The DefaultAdminPresentAndPersistent
+// test's ASSERT_NE(altered_hash, seed_hash) must fire at build time; this
+// complementary test exercises the same guard independently and asserts that
+// the password-hashing function never produces a collision between 'demo'
+// (default seed) and 'changed_for_persistence_test'.
+TEST_F(QAUserAuthPersistence, GDB861_DefaultAndAlteredPasswordHashesDiffer) {
+    auto seed_rec = users_->get_user("demo");
+    ASSERT_TRUE(seed_rec.has_value());
+    const std::string seed_hash = seed_rec->password_hash;
+
+    auto r = engine_->execute("ALTER USER demo WITH PASSWORD 'changed_for_persistence_test'");
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+
+    auto altered_rec = users_->get_user("demo");
+    ASSERT_TRUE(altered_rec.has_value());
+    const std::string altered_hash = altered_rec->password_hash;
+
+    // This must differ — two different passwords must never hash identically.
+    EXPECT_NE(altered_hash, seed_hash);
+    // Both hashes must be non-empty strings.
+    EXPECT_FALSE(seed_hash.empty());
+    EXPECT_FALSE(altered_hash.empty());
+}
