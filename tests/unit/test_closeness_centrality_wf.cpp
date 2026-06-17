@@ -1,4 +1,4 @@
-#include "sixseven/catalog/catalog.h"
+﻿#include "sixseven/catalog/catalog.h"
 #include "sixseven/graph/algorithm_registry.h"
 #include "sixseven/graph/closeness_centrality.h"
 #include "sixseven/graph/graph_engine.h"
@@ -403,10 +403,14 @@ TEST_F(WassermanFaustTest, AnalyticalValuesWithVaryingCentrality) {
     EXPECT_NEAR(scores[1].normalized_closeness, 2.0 / 3.0, 1e-10);
     EXPECT_NEAR(scores[1].closeness, 1.0 / 3.0, 1e-10);
 
-    // Node 2: reaches 3(d=1). sum_farness=1, reachable=2.
-    // normalized = (3-1)/1 = 2.0. WF = (3-1)/(5-1) * 2.0 = 2/4 * 2 = 1.0.
-    EXPECT_NEAR(scores[2].normalized_closeness, 2.0, 1e-10);
-    EXPECT_NEAR(scores[2].closeness, 1.0, 1e-10);
+    // Node 2: reaches 3(d=1). sum_farness=1, reachable_count=2.
+    // r = reachable_count - 1 = 1 (directed-reachable excluding self).
+    // normalized = r/sum_farness = 1/1 = 1.0.
+    // WF = (r/(N-1)) * normalized = (1/4) * 1.0 = 0.25.
+    // Note: the old (buggy) code used nc-1=2 instead of r=1, giving 2.0 and 1.0 — those are
+    // mathematically impossible (>1.0) and were corrected by GDB-862.
+    EXPECT_NEAR(scores[2].normalized_closeness, 1.0, 1e-10);
+    EXPECT_NEAR(scores[2].closeness, 0.25, 1e-10);
 
     // Node 3: can't reach anyone. WF = 0.
     EXPECT_DOUBLE_EQ(scores[3].closeness, 0.0);
@@ -424,8 +428,9 @@ TEST_F(WassermanFaustTest, AnalyticalValuesWithVaryingCentrality) {
 // ---------------------------------------------------------------------------
 
 TEST_F(WassermanFaustTest, NormalizedClosenessIsWithinComponent) {
-    // The normalized_closeness should be (n_c - 1) / sum_farness,
-    // which is the within-component closeness before the WF scaling.
+    // normalized_closeness = r / sum_farness, where r = reachable_count - 1
+    // (directed-reachable nodes excluding self). This is the within-reachable-set
+    // closeness before the WF inter-component scaling.
     // Component A: bidirectional path 1<->2<->3
     // Component B: single directed edge 10->11
     build_graph("knows",
@@ -442,25 +447,26 @@ TEST_F(WassermanFaustTest, NormalizedClosenessIsWithinComponent) {
 
     auto scores = to_wf_map(*result);
 
-    // Verify normalized_closeness = (n_c - 1) / sum_farness for reachable nodes.
+    // Verify normalized_closeness = (reachable_count - 1) / sum_farness for reachable nodes.
     for (const auto& [node, r] : scores) {
         if (r.sum_farness > 0 && r.reachable_count > 1) {
             double expected_norm =
-                static_cast<double>(r.component_size - 1) / static_cast<double>(r.sum_farness);
+                static_cast<double>(r.reachable_count - 1) / static_cast<double>(r.sum_farness);
             EXPECT_NEAR(r.normalized_closeness, expected_norm, 1e-10)
-                << "node " << node << " normalized_closeness should be (n_c-1)/sum_farness";
+                << "node " << node
+                << " normalized_closeness should be (reachable_count-1)/sum_farness";
         } else {
             EXPECT_DOUBLE_EQ(r.normalized_closeness, 0.0)
                 << "node " << node << " with no reachable nodes should have 0 normalized_closeness";
         }
     }
 
-    // Verify WF = [(n_c-1)/(N-1)] * normalized_closeness.
+    // Verify WF = [(reachable_count-1)/(N-1)] * normalized_closeness.
     auto total_nodes = static_cast<int64_t>(scores.size());
     for (const auto& [node, r] : scores) {
         if (r.normalized_closeness > 0.0) {
             double scaling =
-                static_cast<double>(r.component_size - 1) / static_cast<double>(total_nodes - 1);
+                static_cast<double>(r.reachable_count - 1) / static_cast<double>(total_nodes - 1);
             double expected_wf = scaling * r.normalized_closeness;
             EXPECT_NEAR(r.closeness, expected_wf, 1e-10)
                 << "node " << node << " WF closeness should be scaling * normalized_closeness";
@@ -497,6 +503,109 @@ TEST_F(WassermanFaustTest, ValuesNonNegativeAndFinite) {
         EXPECT_FALSE(std::isnan(r.normalized_closeness)) << "node " << node;
         EXPECT_FALSE(std::isinf(r.normalized_closeness)) << "node " << node;
         EXPECT_GE(r.component_size, 1) << "node " << node;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GDB-862 regression: directed-reach < weak-component size must not produce > 1.0
+// ---------------------------------------------------------------------------
+
+// Graph: 1->2 and 3->2.
+// Weak component {1,2,3}, N=3.
+// Node 1: directed BFS reaches only {2} (node 3 has no path to 2 via directed edges from 1).
+//   r=1, sum_dist=1. Correct WF: wf_norm=1/1=1.0, scaling=1/(3-1)=0.5, closeness=0.5.
+//   Buggy old code used nc-1=2 instead of r=1:
+//     wf_norm=(3-1)/1=2.0, scaling=(3-1)/(3-1)=1.0, closeness=2.0 — impossible (>1.0).
+// Node 3: directed BFS reaches only {2}.
+//   r=1, sum_dist=1. Same as node 1: closeness=0.5.
+// Node 2: no outgoing edges. r=0, closeness=0.
+TEST_F(WassermanFaustTest, GDB862_DirectedReachNarrowerThanWeakComponent) {
+    // Two sources 1 and 3, both pointing to a shared sink 2.
+    build_graph("reg862", {{1, 2}, {3, 2}});
+
+    auto result = run_wf("reg862");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_wf_map(*result);
+    ASSERT_EQ(scores.size(), 3u);
+
+    // Universal invariant: every score must be in [0, 1].
+    for (const auto& [node, r] : scores) {
+        EXPECT_GE(r.closeness, 0.0) << "node " << node << " closeness below 0";
+        EXPECT_LE(r.closeness, 1.0 + 1e-10) << "node " << node << " closeness exceeds 1.0";
+        EXPECT_GE(r.normalized_closeness, 0.0) << "node " << node;
+        EXPECT_LE(r.normalized_closeness, 1.0 + 1e-10) << "node " << node;
+    }
+
+    // Node 1: r=1, sum_dist=1, N=3.
+    // wf_normalized = 1/1 = 1.0
+    // scaling = 1/(3-1) = 0.5
+    // closeness = 0.5 * 1.0 = 0.5
+    EXPECT_EQ(scores[1].reachable_count, 2); // includes self
+    EXPECT_EQ(scores[1].sum_farness, 1);
+    EXPECT_NEAR(scores[1].normalized_closeness, 1.0, 1e-10);
+    EXPECT_NEAR(scores[1].closeness, 0.5, 1e-10);
+
+    // Node 3: symmetric to node 1.
+    EXPECT_EQ(scores[3].reachable_count, 2);
+    EXPECT_EQ(scores[3].sum_farness, 1);
+    EXPECT_NEAR(scores[3].normalized_closeness, 1.0, 1e-10);
+    EXPECT_NEAR(scores[3].closeness, 0.5, 1e-10);
+
+    // Node 2: sink — no outgoing edges, r=0, closeness=0.
+    EXPECT_EQ(scores[2].reachable_count, 1); // only self
+    EXPECT_EQ(scores[2].sum_farness, 0);
+    EXPECT_DOUBLE_EQ(scores[2].closeness, 0.0);
+    EXPECT_DOUBLE_EQ(scores[2].normalized_closeness, 0.0);
+
+    // Component size is still 3 for all (weakly connected).
+    for (const auto& [node, r] : scores) {
+        EXPECT_EQ(r.component_size, 3) << "node " << node;
+    }
+}
+
+// Star graph: 4 source nodes each pointing to a single pure sink (node 5).
+// All 5 nodes weakly connected (nc=5, N=5), but each source can only reach
+// 1 other node via directed edges. Verifies the >1.0 fix at scale.
+// Buggy old code: nc-1=4, wf_norm=4/1=4.0, scaling=4/4=1.0, closeness=4.0 — impossible.
+// Correct: r=1, wf_norm=1/1=1.0, scaling=1/(5-1)=0.25, closeness=0.25.
+TEST_F(WassermanFaustTest, GDB862_StarWithSinkLargeWeakComponent) {
+    // 4-to-1 star: nodes 1-4 each point to node 5 (pure sink, no outgoing).
+    build_graph("reg862b", {{1, 5}, {2, 5}, {3, 5}, {4, 5}});
+
+    auto result = run_wf("reg862b");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_wf_map(*result);
+    ASSERT_EQ(scores.size(), 5u);
+
+    // Universal invariant: every score in [0, 1].
+    for (const auto& [node, r] : scores) {
+        EXPECT_GE(r.closeness, 0.0) << "node " << node;
+        EXPECT_LE(r.closeness, 1.0 + 1e-10) << "node " << node << " closeness exceeds 1.0";
+    }
+
+    // Nodes 1-4: each reaches only node 5 via directed edges.
+    // r=1, sum_dist=1, N=5.
+    // wf_norm = 1/1 = 1.0
+    // scaling = 1/(5-1) = 0.25
+    // closeness = 0.25
+    for (int64_t node : {1, 2, 3, 4}) {
+        EXPECT_EQ(scores[node].reachable_count, 2) << "node " << node; // self + node5
+        EXPECT_EQ(scores[node].sum_farness, 1) << "node " << node;
+        EXPECT_NEAR(scores[node].normalized_closeness, 1.0, 1e-10) << "node " << node;
+        EXPECT_NEAR(scores[node].closeness, 0.25, 1e-10) << "node " << node;
+    }
+
+    // Node 5: pure sink, r=0, closeness=0.
+    EXPECT_EQ(scores[5].reachable_count, 1); // only self
+    EXPECT_EQ(scores[5].sum_farness, 0);
+    EXPECT_DOUBLE_EQ(scores[5].closeness, 0.0);
+    EXPECT_DOUBLE_EQ(scores[5].normalized_closeness, 0.0);
+
+    // Component size is 5 for all (all weakly connected).
+    for (const auto& [node, r] : scores) {
+        EXPECT_EQ(r.component_size, 5) << "node " << node;
     }
 }
 
