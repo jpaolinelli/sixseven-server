@@ -1,4 +1,5 @@
 #include "sixseven/graph/algorithm_registry.h"
+#include "sixseven/graph/graph_engine.h"
 
 #include <gtest/gtest.h>
 
@@ -203,12 +204,35 @@ TEST(AlgorithmRegistry, ExecuteReturnsRows) {
     auto* entry = registry.find("test_algo");
     ASSERT_NE(entry, nullptr);
 
-    // Create a minimal context (no real graph engine needed for this test).
-    // We can't easily create a real GraphEngine without storage, so we just
-    // test the execute function directly.
-    EXPECT_EQ(entry->def.output_columns.size(), 2);
+    // Metadata assertions.
+    EXPECT_EQ(entry->def.output_columns.size(), 2u);
     EXPECT_EQ(entry->def.output_columns[0].name, "node_id");
     EXPECT_EQ(entry->def.output_columns[1].name, "score");
+
+    // Verify the execute callable is stored and actually returns the expected rows.
+    ASSERT_TRUE(entry->execute) << "execute function must not be null/default-constructed";
+
+    // GraphEngine is constructible from a Catalog alone; the test execute_fn
+    // ignores its context so no real graph data is needed.
+    Catalog catalog;
+    GraphEngine graph_engine{catalog};
+    AlgorithmContext ctx{graph_engine, default_database_id, /*edge_type=*/"", /*named_args=*/{}};
+
+    auto result = entry->execute(ctx);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    const auto& rows = *result;
+    ASSERT_EQ(rows.size(), 2u);
+
+    // Row 0: node_id=1, score=0.5
+    ASSERT_EQ(rows[0].values.size(), 2u);
+    EXPECT_EQ(std::get<int64_t>(rows[0].values[0].data()), static_cast<int64_t>(1));
+    EXPECT_DOUBLE_EQ(std::get<double>(rows[0].values[1].data()), 0.5);
+
+    // Row 1: node_id=2, score=0.3
+    ASSERT_EQ(rows[1].values.size(), 2u);
+    EXPECT_EQ(std::get<int64_t>(rows[1].values[0].data()), static_cast<int64_t>(2));
+    EXPECT_DOUBLE_EQ(std::get<double>(rows[1].values[1].data()), 0.3);
 }
 
 // ---------------------------------------------------------------------------
