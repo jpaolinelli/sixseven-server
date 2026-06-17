@@ -1,4 +1,4 @@
-#include "sixseven/executor/match_shortest_path.h"
+﻿#include "sixseven/executor/match_shortest_path.h"
 
 #include "sixseven/common/coercion.h"
 #include "sixseven/common/value_hash.h"
@@ -413,16 +413,27 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
                 new_path.steps.push_back({*nbr_int, -1});
 
                 // Check if we've reached the target (table AND pk must match).
+                // Enforce quantifier bounds: only accept paths where
+                //   min_hops <= length < max_depth
+                // The strict upper bound corrects a BFS off-by-one (GDB-1273): the
+                // loop runs while depth < max_depth, so after ++depth, depth reaches
+                // max_depth and processes level-(max_depth-1) nodes whose neighbours
+                // land at max_depth hops — one step past the quantifier ceiling.
+                // The lower bound ensures real discovered paths satisfy min_hops
+                // (GDB-1272): e.g. a direct self-loop under {2,N} has length 1 < 2.
                 if (nbr_node == NodeId{tgt_table_id, tgt_pk}) {
-                    found_at_this_depth = true;
-                    result_paths.push_back(std::move(new_path));
+                    if (new_path.length() >= static_cast<int64_t>(min_hops) &&
+                        new_path.length() < static_cast<int64_t>(max_depth)) {
+                        found_at_this_depth = true;
+                        result_paths.push_back(std::move(new_path));
 
-                    if (path_selector_ == PathSelector::ANY_SHORTEST) {
-                        return ok(std::move(result_paths));
-                    }
-                    if (path_selector_ == PathSelector::SHORTEST_K &&
-                        static_cast<int32_t>(result_paths.size()) >= shortest_k_) {
-                        return ok(std::move(result_paths));
+                        if (path_selector_ == PathSelector::ANY_SHORTEST) {
+                            return ok(std::move(result_paths));
+                        }
+                        if (path_selector_ == PathSelector::SHORTEST_K &&
+                            static_cast<int32_t>(result_paths.size()) >= shortest_k_) {
+                            return ok(std::move(result_paths));
+                        }
                     }
                     continue;
                 }
@@ -807,23 +818,28 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
             new_path.total_weight = new_cost;
 
             // Check if we've reached the target (table AND pk must match — GDB-851).
+            // Also enforce quantifier lower bound: only accept paths with length >=
+            // min_hops.  A direct self-loop under {1,N} must pass (length 1 >=
+            // min_hops 1); under {2,N} it must be rejected (GDB-1272).
             if (nbr_node == NodeId{tgt_table_id, tgt_pk}) {
-                if (path_selector_ == PathSelector::SHORTEST_K) {
-                    // For SHORTEST_K, accept all paths — we sort and trim later.
-                    if (new_cost < best_dest_cost) {
-                        best_dest_cost = new_cost;
+                if (new_path.length() >= static_cast<int64_t>(min_hops)) {
+                    if (path_selector_ == PathSelector::SHORTEST_K) {
+                        // For SHORTEST_K, accept all paths — we sort and trim later.
+                        if (new_cost < best_dest_cost) {
+                            best_dest_cost = new_cost;
+                        }
+                        result_paths.push_back(std::move(new_path));
+                    } else {
+                        // Skip paths that exceed the best known destination cost.
+                        if (new_cost > best_dest_cost) {
+                            continue;
+                        }
+                        if (new_cost < best_dest_cost) {
+                            best_dest_cost = new_cost;
+                            result_paths.clear();
+                        }
+                        result_paths.push_back(std::move(new_path));
                     }
-                    result_paths.push_back(std::move(new_path));
-                } else {
-                    // Skip paths that exceed the best known destination cost.
-                    if (new_cost > best_dest_cost) {
-                        continue;
-                    }
-                    if (new_cost < best_dest_cost) {
-                        best_dest_cost = new_cost;
-                        result_paths.clear();
-                    }
-                    result_paths.push_back(std::move(new_path));
                 }
                 continue;
             }
