@@ -141,6 +141,38 @@ private:
     std::atomic<int> batch_call_count_{0};
 };
 
+// Provider that sleeps during embed_batch to produce measurable latency.
+class QA31SlowProvider : public EmbeddingProvider {
+public:
+    explicit QA31SlowProvider(int32_t dimension,
+                              std::chrono::milliseconds sleep_dur = std::chrono::milliseconds(20))
+        : dimension_(dimension), sleep_dur_(sleep_dur) {}
+
+    Result<std::vector<float>> embed(const std::string& /*text*/) override {
+        std::this_thread::sleep_for(sleep_dur_);
+        return ok(std::vector<float>(static_cast<size_t>(dimension_), 1.0F));
+    }
+
+    Result<std::vector<std::vector<float>>>
+    embed_batch(const std::vector<std::string>& texts) override {
+        std::this_thread::sleep_for(sleep_dur_);
+        std::vector<std::vector<float>> result;
+        result.reserve(texts.size());
+        for (size_t i = 0; i < texts.size(); ++i) {
+            result.emplace_back(static_cast<size_t>(dimension_), 1.0F);
+        }
+        return ok(std::move(result));
+    }
+
+    std::string name() const override { return "qa31_slow"; }
+    size_t dimension() const override { return static_cast<size_t>(dimension_); }
+    Result<void> health_check() override { return ok(); }
+
+private:
+    int32_t dimension_;
+    std::chrono::milliseconds sleep_dur_;
+};
+
 // =============================================================================
 // Helper: build table schemas
 // =============================================================================
@@ -504,11 +536,13 @@ TEST(QA_EmbeddingWorker, EnqueueBatchMixed) {
 }
 
 TEST(QA_EmbeddingWorker, StatsIncludeLatency) {
-    auto provider = std::make_shared<QA31TestProvider>(32);
+    // Use a provider that sleeps 20ms per batch so total_latency_ms is
+    // guaranteed non-zero when the stat is properly accumulated.
+    auto provider = std::make_shared<QA31SlowProvider>(32, std::chrono::milliseconds(20));
     std::atomic<int> store_count{0};
 
     EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = 32});
-    pool.register_provider("qa31_test", provider);
+    pool.register_provider("qa31_slow", provider);
     pool.set_store_callback(
         [&](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> {
             store_count.fetch_add(1);
@@ -516,7 +550,7 @@ TEST(QA_EmbeddingWorker, StatsIncludeLatency) {
         });
 
     ASSERT_TRUE(pool.start().has_value());
-    ASSERT_TRUE(pool.enqueue(make_qa31_insert_job(1, 1, 0, "hello")).has_value());
+    ASSERT_TRUE(pool.enqueue(make_qa31_insert_job(1, 1, 0, "hello", "qa31_slow")).has_value());
 
     for (int i = 0; i < 100 && store_count.load() == 0; ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -526,9 +560,9 @@ TEST(QA_EmbeddingWorker, StatsIncludeLatency) {
 
     auto s = pool.stats();
     EXPECT_EQ(s.jobs_processed, 1u);
-    // total_latency_ms should have been incremented (might be 0 if very fast).
-    // Just verify it's a reasonable value.
-    EXPECT_GE(s.total_latency_ms, 0u);
+    // embed_batch slept >=20ms, so total_latency_ms must be >0.
+    // Fails if the stat is never incremented (mutation-grade assertion).
+    EXPECT_GT(s.total_latency_ms, 0u);
 }
 
 TEST(QA_EmbeddingWorker, ConcurrentEnqueueAndDrain) {
