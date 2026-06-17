@@ -175,8 +175,12 @@ TEST(QA_Page, CompactAfterShrinkingUpdate) {
     size_t after_compact = page.free_space();
 
     // Compact should recover the 400 bytes that the shrunk-in-place tuple left
-    // as internal fragmentation.
-    EXPECT_GE(after_compact, before_compact);
+    // as internal fragmentation. update_tuple shrink-in-place keeps data_offset
+    // unchanged (same slot offset, shorter length), so the 400-byte slack is
+    // invisible to free_space() until compact() repacks by slot length.
+    // The delta is deterministic: old_len(500) - new_len(100) = 400 bytes.
+    // EXPECT_GE was vacuous — it passed even for a no-op compact (after==before).
+    EXPECT_EQ(after_compact, before_compact + 400);
 
     // All live tuples still readable.
     auto t0 = page.get_tuple(0);
