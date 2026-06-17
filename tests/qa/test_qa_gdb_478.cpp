@@ -126,15 +126,17 @@ TEST(QA_GDB478_Registry, DuplicateCaseVariants) {
 }
 
 TEST(QA_GDB478_Registry, RegisterAlgoWithNoOutputColumns) {
+    // node_id-first is now a hard requirement; an empty output_columns schema
+    // must be rejected with INVALID_ARGUMENT.
     AlgorithmRegistry registry;
     AlgorithmDef def;
     def.name = "no_output";
-    // Zero output columns.
+    // Zero output columns -- intentionally invalid under the enforced requirement.
     auto result = registry.register_algorithm(std::move(def), noop_execute);
-    EXPECT_TRUE(result.has_value());
-    auto* entry = registry.find("no_output");
-    ASSERT_NE(entry, nullptr);
-    EXPECT_EQ(entry->def.output_columns.size(), 0);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    // The algorithm must not be findable after a failed registration.
+    EXPECT_EQ(registry.find("no_output"), nullptr);
 }
 
 TEST(QA_GDB478_Registry, RegisterAlgoWithNoParams) {

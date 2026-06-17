@@ -99,34 +99,39 @@ protected:
             ASSERT_TRUE(r.has_value());
         }
 
-        // Algorithm: many_cols — 10 output columns with diverse types.
+        // Algorithm: many_cols -- 11 output columns with diverse types.
+        // node_id INT64 is prepended as [0] to satisfy the node_id-first requirement;
+        // the original type-coverage columns follow as [1]..[10].
         {
             AlgorithmDef def;
             def.name = "many_cols";
             def.output_columns = {
-                {"col_int8", TypeId::INT8, false},
-                {"col_int16", TypeId::INT16, false},
-                {"col_int32", TypeId::INT32, true},
-                {"col_int64", TypeId::INT64, false},
-                {"col_float32", TypeId::FLOAT32, true},
-                {"col_float64", TypeId::FLOAT64, false},
-                {"col_string", TypeId::STRING, true},
-                {"col_bool", TypeId::BOOL, false},
-                {"col_date", TypeId::DATE, true},
-                {"col_uuid", TypeId::UUID, false},
+                {"node_id", TypeId::INT64, false},       // [0] required first column
+                {"col_int8", TypeId::INT8, false},       // [1]
+                {"col_int16", TypeId::INT16, false},     // [2]
+                {"col_int32", TypeId::INT32, true},      // [3]
+                {"col_int64", TypeId::INT64, false},     // [4]
+                {"col_float32", TypeId::FLOAT32, true},  // [5]
+                {"col_float64", TypeId::FLOAT64, false}, // [6]
+                {"col_string", TypeId::STRING, true},    // [7]
+                {"col_bool", TypeId::BOOL, false},       // [8]
+                {"col_date", TypeId::DATE, true},        // [9]
+                {"col_uuid", TypeId::UUID, false},       // [10]
             };
             auto r = registry.register_algorithm(std::move(def), nullptr);
             ASSERT_TRUE(r.has_value());
         }
 
-        // Algorithm: no_output — 0 output columns.
+        // Algorithm: no_output -- 0 output columns.
+        // Registration MUST FAIL: empty output_columns violates the node_id-first requirement.
+        // Tests that previously used no_output are updated to reflect bind failure.
         {
             AlgorithmDef def;
             def.name = "no_output";
             auto r = registry.register_algorithm(std::move(def), nullptr);
-            ASSERT_TRUE(r.has_value());
+            ASSERT_FALSE(r.has_value());
+            EXPECT_EQ(r.error().code, StatusCode::INVALID_ARGUMENT);
         }
-
         binder = std::make_unique<Binder>(catalog, default_database_id, &registry);
     }
 
@@ -257,11 +262,11 @@ TEST_F(QA_GDB548_Binder, EdgeCase_SingleColumnAlgorithm) {
 
 TEST_F(QA_GDB548_Binder, EdgeCase_ManyColumnsSelectStar) {
     auto bound = bind_ok("SELECT * FROM many_cols('e')");
-    ASSERT_EQ(bound.output_columns.size(), 10);
-    EXPECT_EQ(bound.output_columns[0].column_name, "col_int8");
-    EXPECT_EQ(bound.output_columns[0].type_id, TypeId::INT8);
-    EXPECT_EQ(bound.output_columns[9].column_name, "col_uuid");
-    EXPECT_EQ(bound.output_columns[9].type_id, TypeId::UUID);
+    ASSERT_EQ(bound.output_columns.size(), 11);
+    EXPECT_EQ(bound.output_columns[0].column_name, "node_id");
+    EXPECT_EQ(bound.output_columns[0].type_id, TypeId::INT64);
+    EXPECT_EQ(bound.output_columns[10].column_name, "col_uuid");
+    EXPECT_EQ(bound.output_columns[10].type_id, TypeId::UUID);
 }
 
 TEST_F(QA_GDB548_Binder, EdgeCase_ManyColumnsNamedRef) {
@@ -276,9 +281,9 @@ TEST_F(QA_GDB548_Binder, EdgeCase_ManyColumnsNamedRef) {
 }
 
 TEST_F(QA_GDB548_Binder, EdgeCase_ZeroOutputColumnsSelectStar) {
-    // Algorithm with no output columns — SELECT * should return 0 columns.
-    auto bound = bind_ok("SELECT * FROM no_output('e')");
-    EXPECT_EQ(bound.output_columns.size(), 0);
+    // no_output failed registration (empty schema violates node_id-first requirement).
+    // The binder must therefore reject any query referencing it.
+    bind_error("SELECT * FROM no_output('e')", StatusCode::NOT_FOUND);
 }
 
 // ---------------------------------------------------------------------------
@@ -287,36 +292,36 @@ TEST_F(QA_GDB548_Binder, EdgeCase_ZeroOutputColumnsSelectStar) {
 
 TEST_F(QA_GDB548_Binder, TypePreservation_AllTypesCorrect) {
     auto bound = bind_ok("SELECT * FROM many_cols('e')");
-    ASSERT_EQ(bound.output_columns.size(), 10);
+    ASSERT_EQ(bound.output_columns.size(), 11);
 
-    // Check types are preserved exactly.
-    EXPECT_EQ(bound.output_columns[0].type_id, TypeId::INT8);
-    EXPECT_EQ(bound.output_columns[1].type_id, TypeId::INT16);
-    EXPECT_EQ(bound.output_columns[2].type_id, TypeId::INT32);
-    EXPECT_EQ(bound.output_columns[3].type_id, TypeId::INT64);
-    EXPECT_EQ(bound.output_columns[4].type_id, TypeId::FLOAT32);
-    EXPECT_EQ(bound.output_columns[5].type_id, TypeId::FLOAT64);
-    EXPECT_EQ(bound.output_columns[6].type_id, TypeId::STRING);
-    EXPECT_EQ(bound.output_columns[7].type_id, TypeId::BOOL);
-    EXPECT_EQ(bound.output_columns[8].type_id, TypeId::DATE);
-    EXPECT_EQ(bound.output_columns[9].type_id, TypeId::UUID);
+    EXPECT_EQ(bound.output_columns[0].type_id, TypeId::INT64);   // node_id
+    EXPECT_EQ(bound.output_columns[1].type_id, TypeId::INT8);    // col_int8
+    EXPECT_EQ(bound.output_columns[2].type_id, TypeId::INT16);   // col_int16
+    EXPECT_EQ(bound.output_columns[3].type_id, TypeId::INT32);   // col_int32
+    EXPECT_EQ(bound.output_columns[4].type_id, TypeId::INT64);   // col_int64
+    EXPECT_EQ(bound.output_columns[5].type_id, TypeId::FLOAT32); // col_float32
+    EXPECT_EQ(bound.output_columns[6].type_id, TypeId::FLOAT64); // col_float64
+    EXPECT_EQ(bound.output_columns[7].type_id, TypeId::STRING);  // col_string
+    EXPECT_EQ(bound.output_columns[8].type_id, TypeId::BOOL);    // col_bool
+    EXPECT_EQ(bound.output_columns[9].type_id, TypeId::DATE);    // col_date
+    EXPECT_EQ(bound.output_columns[10].type_id, TypeId::UUID);   // col_uuid
 }
 
 TEST_F(QA_GDB548_Binder, NullabilityPreservation) {
     auto bound = bind_ok("SELECT * FROM many_cols('e')");
-    ASSERT_EQ(bound.output_columns.size(), 10);
+    ASSERT_EQ(bound.output_columns.size(), 11);
 
-    // Verify nullable flags match the algorithm definition.
-    EXPECT_FALSE(bound.output_columns[0].nullable); // col_int8
-    EXPECT_FALSE(bound.output_columns[1].nullable); // col_int16
-    EXPECT_TRUE(bound.output_columns[2].nullable);   // col_int32
-    EXPECT_FALSE(bound.output_columns[3].nullable); // col_int64
-    EXPECT_TRUE(bound.output_columns[4].nullable);   // col_float32
-    EXPECT_FALSE(bound.output_columns[5].nullable); // col_float64
-    EXPECT_TRUE(bound.output_columns[6].nullable);   // col_string
-    EXPECT_FALSE(bound.output_columns[7].nullable); // col_bool
-    EXPECT_TRUE(bound.output_columns[8].nullable);   // col_date
-    EXPECT_FALSE(bound.output_columns[9].nullable); // col_uuid
+    EXPECT_FALSE(bound.output_columns[0].nullable);  // node_id
+    EXPECT_FALSE(bound.output_columns[1].nullable);  // col_int8
+    EXPECT_FALSE(bound.output_columns[2].nullable);  // col_int16
+    EXPECT_TRUE(bound.output_columns[3].nullable);   // col_int32
+    EXPECT_FALSE(bound.output_columns[4].nullable);  // col_int64
+    EXPECT_TRUE(bound.output_columns[5].nullable);   // col_float32
+    EXPECT_FALSE(bound.output_columns[6].nullable);  // col_float64
+    EXPECT_TRUE(bound.output_columns[7].nullable);   // col_string
+    EXPECT_FALSE(bound.output_columns[8].nullable);  // col_bool
+    EXPECT_TRUE(bound.output_columns[9].nullable);   // col_date
+    EXPECT_FALSE(bound.output_columns[10].nullable); // col_uuid
 }
 
 // ---------------------------------------------------------------------------
@@ -384,8 +389,8 @@ TEST_F(QA_GDB548_Binder, ErrorPath_QualifiedUnknownColumn) {
 // ---------------------------------------------------------------------------
 
 TEST_F(QA_GDB548_Binder, Complex_WhereAndOrderBy) {
-    auto bound = bind_ok(
-        "SELECT node_id FROM pagerank('knows') WHERE rank > 0.1 ORDER BY rank ASC");
+    auto bound =
+        bind_ok("SELECT node_id FROM pagerank('knows') WHERE rank > 0.1 ORDER BY rank ASC");
     ASSERT_EQ(bound.output_columns.size(), 1);
     EXPECT_EQ(bound.output_columns[0].column_name, "node_id");
 }
@@ -414,9 +419,8 @@ TEST_F(QA_GDB548_Binder, Complex_Distinct) {
 }
 
 TEST_F(QA_GDB548_Binder, Complex_WhereWithCompoundCondition) {
-    auto bound = bind_ok(
-        "SELECT node_id FROM pagerank('knows') "
-        "WHERE rank > 0.1 AND node_id > 0");
+    auto bound = bind_ok("SELECT node_id FROM pagerank('knows') "
+                         "WHERE rank > 0.1 AND node_id > 0");
     ASSERT_EQ(bound.output_columns.size(), 1);
 }
 
@@ -453,8 +457,7 @@ TEST_F(QA_GDB548_Binder, GracefulDegradation_NoRegistryNamedColumn) {
 // ---------------------------------------------------------------------------
 
 TEST_F(QA_GDB548_Binder, NamedParams_DontAffectColumns) {
-    auto bound =
-        bind_ok("SELECT * FROM pagerank('knows', damping := 0.5, iterations := 10)");
+    auto bound = bind_ok("SELECT * FROM pagerank('knows', damping := 0.5, iterations := 10)");
     ASSERT_EQ(bound.output_columns.size(), 2);
     EXPECT_EQ(bound.output_columns[0].column_name, "node_id");
     EXPECT_EQ(bound.output_columns[1].column_name, "rank");
@@ -650,9 +653,8 @@ TEST_F(QA_GDB548_E2E, AC4_OrderByDesc) {
 }
 
 TEST_F(QA_GDB548_E2E, AC4_WhereAndOrderByCombined) {
-    auto result = exec_ok(
-        "SELECT node_id, rank FROM pagerank('knows') "
-        "WHERE rank > 0.1 ORDER BY node_id ASC");
+    auto result = exec_ok("SELECT node_id, rank FROM pagerank('knows') "
+                          "WHERE rank > 0.1 ORDER BY node_id ASC");
     ASSERT_EQ(result.column_names.size(), 2);
 }
 
@@ -683,9 +685,8 @@ TEST_F(QA_GDB548_E2E, NamedParams_WithColumnResolution) {
 }
 
 TEST_F(QA_GDB548_E2E, NamedParams_MultipleWithWhere) {
-    auto result = exec_ok(
-        "SELECT node_id FROM pagerank('knows', damping := 0.9, iterations := 10) "
-        "WHERE rank > 0.0");
+    auto result = exec_ok("SELECT node_id FROM pagerank('knows', damping := 0.9, iterations := 10) "
+                          "WHERE rank > 0.0");
     ASSERT_EQ(result.column_names.size(), 1);
 }
 
@@ -726,8 +727,7 @@ TEST_F(QA_GDB548_E2E, Expression_ArithmeticOnColumn) {
 }
 
 TEST_F(QA_GDB548_E2E, ColumnAlias) {
-    auto result =
-        exec_ok("SELECT node_id AS nid, rank AS score FROM pagerank('knows')");
+    auto result = exec_ok("SELECT node_id AS nid, rank AS score FROM pagerank('knows')");
     ASSERT_EQ(result.column_names.size(), 2);
     EXPECT_EQ(result.column_names[0], "nid");
     EXPECT_EQ(result.column_names[1], "score");
