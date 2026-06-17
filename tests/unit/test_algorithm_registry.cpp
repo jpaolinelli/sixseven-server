@@ -236,31 +236,73 @@ TEST(AlgorithmRegistry, ExecuteReturnsRows) {
 }
 
 // ---------------------------------------------------------------------------
-// Output schema standardisation
+// Output schema standardisation — validated by register_algorithm
 // ---------------------------------------------------------------------------
 
-TEST(AlgorithmRegistry, OutputSchemaNodeIdFirst) {
+// A definition whose first output column is node_id INT64 must be accepted.
+TEST(AlgorithmRegistry, OutputSchemaValidNodeIdFirstAccepted) {
+    AlgorithmRegistry registry;
+
     AlgorithmDef def;
-    def.name = "pagerank";
+    def.name = "test_valid_schema";
     def.output_columns = {
         {"node_id", TypeId::INT64, false},
         {"rank", TypeId::FLOAT64, false},
     };
 
-    // Standard: node_id is always first.
-    EXPECT_EQ(def.output_columns[0].name, "node_id");
-    EXPECT_EQ(def.output_columns[0].type_id, TypeId::INT64);
+    auto result = registry.register_algorithm(std::move(def), noop_execute);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    // The algorithm must now be findable; verify the schema was stored intact.
+    const auto* entry = registry.find("test_valid_schema");
+    ASSERT_NE(entry, nullptr);
+    ASSERT_EQ(entry->def.output_columns.size(), 2u);
+    EXPECT_EQ(entry->def.output_columns[0].name, "node_id");
+    EXPECT_EQ(entry->def.output_columns[0].type_id, TypeId::INT64);
 }
 
-TEST(AlgorithmRegistry, OutputSchemaMultipleColumns) {
+// A definition with an empty output_columns must be rejected with INVALID_ARGUMENT.
+TEST(AlgorithmRegistry, OutputSchemaEmptyColumnsRejected) {
+    AlgorithmRegistry registry;
+
     AlgorithmDef def;
-    def.name = "community_detection";
+    def.name = "test_empty_schema";
+    // output_columns intentionally left empty.
+
+    auto result = registry.register_algorithm(std::move(def), noop_execute);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+// A definition whose first column is not named "node_id" must be rejected.
+TEST(AlgorithmRegistry, OutputSchemaWrongFirstColumnNameRejected) {
+    AlgorithmRegistry registry;
+
+    AlgorithmDef def;
+    def.name = "test_wrong_name";
     def.output_columns = {
-        {"node_id", TypeId::INT64, false},
-        {"community_id", TypeId::INT64, false},
-        {"modularity", TypeId::FLOAT64, true},
+        {"vertex_id", TypeId::INT64, false},
+        {"score", TypeId::FLOAT64, false},
     };
 
-    EXPECT_EQ(def.output_columns.size(), 3);
-    EXPECT_EQ(def.output_columns[2].nullable, true);
+    auto result = registry.register_algorithm(std::move(def), noop_execute);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+// A definition whose first column is named "node_id" but has the wrong type
+// must be rejected.
+TEST(AlgorithmRegistry, OutputSchemaWrongFirstColumnTypeRejected) {
+    AlgorithmRegistry registry;
+
+    AlgorithmDef def;
+    def.name = "test_wrong_type";
+    def.output_columns = {
+        {"node_id", TypeId::STRING, false}, // must be INT64
+        {"score", TypeId::FLOAT64, false},
+    };
+
+    auto result = registry.register_algorithm(std::move(def), noop_execute);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
