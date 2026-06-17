@@ -38,6 +38,9 @@ Result<Config> Config::load_from_file(const std::string& path) {
 
     if (j.contains("data_dir") && j["data_dir"].is_string()) {
         config.data_dir = j["data_dir"].get<std::string>();
+    } else if (j.contains("data_dir")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "data_dir must be a string, got wrong type");
     }
     if (j.contains("port") && j["port"].is_number_unsigned()) {
         auto port_value = j["port"].get<uint64_t>();
@@ -46,9 +49,15 @@ Result<Config> Config::load_from_file(const std::string& path) {
                               "port must be in range 0-65535, got: " + std::to_string(port_value));
         }
         config.port = static_cast<uint16_t>(port_value);
+    } else if (j.contains("port")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "port must be an unsigned integer, got wrong type");
     }
     if (j.contains("log_level") && j["log_level"].is_string()) {
         config.log_level = j["log_level"].get<std::string>();
+    } else if (j.contains("log_level")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "log_level must be a string, got wrong type");
     }
     if (j.contains("buffer_pool_size_mb") && j["buffer_pool_size_mb"].is_number_unsigned()) {
         auto mb = j["buffer_pool_size_mb"].get<uint64_t>();
@@ -62,21 +71,95 @@ Result<Config> Config::load_from_file(const std::string& path) {
                                   std::to_string(kMaxSafeMb) + " MB)");
         }
         config.buffer_pool_size_mb = static_cast<size_t>(mb);
+    } else if (j.contains("buffer_pool_size_mb")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "buffer_pool_size_mb must be an unsigned integer, got wrong type");
     }
     if (j.contains("wal_segment_size_mb") && j["wal_segment_size_mb"].is_number_unsigned()) {
         config.wal_segment_size_mb = j["wal_segment_size_mb"].get<size_t>();
+    } else if (j.contains("wal_segment_size_mb")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "wal_segment_size_mb must be an unsigned integer, got wrong type");
     }
     if (j.contains("max_connections") && j["max_connections"].is_number_unsigned()) {
         config.max_connections = j["max_connections"].get<size_t>();
+    } else if (j.contains("max_connections")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "max_connections must be an unsigned integer, got wrong type");
     }
     if (j.contains("shutdown_timeout_s") && j["shutdown_timeout_s"].is_number()) {
         config.shutdown_timeout_s = j["shutdown_timeout_s"].get<int32_t>();
+    } else if (j.contains("shutdown_timeout_s")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "shutdown_timeout_s must be a number, got wrong type");
     }
     if (j.contains("auth_method") && j["auth_method"].is_string()) {
         config.auth_method = j["auth_method"].get<std::string>();
+    } else if (j.contains("auth_method")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "auth_method must be a string, got wrong type");
+    }
+    if (j.contains("archive_enabled") && j["archive_enabled"].is_boolean()) {
+        config.archive_enabled = j["archive_enabled"].get<bool>();
+    } else if (j.contains("archive_enabled")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "archive_enabled must be a boolean, got wrong type");
+    }
+    if (j.contains("archive_cleanup_policy") && j["archive_cleanup_policy"].is_string()) {
+        config.archive_cleanup_policy = j["archive_cleanup_policy"].get<std::string>();
+    } else if (j.contains("archive_cleanup_policy")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "archive_cleanup_policy must be a string, got wrong type");
+    }
+    // NOTE: JSON key names replication_max_wal_senders, replication_keepalive_interval_ms,
+    // replication_sender_timeout_ms are flat top-level as documented in docs/configuration.md.
+    // apply_setting uses dotted sys_settings keys (replication.max_wal_senders etc.) - a
+    // pre-existing namespace mismatch between the two pathways; kept as-is to match the doc
+    // contract.
+    if (j.contains("replication_max_wal_senders") &&
+        j["replication_max_wal_senders"].is_number_integer()) {
+        auto v = j["replication_max_wal_senders"].get<int32_t>();
+        if (v < 0) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "replication_max_wal_senders must be >= 0, got: " +
+                                  std::to_string(v));
+        }
+        config.replication_max_wal_senders = v;
+    } else if (j.contains("replication_max_wal_senders")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "replication_max_wal_senders must be an integer, got wrong type");
+    }
+    if (j.contains("replication_keepalive_interval_ms") &&
+        j["replication_keepalive_interval_ms"].is_number_integer()) {
+        auto v = j["replication_keepalive_interval_ms"].get<int32_t>();
+        if (v < 0) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "replication_keepalive_interval_ms must be >= 0, got: " +
+                                  std::to_string(v));
+        }
+        config.replication_keepalive_interval_ms = v;
+    } else if (j.contains("replication_keepalive_interval_ms")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "replication_keepalive_interval_ms must be an integer, got wrong type");
+    }
+    if (j.contains("replication_sender_timeout_ms") &&
+        j["replication_sender_timeout_ms"].is_number_integer()) {
+        auto v = j["replication_sender_timeout_ms"].get<int32_t>();
+        if (v < 0) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "replication_sender_timeout_ms must be >= 0, got: " +
+                                  std::to_string(v));
+        }
+        config.replication_sender_timeout_ms = v;
+    } else if (j.contains("replication_sender_timeout_ms")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "replication_sender_timeout_ms must be an integer, got wrong type");
     }
     if (j.contains("master_key_path") && j["master_key_path"].is_string()) {
         config.master_key_path = j["master_key_path"].get<std::string>();
+    } else if (j.contains("master_key_path")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "master_key_path must be a string, got wrong type");
     } else {
         // Derive master_key_path from data_dir (which may have been overridden above).
         config.master_key_path = config.data_dir + "/master.key";
@@ -87,6 +170,9 @@ Result<Config> Config::load_from_file(const std::string& path) {
         const auto& server = j["server"];
         if (server.contains("mode") && server["mode"].is_string()) {
             config.standby_mode = (server["mode"].get<std::string>() == "standby");
+        } else if (server.contains("mode")) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "server.mode must be a string, got wrong type");
         }
     }
 
@@ -95,52 +181,97 @@ Result<Config> Config::load_from_file(const std::string& path) {
         const auto& repl = j["replication"];
         if (repl.contains("primary_host") && repl["primary_host"].is_string()) {
             config.replication_primary_host = repl["primary_host"].get<std::string>();
+        } else if (repl.contains("primary_host")) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "replication.primary_host must be a string, got wrong type");
         }
         if (repl.contains("primary_port") && repl["primary_port"].is_number_unsigned()) {
             auto port_value = repl["primary_port"].get<uint64_t>();
-            if (port_value <= 65535) {
-                config.replication_primary_port = static_cast<uint16_t>(port_value);
+            if (port_value > 65535) {
+                return make_error(StatusCode::INVALID_ARGUMENT,
+                                  "replication.primary_port must be in range 0-65535, got: " +
+                                      std::to_string(port_value));
             }
+            config.replication_primary_port = static_cast<uint16_t>(port_value);
+        } else if (repl.contains("primary_port")) {
+            return make_error(
+                StatusCode::INVALID_ARGUMENT,
+                "replication.primary_port must be an unsigned integer, got wrong type");
         }
         if (repl.contains("retry_interval_ms") && repl["retry_interval_ms"].is_number()) {
             config.replication_retry_interval_ms = repl["retry_interval_ms"].get<int32_t>();
+        } else if (repl.contains("retry_interval_ms")) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "replication.retry_interval_ms must be a number, got wrong type");
         }
         if (repl.contains("max_retry_interval_ms") && repl["max_retry_interval_ms"].is_number()) {
             config.replication_max_retry_interval_ms = repl["max_retry_interval_ms"].get<int32_t>();
+        } else if (repl.contains("max_retry_interval_ms")) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "replication.max_retry_interval_ms must be a number, got wrong type");
         }
         if (repl.contains("promote_max_lag_bytes") && repl["promote_max_lag_bytes"].is_number()) {
             config.replication_promote_max_lag_bytes = repl["promote_max_lag_bytes"].get<int64_t>();
+        } else if (repl.contains("promote_max_lag_bytes")) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "replication.promote_max_lag_bytes must be a number, got wrong type");
         }
         if (repl.contains("synchronous_mode") && repl["synchronous_mode"].is_string()) {
             config.replication_synchronous_mode = repl["synchronous_mode"].get<std::string>();
+        } else if (repl.contains("synchronous_mode")) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "replication.synchronous_mode must be a string, got wrong type");
         }
         if (repl.contains("synchronous_standby_names") &&
             repl["synchronous_standby_names"].is_string()) {
             config.replication_synchronous_standby_names =
                 repl["synchronous_standby_names"].get<std::string>();
+        } else if (repl.contains("synchronous_standby_names")) {
+            return make_error(
+                StatusCode::INVALID_ARGUMENT,
+                "replication.synchronous_standby_names must be a string, got wrong type");
         }
         if (repl.contains("synchronous_commit_count") &&
             repl["synchronous_commit_count"].is_number()) {
             config.replication_synchronous_commit_count =
                 repl["synchronous_commit_count"].get<int32_t>();
+        } else if (repl.contains("synchronous_commit_count")) {
+            return make_error(
+                StatusCode::INVALID_ARGUMENT,
+                "replication.synchronous_commit_count must be a number, got wrong type");
         }
         if (repl.contains("synchronous_timeout_ms") && repl["synchronous_timeout_ms"].is_number()) {
             config.replication_synchronous_timeout_ms =
                 repl["synchronous_timeout_ms"].get<int32_t>();
+        } else if (repl.contains("synchronous_timeout_ms")) {
+            return make_error(
+                StatusCode::INVALID_ARGUMENT,
+                "replication.synchronous_timeout_ms must be a number, got wrong type");
         }
         if (repl.contains("synchronous_fallback") && repl["synchronous_fallback"].is_string()) {
             config.replication_synchronous_fallback =
                 repl["synchronous_fallback"].get<std::string>();
+        } else if (repl.contains("synchronous_fallback")) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "replication.synchronous_fallback must be a string, got wrong type");
         }
         if (repl.contains("lag_warning_threshold_ms") &&
             repl["lag_warning_threshold_ms"].is_number()) {
             config.replication_lag_warning_threshold_ms =
                 repl["lag_warning_threshold_ms"].get<int64_t>();
+        } else if (repl.contains("lag_warning_threshold_ms")) {
+            return make_error(
+                StatusCode::INVALID_ARGUMENT,
+                "replication.lag_warning_threshold_ms must be a number, got wrong type");
         }
         if (repl.contains("disconnect_warning_threshold_ms") &&
             repl["disconnect_warning_threshold_ms"].is_number()) {
             config.replication_disconnect_warning_threshold_ms =
                 repl["disconnect_warning_threshold_ms"].get<int64_t>();
+        } else if (repl.contains("disconnect_warning_threshold_ms")) {
+            return make_error(
+                StatusCode::INVALID_ARGUMENT,
+                "replication.disconnect_warning_threshold_ms must be a number, got wrong type");
         }
     }
 
