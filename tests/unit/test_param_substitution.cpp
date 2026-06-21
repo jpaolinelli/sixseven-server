@@ -7,12 +7,12 @@
 
 #include <gtest/gtest.h>
 
-#include "sixseven/common/platform.h"
-
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
+
+#include "pg_wire_test_helpers.h"
 
 using namespace sixseven;
 
@@ -337,213 +337,50 @@ TEST(ParamSubstitution, DeleteWithTextParam) {
 
 namespace {
 
-int create_socketpair_for_test(int& client_fd) {
-    int fds[2];
-    EXPECT_EQ(sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
-    client_fd = fds[0];
-    return fds[1];
-}
-
-void write_to_fd_for_test(int fd, const std::vector<uint8_t>& data) {
-    size_t written = 0;
-    while (written < data.size()) {
-        auto n = ::write(fd, data.data() + written, data.size() - written);
-        ASSERT_GT(n, 0);
-        written += static_cast<size_t>(n);
-    }
-}
-
-std::vector<uint8_t> read_from_fd_for_test(int fd) {
-    std::vector<uint8_t> buf(8192);
-    auto n = ::read(fd, buf.data(), buf.size());
-    if (n <= 0) {
-        return {};
-    }
-    buf.resize(static_cast<size_t>(n));
-    return buf;
-}
-
-std::vector<uint8_t>
-build_startup_msg(const std::vector<std::pair<std::string, std::string>>& params) {
-    std::vector<uint8_t> body;
-    // Protocol version 3.0.
-    int32_t version = 196608;
-    body.push_back(static_cast<uint8_t>((version >> 24) & 0xFF));
-    body.push_back(static_cast<uint8_t>((version >> 16) & 0xFF));
-    body.push_back(static_cast<uint8_t>((version >> 8) & 0xFF));
-    body.push_back(static_cast<uint8_t>(version & 0xFF));
-    for (const auto& [key, val] : params) {
-        body.insert(body.end(), key.begin(), key.end());
-        body.push_back(0);
-        body.insert(body.end(), val.begin(), val.end());
-        body.push_back(0);
-    }
-    body.push_back(0);
-    int32_t total_len = static_cast<int32_t>(4 + body.size());
-    std::vector<uint8_t> msg;
-    msg.push_back(static_cast<uint8_t>((total_len >> 24) & 0xFF));
-    msg.push_back(static_cast<uint8_t>((total_len >> 16) & 0xFF));
-    msg.push_back(static_cast<uint8_t>((total_len >> 8) & 0xFF));
-    msg.push_back(static_cast<uint8_t>(total_len & 0xFF));
-    msg.insert(msg.end(), body.begin(), body.end());
-    return msg;
-}
-
-std::vector<uint8_t> build_parse_msg(std::string_view stmt_name,
-                                     std::string_view sql,
-                                     const std::vector<uint32_t>& param_oids = {}) {
-    std::vector<uint8_t> body;
-    body.insert(body.end(), stmt_name.begin(), stmt_name.end());
-    body.push_back(0);
-    body.insert(body.end(), sql.begin(), sql.end());
-    body.push_back(0);
-    auto num = static_cast<uint16_t>(param_oids.size());
-    body.push_back(static_cast<uint8_t>((num >> 8) & 0xFF));
-    body.push_back(static_cast<uint8_t>(num & 0xFF));
-    for (uint32_t oid : param_oids) {
-        body.push_back(static_cast<uint8_t>((oid >> 24) & 0xFF));
-        body.push_back(static_cast<uint8_t>((oid >> 16) & 0xFF));
-        body.push_back(static_cast<uint8_t>((oid >> 8) & 0xFF));
-        body.push_back(static_cast<uint8_t>(oid & 0xFF));
-    }
-    std::vector<uint8_t> msg;
-    msg.push_back('P');
-    uint32_t body_len = static_cast<uint32_t>(4 + body.size());
-    msg.push_back(static_cast<uint8_t>((body_len >> 24) & 0xFF));
-    msg.push_back(static_cast<uint8_t>((body_len >> 16) & 0xFF));
-    msg.push_back(static_cast<uint8_t>((body_len >> 8) & 0xFF));
-    msg.push_back(static_cast<uint8_t>(body_len & 0xFF));
-    msg.insert(msg.end(), body.begin(), body.end());
-    return msg;
-}
-
-/// Build a Bind message with optional NULL support.
-/// Use std::nullopt in param_values to send a NULL parameter (length = -1).
-std::vector<uint8_t>
-build_bind_msg(std::string_view portal_name,
-               std::string_view stmt_name,
-               const std::vector<std::optional<std::string>>& param_values = {}) {
-    std::vector<uint8_t> body;
-    body.insert(body.end(), portal_name.begin(), portal_name.end());
-    body.push_back(0);
-    body.insert(body.end(), stmt_name.begin(), stmt_name.end());
-    body.push_back(0);
-    // 0 parameter format codes (use default text).
-    body.push_back(0);
-    body.push_back(0);
-    auto num = static_cast<uint16_t>(param_values.size());
-    body.push_back(static_cast<uint8_t>((num >> 8) & 0xFF));
-    body.push_back(static_cast<uint8_t>(num & 0xFF));
-    for (const auto& val : param_values) {
-        if (!val.has_value()) {
-            // NULL: length = -1.
-            body.push_back(0xFF);
-            body.push_back(0xFF);
-            body.push_back(0xFF);
-            body.push_back(0xFF);
-        } else {
-            auto len = static_cast<uint32_t>(val->size());
-            body.push_back(static_cast<uint8_t>((len >> 24) & 0xFF));
-            body.push_back(static_cast<uint8_t>((len >> 16) & 0xFF));
-            body.push_back(static_cast<uint8_t>((len >> 8) & 0xFF));
-            body.push_back(static_cast<uint8_t>(len & 0xFF));
-            body.insert(body.end(), val->begin(), val->end());
-        }
-    }
-    // 0 result format codes.
-    body.push_back(0);
-    body.push_back(0);
-
-    std::vector<uint8_t> msg;
-    msg.push_back('B');
-    uint32_t body_len = static_cast<uint32_t>(4 + body.size());
-    msg.push_back(static_cast<uint8_t>((body_len >> 24) & 0xFF));
-    msg.push_back(static_cast<uint8_t>((body_len >> 16) & 0xFF));
-    msg.push_back(static_cast<uint8_t>((body_len >> 8) & 0xFF));
-    msg.push_back(static_cast<uint8_t>(body_len & 0xFF));
-    msg.insert(msg.end(), body.begin(), body.end());
-    return msg;
-}
-
-std::vector<uint8_t> build_execute_msg(std::string_view portal_name, int32_t max_rows = 0) {
-    std::vector<uint8_t> msg;
-    msg.push_back('E');
-    uint32_t body_len = static_cast<uint32_t>(4 + portal_name.size() + 1 + 4);
-    msg.push_back(static_cast<uint8_t>((body_len >> 24) & 0xFF));
-    msg.push_back(static_cast<uint8_t>((body_len >> 16) & 0xFF));
-    msg.push_back(static_cast<uint8_t>((body_len >> 8) & 0xFF));
-    msg.push_back(static_cast<uint8_t>(body_len & 0xFF));
-    msg.insert(msg.end(), portal_name.begin(), portal_name.end());
-    msg.push_back(0);
-    auto mr = static_cast<uint32_t>(max_rows);
-    msg.push_back(static_cast<uint8_t>((mr >> 24) & 0xFF));
-    msg.push_back(static_cast<uint8_t>((mr >> 16) & 0xFF));
-    msg.push_back(static_cast<uint8_t>((mr >> 8) & 0xFF));
-    msg.push_back(static_cast<uint8_t>(mr & 0xFF));
-    return msg;
-}
-
-std::vector<uint8_t> build_sync_msg() {
-    return {'S', 0, 0, 0, 4};
-}
-
-/// Build a simple Query message.
-std::vector<uint8_t> build_query_msg(std::string_view sql) {
-    std::vector<uint8_t> msg;
-    msg.push_back('Q');
-    uint32_t body_len = static_cast<uint32_t>(4 + sql.size() + 1);
-    msg.push_back(static_cast<uint8_t>((body_len >> 24) & 0xFF));
-    msg.push_back(static_cast<uint8_t>((body_len >> 16) & 0xFF));
-    msg.push_back(static_cast<uint8_t>((body_len >> 8) & 0xFF));
-    msg.push_back(static_cast<uint8_t>(body_len & 0xFF));
-    msg.insert(msg.end(), sql.begin(), sql.end());
-    msg.push_back(0);
-    return msg;
-}
-
 void do_startup_for_test(int client_fd, Connection& conn, PgProtocolHandler& handler) {
-    auto startup = build_startup_msg({{"user", "test"}});
-    write_to_fd_for_test(client_fd, startup);
+    auto startup = pg_wire_test::build_startup_message({{"user", "test"}});
+    pg_wire_test::write_to_fd(client_fd, startup);
     (void)conn.read_from_socket();
     (void)handler.process(conn);
     (void)conn.write_to_socket();
-    (void)read_from_fd_for_test(client_fd);
+    (void)pg_wire_test::read_from_fd(client_fd);
 }
 
 } // namespace
 
 TEST(ParamSubstitutionWire, ParameterSubstitutionPassesSqlToExecutor) {
     int client_fd = -1;
-    int server_fd = create_socketpair_for_test(client_fd);
+    int server_fd = pg_wire_test::create_socketpair(client_fd);
 
     Connection conn(server_fd);
     PgProtocolHandler handler(100);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
-        received_sql = sql;
-        QueryResult qr;
-        qr.column_names = {"id"};
-        qr.column_types = {TypeId::INT32};
-        qr.rows = {{Value(static_cast<int32_t>(42))}};
-        return ok(std::move(qr));
-    });
+    handler.set_query_executor(
+        [&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
+            received_sql = sql;
+            QueryResult qr;
+            qr.column_names = {"id"};
+            qr.column_types = {TypeId::INT32};
+            qr.rows = {{Value(static_cast<int32_t>(42))}};
+            return ok(std::move(qr));
+        });
 
     do_startup_for_test(client_fd, conn, handler);
 
     // Parse with INT4 OID, Bind with "42", Execute.
     std::vector<uint8_t> batch;
-    auto parse = build_parse_msg("", "SELECT * FROM t WHERE id = $1", {23});
-    auto bind = build_bind_msg("", "", {std::optional<std::string>("42")});
-    auto execute = build_execute_msg("");
-    auto sync = build_sync_msg();
+    auto parse = pg_wire_test::build_parse_message("", "SELECT * FROM t WHERE id = $1", {23});
+    auto bind = pg_wire_test::build_bind_message("", "", {std::optional<std::string>("42")});
+    auto execute = pg_wire_test::build_execute_message("");
+    auto sync = pg_wire_test::build_sync_message();
 
     batch.insert(batch.end(), parse.begin(), parse.end());
     batch.insert(batch.end(), bind.begin(), bind.end());
     batch.insert(batch.end(), execute.begin(), execute.end());
     batch.insert(batch.end(), sync.begin(), sync.end());
 
-    write_to_fd_for_test(client_fd, batch);
+    pg_wire_test::write_to_fd(client_fd, batch);
     (void)conn.read_from_socket();
     auto result = handler.process(conn);
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -557,34 +394,37 @@ TEST(ParamSubstitutionWire, ParameterSubstitutionPassesSqlToExecutor) {
 
 TEST(ParamSubstitutionWire, NullParameterSubstitution) {
     int client_fd = -1;
-    int server_fd = create_socketpair_for_test(client_fd);
+    int server_fd = pg_wire_test::create_socketpair(client_fd);
 
     Connection conn(server_fd);
     PgProtocolHandler handler(101);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
-        received_sql = sql;
-        QueryResult qr;
-        qr.affected_rows = 1;
-        qr.message = "UPDATE";
-        return ok(std::move(qr));
-    });
+    handler.set_query_executor(
+        [&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
+            received_sql = sql;
+            QueryResult qr;
+            qr.affected_rows = 1;
+            qr.message = "UPDATE";
+            return ok(std::move(qr));
+        });
 
     do_startup_for_test(client_fd, conn, handler);
 
     std::vector<uint8_t> batch;
-    auto parse = build_parse_msg("", "UPDATE t SET name = $1 WHERE id = $2", {25, 23});
-    auto bind = build_bind_msg("", "", {std::nullopt, std::optional<std::string>("5")});
-    auto execute = build_execute_msg("");
-    auto sync = build_sync_msg();
+    auto parse =
+        pg_wire_test::build_parse_message("", "UPDATE t SET name = $1 WHERE id = $2", {25, 23});
+    auto bind =
+        pg_wire_test::build_bind_message("", "", {std::nullopt, std::optional<std::string>("5")});
+    auto execute = pg_wire_test::build_execute_message("");
+    auto sync = pg_wire_test::build_sync_message();
 
     batch.insert(batch.end(), parse.begin(), parse.end());
     batch.insert(batch.end(), bind.begin(), bind.end());
     batch.insert(batch.end(), execute.begin(), execute.end());
     batch.insert(batch.end(), sync.begin(), sync.end());
 
-    write_to_fd_for_test(client_fd, batch);
+    pg_wire_test::write_to_fd(client_fd, batch);
     (void)conn.read_from_socket();
     auto result = handler.process(conn);
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -597,34 +437,36 @@ TEST(ParamSubstitutionWire, NullParameterSubstitution) {
 
 TEST(ParamSubstitutionWire, StringParameterWithEscaping) {
     int client_fd = -1;
-    int server_fd = create_socketpair_for_test(client_fd);
+    int server_fd = pg_wire_test::create_socketpair(client_fd);
 
     Connection conn(server_fd);
     PgProtocolHandler handler(102);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
-        received_sql = sql;
-        QueryResult qr;
-        qr.affected_rows = 1;
-        qr.message = "INSERT";
-        return ok(std::move(qr));
-    });
+    handler.set_query_executor(
+        [&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
+            received_sql = sql;
+            QueryResult qr;
+            qr.affected_rows = 1;
+            qr.message = "INSERT";
+            return ok(std::move(qr));
+        });
 
     do_startup_for_test(client_fd, conn, handler);
 
     std::vector<uint8_t> batch;
-    auto parse = build_parse_msg("", "INSERT INTO t (name) VALUES ($1)", {25});
-    auto bind = build_bind_msg("", "", {std::optional<std::string>("it's a test")});
-    auto execute = build_execute_msg("");
-    auto sync = build_sync_msg();
+    auto parse = pg_wire_test::build_parse_message("", "INSERT INTO t (name) VALUES ($1)", {25});
+    auto bind =
+        pg_wire_test::build_bind_message("", "", {std::optional<std::string>("it's a test")});
+    auto execute = pg_wire_test::build_execute_message("");
+    auto sync = pg_wire_test::build_sync_message();
 
     batch.insert(batch.end(), parse.begin(), parse.end());
     batch.insert(batch.end(), bind.begin(), bind.end());
     batch.insert(batch.end(), execute.begin(), execute.end());
     batch.insert(batch.end(), sync.begin(), sync.end());
 
-    write_to_fd_for_test(client_fd, batch);
+    pg_wire_test::write_to_fd(client_fd, batch);
     (void)conn.read_from_socket();
     auto result = handler.process(conn);
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -637,34 +479,35 @@ TEST(ParamSubstitutionWire, StringParameterWithEscaping) {
 
 TEST(ParamSubstitutionWire, DeleteWithParameter) {
     int client_fd = -1;
-    int server_fd = create_socketpair_for_test(client_fd);
+    int server_fd = pg_wire_test::create_socketpair(client_fd);
 
     Connection conn(server_fd);
     PgProtocolHandler handler(103);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
-        received_sql = sql;
-        QueryResult qr;
-        qr.affected_rows = 3;
-        qr.message = "DELETE";
-        return ok(std::move(qr));
-    });
+    handler.set_query_executor(
+        [&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
+            received_sql = sql;
+            QueryResult qr;
+            qr.affected_rows = 3;
+            qr.message = "DELETE";
+            return ok(std::move(qr));
+        });
 
     do_startup_for_test(client_fd, conn, handler);
 
     std::vector<uint8_t> batch;
-    auto parse = build_parse_msg("", "DELETE FROM t WHERE status = $1", {25});
-    auto bind = build_bind_msg("", "", {std::optional<std::string>("inactive")});
-    auto execute = build_execute_msg("");
-    auto sync = build_sync_msg();
+    auto parse = pg_wire_test::build_parse_message("", "DELETE FROM t WHERE status = $1", {25});
+    auto bind = pg_wire_test::build_bind_message("", "", {std::optional<std::string>("inactive")});
+    auto execute = pg_wire_test::build_execute_message("");
+    auto sync = pg_wire_test::build_sync_message();
 
     batch.insert(batch.end(), parse.begin(), parse.end());
     batch.insert(batch.end(), bind.begin(), bind.end());
     batch.insert(batch.end(), execute.begin(), execute.end());
     batch.insert(batch.end(), sync.begin(), sync.end());
 
-    write_to_fd_for_test(client_fd, batch);
+    pg_wire_test::write_to_fd(client_fd, batch);
     (void)conn.read_from_socket();
     auto result = handler.process(conn);
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -677,35 +520,36 @@ TEST(ParamSubstitutionWire, DeleteWithParameter) {
 
 TEST(ParamSubstitutionWire, NoParamsPassthroughUnchanged) {
     int client_fd = -1;
-    int server_fd = create_socketpair_for_test(client_fd);
+    int server_fd = pg_wire_test::create_socketpair(client_fd);
 
     Connection conn(server_fd);
     PgProtocolHandler handler(104);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
-        received_sql = sql;
-        QueryResult qr;
-        qr.column_names = {"x"};
-        qr.column_types = {TypeId::INT32};
-        qr.rows = {{Value(static_cast<int32_t>(1))}};
-        return ok(std::move(qr));
-    });
+    handler.set_query_executor(
+        [&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
+            received_sql = sql;
+            QueryResult qr;
+            qr.column_names = {"x"};
+            qr.column_types = {TypeId::INT32};
+            qr.rows = {{Value(static_cast<int32_t>(1))}};
+            return ok(std::move(qr));
+        });
 
     do_startup_for_test(client_fd, conn, handler);
 
     std::vector<uint8_t> batch;
-    auto parse = build_parse_msg("", "SELECT 1", {});
-    auto bind = build_bind_msg("", "", {});
-    auto execute = build_execute_msg("");
-    auto sync = build_sync_msg();
+    auto parse = pg_wire_test::build_parse_message("", "SELECT 1", {});
+    auto bind = pg_wire_test::build_bind_message("", "", {});
+    auto execute = pg_wire_test::build_execute_message("");
+    auto sync = pg_wire_test::build_sync_message();
 
     batch.insert(batch.end(), parse.begin(), parse.end());
     batch.insert(batch.end(), bind.begin(), bind.end());
     batch.insert(batch.end(), execute.begin(), execute.end());
     batch.insert(batch.end(), sync.begin(), sync.end());
 
-    write_to_fd_for_test(client_fd, batch);
+    pg_wire_test::write_to_fd(client_fd, batch);
     (void)conn.read_from_socket();
     auto result = handler.process(conn);
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -722,36 +566,38 @@ TEST(ParamSubstitutionWire, NoParamsPassthroughUnchanged) {
 
 TEST(ParamSubstitutionWire, SqlLevelExecuteWithParams) {
     int client_fd = -1;
-    int server_fd = create_socketpair_for_test(client_fd);
+    int server_fd = pg_wire_test::create_socketpair(client_fd);
 
     Connection conn(server_fd);
     PgProtocolHandler handler(105);
 
     std::string received_sql;
     int call_count = 0;
-    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
-        ++call_count;
-        received_sql = sql;
-        QueryResult qr;
-        qr.column_names = {"id"};
-        qr.column_types = {TypeId::INT32};
-        qr.rows = {{Value(static_cast<int32_t>(42))}};
-        return ok(std::move(qr));
-    });
+    handler.set_query_executor(
+        [&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
+            ++call_count;
+            received_sql = sql;
+            QueryResult qr;
+            qr.column_names = {"id"};
+            qr.column_types = {TypeId::INT32};
+            qr.rows = {{Value(static_cast<int32_t>(42))}};
+            return ok(std::move(qr));
+        });
 
     do_startup_for_test(client_fd, conn, handler);
 
     // First, PREPARE the statement via simple query.
-    auto prepare_msg = build_query_msg("PREPARE myquery (int) AS SELECT * FROM t WHERE id = $1");
-    write_to_fd_for_test(client_fd, prepare_msg);
+    auto prepare_msg =
+        pg_wire_test::build_query_message("PREPARE myquery (int) AS SELECT * FROM t WHERE id = $1");
+    pg_wire_test::write_to_fd(client_fd, prepare_msg);
     (void)conn.read_from_socket();
     (void)handler.process(conn);
     (void)conn.write_to_socket();
-    (void)read_from_fd_for_test(client_fd);
+    (void)pg_wire_test::read_from_fd(client_fd);
 
     // Now EXECUTE it with a parameter.
-    auto execute_msg = build_query_msg("EXECUTE myquery (42)");
-    write_to_fd_for_test(client_fd, execute_msg);
+    auto execute_msg = pg_wire_test::build_query_message("EXECUTE myquery (42)");
+    pg_wire_test::write_to_fd(client_fd, execute_msg);
     (void)conn.read_from_socket();
     auto result = handler.process(conn);
     ASSERT_TRUE(result.has_value()) << result.error().message;
