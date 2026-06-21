@@ -72,6 +72,11 @@ void ReplicationHealthMonitor::check_health(const WalSenderManager& sender_mgr,
     }
 }
 
+HealthMonitorConfig ReplicationHealthMonitor::config() const {
+    std::lock_guard lock(mutex_);
+    return config_;
+}
+
 HealthReport ReplicationHealthMonitor::last_report() const {
     std::lock_guard lock(mutex_);
     HealthReport report;

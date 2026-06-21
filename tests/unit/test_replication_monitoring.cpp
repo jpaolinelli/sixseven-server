@@ -407,7 +407,9 @@ TEST(ReplicationHealthMonitor, ConfigureUpdatesThresholds) {
     new_cfg.disconnect_warning_threshold = std::chrono::milliseconds(10000);
     monitor.configure(new_cfg);
 
-    // No crash, just verify configure works.
+    auto got = monitor.config();
+    EXPECT_EQ(got.lag_warning_threshold, std::chrono::milliseconds(2000));
+    EXPECT_EQ(got.disconnect_warning_threshold, std::chrono::milliseconds(10000));
 }
 
 TEST(ReplicationHealthMonitor, CheckHealthWithActiveReplica) {

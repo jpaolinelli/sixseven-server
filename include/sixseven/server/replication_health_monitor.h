@@ -65,6 +65,9 @@ public:
     /// call.  Thread-safe (takes the internal mutex).
     [[nodiscard]] HealthReport last_report() const;
 
+    /// Return a copy of the current configuration.  Thread-safe.
+    [[nodiscard]] HealthMonitorConfig config() const;
+
 private:
     mutable std::mutex mutex_;
     HealthMonitorConfig config_;
