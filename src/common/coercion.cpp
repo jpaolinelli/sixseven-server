@@ -315,6 +315,11 @@ Result<Value> coerce(const Value& value, TypeId target) {
     if (target == TypeId::DECIMAL) {
         // For now, store integer value in lo, 0 in hi.
         if (is_integer(from)) {
+            if (from == TypeId::UINT64) {
+                // Avoid the to_int64() round-trip: UINT64 values above INT64_MAX
+                // would wrap to a negative int64, incorrectly producing hi == -1.
+                return ok(Value(Decimal128{0, value.as_uint64()}));
+            }
             int64_t v = to_int64(value);
             if (v >= 0) {
                 return ok(Value(Decimal128{0, static_cast<uint64_t>(v)}));

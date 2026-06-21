@@ -569,3 +569,55 @@ TEST(CrossTypeCompare, StringToUUIDInvalidFormat) {
     auto result = compare(Value(std::string("not-a-uuid")), Value(uuid));
     ASSERT_FALSE(result.has_value());
 }
+
+// -- GDB-873: UINT64 -> DECIMAL coercion sign-flip fix ------------------------
+// UINT64 values > INT64_MAX must produce hi==0 (positive), not hi==-1 (negative).
+
+TEST(CoerceUint64ToDecimal, SmallValue) {
+    // A small UINT64 (42) must round-trip cleanly: hi==0, lo==42.
+    auto result = coerce(Value(static_cast<uint64_t>(42)), TypeId::DECIMAL);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto d = result->as_decimal();
+    EXPECT_EQ(d.hi, 0);
+    EXPECT_EQ(d.lo, static_cast<uint64_t>(42));
+}
+
+TEST(CoerceUint64ToDecimal, BoundaryAtInt64Max) {
+    // 2^63 is the first UINT64 value that wraps when cast to int64_t.
+    // It must produce hi==0, lo==2^63 (positive), not hi==-1.
+    constexpr uint64_t two63 = static_cast<uint64_t>(1) << 63;
+    auto result = coerce(Value(two63), TypeId::DECIMAL);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto d = result->as_decimal();
+    EXPECT_EQ(d.hi, 0);
+    EXPECT_EQ(d.lo, two63);
+}
+
+TEST(CoerceUint64ToDecimal, MaxUint64) {
+    // UINT64_MAX must produce hi==0, lo==UINT64_MAX (positive).
+    constexpr uint64_t max_u64 = std::numeric_limits<uint64_t>::max();
+    auto result = coerce(Value(max_u64), TypeId::DECIMAL);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto d = result->as_decimal();
+    EXPECT_EQ(d.hi, 0);
+    EXPECT_EQ(d.lo, max_u64);
+}
+
+TEST(CoerceInt64ToDecimal, NegativeValueSignedPathUnchanged) {
+    // A genuine negative INT64 must still produce hi==-1 (signed path unchanged).
+    auto result = coerce(Value(static_cast<int64_t>(-5)), TypeId::DECIMAL);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto d = result->as_decimal();
+    EXPECT_EQ(d.hi, -1);
+    EXPECT_EQ(d.lo, static_cast<uint64_t>(-5));
+}
+
+TEST(CoerceInt64ToDecimal, Int64MaxPositive) {
+    // INT64_MAX must produce hi==0, lo==INT64_MAX (fits in signed path).
+    constexpr int64_t max_i64 = std::numeric_limits<int64_t>::max();
+    auto result = coerce(Value(max_i64), TypeId::DECIMAL);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto d = result->as_decimal();
+    EXPECT_EQ(d.hi, 0);
+    EXPECT_EQ(d.lo, static_cast<uint64_t>(max_i64));
+}
