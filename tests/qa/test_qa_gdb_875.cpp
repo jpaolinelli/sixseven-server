@@ -172,7 +172,8 @@ TEST(QA_GDB875_Concurrency, ConcurrentConfigureNoDataRace) {
             }
         });
     }
-    for (auto& th : writers) th.join();
+    for (auto& th : writers)
+        th.join();
 
     // config() must return a coherent (non-torn) snapshot — both fields must
     // belong to the same valid configure() call.
@@ -204,7 +205,8 @@ TEST(QA_GDB875_Concurrency, ConcurrentWritersAndReadersNoRace) {
             while (!stop.load(std::memory_order_relaxed)) {
                 monitor.configure(make_cfg((t + 1) * 50 + i % 10, (t + 1) * 100 + i % 10));
                 ++i;
-                if (i >= kIter) break;
+                if (i >= kIter)
+                    break;
             }
         });
     }
@@ -217,12 +219,14 @@ TEST(QA_GDB875_Concurrency, ConcurrentWritersAndReadersNoRace) {
                 EXPECT_GE(got.lag_warning_threshold.count(), 0);
                 EXPECT_GE(got.disconnect_warning_threshold.count(), 0);
                 ++i;
-                if (i >= kIter) break;
+                if (i >= kIter)
+                    break;
             }
         });
     }
 
-    for (auto& th : threads) th.join();
+    for (auto& th : threads)
+        th.join();
     stop.store(true);
 }
 
