@@ -1,31 +1,19 @@
+#include "sixseven/common/platform.h"
 #include "sixseven/vector/hnsw_index.h"
-#include "sixseven/common/platform.h"
 #include "sixseven/vector/hnsw_page.h"
-#include "sixseven/common/platform.h"
 
 #include <gtest/gtest.h>
-#include "sixseven/common/platform.h"
 
 #include <algorithm>
-#include "sixseven/common/platform.h"
 #include <cmath>
-#include "sixseven/common/platform.h"
 #include <cstring>
-#include "sixseven/common/platform.h"
 #include <filesystem>
-#include "sixseven/common/platform.h"
 #include <limits>
-#include "sixseven/common/platform.h"
 #include <numeric>
-#include "sixseven/common/platform.h"
 #include <random>
-#include "sixseven/common/platform.h"
 #include <set>
-#include "sixseven/common/platform.h"
 #include <thread>
-#include "sixseven/common/platform.h"
 #include <vector>
-#include "sixseven/common/platform.h"
 
 using namespace sixseven;
 
