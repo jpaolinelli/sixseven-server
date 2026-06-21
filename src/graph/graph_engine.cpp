@@ -244,9 +244,15 @@ Result<edge_id_t> GraphEngine::create_edge_type(database_id_t database_id,
     }
 
     // Build property list for catalog (comma-separated name:TYPE pairs).
+    // The sentinel token "__uniq__" is prepended when prevent_duplicates is set
+    // so the flag survives a server restart.  parse_property_columns() skips
+    // tokens that contain no colon, so it is safely ignored during reload.
     std::string props_str;
+    if (prevent_duplicates) {
+        props_str = "__uniq__";
+    }
     for (size_t i = 0; i < property_columns.size(); ++i) {
-        if (i > 0) {
+        if (!props_str.empty()) {
             props_str += ",";
         }
         props_str += property_columns[i].name;
@@ -260,6 +266,7 @@ Result<edge_id_t> GraphEngine::create_edge_type(database_id_t database_id,
     def.source_table_id = source_table_id;
     def.target_table_id = target_table_id;
     def.properties = props_str;
+    def.prevent_duplicates = prevent_duplicates;
 
     auto edge_id_result = catalog_.create_edge_type(database_id, def);
     if (!edge_id_result.has_value()) {
@@ -780,6 +787,19 @@ Result<bool> GraphEngine::load_edge_indexes(const std::string& edge_key,
         if (!std::filesystem::exists(uniq_path)) {
             return ok(false);
         }
+    } else {
+        // Defense-in-depth: warn if a uniq index file exists on disk but the
+        // restored flag is false.  This indicates a legacy catalog record that
+        // predates GDB-871 persistence; the orphaned file is harmless but the
+        // constraint will NOT be enforced without the flag.
+        auto uniq_path = edge_index_path(database_id, edge_id, "uniq");
+        if (std::filesystem::exists(uniq_path)) {
+            SIXSEVEN_LOG_WARN(
+                "edge type id={} has a unique-index file on disk but prevent_duplicates is not "
+                "set in the catalog.  The unique constraint will not be enforced.  "
+                "Recreate the edge type to restore the constraint.",
+                edge_id);
+        }
     }
 
     // Read persisted edge count from heap header extension for staleness check.
@@ -1043,7 +1063,9 @@ Result<void> GraphEngine::load_edges() {
         config.source_pk_type = source_pk_type;
         config.target_pk_type = target_pk_type;
         config.property_columns = prop_cols;
-        config.prevent_duplicates = false; // Not persisted; default to false.
+        // Restore the unique-edge constraint from the persisted sentinel token.
+        // Old catalog records without the token default to false (backward compat).
+        config.prevent_duplicates = et.prevent_duplicates;
 
         edge_tables_.emplace(key, std::make_unique<EdgeTable>(config));
 

@@ -352,6 +352,30 @@ Result<void> CatalogPersistence::load_catalog() {
             def.source_table_id = v[3].as_int32();
             def.target_table_id = v[4].as_int32();
             def.properties = v[5].is_null() ? "" : v[5].as_string();
+            // The "__uniq__" sentinel token in properties encodes prevent_duplicates.
+            // Old catalog records without the token default to false (backward compat).
+            // Use a whole-token match (split by ',') so that a real property column
+            // whose name contains "__uniq__" as a substring (e.g. "__uniq__:STRING")
+            // does NOT falsely set prevent_duplicates=true.  The encode side always
+            // writes the bare sentinel with no colon suffix, so the only exact match
+            // is the token "__uniq__" itself.
+            {
+                bool found = false;
+                const std::string& p = def.properties;
+                std::string::size_type start = 0;
+                while (start <= p.size()) {
+                    auto end = p.find(',', start);
+                    if (end == std::string::npos) {
+                        end = p.size();
+                    }
+                    if (p.compare(start, end - start, "__uniq__") == 0) {
+                        found = true;
+                        break;
+                    }
+                    start = end + 1;
+                }
+                def.prevent_duplicates = found;
+            }
 
             auto r = catalog_.restore_edge_type(db_id, std::move(def));
             if (!r) {

@@ -77,6 +77,11 @@ struct EdgeTypeDef {
     table_id_t source_table_id = 0;
     table_id_t target_table_id = 0;
     std::string properties; // JSON or comma-separated property definitions
+    /// Whether duplicate (source_pk, target_pk) pairs are forbidden.
+    /// Persisted by encoding a sentinel token "__uniq__" in the properties
+    /// string so that existing on-disk catalogs (without the token) default to
+    /// false.  parse_property_columns() ignores tokens without a colon.
+    bool prevent_duplicates = false;
 };
 
 /// Metadata for an EMBEDDING column configuration.
