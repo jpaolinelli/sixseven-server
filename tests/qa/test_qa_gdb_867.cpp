@@ -10,12 +10,12 @@
 
 #include <gtest/gtest.h>
 
-#include "pg_wire_test_helpers.h"
-
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
+
+#include "pg_wire_test_helpers.h"
 
 namespace {
 
@@ -34,8 +34,8 @@ static std::string hex_dump(const std::vector<uint8_t>& v) {
 }
 
 #define ASSERT_BYTES_EQ(actual, expected)                                                          \
-    ASSERT_EQ((actual), (expected)) << "actual : " << hex_dump(actual)                            \
-                                    << "\nexpected: " << hex_dump(expected)
+    ASSERT_EQ((actual), (expected))                                                                \
+        << "actual : " << hex_dump(actual) << "\nexpected: " << hex_dump(expected)
 
 // ---------------------------------------------------------------------------
 // Suite: QA_GDB867_PgWireHelpers — exact-byte assertions
@@ -81,8 +81,7 @@ TEST(QA_GDB867_PgWireHelpers, StartupMessageLengthIncludesItself) {
     ASSERT_GE(msg.size(), 4u);
     uint32_t encoded_len = (static_cast<uint32_t>(msg[0]) << 24) |
                            (static_cast<uint32_t>(msg[1]) << 16) |
-                           (static_cast<uint32_t>(msg[2]) << 8) |
-                           static_cast<uint32_t>(msg[3]);
+                           (static_cast<uint32_t>(msg[2]) << 8) | static_cast<uint32_t>(msg[3]);
     // Length field must equal total message size (i.e. it includes itself).
     EXPECT_EQ(encoded_len, static_cast<uint32_t>(msg.size()));
 }
@@ -92,9 +91,7 @@ TEST(QA_GDB867_PgWireHelpers, StartupMessageLengthIncludesItself) {
 // total_len = 4 + 5 = 9 = 0x09
 TEST(QA_GDB867_PgWireHelpers, StartupMessageEmptyParams) {
     auto msg = pg_wire_test::build_startup_message({});
-    const std::vector<uint8_t> expected = {0x00, 0x00, 0x00, 0x09,
-                                           0x00, 0x03, 0x00, 0x00,
-                                           0x00};
+    const std::vector<uint8_t> expected = {0x00, 0x00, 0x00, 0x09, 0x00, 0x03, 0x00, 0x00, 0x00};
     ASSERT_BYTES_EQ(msg, expected);
 }
 
@@ -138,8 +135,7 @@ TEST(QA_GDB867_PgWireHelpers, ParseMessageLengthIncludesItself) {
     EXPECT_EQ(msg[0], static_cast<uint8_t>('P'));
     uint32_t encoded_len = (static_cast<uint32_t>(msg[1]) << 24) |
                            (static_cast<uint32_t>(msg[2]) << 16) |
-                           (static_cast<uint32_t>(msg[3]) << 8) |
-                           static_cast<uint32_t>(msg[4]);
+                           (static_cast<uint32_t>(msg[3]) << 8) | static_cast<uint32_t>(msg[4]);
     // body_len = 4 + body_size; total msg = 1 + body_len = 1 + encoded_len
     EXPECT_EQ(encoded_len, static_cast<uint32_t>(msg.size() - 1));
 }
@@ -307,9 +303,15 @@ TEST(QA_GDB867_PgWireHelpers, ExecuteMessageExactBytes) {
 
     const std::vector<uint8_t> expected = {
         'E',
-        0x00, 0x00, 0x00, 0x09,
-        0x00,                         // portal "" + null
-        0x00, 0x00, 0x00, 0x00        // max_rows = 0
+        0x00,
+        0x00,
+        0x00,
+        0x09,
+        0x00, // portal "" + null
+        0x00,
+        0x00,
+        0x00,
+        0x00 // max_rows = 0
     };
 
     ASSERT_BYTES_EQ(msg, expected);
@@ -344,10 +346,8 @@ TEST(QA_GDB867_PgWireHelpers, SyncMessageLength) {
     auto msg = pg_wire_test::build_sync_message();
     ASSERT_EQ(msg.size(), 5u);
     EXPECT_EQ(msg[0], static_cast<uint8_t>('S'));
-    uint32_t len = (static_cast<uint32_t>(msg[1]) << 24) |
-                   (static_cast<uint32_t>(msg[2]) << 16) |
-                   (static_cast<uint32_t>(msg[3]) << 8) |
-                   static_cast<uint32_t>(msg[4]);
+    uint32_t len = (static_cast<uint32_t>(msg[1]) << 24) | (static_cast<uint32_t>(msg[2]) << 16) |
+                   (static_cast<uint32_t>(msg[3]) << 8) | static_cast<uint32_t>(msg[4]);
     EXPECT_EQ(len, 4u);
 }
 
@@ -426,12 +426,18 @@ TEST(QA_GDB867_PgWireHelpers, BindMessageZeroParams) {
     auto msg = pg_wire_test::build_bind_message("", "");
     const std::vector<uint8_t> expected = {
         'B',
-        0x00, 0x00, 0x00, 0x0C,
-        0x00,        // portal ""
-        0x00,        // stmt ""
-        0x00, 0x00,  // 0 format codes
-        0x00, 0x00,  // 0 params
-        0x00, 0x00   // 0 result format codes
+        0x00,
+        0x00,
+        0x00,
+        0x0C,
+        0x00, // portal ""
+        0x00, // stmt ""
+        0x00,
+        0x00, // 0 format codes
+        0x00,
+        0x00, // 0 params
+        0x00,
+        0x00 // 0 result format codes
     };
     ASSERT_BYTES_EQ(msg, expected);
 }
@@ -484,8 +490,7 @@ TEST(QA_GDB867_PgWireHelpers, StartupMessageMultipleParams) {
     ASSERT_GE(msg.size(), 4u);
     uint32_t encoded_len = (static_cast<uint32_t>(msg[0]) << 24) |
                            (static_cast<uint32_t>(msg[1]) << 16) |
-                           (static_cast<uint32_t>(msg[2]) << 8) |
-                           static_cast<uint32_t>(msg[3]);
+                           (static_cast<uint32_t>(msg[2]) << 8) | static_cast<uint32_t>(msg[3]);
     EXPECT_EQ(encoded_len, 34u);
     EXPECT_EQ(encoded_len, static_cast<uint32_t>(msg.size()));
     // Protocol version bytes at offset 4-7.
