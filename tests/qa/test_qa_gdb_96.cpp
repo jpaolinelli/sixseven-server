@@ -1,5 +1,12 @@
-/// QA adversarial tests for GDB-96: B+ tree latch crabbing for concurrency.
+/// QA adversarial tests for GDB-96: B+ tree tree-level latching (single
+/// tree-wide std::shared_mutex) for concurrency.
 /// Tests thread safety of concurrent reads, writes, and mixed operations.
+/// NOTE: The implementation uses a COARSE tree-level read/write lock — one
+/// shared_mutex guards the entire tree.  This is NOT fine-grained latch
+/// crabbing (a.k.a. lock coupling), which would hold per-node latches only
+/// along the traversal path.  Tests in this file are written to match the
+/// coarse design; if the locking strategy is ever refined to per-node
+/// crabbing, any test that assumes tree-wide exclusion must be revisited.
 
 #include <gtest/gtest.h>
 
@@ -373,6 +380,14 @@ TEST(QA_GDB96_Scan, MultipleConcurrentScans) {
 // Iterator lifetime / lock holding
 // =============================================================================
 
+// DESIGN PIN: This test intentionally relies on the coarse tree-level locking
+// design.  An open iterator acquires and holds the shared tree latch for its
+// entire lifetime, which blocks ANY writer tree-wide — even inserts targeting
+// a completely different leaf.  This assertion is CORRECT under the current
+// single-std::shared_mutex design.  Under fine-grained latch crabbing it would
+// NOT hold (a writer on a disjoint leaf path would not be blocked), so this
+// test MUST be revisited and updated if per-node / path latching is ever
+// introduced.
 TEST(QA_GDB96_Iterator, IteratorBlocksWrites) {
     // Verify that holding an iterator (shared lock) prevents writes
     // and that destroying it allows writes to proceed.
