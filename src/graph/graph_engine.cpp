@@ -156,51 +156,6 @@ Result<void> GraphEngine::create_edge_storage(database_id_t database_id,
     return ok();
 }
 
-Result<void> GraphEngine::open_edge_storage(database_id_t database_id,
-                                            edge_id_t edge_id,
-                                            TypeId source_pk_type,
-                                            TypeId target_pk_type,
-                                            const std::vector<ColumnDef>& property_columns) {
-    auto path = edge_file_path(database_id, edge_id);
-    if (!std::filesystem::exists(path)) {
-        // No storage file yet — edge type was created but no edges persisted.
-        // Create a new storage file.
-        return create_edge_storage(
-            database_id, edge_id, source_pk_type, target_pk_type, property_columns);
-    }
-
-    auto fid = dm_->open_file(path);
-    if (!fid) {
-        return make_error(fid.error().code, fid.error().message);
-    }
-
-    auto storage = std::make_unique<EdgeStorage>();
-    storage->file_id = *fid;
-    storage->bpm = std::make_unique<BufferPoolManager>(*dm_, *fid, 256);
-    storage->heap = std::make_unique<TableHeap>(*storage->bpm, *dm_, *fid);
-    storage->storage_schema =
-        build_edge_storage_schema(source_pk_type, target_pk_type, property_columns);
-
-    // Find the edge type name.
-    auto edge_types = catalog_.list_all_edge_types();
-    std::string edge_name;
-    database_id_t edge_db_id = database_id;
-    for (const auto& et : edge_types) {
-        if (et.edge_id == edge_id) {
-            edge_name = et.name;
-            edge_db_id = et.database_id;
-            break;
-        }
-    }
-    if (edge_name.empty()) {
-        return make_error(StatusCode::INTERNAL_ERROR,
-                          "edge type not found in catalog for id " + std::to_string(edge_id));
-    }
-
-    edge_storage_[make_edge_key(edge_db_id, edge_name)] = std::move(storage);
-    return ok();
-}
-
 Result<void> GraphEngine::persist_edge(const std::string& edge_key,
                                        uint64_t edge_row_id,
                                        const Value& source_pk,

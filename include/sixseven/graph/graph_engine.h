@@ -225,13 +225,6 @@ private:
                                                    TypeId target_pk_type,
                                                    const std::vector<ColumnDef>& property_columns);
 
-    /// Open existing persistent storage for an edge type.
-    [[nodiscard]] Result<void> open_edge_storage(database_id_t database_id,
-                                                 edge_id_t edge_id,
-                                                 TypeId source_pk_type,
-                                                 TypeId target_pk_type,
-                                                 const std::vector<ColumnDef>& property_columns);
-
     /// Persist a single edge row to the heap file.
     [[nodiscard]] Result<void> persist_edge(const std::string& edge_key,
                                             uint64_t edge_row_id,
