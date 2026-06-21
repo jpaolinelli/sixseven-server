@@ -2,7 +2,6 @@
 /// Tests split correctness, cascading splits, sibling pointer integrity,
 /// boundary capacities, and various insert orderings.
 
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -369,21 +368,42 @@ TEST(QA_GDB93_Duplicates, DuplicatesInterleavedWithUniques) {
 // Unique Constraint with Splits
 // =============================================================================
 
-TEST(QA_GDB93_Unique, RejectDuplicateAfterSplit) {
-    auto tree = make_test_index(3, 3, true);
+// GDB-872: Parameterized over several leaf/internal capacities to cover
+// unique-constraint enforcement across different split points.  The GDB-97
+// file owns the single-capacity canonical copy; this suite broadens coverage
+// to multiple capacities without duplicating that fixed case trivially.
+struct UniqueSplitParam {
+    uint16_t leaf_max;
+    uint16_t internal_max;
+    int num_keys; // keys inserted: i*10 for i in [1..num_keys]
+    int dup_key;  // duplicate to attempt (must equal one of the inserted keys)
+};
 
-    // Insert enough to cause splits
-    for (int i = 1; i <= 10; ++i) {
+class QA_GDB93_UniqueSplitParam : public ::testing::TestWithParam<UniqueSplitParam> {};
+
+TEST_P(QA_GDB93_UniqueSplitParam, RejectDuplicateAfterSplit) {
+    const auto& p = GetParam();
+    auto tree = make_test_index(p.leaf_max, p.internal_max, true);
+
+    for (int i = 1; i <= p.num_keys; ++i) {
         auto ins = tree.insert(make_key(i * 10), make_rid(static_cast<uint32_t>(i)));
         ASSERT_TRUE(ins.has_value()) << "insert failed at key " << i * 10;
     }
 
-    // Try to insert a duplicate of a key that might be in a different leaf now
-    auto dup = tree.insert(make_key(50), make_rid(999));
+    // Attempt to insert a duplicate of a key that may now reside in a non-root leaf
+    auto dup = tree.insert(make_key(p.dup_key), make_rid(999));
     ASSERT_FALSE(dup.has_value());
     EXPECT_EQ(dup.error().code, StatusCode::CONSTRAINT_VIOLATION);
-    EXPECT_EQ(tree.size(), 10u);
+    EXPECT_EQ(tree.size(), static_cast<uint64_t>(p.num_keys));
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    UniqueSplitCapacities,
+    QA_GDB93_UniqueSplitParam,
+    ::testing::Values(UniqueSplitParam{3, 3, 10, 50}, // original GDB-93 scenario, capacity-3
+                      UniqueSplitParam{4, 4, 12, 80}, // capacity-4 tree, mid-range dup
+                      UniqueSplitParam{5, 5, 15, 50}  // capacity-5 tree, early key dup
+                      ));
 
 TEST(QA_GDB93_Unique, RejectDuplicateAtSplitBoundary) {
     auto tree = make_test_index(4, 4, true);
