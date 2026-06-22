@@ -170,26 +170,35 @@ table_id_t create_users_table(Catalog& catalog) {
 // AC: SELECT * FROM pg_catalog.pg_database returns the database row
 // =========================================================================
 
-TEST(GDB567_PgDatabase, AC_ReturnsSingleRow) {
+TEST(GDB567_PgDatabase, AC_ReturnsOneRowPerDatabase) {
     Catalog catalog;
     init_test_catalog(catalog);
-    catalog.register_virtual_table(make_pg_database());
+    catalog.register_virtual_table(make_pg_database(catalog));
 
+    // Catalog ctor creates "sixseven_system"; init_test_catalog adds "demo" -> 2 total.
     auto rows = scan_pg_database(catalog);
-    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows.size(), catalog.list_databases().size());
 }
 
 TEST(GDB567_PgDatabase, AC_CorrectValues) {
     Catalog catalog;
     init_test_catalog(catalog);
-    catalog.register_virtual_table(make_pg_database());
+    catalog.register_virtual_table(make_pg_database(catalog));
 
     auto rows = scan_pg_database(catalog);
-    ASSERT_EQ(rows.size(), 1u);
-    EXPECT_EQ(rows[0].oid, 1);
-    EXPECT_EQ(rows[0].datname, "sixsevendb");
-    EXPECT_EQ(rows[0].datdba, 10);
-    EXPECT_EQ(rows[0].encoding, 6);
+
+    // Find the default database row.
+    const DatabaseRow* demo_row = nullptr;
+    for (const auto& r : rows) {
+        if (r.datname == default_database_name) {
+            demo_row = &r;
+            break;
+        }
+    }
+    ASSERT_NE(demo_row, nullptr) << "Default database row must be present";
+    EXPECT_EQ(demo_row->oid, default_database_id);
+    EXPECT_EQ(demo_row->datdba, 10);
+    EXPECT_EQ(demo_row->encoding, 6);
 }
 
 // =========================================================================
@@ -531,8 +540,7 @@ TEST(GDB567_PgIndex, Edge_IndexOidUniqueness) {
 
     std::unordered_set<int32_t> oids;
     for (const auto& r : rows) {
-        EXPECT_TRUE(oids.insert(r.indexrelid).second)
-            << "Duplicate indexrelid=" << r.indexrelid;
+        EXPECT_TRUE(oids.insert(r.indexrelid).second) << "Duplicate indexrelid=" << r.indexrelid;
     }
 }
 
@@ -652,26 +660,32 @@ TEST(GDB567_PgIndex, Edge_ReversedPKColumnsNotPrimary) {
     catalog.register_virtual_table(make_pg_index(catalog));
     auto rows = scan_pg_index(catalog);
     ASSERT_EQ(rows.size(), 1u);
-    EXPECT_FALSE(rows[0].indisprimary)
-        << "Reversed column order should not match pk_columns";
+    EXPECT_FALSE(rows[0].indisprimary) << "Reversed column order should not match pk_columns";
 }
 
 // =========================================================================
 // Edge case: pg_database is static — independent of catalog state
 // =========================================================================
 
-TEST(GDB567_PgDatabase, Edge_StaticRegardlessOfCatalogState) {
+TEST(GDB567_PgDatabase, Edge_ReflectsCatalogState) {
     Catalog catalog;
     init_test_catalog(catalog);
     catalog.set_next_table_id(first_user_table_id);
 
     create_users_table(catalog);
-    catalog.register_virtual_table(make_pg_database());
+    catalog.register_virtual_table(make_pg_database(catalog));
 
+    // pg_database reflects real catalog data; find the default database row.
     auto rows = scan_pg_database(catalog);
-    ASSERT_EQ(rows.size(), 1u);
-    EXPECT_EQ(rows[0].oid, 1);
-    EXPECT_EQ(rows[0].datname, "sixsevendb");
+    EXPECT_EQ(rows.size(), catalog.list_databases().size());
+
+    bool found_default = false;
+    for (const auto& r : rows) {
+        if (r.oid == default_database_id && r.datname == default_database_name) {
+            found_default = true;
+        }
+    }
+    EXPECT_TRUE(found_default) << "Default database row must be present";
 }
 
 // =========================================================================
@@ -681,12 +695,19 @@ TEST(GDB567_PgDatabase, Edge_StaticRegardlessOfCatalogState) {
 TEST(GDB567_PgDatabase, Edge_RepeatedScansConsistent) {
     Catalog catalog;
     init_test_catalog(catalog);
-    catalog.register_virtual_table(make_pg_database());
+    catalog.register_virtual_table(make_pg_database(catalog));
 
+    auto expected_count = catalog.list_databases().size();
     for (int i = 0; i < 5; ++i) {
         auto rows = scan_pg_database(catalog);
-        ASSERT_EQ(rows.size(), 1u) << "iteration=" << i;
-        EXPECT_EQ(rows[0].datname, "sixsevendb") << "iteration=" << i;
+        ASSERT_EQ(rows.size(), expected_count) << "iteration=" << i;
+        bool found_default = false;
+        for (const auto& r : rows) {
+            if (r.datname == default_database_name) {
+                found_default = true;
+            }
+        }
+        EXPECT_TRUE(found_default) << "Default database must be present at iteration=" << i;
     }
 }
 
@@ -695,7 +716,9 @@ TEST(GDB567_PgDatabase, Edge_RepeatedScansConsistent) {
 // =========================================================================
 
 TEST(GDB567_PgDatabase, Edge_HasFourColumns) {
-    auto def = make_pg_database();
+    Catalog catalog;
+    init_test_catalog(catalog);
+    auto def = make_pg_database(catalog);
     EXPECT_EQ(def.columns.size(), 4u);
     EXPECT_EQ(def.columns[0].name, "oid");
     EXPECT_EQ(def.columns[1].name, "datname");
