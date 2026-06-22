@@ -210,8 +210,8 @@ TEST(QA_GDB892, LevelOffSuppressesAll) {
     restore_logger();
     const std::string captured = oss.str();
 
-    EXPECT_TRUE(captured.empty())
-        << "level=off must suppress all output; captured: [" << captured << "]";
+    EXPECT_TRUE(captured.empty()) << "level=off must suppress all output; captured: [" << captured
+                                  << "]";
 }
 
 // Adversarial: multiple messages at the same level — confirm all are captured,
