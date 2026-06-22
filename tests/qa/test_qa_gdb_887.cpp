@@ -46,7 +46,9 @@ static TableSchema make_node_schema(const std::string& name) {
     return schema;
 }
 
-static Value pk(int64_t v) { return Value(v); }
+static Value pk(int64_t v) {
+    return Value(v);
+}
 
 struct SCCResult {
     int64_t component_id;
@@ -57,9 +59,9 @@ std::unordered_map<int64_t, SCCResult> to_scc_map(const std::vector<AlgorithmRow
     std::unordered_map<int64_t, SCCResult> result;
     for (const auto& row : rows) {
         EXPECT_EQ(row.values.size(), 3u);
-        auto node_id  = std::get<int64_t>(row.values[0].data());
-        auto comp_id  = std::get<int64_t>(row.values[1].data());
-        auto comp_sz  = std::get<int64_t>(row.values[2].data());
+        auto node_id = std::get<int64_t>(row.values[0].data());
+        auto comp_id = std::get<int64_t>(row.values[1].data());
+        auto comp_sz = std::get<int64_t>(row.values[2].data());
         result[node_id] = {comp_id, comp_sz};
     }
     return result;
@@ -67,7 +69,8 @@ std::unordered_map<int64_t, SCCResult> to_scc_map(const std::vector<AlgorithmRow
 
 int64_t count_components(const std::unordered_map<int64_t, SCCResult>& m) {
     std::unordered_set<int64_t> comps;
-    for (const auto& [_, r] : m) comps.insert(r.component_id);
+    for (const auto& [_, r] : m)
+        comps.insert(r.component_id);
     return static_cast<int64_t>(comps.size());
 }
 
@@ -89,8 +92,7 @@ protected:
     void build_graph(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
         auto et = engine_.create_edge_type(
-            default_database_id, edge_type, table_id_, table_id_,
-            TypeId::INT64, TypeId::INT64, {});
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
 
         for (auto [src, tgt] : edges) {
@@ -405,12 +407,16 @@ TEST_F(QA_GDB887, OutputContainsEveryNode) {
     // Mix: cycle {1,2,3}, DAG chain 4->5->6 (6 is kEmpty sink),
     // isolated self-loop 7->7 (kEmpty after self-loop skip),
     // extra sink 8 (target of 3).
-    build_graph("follows", {
-        {1, 2}, {2, 3}, {3, 1}, // cycle
-        {4, 5}, {5, 6},          // chain
-        {7, 7},                  // self-loop only
-        {3, 8},                  // extra sink from cycle
-    });
+    build_graph("follows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {3, 1}, // cycle
+                    {4, 5},
+                    {5, 6}, // chain
+                    {7, 7}, // self-loop only
+                    {3, 8}, // extra sink from cycle
+                });
 
     auto result = run();
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -441,12 +447,16 @@ TEST_F(QA_GDB887, OutputContainsEveryNode) {
 // ---------------------------------------------------------------------------
 
 TEST_F(QA_GDB887, ComponentSizesSumToNodeCount) {
-    build_graph("follows", {
-        {1, 2}, {2, 3}, {3, 1},  // SCC size 3
-        {4, 5}, {5, 4},           // SCC size 2
-        {6, 7},                   // two singletons
-        {8, 8},                   // self-loop -> singleton (kEmpty)
-    });
+    build_graph("follows",
+                {
+                    {1, 2},
+                    {2, 3},
+                    {3, 1}, // SCC size 3
+                    {4, 5},
+                    {5, 4}, // SCC size 2
+                    {6, 7}, // two singletons
+                    {8, 8}, // self-loop -> singleton (kEmpty)
+                });
 
     auto result = run();
     ASSERT_TRUE(result.has_value()) << result.error().message;
