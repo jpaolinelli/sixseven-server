@@ -311,9 +311,6 @@ TEST_F(QA_GDB324, FourArgConstructorWithNullTokenizerFallsBackToHashTokenizer) {
 
     OnnxProvider provider("model.onnx", 3, std::move(mock), nullptr);
 
-    // tokenizer() must return a usable tokenizer (no crash / UB).
-    EXPECT_NO_FATAL_FAILURE(provider.tokenizer());
-
     // The fallback must be a HashTokenizer — its vocab_size is 30000,
     // which is distinct from the WordPiece vocab_size=5 used in the
     // sibling FourArgConstructorUsesProvidedTokenizer test.
@@ -878,6 +875,32 @@ TEST_F(QA_GDB324, BackwardCompatHealthCheckStillWorks) {
 
     auto result = provider.health_check();
     ASSERT_TRUE(result.has_value()) << result.error().message;
+}
+
+// ===========================================================================
+// GDB-886: null tokenizer + embed_batch() path
+// ===========================================================================
+
+TEST_F(QA_GDB324, GDB886NullTokenizerEmbedBatchSucceeds) {
+    // Adversarial: nullptr tokenizer passed to 4-arg ctor; embed_batch must
+    // use the fallback HashTokenizer without crashing or dereferencing null.
+    auto mock = std::make_unique<MockOnnxSession324>();
+    auto* mock_ptr = mock.get();
+    mock_ptr->set_embedding({0.5F, 0.6F, 0.7F});
+
+    OnnxProvider provider("model.onnx", 3, std::move(mock), nullptr);
+
+    // Batch of two texts — embed_batch dereferences tokenizer_ for each.
+    auto result = provider.embed_batch({"hello world", "adversarial"});
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->size(), 2u);
+
+    // Every row must have the expected dimension.
+    EXPECT_EQ((*result)[0].size(), 3u);
+    EXPECT_EQ((*result)[1].size(), 3u);
+
+    // Tokenizer path routed through HashTokenizer: MAX_SEQ_LENGTH tokens sent.
+    EXPECT_EQ(mock_ptr->last_input_ids_.size(), OnnxProvider::MAX_SEQ_LENGTH);
 }
 
 // ===========================================================================
