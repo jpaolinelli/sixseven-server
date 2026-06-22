@@ -144,9 +144,9 @@ Initialize at startup: `sixseven::init_logging("info");`
 - **MVCC**: Tuple versioning with xmin/xmax for transaction isolation
 - **EMBEDDING type**: Native vector column type with auto-generation from source columns
 
-## Type System (22 Types)
+## Type System (23 Types)
 
-INT8, INT16, INT32, INT64, UINT8, UINT16, UINT32, UINT64, FLOAT32, FLOAT64, DECIMAL(p,s), BOOL, STRING, BLOB, DATE, TIME, TIMESTAMP, INTERVAL, POINT, JSON, UUID, EMBEDDING(dim, source, provider)
+INT8, INT16, INT32, INT64, UINT8, UINT16, UINT32, UINT64, FLOAT32, FLOAT64, DECIMAL(p,s), BOOL, STRING, BLOB, DATE, TIME, TIMESTAMP, INTERVAL, POINT, JSON, UUID, EMBEDDING(dim, source, provider), PATH
 
 ## Compiler Flags
 

@@ -128,7 +128,7 @@ using ValueData = std::variant<std::monostate, // NULL
                                Path            // PATH
                                >;
 
-/// A polymorphic value that can hold any of the 22 SixSevenDB data types, or NULL.
+/// A polymorphic value that can hold any of the 23 SixSevenDB data types, or NULL.
 class Value {
 public:
     /// Construct a NULL value.

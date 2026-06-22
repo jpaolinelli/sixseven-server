@@ -9,7 +9,7 @@
 
 namespace sixseven {
 
-/// Enumerates all 22 data types supported by SixSevenDB.
+/// Enumerates all 23 data types supported by SixSevenDB.
 enum class TypeId : uint8_t {
     // Integer types
     INT8,

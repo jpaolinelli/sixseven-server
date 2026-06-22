@@ -331,7 +331,7 @@ TEST(Value, TryAsNull) {
 }
 
 TEST(Value, TryAsAllTypes) {
-    // Verify try_as works for all 22 types.
+    // Verify try_as works for all 23 types.
     EXPECT_TRUE(Value(int8_t{1}).try_as_int8().has_value());
     EXPECT_TRUE(Value(int16_t{1}).try_as_int16().has_value());
     EXPECT_TRUE(Value(int32_t{1}).try_as_int32().has_value());

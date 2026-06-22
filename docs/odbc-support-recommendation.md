@@ -39,7 +39,7 @@ SixSevenDB should implement **pg_catalog virtual tables** to enable psqlODBC and
 SixSevenDB already implements:
 - Full PG v3.0 wire protocol (simple + extended query)
 - MD5 and SCRAM-SHA-256 authentication
-- Type OID mapping for all 22 SixSevenDB types (including EMBEDDING = OID 100000)
+- Type OID mapping for all 23 SixSevenDB types (including EMBEDDING = OID 100000)
 - SQLSTATE error codes
 - Transaction state tracking (BEGIN/COMMIT/ROLLBACK)
 - Session variables (SET/SHOW/RESET)
@@ -102,7 +102,7 @@ All BI tools need:
 | Component | Effort |
 |-----------|--------|
 | Virtual table infrastructure (schema registration, query routing) | 2-3 days |
-| pg_type (22 type rows) | 1 day |
+| pg_type (23 type rows) | 1 day |
 | pg_class (table + index entries) | 1-2 days |
 | pg_attribute (column metadata) | 1-2 days |
 | pg_namespace (public + pg_catalog schemas) | 0.5 day |

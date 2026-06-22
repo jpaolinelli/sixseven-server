@@ -43,7 +43,7 @@ After this plan is approved, we will create tickets for each work item.
 
 ---
 
-## Type System (22 Types)
+## Type System (23 Types)
 
 | Category | Types |
 |----------|-------|
@@ -327,7 +327,7 @@ sixseven/
 ## Phase 1: Storage Foundation (Weeks 1–6)
 
 ### 1.1 Type System
-- `TypeId` enum with all 22 types
+- `TypeId` enum with all 23 types
 - `Value` — tagged union / `std::variant` for all types
 - Type traits: `size_of()`, `alignment()`, `is_numeric()`, `is_comparable()`
 - Type coercion rules matrix
