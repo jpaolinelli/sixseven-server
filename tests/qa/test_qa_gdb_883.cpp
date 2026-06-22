@@ -213,3 +213,130 @@ TEST_F(QA_GDB883, Regression_BeginCommitUnaffected) {
     auto r2 = session_->try_handle_command("COMMIT");
     EXPECT_FALSE(r2.has_value());
 }
+
+// ===========================================================================
+// Additional adversarial tests added by QA (GDB-883 audit)
+// ===========================================================================
+
+// Adversarial: SAVEPOINT must return NOT_IMPLEMENTED regardless of state.
+// Idle, IN_TRANSACTION, and FAILED all must error -- no state has a "working"
+// savepoint path.
+
+TEST(QA_GDB883_Adversarial, SavepointFromIdleState_NotImplemented) {
+    Session s(1);
+    ASSERT_EQ(s.transaction_state(), TransactionState::IDLE);
+    auto r = s.create_savepoint("sp1");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::NOT_IMPLEMENTED);
+}
+
+TEST(QA_GDB883_Adversarial, ReleaseFromIdleState_NotImplemented) {
+    Session s(1);
+    auto r = s.release_savepoint("sp1");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::NOT_IMPLEMENTED);
+}
+
+TEST(QA_GDB883_Adversarial, RollbackToFromIdleState_NotImplemented) {
+    Session s(1);
+    auto r = s.rollback_to_savepoint("sp1");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::NOT_IMPLEMENTED);
+}
+
+// Adversarial: error messages must be non-empty and informative, not
+// "not implemented" with an empty string.
+TEST_F(QA_GDB883, ErrorMessages_Savepoint_NonEmpty) {
+    auto r = session_->create_savepoint("sp1");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_FALSE(r.error().message.empty()) << "create_savepoint error message must not be empty";
+    EXPECT_NE(r.error().message.find("SAVEPOINT"), std::string::npos)
+        << "create_savepoint error message should mention SAVEPOINT";
+}
+
+TEST_F(QA_GDB883, ErrorMessages_ReleaseSavepoint_NonEmpty) {
+    auto r = session_->release_savepoint("sp1");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_FALSE(r.error().message.empty());
+}
+
+TEST_F(QA_GDB883, ErrorMessages_RollbackTo_NonEmpty) {
+    auto r = session_->rollback_to_savepoint("sp1");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_FALSE(r.error().message.empty());
+}
+
+// Adversarial: deque must stay empty even after many successive calls.
+// (No accumulation from repeated calls.)
+TEST_F(QA_GDB883, DequeInvariant_RepeatedCallsNeverAccumulate) {
+    for (int i = 0; i < 100; ++i) {
+        (void)session_->create_savepoint("sp" + std::to_string(i));
+    }
+    EXPECT_TRUE(session_->savepoints().empty())
+        << "savepoints_ deque grew despite all create_savepoint calls failing";
+}
+
+// Adversarial: an empty savepoint name must still return NOT_IMPLEMENTED
+// (not some other error code like PARSE_ERROR or INVALID_ARGUMENT).
+TEST_F(QA_GDB883, EmptyNamePassedDirectly_NotImplemented) {
+    auto r1 = session_->create_savepoint("");
+    ASSERT_FALSE(r1.has_value());
+    EXPECT_EQ(r1.error().code, StatusCode::NOT_IMPLEMENTED);
+
+    auto r2 = session_->release_savepoint("");
+    ASSERT_FALSE(r2.has_value());
+    EXPECT_EQ(r2.error().code, StatusCode::NOT_IMPLEMENTED);
+
+    auto r3 = session_->rollback_to_savepoint("");
+    ASSERT_FALSE(r3.has_value());
+    EXPECT_EQ(r3.error().code, StatusCode::NOT_IMPLEMENTED);
+}
+
+// Adversarial: transaction state must not change at all after any savepoint
+// command -- not IDLE->FAILED, not FAILED->IN_TRANSACTION.
+TEST_F(QA_GDB883, TransactionState_UnchangedAfterSavepointError_InTransaction) {
+    ASSERT_EQ(session_->transaction_state(), TransactionState::IN_TRANSACTION);
+    (void)session_->create_savepoint("sp1");
+    EXPECT_EQ(session_->transaction_state(), TransactionState::IN_TRANSACTION)
+        << "create_savepoint error must not change transaction state";
+    (void)session_->release_savepoint("sp1");
+    EXPECT_EQ(session_->transaction_state(), TransactionState::IN_TRANSACTION);
+    (void)session_->rollback_to_savepoint("sp1");
+    EXPECT_EQ(session_->transaction_state(), TransactionState::IN_TRANSACTION);
+}
+
+TEST_F(QA_GDB883, TransactionState_UnchangedAfterSavepointError_Failed) {
+    session_->update_transaction_state("bad", false);
+    ASSERT_EQ(session_->transaction_state(), TransactionState::FAILED);
+    (void)session_->create_savepoint("sp1");
+    EXPECT_EQ(session_->transaction_state(), TransactionState::FAILED);
+    (void)session_->release_savepoint("sp1");
+    EXPECT_EQ(session_->transaction_state(), TransactionState::FAILED);
+    (void)session_->rollback_to_savepoint("sp1");
+    EXPECT_EQ(session_->transaction_state(), TransactionState::FAILED);
+}
+
+// Adversarial: plain ROLLBACK (no "TO") from FAILED state still resets to IDLE.
+// This is non-savepoint behavior that must be unaffected by GDB-883.
+TEST_F(QA_GDB883, PlainRollback_FromFailed_ResetsToIdle) {
+    session_->update_transaction_state("bad", false);
+    ASSERT_EQ(session_->transaction_state(), TransactionState::FAILED);
+    session_->update_transaction_state("ROLLBACK", true);
+    EXPECT_EQ(session_->transaction_state(), TransactionState::IDLE)
+        << "Plain ROLLBACK from FAILED state must reset to IDLE (unaffected by GDB-883)";
+}
+
+// Adversarial: case variants of ROLLBACK TO must all be caught.
+TEST_F(QA_GDB883, WirePath_RollbackToLowercase_NotImplemented) {
+    auto r = session_->try_handle_command("rollback to savepoint mysp");
+    ASSERT_TRUE(r.has_value());
+    ASSERT_FALSE(r->has_value());
+    EXPECT_EQ(r->error().code, StatusCode::NOT_IMPLEMENTED);
+}
+
+TEST_F(QA_GDB883, WirePath_SavepointMixedCase_NotImplemented) {
+    auto r = session_->try_handle_command("Savepoint MySP");
+    ASSERT_TRUE(r.has_value());
+    ASSERT_FALSE(r->has_value());
+    EXPECT_EQ(r->error().code, StatusCode::NOT_IMPLEMENTED);
+}
