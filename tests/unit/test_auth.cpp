@@ -504,12 +504,34 @@ TEST(AuthConfig, DefaultAuthMethodIsScram) {
 
 TEST(AuthConfig, AuthMethodFromConfigFile) {
     auto tmp_dir = std::filesystem::temp_directory_path();
-    auto config_path = tmp_dir / "sixseven_test_auth_config.json";
+    auto config_path = tmp_dir / "sixseven_test_auth_config_md5.json";
 
-    // Write config file with auth_method set.
+    // Write config file with a NON-default auth_method ("md5").
+    // If the parse branch in config.cpp were removed, auth_method would
+    // fall back to the default "scram-sha-256" and this assertion would fail.
     {
         std::ofstream ofs(config_path);
-        ofs << R"({"auth_method": "scram-sha-256"})";
+        ofs << R"({"auth_method": "md5"})";
+    }
+
+    auto config = Config::load_from_file(config_path.string());
+    ASSERT_TRUE(config.has_value()) << config.error().message;
+    EXPECT_EQ(config->auth_method, "md5");
+
+    std::filesystem::remove(config_path);
+}
+
+TEST(AuthConfig, AuthMethodDefaultsToScramWhenAbsentInFile) {
+    auto tmp_dir = std::filesystem::temp_directory_path();
+    auto config_path = tmp_dir / "sixseven_test_auth_config_nokey.json";
+
+    // Write a config file that has no auth_method key at all.
+    // The field must fall back to the default "scram-sha-256" through the
+    // file-load path (complementing DefaultAuthMethodIsScram which covers
+    // the in-memory default).
+    {
+        std::ofstream ofs(config_path);
+        ofs << R"({"port": 5432})";
     }
 
     auto config = Config::load_from_file(config_path.string());
