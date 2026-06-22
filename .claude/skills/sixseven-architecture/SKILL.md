@@ -6,7 +6,7 @@ user-invocable: false
 
 # SixSevenDB Architecture
 
-> The high-level diagram, module list, directory layout, and 22-type list are in the project `CLAUDE.md`, which is always loaded. This skill carries only the detail `CLAUDE.md` does not: the SQL pipeline stages with file paths, the Iterator contract, the build-order dependency graph, and the module→path map. Read it when you need to trace a query path or locate a module's files.
+> The high-level diagram, module list, directory layout, and 23-type list are in the project `CLAUDE.md`, which is always loaded. This skill carries only the detail `CLAUDE.md` does not: the SQL pipeline stages with file paths, the Iterator contract, the build-order dependency graph, and the module→path map. Read it when you need to trace a query path or locate a module's files.
 
 ## SQL Pipeline
 

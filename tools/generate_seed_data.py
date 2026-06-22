@@ -3,7 +3,7 @@
 SixSevenDB Seed Data Generator
 
 Generates realistic SQL seed data that exercises every SixSevenDB feature:
-  - All 22 data types
+  - All 23 data types
   - DDL (CREATE DATABASE/TABLE/INDEX, ALTER TABLE, edge types)
   - DML (INSERT, UPDATE, DELETE, LINK, UNLINK)
   - Queries (JOINs, CTEs, window functions, subqueries, set ops, aggregates)
@@ -580,7 +580,7 @@ def generate(scale_name: str):
     emit("")
 
     # -----------------------------------------------------------------------
-    emit_comment("DDL: TABLES (all 22 types, constraints)")
+    emit_comment("DDL: TABLES (all 23 types, constraints)")
     # -----------------------------------------------------------------------
 
     emit("""\
