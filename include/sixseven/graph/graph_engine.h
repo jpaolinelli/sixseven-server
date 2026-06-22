@@ -249,6 +249,14 @@ private:
                                database_id_t database_id,
                                const std::string& name);
 
+    /// Tear down persistent storage for an edge type and erase it from the
+    /// in-memory maps (must hold mu_). Caller is responsible for catalog
+    /// removal. All dm_ accesses are null-guarded.
+    void teardown_edge_storage_locked(const std::string& edge_key,
+                                      database_id_t database_id,
+                                      const std::string& name,
+                                      edge_id_t edge_id);
+
     Catalog& catalog_;
     DiskManager* dm_ = nullptr;
     std::filesystem::path data_dir_;
