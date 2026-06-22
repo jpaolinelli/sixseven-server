@@ -7,6 +7,7 @@
 
 #include "sixseven/vector/onnx_provider.h"
 #include "sixseven/vector/tokenizer.h"
+#include "sixseven/vector/wordpiece_tokenizer.h"
 
 #include <gtest/gtest.h>
 
@@ -126,35 +127,56 @@ TEST(QA_GDB318_TokenizerConfig, DefaultValues) {
     EXPECT_EQ(config.special_tokens.sep, 102);
 }
 
-TEST(QA_GDB318_TokenizerConfig, CanPopulateVocab) {
+// Behavioral test: verifies that the vocab and model_type in TokenizerConfig
+// actually drive WordPieceTokenizer::encode() output.  A word present in the
+// vocab must map to its configured ID; an out-of-vocabulary word must map to
+// the UNK id.  The test FAILS if the tokenizer ignores the supplied vocab.
+TEST(QA_GDB318_TokenizerConfig, WordPieceVocabDrivesEncodeOutput) {
     TokenizerConfig config;
-    config.vocab["hello"] = 500;
-    config.vocab["world"] = 501;
-    EXPECT_EQ(config.vocab.size(), 2u);
-    EXPECT_EQ(config.vocab.at("hello"), 500);
-}
-
-TEST(QA_GDB318_TokenizerConfig, EnumVariants) {
-    // Verify all enum variants can be assigned.
-    TokenizerConfig config;
-
     config.model_type = TokenizerModelType::WORDPIECE;
-    EXPECT_EQ(config.model_type, TokenizerModelType::WORDPIECE);
-
-    config.model_type = TokenizerModelType::BPE;
-    EXPECT_EQ(config.model_type, TokenizerModelType::BPE);
-
-    config.normalizer = NormalizerType::NONE;
-    EXPECT_EQ(config.normalizer, NormalizerType::NONE);
-
-    config.normalizer = NormalizerType::NFC;
-    EXPECT_EQ(config.normalizer, NormalizerType::NFC);
-
-    config.pre_tokenizer = PreTokenizerType::NONE;
-    EXPECT_EQ(config.pre_tokenizer, PreTokenizerType::NONE);
-
+    config.normalizer = NormalizerType::LOWERCASE;
     config.pre_tokenizer = PreTokenizerType::WHITESPACE;
-    EXPECT_EQ(config.pre_tokenizer, PreTokenizerType::WHITESPACE);
+    config.subword_prefix = "##";
+
+    // Special tokens at their standard BERT positions.
+    config.special_tokens.pad = 0;
+    config.special_tokens.unk = 100;
+    config.special_tokens.cls = 101;
+    config.special_tokens.sep = 102;
+    config.special_tokens.mask = 103;
+
+    // Custom vocab: only "hello" and "world" are known; "missing" is absent.
+    config.vocab["[PAD]"] = 0;
+    config.vocab["[UNK]"] = 100;
+    config.vocab["[CLS]"] = 101;
+    config.vocab["[SEP]"] = 102;
+    config.vocab["[MASK]"] = 103;
+    config.vocab["hello"] = 200;
+    config.vocab["world"] = 201;
+
+    WordPieceTokenizer tok(config);
+
+    // Encode a two-word string where both words are in the vocab.
+    // Expected (max_length=6): [CLS=101, hello=200, world=201, SEP=102, PAD=0, PAD=0]
+    auto tokens = tok.encode("hello world", 6);
+    ASSERT_EQ(tokens.size(), 6u);
+    EXPECT_EQ(tokens[0], 101); // CLS
+    EXPECT_EQ(tokens[1], 200); // "hello" -> vocab id 200
+    EXPECT_EQ(tokens[2], 201); // "world" -> vocab id 201
+    EXPECT_EQ(tokens[3], 102); // SEP
+    EXPECT_EQ(tokens[4], 0);   // PAD
+    EXPECT_EQ(tokens[5], 0);   // PAD
+
+    // Encode a string with an out-of-vocabulary word.
+    // "missing" is absent from the vocab, so WordPiece must emit UNK (100).
+    // Expected (max_length=5): [CLS=101, UNK=100, SEP=102, PAD=0, PAD=0]
+    auto tokens_unk = tok.encode("missing", 5);
+    ASSERT_EQ(tokens_unk.size(), 5u);
+    EXPECT_EQ(tokens_unk[0], 101); // CLS
+    EXPECT_EQ(tokens_unk[1], 100); // "missing" -> UNK
+    EXPECT_EQ(tokens_unk[2], 102); // SEP
+    EXPECT_EQ(tokens_unk[3], 0);   // PAD
+    EXPECT_EQ(tokens_unk[4], 0);   // PAD
 }
 
 // ===========================================================================
