@@ -152,7 +152,7 @@ const std::vector<Embedding> qa723_embs = {
 // pre-fix it returned L2 ordering (1, 3, 4, 2) with L2-squared distances.
 TEST_F(QA723NearestScanTest, CosineQueryOnHnswReturnsCosineOrdering) {
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
 
     HnswIndexConfig hnsw_config;
     hnsw_config.dimension = 3;
@@ -197,7 +197,7 @@ TEST_F(QA723NearestScanTest, HnswMatchesBruteForceForAllMetrics) {
     };
 
     for (auto metric : metrics) {
-        HnswIndex hnsw(*hnsw_bpm_, nullptr);
+        HnswIndex hnsw(*hnsw_bpm_);
         HnswIndexConfig hnsw_config;
         hnsw_config.dimension = 3;
         hnsw_config.m = 8;
@@ -227,7 +227,7 @@ TEST_F(QA723NearestScanTest, HnswMatchesBruteForceForAllMetrics) {
 // most-similar-first with _distance equal to the RAW dot product, descending.
 TEST_F(QA723NearestScanTest, DotQueryOnHnswEmitsRawDotDescending) {
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
 
     HnswIndexConfig hnsw_config;
     hnsw_config.dimension = 3;
@@ -263,7 +263,7 @@ TEST_F(QA723NearestScanTest, DotQueryOnHnswEmitsRawDotDescending) {
 // results match the no-index path exactly.
 TEST_F(QA723NearestScanTest, LegacyL2IndexCosineQueryFallsBackToBruteForce) {
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
 
     HnswIndexConfig hnsw_config;
     hnsw_config.dimension = 3;

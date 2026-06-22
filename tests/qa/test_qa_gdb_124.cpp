@@ -51,7 +51,7 @@ struct Fixture {
 
 TEST(QA_GDB_124_Delete, DeleteOnlyNode) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -79,7 +79,7 @@ TEST(QA_GDB_124_Delete, DeleteOnlyNode) {
 
 TEST(QA_GDB_124_Delete, DeleteAllNodes) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -112,7 +112,7 @@ TEST(QA_GDB_124_Delete, DeleteAllNodes) {
 
 TEST(QA_GDB_124_Delete, DeleteFirstNode) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -140,7 +140,7 @@ TEST(QA_GDB_124_Delete, DeleteFirstNode) {
 
 TEST(QA_GDB_124_Delete, DeleteLastNode) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -172,7 +172,7 @@ TEST(QA_GDB_124_Delete, DeleteLastNode) {
 
 TEST(QA_GDB_124_DeleteInsert, InsertAfterDelete) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -205,7 +205,7 @@ TEST(QA_GDB_124_DeleteInsert, InsertAfterDelete) {
 
 TEST(QA_GDB_124_DeleteInsert, InsertAfterDeleteAll) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -245,7 +245,7 @@ TEST(QA_GDB_124_DeleteInsert, InsertAfterDeleteAll) {
 
 TEST(QA_GDB_124_Compact, CompactAllTombstoned) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -277,7 +277,7 @@ TEST(QA_GDB_124_Compact, CompactAllTombstoned) {
 
 TEST(QA_GDB_124_Compact, CompactThenSearch) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -313,7 +313,7 @@ TEST(QA_GDB_124_Compact, CompactThenSearch) {
 
 TEST(QA_GDB_124_Compact, InsertAfterCompaction) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -350,7 +350,7 @@ TEST(QA_GDB_124_Compact, InsertAfterCompaction) {
 
 TEST(QA_GDB_124_Compact, MultiRoundDeleteCompact) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -392,7 +392,7 @@ TEST(QA_GDB_124_Compact, MultiRoundDeleteCompact) {
 
 TEST(QA_GDB_124_Compact, CompactTwiceIsIdempotent) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -421,7 +421,7 @@ TEST(QA_GDB_124_Compact, CompactTwiceIsIdempotent) {
 
 TEST(QA_GDB_124_Filter, FilteredSearchAfterDelete) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -452,7 +452,7 @@ TEST(QA_GDB_124_Filter, FilteredSearchAfterDelete) {
 
 TEST(QA_GDB_124_Filter, FilterRejectsAllAfterDelete) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -484,7 +484,7 @@ TEST(QA_GDB_124_Persistence, TombstonesSurviveLoad) {
     PageId meta_pid = 0;
 
     {
-        HnswIndex index(*fix.bpm, nullptr);
+        HnswIndex index(*fix.bpm);
         HnswIndexConfig config;
         config.dimension = 2;
         config.m = 4;
@@ -506,7 +506,7 @@ TEST(QA_GDB_124_Persistence, TombstonesSurviveLoad) {
     }
 
     {
-        HnswIndex loaded(*fix.bpm, nullptr);
+        HnswIndex loaded(*fix.bpm);
         ASSERT_TRUE(loaded.load(meta_pid).has_value());
         EXPECT_EQ(loaded.node_count(), 8u);
         EXPECT_EQ(loaded.meta().tombstone_count, 2u);
@@ -527,7 +527,7 @@ TEST(QA_GDB_124_Persistence, CompactAfterLoad) {
     PageId meta_pid = 0;
 
     {
-        HnswIndex index(*fix.bpm, nullptr);
+        HnswIndex index(*fix.bpm);
         HnswIndexConfig config;
         config.dimension = 2;
         config.m = 4;
@@ -548,7 +548,7 @@ TEST(QA_GDB_124_Persistence, CompactAfterLoad) {
     }
 
     {
-        HnswIndex loaded(*fix.bpm, nullptr);
+        HnswIndex loaded(*fix.bpm);
         ASSERT_TRUE(loaded.load(meta_pid).has_value());
         EXPECT_EQ(loaded.meta().tombstone_count, 3u);
 
@@ -572,7 +572,7 @@ TEST(QA_GDB_124_Persistence, CompactAfterLoad) {
 
 TEST(QA_GDB_124_NodeCount, AccurateThroughCycles) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -614,7 +614,7 @@ TEST(QA_GDB_124_NodeCount, AccurateThroughCycles) {
 
 TEST(QA_GDB_124_Delete, DeleteEntryPointAndCompact) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -655,7 +655,7 @@ TEST(QA_GDB_124_Delete, DeleteEntryPointAndCompact) {
 
 TEST(QA_GDB_124_Stress, DeleteHalfAndSearch) {
     Fixture fix(256);
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 4;
     config.m = 8;
@@ -696,7 +696,7 @@ TEST(QA_GDB_124_Stress, DeleteHalfAndSearch) {
 
 TEST(QA_GDB_124_Stress, AlternatingInsertDelete) {
     Fixture fix(256);
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;

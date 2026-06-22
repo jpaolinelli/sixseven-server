@@ -333,7 +333,7 @@ TEST_F(ReembedTest, HnswIndexIsRebuiltAfterReembed) {
     ASSERT_TRUE(hfid.has_value()) << hfid.error().message;
 
     auto hnsw_bpm = std::make_unique<BufferPoolManager>(dm_, *hfid, 256);
-    auto hnsw = std::make_unique<HnswIndex>(*hnsw_bpm, nullptr);
+    auto hnsw = std::make_unique<HnswIndex>(*hnsw_bpm);
 
     auto create_result = hnsw->create({.dimension = 4});
     ASSERT_TRUE(create_result.has_value()) << create_result.error().message;

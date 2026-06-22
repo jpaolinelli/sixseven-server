@@ -314,7 +314,7 @@ TEST_F(QANearestPrefilterTest, PrefilteredPrioritizedOverHnsw) {
 
     {
         BufferPoolManager hnsw_bpm(dm_, *hnsw_fid, 64);
-        HnswIndex hnsw_index(hnsw_bpm, nullptr);
+        HnswIndex hnsw_index(hnsw_bpm);
         HnswIndexConfig hnsw_cfg;
         hnsw_cfg.dimension = 3;
         hnsw_cfg.m = 4;
@@ -614,7 +614,7 @@ TEST_F(QANearestPrefilterTest, GDB843_EmptyPrefilterWithHnswUsesHnswPath) {
 
     {
         BufferPoolManager hnsw_bpm(dm_, *hnsw_fid, 64);
-        HnswIndex hnsw_index(hnsw_bpm, nullptr);
+        HnswIndex hnsw_index(hnsw_bpm);
         HnswIndexConfig hnsw_cfg;
         hnsw_cfg.dimension = 3;
         hnsw_cfg.m = 4;
@@ -689,7 +689,7 @@ TEST_F(QANearestPrefilterTest, GDB843_PrefilterSubsetOfHnswRows) {
 
     {
         BufferPoolManager hnsw_bpm(dm_, *hnsw_fid, 64);
-        HnswIndex hnsw_index(hnsw_bpm, nullptr);
+        HnswIndex hnsw_index(hnsw_bpm);
         HnswIndexConfig hnsw_cfg;
         hnsw_cfg.dimension = 3;
         hnsw_cfg.m = 4;
@@ -776,7 +776,7 @@ TEST_F(QANearestPrefilterTest, GDB843_PrefilterSupersetOfHnswRowsAllEvaluated) {
 
     {
         BufferPoolManager hnsw_bpm(dm_, *hnsw_fid, 64);
-        HnswIndex hnsw_index(hnsw_bpm, nullptr);
+        HnswIndex hnsw_index(hnsw_bpm);
         HnswIndexConfig hnsw_cfg;
         hnsw_cfg.dimension = 3;
         hnsw_cfg.m = 4;
@@ -852,7 +852,7 @@ TEST_F(QANearestPrefilterTest, GDB843_PrefilterDisjointFromHnswStillWins) {
 
     {
         BufferPoolManager hnsw_bpm(dm_, *hnsw_fid, 64);
-        HnswIndex hnsw_index(hnsw_bpm, nullptr);
+        HnswIndex hnsw_index(hnsw_bpm);
         HnswIndexConfig hnsw_cfg;
         hnsw_cfg.dimension = 3;
         hnsw_cfg.m = 4;
@@ -956,7 +956,7 @@ TEST_F(QANearestPrefilterTest, GDB843_MultipleDistinctPrefilterSetsWithHnsw) {
 
     {
         BufferPoolManager hnsw_bpm(dm_, *hnsw_fid, 64);
-        HnswIndex hnsw_index(hnsw_bpm, nullptr);
+        HnswIndex hnsw_index(hnsw_bpm);
         HnswIndexConfig hnsw_cfg;
         hnsw_cfg.dimension = 3;
         hnsw_cfg.m = 4;
@@ -1069,7 +1069,7 @@ TEST_F(QANearestPrefilterTest, GDB843_ResultsReadableAfterHnswBpmDestroyed) {
 
     {
         BufferPoolManager hnsw_bpm(dm_, *hnsw_fid, 64);
-        HnswIndex hnsw_index(hnsw_bpm, nullptr);
+        HnswIndex hnsw_index(hnsw_bpm);
         HnswIndexConfig hnsw_cfg;
         hnsw_cfg.dimension = 3;
         hnsw_cfg.m = 4;

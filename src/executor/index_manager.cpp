@@ -222,7 +222,7 @@ Result<void> IndexManager::load_hnsw_from_disk(const IndexDef& def, database_id_
         return make_error(StatusCode::NOT_FOUND, "no meta page ID stored in index file header");
     }
 
-    auto hnsw = std::make_unique<HnswIndex>(*(*storage)->bpm, nullptr);
+    auto hnsw = std::make_unique<HnswIndex>(*(*storage)->bpm);
     auto load = hnsw->load(*meta_page_id);
     if (!load) {
         return make_error(load.error().code, load.error().message);
@@ -353,7 +353,7 @@ Result<void> IndexManager::rebuild_hnsw_from_table(const IndexDef& def, database
                           "failed to create HNSW index storage: " + storage.error().message);
     }
 
-    auto hnsw = std::make_unique<HnswIndex>(*(*storage)->bpm, nullptr);
+    auto hnsw = std::make_unique<HnswIndex>(*(*storage)->bpm);
     HnswIndexConfig config;
     config.dimension = dimension;
     // Auto-created EMBEDDING indexes serve the default NEAREST metric, which

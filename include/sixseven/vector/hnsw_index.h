@@ -2,7 +2,6 @@
 
 #include "sixseven/common/result.h"
 #include "sixseven/storage/buffer_pool.h"
-#include "sixseven/storage/wal.h"
 #include "sixseven/vector/hnsw_page.h"
 
 #include <cstdint>
@@ -45,19 +44,21 @@ struct HnswSearchResult {
 /// be included in results.
 using HnswFilterPredicate = std::function<bool(uint32_t node_id)>;
 
-/// Persistent HNSW index backed by the buffer pool and WAL.
+/// Persistent HNSW index backed by the buffer pool.
 ///
-/// All page reads/writes go through the buffer pool. Structural changes
-/// (insert, delete, neighbor updates) are logged to WAL for crash recovery.
+/// All page reads/writes go through the buffer pool. Durability is
+/// checkpoint-based: IndexManager::flush_hnsw / flush_all flushes dirty
+/// pages to disk. There is no per-operation WAL; crash recovery at the
+/// HNSW level is tracked under GDB-704 (Durability epic).
 ///
-/// The index maintains an in-memory mapping of node_id → (page_id, slot_id)
-/// for fast node lookups. This map is rebuilt on load by scanning HNSW_NODE pages.
+/// The index maintains an in-memory mapping of node_id -> (page_id, slot_id)
+/// for fast node lookups. This map is rebuilt on load by scanning HNSW_NODE
+/// pages.
 class HnswIndex {
 public:
-    /// Construct an HnswIndex that uses the given buffer pool and WAL writer.
+    /// Construct an HnswIndex that uses the given buffer pool.
     /// @param buffer_pool Buffer pool for page I/O.
-    /// @param wal WAL writer for crash recovery logging (may be nullptr for tests).
-    HnswIndex(BufferPoolManager& buffer_pool, WalWriter* wal);
+    explicit HnswIndex(BufferPoolManager& buffer_pool);
 
     ~HnswIndex() = default;
 
@@ -180,17 +181,12 @@ private:
     [[nodiscard]] static std::vector<HnswNeighbor>
     select_neighbors(const std::vector<Candidate>& candidates, uint16_t max_neighbors);
 
-    /// Log a WAL record for an HNSW page modification.
-    [[nodiscard]] Result<void>
-    log_wal(WalRecordType type, PageId page_id, SlotId slot_id, std::span<const uint8_t> data);
-
     BufferPoolManager& buffer_pool_;
-    WalWriter* wal_;
 
     PageId meta_page_id_ = 0;
     HnswMeta meta_;
 
-    /// Maps node_id → storage location for fast lookups.
+    /// Maps node_id -> storage location for fast lookups.
     std::unordered_map<uint32_t, HnswNodeLocation> node_map_;
 
     /// Tracks pages of each type that may have free space.

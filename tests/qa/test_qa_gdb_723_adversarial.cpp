@@ -39,10 +39,10 @@ protected:
     void SetUp() override {
         // Unique paths per test instance
         std::string suffix = std::to_string(reinterpret_cast<uintptr_t>(this));
-        table_path_ = std::filesystem::temp_directory_path() /
-                      ("sixseven_qa723adv_table_" + suffix + ".db");
-        hnsw_path_ = std::filesystem::temp_directory_path() /
-                     ("sixseven_qa723adv_hnsw_" + suffix + ".db");
+        table_path_ =
+            std::filesystem::temp_directory_path() / ("sixseven_qa723adv_table_" + suffix + ".db");
+        hnsw_path_ =
+            std::filesystem::temp_directory_path() / ("sixseven_qa723adv_hnsw_" + suffix + ".db");
 
         std::filesystem::remove(table_path_);
         std::filesystem::remove(hnsw_path_);
@@ -105,8 +105,8 @@ protected:
         ASSERT_TRUE(rid.has_value()) << rid.error().message;
     }
 
-    HnswIndexConfig make_config(uint32_t dim, DistanceMetric metric,
-                                uint16_t m = 8, uint16_t efc = 50, uint16_t efs = 50) {
+    HnswIndexConfig make_config(
+        uint32_t dim, DistanceMetric metric, uint16_t m = 8, uint16_t efc = 50, uint16_t efs = 50) {
         HnswIndexConfig c;
         c.dimension = dim;
         c.metric = metric;
@@ -116,8 +116,10 @@ protected:
         return c;
     }
 
-    std::vector<Tuple> run_nearest(TableHeap& heap, DistanceMetric metric,
-                                   HnswIndex* hnsw, uint32_t k,
+    std::vector<Tuple> run_nearest(TableHeap& heap,
+                                   DistanceMetric metric,
+                                   HnswIndex* hnsw,
+                                   uint32_t k,
                                    const std::vector<float>& query) {
         NearestScanConfig config;
         config.k = k;
@@ -128,8 +130,7 @@ protected:
         OutputSchema schema(output_cols_);
         BoundStatement bound;
         NearestScanOperator op(
-            heap, storage_schema_, std::move(config), std::move(schema),
-            nullptr, bound, hnsw);
+            heap, storage_schema_, std::move(config), std::move(schema), nullptr, bound, hnsw);
         auto open_res = op.open();
         EXPECT_TRUE(open_res.has_value()) << open_res.error().message;
 
@@ -191,7 +192,7 @@ TEST_F(QA723Adversarial, ParityStress50VectorsMixedMagnitudes) {
         reset_storage();
 
         TableHeap heap(*table_bpm_, dm_, table_fid_);
-        HnswIndex hnsw(*hnsw_bpm_, nullptr);
+        HnswIndex hnsw(*hnsw_bpm_);
         ASSERT_TRUE(hnsw.create(make_config(DIM, metric, 16, 200, 200)).has_value());
 
         for (uint32_t i = 0; i < N; ++i) {
@@ -211,9 +212,7 @@ TEST_F(QA723Adversarial, ParityStress50VectorsMixedMagnitudes) {
             EXPECT_EQ(via_hnsw[r].values[0].as_int32(), via_brute[r].values[0].as_int32())
                 << "metric=" << distance_metric_name(metric) << " rank=" << r;
             EXPECT_NEAR(
-                via_hnsw[r].values[2].as_float64(),
-                via_brute[r].values[2].as_float64(),
-                1e-4)
+                via_hnsw[r].values[2].as_float64(), via_brute[r].values[2].as_float64(), 1e-4)
                 << "metric=" << distance_metric_name(metric) << " rank=" << r;
         }
     }
@@ -229,7 +228,7 @@ TEST_F(QA723Adversarial, ZeroVectorNoCrashDeterministic) {
     const uint32_t DIM = 3;
 
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
     ASSERT_TRUE(hnsw.create(make_config(DIM, DistanceMetric::COSINE)).has_value());
 
     Embedding zero_emb = {0.0F, 0.0F, 0.0F};
@@ -268,7 +267,7 @@ TEST_F(QA723Adversarial, DuplicateVectorsNoCrash) {
     Embedding dup = {0.6F, 0.8F}; // unit vector, cosine dist from [1,0] = 0.4
 
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
     ASSERT_TRUE(hnsw.create(make_config(DIM, DistanceMetric::COSINE)).has_value());
 
     for (int i = 0; i < 5; ++i) {
@@ -298,7 +297,7 @@ TEST_F(QA723Adversarial, SingleVectorExactMatch) {
     Embedding stored = {0.5F, 0.5F, 0.707107F};
 
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
     ASSERT_TRUE(hnsw.create(make_config(DIM, DistanceMetric::COSINE)).has_value());
 
     insert_row(heap, 42, stored);
@@ -322,7 +321,7 @@ TEST_F(QA723Adversarial, QueryEqualsStoredVectorL2IsZero) {
     Embedding other = {1.0F, 2.0F, 3.0F, 4.0F};
 
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
     ASSERT_TRUE(hnsw.create(make_config(DIM, DistanceMetric::L2)).has_value());
 
     insert_row(heap, 7, stored);
@@ -366,10 +365,9 @@ TEST_F(QA723Adversarial, PersistenceRoundTripMetricSurvives) {
         auto bytes = serialize_hnsw_meta(meta);
         auto result = deserialize_hnsw_meta(bytes);
         ASSERT_TRUE(result.has_value())
-            << "deserialize failed for metric=" << distance_metric_name(m)
-            << ": " << (result.has_value() ? "" : result.error().message);
-        EXPECT_EQ(result->metric, m)
-            << "metric not preserved: " << distance_metric_name(m);
+            << "deserialize failed for metric=" << distance_metric_name(m) << ": "
+            << (result.has_value() ? "" : result.error().message);
+        EXPECT_EQ(result->metric, m) << "metric not preserved: " << distance_metric_name(m);
     }
 }
 
@@ -431,7 +429,7 @@ TEST_F(QA723Adversarial, InvalidMetricByteReturnsError) {
 // ---------------------------------------------------------------------------
 TEST_F(QA723Adversarial, DotProductConfigNormalizesToInnerProduct) {
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
 
     ASSERT_TRUE(hnsw.create(make_config(3, DistanceMetric::DOT_PRODUCT)).has_value());
 
@@ -458,10 +456,7 @@ TEST_F(QA723Adversarial, DotProductConfigNormalizesToInnerProduct) {
     for (size_t i = 0; i < via_hnsw.size(); ++i) {
         EXPECT_EQ(via_hnsw[i].values[0].as_int32(), via_brute[i].values[0].as_int32())
             << "rank=" << i;
-        EXPECT_NEAR(
-            via_hnsw[i].values[2].as_float64(),
-            via_brute[i].values[2].as_float64(),
-            1e-5)
+        EXPECT_NEAR(via_hnsw[i].values[2].as_float64(), via_brute[i].values[2].as_float64(), 1e-5)
             << "rank=" << i;
     }
 }
@@ -471,7 +466,7 @@ TEST_F(QA723Adversarial, DotProductConfigNormalizesToInnerProduct) {
 // ---------------------------------------------------------------------------
 TEST_F(QA723Adversarial, ResetPreservesMetric) {
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
 
     ASSERT_TRUE(hnsw.create(make_config(3, DistanceMetric::COSINE)).has_value());
     EXPECT_EQ(hnsw.metric(), DistanceMetric::COSINE);
@@ -486,8 +481,7 @@ TEST_F(QA723Adversarial, ResetPreservesMetric) {
     ASSERT_TRUE(hnsw.reset().has_value());
 
     // Metric must still be COSINE after reset
-    EXPECT_EQ(hnsw.metric(), DistanceMetric::COSINE)
-        << "reset() must preserve the distance metric";
+    EXPECT_EQ(hnsw.metric(), DistanceMetric::COSINE) << "reset() must preserve the distance metric";
 
     // Re-insert and verify results are still COSINE-ordered
     ASSERT_TRUE(hnsw.insert(e1).has_value());
@@ -514,12 +508,12 @@ TEST_F(QA723Adversarial, MetricMismatchFallbackExactDistances) {
     const uint32_t DIM = 3;
 
     // Non-unit-norm vectors where L2 and cosine orderings genuinely differ
-    Embedding v1 = {10.0F, 0.0F, 0.0F};   // huge magnitude, perfectly aligned
-    Embedding v2 = {0.5F, 0.5F, 0.0F};    // moderate, 45 deg
-    Embedding v3 = {0.0F, 0.0F, -1.0F};   // perpendicular, negative
+    Embedding v1 = {10.0F, 0.0F, 0.0F}; // huge magnitude, perfectly aligned
+    Embedding v2 = {0.5F, 0.5F, 0.0F};  // moderate, 45 deg
+    Embedding v3 = {0.0F, 0.0F, -1.0F}; // perpendicular, negative
 
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
     ASSERT_TRUE(hnsw.create(make_config(DIM, DistanceMetric::L2)).has_value());
 
     insert_row(heap, 1, v1);
@@ -538,9 +532,8 @@ TEST_F(QA723Adversarial, MetricMismatchFallbackExactDistances) {
         EXPECT_EQ(with_mismatch[i].values[0].as_int32(), no_index[i].values[0].as_int32())
             << "rank=" << i << " ordering differs";
         // Exact floating-point match since both paths compute identically
-        EXPECT_DOUBLE_EQ(
-            with_mismatch[i].values[2].as_float64(),
-            no_index[i].values[2].as_float64())
+        EXPECT_DOUBLE_EQ(with_mismatch[i].values[2].as_float64(),
+                         no_index[i].values[2].as_float64())
             << "rank=" << i << " distance differs";
     }
 }
@@ -559,7 +552,7 @@ TEST_F(QA723Adversarial, DisplayDistanceDotReturnsRawPositiveDot) {
     Embedding e2 = {1.0F, 0.0F};
 
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
     ASSERT_TRUE(hnsw.create(make_config(DIM, DistanceMetric::DOT_PRODUCT)).has_value());
 
     insert_row(heap, 1, e1);
@@ -576,8 +569,7 @@ TEST_F(QA723Adversarial, DisplayDistanceDotReturnsRawPositiveDot) {
     ASSERT_EQ(via_brute.size(), 2u);
 
     // Most similar first: id 1 (dot=3.0) then id 2 (dot=1.0)
-    EXPECT_EQ(via_hnsw[0].values[0].as_int32(), 1)
-        << "HNSW: highest dot product must appear first";
+    EXPECT_EQ(via_hnsw[0].values[0].as_int32(), 1) << "HNSW: highest dot product must appear first";
     EXPECT_EQ(via_hnsw[1].values[0].as_int32(), 2);
 
     // _distance must be raw dot product (positive), not the negated sort key
