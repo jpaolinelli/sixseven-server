@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sixseven/common/result.h"
+#include "sixseven/executor/graph_traversal_core.h"
 #include "sixseven/executor/iterator.h"
 #include "sixseven/executor/tuple.h"
 #include "sixseven/graph/graph_engine.h"

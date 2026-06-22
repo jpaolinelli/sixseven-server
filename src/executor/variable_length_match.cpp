@@ -3,6 +3,7 @@
 #include "sixseven/common/coercion.h"
 #include "sixseven/common/value_hash.h"
 #include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/executor/graph_traversal_core.h"
 #include "sixseven/table/tuple.h"
 
 #include <algorithm>
@@ -11,24 +12,6 @@
 #include <unordered_set>
 
 namespace sixseven {
-
-namespace {
-
-/// Convert a Value PK to int64_t for PathStep storage.
-Result<int64_t> pk_to_int64(const Value& pk) {
-    if (!pk.is_null()) {
-        if (auto* p = std::get_if<int64_t>(&pk.data())) {
-            return ok(*p);
-        }
-        if (auto* p32 = std::get_if<int32_t>(&pk.data())) {
-            return ok(static_cast<int64_t>(*p32));
-        }
-    }
-    return make_error(StatusCode::INVALID_ARGUMENT,
-                      "variable-length MATCH requires integer primary keys for path tracking");
-}
-
-} // namespace
 
 VariableLengthMatchOperator::VariableLengthMatchOperator(GraphEngine& graph_engine,
                                                          const Catalog& catalog,
@@ -148,26 +131,7 @@ VariableLengthMatchOperator::get_all_pks(const std::string& table_name) const {
 
 Result<std::vector<std::pair<Value, int64_t>>> VariableLengthMatchOperator::get_neighbors(
     const std::string& edge_type, const Value& pk, TraverseDirection direction) const {
-    std::vector<std::pair<Value, int64_t>> neighbors;
-
-    if (direction == TraverseDirection::OUT || direction == TraverseDirection::BOTH) {
-        auto fwd = graph_engine_.get_edges_from(database_id_, edge_type, pk);
-        if (fwd) {
-            for (auto& e : *fwd) {
-                neighbors.emplace_back(std::move(e.target_pk), static_cast<int64_t>(e.edge_row_id));
-            }
-        }
-    }
-    if (direction == TraverseDirection::IN || direction == TraverseDirection::BOTH) {
-        auto rev = graph_engine_.get_edges_to(database_id_, edge_type, pk);
-        if (rev) {
-            for (auto& e : *rev) {
-                neighbors.emplace_back(std::move(e.source_pk), static_cast<int64_t>(e.edge_row_id));
-            }
-        }
-    }
-
-    return ok(std::move(neighbors));
+    return expand_neighbors_ids(graph_engine_, database_id_, edge_type, pk, direction);
 }
 
 Result<std::vector<Value>>

@@ -22,6 +22,7 @@ add_library(sixseven_executor STATIC
     window_function.cpp
     subquery_source.cpp
     prepend_tuple.cpp
+    graph_traversal_core.cpp
     traversal.cpp
     enriched_traversal.cpp
     edge_traversal.cpp

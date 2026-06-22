@@ -3,33 +3,14 @@
 #include "sixseven/common/logging.h"
 #include "sixseven/common/value_hash.h"
 #include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/executor/graph_traversal_core.h"
 
-#include <algorithm>
 #include <cassert>
 #include <deque>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace sixseven {
-
-namespace {
-
-/// Convert a Value PK to int64_t for PathStep storage.
-/// Returns an error if the PK is not an integer type.
-Result<int64_t> pk_to_int64(const Value& pk) {
-    if (!pk.is_null()) {
-        if (auto* p = std::get_if<int64_t>(&pk.data())) {
-            return ok(*p);
-        }
-        if (auto* p32 = std::get_if<int32_t>(&pk.data())) {
-            return ok(static_cast<int64_t>(*p32));
-        }
-    }
-    return make_error(StatusCode::INVALID_ARGUMENT,
-                      "TRAVERSE WITH TRACE requires integer primary keys");
-}
-
-} // namespace
 
 EnrichedTraversalOperator::EnrichedTraversalOperator(GraphEngine& graph_engine,
                                                      TraversalConfig config,
@@ -169,31 +150,8 @@ Result<void> EnrichedTraversalOperator::run_bfs() {
 
 Result<std::vector<std::pair<Value, EdgeRow>>>
 EnrichedTraversalOperator::get_neighbors(const Value& node_pk) const {
-    std::vector<std::pair<Value, EdgeRow>> result;
-
-    if (config_.direction == TraverseDirection::OUT ||
-        config_.direction == TraverseDirection::BOTH) {
-        auto edges = graph_engine_.get_edges_from(config_.database_id, config_.edge_type, node_pk);
-        if (!edges) {
-            return tl::unexpected(edges.error());
-        }
-        for (auto& edge : *edges) {
-            result.emplace_back(edge.target_pk, std::move(edge));
-        }
-    }
-
-    if (config_.direction == TraverseDirection::IN ||
-        config_.direction == TraverseDirection::BOTH) {
-        auto edges = graph_engine_.get_edges_to(config_.database_id, config_.edge_type, node_pk);
-        if (!edges) {
-            return tl::unexpected(edges.error());
-        }
-        for (auto& edge : *edges) {
-            result.emplace_back(edge.source_pk, std::move(edge));
-        }
-    }
-
-    return ok(std::move(result));
+    return expand_neighbors(
+        graph_engine_, config_.database_id, config_.edge_type, node_pk, config_.direction);
 }
 
 // ---------------------------------------------------------------------------
@@ -313,63 +271,7 @@ Result<void> EnrichedTraversalOperator::enrich_results() {
 
 Result<Path> EnrichedTraversalOperator::reconstruct_path(const Value& target,
                                                          int32_t target_depth) const {
-    // Walk parent pointers backward from target to the start node, collecting
-    // (node_pk, incoming_edge_row_id) pairs, then reverse to get start->target.
-    std::vector<PathStep> reversed;
-
-    // A valid parent chain consumes each parent-map entry at most once plus a
-    // terminal step for the start node; anything longer means the parent map
-    // contains a cycle (GDB-694).
-    const size_t max_steps = parent_map_.size() + 1;
-
-    Value cursor = target;
-    int32_t remaining = target_depth;
-    while (true) {
-        if (reversed.size() >= max_steps) {
-            return make_error(StatusCode::INTERNAL_ERROR,
-                              "TRACE path reconstruction detected a cycle in the parent map");
-        }
-
-        auto cursor_int = pk_to_int64(cursor);
-        if (!cursor_int) {
-            return tl::unexpected(cursor_int.error());
-        }
-
-        // After target_depth hops the cursor is the start node. The depth guard
-        // is required for heterogeneous edges: the parent map is keyed by PK
-        // only, so a node in another table sharing the start node's PK would
-        // otherwise be treated as its own parent and loop forever (GDB-694).
-        if (remaining <= 0) {
-            reversed.push_back({*cursor_int, -1});
-            break;
-        }
-
-        auto it = parent_map_.find(cursor);
-        if (it == parent_map_.end()) {
-            // Reached the start node (no parent entry): no incoming edge.
-            reversed.push_back({*cursor_int, -1});
-            break;
-        }
-
-        reversed.push_back({*cursor_int, it->second.edge_row_id});
-        cursor = it->second.parent_pk;
-        --remaining;
-    }
-
-    // reversed is target..start. Reverse to start..target.
-    std::reverse(reversed.begin(), reversed.end());
-
-    // Each step carries its own *incoming* edge id; Path semantics want the
-    // *outgoing* edge to the next step, so shift edge ids toward the start and
-    // clear the terminal step's edge.
-    Path path;
-    path.steps.reserve(reversed.size());
-    for (size_t i = 0; i < reversed.size(); ++i) {
-        int64_t outgoing = (i + 1 < reversed.size()) ? reversed[i + 1].edge_id : -1;
-        path.steps.push_back({reversed[i].node_pk, outgoing});
-    }
-
-    return ok(std::move(path));
+    return sixseven::reconstruct_path(target, target_depth, parent_map_);
 }
 
 } // namespace sixseven
