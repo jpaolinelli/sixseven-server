@@ -1136,27 +1136,38 @@ TEST(BTreeQA_Concurrency, ConcurrentRangeScanDuringInsert) {
 }
 
 // =============================================================================
-// WAL Integration
+// Split correctness (in-memory, no WAL)
 // =============================================================================
 
-TEST(BTreeQA_WAL, InsertWithWalWriter) {
-    // Verify that split operations log WAL records when a WAL writer is provided.
-    // We use a minimal WalWriter to count split records.
-    // Since WalWriter requires a file, we just verify the tree works with nullptr
-    // WAL (no logging) - which is the default path.
+TEST(BTreeQA_Split, InsertManyKeysAcrossSplitsRoundTrips) {
+    // Exercise leaf and internal node splits and verify every inserted key is
+    // still searchable after the tree restructures.
+    //
+    // BTreeIndex has no WAL-logging path (its only constructor takes BTreeConfig;
+    // there is no WalWriter parameter and split operations do not emit WAL
+    // records), so WAL coverage is intentionally not claimed here.
+    //
+    // With leaf_max_keys=3 and 20 sequential inserts the tree is forced to
+    // perform multiple leaf splits and at least one internal split, making the
+    // root an internal node.
     auto tree = make_test_index(3, 3);
 
     for (int i = 1; i <= 20; ++i) {
         ASSERT_TRUE(tree.insert(make_key(i), make_rid(static_cast<uint32_t>(i))).has_value());
     }
 
-    // Verify the tree is correct.
+    // All 20 entries must be present after splits.
     EXPECT_EQ(tree.size(), 20u);
     for (int i = 1; i <= 20; ++i) {
         auto s = tree.search(make_key(i));
         ASSERT_TRUE(s.has_value());
         EXPECT_TRUE(s->has_value());
     }
+
+    // With leaf_max_keys=3 and 20 inserts the tree must have split at least
+    // once: the root page must be an internal node, not a leaf.
+    EXPECT_FALSE(tree.is_leaf_node(tree.root_page_id()))
+        << "root should be an internal node after 20 inserts with leaf_max=3";
 }
 
 // =============================================================================
