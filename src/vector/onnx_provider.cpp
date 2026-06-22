@@ -527,7 +527,8 @@ OnnxProvider::OnnxProvider(std::string model_path,
                            std::unique_ptr<OnnxSession> session,
                            std::unique_ptr<Tokenizer> tokenizer)
     : model_path_(std::move(model_path)), dimension_(dim), session_(std::move(session)),
-      tokenizer_(std::move(tokenizer)) {}
+      tokenizer_(tokenizer ? std::move(tokenizer)
+                           : std::make_unique<HashTokenizer>(MAX_SEQ_LENGTH)) {}
 
 Result<std::vector<float>> OnnxProvider::embed(const std::string& text) {
     if (text.empty()) {
