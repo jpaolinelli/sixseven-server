@@ -328,6 +328,11 @@ void GraphEngine::teardown_edge_storage_locked(const std::string& edge_key,
 
         // Close and remove heap file.
         (void)storage.bpm->flush_all();
+        // Defensive guard: dm_ != nullptr is always true when edge_storage_ is
+        // populated, because create_edge_type only calls create_edge_storage when
+        // has_persistence() is true (i.e. dm_ != nullptr). The guard is kept for
+        // consistency with drop_edge_type_locked and the destructor so that this
+        // helper remains safe regardless of call site.
         if (dm_ != nullptr) {
             (void)dm_->close_file(storage.file_id);
         }

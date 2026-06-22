@@ -692,15 +692,21 @@ TEST_F(EdgePersistenceTest, GDB879_DropEdgeTypeRemovesStorageFile) {
         << "storage file should be removed after drop";
 }
 
-// (c) LATENT-BUG REGRESSION: drop_edge_type on a non-persistent GraphEngine
-//     (dm_==nullptr) must not crash.
+// (c) drop_edge_type on a non-persistent GraphEngine (dm_==nullptr) removes
+// the edge type from edge_tables_ and the catalog, then returns NOT_FOUND on a
+// second drop.
 //
-// A non-persistent engine has no edge_storage_ entries for edge types it owns,
-// so the teardown path skips the storage block entirely. The edge table is
-// simply removed from the in-memory map. This test verifies that no null-deref
-// occurs and that both drop_edge_type and drop_edge_type_locked produce the
-// same observable end-state (edge type absent, second call returns NOT_FOUND).
-TEST(GDB879_NullDmDropEdgeType, DropEdgeTypeNoPersistenceDoesNotCrash) {
+// On a non-persistent engine, create_edge_type does NOT populate edge_storage_
+// (storage creation is gated on has_persistence()), so teardown_edge_storage_locked
+// always finds sit==edge_storage_.end() and skips the storage block entirely.
+// What this test actually exercises is the real no-persistence drop path:
+// edge_tables_ erase + catalog drop, with the in-memory edge table gone after.
+//
+// The dm_!=nullptr guard inside teardown_edge_storage_locked is defensive
+// consistency with drop_edge_type_locked and the destructor; it is not
+// reachable through the public API on a dm_==nullptr engine (see comment in
+// graph_engine.cpp).
+TEST(GDB879_NullDmDropEdgeType, DropEdgeTypeOnNonPersistentEngineDropsTypeWithoutStorage) {
     Catalog catalog;
     // Use the non-persistent constructor (dm_ stays nullptr).
     GraphEngine engine(catalog);
@@ -733,19 +739,27 @@ TEST(GDB879_NullDmDropEdgeType, DropEdgeTypeNoPersistenceDoesNotCrash) {
                                       {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
-    // Add an in-memory edge so the engine is in a non-trivial state.
+    // Insert edges so edge_tables_ holds a live, non-empty EdgeTable.
+    // (edge_storage_ stays empty — not populated without persistence.)
     ASSERT_TRUE(engine.link(db_id, "connected", Value(int64_t{1}), Value(int64_t{2})).has_value());
+    ASSERT_TRUE(engine.link(db_id, "connected", Value(int64_t{1}), Value(int64_t{3})).has_value());
 
-    // drop_edge_type should not crash or null-deref even with dm_==nullptr.
+    // Verify the edge type is reachable before drop.
+    auto before = engine.get_edges_from(db_id, "connected", Value(int64_t{1}));
+    ASSERT_TRUE(before.has_value()) << before.error().message;
+    EXPECT_EQ(before->size(), 2u);
+
+    // drop_edge_type exercises the no-persistence teardown path:
+    // edge_tables_.erase() + catalog_.drop_edge_type(). No storage block runs.
     auto drop1 = engine.drop_edge_type(db_id, "connected");
     ASSERT_TRUE(drop1.has_value()) << drop1.error().message;
 
-    // Edge type should be gone.
-    auto edges = engine.get_edges_from(db_id, "connected", Value(int64_t{1}));
-    ASSERT_FALSE(edges.has_value());
-    EXPECT_EQ(edges.error().code, StatusCode::NOT_FOUND);
+    // Edge type and all in-memory data must be gone from edge_tables_.
+    auto after = engine.get_edges_from(db_id, "connected", Value(int64_t{1}));
+    ASSERT_FALSE(after.has_value());
+    EXPECT_EQ(after.error().code, StatusCode::NOT_FOUND);
 
-    // Second drop returns NOT_FOUND.
+    // Second drop returns NOT_FOUND (catalog entry also removed).
     auto drop2 = engine.drop_edge_type(db_id, "connected");
     ASSERT_FALSE(drop2.has_value());
     EXPECT_EQ(drop2.error().code, StatusCode::NOT_FOUND);
