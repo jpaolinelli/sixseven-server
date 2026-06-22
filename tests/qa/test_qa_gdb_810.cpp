@@ -15,6 +15,11 @@
 // A clean build of this TU proves the fix is correct.
 
 // Force debug logging active for this translation unit — the key compile-time check.
+// #undef first: since GDB-892 the project-wide CMake definition sets SPDLOG_ACTIVE_LEVEL
+// to SPDLOG_LEVEL_TRACE for Debug builds.  Redefining to SPDLOG_LEVEL_DEBUG without
+// undefing first triggers -Werror=macro-redefined.  The intent (DEBUG active) is still
+// satisfied because TRACE >= DEBUG in terms of what is compiled in.
+#undef SPDLOG_ACTIVE_LEVEL
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_DEBUG
 
 #include "sixseven/index/btree_index.h"
@@ -51,7 +56,8 @@ protected:
         auto path = data_dir_ / (name + ".db");
         auto fid = dm_->create_file(path, false, true);
         EXPECT_TRUE(fid.has_value()) << fid.error().message;
-        if (!fid) return {FileId{}, nullptr};
+        if (!fid)
+            return {FileId{}, nullptr};
         return {*fid, std::make_unique<BufferPoolManager>(*dm_, *fid, 512)};
     }
 
@@ -59,7 +65,8 @@ protected:
         auto path = data_dir_ / (name + ".db");
         auto fid = dm_->open_file(path);
         EXPECT_TRUE(fid.has_value()) << fid.error().message;
-        if (!fid) return {FileId{}, nullptr};
+        if (!fid)
+            return {FileId{}, nullptr};
         return {*fid, std::make_unique<BufferPoolManager>(*dm_, *fid, 512)};
     }
 
@@ -325,7 +332,7 @@ TEST_F(QA_GDB810_BTreePersist, GDB810_RIDSlotIdPreservedAfterLoad) {
     // Use distinct slot_id values to detect if serialization drops them.
     for (int32_t i = 1; i <= 10; ++i) {
         auto r = original.insert({Value(i)},
-                                  RID{static_cast<PageId>(i * 10), static_cast<SlotId>(i * 3)});
+                                 RID{static_cast<PageId>(i * 10), static_cast<SlotId>(i * 3)});
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 
@@ -358,8 +365,7 @@ TEST_F(QA_GDB810_BTreePersist, GDB810_InvalidMetaPageId_NonExistentPage) {
     ASSERT_NE(bpm, nullptr);
 
     auto result = BTreePersistence::load(*bpm, static_cast<PageId>(9999));
-    EXPECT_FALSE(result.has_value())
-        << "load with non-existent meta page should return an error";
+    EXPECT_FALSE(result.has_value()) << "load with non-existent meta page should return an error";
 }
 
 TEST_F(QA_GDB810_BTreePersist, GDB810_ZeroMetaPageId_GracefulError) {
@@ -368,8 +374,7 @@ TEST_F(QA_GDB810_BTreePersist, GDB810_ZeroMetaPageId_GracefulError) {
 
     // Page 0 is the invalid sentinel in this codebase.
     auto result = BTreePersistence::load(*bpm, static_cast<PageId>(0));
-    EXPECT_FALSE(result.has_value())
-        << "load with page_id=0 should fail gracefully";
+    EXPECT_FALSE(result.has_value()) << "load with page_id=0 should fail gracefully";
 }
 
 TEST_F(QA_GDB810_BTreePersist, GDB810_WrongBPM_GracefulError) {

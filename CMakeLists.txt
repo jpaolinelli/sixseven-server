@@ -41,6 +41,16 @@ if(WIN32)
     )
 endif()
 
+# Compile-time log level: TRACE for Debug (and Debug-based asan/tsan presets),
+# INFO for Release.  Without this, spdlog defaults to SPDLOG_LEVEL_INFO and
+# SIXSEVEN_LOG_TRACE/DEBUG compile to no-ops — see GDB-892.
+# Note: the asan and tsan presets both use CMAKE_BUILD_TYPE=Debug, so they
+# automatically get SPDLOG_LEVEL_TRACE and expose all debug/trace call sites
+# to compile-time checking.
+add_compile_definitions(
+    SPDLOG_ACTIVE_LEVEL=$<IF:$<CONFIG:Debug>,SPDLOG_LEVEL_TRACE,SPDLOG_LEVEL_INFO>
+)
+
 # Testing
 enable_testing()
 
