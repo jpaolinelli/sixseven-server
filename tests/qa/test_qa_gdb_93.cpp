@@ -327,7 +327,7 @@ TEST(QA_GDB93_Duplicates, ManyDuplicatesCauseSplits) {
     EXPECT_EQ(entries->size(), 20u);
 }
 
-TEST(QA_GDB93_Duplicates, RangeScanWithBeginKeyMissesDuplicates) {
+TEST(QA_GDB93_Duplicates, RangeScanWithBeginKeyFindsAllDuplicates) {
     // FIXED (GDB-240): range_scan(begin_key=K) with many duplicate keys
     // spanning multiple leaves now correctly walks backward through
     // prev_leaf_id pointers to find the leftmost leaf.
