@@ -70,40 +70,6 @@ TEST(TypeId, FixedSizeReturnsNulloptForVariableLength) {
     EXPECT_FALSE(fixed_size(TypeId::EMBEDDING).has_value());
 }
 
-// -- alignment ----------------------------------------------------------------
-
-TEST(TypeId, AlignmentValues) {
-    EXPECT_EQ(alignment(TypeId::INT8), 1U);
-    EXPECT_EQ(alignment(TypeId::BOOL), 1U);
-    EXPECT_EQ(alignment(TypeId::UINT8), 1U);
-
-    EXPECT_EQ(alignment(TypeId::INT16), 2U);
-    EXPECT_EQ(alignment(TypeId::UINT16), 2U);
-
-    EXPECT_EQ(alignment(TypeId::INT32), 4U);
-    EXPECT_EQ(alignment(TypeId::UINT32), 4U);
-    EXPECT_EQ(alignment(TypeId::FLOAT32), 4U);
-    EXPECT_EQ(alignment(TypeId::DATE), 4U);
-
-    EXPECT_EQ(alignment(TypeId::INT64), 8U);
-    EXPECT_EQ(alignment(TypeId::UINT64), 8U);
-    EXPECT_EQ(alignment(TypeId::FLOAT64), 8U);
-    EXPECT_EQ(alignment(TypeId::TIME), 8U);
-    EXPECT_EQ(alignment(TypeId::TIMESTAMP), 8U);
-    EXPECT_EQ(alignment(TypeId::DECIMAL), 8U);
-    EXPECT_EQ(alignment(TypeId::INTERVAL), 8U);
-    EXPECT_EQ(alignment(TypeId::POINT), 8U);
-
-    // UUID is a byte array — 1-byte aligned
-    EXPECT_EQ(alignment(TypeId::UUID), 1U);
-
-    // Variable-length types are pointer-aligned
-    EXPECT_EQ(alignment(TypeId::STRING), 8U);
-    EXPECT_EQ(alignment(TypeId::BLOB), 8U);
-    EXPECT_EQ(alignment(TypeId::JSON), 8U);
-    EXPECT_EQ(alignment(TypeId::EMBEDDING), 8U);
-}
-
 // -- is_numeric ---------------------------------------------------------------
 
 TEST(TypeId, IsNumeric) {

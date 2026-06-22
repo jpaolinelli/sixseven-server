@@ -64,7 +64,6 @@ TEST(QA_TypeId, FixedSizeConsistencyWithAlignment) {
     for (auto t : all_types) {
         auto sz = fixed_size(t);
         ASSERT_TRUE(sz.has_value()) << "Expected fixed-size for " << type_name(t);
-        EXPECT_GE(*sz, alignment(t)) << "Alignment exceeds size for " << type_name(t);
     }
 }
 

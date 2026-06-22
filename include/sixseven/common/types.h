@@ -228,42 +228,6 @@ constexpr std::optional<size_t> fixed_size(TypeId id) {
     return std::nullopt;
 }
 
-/// Return the natural alignment requirement for a type in bytes.
-constexpr size_t alignment(TypeId id) {
-    switch (id) {
-    case TypeId::INT8:
-    case TypeId::UINT8:
-    case TypeId::BOOL:
-        return 1;
-    case TypeId::INT16:
-    case TypeId::UINT16:
-        return 2;
-    case TypeId::INT32:
-    case TypeId::UINT32:
-    case TypeId::FLOAT32:
-    case TypeId::DATE:
-        return 4;
-    case TypeId::INT64:
-    case TypeId::UINT64:
-    case TypeId::FLOAT64:
-    case TypeId::TIME:
-    case TypeId::TIMESTAMP:
-    case TypeId::DECIMAL:
-    case TypeId::INTERVAL:
-    case TypeId::POINT:
-        return 8;
-    case TypeId::UUID:
-        return 1; // byte array, no alignment requirement
-    case TypeId::STRING:
-    case TypeId::BLOB:
-    case TypeId::JSON:
-    case TypeId::EMBEDDING:
-    case TypeId::PATH:
-        return 8; // pointer-aligned for variable-length data
-    }
-    return 1;
-}
-
 /// Return true if the type is any numeric type (integer, floating, or decimal).
 constexpr bool is_numeric(TypeId id) {
     switch (id) {
