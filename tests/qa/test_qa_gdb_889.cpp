@@ -41,13 +41,13 @@ TEST(QA_GDB889, RecordLength42IsRejected) {
 // ---------------------------------------------------------------------------
 TEST(QA_GDB889, RecordLength43IsAccepted) {
     WalRecord record;
-    record.lsn      = 99;
-    record.txn_id   = 7;
+    record.lsn = 99;
+    record.txn_id = 7;
     record.prev_lsn = 0;
-    record.type     = WalRecordType::BEGIN;
+    record.type = WalRecordType::BEGIN;
     record.table_id = 0;
-    record.page_id  = 0;
-    record.slot_id  = 0;
+    record.page_id = 0;
+    record.slot_id = 0;
     record.data.clear();
 
     auto bytes = serialize_wal_record(record);
@@ -63,9 +63,9 @@ TEST(QA_GDB889, RecordLength43IsAccepted) {
     // Full round-trip must succeed.
     auto result = deserialize_wal_record(bytes);
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ(result->lsn,    99u);
+    EXPECT_EQ(result->lsn, 99u);
     EXPECT_EQ(result->txn_id, 7u);
-    EXPECT_EQ(result->type,   WalRecordType::BEGIN);
+    EXPECT_EQ(result->type, WalRecordType::BEGIN);
     EXPECT_TRUE(result->data.empty());
 }
 
@@ -108,16 +108,16 @@ TEST(QA_GDB889, AllRecordTypesWithEmptyDataRoundTrip) {
 
     for (auto type : types) {
         WalRecord r;
-        r.lsn    = 100;
+        r.lsn = 100;
         r.txn_id = 5;
-        r.type   = type;
+        r.type = type;
         r.data.clear();
 
-        auto bytes  = serialize_wal_record(r);
+        auto bytes = serialize_wal_record(r);
         auto result = deserialize_wal_record(bytes);
         ASSERT_TRUE(result.has_value())
-            << "type=" << wal_record_type_name(type) << " round-trip failed: "
-            << (result.has_value() ? "" : result.error().message);
+            << "type=" << wal_record_type_name(type)
+            << " round-trip failed: " << (result.has_value() ? "" : result.error().message);
         EXPECT_EQ(result->type, type);
         EXPECT_TRUE(result->data.empty());
     }
@@ -128,14 +128,14 @@ TEST(QA_GDB889, AllRecordTypesWithEmptyDataRoundTrip) {
 // ---------------------------------------------------------------------------
 TEST(QA_GDB889, RecordWithNonEmptyDataRoundTrips) {
     WalRecord r;
-    r.lsn      = 1;
-    r.txn_id   = 42;
+    r.lsn = 1;
+    r.txn_id = 42;
     r.prev_lsn = 0;
-    r.type     = WalRecordType::INSERT;
+    r.type = WalRecordType::INSERT;
     r.table_id = 7;
-    r.page_id  = 3;
-    r.slot_id  = 2;
-    r.data     = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04};
+    r.page_id = 3;
+    r.slot_id = 2;
+    r.data = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04};
 
     auto bytes = serialize_wal_record(r);
     // record_length field should be 43 + 8 = 51.
@@ -145,12 +145,12 @@ TEST(QA_GDB889, RecordWithNonEmptyDataRoundTrips) {
 
     auto result = deserialize_wal_record(bytes);
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ(result->lsn,      1u);
-    EXPECT_EQ(result->txn_id,  42u);
-    EXPECT_EQ(result->type,    WalRecordType::INSERT);
+    EXPECT_EQ(result->lsn, 1u);
+    EXPECT_EQ(result->txn_id, 42u);
+    EXPECT_EQ(result->type, WalRecordType::INSERT);
     EXPECT_EQ(result->table_id, 7u);
-    EXPECT_EQ(result->page_id,  3u);
-    EXPECT_EQ(result->slot_id,  2u);
+    EXPECT_EQ(result->page_id, 3u);
+    EXPECT_EQ(result->slot_id, 2u);
     ASSERT_EQ(result->data.size(), 8u);
     EXPECT_EQ(result->data[0], 0xDE);
     EXPECT_EQ(result->data[7], 0x04);
@@ -161,18 +161,18 @@ TEST(QA_GDB889, RecordWithNonEmptyDataRoundTrips) {
 // ---------------------------------------------------------------------------
 TEST(QA_GDB889, LargePayloadRoundTrips) {
     WalRecord r;
-    r.lsn    = 9999;
+    r.lsn = 9999;
     r.txn_id = 123;
-    r.type   = WalRecordType::UPDATE;
+    r.type = WalRecordType::UPDATE;
     r.data.resize(1024, 0xAB);
 
-    auto bytes  = serialize_wal_record(r);
+    auto bytes = serialize_wal_record(r);
     auto result = deserialize_wal_record(bytes);
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ(result->lsn,            9999u);
-    EXPECT_EQ(result->data.size(),    1024u);
-    EXPECT_EQ(result->data[0],        0xAB);
-    EXPECT_EQ(result->data[1023],     0xAB);
+    EXPECT_EQ(result->lsn, 9999u);
+    EXPECT_EQ(result->data.size(), 1024u);
+    EXPECT_EQ(result->data[0], 0xAB);
+    EXPECT_EQ(result->data[1023], 0xAB);
 }
 
 // ---------------------------------------------------------------------------
@@ -194,9 +194,9 @@ TEST(QA_GDB889, BufferShorterThanOverheadRejected) {
 // ---------------------------------------------------------------------------
 TEST(QA_GDB889, CrcMismatchRejected) {
     WalRecord r;
-    r.lsn    = 1;
+    r.lsn = 1;
     r.txn_id = 1;
-    r.type   = WalRecordType::COMMIT;
+    r.type = WalRecordType::COMMIT;
 
     auto bytes = serialize_wal_record(r);
     ASSERT_GE(bytes.size(), wal_record_overhead);
@@ -256,25 +256,25 @@ TEST(QA_GDB889, RecordLength44GarbageBufferCrcMismatch) {
 // ---------------------------------------------------------------------------
 TEST(QA_GDB889, MaxFieldValuesRoundTrip) {
     WalRecord r;
-    r.lsn      = UINT64_MAX;
-    r.txn_id   = UINT64_MAX - 1;
+    r.lsn = UINT64_MAX;
+    r.txn_id = UINT64_MAX - 1;
     r.prev_lsn = UINT64_MAX - 2;
-    r.type     = WalRecordType::PROMOTE;
+    r.type = WalRecordType::PROMOTE;
     r.table_id = UINT32_MAX;
-    r.page_id  = UINT32_MAX;
-    r.slot_id  = UINT16_MAX;
-    r.data     = {0xFF, 0xFE, 0xFD};
+    r.page_id = UINT32_MAX;
+    r.slot_id = UINT16_MAX;
+    r.data = {0xFF, 0xFE, 0xFD};
 
-    auto bytes  = serialize_wal_record(r);
+    auto bytes = serialize_wal_record(r);
     auto result = deserialize_wal_record(bytes);
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ(result->lsn,      UINT64_MAX);
-    EXPECT_EQ(result->txn_id,   UINT64_MAX - 1);
+    EXPECT_EQ(result->lsn, UINT64_MAX);
+    EXPECT_EQ(result->txn_id, UINT64_MAX - 1);
     EXPECT_EQ(result->prev_lsn, UINT64_MAX - 2);
-    EXPECT_EQ(result->type,     WalRecordType::PROMOTE);
+    EXPECT_EQ(result->type, WalRecordType::PROMOTE);
     EXPECT_EQ(result->table_id, UINT32_MAX);
-    EXPECT_EQ(result->page_id,  UINT32_MAX);
-    EXPECT_EQ(result->slot_id,  UINT16_MAX);
+    EXPECT_EQ(result->page_id, UINT32_MAX);
+    EXPECT_EQ(result->slot_id, UINT16_MAX);
     ASSERT_EQ(result->data.size(), 3u);
     EXPECT_EQ(result->data[0], 0xFF);
 }
@@ -287,8 +287,7 @@ TEST(QA_GDB889, LengthsZeroToThreeStillRejected) {
     for (uint32_t rl = 0; rl <= 3; ++rl) {
         std::memcpy(buf.data(), &rl, sizeof(uint32_t));
         auto result = deserialize_wal_record(buf);
-        EXPECT_FALSE(result.has_value())
-            << "record_length=" << rl << " should be REJECTED";
+        EXPECT_FALSE(result.has_value()) << "record_length=" << rl << " should be REJECTED";
     }
 }
 
