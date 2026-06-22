@@ -279,65 +279,29 @@ char Session::ready_for_query_status() const {
 // -- Savepoints ---------------------------------------------------------------
 
 Result<void> Session::create_savepoint(const std::string& name) {
-    if (txn_state_ == TransactionState::IDLE) {
-        return make_error(StatusCode::INVALID_ARGUMENT,
-                          "SAVEPOINT can only be used in a transaction block");
-    }
-    if (txn_state_ == TransactionState::FAILED) {
-        return make_error(StatusCode::TXN_ABORTED,
-                          "current transaction is aborted, commands ignored until end of "
-                          "transaction block");
-    }
-    savepoints_.push_back(name);
-    SIXSEVEN_LOG_DEBUG("session {}: SAVEPOINT {}", backend_pid_, name);
-    return ok();
+    // Subtransaction rollback is not implemented. Returning success here would
+    // silently allow data written after this savepoint to be committed even when
+    // the client issues ROLLBACK TO SAVEPOINT (audit finding C5, GDB-883).
+    (void)name;
+    return make_error(StatusCode::NOT_IMPLEMENTED,
+                      "SAVEPOINT is not supported: subtransaction rollback is not implemented "
+                      "(savepoints would not actually roll back data)");
 }
 
 Result<void> Session::release_savepoint(const std::string& name) {
-    if (txn_state_ == TransactionState::IDLE) {
-        return make_error(StatusCode::INVALID_ARGUMENT,
-                          "RELEASE SAVEPOINT can only be used in a transaction block");
-    }
-    if (txn_state_ == TransactionState::FAILED) {
-        return make_error(StatusCode::TXN_ABORTED,
-                          "current transaction is aborted, commands ignored until end of "
-                          "transaction block");
-    }
-    // Find the savepoint from the back (most recent first).
-    for (auto it = savepoints_.rbegin(); it != savepoints_.rend(); ++it) {
-        if (*it == name) {
-            savepoints_.erase(std::next(it).base());
-            SIXSEVEN_LOG_DEBUG("session {}: RELEASE SAVEPOINT {}", backend_pid_, name);
-            return ok();
-        }
-    }
-    return make_error(StatusCode::INVALID_ARGUMENT, "savepoint \"" + name + "\" does not exist");
+    (void)name;
+    return make_error(StatusCode::NOT_IMPLEMENTED,
+                      "RELEASE SAVEPOINT is not supported: subtransaction rollback is not "
+                      "implemented (savepoints would not actually roll back data)");
 }
 
 Result<void> Session::rollback_to_savepoint(const std::string& name) {
-    if (txn_state_ == TransactionState::IDLE) {
-        return make_error(StatusCode::INVALID_ARGUMENT,
-                          "ROLLBACK TO SAVEPOINT can only be used in a transaction block");
-    }
-    // Find the savepoint from the back.
-    for (auto it = savepoints_.rbegin(); it != savepoints_.rend(); ++it) {
-        if (*it == name) {
-            // Pop all savepoints after this one (keep the named one).
-            auto forward_it = std::next(it).base();
-            savepoints_.erase(std::next(forward_it), savepoints_.end());
-            // If in FAILED state, recover to IN_TRANSACTION.
-            if (txn_state_ == TransactionState::FAILED) {
-                txn_state_ = TransactionState::IN_TRANSACTION;
-                SIXSEVEN_LOG_DEBUG("session {}: ROLLBACK TO SAVEPOINT {} (recovered from FAILED)",
-                                   backend_pid_,
-                                   name);
-            } else {
-                SIXSEVEN_LOG_DEBUG("session {}: ROLLBACK TO SAVEPOINT {}", backend_pid_, name);
-            }
-            return ok();
-        }
-    }
-    return make_error(StatusCode::INVALID_ARGUMENT, "savepoint \"" + name + "\" does not exist");
+    // Returning success here would silently commit data that the client
+    // intended to roll back (audit finding C5, GDB-883).
+    (void)name;
+    return make_error(StatusCode::NOT_IMPLEMENTED,
+                      "ROLLBACK TO SAVEPOINT is not supported: subtransaction rollback is not "
+                      "implemented (savepoints would not actually roll back data)");
 }
 
 const std::deque<std::string>& Session::savepoints() const {
