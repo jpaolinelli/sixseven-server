@@ -303,9 +303,10 @@ Result<void> ReplicationSlotManager::load() {
     return ok();
 }
 
-void ReplicationSlotManager::check_wal_accumulation(lsn_t current_lsn) const {
+std::vector<std::string> ReplicationSlotManager::check_wal_accumulation(lsn_t current_lsn) const {
     std::lock_guard lock(mutex_);
 
+    std::vector<std::string> warned;
     for (const auto& [name, slot] : slots_) {
         if (slot.active || slot.restart_lsn == invalid_lsn) {
             continue;
@@ -321,9 +322,11 @@ void ReplicationSlotManager::check_wal_accumulation(lsn_t current_lsn) const {
                                retained_bytes,
                                slot.restart_lsn,
                                current_lsn);
+                warned.push_back(name);
             }
         }
     }
+    return warned;
 }
 
 std::filesystem::path ReplicationSlotManager::persistence_path() const {
