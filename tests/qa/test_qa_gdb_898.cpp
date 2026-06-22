@@ -59,8 +59,10 @@ std::vector<DbRow> scan_pg_database(Catalog& catalog) {
         if (!next_r.has_value() || !next_r->has_value())
             break;
         auto& t = next_r->value();
-        rows.push_back({t.values[0].as_int32(), std::string(t.values[1].as_string()),
-                        t.values[2].as_int32(), t.values[3].as_int32()});
+        rows.push_back({t.values[0].as_int32(),
+                        std::string(t.values[1].as_string()),
+                        t.values[2].as_int32(),
+                        t.values[3].as_int32()});
     }
     scan.close();
     return rows;
@@ -92,8 +94,7 @@ TEST(QA_GDB898_PgDatabase, RowCountEqualsCatalogDatabaseCount) {
     EXPECT_EQ(rows.size(), catalog_count)
         << "pg_database row count must equal catalog.list_databases().size()";
     // Crucially: if canned row was returned we'd see 1, not 2.
-    EXPECT_GE(rows.size(), 2u)
-        << "Expected at least the system database + the default database";
+    EXPECT_GE(rows.size(), 2u) << "Expected at least the system database + the default database";
 }
 
 // GDB898_MutationGrade: row OID must match the real database_id, not always 1.
@@ -433,8 +434,7 @@ TEST(QA_GDB898_PgDatabase, GeneratorReflectsLatestCatalogState) {
     ASSERT_TRUE(drop_r.has_value());
 
     auto rows_after_drop = vt->generator();
-    EXPECT_EQ(rows_after_drop.size(), count_before)
-        << "Generator must reflect dropped database";
+    EXPECT_EQ(rows_after_drop.size(), count_before) << "Generator must reflect dropped database";
 }
 
 // ---------------------------------------------------------------------------
