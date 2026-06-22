@@ -129,11 +129,12 @@ strongly_connected_components_execute(const AlgorithmContext& ctx) {
         on_stack.insert(start);
         call_stack.push({start, 0});
 
+        static const std::vector<int64_t> kEmpty;
         while (!call_stack.empty()) {
             auto& frame = call_stack.top();
             int64_t u = frame.node;
             auto adj_it = adj.find(u);
-            const auto& neighbors = (adj_it != adj.end()) ? adj_it->second : std::vector<int64_t>{};
+            const auto& neighbors = (adj_it != adj.end()) ? adj_it->second : kEmpty;
 
             if (frame.adj_idx < neighbors.size()) {
                 int64_t w = neighbors[frame.adj_idx];

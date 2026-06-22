@@ -514,3 +514,62 @@ TEST_F(SCCTest, ComponentIdIsSmallestNode) {
         EXPECT_EQ(m[node].component_size, 3) << "node " << node;
     }
 }
+
+// ---------------------------------------------------------------------------
+// High-degree hub — exercises the kEmpty reference fix (GDB-887)
+//
+// Hub node 0 has 500 out-edges to leaf nodes 1..500. Each leaf points back
+// to hub 0, forming a single SCC of size 501. Two extra nodes (501->502)
+// form a DAG-only path (two singletons). This graph was pathologically slow
+// before the kEmpty fix because adj_it->second was copied O(deg^2) times.
+// ---------------------------------------------------------------------------
+
+TEST_F(SCCTest, HighDegreeHubCorrectSCC) {
+    const int64_t kHubDegree = 500;
+    const int64_t kHub = 0;
+
+    std::vector<std::pair<int64_t, int64_t>> edges;
+    edges.reserve(static_cast<size_t>(kHubDegree * 2 + 1));
+
+    // Hub -> each leaf, and each leaf -> hub (forming one big SCC).
+    for (int64_t leaf = 1; leaf <= kHubDegree; ++leaf) {
+        edges.push_back({kHub, leaf});
+        edges.push_back({leaf, kHub});
+    }
+
+    // Two additional singleton nodes connected by a one-way edge.
+    const int64_t kExtraA = kHubDegree + 1;
+    const int64_t kExtraB = kHubDegree + 2;
+    edges.push_back({kExtraA, kExtraB});
+
+    build_graph("follows", edges);
+
+    auto result = run("follows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto m = to_scc_map(*result);
+
+    // Total nodes: hub + 500 leaves + 2 extras = 503.
+    EXPECT_EQ(m.size(), static_cast<size_t>(kHubDegree + 3));
+
+    // Hub and all leaves must share a single SCC of size kHubDegree+1.
+    // The component_id is the smallest node id = 0 (kHub).
+    const int64_t kExpectedHubCompId = kHub;
+    const int64_t kExpectedHubCompSize = kHubDegree + 1;
+
+    EXPECT_EQ(m[kHub].component_id, kExpectedHubCompId);
+    EXPECT_EQ(m[kHub].component_size, kExpectedHubCompSize);
+    for (int64_t leaf = 1; leaf <= kHubDegree; ++leaf) {
+        EXPECT_EQ(m[leaf].component_id, kExpectedHubCompId) << "leaf " << leaf;
+        EXPECT_EQ(m[leaf].component_size, kExpectedHubCompSize) << "leaf " << leaf;
+    }
+
+    // Extra nodes are singletons.
+    EXPECT_EQ(m[kExtraA].component_id, kExtraA);
+    EXPECT_EQ(m[kExtraA].component_size, 1);
+    EXPECT_EQ(m[kExtraB].component_id, kExtraB);
+    EXPECT_EQ(m[kExtraB].component_size, 1);
+
+    // Exactly 3 distinct components: the hub SCC, kExtraA, kExtraB.
+    EXPECT_EQ(count_components(m), 3);
+}
