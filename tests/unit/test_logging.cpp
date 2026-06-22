@@ -8,9 +8,10 @@
 #include <sstream>
 #include <string>
 
-// NOTE: SPDLOG_ACTIVE_LEVEL defaults to SPDLOG_LEVEL_INFO in this build, so
-// SIXSEVEN_LOG_TRACE and SIXSEVEN_LOG_DEBUG compile to no-ops.  The tests
-// below only exercise levels that are compiled in (INFO and above).
+// NOTE: Since GDB-892, Debug builds set SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE
+// via a project-wide CMake compile definition.  SIXSEVEN_LOG_TRACE and
+// SIXSEVEN_LOG_DEBUG are fully compiled in for Debug (and Debug-based asan/tsan
+// presets).  Tests below cover the full level range including debug and trace.
 
 TEST(Logging, InitDoesNotCrash) {
     EXPECT_NO_THROW(sixseven::init_logging("info"));
@@ -107,6 +108,58 @@ TEST(Logging, InfoLevelCapturesInfoAndAbove) {
         << "WARN must appear at level=info; captured: " << captured;
     EXPECT_NE(captured.find("error-check"), std::string::npos)
         << "ERROR must appear at level=info; captured: " << captured;
+
+    restore_default_logger();
+}
+
+// Verify that SIXSEVEN_LOG_DEBUG and SIXSEVEN_LOG_TRACE produce actual output
+// when the runtime level is set to debug/trace.  Before GDB-892 these macros
+// compiled to no-ops (SPDLOG_ACTIVE_LEVEL defaulted to INFO), so this test
+// would always pass vacuously even when the runtime level was debug — the
+// message simply never existed in the binary.  After the fix, the call sites
+// are compiled in and the captured output must contain the marker text.
+TEST(Logging, DebugAndTraceLevelsProduceOutput) {
+    std::ostringstream oss;
+    sixseven::init_logging(make_capturing_logger("test_debug_trace", oss, spdlog::level::trace));
+
+    SIXSEVEN_LOG_DEBUG("debug-marker-{}", 42);
+    SIXSEVEN_LOG_TRACE("trace-marker-{}", 99);
+    SIXSEVEN_LOG_INFO("info-marker");
+
+    const std::string captured = oss.str();
+
+    EXPECT_NE(captured.find("debug-marker-42"), std::string::npos)
+        << "SIXSEVEN_LOG_DEBUG must produce output when runtime level=trace; captured: "
+        << captured;
+    EXPECT_NE(captured.find("trace-marker-99"), std::string::npos)
+        << "SIXSEVEN_LOG_TRACE must produce output when runtime level=trace; captured: "
+        << captured;
+    EXPECT_NE(captured.find("info-marker"), std::string::npos)
+        << "SIXSEVEN_LOG_INFO must produce output when runtime level=trace; captured: " << captured;
+
+    restore_default_logger();
+}
+
+// Verify that runtime level=info suppresses debug and trace even though those
+// call sites are compiled in (SPDLOG_ACTIVE_LEVEL=TRACE in Debug builds).
+// This ensures compile-time vs runtime filtering are both working correctly.
+TEST(Logging, DebugSuppressedAtRuntimeInfoLevel) {
+    std::ostringstream oss;
+    sixseven::init_logging(
+        make_capturing_logger("test_debug_suppressed", oss, spdlog::level::info));
+
+    SIXSEVEN_LOG_DEBUG("should-not-appear-debug");
+    SIXSEVEN_LOG_TRACE("should-not-appear-trace");
+    SIXSEVEN_LOG_INFO("should-appear-info");
+
+    const std::string captured = oss.str();
+
+    EXPECT_EQ(captured.find("should-not-appear-debug"), std::string::npos)
+        << "DEBUG must be suppressed at runtime level=info; captured: " << captured;
+    EXPECT_EQ(captured.find("should-not-appear-trace"), std::string::npos)
+        << "TRACE must be suppressed at runtime level=info; captured: " << captured;
+    EXPECT_NE(captured.find("should-appear-info"), std::string::npos)
+        << "INFO must appear at runtime level=info; captured: " << captured;
 
     restore_default_logger();
 }
