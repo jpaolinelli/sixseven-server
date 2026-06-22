@@ -101,7 +101,8 @@ TEST(QA_GDB899, NoNulLeak_4ByteOverlongNul_F0808080_Lowercase) {
 TEST(QA_GDB899, EmbeddedLiteralNul_NullNormalizer_PassThrough) {
     NullNormalizer norm;
     // NullNormalizer returns input unchanged: a literal NUL stays.
-    std::string input = "ab\x00" "cd";
+    std::string input = "ab\x00"
+                        "cd";
     input.resize(5); // ensure the NUL is part of the string
     std::string result = norm.normalize(input);
     EXPECT_EQ(result.size(), 5u);
@@ -171,8 +172,7 @@ TEST(QA_GDB899, TruncatedTwoByte_C0Only) {
     BertNormalizer norm(false, false, false, false);
     // C0 alone (no continuation byte).
     std::string result = norm.normalize("\xC0");
-    EXPECT_EQ(result.find('\x00'), std::string::npos)
-        << "Truncated C0 produced a raw NUL";
+    EXPECT_EQ(result.find('\x00'), std::string::npos) << "Truncated C0 produced a raw NUL";
     EXPECT_NE(result.find(REPLACEMENT), std::string::npos);
 }
 
@@ -180,8 +180,7 @@ TEST(QA_GDB899, TruncatedThreeByte_E080Only) {
     BertNormalizer norm(false, false, false, false);
     // E0 80 — only two bytes of a 3-byte sequence.
     std::string result = norm.normalize("\xE0\x80");
-    EXPECT_EQ(result.find('\x00'), std::string::npos)
-        << "Truncated E0 80 produced a raw NUL";
+    EXPECT_EQ(result.find('\x00'), std::string::npos) << "Truncated E0 80 produced a raw NUL";
     // Should produce at least one replacement character.
     EXPECT_NE(result.find(REPLACEMENT), std::string::npos);
 }
@@ -190,8 +189,7 @@ TEST(QA_GDB899, TruncatedFourByte_F08080Only) {
     BertNormalizer norm(false, false, false, false);
     // F0 80 80 — three bytes of a 4-byte sequence.
     std::string result = norm.normalize("\xF0\x80\x80");
-    EXPECT_EQ(result.find('\x00'), std::string::npos)
-        << "Truncated F0 80 80 produced a raw NUL";
+    EXPECT_EQ(result.find('\x00'), std::string::npos) << "Truncated F0 80 80 produced a raw NUL";
     EXPECT_NE(result.find(REPLACEMENT), std::string::npos);
 }
 
@@ -217,7 +215,7 @@ TEST(QA_GDB899, Stress_Mixed3And4ByteOverlongNuls_NoNulLeak) {
     BertNormalizer norm(false, false, false, false);
     std::string input;
     for (int i = 0; i < 200; ++i) {
-        input += "\xE0\x80\x80"; // 3-byte overlong NUL
+        input += "\xE0\x80\x80";     // 3-byte overlong NUL
         input += "\xF0\x80\x80\x80"; // 4-byte overlong NUL
     }
     std::string result = norm.normalize(input);
@@ -237,8 +235,7 @@ TEST(QA_GDB899, NullNormalizerPassThrough_NoDecoding) {
     // NullNormalizer must return input byte-for-byte (no decoding).
     std::string input = "\xC0\x80\xE0\x80\x80\xF0\x80\x80\x80";
     std::string result = norm.normalize(input);
-    EXPECT_EQ(result, input)
-        << "NullNormalizer must return input unchanged";
+    EXPECT_EQ(result, input) << "NullNormalizer must return input unchanged";
 }
 
 } // namespace
