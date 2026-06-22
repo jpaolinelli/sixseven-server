@@ -10,7 +10,14 @@
 ///
 /// Mutation grade: commenting out the WalRecovery::recover() call in
 /// run_startup_recovery() causes the committed-data raw-image checks to fail.
+///
+/// TEST 6 exercises the GDB-1276 fix: StorageManager::set_wal_writer()
+/// propagates the writer to all managed heaps.  Without that wiring, every
+/// heap has wal_==nullptr, no WAL records are produced by DML, and recovery
+/// sees records_redone==0 even after a crash.
 
+#include "sixseven/catalog/schema.h"
+#include "sixseven/executor/storage_manager.h"
 #include "sixseven/storage/buffer_pool.h"
 #include "sixseven/storage/clean_shutdown_marker.h"
 #include "sixseven/storage/disk_manager.h"
@@ -358,4 +365,98 @@ TEST_F(CrashRecoveryIntegrationTest, RecoveryIsIdempotent) {
         auto result = r.recover();
         ASSERT_TRUE(result.has_value()) << result.error().message;
     }
+}
+
+// =============================================================================
+// TEST 6 — StorageManager::set_wal_writer() propagates to managed heaps so
+//          DML via the StorageManager produces real WAL records (GDB-1276).
+//
+// This test mirrors the main.cpp wiring: a WalWriter is attached to a
+// StorageManager, which in turn attaches it to every heap it manages via
+// attach_wal().  A committed INSERT is then run through the managed heap
+// (exactly as the QueryEngine's InsertOperator does).  After a simulated
+// crash, WalRecovery::recover() is run against the same WAL directory and
+// must report records_redone > 0.
+//
+// MUTATION GRADE: removing the storage.set_wal_writer(&wal_writer) call
+// from main.cpp (or from StorageManager::create_table_storage) leaves
+// wal_==nullptr on every heap, so no WAL records are written and
+// records_redone stays 0 — causing EXPECT_GT below to fail.
+// =============================================================================
+
+TEST_F(CrashRecoveryIntegrationTest, StorageManagerPropagatesWalWriterToHeaps) {
+    constexpr table_id_t kManagedTableId = 42;
+    constexpr database_id_t kDbId = 1;
+
+    // Build a minimal TableSchema with one INT32 column so StorageManager
+    // can construct its storage_schema (used by create_table_storage).
+    sixseven::TableSchema ts;
+    ts.table_id = kManagedTableId;
+    ts.name = "test_table";
+    sixseven::CatalogColumnDef col;
+    col.ordinal = 0;
+    col.name = "id";
+    col.type_id = sixseven::TypeId::INT32;
+    col.nullable = false;
+    ts.columns.push_back(col);
+
+    // Phase 1: DML through StorageManager with WAL writer attached.
+    std::vector<sixseven::RID> rids;
+    {
+        sixseven::DiskManager dm;
+        sixseven::StorageManager storage(dm, data_dir_, 64);
+
+        // Create database directories so create_table_storage can place its file.
+        ASSERT_TRUE(storage.create_database_storage(kDbId).has_value());
+        ASSERT_TRUE(storage.create_table_storage(kDbId, kManagedTableId, ts).has_value());
+
+        // Open the WAL writer — same wal_dir_ used by recovery below.
+        sixseven::WalWriterOptions opts;
+        opts.enable_group_commit = false; // Synchronous for test determinism.
+        sixseven::WalWriter wal_writer(wal_dir_, opts);
+        ASSERT_TRUE(wal_writer.open().has_value());
+
+        // Wire it — this is the production path from main.cpp.
+        storage.set_wal_writer(&wal_writer);
+
+        // Insert tuples through the managed heap.  The heap now has wal_ != null,
+        // so insert_tuple() writes WAL records (BEGIN + INSERT + ... emitted by
+        // the heap's write_wal_record helper).
+        auto ts_result = storage.get_table_storage(kManagedTableId);
+        ASSERT_TRUE(ts_result.has_value());
+        auto* heap = ts_result.value()->heap.get();
+
+        for (uint8_t i = 1; i <= 4; ++i) {
+            auto rid = heap->insert_tuple(make_payload(32, i));
+            ASSERT_TRUE(rid.has_value()) << rid.error().message;
+            rids.push_back(*rid);
+        }
+
+        // Simulate crash: flush WAL, flush pages, no clean-shutdown marker.
+        ASSERT_TRUE(wal_writer.flush().has_value());
+        ASSERT_TRUE(wal_writer.close().has_value());
+        // Detach writer before storage destructor so no further WAL writes.
+        storage.set_wal_writer(nullptr);
+        // No CleanShutdownMarker::write() — intentional crash simulation.
+    }
+    ASSERT_EQ(rids.size(), 4u);
+
+    // Phase 2: recovery via the same wal_dir_ path.
+    // Open a fresh recovery heap (empty) into which recovery will redo the inserts.
+    open_recovery_heap();
+
+    sixseven::TableHeapRecoveryHandler handler;
+    handler.register_table(kManagedTableId, recovery_heap_.get());
+    sixseven::WalRecovery wal_recovery(wal_dir_, handler);
+    auto stats = wal_recovery.recover();
+    ASSERT_TRUE(stats.has_value()) << stats.error().message;
+
+    // The critical assertion: WAL records must have been produced by the
+    // managed-heap DML and recovered here.  If set_wal_writer() were not
+    // wired, records_redone would be 0.
+    EXPECT_GT(stats->records_redone, 0u)
+        << "records_redone=0 — set_wal_writer() did not propagate writer to the "
+           "managed heap; no WAL records were produced by INSERT";
+    EXPECT_EQ(stats->records_redone, rids.size())
+        << "expected one redo record per committed INSERT";
 }

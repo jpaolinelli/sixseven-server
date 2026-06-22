@@ -1,6 +1,7 @@
 #include "sixseven/executor/storage_manager.h"
 
 #include "sixseven/common/status.h"
+#include "sixseven/storage/wal.h"
 
 #include <string>
 
@@ -42,6 +43,14 @@ void StorageManager::set_txn_manager(const TransactionManager* txn_mgr) {
     txn_mgr_ = txn_mgr;
     for (auto& [table_id, storage] : tables_) {
         storage->heap->attach_txn_manager(txn_mgr_);
+    }
+}
+
+void StorageManager::set_wal_writer(WalWriter* writer) {
+    std::lock_guard lock(mu_);
+    wal_writer_ = writer;
+    for (auto& [table_id, storage] : tables_) {
+        storage->heap->attach_wal(wal_writer_, table_id);
     }
 }
 
@@ -118,6 +127,9 @@ Result<void> StorageManager::create_table_storage(database_id_t db_id,
     storage->heap = std::make_unique<TableHeap>(
         *storage->bpm, dm_, *fid, TableHeapOptions{.mvcc_headers = true});
     storage->heap->attach_txn_manager(txn_mgr_);
+    if (wal_writer_ != nullptr) {
+        storage->heap->attach_wal(wal_writer_, table_id);
+    }
     storage->storage_schema = build_storage_schema(table_schema);
 
     tables_[table_id] = std::move(storage);
@@ -150,6 +162,9 @@ Result<void> StorageManager::open_table_storage(database_id_t db_id,
     storage->heap = std::make_unique<TableHeap>(
         *storage->bpm, dm_, *fid, TableHeapOptions{.mvcc_headers = true});
     storage->heap->attach_txn_manager(txn_mgr_);
+    if (wal_writer_ != nullptr) {
+        storage->heap->attach_wal(wal_writer_, table_id);
+    }
     storage->storage_schema = build_storage_schema(table_schema);
 
     tables_[table_id] = std::move(storage);

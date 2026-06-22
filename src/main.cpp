@@ -26,6 +26,7 @@
 #include "sixseven/server/server.h"
 #include "sixseven/storage/clean_shutdown_marker.h"
 #include "sixseven/storage/disk_manager.h"
+#include "sixseven/storage/wal.h"
 #include "sixseven/storage/wal_recovery.h"
 #include "sixseven/table/table_wal.h"
 #include "sixseven/vector/backfill_manager.h"
@@ -237,6 +238,43 @@ int main(int argc, char* argv[]) {
                               stats.max_lsn);
         }
     }
+
+    // -- WAL writer ---------------------------------------------------------------
+    //
+    // Open the WAL writer AFTER crash recovery has finished reading the existing
+    // WAL segments.  Both recovery and the writer use the same canonical path
+    // (data_dir/"wal") — this is the single source of truth for the WAL directory.
+    //
+    // Startup ordering:
+    //   1. WalRecovery reads existing segments (above).
+    //   2. WalWriter::open() resumes from the last valid record in the latest
+    //      existing segment — it does NOT truncate or destroy prior segments.
+    //   3. All subsequent DML via QueryEngine emits real WAL records.
+    //   4. On shutdown: flush + close WAL, THEN write the clean-shutdown marker
+    //      so the marker only appears once all data is durably persisted.
+    //
+    // Lifetime: WalWriter is declared at main-function scope so it outlives the
+    // Server, QueryEngine, and StorageManager (all of which hold a raw pointer
+    // obtained via set_wal_writer).  Destructor runs last.
+    std::filesystem::path wal_dir = data_dir / "wal";
+    std::filesystem::create_directories(wal_dir);
+    sixseven::WalWriter wal_writer(wal_dir);
+    {
+        auto wal_open = wal_writer.open();
+        if (!wal_open) {
+            SIXSEVEN_LOG_ERROR("WAL writer open failed — cannot start server: {}",
+                               wal_open.error().message);
+            return 1;
+        }
+    }
+    SIXSEVEN_LOG_INFO("WAL writer opened (wal_dir={})", wal_dir.string());
+
+    // Propagate writer to every existing TableHeap (already open via bootstrap)
+    // and to every heap created afterwards (CREATE TABLE during this session).
+    storage.set_wal_writer(&wal_writer);
+
+    // Wire into QueryEngine so pg_current_wal_lsn() reflects real WAL position.
+    engine.set_wal_writer(&wal_writer);
 
     // Load B+ tree and hash indexes asynchronously from persisted disk files.
     // Indexes are loaded in background threads; queries fall back to sequential
@@ -500,6 +538,22 @@ int main(int argc, char* argv[]) {
         auto flush = storage.flush_all();
         if (!flush) {
             SIXSEVEN_LOG_WARN("pre-marker storage flush failed: {}", flush.error().message);
+        }
+    }
+
+    // Detach WAL writer from all heaps and engine before closing it so no
+    // DML races with the close.  Then flush+close to ensure every WAL record
+    // written during this session is durably on disk before the marker appears.
+    storage.set_wal_writer(nullptr);
+    engine.set_wal_writer(nullptr);
+    {
+        auto wal_flush = wal_writer.flush();
+        if (!wal_flush) {
+            SIXSEVEN_LOG_WARN("WAL flush failed on shutdown: {}", wal_flush.error().message);
+        }
+        auto wal_close = wal_writer.close();
+        if (!wal_close) {
+            SIXSEVEN_LOG_WARN("WAL close failed on shutdown: {}", wal_close.error().message);
         }
     }
 

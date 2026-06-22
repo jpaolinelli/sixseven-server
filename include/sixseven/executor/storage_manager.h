@@ -15,6 +15,9 @@
 
 namespace sixseven {
 
+// Forward declaration.
+class WalWriter;
+
 /// Physical storage state for a single table.
 struct TableStorage {
     FileId file_id = 0;
@@ -79,6 +82,17 @@ public:
     /// @param txn_mgr Transaction manager (not owned; must outlive this
     ///                StorageManager or be detached).
     void set_txn_manager(const TransactionManager* txn_mgr);
+
+    /// Attach a WAL writer so every table heap emits WAL records for DML
+    /// (GDB-900 / GDB-1276). Applied to all currently open table heaps and to
+    /// every heap opened or created afterwards. Pass nullptr to detach.
+    ///
+    /// Each heap is attached with its own table_id so WAL records carry the
+    /// correct table identifier for crash recovery.
+    ///
+    /// @param writer  WAL writer (not owned; must outlive this StorageManager
+    ///                or be detached via set_wal_writer(nullptr)).
+    void set_wal_writer(WalWriter* writer);
 
     /// Get the storage for an existing table.
     [[nodiscard]] Result<TableStorage*> get_table_storage(table_id_t table_id);
@@ -150,6 +164,10 @@ private:
     /// Transaction manager attached to table heaps for MVCC visibility
     /// filtering (GDB-747, not owned; may be null).
     const TransactionManager* txn_mgr_ = nullptr;
+
+    /// WAL writer attached to every table heap so DML emits WAL records for
+    /// crash recovery (GDB-900 / GDB-1276, not owned; may be null).
+    WalWriter* wal_writer_ = nullptr;
 
     static constexpr uint32_t index_pool_size_ = 64;
 
