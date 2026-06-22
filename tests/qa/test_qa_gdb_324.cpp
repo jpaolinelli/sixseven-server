@@ -301,23 +301,32 @@ TEST_F(QA_GDB324, FourArgConstructorUsesProvidedTokenizer) {
     EXPECT_EQ(provider.tokenizer().vocab_size(), 5u);
 }
 
-TEST_F(QA_GDB324, FourArgConstructorWithNullTokenizerCrashesOnEmbed) {
-    // Passing nullptr as tokenizer — embed() should crash or fail.
-    // This tests null safety. The implementation doesn't check for null.
+TEST_F(QA_GDB324, FourArgConstructorWithNullTokenizerFallsBackToHashTokenizer) {
+    // When nullptr is passed as the tokenizer argument, the 4-arg constructor
+    // must fall back to the same HashTokenizer default used by the 3-arg
+    // constructor. This prevents UB on embed() / tokenizer() and keeps
+    // behavior identical to the no-tokenizer overload.
     auto mock = std::make_unique<MockOnnxSession324>();
     mock->set_embedding({0.1F, 0.2F, 0.3F});
 
-    // Construct with nullptr tokenizer.
     OnnxProvider provider("model.onnx", 3, std::move(mock), nullptr);
 
-    // Calling embed should not crash silently — we expect a segfault or
-    // at minimum, this test documents the behavior.
-    // NOTE: We cannot EXPECT_DEATH in all environments, so we test
-    // that tokenizer() returns a reference — if null, this is UB.
-    // The fact that the constructor accepts nullptr is the bug.
-    // For now, document it: calling tokenizer() on null is undefined.
-    // We verify the constructor at least doesn't crash.
-    SUCCEED() << "Constructor accepted nullptr tokenizer — potential null deref bug";
+    // tokenizer() must return a usable tokenizer (no crash / UB).
+    EXPECT_NO_FATAL_FAILURE(provider.tokenizer());
+
+    // The fallback must be a HashTokenizer — its vocab_size is 30000,
+    // which is distinct from the WordPiece vocab_size=5 used in the
+    // sibling FourArgConstructorUsesProvidedTokenizer test.
+    EXPECT_EQ(provider.tokenizer().vocab_size(), HashTokenizer::VOCAB_SIZE);
+
+    // embed() must succeed end-to-end through the fallback tokenizer.
+    // This assertion would crash or produce UB if the null-guard were removed.
+    auto result = provider.embed("hello world");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->size(), 3u);
+    EXPECT_FLOAT_EQ((*result)[0], 0.1F);
+    EXPECT_FLOAT_EQ((*result)[1], 0.2F);
+    EXPECT_FLOAT_EQ((*result)[2], 0.3F);
 }
 
 // ===========================================================================
