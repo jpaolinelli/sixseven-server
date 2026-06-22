@@ -10,6 +10,7 @@ using namespace sixseven;
 
 // ---------------------------------------------------------------------------
 // Parser tests for savepoint statements
+// (unchanged — parsing still works, only execution returns NOT_IMPLEMENTED)
 // ---------------------------------------------------------------------------
 
 static StmtPtr parse_one(std::string_view sql) {
@@ -74,7 +75,9 @@ TEST(SavepointParser, ReleaseWithoutSavepointKeywordFails) {
 }
 
 // ---------------------------------------------------------------------------
-// Session savepoint stack tests
+// Session savepoint execution tests
+// GDB-883: all three execution commands now return NOT_IMPLEMENTED instead of
+// fake success to prevent silent data-integrity violations (audit finding C5).
 // ---------------------------------------------------------------------------
 
 class SessionSavepointTest : public ::testing::Test {
@@ -85,224 +88,148 @@ protected:
         session_->update_transaction_state("BEGIN", true);
     }
 
-    /// Helper to create a savepoint with assertion.
-    void create_sp(const std::string& name) {
-        auto r = session_->create_savepoint(name);
-        ASSERT_TRUE(r.has_value()) << r.error().message;
-    }
-
     std::unique_ptr<Session> session_;
 };
 
-TEST_F(SessionSavepointTest, CreateSavepointInTransaction) {
+// -- create_savepoint ---------------------------------------------------------
+
+TEST_F(SessionSavepointTest, CreateSavepointReturnsNotImplemented) {
+    // GDB-883: SAVEPOINT must not fake success; it has no engine backing.
     auto result = session_->create_savepoint("sp1");
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    ASSERT_EQ(session_->savepoints().size(), 1u);
-    EXPECT_EQ(session_->savepoints().back(), "sp1");
-}
-
-TEST_F(SessionSavepointTest, CreateSavepointOutsideTransactionFails) {
-    Session idle_session(2);
-    auto result = idle_session.create_savepoint("sp1");
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
-}
-
-TEST_F(SessionSavepointTest, ReleaseSavepoint) {
-    create_sp("sp1");
-    auto result = session_->release_savepoint("sp1");
-    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result.error().code, StatusCode::NOT_IMPLEMENTED);
+    // savepoints_ must remain empty -- no deque mutation.
     EXPECT_TRUE(session_->savepoints().empty());
 }
 
-TEST_F(SessionSavepointTest, ReleaseNonexistentSavepointFails) {
-    auto result = session_->release_savepoint("nonexistent");
+TEST_F(SessionSavepointTest, CreateSavepointOutsideTransactionReturnsNotImplemented) {
+    Session idle_session(2);
+    auto result = idle_session.create_savepoint("sp1");
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_EQ(result.error().code, StatusCode::NOT_IMPLEMENTED);
 }
 
-TEST_F(SessionSavepointTest, ReleaseSavepointOutsideTransactionFails) {
+TEST_F(SessionSavepointTest, CreateSavepointInFailedStateReturnsNotImplemented) {
+    session_->update_transaction_state("SELECT bad", false);
+    ASSERT_EQ(session_->transaction_state(), TransactionState::FAILED);
+    auto result = session_->create_savepoint("sp1");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::NOT_IMPLEMENTED);
+}
+
+// -- release_savepoint --------------------------------------------------------
+
+TEST_F(SessionSavepointTest, ReleaseSavepointReturnsNotImplemented) {
+    auto result = session_->release_savepoint("sp1");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::NOT_IMPLEMENTED);
+}
+
+TEST_F(SessionSavepointTest, ReleaseSavepointOutsideTransactionReturnsNotImplemented) {
     Session idle_session(2);
     auto result = idle_session.release_savepoint("sp1");
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_EQ(result.error().code, StatusCode::NOT_IMPLEMENTED);
 }
 
-TEST_F(SessionSavepointTest, RollbackToSavepoint) {
-    create_sp("sp1");
-    create_sp("sp2");
+TEST_F(SessionSavepointTest, ReleaseSavepointInFailedStateReturnsNotImplemented) {
+    session_->update_transaction_state("SELECT bad", false);
+    ASSERT_EQ(session_->transaction_state(), TransactionState::FAILED);
+    auto result = session_->release_savepoint("sp1");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::NOT_IMPLEMENTED);
+}
+
+// -- rollback_to_savepoint ----------------------------------------------------
+
+TEST_F(SessionSavepointTest, RollbackToSavepointReturnsNotImplemented) {
     auto result = session_->rollback_to_savepoint("sp1");
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    // sp2 should be gone, sp1 should remain.
-    ASSERT_EQ(session_->savepoints().size(), 1u);
-    EXPECT_EQ(session_->savepoints().back(), "sp1");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::NOT_IMPLEMENTED);
 }
 
-TEST_F(SessionSavepointTest, RollbackToSavepointRecoveryFromFailed) {
-    create_sp("sp1");
-    // Simulate a failed statement.
+TEST_F(SessionSavepointTest, RollbackToSavepointOutsideTransactionReturnsNotImplemented) {
+    Session idle_session(2);
+    auto result = idle_session.rollback_to_savepoint("sp1");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::NOT_IMPLEMENTED);
+}
+
+TEST_F(SessionSavepointTest, RollbackToSavepointDoesNotRecoverFailedState) {
+    // GDB-883: rollback_to previously flipped FAILED->IN_TRANSACTION as a
+    // side-effect of fake success. With NOT_IMPLEMENTED it must not do so.
     session_->update_transaction_state("SELECT bad", false);
     ASSERT_EQ(session_->transaction_state(), TransactionState::FAILED);
 
     auto result = session_->rollback_to_savepoint("sp1");
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ(session_->transaction_state(), TransactionState::IN_TRANSACTION);
-    // sp1 should still be there.
-    ASSERT_EQ(session_->savepoints().size(), 1u);
-    EXPECT_EQ(session_->savepoints().back(), "sp1");
-}
-
-TEST_F(SessionSavepointTest, RollbackToNonexistentSavepointFails) {
-    auto result = session_->rollback_to_savepoint("nonexistent");
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_EQ(result.error().code, StatusCode::NOT_IMPLEMENTED);
+    // State must remain FAILED -- no silent recovery.
+    EXPECT_EQ(session_->transaction_state(), TransactionState::FAILED);
 }
 
-TEST_F(SessionSavepointTest, RollbackToSavepointOutsideTransactionFails) {
-    Session idle_session(2);
-    auto result = idle_session.rollback_to_savepoint("sp1");
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+// -- savepoints() accessor ----------------------------------------------------
+
+TEST_F(SessionSavepointTest, SavepointsDequeAlwaysEmpty) {
+    // create_savepoint no longer pushes, so the deque stays empty.
+    (void)session_->create_savepoint("sp1");
+    (void)session_->create_savepoint("sp2");
+    EXPECT_TRUE(session_->savepoints().empty());
 }
 
-TEST_F(SessionSavepointTest, NestedSavepoints) {
-    create_sp("a");
-    create_sp("b");
-    create_sp("c");
-    ASSERT_EQ(session_->savepoints().size(), 3u);
+// -- COMMIT/ROLLBACK/cleanup still work as before -----------------------------
 
-    // Rolling back to "a" should remove "b" and "c" but keep "a".
-    auto result = session_->rollback_to_savepoint("a");
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    ASSERT_EQ(session_->savepoints().size(), 1u);
-    EXPECT_EQ(session_->savepoints().back(), "a");
-}
-
-TEST_F(SessionSavepointTest, NestedSavepointsRollbackToMiddle) {
-    create_sp("a");
-    create_sp("b");
-    create_sp("c");
-
-    // Rolling back to "b" should remove "c" but keep "a" and "b".
-    auto result = session_->rollback_to_savepoint("b");
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    ASSERT_EQ(session_->savepoints().size(), 2u);
-    EXPECT_EQ(session_->savepoints()[0], "a");
-    EXPECT_EQ(session_->savepoints()[1], "b");
-}
-
-TEST_F(SessionSavepointTest, DuplicateSavepointNames) {
-    // PostgreSQL allows duplicate savepoint names; the most recent one wins.
-    create_sp("sp1");
-    create_sp("sp1");
-    ASSERT_EQ(session_->savepoints().size(), 2u);
-
-    // Rollback to "sp1" finds the most recent one (search from back).
-    auto result = session_->rollback_to_savepoint("sp1");
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    // The second sp1 is found; nothing after it to remove. Both remain.
-    ASSERT_EQ(session_->savepoints().size(), 2u);
-}
-
-TEST_F(SessionSavepointTest, CommitClearsSavepoints) {
-    create_sp("sp1");
-    create_sp("sp2");
+TEST_F(SessionSavepointTest, CommitTransitionsToIdle) {
     session_->update_transaction_state("COMMIT", true);
     EXPECT_TRUE(session_->savepoints().empty());
     EXPECT_EQ(session_->transaction_state(), TransactionState::IDLE);
 }
 
-TEST_F(SessionSavepointTest, RollbackClearsSavepoints) {
-    create_sp("sp1");
+TEST_F(SessionSavepointTest, RollbackTransitionsToIdle) {
     session_->update_transaction_state("ROLLBACK", true);
     EXPECT_TRUE(session_->savepoints().empty());
     EXPECT_EQ(session_->transaction_state(), TransactionState::IDLE);
 }
 
-TEST_F(SessionSavepointTest, CleanupClearsSavepoints) {
-    create_sp("sp1");
+TEST_F(SessionSavepointTest, CleanupResetsState) {
     session_->cleanup();
     EXPECT_TRUE(session_->savepoints().empty());
 }
 
 // ---------------------------------------------------------------------------
-// Session command handling tests for savepoint commands
+// Wire-command dispatch tests (try_handle_command)
 // ---------------------------------------------------------------------------
 
-TEST_F(SessionSavepointTest, TryHandleSavepointCommand) {
+TEST_F(SessionSavepointTest, TryHandleSavepointCommandReturnsNotImplemented) {
     auto result = session_->try_handle_command("SAVEPOINT sp1");
-    ASSERT_TRUE(result.has_value());
-    ASSERT_TRUE(result->has_value()) << result->error().message;
-    EXPECT_EQ(result->value().message, "SAVEPOINT");
-    ASSERT_EQ(session_->savepoints().size(), 1u);
+    ASSERT_TRUE(result.has_value()); // command was intercepted
+    ASSERT_FALSE(result->has_value());
+    EXPECT_EQ(result->error().code, StatusCode::NOT_IMPLEMENTED);
 }
 
-TEST_F(SessionSavepointTest, TryHandleReleaseSavepointCommand) {
-    create_sp("sp1");
+TEST_F(SessionSavepointTest, TryHandleReleaseSavepointCommandReturnsNotImplemented) {
     auto result = session_->try_handle_command("RELEASE SAVEPOINT sp1");
     ASSERT_TRUE(result.has_value());
-    ASSERT_TRUE(result->has_value()) << result->error().message;
-    EXPECT_EQ(result->value().message, "RELEASE");
-    EXPECT_TRUE(session_->savepoints().empty());
+    ASSERT_FALSE(result->has_value());
+    EXPECT_EQ(result->error().code, StatusCode::NOT_IMPLEMENTED);
 }
 
-TEST_F(SessionSavepointTest, TryHandleRollbackToCommand) {
-    create_sp("sp1");
+TEST_F(SessionSavepointTest, TryHandleRollbackToCommandReturnsNotImplemented) {
     auto result = session_->try_handle_command("ROLLBACK TO sp1");
     ASSERT_TRUE(result.has_value());
-    ASSERT_TRUE(result->has_value()) << result->error().message;
-    EXPECT_EQ(result->value().message, "ROLLBACK");
+    ASSERT_FALSE(result->has_value());
+    EXPECT_EQ(result->error().code, StatusCode::NOT_IMPLEMENTED);
 }
 
-TEST_F(SessionSavepointTest, TryHandleRollbackToSavepointCommand) {
-    create_sp("sp1");
+TEST_F(SessionSavepointTest, TryHandleRollbackToSavepointCommandReturnsNotImplemented) {
     auto result = session_->try_handle_command("ROLLBACK TO SAVEPOINT sp1");
     ASSERT_TRUE(result.has_value());
-    ASSERT_TRUE(result->has_value()) << result->error().message;
-    EXPECT_EQ(result->value().message, "ROLLBACK");
+    ASSERT_FALSE(result->has_value());
+    EXPECT_EQ(result->error().code, StatusCode::NOT_IMPLEMENTED);
 }
 
-TEST_F(SessionSavepointTest, SavepointErrorRecoveryWorkflow) {
-    // Simulates the psqlODBC pattern:
-    // BEGIN -> SAVEPOINT sp1 -> failing query -> ROLLBACK TO sp1 -> continue
-    EXPECT_EQ(session_->transaction_state(), TransactionState::IN_TRANSACTION);
-
-    // Create savepoint.
-    auto sp_result = session_->try_handle_command("SAVEPOINT sp1");
-    ASSERT_TRUE(sp_result.has_value());
-    ASSERT_TRUE(sp_result->has_value());
-
-    // Simulate a failing statement.
-    session_->update_transaction_state("SELECT * FROM nonexistent", false);
-    EXPECT_EQ(session_->transaction_state(), TransactionState::FAILED);
-
-    // Rollback to savepoint should recover.
-    auto rb_result = session_->try_handle_command("ROLLBACK TO SAVEPOINT sp1");
-    ASSERT_TRUE(rb_result.has_value());
-    ASSERT_TRUE(rb_result->has_value()) << rb_result->error().message;
-    EXPECT_EQ(session_->transaction_state(), TransactionState::IN_TRANSACTION);
-
-    // Now we can continue with more statements.
-    auto sp2_result = session_->try_handle_command("SAVEPOINT sp2");
-    ASSERT_TRUE(sp2_result.has_value());
-    ASSERT_TRUE(sp2_result->has_value());
-}
-
-TEST_F(SessionSavepointTest, CreateSavepointInFailedStateFails) {
-    session_->update_transaction_state("SELECT bad", false);
-    ASSERT_EQ(session_->transaction_state(), TransactionState::FAILED);
-
-    auto result = session_->create_savepoint("sp1");
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::TXN_ABORTED);
-}
-
-TEST_F(SessionSavepointTest, ReleaseSavepointInFailedStateFails) {
-    create_sp("sp1");
-    session_->update_transaction_state("SELECT bad", false);
-    ASSERT_EQ(session_->transaction_state(), TransactionState::FAILED);
-
-    auto result = session_->release_savepoint("sp1");
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::TXN_ABORTED);
+TEST_F(SessionSavepointTest, PlainRollbackNotIntercepted) {
+    // "ROLLBACK" (without TO) is not a savepoint command -- must pass through.
+    auto result = session_->try_handle_command("ROLLBACK");
+    EXPECT_FALSE(result.has_value());
 }
