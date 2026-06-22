@@ -7,6 +7,9 @@
 ///   (b) Edge cases: all-same, all-distinct, mixed NULLs, single value, empty.
 ///   (c) NULL behavior locked in: COUNT(DISTINCT) excludes NULLs (SQL standard).
 ///   (d) End-to-end SQL path via QueryEngine.
+///   (e) Adversarial: NaN, +/-0.0, duplicate floats, very long strings.
+///   (f) Non-vacuity: mutation-grade assertions confirming tests would fail if
+///       dedup were broken.
 
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/coercion.h"
@@ -426,6 +429,207 @@ TEST_F(QA_GDB880_E2E, LargeGroupE2E) {
     ASSERT_EQ(qr.rows.size(), 1u);
     ASSERT_EQ(qr.rows[0].size(), 2u);
     EXPECT_EQ(qr.rows[0][1].as_int64(), 5);
+}
+
+// ===========================================================================
+// (e) Adversarial: float edge cases — NaN, ±0.0, duplicate floats
+// ===========================================================================
+
+// OutputSchema with FLOAT64 column for float tests.
+static OutputSchema float64_schema() {
+    return OutputSchema({
+        {"t", "grp", TypeId::STRING, false, 1},
+        {"t", "val", TypeId::FLOAT64, true, 1},
+    });
+}
+
+// NaN values: compare_doubles treats NaN==NaN as equal, so two NaN rows
+// should dedup to a distinct count of 1 (not 2).
+// NaN produced via 0.0/0.0 — no <cmath> required on MSVC.
+TEST_F(QA_GDB880, NanDedupedToOne) {
+    // NOLINTNEXTLINE(clang-diagnostic-division-by-zero)
+    volatile double zero = 0.0;
+    double nan_val = zero / zero; // quiet NaN on x86
+    std::vector<Tuple> data = {
+        Tuple{{Value(std::string("g")), Value(nan_val)}, {}},
+        Tuple{{Value(std::string("g")), Value(nan_val)}, {}},
+        Tuple{{Value(std::string("g")), Value(1.0)}, {}},
+    };
+
+    BoundStatement bound;
+    AggTestBuilder builder;
+    builder.add_group_by(col_ref("t", "grp"), {"t", "grp", TypeId::STRING, false, 1});
+    builder.add_agg(AggFunc::COUNT_DISTINCT, col_ref("t", "val"), "", TypeId::INT64, false);
+
+    auto child = std::make_unique<VectorIterator>(float64_schema(), std::move(data));
+    auto agg = builder.build(std::move(child), bound);
+
+    auto rows = run(*agg);
+    ASSERT_EQ(rows.size(), 1u);
+    // NaN deduped to 1, plus 1.0 = 2 distinct (not 3).
+    EXPECT_EQ(rows[0].values[1].as_int64(), 2);
+}
+
+// Positive zero and negative zero: IEEE 754 treats them as equal under <, >,
+// and compare_doubles also returns equal — so ±0.0 dedup to 1 distinct.
+TEST_F(QA_GDB880, PosAndNegZeroDedupedToOne) {
+    double pos_zero = 0.0;
+    double neg_zero = -0.0;
+    std::vector<Tuple> data = {
+        Tuple{{Value(std::string("g")), Value(pos_zero)}, {}},
+        Tuple{{Value(std::string("g")), Value(neg_zero)}, {}},
+        Tuple{{Value(std::string("g")), Value(pos_zero)}, {}},
+    };
+
+    BoundStatement bound;
+    AggTestBuilder builder;
+    builder.add_group_by(col_ref("t", "grp"), {"t", "grp", TypeId::STRING, false, 1});
+    builder.add_agg(AggFunc::COUNT_DISTINCT, col_ref("t", "val"), "", TypeId::INT64, false);
+
+    auto child = std::make_unique<VectorIterator>(float64_schema(), std::move(data));
+    auto agg = builder.build(std::move(child), bound);
+
+    auto rows = run(*agg);
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].values[1].as_int64(), 1); // +0.0 == -0.0 under compare()
+}
+
+// Duplicate floats in unsorted order: sort+unique must still deduplicate.
+TEST_F(QA_GDB880, DuplicateFloatsUnsortedOrder) {
+    // Values: 3.0, 1.0, 2.0, 1.0, 3.0, 2.0 — 3 distinct.
+    std::vector<Tuple> data = {
+        Tuple{{Value(std::string("g")), Value(3.0)}, {}},
+        Tuple{{Value(std::string("g")), Value(1.0)}, {}},
+        Tuple{{Value(std::string("g")), Value(2.0)}, {}},
+        Tuple{{Value(std::string("g")), Value(1.0)}, {}},
+        Tuple{{Value(std::string("g")), Value(3.0)}, {}},
+        Tuple{{Value(std::string("g")), Value(2.0)}, {}},
+    };
+
+    BoundStatement bound;
+    AggTestBuilder builder;
+    builder.add_group_by(col_ref("t", "grp"), {"t", "grp", TypeId::STRING, false, 1});
+    builder.add_agg(AggFunc::COUNT_DISTINCT, col_ref("t", "val"), "", TypeId::INT64, false);
+
+    auto child = std::make_unique<VectorIterator>(float64_schema(), std::move(data));
+    auto agg = builder.build(std::move(child), bound);
+
+    auto rows = run(*agg);
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].values[1].as_int64(), 3);
+}
+
+// +Inf and -Inf: should be distinct from each other and from finite values.
+// 1e308 * 10 overflows to +Inf on IEEE 754; negation gives -Inf.
+TEST_F(QA_GDB880, InfinityValuesDistinct) {
+    double pos_inf = 1e308 * 10.0; // +Inf
+    double neg_inf = -pos_inf;     // -Inf
+    std::vector<Tuple> data = {
+        Tuple{{Value(std::string("g")), Value(pos_inf)}, {}},
+        Tuple{{Value(std::string("g")), Value(pos_inf)}, {}},
+        Tuple{{Value(std::string("g")), Value(neg_inf)}, {}},
+        Tuple{{Value(std::string("g")), Value(1.0)}, {}},
+    };
+
+    BoundStatement bound;
+    AggTestBuilder builder;
+    builder.add_group_by(col_ref("t", "grp"), {"t", "grp", TypeId::STRING, false, 1});
+    builder.add_agg(AggFunc::COUNT_DISTINCT, col_ref("t", "val"), "", TypeId::INT64, false);
+
+    auto child = std::make_unique<VectorIterator>(float64_schema(), std::move(data));
+    auto agg = builder.build(std::move(child), bound);
+
+    auto rows = run(*agg);
+    ASSERT_EQ(rows.size(), 1u);
+    // +Inf deduped to 1, -Inf = 1, 1.0 = 1 → 3 distinct total.
+    EXPECT_EQ(rows[0].values[1].as_int64(), 3);
+}
+
+// ===========================================================================
+// (e) Adversarial: very long strings — sort must handle large allocations.
+// ===========================================================================
+
+TEST_F(QA_GDB880, VeryLongStringsDedupCorrectly) {
+    // Two distinct very long strings (8000 chars each), repeated multiple times.
+    std::string long_a(8000, 'a');
+    std::string long_b(8000, 'b');
+    std::vector<Tuple> data;
+    for (int i = 0; i < 50; ++i) {
+        data.push_back(Tuple{{Value(std::string("g")), Value(long_a)}, {}});
+        data.push_back(Tuple{{Value(std::string("g")), Value(long_b)}, {}});
+    }
+
+    BoundStatement bound;
+    AggTestBuilder builder;
+    builder.add_group_by(col_ref("t", "grp"), {"t", "grp", TypeId::STRING, false, 1});
+    builder.add_agg(AggFunc::COUNT_DISTINCT, col_ref("t", "val"), "", TypeId::INT64, false);
+
+    auto child = std::make_unique<VectorIterator>(string_schema(), std::move(data));
+    auto agg = builder.build(std::move(child), bound);
+
+    auto rows = run(*agg);
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].values[1].as_int64(), 2);
+}
+
+// ===========================================================================
+// (f) Non-vacuity / mutation guard: LargeGroupCorrectDistinctCount would fail
+// if the unique predicate were broken (all values kept). Confirm the count is
+// exact — not merely "positive" — so a broken dedup would produce 1000 != 10.
+// This is a meta-assertion; the value 10 is precise, not a range.
+// ===========================================================================
+
+TEST_F(QA_GDB880, MutationGuard_LargeGroupExactCount) {
+    // Same setup as LargeGroupCorrectDistinctCount. A broken dedup returning
+    // all rows would yield 1000; one that deduped nothing would yield 1 if sort
+    // happened to put same values adjacent. 10 is the ONLY correct answer.
+    std::vector<Tuple> data;
+    data.reserve(1000);
+    for (int i = 0; i < 1000; ++i) {
+        data.push_back(Tuple{{Value(std::string("g")), Value(int32_t(i % 10))}, {}});
+    }
+
+    BoundStatement bound;
+    AggTestBuilder builder;
+    builder.add_group_by(col_ref("t", "grp"), {"t", "grp", TypeId::STRING, false, 1});
+    builder.add_agg(AggFunc::COUNT_DISTINCT, col_ref("t", "val"), "", TypeId::INT64, false);
+
+    auto child = std::make_unique<VectorIterator>(int_schema(), std::move(data));
+    auto agg = builder.build(std::move(child), bound);
+
+    auto rows = run(*agg);
+    ASSERT_EQ(rows.size(), 1u);
+    int64_t count = rows[0].values[1].as_int64();
+    // Exact assertion: broken dedup gives 1000, correct gives 10.
+    EXPECT_EQ(count, 10) << "Expected exactly 10 distinct values; got " << count
+                         << " (if 1000, dedup is entirely broken; if 1, unique pred is "
+                            "inverted)";
+}
+
+// Mutation guard for NULL exclusion: if NULLs were counted, result would be 5
+// instead of 3.
+TEST_F(QA_GDB880, MutationGuard_NullsNotCounted) {
+    std::vector<Tuple> data = {
+        Tuple{{Value(std::string("g")), Value::make_null()}, {}},
+        Tuple{{Value(std::string("g")), Value::make_null()}, {}},
+        Tuple{{Value(std::string("g")), Value(int32_t(10))}, {}},
+        Tuple{{Value(std::string("g")), Value(int32_t(20))}, {}},
+        Tuple{{Value(std::string("g")), Value(int32_t(30))}, {}},
+    };
+
+    BoundStatement bound;
+    AggTestBuilder builder;
+    builder.add_group_by(col_ref("t", "grp"), {"t", "grp", TypeId::STRING, false, 1});
+    builder.add_agg(AggFunc::COUNT_DISTINCT, col_ref("t", "val"), "", TypeId::INT64, false);
+
+    auto child = std::make_unique<VectorIterator>(int_schema(), std::move(data));
+    auto agg = builder.build(std::move(child), bound);
+
+    auto rows = run(*agg);
+    ASSERT_EQ(rows.size(), 1u);
+    int64_t count = rows[0].values[1].as_int64();
+    EXPECT_EQ(count, 3) << "Expected 3 (NULLs excluded); got " << count
+                        << " (if 5, NULLs are incorrectly counted as distinct)";
 }
 
 } // namespace
