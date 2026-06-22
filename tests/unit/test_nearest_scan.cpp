@@ -1,4 +1,4 @@
-#include "sixseven/catalog/catalog.h"
+﻿#include "sixseven/catalog/catalog.h"
 #include "sixseven/common/types.h"
 #include "sixseven/common/value.h"
 #include "sixseven/executor/nearest_scan.h"
@@ -181,9 +181,9 @@ TEST_F(NearestScanTest, BruteForceBasicNearest) {
     ASSERT_EQ(results.size(), 3u);
 
     // Results should be sorted by distance ASC.
-    // Row 1: [1,0,0] → L2 distance 0
-    // Row 4: [1,1,0] → L2 distance (0+1+0) = 1.0
-    // Row 5: [0.5,0.5,0.5] → L2 distance (0.25+0.25+0.25) = 0.75
+    // Row 1: [1,0,0] â†’ L2 distance 0
+    // Row 4: [1,1,0] â†’ L2 distance (0+1+0) = 1.0
+    // Row 5: [0.5,0.5,0.5] â†’ L2 distance (0.25+0.25+0.25) = 0.75
     // So order: row 1 (0), row 5 (0.75), row 4 (1.0)
     EXPECT_EQ(results[0].values[0].as_int32(), 1);
     EXPECT_EQ(results[1].values[0].as_int32(), 5);
@@ -266,7 +266,7 @@ TEST_F(NearestScanTest, BruteForceCosineMetric) {
     auto results = drain(op);
     ASSERT_EQ(results.size(), 3u);
 
-    // Cosine: same direction → 0, orthogonal → 1, opposite → 2.
+    // Cosine: same direction â†’ 0, orthogonal â†’ 1, opposite â†’ 2.
     EXPECT_EQ(results[0].values[0].as_int32(), 1); // cosine_dist = 0
     EXPECT_EQ(results[1].values[0].as_int32(), 3); // cosine_dist = 1
     EXPECT_EQ(results[2].values[0].as_int32(), 2); // cosine_dist = 2
@@ -323,7 +323,7 @@ TEST_F(NearestScanTest, BruteForceWithWhereFilter) {
     insert_row(heap, 3, "alpha", {0.5F, 0.5F, 0.0F}); // 3rd closest, name=alpha
     insert_row(heap, 4, "beta", {0.0F, 1.0F, 0.0F});  // further, name=beta
 
-    // WHERE name = 'beta' — should skip alpha rows.
+    // WHERE name = 'beta' â€” should skip alpha rows.
     auto where = binary_expr(BinaryOp::EQUAL, col_ref("name"), lit_string("beta"));
 
     // Register the WHERE expression types in the BoundStatement.
@@ -395,7 +395,7 @@ TEST_F(NearestScanTest, BruteForceWithGraphScope) {
     ASSERT_TRUE(op.open().has_value());
     auto results = drain(op);
 
-    // Should only contain rows with ordinals 0, 2, 4 → ids 1, 3, 5.
+    // Should only contain rows with ordinals 0, 2, 4 â†’ ids 1, 3, 5.
     ASSERT_EQ(results.size(), 3u);
     EXPECT_EQ(results[0].values[0].as_int32(), 1); // closest among allowed
     EXPECT_EQ(results[1].values[0].as_int32(), 3); // next closest
@@ -410,7 +410,7 @@ TEST_F(NearestScanTest, BruteForceWithGraphScope) {
 
 TEST_F(NearestScanTest, HnswIndexBasicSearch) {
     TableHeap heap(*table_bpm_, dm_, table_file_id_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
 
     // Create a 3-dimensional HNSW index.
     HnswIndexConfig hnsw_config;
@@ -459,7 +459,7 @@ TEST_F(NearestScanTest, HnswIndexBasicSearch) {
     ASSERT_EQ(results.size(), 3u);
 
     // With HNSW search, the top-3 closest to [1,0,0] should be:
-    // alpha (0), epsilon (0.5), delta (1.0) — same as brute force.
+    // alpha (0), epsilon (0.5), delta (1.0) â€” same as brute force.
     EXPECT_EQ(results[0].values[0].as_int32(), 1);
 
     // Verify distance column is present.
@@ -478,7 +478,7 @@ TEST_F(NearestScanTest, HnswIndexBasicSearch) {
 // return that row exactly once, not once per node.
 TEST_F(NearestScanTest, DeduplicatesRowWithMultipleHnswNodes) {
     TableHeap heap(*table_bpm_, dm_, table_file_id_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
 
     HnswIndexConfig hnsw_config;
     hnsw_config.dimension = 3;
@@ -536,7 +536,7 @@ TEST_F(NearestScanTest, DeduplicatesRowWithMultipleHnswNodes) {
 
 TEST_F(NearestScanTest, HnswIndexFilteredSearch) {
     TableHeap heap(*table_bpm_, dm_, table_file_id_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
 
     HnswIndexConfig hnsw_config;
     hnsw_config.dimension = 3;
@@ -783,7 +783,7 @@ TEST_F(NearestScanTest, PrefilteredInvalidRidYieldsNoRows) {
     config.query_vector = {1.0F, 0.0F, 0.0F};
     config.metric = DistanceMetric::L2;
     config.embedding_column_index = 2;
-    // Non-empty set, but the RID does not exist in the heap → zero candidates.
+    // Non-empty set, but the RID does not exist in the heap â†’ zero candidates.
     config.prefiltered_rids = {RID{9999, 9999}};
 
     OutputSchema schema(output_cols_);
@@ -794,13 +794,13 @@ TEST_F(NearestScanTest, PrefilteredInvalidRidYieldsNoRows) {
 
     ASSERT_TRUE(op.open().has_value());
     auto results = drain(op);
-    EXPECT_EQ(results.size(), 0u); // non-empty set with no valid candidates → empty result
+    EXPECT_EQ(results.size(), 0u); // non-empty set with no valid candidates â†’ empty result
     op.close();
 }
 
-// An EMPTY prefiltered_rids vector means "no prefilter" — the executor must fall
+// An EMPTY prefiltered_rids vector means "no prefilter" â€” the executor must fall
 // through to the brute-force / normal scan and return rows from the heap.
-// This is the semantic distinction: empty ≠ "zero candidates"; it means "all rows
+// This is the semantic distinction: empty â‰  "zero candidates"; it means "all rows
 // are candidates".  If the dispatch ever changes so that an empty set is treated as
 // zero candidates (returns nothing) this test will fail.
 TEST_F(NearestScanTest, PrefilteredEmptyVectorFallsThroughToScan) {
@@ -815,7 +815,7 @@ TEST_F(NearestScanTest, PrefilteredEmptyVectorFallsThroughToScan) {
     config.query_vector = {1.0F, 0.0F, 0.0F};
     config.metric = DistanceMetric::L2;
     config.embedding_column_index = 2;
-    // Intentionally empty — must NOT take the prefiltered branch.
+    // Intentionally empty â€” must NOT take the prefiltered branch.
     config.prefiltered_rids = {};
 
     OutputSchema schema(output_cols_);
@@ -826,12 +826,12 @@ TEST_F(NearestScanTest, PrefilteredEmptyVectorFallsThroughToScan) {
 
     ASSERT_TRUE(op.open().has_value());
     auto results = drain(op);
-    // Falls through to normal scan: k=2 from 3 rows → exactly 2 results.
+    // Falls through to normal scan: k=2 from 3 rows â†’ exactly 2 results.
     // Nearest to [1,0,0] via L2:
     //   alpha [1,0,0]: distance 0.0  (closest)
     //   beta  [0,1,0]: distance 2.0
     //   gamma [0,0,1]: distance 2.0
-    // Top-2: alpha (0.0), then either beta or gamma (both 2.0 — implementation-defined
+    // Top-2: alpha (0.0), then either beta or gamma (both 2.0 â€” implementation-defined
     // tiebreak); assert count=2 and that the closest is alpha.
     ASSERT_EQ(results.size(), 2u);
     EXPECT_EQ(results[0].values[0].as_int32(), 1); // alpha is unambiguously closest
@@ -961,7 +961,7 @@ TEST_F(NearestScanTest, PrefilteredSkipsNullEmbeddings) {
 // Gold assertion: for every metric, the HNSW path and the brute-force path
 // must produce IDENTICAL ordering and IDENTICAL _distance values on the same
 // data. The dataset uses non-unit-norm vectors so L2 / COSINE / DOT all rank
-// differently — the tiny size makes HNSW exact.
+// differently â€” the tiny size makes HNSW exact.
 TEST_F(NearestScanTest, HnswAndBruteForceIdenticalForAllMetrics) {
     TableHeap heap(*table_bpm_, dm_, table_file_id_);
 
@@ -983,7 +983,7 @@ TEST_F(NearestScanTest, HnswAndBruteForceIdenticalForAllMetrics) {
 
     for (auto metric : metrics) {
         // Build an HNSW index with the matching metric.
-        HnswIndex hnsw(*hnsw_bpm_, nullptr);
+        HnswIndex hnsw(*hnsw_bpm_);
         HnswIndexConfig hnsw_config;
         hnsw_config.dimension = 3;
         hnsw_config.m = 8;
@@ -1032,7 +1032,7 @@ TEST_F(NearestScanTest, HnswAndBruteForceIdenticalForAllMetrics) {
 // rather than emit index-metric distances.
 TEST_F(NearestScanTest, MetricMismatchFallsBackToBruteForce) {
     TableHeap heap(*table_bpm_, dm_, table_file_id_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
 
     // Index built with L2 (the legacy on-disk default).
     HnswIndexConfig hnsw_config;

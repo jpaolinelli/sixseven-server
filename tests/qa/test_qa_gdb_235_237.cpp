@@ -13,40 +13,25 @@
 //          validation that all indices got embeddings.
 // =============================================================================
 
+#include "sixseven/common/platform.h"
 #include "sixseven/vector/embedding_worker.h"
-#include "sixseven/common/platform.h"
 #include "sixseven/vector/hnsw_index.h"
-#include "sixseven/common/platform.h"
 #include "sixseven/vector/hnsw_page.h"
-#include "sixseven/common/platform.h"
 #include "sixseven/vector/http_client.h"
-#include "sixseven/common/platform.h"
 #include "sixseven/vector/openai_provider.h"
-#include "sixseven/common/platform.h"
 
 #include <gtest/gtest.h>
-#include "sixseven/common/platform.h"
 
 #include <atomic>
-#include "sixseven/common/platform.h"
 #include <chrono>
-#include "sixseven/common/platform.h"
 #include <cstring>
-#include "sixseven/common/platform.h"
 #include <filesystem>
-#include "sixseven/common/platform.h"
 #include <memory>
-#include "sixseven/common/platform.h"
 #include <mutex>
-#include "sixseven/common/platform.h"
 #include <set>
-#include "sixseven/common/platform.h"
 #include <string>
-#include "sixseven/common/platform.h"
 #include <thread>
-#include "sixseven/common/platform.h"
 #include <vector>
-#include "sixseven/common/platform.h"
 
 using namespace sixseven;
 
@@ -226,7 +211,7 @@ static EmbeddingJob make_qa236_job(table_id_t table_id,
 // nodes would be kept; with <=, all are retained.
 TEST(QA_HnswIdenticalVectors, TenIdenticalSearchForAll) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 3;
@@ -257,7 +242,7 @@ TEST(QA_HnswIdenticalVectors, TenIdenticalSearchForAll) {
 // reachable despite the low neighbor limit forcing eviction decisions.
 TEST(QA_HnswIdenticalVectors, TwentyIdenticalWithSmallM) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 4;
@@ -289,7 +274,7 @@ TEST(QA_HnswIdenticalVectors, TwentyIdenticalWithSmallM) {
 // found together.
 TEST(QA_HnswIdenticalVectors, MixedIdenticalAndUnique) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -336,7 +321,7 @@ TEST(QA_HnswIdenticalVectors, MixedIdenticalAndUnique) {
 // bidirectional connections to each other.
 TEST(QA_HnswIdenticalVectors, TwoIdenticalBidirectionalConnections) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -396,7 +381,7 @@ TEST(QA_HnswIdenticalVectors, TwoIdenticalBidirectionalConnections) {
 // connectivity should still be maintained.
 TEST(QA_HnswIdenticalVectors, VeryCloseDistancesMaintainConnectivity) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;

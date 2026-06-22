@@ -21,8 +21,7 @@ DistanceMetric normalize_metric(DistanceMetric metric) {
 
 } // anonymous namespace
 
-HnswIndex::HnswIndex(BufferPoolManager& buffer_pool, WalWriter* wal)
-    : buffer_pool_(buffer_pool), wal_(wal) {}
+HnswIndex::HnswIndex(BufferPoolManager& buffer_pool) : buffer_pool_(buffer_pool) {}
 
 // -- Index lifecycle ---------------------------------------------------------
 
@@ -196,15 +195,6 @@ Result<uint32_t> HnswIndex::insert(std::span<const float> vector) {
             return make_error(flush_result.error().code, flush_result.error().message);
         }
 
-        // Log to WAL if available.
-        if (wal_ != nullptr) {
-            auto node_bytes = serialize_hnsw_node(new_node);
-            (void)log_wal(WalRecordType::INSERT,
-                          node_loc_result.value().page_id,
-                          node_loc_result.value().slot_id,
-                          node_bytes);
-        }
-
         return ok(new_id);
     }
 
@@ -284,17 +274,7 @@ Result<uint32_t> HnswIndex::insert(std::span<const float> vector) {
                 }
             }
 
-            auto upd = update_node(neighbor_loc_result.value(), neighbor_node);
-            if (upd.has_value() && wal_ != nullptr) {
-                auto cur_loc = node_location(neighbor.node_id);
-                if (cur_loc.has_value()) {
-                    auto nbytes = serialize_hnsw_node(neighbor_node);
-                    (void)log_wal(WalRecordType::UPDATE,
-                                  cur_loc.value().page_id,
-                                  cur_loc.value().slot_id,
-                                  nbytes);
-                }
-            }
+            (void)update_node(neighbor_loc_result.value(), neighbor_node);
         }
     }
 
@@ -308,15 +288,6 @@ Result<uint32_t> HnswIndex::insert(std::span<const float> vector) {
     auto flush_result = flush_meta();
     if (!flush_result.has_value()) {
         return make_error(flush_result.error().code, flush_result.error().message);
-    }
-
-    // Log to WAL if available.
-    if (wal_ != nullptr) {
-        auto node_bytes = serialize_hnsw_node(new_node);
-        (void)log_wal(WalRecordType::INSERT,
-                      node_loc_result.value().page_id,
-                      node_loc_result.value().slot_id,
-                      node_bytes);
     }
 
     return ok(new_id);
@@ -425,17 +396,7 @@ Result<void> HnswIndex::remove(uint32_t node_id) {
                                [node_id](const HnswNeighbor& n) { return n.node_id == node_id; }),
                 nlist.end());
 
-            auto upd = update_node(nloc.value(), nnode);
-            if (upd.has_value() && wal_ != nullptr) {
-                auto cur_loc = node_location(neighbor.node_id);
-                if (cur_loc.has_value()) {
-                    auto nbytes = serialize_hnsw_node(nnode);
-                    (void)log_wal(WalRecordType::UPDATE,
-                                  cur_loc.value().page_id,
-                                  cur_loc.value().slot_id,
-                                  nbytes);
-                }
-            }
+            (void)update_node(nloc.value(), nnode);
         }
     }
 
@@ -465,12 +426,6 @@ Result<void> HnswIndex::remove(uint32_t node_id) {
     auto flush_result = flush_meta();
     if (!flush_result.has_value()) {
         return make_error(flush_result.error().code, flush_result.error().message);
-    }
-
-    // Log to WAL.
-    if (wal_ != nullptr) {
-        auto node_bytes = serialize_hnsw_node(node);
-        (void)log_wal(WalRecordType::DELETE, loc.page_id, loc.slot_id, node_bytes);
     }
 
     return ok();
@@ -804,11 +759,6 @@ Result<void> HnswIndex::flush_meta() {
 
     (void)buffer_pool_.unpin_page(meta_page_id_, true);
 
-    // WAL log the metadata update.
-    if (wal_ != nullptr) {
-        (void)log_wal(WalRecordType::UPDATE, meta_page_id_, 0, meta_bytes);
-    }
-
     return ok();
 }
 
@@ -1061,28 +1011,6 @@ std::vector<HnswNeighbor> HnswIndex::select_neighbors(const std::vector<Candidat
         selected.push_back({candidates[i].node_id, candidates[i].distance});
     }
     return selected;
-}
-
-Result<void> HnswIndex::log_wal(WalRecordType type,
-                                PageId page_id,
-                                SlotId slot_id,
-                                std::span<const uint8_t> data) {
-    if (wal_ == nullptr) {
-        return ok();
-    }
-
-    WalRecord record;
-    record.type = type;
-    record.page_id = page_id;
-    record.slot_id = slot_id;
-    record.data.assign(data.begin(), data.end());
-
-    auto result = wal_->append(record);
-    if (!result.has_value()) {
-        SIXSEVEN_LOG_WARN("Failed to log HNSW WAL record");
-    }
-
-    return ok();
 }
 
 } // namespace sixseven

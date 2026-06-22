@@ -49,7 +49,7 @@ struct Fixture {
 
 TEST(QA_GDB_123_Search, SearchKZero) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -67,7 +67,7 @@ TEST(QA_GDB_123_Search, SearchKZero) {
 
 TEST(QA_GDB_123_Search, SearchKLargerThanDataset) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -90,7 +90,7 @@ TEST(QA_GDB_123_Search, SearchKLargerThanDataset) {
 
 TEST(QA_GDB_123_Search, SearchSingleElement) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -110,7 +110,7 @@ TEST(QA_GDB_123_Search, SearchSingleElement) {
 
 TEST(QA_GDB_123_Search, DuplicateVectors) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -139,7 +139,7 @@ TEST(QA_GDB_123_Search, DuplicateVectors) {
 
 TEST(QA_GDB_123_Search, FilterRejectsAll) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -161,7 +161,7 @@ TEST(QA_GDB_123_Search, FilterRejectsAll) {
 
 TEST(QA_GDB_123_Search, FilterAcceptsAll) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -186,7 +186,7 @@ TEST(QA_GDB_123_Search, FilterAcceptsAll) {
 
 TEST(QA_GDB_123_Insert, ZeroDimensionConfig) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 0;
     auto result = index.create(config);
@@ -196,7 +196,7 @@ TEST(QA_GDB_123_Insert, ZeroDimensionConfig) {
 
 TEST(QA_GDB_123_Insert, ZeroMConfig) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 4;
     config.m = 0;
@@ -207,7 +207,7 @@ TEST(QA_GDB_123_Insert, ZeroMConfig) {
 
 TEST(QA_GDB_123_Insert, InsertEmptyVector) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 4;
     ASSERT_TRUE(index.create(config).has_value());
@@ -221,7 +221,7 @@ TEST(QA_GDB_123_Insert, InsertEmptyVector) {
 
 TEST(QA_GDB_123_Insert, InsertWrongDimension) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 4;
     ASSERT_TRUE(index.create(config).has_value());
@@ -235,7 +235,7 @@ TEST(QA_GDB_123_Insert, InsertWrongDimension) {
 
 TEST(QA_GDB_123_Insert, SequentialNodeIds) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -254,7 +254,7 @@ TEST(QA_GDB_123_Insert, SequentialNodeIds) {
 
 TEST(QA_GDB_123_Insert, LargeDimension) {
     Fixture fix(512);
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 1024;
     config.m = 4;
@@ -280,7 +280,7 @@ TEST(QA_GDB_123_Insert, LargeDimension) {
 
 TEST(QA_GDB_123_Reset, InsertAfterReset) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -327,7 +327,7 @@ TEST(QA_GDB_123_Reset, InsertAfterReset) {
 
 TEST(QA_GDB_123_MParam, SmallM) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 2; // Very small M
@@ -351,7 +351,7 @@ TEST(QA_GDB_123_MParam, SmallM) {
 
 TEST(QA_GDB_123_MParam, LargeM) {
     Fixture fix(256);
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 64; // Large M
@@ -378,7 +378,7 @@ TEST(QA_GDB_123_MParam, LargeM) {
 
 TEST(QA_GDB_123_Search, WrongQueryDimension) {
     Fixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 4;
     ASSERT_TRUE(index.create(config).has_value());
@@ -403,7 +403,7 @@ TEST(QA_GDB_123_Persistence, NodeCountAfterLoad) {
     PageId meta_pid = 0;
 
     {
-        HnswIndex index(*fix.bpm, nullptr);
+        HnswIndex index(*fix.bpm);
         HnswIndexConfig config;
         config.dimension = 2;
         config.m = 4;
@@ -420,7 +420,7 @@ TEST(QA_GDB_123_Persistence, NodeCountAfterLoad) {
     }
 
     {
-        HnswIndex loaded(*fix.bpm, nullptr);
+        HnswIndex loaded(*fix.bpm);
         ASSERT_TRUE(loaded.load(meta_pid).has_value());
         EXPECT_EQ(loaded.node_count(), 25u);
         EXPECT_EQ(loaded.dimension(), 2u);

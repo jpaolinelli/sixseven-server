@@ -382,7 +382,7 @@ struct TestFixture {
 TEST(HnswPageIntegration, CreateAndLoadIndex) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 128;
@@ -406,7 +406,7 @@ TEST(HnswPageIntegration, CreateAndLoadIndex) {
     EXPECT_EQ(meta.node_count, 0u);
 
     // Load from the same metadata page.
-    HnswIndex loaded_index(*fix.bpm, nullptr);
+    HnswIndex loaded_index(*fix.bpm);
     auto load_result = loaded_index.load(meta_pid);
     ASSERT_TRUE(load_result.has_value()) << load_result.error().message;
 
@@ -418,7 +418,7 @@ TEST(HnswPageIntegration, CreateAndLoadIndex) {
 TEST(HnswPageIntegration, AllocateAndReadNode) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 4;
     auto cr = index.create(config);
@@ -449,7 +449,7 @@ TEST(HnswPageIntegration, AllocateAndReadNode) {
 TEST(HnswPageIntegration, AllocateAndReadVector) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 4;
     auto cr = index.create(config);
@@ -474,7 +474,7 @@ TEST(HnswPageIntegration, AllocateAndReadVector) {
 TEST(HnswPageIntegration, UpdateNodeNeighbors) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 4;
     auto cr = index.create(config);
@@ -506,7 +506,7 @@ TEST(HnswPageIntegration, UpdateNodeNeighbors) {
 TEST(HnswPageIntegration, MultipleNodesPerPage) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 4;
     auto cr = index.create(config);
@@ -540,7 +540,7 @@ TEST(HnswPageIntegration, MultipleNodesPerPage) {
 TEST(HnswPageIntegration, FlushAndReloadMeta) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 256;
     config.m = 32;
@@ -550,7 +550,7 @@ TEST(HnswPageIntegration, FlushAndReloadMeta) {
     PageId meta_pid = index.meta_page_id();
 
     // Reload and verify the persisted metadata.
-    HnswIndex loaded(*fix.bpm, nullptr);
+    HnswIndex loaded(*fix.bpm);
     auto lr = loaded.load(meta_pid);
     ASSERT_TRUE(lr.has_value()) << lr.error().message;
 
@@ -561,7 +561,7 @@ TEST(HnswPageIntegration, FlushAndReloadMeta) {
 TEST(HnswPageIntegration, CreateWithZeroDimensionFails) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 0;
 
@@ -573,7 +573,7 @@ TEST(HnswPageIntegration, CreateWithZeroDimensionFails) {
 TEST(HnswPageIntegration, NodeLocationLookup) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 4;
     auto cr = index.create(config);
@@ -657,7 +657,7 @@ std::vector<std::pair<uint32_t, float>> brute_force_knn(
 TEST(HnswInsertSearch, InsertSingleVector) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 4;
     config.m = 4;
@@ -678,7 +678,7 @@ TEST(HnswInsertSearch, InsertSingleVector) {
 TEST(HnswInsertSearch, InsertAndSearchExactMatch) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 4;
     config.m = 4;
@@ -709,7 +709,7 @@ TEST(HnswInsertSearch, InsertAndSearchExactMatch) {
 TEST(HnswInsertSearch, CosineMetricRanksByCosineNotL2) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -743,7 +743,7 @@ TEST(HnswInsertSearch, CosineMetricRanksByCosineNotL2) {
 TEST(HnswInsertSearch, InnerProductMetricRanksByDot) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -779,7 +779,7 @@ TEST(HnswInsertSearch, MetricPersistsAcrossLoad) {
 
     PageId meta_page_id = 0;
     {
-        HnswIndex index(*fix.bpm, nullptr);
+        HnswIndex index(*fix.bpm);
         HnswIndexConfig config;
         config.dimension = 2;
         config.m = 4;
@@ -789,7 +789,7 @@ TEST(HnswInsertSearch, MetricPersistsAcrossLoad) {
         meta_page_id = index.meta_page_id();
     }
 
-    HnswIndex reloaded(*fix.bpm, nullptr);
+    HnswIndex reloaded(*fix.bpm);
     auto load = reloaded.load(meta_page_id);
     ASSERT_TRUE(load.has_value()) << load.error().message;
     EXPECT_EQ(reloaded.metric(), DistanceMetric::COSINE);
@@ -799,7 +799,7 @@ TEST(HnswInsertSearch, MetricPersistsAcrossLoad) {
 TEST(HnswInsertSearch, SearchTopK) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -830,7 +830,7 @@ TEST(HnswInsertSearch, SearchTopK) {
 TEST(HnswInsertSearch, SearchEmptyIndex) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 4;
     auto cr = index.create(config);
@@ -845,7 +845,7 @@ TEST(HnswInsertSearch, SearchEmptyIndex) {
 TEST(HnswInsertSearch, DimensionMismatchFails) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 4;
     auto cr = index.create(config);
@@ -866,7 +866,7 @@ TEST(HnswInsertSearch, DimensionMismatchFails) {
 TEST(HnswInsertSearch, FilteredSearch) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -894,7 +894,7 @@ TEST(HnswInsertSearch, FilteredSearch) {
 TEST(HnswInsertSearch, RecallAt10Over1000Vectors) {
     LargeTestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 32;
     config.m = 16;
@@ -955,7 +955,7 @@ TEST(HnswInsertSearch, RecallAt10Over1000Vectors) {
 TEST(HnswInsertSearch, InsertManySmallDimension) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -989,7 +989,7 @@ TEST(HnswInsertSearch, InsertManySmallDimension) {
 TEST(HnswDelete, DeleteSingleNode) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -1024,7 +1024,7 @@ TEST(HnswDelete, DeleteSingleNode) {
 TEST(HnswDelete, DeleteNonExistentNodeFails) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     auto cr = index.create(config);
@@ -1038,7 +1038,7 @@ TEST(HnswDelete, DeleteNonExistentNodeFails) {
 TEST(HnswDelete, DeleteEntryPoint) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -1073,7 +1073,7 @@ TEST(HnswDelete, DeleteEntryPoint) {
 TEST(HnswDelete, CompactionFreesTombstones) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -1114,7 +1114,7 @@ TEST(HnswDelete, CompactionFreesTombstones) {
 TEST(HnswDelete, SearchAfterDelete20Percent) {
     LargeTestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 16;
     config.m = 16;
@@ -1204,7 +1204,7 @@ TEST(HnswDelete, SearchAfterDelete20Percent) {
 TEST(HnswDelete, CompactionOnEmptyTombstones) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     auto cr = index.create(config);
@@ -1219,7 +1219,7 @@ TEST(HnswDelete, CompactionOnEmptyTombstones) {
 TEST(HnswDelete, DoubleDeleteFails) {
     TestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 2;
     config.m = 4;
@@ -1257,7 +1257,7 @@ TEST(HnswPersistence, LoadAndSearchAfterInsert) {
         ASSERT_TRUE(fid1.has_value());
         auto bpm1 = std::make_unique<BufferPoolManager>(dm1, *fid1, 4096);
 
-        HnswIndex index(*bpm1, nullptr);
+        HnswIndex index(*bpm1);
         HnswIndexConfig config;
         config.dimension = dim;
         config.m = 8;
@@ -1294,7 +1294,7 @@ TEST(HnswPersistence, LoadAndSearchAfterInsert) {
         ASSERT_TRUE(fid2.has_value());
         auto bpm2 = std::make_unique<BufferPoolManager>(dm2, *fid2, 4096);
 
-        HnswIndex loaded(*bpm2, nullptr);
+        HnswIndex loaded(*bpm2);
         auto lr = loaded.load(meta_pid);
         ASSERT_TRUE(lr.has_value()) << lr.error().message;
 
@@ -1333,7 +1333,7 @@ TEST(HnswPersistence, InsertAfterLoad) {
         ASSERT_TRUE(fid1.has_value());
         auto bpm1 = std::make_unique<BufferPoolManager>(dm1, *fid1, 4096);
 
-        HnswIndex index(*bpm1, nullptr);
+        HnswIndex index(*bpm1);
         HnswIndexConfig config;
         config.dimension = dim;
         config.m = 4;
@@ -1365,7 +1365,7 @@ TEST(HnswPersistence, InsertAfterLoad) {
         ASSERT_TRUE(fid2.has_value());
         auto bpm2 = std::make_unique<BufferPoolManager>(dm2, *fid2, 4096);
 
-        HnswIndex loaded(*bpm2, nullptr);
+        HnswIndex loaded(*bpm2);
         auto lr = loaded.load(meta_pid);
         ASSERT_TRUE(lr.has_value()) << lr.error().message;
         EXPECT_EQ(loaded.node_count(), 10u);
@@ -1397,7 +1397,7 @@ TEST(HnswPersistence, InsertAfterLoad) {
 TEST(HnswConcurrency, ConcurrentSearches) {
     LargeTestFixture fix;
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
     config.dimension = 4;
     config.m = 8;

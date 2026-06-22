@@ -670,7 +670,7 @@ TEST_F(QA717AdvNearestScanOperatorTest, PrefilteredAllRidsInvalidReturnsEmpty) {
 // path (GDB-717 display conventions).
 TEST_F(QA717AdvNearestScanOperatorTest, HnswPathDotOrderedForDotQueries) {
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
 
     HnswIndexConfig hnsw_config;
     hnsw_config.dimension = 3;

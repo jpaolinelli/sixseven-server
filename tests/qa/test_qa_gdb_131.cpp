@@ -411,7 +411,7 @@ TEST_F(QA131NearestScanTest, WhereFilterRejectsAll) {
 
 TEST_F(QA131NearestScanTest, HnswMatchesBruteForceTopResult) {
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
 
     HnswIndexConfig hnsw_config;
     hnsw_config.dimension = 3;
@@ -483,7 +483,7 @@ TEST_F(QA131NearestScanTest, HnswMatchesBruteForceTopResult) {
 
 TEST_F(QA131NearestScanTest, HnswGraphScopeFilteredSearch) {
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
 
     HnswIndexConfig hnsw_config;
     hnsw_config.dimension = 2;
@@ -685,7 +685,7 @@ TEST_F(QA131NearestScanTest, CosineUnitVectorsCorrectOrder) {
 
 TEST_F(QA131NearestScanTest, HnswEmptyIndexFallsToBruteForce) {
     TableHeap heap(*table_bpm_, dm_, table_fid_);
-    HnswIndex hnsw(*hnsw_bpm_, nullptr);
+    HnswIndex hnsw(*hnsw_bpm_);
 
     HnswIndexConfig hnsw_config;
     hnsw_config.dimension = 3;

@@ -269,7 +269,7 @@ TEST(QA_HnswSerialization, NodeMaxNodeIdBoundary) {
 
 TEST(QA_HnswCreate, CreateWithMParamZeroFails) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 4;
@@ -282,7 +282,7 @@ TEST(QA_HnswCreate, CreateWithMParamZeroFails) {
 
 TEST(QA_HnswCreate, CreateWithDimension1) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 1;
@@ -311,7 +311,7 @@ TEST(QA_HnswCreate, CreateWithDimension1) {
 
 TEST(QA_HnswCreate, CreateWithMParam1) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -337,7 +337,7 @@ TEST(QA_HnswCreate, CreateWithMParam1) {
 
 TEST(QA_HnswCreate, CreateWithLargeEfValues) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 4;
@@ -357,7 +357,7 @@ TEST(QA_HnswCreate, CreateWithLargeEfValues) {
 
 TEST(QA_HnswInsert, InsertIdenticalVectors) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 3;
@@ -387,7 +387,7 @@ TEST(QA_HnswInsert, InsertIdenticalVectors) {
 
 TEST(QA_HnswInsert, InsertEmptyVectorFailsIfDimIsNonZero) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 4;
@@ -401,7 +401,7 @@ TEST(QA_HnswInsert, InsertEmptyVectorFailsIfDimIsNonZero) {
 
 TEST(QA_HnswInsert, InsertSingleThenDeleteThenInsert) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -439,7 +439,7 @@ TEST(QA_HnswInsert, InsertSingleThenDeleteThenInsert) {
 
 TEST(QA_HnswSearch, SearchWithKZero) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -459,7 +459,7 @@ TEST(QA_HnswSearch, SearchWithKZero) {
 
 TEST(QA_HnswSearch, SearchWithKGreaterThanNodeCount) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -484,7 +484,7 @@ TEST(QA_HnswSearch, SearchWithKGreaterThanNodeCount) {
 
 TEST(QA_HnswSearch, SearchResultsAreSortedByDistance) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -512,7 +512,7 @@ TEST(QA_HnswSearch, SearchResultsAreSortedByDistance) {
 
 TEST(QA_HnswSearch, FilteredSearchRejectsAll) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -535,7 +535,7 @@ TEST(QA_HnswSearch, FilteredSearchRejectsAll) {
 
 TEST(QA_HnswSearch, FilteredSearchAcceptsAll) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -564,7 +564,7 @@ TEST(QA_HnswSearch, FilteredSearchAcceptsAll) {
 
 TEST(QA_HnswSearch, SearchAfterAllNodesDeleted) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -597,7 +597,7 @@ TEST(QA_HnswSearch, SearchAfterAllNodesDeleted) {
 
 TEST(QA_HnswDelete, DeleteOnlyNode) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -623,7 +623,7 @@ TEST(QA_HnswDelete, DeleteOnlyNode) {
 
 TEST(QA_HnswDelete, DeleteAllButOneNode) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -657,7 +657,7 @@ TEST(QA_HnswDelete, DeleteAllButOneNode) {
 
 TEST(QA_HnswDelete, DeleteAndReinsertManyRounds) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -698,7 +698,7 @@ TEST(QA_HnswDelete, DeleteAndReinsertManyRounds) {
 
 TEST(QA_HnswDelete, CompactAfterDeletingEntryPoint) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -729,7 +729,7 @@ TEST(QA_HnswDelete, CompactAfterDeletingEntryPoint) {
 
 TEST(QA_HnswDelete, DeleteAllThenCompactThenInsert) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -786,7 +786,7 @@ TEST(QA_HnswPersistence, LoadNonMetaPageFails) {
     page->set_page_type(PageType::DATA);
     (void)fix.bpm->unpin_page(pid, true);
 
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
     auto lr = index.load(pid);
     ASSERT_FALSE(lr.has_value());
     EXPECT_EQ(lr.error().code, StatusCode::INVALID_ARGUMENT);
@@ -799,7 +799,7 @@ TEST(QA_HnswPersistence, PersistAfterDeleteAndCompact) {
 
     // Phase 1: create, insert, delete, compact.
     {
-        HnswIndex index(*fix.bpm, nullptr);
+        HnswIndex index(*fix.bpm);
         HnswIndexConfig config;
         config.dimension = dim;
         config.m = 4;
@@ -823,7 +823,7 @@ TEST(QA_HnswPersistence, PersistAfterDeleteAndCompact) {
 
     // Phase 2: load and verify.
     {
-        HnswIndex loaded(*fix.bpm, nullptr);
+        HnswIndex loaded(*fix.bpm);
         ASSERT_TRUE(loaded.load(meta_pid).has_value());
 
         EXPECT_EQ(loaded.node_count(), 10u);
@@ -842,7 +842,7 @@ TEST(QA_HnswPersistence, PersistAfterDeleteAndCompact) {
 
 TEST(QA_HnswPersistence, ResetAndVerifyCleanState) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -886,7 +886,7 @@ TEST(QA_HnswPersistence, ResetAndVerifyCleanState) {
 
 TEST(QA_HnswEntryPoint, EntryPointUpdatedOnHigherLayerInsert) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -911,7 +911,7 @@ TEST(QA_HnswEntryPoint, EntryPointUpdatedOnHigherLayerInsert) {
 
 TEST(QA_HnswEntryPoint, DeleteEntryPointSetsValidReplacement) {
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -947,7 +947,7 @@ TEST(QA_HnswEntryPoint, DeleteEntryPointSetsValidReplacement) {
 
 TEST(QA_HnswStress, InsertSearchDelete500Vectors) {
     LargeFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 8;
@@ -1007,7 +1007,7 @@ TEST(QA_HnswStress, InsertSearchDelete500Vectors) {
 
 TEST(QA_HnswStress, ConcurrentSearchesDuringHeavyLoad) {
     LargeFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 4;
@@ -1064,7 +1064,7 @@ TEST(QA_HnswAC, PersistsAcrossRestart) {
 
     // Create and populate.
     {
-        HnswIndex index(*fix.bpm, nullptr);
+        HnswIndex index(*fix.bpm);
         HnswIndexConfig config;
         config.dimension = 4;
         config.m = 8;
@@ -1083,7 +1083,7 @@ TEST(QA_HnswAC, PersistsAcrossRestart) {
 
     // "Restart": load from disk.
     {
-        HnswIndex loaded(*fix.bpm, nullptr);
+        HnswIndex loaded(*fix.bpm);
         ASSERT_TRUE(loaded.load(meta_pid).has_value());
         EXPECT_EQ(loaded.node_count(), 50u);
         EXPECT_EQ(loaded.dimension(), 4u);
@@ -1100,7 +1100,7 @@ TEST(QA_HnswAC, PersistsAcrossRestart) {
 TEST(QA_HnswAC, LazyDeleteWithCompactionReclaimsSpace) {
     // AC: Lazy delete with compaction reclaims space.
     SmallFixture fix;
-    HnswIndex index(*fix.bpm, nullptr);
+    HnswIndex index(*fix.bpm);
 
     HnswIndexConfig config;
     config.dimension = 2;
@@ -1153,7 +1153,7 @@ TEST(QA_HnswAC, UnitTestsForInsertSearchDeletePersistenceRecovery) {
 
     // Phase 1: Create, insert, search, delete.
     {
-        HnswIndex index(*fix.bpm, nullptr);
+        HnswIndex index(*fix.bpm);
         HnswIndexConfig config;
         config.dimension = dim;
         config.m = 8;
@@ -1181,7 +1181,7 @@ TEST(QA_HnswAC, UnitTestsForInsertSearchDeletePersistenceRecovery) {
 
     // Phase 2: Load, search (deleted node absent), compact, search.
     {
-        HnswIndex loaded(*fix.bpm, nullptr);
+        HnswIndex loaded(*fix.bpm);
         ASSERT_TRUE(loaded.load(meta_pid).has_value());
         EXPECT_EQ(loaded.node_count(), 29u);
 
