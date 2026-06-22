@@ -679,11 +679,9 @@ TEST_F(EdgePersistenceTest, GDB879_DropEdgeTypeRemovesStorageFile) {
     ASSERT_TRUE(engine_->link(default_database_id, "owns", pk(10), pk(20)).has_value());
 
     // Compute the expected file path (mirrors GraphEngine::edge_file_path).
-    auto expected_path = data_dir_ / "databases" /
-                         std::to_string(default_database_id) / "edges" /
+    auto expected_path = data_dir_ / "databases" / std::to_string(default_database_id) / "edges" /
                          ("edge_" + std::to_string(eid) + ".db");
-    ASSERT_TRUE(std::filesystem::exists(expected_path))
-        << "storage file should exist after create";
+    ASSERT_TRUE(std::filesystem::exists(expected_path)) << "storage file should exist after create";
 
     auto drop = engine_->drop_edge_type(default_database_id, "owns");
     ASSERT_TRUE(drop.has_value()) << drop.error().message;
@@ -730,13 +728,8 @@ TEST(GDB879_NullDmDropEdgeType, DropEdgeTypeOnNonPersistentEngineDropsTypeWithou
     auto tgt = catalog.create_table(db_id, tgt_schema);
     ASSERT_TRUE(tgt.has_value()) << tgt.error().message;
 
-    auto et = engine.create_edge_type(db_id,
-                                      "connected",
-                                      *src,
-                                      *tgt,
-                                      TypeId::INT64,
-                                      TypeId::INT64,
-                                      {});
+    auto et =
+        engine.create_edge_type(db_id, "connected", *src, *tgt, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(et.has_value()) << et.error().message;
 
     // Insert edges so edge_tables_ holds a live, non-empty EdgeTable.
