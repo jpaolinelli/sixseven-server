@@ -122,3 +122,155 @@ TEST(QA_GDB892, DebugSuppressedAtRuntimeWarnLevel) {
     EXPECT_NE(captured.find("gdb892-should-appear-warn"), std::string::npos)
         << "WARN must appear at runtime level=warn; captured: [" << captured << "]";
 }
+
+// ---------------------------------------------------------------------------
+// Adversarial: full runtime level transition matrix.
+// Each test sets a distinct runtime level and verifies the correct subset of
+// messages is captured.  All of these rely on SPDLOG_ACTIVE_LEVEL=TRACE being
+// compiled in; before the fix they would all trivially pass (no debug/trace
+// output) while providing no actual coverage.
+// ---------------------------------------------------------------------------
+
+// Level=error: only ERROR passes; DEBUG, WARN suppressed.
+TEST(QA_GDB892, LevelErrorSuppressesDebugAndWarn) {
+    std::ostringstream oss;
+    init_logging(make_qa_logger("qa892_lvl_error", oss, spdlog::level::err));
+
+    SIXSEVEN_LOG_TRACE("892-err-trace");
+    SIXSEVEN_LOG_DEBUG("892-err-debug");
+    SIXSEVEN_LOG_WARN("892-err-warn");
+    SIXSEVEN_LOG_ERROR("892-err-error");
+
+    restore_logger();
+    const std::string captured = oss.str();
+
+    EXPECT_EQ(captured.find("892-err-trace"), std::string::npos)
+        << "TRACE must be suppressed at level=error; captured: [" << captured << "]";
+    EXPECT_EQ(captured.find("892-err-debug"), std::string::npos)
+        << "DEBUG must be suppressed at level=error; captured: [" << captured << "]";
+    EXPECT_EQ(captured.find("892-err-warn"), std::string::npos)
+        << "WARN must be suppressed at level=error; captured: [" << captured << "]";
+    EXPECT_NE(captured.find("892-err-error"), std::string::npos)
+        << "ERROR must appear at level=error; captured: [" << captured << "]";
+}
+
+// Level=info: INFO/WARN/ERROR pass; DEBUG and TRACE suppressed.
+TEST(QA_GDB892, LevelInfoSuppressesDebugAndTrace) {
+    std::ostringstream oss;
+    init_logging(make_qa_logger("qa892_lvl_info", oss, spdlog::level::info));
+
+    SIXSEVEN_LOG_TRACE("892-info-trace");
+    SIXSEVEN_LOG_DEBUG("892-info-debug");
+    SIXSEVEN_LOG_INFO("892-info-info");
+    SIXSEVEN_LOG_WARN("892-info-warn");
+
+    restore_logger();
+    const std::string captured = oss.str();
+
+    EXPECT_EQ(captured.find("892-info-trace"), std::string::npos)
+        << "TRACE must be suppressed at level=info; captured: [" << captured << "]";
+    EXPECT_EQ(captured.find("892-info-debug"), std::string::npos)
+        << "DEBUG must be suppressed at level=info; captured: [" << captured << "]";
+    EXPECT_NE(captured.find("892-info-info"), std::string::npos)
+        << "INFO must appear at level=info; captured: [" << captured << "]";
+    EXPECT_NE(captured.find("892-info-warn"), std::string::npos)
+        << "WARN must appear at level=info; captured: [" << captured << "]";
+}
+
+// Level=debug: DEBUG and above pass; TRACE suppressed.
+TEST(QA_GDB892, LevelDebugSuppressesTrace) {
+    std::ostringstream oss;
+    init_logging(make_qa_logger("qa892_lvl_debug", oss, spdlog::level::debug));
+
+    SIXSEVEN_LOG_TRACE("892-debug-trace");
+    SIXSEVEN_LOG_DEBUG("892-debug-debug");
+    SIXSEVEN_LOG_INFO("892-debug-info");
+
+    restore_logger();
+    const std::string captured = oss.str();
+
+    EXPECT_EQ(captured.find("892-debug-trace"), std::string::npos)
+        << "TRACE must be suppressed at level=debug; captured: [" << captured << "]";
+    EXPECT_NE(captured.find("892-debug-debug"), std::string::npos)
+        << "DEBUG must appear at level=debug; captured: [" << captured << "]";
+    EXPECT_NE(captured.find("892-debug-info"), std::string::npos)
+        << "INFO must appear at level=debug; captured: [" << captured << "]";
+}
+
+// Level=off: nothing passes through.
+TEST(QA_GDB892, LevelOffSuppressesAll) {
+    std::ostringstream oss;
+    init_logging(make_qa_logger("qa892_lvl_off", oss, spdlog::level::off));
+
+    SIXSEVEN_LOG_TRACE("892-off-trace");
+    SIXSEVEN_LOG_DEBUG("892-off-debug");
+    SIXSEVEN_LOG_INFO("892-off-info");
+    SIXSEVEN_LOG_ERROR("892-off-error");
+
+    restore_logger();
+    const std::string captured = oss.str();
+
+    EXPECT_TRUE(captured.empty())
+        << "level=off must suppress all output; captured: [" << captured << "]";
+}
+
+// Adversarial: multiple messages at the same level — confirm all are captured,
+// not just the first.
+TEST(QA_GDB892, MultipleDebugMessagesAllCaptured) {
+    std::ostringstream oss;
+    init_logging(make_qa_logger("qa892_multi", oss, spdlog::level::debug));
+
+    SIXSEVEN_LOG_DEBUG("892-multi-alpha");
+    SIXSEVEN_LOG_DEBUG("892-multi-beta");
+    SIXSEVEN_LOG_DEBUG("892-multi-gamma");
+
+    restore_logger();
+    const std::string captured = oss.str();
+
+    EXPECT_NE(captured.find("892-multi-alpha"), std::string::npos)
+        << "First DEBUG message must appear; captured: [" << captured << "]";
+    EXPECT_NE(captured.find("892-multi-beta"), std::string::npos)
+        << "Second DEBUG message must appear; captured: [" << captured << "]";
+    EXPECT_NE(captured.find("892-multi-gamma"), std::string::npos)
+        << "Third DEBUG message must appear; captured: [" << captured << "]";
+}
+
+// Adversarial: restore_logger() isolation — a prior test's captured logger must
+// not bleed into the next test.  Emit a unique marker in the first test, then
+// confirm a fresh capture in the second test does not see it.
+TEST(QA_GDB892, LoggerRestoredBetweenTests_Part1) {
+    std::ostringstream oss1;
+    init_logging(make_qa_logger("qa892_iso1", oss1, spdlog::level::debug));
+
+    SIXSEVEN_LOG_DEBUG("892-isolation-canary");
+
+    restore_logger();
+
+    // After restore, emit via the now-sinkless default logger — must not appear
+    // in oss1 (the sink was detached when we called restore_logger).
+    SIXSEVEN_LOG_DEBUG("892-isolation-after-restore");
+
+    EXPECT_EQ(oss1.str().find("892-isolation-after-restore"), std::string::npos)
+        << "Post-restore log must not appear in the detached sink; captured: [" << oss1.str()
+        << "]";
+}
+
+// Adversarial: SIXSEVEN_LOG_TRACE with format args — confirm expansion is
+// correct (before the fix the call would be entirely absent; after, all args
+// must be substituted correctly).
+TEST(QA_GDB892, TraceFormattingWithMultipleArgs) {
+    std::ostringstream oss;
+    init_logging(make_qa_logger("qa892_fmt", oss, spdlog::level::trace));
+
+    SIXSEVEN_LOG_TRACE("892-fmt key={} val={} flag={}", "mykey", 123, true);
+
+    restore_logger();
+    const std::string captured = oss.str();
+
+    EXPECT_NE(captured.find("key=mykey"), std::string::npos)
+        << "String arg must be formatted; captured: [" << captured << "]";
+    EXPECT_NE(captured.find("val=123"), std::string::npos)
+        << "Int arg must be formatted; captured: [" << captured << "]";
+    EXPECT_NE(captured.find("flag=true"), std::string::npos)
+        << "Bool arg must be formatted; captured: [" << captured << "]";
+}
