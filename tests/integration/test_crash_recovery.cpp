@@ -230,7 +230,88 @@ TEST_F(CrashRecoveryIntegrationTest, CleanShutdownSkipsRecovery) {
 }
 
 // =============================================================================
-// TEST 3 - Recovery on empty WAL directory succeeds with zero stats.
+// TEST 3 - Uncommitted data is rolled back (undo phase) after a crash.
+//
+// Writes a BEGIN record for a real (non-frozen) txn_id, inserts tuples tagged
+// with that txn_id so their WAL records carry the in-flight id, then simulates
+// a crash WITHOUT writing COMMIT or ABORT.  Recovery must classify the txn as
+// aborted/in-progress, undo each INSERT (removing the slot), and report
+// records_undone > 0.  The undo phase (Phase 3, wal_recovery.cpp ~lines
+// 233-243) is the code path exercised; without it this test fails because the
+// inserted tuples remain visible in the recovery heap.
+//
+// MUTATION GRADE: commenting out the undo loop in WalRecovery::recover()
+// causes the raw_slot checks below to return non-empty instead of empty,
+// failing the EXPECT_TRUE assertions.  Commenting out the active_txns
+// insertion into aborted_txns causes records_undone to stay 0.
+// =============================================================================
+
+TEST_F(CrashRecoveryIntegrationTest, UncommittedDataRolledBackAfterCrashRecovery) {
+    // Choose a real txn_id that is not frozen_txn_id and not invalid_txn_id.
+    // The value just needs to be distinct from frozen_txn_id (~0ULL).
+    constexpr txn_id_t kInflightTxnId = 42;
+
+    // Phase 1: open the primary heap and write an in-flight transaction.
+    std::vector<RID> rids;
+    {
+        open_primary();
+
+        // Write a BEGIN record for the in-flight txn so the analysis phase
+        // adds it to active_txns (and therefore aborted_txns at crash time).
+        WalRecord begin_rec;
+        begin_rec.type = WalRecordType::BEGIN;
+        begin_rec.txn_id = kInflightTxnId;
+        auto begin_lsn = wal_->append(begin_rec);
+        ASSERT_TRUE(begin_lsn.has_value()) << begin_lsn.error().message;
+
+        // Insert tuples stamped with the in-flight txn_id.  insert_tuple()
+        // passes xmin as the WAL record's txn_id, so recovery sees these
+        // INSERT records as belonging to kInflightTxnId.
+        for (uint8_t i = 1; i <= 3; ++i) {
+            auto rid = primary_heap_->insert_tuple(make_payload(64, i), kInflightTxnId);
+            ASSERT_TRUE(rid.has_value()) << rid.error().message;
+            rids.push_back(*rid);
+        }
+
+        // Crash: flush WAL and pages without writing COMMIT or ABORT, and
+        // without writing a clean-shutdown marker.
+        simulate_crash();
+    }
+    ASSERT_EQ(rids.size(), 3u);
+    ASSERT_FALSE(CleanShutdownMarker(data_dir_).exists());
+
+    // Phase 2: run recovery into a fresh empty heap.
+    open_recovery_heap();
+
+    TableHeapRecoveryHandler handler;
+    handler.register_table(kTableId, recovery_heap_.get());
+    WalRecovery wal_recovery(wal_dir_, handler);
+    auto result = wal_recovery.recover();
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    // The undo phase must have run and processed all three INSERT records.
+    EXPECT_GT(result->records_undone, 0u)
+        << "records_undone=" << result->records_undone
+        << " — undo phase did not run; in-flight txn was not classified as aborted";
+    EXPECT_EQ(result->records_undone, 3u) << "expected 3 INSERTs undone (one per in-flight tuple)";
+
+    // The aborted/in-progress count must include our txn.
+    EXPECT_GE(result->aborted_txns, 1u);
+    EXPECT_TRUE(result->aborted_txn_ids.count(kInflightTxnId) > 0)
+        << "txn " << kInflightTxnId << " not found in aborted_txn_ids";
+
+    // The undo handler removes INSERT slots, so every RID written by the
+    // in-flight txn must be absent from the recovered heap.
+    for (const auto& rid : rids) {
+        auto raw = raw_slot(*recovery_bpm_, rid);
+        EXPECT_TRUE(raw.empty())
+            << "RID{" << rid.page_id << "," << rid.slot_id
+            << "} still present after undo — uncommitted tuple was not rolled back";
+    }
+}
+
+// =============================================================================
+// TEST 4 (was 3) - Recovery on empty WAL directory succeeds with zero stats.
 // =============================================================================
 
 TEST_F(CrashRecoveryIntegrationTest, RecoveryOnEmptyWalDirectorySucceeds) {
@@ -247,7 +328,7 @@ TEST_F(CrashRecoveryIntegrationTest, RecoveryOnEmptyWalDirectorySucceeds) {
 }
 
 // =============================================================================
-// TEST 4 - Recovery is idempotent: running recover() twice does not fail.
+// TEST 5 (was 4) - Recovery is idempotent: running recover() twice does not fail.
 // =============================================================================
 
 TEST_F(CrashRecoveryIntegrationTest, RecoveryIsIdempotent) {
