@@ -24,7 +24,10 @@
 #include "sixseven/graph/triangle_count.h"
 #include "sixseven/server/auth.h"
 #include "sixseven/server/server.h"
+#include "sixseven/storage/clean_shutdown_marker.h"
 #include "sixseven/storage/disk_manager.h"
+#include "sixseven/storage/wal_recovery.h"
+#include "sixseven/table/table_wal.h"
 #include "sixseven/vector/backfill_manager.h"
 #include "sixseven/vector/builtin_provider.h"
 #include "sixseven/vector/embedding_worker.h"
@@ -181,6 +184,58 @@ int main(int argc, char* argv[]) {
     if (!boot) {
         SIXSEVEN_LOG_ERROR("bootstrap failed: {}", boot.error().message);
         return 1;
+    }
+
+    // -- WAL crash recovery -------------------------------------------------------
+    //
+    // The clean-shutdown marker (<data_dir>/clean_shutdown) is written AFTER every
+    // graceful shutdown and DELETED at the start of a clean-path restart.
+    //
+    //   marker PRESENT  =>  previous run shut down cleanly; skip recovery.
+    //   marker ABSENT   =>  crash / kill -9 detected; run WAL recovery.
+    //
+    // Recovery MUST run BEFORE the server accepts any connections so that
+    // committed data is visible and uncommitted writes are rolled back.
+    // A recovery failure is FATAL — we must never serve stale state.
+    {
+        std::filesystem::path wal_dir = data_dir / "wal";
+        sixseven::CleanShutdownMarker marker(data_dir);
+
+        if (marker.exists()) {
+            // Previous run was clean — delete the marker and skip recovery.
+            SIXSEVEN_LOG_INFO("clean shutdown marker found — skipping WAL recovery");
+            auto rm = marker.remove();
+            if (!rm) {
+                SIXSEVEN_LOG_WARN("failed to remove clean-shutdown marker: {}", rm.error().message);
+            }
+        } else {
+            // No marker — assume crash; run ARIES recovery.
+            SIXSEVEN_LOG_INFO("no clean shutdown marker — running WAL recovery (wal_dir={})",
+                              wal_dir.string());
+
+            sixseven::TableHeapRecoveryHandler recovery_handler;
+            storage.for_each_table_heap(
+                [&recovery_handler](sixseven::table_id_t tid, sixseven::TableHeap* heap) {
+                    recovery_handler.register_table(tid, heap);
+                });
+
+            sixseven::WalRecovery wal_recovery(wal_dir, recovery_handler);
+            auto recover_result = wal_recovery.recover();
+            if (!recover_result) {
+                SIXSEVEN_LOG_ERROR("WAL recovery failed — cannot start server: {}",
+                                   recover_result.error().message);
+                return 1;
+            }
+            const auto& stats = *recover_result;
+            SIXSEVEN_LOG_INFO("WAL recovery complete: scanned={} redone={} undone={} "
+                              "committed_txns={} aborted_txns={} max_lsn={}",
+                              stats.records_scanned,
+                              stats.records_redone,
+                              stats.records_undone,
+                              stats.committed_txns,
+                              stats.aborted_txns,
+                              stats.max_lsn);
+        }
     }
 
     // Load B+ tree and hash indexes asynchronously from persisted disk files.
@@ -437,6 +492,30 @@ int main(int argc, char* argv[]) {
     if (!result) {
         SIXSEVEN_LOG_ERROR("server error: {}", result.error().message);
         return 1;
+    }
+
+    // Flush all table heaps before writing the clean-shutdown marker so the
+    // marker only appears once the data is durably on disk.
+    {
+        auto flush = storage.flush_all();
+        if (!flush) {
+            SIXSEVEN_LOG_WARN("pre-marker storage flush failed: {}", flush.error().message);
+        }
+    }
+
+    // Write the clean-shutdown marker so the next startup can safely skip
+    // WAL recovery. This is written LAST — after all data is flushed — so
+    // a crash between flush and marker write is safe (the missing marker
+    // triggers an idempotent recovery that finds nothing to redo/undo).
+    {
+        sixseven::CleanShutdownMarker marker(data_dir);
+        auto write_result = marker.write();
+        if (!write_result) {
+            SIXSEVEN_LOG_WARN("failed to write clean-shutdown marker (non-fatal): {}",
+                              write_result.error().message);
+        } else {
+            SIXSEVEN_LOG_INFO("clean-shutdown marker written: {}", marker.path().string());
+        }
     }
 
     SIXSEVEN_LOG_INFO("SixSevenDB Server stopped cleanly");

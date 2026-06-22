@@ -8,6 +8,7 @@
 #include "sixseven/table/tuple.h"
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -124,6 +125,13 @@ public:
 
     /// Write the meta page ID to an index file's header extension.
     [[nodiscard]] Result<void> write_index_meta_page_id(index_id_t index_id, PageId meta_page_id);
+
+    /// Invoke @p fn(table_id, heap*) for every open table heap.
+    /// Used by WAL crash recovery to register all live heaps with
+    /// TableHeapRecoveryHandler before calling WalRecovery::recover().
+    /// The callback is invoked under the internal mutex — it must be
+    /// lightweight and must not call back into StorageManager.
+    void for_each_table_heap(const std::function<void(table_id_t, TableHeap*)>& fn) const;
 
 private:
     /// Build the directory path for a database: {data_dir}/databases/{db_id}/

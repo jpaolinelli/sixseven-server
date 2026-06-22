@@ -29,6 +29,14 @@ StorageManager::~StorageManager() {
     indexes_.clear();
 }
 
+void StorageManager::for_each_table_heap(
+    const std::function<void(table_id_t, TableHeap*)>& fn) const {
+    std::lock_guard lock(mu_);
+    for (const auto& [table_id, storage] : tables_) {
+        fn(table_id, storage->heap.get());
+    }
+}
+
 void StorageManager::set_txn_manager(const TransactionManager* txn_mgr) {
     std::lock_guard lock(mu_);
     txn_mgr_ = txn_mgr;
