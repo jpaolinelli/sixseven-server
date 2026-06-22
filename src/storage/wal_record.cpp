@@ -92,10 +92,16 @@ Result<WalRecord> deserialize_wal_record(std::span<const uint8_t> buf) {
                               std::to_string(buf.size()));
     }
 
-    // Validate record_length is large enough to hold at least the trailing CRC.
-    if (record_length < sizeof(uint32_t)) {
-        return make_error(StatusCode::INVALID_ARGUMENT,
-                          "WAL record_length too small: " + std::to_string(record_length));
+    // Validate record_length is large enough to hold the fixed header and
+    // trailing CRC.  The minimum valid value is header(39) + crc(4) = 43;
+    // anything smaller cannot contain a complete WAL record.
+    constexpr uint32_t kMinRecordLength =
+        static_cast<uint32_t>(wal_record_header_size) + static_cast<uint32_t>(sizeof(uint32_t));
+    if (record_length < kMinRecordLength) {
+        return make_error(
+            StatusCode::INVALID_ARGUMENT,
+            "WAL record_length too small to hold header+CRC: " + std::to_string(record_length) +
+                " (minimum " + std::to_string(kMinRecordLength) + ")");
     }
 
     // CRC check: covers everything after record_length, excluding the trailing CRC.
