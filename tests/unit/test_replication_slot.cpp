@@ -443,9 +443,10 @@ TEST(ReplicationSlot, WalAccumulationWarning) {
     mgr.update_confirmed_lsn("replica_1", 100);
     ASSERT_TRUE(mgr.deactivate_slot("replica_1").has_value());
 
-    // Current LSN is 300, retained = 200 > 100 threshold.
-    // This should log a warning (we can't assert on logs, but it should not crash).
-    mgr.check_wal_accumulation(300);
+    // Current LSN is 300, retained = 200 > 100 threshold — slot must be reported.
+    auto warned = mgr.check_wal_accumulation(300);
+    ASSERT_EQ(warned.size(), 1u);
+    EXPECT_EQ(warned[0], "replica_1");
 }
 
 TEST(ReplicationSlot, WalAccumulationNoWarningForActive) {
@@ -456,8 +457,23 @@ TEST(ReplicationSlot, WalAccumulationNoWarningForActive) {
     ASSERT_TRUE(mgr.activate_slot("replica_1", 100).has_value());
     mgr.update_confirmed_lsn("replica_1", 100);
 
-    // Should not warn for active slots.
-    mgr.check_wal_accumulation(300);
+    // Active slots must be exempt — returned vector must be empty.
+    auto warned = mgr.check_wal_accumulation(300);
+    EXPECT_TRUE(warned.empty());
+}
+
+TEST(ReplicationSlot, WalAccumulationNoWarningForInactiveUnderThreshold) {
+    TempDir dir;
+    // Threshold of 500; retained will be 200 — must NOT warn.
+    ReplicationSlotManager mgr(dir.path(), 500);
+
+    ASSERT_TRUE(mgr.create_slot("replica_1").has_value());
+    mgr.update_confirmed_lsn("replica_1", 100);
+    ASSERT_TRUE(mgr.deactivate_slot("replica_1").has_value());
+
+    // retained = 300 - 100 = 200 <= 500 threshold — no warning.
+    auto warned = mgr.check_wal_accumulation(300);
+    EXPECT_TRUE(warned.empty());
 }
 
 // -- Concurrent access --------------------------------------------------------

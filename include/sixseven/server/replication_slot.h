@@ -97,7 +97,8 @@ public:
 
     /// Check WAL accumulation for inactive slots and log warnings.
     /// @param current_lsn  The primary's current WAL LSN.
-    void check_wal_accumulation(lsn_t current_lsn) const;
+    /// @return Names of inactive slots whose retained WAL exceeded the threshold.
+    std::vector<std::string> check_wal_accumulation(lsn_t current_lsn) const;
 
 private:
     /// Persist slots without locking (caller must hold mutex_).
