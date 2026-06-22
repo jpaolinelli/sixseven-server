@@ -72,19 +72,16 @@ TEST(QA_WalRecord, DeserializeRecordLengthThreeCausesUnderflow) {
 }
 
 TEST(QA_WalRecord, DeserializeRecordLengthExactlyFour) {
-    // record_length = 4 — crc_length = 0 (no underflow). CRC of 0 bytes
-    // happens to match the all-zero buffer, so deserialization "succeeds"
-    // with garbage data. This is a Medium bug: the function should reject
-    // record_length values too small to hold the header (39) + CRC (4) = 43.
+    // record_length = 4 is below the minimum valid value of 43
+    // (header=39 + crc=4). GDB-889: the prod fix now rejects record_length
+    // values that cannot hold a complete header+CRC, so this must FAIL.
     std::vector<uint8_t> buf(47, 0);
     uint32_t record_length = 4;
     std::memcpy(buf.data(), &record_length, sizeof(uint32_t));
 
     auto result = deserialize_wal_record(buf);
-    // Documenting current behavior: succeeds with garbage (all zeros).
-    // Ideally should fail — record_length < 43 cannot hold a valid header.
-    // This is a related Medium finding to the Critical underflow bug.
-    EXPECT_TRUE(result.has_value());
+    // record_length=4 is now correctly REJECTED (too small for header+CRC).
+    EXPECT_FALSE(result.has_value());
 }
 
 TEST(QA_WalRecord, DeserializeRecordLengthSmallerThanHeaderPlusCrc) {
@@ -96,6 +93,50 @@ TEST(QA_WalRecord, DeserializeRecordLengthSmallerThanHeaderPlusCrc) {
 
     auto result = deserialize_wal_record(buf);
     EXPECT_FALSE(result.has_value());
+}
+
+TEST(QA_WalRecord, DeserializeRecordLengthFortyTwoRejected) {
+    // GDB-889 boundary regression: record_length=42 is one below the minimum
+    // (43 = header(39) + crc(4)) and must be REJECTED.
+    std::vector<uint8_t> buf(47, 0);
+    uint32_t record_length = 42;
+    std::memcpy(buf.data(), &record_length, sizeof(uint32_t));
+
+    auto result = deserialize_wal_record(buf);
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(QA_WalRecord, DeserializeMinimalValidRecordRoundTrips) {
+    // GDB-889 boundary regression: a real serialized BEGIN record with empty
+    // data must have record_length == 43 (the minimum) and must deserialize
+    // correctly. Proves the fix does NOT over-correct into rejecting valid records.
+    WalRecord record;
+    record.lsn = 1;
+    record.txn_id = 2;
+    record.prev_lsn = 0;
+    record.type = WalRecordType::BEGIN;
+    record.table_id = 0;
+    record.page_id = 0;
+    record.slot_id = 0;
+    record.data.clear(); // Empty — minimal record.
+
+    auto bytes = serialize_wal_record(record);
+
+    // The total serialized size must be wal_record_overhead (47 = 4 + 43).
+    ASSERT_EQ(bytes.size(), wal_record_overhead);
+
+    // The record_length field (first 4 bytes) must equal kMinRecordLength = 43.
+    uint32_t stored_record_length = 0;
+    std::memcpy(&stored_record_length, bytes.data(), sizeof(uint32_t));
+    EXPECT_EQ(stored_record_length, 43u);
+
+    // Deserialization must succeed and round-trip all fields.
+    auto result = deserialize_wal_record(bytes);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->lsn, 1u);
+    EXPECT_EQ(result->txn_id, 2u);
+    EXPECT_EQ(result->type, WalRecordType::BEGIN);
+    EXPECT_TRUE(result->data.empty());
 }
 
 TEST(QA_WalRecord, DeserializeRecordLengthMaxUint32) {
