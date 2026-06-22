@@ -3,6 +3,7 @@
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/result.h"
 #include "sixseven/common/value.h"
+#include "sixseven/executor/graph_traversal_core.h"
 #include "sixseven/executor/iterator.h"
 #include "sixseven/executor/pattern_match.h"
 #include "sixseven/executor/storage_manager.h"

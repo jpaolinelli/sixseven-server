@@ -2,41 +2,13 @@
 
 #include "sixseven/common/coercion.h"
 #include "sixseven/common/value_hash.h"
+#include "sixseven/executor/graph_traversal_core.h"
 
 #include <deque>
-#include <functional>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace sixseven {
-
-namespace {
-
-/// A table-aware node identity: (table_id, pk).
-///
-/// Used as the map/set key in the bidirectional BFS when the edge is
-/// heterogeneous — i.e. source and target nodes live in different tables.
-/// Without the table discriminant, two nodes from different tables with the
-/// same PK value would collide in the visited/parent maps, either fabricating
-/// a meeting point or silently dropping valid nodes (GDB-842).
-struct NodeId {
-    table_id_t table_id = 0;
-    Value pk;
-
-    bool operator==(const NodeId& other) const {
-        return table_id == other.table_id && ValueEqual{}(pk, other.pk);
-    }
-};
-
-struct NodeIdHash {
-    size_t operator()(const NodeId& n) const {
-        size_t h = std::hash<table_id_t>{}(n.table_id);
-        h ^= ValueHash{}(n.pk) + 0x9e3779b9U + (h << 6) + (h >> 2);
-        return h;
-    }
-};
-
-} // namespace
 
 ShortestPathOperator::ShortestPathOperator(GraphEngine& graph_engine,
                                            ShortestPathConfig config,
@@ -256,28 +228,16 @@ Result<void> ShortestPathOperator::run_bidirectional_bfs() {
 
 Result<std::vector<Value>> ShortestPathOperator::get_neighbors(const Value& node_pk,
                                                                TraverseDirection dir) const {
+    auto pairs =
+        expand_neighbors_ids(graph_engine_, config_.database_id, config_.edge_type, node_pk, dir);
+    if (!pairs) {
+        return tl::unexpected(pairs.error());
+    }
     std::vector<Value> result;
-
-    if (dir == TraverseDirection::OUT || dir == TraverseDirection::BOTH) {
-        auto edges = graph_engine_.get_edges_from(config_.database_id, config_.edge_type, node_pk);
-        if (!edges) {
-            return tl::unexpected(edges.error());
-        }
-        for (auto& edge : *edges) {
-            result.push_back(std::move(edge.target_pk));
-        }
+    result.reserve(pairs->size());
+    for (auto& [pk, /*edge_id*/ unused] : *pairs) {
+        result.push_back(std::move(pk));
     }
-
-    if (dir == TraverseDirection::IN || dir == TraverseDirection::BOTH) {
-        auto edges = graph_engine_.get_edges_to(config_.database_id, config_.edge_type, node_pk);
-        if (!edges) {
-            return tl::unexpected(edges.error());
-        }
-        for (auto& edge : *edges) {
-            result.push_back(std::move(edge.source_pk));
-        }
-    }
-
     return ok(std::move(result));
 }
 

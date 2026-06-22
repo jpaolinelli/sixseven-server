@@ -3,6 +3,7 @@
 #include "sixseven/common/coercion.h"
 #include "sixseven/common/value_hash.h"
 #include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/executor/graph_traversal_core.h"
 #include "sixseven/table/tuple.h"
 
 #include <algorithm>
@@ -13,48 +14,6 @@
 #include <unordered_set>
 
 namespace sixseven {
-
-namespace {
-
-/// A table-aware node identity: (table_id, pk).
-///
-/// Keying BFS visited/cost maps by bare PK Value causes cross-table PK
-/// collisions when src and tgt nodes belong to different tables (GDB-851).
-/// Using NodeId prevents two nodes from different tables with the same PK
-/// from being treated as the same node.
-struct NodeId {
-    table_id_t table_id = 0;
-    Value pk;
-
-    bool operator==(const NodeId& other) const {
-        return table_id == other.table_id && ValueEqual{}(pk, other.pk);
-    }
-};
-
-struct NodeIdHash {
-    size_t operator()(const NodeId& n) const {
-        size_t h = std::hash<table_id_t>{}(n.table_id);
-        h ^= ValueHash{}(n.pk) + 0x9e3779b9U + (h << 6) + (h >> 2);
-        return h;
-    }
-};
-
-/// Convert a Value PK to int64_t for PathStep storage.
-/// Returns an error if the PK is not an integer type.
-Result<int64_t> pk_to_int64(const Value& pk) {
-    if (!pk.is_null()) {
-        if (auto* p = std::get_if<int64_t>(&pk.data())) {
-            return ok(*p);
-        }
-        if (auto* p32 = std::get_if<int32_t>(&pk.data())) {
-            return ok(static_cast<int64_t>(*p32));
-        }
-    }
-    return make_error(StatusCode::INVALID_ARGUMENT,
-                      "shortest path MATCH requires integer primary keys");
-}
-
-} // namespace
 
 MatchShortestPathOperator::MatchShortestPathOperator(GraphEngine& graph_engine,
                                                      const Catalog& catalog,
@@ -181,26 +140,7 @@ MatchShortestPathOperator::get_all_pks(const std::string& table_name) const {
 
 Result<std::vector<std::pair<Value, int64_t>>> MatchShortestPathOperator::get_neighbors(
     const std::string& edge_type, const Value& pk, TraverseDirection direction) const {
-    std::vector<std::pair<Value, int64_t>> neighbors;
-
-    if (direction == TraverseDirection::OUT || direction == TraverseDirection::BOTH) {
-        auto fwd = graph_engine_.get_edges_from(database_id_, edge_type, pk);
-        if (fwd) {
-            for (auto& e : *fwd) {
-                neighbors.emplace_back(std::move(e.target_pk), static_cast<int64_t>(e.edge_row_id));
-            }
-        }
-    }
-    if (direction == TraverseDirection::IN || direction == TraverseDirection::BOTH) {
-        auto rev = graph_engine_.get_edges_to(database_id_, edge_type, pk);
-        if (rev) {
-            for (auto& e : *rev) {
-                neighbors.emplace_back(std::move(e.source_pk), static_cast<int64_t>(e.edge_row_id));
-            }
-        }
-    }
-
-    return ok(std::move(neighbors));
+    return expand_neighbors_ids(graph_engine_, database_id_, edge_type, pk, direction);
 }
 
 Result<std::vector<Value>> MatchShortestPathOperator::fetch_node_data(const std::string& table_name,
