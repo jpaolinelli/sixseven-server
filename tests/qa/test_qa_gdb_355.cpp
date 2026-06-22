@@ -33,7 +33,7 @@ TEST(QA_GDB355, OverlongNulC080) {
     std::string input = "\xC0\x80";
     std::string result = norm.normalize(input);
     // Should contain replacement character(s), NOT a NUL byte.
-    EXPECT_NE(result.find('\x00'), std::string::npos - 1); // no raw NUL
+    EXPECT_EQ(result.find('\x00'), std::string::npos); // no raw NUL
     EXPECT_NE(result.find(REPLACEMENT), std::string::npos);
 }
 
