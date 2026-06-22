@@ -632,3 +632,121 @@ TEST_F(EdgePersistenceTest, EdgeIndexWithProperties) {
     ASSERT_TRUE(to_100.has_value()) << to_100.error().message;
     EXPECT_EQ(to_100->size(), 2u);
 }
+
+// == GDB-879: drop_edge_type dedup + null-guard regression ====================
+
+// (a/b) drop_edge_type on a persistent engine removes edge type, returns ok().
+//       Second drop returns NOT_FOUND.
+TEST_F(EdgePersistenceTest, GDB879_DropEdgeTypePersistentOkThenNotFound) {
+    auto et = engine_->create_edge_type(default_database_id,
+                                        "knows",
+                                        users_table_id_,
+                                        users_table_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {});
+    ASSERT_TRUE(et.has_value()) << et.error().message;
+
+    ASSERT_TRUE(engine_->link(default_database_id, "knows", pk(1), pk(2)).has_value());
+
+    // First drop: should succeed.
+    auto drop1 = engine_->drop_edge_type(default_database_id, "knows");
+    ASSERT_TRUE(drop1.has_value()) << drop1.error().message;
+
+    // Edge type should be gone.
+    auto after = engine_->get_edges_from(default_database_id, "knows", pk(1));
+    ASSERT_FALSE(after.has_value());
+    EXPECT_EQ(after.error().code, StatusCode::NOT_FOUND);
+
+    // Second drop: should return NOT_FOUND.
+    auto drop2 = engine_->drop_edge_type(default_database_id, "knows");
+    ASSERT_FALSE(drop2.has_value());
+    EXPECT_EQ(drop2.error().code, StatusCode::NOT_FOUND);
+}
+
+// (b) drop_edge_type removes the storage file from disk.
+TEST_F(EdgePersistenceTest, GDB879_DropEdgeTypeRemovesStorageFile) {
+    auto et = engine_->create_edge_type(default_database_id,
+                                        "owns",
+                                        users_table_id_,
+                                        posts_table_id_,
+                                        TypeId::INT64,
+                                        TypeId::INT64,
+                                        {});
+    ASSERT_TRUE(et.has_value()) << et.error().message;
+    edge_id_t eid = *et;
+
+    ASSERT_TRUE(engine_->link(default_database_id, "owns", pk(10), pk(20)).has_value());
+
+    // Compute the expected file path (mirrors GraphEngine::edge_file_path).
+    auto expected_path = data_dir_ / "databases" /
+                         std::to_string(default_database_id) / "edges" /
+                         ("edge_" + std::to_string(eid) + ".db");
+    ASSERT_TRUE(std::filesystem::exists(expected_path))
+        << "storage file should exist after create";
+
+    auto drop = engine_->drop_edge_type(default_database_id, "owns");
+    ASSERT_TRUE(drop.has_value()) << drop.error().message;
+
+    EXPECT_FALSE(std::filesystem::exists(expected_path))
+        << "storage file should be removed after drop";
+}
+
+// (c) LATENT-BUG REGRESSION: drop_edge_type on a non-persistent GraphEngine
+//     (dm_==nullptr) must not crash.
+//
+// A non-persistent engine has no edge_storage_ entries for edge types it owns,
+// so the teardown path skips the storage block entirely. The edge table is
+// simply removed from the in-memory map. This test verifies that no null-deref
+// occurs and that both drop_edge_type and drop_edge_type_locked produce the
+// same observable end-state (edge type absent, second call returns NOT_FOUND).
+TEST(GDB879_NullDmDropEdgeType, DropEdgeTypeNoPersistenceDoesNotCrash) {
+    Catalog catalog;
+    // Use the non-persistent constructor (dm_ stays nullptr).
+    GraphEngine engine(catalog);
+
+    // Bootstrap catalog so create_edge_type can register the edge type.
+    init_test_catalog(catalog);
+    database_id_t db_id = default_database_id;
+
+    // Register dummy tables directly in the catalog.
+    TableSchema src_schema;
+    src_schema.name = "nodes_a";
+    src_schema.columns = {{0, "id", TypeId::INT64, false, ""}};
+    src_schema.pk_columns = "id";
+    auto src = catalog.create_table(db_id, src_schema);
+    ASSERT_TRUE(src.has_value()) << src.error().message;
+
+    TableSchema tgt_schema;
+    tgt_schema.name = "nodes_b";
+    tgt_schema.columns = {{0, "id", TypeId::INT64, false, ""}};
+    tgt_schema.pk_columns = "id";
+    auto tgt = catalog.create_table(db_id, tgt_schema);
+    ASSERT_TRUE(tgt.has_value()) << tgt.error().message;
+
+    auto et = engine.create_edge_type(db_id,
+                                      "connected",
+                                      *src,
+                                      *tgt,
+                                      TypeId::INT64,
+                                      TypeId::INT64,
+                                      {});
+    ASSERT_TRUE(et.has_value()) << et.error().message;
+
+    // Add an in-memory edge so the engine is in a non-trivial state.
+    ASSERT_TRUE(engine.link(db_id, "connected", Value(int64_t{1}), Value(int64_t{2})).has_value());
+
+    // drop_edge_type should not crash or null-deref even with dm_==nullptr.
+    auto drop1 = engine.drop_edge_type(db_id, "connected");
+    ASSERT_TRUE(drop1.has_value()) << drop1.error().message;
+
+    // Edge type should be gone.
+    auto edges = engine.get_edges_from(db_id, "connected", Value(int64_t{1}));
+    ASSERT_FALSE(edges.has_value());
+    EXPECT_EQ(edges.error().code, StatusCode::NOT_FOUND);
+
+    // Second drop returns NOT_FOUND.
+    auto drop2 = engine.drop_edge_type(db_id, "connected");
+    ASSERT_FALSE(drop2.has_value());
+    EXPECT_EQ(drop2.error().code, StatusCode::NOT_FOUND);
+}

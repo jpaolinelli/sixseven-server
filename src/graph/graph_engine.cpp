@@ -301,19 +301,10 @@ Result<edge_id_t> GraphEngine::create_edge_type(database_id_t database_id,
     return ok(*edge_id_result);
 }
 
-void GraphEngine::drop_edge_type_locked(const std::string& edge_key,
-                                        database_id_t database_id,
-                                        const std::string& name) {
-    auto it = edge_tables_.find(edge_key);
-    if (it == edge_tables_.end()) {
-        return;
-    }
-
-    auto edge_id = it->second->config().edge_id;
-
-    // Remove from catalog (ignore errors — may already be removed by CASCADE).
-    (void)catalog_.drop_edge_type(database_id, name);
-
+void GraphEngine::teardown_edge_storage_locked(const std::string& edge_key,
+                                               database_id_t database_id,
+                                               const std::string& name,
+                                               edge_id_t edge_id) {
     // Remove persistent storage if present.
     auto sit = edge_storage_.find(edge_key);
     if (sit != edge_storage_.end()) {
@@ -348,9 +339,25 @@ void GraphEngine::drop_edge_type_locked(const std::string& edge_key,
     }
 
     // Remove the backing EdgeTable.
-    edge_tables_.erase(it);
+    edge_tables_.erase(edge_key);
 
     SIXSEVEN_LOG_INFO("dropped edge type '{}' (database={})", name, database_id);
+}
+
+void GraphEngine::drop_edge_type_locked(const std::string& edge_key,
+                                        database_id_t database_id,
+                                        const std::string& name) {
+    auto it = edge_tables_.find(edge_key);
+    if (it == edge_tables_.end()) {
+        return;
+    }
+
+    auto edge_id = it->second->config().edge_id;
+
+    // Remove from catalog (ignore errors — may already be removed by CASCADE).
+    (void)catalog_.drop_edge_type(database_id, name);
+
+    teardown_edge_storage_locked(edge_key, database_id, name, edge_id);
 }
 
 Result<void> GraphEngine::drop_edge_type(database_id_t database_id, const std::string& name) {
@@ -366,45 +373,13 @@ Result<void> GraphEngine::drop_edge_type(database_id_t database_id, const std::s
 
     auto edge_id = it->second->config().edge_id;
 
-    // Remove from catalog.
+    // Remove from catalog (error-propagating — unlike the locked variant).
     auto drop_result = catalog_.drop_edge_type(database_id, name);
     if (!drop_result.has_value()) {
         return tl::unexpected(drop_result.error());
     }
 
-    // Remove persistent storage if present.
-    auto sit = edge_storage_.find(key);
-    if (sit != edge_storage_.end()) {
-        auto& storage = *sit->second;
-
-        // Close and remove edge index files.
-        auto close_and_remove_idx = [&](std::unique_ptr<EdgeIndexStorage>& idx,
-                                        const std::string& suffix) {
-            if (idx) {
-                (void)idx->bpm->flush_all();
-                (void)dm_->close_file(idx->file_id);
-                idx.reset();
-            }
-            std::filesystem::remove(edge_index_path(database_id, edge_id, suffix));
-        };
-        close_and_remove_idx(storage.fwd_idx, "fwd");
-        close_and_remove_idx(storage.rev_idx, "rev");
-        close_and_remove_idx(storage.uniq_idx, "uniq");
-
-        // Close and remove heap file.
-        (void)storage.bpm->flush_all();
-        (void)dm_->close_file(storage.file_id);
-
-        auto path = edge_file_path(database_id, edge_id);
-        std::filesystem::remove(path);
-
-        edge_storage_.erase(sit);
-    }
-
-    // Remove the backing EdgeTable.
-    edge_tables_.erase(it);
-
-    SIXSEVEN_LOG_INFO("dropped edge type '{}' (database={})", name, database_id);
+    teardown_edge_storage_locked(key, database_id, name, edge_id);
     return ok();
 }
 
