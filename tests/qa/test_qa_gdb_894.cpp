@@ -181,8 +181,7 @@ TEST_F(QA_GDB894_AsymmetricGraph, GDB894_ShortestPath_BOTH_FindsReverseEdge) {
     }
 
     // BOTH: path 3->2->1 via reverse edges (2 hops).
-    auto qr_both =
-        exec_ok("SHORTEST PATH FROM users(3) TO users(1) VIA follows DIRECTION BOTH");
+    auto qr_both = exec_ok("SHORTEST PATH FROM users(3) TO users(1) VIA follows DIRECTION BOTH");
     EXPECT_GT(qr_both.rows.size(), 0u)
         << "BOTH direction should find path 3->2->1 via reverse edges";
 }
@@ -201,8 +200,7 @@ TEST_F(QA_GDB894_AsymmetricGraph, GDB894_ShortestPath_OUT_DirectionCorrect) {
 TEST_F(QA_GDB894_AsymmetricGraph, GDB894_PatternMatch_BOTH_FromNode2_BothNeighbors) {
     // FROM MATCH with BOTH direction from node 2: should find both 1 (incoming) and 3 (outgoing).
     // pattern_match uses undirected matching: (a)-[e:follows]-(b) retrieves both.
-    auto qr = exec_ok(
-        "SELECT b.id FROM MATCH (a:users)-[e:follows]-(b:users) WHERE a.id = 2");
+    auto qr = exec_ok("SELECT b.id FROM MATCH (a:users)-[e:follows]-(b:users) WHERE a.id = 2");
     auto pks = pk_set(qr);
     EXPECT_EQ(pks.count(1), 1u) << "Pattern match undirected: incoming neighbor 1 must be found";
     EXPECT_EQ(pks.count(3), 1u) << "Pattern match undirected: outgoing neighbor 3 must be found";
@@ -210,8 +208,7 @@ TEST_F(QA_GDB894_AsymmetricGraph, GDB894_PatternMatch_BOTH_FromNode2_BothNeighbo
 
 TEST_F(QA_GDB894_AsymmetricGraph, GDB894_PatternMatch_DirectedOut_OnlyOutgoing) {
     // Directed pattern match (->): from node 2, only out-neighbor 3.
-    auto qr = exec_ok(
-        "SELECT b.id FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.id = 2");
+    auto qr = exec_ok("SELECT b.id FROM MATCH (a:users)-[e:follows]->(b:users) WHERE a.id = 2");
     auto pks = pk_set(qr);
     EXPECT_EQ(pks.count(3), 1u);
     EXPECT_EQ(pks.count(1), 0u) << "Directed OUT pattern match must not return incoming neighbor 1";
@@ -289,11 +286,10 @@ TEST_F(QA_GDB894_CyclicGraph, GDB894_ShortestPath_Cyclic_FindsCorrectPath) {
 
 TEST_F(QA_GDB894_CyclicGraph, GDB894_VariableLengthMatch_Cyclic_Terminates) {
     // Variable-length match on cyclic graph. Should terminate within max_visited.
-    auto result = engine_->execute(
-        "SELECT a.id, b.id FROM MATCH (a:nodes)-[r:loops]->{1,3}(b:nodes)");
+    auto result =
+        engine_->execute("SELECT a.id, b.id FROM MATCH (a:nodes)-[r:loops]->{1,3}(b:nodes)");
     // Should not hang. Accept success or INVALID_ARGUMENT (max_visited exceeded).
-    EXPECT_TRUE(result.has_value() ||
-                result.error().code == StatusCode::INVALID_ARGUMENT)
+    EXPECT_TRUE(result.has_value() || result.error().code == StatusCode::INVALID_ARGUMENT)
         << "Variable length match on cyclic graph must terminate: "
         << (result ? "" : result.error().message);
 }
@@ -634,8 +630,8 @@ protected:
         exec_ok("CREATE TABLE users (id INT PRIMARY KEY, val INT)");
         exec_ok("INSERT INTO users VALUES (1, 100)"); // hub
         for (int i = 2; i <= kSpokes + 1; ++i) {
-            exec_ok("INSERT INTO users VALUES (" + std::to_string(i) + ", " +
-                    std::to_string(i) + ")");
+            exec_ok("INSERT INTO users VALUES (" + std::to_string(i) + ", " + std::to_string(i) +
+                    ")");
         }
         exec_ok("CREATE EDGE TYPE spoke FROM users TO users");
         // hub -> all spokes (OUT only — no reverse edges)
