@@ -33,8 +33,7 @@ class QA_GDB895 : public ::testing::Test {
 protected:
     void SetUp() override {
         std::string tag = std::to_string(reinterpret_cast<uintptr_t>(this));
-        data_dir_ =
-            std::filesystem::temp_directory_path() / ("sixseven_qa_gdb895_" + tag);
+        data_dir_ = std::filesystem::temp_directory_path() / ("sixseven_qa_gdb895_" + tag);
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
         dm_ = std::make_unique<DiskManager>();
