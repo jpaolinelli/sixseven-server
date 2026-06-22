@@ -178,7 +178,7 @@ uint32_t pg_oid(TypeId t) {
 
 } // namespace
 
-VirtualTableDef make_pg_database() {
+VirtualTableDef make_pg_database(Catalog& catalog) {
     VirtualTableDef def;
     def.name = "pg_database";
     def.columns = {
@@ -187,8 +187,12 @@ VirtualTableDef make_pg_database() {
         {2, "datdba", TypeId::INT32, false, ""},
         {3, "encoding", TypeId::INT32, false, ""},
     };
-    def.generator = []() -> std::vector<std::vector<std::string>> {
-        return {{"1", "sixsevendb", "10", "6"}};
+    def.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
+        std::vector<std::vector<std::string>> rows;
+        for (const auto& db : catalog.list_databases()) {
+            rows.push_back({std::to_string(db.database_id), db.name, "10", "6"});
+        }
+        return rows;
     };
     return def;
 }
@@ -371,7 +375,7 @@ VirtualTableDef make_pg_index(Catalog& catalog) {
 }
 
 void register_pg_catalog_tables(Catalog& catalog) {
-    catalog.register_virtual_table(make_pg_database());
+    catalog.register_virtual_table(make_pg_database(catalog));
     catalog.register_virtual_table(make_pg_namespace());
     catalog.register_virtual_table(make_pg_type());
     catalog.register_virtual_table(make_pg_class(catalog));

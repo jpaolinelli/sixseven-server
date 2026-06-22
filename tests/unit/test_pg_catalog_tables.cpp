@@ -278,8 +278,6 @@ TEST(PgNamespace, LookupSucceeds) {
 // Helper: pg_oid / pg_typlen lambdas (matching production)
 // =========================================================================
 
-
-
 // =========================================================================
 // Helper: register pg_class and pg_attribute
 // =========================================================================
@@ -714,7 +712,7 @@ void register_pg_index(Catalog& catalog) {
 }
 
 void register_pg_database(Catalog& catalog) {
-    catalog.register_virtual_table(make_pg_database());
+    catalog.register_virtual_table(make_pg_database(catalog));
 }
 
 // =========================================================================
@@ -823,27 +821,71 @@ std::vector<DatabaseRow> scan_pg_database(Catalog& catalog) {
 // pg_database tests
 // =========================================================================
 
-TEST(PgDatabase, ReturnsSingleRow) {
+TEST(PgDatabase, ReturnsOneRowPerCatalogDatabase) {
     Catalog catalog;
     init_test_catalog(catalog);
     register_pg_database(catalog);
 
+    // The Catalog ctor creates system_database_id="sixseven_system" and
+    // init_test_catalog adds default_database_id="demo" -> 2 databases total.
     auto rows = scan_pg_database(catalog);
-    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows.size(), catalog.list_databases().size());
 }
 
-TEST(PgDatabase, HasCorrectValues) {
+TEST(PgDatabase, DefaultDatabaseRowHasCorrectValues) {
     Catalog catalog;
     init_test_catalog(catalog);
     register_pg_database(catalog);
 
     auto rows = scan_pg_database(catalog);
-    ASSERT_EQ(rows.size(), 1u);
 
-    EXPECT_EQ(rows[0].oid, 1);
-    EXPECT_EQ(rows[0].datname, "sixsevendb");
-    EXPECT_EQ(rows[0].datdba, 10);
-    EXPECT_EQ(rows[0].encoding, 6);
+    // Find the default ("demo") database row.
+    const DatabaseRow* demo_row = nullptr;
+    for (const auto& r : rows) {
+        if (r.datname == default_database_name) {
+            demo_row = &r;
+            break;
+        }
+    }
+    ASSERT_NE(demo_row, nullptr) << "Expected a row for the default database";
+    EXPECT_EQ(demo_row->oid, default_database_id);
+    EXPECT_EQ(demo_row->datdba, 10);
+    EXPECT_EQ(demo_row->encoding, 6);
+}
+
+TEST(PgDatabase, NewDatabaseAppearsInPgDatabase) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    register_pg_database(catalog);
+
+    // Record baseline count (system db + default db).
+    auto baseline_count = catalog.list_databases().size();
+
+    // Add another database and verify it appears in pg_database output.
+    auto create_r = catalog.create_database("testdb_extra");
+    ASSERT_TRUE(create_r.has_value()) << create_r.error().message;
+    database_id_t new_id = *create_r;
+
+    // The generator captures catalog by reference, so calling it after the new
+    // database is created must return one additional row.
+    auto vt = catalog.get_virtual_table("pg_database");
+    ASSERT_TRUE(vt.has_value());
+    auto raw_rows = vt->generator();
+
+    EXPECT_EQ(raw_rows.size(), baseline_count + 1u);
+
+    bool found_default = false;
+    bool found_new = false;
+    for (const auto& row : raw_rows) {
+        if (row[0] == std::to_string(default_database_id) && row[1] == default_database_name) {
+            found_default = true;
+        }
+        if (row[0] == std::to_string(new_id) && row[1] == "testdb_extra") {
+            found_new = true;
+        }
+    }
+    EXPECT_TRUE(found_default) << "Default database row must still be present";
+    EXPECT_TRUE(found_new) << "Newly created database must appear in pg_database";
 }
 
 // =========================================================================

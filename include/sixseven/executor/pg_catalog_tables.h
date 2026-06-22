@@ -6,7 +6,7 @@ namespace sixseven {
 
 class Catalog;
 
-VirtualTableDef make_pg_database();
+VirtualTableDef make_pg_database(Catalog& catalog);
 VirtualTableDef make_pg_namespace();
 VirtualTableDef make_pg_type();
 VirtualTableDef make_pg_class(Catalog& catalog);
