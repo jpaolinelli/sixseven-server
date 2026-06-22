@@ -511,18 +511,16 @@ TEST_F(QA_GDB324, LoadTokenizerMissingModelTypeFails) {
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
-TEST_F(QA_GDB324, LoadTokenizerUnigramTypeReturnsUnsupported) {
+TEST_F(QA_GDB324, LoadTokenizerArrayFormVocabFails) {
+    // write_unigram_json writes model.vocab as a JSON array, not an object.
+    // load_tokenizer_config requires vocab to be an object (string->int map);
+    // the array form must be rejected with PARSE_ERROR.
     auto unigram_path = base_dir_ / "unigram.json";
     write_unigram_json(unigram_path);
 
-    // Unigram model type is parsed but may be unsupported for tokenizer creation.
     auto result = load_tokenizer_config(unigram_path.string());
-    // The loader should fail because Unigram is not fully supported.
-    // Actually, looking at the code, parse_model_type returns UNIGRAM successfully,
-    // but there's no vocab object. Let me check...
-    // Actually the Unigram json we wrote has no proper vocab object format.
-    // Let's test with a proper one.
     ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
 
 TEST_F(QA_GDB324, LoadTokenizerNonexistentFileFails) {
@@ -551,7 +549,11 @@ TEST_F(QA_GDB324, LoadTokenizerJsonArrayRootFails) {
 
 // ===========================================================================
 // Tokenizer config with unsupported model type (Unigram)
-// - Tests that create_onnx_provider falls back to HashTokenizer
+// - A proper-object-vocab Unigram config is accepted by load_tokenizer_config
+//   (model_type == UNIGRAM), but create_onnx_provider returns INVALID_ARGUMENT
+//   for any model type other than WordPiece or BPE (default: case in the
+//   switch in src/vector/onnx_provider.cpp).  There is no HashTokenizer
+//   fallback on the unsupported-model-type path.
 // ===========================================================================
 
 TEST_F(QA_GDB324, LoadUnigramTokenizerConfigSucceeds) {
@@ -569,6 +571,29 @@ TEST_F(QA_GDB324, LoadUnigramTokenizerConfigSucceeds) {
     // Unigram is a valid model type in the parser.
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->model_type, TokenizerModelType::UNIGRAM);
+}
+
+TEST_F(QA_GDB324, CreateOnnxProviderUnigramTypeReturnsInvalidArgument) {
+    // create_onnx_provider's switch handles WORDPIECE and BPE only; the
+    // default: case returns INVALID_ARGUMENT for every other model type.
+    // This test drives that branch with a Unigram tokenizer.json whose vocab
+    // is a proper object (so load_tokenizer_config succeeds and the switch is
+    // reached), paired with a dummy model.onnx file (content is irrelevant —
+    // resolve_onnx_model_paths only checks existence, not content).
+    auto dir = base_dir_ / "unigram_provider";
+    write_file(dir / "model.onnx", "dummy");
+    nlohmann::json doc;
+    doc["model"]["type"] = "Unigram";
+    doc["model"]["vocab"] = {{"hello", 1}, {"world", 2}};
+    doc["added_tokens"] = nlohmann::json::array();
+    std::ofstream tok_out(dir / "tokenizer.json");
+    tok_out << doc.dump();
+    tok_out.close();
+
+    auto result = create_onnx_provider(dir.string(), 384);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_NE(result.error().message.find("unsupported tokenizer model type"), std::string::npos);
 }
 
 // ===========================================================================
