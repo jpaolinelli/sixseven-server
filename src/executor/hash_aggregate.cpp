@@ -263,25 +263,27 @@ Value finalise(AccumulatorState& state) {
         return Value(state.count);
 
     case AggFunc::COUNT_DISTINCT: {
-        // Deduplicate by sorting and removing duplicates.
+        // Deduplicate using sort + unique — O(n log n), behavior-identical to
+        // the previous O(n^2) loop because both use compare() equality.
+        // ValueHash/ValueEqual cannot be used here: ValueHash hashes by the
+        // stored numeric type, so cross-type numerics (e.g. INT32(1) vs
+        // FLOAT64(1.0)) would hash differently even though compare() considers
+        // them equal, violating the unordered_set invariant.
         int64_t distinct_count = 0;
         if (!state.distinct_values.empty()) {
-            // Use a simple O(n^2) comparison for correctness.
-            std::vector<Value> unique;
-            for (auto& v : state.distinct_values) {
-                bool is_dup = false;
-                for (auto& u : unique) {
-                    auto cmp = compare(v, u);
-                    if (cmp && *cmp == std::strong_ordering::equal) {
-                        is_dup = true;
-                        break;
-                    }
-                }
-                if (!is_dup) {
-                    unique.push_back(v);
-                }
-            }
-            distinct_count = static_cast<int64_t>(unique.size());
+            std::sort(state.distinct_values.begin(),
+                      state.distinct_values.end(),
+                      [](const Value& a, const Value& b) {
+                          auto cmp = compare(a, b);
+                          return cmp && *cmp == std::strong_ordering::less;
+                      });
+            auto new_end = std::unique(state.distinct_values.begin(),
+                                       state.distinct_values.end(),
+                                       [](const Value& a, const Value& b) {
+                                           auto cmp = compare(a, b);
+                                           return cmp && *cmp == std::strong_ordering::equal;
+                                       });
+            distinct_count = static_cast<int64_t>(new_end - state.distinct_values.begin());
         }
         return Value(distinct_count);
     }
