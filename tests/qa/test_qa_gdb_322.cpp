@@ -109,17 +109,18 @@ TEST(QA_GDB322_GreedyLongestMatch, ChoosesLongestContinuationSubword) {
     EXPECT_EQ(ids[3], SEP);
 }
 
-TEST(QA_GDB322_GreedyLongestMatch, FallsBackToShorterPrefixWhenLongerFails) {
-    // "abce": "abce" not in vocab, "abc" not followed by continuation for "e".
-    // "abc"(301) matches first, then "e" -> "##e" not in vocab -> UNK for whole word.
-    // Actually wait: the algorithm returns UNK for the ENTIRE word if any
-    // continuation fails. So "abce" -> UNK.
+TEST(QA_GDB322_GreedyLongestMatch, ContinuationFailureAfterLongPrefixMakesWholeWordUNK) {
+    // WordPiece is greedy-longest-match with NO backtracking. "abc"(301) matches
+    // the longest prefix of "abce", but remainder "e" requires "##e" which is
+    // not in vocab, so the whole word becomes UNK. This case is retained because
+    // it exercises continuation-failure after a long (3-char "abc") prefix,
+    // complementing FirstCharMatchButContinuationFails ("af", fails after a
+    // 1-char match) - distinct match-length coverage, not a pure duplicate.
     auto config = make_qa_config();
     WordPieceTokenizer tok(config);
     auto ids = tok.encode("abce", 8);
     ASSERT_EQ(ids.size(), 8u);
     EXPECT_EQ(ids[0], CLS);
-    // "abc"(301) matches, remainder "e" needs "##e" which is not in vocab -> UNK for whole word
     EXPECT_EQ(ids[1], UNK);
     EXPECT_EQ(ids[2], SEP);
 }
