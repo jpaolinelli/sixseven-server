@@ -885,7 +885,7 @@ TEST(BTreeStress, FullScanSortedAfterMixedOps) {
     expected.reserve(66);
     for (int i = 0; i < 100; ++i) {
         if (i % 3 != 0) {
-            expected.push_back(static_cast<int64_t>(i * 3));
+            expected.push_back(static_cast<int64_t>(i) * 3);
         }
     }
     // expected is already sorted (i ascending => i*3 ascending).

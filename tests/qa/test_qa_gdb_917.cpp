@@ -11,12 +11,12 @@
 ///   3. Survivor set correctness: first=3, last=294, count=66.
 ///   4. Broader regression: full mixed insert/delete/scan path.
 
-#include "test_btree_helpers.h"
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <vector>
+
+#include "test_btree_helpers.h"
 
 using namespace sixseven;
 using namespace sixseven::test;
@@ -98,8 +98,7 @@ TEST(QA_GDB917, FullScanReturns66SurvivorsWithCorrectContent) {
 
     // Per-entry exact-key check (safe: ASSERT_EQ above guards against OOB).
     for (size_t k = 0; k < entries->size(); ++k) {
-        EXPECT_EQ(key_val((*entries)[k].first), expected[k])
-            << "Key mismatch at scan index " << k;
+        EXPECT_EQ(key_val((*entries)[k].first), expected[k]) << "Key mismatch at scan index " << k;
     }
 
     // Sortedness (pre-existing check, kept for completeness).
