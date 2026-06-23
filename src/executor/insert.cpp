@@ -5,6 +5,7 @@
 #include "sixseven/common/logging.h"
 #include "sixseven/common/types.h"
 #include "sixseven/executor/expr_evaluator.h"
+#include "sixseven/vector/embedding_column.h"
 #include "sixseven/vector/embedding_worker.h"
 
 #include <algorithm>
@@ -293,15 +294,20 @@ void InsertOperator::enqueue_embedding_jobs(const RID& rid, const std::vector<Va
         job.dimension = emb.dimension;
         job.type = EmbeddingJob::Type::INSERT;
 
-        // Resolve source column by name and extract text value.
-        for (size_t i = 0; i < column_names_.size() && i < values.size(); ++i) {
-            if (column_names_[i] == emb.source_expr) {
-                if (!values[i].is_null() && values[i].type_id() == TypeId::STRING) {
-                    job.source_text = values[i].as_string();
-                }
-                break;
-            }
+        // Resolve source text via the shared multi-column helper.
+        // Build a lightweight schema view from the insert column list so that
+        // build_source_text can match column names uniformly.
+        std::vector<CatalogColumnDef> insert_schema;
+        insert_schema.reserve(column_names_.size());
+        for (size_t i = 0; i < column_names_.size(); ++i) {
+            CatalogColumnDef cd;
+            cd.name = column_names_[i];
+            cd.ordinal = static_cast<int32_t>(i);
+            insert_schema.push_back(std::move(cd));
         }
+        auto src =
+            EmbeddingColumnManager::build_source_text(emb.source_expr, insert_schema, values);
+        job.source_text = std::move(src.text);
 
         // Skip jobs with empty or whitespace-only source text — NULL/blank source
         // means NULL embedding; no need to enqueue a job that will always fail.

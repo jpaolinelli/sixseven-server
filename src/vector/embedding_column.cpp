@@ -64,12 +64,12 @@ Result<void> EmbeddingColumnManager::register_table_embeddings(
         }
 
         SIXSEVEN_LOG_INFO("registered EMBEDDING column: table={}, column={}, dim={}, provider={}, "
-                       "index={}",
-                       table_schema.name,
-                       column_name,
-                       def.dimension,
-                       def.provider,
-                       index_def.name);
+                          "index={}",
+                          table_schema.name,
+                          column_name,
+                          def.dimension,
+                          def.provider,
+                          index_def.name);
     }
 
     return ok();
@@ -199,21 +199,80 @@ std::string EmbeddingColumnManager::make_index_name(const std::string& table_nam
     return "hnsw_" + table_name + "_" + column_name;
 }
 
+// ---------------------------------------------------------------------------
+// parse_source_columns
+// ---------------------------------------------------------------------------
+
+std::vector<std::string>
+EmbeddingColumnManager::parse_source_columns(const std::string& source_expr) {
+    std::vector<std::string> result;
+    if (source_expr.empty()) {
+        return result;
+    }
+    std::istringstream stream(source_expr);
+    std::string token;
+    while (std::getline(stream, token, ',')) {
+        // Trim leading and trailing ASCII spaces.
+        auto start = token.find_first_not_of(' ');
+        if (start == std::string::npos) {
+            continue; // blank token — skip
+        }
+        auto end = token.find_last_not_of(' ');
+        result.push_back(token.substr(start, end - start + 1));
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// build_source_text
+// ---------------------------------------------------------------------------
+
+EmbeddingColumnManager::SourceTextResult
+EmbeddingColumnManager::build_source_text(const std::string& source_expr,
+                                          const std::vector<CatalogColumnDef>& schema_columns,
+                                          const std::vector<Value>& values) {
+    SourceTextResult out;
+    auto col_names = parse_source_columns(source_expr);
+
+    std::string joined;
+    for (const auto& col_name : col_names) {
+        // Find the column index in the schema by name.
+        for (size_t i = 0; i < schema_columns.size(); ++i) {
+            if (schema_columns[i].name == col_name) {
+                ++out.resolved_count;
+                if (i < values.size() && !values[i].is_null() &&
+                    values[i].type_id() == TypeId::STRING) {
+                    const auto& part = values[i].as_string();
+                    if (!part.empty()) {
+                        if (!joined.empty()) {
+                            joined += ' ';
+                        }
+                        joined += part;
+                    }
+                }
+                break;
+            }
+        }
+        // Column names not found in the schema are silently skipped; they do not
+        // increment resolved_count.  A caller that gets resolved_count == 0 knows
+        // the source_expr is completely misconfigured.
+    }
+
+    out.text = std::move(joined);
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// source_expr_references (refactored to reuse parse_source_columns)
+// ---------------------------------------------------------------------------
+
 bool EmbeddingColumnManager::source_expr_references(
     const std::string& source_expr, const std::vector<std::string>& changed_columns) {
     // source_expr is a comma-separated list of column names (e.g., "name" or "name,active").
-    // Check if any changed column appears in the source expression.
+    // Check if any changed column appears in the parsed source expression.
+    auto parsed = parse_source_columns(source_expr);
     for (const auto& col : changed_columns) {
-        // Parse the source_expr by comma to match exact column names.
-        std::istringstream stream(source_expr);
-        std::string token;
-        while (std::getline(stream, token, ',')) {
-            // Trim whitespace.
-            auto start = token.find_first_not_of(' ');
-            auto end = token.find_last_not_of(' ');
-            if (start != std::string::npos) {
-                token = token.substr(start, end - start + 1);
-            }
+        for (const auto& token : parsed) {
             if (token == col) {
                 return true;
             }

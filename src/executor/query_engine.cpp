@@ -2137,16 +2137,9 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
             source_texts.reserve(batch.size());
 
             for (const auto& row : batch) {
-                std::string text;
-                for (size_t i = 0; i < table_schema->columns.size(); ++i) {
-                    if (table_schema->columns[i].name == target.def.source_expr) {
-                        if (!row.values[i].is_null() && row.values[i].type_id() == TypeId::STRING) {
-                            text = row.values[i].as_string();
-                        }
-                        break;
-                    }
-                }
-                source_texts.push_back(std::move(text));
+                auto src = EmbeddingColumnManager::build_source_text(
+                    target.def.source_expr, table_schema->columns, row.values);
+                source_texts.push_back(std::move(src.text));
             }
 
             // Batch embed via the provider.

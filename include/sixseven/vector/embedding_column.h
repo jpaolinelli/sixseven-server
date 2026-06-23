@@ -2,6 +2,7 @@
 
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/result.h"
+#include "sixseven/common/value.h"
 
 #include <cstdint>
 #include <string>
@@ -107,6 +108,47 @@ public:
     /// @return Index name in the format "hnsw_<table>_<column>".
     [[nodiscard]] static std::string make_index_name(const std::string& table_name,
                                                      const std::string& column_name);
+
+    /// Parse a comma-separated source_expr into a list of trimmed column names.
+    ///
+    /// "name,active" -> ["name", "active"]
+    /// " name , active " -> ["name", "active"]
+    /// "name" -> ["name"]
+    /// "" -> []
+    ///
+    /// @param source_expr The EMBEDDING source_expr field value.
+    /// @return Ordered list of trimmed column names (empty tokens omitted).
+    [[nodiscard]] static std::vector<std::string>
+    parse_source_columns(const std::string& source_expr);
+
+    /// Result of build_source_text.
+    struct SourceTextResult {
+        /// Space-joined text from all resolved columns (NULLs/non-STRINGs skipped).
+        std::string text;
+        /// How many parsed column names actually resolved to a matching schema column.
+        /// Zero means the source_expr is misconfigured (no column name matched any
+        /// schema column), distinguishable from legitimate all-NULL rows where
+        /// resolved_count > 0 but text is empty.
+        size_t resolved_count = 0;
+    };
+
+    /// Build source text by concatenating values for each parsed column name.
+    ///
+    /// For each column name from parse_source_columns(source_expr):
+    ///   - Finds the column index in schema_columns by name.
+    ///   - If the corresponding value is a non-null STRING, appends it.
+    ///   - NULL, non-STRING, or empty values are skipped (resolved_count still
+    ///     increments because the column was found in the schema).
+    /// Parts are joined with a single space separator.
+    ///
+    /// @param source_expr    The EMBEDDING source_expr field value.
+    /// @param schema_columns Schema column list (name + ordinal).
+    /// @param values         Row values in schema-column order.
+    /// @return SourceTextResult with the joined text and how many source columns resolved.
+    [[nodiscard]] static SourceTextResult
+    build_source_text(const std::string& source_expr,
+                      const std::vector<CatalogColumnDef>& schema_columns,
+                      const std::vector<Value>& values);
 
 private:
     /// Check whether a source expression references any of the changed columns.
