@@ -1,7 +1,6 @@
 #include "sixseven/server/server.h"
 
 #include "sixseven/common/logging.h"
-
 #include "sixseven/common/platform.h"
 
 #include <cerrno>
@@ -70,8 +69,8 @@ Result<void> Server::setup_listener() {
 
     // Allow address reuse.
     int opt = 1;
-    ::setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR,
-                 reinterpret_cast<const char*>(&opt), sizeof(opt));
+    ::setsockopt(
+        listen_fd_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt));
 
     auto nb_result = set_nonblocking(listen_fd_);
     if (!nb_result) {
@@ -156,7 +155,7 @@ void Server::do_shutdown() {
     // Step 2: Wait for the thread pool to drain pending work.
     if (thread_pool_) {
         SIXSEVEN_LOG_INFO("shutdown: draining thread pool ({} pending tasks)",
-                       thread_pool_->pending_tasks());
+                          thread_pool_->pending_tasks());
         thread_pool_->shutdown();
         SIXSEVEN_LOG_INFO("shutdown: thread pool drained");
     }
@@ -242,8 +241,8 @@ void Server::accept_connection() {
         std::lock_guard lock(connections_mutex_);
         if (connections_.size() >= config_.max_connections) {
             SIXSEVEN_LOG_WARN("max connections ({}) reached, rejecting fd={}",
-                           config_.max_connections,
-                           client_fd);
+                              config_.max_connections,
+                              client_fd);
             sixseven_platform::socket_close(client_fd);
             return;
         }
@@ -256,6 +255,20 @@ void Server::accept_connection() {
         sixseven_platform::socket_close(client_fd);
         return;
     }
+
+    // Belt-and-suspenders SIGPIPE suppression for macOS/BSD where MSG_NOSIGNAL
+    // is unavailable.  Linux uses MSG_NOSIGNAL in Connection::write_to_socket.
+    // Windows has no SIGPIPE, so this is a no-op there.
+#if defined(SO_NOSIGPIPE)
+    {
+        int nosig = 1;
+        ::setsockopt(client_fd,
+                     SOL_SOCKET,
+                     SO_NOSIGPIPE,
+                     reinterpret_cast<const char*>(&nosig),
+                     sizeof(nosig));
+    }
+#endif
 
     auto add_result = event_loop_->add_fd(client_fd, EventType::READ);
     if (!add_result) {

@@ -1,7 +1,6 @@
 #include "sixseven/server/connection.h"
 
 #include "sixseven/common/logging.h"
-
 #include "sixseven/common/platform.h"
 
 #include <cerrno>
@@ -89,9 +88,9 @@ Result<void> Connection::transition_to(ConnectionState new_state) {
     }
 
     SIXSEVEN_LOG_DEBUG("connection fd={} state {} -> {}",
-                    fd_,
-                    connection_state_name(state_),
-                    connection_state_name(new_state));
+                       fd_,
+                       connection_state_name(state_),
+                       connection_state_name(new_state));
     state_ = new_state;
     return ok();
 }
@@ -134,10 +133,22 @@ Result<size_t> Connection::write_to_socket() {
         return ok(size_t{0});
     }
 
+    // Use MSG_NOSIGNAL on Linux so a write to a disconnected peer returns
+    // EPIPE (errno) rather than raising SIGPIPE and potentially killing the
+    // process.  On macOS/BSD MSG_NOSIGNAL does not exist; SO_NOSIGPIPE is set
+    // on the accepted socket instead (see server.cpp accept_connection).  On
+    // Windows neither exists and Winsock has no SIGPIPE concept, so flags=0
+    // is correct there too.
+#if defined(MSG_NOSIGNAL)
+    constexpr int kSendFlags = MSG_NOSIGNAL;
+#else
+    constexpr int kSendFlags = 0;
+#endif
+
     ssize_t n = ::send(fd_,
                        reinterpret_cast<const char*>(write_buffer_.data()),
                        static_cast<int>(write_buffer_.size()),
-                       0);
+                       kSendFlags);
     if (n < 0) {
 #if defined(_WIN32)
         if (sixseven_platform::is_socket_would_block()) {

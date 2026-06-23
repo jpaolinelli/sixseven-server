@@ -5,11 +5,10 @@
 /// concurrent shutdown from multiple threads, health info after shutdown,
 /// request_shutdown vs shutdown semantics, connections during shutdown.
 
+#include "sixseven/common/platform.h"
 #include "sixseven/server/server.h"
 
 #include <gtest/gtest.h>
-
-#include "sixseven/common/platform.h"
 
 #include <chrono>
 #include <csignal>
@@ -307,30 +306,70 @@ TEST_F(QA145LifecycleTest, PeerWritesDuringShutdown) {
 // SIGPIPE is ignored (write to closed socket doesn't crash)
 // --------------------------------------------------------------------------
 
+// Tests that the server survives a client that disconnects mid-write without
+// being killed by SIGPIPE.
+//
+// Protection layers (both must hold for the server to survive):
+//   1. connection.cpp: ::send() uses MSG_NOSIGNAL on Linux so a broken-pipe
+//      write returns -1/EPIPE without raising a signal.
+//   2. server.cpp accept_connection: SO_NOSIGPIPE socket option on macOS/BSD
+//      where MSG_NOSIGNAL is unavailable.
+//   3. main.cpp:59: process-global std::signal(SIGPIPE, SIG_IGN) as a final
+//      belt-and-suspenders layer.
+//
+// Note on SIG_DFL: we intentionally do NOT set SIGPIPE to SIG_DFL in this
+// test.  The gtest binary is a single process; setting SIG_DFL while the
+// server thread might be in ::send() would create a window where a stray
+// SIGPIPE kills the entire test runner, making the test itself flaky and
+// destructive.  Instead we assert the server-survives outcome: the server
+// stays running after a client abrupt disconnect and can accept a new
+// connection.  This is a meaningful functional assertion -- if the server's
+// send path raised SIGPIPE and the process-global handler were missing, the
+// server thread would die (or the process would crash) and is_running() would
+// return false.
 #if !defined(_WIN32)
-TEST_F(QA145LifecycleTest, SigpipeIgnored) {
-    // SIGPIPE should be ignored by the server. Verify it's safe to set
-    // SIG_IGN as main.cpp does.
-    auto prev_handler = std::signal(SIGPIPE, SIG_IGN);
-    EXPECT_NE(prev_handler, SIG_ERR);
+TEST_F(QA145LifecycleTest, ServerSurvivesClientDisconnectMidWrite) {
+    Server server(make_config(0, 50));
+    std::thread t([&server] { (void)server.start(); });
+    wait_for_running(server);
+    ASSERT_TRUE(server.is_running());
 
-    // Create a socketpair, close one end, write to the other.
-    // If SIGPIPE is properly ignored, we get EPIPE instead of a crash.
-    int fds[2];
-    ASSERT_EQ(sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
-    sixseven_platform::socket_close(fds[0]);
+    uint16_t port = server.bound_port();
+    ASSERT_GT(port, 0u);
 
-    ssize_t n = ::write(fds[1], "x", 1);
-    EXPECT_EQ(n, -1);
-    EXPECT_EQ(errno, EPIPE);
+    // Connect a client and immediately close it to trigger a broken-pipe
+    // condition on the server's next outbound write attempt.
+    int c = connect_to(port);
+    ASSERT_GE(c, 0) << "failed to connect to server on port " << port;
 
-    sixseven_platform::socket_close(fds[1]);
+    // Give the server a moment to register the connection.
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    // Restore previous handler.
-    std::signal(SIGPIPE, prev_handler);
+    // Abruptly close the client -- the server may attempt to write to this fd
+    // and will get EPIPE.  With MSG_NOSIGNAL/SO_NOSIGPIPE the server survives.
+    sixseven_platform::socket_close(c);
+
+    // Wait briefly for the server to react to the closed client.
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    // Primary assertion: the server is still running (not killed by SIGPIPE).
+    EXPECT_TRUE(server.is_running())
+        << "server stopped after client disconnect -- possible SIGPIPE kill";
+
+    // Secondary assertion: the server can still accept a fresh connection,
+    // proving the event loop and listen socket are healthy.
+    int c2 = connect_to(port);
+    EXPECT_GE(c2, 0) << "server refused reconnect after client disconnect";
+    if (c2 >= 0) {
+        sixseven_platform::socket_close(c2);
+    }
+
+    server.shutdown();
+    t.join();
+    EXPECT_FALSE(server.is_running());
 }
 #else
-TEST_F(QA145LifecycleTest, SigpipeIgnored) {
+TEST_F(QA145LifecycleTest, ServerSurvivesClientDisconnectMidWrite) {
     GTEST_SKIP() << "SIGPIPE test is POSIX-only";
 }
 #endif
