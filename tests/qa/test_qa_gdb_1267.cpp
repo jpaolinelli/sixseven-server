@@ -630,7 +630,7 @@ TEST_F(QA_GDB1267, Interaction_AllOps_Concurrent_GDB1267) {
         auto it = std::move(*it_result);
         for (;;) {
             auto r = it.next();
-            if (!r.has_value()) { break; }   // scan error — stop
+            if (!r.has_value()) { break; }   // scan error - stop
             if (!r->has_value()) { break; }  // end of scan
             // just iterate — must not crash
         }

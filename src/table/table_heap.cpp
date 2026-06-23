@@ -931,7 +931,7 @@ Result<std::optional<std::pair<RID, std::vector<uint8_t>>>> TableIterator::next(
     while (!exhausted_ && current_page_ < total_pages_) {
         auto page_result = bpm_.fetch_page(current_page_);
         if (!page_result) {
-            // Surface the fetch failure — silently skipping a page would
+            // Surface the fetch failure - silently skipping a page would
             // produce an incomplete scan with no error (GDB-915).
             exhausted_ = true;
             return tl::unexpected(page_result.error());
@@ -1014,7 +1014,7 @@ void TableIterator::skip(size_t count) {
     while (skipped < count && !exhausted_ && current_page_ < total_pages_) {
         auto page_result = bpm_.fetch_page(current_page_);
         if (!page_result) {
-            // Stop on a fetch failure — treat the scan as exhausted so the
+            // Stop on a fetch failure - treat the scan as exhausted so the
             // caller does not read past an unreadable page (GDB-915).
             exhausted_ = true;
             break;
