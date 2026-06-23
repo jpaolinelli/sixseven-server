@@ -1,5 +1,6 @@
 #include "sixseven/executor/storage_manager.h"
 
+#include "sixseven/common/logging.h"
 #include "sixseven/common/status.h"
 #include "sixseven/storage/wal.h"
 
@@ -36,6 +37,11 @@ void StorageManager::for_each_table_heap(
     for (const auto& [table_id, storage] : tables_) {
         fn(table_id, storage->heap.get());
     }
+}
+
+void StorageManager::set_double_write_enabled(bool enabled) {
+    std::lock_guard lock(mu_);
+    dwb_enabled_ = enabled;
 }
 
 void StorageManager::set_txn_manager(const TransactionManager* txn_mgr) {
@@ -123,6 +129,14 @@ Result<void> StorageManager::create_table_storage(database_id_t db_id,
     auto storage = std::make_unique<TableStorage>();
     storage->file_id = *fid;
     storage->bpm = std::make_unique<BufferPoolManager>(dm_, *fid, pool_size_);
+    if (dwb_enabled_) {
+        auto dwb_r = storage->bpm->enable_double_write(path.string() + ".dwb");
+        if (!dwb_r) {
+            SIXSEVEN_LOG_WARN("DWB enable failed for table {}: {} -- continuing without DWB",
+                              table_id,
+                              dwb_r.error().message);
+        }
+    }
     // SQL table files store MVCC tuple headers (v2 file format, GDB-714).
     storage->heap = std::make_unique<TableHeap>(
         *storage->bpm, dm_, *fid, TableHeapOptions{.mvcc_headers = true});
@@ -158,6 +172,14 @@ Result<void> StorageManager::open_table_storage(database_id_t db_id,
     auto storage = std::make_unique<TableStorage>();
     storage->file_id = *fid;
     storage->bpm = std::make_unique<BufferPoolManager>(dm_, *fid, pool_size_);
+    if (dwb_enabled_) {
+        auto dwb_r = storage->bpm->enable_double_write(path.string() + ".dwb");
+        if (!dwb_r) {
+            SIXSEVEN_LOG_WARN("DWB enable failed for table {}: {} -- continuing without DWB",
+                              table_id,
+                              dwb_r.error().message);
+        }
+    }
     // SQL table files store MVCC tuple headers (v2 file format, GDB-714).
     storage->heap = std::make_unique<TableHeap>(
         *storage->bpm, dm_, *fid, TableHeapOptions{.mvcc_headers = true});

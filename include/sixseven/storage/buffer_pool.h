@@ -217,11 +217,28 @@ public:
 
     // -- Thread safety & background flusher ----------------------------------
 
+    /// Statistics returned by the DWB recovery pass.
+    struct DwbRecoveryStats {
+        uint32_t pages_restored = 0; ///< Data pages rewritten from the DWB.
+        uint32_t slots_skipped = 0;  ///< DWB slots skipped (empty or self-torn).
+    };
+
     /// Enable the double-write buffer for torn page protection.
     /// Pages are written to the DWB file first, fsynced, then written to the
     /// data file. If a crash occurs during the data file write, recovery can
     /// restore the page from the DWB.
+    ///
+    /// If the DWB file already exists, recovery runs first: any intact DWB
+    /// copy whose corresponding data-file page fails the CRC check is
+    /// rewritten from the DWB before normal operation resumes.
+    /// A new or zero-length DWB file is treated as empty (nothing to recover).
     [[nodiscard]] Result<void> enable_double_write(const std::filesystem::path& dwb_path);
+
+    /// Run the DWB recovery pass without enabling ongoing DWB writes.
+    /// Exposed mainly for testing; normally called automatically by
+    /// enable_double_write() when it opens an existing DWB file.
+    /// Must hold dwb_mutex_ before calling.
+    [[nodiscard]] Result<DwbRecoveryStats> recover_double_write();
 
     /// Set the dirty ratio threshold that triggers the background flusher.
     /// When the fraction of dirty frames exceeds this threshold, the flusher

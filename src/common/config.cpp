@@ -111,6 +111,12 @@ Result<Config> Config::load_from_file(const std::string& path) {
         return make_error(StatusCode::INVALID_ARGUMENT,
                           "archive_cleanup_policy must be a string, got wrong type");
     }
+    if (j.contains("storage_double_write") && j["storage_double_write"].is_boolean()) {
+        config.storage_double_write = j["storage_double_write"].get<bool>();
+    } else if (j.contains("storage_double_write")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "storage_double_write must be a boolean, got wrong type");
+    }
     // NOTE: JSON key names replication_max_wal_senders, replication_keepalive_interval_ms,
     // replication_sender_timeout_ms are flat top-level as documented in docs/configuration.md.
     // apply_setting uses dotted sys_settings keys (replication.max_wal_senders etc.) - a

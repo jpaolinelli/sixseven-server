@@ -43,6 +43,9 @@ struct Config {
     // Authentication settings.
     std::string auth_method = "scram-sha-256"; ///< trust, md5, or scram-sha-256.
 
+    // Storage durability settings.
+    bool storage_double_write = true; ///< Enable double-write buffer for torn-page protection.
+
     // Server lifecycle settings.
     int32_t shutdown_timeout_s = 30; ///< Seconds to wait for active queries on shutdown.
 
