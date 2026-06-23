@@ -89,8 +89,8 @@ TEST_F(QA916SigpipeTest, GDB916_HappyPathRoundTripSendFlagsDoNotBreakWrite) {
     // Send a minimal PG startup packet (length=8, protocol=3.0).
     // The server will reply with an Authentication request.
     const uint8_t startup[8] = {0x00, 0x00, 0x00, 0x08, 0x00, 0x03, 0x00, 0x00};
-    int sent = static_cast<int>(
-        ::send(c, reinterpret_cast<const char*>(startup), sizeof(startup), 0));
+    int sent =
+        static_cast<int>(::send(c, reinterpret_cast<const char*>(startup), sizeof(startup), 0));
     EXPECT_EQ(sent, 8) << "failed to send startup packet";
 
     // Give the server time to respond.
@@ -164,9 +164,8 @@ TEST_F(QA916SigpipeTest, GDB916_RapidConnectDisconnectChurnServerStaysRunning) {
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
     // Primary assertion: server is still running.
-    EXPECT_TRUE(server.is_running())
-        << "server stopped after rapid connect/disconnect churn -- "
-           "WSAECONNRESET or broken-pipe error not handled gracefully";
+    EXPECT_TRUE(server.is_running()) << "server stopped after rapid connect/disconnect churn -- "
+                                        "WSAECONNRESET or broken-pipe error not handled gracefully";
 
     // Secondary assertion: server still accepts new connections.
     int c2 = connect_to(port);
@@ -213,8 +212,7 @@ TEST_F(QA916SigpipeTest, GDB916_ConnectSendThenRstDisconnectServerSurvives) {
         struct linger lg{};
         lg.l_onoff = 1;
         lg.l_linger = 0;
-        ::setsockopt(
-            c, SOL_SOCKET, SO_LINGER, reinterpret_cast<const char*>(&lg), sizeof(lg));
+        ::setsockopt(c, SOL_SOCKET, SO_LINGER, reinterpret_cast<const char*>(&lg), sizeof(lg));
         sixseven_platform::socket_close(c);
 
         // Brief gap so the server has time to react before the next client.
@@ -224,9 +222,8 @@ TEST_F(QA916SigpipeTest, GDB916_ConnectSendThenRstDisconnectServerSurvives) {
     // Let the event loop fully drain.
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
-    EXPECT_TRUE(server.is_running())
-        << "server stopped after RST-disconnect clients -- "
-           "broken-pipe / WSAECONNRESET on ::send() not handled";
+    EXPECT_TRUE(server.is_running()) << "server stopped after RST-disconnect clients -- "
+                                        "broken-pipe / WSAECONNRESET on ::send() not handled";
 
     // Reconnect to confirm the listen socket is still healthy.
     int c2 = connect_to(port);
@@ -274,8 +271,7 @@ TEST_F(QA916SigpipeTest, GDB916_MaxConnectionsEnforcedDuringChurn) {
     }
 
     // Server must still be running.
-    EXPECT_TRUE(server.is_running())
-        << "server stopped when max_connections limit was hit";
+    EXPECT_TRUE(server.is_running()) << "server stopped when max_connections limit was hit";
 
     for (int fd : held) {
         sixseven_platform::socket_close(fd);
@@ -346,8 +342,7 @@ TEST_F(QA916SigpipeTest, GDB916_BoundPortStableAfterChurn) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     uint16_t port_after = server.bound_port();
-    EXPECT_EQ(port_before, port_after)
-        << "bound_port() changed after connect/disconnect churn";
+    EXPECT_EQ(port_before, port_after) << "bound_port() changed after connect/disconnect churn";
 
     server.shutdown();
     t.join();
