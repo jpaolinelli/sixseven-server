@@ -507,9 +507,15 @@ TEST_F(GDB919Test, Adversarial_DeleteMiddleNodeFlankingNodesStillReturned) {
     bool saw_3 = false;
     for (const auto& sr : *res) {
         EXPECT_NE(sr.node_id, 1u) << "deleted node 1 must not appear";
-        if (sr.node_id == 0u) { saw_0 = true; }
-        if (sr.node_id == 2u) { saw_2 = true; }
-        if (sr.node_id == 3u) { saw_3 = true; }
+        if (sr.node_id == 0u) {
+            saw_0 = true;
+        }
+        if (sr.node_id == 2u) {
+            saw_2 = true;
+        }
+        if (sr.node_id == 3u) {
+            saw_3 = true;
+        }
     }
     EXPECT_TRUE(saw_0) << "live node 0 must be reachable after deleting middle node";
     EXPECT_TRUE(saw_2) << "live node 2 must be reachable after deleting middle node";
@@ -607,7 +613,9 @@ TEST_F(GDB919Test, Adversarial_DeleteThenReinsertNewNodeFindableNoCollision) {
     bool found_new = false;
     for (const auto& sr : *res) {
         EXPECT_NE(sr.node_id, 0u) << "tombstoned node 0 must not appear in search results";
-        if (sr.node_id == 2u) { found_new = true; }
+        if (sr.node_id == 2u) {
+            found_new = true;
+        }
     }
     EXPECT_TRUE(found_new) << "newly inserted node 2 must be findable by search";
 }
@@ -636,7 +644,7 @@ TEST_F(GDB919Test, Adversarial_BestEffortDeleteCommitsHeapEvenWithHnswTarget) {
     auto nr = del_op.next();
     // The DELETE must succeed (Result is ok) regardless of HNSW state.
     ASSERT_TRUE(nr.has_value()) << "DELETE must not fail due to HNSW maintenance: "
-                                 << nr.error().message;
+                                << nr.error().message;
     ASSERT_TRUE(nr->has_value());
     // Row count == 1 confirms the heap tuple was actually deleted.
     EXPECT_EQ((*nr)->values[0].as_int64(), 1)
@@ -667,7 +675,7 @@ TEST_F(GDB919Test, Adversarial_NullIndexPointerInTargetSkippedSafely) {
     auto nr = del_op.next();
     // Must not crash; the delete succeeds because HNSW skip is best-effort.
     ASSERT_TRUE(nr.has_value()) << "DELETE must not crash on null index pointer: "
-                                 << nr.error().message;
+                                << nr.error().message;
     ASSERT_TRUE(nr->has_value());
     EXPECT_EQ((*nr)->values[0].as_int64(), 1);
     del_op.close();
