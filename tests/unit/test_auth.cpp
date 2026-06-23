@@ -79,6 +79,13 @@ TEST(CryptoHelpers, Md5HexDifferentInputsDifferentHashes) {
     EXPECT_NE(h1, h2);
 }
 
+// Known-answer RFC vector: md5("hello") = 5d41402abc4b2a76b9719d911017c592.
+// Independently verifiable: echo -n hello | md5sum
+// This pins the md5_hex implementation against an externally-computable constant.
+TEST(CryptoHelpers, Md5HexKnownAnswerHello) {
+    EXPECT_EQ(md5_hex("hello"), "5d41402abc4b2a76b9719d911017c592");
+}
+
 TEST(CryptoHelpers, Sha256ProducesCorrectLength) {
     std::vector<uint8_t> data = {'h', 'e', 'l', 'l', 'o'};
     auto hash = sha256(data);
@@ -193,6 +200,24 @@ TEST(PasswordHashing, Md5HashIncorporatesUsername) {
     auto r1 = hash_password_md5("alice", "secret");
     auto r2 = hash_password_md5("bob", "secret");
     EXPECT_NE(r1.password_hash, r2.password_hash);
+}
+
+// Wire-interop guard: PostgreSQL md5 auth stores md5(password + username).
+// The stored hash for password="secret", username="alice" must equal
+// "md5" + md5("secret" + "alice") = "md5" + md5("secretalice").
+//
+// Independently verifiable: echo -n secretalice | md5sum
+//   => 4a0a68b43b6cd5cf266fa02f196e2371
+//
+// Wrong order md5("alice" + "secret") = md5("alicesecret")
+//   => c4e31313222cf05fcdd1fc068af5570e  (distinct - regression is detectable)
+//
+// A regression in src/server/auth.cpp:253 that flips to md5(username+password)
+// would produce "md5c4e31313222cf05fcdd1fc068af5570e" and FAIL this assertion,
+// while breaking every real psql/libpq client that cannot authenticate.
+TEST(PasswordHashing, Md5HashKnownAnswerPostgresWireOrder) {
+    auto record = hash_password_md5("alice", "secret");
+    EXPECT_EQ(record.password_hash, "md54a0a68b43b6cd5cf266fa02f196e2371");
 }
 
 TEST(PasswordHashing, ScramHashFormat) {
