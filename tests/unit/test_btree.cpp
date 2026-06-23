@@ -875,6 +875,26 @@ TEST(BTreeStress, FullScanSortedAfterMixedOps) {
     auto entries = collect_scan(*scan);
     ASSERT_TRUE(entries.has_value());
 
+    // 100 inserted (i*3 for i in 0..99) minus 34 deleted (i*3 for i in 0,3,6,...,99,
+    // i.e. multiples of 9) = 66 survivors (multiples of 3 that are not multiples of 9).
+    ASSERT_EQ(entries->size(), 66u) << "Expected 66 survivors after deletions";
+    EXPECT_EQ(tree.size(), 66u);
+
+    // Build the exact expected survivor set: i*3 for i in 0..99 where i % 3 != 0.
+    std::vector<int64_t> expected;
+    expected.reserve(66);
+    for (int i = 0; i < 100; ++i) {
+        if (i % 3 != 0) {
+            expected.push_back(static_cast<int64_t>(i * 3));
+        }
+    }
+    // expected is already sorted (i ascending => i*3 ascending).
+    ASSERT_EQ(expected.size(), 66u);
+
+    for (size_t i = 0; i < entries->size(); ++i) {
+        EXPECT_EQ(key_val((*entries)[i].first), expected[i]) << "Mismatch at scan index " << i;
+    }
+
     for (size_t i = 1; i < entries->size(); ++i) {
         EXPECT_LT(key_val((*entries)[i - 1].first), key_val((*entries)[i].first))
             << "Not sorted at index " << i;
