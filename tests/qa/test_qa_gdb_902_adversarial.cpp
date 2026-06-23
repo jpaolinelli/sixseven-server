@@ -186,8 +186,8 @@ TEST(QA_GDB902_Adversarial, SameIndexNameTwoDatabasesIsAllowed) {
 
     // Same name, different db — must NOT return ALREADY_EXISTS.
     auto iy = catalog.create_index(make_index(*ty, "idx_ae"));
-    ASSERT_TRUE(iy.has_value())
-        << "create_index with same name in different db must succeed: " << iy.error().message;
+    ASSERT_TRUE(iy.has_value()) << "create_index with same name in different db must succeed: "
+                                << iy.error().message;
 
     EXPECT_NE(*ix, *iy) << "Two indexes in different dbs must have distinct index_ids";
 }
