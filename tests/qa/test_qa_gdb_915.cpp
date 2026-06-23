@@ -90,8 +90,7 @@ TEST_F(GDB915Test, HappyPathMultiPageScanReturnsAllRows) {
         ++count;
     }
 
-    EXPECT_EQ(count, kRows)
-        << "Happy-path scan must return all " << kRows << " rows with no error";
+    EXPECT_EQ(count, kRows) << "Happy-path scan must return all " << kRows << " rows with no error";
 }
 
 // =============================================================================
@@ -179,10 +178,9 @@ TEST_F(GDB915Test, PinExhaustionCausesNextToReturnError) {
     // After the fix: either we get an error (correct), or we got all rows
     // because they were already in the pool (also correct).
     if (!got_error) {
-        EXPECT_GT(row_count, 0)
-            << "Silent incomplete scan: next() returned 0 rows with no error. "
-               "This is the GDB-915 regression -- page fetch failures must be "
-               "surfaced as errors, not silently skipped.";
+        EXPECT_GT(row_count, 0) << "Silent incomplete scan: next() returned 0 rows with no error. "
+                                   "This is the GDB-915 regression -- page fetch failures must be "
+                                   "surfaced as errors, not silently skipped.";
     }
 
     // Unpin the frames we deliberately held.
