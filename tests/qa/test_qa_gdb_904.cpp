@@ -18,7 +18,7 @@ using test::write_aborted_txn;
 using test::write_committed_txn;
 
 // =============================================================================
-// QA_GDB904 — Adversarial tests for GDB-904 (invalid txn_id=0 WARN + skip)
+// QA_GDB904 - Adversarial tests for GDB-904 (invalid txn_id=0 WARN + skip)
 //
 // DISPOSITION:
 //   invalid_txn_id (0)  = invalid sentinel; data records skipped + WARN
@@ -58,7 +58,7 @@ public:
 };
 
 // ---------------------------------------------------------------------------
-// EDGE 1: Multiple txn_id=0 data records in one WAL — all warned+skipped,
+// EDGE 1: Multiple txn_id=0 data records in one WAL - all warned+skipped,
 // valid records around them intact.
 // ---------------------------------------------------------------------------
 TEST(QA_GDB904, MultipleInvalidTxnIdZeroRecordsAllSkipped) {
@@ -111,7 +111,7 @@ TEST(QA_GDB904, MultipleInvalidTxnIdZeroRecordsAllSkipped) {
 }
 
 // ---------------------------------------------------------------------------
-// EDGE 2: txn_id=0 mixed with a real committed txn — the committed txn's
+// EDGE 2: txn_id=0 mixed with a real committed txn - the committed txn's
 // data record is redone; the txn_id=0 record is skipped.
 // ---------------------------------------------------------------------------
 TEST(QA_GDB904, InvalidTxnIdZeroMixedWithCommittedTxnSkipsZeroOnly) {
@@ -224,7 +224,7 @@ TEST(QA_GDB904, FrozenTxnIdRecordsAreNotSkippedByInvalidSentinelBranch) {
         WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
 
-        // Frozen records of every data type — all must be redone.
+        // Frozen records of every data type - all must be redone.
         const std::vector<WalRecordType> data_types = {
             WalRecordType::INSERT,
             WalRecordType::UPDATE,
@@ -296,8 +296,8 @@ TEST(QA_GDB904, RecordsScannerCountIncludesSkippedInvalidRecord) {
 }
 
 // ---------------------------------------------------------------------------
-// BEHAVIOR-PRESERVATION: Full mixed WAL — frozen + committed + aborted +
-// in-flight + txn_id=0 — only the txn_id=0 records are skipped; all valid
+// BEHAVIOR-PRESERVATION: Full mixed WAL - frozen + committed + aborted +
+// in-flight + txn_id=0 - only the txn_id=0 records are skipped; all valid
 // records are handled correctly.
 // ---------------------------------------------------------------------------
 TEST(QA_GDB904, FullMixedWalCorrectlyHandlesAllRecordClasses) {
@@ -307,7 +307,7 @@ TEST(QA_GDB904, FullMixedWalCorrectlyHandlesAllRecordClasses) {
         WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
 
-        // Frozen/autocommit INSERT — must be redone.
+        // Frozen/autocommit INSERT - must be redone.
         WalRecord frozen;
         frozen.type = WalRecordType::INSERT;
         frozen.txn_id = frozen_txn_id;
@@ -315,13 +315,13 @@ TEST(QA_GDB904, FullMixedWalCorrectlyHandlesAllRecordClasses) {
         frozen.data = {0x01};
         ASSERT_TRUE(writer.append(frozen).has_value());
 
-        // Committed txn (txn_id=10) — INSERT must be redone.
+        // Committed txn (txn_id=10) - INSERT must be redone.
         write_committed_txn(writer, 10, 2, "committed-payload");
 
-        // Aborted txn (txn_id=20) — INSERT must be undone.
+        // Aborted txn (txn_id=20) - INSERT must be undone.
         write_aborted_txn(writer, 20, 3, "aborted-payload");
 
-        // In-flight txn (txn_id=30, BEGIN + INSERT, no COMMIT) — must be undone.
+        // In-flight txn (txn_id=30, BEGIN + INSERT, no COMMIT) - must be undone.
         WalRecord begin30;
         begin30.type = WalRecordType::BEGIN;
         begin30.txn_id = 30;
@@ -334,7 +334,7 @@ TEST(QA_GDB904, FullMixedWalCorrectlyHandlesAllRecordClasses) {
         inflight.data = {0x99};
         ASSERT_TRUE(writer.append(inflight).has_value());
 
-        // txn_id=0 record scattered in the middle — must be skipped.
+        // txn_id=0 record scattered in the middle - must be skipped.
         WalRecord bad;
         bad.type = WalRecordType::DELETE;
         bad.txn_id = invalid_txn_id;
@@ -342,7 +342,7 @@ TEST(QA_GDB904, FullMixedWalCorrectlyHandlesAllRecordClasses) {
         bad.data = {0xBB};
         ASSERT_TRUE(writer.append(bad).has_value());
 
-        // Another frozen INSERT at the end — must be redone.
+        // Another frozen INSERT at the end - must be redone.
         WalRecord frozen2;
         frozen2.type = WalRecordType::INSERT;
         frozen2.txn_id = frozen_txn_id;
@@ -470,13 +470,13 @@ TEST(QA_GDB904, InvalidTxnIdZeroAfterCheckpointSkipped) {
         WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
 
-        // txn 1 committed before checkpoint — discarded by checkpoint.
+        // txn 1 committed before checkpoint - discarded by checkpoint.
         write_committed_txn(writer, 1, 10, "pre-checkpoint");
 
         // Checkpoint.
         ASSERT_TRUE(writer.write_checkpoint({}).has_value());
 
-        // txn_id=0 data record after checkpoint — must be skipped+warned.
+        // txn_id=0 data record after checkpoint - must be skipped+warned.
         WalRecord bad;
         bad.type = WalRecordType::INSERT;
         bad.txn_id = invalid_txn_id;
@@ -484,7 +484,7 @@ TEST(QA_GDB904, InvalidTxnIdZeroAfterCheckpointSkipped) {
         bad.data = {0xCC};
         ASSERT_TRUE(writer.append(bad).has_value());
 
-        // Valid committed txn after checkpoint — must be redone.
+        // Valid committed txn after checkpoint - must be redone.
         write_committed_txn(writer, 2, 20, "post-checkpoint");
 
         ASSERT_TRUE(writer.flush().has_value());
