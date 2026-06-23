@@ -4,13 +4,15 @@
 #include "sixseven/parser/ast.h"
 #include "sixseven/table/table_heap.h"
 #include "sixseven/table/tuple.h"
+#include "sixseven/vector/embedding_column.h"
 
 #include <chrono>
 #include <cstddef>
 
 namespace sixseven {
 
-BackfillManager::BackfillManager(Catalog& catalog, StorageManager& storage,
+BackfillManager::BackfillManager(Catalog& catalog,
+                                 StorageManager& storage,
                                  EmbeddingWorkerPool& pool)
     : catalog_(catalog), storage_(storage), pool_(pool) {}
 
@@ -61,7 +63,9 @@ Result<void> BackfillManager::start(const BackfillStmt& stmt, database_id_t db_i
     jobs_.push_back(std::move(job));
 
     SIXSEVEN_LOG_INFO("backfill started for table '{}' (batch={}, rate_limit={})",
-                      stmt.table_name, job_ptr->batch_size, job_ptr->rate_limit);
+                      stmt.table_name,
+                      job_ptr->batch_size,
+                      job_ptr->rate_limit);
 
     return ok();
 }
@@ -74,8 +78,7 @@ Result<void> BackfillManager::cancel(const std::string& table_name) {
             return ok();
         }
     }
-    return make_error(StatusCode::NOT_FOUND,
-                      "no running backfill for table " + table_name);
+    return make_error(StatusCode::NOT_FOUND, "no running backfill for table " + table_name);
 }
 
 BackfillManager::Status BackfillManager::status(const std::string& table_name) const {
@@ -118,16 +121,16 @@ void BackfillManager::backfill_loop(BackfillJob& job) {
     // Resolve the table schema and storage.
     auto table_schema = catalog_.get_table(job.db_id, job.table_name);
     if (!table_schema) {
-        SIXSEVEN_LOG_ERROR("backfill: table '{}' not found: {}", job.table_name,
-                           table_schema.error().message);
+        SIXSEVEN_LOG_ERROR(
+            "backfill: table '{}' not found: {}", job.table_name, table_schema.error().message);
         job.running.store(false);
         return;
     }
 
     auto ts = storage_.get_table_storage(table_schema->table_id);
     if (!ts) {
-        SIXSEVEN_LOG_ERROR("backfill: storage not found for table '{}': {}", job.table_name,
-                           ts.error().message);
+        SIXSEVEN_LOG_ERROR(
+            "backfill: storage not found for table '{}': {}", job.table_name, ts.error().message);
         job.running.store(false);
         return;
     }
@@ -140,11 +143,13 @@ void BackfillManager::backfill_loop(BackfillJob& job) {
         return;
     }
 
-    // Map embedding column ordinals to their schema index and source column index.
+    // Map embedding column ordinals to their schema index.
+    // source_idx is intentionally NOT stored here: multi-column source_expr support
+    // is handled at row-processing time via EmbeddingColumnManager::build_source_text,
+    // which parses the comma-separated source_expr and concatenates matching values.
     struct EmbColInfo {
-        int32_t column_id = 0;       // Ordinal in catalog.
-        size_t schema_idx = 0;       // Index in table_schema.columns.
-        size_t source_idx = 0;       // Index of source column in table_schema.columns.
+        int32_t column_id = 0; // Ordinal in catalog.
+        size_t schema_idx = 0; // Index of the EMBEDDING column in table_schema.columns.
         std::string provider;
         int32_t dimension = 0;
         std::string source_expr;
@@ -158,18 +163,10 @@ void BackfillManager::backfill_loop(BackfillJob& job) {
         info.dimension = ec.dimension;
         info.source_expr = ec.source_expr;
 
-        // Find schema index for the embedding column.
+        // Find schema index for the embedding column itself.
         for (size_t i = 0; i < table_schema->columns.size(); ++i) {
             if (table_schema->columns[i].ordinal == ec.column_id) {
                 info.schema_idx = i;
-                break;
-            }
-        }
-
-        // Find the source column by name (source_expr is typically a column name).
-        for (size_t i = 0; i < table_schema->columns.size(); ++i) {
-            if (table_schema->columns[i].name == ec.source_expr) {
-                info.source_idx = i;
                 break;
             }
         }
@@ -180,8 +177,8 @@ void BackfillManager::backfill_loop(BackfillJob& job) {
     // Open heap iterator and scan sequentially.
     auto it = table_storage->heap->begin();
     if (!it) {
-        SIXSEVEN_LOG_ERROR("backfill: failed to open heap for '{}': {}", job.table_name,
-                           it.error().message);
+        SIXSEVEN_LOG_ERROR(
+            "backfill: failed to open heap for '{}': {}", job.table_name, it.error().message);
         job.running.store(false);
         return;
     }
@@ -199,8 +196,10 @@ void BackfillManager::backfill_loop(BackfillJob& job) {
 
         auto values = TupleSerializer::deserialize(data, table_storage->storage_schema);
         if (!values) {
-            SIXSEVEN_LOG_WARN("backfill: deserialize failed at rid ({},{}): {}", rid.page_id,
-                              rid.slot_id, values.error().message);
+            SIXSEVEN_LOG_WARN("backfill: deserialize failed at rid ({},{}): {}",
+                              rid.page_id,
+                              rid.slot_id,
+                              values.error().message);
             job.processed.fetch_add(1);
             continue;
         }
@@ -215,15 +214,26 @@ void BackfillManager::backfill_loop(BackfillJob& job) {
 
             row_had_all_embeddings = false;
 
-            // Get source text.
-            std::string source_text;
-            if (info.source_idx < values->size() && !(*values)[info.source_idx].is_null() &&
-                (*values)[info.source_idx].type_id() == TypeId::STRING) {
-                source_text = (*values)[info.source_idx].as_string();
+            // Build source text via the shared multi-column helper.
+            auto src = EmbeddingColumnManager::build_source_text(
+                info.source_expr, table_schema->columns, *values);
+
+            // Zero resolved_count means source_expr names no valid schema column —
+            // this is a misconfiguration.  Log an error and skip the row to avoid
+            // embedding wrong data (old behaviour was to silently embed column 0).
+            if (src.resolved_count == 0) {
+                SIXSEVEN_LOG_ERROR(
+                    "backfill: source_expr '{}' for table '{}' column_id={} resolved no schema "
+                    "columns — skipping row (check EMBEDDING column definition)",
+                    info.source_expr,
+                    job.table_name,
+                    info.column_id);
+                continue;
             }
-            if (source_text.empty()) {
-                continue; // No source text — skip.
+            if (src.text.empty()) {
+                continue; // All source columns were NULL or non-STRING — skip.
             }
+            std::string source_text = std::move(src.text);
 
             // Pack RID into int64_t for the worker pool.
             int64_t packed_rid = (static_cast<int64_t>(static_cast<uint64_t>(rid.page_id)) << 32) |
@@ -293,8 +303,11 @@ void BackfillManager::backfill_loop(BackfillJob& job) {
 
     SIXSEVEN_LOG_INFO("backfill completed for '{}': processed={}, generated={}, skipped={}, "
                       "{:.1f} rows/sec",
-                      job.table_name, job.processed.load(), job.generated.load(),
-                      job.skipped.load(), job.rows_per_sec.load());
+                      job.table_name,
+                      job.processed.load(),
+                      job.generated.load(),
+                      job.skipped.load(),
+                      job.rows_per_sec.load());
 }
 
 } // namespace sixseven
