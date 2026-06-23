@@ -5,6 +5,12 @@
 ///   2. A torn/partial DWB copy does NOT clobber a valid data page.
 ///   3. A valid data page is left untouched (recovery is a no-op).
 ///   4. Opening an existing DWB file without O_TRUNC preserves recovery data.
+///   5. (Adversarial) DWB slot with wrong page_id does not corrupt a different page.
+///   6. (Adversarial) Zeroed/empty DWB file => recovery is a clean no-op.
+///   7. (Adversarial) DWB disabled via set_double_write_enabled(false) still works.
+///   8. (Adversarial) enable_double_write() called twice returns ALREADY_EXISTS.
+///   9. (Adversarial) DWB slot page_id == 0 (file header) is skipped -- not restored.
+///  10. (Adversarial) DWB slot page_id beyond file extent is skipped -- no oob write.
 
 #include "sixseven/common/platform.h"
 #include "sixseven/storage/buffer_pool.h"
@@ -246,4 +252,239 @@ TEST_F(QA_GDB922_DwbRecovery, NoDwbTruncOnReopen) {
     auto size_after = std::filesystem::file_size(dwb_path_);
     EXPECT_GE(size_after, static_cast<uintmax_t>(page_size))
         << "DWB file must not be zero-length after re-open (O_TRUNC bug regression)";
+}
+
+// =============================================================================
+// Adversarial AC5: DWB slot page_id does not match any corrupted page --
+// recovery must NOT write to a page that is not actually torn.
+// =============================================================================
+
+/// Scenario: write page A through the DWB (DWB holds a valid copy of A).
+/// Then corrupt page A (tears it), re-enable DWB so recovery restores A.
+/// Then write page B through a new BPM (DWB now holds a copy of B).
+/// Corrupt page A again but NOT page B.
+/// Re-enable DWB: the DWB slot holds B's copy. Recovery reads the data file
+/// for B and finds it valid => no restore. Page A stays corrupted (no wrong-
+/// page restore). This proves recovery does not blindly write to a page that
+/// the DWB slot does not match or that is not torn.
+TEST_F(QA_GDB922_DwbRecovery, DwbSlotProtectsOnlyItsOwnPage) {
+    // Write page A through the DWB.
+    const uint8_t kFillA = 0xAA;
+    PageId pid_a = write_page_through_dwb(kFillA);
+    bpm_.reset();
+
+    // Corrupt page A, reopen DM, run recovery -> A is restored.
+    corrupt_data_page_and_reopen(pid_a);
+    {
+        bpm_ = std::make_unique<BufferPoolManager>(dm_, file_id_, 4);
+        auto en = bpm_->enable_double_write(dwb_path_);
+        ASSERT_TRUE(en.has_value()) << en.error().message;
+        // After recovery, A should be readable again.
+        Page p(0, PageType::DATA);
+        auto r = dm_.read_page(file_id_, pid_a, p);
+        ASSERT_TRUE(r.has_value()) << "Page A should be restored after first recovery";
+    }
+    bpm_.reset();
+
+    // Now write page B through a new BPM (DWB slot is overwritten with B).
+    const uint8_t kFillB = 0xBB;
+    PageId pid_b = write_page_through_dwb(kFillB);
+    bpm_.reset();
+
+    // Corrupt page A again but leave page B intact.
+    corrupt_data_page_and_reopen(pid_a);
+
+    // Re-enable DWB: slot holds B's copy; B is valid so recovery is a no-op.
+    bpm_ = std::make_unique<BufferPoolManager>(dm_, file_id_, 4);
+    auto en = bpm_->enable_double_write(dwb_path_);
+    ASSERT_TRUE(en.has_value()) << en.error().message;
+
+    // Page B must still be intact (recovery must not have wrongly written to it).
+    {
+        Page pb(0, PageType::DATA);
+        auto r = dm_.read_page(file_id_, pid_b, pb);
+        ASSERT_TRUE(r.has_value()) << "Page B must remain intact (slot was for B, B was valid)";
+        auto tuple = pb.get_tuple(0);
+        ASSERT_TRUE(tuple.has_value());
+        EXPECT_EQ((*tuple)[0], kFillB);
+    }
+
+    // Page A is still corrupted (the DWB slot held B, not A, so A was not restored).
+    {
+        Page pa(0, PageType::DATA);
+        auto r = dm_.read_page(file_id_, pid_a, pa);
+        EXPECT_FALSE(r.has_value()) << "Page A should still be corrupted (DWB slot was for B)";
+    }
+}
+
+// =============================================================================
+// Adversarial AC6: Zeroed / empty DWB file => recovery is a clean no-op.
+// =============================================================================
+
+/// If the DWB file is exactly one page of zero bytes, it must NOT trigger a
+/// restore (the computed checksum of an all-zeros page will not match the stored
+/// checksum field of zero, because the stored field is part of the page data and
+/// compute_page_checksum excludes it from the CRC -- but the CRC of all-zeros
+/// payload is non-zero, so stored==0 != computed!=0 => skip).
+TEST_F(QA_GDB922_DwbRecovery, ZeroedDwbFileIsNoop) {
+    // Write a real page so we have a valid data file page to verify against.
+    const uint8_t kFill = 0x99;
+    PageId pid = write_page_through_dwb(kFill);
+    bpm_.reset();
+
+    // Overwrite the entire DWB file with zeros.
+    {
+        int fd = ::open(dwb_path_.string().c_str(), O_RDWR, 0644);
+        ASSERT_GE(fd, 0);
+        std::array<uint8_t, page_size> zeros{};
+        ssize_t w = sixseven_platform::pwrite(fd, zeros.data(), zeros.size(), 0);
+        EXPECT_EQ(w, static_cast<ssize_t>(zeros.size()));
+        ::close(fd);
+    }
+
+    // Re-enable DWB: zeroed slot must be skipped.
+    bpm_ = std::make_unique<BufferPoolManager>(dm_, file_id_, 4);
+    auto en = bpm_->enable_double_write(dwb_path_);
+    ASSERT_TRUE(en.has_value()) << "enable_double_write must succeed with zeroed DWB";
+
+    // Data page must remain intact (no false restore from zeros).
+    Page p(0, PageType::DATA);
+    auto r = dm_.read_page(file_id_, pid, p);
+    ASSERT_TRUE(r.has_value()) << "Data page must not be clobbered by zeroed DWB slot";
+    auto tuple = p.get_tuple(0);
+    ASSERT_TRUE(tuple.has_value());
+    EXPECT_EQ((*tuple)[0], kFill);
+}
+
+// =============================================================================
+// Adversarial AC7: DWB disabled (set_double_write_enabled(false)) -- normal
+// table CRUD still works; no DWB file is created.
+// Note: StorageManager is the integration point; test at BPM level since
+// StorageManager needs the full executor/catalog stack. We verify simply that
+// NOT calling enable_double_write still allows write/read.
+// =============================================================================
+
+TEST_F(QA_GDB922_DwbRecovery, NoDwbEnabledStillAllowsCrud) {
+    // Create BPM without DWB (simulates storage_double_write=false path).
+    bpm_ = std::make_unique<BufferPoolManager>(dm_, file_id_, 4);
+    // DWB NOT enabled.
+
+    auto np = bpm_->new_page();
+    ASSERT_TRUE(np.has_value()) << np.error().message;
+    PageId pid = (*np)->page_id();
+
+    std::vector<uint8_t> payload(32, uint8_t(0x42));
+    ASSERT_TRUE((*np)->insert_tuple(payload).has_value());
+    ASSERT_TRUE(bpm_->unpin_page(pid, true).has_value());
+    ASSERT_TRUE(bpm_->flush_page(pid).has_value());
+
+    // Evict and re-fetch to confirm round-trip through disk.
+    ASSERT_TRUE(bpm_->delete_page(pid).has_value());
+
+    // Re-read via DiskManager directly.
+    Page p(0, PageType::DATA);
+    auto r = dm_.read_page(file_id_, pid, p);
+    ASSERT_TRUE(r.has_value()) << "Page should be readable without DWB enabled";
+    auto tuple = p.get_tuple(0);
+    ASSERT_TRUE(tuple.has_value());
+    EXPECT_EQ((*tuple)[0], uint8_t(0x42));
+
+    // No DWB file should have been created.
+    EXPECT_FALSE(std::filesystem::exists(dwb_path_)) << "DWB file must not exist when not enabled";
+}
+
+// =============================================================================
+// Adversarial AC8: enable_double_write() called twice returns ALREADY_EXISTS.
+// =============================================================================
+
+TEST_F(QA_GDB922_DwbRecovery, EnableDwbTwiceReturnsAlreadyExists) {
+    bpm_ = std::make_unique<BufferPoolManager>(dm_, file_id_, 4);
+
+    auto en1 = bpm_->enable_double_write(dwb_path_);
+    ASSERT_TRUE(en1.has_value()) << en1.error().message;
+
+    auto en2 = bpm_->enable_double_write(dwb_path_);
+    ASSERT_FALSE(en2.has_value()) << "Second enable_double_write must fail";
+    EXPECT_EQ(en2.error().code, StatusCode::ALREADY_EXISTS);
+}
+
+// =============================================================================
+// Adversarial AC9: DWB slot with page_id == 0 (file header page) is skipped.
+// The recovery code checks page_id != 0 to avoid overwriting the file header.
+// We synthesize a fake DWB slot with page_id=0 and a valid checksum and verify
+// that enable_double_write does NOT restore it.
+// =============================================================================
+
+TEST_F(QA_GDB922_DwbRecovery, DwbSlotWithPageIdZeroIsSkipped) {
+    // Create a fake DWB file containing a Page whose page_id == 0 but has a
+    // valid checksum. Recovery should skip this slot (page_id==0 guard).
+    {
+        Page fake_page(0, PageType::DATA); // page_id = 0
+        // Give it a non-zero payload so it doesn't look empty.
+        std::vector<uint8_t> payload(16, uint8_t(0xBE));
+        (void)fake_page.insert_tuple(payload);
+        // Set valid checksum.
+        fake_page.set_checksum(compute_page_checksum(fake_page));
+
+        int fd = ::open(dwb_path_.string().c_str(), O_RDWR | O_CREAT, 0644);
+        ASSERT_GE(fd, 0);
+        ssize_t w = sixseven_platform::pwrite(fd, fake_page.raw().data(), page_size, 0);
+        EXPECT_EQ(w, static_cast<ssize_t>(page_size));
+        ::close(fd);
+    }
+
+    bpm_ = std::make_unique<BufferPoolManager>(dm_, file_id_, 4);
+    // Recovery runs: must skip page_id==0 and succeed.
+    auto en = bpm_->enable_double_write(dwb_path_);
+    ASSERT_TRUE(en.has_value()) << "enable_double_write must succeed even with page_id=0 slot";
+
+    // File header (page 0) must be intact -- try to read a page that IS in the
+    // file (we haven't corrupted anything, so the read must succeed).
+    // Allocate a user page to confirm the file is usable.
+    auto np = bpm_->new_page();
+    ASSERT_TRUE(np.has_value()) << "Should be able to allocate pages after skipping page_id=0 slot";
+}
+
+// =============================================================================
+// Adversarial AC10: DWB slot with page_id beyond the file extent is skipped --
+// no out-of-bounds write to a non-existent page.
+// =============================================================================
+
+TEST_F(QA_GDB922_DwbRecovery, DwbSlotBeyondFileExtentIsSkipped) {
+    // Write a real page so the data file exists with known content.
+    const uint8_t kFill = 0x77;
+    PageId pid = write_page_through_dwb(kFill);
+    bpm_.reset();
+
+    // Record actual page count via DiskManager.
+    auto pc = dm_.file_page_count(file_id_);
+    ASSERT_TRUE(pc.has_value());
+    PageId out_of_bounds_pid = *pc + 999; // well beyond the file.
+
+    // Craft a DWB slot claiming to protect an out-of-bounds page.
+    {
+        Page fake_page(out_of_bounds_pid, PageType::DATA);
+        std::vector<uint8_t> payload(16, uint8_t(0xEF));
+        (void)fake_page.insert_tuple(payload);
+        fake_page.set_checksum(compute_page_checksum(fake_page));
+
+        int fd = ::open(dwb_path_.string().c_str(), O_RDWR, 0644);
+        ASSERT_GE(fd, 0);
+        ssize_t w = sixseven_platform::pwrite(fd, fake_page.raw().data(), page_size, 0);
+        EXPECT_EQ(w, static_cast<ssize_t>(page_size));
+        ::close(fd);
+    }
+
+    // Re-enable DWB: must skip the out-of-bounds slot gracefully.
+    bpm_ = std::make_unique<BufferPoolManager>(dm_, file_id_, 4);
+    auto en = bpm_->enable_double_write(dwb_path_);
+    ASSERT_TRUE(en.has_value()) << "enable_double_write must succeed for out-of-bounds slot";
+
+    // Existing page must be intact.
+    Page p(0, PageType::DATA);
+    auto r = dm_.read_page(file_id_, pid, p);
+    ASSERT_TRUE(r.has_value()) << "Existing page must be intact after out-of-bounds slot skip";
+    auto tuple = p.get_tuple(0);
+    ASSERT_TRUE(tuple.has_value());
+    EXPECT_EQ((*tuple)[0], kFill);
 }
