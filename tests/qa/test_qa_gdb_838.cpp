@@ -147,7 +147,10 @@ TEST_F(QA_GDB838, HighContention_16Threads_SmallRows_GDB838) {
     ASSERT_TRUE(it_result.has_value()) << it_result.error().message;
     auto it = std::move(*it_result);
     int scanned = 0;
-    while (it.next().has_value()) {
+    for (;;) {
+        auto r = it.next();
+        ASSERT_TRUE(r.has_value());
+        if (!r->has_value()) { break; }
         ++scanned;
     }
     EXPECT_EQ(scanned, kTotal) << "scan found " << scanned << " rows, expected " << kTotal;
@@ -238,7 +241,10 @@ TEST_F(QA_GDB838, HighContention_32Threads_Repeat_GDB838) {
     ASSERT_TRUE(it_result.has_value());
     auto it = std::move(*it_result);
     int scanned = 0;
-    while (it.next().has_value()) {
+    for (;;) {
+        auto r = it.next();
+        ASSERT_TRUE(r.has_value());
+        if (!r->has_value()) { break; }
         ++scanned;
     }
     EXPECT_EQ(scanned, grand_total);
@@ -310,7 +316,10 @@ TEST_F(QA_GDB838, MixedInsertDeleteScan_GDB838) {
         }
         auto it = std::move(*it_result);
         int local_count = 0;
-        while (it.next().has_value()) {
+        for (;;) {
+            auto r = it.next();
+            ASSERT_TRUE(r.has_value());
+            if (!r->has_value()) { break; }
             ++local_count;
         }
         scan_count.fetch_add(local_count, std::memory_order_relaxed);
@@ -436,7 +445,10 @@ TEST_F(QA_GDB838, ConcurrentBatchAndSingleInsert_GDB838) {
     ASSERT_TRUE(it_result.has_value());
     auto it = std::move(*it_result);
     int scanned = 0;
-    while (it.next().has_value()) {
+    for (;;) {
+        auto r = it.next();
+        ASSERT_TRUE(r.has_value());
+        if (!r->has_value()) { break; }
         ++scanned;
     }
     EXPECT_EQ(scanned, kExpected);
@@ -520,7 +532,10 @@ TEST_F(QA_GDB838, HintOverflow_PageBoundaryStress_GDB838) {
     ASSERT_TRUE(it_result.has_value());
     auto it = std::move(*it_result);
     int scanned = 0;
-    while (it.next().has_value()) {
+    for (;;) {
+        auto r = it.next();
+        ASSERT_TRUE(r.has_value());
+        if (!r->has_value()) { break; }
         ++scanned;
     }
     EXPECT_EQ(scanned, 3 + kTotal);
@@ -606,7 +621,10 @@ TEST_F(QA_GDB838, RowCountCorrect_ConcurrentInsertDelete_GDB838) {
     ASSERT_TRUE(it_result.has_value());
     auto it = std::move(*it_result);
     int scanned = 0;
-    while (it.next().has_value()) {
+    for (;;) {
+        auto r = it.next();
+        ASSERT_TRUE(r.has_value());
+        if (!r->has_value()) { break; }
         ++scanned;
     }
     EXPECT_EQ(scanned, expected_rc)

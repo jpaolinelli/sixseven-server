@@ -272,9 +272,12 @@ public:
                   const TransactionManager* txn_mgr = nullptr);
 
     /// Advance to the next live tuple.
-    /// @return A pair of (RID, tuple data copy), or nullopt if scan is exhausted.
-    ///         For MVCC heaps the data is the user payload (header stripped).
-    [[nodiscard]] std::optional<std::pair<RID, std::vector<uint8_t>>> next();
+    /// @return ok(some pair)   -- a live tuple was found.
+    ///         ok(nullopt)     -- scan is exhausted (end of heap).
+    ///         error           -- a page could not be fetched (I/O error or
+    ///                           buffer-pool pin exhaustion); the scan is
+    ///                           invalid after an error is returned.
+    [[nodiscard]] Result<std::optional<std::pair<RID, std::vector<uint8_t>>>> next();
 
     /// Skip @p count live tuples without deserializing or copying their data.
     /// Much faster than calling next() and discarding the result, because it

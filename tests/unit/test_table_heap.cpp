@@ -234,7 +234,8 @@ TEST_F(TableHeapTest, SequentialScanEmpty) {
     ASSERT_TRUE(it_result.has_value()) << it_result.error().message;
     auto it = std::move(*it_result);
     auto result = it.next();
-    EXPECT_FALSE(result.has_value());
+    ASSERT_TRUE(result.has_value()) << "next() returned error on empty heap: " << result.error().message;
+    EXPECT_FALSE(result->has_value());
 }
 
 TEST_F(TableHeapTest, SequentialScanSinglePage) {
@@ -251,8 +252,13 @@ TEST_F(TableHeapTest, SequentialScanSinglePage) {
     ASSERT_TRUE(it_result.has_value()) << it_result.error().message;
     auto it = std::move(*it_result);
     int count = 0;
-    while (auto result = it.next()) {
-        auto& [rid, data] = *result;
+    for (;;) {
+        auto result = it.next();
+        ASSERT_TRUE(result.has_value()) << result.error().message;
+        if (!result->has_value()) {
+            break;
+        }
+        auto& [rid, data] = **result;
         EXPECT_EQ(data.size(), 50u);
         EXPECT_EQ(data[0], static_cast<uint8_t>(count));
         count++;
@@ -278,8 +284,13 @@ TEST_F(TableHeapTest, SequentialScanMultiplePages) {
     ASSERT_TRUE(it_result.has_value()) << it_result.error().message;
     auto it = std::move(*it_result);
     int count = 0;
-    while (auto result = it.next()) {
-        auto& [rid, data] = *result;
+    for (;;) {
+        auto result = it.next();
+        ASSERT_TRUE(result.has_value()) << result.error().message;
+        if (!result->has_value()) {
+            break;
+        }
+        auto& [rid, data] = **result;
         EXPECT_EQ(data.size(), 2000u);
         count++;
     }
@@ -303,8 +314,13 @@ TEST_F(TableHeapTest, SequentialScanSkipsDeletedTuples) {
     ASSERT_TRUE(it_result.has_value()) << it_result.error().message;
     auto it = std::move(*it_result);
     std::vector<uint8_t> first_bytes;
-    while (auto result = it.next()) {
-        first_bytes.push_back(result->second[0]);
+    for (;;) {
+        auto result = it.next();
+        ASSERT_TRUE(result.has_value()) << result.error().message;
+        if (!result->has_value()) {
+            break;
+        }
+        first_bytes.push_back((*result)->second[0]);
     }
 
     ASSERT_EQ(first_bytes.size(), 2u);
@@ -332,10 +348,15 @@ TEST_F(TableHeapTest, SequentialScanCrossPageWithDeletes) {
     ASSERT_TRUE(it_result.has_value()) << it_result.error().message;
     auto it = std::move(*it_result);
     int count = 0;
-    while (auto result = it.next()) {
-        auto& [rid, data] = *result;
+    for (;;) {
+        auto result = it.next();
+        ASSERT_TRUE(result.has_value()) << result.error().message;
+        if (!result->has_value()) {
+            break;
+        }
+        auto& [rid, data] = **result;
         EXPECT_EQ(data.size(), 2000u);
-        // Remaining tuples: indices 1, 3, 5, 7, 9, 11, 13 — all odd.
+        // Remaining tuples: indices 1, 3, 5, 7, 9, 11, 13 -- all odd.
         EXPECT_EQ(data[0], static_cast<uint8_t>(count * 2 + 1));
         count++;
     }
@@ -497,7 +518,8 @@ TEST_F(TableHeapTest, BeginReturnsResult) {
     // Iterator from empty heap should have no tuples.
     auto it = std::move(*result);
     auto next = it.next();
-    EXPECT_FALSE(next.has_value());
+    ASSERT_TRUE(next.has_value()) << next.error().message;
+    EXPECT_FALSE(next->has_value());
 }
 
 // -- Row count (GDB-616) -----------------------------------------------------
@@ -918,7 +940,12 @@ TEST_F(TableHeapTest, ConcurrentInsertStress_GDB838) {
     ASSERT_TRUE(it_result.has_value()) << it_result.error().message;
     auto it = std::move(*it_result);
     int scanned = 0;
-    while (it.next().has_value()) {
+    for (;;) {
+        auto r = it.next();
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+        if (!r->has_value()) {
+            break;
+        }
         ++scanned;
     }
     EXPECT_EQ(scanned, kTotalRows)

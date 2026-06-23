@@ -73,8 +73,11 @@ protected:
         auto it = (*ts)->heap->begin();
         if (!it)
             return rows;
-        while (auto row = it->next()) {
-            auto values = TupleSerializer::deserialize(row->second, schema);
+        for (;;) {
+            auto row_result = it->next();
+            if (!row_result.has_value()) break;
+            if (!row_result->has_value()) break;
+            auto values = TupleSerializer::deserialize((*row_result)->second, schema);
             if (!values)
                 continue;
             rows.push_back({static_cast<table_id_t>((*values)[0].as_int32()),
@@ -99,8 +102,11 @@ protected:
         auto it = (*ts)->heap->begin();
         if (!it)
             return rows;
-        while (auto row = it->next()) {
-            auto values = TupleSerializer::deserialize(row->second, schema);
+        for (;;) {
+            auto row_result = it->next();
+            if (!row_result.has_value()) break;
+            if (!row_result->has_value()) break;
+            auto values = TupleSerializer::deserialize((*row_result)->second, schema);
             if (!values)
                 continue;
             rows.push_back({static_cast<table_id_t>((*values)[0].as_int32()),
@@ -125,8 +131,11 @@ protected:
         auto it = (*ts)->heap->begin();
         if (!it)
             return rows;
-        while (auto row = it->next()) {
-            auto values = TupleSerializer::deserialize(row->second, schema);
+        for (;;) {
+            auto row_result = it->next();
+            if (!row_result.has_value()) break;
+            if (!row_result->has_value()) break;
+            auto values = TupleSerializer::deserialize((*row_result)->second, schema);
             if (!values)
                 continue;
             rows.push_back({(*values)[0].as_int32(),

@@ -151,7 +151,12 @@ static void verify_insert_results(TableHeap& heap,
     ASSERT_TRUE(it_result.has_value()) << label << ": begin() failed";
     auto it = std::move(*it_result);
     int scanned = 0;
-    while (it.next().has_value()) {
+    for (;;) {
+        auto r = it.next();
+        ASSERT_TRUE(r.has_value()) << "scan error: " << r.error().message;
+        if (!r->has_value()) {
+            break;
+        }
         ++scanned;
     }
     EXPECT_EQ(scanned, expected_total) << label << ": scan mismatch";
@@ -214,7 +219,12 @@ TEST_F(QA_GDB1267, NearPageSize_8Threads_40Rows_3Iters_GDB1267) {
     ASSERT_TRUE(it_result.has_value());
     auto it = std::move(*it_result);
     int scanned = 0;
-    while (it.next().has_value()) {
+    for (;;) {
+        auto r = it.next();
+        ASSERT_TRUE(r.has_value()) << "scan error: " << r.error().message;
+        if (!r->has_value()) {
+            break;
+        }
         ++scanned;
     }
     EXPECT_EQ(scanned, grand_total) << "grand total scan mismatch";
@@ -375,7 +385,12 @@ TEST_F(QA_GDB1267, RetryExhaustion_64Threads_TinyPool_ErrorIsInternalError_GDB12
     ASSERT_TRUE(it_result.has_value());
     auto it = std::move(*it_result);
     int scanned = 0;
-    while (it.next().has_value()) {
+    for (;;) {
+        auto r = it.next();
+        ASSERT_TRUE(r.has_value()) << "scan error: " << r.error().message;
+        if (!r->has_value()) {
+            break;
+        }
         ++scanned;
     }
     EXPECT_EQ(scanned, successful) << "scan count mismatch after exhaustion scenario";
@@ -515,7 +530,12 @@ TEST_F(QA_GDB1267, PinLeak_SustainedRetryPressure_GDB1267) {
     ASSERT_TRUE(it_result.has_value());
     auto it = std::move(*it_result);
     int scanned = 0;
-    while (it.next().has_value()) {
+    for (;;) {
+        auto r = it.next();
+        ASSERT_TRUE(r.has_value()) << "scan error: " << r.error().message;
+        if (!r->has_value()) {
+            break;
+        }
         ++scanned;
     }
     EXPECT_EQ(scanned, grand_total) << "scan total mismatch after sustained inserts";
@@ -608,7 +628,10 @@ TEST_F(QA_GDB1267, Interaction_AllOps_Concurrent_GDB1267) {
             return;
         }
         auto it = std::move(*it_result);
-        while (it.next().has_value()) {
+        for (;;) {
+            auto r = it.next();
+            if (!r.has_value()) { break; }   // scan error - stop
+            if (!r->has_value()) { break; }  // end of scan
             // just iterate — must not crash
         }
     };
@@ -694,7 +717,12 @@ TEST_F(QA_GDB1267, PersistenceReopen_HeavyConcurrentInsert_GDB1267) {
     ASSERT_TRUE(it_result.has_value());
     auto it = std::move(*it_result);
     int scanned = 0;
-    while (it.next().has_value()) {
+    for (;;) {
+        auto r = it.next();
+        ASSERT_TRUE(r.has_value()) << "scan error: " << r.error().message;
+        if (!r->has_value()) {
+            break;
+        }
         ++scanned;
     }
     EXPECT_EQ(scanned, kTotal) << "scan count mismatch after reopen";
@@ -771,7 +799,12 @@ TEST_F(QA_GDB1267, BarrierBurst_32Threads_NearPageSize_5Rounds_GDB1267) {
     ASSERT_TRUE(it_result.has_value());
     auto it = std::move(*it_result);
     int scanned = 0;
-    while (it.next().has_value()) {
+    for (;;) {
+        auto r = it.next();
+        ASSERT_TRUE(r.has_value()) << "scan error: " << r.error().message;
+        if (!r->has_value()) {
+            break;
+        }
         ++scanned;
     }
     EXPECT_EQ(scanned, grand_total);

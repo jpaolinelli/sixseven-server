@@ -3684,11 +3684,14 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
         }
 
         while (true) {
-            auto row = scan_it->next();
-            if (!row) {
+            auto row_result = scan_it->next();
+            if (!row_result) {
+                return make_error(row_result.error().code, row_result.error().message);
+            }
+            if (!row_result->has_value()) {
                 break;
             }
-            auto& [rid, data] = *row;
+            auto& [rid, data] = **row_result;
             auto values = TupleSerializer::deserialize(data, storage->storage_schema);
             if (!values) {
                 return make_error(values.error().code, values.error().message);

@@ -176,8 +176,13 @@ TEST_F(TableHeapMvccTest, IteratorStripsHeaders) {
     ASSERT_TRUE(it.has_value());
 
     uint8_t expected = 1;
-    while (auto row = it->next()) {
-        EXPECT_EQ(row->second, make_bytes(25, expected));
+    for (;;) {
+        auto row_result = it->next();
+        ASSERT_TRUE(row_result.has_value()) << row_result.error().message;
+        if (!row_result->has_value()) {
+            break;
+        }
+        EXPECT_EQ((*row_result)->second, make_bytes(25, expected));
         ++expected;
     }
     EXPECT_EQ(expected, 4);

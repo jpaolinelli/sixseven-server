@@ -152,8 +152,16 @@ Result<void> CatalogPersistence::load_catalog() {
         if (!it) {
             return make_error(it.error().code, it.error().message);
         }
-        while (auto row = it->next()) {
-            auto values = TupleSerializer::deserialize(row->second, storage_schema);
+        for (;;) {
+            auto row_result = it->next();
+            if (!row_result) {
+                return make_error(row_result.error().code, row_result.error().message);
+            }
+            if (!row_result->has_value()) {
+                break;
+            }
+            auto& row = **row_result;
+            auto values = TupleSerializer::deserialize(row.second, storage_schema);
             if (!values) {
                 SIXSEVEN_LOG_WARN("catalog persistence: skipping corrupt sys_databases row");
                 continue;
@@ -201,8 +209,16 @@ Result<void> CatalogPersistence::load_catalog() {
         if (!it) {
             return make_error(it.error().code, it.error().message);
         }
-        while (auto row = it->next()) {
-            auto values = TupleSerializer::deserialize(row->second, storage_schema);
+        for (;;) {
+            auto row_result = it->next();
+            if (!row_result) {
+                return make_error(row_result.error().code, row_result.error().message);
+            }
+            if (!row_result->has_value()) {
+                break;
+            }
+            auto& row = **row_result;
+            auto values = TupleSerializer::deserialize(row.second, storage_schema);
             if (!values) {
                 SIXSEVEN_LOG_WARN("catalog persistence: skipping corrupt sys_tables row");
                 continue;
@@ -228,8 +244,16 @@ Result<void> CatalogPersistence::load_catalog() {
         if (!it) {
             return make_error(it.error().code, it.error().message);
         }
-        while (auto row = it->next()) {
-            auto values = TupleSerializer::deserialize(row->second, storage_schema);
+        for (;;) {
+            auto row_result = it->next();
+            if (!row_result) {
+                return make_error(row_result.error().code, row_result.error().message);
+            }
+            if (!row_result->has_value()) {
+                break;
+            }
+            auto& row = **row_result;
+            auto values = TupleSerializer::deserialize(row.second, storage_schema);
             if (!values) {
                 SIXSEVEN_LOG_WARN("catalog persistence: skipping corrupt sys_columns row");
                 continue;
@@ -306,8 +330,16 @@ Result<void> CatalogPersistence::load_catalog() {
         if (!it) {
             return make_error(it.error().code, it.error().message);
         }
-        while (auto row = it->next()) {
-            auto values = TupleSerializer::deserialize(row->second, storage_schema);
+        for (;;) {
+            auto row_result = it->next();
+            if (!row_result) {
+                return make_error(row_result.error().code, row_result.error().message);
+            }
+            if (!row_result->has_value()) {
+                break;
+            }
+            auto& row = **row_result;
+            auto values = TupleSerializer::deserialize(row.second, storage_schema);
             if (!values) {
                 continue;
             }
@@ -339,8 +371,16 @@ Result<void> CatalogPersistence::load_catalog() {
         if (!it) {
             return make_error(it.error().code, it.error().message);
         }
-        while (auto row = it->next()) {
-            auto values = TupleSerializer::deserialize(row->second, storage_schema);
+        for (;;) {
+            auto row_result = it->next();
+            if (!row_result) {
+                return make_error(row_result.error().code, row_result.error().message);
+            }
+            if (!row_result->has_value()) {
+                break;
+            }
+            auto& row = **row_result;
+            auto values = TupleSerializer::deserialize(row.second, storage_schema);
             if (!values) {
                 continue;
             }
@@ -396,8 +436,16 @@ Result<void> CatalogPersistence::load_catalog() {
         if (!it) {
             return make_error(it.error().code, it.error().message);
         }
-        while (auto row = it->next()) {
-            auto values = TupleSerializer::deserialize(row->second, storage_schema);
+        for (;;) {
+            auto row_result = it->next();
+            if (!row_result) {
+                return make_error(row_result.error().code, row_result.error().message);
+            }
+            if (!row_result->has_value()) {
+                break;
+            }
+            auto& row = **row_result;
+            auto values = TupleSerializer::deserialize(row.second, storage_schema);
             if (!values) {
                 continue;
             }
@@ -478,13 +526,21 @@ Result<void> CatalogPersistence::delete_rows(table_id_t sys_table_id, Pred predi
     if (!it) {
         return make_error(it.error().code, it.error().message);
     }
-    while (auto row = it->next()) {
-        auto values = TupleSerializer::deserialize(row->second, storage_schema);
+    for (;;) {
+        auto row_result = it->next();
+        if (!row_result) {
+            return make_error(row_result.error().code, row_result.error().message);
+        }
+        if (!row_result->has_value()) {
+            break;
+        }
+        auto& row = **row_result;
+        auto values = TupleSerializer::deserialize(row.second, storage_schema);
         if (!values) {
             continue; // Skip corrupt rows.
         }
         if (predicate(*values)) {
-            to_delete.push_back(row->first);
+            to_delete.push_back(row.first);
         }
     }
 
@@ -696,8 +752,16 @@ Result<void> CatalogPersistence::migrate_databases_from_sys_tables() {
 
     // Collect distinct database IDs.
     std::set<database_id_t> db_ids;
-    while (auto row = it->next()) {
-        auto values = TupleSerializer::deserialize(row->second, storage_schema);
+    for (;;) {
+        auto row_result = it->next();
+        if (!row_result) {
+            return make_error(row_result.error().code, row_result.error().message);
+        }
+        if (!row_result->has_value()) {
+            break;
+        }
+        auto& row = **row_result;
+        auto values = TupleSerializer::deserialize(row.second, storage_schema);
         if (!values) {
             continue;
         }
@@ -817,8 +881,16 @@ Result<std::vector<EmbeddingJob>> CatalogPersistence::load_embedding_jobs() {
     }
 
     std::vector<EmbeddingJob> jobs;
-    while (auto row = it->next()) {
-        auto values = TupleSerializer::deserialize(row->second, storage_schema);
+    for (;;) {
+        auto row_result = it->next();
+        if (!row_result) {
+            return make_error(row_result.error().code, row_result.error().message);
+        }
+        if (!row_result->has_value()) {
+            break;
+        }
+        auto& row = **row_result;
+        auto values = TupleSerializer::deserialize(row.second, storage_schema);
         if (!values) {
             SIXSEVEN_LOG_WARN("embedding job persistence: skipping corrupt row");
             continue;
@@ -887,8 +959,16 @@ Result<std::vector<UserRecord>> CatalogPersistence::load_users() {
     }
 
     std::vector<UserRecord> users;
-    while (auto row = it->next()) {
-        auto values = TupleSerializer::deserialize(row->second, storage_schema);
+    for (;;) {
+        auto row_result = it->next();
+        if (!row_result) {
+            return make_error(row_result.error().code, row_result.error().message);
+        }
+        if (!row_result->has_value()) {
+            break;
+        }
+        auto& row = **row_result;
+        auto values = TupleSerializer::deserialize(row.second, storage_schema);
         if (!values) {
             SIXSEVEN_LOG_WARN("user persistence: skipping corrupt row");
             continue;

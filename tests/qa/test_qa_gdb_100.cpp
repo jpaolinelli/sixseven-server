@@ -184,7 +184,8 @@ TEST_F(QA_GDB100, DeleteAllTuples) {
     auto it = heap.begin();
     ASSERT_TRUE(it.has_value());
     auto next = it->next();
-    EXPECT_FALSE(next.has_value());
+    ASSERT_TRUE(next.has_value()) << next.error().message;
+    EXPECT_FALSE(next->has_value());
 }
 
 TEST_F(QA_GDB100, DeleteFirstAndLastTuples) {
@@ -206,7 +207,12 @@ TEST_F(QA_GDB100, DeleteFirstAndLastTuples) {
     ASSERT_TRUE(it.has_value());
 
     int count = 0;
-    while (auto entry = it->next()) {
+    for (;;) {
+        auto entry = it->next();
+        ASSERT_TRUE(entry.has_value()) << entry.error().message;
+        if (!entry->has_value()) {
+            break;
+        }
         ++count;
     }
     EXPECT_EQ(count, 8);
@@ -284,7 +290,8 @@ TEST_F(QA_GDB100, ScanEmptyTable) {
     ASSERT_TRUE(it.has_value());
 
     auto next = it->next();
-    EXPECT_FALSE(next.has_value());
+    ASSERT_TRUE(next.has_value()) << next.error().message;
+    EXPECT_FALSE(next->has_value());
 }
 
 TEST_F(QA_GDB100, ScanReturnsSortedRids) {
@@ -299,8 +306,13 @@ TEST_F(QA_GDB100, ScanReturnsSortedRids) {
 
     RID prev = RID::invalid();
     int count = 0;
-    while (auto entry = it->next()) {
-        auto& [rid, data] = *entry;
+    for (;;) {
+        auto entry = it->next();
+        ASSERT_TRUE(entry.has_value()) << entry.error().message;
+        if (!entry->has_value()) {
+            break;
+        }
+        auto& [rid, data] = **entry;
         if (count > 0) {
             EXPECT_GT(rid, prev) << "RIDs should be in order";
         }
@@ -331,8 +343,13 @@ TEST_F(QA_GDB100, ScanSkipsDeletedAcrossPages) {
     ASSERT_TRUE(it.has_value());
 
     int count = 0;
-    while (auto entry = it->next()) {
-        auto& [rid, data] = *entry;
+    for (;;) {
+        auto entry = it->next();
+        ASSERT_TRUE(entry.has_value()) << entry.error().message;
+        if (!entry->has_value()) {
+            break;
+        }
+        auto& [rid, data] = **entry;
         EXPECT_EQ(data.size(), 200u);
         // The fill byte should be an odd number (even-indexed tuples were deleted)
         EXPECT_TRUE(data[0] % 2 == 1)
@@ -368,7 +385,12 @@ TEST_F(QA_GDB100, ScanAfterDeleteAndReinsert) {
     ASSERT_TRUE(it.has_value());
 
     int count = 0;
-    while (auto entry = it->next()) {
+    for (;;) {
+        auto entry = it->next();
+        ASSERT_TRUE(entry.has_value()) << entry.error().message;
+        if (!entry->has_value()) {
+            break;
+        }
         ++count;
     }
     EXPECT_EQ(count, 20);
@@ -464,8 +486,13 @@ TEST_F(QA_GDB100, StressInsertDeleteScan) {
     ASSERT_TRUE(it.has_value());
 
     int count = 0;
-    while (auto entry = it->next()) {
-        auto& [rid, data] = *entry;
+    for (;;) {
+        auto entry = it->next();
+        ASSERT_TRUE(entry.has_value()) << entry.error().message;
+        if (!entry->has_value()) {
+            break;
+        }
+        auto& [rid, data] = **entry;
         // Verify this isn't a deleted tuple
         EXPECT_EQ(deleted.count(rid), 0u) << "Scan returned deleted RID";
         ++count;

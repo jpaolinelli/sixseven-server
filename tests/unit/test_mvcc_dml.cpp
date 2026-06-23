@@ -295,7 +295,9 @@ TEST_F(TableHeapMarkDeletedTest, MarkDeletedHidesTupleButKeepsSlot) {
     // Scans skip the deleted version.
     auto it = heap_->begin();
     ASSERT_TRUE(it.has_value());
-    EXPECT_FALSE(it->next().has_value());
+    auto mvcc_next = it->next();
+    ASSERT_TRUE(mvcc_next.has_value()) << mvcc_next.error().message;
+    EXPECT_FALSE(mvcc_next->has_value());
 }
 
 TEST_F(TableHeapMarkDeletedTest, MarkDeletedStampsVersionChainPointer) {

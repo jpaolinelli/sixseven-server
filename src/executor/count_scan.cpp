@@ -29,7 +29,11 @@ Result<std::optional<Tuple>> CountScanOperator::do_next() {
         if (!iter) {
             return make_error(iter.error().code, iter.error().message);
         }
-        while (iter->next().has_value()) {
+        while (true) {
+            auto r = iter->next();
+            if (!r || !r->has_value()) {
+                break;
+            }
             ++count;
         }
     } else {

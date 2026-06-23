@@ -125,8 +125,11 @@ protected:
         auto schema = StorageManager::build_storage_schema(sys_databases_schema());
         auto it = (*ts)->heap->begin();
         if (!it) return entries;
-        while (auto row = it->next()) {
-            auto values = TupleSerializer::deserialize(row->second, schema);
+        for (;;) {
+            auto row_result = it->next();
+            if (!row_result.has_value()) break;
+            if (!row_result->has_value()) break;
+            auto values = TupleSerializer::deserialize((*row_result)->second, schema);
             if (!values) continue;
             entries.emplace_back(
                 static_cast<database_id_t>((*values)[0].as_int32()),

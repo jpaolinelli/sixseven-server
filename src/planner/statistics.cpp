@@ -75,8 +75,12 @@ static Result<std::vector<std::vector<Value>>> sample_table(TableHeap& heap,
     uint64_t valid_rows = 0; // Rows that deserialized successfully (GDB-1232).
     total_row_bytes = 0;
 
-    while (auto row = iter.next()) {
-        auto& [rid, data] = *row;
+    for (;;) {
+        auto row_result = iter.next();
+        if (!row_result || !row_result->has_value()) {
+            break;
+        }
+        auto& [rid, data] = **row_result;
         total_row_bytes += data.size();
 
         auto values = TupleSerializer::deserialize(data, storage_schema);

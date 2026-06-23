@@ -1556,11 +1556,14 @@ Result<void> QueryEngine::ensure_pk_cache(table_id_t table_id) {
     }
 
     while (true) {
-        auto row = iter->next();
-        if (!row) {
+        auto row_result = iter->next();
+        if (!row_result) {
+            return tl::unexpected(row_result.error());
+        }
+        if (!row_result->has_value()) {
             break;
         }
-        auto [rid, data] = *row;
+        auto [rid, data] = **row_result;
         auto values = TupleSerializer::deserialize(data, table_storage->storage_schema);
         if (!values || pk_col_idx >= values->size()) {
             continue;
@@ -2196,12 +2199,15 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
     };
 
     while (true) {
-        auto row = scan_it->next();
-        if (!row) {
+        auto row_result = scan_it->next();
+        if (!row_result) {
+            return make_error(row_result.error().code, row_result.error().message);
+        }
+        if (!row_result->has_value()) {
             break;
         }
 
-        auto& [rid, data] = *row;
+        auto& [rid, data] = **row_result;
         auto values = TupleSerializer::deserialize(data, table_storage->storage_schema);
         if (!values) {
             ++total_skipped;
@@ -2276,11 +2282,16 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
             std::vector<RID> rid_map;
             uint32_t inserted = 0;
             while (true) {
-                auto row = rebuild_it->next();
-                if (!row) {
+                auto row_result = rebuild_it->next();
+                if (!row_result) {
+                    SIXSEVEN_LOG_WARN("REEMBED: scan error during HNSW rebuild: {}",
+                                      row_result.error().message);
                     break;
                 }
-                auto& [rid, data] = *row;
+                if (!row_result->has_value()) {
+                    break;
+                }
+                auto& [rid, data] = **row_result;
                 auto vals = TupleSerializer::deserialize(data, table_storage->storage_schema);
                 if (!vals) {
                     continue;
@@ -3275,7 +3286,11 @@ Result<QueryResult> QueryEngine::execute_alter_table(const AlterTableStmt& stmt)
             if (ts) {
                 auto it = (*ts)->heap->begin();
                 if (it) {
-                    if (it->next().has_value()) {
+                    auto first = it->next();
+                    if (!first) {
+                        return make_error(first.error().code, first.error().message);
+                    }
+                    if (first->has_value()) {
                         return make_error(StatusCode::CONSTRAINT_VIOLATION,
                                           "cannot add NOT NULL column '" + ccd.name +
                                               "' without DEFAULT to a table with existing rows");
@@ -3306,8 +3321,15 @@ Result<QueryResult> QueryEngine::execute_alter_table(const AlterTableStmt& stmt)
             std::vector<std::pair<RID, std::vector<uint8_t>>> tuples;
             auto it = (*ts)->heap->begin();
             if (it) {
-                while (auto row = it->next()) {
-                    tuples.push_back(std::move(*row));
+                for (;;) {
+                    auto row_result = it->next();
+                    if (!row_result) {
+                        return make_error(row_result.error().code, row_result.error().message);
+                    }
+                    if (!row_result->has_value()) {
+                        break;
+                    }
+                    tuples.push_back(std::move(**row_result));
                 }
             }
 
@@ -3426,8 +3448,15 @@ Result<QueryResult> QueryEngine::execute_alter_table(const AlterTableStmt& stmt)
             std::vector<std::pair<RID, std::vector<uint8_t>>> tuples;
             auto it = (*ts)->heap->begin();
             if (it) {
-                while (auto row = it->next()) {
-                    tuples.push_back(std::move(*row));
+                for (;;) {
+                    auto row_result = it->next();
+                    if (!row_result) {
+                        return make_error(row_result.error().code, row_result.error().message);
+                    }
+                    if (!row_result->has_value()) {
+                        break;
+                    }
+                    tuples.push_back(std::move(**row_result));
                 }
             }
 

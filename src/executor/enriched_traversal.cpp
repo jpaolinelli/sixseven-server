@@ -176,12 +176,15 @@ Result<void> EnrichedTraversalOperator::enrich_results() {
         }
 
         while (true) {
-            auto row = iter->next();
-            if (!row) {
+            auto row_result = iter->next();
+            if (!row_result) {
+                return tl::unexpected(row_result.error());
+            }
+            if (!row_result->has_value()) {
                 break;
             }
 
-            auto [rid, data] = *row;
+            auto [rid, data] = **row_result;
             auto deserialized = TupleSerializer::deserialize(data, target_storage_schema_);
             if (!deserialized) {
                 SIXSEVEN_LOG_WARN("enriched traversal: skipping row — deserialization failed: {}",

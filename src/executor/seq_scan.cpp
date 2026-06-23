@@ -33,11 +33,15 @@ Result<std::optional<Tuple>> SeqScanOperator::do_next() {
     }
 
     while (true) {
-        auto row = iter_->next();
-        if (!row) {
+        auto row_result = iter_->next();
+        if (!row_result) {
+            return tl::unexpected(row_result.error());
+        }
+        if (!row_result->has_value()) {
             // Iterator exhausted.
             return ok(std::optional<Tuple>(std::nullopt));
         }
+        auto& row = *row_result;
 
         auto& [rid, data] = *row;
 

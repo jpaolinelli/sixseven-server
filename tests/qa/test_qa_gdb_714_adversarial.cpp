@@ -135,20 +135,24 @@ protected:
         ASSERT_TRUE(it.has_value()) << it.error().message;
 
         size_t seen = 0;
-        while (auto row = it->next()) {
-            auto key = rid_key(row->first);
+        for (;;) {
+            auto row_result = it->next();
+            ASSERT_TRUE(row_result.has_value()) << "scan error: " << row_result.error().message;
+            if (!row_result->has_value()) { break; }
+            auto& [row_rid, row_data] = **row_result;
+            auto key = rid_key(row_rid);
             auto expected = model.find(key);
             ASSERT_NE(expected, model.end())
-                << "unexpected live tuple at page " << row->first.page_id << " slot "
-                << row->first.slot_id;
-            EXPECT_EQ(row->second, expected->second.payload)
-                << "payload mismatch at page " << row->first.page_id << " slot "
-                << row->first.slot_id;
+                << "unexpected live tuple at page " << row_rid.page_id << " slot "
+                << row_rid.slot_id;
+            EXPECT_EQ(row_data, expected->second.payload)
+                << "payload mismatch at page " << row_rid.page_id << " slot "
+                << row_rid.slot_id;
 
-            auto header = heap_->get_tuple_header(row->first);
+            auto header = heap_->get_tuple_header(row_rid);
             ASSERT_TRUE(header.has_value()) << header.error().message;
             EXPECT_EQ(header->xmin, expected->second.xmin)
-                << "xmin mismatch at page " << row->first.page_id << " slot " << row->first.slot_id;
+                << "xmin mismatch at page " << row_rid.page_id << " slot " << row_rid.slot_id;
             EXPECT_EQ(header->xmax, invalid_txn_id);
             ++seen;
         }
@@ -436,8 +440,11 @@ TEST_F(QA_GDB714_StorageAdversarial, MvccHeapOverRawFileDoesNotCrash) {
     auto it = mvcc_view.begin();
     ASSERT_TRUE(it.has_value());
     size_t rows = 0;
-    while (auto row = it->next()) {
-        EXPECT_LE(row->second.size(), 40u - mvcc_header_size);
+    for (;;) {
+        auto row_result = it->next();
+        ASSERT_TRUE(row_result.has_value()) << "scan error: " << row_result.error().message;
+        if (!row_result->has_value()) { break; }
+        EXPECT_LE((*row_result)->second.size(), 40u - mvcc_header_size);
         ++rows;
     }
     EXPECT_EQ(rows, 1u);
@@ -482,17 +489,21 @@ TEST_F(QA_GDB714_StorageAdversarial, ConcurrentInsertsProduceNoTornHeaders) {
     size_t count_a = 0;
     size_t count_b = 0;
     size_t count_seed = 0;
-    while (auto row = it->next()) {
-        ASSERT_EQ(row->second.size(), 32u);
+    for (;;) {
+        auto row_result = it->next();
+        ASSERT_TRUE(row_result.has_value()) << "scan error: " << row_result.error().message;
+        if (!row_result->has_value()) { break; }
+        auto& [row_rid, row_data] = **row_result;
+        ASSERT_EQ(row_data.size(), 32u);
         // Payload must be uniformly one fill byte — a mix would be a torn write.
-        uint8_t first = row->second[0];
+        uint8_t first = row_data[0];
         ASSERT_TRUE(first == 0x11 || first == 0x99 || first == 0x55) << static_cast<int>(first);
-        for (uint8_t b : row->second) {
+        for (uint8_t b : row_data) {
             ASSERT_EQ(b, first);
         }
         (first == 0x11 ? count_a : (first == 0x99 ? count_b : count_seed))++;
 
-        auto header = heap_->get_tuple_header(row->first);
+        auto header = heap_->get_tuple_header(row_rid);
         ASSERT_TRUE(header.has_value()) << header.error().message;
         EXPECT_EQ(header->xmin, frozen_txn_id);
         EXPECT_EQ(header->xmax, invalid_txn_id);
@@ -907,9 +918,12 @@ TEST_F(QA_GDB714_WalAdversarial, HeaderOnlyImageRedoDoesNotCrashReads) {
     auto it = recovered_heap_->begin();
     ASSERT_TRUE(it.has_value());
     auto row = it->next();
-    ASSERT_TRUE(row.has_value());
-    EXPECT_TRUE(row->second.empty());
-    EXPECT_FALSE(it->next().has_value());
+    ASSERT_TRUE(row.has_value()) << "next() error: " << row.error().message;
+    ASSERT_TRUE(row->has_value()) << "expected a row, got end-of-scan";
+    EXPECT_TRUE((**row).second.empty());
+    auto end = it->next();
+    ASSERT_TRUE(end.has_value()) << "next() error: " << end.error().message;
+    EXPECT_FALSE(end->has_value());
 }
 
 // =============================================================================

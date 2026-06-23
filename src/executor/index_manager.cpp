@@ -265,8 +265,12 @@ Result<void> IndexManager::load_hnsw_from_disk(const IndexDef& def, database_id_
                     auto it = (*ts)->heap->begin();
                     if (it) {
                         rid_map.reserve(node_count);
-                        while (auto row = it->next()) {
-                            auto& [rid, data] = *row;
+                        for (;;) {
+                            auto row_result = it->next();
+                            if (!row_result || !row_result->has_value()) {
+                                break;
+                            }
+                            auto& [rid, data] = **row_result;
                             auto vals = TupleSerializer::deserialize(data, storage_schema);
                             if (!vals)
                                 continue;
@@ -375,8 +379,12 @@ Result<void> IndexManager::rebuild_hnsw_from_table(const IndexDef& def, database
         auto it = (*ts)->heap->begin();
         if (it) {
             uint32_t inserted = 0;
-            while (auto row = it->next()) {
-                auto& [rid, data] = *row;
+            for (;;) {
+                auto row_result = it->next();
+                if (!row_result || !row_result->has_value()) {
+                    break;
+                }
+                auto& [rid, data] = **row_result;
                 auto vals = TupleSerializer::deserialize(data, storage_schema);
                 if (!vals)
                     continue;
@@ -545,8 +553,13 @@ Result<void> IndexManager::rebuild_bm25_from_table(const IndexDef& def, database
         auto storage_schema = StorageManager::build_storage_schema(*table_schema);
         auto it = (*ts)->heap->begin();
         if (it) {
-            while (auto row = it->next()) {
-                auto vals = TupleSerializer::deserialize(row->second, storage_schema);
+            for (;;) {
+                auto row_result = it->next();
+                if (!row_result || !row_result->has_value()) {
+                    break;
+                }
+                auto& row = **row_result;
+                auto vals = TupleSerializer::deserialize(row.second, storage_schema);
                 if (!vals) {
                     continue;
                 }
@@ -558,7 +571,7 @@ Result<void> IndexManager::rebuild_bm25_from_table(const IndexDef& def, database
                 if (!s) {
                     continue;
                 }
-                (void)idx->add_document(row->first, **s);
+                (void)idx->add_document(row.first, **s);
             }
         }
     }
@@ -820,8 +833,13 @@ Result<void> IndexManager::rebuild_all_indexes() {
 
         int64_t autoincrement_max = 0;
 
-        while (auto row = it->next()) {
-            auto vals = TupleSerializer::deserialize(row->second, storage_schema);
+        for (;;) {
+            auto row_result = it->next();
+            if (!row_result || !row_result->has_value()) {
+                break;
+            }
+            auto& row = **row_result;
+            auto vals = TupleSerializer::deserialize(row.second, storage_schema);
             if (!vals) {
                 continue; // Skip corrupt rows.
             }
@@ -834,7 +852,7 @@ Result<void> IndexManager::rebuild_all_indexes() {
                     key.push_back((*vals)[ordinal]);
                 }
 
-                RID rid = row->first;
+                RID rid = row.first;
 
                 if (entry.btree != nullptr) {
                     auto ins = entry.btree->insert(key, rid);
@@ -1005,8 +1023,13 @@ Result<void> IndexManager::start_async_load() {
                             auto it = (*ts)->heap->begin();
                             if (it) {
                                 int64_t max_val = 0;
-                                while (auto row = it->next()) {
-                                    auto vals = TupleSerializer::deserialize(row->second, schema);
+                                for (;;) {
+                                    auto row_result = it->next();
+                                    if (!row_result || !row_result->has_value()) {
+                                        break;
+                                    }
+                                    auto& row = **row_result;
+                                    auto vals = TupleSerializer::deserialize(row.second, schema);
                                     if (!vals)
                                         continue;
                                     auto& v = (*vals)[static_cast<size_t>(col.ordinal)];
@@ -1133,8 +1156,13 @@ Result<void> IndexManager::start_async_load() {
                     auto storage_schema = StorageManager::build_storage_schema(*schema);
                     auto it = (*ts)->heap->begin();
                     if (it) {
-                        while (auto row = it->next()) {
-                            auto vals = TupleSerializer::deserialize(row->second, storage_schema);
+                        for (;;) {
+                            auto row_result = it->next();
+                            if (!row_result || !row_result->has_value()) {
+                                break;
+                            }
+                            auto& row = **row_result;
+                            auto vals = TupleSerializer::deserialize(row.second, storage_schema);
                             if (!vals)
                                 continue;
                             KeyType key;
@@ -1142,9 +1170,9 @@ Result<void> IndexManager::start_async_load() {
                                 key.push_back((*vals)[ordinal]);
                             }
                             if (btree_ptr)
-                                (void)btree_ptr->insert(key, row->first);
+                                (void)btree_ptr->insert(key, row.first);
                             if (hash_ptr)
-                                (void)hash_ptr->insert(key, row->first);
+                                (void)hash_ptr->insert(key, row.first);
                         }
                     }
                 }
@@ -1392,8 +1420,16 @@ Result<void> IndexManager::create_and_populate_index(const IndexDef& def,
         return make_error(it.error().code, it.error().message);
     }
 
-    while (auto row = it->next()) {
-        auto vals = TupleSerializer::deserialize(row->second, storage_schema);
+    for (;;) {
+        auto row_result = it->next();
+        if (!row_result) {
+            return make_error(row_result.error().code, row_result.error().message);
+        }
+        if (!row_result->has_value()) {
+            break;
+        }
+        auto& row = **row_result;
+        auto vals = TupleSerializer::deserialize(row.second, storage_schema);
         if (!vals) {
             continue;
         }
@@ -1404,7 +1440,7 @@ Result<void> IndexManager::create_and_populate_index(const IndexDef& def,
             key.push_back((*vals)[ordinal]);
         }
 
-        RID rid = row->first;
+        RID rid = row.first;
 
         if (btree_ptr != nullptr) {
             auto ins = btree_ptr->insert(key, rid);
