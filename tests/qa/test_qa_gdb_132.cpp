@@ -148,11 +148,11 @@ protected:
 
         std::vector<Embedding> result;
         while (true) {
-            auto row = it->next();
-            if (!row) {
+            auto row_result = it->next();
+            if (!row_result || !row_result->has_value()) {
                 break;
             }
-            auto& [rid, data] = *row;
+            auto& [rid, data] = **row_result;
             auto values = TupleSerializer::deserialize(data, table_storage->storage_schema);
             if (!values) {
                 continue;

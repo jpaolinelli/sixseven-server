@@ -432,8 +432,11 @@ TEST_F(GDB617BatchInsert, SequentialScanAfterBatchInsert) {
 
     std::vector<uint8_t> first_bytes;
     int count = 0;
-    while (auto row = it.next()) {
-        auto& [rid, data] = *row;
+    for (;;) {
+        auto row_result = it.next();
+        ASSERT_TRUE(row_result.has_value()) << "scan error: " << row_result.error().message;
+        if (!row_result->has_value()) { break; }
+        auto& [rid, data] = **row_result;
         EXPECT_EQ(data.size(), 500u);
         first_bytes.push_back(data[0]);
         ++count;
@@ -471,7 +474,10 @@ TEST_F(GDB617BatchInsert, SequentialScanAfterBatchAndDeletes) {
     auto it = std::move(*it_result);
 
     int count = 0;
-    while (auto row = it.next()) {
+    for (;;) {
+        auto r = it.next();
+        ASSERT_TRUE(r.has_value()) << "scan error: " << r.error().message;
+        if (!r->has_value()) { break; }
         ++count;
     }
     // Deleted indices: 0, 3, 6, 9, 12, 15, 18 = 7 deleted. 20 - 7 = 13.
@@ -652,7 +658,10 @@ TEST_F(GDB617BatchInsert, ConsecutiveBatchInserts) {
     ASSERT_TRUE(it_result.has_value()) << it_result.error().message;
     auto it = std::move(*it_result);
     int count = 0;
-    while (auto row = it.next()) {
+    for (;;) {
+        auto r = it.next();
+        ASSERT_TRUE(r.has_value()) << "scan error: " << r.error().message;
+        if (!r->has_value()) { break; }
         ++count;
     }
     EXPECT_EQ(count, 45);

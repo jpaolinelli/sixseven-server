@@ -187,12 +187,12 @@ void BackfillManager::backfill_loop(BackfillJob& job) {
     batch.reserve(job.batch_size);
 
     while (!job.cancel_requested.load()) {
-        auto row = it->next();
-        if (!row) {
+        auto row_result = it->next();
+        if (!row_result || !row_result->has_value()) {
             break;
         }
 
-        auto& [rid, data] = *row;
+        auto& [rid, data] = **row_result;
 
         auto values = TupleSerializer::deserialize(data, table_storage->storage_schema);
         if (!values) {

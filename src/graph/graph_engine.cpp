@@ -1096,8 +1096,13 @@ Result<void> GraphEngine::load_edges() {
             continue;
         }
 
-        while (auto row = iter->next()) {
-            auto values = TupleSerializer::deserialize(row->second, edge_store.storage_schema);
+        for (;;) {
+            auto row_result = iter->next();
+            if (!row_result || !row_result->has_value()) {
+                break;
+            }
+            auto& row = **row_result;
+            auto values = TupleSerializer::deserialize(row.second, edge_store.storage_schema);
             if (!values) {
                 SIXSEVEN_LOG_WARN("skipping corrupt edge row in '{}'", et.name);
                 continue;
@@ -1136,7 +1141,7 @@ Result<void> GraphEngine::load_edges() {
             }
 
             // Store RID mapping for future deletes.
-            edge_store.rid_map[edge_row_id] = row->first;
+            edge_store.rid_map[edge_row_id] = row.first;
             ++total_edges;
         }
     }

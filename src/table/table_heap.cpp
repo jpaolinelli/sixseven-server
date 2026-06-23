@@ -927,14 +927,14 @@ TableIterator::TableIterator(BufferPoolManager& bpm,
     : bpm_(bpm), current_page_(start_page), total_pages_(total_pages),
       strip_mvcc_headers_(strip_mvcc_headers), txn_mgr_(txn_mgr) {}
 
-std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
+Result<std::optional<std::pair<RID, std::vector<uint8_t>>>> TableIterator::next() {
     while (!exhausted_ && current_page_ < total_pages_) {
         auto page_result = bpm_.fetch_page(current_page_);
         if (!page_result) {
-            // Skip pages that can't be fetched.
-            current_page_++;
-            current_slot_ = 0;
-            continue;
+            // Surface the fetch failure — silently skipping a page would
+            // produce an incomplete scan with no error (GDB-915).
+            exhausted_ = true;
+            return tl::unexpected(page_result.error());
         }
 
         Page* page = *page_result;
@@ -974,7 +974,7 @@ std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
                     tuple->erase(tuple->begin(),
                                  tuple->begin() + static_cast<std::ptrdiff_t>(strip));
                 }
-                return std::make_pair(rid, std::move(*tuple));
+                return ok(std::make_optional(std::make_pair(rid, std::move(*tuple))));
             }
             // Deleted slot — skip.
             current_slot_++;
@@ -991,7 +991,7 @@ std::optional<std::pair<RID, std::vector<uint8_t>>> TableIterator::next() {
     }
 
     exhausted_ = true;
-    return std::nullopt;
+    return ok(std::optional<std::pair<RID, std::vector<uint8_t>>>(std::nullopt));
 }
 
 void TableIterator::skip(size_t count) {
@@ -1000,7 +1000,9 @@ void TableIterator::skip(size_t count) {
     // would over-skip. Fall back to next(), which applies the filter.
     if (strip_mvcc_headers_) {
         for (size_t i = 0; i < count; ++i) {
-            if (!next().has_value()) {
+            auto r = next();
+            // Stop on error (scan is invalid) or on end of heap.
+            if (!r || !r->has_value()) {
                 break;
             }
         }
@@ -1012,9 +1014,10 @@ void TableIterator::skip(size_t count) {
     while (skipped < count && !exhausted_ && current_page_ < total_pages_) {
         auto page_result = bpm_.fetch_page(current_page_);
         if (!page_result) {
-            current_page_++;
-            current_slot_ = 0;
-            continue;
+            // Stop on a fetch failure — treat the scan as exhausted so the
+            // caller does not read past an unreadable page (GDB-915).
+            exhausted_ = true;
+            break;
         }
 
         Page* page = *page_result;

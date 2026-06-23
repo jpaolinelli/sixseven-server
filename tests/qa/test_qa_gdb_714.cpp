@@ -114,8 +114,12 @@ TEST_F(QA_GDB714, SqlInsertedRowsCarryMvccHeaders) {
     ASSERT_TRUE(it.has_value());
 
     size_t rows = 0;
-    while (auto row = it->next()) {
-        auto header = heap->get_tuple_header(row->first);
+    for (;;) {
+        auto row_result = it->next();
+        ASSERT_TRUE(row_result.has_value()) << "scan error: " << row_result.error().message;
+        if (!row_result->has_value()) { break; }
+        auto& [rid, data] = **row_result;
+        auto header = heap->get_tuple_header(rid);
         ASSERT_TRUE(header.has_value()) << header.error().message;
         // Since GDB-747, autocommit DML stamps a real per-statement
         // transaction id (committed immediately), not the frozen sentinel.
@@ -154,8 +158,12 @@ TEST_F(QA_GDB714, HeadersAndDataPersistAcrossEngineRestart) {
     auto it = heap->begin();
     ASSERT_TRUE(it.has_value());
     size_t rows = 0;
-    while (auto row = it->next()) {
-        auto header = heap->get_tuple_header(row->first);
+    for (;;) {
+        auto row_result = it->next();
+        ASSERT_TRUE(row_result.has_value()) << "scan error: " << row_result.error().message;
+        if (!row_result->has_value()) { break; }
+        auto& [rid, data] = **row_result;
+        auto header = heap->get_tuple_header(rid);
         ASSERT_TRUE(header.has_value()) << header.error().message;
         // Real xmin stamps (GDB-747) persist across restart. Ids unknown to
         // the fresh TransactionManager read as committed, so the rows stay
@@ -180,9 +188,12 @@ TEST_F(QA_GDB714, UpdateCreatesNewVersionAndPreservesData) {
     ASSERT_NE(heap, nullptr);
     auto it = heap->begin();
     ASSERT_TRUE(it.has_value());
-    while (auto row = it->next()) {
+    for (;;) {
+        auto row_result = it->next();
+        ASSERT_TRUE(row_result.has_value()) << "scan error: " << row_result.error().message;
+        if (!row_result->has_value()) { break; }
         // Visible versions are undeleted and carry a valid creator id.
-        auto header = heap->get_tuple_header(row->first);
+        auto header = heap->get_tuple_header((*row_result)->first);
         ASSERT_TRUE(header.has_value()) << header.error().message;
         EXPECT_NE(header->xmin, invalid_txn_id);
         EXPECT_EQ(header->xmax, invalid_txn_id);

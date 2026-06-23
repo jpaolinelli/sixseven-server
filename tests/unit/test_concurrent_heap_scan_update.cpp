@@ -138,8 +138,12 @@ TEST_F(ConcurrentHeapScanUpdate, ScannerNeverObservesTornTuple) {
         while (!stop.load(std::memory_order_relaxed)) {
             auto it = heap.begin();
             if (!it.has_value()) continue;
-            while (auto row = it->next()) {
-                const auto& bytes = row->second;
+            for (;;) {
+                auto row_result = it->next();
+                if (!row_result || !row_result->has_value()) {
+                    break;
+                }
+                const auto& bytes = (*row_result)->second;
                 if (!payload_is_consistent(bytes)) {
                     torn_reads.fetch_add(1, std::memory_order_relaxed);
                 }

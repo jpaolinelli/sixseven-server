@@ -129,12 +129,15 @@ Result<void> NearestScanOperator::execute_brute_force() {
     std::span<const float> query_span(config_.query_vector);
 
     while (true) {
-        auto row = it->next();
-        if (!row) {
+        auto row_result = it->next();
+        if (!row_result) {
+            return make_error(row_result.error().code, row_result.error().message);
+        }
+        if (!row_result->has_value()) {
             break;
         }
 
-        auto& [rid, data] = *row;
+        auto& [rid, data] = **row_result;
 
         auto values = TupleSerializer::deserialize(data, storage_schema_);
         if (!values) {
@@ -351,12 +354,15 @@ Result<void> NearestScanOperator::execute_hnsw_search() {
             auto emb_idx = static_cast<size_t>(config_.embedding_column_index);
             uint32_t node_ordinal = 0;
             while (true) {
-                auto row = it->next();
-                if (!row) {
+                auto row_result = it->next();
+                if (!row_result) {
+                    return make_error(row_result.error().code, row_result.error().message);
+                }
+                if (!row_result->has_value()) {
                     break;
                 }
 
-                auto& [rid, data] = *row;
+                auto& [rid, data] = **row_result;
                 auto values = TupleSerializer::deserialize(data, storage_schema_);
                 if (!values) {
                     return make_error(values.error().code, values.error().message);

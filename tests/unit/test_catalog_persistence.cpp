@@ -816,8 +816,14 @@ TEST_F(CatalogPersistenceTest, PersistDatabase) {
     ASSERT_TRUE(it.has_value()) << it.error().message;
 
     bool found = false;
-    while (auto row = it->next()) {
-        auto values = TupleSerializer::deserialize(row->second, storage_schema);
+    for (;;) {
+        auto row_result = it->next();
+        ASSERT_TRUE(row_result.has_value()) << row_result.error().message;
+        if (!row_result->has_value()) {
+            break;
+        }
+        auto& row = **row_result;
+        auto values = TupleSerializer::deserialize(row.second, storage_schema);
         ASSERT_TRUE(values.has_value());
         if ((*values)[0].as_int32() == 42) {
             EXPECT_EQ((*values)[1].as_string(), "test_db");
@@ -849,8 +855,14 @@ TEST_F(CatalogPersistenceTest, DemoDatabaseCreatedDuringFirstBootstrap) {
     ASSERT_TRUE(it.has_value()) << it.error().message;
 
     bool found = false;
-    while (auto row = it->next()) {
-        auto values = TupleSerializer::deserialize(row->second, storage_schema);
+    for (;;) {
+        auto row_result = it->next();
+        ASSERT_TRUE(row_result.has_value()) << row_result.error().message;
+        if (!row_result->has_value()) {
+            break;
+        }
+        auto& row = **row_result;
+        auto values = TupleSerializer::deserialize(row.second, storage_schema);
         ASSERT_TRUE(values.has_value());
         if ((*values)[0].as_int32() == default_database_id) {
             EXPECT_EQ((*values)[1].as_string(), "demo");
@@ -959,8 +971,14 @@ TEST_F(CatalogPersistenceTest, RemoveDatabase) {
     ASSERT_TRUE(it.has_value()) << it.error().message;
 
     std::vector<int32_t> db_ids;
-    while (auto row = it->next()) {
-        auto values = TupleSerializer::deserialize(row->second, storage_schema);
+    for (;;) {
+        auto row_result = it->next();
+        ASSERT_TRUE(row_result.has_value()) << row_result.error().message;
+        if (!row_result->has_value()) {
+            break;
+        }
+        auto& row = **row_result;
+        auto values = TupleSerializer::deserialize(row.second, storage_schema);
         ASSERT_TRUE(values.has_value());
         db_ids.push_back((*values)[0].as_int32());
     }

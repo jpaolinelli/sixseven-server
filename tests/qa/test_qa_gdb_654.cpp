@@ -100,8 +100,11 @@ protected:
         auto it = (*ts)->heap->begin();
         if (!it) return result;
 
-        while (auto row = it->next()) {
-            auto values = TupleSerializer::deserialize(row->second, storage_schema);
+        for (;;) {
+            auto row_result = it->next();
+            if (!row_result.has_value()) break;
+            if (!row_result->has_value()) break;
+            auto values = TupleSerializer::deserialize((*row_result)->second, storage_schema);
             if (!values) continue;
             result.emplace_back((*values)[0].as_int32(), (*values)[1].as_string());
         }

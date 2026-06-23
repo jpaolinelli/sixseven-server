@@ -842,7 +842,12 @@ TEST_F(QA_TableHeapTest, SequentialScanAllDeleted) {
     auto it = std::move(*it_result);
 
     int count = 0;
-    while (it.next()) {
+    for (;;) {
+        auto r = it.next();
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+        if (!r->has_value()) {
+            break;
+        }
         count++;
     }
     EXPECT_EQ(count, 0);
@@ -861,17 +866,21 @@ TEST_F(QA_TableHeapTest, SequentialScanMultipleCallsAfterExhaustion) {
     auto it = std::move(*it_result);
 
     auto r1 = it.next();
-    EXPECT_TRUE(r1.has_value());
+    ASSERT_TRUE(r1.has_value()) << r1.error().message;
+    EXPECT_TRUE(r1->has_value());
 
     auto r2 = it.next();
-    EXPECT_FALSE(r2.has_value());
+    ASSERT_TRUE(r2.has_value()) << r2.error().message;
+    EXPECT_FALSE(r2->has_value());
 
     // Calling next() again after exhaustion should be safe.
     auto r3 = it.next();
-    EXPECT_FALSE(r3.has_value());
+    ASSERT_TRUE(r3.has_value()) << r3.error().message;
+    EXPECT_FALSE(r3->has_value());
 
     auto r4 = it.next();
-    EXPECT_FALSE(r4.has_value());
+    ASSERT_TRUE(r4.has_value()) << r4.error().message;
+    EXPECT_FALSE(r4->has_value());
 }
 
 // -- Insert, delete all, insert again -----------------------------------------
@@ -910,7 +919,12 @@ TEST_F(QA_TableHeapTest, InsertDeleteAllInsertAgain) {
     ASSERT_TRUE(it.has_value());
     auto iter = std::move(*it);
     int count = 0;
-    while (iter.next()) {
+    for (;;) {
+        auto r = iter.next();
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+        if (!r->has_value()) {
+            break;
+        }
         count++;
     }
     EXPECT_EQ(count, 5);
@@ -935,7 +949,12 @@ TEST_F(QA_TableHeapTest, StressManySmallInserts) {
     ASSERT_TRUE(it_result.has_value());
     auto it = std::move(*it_result);
     int count = 0;
-    while (it.next()) {
+    for (;;) {
+        auto r = it.next();
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+        if (!r->has_value()) {
+            break;
+        }
         count++;
     }
     EXPECT_EQ(count, N);
@@ -1014,7 +1033,12 @@ TEST_F(QA_TableHeapTest, InterleavedInsertDelete) {
     ASSERT_TRUE(it.has_value());
     auto iter = std::move(*it);
     int count = 0;
-    while (iter.next()) {
+    for (;;) {
+        auto r = iter.next();
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+        if (!r->has_value()) {
+            break;
+        }
         count++;
     }
     EXPECT_EQ(count, 10);

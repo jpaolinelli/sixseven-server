@@ -119,12 +119,15 @@ MatchShortestPathOperator::get_all_pks(const std::string& table_name) const {
     }
 
     while (true) {
-        auto row = iter->next();
-        if (!row) {
+        auto row_result = iter->next();
+        if (!row_result) {
+            return tl::unexpected(row_result.error());
+        }
+        if (!row_result->has_value()) {
             break;
         }
 
-        auto [rid, data] = *row;
+        auto [rid, data] = **row_result;
         auto deserialized = TupleSerializer::deserialize(data, (*ts)->storage_schema);
         if (!deserialized) {
             continue;
@@ -173,12 +176,15 @@ Result<std::vector<Value>> MatchShortestPathOperator::fetch_node_data(const std:
     }
 
     while (true) {
-        auto row = iter->next();
-        if (!row) {
+        auto row_result = iter->next();
+        if (!row_result) {
+            return tl::unexpected(row_result.error());
+        }
+        if (!row_result->has_value()) {
             break;
         }
 
-        auto [rid, data] = *row;
+        auto [rid, data] = **row_result;
         auto deserialized = TupleSerializer::deserialize(data, (*ts)->storage_schema);
         if (!deserialized) {
             continue;

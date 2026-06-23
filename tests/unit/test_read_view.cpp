@@ -92,7 +92,12 @@ protected:
         auto it = heap_->begin();
         EXPECT_TRUE(it.has_value());
         size_t n = 0;
-        while (it->next().has_value()) {
+        for (;;) {
+            auto r = it->next();
+            EXPECT_TRUE(r.has_value());
+            if (!r || !r->has_value()) {
+                break;
+            }
             ++n;
         }
         return n;
@@ -154,8 +159,9 @@ TEST_F(ReadViewHeapTest, UncommittedDeleteStillVisibleToOthersInvisibleToSelf) {
     auto it = heap_->begin();
     ASSERT_TRUE(it.has_value());
     auto row = it->next();
-    ASSERT_TRUE(row.has_value());
-    ASSERT_TRUE(heap_->mark_deleted(row->first, deleter->txn_id).has_value());
+    ASSERT_TRUE(row.has_value()) << row.error().message;
+    ASSERT_TRUE(row->has_value());
+    ASSERT_TRUE(heap_->mark_deleted((*row)->first, deleter->txn_id).has_value());
 
     {
         // Another viewer still sees the row (deleter has not committed).
