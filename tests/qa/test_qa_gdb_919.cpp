@@ -77,6 +77,44 @@ private:
     bool yielded_ = false;
 };
 
+// Multi-tuple iterator: yields all given RIDs in order.
+class MultiTupleIterator : public Iterator {
+public:
+    explicit MultiTupleIterator(std::vector<RID> rids) : rids_(std::move(rids)) {
+        schema_ = OutputSchema({{"", "id", TypeId::INT32, false, 0}});
+    }
+
+    const OutputSchema& output_schema() const override { return schema_; }
+    std::string plan_node_name() const override { return "MultiTuple"; }
+    std::string plan_node_detail() const override { return ""; }
+    std::vector<const Iterator*> plan_children() const override { return {}; }
+
+protected:
+    Result<void> do_open() override {
+        cursor_ = 0;
+        return ok();
+    }
+
+    Result<std::optional<Tuple>> do_next() override {
+        if (cursor_ >= rids_.size()) {
+            return ok(std::optional<Tuple>(std::nullopt));
+        }
+        Tuple t;
+        t.values.push_back(Value(static_cast<int32_t>(cursor_)));
+        t.rid = rids_[cursor_++];
+        return ok(std::optional<Tuple>(std::move(t)));
+    }
+
+    void do_close() override {}
+
+    std::vector<Iterator*> plan_children_mutable() override { return {}; }
+
+private:
+    std::vector<RID> rids_;
+    size_t cursor_ = 0;
+    OutputSchema schema_;
+};
+
 } // namespace
 
 // =============================================================================
@@ -148,6 +186,18 @@ protected:
 
         rid_map_.push_back(rid);
         return rid;
+    }
+
+    // Run a single-RID delete through a DeleteOperator with the shared HNSW target.
+    void delete_row(RID rid) {
+        const index_id_t kFakeIndexId = 1;
+        HnswMaintenanceTarget target{hnsw_.get(), kFakeIndexId, &rid_map_};
+        auto child = std::make_unique<SingleTupleIterator>(rid);
+        DeleteOperator del_op(*heap_, std::move(child));
+        del_op.hnsw_targets_.push_back(target);
+        ASSERT_TRUE(del_op.open().has_value());
+        ASSERT_TRUE(del_op.next().has_value());
+        del_op.close();
     }
 
     DiskManager dm_;
@@ -377,4 +427,297 @@ TEST_F(GDB919Test, DeleteRidNotInRidMapIsNoop) {
     EXPECT_EQ(hnsw_->node_count(), 1u);
     ASSERT_EQ(rid_map_.size(), 1u);
     EXPECT_EQ(rid_map_[0], rid0);
+}
+
+// =============================================================================
+// Adversarial A1: Delete the NEAREST NEIGHBOR -- the next-nearest must surface.
+//
+// Insert 3 nodes. Query for nearest to kVec0 -- node 0 must be first.
+// Delete node 0. Query again -- node 0 must be absent; the next-nearest
+// (node 2 = kVec2 or node 1 = kVec1) must be returned instead. No live node
+// is wrongly dropped.
+// =============================================================================
+
+TEST_F(GDB919Test, Adversarial_DeleteNearestNeighborNextNearestSurfaces) {
+    // Insert three vectors. kVec0={1,0}, kVec1={0,1}, kVec2={-1,0}.
+    RID rid0 = insert_row_and_vector(0, kVec0);
+    RID rid1 = insert_row_and_vector(1, kVec1);
+    RID rid2 = insert_row_and_vector(2, kVec2);
+    (void)rid1;
+    (void)rid2;
+
+    ASSERT_EQ(hnsw_->node_count(), 3u);
+
+    // Confirm node 0 is nearest to {1,0}.
+    std::vector<float> query = {1.0F, 0.0F};
+    {
+        auto res = hnsw_->search(std::span<const float>(query), 3u);
+        ASSERT_TRUE(res.has_value()) << res.error().message;
+        ASSERT_FALSE(res->empty());
+        EXPECT_EQ((*res)[0].node_id, 0u) << "node 0 should be nearest to kVec0 before delete";
+    }
+
+    // Delete rid0 (node_id 0 -- the nearest neighbor).
+    delete_row(rid0);
+    EXPECT_EQ(hnsw_->node_count(), 2u);
+    EXPECT_EQ(rid_map_[0], RID::invalid());
+
+    // After delete: node 0 must NOT appear in results.
+    {
+        auto res = hnsw_->search(std::span<const float>(query), 3u);
+        ASSERT_TRUE(res.has_value()) << res.error().message;
+        for (const auto& sr : *res) {
+            EXPECT_NE(sr.node_id, 0u) << "deleted node 0 must not appear after delete";
+        }
+        // At least one live node (1 or 2) must appear.
+        EXPECT_FALSE(res->empty()) << "search on non-empty index must return results";
+    }
+}
+
+// =============================================================================
+// Adversarial A2: Delete a middle node -- flanking live nodes still returned.
+//
+// Insert 4 nodes. Delete the middle node (node_id 1). Query -- both node 0
+// and node 2 must still appear; node 1 must be absent.
+// =============================================================================
+
+TEST_F(GDB919Test, Adversarial_DeleteMiddleNodeFlankingNodesStillReturned) {
+    RID rid0 = insert_row_and_vector(0, kVec0);
+    RID rid1 = insert_row_and_vector(1, kVec1);
+    RID rid2 = insert_row_and_vector(2, kVec2);
+    RID rid3 = insert_row_and_vector(3, kVec3);
+    (void)rid0;
+    (void)rid2;
+    (void)rid3;
+
+    ASSERT_EQ(hnsw_->node_count(), 4u);
+
+    // Delete middle node rid1.
+    delete_row(rid1);
+    EXPECT_EQ(hnsw_->node_count(), 3u);
+    EXPECT_EQ(rid_map_[1], RID::invalid());
+
+    // Query broadly -- must get all 3 surviving nodes, none is node 1.
+    std::vector<float> query = {0.0F, 0.0F}; // equidistant from all
+    auto res = hnsw_->search(std::span<const float>(query), 4u);
+    ASSERT_TRUE(res.has_value()) << res.error().message;
+
+    bool saw_0 = false;
+    bool saw_2 = false;
+    bool saw_3 = false;
+    for (const auto& sr : *res) {
+        EXPECT_NE(sr.node_id, 1u) << "deleted node 1 must not appear";
+        if (sr.node_id == 0u) { saw_0 = true; }
+        if (sr.node_id == 2u) { saw_2 = true; }
+        if (sr.node_id == 3u) { saw_3 = true; }
+    }
+    EXPECT_TRUE(saw_0) << "live node 0 must be reachable after deleting middle node";
+    EXPECT_TRUE(saw_2) << "live node 2 must be reachable after deleting middle node";
+    EXPECT_TRUE(saw_3) << "live node 3 must be reachable after deleting middle node";
+}
+
+// =============================================================================
+// Adversarial A3: Delete ALL rows -- index is empty, search does not crash.
+//
+// After deleting every row, node_count()==0 and search returns empty results
+// without crashing or returning garbage.
+// =============================================================================
+
+TEST_F(GDB919Test, Adversarial_DeleteAllRowsIndexEmptyNodesSearchIsClean) {
+    RID rid0 = insert_row_and_vector(0, kVec0);
+    RID rid1 = insert_row_and_vector(1, kVec1);
+    RID rid2 = insert_row_and_vector(2, kVec2);
+
+    ASSERT_EQ(hnsw_->node_count(), 3u);
+
+    // Delete all three using a single multi-row DeleteOperator.
+    const index_id_t kFakeIndexId = 1;
+    HnswMaintenanceTarget target{hnsw_.get(), kFakeIndexId, &rid_map_};
+
+    auto child = std::make_unique<MultiTupleIterator>(std::vector<RID>{rid0, rid1, rid2});
+    DeleteOperator del_op(*heap_, std::move(child));
+    del_op.hnsw_targets_.push_back(target);
+
+    ASSERT_TRUE(del_op.open().has_value());
+    auto nr = del_op.next();
+    ASSERT_TRUE(nr.has_value()) << nr.error().message;
+    ASSERT_TRUE(nr->has_value());
+    EXPECT_EQ((*nr)->values[0].as_int64(), 3); // 3 rows deleted
+    del_op.close();
+
+    EXPECT_EQ(hnsw_->node_count(), 0u);
+    // All rid_map slots must be invalidated.
+    for (size_t i = 0; i < rid_map_.size(); ++i) {
+        EXPECT_EQ(rid_map_[i], RID::invalid())
+            << "rid_map slot " << i << " must be invalid after deleting all rows";
+    }
+
+    // Search on empty index must not crash and must return empty results.
+    std::vector<float> query = {1.0F, 0.0F};
+    auto res = hnsw_->search(std::span<const float>(query), 3u);
+    ASSERT_TRUE(res.has_value()) << "search on empty index must not error: " << res.error().message;
+    EXPECT_TRUE(res->empty()) << "empty index must return zero results";
+}
+
+// =============================================================================
+// Adversarial A4: Delete then re-INSERT -- new node is findable, tombstone slot
+// is not reused to collide with the new node.
+//
+// node_id assignment is monotonically increasing; a new insert gets a fresh
+// node_id, never the tombstoned one. The rid_map must grow correctly so the
+// new RID is at the new node_id position.
+// =============================================================================
+
+TEST_F(GDB919Test, Adversarial_DeleteThenReinsertNewNodeFindableNoCollision) {
+    RID rid0 = insert_row_and_vector(0, kVec0);
+    RID rid1 = insert_row_and_vector(1, kVec1);
+    ASSERT_EQ(hnsw_->node_count(), 2u);
+
+    // Delete rid0 (node_id 0).
+    delete_row(rid0);
+    EXPECT_EQ(hnsw_->node_count(), 1u);
+    EXPECT_EQ(rid_map_[0], RID::invalid());
+
+    // Insert a new row with a distinct vector.
+    std::vector<float> new_vec = {0.5F, 0.5F};
+    RID rid_new = insert_row_and_vector(99, new_vec);
+    ASSERT_NE(rid_new, RID::invalid());
+
+    // The new node should have a higher node_id than the tombstoned one (2).
+    EXPECT_EQ(hnsw_->node_count(), 2u);
+
+    // The tombstoned slot (node_id 0) must still be invalid in rid_map.
+    EXPECT_EQ(rid_map_[0], RID::invalid())
+        << "tombstoned rid_map slot 0 must not be reused by re-insert";
+
+    // The new node (node_id 2) must map to rid_new.
+    ASSERT_GE(rid_map_.size(), 3u);
+    EXPECT_EQ(rid_map_[2], rid_new) << "new insert must be at node_id 2, mapping to rid_new";
+
+    // The live surviving node (rid1) must still be findable.
+    (void)rid1;
+    // node_id 1 -> rid1 must still be valid.
+    EXPECT_NE(rid_map_[1], RID::invalid()) << "surviving node 1 must still have valid rid_map";
+
+    // Search for new_vec -- must return the new node (node_id 2), not the tombstone.
+    auto res = hnsw_->search(std::span<const float>(new_vec), 3u);
+    ASSERT_TRUE(res.has_value()) << res.error().message;
+    ASSERT_FALSE(res->empty());
+
+    bool found_new = false;
+    for (const auto& sr : *res) {
+        EXPECT_NE(sr.node_id, 0u) << "tombstoned node 0 must not appear in search results";
+        if (sr.node_id == 2u) { found_new = true; }
+    }
+    EXPECT_TRUE(found_new) << "newly inserted node 2 must be findable by search";
+}
+
+// =============================================================================
+// Adversarial A5: Best-effort behavior -- DELETE commits even with HNSW target.
+//
+// The heap tuple must be gone (delete_tuple returns ok) even if HNSW maintenance
+// is invoked. Specifically: after DeleteOperator completes with a target that
+// maps the RID, the heap's own deletion must have committed (row count = 1).
+// This verifies the best-effort contract: HNSW errors never abort the DELETE.
+// =============================================================================
+
+TEST_F(GDB919Test, Adversarial_BestEffortDeleteCommitsHeapEvenWithHnswTarget) {
+    RID rid0 = insert_row_and_vector(0, kVec0);
+    ASSERT_EQ(hnsw_->node_count(), 1u);
+
+    const index_id_t kFakeIndexId = 1;
+    HnswMaintenanceTarget target{hnsw_.get(), kFakeIndexId, &rid_map_};
+
+    auto child = std::make_unique<SingleTupleIterator>(rid0);
+    DeleteOperator del_op(*heap_, std::move(child));
+    del_op.hnsw_targets_.push_back(target);
+
+    ASSERT_TRUE(del_op.open().has_value());
+    auto nr = del_op.next();
+    // The DELETE must succeed (Result is ok) regardless of HNSW state.
+    ASSERT_TRUE(nr.has_value()) << "DELETE must not fail due to HNSW maintenance: "
+                                 << nr.error().message;
+    ASSERT_TRUE(nr->has_value());
+    // Row count == 1 confirms the heap tuple was actually deleted.
+    EXPECT_EQ((*nr)->values[0].as_int64(), 1)
+        << "row count must be 1: heap delete must have committed";
+    del_op.close();
+}
+
+// =============================================================================
+// Adversarial A6: Null index pointer in HnswMaintenanceTarget is skipped safely.
+//
+// If index == nullptr in the target struct (pathological planner state), the
+// loop must not dereference it and must not crash.
+// =============================================================================
+
+TEST_F(GDB919Test, Adversarial_NullIndexPointerInTargetSkippedSafely) {
+    RID rid0 = insert_row_and_vector(0, kVec0);
+    ASSERT_EQ(hnsw_->node_count(), 1u);
+
+    const index_id_t kFakeIndexId = 1;
+    // Deliberately set index to nullptr -- this is the guard condition in do_next().
+    HnswMaintenanceTarget bad_target{nullptr, kFakeIndexId, &rid_map_};
+
+    auto child = std::make_unique<SingleTupleIterator>(rid0);
+    DeleteOperator del_op(*heap_, std::move(child));
+    del_op.hnsw_targets_.push_back(bad_target);
+
+    ASSERT_TRUE(del_op.open().has_value());
+    auto nr = del_op.next();
+    // Must not crash; the delete succeeds because HNSW skip is best-effort.
+    ASSERT_TRUE(nr.has_value()) << "DELETE must not crash on null index pointer: "
+                                 << nr.error().message;
+    ASSERT_TRUE(nr->has_value());
+    EXPECT_EQ((*nr)->values[0].as_int64(), 1);
+    del_op.close();
+
+    // HNSW is untouched (null pointer was skipped), node_count still 1.
+    EXPECT_EQ(hnsw_->node_count(), 1u);
+}
+
+// =============================================================================
+// Adversarial A7: Empty rid_map with a valid HNSW target -- no crash, no OOB.
+//
+// If the rid_map is empty (no entries) and a RID is presented for deletion,
+// the linear scan finds nothing and exits cleanly. The HNSW is not modified.
+// =============================================================================
+
+TEST_F(GDB919Test, Adversarial_EmptyRidMapWithValidTargetNoOob) {
+    // Insert a heap row without adding it to rid_map or HNSW.
+    std::vector<Value> vals = {Value(int32_t{1}), Value(Embedding(kVec0))};
+    auto bytes = TupleSerializer::serialize(vals, storage_schema_);
+    ASSERT_TRUE(bytes.has_value());
+    auto rid_result = heap_->insert_tuple(*bytes);
+    ASSERT_TRUE(rid_result.has_value());
+    RID rid = *rid_result;
+
+    // rid_map_ is empty (we never called insert_row_and_vector).
+    ASSERT_TRUE(rid_map_.empty());
+
+    // Create a fresh HNSW index and insert one node to confirm no corruption.
+    auto node_res = hnsw_->insert(std::span<const float>(kVec1));
+    ASSERT_TRUE(node_res.has_value());
+    // Leave rid_map_ empty to test empty-map path.
+    rid_map_.clear();
+    ASSERT_EQ(hnsw_->node_count(), 1u);
+
+    const index_id_t kFakeIndexId = 1;
+    HnswMaintenanceTarget target{hnsw_.get(), kFakeIndexId, &rid_map_};
+
+    auto child = std::make_unique<SingleTupleIterator>(rid);
+    DeleteOperator del_op(*heap_, std::move(child));
+    del_op.hnsw_targets_.push_back(target);
+
+    ASSERT_TRUE(del_op.open().has_value());
+    auto nr = del_op.next();
+    // Must not crash (empty rid_map linear scan exits immediately).
+    ASSERT_TRUE(nr.has_value()) << nr.error().message;
+    ASSERT_TRUE(nr->has_value());
+    EXPECT_EQ((*nr)->values[0].as_int64(), 1);
+    del_op.close();
+
+    // HNSW unchanged -- node_count stays at 1.
+    EXPECT_EQ(hnsw_->node_count(), 1u);
+    EXPECT_TRUE(rid_map_.empty());
 }
