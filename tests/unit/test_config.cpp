@@ -240,7 +240,7 @@ TEST(Config, ApplySettingValidValues_AllNumericKeys) {
         {"replication.synchronous_commit_count", "1"},
         {"replication.synchronous_timeout_ms", "30000"},
         {"replication.promote_max_lag_bytes", "0"},
-        {"replication.lag_warning_threshold_ms", "10000"},
+        {"replication.lag_warning_threshold_bytes", "10000"},
         {"replication.disconnect_warning_threshold_ms", "60000"},
         {"server.shutdown_timeout_s", "30"},
     };
@@ -402,7 +402,7 @@ TEST_F(ConfigFileTest, GDB853_FullValidConfigLoadsAllFields) {
             "synchronous_commit_count": 2,
             "synchronous_timeout_ms": 10000,
             "synchronous_fallback": "warn",
-            "lag_warning_threshold_ms": 5000,
+            "lag_warning_threshold_bytes": 5000,
             "disconnect_warning_threshold_ms": 30000
         }
     })");

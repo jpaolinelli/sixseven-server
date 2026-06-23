@@ -37,13 +37,12 @@ void ReplicationHealthMonitor::check_health(const WalSenderManager& sender_mgr,
             auto lag_bytes =
                 static_cast<int64_t>(current_lsn) - static_cast<int64_t>(s.applied_lsn);
             last_lag_bytes_[id] = lag_bytes;
-            if (lag_bytes > config_.lag_warning_threshold.count()) {
+            if (lag_bytes > config_.lag_warning_threshold_bytes) {
                 ++warning_count_;
-                SIXSEVEN_LOG_WARN(
-                    "replication lag for {} is {} bytes (threshold: {} ms equivalent)",
-                    id,
-                    lag_bytes,
-                    config_.lag_warning_threshold.count());
+                SIXSEVEN_LOG_WARN("replication lag for {} is {} bytes (threshold: {} bytes)",
+                                  id,
+                                  lag_bytes,
+                                  config_.lag_warning_threshold_bytes);
             }
         }
     }

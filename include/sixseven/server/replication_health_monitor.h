@@ -17,8 +17,9 @@ class ReplicationSlotManager;
 
 /// Configuration for replication health monitoring.
 struct HealthMonitorConfig {
-    /// Replication lag threshold before a warning is logged (milliseconds).
-    std::chrono::milliseconds lag_warning_threshold{10000};
+    /// Replication lag threshold before a warning is logged (bytes behind:
+    /// current_lsn - applied_lsn).
+    int64_t lag_warning_threshold_bytes{10000};
 
     /// Disconnect threshold before an error is logged (milliseconds).
     std::chrono::milliseconds disconnect_warning_threshold{60000};

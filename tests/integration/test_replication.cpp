@@ -864,7 +864,7 @@ TEST_F(ReplicationIntegrationTest, HealthMonitorIntegration) {
     })) << "sender never processed the full-ack status message";
 
     HealthMonitorConfig hm_cfg_a;
-    hm_cfg_a.lag_warning_threshold = std::chrono::milliseconds(10000);
+    hm_cfg_a.lag_warning_threshold_bytes = 10000;
     hm_cfg_a.disconnect_warning_threshold = std::chrono::milliseconds(60000);
     ReplicationHealthMonitor monitor_a(hm_cfg_a);
 
@@ -905,7 +905,7 @@ TEST_F(ReplicationIntegrationTest, HealthMonitorIntegration) {
     })) << "sender never processed the behind-ack status message";
 
     HealthMonitorConfig hm_cfg_b;
-    hm_cfg_b.lag_warning_threshold = std::chrono::milliseconds(0); // warn on any lag
+    hm_cfg_b.lag_warning_threshold_bytes = 0; // warn on any lag
     hm_cfg_b.disconnect_warning_threshold = std::chrono::milliseconds(60000);
     ReplicationHealthMonitor monitor_b(hm_cfg_b);
 

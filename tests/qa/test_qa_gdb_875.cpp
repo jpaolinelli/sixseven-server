@@ -3,7 +3,7 @@
 ///
 /// Focus areas:
 ///  1. Mutation-grade check: assertions fire when configure() is a no-op
-///     (proven by design — we verify the post-configure values differ from initial).
+///     (proven by design -- we verify the post-configure values differ from initial).
 ///  2. config() returns a consistent snapshot (no torn read).
 ///  3. No deadlock: config() and check_health() both take mutex_ but never
 ///     call each other while holding the lock.
@@ -31,10 +31,12 @@ using namespace sixseven::test;
 
 // ---------------------------------------------------------------------------
 // Helper: build a minimal HealthMonitorConfig with distinct values.
+// lag_bytes is the replication lag threshold in bytes (current_lsn - applied_lsn).
+// disconnect_ms is the disconnect threshold in real milliseconds.
 // ---------------------------------------------------------------------------
-static HealthMonitorConfig make_cfg(int lag_ms, int disconnect_ms) {
+static HealthMonitorConfig make_cfg(int64_t lag_bytes, int disconnect_ms) {
     HealthMonitorConfig c;
-    c.lag_warning_threshold = std::chrono::milliseconds(lag_ms);
+    c.lag_warning_threshold_bytes = lag_bytes;
     c.disconnect_warning_threshold = std::chrono::milliseconds(disconnect_ms);
     return c;
 }
@@ -48,8 +50,8 @@ TEST(QA_GDB875_ConfigAccessor, DefaultConstructedHasExpectedDefaults) {
     ReplicationHealthMonitor monitor;
     auto cfg = monitor.config();
     // Defaults from HealthMonitorConfig struct definition:
-    // lag_warning_threshold{10000}, disconnect_warning_threshold{60000}
-    EXPECT_EQ(cfg.lag_warning_threshold, std::chrono::milliseconds(10000));
+    // lag_warning_threshold_bytes{10000}, disconnect_warning_threshold{60000}
+    EXPECT_EQ(cfg.lag_warning_threshold_bytes, 10000);
     EXPECT_EQ(cfg.disconnect_warning_threshold, std::chrono::milliseconds(60000));
 }
 
@@ -57,20 +59,20 @@ TEST(QA_GDB875_ConfigAccessor, DefaultConstructedHasExpectedDefaults) {
 TEST(QA_GDB875_ConfigAccessor, ConstructorConfigReflectedByAccessor) {
     auto monitor = ReplicationHealthMonitor(make_cfg(1234, 5678));
     auto got = monitor.config();
-    EXPECT_EQ(got.lag_warning_threshold, std::chrono::milliseconds(1234));
+    EXPECT_EQ(got.lag_warning_threshold_bytes, 1234);
     EXPECT_EQ(got.disconnect_warning_threshold, std::chrono::milliseconds(5678));
 }
 
 /// MUTATION-GRADE: after configure() the accessor must return the NEW values.
 /// If configure() were a no-op, the initial values (5000 / 30000) would be
-/// returned and both assertions below would FAIL — proving non-vacuity.
+/// returned and both assertions below would FAIL -- proving non-vacuity.
 TEST(QA_GDB875_ConfigAccessor, ConfigureUpdatesThresholdsMutationGrade) {
     ReplicationHealthMonitor monitor(make_cfg(5000, 30000));
 
     monitor.configure(make_cfg(2000, 10000));
 
     auto got = monitor.config();
-    EXPECT_EQ(got.lag_warning_threshold, std::chrono::milliseconds(2000));
+    EXPECT_EQ(got.lag_warning_threshold_bytes, 2000);
     EXPECT_EQ(got.disconnect_warning_threshold, std::chrono::milliseconds(10000));
 }
 
@@ -79,13 +81,13 @@ TEST(QA_GDB875_ConfigAccessor, PreAndPostConfigureDiffer) {
     ReplicationHealthMonitor monitor(make_cfg(9999, 9999));
 
     auto before = monitor.config();
-    EXPECT_EQ(before.lag_warning_threshold, std::chrono::milliseconds(9999));
+    EXPECT_EQ(before.lag_warning_threshold_bytes, 9999);
 
     monitor.configure(make_cfg(1, 1));
 
     auto after = monitor.config();
-    EXPECT_EQ(after.lag_warning_threshold, std::chrono::milliseconds(1));
-    EXPECT_NE(before.lag_warning_threshold, after.lag_warning_threshold);
+    EXPECT_EQ(after.lag_warning_threshold_bytes, 1);
+    EXPECT_NE(before.lag_warning_threshold_bytes, after.lag_warning_threshold_bytes);
 }
 
 /// configure() called multiple times: last write wins.
@@ -93,11 +95,11 @@ TEST(QA_GDB875_ConfigAccessor, RepeatedConfigureLastWriteWins) {
     ReplicationHealthMonitor monitor(make_cfg(100, 200));
 
     for (int i = 1; i <= 100; ++i) {
-        monitor.configure(make_cfg(i * 10, i * 20));
+        monitor.configure(make_cfg(static_cast<int64_t>(i) * 10, i * 20));
     }
 
     auto got = monitor.config();
-    EXPECT_EQ(got.lag_warning_threshold, std::chrono::milliseconds(1000));
+    EXPECT_EQ(got.lag_warning_threshold_bytes, 1000);
     EXPECT_EQ(got.disconnect_warning_threshold, std::chrono::milliseconds(2000));
 }
 
@@ -107,7 +109,7 @@ TEST(QA_GDB875_ConfigAccessor, MultipleConfigCallsIdempotent) {
 
     for (int i = 0; i < 50; ++i) {
         auto got = monitor.config();
-        EXPECT_EQ(got.lag_warning_threshold, std::chrono::milliseconds(3333));
+        EXPECT_EQ(got.lag_warning_threshold_bytes, 3333);
         EXPECT_EQ(got.disconnect_warning_threshold, std::chrono::milliseconds(7777));
     }
 }
@@ -156,7 +158,7 @@ TEST(QA_GDB875_LockSafety, CheckHealthAndConfigInterleavedNoDeadlock) {
 // ===========================================================================
 
 /// Concurrent configure() calls: no data race (ASan TSan bait).
-/// Final config() must return one of the two written values — not a torn read.
+/// Final config() must return one of the two written values -- not a torn read.
 TEST(QA_GDB875_Concurrency, ConcurrentConfigureNoDataRace) {
     ReplicationHealthMonitor monitor(make_cfg(1000, 2000));
 
@@ -168,17 +170,17 @@ TEST(QA_GDB875_Concurrency, ConcurrentConfigureNoDataRace) {
     for (int t = 0; t < kThreads; ++t) {
         writers.emplace_back([&monitor, t] {
             for (int i = 0; i < kIter; ++i) {
-                monitor.configure(make_cfg((t + 1) * 100, (t + 1) * 200));
+                monitor.configure(make_cfg(static_cast<int64_t>(t + 1) * 100, (t + 1) * 200));
             }
         });
     }
     for (auto& th : writers)
         th.join();
 
-    // config() must return a coherent (non-torn) snapshot — both fields must
+    // config() must return a coherent (non-torn) snapshot -- both fields must
     // belong to the same valid configure() call.
     auto got = monitor.config();
-    auto lag = got.lag_warning_threshold.count();
+    auto lag = got.lag_warning_threshold_bytes;
     auto disc = got.disconnect_warning_threshold.count();
 
     // Each thread wrote lag=(t+1)*100, disc=(t+1)*200, so disc == lag*2 always.
@@ -203,7 +205,8 @@ TEST(QA_GDB875_Concurrency, ConcurrentWritersAndReadersNoRace) {
         threads.emplace_back([&monitor, &stop, t] {
             int i = 0;
             while (!stop.load(std::memory_order_relaxed)) {
-                monitor.configure(make_cfg((t + 1) * 50 + i % 10, (t + 1) * 100 + i % 10));
+                monitor.configure(
+                    make_cfg(static_cast<int64_t>(t + 1) * 50 + i % 10, (t + 1) * 100 + i % 10));
                 ++i;
                 if (i >= kIter)
                     break;
@@ -216,7 +219,7 @@ TEST(QA_GDB875_Concurrency, ConcurrentWritersAndReadersNoRace) {
             int i = 0;
             while (!stop.load(std::memory_order_relaxed)) {
                 auto got = monitor.config();
-                EXPECT_GE(got.lag_warning_threshold.count(), 0);
+                EXPECT_GE(got.lag_warning_threshold_bytes, 0);
                 EXPECT_GE(got.disconnect_warning_threshold.count(), 0);
                 ++i;
                 if (i >= kIter)
@@ -258,7 +261,7 @@ TEST(QA_GDB875_Concurrency, ConcurrentConfigureAndCheckHealthNoDeadlock) {
     configurator.join();
     checker.join();
 
-    // No deadlock — both threads completed.
+    // No deadlock -- both threads completed.
     SUCCEED();
 
     sender_mgr.stop_all();
@@ -269,24 +272,24 @@ TEST(QA_GDB875_Concurrency, ConcurrentConfigureAndCheckHealthNoDeadlock) {
 // Suite: QA_GDB875_BoundaryValues
 // ===========================================================================
 
-/// configure() with zero-duration thresholds (boundary: minimum value).
+/// configure() with zero thresholds (boundary: minimum value).
 TEST(QA_GDB875_BoundaryValues, ZeroDurationThresholds) {
     ReplicationHealthMonitor monitor;
     monitor.configure(make_cfg(0, 0));
 
     auto got = monitor.config();
-    EXPECT_EQ(got.lag_warning_threshold, std::chrono::milliseconds(0));
+    EXPECT_EQ(got.lag_warning_threshold_bytes, 0);
     EXPECT_EQ(got.disconnect_warning_threshold, std::chrono::milliseconds(0));
 }
 
-/// configure() with very large thresholds (INT32_MAX ms).
+/// configure() with very large thresholds (INT32_MAX).
 TEST(QA_GDB875_BoundaryValues, VeryLargeThresholds) {
-    constexpr int kMax = 2147483647;
+    constexpr int64_t kMax = 2147483647;
     ReplicationHealthMonitor monitor;
-    monitor.configure(make_cfg(kMax, kMax));
+    monitor.configure(make_cfg(kMax, static_cast<int>(kMax)));
 
     auto got = monitor.config();
-    EXPECT_EQ(got.lag_warning_threshold.count(), kMax);
+    EXPECT_EQ(got.lag_warning_threshold_bytes, kMax);
     EXPECT_EQ(got.disconnect_warning_threshold.count(), kMax);
 }
 
@@ -296,6 +299,6 @@ TEST(QA_GDB875_BoundaryValues, AsymmetricThresholds) {
     monitor.configure(make_cfg(1, 2147483647));
 
     auto got = monitor.config();
-    EXPECT_EQ(got.lag_warning_threshold.count(), 1);
+    EXPECT_EQ(got.lag_warning_threshold_bytes, 1);
     EXPECT_EQ(got.disconnect_warning_threshold.count(), 2147483647);
 }
