@@ -24,7 +24,11 @@
 #include "sixseven/graph/triangle_count.h"
 #include "sixseven/server/auth.h"
 #include "sixseven/server/server.h"
+#include "sixseven/storage/clean_shutdown_marker.h"
 #include "sixseven/storage/disk_manager.h"
+#include "sixseven/storage/wal.h"
+#include "sixseven/storage/wal_recovery.h"
+#include "sixseven/table/table_wal.h"
 #include "sixseven/vector/backfill_manager.h"
 #include "sixseven/vector/builtin_provider.h"
 #include "sixseven/vector/embedding_worker.h"
@@ -182,6 +186,95 @@ int main(int argc, char* argv[]) {
         SIXSEVEN_LOG_ERROR("bootstrap failed: {}", boot.error().message);
         return 1;
     }
+
+    // -- WAL crash recovery -------------------------------------------------------
+    //
+    // The clean-shutdown marker (<data_dir>/clean_shutdown) is written AFTER every
+    // graceful shutdown and DELETED at the start of a clean-path restart.
+    //
+    //   marker PRESENT  =>  previous run shut down cleanly; skip recovery.
+    //   marker ABSENT   =>  crash / kill -9 detected; run WAL recovery.
+    //
+    // Recovery MUST run BEFORE the server accepts any connections so that
+    // committed data is visible and uncommitted writes are rolled back.
+    // A recovery failure is FATAL — we must never serve stale state.
+    {
+        std::filesystem::path wal_dir = data_dir / "wal";
+        sixseven::CleanShutdownMarker marker(data_dir);
+
+        if (marker.exists()) {
+            // Previous run was clean — delete the marker and skip recovery.
+            SIXSEVEN_LOG_INFO("clean shutdown marker found — skipping WAL recovery");
+            auto rm = marker.remove();
+            if (!rm) {
+                SIXSEVEN_LOG_WARN("failed to remove clean-shutdown marker: {}", rm.error().message);
+            }
+        } else {
+            // No marker — assume crash; run ARIES recovery.
+            SIXSEVEN_LOG_INFO("no clean shutdown marker — running WAL recovery (wal_dir={})",
+                              wal_dir.string());
+
+            sixseven::TableHeapRecoveryHandler recovery_handler;
+            storage.for_each_table_heap(
+                [&recovery_handler](sixseven::table_id_t tid, sixseven::TableHeap* heap) {
+                    recovery_handler.register_table(tid, heap);
+                });
+
+            sixseven::WalRecovery wal_recovery(wal_dir, recovery_handler);
+            auto recover_result = wal_recovery.recover();
+            if (!recover_result) {
+                SIXSEVEN_LOG_ERROR("WAL recovery failed — cannot start server: {}",
+                                   recover_result.error().message);
+                return 1;
+            }
+            const auto& stats = *recover_result;
+            SIXSEVEN_LOG_INFO("WAL recovery complete: scanned={} redone={} undone={} "
+                              "committed_txns={} aborted_txns={} max_lsn={}",
+                              stats.records_scanned,
+                              stats.records_redone,
+                              stats.records_undone,
+                              stats.committed_txns,
+                              stats.aborted_txns,
+                              stats.max_lsn);
+        }
+    }
+
+    // -- WAL writer ---------------------------------------------------------------
+    //
+    // Open the WAL writer AFTER crash recovery has finished reading the existing
+    // WAL segments.  Both recovery and the writer use the same canonical path
+    // (data_dir/"wal") — this is the single source of truth for the WAL directory.
+    //
+    // Startup ordering:
+    //   1. WalRecovery reads existing segments (above).
+    //   2. WalWriter::open() resumes from the last valid record in the latest
+    //      existing segment — it does NOT truncate or destroy prior segments.
+    //   3. All subsequent DML via QueryEngine emits real WAL records.
+    //   4. On shutdown: flush + close WAL, THEN write the clean-shutdown marker
+    //      so the marker only appears once all data is durably persisted.
+    //
+    // Lifetime: WalWriter is declared at main-function scope so it outlives the
+    // Server, QueryEngine, and StorageManager (all of which hold a raw pointer
+    // obtained via set_wal_writer).  Destructor runs last.
+    std::filesystem::path wal_dir = data_dir / "wal";
+    std::filesystem::create_directories(wal_dir);
+    sixseven::WalWriter wal_writer(wal_dir);
+    {
+        auto wal_open = wal_writer.open();
+        if (!wal_open) {
+            SIXSEVEN_LOG_ERROR("WAL writer open failed — cannot start server: {}",
+                               wal_open.error().message);
+            return 1;
+        }
+    }
+    SIXSEVEN_LOG_INFO("WAL writer opened (wal_dir={})", wal_dir.string());
+
+    // Propagate writer to every existing TableHeap (already open via bootstrap)
+    // and to every heap created afterwards (CREATE TABLE during this session).
+    storage.set_wal_writer(&wal_writer);
+
+    // Wire into QueryEngine so pg_current_wal_lsn() reflects real WAL position.
+    engine.set_wal_writer(&wal_writer);
 
     // Load B+ tree and hash indexes asynchronously from persisted disk files.
     // Indexes are loaded in background threads; queries fall back to sequential
@@ -437,6 +530,46 @@ int main(int argc, char* argv[]) {
     if (!result) {
         SIXSEVEN_LOG_ERROR("server error: {}", result.error().message);
         return 1;
+    }
+
+    // Flush all table heaps before writing the clean-shutdown marker so the
+    // marker only appears once the data is durably on disk.
+    {
+        auto flush = storage.flush_all();
+        if (!flush) {
+            SIXSEVEN_LOG_WARN("pre-marker storage flush failed: {}", flush.error().message);
+        }
+    }
+
+    // Detach WAL writer from all heaps and engine before closing it so no
+    // DML races with the close.  Then flush+close to ensure every WAL record
+    // written during this session is durably on disk before the marker appears.
+    storage.set_wal_writer(nullptr);
+    engine.set_wal_writer(nullptr);
+    {
+        auto wal_flush = wal_writer.flush();
+        if (!wal_flush) {
+            SIXSEVEN_LOG_WARN("WAL flush failed on shutdown: {}", wal_flush.error().message);
+        }
+        auto wal_close = wal_writer.close();
+        if (!wal_close) {
+            SIXSEVEN_LOG_WARN("WAL close failed on shutdown: {}", wal_close.error().message);
+        }
+    }
+
+    // Write the clean-shutdown marker so the next startup can safely skip
+    // WAL recovery. This is written LAST — after all data is flushed — so
+    // a crash between flush and marker write is safe (the missing marker
+    // triggers an idempotent recovery that finds nothing to redo/undo).
+    {
+        sixseven::CleanShutdownMarker marker(data_dir);
+        auto write_result = marker.write();
+        if (!write_result) {
+            SIXSEVEN_LOG_WARN("failed to write clean-shutdown marker (non-fatal): {}",
+                              write_result.error().message);
+        } else {
+            SIXSEVEN_LOG_INFO("clean-shutdown marker written: {}", marker.path().string());
+        }
     }
 
     SIXSEVEN_LOG_INFO("SixSevenDB Server stopped cleanly");

@@ -8,11 +8,15 @@
 #include "sixseven/table/tuple.h"
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
 
 namespace sixseven {
+
+// Forward declaration.
+class WalWriter;
 
 /// Physical storage state for a single table.
 struct TableStorage {
@@ -79,6 +83,17 @@ public:
     ///                StorageManager or be detached).
     void set_txn_manager(const TransactionManager* txn_mgr);
 
+    /// Attach a WAL writer so every table heap emits WAL records for DML
+    /// (GDB-900 / GDB-1276). Applied to all currently open table heaps and to
+    /// every heap opened or created afterwards. Pass nullptr to detach.
+    ///
+    /// Each heap is attached with its own table_id so WAL records carry the
+    /// correct table identifier for crash recovery.
+    ///
+    /// @param writer  WAL writer (not owned; must outlive this StorageManager
+    ///                or be detached via set_wal_writer(nullptr)).
+    void set_wal_writer(WalWriter* writer);
+
     /// Get the storage for an existing table.
     [[nodiscard]] Result<TableStorage*> get_table_storage(table_id_t table_id);
 
@@ -125,6 +140,13 @@ public:
     /// Write the meta page ID to an index file's header extension.
     [[nodiscard]] Result<void> write_index_meta_page_id(index_id_t index_id, PageId meta_page_id);
 
+    /// Invoke @p fn(table_id, heap*) for every open table heap.
+    /// Used by WAL crash recovery to register all live heaps with
+    /// TableHeapRecoveryHandler before calling WalRecovery::recover().
+    /// The callback is invoked under the internal mutex — it must be
+    /// lightweight and must not call back into StorageManager.
+    void for_each_table_heap(const std::function<void(table_id_t, TableHeap*)>& fn) const;
+
 private:
     /// Build the directory path for a database: {data_dir}/databases/{db_id}/
     [[nodiscard]] std::filesystem::path database_path(database_id_t db_id) const;
@@ -142,6 +164,10 @@ private:
     /// Transaction manager attached to table heaps for MVCC visibility
     /// filtering (GDB-747, not owned; may be null).
     const TransactionManager* txn_mgr_ = nullptr;
+
+    /// WAL writer attached to every table heap so DML emits WAL records for
+    /// crash recovery (GDB-900 / GDB-1276, not owned; may be null).
+    WalWriter* wal_writer_ = nullptr;
 
     static constexpr uint32_t index_pool_size_ = 64;
 

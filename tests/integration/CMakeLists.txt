@@ -1,6 +1,7 @@
 # SixSevenDB integration tests
 
 add_executable(sixseven_integration_tests
+    test_crash_recovery.cpp
     test_multi_database.cpp
     test_replication.cpp
     test_system_database.cpp

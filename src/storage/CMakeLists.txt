@@ -10,6 +10,7 @@ add_library(sixseven_storage STATIC
     wal.cpp
     wal_recovery.cpp
     wal_archive.cpp
+    clean_shutdown_marker.cpp
 )
 
 target_include_directories(sixseven_storage PUBLIC ${PROJECT_SOURCE_DIR}/include)
