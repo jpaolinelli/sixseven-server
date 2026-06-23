@@ -5,11 +5,10 @@
 /// concurrent shutdown from multiple threads, health info after shutdown,
 /// request_shutdown vs shutdown semantics, connections during shutdown.
 
+#include "sixseven/common/platform.h"
 #include "sixseven/server/server.h"
 
 #include <gtest/gtest.h>
-
-#include "sixseven/common/platform.h"
 
 #include <chrono>
 #include <csignal>
@@ -307,30 +306,90 @@ TEST_F(QA145LifecycleTest, PeerWritesDuringShutdown) {
 // SIGPIPE is ignored (write to closed socket doesn't crash)
 // --------------------------------------------------------------------------
 
+// Tests that the server survives a client that disconnects mid-write without
+// being killed by SIGPIPE.
+//
+// Protection layers (both must hold for the server to survive):
+//   1. connection.cpp: ::send() uses MSG_NOSIGNAL on Linux so a broken-pipe
+//      write returns -1/EPIPE without raising a signal.
+//   2. server.cpp accept_connection: SO_NOSIGPIPE socket option on macOS/BSD
+//      where MSG_NOSIGNAL is unavailable.
+//   3. main.cpp:59: process-global std::signal(SIGPIPE, SIG_IGN) as a final
+//      belt-and-suspenders layer.
+//
+// Note on SIG_DFL: we intentionally do NOT set SIGPIPE to SIG_DFL in this
+// test.  The gtest binary is a single process; setting SIG_DFL while the
+// server thread might be in ::send() would create a window where a stray
+// SIGPIPE kills the entire test runner, making the test itself flaky and
+// destructive.  Instead we assert the server-survives outcome: the server
+// stays running after a client abrupt disconnect and can accept a new
+// connection.  This is a meaningful functional assertion -- if the server's
+// send path raised SIGPIPE and the process-global handler were missing, the
+// server thread would die (or the process would crash) and is_running() would
+// return false.
 #if !defined(_WIN32)
-TEST_F(QA145LifecycleTest, SigpipeIgnored) {
-    // SIGPIPE should be ignored by the server. Verify it's safe to set
-    // SIG_IGN as main.cpp does.
-    auto prev_handler = std::signal(SIGPIPE, SIG_IGN);
-    EXPECT_NE(prev_handler, SIG_ERR);
+TEST_F(QA145LifecycleTest, ServerSurvivesClientDisconnectMidWrite) {
+    Server server(make_config(0, 50));
+    std::thread t([&server] { (void)server.start(); });
+    wait_for_running(server);
+    ASSERT_TRUE(server.is_running());
 
-    // Create a socketpair, close one end, write to the other.
-    // If SIGPIPE is properly ignored, we get EPIPE instead of a crash.
-    int fds[2];
-    ASSERT_EQ(sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
-    sixseven_platform::socket_close(fds[0]);
+    uint16_t port = server.bound_port();
+    ASSERT_GT(port, 0u);
 
-    ssize_t n = ::write(fds[1], "x", 1);
-    EXPECT_EQ(n, -1);
-    EXPECT_EQ(errno, EPIPE);
+    int c = connect_to(port);
+    ASSERT_GE(c, 0) << "failed to connect to server on port " << port;
 
-    sixseven_platform::socket_close(fds[1]);
+    // Send a minimal PostgreSQL startup packet (length=8, protocol=3.0, no
+    // params) so the server's PG handler sees a valid request and enqueues a
+    // response into its write buffer.  This forces the server to call ::send()
+    // to the peer -- the exact path that MSG_NOSIGNAL (Linux) / SO_NOSIGPIPE
+    // (macOS) must protect when the peer disconnects abruptly.
+    const uint8_t startup[8] = {0x00, 0x00, 0x00, 0x08, 0x00, 0x03, 0x00, 0x00};
+    ::send(c, reinterpret_cast<const char*>(startup), sizeof(startup), 0);
 
-    // Restore previous handler.
-    std::signal(SIGPIPE, prev_handler);
+    // Give the server time to receive the startup packet and queue a response.
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Set SO_LINGER with l_linger=0 on the client fd so that close() sends a
+    // TCP RST rather than a graceful FIN.  The RST causes the server's pending
+    // ::send() to return -1/EPIPE (or ECONNRESET) instead of completing against
+    // a half-open socket, genuinely provoking the broken-pipe condition that the
+    // MSG_NOSIGNAL / SO_NOSIGPIPE hardening exists to suppress.
+    struct linger lg{};
+    lg.l_onoff = 1;
+    lg.l_linger = 0;
+    ::setsockopt(c, SOL_SOCKET, SO_LINGER, &lg, static_cast<socklen_t>(sizeof(lg)));
+
+    // RST-close the client.  The server's event loop will wake on
+    // EventType::WRITE and attempt ::send() to the now-dead peer.  With
+    // MSG_NOSIGNAL (Linux) / SO_NOSIGPIPE (macOS) that ::send() returns -1
+    // without raising SIGPIPE; main.cpp:59 SIG_IGN is the process-level
+    // backstop.  If either layer were missing, SIGPIPE would kill the process
+    // and the is_running / reconnect assertions below would fail.
+    sixseven_platform::socket_close(c);
+
+    // Wait for the event loop to wake on the write event and handle the error.
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    // Primary assertion: the server is still running (not killed by SIGPIPE).
+    EXPECT_TRUE(server.is_running())
+        << "server stopped after client RST-disconnect -- possible SIGPIPE kill";
+
+    // Secondary assertion: the server can still accept a fresh connection,
+    // proving the event loop and listen socket are healthy after the error.
+    int c2 = connect_to(port);
+    EXPECT_GE(c2, 0) << "server refused reconnect after client RST-disconnect";
+    if (c2 >= 0) {
+        sixseven_platform::socket_close(c2);
+    }
+
+    server.shutdown();
+    t.join();
+    EXPECT_FALSE(server.is_running());
 }
 #else
-TEST_F(QA145LifecycleTest, SigpipeIgnored) {
+TEST_F(QA145LifecycleTest, ServerSurvivesClientDisconnectMidWrite) {
     GTEST_SKIP() << "SIGPIPE test is POSIX-only";
 }
 #endif
