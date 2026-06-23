@@ -142,7 +142,7 @@ Result<RecoveryStats> WalRecovery::recover() {
                     }
                 } else {
                     SIXSEVEN_LOG_WARN("WAL recovery: failed to decode checkpoint data: {}",
-                                   active.error().message);
+                                      active.error().message);
                 }
             }
             continue; // Don't buffer the checkpoint record itself.
@@ -177,8 +177,21 @@ Result<RecoveryStats> WalRecovery::recover() {
         }
 
         // --- Buffer only data records (BEGIN/COMMIT/ABORT are not needed) ----
+        // Note: invalid_txn_id (0) is the invalid sentinel; frozen_txn_id (~0)
+        // is the separate autocommit marker (handled in redo/undo phases).
+        // Legitimate DML never writes a data record with txn_id=0, so treat
+        // any such record as malformed: emit a WARN and skip it rather than
+        // silently dropping it with no observable signal.
         if (is_data_record(record->type)) {
-            post_checkpoint_records.push_back(std::move(*record));
+            if (record->txn_id == invalid_txn_id) {
+                SIXSEVEN_LOG_WARN(
+                    "WAL recovery: data record with invalid txn_id (sentinel 0) "
+                    "at lsn={} table_id={} -- record is malformed and will be skipped",
+                    record->lsn,
+                    record->table_id);
+            } else {
+                post_checkpoint_records.push_back(std::move(*record));
+            }
         }
     }
 
@@ -200,12 +213,12 @@ Result<RecoveryStats> WalRecovery::recover() {
     stats.aborted_txn_ids = aborted_txns;
 
     SIXSEVEN_LOG_INFO("WAL recovery analysis: {} records scanned, checkpoint_lsn={}, max_lsn={}, "
-                   "{} committed, {} aborted/in-progress",
-                   stats.records_scanned,
-                   last_checkpoint_lsn,
-                   stats.max_lsn,
-                   stats.committed_txns,
-                   stats.aborted_txns);
+                      "{} committed, {} aborted/in-progress",
+                      stats.records_scanned,
+                      last_checkpoint_lsn,
+                      stats.max_lsn,
+                      stats.committed_txns,
+                      stats.aborted_txns);
 
     // ---- Phase 2: Redo ------------------------------------------------------
     // Replay data records of committed transactions in forward order.
