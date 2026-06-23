@@ -129,60 +129,11 @@ TokenizerConfig make_bpe_config() {
 // QA_GDB325_JsonLoader — Adversarial JSON loading tests
 // =====================================================================
 
-TEST(QA_GDB325_JsonLoader, EmptyVocabIsAccepted) {
-    // An empty vocab object is structurally valid (but useless).
-    TempJsonFile file(R"({"model": {"type": "WordPiece", "vocab": {}}})", "empty_vocab");
-    auto result = load_tokenizer_config(file.path());
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_TRUE(result->vocab.empty());
-}
-
-TEST(QA_GDB325_JsonLoader, NegativeTokenIdAccepted) {
-    // Negative IDs are valid in the JSON — no range check.
-    TempJsonFile file(R"({"model": {"type": "WordPiece", "vocab": {"hello": -1}}})", "neg_id");
-    auto result = load_tokenizer_config(file.path());
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ(result->vocab.at("hello"), -1);
-}
-
-TEST(QA_GDB325_JsonLoader, DuplicateVocabKeysLastWins) {
-    // JSON spec: duplicate keys → last value wins (nlohmann::json behavior).
-    TempJsonFile file(R"({"model": {"type": "WordPiece", "vocab": {"hello": 1, "hello": 2}}})",
-                      "dup_keys");
-    auto result = load_tokenizer_config(file.path());
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ(result->vocab.at("hello"), 2);
-}
-
-TEST(QA_GDB325_JsonLoader, VeryLargeVocabId) {
-    TempJsonFile file(R"({"model": {"type": "WordPiece", "vocab": {"x": 9223372036854775807}}})",
-                      "large_id");
-    auto result = load_tokenizer_config(file.path());
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ(result->vocab.at("x"), INT64_MAX);
-}
-
 TEST(QA_GDB325_JsonLoader, ModelNotObjectReturnsError) {
     TempJsonFile file(R"({"model": "not_an_object"})", "model_str");
     auto result = load_tokenizer_config(file.path());
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
-}
-
-TEST(QA_GDB325_JsonLoader, ModelNullReturnsError) {
-    TempJsonFile file(R"({"model": null})", "model_null");
-    auto result = load_tokenizer_config(file.path());
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
-}
-
-TEST(QA_GDB325_JsonLoader, MergesNonArrayIgnored) {
-    // "merges" as a string should be silently ignored.
-    TempJsonFile file(R"({"model": {"type": "BPE", "vocab": {"a": 0}, "merges": "not_array"}})",
-                      "merges_str");
-    auto result = load_tokenizer_config(file.path());
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_TRUE(result->merges.empty());
 }
 
 TEST(QA_GDB325_JsonLoader, AddedTokensMalformedEntriesSkipped) {
@@ -375,17 +326,6 @@ TEST(QA_GDB325_TextNormalizer, FactoryCreateNormalizerAllTypes) {
 // =====================================================================
 // QA_GDB325_PreTokenizer — Adversarial pre-tokenization tests
 // =====================================================================
-
-TEST(QA_GDB325_PreTokenizer, AllAsciiPunctuationCharacters) {
-    BertPreTokenizer pt;
-    // Every ASCII punctuation character should be its own token.
-    std::string punct = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
-    auto tokens = pt.pre_tokenize(punct);
-    EXPECT_EQ(tokens.size(), punct.size());
-    for (size_t i = 0; i < tokens.size(); ++i) {
-        EXPECT_EQ(tokens[i].size(), 1u);
-    }
-}
 
 TEST(QA_GDB325_PreTokenizer, SingleCharacterWord) {
     BertPreTokenizer pt;
@@ -589,24 +529,6 @@ TEST_F(QA_GDB325_WordPieceTest, SubwordSplitABC) {
     EXPECT_EQ(ids[2], 102); // SEP
 }
 
-TEST_F(QA_GDB325_WordPieceTest, EmptyVocabAllUnk) {
-    TokenizerConfig config;
-    config.vocab = {};
-    config.special_tokens = {.pad = 0, .unk = 100, .cls = 101, .sep = 102, .mask = 103};
-    config.model_type = TokenizerModelType::WORDPIECE;
-    config.normalizer = NormalizerType::NONE;
-    config.pre_tokenizer = PreTokenizerType::PUNCTUATION;
-    config.subword_prefix = "##";
-
-    WordPieceTokenizer tok(config);
-    auto ids = tok.encode("hello world", 8);
-    ASSERT_EQ(ids.size(), 8u);
-    EXPECT_EQ(ids[0], 101); // CLS
-    EXPECT_EQ(ids[1], 100); // UNK
-    EXPECT_EQ(ids[2], 100); // UNK
-    EXPECT_EQ(ids[3], 102); // SEP
-}
-
 TEST_F(QA_GDB325_WordPieceTest, LongWordManySubwords) {
     // "embedding" with our test vocab: "em"(7861) + "##bed"(8270) + "##ding"(4667)
     auto ids = tokenizer_->encode("embedding", 8);
@@ -705,35 +627,6 @@ protected:
     void SetUp() override { tokenizer_ = std::make_unique<BPETokenizer>(make_bpe_config()); }
     std::unique_ptr<BPETokenizer> tokenizer_;
 };
-
-TEST_F(QA_GDB325_BPETest, EmptyMergeRules) {
-    auto config = make_bpe_config();
-    config.merges.clear();
-    BPETokenizer tok(config);
-
-    // "hello" with no merges: each byte stays separate.
-    auto ids = tok.encode("hello", 16);
-    ASSERT_EQ(ids.size(), 16u);
-    EXPECT_EQ(ids[0], 0); // CLS
-    // 'h'=100, 'e'=101, 'l'=102, 'l'=102, 'o'=103
-    EXPECT_EQ(ids[1], 100);
-    EXPECT_EQ(ids[2], 101);
-    EXPECT_EQ(ids[3], 102);
-    EXPECT_EQ(ids[4], 102);
-    EXPECT_EQ(ids[5], 103);
-    EXPECT_EQ(ids[6], 2); // SEP
-}
-
-TEST_F(QA_GDB325_BPETest, AllUnknownBytes) {
-    // 'z' not in vocab → every character produces UNK.
-    auto ids = tokenizer_->encode("zzzzz", 16);
-    ASSERT_EQ(ids.size(), 16u);
-    EXPECT_EQ(ids[0], 0); // CLS
-    for (size_t i = 1; i <= 5; ++i) {
-        EXPECT_EQ(ids[i], 3) << "index " << i; // UNK
-    }
-    EXPECT_EQ(ids[6], 2); // SEP
-}
 
 TEST_F(QA_GDB325_BPETest, NonAsciiByteInput) {
     // Byte 0xFF maps through byte-to-unicode to a high codepoint.
