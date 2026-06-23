@@ -39,20 +39,14 @@ Result<void> PromotionManager::promote() {
     // --- Step 1: Check replay lag guard rail ---
     if (receiver_ != nullptr) {
         auto state = receiver_->get_state();
+        auto guard = check_lag_guard(config_, state);
+        if (!guard) {
+            promotion_in_progress_ = false;
+            return tl::unexpected(guard.error());
+        }
         if (state.received_lsn != invalid_lsn && state.applied_lsn != invalid_lsn &&
             state.received_lsn > state.applied_lsn) {
             auto lag_bytes = static_cast<int64_t>(state.received_lsn - state.applied_lsn);
-
-            if (config_.replication_promote_max_lag_bytes > 0 &&
-                lag_bytes > config_.replication_promote_max_lag_bytes) {
-                promotion_in_progress_ = false;
-                return make_error(
-                    StatusCode::REPLICATION_ERROR,
-                    "replay lag too high for promotion: " + std::to_string(lag_bytes) +
-                        " bytes exceeds threshold of " +
-                        std::to_string(config_.replication_promote_max_lag_bytes) + " bytes");
-            }
-
             if (lag_bytes > 0) {
                 SIXSEVEN_LOG_WARN("promoting with {} bytes of unapplied WAL", lag_bytes);
             }
@@ -102,7 +96,8 @@ Result<void> PromotionManager::promote() {
     // --- Step 6: Persist timeline ID ---
     auto save_result = save_timeline();
     if (!save_result) {
-        SIXSEVEN_LOG_WARN("promotion: failed to persist timeline ID: {}", save_result.error().message);
+        SIXSEVEN_LOG_WARN("promotion: failed to persist timeline ID: {}",
+                          save_result.error().message);
         // Non-fatal: the PROMOTE record in WAL is the authoritative source.
     }
 
@@ -115,8 +110,8 @@ Result<void> PromotionManager::promote() {
         auto reopen_result = disk_mgr_.reopen_file_readwrite(fid);
         if (!reopen_result) {
             SIXSEVEN_LOG_WARN("promotion: failed to reopen file {} in read/write mode: {}",
-                           fid,
-                           reopen_result.error().message);
+                              fid,
+                              reopen_result.error().message);
         }
     }
 
@@ -196,6 +191,23 @@ Result<void> PromotionManager::save_timeline() const {
 
 std::filesystem::path PromotionManager::timeline_path() const {
     return wal_dir_ / "timeline_id";
+}
+
+// static
+Result<void> PromotionManager::check_lag_guard(const Config& config,
+                                               const ReplicationState& state) {
+    if (config.replication_promote_max_lag_bytes > 0 && state.received_lsn != invalid_lsn &&
+        state.applied_lsn != invalid_lsn && state.received_lsn > state.applied_lsn) {
+        auto lag_bytes = static_cast<int64_t>(state.received_lsn - state.applied_lsn);
+        if (lag_bytes > config.replication_promote_max_lag_bytes) {
+            return make_error(StatusCode::REPLICATION_ERROR,
+                              "replay lag too high for promotion: " + std::to_string(lag_bytes) +
+                                  " bytes exceeds threshold of " +
+                                  std::to_string(config.replication_promote_max_lag_bytes) +
+                                  " bytes");
+        }
+    }
+    return ok();
 }
 
 } // namespace sixseven
