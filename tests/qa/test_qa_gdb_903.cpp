@@ -24,7 +24,7 @@
 using namespace sixseven;
 
 // =============================================================================
-// GDB903 — Known-answer mutation-grade checks
+// GDB903 - Known-answer mutation-grade checks
 // =============================================================================
 
 // Independently computable: md5("hello") = 5d41402abc4b2a76b9719d911017c592
@@ -80,7 +80,7 @@ TEST(QA_GDB903_PasswordHashing, WireOrderKnownAnswerBobPassword) {
 }
 
 // =============================================================================
-// GDB903 — Md5Verification challenge-response is not trivially self-referential
+// GDB903 - Md5Verification challenge-response is not trivially self-referential
 // =============================================================================
 
 // verify_md5_password must reject a client response built from a DIFFERENT
@@ -106,8 +106,7 @@ TEST(QA_GDB903_Md5Verification, WrongStoredHashRejectsCorrectClientResponse) {
     std::string client_response = "md5" + md5_hex(inner_hash + salt_hex);
 
     // Verifying against correct_record's stored hash must FAIL.
-    EXPECT_FALSE(
-        verify_md5_password(correct_record.password_hash, "alice", salt, client_response))
+    EXPECT_FALSE(verify_md5_password(correct_record.password_hash, "alice", salt, client_response))
         << "verify_md5_password accepted a response built from the wrong password hash";
 }
 
@@ -115,7 +114,7 @@ TEST(QA_GDB903_Md5Verification, WrongStoredHashRejectsCorrectClientResponse) {
 TEST(QA_GDB903_Md5Verification, MalformedResponseMissingMd5Prefix) {
     auto record = hash_password_md5("alice", "secret");
     std::array<uint8_t, 4> salt = {0x01, 0x02, 0x03, 0x04};
-    // No "md5" prefix — just raw hex.
+    // No "md5" prefix - just raw hex.
     std::string bare_hex = md5_hex("secretalice");
     EXPECT_FALSE(verify_md5_password(record.password_hash, "alice", salt, bare_hex));
 }
