@@ -78,8 +78,7 @@ TEST(QA_GDB918_Config, BoundaryINT64MAX) {
     auto r = cfg.apply_setting("replication.lag_warning_threshold_bytes",
                                std::to_string(std::numeric_limits<int64_t>::max()));
     ASSERT_TRUE(r.has_value()) << r.error().message;
-    EXPECT_EQ(cfg.replication_lag_warning_threshold_bytes,
-              std::numeric_limits<int64_t>::max());
+    EXPECT_EQ(cfg.replication_lag_warning_threshold_bytes, std::numeric_limits<int64_t>::max());
 }
 
 TEST(QA_GDB918_Config, JsonConfigNewKeyParsed) {
@@ -110,8 +109,7 @@ TEST(QA_GDB918_HealthMonitorConfig, DefaultsAreInt64AndCorrectValue) {
     EXPECT_EQ(cfg.lag_warning_threshold_bytes, 10000);
     // disconnect_warning_threshold must still be milliseconds (unchanged).
     static_assert(
-        std::is_same_v<decltype(cfg.disconnect_warning_threshold),
-                       std::chrono::milliseconds>,
+        std::is_same_v<decltype(cfg.disconnect_warning_threshold), std::chrono::milliseconds>,
         "disconnect_warning_threshold must remain std::chrono::milliseconds");
     EXPECT_EQ(cfg.disconnect_warning_threshold.count(), 60000);
 }
@@ -186,8 +184,7 @@ TEST(QA_GDB918_DisconnectRegression, DisconnectThresholdFieldIsMilliseconds) {
     // bytes or any other type.
     HealthMonitorConfig cfg;
     static_assert(
-        std::is_same_v<decltype(cfg.disconnect_warning_threshold),
-                       std::chrono::milliseconds>,
+        std::is_same_v<decltype(cfg.disconnect_warning_threshold), std::chrono::milliseconds>,
         "disconnect_warning_threshold must be std::chrono::milliseconds");
     EXPECT_EQ(cfg.disconnect_warning_threshold.count(), 60000);
 }
@@ -209,8 +206,7 @@ TEST(QA_GDB918_DisconnectRegression, ConfigDisconnectFieldStillNamedMs) {
     // Verify the Config struct field is the ms one (not bytes).
     Config cfg = Config::load_defaults();
     static_assert(
-        std::is_same_v<decltype(cfg.replication_disconnect_warning_threshold_ms),
-                       int64_t>,
+        std::is_same_v<decltype(cfg.replication_disconnect_warning_threshold_ms), int64_t>,
         "disconnect threshold in Config must remain int64_t ms field");
     EXPECT_EQ(cfg.replication_disconnect_warning_threshold_ms, 60000);
 }
