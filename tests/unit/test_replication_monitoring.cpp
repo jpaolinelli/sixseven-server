@@ -9,6 +9,7 @@
 #include "sixseven/executor/storage_manager.h"
 #include "sixseven/executor/system_bootstrap.h"
 #include "sixseven/server/replication_health_monitor.h"
+#include "sixseven/server/replication_message.h"
 #include "sixseven/server/replication_slot.h"
 #include "sixseven/server/wal_receiver.h"
 #include "sixseven/server/wal_sender_manager.h"
@@ -64,6 +65,52 @@ public:
 private:
     std::string peer_;
     std::atomic<bool> open_{true};
+};
+
+/// A ReplicationConnection that delivers one pre-baked StandbyStatusMessage on
+/// the first receive() call and then returns empty buffers.  Used to drive an
+/// applied_lsn into WalSenderManager so check_health() can evaluate the lag
+/// comparison against a known threshold.
+class StatusReportingConnection : public ReplicationConnection {
+public:
+    explicit StatusReportingConnection(std::string peer, lsn_t applied_lsn)
+        : peer_(std::move(peer)) {
+        StandbyStatusMessage msg;
+        msg.received_lsn = applied_lsn;
+        msg.flushed_lsn = applied_lsn;
+        msg.applied_lsn = applied_lsn;
+        msg.timestamp_us = 0;
+        status_bytes_ = serialize_standby_status(msg);
+    }
+
+    Result<void> send(std::span<const uint8_t> /*data*/) override {
+        if (!open_.load()) {
+            return make_error(StatusCode::NETWORK_ERROR, "closed");
+        }
+        return ok();
+    }
+
+    Result<std::vector<uint8_t>> receive(size_t /*max_bytes*/,
+                                         std::chrono::milliseconds /*timeout*/) override {
+        if (!open_.load()) {
+            return make_error(StatusCode::NETWORK_ERROR, "closed");
+        }
+        // Return the status message once, then empty.
+        if (!delivered_.exchange(true)) {
+            return ok(status_bytes_);
+        }
+        return ok(std::vector<uint8_t>{});
+    }
+
+    void close() override { open_.store(false); }
+    bool is_open() const override { return open_.load(); }
+    std::string peer_description() const override { return peer_; }
+
+private:
+    std::string peer_;
+    std::vector<uint8_t> status_bytes_;
+    std::atomic<bool> open_{true};
+    std::atomic<bool> delivered_{false};
 };
 
 /// Null recovery handler for WalReceiver tests.
@@ -358,7 +405,7 @@ TEST_F(ReplicationMonitoringTest, HealthCheckSettingsExistInShowAll) {
     bool found_disconnect = false;
     for (const auto& row : qr.rows) {
         auto key = row[0].as_string();
-        if (key == "replication.lag_warning_threshold_ms") {
+        if (key == "replication.lag_warning_threshold_bytes") {
             found_lag = true;
             EXPECT_EQ(row[1].as_string(), "10000");
         }
@@ -384,7 +431,7 @@ TEST(ReplicationHealthMonitor, CheckHealthNoReplicas) {
     ReplicationSlotManager slot_mgr(dir.path());
 
     HealthMonitorConfig cfg;
-    cfg.lag_warning_threshold = std::chrono::milliseconds(1000);
+    cfg.lag_warning_threshold_bytes = 1000;
     cfg.disconnect_warning_threshold = std::chrono::milliseconds(500);
 
     ReplicationHealthMonitor monitor(cfg);
@@ -397,18 +444,18 @@ TEST(ReplicationHealthMonitor, CheckHealthNoReplicas) {
 
 TEST(ReplicationHealthMonitor, ConfigureUpdatesThresholds) {
     HealthMonitorConfig cfg;
-    cfg.lag_warning_threshold = std::chrono::milliseconds(5000);
+    cfg.lag_warning_threshold_bytes = 5000;
     cfg.disconnect_warning_threshold = std::chrono::milliseconds(30000);
 
     ReplicationHealthMonitor monitor(cfg);
 
     HealthMonitorConfig new_cfg;
-    new_cfg.lag_warning_threshold = std::chrono::milliseconds(2000);
+    new_cfg.lag_warning_threshold_bytes = 2000;
     new_cfg.disconnect_warning_threshold = std::chrono::milliseconds(10000);
     monitor.configure(new_cfg);
 
     auto got = monitor.config();
-    EXPECT_EQ(got.lag_warning_threshold, std::chrono::milliseconds(2000));
+    EXPECT_EQ(got.lag_warning_threshold_bytes, 2000);
     EXPECT_EQ(got.disconnect_warning_threshold, std::chrono::milliseconds(10000));
 }
 
@@ -435,14 +482,146 @@ TEST(ReplicationHealthMonitor, CheckHealthWithActiveReplica) {
     // Give sender thread time to start.
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
+    // Threshold set very high so no lag warning fires for this active replica.
     HealthMonitorConfig cfg;
-    cfg.lag_warning_threshold = std::chrono::milliseconds(1);
+    cfg.lag_warning_threshold_bytes = INT64_MAX;
     cfg.disconnect_warning_threshold = std::chrono::milliseconds(60000);
     ReplicationHealthMonitor monitor(cfg);
 
-    // Should not crash, may log a warning for lag.
     monitor.check_health(sender_mgr, nullptr, writer);
+    // With an extremely high threshold no warning should fire.
+    auto report = monitor.last_report();
+    EXPECT_EQ(report.warning_count, 0u) << "unexpected lag warning with INT64_MAX threshold";
 
     sender_mgr.stop_all();
+    ASSERT_TRUE(writer.close().has_value());
+}
+
+// =============================================================================
+// GDB-918: lag_warning_threshold_bytes boundary tests
+//
+// Mutation-grade: the warn decision (lag_bytes > threshold_bytes) is observable
+// through HealthReport::warning_count.  These tests drive applied_lsn to a
+// known value, set the threshold just above and just below the resulting lag,
+// and assert that warning_count changes accordingly.
+// =============================================================================
+
+/// Helper: wait until the sender_mgr reports applied_lsn == target for
+/// the first sender, or until the deadline.
+static bool wait_for_applied_lsn(const WalSenderManager& mgr, lsn_t target) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        auto statuses = mgr.get_sender_statuses();
+        if (!statuses.empty() && statuses[0].applied_lsn == target) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+}
+
+/// GDB-918: threshold just ABOVE the lag -- no warning fires.
+TEST(ReplicationHealthMonitor, GDB918_LagBelowThresholdNoWarning) {
+    TempWalDir dir;
+    WalWriter writer(dir.path(), test_wal_opts());
+    ASSERT_TRUE(writer.open().has_value());
+
+    // Write several WAL records so current_lsn > 0.
+    for (int i = 0; i < 5; ++i) {
+        WalRecord rec;
+        rec.type = WalRecordType::BEGIN;
+        rec.txn_id = static_cast<txn_id_t>(i + 1);
+        ASSERT_TRUE(writer.append(rec).has_value());
+    }
+    ASSERT_TRUE(writer.flush().has_value());
+
+    lsn_t primary_lsn = writer.current_lsn();
+    ASSERT_GT(primary_lsn, 0u);
+
+    // Replica reports applied_lsn = 1 (behind the primary).
+    lsn_t applied = 1;
+    int64_t lag_bytes = static_cast<int64_t>(primary_lsn) - static_cast<int64_t>(applied);
+    ASSERT_GT(lag_bytes, 0);
+
+    WalSenderOptions opts;
+    opts.keepalive_interval = std::chrono::milliseconds(50);
+    opts.sender_timeout = std::chrono::milliseconds(5000);
+    WalSenderManager sender_mgr918a(dir.path(), nullptr, writer, 10, opts);
+
+    auto conn = std::make_unique<StatusReportingConnection>("lag-test-replica", applied);
+    ASSERT_TRUE(sender_mgr918a.accept_connection(std::move(conn), 1).has_value());
+
+    // Wait for the sender to process the status message.
+    ASSERT_TRUE(wait_for_applied_lsn(sender_mgr918a, applied))
+        << "sender never processed applied_lsn=" << applied;
+
+    // Threshold = lag_bytes + 1: lag is BELOW threshold, no warning.
+    HealthMonitorConfig cfg_above;
+    cfg_above.lag_warning_threshold_bytes = lag_bytes + 1;
+    cfg_above.disconnect_warning_threshold = std::chrono::milliseconds(60000);
+    ReplicationHealthMonitor monitor_above(cfg_above);
+
+    monitor_above.check_health(sender_mgr918a, nullptr, writer);
+
+    auto report_above = monitor_above.last_report();
+    EXPECT_EQ(report_above.warning_count, 0u)
+        << "no warning expected: lag=" << lag_bytes << " threshold=" << (lag_bytes + 1);
+
+    sender_mgr918a.stop_all();
+    ASSERT_TRUE(writer.close().has_value());
+}
+
+/// GDB-918: threshold just BELOW the lag -- warning fires exactly once.
+TEST(ReplicationHealthMonitor, GDB918_LagAboveThresholdWarningFires) {
+    TempWalDir dir;
+    WalWriter writer(dir.path(), test_wal_opts());
+    ASSERT_TRUE(writer.open().has_value());
+
+    // Write several WAL records so current_lsn > 0.
+    for (int i = 0; i < 5; ++i) {
+        WalRecord rec;
+        rec.type = WalRecordType::BEGIN;
+        rec.txn_id = static_cast<txn_id_t>(i + 1);
+        ASSERT_TRUE(writer.append(rec).has_value());
+    }
+    ASSERT_TRUE(writer.flush().has_value());
+
+    lsn_t primary_lsn = writer.current_lsn();
+    ASSERT_GT(primary_lsn, 0u);
+
+    // Replica reports applied_lsn = 1 (behind the primary).
+    lsn_t applied = 1;
+    int64_t lag_bytes = static_cast<int64_t>(primary_lsn) - static_cast<int64_t>(applied);
+    ASSERT_GT(lag_bytes, 0);
+
+    WalSenderOptions opts;
+    opts.keepalive_interval = std::chrono::milliseconds(50);
+    opts.sender_timeout = std::chrono::milliseconds(5000);
+    WalSenderManager sender_mgr918b(dir.path(), nullptr, writer, 10, opts);
+
+    auto conn = std::make_unique<StatusReportingConnection>("lag-test-replica", applied);
+    ASSERT_TRUE(sender_mgr918b.accept_connection(std::move(conn), 1).has_value());
+
+    // Wait for the sender to process the status message.
+    ASSERT_TRUE(wait_for_applied_lsn(sender_mgr918b, applied))
+        << "sender never processed applied_lsn=" << applied;
+
+    // Threshold = lag_bytes - 1: lag is ABOVE threshold, warning fires.
+    HealthMonitorConfig cfg_below;
+    cfg_below.lag_warning_threshold_bytes = lag_bytes - 1;
+    cfg_below.disconnect_warning_threshold = std::chrono::milliseconds(60000);
+    ReplicationHealthMonitor monitor_below(cfg_below);
+
+    monitor_below.check_health(sender_mgr918b, nullptr, writer);
+
+    auto report_below = monitor_below.last_report();
+    EXPECT_GT(report_below.warning_count, 0u)
+        << "warning expected: lag=" << lag_bytes << " threshold=" << (lag_bytes - 1);
+    // Verify the lag entry is present and matches.
+    ASSERT_EQ(report_below.last_lag_bytes.count("lag-test-replica"), 1u)
+        << "lag-test-replica absent from lag map";
+    EXPECT_EQ(report_below.last_lag_bytes.at("lag-test-replica"), lag_bytes);
+
+    sender_mgr918b.stop_all();
     ASSERT_TRUE(writer.close().has_value());
 }

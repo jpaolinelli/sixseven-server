@@ -627,7 +627,7 @@ TEST_F(QA_GDB853, AllFieldsLoadedTogether_FullValidConfig_ExactAssertions) {
             "synchronous_commit_count": 2,
             "synchronous_timeout_ms": 5000,
             "synchronous_fallback": "warn",
-            "lag_warning_threshold_ms": 3000,
+            "lag_warning_threshold_bytes": 3000,
             "disconnect_warning_threshold_ms": 15000
         }
     })");
@@ -660,7 +660,7 @@ TEST_F(QA_GDB853, AllFieldsLoadedTogether_FullValidConfig_ExactAssertions) {
     EXPECT_EQ(r->replication_synchronous_commit_count, 2);
     EXPECT_EQ(r->replication_synchronous_timeout_ms, 5000);
     EXPECT_EQ(r->replication_synchronous_fallback, "warn");
-    EXPECT_EQ(r->replication_lag_warning_threshold_ms, 3000);
+    EXPECT_EQ(r->replication_lag_warning_threshold_bytes, 3000);
     EXPECT_EQ(r->replication_disconnect_warning_threshold_ms, 15000);
 }
 

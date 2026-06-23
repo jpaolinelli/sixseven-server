@@ -255,14 +255,14 @@ Result<Config> Config::load_from_file(const std::string& path) {
             return make_error(StatusCode::INVALID_ARGUMENT,
                               "replication.synchronous_fallback must be a string, got wrong type");
         }
-        if (repl.contains("lag_warning_threshold_ms") &&
-            repl["lag_warning_threshold_ms"].is_number()) {
-            config.replication_lag_warning_threshold_ms =
-                repl["lag_warning_threshold_ms"].get<int64_t>();
-        } else if (repl.contains("lag_warning_threshold_ms")) {
+        if (repl.contains("lag_warning_threshold_bytes") &&
+            repl["lag_warning_threshold_bytes"].is_number()) {
+            config.replication_lag_warning_threshold_bytes =
+                repl["lag_warning_threshold_bytes"].get<int64_t>();
+        } else if (repl.contains("lag_warning_threshold_bytes")) {
             return make_error(
                 StatusCode::INVALID_ARGUMENT,
-                "replication.lag_warning_threshold_ms must be a number, got wrong type");
+                "replication.lag_warning_threshold_bytes must be a number, got wrong type");
         }
         if (repl.contains("disconnect_warning_threshold_ms") &&
             repl["disconnect_warning_threshold_ms"].is_number()) {
@@ -437,7 +437,7 @@ Result<void> Config::validate_setting(const std::string& key, const std::string&
         if (!r) {
             return make_error(r.error().code, r.error().message);
         }
-    } else if (key == "replication.lag_warning_threshold_ms") {
+    } else if (key == "replication.lag_warning_threshold_bytes") {
         auto r = parse_i64(key, value);
         if (!r) {
             return make_error(r.error().code, r.error().message);
@@ -569,12 +569,12 @@ Result<void> Config::apply_setting(const std::string& key, const std::string& va
             return make_error(r.error().code, r.error().message);
         }
         replication_promote_max_lag_bytes = *r;
-    } else if (key == "replication.lag_warning_threshold_ms") {
+    } else if (key == "replication.lag_warning_threshold_bytes") {
         auto r = parse_i64(key, value);
         if (!r) {
             return make_error(r.error().code, r.error().message);
         }
-        replication_lag_warning_threshold_ms = *r;
+        replication_lag_warning_threshold_bytes = *r;
     } else if (key == "replication.disconnect_warning_threshold_ms") {
         auto r = parse_i64(key, value);
         if (!r) {

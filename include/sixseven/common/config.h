@@ -47,7 +47,8 @@ struct Config {
     int32_t shutdown_timeout_s = 30; ///< Seconds to wait for active queries on shutdown.
 
     // Health monitoring thresholds.
-    int64_t replication_lag_warning_threshold_ms = 10000;        ///< Lag threshold for warnings.
+    int64_t replication_lag_warning_threshold_bytes =
+        10000; ///< Lag threshold for warnings (bytes behind: current_lsn - applied_lsn).
     int64_t replication_disconnect_warning_threshold_ms = 60000; ///< Disconnect threshold.
 
     /// Create a Config with all default values.
