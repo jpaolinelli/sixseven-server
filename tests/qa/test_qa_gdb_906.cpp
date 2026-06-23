@@ -22,7 +22,7 @@ static Config make_cfg(int64_t max_lag) {
 static ReplicationState make_state(lsn_t received, lsn_t applied) {
     ReplicationState s;
     s.received_lsn = received;
-    s.applied_lsn  = applied;
+    s.applied_lsn = applied;
     return s;
 }
 
@@ -33,13 +33,13 @@ static ReplicationState make_state(lsn_t received, lsn_t applied) {
 // --- AC: limit disabled (0) is always ok regardless of lag magnitude ---
 
 TEST(QA_GDB906_LagGuard, LimitDisabledZeroLag) {
-    auto cfg   = make_cfg(0);
+    auto cfg = make_cfg(0);
     auto state = make_state(500, 500);
     EXPECT_TRUE(PromotionManager::check_lag_guard(cfg, state).has_value());
 }
 
 TEST(QA_GDB906_LagGuard, LimitDisabledMassiveLag) {
-    auto cfg   = make_cfg(0);
+    auto cfg = make_cfg(0);
     auto state = make_state(1000000, 0);
     EXPECT_TRUE(PromotionManager::check_lag_guard(cfg, state).has_value());
 }
@@ -47,18 +47,18 @@ TEST(QA_GDB906_LagGuard, LimitDisabledMassiveLag) {
 // --- AC: lag strictly over limit returns REPLICATION_ERROR ---
 
 TEST(QA_GDB906_LagGuard, LagOverLimitReturnsReplicationError) {
-    auto cfg   = make_cfg(100);
+    auto cfg = make_cfg(100);
     auto state = make_state(200, 99); // lag = 101 > 100
-    auto r     = PromotionManager::check_lag_guard(cfg, state);
+    auto r = PromotionManager::check_lag_guard(cfg, state);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::REPLICATION_ERROR);
     EXPECT_NE(r.error().message.find("replay lag too high"), std::string::npos);
 }
 
 TEST(QA_GDB906_LagGuard, LagOneBytePastLimitReturnsError) {
-    auto cfg   = make_cfg(100);
+    auto cfg = make_cfg(100);
     auto state = make_state(201, 100); // lag = 101
-    auto r     = PromotionManager::check_lag_guard(cfg, state);
+    auto r = PromotionManager::check_lag_guard(cfg, state);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::REPLICATION_ERROR);
 }
@@ -66,7 +66,7 @@ TEST(QA_GDB906_LagGuard, LagOneBytePastLimitReturnsError) {
 // --- AC: lag exactly at limit is ok (strict >) ---
 
 TEST(QA_GDB906_LagGuard, LagExactlyAtLimitIsOk) {
-    auto cfg   = make_cfg(100);
+    auto cfg = make_cfg(100);
     auto state = make_state(200, 100); // lag = 100, not > 100
     EXPECT_TRUE(PromotionManager::check_lag_guard(cfg, state).has_value());
 }
@@ -74,7 +74,7 @@ TEST(QA_GDB906_LagGuard, LagExactlyAtLimitIsOk) {
 // --- AC: zero lag is always ok when limit active ---
 
 TEST(QA_GDB906_LagGuard, ZeroLagWithLimitActiveIsOk) {
-    auto cfg   = make_cfg(1);
+    auto cfg = make_cfg(1);
     auto state = make_state(500, 500); // lag = 0
     EXPECT_TRUE(PromotionManager::check_lag_guard(cfg, state).has_value());
 }
@@ -83,18 +83,18 @@ TEST(QA_GDB906_LagGuard, ZeroLagWithLimitActiveIsOk) {
 
 TEST(QA_GDB906_LagGuard, InvalidLsnsSkipGuardBothInvalid) {
     auto cfg = make_cfg(1); // limit active
-    ReplicationState state;  // both default to invalid_lsn (0)
+    ReplicationState state; // both default to invalid_lsn (0)
     EXPECT_TRUE(PromotionManager::check_lag_guard(cfg, state).has_value());
 }
 
 TEST(QA_GDB906_LagGuard, InvalidLsnsSkipGuardReceivedInvalid) {
-    auto cfg   = make_cfg(1);
+    auto cfg = make_cfg(1);
     auto state = make_state(invalid_lsn, 500);
     EXPECT_TRUE(PromotionManager::check_lag_guard(cfg, state).has_value());
 }
 
 TEST(QA_GDB906_LagGuard, InvalidLsnsSkipGuardAppliedInvalid) {
-    auto cfg   = make_cfg(1);
+    auto cfg = make_cfg(1);
     auto state = make_state(500, invalid_lsn);
     // received_lsn(500) != invalid_lsn(0) but applied_lsn == invalid_lsn:
     // guard condition short-circuits -> ok()
@@ -107,7 +107,7 @@ TEST(QA_GDB906_LagGuard, InvalidLsnsSkipGuardAppliedInvalid) {
 //     never enter the lag arithmetic and must return ok(). ---
 
 TEST(QA_GDB906_LagGuard, BackwardsLsnsReturnOk) {
-    auto cfg   = make_cfg(1); // tiny limit active
+    auto cfg = make_cfg(1); // tiny limit active
     // applied ahead of received - should not trip guard
     auto state = make_state(100, 200);
     EXPECT_TRUE(PromotionManager::check_lag_guard(cfg, state).has_value())
@@ -117,15 +117,15 @@ TEST(QA_GDB906_LagGuard, BackwardsLsnsReturnOk) {
 // --- Adversarial: limit of 1 (minimum non-zero threshold) ---
 
 TEST(QA_GDB906_LagGuard, LimitOneExactLagOfOneIsOk) {
-    auto cfg   = make_cfg(1);
+    auto cfg = make_cfg(1);
     auto state = make_state(1001, 1000); // lag = 1, not > 1
     EXPECT_TRUE(PromotionManager::check_lag_guard(cfg, state).has_value());
 }
 
 TEST(QA_GDB906_LagGuard, LimitOneExactLagOfTwoIsError) {
-    auto cfg   = make_cfg(1);
+    auto cfg = make_cfg(1);
     auto state = make_state(1002, 1000); // lag = 2 > 1
-    auto r     = PromotionManager::check_lag_guard(cfg, state);
+    auto r = PromotionManager::check_lag_guard(cfg, state);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::REPLICATION_ERROR);
 }
@@ -133,10 +133,10 @@ TEST(QA_GDB906_LagGuard, LimitOneExactLagOfTwoIsError) {
 // --- Adversarial: INT64_MAX as limit (practical upper bound) ---
 
 TEST(QA_GDB906_LagGuard, LimitInt64MaxAllowsLargeLag) {
-    auto cfg   = make_cfg(std::numeric_limits<int64_t>::max());
+    auto cfg = make_cfg(std::numeric_limits<int64_t>::max());
     // lag = INT64_MAX - 1, still <= INT64_MAX
-    lsn_t applied   = 1;
-    lsn_t received  = static_cast<lsn_t>(std::numeric_limits<int64_t>::max());
+    lsn_t applied = 1;
+    lsn_t received = static_cast<lsn_t>(std::numeric_limits<int64_t>::max());
     auto state = make_state(received, applied);
     EXPECT_TRUE(PromotionManager::check_lag_guard(cfg, state).has_value());
 }
@@ -150,12 +150,12 @@ TEST(QA_GDB906_LagGuard, LimitInt64MaxAllowsLargeLag) {
 
 TEST(QA_GDB906_LagGuard, UltraLargeLagCastBehaviorDocumented) {
     // Construct a lag of UINT64_MAX (received=UINT64_MAX-1, applied=invalid_lsn
-    // is 0, so we use applied=0 which equals invalid_lsn — that would make the
+    // is 0, so we use applied=0 which equals invalid_lsn - that would make the
     // guard skip). Use applied=1 so both LSNs are valid and the arithmetic fires.
     lsn_t received = std::numeric_limits<uint64_t>::max(); // UINT64_MAX
-    lsn_t applied  = 1;                                    // lag = UINT64_MAX-1
-    auto cfg       = make_cfg(100);
-    auto state     = make_state(received, applied);
+    lsn_t applied = 1;                                     // lag = UINT64_MAX-1
+    auto cfg = make_cfg(100);
+    auto state = make_state(received, applied);
     // received_lsn > applied_lsn is true; lag cast = (int64_t)(UINT64_MAX-1) = -2
     // -2 > 100 is false -> guard passes (false negative, pre-existing behavior)
     // We assert the actual result so any change is caught:
@@ -171,9 +171,9 @@ TEST(QA_GDB906_LagGuard, UltraLargeLagCastBehaviorDocumented) {
 TEST(QA_GDB906_LagGuard, MutationKill_GuardDeletionWouldPass) {
     // If check_lag_guard were deleted (always returns ok()), this test would
     // fail because we ASSERT an error below.
-    auto cfg   = make_cfg(50);
+    auto cfg = make_cfg(50);
     auto state = make_state(200, 100); // lag = 100 > 50
-    auto r     = PromotionManager::check_lag_guard(cfg, state);
+    auto r = PromotionManager::check_lag_guard(cfg, state);
     ASSERT_FALSE(r.has_value())
         << "Must return error when lag > limit; deleting the guard would break this";
     EXPECT_EQ(r.error().code, StatusCode::REPLICATION_ERROR);
@@ -183,9 +183,9 @@ TEST(QA_GDB906_LagGuard, MutationKill_GuardDeletionWouldPass) {
 TEST(QA_GDB906_LagGuard, MutationKill_ComparisonInversionWouldFail) {
     // If the comparison were inverted to >=, LagExactlyAtLimitIsOk would still
     // pass, but this exact-boundary test (lag == limit) must return ok().
-    auto cfg   = make_cfg(100);
+    auto cfg = make_cfg(100);
     auto state = make_state(200, 100); // lag exactly 100
-    auto r     = PromotionManager::check_lag_guard(cfg, state);
+    auto r = PromotionManager::check_lag_guard(cfg, state);
     ASSERT_TRUE(r.has_value())
         << "Exact boundary (lag == limit) must succeed; inverted >= would break this";
 }
@@ -193,9 +193,9 @@ TEST(QA_GDB906_LagGuard, MutationKill_ComparisonInversionWouldFail) {
 // --- Mutation-grade: error message content ---
 
 TEST(QA_GDB906_LagGuard, ErrorMessageContainsLagTooHigh) {
-    auto cfg   = make_cfg(10);
+    auto cfg = make_cfg(10);
     auto state = make_state(100, 50); // lag = 50 > 10
-    auto r     = PromotionManager::check_lag_guard(cfg, state);
+    auto r = PromotionManager::check_lag_guard(cfg, state);
     ASSERT_FALSE(r.has_value());
     EXPECT_NE(r.error().message.find("replay lag too high"), std::string::npos)
         << "Error message must contain 'replay lag too high'; got: " << r.error().message;
