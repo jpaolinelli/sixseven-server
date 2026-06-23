@@ -32,7 +32,9 @@ static TableSchema make_node_schema() {
     return schema;
 }
 
-static Value pk(int64_t v) { return Value(v); }
+static Value pk(int64_t v) {
+    return Value(v);
+}
 
 std::unordered_map<int64_t, double> centrality_map(const std::vector<AlgorithmRow>& rows) {
     std::unordered_map<int64_t, double> m;
@@ -58,8 +60,7 @@ protected:
     void build_edges(const std::string& edge_type,
                      const std::vector<std::pair<int64_t, int64_t>>& edges) {
         auto et = engine_.create_edge_type(
-            default_database_id, edge_type, table_id_, table_id_,
-            TypeId::INT64, TypeId::INT64, {});
+            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(et.has_value()) << et.error().message;
         for (auto [src, tgt] : edges) {
             auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
@@ -103,8 +104,8 @@ TEST_F(QA_GDB920, CycleGraph_ScoresAboveHalf) {
     ASSERT_EQ(scores.size(), 3u);
 
     for (int64_t n : {1, 2, 3}) {
-        EXPECT_GT(scores[n], 0.5)
-            << "node " << n << " score must exceed 0.5; all-zero regression would fail here";
+        EXPECT_GT(scores[n], 0.5) << "node " << n
+                                  << " score must exceed 0.5; all-zero regression would fail here";
     }
 }
 
