@@ -595,19 +595,25 @@ public:
     std::vector<Entry> undo_entries;
 };
 
-TEST(QA_WalRecovery, RecoverWithTxnIdZeroDataRecords) {
-    // Data records with txn_id = 0 skip transaction tracking.
-    // They should NOT be silently dropped — they represent valid operations.
+// txn_id == invalid_txn_id (0) is the INVALID sentinel; it is distinct from
+// frozen_txn_id (~0), which is the AUTOCOMMIT marker. A data record stamped
+// with the invalid sentinel is malformed -- legitimate DML always uses either
+// a real txn_id or frozen_txn_id. The recovery path intentionally skips such
+// records (neither redoes nor undoes them) and emits a WARN so the drop is
+// observable in logs. The contrast test below (RecoverRedoesFrozenTxnIdDataRecord)
+// pins that frozen_txn_id records ARE redone, so the skip is sentinel-specific.
+TEST(QA_WalRecovery, RecoverSkipsInvalidTxnIdZeroDataRecord) {
     TempWalDir dir;
 
     {
         WalWriter writer(dir.path(), test_wal_opts());
         ASSERT_TRUE(writer.open().has_value());
 
-        // A data record with txn_id = 0.
+        // A data record stamped with the invalid sentinel (txn_id=0).
+        // This is malformed: real DML never produces txn_id=0 data records.
         WalRecord insert;
         insert.type = WalRecordType::INSERT;
-        insert.txn_id = 0;
+        insert.txn_id = invalid_txn_id; // 0 -- the invalid sentinel
         insert.table_id = 10;
         insert.data = {0x01, 0x02};
         ASSERT_TRUE(writer.append(insert).has_value());
@@ -621,13 +627,44 @@ TEST(QA_WalRecovery, RecoverWithTxnIdZeroDataRecords) {
     auto stats = recovery.recover();
     ASSERT_TRUE(stats.has_value()) << stats.error().message;
 
-    // txn_id=0 records: they're not in committed_txns, not in aborted_txns.
-    // They go to active_txns (because `if (record->txn_id != 0)` skips
-    // them), so they won't be tracked at all. They won't be redone or undone.
-    // This is a potential data loss scenario for txn_id=0 records.
-    // Documenting the behavior: currently txn_id=0 data records are dropped.
+    // The malformed record is scanned but intentionally not redone or undone.
+    // A WARN is emitted in the recovery log (observable; not a silent drop).
     EXPECT_EQ(stats->records_scanned, 1u);
     EXPECT_EQ(handler.redo_entries.size(), 0u);
+    EXPECT_EQ(handler.undo_entries.size(), 0u);
+}
+
+// Contrast: a data record stamped with frozen_txn_id (~0, the AUTOCOMMIT
+// marker) is VALID and must be redone. If this assertion fails, the invalid-
+// sentinel skip was widened to accidentally drop frozen/autocommit records.
+TEST(QA_WalRecovery, RecoverRedoesFrozenTxnIdDataRecord) {
+    TempWalDir dir;
+
+    {
+        WalWriter writer(dir.path(), test_wal_opts());
+        ASSERT_TRUE(writer.open().has_value());
+
+        // A data record stamped with frozen_txn_id -- normal autocommit DML.
+        WalRecord insert;
+        insert.type = WalRecordType::INSERT;
+        insert.txn_id = frozen_txn_id; // ~0 -- the autocommit marker
+        insert.table_id = 20;
+        insert.data = {0xAA, 0xBB};
+        ASSERT_TRUE(writer.append(insert).has_value());
+
+        ASSERT_TRUE(writer.flush().has_value());
+        ASSERT_TRUE(writer.close().has_value());
+    }
+
+    QARecoveryHandler handler;
+    WalRecovery recovery(dir.path(), handler);
+    auto stats = recovery.recover();
+    ASSERT_TRUE(stats.has_value()) << stats.error().message;
+
+    // frozen_txn_id records are always redone (autocommit = committed).
+    EXPECT_EQ(stats->records_scanned, 1u);
+    ASSERT_EQ(handler.redo_entries.size(), 1u);
+    EXPECT_EQ(handler.redo_entries[0].txn_id, frozen_txn_id);
     EXPECT_EQ(handler.undo_entries.size(), 0u);
 }
 
