@@ -121,6 +121,7 @@ int main(int argc, char* argv[]) {
     sixseven::DiskManager disk_manager;
     sixseven::Catalog catalog;
     sixseven::StorageManager storage(disk_manager, data_dir, sixseven::frames_from_config(config));
+    storage.set_double_write_enabled(config.storage_double_write);
     sixseven::CatalogPersistence persistence(catalog, storage);
     sixseven::GraphEngine graph_engine(catalog, disk_manager, data_dir);
     sixseven::ProviderRegistry provider_registry(catalog);

@@ -140,6 +140,13 @@ public:
     /// Write the meta page ID to an index file's header extension.
     [[nodiscard]] Result<void> write_index_meta_page_id(index_id_t index_id, PageId meta_page_id);
 
+    /// Enable the double-write buffer for all table storage files.
+    /// When set, each BufferPoolManager opened or created afterwards will
+    /// call enable_double_write() with a path derived from the table file
+    /// (table_<id>.db.dwb in the same directory). Recovery runs automatically
+    /// on each existing DWB file at open time. Defaults to off.
+    void set_double_write_enabled(bool enabled);
+
     /// Invoke @p fn(table_id, heap*) for every open table heap.
     /// Used by WAL crash recovery to register all live heaps with
     /// TableHeapRecoveryHandler before calling WalRecovery::recover().
@@ -164,6 +171,9 @@ private:
     /// Transaction manager attached to table heaps for MVCC visibility
     /// filtering (GDB-747, not owned; may be null).
     const TransactionManager* txn_mgr_ = nullptr;
+
+    /// Whether the DWB is enabled for table storage files (GDB-922).
+    bool dwb_enabled_ = false;
 
     /// WAL writer attached to every table heap so DML emits WAL records for
     /// crash recovery (GDB-900 / GDB-1276, not owned; may be null).

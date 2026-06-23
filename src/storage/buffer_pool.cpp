@@ -480,21 +480,126 @@ Result<void> BufferPoolManager::enable_double_write(const std::filesystem::path&
         return make_error(StatusCode::ALREADY_EXISTS, "double-write buffer already enabled");
     }
 
-    int fd = ::open(dwb_path.string().c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+    // Open without O_TRUNC so crash-time DWB contents survive.
+    int fd = ::open(dwb_path.string().c_str(), O_RDWR | O_CREAT, 0644);
     if (fd < 0) {
         return make_error(StatusCode::IO_ERROR,
-                          "failed to create DWB file: " + std::string(std::strerror(errno)));
+                          "failed to open DWB file: " + std::string(std::strerror(errno)));
     }
 
-    // Pre-allocate one page of space.
+    dwb_fd_ = fd;
+
+    // If the file already had content, run recovery before reusing the slot.
+    // recover_double_write() reads the slot under dwb_mutex_ (which we hold),
+    // so we call it directly (no second lock needed).
+    auto rec = recover_double_write();
+    if (!rec) {
+        // Fail closed: log and disable DWB rather than potentially clobbering
+        // good data.
+        SIXSEVEN_LOG_ERROR("DWB recovery failed: {} -- double-write disabled", rec.error().message);
+        ::close(dwb_fd_);
+        dwb_fd_ = -1;
+        return make_error(rec.error().code, rec.error().message);
+    }
+    if (rec->pages_restored > 0) {
+        SIXSEVEN_LOG_INFO("DWB recovery: restored {} torn page(s), skipped {} slot(s)",
+                          rec->pages_restored,
+                          rec->slots_skipped);
+    }
+
+    // Reset the slot to all-zeros so the next write starts clean.
+    // Pre-allocate one page of space (also handles brand-new files).
     if (sixseven_platform::ftruncate(fd, static_cast<off_t>(page_size)) < 0) {
-        ::close(fd);
+        ::close(dwb_fd_);
+        dwb_fd_ = -1;
         return make_error(StatusCode::IO_ERROR,
                           "failed to extend DWB file: " + std::string(std::strerror(errno)));
     }
 
-    dwb_fd_ = fd;
     return ok();
+}
+
+Result<BufferPoolManager::DwbRecoveryStats> BufferPoolManager::recover_double_write() {
+    // Caller must hold dwb_mutex_.
+    DwbRecoveryStats stats;
+
+    if (dwb_fd_ < 0) {
+        return ok(stats); // DWB not open -- nothing to do.
+    }
+
+    // Determine how many bytes the DWB file currently holds.
+    sixseven_platform::stat64_t st{};
+    if (sixseven_platform::fstat64(dwb_fd_, &st) < 0) {
+        stats.slots_skipped = 1;
+        return ok(stats);
+    }
+    const auto file_sz = static_cast<int64_t>(st.st_size);
+    if (file_sz < static_cast<int64_t>(page_size)) {
+        // File is smaller than one page: either brand-new or zero-length.
+        // Nothing to recover.
+        stats.slots_skipped = 1;
+        return ok(stats);
+    }
+
+    // Read the single DWB slot (offset 0, page_size bytes).
+    std::array<uint8_t, page_size> slot_buf{};
+    ssize_t n = sixseven_platform::pread(dwb_fd_, slot_buf.data(), page_size, 0);
+    if (n != static_cast<ssize_t>(page_size)) {
+        // Partial read: slot is itself torn -- skip.
+        stats.slots_skipped = 1;
+        return ok(stats);
+    }
+
+    // Parse the DWB copy as a Page to access page_id and checksum.
+    Page dwb_page(slot_buf);
+
+    // Validate the DWB copy's checksum.
+    uint32_t dwb_stored_cksum = dwb_page.checksum();
+    uint32_t dwb_computed_cksum = compute_page_checksum(dwb_page);
+    if (dwb_stored_cksum != dwb_computed_cksum || dwb_stored_cksum == 0) {
+        // DWB copy is itself torn or empty (all-zeros gives 0 vs computed).
+        // Do NOT clobber the data file.
+        stats.slots_skipped = 1;
+        return ok(stats);
+    }
+
+    // DWB copy is intact.  Look up which data-file page it protects.
+    PageId target_pid = dwb_page.page_id();
+    if (target_pid == 0) {
+        // page_id == 0 is the file header, not a regular page -- skip.
+        stats.slots_skipped = 1;
+        return ok(stats);
+    }
+
+    // Guard: page must be within the current file extent.
+    auto page_count = disk_manager_.file_page_count(file_id_);
+    if (!page_count || target_pid >= *page_count) {
+        stats.slots_skipped = 1;
+        return ok(stats);
+    }
+
+    // Check the corresponding data-file page's checksum without going through
+    // the full DiskManager CRC path: try a normal read_page which validates CRC.
+    {
+        Page probe(0, PageType::DATA);
+        auto read_result = disk_manager_.read_page(file_id_, target_pid, probe);
+        if (read_result.has_value()) {
+            // Data page checksum is valid -- no restoration needed.
+            return ok(stats);
+        }
+    }
+
+    // Data page failed CRC (torn) -- restore from DWB copy.
+    // dwb_page already holds the intact page bytes; write it to the data file.
+    auto write_result = disk_manager_.write_page(file_id_, target_pid, dwb_page);
+    if (!write_result) {
+        return make_error(write_result.error().code,
+                          "DWB restore write failed for page " + std::to_string(target_pid) + ": " +
+                              write_result.error().message);
+    }
+
+    stats.pages_restored = 1;
+    return ok(stats);
 }
 
 Result<void> BufferPoolManager::start_flusher(std::chrono::milliseconds interval) {
