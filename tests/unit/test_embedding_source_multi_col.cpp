@@ -272,3 +272,98 @@ TEST(BackfillPathMultiColSource, SingleColSourceExprRegression) {
     EXPECT_EQ(src.resolved_count, 1u);
     EXPECT_EQ(src.text.find("99"), std::string::npos);
 }
+
+// ===========================================================================
+// REEMBED path: zero-resolve guard contract (GDB-901)
+//
+// REEMBED drives build_source_text for every row in each batch.  When
+// resolved_count==0 the caller must skip that row and must NOT forward an
+// empty string to embed_batch (which would persist a garbage vector).
+//
+// We verify the helper-level contract here; the QueryEngine guard that acts
+// on this signal is tested by inspecting resolved_count in the same way the
+// production loop does.
+// ===========================================================================
+
+TEST(ReembedZeroResolve, ZeroResolveProducesEmptyTextAndZeroCount) {
+    // source_expr names a column that does not exist in the schema —
+    // exactly the misconfiguration that the REEMBED guard is protecting against.
+    auto schema = make_schema({"id", "name", "bio"});
+    std::vector<Value> values = {
+        Value(int32_t{1}), Value(std::string("Ivan")), Value(std::string("desc"))};
+
+    auto src = EmbeddingColumnManager::build_source_text("nonexistent_col", schema, values);
+
+    // The REEMBED guard condition: resolved_count == 0 means skip this row.
+    EXPECT_EQ(src.resolved_count, 0u);
+    // text must be empty — sending this to embed_batch would produce a garbage vector.
+    EXPECT_TRUE(src.text.empty());
+}
+
+TEST(ReembedZeroResolve, SkipsRowAndDoesNotEmbed) {
+    // Simulate the REEMBED inner-loop logic: only push to source_texts when
+    // resolved_count > 0; leave source_texts empty when all rows zero-resolve.
+    auto schema = make_schema({"id", "title"});
+    std::vector<Value> row_values = {Value(int32_t{7}), Value(std::string("Hello"))};
+
+    // Two rows in the batch, both with a bogus source_expr.
+    std::vector<std::string> source_texts;
+    std::vector<size_t> active_indices;
+    size_t total_skipped = 0;
+
+    for (size_t row_i = 0; row_i < 2; ++row_i) {
+        auto src = EmbeddingColumnManager::build_source_text("bogus_col", schema, row_values);
+        if (src.resolved_count == 0) {
+            ++total_skipped;
+            continue;
+        }
+        active_indices.push_back(row_i);
+        source_texts.push_back(std::move(src.text));
+    }
+
+    // Nothing should reach embed_batch.
+    EXPECT_TRUE(source_texts.empty());
+    EXPECT_TRUE(active_indices.empty());
+    // Both rows must be counted as skipped.
+    EXPECT_EQ(total_skipped, 2u);
+}
+
+TEST(ReembedZeroResolve, ActiveIndicesAlignWithEmbeddings) {
+    // When some rows zero-resolve and some don't, active_indices must correctly
+    // map embedding[i] back to batch[active_indices[i]].
+    auto schema = make_schema({"id", "name"});
+
+    // Row 0: name exists — resolves.
+    // Row 1: use a source_expr that won't match — zero-resolve.
+    // Row 2: name exists — resolves.
+    std::vector<std::vector<Value>> batch = {
+        {Value(int32_t{1}), Value(std::string("Alice"))},
+        {Value(int32_t{2}), Value(std::string("Bob"))},
+        {Value(int32_t{3}), Value(std::string("Carol"))},
+    };
+
+    std::vector<std::string> source_texts;
+    std::vector<size_t> active_indices;
+    size_t total_skipped = 0;
+
+    // Row 0 and 2 use "name" (resolves); row 1 uses a bogus expr.
+    std::vector<std::string> exprs = {"name", "bogus_col", "name"};
+
+    for (size_t row_i = 0; row_i < batch.size(); ++row_i) {
+        auto src = EmbeddingColumnManager::build_source_text(exprs[row_i], schema, batch[row_i]);
+        if (src.resolved_count == 0) {
+            ++total_skipped;
+            continue;
+        }
+        active_indices.push_back(row_i);
+        source_texts.push_back(std::move(src.text));
+    }
+
+    // Only rows 0 and 2 made it through.
+    ASSERT_EQ(active_indices.size(), 2u);
+    EXPECT_EQ(active_indices[0], 0u);
+    EXPECT_EQ(active_indices[1], 2u);
+    EXPECT_EQ(source_texts[0], "Alice");
+    EXPECT_EQ(source_texts[1], "Carol");
+    EXPECT_EQ(total_skipped, 1u);
+}

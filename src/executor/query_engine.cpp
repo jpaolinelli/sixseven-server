@@ -2132,14 +2132,33 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
         }
 
         for (auto& target : targets) {
-            // Extract source texts from each row.
+            // Extract source texts from each row, skipping rows where source_expr
+            // resolves no schema columns (misconfigured EMBEDDING definition).
             std::vector<std::string> source_texts;
+            std::vector<size_t> active_indices;
             source_texts.reserve(batch.size());
+            active_indices.reserve(batch.size());
 
-            for (const auto& row : batch) {
+            for (size_t row_i = 0; row_i < batch.size(); ++row_i) {
+                const auto& row = batch[row_i];
                 auto src = EmbeddingColumnManager::build_source_text(
                     target.def.source_expr, table_schema->columns, row.values);
+                if (src.resolved_count == 0) {
+                    SIXSEVEN_LOG_ERROR(
+                        "reembed: source_expr '{}' for table '{}' column_id={} resolved no "
+                        "schema columns â skipping row (check EMBEDDING column definition)",
+                        target.def.source_expr,
+                        stmt.table_name,
+                        target.def.column_id);
+                    ++total_skipped;
+                    continue;
+                }
+                active_indices.push_back(row_i);
                 source_texts.push_back(std::move(src.text));
+            }
+
+            if (source_texts.empty()) {
+                continue;
             }
 
             // Batch embed via the provider.
@@ -2148,13 +2167,13 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
                 SIXSEVEN_LOG_WARN("REEMBED: batch embed failed for provider '{}': {}",
                                   target.def.provider,
                                   embeddings.error().message);
-                total_skipped += static_cast<int64_t>(batch.size());
+                total_skipped += static_cast<int64_t>(active_indices.size());
                 continue;
             }
 
-            // Update each row's embedding and persist.
-            for (size_t i = 0; i < batch.size(); ++i) {
-                auto& row = batch[i];
+            // Update each active row's embedding and persist.
+            for (size_t i = 0; i < active_indices.size(); ++i) {
+                auto& row = batch[active_indices[i]];
 
                 row.values[target.column_index] = Value(Embedding((*embeddings)[i]));
 
