@@ -22,9 +22,8 @@ using namespace sixseven;
 // Helpers
 // ---------------------------------------------------------------------------
 
-static std::vector<CatalogColumnDef>
-make_schema(const std::vector<std::string>& names,
-            const std::vector<TypeId>& types = {}) {
+static std::vector<CatalogColumnDef> make_schema(const std::vector<std::string>& names,
+                                                 const std::vector<TypeId>& types = {}) {
     std::vector<CatalogColumnDef> cols;
     for (size_t i = 0; i < names.size(); ++i) {
         CatalogColumnDef cd;
@@ -45,12 +44,10 @@ make_schema(const std::vector<std::string>& names,
 // and IS the concatenation of name+active.
 TEST(QA_GDB901_Mutation, MultiColExprNotCol0) {
     // Schema: col0=id (INT32, not STRING), col1=name, col2=active.
-    auto schema = make_schema({"id", "name", "active"},
-                              {TypeId::INT32, TypeId::STRING, TypeId::STRING});
+    auto schema =
+        make_schema({"id", "name", "active"}, {TypeId::INT32, TypeId::STRING, TypeId::STRING});
     std::vector<Value> values = {
-        Value(int32_t{1}),
-        Value(std::string("Alice")),
-        Value(std::string("yes"))};
+        Value(int32_t{1}), Value(std::string("Alice")), Value(std::string("yes"))};
 
     auto src = EmbeddingColumnManager::build_source_text("name,active", schema, values);
 
@@ -66,10 +63,9 @@ TEST(QA_GDB901_Mutation, MultiColExprNotCol0) {
 // is not named in source_expr.
 TEST(QA_GDB901_Mutation, MultiColExprDoesNotLeakFirstCol) {
     auto schema = make_schema({"secret", "name", "active"});
-    std::vector<Value> values = {
-        Value(std::string("SHOULD_NOT_APPEAR")),
-        Value(std::string("Bob")),
-        Value(std::string("no"))};
+    std::vector<Value> values = {Value(std::string("SHOULD_NOT_APPEAR")),
+                                 Value(std::string("Bob")),
+                                 Value(std::string("no"))};
 
     auto src = EmbeddingColumnManager::build_source_text("name,active", schema, values);
 
@@ -82,9 +78,7 @@ TEST(QA_GDB901_Mutation, MultiColExprDoesNotLeakFirstCol) {
 TEST(QA_GDB901_Mutation, ZeroResolveNeverEmbedCol0) {
     auto schema = make_schema({"id", "name", "active"});
     std::vector<Value> values = {
-        Value(std::string("col0-text")),
-        Value(std::string("Bob")),
-        Value(std::string("no"))};
+        Value(std::string("col0-text")), Value(std::string("Bob")), Value(std::string("no"))};
 
     // source_expr names nothing that exists.
     auto src = EmbeddingColumnManager::build_source_text("nonexistent", schema, values);
@@ -104,9 +98,7 @@ TEST(QA_GDB901_Mutation, ZeroResolveNeverEmbedCol0) {
 TEST(QA_GDB901_ConcatSemantics, OrderPreserved) {
     auto schema = make_schema({"id", "name", "active"});
     std::vector<Value> values = {
-        Value(int32_t{1}),
-        Value(std::string("Alice")),
-        Value(std::string("yes"))};
+        Value(int32_t{1}), Value(std::string("Alice")), Value(std::string("yes"))};
 
     auto src = EmbeddingColumnManager::build_source_text("active,name", schema, values);
     EXPECT_EQ(src.text, "yes Alice");
@@ -116,9 +108,7 @@ TEST(QA_GDB901_ConcatSemantics, OrderPreserved) {
 // Values that themselves contain commas and spaces — they must pass through verbatim.
 TEST(QA_GDB901_ConcatSemantics, EmbeddedCommasAndSpacesInValues) {
     auto schema = make_schema({"a", "b"});
-    std::vector<Value> values = {
-        Value(std::string("hello, world")),
-        Value(std::string("foo bar"))};
+    std::vector<Value> values = {Value(std::string("hello, world")), Value(std::string("foo bar"))};
 
     auto src = EmbeddingColumnManager::build_source_text("a,b", schema, values);
     EXPECT_EQ(src.text, "hello, world foo bar");
@@ -138,10 +128,7 @@ TEST(QA_GDB901_ConcatSemantics, NullInFirstPosition) {
 // NULL in middle position.
 TEST(QA_GDB901_ConcatSemantics, NullInMiddlePosition) {
     auto schema = make_schema({"a", "b", "c"});
-    std::vector<Value> values = {
-        Value(std::string("first")),
-        Value(),
-        Value(std::string("third"))};
+    std::vector<Value> values = {Value(std::string("first")), Value(), Value(std::string("third"))};
 
     auto src = EmbeddingColumnManager::build_source_text("a,b,c", schema, values);
     EXPECT_EQ(src.text, "first third");
@@ -170,25 +157,21 @@ TEST(QA_GDB901_ConcatSemantics, AllNullResolvedCountPositive) {
 
 // Non-STRING types interleaved: INT32, BOOL, EMBEDDING all skipped; STRING contributes.
 TEST(QA_GDB901_ConcatSemantics, NonStringTypesSkipped) {
-    auto schema = make_schema({"num", "flag", "desc"},
-                              {TypeId::INT32, TypeId::BOOL, TypeId::STRING});
+    auto schema =
+        make_schema({"num", "flag", "desc"}, {TypeId::INT32, TypeId::BOOL, TypeId::STRING});
     std::vector<Value> values = {
-        Value(int32_t{42}),
-        Value(true),
-        Value(std::string("description"))};
+        Value(int32_t{42}), Value(true), Value(std::string("description"))};
 
     auto src = EmbeddingColumnManager::build_source_text("num,flag,desc", schema, values);
     EXPECT_EQ(src.text, "description");
-    EXPECT_EQ(src.resolved_count, 3u);  // all three resolved in schema
+    EXPECT_EQ(src.resolved_count, 3u); // all three resolved in schema
 }
 
 // Empty string value: skipped (not added to joined, no dangling space).
 TEST(QA_GDB901_ConcatSemantics, EmptyStringValueSkipped) {
     auto schema = make_schema({"a", "b", "c"});
     std::vector<Value> values = {
-        Value(std::string("first")),
-        Value(std::string("")),
-        Value(std::string("third"))};
+        Value(std::string("first")), Value(std::string("")), Value(std::string("third"))};
 
     auto src = EmbeddingColumnManager::build_source_text("a,b,c", schema, values);
     EXPECT_EQ(src.text, "first third");
@@ -206,7 +189,8 @@ TEST(QA_GDB901_ConcatSemantics, VeryLongConcatenation) {
         names.push_back("col" + std::to_string(i));
         types.push_back(TypeId::STRING);
         values.push_back(Value(std::string(100, 'a' + static_cast<char>(i % 26))));
-        if (i > 0) source_expr += ',';
+        if (i > 0)
+            source_expr += ',';
         source_expr += "col" + std::to_string(i);
     }
 
@@ -224,9 +208,7 @@ TEST(QA_GDB901_ConcatSemantics, UnicodeValues) {
     const std::string chinese = "\xe4\xb8\xad\xe6\x96\x87"; // "中文"
     const std::string french = "\xc3\xa9l\xc3\xa8ve";       // "élève"
     auto schema = make_schema({"a", "b"});
-    std::vector<Value> values = {
-        Value(chinese),
-        Value(french)};
+    std::vector<Value> values = {Value(chinese), Value(french)};
 
     auto src = EmbeddingColumnManager::build_source_text("a,b", schema, values);
     EXPECT_EQ(src.text, chinese + " " + french);
@@ -248,9 +230,7 @@ TEST(QA_GDB901_ConcatSemantics, DuplicateColumnNameInSourceExpr) {
 // Column name with surrounding whitespace in source_expr is trimmed before matching.
 TEST(QA_GDB901_ConcatSemantics, WhitespacePaddedColumnNamesInSourceExpr) {
     auto schema = make_schema({"name", "active"});
-    std::vector<Value> values = {
-        Value(std::string("Dave")),
-        Value(std::string("yes"))};
+    std::vector<Value> values = {Value(std::string("Dave")), Value(std::string("yes"))};
 
     auto src = EmbeddingColumnManager::build_source_text(" name , active ", schema, values);
     EXPECT_EQ(src.text, "Dave yes");
@@ -264,22 +244,18 @@ TEST(QA_GDB901_ConcatSemantics, WhitespacePaddedColumnNamesInSourceExpr) {
 // Partial match (one valid + one invalid name) -> resolved_count > 0, partial text.
 TEST(QA_GDB901_ZeroResolve, PartialMatchReturnsPartialText) {
     auto schema = make_schema({"name", "active"});
-    std::vector<Value> values = {
-        Value(std::string("Carol")),
-        Value(std::string("yes"))};
+    std::vector<Value> values = {Value(std::string("Carol")), Value(std::string("yes"))};
 
     // "name" resolves, "missing" does not.
     auto src = EmbeddingColumnManager::build_source_text("name,missing", schema, values);
     EXPECT_EQ(src.text, "Carol");
-    EXPECT_EQ(src.resolved_count, 1u);  // only "name" resolved
+    EXPECT_EQ(src.resolved_count, 1u); // only "name" resolved
 }
 
 // Completely bogus source_expr.
 TEST(QA_GDB901_ZeroResolve, AllColumnsMissing) {
     auto schema = make_schema({"name", "active"});
-    std::vector<Value> values = {
-        Value(std::string("Carol")),
-        Value(std::string("yes"))};
+    std::vector<Value> values = {Value(std::string("Carol")), Value(std::string("yes"))};
 
     auto src = EmbeddingColumnManager::build_source_text("bogus1,bogus2", schema, values);
     EXPECT_EQ(src.resolved_count, 0u);
@@ -303,8 +279,8 @@ TEST(QA_GDB901_ZeroResolve, EmptyValuesDoesNotCrash) {
 
     auto src = EmbeddingColumnManager::build_source_text("name", schema, values);
     // schema has "name" but values is empty -> i >= values.size() -> skipped.
-    EXPECT_EQ(src.resolved_count, 1u);  // column found in schema
-    EXPECT_TRUE(src.text.empty());      // but value missing -> no text
+    EXPECT_EQ(src.resolved_count, 1u); // column found in schema
+    EXPECT_TRUE(src.text.empty());     // but value missing -> no text
 }
 
 // Empty schema does not crash.
@@ -325,12 +301,10 @@ TEST(QA_GDB901_ZeroResolve, EmptySchemaDoesNotCrash) {
 // call build_source_text -> must match BACKFILL path (same helper, same schema).
 TEST(QA_GDB901_CrossPath, InsertAndBackfillProxyAgreeSingleCol) {
     // Schema as seen by BACKFILL (full catalog schema).
-    auto backfill_schema = make_schema({"id", "name", "active"},
-                                       {TypeId::INT32, TypeId::STRING, TypeId::STRING});
+    auto backfill_schema =
+        make_schema({"id", "name", "active"}, {TypeId::INT32, TypeId::STRING, TypeId::STRING});
     std::vector<Value> values = {
-        Value(int32_t{1}),
-        Value(std::string("Alice")),
-        Value(std::string("yes"))};
+        Value(int32_t{1}), Value(std::string("Alice")), Value(std::string("yes"))};
 
     // INSERT path builds its own schema slice from column_names_.
     // Columns: same as backfill schema here.
@@ -351,12 +325,10 @@ TEST(QA_GDB901_CrossPath, InsertAndBackfillProxyAgreeSingleCol) {
 }
 
 TEST(QA_GDB901_CrossPath, InsertAndBackfillProxyAgreeMultiCol) {
-    auto backfill_schema = make_schema({"id", "name", "active"},
-                                       {TypeId::INT32, TypeId::STRING, TypeId::STRING});
+    auto backfill_schema =
+        make_schema({"id", "name", "active"}, {TypeId::INT32, TypeId::STRING, TypeId::STRING});
     std::vector<Value> values = {
-        Value(int32_t{1}),
-        Value(std::string("Alice")),
-        Value(std::string("yes"))};
+        Value(int32_t{1}), Value(std::string("Alice")), Value(std::string("yes"))};
 
     std::vector<std::string> col_names = {"id", "name", "active"};
     std::vector<CatalogColumnDef> insert_schema;
@@ -379,12 +351,10 @@ TEST(QA_GDB901_CrossPath, InsertAndBackfillProxyAgreeMultiCol) {
 // REEMBED uses table_schema->columns (same as BACKFILL). Verify text matches.
 TEST(QA_GDB901_CrossPath, ReembedProxyMatchesBackfill) {
     // Full catalog schema — same as what REEMBED passes to build_source_text.
-    auto full_schema = make_schema({"id", "description", "tags"},
-                                   {TypeId::INT32, TypeId::STRING, TypeId::STRING});
+    auto full_schema =
+        make_schema({"id", "description", "tags"}, {TypeId::INT32, TypeId::STRING, TypeId::STRING});
     std::vector<Value> values = {
-        Value(int32_t{7}),
-        Value(std::string("A widget")),
-        Value(std::string("hardware,sale"))};
+        Value(int32_t{7}), Value(std::string("A widget")), Value(std::string("hardware,sale"))};
 
     auto reembed_src =
         EmbeddingColumnManager::build_source_text("description,tags", full_schema, values);
@@ -401,12 +371,10 @@ TEST(QA_GDB901_CrossPath, ReembedProxyMatchesBackfill) {
 // ---------------------------------------------------------------------------
 
 TEST(QA_GDB901_Regression, SingleColByteIdenticalNoLeadingSpace) {
-    auto schema = make_schema({"id", "name", "bio"},
-                              {TypeId::INT32, TypeId::STRING, TypeId::STRING});
+    auto schema =
+        make_schema({"id", "name", "bio"}, {TypeId::INT32, TypeId::STRING, TypeId::STRING});
     std::vector<Value> values = {
-        Value(int32_t{1}),
-        Value(std::string("ExactText")),
-        Value(std::string("unused"))};
+        Value(int32_t{1}), Value(std::string("ExactText")), Value(std::string("unused"))};
 
     auto src = EmbeddingColumnManager::build_source_text("name", schema, values);
     EXPECT_EQ(src.text, "ExactText");
@@ -418,11 +386,11 @@ TEST(QA_GDB901_Regression, SingleColByteIdenticalNoLeadingSpace) {
 
 TEST(QA_GDB901_Regression, SingleColNullYieldsEmptyTextPositiveResolved) {
     auto schema = make_schema({"name"});
-    std::vector<Value> values = {Value()};  // null
+    std::vector<Value> values = {Value()}; // null
 
     auto src = EmbeddingColumnManager::build_source_text("name", schema, values);
     EXPECT_TRUE(src.text.empty());
-    EXPECT_EQ(src.resolved_count, 1u);  // column found -> resolved
+    EXPECT_EQ(src.resolved_count, 1u); // column found -> resolved
 }
 
 // ---------------------------------------------------------------------------
@@ -433,7 +401,8 @@ TEST(QA_GDB901_ParseSourceColumns, ManyColumns) {
     std::string expr;
     const int N = 50;
     for (int i = 0; i < N; ++i) {
-        if (i > 0) expr += ',';
+        if (i > 0)
+            expr += ',';
         expr += "col" + std::to_string(i);
     }
     auto cols = EmbeddingColumnManager::parse_source_columns(expr);

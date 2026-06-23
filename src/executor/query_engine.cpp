@@ -2146,7 +2146,7 @@ Result<QueryResult> QueryEngine::execute_reembed(const ReembedStmt& stmt) {
                 if (src.resolved_count == 0) {
                     SIXSEVEN_LOG_ERROR(
                         "reembed: source_expr '{}' for table '{}' column_id={} resolved no "
-                        "schema columns â skipping row (check EMBEDDING column definition)",
+                        "schema columns - skipping row (check EMBEDDING column definition)",
                         target.def.source_expr,
                         stmt.table_name,
                         target.def.column_id);
