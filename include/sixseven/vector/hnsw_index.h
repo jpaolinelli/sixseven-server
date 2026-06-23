@@ -1,6 +1,8 @@
 #pragma once
 
+#include "sixseven/catalog/schema.h"
 #include "sixseven/common/result.h"
+#include "sixseven/index/rid.h"
 #include "sixseven/storage/buffer_pool.h"
 #include "sixseven/vector/hnsw_page.h"
 
@@ -43,6 +45,18 @@ struct HnswSearchResult {
 /// Predicate callback for filtered search. Returns true if the node should
 /// be included in results.
 using HnswFilterPredicate = std::function<bool(uint32_t node_id)>;
+
+// Forward declaration so HnswMaintenanceTarget can reference HnswIndex*.
+class HnswIndex;
+
+/// An HNSW index that DML operators (DELETE) must maintain, paired with the
+/// index_id used to look up the node->RID map in IndexManager. Populated by
+/// the planner for DELETE on tables with EMBEDDING columns.
+struct HnswMaintenanceTarget {
+    HnswIndex* index = nullptr;
+    index_id_t index_id = 0;
+    std::vector<RID>* rid_map = nullptr; // node_id -> RID; slot set to invalid() on remove
+};
 
 /// Persistent HNSW index backed by the buffer pool.
 ///

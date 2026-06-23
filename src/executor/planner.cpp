@@ -2814,6 +2814,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_delete(const DeleteStmt& stmt,
 
     auto iter = std::make_unique<DeleteOperator>(*storage->heap, std::move(scan));
     iter->bm25_targets_ = collect_bm25_targets(*table_schema);
+    iter->hnsw_targets_ = collect_hnsw_targets(*table_schema);
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
 }
 
@@ -4007,6 +4008,29 @@ std::vector<Bm25MaintenanceTarget> Planner::collect_bm25_targets(const TableSche
                 break;
             }
         }
+    }
+    return targets;
+}
+
+std::vector<HnswMaintenanceTarget> Planner::collect_hnsw_targets(const TableSchema& schema) const {
+    std::vector<HnswMaintenanceTarget> targets;
+    if (hnsw_indexes_ == nullptr || hnsw_rid_maps_ == nullptr) {
+        return targets;
+    }
+    auto indexes = catalog_.list_indexes(schema.table_id);
+    for (const auto& idx : indexes) {
+        if (idx.index_type != "hnsw") {
+            continue;
+        }
+        auto it = hnsw_indexes_->find(idx.index_id);
+        if (it == hnsw_indexes_->end() || it->second == nullptr) {
+            continue;
+        }
+        auto rm_it = hnsw_rid_maps_->find(idx.index_id);
+        if (rm_it == hnsw_rid_maps_->end()) {
+            continue;
+        }
+        targets.push_back({it->second, idx.index_id, &rm_it->second});
     }
     return targets;
 }

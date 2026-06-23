@@ -204,6 +204,11 @@ private:
     [[nodiscard]] std::vector<Bm25MaintenanceTarget>
     collect_bm25_targets(const TableSchema& schema) const;
 
+    /// Collect the HNSW indexes on a table so DELETE can tombstone removed
+    /// vectors. Returns one HnswMaintenanceTarget per HNSW index on the table.
+    [[nodiscard]] std::vector<HnswMaintenanceTarget>
+    collect_hnsw_targets(const TableSchema& schema) const;
+
     /// Collect the B-tree indexes on a table so INSERT can maintain them.
     /// Returns one BtreeMaintenanceTarget per btree index on the table.
     [[nodiscard]] std::vector<BtreeMaintenanceTarget>

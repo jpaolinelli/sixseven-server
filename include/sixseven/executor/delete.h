@@ -4,6 +4,7 @@
 #include "sixseven/executor/tuple.h"
 #include "sixseven/index/bm25_index.h"
 #include "sixseven/table/table_heap.h"
+#include "sixseven/vector/hnsw_index.h"
 
 #include <cstdint>
 #include <memory>
@@ -30,6 +31,11 @@ public:
     /// BM25 indexes on this table to maintain on delete. Set by the planner.
     /// Only the index pointer is used (removal is keyed by RID).
     std::vector<Bm25MaintenanceTarget> bm25_targets_;
+
+    /// HNSW indexes on this table to maintain on delete. Set by the planner.
+    /// On delete, the node corresponding to the deleted RID is tombstoned and
+    /// its rid_map slot is invalidated so nearest-scan skips it consistently.
+    std::vector<HnswMaintenanceTarget> hnsw_targets_;
 
     /// Set the transaction id stamped as xmax on deleted versions (GDB-747).
     /// Defaults to frozen_txn_id (always-committed) when no transaction
