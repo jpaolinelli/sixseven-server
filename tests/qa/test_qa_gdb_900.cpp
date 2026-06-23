@@ -715,3 +715,202 @@ TEST_F(QA_GDB900, RecoveryOnInvalidWalDirReturnsError) {
     // If it returns success with 0 records scanned, that is also acceptable
     // (treating non-dir as empty WAL).
 }
+
+// =============================================================================
+// 15. Bootstrap-before-WAL durability (residual risk from GDB-900 scope
+// expansion). In production, bootstrap DML runs BEFORE the WAL writer is
+// opened. The bootstrap path calls storage.flush_all() to make the data
+// durable via page-level fsync rather than WAL. This test confirms that
+// flush_all()-only durability (no WAL records) survives a simulated crash:
+// recovery finds 0 WAL records to redo, but the data was already page-flushed
+// and is present in the heap directly (not via redo).
+//
+// RESIDUAL RISK: if flush_all() fails silently, bootstrap data is lost on crash.
+// This test verifies the flush → crash → data-present contract.
+// =============================================================================
+
+TEST_F(QA_GDB900, BootstrapBeforeWalDataSurvivesCrashViaPageFlush) {
+    // Simulate bootstrap path: open a heap WITHOUT a WAL writer (wal==nullptr).
+    // Use a separate DiskManager so we can close the file and reopen it cleanly.
+    std::vector<RID> bootstrap_rids;
+    fs::path bootstrap_path = data_dir_ / "bootstrap.db";
+
+    {
+        DiskManager local_dm;
+        auto fid = local_dm.create_file(bootstrap_path, false, true);
+        ASSERT_TRUE(fid.has_value()) << fid.error().message;
+        auto bpm = std::make_unique<BufferPoolManager>(local_dm, *fid, 64);
+        auto heap = std::make_unique<TableHeap>(
+            *bpm, local_dm, *fid, TableHeapOptions{.mvcc_headers = true});
+        // No attach_wal() call — mirrors bootstrap path before WAL is opened.
+
+        for (uint8_t i = 1; i <= 4; ++i) {
+            auto rid = heap->insert_tuple(make_payload(32, i));
+            ASSERT_TRUE(rid.has_value()) << rid.error().message;
+            bootstrap_rids.push_back(*rid);
+        }
+
+        // Flush pages to disk (what bootstrap does in main.cpp after demo data).
+        ASSERT_TRUE(bpm->flush_all().has_value());
+        heap.reset();
+        bpm.reset();
+        (void)local_dm.close_file(*fid);
+        // No WAL writer, no clean-shutdown marker — simulates crash after flush.
+    }
+
+    // Verify: re-open the bootstrap heap in a second DiskManager and confirm
+    // tuples are present in the page files (no WAL needed, flushed directly).
+    {
+        DiskManager local_dm2;
+        auto fid = local_dm2.open_file(bootstrap_path);
+        ASSERT_TRUE(fid.has_value()) << fid.error().message;
+        auto bpm = std::make_unique<BufferPoolManager>(local_dm2, *fid, 64);
+        for (const auto& rid : bootstrap_rids) {
+            auto page = bpm->fetch_page(rid.page_id);
+            ASSERT_TRUE(page.has_value()) << "page fetch failed for bootstrap RID";
+            auto raw = (*page)->get_tuple(rid.slot_id);
+            EXPECT_TRUE(raw.has_value() && !raw->empty())
+                << "bootstrap RID{" << rid.page_id << "," << rid.slot_id
+                << "} missing after page flush — flush_all() did not make data durable";
+            (void)bpm->unpin_page(rid.page_id, false);
+        }
+        bpm.reset();
+        (void)local_dm2.close_file(*fid);
+    }
+
+    // Recovery runs (no marker) but finds 0 WAL records — that is correct;
+    // data is already in page files from flush_all().
+    open_recovery_heap();
+    TableHeapRecoveryHandler handler;
+    handler.register_table(kTableId1, recovery_heap_.get());
+    WalRecovery wal_recovery(wal_dir_, handler);
+    auto result = wal_recovery.recover();
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->records_redone, 0u)
+        << "bootstrap-only data must not produce WAL records; records_redone should be 0";
+}
+
+// =============================================================================
+// 16. WAL writer RESUME semantics: WalWriter::open() on an existing segment
+// after a crash must NOT corrupt or truncate prior valid records. The writer
+// resumes from the end of the last valid record (scan_segment). A second
+// WalWriter opened on the same directory must be able to append new records
+// that are then recoverable, while the first session's records are also intact.
+//
+// RESIDUAL RISK: if scan_segment() fails to find the correct resume offset
+// after a partial/torn write, the new writer could overwrite valid records
+// from the previous session.
+// =============================================================================
+
+TEST_F(QA_GDB900, WalWriterResumeAfterCrashPreservesOldRecords) {
+    // Session 1: write one committed insert via the primary heap, crash.
+    {
+        open_primary();
+        auto rid = primary_heap_->insert_tuple(make_payload(32, 0xAA));
+        ASSERT_TRUE(rid.has_value()) << rid.error().message;
+        simulate_crash(); // flush WAL + pages, no marker
+    }
+
+    // Session 2: open a NEW heap backed by the SAME WAL directory.
+    // WalWriter::open() resumes from the end of the last valid record in
+    // the existing segment — it must not truncate prior records.
+    WalWriterOptions opts;
+    opts.enable_group_commit = false;
+    WalWriter resumed_writer(wal_dir_, opts);
+    ASSERT_TRUE(resumed_writer.open().has_value())
+        << "WalWriter::open() must succeed on existing segment after crash";
+
+    // Open a second heap file and attach the resumed writer to it.
+    auto fid2 = dm_.create_file(data_dir_ / "session2.db", false, true);
+    ASSERT_TRUE(fid2.has_value()) << fid2.error().message;
+    auto bpm2 = std::make_unique<BufferPoolManager>(dm_, *fid2, 64);
+    auto heap2 = std::make_unique<TableHeap>(
+        *bpm2, dm_, *fid2, TableHeapOptions{.mvcc_headers = true});
+    heap2->attach_wal(&resumed_writer, kTableId2); // different table_id
+
+    // Insert a tuple through the real heap so the WAL record is valid.
+    auto rid2 = heap2->insert_tuple(make_payload(32, 0xBB));
+    ASSERT_TRUE(rid2.has_value()) << rid2.error().message;
+
+    ASSERT_TRUE(resumed_writer.flush().has_value());
+    ASSERT_TRUE(resumed_writer.close().has_value());
+    heap2->attach_wal(nullptr, 0);
+    ASSERT_TRUE(bpm2->flush_all().has_value());
+    heap2.reset();
+    bpm2.reset();
+
+    // Recovery must find BOTH session 1's record AND session 2's record.
+    open_recovery_heap();
+    open_recovery_heap2();
+    TableHeapRecoveryHandler handler;
+    handler.register_table(kTableId1, recovery_heap_.get());
+    handler.register_table(kTableId2, recovery_heap2_.get());
+    WalRecovery wal_recovery(wal_dir_, handler);
+    auto result = wal_recovery.recover();
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    // Both session 1 and session 2 produced 1 INSERT each (both frozen_txn_id).
+    EXPECT_GE(result->records_redone, 2u)
+        << "resume write corrupted prior session's WAL records; "
+           "records_redone=" << result->records_redone
+        << " (expected >=2: one from session1, one from session2)";
+}
+
+// =============================================================================
+// 17. Late-DML detach contract: after set_wal_writer(nullptr), a heap that
+// previously had a WAL writer attached must stop producing WAL records. This
+// tests that the shutdown detach (main.cpp: storage.set_wal_writer(nullptr)
+// before wal_writer.close()) leaves the heap in a safe no-WAL state and that
+// subsequent inserts on that heap do NOT write to an already-closed writer.
+//
+// RESIDUAL RISK: if attach_wal(nullptr) is not thread-safe, a concurrent DML
+// operation could see a partially-updated wal_ pointer. This test exercises
+// the sequential detach-then-insert path to confirm no crash.
+// =============================================================================
+
+TEST_F(QA_GDB900, DetachWalWriterStopsWalProduction) {
+    RID pre_detach_rid;
+    RID post_detach_rid;
+
+    open_primary();
+
+    // Insert one row while WAL is attached.
+    auto r1 = primary_heap_->insert_tuple(make_payload(16, 0x11));
+    ASSERT_TRUE(r1.has_value()) << r1.error().message;
+    pre_detach_rid = *r1;
+
+    // Detach the WAL writer (mirrors shutdown path in main.cpp).
+    primary_heap_->attach_wal(nullptr, 0);
+
+    // Insert one row AFTER detach — must not crash, must not write WAL.
+    auto r2 = primary_heap_->insert_tuple(make_payload(16, 0x22));
+    ASSERT_TRUE(r2.has_value()) << r2.error().message;
+    post_detach_rid = *r2;
+
+    // Close WAL cleanly and flush pages.
+    ASSERT_TRUE(wal_->flush().has_value());
+    ASSERT_TRUE(wal_->close().has_value());
+    wal_.reset();
+    ASSERT_TRUE(primary_bpm_->flush_all().has_value());
+    // No marker — crash simulation.
+
+    // Run recovery.
+    open_recovery_heap();
+    TableHeapRecoveryHandler handler;
+    handler.register_table(kTableId1, recovery_heap_.get());
+    WalRecovery wal_recovery(wal_dir_, handler);
+    auto result = wal_recovery.recover();
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    // pre_detach_rid must be recovered (WAL record was produced).
+    auto pre_raw = raw_slot(*recovery_bpm_, pre_detach_rid);
+    EXPECT_FALSE(pre_raw.empty())
+        << "pre-detach insert must be recovered via WAL redo";
+
+    // post_detach_rid must NOT be in the recovery heap (no WAL record).
+    // The post-detach insert is in the primary heap's pages but not in WAL,
+    // so it is effectively "lost" in a crash — this is the expected contract.
+    auto post_raw = raw_slot(*recovery_bpm_, post_detach_rid);
+    EXPECT_TRUE(post_raw.empty())
+        << "post-detach insert must NOT appear in recovery heap (no WAL record was written)";
+}
