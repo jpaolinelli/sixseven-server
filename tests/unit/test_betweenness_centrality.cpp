@@ -265,8 +265,14 @@ TEST_F(BetweennessCentralityTest, CycleGraph) {
     EXPECT_EQ(scores.size(), 3u);
     verify_scores_non_negative(scores);
 
-    // In a directed 3-cycle, each node lies on exactly one shortest path
-    // from its predecessor to its successor. All scores equal.
+    // In the directed 3-cycle 1->2->3->1, ordered pairs with an intermediary
+    // are: (1,3) via 2, (2,1) via 3, (3,2) via 1. Each node is the sole
+    // intermediary on exactly one ordered pair, so unnormalized betweenness
+    // is 1.0 for each node (no halving; consistent with the directed
+    // DiamondGraph reference where nodes 2 and 3 each score 0.5).
+    EXPECT_NEAR(scores[1], 1.0, 1e-10);
+    EXPECT_NEAR(scores[2], 1.0, 1e-10);
+    EXPECT_NEAR(scores[3], 1.0, 1e-10);
     EXPECT_NEAR(scores[1], scores[2], 1e-10);
     EXPECT_NEAR(scores[2], scores[3], 1e-10);
 }
