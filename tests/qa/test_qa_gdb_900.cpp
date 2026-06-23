@@ -191,8 +191,8 @@ TEST_F(QA_GDB900, MarkerRemoveOnAbsentFileIsIdempotent) {
 
     // Removing a non-existent marker must succeed (no error).
     auto rm = marker.remove();
-    EXPECT_TRUE(rm.has_value())
-        << "remove() on absent marker returned error: " << (rm ? "" : rm.error().message);
+    EXPECT_TRUE(rm.has_value()) << "remove() on absent marker returned error: "
+                                << (rm ? "" : rm.error().message);
 }
 
 // =============================================================================
@@ -309,8 +309,7 @@ TEST_F(QA_GDB900, RecoveryIdempotentThreeRuns) {
     EXPECT_GT(first_redone, 0u);
     EXPECT_EQ(second_redone, first_redone)
         << "idempotency: second run must redo same count as first";
-    EXPECT_EQ(third_redone, first_redone)
-        << "idempotency: third run must redo same count as first";
+    EXPECT_EQ(third_redone, first_redone) << "idempotency: third run must redo same count as first";
 }
 
 // =============================================================================
@@ -434,9 +433,8 @@ TEST_F(QA_GDB900, MixedCommittedAndUncommittedInSameWal) {
         auto primary_raw = raw_slot(*primary_bpm_, rid);
         auto recovery_raw = raw_slot(*recovery_bpm_, rid);
         ASSERT_FALSE(primary_raw.empty()) << "primary committed slot empty";
-        EXPECT_EQ(recovery_raw, primary_raw)
-            << "committed RID{" << rid.page_id << "," << rid.slot_id
-            << "} missing or wrong after recovery";
+        EXPECT_EQ(recovery_raw, primary_raw) << "committed RID{" << rid.page_id << ","
+                                             << rid.slot_id << "} missing or wrong after recovery";
     }
 
     // Verify in-flight data is absent (rolled back).
@@ -484,7 +482,8 @@ TEST_F(QA_GDB900, CleanShutdownCycleSkipsRecoveryAndConsumesMarker) {
     }
 
     EXPECT_FALSE(recovery_ran) << "recovery must NOT run when clean-shutdown marker is present";
-    EXPECT_FALSE(startup_marker.exists()) << "marker must be consumed (deleted) after clean startup";
+    EXPECT_FALSE(startup_marker.exists())
+        << "marker must be consumed (deleted) after clean startup";
 
     // Recovery heap must still be empty (no redo ran).
     // The recovery heap has no data since we never ran WalRecovery.
@@ -570,8 +569,7 @@ TEST_F(QA_GDB900, ManyTablesAllRecoveredUnderCrash) {
         heaps[t]->attach_wal(wal_writer.get(), static_cast<uint32_t>(100 + t));
 
         for (int r = 0; r < kRowsPerTable; ++r) {
-            auto rid = heaps[t]->insert_tuple(
-                make_payload(16, static_cast<uint8_t>(t * 10 + r)));
+            auto rid = heaps[t]->insert_tuple(make_payload(16, static_cast<uint8_t>(t * 10 + r)));
             ASSERT_TRUE(rid.has_value()) << rid.error().message;
             all_rids[t].push_back(*rid);
         }
@@ -611,11 +609,9 @@ TEST_F(QA_GDB900, ManyTablesAllRecoveredUnderCrash) {
             auto rid = all_rids[t][r];
             auto primary_raw = raw_slot(*bpms[t], rid);
             auto recovery_raw = raw_slot(*rec_bpms[t], rid);
-            ASSERT_FALSE(primary_raw.empty())
-                << "table " << t << " primary slot empty";
-            EXPECT_EQ(recovery_raw, primary_raw)
-                << "table " << t << " RID{" << rid.page_id << "," << rid.slot_id
-                << "} mismatch after recovery";
+            ASSERT_FALSE(primary_raw.empty()) << "table " << t << " primary slot empty";
+            EXPECT_EQ(recovery_raw, primary_raw) << "table " << t << " RID{" << rid.page_id << ","
+                                                 << rid.slot_id << "} mismatch after recovery";
         }
     }
 }
@@ -640,8 +636,8 @@ TEST_F(QA_GDB900, RecordsUndoneCountMatchesActualUndoneTuples) {
         ASSERT_TRUE(wal_->append(begin_rec).has_value());
 
         for (int i = 0; i < kRowCount; ++i) {
-            auto rid = primary_heap_->insert_tuple(
-                make_payload(20, static_cast<uint8_t>(i + 1)), kInflightId);
+            auto rid = primary_heap_->insert_tuple(make_payload(20, static_cast<uint8_t>(i + 1)),
+                                                   kInflightId);
             ASSERT_TRUE(rid.has_value()) << rid.error().message;
             rids.push_back(*rid);
         }
@@ -664,9 +660,8 @@ TEST_F(QA_GDB900, RecordsUndoneCountMatchesActualUndoneTuples) {
 
     for (const auto& rid : rids) {
         auto raw = raw_slot(*recovery_bpm_, rid);
-        EXPECT_TRUE(raw.empty())
-            << "RID{" << rid.page_id << "," << rid.slot_id
-            << "} still visible — undo did not remove it";
+        EXPECT_TRUE(raw.empty()) << "RID{" << rid.page_id << "," << rid.slot_id
+                                 << "} still visible — undo did not remove it";
     }
 }
 
@@ -677,8 +672,7 @@ TEST_F(QA_GDB900, RecordsUndoneCountMatchesActualUndoneTuples) {
 TEST_F(QA_GDB900, MarkerPathReturnsExpectedLocation) {
     CleanShutdownMarker marker(data_dir_);
     auto expected = data_dir_ / "clean_shutdown";
-    EXPECT_EQ(marker.path(), expected)
-        << "marker path does not match <data_dir>/clean_shutdown";
+    EXPECT_EQ(marker.path(), expected) << "marker path does not match <data_dir>/clean_shutdown";
 }
 
 // =============================================================================
@@ -824,8 +818,8 @@ TEST_F(QA_GDB900, WalWriterResumeAfterCrashPreservesOldRecords) {
     auto fid2 = dm_.create_file(data_dir_ / "session2.db", false, true);
     ASSERT_TRUE(fid2.has_value()) << fid2.error().message;
     auto bpm2 = std::make_unique<BufferPoolManager>(dm_, *fid2, 64);
-    auto heap2 = std::make_unique<TableHeap>(
-        *bpm2, dm_, *fid2, TableHeapOptions{.mvcc_headers = true});
+    auto heap2 =
+        std::make_unique<TableHeap>(*bpm2, dm_, *fid2, TableHeapOptions{.mvcc_headers = true});
     heap2->attach_wal(&resumed_writer, kTableId2); // different table_id
 
     // Insert a tuple through the real heap so the WAL record is valid.
@@ -852,8 +846,8 @@ TEST_F(QA_GDB900, WalWriterResumeAfterCrashPreservesOldRecords) {
     // Both session 1 and session 2 produced 1 INSERT each (both frozen_txn_id).
     EXPECT_GE(result->records_redone, 2u)
         << "resume write corrupted prior session's WAL records; "
-           "records_redone=" << result->records_redone
-        << " (expected >=2: one from session1, one from session2)";
+           "records_redone="
+        << result->records_redone << " (expected >=2: one from session1, one from session2)";
 }
 
 // =============================================================================
@@ -904,8 +898,7 @@ TEST_F(QA_GDB900, DetachWalWriterStopsWalProduction) {
 
     // pre_detach_rid must be recovered (WAL record was produced).
     auto pre_raw = raw_slot(*recovery_bpm_, pre_detach_rid);
-    EXPECT_FALSE(pre_raw.empty())
-        << "pre-detach insert must be recovered via WAL redo";
+    EXPECT_FALSE(pre_raw.empty()) << "pre-detach insert must be recovered via WAL redo";
 
     // post_detach_rid must NOT be in the recovery heap (no WAL record).
     // The post-detach insert is in the primary heap's pages but not in WAL,
