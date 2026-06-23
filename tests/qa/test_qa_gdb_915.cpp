@@ -204,3 +204,223 @@ TEST_F(GDB915Test, EmptyHeapScanReturnsNulloptNotError) {
     ASSERT_TRUE(r.has_value()) << "Empty-heap next() returned error: " << r.error().message;
     EXPECT_FALSE(r->has_value()) << "Empty-heap next() should return nullopt";
 }
+
+// =============================================================================
+// Adversarial: After an error, the exhausted_ flag is set and repeated calls
+// to next() must NOT return rows (must stay exhausted or error).
+// =============================================================================
+
+TEST_F(GDB915Test, NextAfterErrorStaysExhausted) {
+    constexpr uint32_t kPoolSize = 2;
+    bpm_ = std::make_unique<BufferPoolManager>(dm_, file_id_, kPoolSize);
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    // Fill two pages.
+    auto r1 = heap.insert_tuple(make_blob(8160, 0x11));
+    ASSERT_TRUE(r1.has_value()) << r1.error().message;
+    auto r2 = heap.insert_tuple(make_blob(8160, 0x22));
+    ASSERT_TRUE(r2.has_value()) << r2.error().message;
+    (void)bpm_->flush_all();
+
+    // Pin both frames to exhaust the pool.
+    auto p0 = bpm_->fetch_page(r1->page_id);
+    ASSERT_TRUE(p0.has_value());
+    auto p1 = bpm_->fetch_page(r2->page_id);
+    ASSERT_TRUE(p1.has_value());
+
+    auto it = heap.begin();
+    ASSERT_TRUE(it.has_value());
+
+    // Drive to first error or exhaustion.
+    bool saw_error = false;
+    for (int i = 0; i < 10; ++i) {
+        auto nr = it->next();
+        if (!nr) {
+            saw_error = true;
+            break;
+        }
+        if (!nr->has_value()) {
+            break;
+        }
+    }
+
+    if (saw_error) {
+        // After an error the iterator must be exhausted -- further calls must
+        // NOT return rows (they may return errors or nullopt, but not data).
+        for (int i = 0; i < 3; ++i) {
+            auto nr2 = it->next();
+            if (nr2.has_value() && nr2->has_value()) {
+                ADD_FAILURE() << "next() returned a row after the iterator reported an error "
+                                 "(exhausted_ flag not set correctly)";
+                break;
+            }
+        }
+    }
+
+    (void)bpm_->unpin_page(r1->page_id, false);
+    (void)bpm_->unpin_page(r2->page_id, false);
+}
+
+// =============================================================================
+// Adversarial: Heap with all-deleted slots must return nullopt (normal
+// exhaustion), NOT an error. Deleted slots are logically absent but the page
+// is still readable -- this must not be confused with a fetch_page failure.
+// =============================================================================
+
+TEST_F(GDB915Test, HeapWithAllDeletedSlotsScanReturnsNullopt) {
+    bpm_ = std::make_unique<BufferPoolManager>(dm_, file_id_, 64);
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    // Insert and immediately delete several tuples.
+    std::vector<RID> rids;
+    for (int i = 0; i < 5; ++i) {
+        auto r = heap.insert_tuple(make_blob(100, static_cast<uint8_t>(i)));
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+        rids.push_back(*r);
+    }
+    for (const auto& rid : rids) {
+        auto d = heap.delete_tuple(rid);
+        ASSERT_TRUE(d.has_value()) << d.error().message;
+    }
+
+    auto it = heap.begin();
+    ASSERT_TRUE(it.has_value()) << it.error().message;
+
+    // Scan must succeed (no error) and return zero rows.
+    int count = 0;
+    for (;;) {
+        auto r = it->next();
+        ASSERT_TRUE(r.has_value())
+            << "Scan over all-deleted heap returned error: " << r.error().message;
+        if (!r->has_value()) {
+            break;
+        }
+        ++count;
+    }
+    EXPECT_EQ(count, 0) << "All-deleted heap must yield 0 rows, not skip pages with errors";
+}
+
+// =============================================================================
+// Adversarial: Single-row heap (one page) -- normal scan must return exactly
+// one row with no error. Boundary condition: single-page heap.
+// =============================================================================
+
+TEST_F(GDB915Test, SingleRowScanReturnsExactlyOneRow) {
+    bpm_ = std::make_unique<BufferPoolManager>(dm_, file_id_, 64);
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    auto ins = heap.insert_tuple(make_blob(50, 0xCC));
+    ASSERT_TRUE(ins.has_value()) << ins.error().message;
+
+    auto it = heap.begin();
+    ASSERT_TRUE(it.has_value());
+
+    auto r1 = it->next();
+    ASSERT_TRUE(r1.has_value()) << r1.error().message;
+    ASSERT_TRUE(r1->has_value()) << "Expected one row, got nullopt";
+
+    auto r2 = it->next();
+    ASSERT_TRUE(r2.has_value()) << r2.error().message;
+    EXPECT_FALSE(r2->has_value()) << "Expected nullopt after last row";
+}
+
+// =============================================================================
+// Adversarial: Page-boundary crossing -- rows that straddle a page boundary
+// must all be returned. Insert enough rows to fill multiple pages, then verify
+// EXACT count matches insert count (no off-by-one at page transitions).
+// =============================================================================
+
+TEST_F(GDB915Test, PageBoundaryCrossingYieldsExactCount) {
+    bpm_ = std::make_unique<BufferPoolManager>(dm_, file_id_, 64);
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    // 3000-byte tuples: ~2-3 per 8K page -- guarantees multiple page crossings.
+    constexpr int kRows = 15;
+    for (int i = 0; i < kRows; ++i) {
+        auto r = heap.insert_tuple(make_blob(3000, static_cast<uint8_t>(i & 0xFF)));
+        ASSERT_TRUE(r.has_value()) << "insert " << i << " failed: " << r.error().message;
+    }
+
+    auto it = heap.begin();
+    ASSERT_TRUE(it.has_value());
+
+    int count = 0;
+    for (;;) {
+        auto r = it->next();
+        ASSERT_TRUE(r.has_value()) << "Error at row " << count << ": " << r.error().message;
+        if (!r->has_value()) {
+            break;
+        }
+        ++count;
+    }
+    EXPECT_EQ(count, kRows) << "Page-boundary crossing must not drop or duplicate rows";
+}
+
+// =============================================================================
+// Adversarial: SeqScanOperator propagates the error from the iterator.
+// If the underlying TableIterator returns an error, SeqScanOperator::do_next()
+// must also return an error (not a truncated-success result).
+//
+// Uses pin exhaustion as the fault-injection seam (same as AC2).
+// =============================================================================
+
+#include "sixseven/executor/iterator.h"
+#include "sixseven/executor/seq_scan.h"
+#include "sixseven/table/tuple.h"
+
+TEST_F(GDB915Test, SeqScanOperatorPropagatesIteratorError) {
+    constexpr uint32_t kPoolSize = 2;
+    bpm_ = std::make_unique<BufferPoolManager>(dm_, file_id_, kPoolSize);
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    // Two full pages.
+    auto r1 = heap.insert_tuple(make_blob(8160, 0xDD));
+    ASSERT_TRUE(r1.has_value()) << r1.error().message;
+    auto r2 = heap.insert_tuple(make_blob(8160, 0xEE));
+    ASSERT_TRUE(r2.has_value()) << r2.error().message;
+    (void)bpm_->flush_all();
+
+    // Exhaust pool.
+    auto p0 = bpm_->fetch_page(r1->page_id);
+    ASSERT_TRUE(p0.has_value());
+    auto p1 = bpm_->fetch_page(r2->page_id);
+    ASSERT_TRUE(p1.has_value());
+
+    // Build a minimal schema (one INT32 column).
+    Schema storage_schema(std::vector<ColumnDef>{{"v", TypeId::INT32}});
+
+    OutputSchema out_schema(std::vector<OutputColumn>{{"", "v", TypeId::INT32}});
+
+    SeqScanOperator op(heap, storage_schema, std::move(out_schema), nullptr, nullptr);
+
+    auto open_res = op.open();
+    ASSERT_TRUE(open_res.has_value()) << open_res.error().message;
+
+    // Drive the operator: it must either return an error or return the rows that
+    // were already cached. It must NEVER return 0 rows without an error (the
+    // pre-GDB-915 silent-loss pattern).
+    bool got_error = false;
+    int row_count = 0;
+    for (int iter_guard = 0; iter_guard < 100; ++iter_guard) {
+        auto nr = op.next();
+        if (!nr) {
+            got_error = true;
+            break;
+        }
+        if (!nr->has_value()) {
+            break;
+        }
+        ++row_count;
+    }
+
+    op.close();
+
+    if (!got_error) {
+        EXPECT_GT(row_count, 0)
+            << "SeqScanOperator returned 0 rows with no error (GDB-915 regression): "
+               "fetch_page failure was silently swallowed";
+    }
+
+    (void)bpm_->unpin_page(r1->page_id, false);
+    (void)bpm_->unpin_page(r2->page_id, false);
+}
