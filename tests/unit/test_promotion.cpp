@@ -49,7 +49,7 @@ public:
         if (!open_.load()) {
             return make_error(StatusCode::NETWORK_ERROR, "closed");
         }
-        // Block until closed or timeout â€” simulates waiting for data.
+        // Block until closed or timeout -" simulates waiting for data.
         std::unique_lock lock(mu_);
         cv_.wait_for(lock, timeout, [this] { return !open_.load(); });
         if (!open_.load()) {
@@ -190,7 +190,7 @@ TEST_F(PromotionTest, CannotPromoteTwice) {
     auto result = pm.promote();
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
-    // Second promote should fail â€” server is now primary.
+    // Second promote should fail -" server is now primary.
     auto result2 = pm.promote();
     ASSERT_FALSE(result2.has_value());
     EXPECT_EQ(result2.error().code, StatusCode::REPLICATION_ERROR);
@@ -238,7 +238,7 @@ TEST_F(PromotionTest, TimelinePersistence) {
 TEST_F(PromotionTest, LoadTimelineDefaultsToOne) {
     PromotionManager pm(config_, nullptr, *wal_writer_, disk_mgr_, wal_dir_->path());
 
-    // No timeline file exists â€” should default to 1.
+    // No timeline file exists -" should default to 1.
     auto load_result = pm.load_timeline();
     ASSERT_TRUE(load_result.has_value()) << load_result.error().message;
     EXPECT_EQ(pm.timeline_id(), 1u);
@@ -314,12 +314,92 @@ TEST_F(PromotionTest, DeserializePromoteDataTooShort) {
 // =============================================================================
 
 TEST_F(PromotionTest, PromoteMaxLagBytesDefault) {
-    // Default is 0 (no lag limit) â€” promotion should succeed even with lag.
+    // Default is 0 (no lag limit) -" promotion should succeed even with lag.
     EXPECT_EQ(config_.replication_promote_max_lag_bytes, 0);
 
     PromotionManager pm(config_, nullptr, *wal_writer_, disk_mgr_, wal_dir_->path());
     auto result = pm.promote();
     ASSERT_TRUE(result.has_value()) << result.error().message;
+}
+
+// check_lag_guard: limit disabled (0) -> always ok
+TEST(LagGuardTest, LimitDisabledAlwaysOk) {
+    Config cfg = Config::load_defaults();
+    cfg.replication_promote_max_lag_bytes = 0;
+
+    ReplicationState state;
+    state.received_lsn = 10000;
+    state.applied_lsn = 0;
+
+    auto result = PromotionManager::check_lag_guard(cfg, state);
+    EXPECT_TRUE(result.has_value());
+}
+
+// check_lag_guard: lag strictly over limit -> REPLICATION_ERROR
+TEST(LagGuardTest, LagOverLimitReturnsError) {
+    Config cfg = Config::load_defaults();
+    cfg.replication_promote_max_lag_bytes = 100;
+
+    ReplicationState state;
+    state.received_lsn = 200;
+    state.applied_lsn = 99; // lag = 101, exceeds 100
+
+    auto result = PromotionManager::check_lag_guard(cfg, state);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::REPLICATION_ERROR);
+    EXPECT_NE(result.error().message.find("replay lag too high"), std::string::npos);
+}
+
+// check_lag_guard: lag exactly at limit -> ok (strict >)
+TEST(LagGuardTest, LagExactlyAtLimitIsOk) {
+    Config cfg = Config::load_defaults();
+    cfg.replication_promote_max_lag_bytes = 100;
+
+    ReplicationState state;
+    state.received_lsn = 200;
+    state.applied_lsn = 100; // lag = 100, not > 100
+
+    auto result = PromotionManager::check_lag_guard(cfg, state);
+    EXPECT_TRUE(result.has_value());
+}
+
+// check_lag_guard: lag one byte over limit -> error
+TEST(LagGuardTest, LagOneBytePastLimitReturnsError) {
+    Config cfg = Config::load_defaults();
+    cfg.replication_promote_max_lag_bytes = 100;
+
+    ReplicationState state;
+    state.received_lsn = 201;
+    state.applied_lsn = 100; // lag = 101
+
+    auto result = PromotionManager::check_lag_guard(cfg, state);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::REPLICATION_ERROR);
+}
+
+// check_lag_guard: zero or negative lag -> ok
+TEST(LagGuardTest, ZeroLagIsOk) {
+    Config cfg = Config::load_defaults();
+    cfg.replication_promote_max_lag_bytes = 100;
+
+    ReplicationState state;
+    state.received_lsn = 500;
+    state.applied_lsn = 500; // lag = 0
+
+    auto result = PromotionManager::check_lag_guard(cfg, state);
+    EXPECT_TRUE(result.has_value());
+}
+
+// check_lag_guard: invalid LSNs -> ok (guard skipped)
+TEST(LagGuardTest, InvalidLsnsAreOk) {
+    Config cfg = Config::load_defaults();
+    cfg.replication_promote_max_lag_bytes = 100;
+
+    ReplicationState state;
+    // received_lsn and applied_lsn default to invalid_lsn
+
+    auto result = PromotionManager::check_lag_guard(cfg, state);
+    EXPECT_TRUE(result.has_value());
 }
 
 // =============================================================================

@@ -76,6 +76,14 @@ public:
     /// Deserialize a timeline ID from a PROMOTE WAL record's data payload.
     [[nodiscard]] static Result<uint64_t> deserialize_promote_data(std::span<const uint8_t> data);
 
+    /// Check the replay lag guard rail.
+    /// Returns an error if config.replication_promote_max_lag_bytes > 0 and
+    /// (state.received_lsn - state.applied_lsn) > that limit.
+    /// Returns ok() in all other cases (limit disabled, lag within threshold, or
+    /// LSNs not yet valid).
+    [[nodiscard]] static Result<void> check_lag_guard(const Config& config,
+                                                      const ReplicationState& state);
+
 private:
     /// Persist the current timeline ID to the WAL directory.
     [[nodiscard]] Result<void> save_timeline() const;
