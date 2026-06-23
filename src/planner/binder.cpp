@@ -2436,7 +2436,7 @@ Result<BoundStatement> Binder::bind_create_index(const CreateIndexStmt& stmt) {
 
     // Check for duplicate index name (unless IF NOT EXISTS).
     if (!stmt.if_not_exists) {
-        auto existing = catalog_.get_index(stmt.name);
+        auto existing = catalog_.get_index(database_id_, stmt.name);
         if (existing) {
             return make_error(StatusCode::ALREADY_EXISTS, "index " + stmt.name + " already exists");
         }
@@ -2450,7 +2450,7 @@ Result<BoundStatement> Binder::bind_drop_index(const DropIndexStmt& stmt) {
     bound.stmt = &stmt;
 
     if (!stmt.if_exists) {
-        auto idx = catalog_.get_index(stmt.name);
+        auto idx = catalog_.get_index(database_id_, stmt.name);
         if (!idx) {
             return tl::unexpected(idx.error());
         }

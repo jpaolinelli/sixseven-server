@@ -131,7 +131,7 @@ TEST_F(GDB845Test, GDB845_InsertMaintainsBtreeIndexInMemory) {
     exec_ok("INSERT INTO t_btree VALUES (20, 'twenty')");
     exec_ok("INSERT INTO t_btree VALUES (30, 'thirty')");
 
-    auto idx = catalog_->get_index("idx_btree");
+    auto idx = catalog_->get_index(default_database_id, "idx_btree");
     ASSERT_TRUE(idx.has_value());
     auto it = index_manager_->btree_map()->find(idx->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -180,7 +180,7 @@ TEST_F(GDB845Test, GDB845_FlushPersistsPostInsertState) {
     bootstrap();
     build_index_manager();
 
-    auto idx = catalog_->get_index("idx_flush");
+    auto idx = catalog_->get_index(default_database_id, "idx_flush");
     ASSERT_TRUE(idx.has_value());
     auto it = index_manager_->btree_map()->find(idx->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -219,7 +219,7 @@ TEST_F(GDB845Test, GDB845_InsertMaintainsHashIndexInMemory) {
     exec_ok("INSERT INTO t_hash VALUES (200, 'y')");
     exec_ok("INSERT INTO t_hash VALUES (300, 'z')");
 
-    auto idx = catalog_->get_index("idx_hash");
+    auto idx = catalog_->get_index(default_database_id, "idx_hash");
     ASSERT_TRUE(idx.has_value());
     auto it = index_manager_->hash_map()->find(idx->index_id);
     ASSERT_NE(it, index_manager_->hash_map()->end());
@@ -255,7 +255,7 @@ TEST_F(GDB845Test, GDB845_FlushPersistsPostInsertHashState) {
     bootstrap();
     build_index_manager();
 
-    auto idx = catalog_->get_index("idx_hash_flush");
+    auto idx = catalog_->get_index(default_database_id, "idx_hash_flush");
     ASSERT_TRUE(idx.has_value());
     auto it = index_manager_->hash_map()->find(idx->index_id);
     ASSERT_NE(it, index_manager_->hash_map()->end());
@@ -313,7 +313,7 @@ TEST_F(GDB845Test, GDB845_Adv_InsertSelectInsertsRows) {
            "not executed (plan_insert() never handled stmt.select).";
 
     // If rows were inserted, the index must also be maintained.
-    auto idx = catalog_->get_index("idx_dst_adv");
+    auto idx = catalog_->get_index(default_database_id, "idx_dst_adv");
     ASSERT_TRUE(idx.has_value());
     auto it = index_manager_->btree_map()->find(idx->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -340,9 +340,9 @@ TEST_F(GDB845Test, GDB845_Adv_MultipleIndexesOnOneTable) {
     exec_ok("INSERT INTO multi_idx VALUES (2, 'bob', 200)");
     exec_ok("INSERT INTO multi_idx VALUES (3, 'carol', 300)");
 
-    auto idx_id = catalog_->get_index("idx_multi_id");
+    auto idx_id = catalog_->get_index(default_database_id, "idx_multi_id");
     ASSERT_TRUE(idx_id.has_value());
-    auto idx_score = catalog_->get_index("idx_multi_score");
+    auto idx_score = catalog_->get_index(default_database_id, "idx_multi_score");
     ASSERT_TRUE(idx_score.has_value());
 
     auto bt = index_manager_->btree_map()->find(idx_id->index_id);
@@ -374,13 +374,13 @@ TEST_F(GDB845Test, GDB845_Adv_MultipleIndexesOnOneTable) {
     bootstrap();
     build_index_manager();
 
-    auto idx_id2 = catalog_->get_index("idx_multi_id");
+    auto idx_id2 = catalog_->get_index(default_database_id, "idx_multi_id");
     ASSERT_TRUE(idx_id2.has_value());
     auto bt2 = index_manager_->btree_map()->find(idx_id2->index_id);
     ASSERT_NE(bt2, index_manager_->btree_map()->end());
     ASSERT_EQ(bt2->second->size(), 3u) << "BTree index must persist 3 rows after restart";
 
-    auto idx_score2 = catalog_->get_index("idx_multi_score");
+    auto idx_score2 = catalog_->get_index(default_database_id, "idx_multi_score");
     ASSERT_TRUE(idx_score2.has_value());
     auto ht2 = index_manager_->hash_map()->find(idx_score2->index_id);
     ASSERT_NE(ht2, index_manager_->hash_map()->end());
@@ -403,7 +403,7 @@ TEST_F(GDB845Test, GDB845_Adv_DuplicateKeysNonUniqueIndex) {
     // Second row with same key — non-unique index must accept both postings.
     exec_ok("INSERT INTO dup_tbl VALUES (42, 'second')");
 
-    auto idx = catalog_->get_index("idx_dup");
+    auto idx = catalog_->get_index(default_database_id, "idx_dup");
     ASSERT_TRUE(idx.has_value());
     auto it = index_manager_->btree_map()->find(idx->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -430,7 +430,7 @@ TEST_F(GDB845Test, GDB845_Adv_NullInIndexedColumn) {
     // Insert a normal row after the NULL row.
     exec_ok("INSERT INTO null_tbl VALUES (2, 'y')");
 
-    auto idx = catalog_->get_index("idx_null");
+    auto idx = catalog_->get_index(default_database_id, "idx_null");
     ASSERT_TRUE(idx.has_value());
     auto it = index_manager_->btree_map()->find(idx->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -472,7 +472,7 @@ TEST_F(GDB845Test, GDB845_Adv_LargeBatchInsertAllIndexed) {
         exec_ok(sql);
     }
 
-    auto idx = catalog_->get_index("idx_large");
+    auto idx = catalog_->get_index(default_database_id, "idx_large");
     ASSERT_TRUE(idx.has_value());
     auto it = index_manager_->btree_map()->find(idx->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -493,7 +493,7 @@ TEST_F(GDB845Test, GDB845_Adv_LargeBatchInsertAllIndexed) {
     bootstrap();
     build_index_manager();
 
-    auto idx2 = catalog_->get_index("idx_large");
+    auto idx2 = catalog_->get_index(default_database_id, "idx_large");
     ASSERT_TRUE(idx2.has_value());
     auto it2 = index_manager_->btree_map()->find(idx2->index_id);
     ASSERT_NE(it2, index_manager_->btree_map()->end());
@@ -521,7 +521,7 @@ TEST_F(GDB845Test, GDB845_Adv_CorruptFileRebuildFallback) {
     ASSERT_TRUE(flush.has_value()) << flush.error().message;
 
     // Locate and corrupt the on-disk index file.
-    auto idx = catalog_->get_index("idx_rebuild");
+    auto idx = catalog_->get_index(default_database_id, "idx_rebuild");
     ASSERT_TRUE(idx.has_value());
     // Index files: <data_dir>/<db_id>/indexes/index_<index_id>.db
     // The default database id is 1 (user database after system bootstrap).
@@ -550,7 +550,7 @@ TEST_F(GDB845Test, GDB845_Adv_CorruptFileRebuildFallback) {
         bootstrap();
         build_index_manager();
 
-        auto idx2 = catalog_->get_index("idx_rebuild");
+        auto idx2 = catalog_->get_index(default_database_id, "idx_rebuild");
         ASSERT_TRUE(idx2.has_value());
         auto it2 = index_manager_->btree_map()->find(idx2->index_id);
         ASSERT_NE(it2, index_manager_->btree_map()->end());
@@ -601,7 +601,7 @@ TEST_F(GDB845Test, GDB1268_InsertSelectWithWhereFilter) {
         << "dst_filter must have exactly 3 rows after filtered INSERT...SELECT";
 
     // Index must reflect the 3 inserted rows.
-    auto idx = catalog_->get_index("idx_dst_filter");
+    auto idx = catalog_->get_index(default_database_id, "idx_dst_filter");
     ASSERT_TRUE(idx.has_value());
     auto it = index_manager_->btree_map()->find(idx->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -652,7 +652,7 @@ TEST_F(GDB845Test, GDB1268_InsertSelectEmptyResult) {
     ASSERT_EQ(cnt->rows[0][0].as_int64(), int64_t(0)) << "dst_empty must have 0 rows";
 
     // Index must also be empty.
-    auto idx = catalog_->get_index("idx_dst_empty");
+    auto idx = catalog_->get_index(default_database_id, "idx_dst_empty");
     ASSERT_TRUE(idx.has_value());
     auto it = index_manager_->btree_map()->find(idx->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -716,7 +716,7 @@ TEST_F(GDB845Test, GDB1268_InsertSelectMaintainsIndexPersistsAcrossRestart) {
     ASSERT_EQ(ins->affected_rows, int64_t(3));
 
     // Check btree index in-memory.
-    auto btree_idx = catalog_->get_index("idx_dst_id");
+    auto btree_idx = catalog_->get_index(default_database_id, "idx_dst_id");
     ASSERT_TRUE(btree_idx.has_value());
     auto bt = index_manager_->btree_map()->find(btree_idx->index_id);
     ASSERT_NE(bt, index_manager_->btree_map()->end());
@@ -729,7 +729,7 @@ TEST_F(GDB845Test, GDB1268_InsertSelectMaintainsIndexPersistsAcrossRestart) {
     }
 
     // Check hash index in-memory.
-    auto hash_idx = catalog_->get_index("idx_dst_id_hash");
+    auto hash_idx = catalog_->get_index(default_database_id, "idx_dst_id_hash");
     ASSERT_TRUE(hash_idx.has_value());
     auto ht = index_manager_->hash_map()->find(hash_idx->index_id);
     ASSERT_NE(ht, index_manager_->hash_map()->end());
@@ -748,14 +748,14 @@ TEST_F(GDB845Test, GDB1268_InsertSelectMaintainsIndexPersistsAcrossRestart) {
     bootstrap();
     build_index_manager();
 
-    auto btree_idx2 = catalog_->get_index("idx_dst_id");
+    auto btree_idx2 = catalog_->get_index(default_database_id, "idx_dst_id");
     ASSERT_TRUE(btree_idx2.has_value());
     auto bt2 = index_manager_->btree_map()->find(btree_idx2->index_id);
     ASSERT_NE(bt2, index_manager_->btree_map()->end());
     ASSERT_EQ(bt2->second->size(), 3u)
         << "BTree index must have 3 entries after flush+restart (INSERT...SELECT path)";
 
-    auto hash_idx2 = catalog_->get_index("idx_dst_id_hash");
+    auto hash_idx2 = catalog_->get_index(default_database_id, "idx_dst_id_hash");
     ASSERT_TRUE(hash_idx2.has_value());
     auto ht2 = index_manager_->hash_map()->find(hash_idx2->index_id);
     ASSERT_NE(ht2, index_manager_->hash_map()->end());
@@ -785,14 +785,14 @@ TEST_F(GDB845Test, GDB1268_InsertSelectFromIndexedSourceTable) {
     ASSERT_EQ(ins->affected_rows, int64_t(3));
 
     // Source index must still have exactly 3 entries (unaffected).
-    auto src_idx = catalog_->get_index("idx_src");
+    auto src_idx = catalog_->get_index(default_database_id, "idx_src");
     ASSERT_TRUE(src_idx.has_value());
     auto src_bt = index_manager_->btree_map()->find(src_idx->index_id);
     ASSERT_NE(src_bt, index_manager_->btree_map()->end());
     ASSERT_EQ(src_bt->second->size(), 3u) << "Source index must be unaffected by INSERT...SELECT";
 
     // Destination index must have 3 entries.
-    auto dst_idx = catalog_->get_index("idx_dst_from_indexed");
+    auto dst_idx = catalog_->get_index(default_database_id, "idx_dst_from_indexed");
     ASSERT_TRUE(dst_idx.has_value());
     auto dst_bt = index_manager_->btree_map()->find(dst_idx->index_id);
     ASSERT_NE(dst_bt, index_manager_->btree_map()->end());
@@ -821,7 +821,7 @@ TEST_F(GDB845Test, GDB1268_InsertSelectDuplicateKeysNonUniqueTargetIndex) {
     ASSERT_EQ(ins->affected_rows, int64_t(3));
 
     // Non-unique BTree must hold 3 entries: 2 for key=7, 1 for key=8.
-    auto idx = catalog_->get_index("idx_dst_dup");
+    auto idx = catalog_->get_index(default_database_id, "idx_dst_dup");
     ASSERT_TRUE(idx.has_value());
     auto it = index_manager_->btree_map()->find(idx->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -883,7 +883,7 @@ TEST_F(GDB845Test, GDB1268_InsertSelectNullValueInIndexedColumn) {
     ASSERT_EQ(ins->affected_rows, int64_t(3)) << "All 3 rows must be inserted including NULL row";
 
     // Non-NULL keys must be findable.
-    auto idx = catalog_->get_index("idx_dst_null_sel");
+    auto idx = catalog_->get_index(default_database_id, "idx_dst_null_sel");
     ASSERT_TRUE(idx.has_value());
     auto it = index_manager_->btree_map()->find(idx->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -929,7 +929,7 @@ TEST_F(GDB845Test, GDB1268_InsertSelectLargeBatch1000Rows) {
         << "INSERT...SELECT must insert all " << total << " rows, got " << ins->affected_rows;
 
     // Index must have exactly 1000 entries.
-    auto idx = catalog_->get_index("idx_dst_large_sel");
+    auto idx = catalog_->get_index(default_database_id, "idx_dst_large_sel");
     ASSERT_TRUE(idx.has_value());
     auto it = index_manager_->btree_map()->find(idx->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -950,7 +950,7 @@ TEST_F(GDB845Test, GDB1268_InsertSelectLargeBatch1000Rows) {
     bootstrap();
     build_index_manager();
 
-    auto idx2 = catalog_->get_index("idx_dst_large_sel");
+    auto idx2 = catalog_->get_index(default_database_id, "idx_dst_large_sel");
     ASSERT_TRUE(idx2.has_value());
     auto it2 = index_manager_->btree_map()->find(idx2->index_id);
     ASSERT_NE(it2, index_manager_->btree_map()->end());
@@ -979,7 +979,7 @@ TEST_F(GDB845Test, GDB845_KnownGap_UpdateLeavesIndexStale) {
     // the gap — we do NOT ASSERT_EQ here so the test never blocks a merge.
     exec_ok("UPDATE upd_gap_tbl SET id = 99 WHERE id = 2");
 
-    auto idx = catalog_->get_index("idx_upd_gap");
+    auto idx = catalog_->get_index(default_database_id, "idx_upd_gap");
     ASSERT_TRUE(idx.has_value());
     auto it = index_manager_->btree_map()->find(idx->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());

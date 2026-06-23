@@ -1485,32 +1485,10 @@ Result<void> IndexManager::reindex(const std::string& name, database_id_t db_id)
     // Wait for any in-progress async loading to finish before rebuilding.
     wait_for_load_complete();
 
-    // Try to find by index name first.
-    // get_index() is globally ambiguous when multiple databases have
-    // the same index name, so verify the result belongs to the caller's database.
-    auto idx = catalog_.get_index(name);
+    // Try to find by index name first, scoped to the caller's database.
+    auto idx = catalog_.get_index(db_id, name);
     if (idx) {
-        auto idx_db_id = find_database_for_table(idx->table_id);
-        // If the found index belongs to a different database, check if the
-        // caller's database also has an index with this name on a local table.
-        if (idx_db_id != db_id) {
-            // Search for the index by name within the caller's database.
-            bool found_local = false;
-            auto tables = catalog_.list_tables(db_id);
-            for (const auto& tbl : tables) {
-                auto indexes = catalog_.list_indexes(tbl.table_id);
-                for (const auto& local_idx : indexes) {
-                    if (local_idx.name == name) {
-                        idx = local_idx;
-                        idx_db_id = db_id;
-                        found_local = true;
-                        break;
-                    }
-                }
-                if (found_local)
-                    break;
-            }
-        }
+        auto idx_db_id = db_id;
         SIXSEVEN_LOG_INFO("reindex '{}': found index (type={}, table_id={}, db_id={})",
                           name,
                           idx->index_type,
@@ -1567,9 +1545,7 @@ Result<void> IndexManager::reindex(const std::string& name, database_id_t db_id)
                           index_def.index_type,
                           index_def.table_id);
 
-        // Rebuild directly using the IndexDef from list_indexes rather than
-        // recursing through get_index(name), which is globally ambiguous when
-        // multiple databases have indexes with the same name.
+        // Rebuild directly using the IndexDef from list_indexes.
         Result<void> r;
         if (index_def.index_type == "hnsw") {
             {

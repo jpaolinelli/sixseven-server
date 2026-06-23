@@ -105,12 +105,14 @@ public:
     /// Fails with NOT_FOUND if the referenced table does not exist.
     [[nodiscard]] Result<index_id_t> create_index(IndexDef def);
 
-    /// Drop an index by name.
-    /// Fails with NOT_FOUND if the index does not exist.
-    [[nodiscard]] Result<void> drop_index(const std::string& name);
+    /// Drop an index by name within the given database.
+    /// Fails with NOT_FOUND if the index does not exist in that database.
+    [[nodiscard]] Result<void> drop_index(database_id_t database_id, const std::string& name);
 
-    /// Retrieve an index definition by name.
-    [[nodiscard]] Result<IndexDef> get_index(const std::string& name) const;
+    /// Retrieve an index definition by name within the given database.
+    /// Fails with NOT_FOUND if the index does not exist in that database.
+    [[nodiscard]] Result<IndexDef> get_index(database_id_t database_id,
+                                             const std::string& name) const;
 
     /// List all indexes for a given table.
     [[nodiscard]] std::vector<IndexDef> list_indexes(table_id_t table_id) const;

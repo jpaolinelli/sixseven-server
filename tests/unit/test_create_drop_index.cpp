@@ -70,7 +70,7 @@ TEST_F(CreateDropIndexTest, CreateIndexBasic) {
     EXPECT_EQ(qr.message, "CREATE INDEX");
 
     // Verify the index exists in the catalog.
-    auto idx = catalog_.get_index("idx_email");
+    auto idx = catalog_.get_index(default_database_id, "idx_email");
     ASSERT_TRUE(idx.has_value()) << idx.error().message;
     EXPECT_EQ(idx->name, "idx_email");
     EXPECT_EQ(idx->columns, "email");
@@ -82,7 +82,7 @@ TEST_F(CreateDropIndexTest, CreateUniqueIndex) {
     auto qr = exec_ok("CREATE UNIQUE INDEX idx_email_unique ON users(email)");
     EXPECT_EQ(qr.message, "CREATE INDEX");
 
-    auto idx = catalog_.get_index("idx_email_unique");
+    auto idx = catalog_.get_index(default_database_id, "idx_email_unique");
     ASSERT_TRUE(idx.has_value()) << idx.error().message;
     EXPECT_TRUE(idx->is_unique);
 }
@@ -91,7 +91,7 @@ TEST_F(CreateDropIndexTest, CreateIndexMultipleColumns) {
     auto qr = exec_ok("CREATE INDEX idx_multi ON users(email, age)");
     EXPECT_EQ(qr.message, "CREATE INDEX");
 
-    auto idx = catalog_.get_index("idx_multi");
+    auto idx = catalog_.get_index(default_database_id, "idx_multi");
     ASSERT_TRUE(idx.has_value()) << idx.error().message;
     EXPECT_EQ(idx->columns, "email,age");
 }
@@ -100,7 +100,7 @@ TEST_F(CreateDropIndexTest, CreateIndexUsingMethod) {
     auto qr = exec_ok("CREATE INDEX idx_hash ON users(email) USING hash");
     EXPECT_EQ(qr.message, "CREATE INDEX");
 
-    auto idx = catalog_.get_index("idx_hash");
+    auto idx = catalog_.get_index(default_database_id, "idx_hash");
     ASSERT_TRUE(idx.has_value()) << idx.error().message;
     EXPECT_EQ(idx->index_type, "hash");
 }
@@ -109,7 +109,7 @@ TEST_F(CreateDropIndexTest, CreateIndexIfNotExistsNew) {
     auto qr = exec_ok("CREATE INDEX IF NOT EXISTS idx_email ON users(email)");
     EXPECT_EQ(qr.message, "CREATE INDEX");
 
-    auto idx = catalog_.get_index("idx_email");
+    auto idx = catalog_.get_index(default_database_id, "idx_email");
     ASSERT_TRUE(idx.has_value()) << idx.error().message;
 }
 
@@ -137,7 +137,7 @@ TEST_F(CreateDropIndexTest, CreateIndexNonexistentColumn) {
 TEST_F(CreateDropIndexTest, CreateIndexDefaultMethodIsBtree) {
     exec_ok("CREATE INDEX idx_email ON users(email)");
 
-    auto idx = catalog_.get_index("idx_email");
+    auto idx = catalog_.get_index(default_database_id, "idx_email");
     ASSERT_TRUE(idx.has_value()) << idx.error().message;
     EXPECT_EQ(idx->index_type, "btree");
 }
@@ -153,7 +153,7 @@ TEST_F(CreateDropIndexTest, DropIndexBasic) {
     EXPECT_EQ(qr.message, "DROP INDEX");
 
     // Verify the index no longer exists.
-    auto idx = catalog_.get_index("idx_email");
+    auto idx = catalog_.get_index(default_database_id, "idx_email");
     EXPECT_FALSE(idx.has_value());
 }
 
@@ -175,7 +175,7 @@ TEST_F(CreateDropIndexTest, DropIndexThenRecreate) {
     auto qr = exec_ok("CREATE INDEX idx_email ON users(email)");
     EXPECT_EQ(qr.message, "CREATE INDEX");
 
-    auto idx = catalog_.get_index("idx_email");
+    auto idx = catalog_.get_index(default_database_id, "idx_email");
     ASSERT_TRUE(idx.has_value()) << idx.error().message;
 }
 
@@ -191,7 +191,7 @@ TEST_F(CreateDropIndexTest, CreateIndexOnTableWithData) {
     auto qr = exec_ok("CREATE INDEX idx_email ON users(email)");
     EXPECT_EQ(qr.message, "CREATE INDEX");
 
-    auto idx = catalog_.get_index("idx_email");
+    auto idx = catalog_.get_index(default_database_id, "idx_email");
     ASSERT_TRUE(idx.has_value()) << idx.error().message;
 }
 

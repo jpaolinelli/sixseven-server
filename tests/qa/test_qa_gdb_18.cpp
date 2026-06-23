@@ -11,6 +11,8 @@
 #include <thread>
 #include <vector>
 
+#include "test_catalog_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -36,6 +38,7 @@ static TableSchema make_test_schema(const std::string& name) {
 
 TEST(QA_Catalog, CreateTableEmptyName) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto result = catalog.create_table(default_database_id, make_test_schema(""));
     // Empty name should ideally be rejected, but if it succeeds,
     // verify it's retrievable.
@@ -56,6 +59,7 @@ TEST(QA_Catalog, CreateDatabaseEmptyName) {
 
 TEST(QA_Catalog, CreateIndexEmptyName) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto tid = catalog.create_table(default_database_id, make_test_schema("t"));
     ASSERT_TRUE(tid.has_value());
 
@@ -67,13 +71,14 @@ TEST(QA_Catalog, CreateIndexEmptyName) {
 
     auto result = catalog.create_index(def);
     if (result.has_value()) {
-        auto get = catalog.get_index("");
+        auto get = catalog.get_index(default_database_id, "");
         EXPECT_TRUE(get.has_value());
     }
 }
 
 TEST(QA_Catalog, CreateEdgeTypeEmptyName) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto t1 = catalog.create_table(default_database_id, make_test_schema("a"));
     auto t2 = catalog.create_table(default_database_id, make_test_schema("b"));
     ASSERT_TRUE(t1.has_value());
@@ -97,6 +102,7 @@ TEST(QA_Catalog, CreateEdgeTypeEmptyName) {
 
 TEST(QA_Catalog, CreateTableZeroColumns) {
     Catalog catalog;
+    init_test_catalog(catalog);
     TableSchema schema;
     schema.name = "empty_cols";
     // No columns at all.
@@ -116,6 +122,7 @@ TEST(QA_Catalog, CreateTableZeroColumns) {
 
 TEST(QA_Catalog, RegisterEmbeddingColumnZeroDimension) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto tid = catalog.create_table(default_database_id, make_test_schema("docs"));
     ASSERT_TRUE(tid.has_value());
 
@@ -137,6 +144,7 @@ TEST(QA_Catalog, RegisterEmbeddingColumnZeroDimension) {
 
 TEST(QA_Catalog, RegisterEmbeddingColumnNegativeDimension) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto tid = catalog.create_table(default_database_id, make_test_schema("docs"));
     ASSERT_TRUE(tid.has_value());
 
@@ -157,6 +165,7 @@ TEST(QA_Catalog, RegisterEmbeddingColumnNegativeDimension) {
 
 TEST(QA_Catalog, RegisterEmbeddingColumnInvalidColumnId) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto tid = catalog.create_table(default_database_id, make_test_schema("docs"));
     ASSERT_TRUE(tid.has_value());
 
@@ -182,6 +191,7 @@ TEST(QA_Catalog, RegisterEmbeddingColumnInvalidColumnId) {
 
 TEST(QA_Catalog, CreateIndexWithNonexistentColumns) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto tid = catalog.create_table(default_database_id, make_test_schema("users"));
     ASSERT_TRUE(tid.has_value());
 
@@ -194,7 +204,7 @@ TEST(QA_Catalog, CreateIndexWithNonexistentColumns) {
     auto result = catalog.create_index(def);
     // Documenting: no column validation.
     if (result.has_value()) {
-        auto get = catalog.get_index("idx_bogus");
+        auto get = catalog.get_index(default_database_id, "idx_bogus");
         ASSERT_TRUE(get.has_value());
         EXPECT_EQ(get->columns, "nonexistent_column");
     }
@@ -202,6 +212,7 @@ TEST(QA_Catalog, CreateIndexWithNonexistentColumns) {
 
 TEST(QA_Catalog, CreateIndexWithEmptyColumns) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto tid = catalog.create_table(default_database_id, make_test_schema("users"));
     ASSERT_TRUE(tid.has_value());
 
@@ -214,7 +225,7 @@ TEST(QA_Catalog, CreateIndexWithEmptyColumns) {
     auto result = catalog.create_index(def);
     // Documenting: no empty column validation.
     if (result.has_value()) {
-        auto get = catalog.get_index("idx_empty_cols");
+        auto get = catalog.get_index(default_database_id, "idx_empty_cols");
         ASSERT_TRUE(get.has_value());
         EXPECT_EQ(get->columns, "");
     }
@@ -226,6 +237,7 @@ TEST(QA_Catalog, CreateIndexWithEmptyColumns) {
 
 TEST(QA_Catalog, DropTableTwiceFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto tid = catalog.create_table(default_database_id, make_test_schema("temp"));
     ASSERT_TRUE(tid.has_value());
 
@@ -239,6 +251,7 @@ TEST(QA_Catalog, DropTableTwiceFails) {
 
 TEST(QA_Catalog, DropIndexTwiceFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto tid = catalog.create_table(default_database_id, make_test_schema("t"));
     ASSERT_TRUE(tid.has_value());
 
@@ -249,16 +262,17 @@ TEST(QA_Catalog, DropIndexTwiceFails) {
     def.columns = "id";
     ASSERT_TRUE(catalog.create_index(def).has_value());
 
-    auto drop1 = catalog.drop_index("idx");
+    auto drop1 = catalog.drop_index(default_database_id, "idx");
     ASSERT_TRUE(drop1.has_value());
 
-    auto drop2 = catalog.drop_index("idx");
+    auto drop2 = catalog.drop_index(default_database_id, "idx");
     ASSERT_FALSE(drop2.has_value());
     EXPECT_EQ(drop2.error().code, StatusCode::NOT_FOUND);
 }
 
 TEST(QA_Catalog, DropEdgeTypeTwiceFails) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto t1 = catalog.create_table(default_database_id, make_test_schema("a"));
     auto t2 = catalog.create_table(default_database_id, make_test_schema("b"));
     ASSERT_TRUE(t1.has_value());
@@ -295,10 +309,13 @@ TEST(QA_Catalog, DropDatabaseTwiceFails) {
 // Catalog: Global index naming across databases
 // =============================================================================
 
-TEST(QA_Catalog, IndexNameGlobalNotScopedPerDatabase) {
+// GDB-902: Index names are now scoped per-database (not global).
+// Same index name in different databases must succeed (create_index allows it),
+// and get_index must return the correct definition for each database.
+TEST(QA_Catalog, IndexNameScopedPerDatabase) {
     Catalog catalog;
-    auto db1 = catalog.create_database("db1");
-    auto db2 = catalog.create_database("db2");
+    auto db1 = catalog.create_database("db1_gdb18");
+    auto db2 = catalog.create_database("db2_gdb18");
     ASSERT_TRUE(db1.has_value());
     ASSERT_TRUE(db2.has_value());
 
@@ -315,15 +332,22 @@ TEST(QA_Catalog, IndexNameGlobalNotScopedPerDatabase) {
     auto r1 = catalog.create_index(def1);
     ASSERT_TRUE(r1.has_value());
 
-    // Same index name in different database should fail because names are global.
+    // Same index name in a DIFFERENT database must SUCCEED (GDB-902 fix).
     IndexDef def2;
     def2.table_id = *t2;
     def2.name = "idx_same_name";
     def2.index_type = "btree";
     def2.columns = "id";
     auto r2 = catalog.create_index(def2);
-    ASSERT_FALSE(r2.has_value());
-    EXPECT_EQ(r2.error().code, StatusCode::ALREADY_EXISTS);
+    ASSERT_TRUE(r2.has_value()) << "Same name in different db must succeed: " << r2.error().message;
+
+    // Each database's get_index must return its own table's index.
+    auto get1 = catalog.get_index(*db1, "idx_same_name");
+    auto get2 = catalog.get_index(*db2, "idx_same_name");
+    ASSERT_TRUE(get1.has_value());
+    ASSERT_TRUE(get2.has_value());
+    EXPECT_EQ(get1->table_id, *t1);
+    EXPECT_EQ(get2->table_id, *t2);
 }
 
 // =============================================================================
@@ -345,6 +369,7 @@ TEST(QA_Catalog, CreateEdgeTypeBothTablesNonexistent) {
 
 TEST(QA_Catalog, CreateEdgeTypeAfterSourceDropped) {
     Catalog catalog;
+    init_test_catalog(catalog);
     auto t1 = catalog.create_table(default_database_id, make_test_schema("src"));
     auto t2 = catalog.create_table(default_database_id, make_test_schema("tgt"));
     ASSERT_TRUE(t1.has_value());
@@ -391,6 +416,7 @@ TEST(QA_Catalog, ListEmbeddingColumnsNonexistentTable) {
 
 TEST(QA_Catalog, StressCreateManyTables) {
     Catalog catalog;
+    init_test_catalog(catalog);
     constexpr int N = 500;
 
     for (int i = 0; i < N; ++i) {
@@ -412,6 +438,7 @@ TEST(QA_Catalog, StressCreateManyTables) {
 
 TEST(QA_Catalog, StressCreateAndDropManyTables) {
     Catalog catalog;
+    init_test_catalog(catalog);
     constexpr int N = 200;
 
     // Create N tables.
@@ -437,6 +464,7 @@ TEST(QA_Catalog, StressCreateAndDropManyTables) {
 
 TEST(QA_Catalog, CreateTableVeryLongName) {
     Catalog catalog;
+    init_test_catalog(catalog);
     std::string long_name(10000, 'x');
 
     auto result = catalog.create_table(default_database_id, make_test_schema(long_name));
@@ -583,6 +611,7 @@ TEST(QA_Catalog, ListEmbeddingProvidersEmpty) {
 
 TEST(QA_Catalog, ConcurrentCreateTables) {
     Catalog catalog;
+    init_test_catalog(catalog);
     constexpr int threads_count = 8;
     constexpr int tables_per_thread = 50;
 
@@ -658,6 +687,7 @@ TEST(QA_Catalog, DropDatabaseCascadeRemovesEdgeTypesAndEmbeddings) {
 
 TEST(QA_Catalog, RecreateAfterDropPreservesIdMonotonicity) {
     Catalog catalog;
+    init_test_catalog(catalog);
 
     auto id1 = catalog.create_table(default_database_id, make_test_schema("t1"));
     ASSERT_TRUE(id1.has_value());

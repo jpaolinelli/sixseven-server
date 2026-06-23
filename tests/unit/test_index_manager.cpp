@@ -127,7 +127,7 @@ TEST_F(IndexManagerTest, RebuildBTreeIndexFromData) {
     ASSERT_FALSE(btree_map->empty());
 
     // Find the index.
-    auto idx_def = catalog_->get_index("idx_users_id");
+    auto idx_def = catalog_->get_index(default_database_id, "idx_users_id");
     ASSERT_TRUE(idx_def.has_value());
     auto it = btree_map->find(idx_def->index_id);
     ASSERT_NE(it, btree_map->end());
@@ -160,7 +160,7 @@ TEST_F(IndexManagerTest, RebuildHashIndexFromData) {
     auto* hash_map = index_manager_->hash_map();
     ASSERT_FALSE(hash_map->empty());
 
-    auto idx_def = catalog_->get_index("idx_products_id");
+    auto idx_def = catalog_->get_index(default_database_id, "idx_products_id");
     ASSERT_TRUE(idx_def.has_value());
     auto it = hash_map->find(idx_def->index_id);
     ASSERT_NE(it, hash_map->end());
@@ -192,11 +192,11 @@ TEST_F(IndexManagerTest, RebuildMultipleIndexesOnSameTable) {
     EXPECT_EQ(index_manager_->hash_map()->size(), 1);
 
     // Both should have 2 entries.
-    auto btree_idx = catalog_->get_index("idx_items_id");
+    auto btree_idx = catalog_->get_index(default_database_id, "idx_items_id");
     ASSERT_TRUE(btree_idx.has_value());
     EXPECT_EQ((*index_manager_->btree_map())[btree_idx->index_id]->size(), 2);
 
-    auto hash_idx = catalog_->get_index("idx_items_price");
+    auto hash_idx = catalog_->get_index(default_database_id, "idx_items_price");
     ASSERT_TRUE(hash_idx.has_value());
     EXPECT_EQ((*index_manager_->hash_map())[hash_idx->index_id]->size(), 2);
 }
@@ -213,7 +213,7 @@ TEST_F(IndexManagerTest, EmptyTableRebuild) {
 
     rebuild_indexes();
 
-    auto idx_def = catalog_->get_index("idx_empty");
+    auto idx_def = catalog_->get_index(default_database_id, "idx_empty");
     ASSERT_TRUE(idx_def.has_value());
     auto it = index_manager_->btree_map()->find(idx_def->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -246,7 +246,7 @@ TEST_F(IndexManagerTest, AutoincrementCombinedWithRebuild) {
     EXPECT_EQ(counter, 4); // max was 3, so next is 4.
 
     // Verify index was also rebuilt with existing data.
-    auto idx_def = catalog_->get_index("idx_auto_name");
+    auto idx_def = catalog_->get_index(default_database_id, "idx_auto_name");
     ASSERT_TRUE(idx_def.has_value());
     auto it = index_manager_->btree_map()->find(idx_def->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -272,7 +272,7 @@ TEST_F(IndexManagerTest, IndexUsedAfterRestart) {
     rebuild_indexes();
 
     // Verify the index is available after restart.
-    auto idx_def = catalog_->get_index("idx_users_id");
+    auto idx_def = catalog_->get_index(default_database_id, "idx_users_id");
     ASSERT_TRUE(idx_def.has_value());
     auto it = index_manager_->btree_map()->find(idx_def->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -300,7 +300,7 @@ TEST_F(IndexManagerTest, CreateAndPopulateAtRuntime) {
     exec_ok("CREATE INDEX idx_rt_id ON rt(id)");
 
     // The index should be populated with existing data.
-    auto idx_def = catalog_->get_index("idx_rt_id");
+    auto idx_def = catalog_->get_index(default_database_id, "idx_rt_id");
     ASSERT_TRUE(idx_def.has_value());
     auto it = index_manager_->btree_map()->find(idx_def->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -366,7 +366,7 @@ TEST_F(IndexManagerTest, PersistAndLoadFromDisk) {
     rebuild_indexes();
 
     // Verify the index was loaded from disk.
-    auto idx_def = catalog_->get_index("idx_persist_id");
+    auto idx_def = catalog_->get_index(default_database_id, "idx_persist_id");
     ASSERT_TRUE(idx_def.has_value());
     auto it = index_manager_->btree_map()->find(idx_def->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -397,7 +397,7 @@ TEST_F(IndexManagerTest, HashPersistAndLoadFromDisk) {
     run_bootstrap();
     rebuild_indexes();
 
-    auto idx_def = catalog_->get_index("idx_hash_persist");
+    auto idx_def = catalog_->get_index(default_database_id, "idx_hash_persist");
     ASSERT_TRUE(idx_def.has_value());
     auto it = index_manager_->hash_map()->find(idx_def->index_id);
     ASSERT_NE(it, index_manager_->hash_map()->end());
@@ -477,7 +477,7 @@ TEST_F(IndexManagerTest, FlushPersistsLatestState) {
     // Verify the in-memory index has 1 entry after CREATE INDEX (only row 1
     // was present at index-creation time).
     {
-        auto idx_pre = catalog_->get_index("idx_flush");
+        auto idx_pre = catalog_->get_index(default_database_id, "idx_flush");
         ASSERT_TRUE(idx_pre.has_value());
         auto it_pre = index_manager_->btree_map()->find(idx_pre->index_id);
         ASSERT_NE(it_pre, index_manager_->btree_map()->end());
@@ -492,7 +492,7 @@ TEST_F(IndexManagerTest, FlushPersistsLatestState) {
 
     // Verify the in-memory index now has 3 entries (INSERT maintained it).
     {
-        auto idx_live = catalog_->get_index("idx_flush");
+        auto idx_live = catalog_->get_index(default_database_id, "idx_flush");
         ASSERT_TRUE(idx_live.has_value());
         auto it_live = index_manager_->btree_map()->find(idx_live->index_id);
         ASSERT_NE(it_live, index_manager_->btree_map()->end());
@@ -522,7 +522,7 @@ TEST_F(IndexManagerTest, FlushPersistsLatestState) {
     run_bootstrap();
     rebuild_indexes();
 
-    auto idx_def = catalog_->get_index("idx_flush");
+    auto idx_def = catalog_->get_index(default_database_id, "idx_flush");
     ASSERT_TRUE(idx_def.has_value());
     auto it = index_manager_->btree_map()->find(idx_def->index_id);
     ASSERT_NE(it, index_manager_->btree_map()->end());
@@ -617,7 +617,7 @@ protected:
 
     /// Look up HNSW index_id by index name from the catalog.
     index_id_t hnsw_index_id(const std::string& index_name) {
-        auto idx = catalog_->get_index(index_name);
+        auto idx = catalog_->get_index(default_database_id, index_name);
         EXPECT_TRUE(idx.has_value()) << "index '" << index_name << "' not found";
         return idx ? idx->index_id : 0;
     }
@@ -821,24 +821,24 @@ TEST_F(HnswIndexManagerTest, BootstrapMigratesMissingHnswIndex) {
     auto index_name = EmbeddingColumnManager::make_index_name("docs", "body_vec");
 
     // Verify index exists in catalog.
-    auto idx = catalog_->get_index(index_name);
+    auto idx = catalog_->get_index(default_database_id, index_name);
     ASSERT_TRUE(idx.has_value());
 
     // Simulate an old deployment: remove the HNSW IndexDef from sys_indexes
     // but leave the embedding column metadata intact.
     auto remove_r = persistence_->remove_index(idx->index_id);
     ASSERT_TRUE(remove_r.has_value()) << remove_r.error().message;
-    (void)catalog_->drop_index(idx->name);
+    (void)catalog_->drop_index(default_database_id, idx->name);
 
     // Confirm it's gone.
-    EXPECT_FALSE(catalog_->get_index(index_name).has_value());
+    EXPECT_FALSE(catalog_->get_index(default_database_id, index_name).has_value());
 
     // Restart — bootstrap should detect the missing HNSW entry and recreate it.
     restart();
     run_bootstrap();
 
     // The migration should have created the IndexDef.
-    auto migrated_idx = catalog_->get_index(index_name);
+    auto migrated_idx = catalog_->get_index(default_database_id, index_name);
     ASSERT_TRUE(migrated_idx.has_value()) << "bootstrap did not migrate missing HNSW index";
     EXPECT_EQ(migrated_idx->index_type, "hnsw");
     EXPECT_EQ(migrated_idx->columns, "body_vec");
