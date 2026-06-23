@@ -68,7 +68,7 @@ protected:
 TEST_F(GDB808Test, GDB808_IndexRestoreHighestLast_NoCollision) {
     auto r1 = catalog_.restore_index(make_index_def("ix1", 5));
     auto r2 = catalog_.restore_index(make_index_def("ix2", 3));
-    auto r3 = catalog_.restore_index(make_index_def("ix3", 9));  // highest last
+    auto r3 = catalog_.restore_index(make_index_def("ix3", 9)); // highest last
     ASSERT_TRUE(r1.has_value());
     ASSERT_TRUE(r2.has_value());
     ASSERT_TRUE(r3.has_value());
@@ -81,7 +81,7 @@ TEST_F(GDB808Test, GDB808_IndexRestoreHighestLast_NoCollision) {
 
 // Restore highest id first — counter must still be max+1.
 TEST_F(GDB808Test, GDB808_IndexRestoreHighestFirst_NoCollision) {
-    auto r1 = catalog_.restore_index(make_index_def("ix1", 99));  // highest first
+    auto r1 = catalog_.restore_index(make_index_def("ix1", 99)); // highest first
     auto r2 = catalog_.restore_index(make_index_def("ix2", 1));
     auto r3 = catalog_.restore_index(make_index_def("ix3", 50));
     ASSERT_TRUE(r1.has_value());
@@ -124,8 +124,8 @@ TEST_F(GDB808Test, GDB808_IndexRestoreVeryLargeId_NoCollision) {
 
     auto nid = catalog_.create_index(make_index_def("ix_new"));
     ASSERT_TRUE(nid.has_value()) << nid.error().message;
-    EXPECT_GT(*nid, BIG)
-        << "Allocated index_id " << *nid << " would collide with restored id " << BIG;
+    EXPECT_GT(*nid, BIG) << "Allocated index_id " << *nid << " would collide with restored id "
+                         << BIG;
 }
 
 // Allocate one, then restore a higher id, then allocate again — both new ids
@@ -156,8 +156,8 @@ TEST_F(GDB808Test, GDB808_IndexManyAllocationsAfterRestore_NoCollision) {
         auto nd = make_index_def("ix_loop_" + std::to_string(i));
         auto nid = catalog_.create_index(nd);
         ASSERT_TRUE(nid.has_value()) << nid.error().message;
-        EXPECT_GT(*nid, RESTORED) << "Allocation " << i << " id " << *nid
-                                  << " <= restored id " << RESTORED;
+        EXPECT_GT(*nid, RESTORED) << "Allocation " << i << " id " << *nid << " <= restored id "
+                                  << RESTORED;
         for (auto prev : allocated) {
             EXPECT_NE(*nid, prev) << "Duplicate index_id " << *nid << " allocated";
         }
@@ -170,9 +170,12 @@ TEST_F(GDB808Test, GDB808_IndexManyAllocationsAfterRestore_NoCollision) {
 // ---------------------------------------------------------------------------
 
 TEST_F(GDB808Test, GDB808_EdgeRestoreHighestLast_NoCollision) {
-    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e1", 10)).has_value());
-    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e2", 4)).has_value());
-    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e3", 77)).has_value()); // highest last
+    ASSERT_TRUE(
+        catalog_.restore_edge_type(default_database_id, make_edge_def("e1", 10)).has_value());
+    ASSERT_TRUE(
+        catalog_.restore_edge_type(default_database_id, make_edge_def("e2", 4)).has_value());
+    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e3", 77))
+                    .has_value()); // highest last
 
     auto nid = catalog_.create_edge_type(default_database_id, make_edge_def("e_new"));
     ASSERT_TRUE(nid.has_value()) << nid.error().message;
@@ -180,9 +183,12 @@ TEST_F(GDB808Test, GDB808_EdgeRestoreHighestLast_NoCollision) {
 }
 
 TEST_F(GDB808Test, GDB808_EdgeRestoreHighestFirst_NoCollision) {
-    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e1", 200)).has_value()); // highest first
-    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e2", 7)).has_value());
-    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e3", 50)).has_value());
+    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e1", 200))
+                    .has_value()); // highest first
+    ASSERT_TRUE(
+        catalog_.restore_edge_type(default_database_id, make_edge_def("e2", 7)).has_value());
+    ASSERT_TRUE(
+        catalog_.restore_edge_type(default_database_id, make_edge_def("e3", 50)).has_value());
 
     auto nid = catalog_.create_edge_type(default_database_id, make_edge_def("e_new"));
     ASSERT_TRUE(nid.has_value()) << nid.error().message;
@@ -190,9 +196,12 @@ TEST_F(GDB808Test, GDB808_EdgeRestoreHighestFirst_NoCollision) {
 }
 
 TEST_F(GDB808Test, GDB808_EdgeRestoreWithGaps_NoCollision) {
-    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e1", 1)).has_value());
-    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e5", 5)).has_value());
-    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e9", 9)).has_value());
+    ASSERT_TRUE(
+        catalog_.restore_edge_type(default_database_id, make_edge_def("e1", 1)).has_value());
+    ASSERT_TRUE(
+        catalog_.restore_edge_type(default_database_id, make_edge_def("e5", 5)).has_value());
+    ASSERT_TRUE(
+        catalog_.restore_edge_type(default_database_id, make_edge_def("e9", 9)).has_value());
 
     auto nid = catalog_.create_edge_type(default_database_id, make_edge_def("e_new"));
     ASSERT_TRUE(nid.has_value()) << nid.error().message;
@@ -210,7 +219,8 @@ TEST_F(GDB808Test, GDB808_EdgeRestoreZeroItems_AllocatesFromBase) {
 
 TEST_F(GDB808Test, GDB808_EdgeRestoreVeryLargeId_NoCollision) {
     constexpr edge_id_t BIG = 2'000'000;
-    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e_big", BIG)).has_value());
+    ASSERT_TRUE(
+        catalog_.restore_edge_type(default_database_id, make_edge_def("e_big", BIG)).has_value());
 
     auto nid = catalog_.create_edge_type(default_database_id, make_edge_def("e_new"));
     ASSERT_TRUE(nid.has_value()) << nid.error().message;
@@ -222,7 +232,9 @@ TEST_F(GDB808Test, GDB808_EdgeAllocateRestoreAllocate_NoCollision) {
     ASSERT_TRUE(id1.has_value());
 
     constexpr edge_id_t RESTORED = 999;
-    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e_restored", RESTORED)).has_value());
+    ASSERT_TRUE(
+        catalog_.restore_edge_type(default_database_id, make_edge_def("e_restored", RESTORED))
+            .has_value());
 
     auto id2 = catalog_.create_edge_type(default_database_id, make_edge_def("e_second"));
     ASSERT_TRUE(id2.has_value()) << id2.error().message;
@@ -234,7 +246,8 @@ TEST_F(GDB808Test, GDB808_EdgeAllocateRestoreAllocate_NoCollision) {
 
 TEST_F(GDB808Test, GDB808_EdgeManyAllocationsAfterRestore_NoCollision) {
     constexpr edge_id_t RESTORED = 88;
-    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e_base", RESTORED)).has_value());
+    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e_base", RESTORED))
+                    .has_value());
 
     std::vector<edge_id_t> allocated;
     for (int i = 0; i < 20; ++i) {
@@ -257,7 +270,8 @@ TEST_F(GDB808Test, GDB808_EdgeManyAllocationsAfterRestore_NoCollision) {
 TEST_F(GDB808Test, GDB808_IndexAndEdgeCountersIndependent) {
     // Restore index at id 500, edge at id 3.
     ASSERT_TRUE(catalog_.restore_index(make_index_def("ix_high", 500)).has_value());
-    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e_low", 3)).has_value());
+    ASSERT_TRUE(
+        catalog_.restore_edge_type(default_database_id, make_edge_def("e_low", 3)).has_value());
 
     auto new_edge = catalog_.create_edge_type(default_database_id, make_edge_def("e_new"));
     ASSERT_TRUE(new_edge.has_value()) << new_edge.error().message;
@@ -315,7 +329,8 @@ TEST_F(GDB808Test, GDB808_DuplicateRestoreIndexRejected) {
 }
 
 TEST_F(GDB808Test, GDB808_DuplicateRestoreEdgeRejected) {
-    ASSERT_TRUE(catalog_.restore_edge_type(default_database_id, make_edge_def("e_dup", 13)).has_value());
+    ASSERT_TRUE(
+        catalog_.restore_edge_type(default_database_id, make_edge_def("e_dup", 13)).has_value());
     auto r2 = catalog_.restore_edge_type(default_database_id, make_edge_def("e_dup", 13));
     ASSERT_FALSE(r2.has_value()) << "Duplicate restore_edge_type should fail";
     EXPECT_EQ(r2.error().code, StatusCode::ALREADY_EXISTS);
@@ -331,7 +346,7 @@ TEST_F(GDB808Test, GDB808_DropThenRestoreHigherId_NoCollision) {
     // The new allocation after restore must be > 50.
     auto id1 = catalog_.create_index(make_index_def("ix_drop_me"));
     ASSERT_TRUE(id1.has_value());
-    ASSERT_TRUE(catalog_.drop_index("ix_drop_me").has_value());
+    ASSERT_TRUE(catalog_.drop_index(default_database_id, "ix_drop_me").has_value());
 
     ASSERT_TRUE(catalog_.restore_index(make_index_def("ix_restored", 50)).has_value());
 

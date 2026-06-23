@@ -210,8 +210,8 @@ TEST_F(QA_GDB259, DropTableCleansUpMultipleEmbeddings) {
 
     // All embedding columns and HNSW indexes must be gone.
     EXPECT_TRUE(catalog_.list_all_embedding_columns().empty());
-    EXPECT_FALSE(catalog_.get_index("hnsw_docs_t_vec").has_value());
-    EXPECT_FALSE(catalog_.get_index("hnsw_docs_b_vec").has_value());
+    EXPECT_FALSE(catalog_.get_index(default_database_id, "hnsw_docs_t_vec").has_value());
+    EXPECT_FALSE(catalog_.get_index(default_database_id, "hnsw_docs_b_vec").has_value());
 }
 
 // =============================================================================
@@ -354,7 +354,7 @@ TEST_F(QA_GDB259, HnswIndexProperties) {
     auto schema = catalog_.get_table(default_database_id, "props");
     ASSERT_TRUE(schema.has_value());
 
-    auto idx = catalog_.get_index("hnsw_props_vec");
+    auto idx = catalog_.get_index(default_database_id, "hnsw_props_vec");
     ASSERT_TRUE(idx.has_value()) << idx.error().message;
     EXPECT_EQ(idx->table_id, schema->table_id);
     EXPECT_EQ(idx->index_type, "hnsw");

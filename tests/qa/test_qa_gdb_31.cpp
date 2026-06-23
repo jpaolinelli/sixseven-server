@@ -936,14 +936,14 @@ TEST(QA_EmbeddingColumnE2E, RegisterThenDropTableCleanup) {
 
     // Verify registration.
     EXPECT_EQ(catalog.list_embedding_columns(*tid).size(), 1u);
-    EXPECT_TRUE(catalog.get_index("hnsw_cleanup_test_embedding").has_value());
+    EXPECT_TRUE(catalog.get_index(default_database_id, "hnsw_cleanup_test_embedding").has_value());
 
     // Drop table — should cascade cleanup.
     ASSERT_TRUE(catalog.drop_table(default_database_id, "cleanup_test").has_value());
 
     // After drop: embedding columns and indexes should be gone.
     EXPECT_TRUE(catalog.list_all_embedding_columns().empty());
-    EXPECT_FALSE(catalog.get_index("hnsw_cleanup_test_embedding").has_value());
+    EXPECT_FALSE(catalog.get_index(default_database_id, "hnsw_cleanup_test_embedding").has_value());
 }
 
 TEST(QA_EmbeddingColumnE2E, FullPipeline) {

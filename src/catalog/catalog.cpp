@@ -529,15 +529,15 @@ Result<index_id_t> Catalog::create_index(IndexDef def) {
     return ok(id);
 }
 
-Result<void> Catalog::drop_index(const std::string& name) {
+Result<void> Catalog::drop_index(database_id_t database_id, const std::string& name) {
     std::lock_guard lock(mu_);
 
-    // Search across all databases for the index name.
-    for (auto& [db_id, db_names] : index_name_to_id_) {
-        auto name_it = db_names.find(name);
-        if (name_it != db_names.end()) {
+    auto outer_it = index_name_to_id_.find(database_id);
+    if (outer_it != index_name_to_id_.end()) {
+        auto name_it = outer_it->second.find(name);
+        if (name_it != outer_it->second.end()) {
             indexes_by_id_.erase(name_it->second);
-            db_names.erase(name_it);
+            outer_it->second.erase(name_it);
             return ok();
         }
     }
@@ -545,13 +545,13 @@ Result<void> Catalog::drop_index(const std::string& name) {
     return make_error(StatusCode::NOT_FOUND, "index '" + name + "' not found");
 }
 
-Result<IndexDef> Catalog::get_index(const std::string& name) const {
+Result<IndexDef> Catalog::get_index(database_id_t database_id, const std::string& name) const {
     std::lock_guard lock(mu_);
 
-    // Search across all databases for the index name.
-    for (const auto& [db_id, db_names] : index_name_to_id_) {
-        auto name_it = db_names.find(name);
-        if (name_it != db_names.end()) {
+    auto outer_it = index_name_to_id_.find(database_id);
+    if (outer_it != index_name_to_id_.end()) {
+        auto name_it = outer_it->second.find(name);
+        if (name_it != outer_it->second.end()) {
             return ok(indexes_by_id_.at(name_it->second));
         }
     }

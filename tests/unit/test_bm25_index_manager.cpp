@@ -85,7 +85,7 @@ protected:
     }
 
     Bm25Index* find_bm25(const std::string& index_name) {
-        auto def = catalog_->get_index(index_name);
+        auto def = catalog_->get_index(default_database_id, index_name);
         EXPECT_TRUE(def.has_value());
         if (!def.has_value()) {
             return nullptr;

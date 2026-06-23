@@ -287,7 +287,7 @@ TEST(Catalog, GetIndex) {
     auto idx_id = catalog.create_index(def);
     ASSERT_TRUE(idx_id.has_value());
 
-    auto retrieved = catalog.get_index("idx_users_name");
+    auto retrieved = catalog.get_index(default_database_id, "idx_users_name");
     ASSERT_TRUE(retrieved.has_value()) << retrieved.error().message;
     EXPECT_EQ(retrieved->name, "idx_users_name");
     EXPECT_EQ(retrieved->table_id, *tid);
@@ -300,7 +300,7 @@ TEST(Catalog, GetIndex) {
 TEST(Catalog, GetIndexNotFound) {
     Catalog catalog;
     init_test_catalog(catalog);
-    auto result = catalog.get_index("nonexistent");
+    auto result = catalog.get_index(default_database_id, "nonexistent");
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
@@ -380,17 +380,17 @@ TEST(Catalog, DropIndex) {
     def.columns = "name";
     ASSERT_TRUE(catalog.create_index(def).has_value());
 
-    auto drop = catalog.drop_index("idx_users_name");
+    auto drop = catalog.drop_index(default_database_id, "idx_users_name");
     ASSERT_TRUE(drop.has_value()) << drop.error().message;
 
-    auto get = catalog.get_index("idx_users_name");
+    auto get = catalog.get_index(default_database_id, "idx_users_name");
     EXPECT_FALSE(get.has_value());
 }
 
 TEST(Catalog, DropIndexNotFound) {
     Catalog catalog;
     init_test_catalog(catalog);
-    auto drop = catalog.drop_index("nonexistent");
+    auto drop = catalog.drop_index(default_database_id, "nonexistent");
     ASSERT_FALSE(drop.has_value());
     EXPECT_EQ(drop.error().code, StatusCode::NOT_FOUND);
 }
@@ -466,8 +466,8 @@ TEST(Catalog, DropTableCascadesToIndexes) {
     ASSERT_TRUE(catalog.drop_table(default_database_id, "users").has_value());
 
     // Both indexes should be gone.
-    EXPECT_FALSE(catalog.get_index("idx_a").has_value());
-    EXPECT_FALSE(catalog.get_index("idx_b").has_value());
+    EXPECT_FALSE(catalog.get_index(default_database_id, "idx_a").has_value());
+    EXPECT_FALSE(catalog.get_index(default_database_id, "idx_b").has_value());
     EXPECT_TRUE(catalog.list_all_indexes().empty());
 }
 
@@ -1119,7 +1119,7 @@ TEST(Catalog, DropDatabaseCascadeRemovesIndexes) {
     auto drop = catalog.drop_database(*db_id, true);
     ASSERT_TRUE(drop.has_value()) << drop.error().message;
 
-    EXPECT_FALSE(catalog.get_index("idx_in_dropped_db").has_value());
+    EXPECT_FALSE(catalog.get_index(*db_id, "idx_in_dropped_db").has_value());
 }
 
 TEST(Catalog, DropDatabaseRemovesFromList) {

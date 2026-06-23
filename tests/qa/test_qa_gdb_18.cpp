@@ -67,7 +67,7 @@ TEST(QA_Catalog, CreateIndexEmptyName) {
 
     auto result = catalog.create_index(def);
     if (result.has_value()) {
-        auto get = catalog.get_index("");
+        auto get = catalog.get_index(default_database_id, "");
         EXPECT_TRUE(get.has_value());
     }
 }
@@ -194,7 +194,7 @@ TEST(QA_Catalog, CreateIndexWithNonexistentColumns) {
     auto result = catalog.create_index(def);
     // Documenting: no column validation.
     if (result.has_value()) {
-        auto get = catalog.get_index("idx_bogus");
+        auto get = catalog.get_index(default_database_id, "idx_bogus");
         ASSERT_TRUE(get.has_value());
         EXPECT_EQ(get->columns, "nonexistent_column");
     }
@@ -214,7 +214,7 @@ TEST(QA_Catalog, CreateIndexWithEmptyColumns) {
     auto result = catalog.create_index(def);
     // Documenting: no empty column validation.
     if (result.has_value()) {
-        auto get = catalog.get_index("idx_empty_cols");
+        auto get = catalog.get_index(default_database_id, "idx_empty_cols");
         ASSERT_TRUE(get.has_value());
         EXPECT_EQ(get->columns, "");
     }
@@ -249,10 +249,10 @@ TEST(QA_Catalog, DropIndexTwiceFails) {
     def.columns = "id";
     ASSERT_TRUE(catalog.create_index(def).has_value());
 
-    auto drop1 = catalog.drop_index("idx");
+    auto drop1 = catalog.drop_index(default_database_id, "idx");
     ASSERT_TRUE(drop1.has_value());
 
-    auto drop2 = catalog.drop_index("idx");
+    auto drop2 = catalog.drop_index(default_database_id, "idx");
     ASSERT_FALSE(drop2.has_value());
     EXPECT_EQ(drop2.error().code, StatusCode::NOT_FOUND);
 }

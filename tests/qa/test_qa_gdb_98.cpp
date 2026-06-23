@@ -408,7 +408,7 @@ TEST(QA_GDB98_Indexes, CreateAndRetrieve) {
     auto r = catalog.create_index(idef);
     ASSERT_TRUE(r.has_value());
 
-    auto idx = catalog.get_index("idx_users_id");
+    auto idx = catalog.get_index(default_database_id, "idx_users_id");
     ASSERT_TRUE(idx.has_value());
     EXPECT_EQ(idx->table_id, *tid);
     EXPECT_EQ(idx->index_type, "btree");
@@ -453,10 +453,10 @@ TEST(QA_GDB98_Indexes, CascadeDropWithTable) {
     auto dr = catalog.drop_table(default_database_id, "t");
     ASSERT_TRUE(dr.has_value());
 
-    auto i1 = catalog.get_index("idx1");
+    auto i1 = catalog.get_index(default_database_id, "idx1");
     ASSERT_FALSE(i1.has_value());
 
-    auto i2 = catalog.get_index("idx2");
+    auto i2 = catalog.get_index(default_database_id, "idx2");
     ASSERT_FALSE(i2.has_value());
 
     auto all = catalog.list_indexes(*tid);
@@ -465,7 +465,7 @@ TEST(QA_GDB98_Indexes, CascadeDropWithTable) {
 
 TEST(QA_GDB98_Indexes, DropNonexistentIndex) {
     Catalog catalog;
-    auto r = catalog.drop_index("nonexistent");
+    auto r = catalog.drop_index(default_database_id, "nonexistent");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::NOT_FOUND);
 }
@@ -584,7 +584,7 @@ TEST(QA_GDB98_Restore, RestoreIndexPreservesId) {
     auto r = catalog.restore_index(def);
     ASSERT_TRUE(r.has_value());
 
-    auto idx = catalog.get_index("restored_idx");
+    auto idx = catalog.get_index(default_database_id, "restored_idx");
     ASSERT_TRUE(idx.has_value());
     EXPECT_EQ(idx->index_id, 100);
 }

@@ -3544,7 +3544,7 @@ Result<QueryResult> QueryEngine::execute_create_index(const CreateIndexStmt& stm
     }
 
     // Check for duplicate index name.
-    auto existing = catalog_.get_index(stmt.name);
+    auto existing = catalog_.get_index(current_database_id_, stmt.name);
     if (existing) {
         if (stmt.if_not_exists) {
             QueryResult qr;
@@ -3620,7 +3620,7 @@ Result<QueryResult> QueryEngine::execute_create_index(const CreateIndexStmt& stm
 
     // Persist to system catalog tables.
     if (catalog_persistence_ != nullptr) {
-        auto created_def = catalog_.get_index(stmt.name);
+        auto created_def = catalog_.get_index(current_database_id_, stmt.name);
         if (created_def) {
             auto persist = catalog_persistence_->persist_index(*created_def);
             if (!persist) {
@@ -3632,7 +3632,7 @@ Result<QueryResult> QueryEngine::execute_create_index(const CreateIndexStmt& stm
 
     // Build and populate the in-memory index structure.
     if (index_manager_ != nullptr) {
-        auto created_def2 = catalog_.get_index(stmt.name);
+        auto created_def2 = catalog_.get_index(current_database_id_, stmt.name);
         if (created_def2) {
             auto populate = index_manager_->create_and_populate_index(*created_def2, *schema);
             if (!populate) {
@@ -3655,7 +3655,7 @@ Result<QueryResult> QueryEngine::execute_create_index(const CreateIndexStmt& stm
 
 Result<QueryResult> QueryEngine::execute_drop_index(const DropIndexStmt& stmt) {
     // Look up the index to get its ID for persistence removal.
-    auto idx = catalog_.get_index(stmt.name);
+    auto idx = catalog_.get_index(current_database_id_, stmt.name);
     if (!idx) {
         if (stmt.if_exists) {
             QueryResult qr;
@@ -3683,7 +3683,7 @@ Result<QueryResult> QueryEngine::execute_drop_index(const DropIndexStmt& stmt) {
     }
 
     // Remove from catalog.
-    auto drop_result = catalog_.drop_index(stmt.name);
+    auto drop_result = catalog_.drop_index(current_database_id_, stmt.name);
     if (!drop_result) {
         return make_error(drop_result.error().code, drop_result.error().message);
     }

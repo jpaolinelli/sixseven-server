@@ -104,11 +104,11 @@ TEST(EmbeddingColumn, RegisterMultipleEmbeddings) {
     EXPECT_EQ(indexes.size(), 2u);
 
     // Verify both HNSW indexes were created.
-    auto idx1 = catalog.get_index("hnsw_articles_title_vec");
+    auto idx1 = catalog.get_index(default_database_id, "hnsw_articles_title_vec");
     ASSERT_TRUE(idx1.has_value()) << idx1.error().message;
     EXPECT_EQ(idx1->index_type, "hnsw");
 
-    auto idx2 = catalog.get_index("hnsw_articles_body_vec");
+    auto idx2 = catalog.get_index(default_database_id, "hnsw_articles_body_vec");
     ASSERT_TRUE(idx2.has_value()) << idx2.error().message;
     EXPECT_EQ(idx2->index_type, "hnsw");
 }
@@ -471,12 +471,12 @@ TEST(EmbeddingColumn, DropTableCascadesToEmbeddingIndexes) {
     ASSERT_TRUE(mgr.register_table_embeddings(*tid, {def}).has_value());
 
     // Verify index exists.
-    ASSERT_TRUE(catalog.get_index("hnsw_docs_embedding").has_value());
+    ASSERT_TRUE(catalog.get_index(default_database_id, "hnsw_docs_embedding").has_value());
 
     // Drop the table.
     ASSERT_TRUE(catalog.drop_table(default_database_id, "docs").has_value());
 
     // Both embedding columns and HNSW index should be gone.
     EXPECT_TRUE(catalog.list_all_embedding_columns().empty());
-    EXPECT_FALSE(catalog.get_index("hnsw_docs_embedding").has_value());
+    EXPECT_FALSE(catalog.get_index(default_database_id, "hnsw_docs_embedding").has_value());
 }
