@@ -173,7 +173,8 @@ TEST(QA_Catalog, RegisterEmbeddingColumnInvalidColumnId) {
     def.provider = "test";
 
     auto result = catalog.register_embedding_column(def);
-    // Current behavior: out-of-range column_id IS accepted (no column_id validation against schema).
+    // Current behavior: out-of-range column_id IS accepted (no column_id validation against
+    // schema).
     ASSERT_TRUE(result.has_value()) << result.error().message;
     auto embs = catalog.list_embedding_columns(*tid);
     ASSERT_EQ(embs.size(), 1u);

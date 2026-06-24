@@ -67,7 +67,7 @@ TEST(QA_GDB925, NegativeDimEmbeddingColumnDownstreamSafe) {
     auto all = catalog.list_all_embedding_columns();
     EXPECT_FALSE(all.empty());
 
-    // Drop the table that owns the embedding column — must not crash.
+    // Drop the table that owns the embedding column - must not crash.
     // (system database protection doesn't apply; this is in the default db.)
     auto drop = catalog.drop_table(default_database_id, "docs");
     ASSERT_TRUE(drop.has_value()) << drop.error().message;
@@ -121,7 +121,7 @@ TEST(QA_GDB925, ZeroDimEmbeddingColumnDownstreamSafe) {
 }
 
 // ---------------------------------------------------------------------------
-// Downstream safety: index on nonexistent column — list and drop must be safe
+// Downstream safety: index on nonexistent column - list and drop must be safe
 // ---------------------------------------------------------------------------
 
 TEST(QA_GDB925, IndexOnNonexistentColumnDownstreamSafe) {
@@ -166,7 +166,7 @@ TEST(QA_GDB925, IndexOnNonexistentColumnDownstreamSafe) {
 }
 
 // ---------------------------------------------------------------------------
-// Downstream safety: empty-name objects — list/get/drop must not crash
+// Downstream safety: empty-name objects - list/get/drop must not crash
 // ---------------------------------------------------------------------------
 
 TEST(QA_GDB925, EmptyNameTableListGetDropSafe) {
@@ -201,7 +201,7 @@ TEST(QA_GDB925, EmptyNameTableListGetDropSafe) {
 }
 
 // ---------------------------------------------------------------------------
-// Downstream safety: empty-name index — list/get/drop must not crash
+// Downstream safety: empty-name index - list/get/drop must not crash
 // ---------------------------------------------------------------------------
 
 TEST(QA_GDB925, EmptyNameIndexListGetDropSafe) {
@@ -232,7 +232,7 @@ TEST(QA_GDB925, EmptyNameIndexListGetDropSafe) {
 }
 
 // ---------------------------------------------------------------------------
-// Downstream safety: out-of-range column_id embedding — catalog remains
+// Downstream safety: out-of-range column_id embedding - catalog remains
 // consistent after the bogus registration.
 // ---------------------------------------------------------------------------
 
@@ -263,7 +263,8 @@ TEST(QA_GDB925, OutOfRangeColumnIdEmbeddingCatalogConsistency) {
     def2.provider = "test";
 
     auto reg2 = catalog.register_embedding_column(def2);
-    ASSERT_TRUE(reg2.has_value()) << "Catalog corrupted by bogus column_id: " << reg2.error().message;
+    ASSERT_TRUE(reg2.has_value()) << "Catalog corrupted by bogus column_id: "
+                                  << reg2.error().message;
 
     auto embs = catalog.list_embedding_columns(*tid);
     ASSERT_EQ(embs.size(), 2u);
