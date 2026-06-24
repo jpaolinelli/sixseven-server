@@ -48,6 +48,9 @@ double Bm25Index::avg_doc_length() const {
 }
 
 Result<void> Bm25Index::add_document(RID rid, const std::string& text) {
+    if (fault_inject_) {
+        return make_error(StatusCode::INTERNAL_ERROR, "BM25 fault injection: add_document");
+    }
     std::unique_lock lk(latch_);
 
     // Replace an existing document so UPDATE is idempotent.
@@ -90,6 +93,9 @@ Result<void> Bm25Index::add_document(RID rid, const std::string& text) {
 }
 
 Result<void> Bm25Index::remove_document(RID rid) {
+    if (fault_inject_) {
+        return make_error(StatusCode::INTERNAL_ERROR, "BM25 fault injection: remove_document");
+    }
     std::unique_lock lk(latch_);
     auto it = doc_terms_.find(rid);
     if (it == doc_terms_.end()) {

@@ -162,8 +162,12 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
                 return make_error(rid.error().code, rid.error().message);
             }
             enqueue_embedding_jobs(*rid, values);
-            maintain_bm25(*rid, values);
-            maintain_secondary_indexes(*rid, values);
+            if (auto r = maintain_bm25(*rid, values); !r) {
+                return tl::unexpected(r.error());
+            }
+            if (auto r = maintain_secondary_indexes(*rid, values); !r) {
+                return tl::unexpected(r.error());
+            }
             ++count;
         }
     } else {
@@ -249,8 +253,12 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
         // Enqueue embedding jobs and maintain BM25 indexes for each inserted row.
         for (size_t i = 0; i < rids->size(); ++i) {
             enqueue_embedding_jobs((*rids)[i], all_values[i]);
-            maintain_bm25((*rids)[i], all_values[i]);
-            maintain_secondary_indexes((*rids)[i], all_values[i]);
+            if (auto r = maintain_bm25((*rids)[i], all_values[i]); !r) {
+                return tl::unexpected(r.error());
+            }
+            if (auto r = maintain_secondary_indexes((*rids)[i], all_values[i]); !r) {
+                return tl::unexpected(r.error());
+            }
         }
         count = static_cast<int64_t>(rids->size());
     }
@@ -351,7 +359,8 @@ void InsertOperator::enqueue_embedding_jobs(const RID& rid, const std::vector<Va
     }
 }
 
-void InsertOperator::maintain_secondary_indexes(const RID& rid, const std::vector<Value>& values) {
+Result<void> InsertOperator::maintain_secondary_indexes(const RID& rid,
+                                                        const std::vector<Value>& values) {
     for (const auto& target : btree_targets_) {
         if (target.index == nullptr) {
             continue;
@@ -365,10 +374,7 @@ void InsertOperator::maintain_secondary_indexes(const RID& rid, const std::vecto
         }
         auto r = target.index->insert(key, rid);
         if (!r) {
-            SIXSEVEN_LOG_WARN("btree index insert maintenance failed for rid=({},{}): {}",
-                              rid.page_id,
-                              rid.slot_id,
-                              r.error().message);
+            return tl::unexpected(r.error());
         }
     }
 
@@ -385,20 +391,19 @@ void InsertOperator::maintain_secondary_indexes(const RID& rid, const std::vecto
         }
         auto r = target.index->insert(key, rid);
         if (!r) {
-            SIXSEVEN_LOG_WARN("hash index insert maintenance failed for rid=({},{}): {}",
-                              rid.page_id,
-                              rid.slot_id,
-                              r.error().message);
+            return tl::unexpected(r.error());
         }
     }
+    return ok();
 }
 
-void InsertOperator::maintain_bm25(const RID& rid, const std::vector<Value>& values) {
+Result<void> InsertOperator::maintain_bm25(const RID& rid, const std::vector<Value>& values) {
     for (const auto& target : bm25_targets_) {
         if (target.index == nullptr || target.text_column_index >= values.size()) {
             continue;
         }
         const auto& v = values[target.text_column_index];
+        // NULL text means the row was never indexed for BM25 - benign skip.
         if (v.is_null()) {
             continue;
         }
@@ -408,12 +413,10 @@ void InsertOperator::maintain_bm25(const RID& rid, const std::vector<Value>& val
         }
         auto r = target.index->add_document(rid, **s);
         if (!r) {
-            SIXSEVEN_LOG_WARN("BM25 insert maintenance failed for rid=({},{}): {}",
-                              rid.page_id,
-                              rid.slot_id,
-                              r.error().message);
+            return tl::unexpected(r.error());
         }
     }
+    return ok();
 }
 
 } // namespace sixseven

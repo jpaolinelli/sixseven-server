@@ -138,12 +138,15 @@ private:
     void enqueue_embedding_jobs(const RID& rid, const std::vector<Value>& values);
 
     /// Synchronously index the row's text into any BM25 indexes on the table.
-    /// Best-effort: logs warnings on failure but does not propagate errors.
-    void maintain_bm25(const RID& rid, const std::vector<Value>& values);
+    /// Returns an error if any index maintenance fails; the caller must propagate
+    /// the error so the statement is aborted and the table mutation rolled back.
+    [[nodiscard]] Result<void> maintain_bm25(const RID& rid, const std::vector<Value>& values);
 
     /// Synchronously insert the row's key into all B-tree and hash indexes.
-    /// Best-effort: logs warnings on failure but does not propagate errors.
-    void maintain_secondary_indexes(const RID& rid, const std::vector<Value>& values);
+    /// Returns an error if any index maintenance fails; the caller must propagate
+    /// the error so the statement is aborted and the table mutation rolled back.
+    [[nodiscard]] Result<void> maintain_secondary_indexes(const RID& rid,
+                                                          const std::vector<Value>& values);
 
     TableHeap& heap_;
     const Schema& storage_schema_;

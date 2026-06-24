@@ -127,16 +127,15 @@ Result<std::optional<Tuple>> UpdateOperator::do_next() {
 
             // Maintain BM25 indexes: the row moved to a new RID, so drop the
             // old version's postings before indexing the new version.
+            // remove_document is a no-op for un-indexed RIDs (NULL text rows
+            // were never added), so no NOT_FOUND special-case is needed.
             for (const auto& target : bm25_targets_) {
                 if (target.index == nullptr) {
                     continue;
                 }
                 auto removed = target.index->remove_document(upd.old_rid);
                 if (!removed) {
-                    SIXSEVEN_LOG_WARN("BM25 update maintenance failed for rid=({},{}): {}",
-                                      upd.old_rid.page_id,
-                                      upd.old_rid.slot_id,
-                                      removed.error().message);
+                    return tl::unexpected(removed.error());
                 }
             }
         } else {
@@ -148,6 +147,8 @@ Result<std::optional<Tuple>> UpdateOperator::do_next() {
         }
 
         // Index the (possibly changed) text under the row's current RID.
+        // When new value is NULL, remove_document is a no-op for un-indexed
+        // RIDs (benign), so no NOT_FOUND special-case is needed.
         for (const auto& target : bm25_targets_) {
             if (target.index == nullptr || target.text_column_index >= upd.new_values.size()) {
                 continue;
@@ -156,10 +157,7 @@ Result<std::optional<Tuple>> UpdateOperator::do_next() {
             Result<void> r = v.is_null() ? target.index->remove_document(bm25_rid)
                                          : target.index->add_document(bm25_rid, v.as_string());
             if (!r) {
-                SIXSEVEN_LOG_WARN("BM25 update maintenance failed for rid=({},{}): {}",
-                                  bm25_rid.page_id,
-                                  bm25_rid.slot_id,
-                                  r.error().message);
+                return tl::unexpected(r.error());
             }
         }
         ++count;
