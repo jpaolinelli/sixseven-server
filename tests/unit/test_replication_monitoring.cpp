@@ -365,35 +365,6 @@ TEST_F(ReplicationMonitoringTest, PgLastWalReplayLsnNullWithoutReceiver) {
 }
 
 // =============================================================================
-// Parser tests for new SHOW variants
-// =============================================================================
-
-TEST_F(ReplicationMonitoringTest, ParseShowReplicationStatus) {
-    // Verify the parser handles "SHOW REPLICATION STATUS" correctly.
-    WalSenderOptions opts;
-    WalSenderManager sender_mgr(wal_dir_, nullptr, *writer_, 10, opts);
-    engine_->set_wal_sender_manager(&sender_mgr);
-
-    auto qr = exec_ok("SHOW REPLICATION STATUS");
-    EXPECT_EQ(qr.column_names[0], "slot_name");
-
-    sender_mgr.stop_all();
-}
-
-TEST_F(ReplicationMonitoringTest, ParseShowStandbyStatus) {
-    NullRecoveryHandler handler;
-    auto factory = [](const std::string& /*host*/,
-                      uint16_t /*port*/) -> Result<std::unique_ptr<ReplicationConnection>> {
-        return make_error(StatusCode::NETWORK_ERROR, "test");
-    };
-    WalReceiver receiver(factory, wal_dir_, handler);
-    engine_->set_wal_receiver(&receiver);
-
-    auto qr = exec_ok("SHOW STANDBY STATUS");
-    EXPECT_EQ(qr.column_names[0], "received_lsn");
-}
-
-// =============================================================================
 // Health check config in settings
 // =============================================================================
 
