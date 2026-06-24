@@ -1,26 +1,17 @@
-#include "sixseven/catalog/catalog.h"
-#include "sixseven/common/config.h"
-#include "sixseven/executor/catalog_persistence.h"
 #include "sixseven/executor/index_manager.h"
-#include "sixseven/executor/query_engine.h"
-#include "sixseven/executor/storage_manager.h"
-#include "sixseven/executor/system_bootstrap.h"
-#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
 #include <filesystem>
-#include <memory>
-#include <string>
 
-#include "test_catalog_helpers.h"
+#include "query_engine_fixture.h"
 
 using namespace sixseven;
 
 // Verifies the IndexManager integration for BM25: CREATE INDEX ... USING bm25
 // populates an in-memory inverted index, persists it to disk, and reloads it
 // across a simulated restart.
-class Bm25IndexManagerTest : public ::testing::Test {
+class Bm25IndexManagerTest : public QueryEngineFixture {
 protected:
     void SetUp() override {
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_bm25_index_manager";
@@ -34,56 +25,6 @@ protected:
         std::filesystem::remove_all(data_dir_);
     }
 
-    void make_stack() {
-        dm_ = std::make_unique<DiskManager>();
-        catalog_ = std::make_unique<Catalog>();
-        init_test_catalog(*catalog_);
-        storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
-        persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
-        engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
-        engine_->set_catalog_persistence(persistence_.get());
-        config_ = Config::load_defaults();
-    }
-
-    void reset_stack() {
-        index_manager_.reset();
-        engine_.reset();
-        persistence_.reset();
-        storage_.reset();
-        catalog_.reset();
-        dm_.reset();
-    }
-
-    void run_bootstrap() {
-        auto result = SystemBootstrap::bootstrap(
-            *engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
-        ASSERT_TRUE(result.has_value()) << result.error().message;
-    }
-
-    void rebuild_indexes() {
-        index_manager_ = std::make_unique<IndexManager>(*catalog_, *storage_);
-        index_manager_->set_catalog_persistence(persistence_.get());
-        auto r = index_manager_->rebuild_all_indexes();
-        ASSERT_TRUE(r.has_value()) << r.error().message;
-        engine_->set_index_manager(index_manager_.get());
-    }
-
-    void restart_and_reload() {
-        // Flush indexes, tear down, rebuild the stack, reload the persisted
-        // catalog (bootstrap), then reload indexes from disk.
-        ASSERT_TRUE(index_manager_->flush_all_indexes().has_value());
-        reset_stack();
-        make_stack();
-        run_bootstrap();
-        rebuild_indexes();
-    }
-
-    QueryResult exec_ok(const std::string& sql) {
-        auto result = engine_->execute(sql);
-        EXPECT_TRUE(result.has_value()) << result.error().message;
-        return result ? std::move(*result) : QueryResult{};
-    }
-
     Bm25Index* find_bm25(const std::string& index_name) {
         auto def = catalog_->get_index(default_database_id, index_name);
         EXPECT_TRUE(def.has_value());
@@ -94,15 +35,6 @@ protected:
         auto it = map->find(def->index_id);
         return it == map->end() ? nullptr : it->second;
     }
-
-    std::filesystem::path data_dir_;
-    std::unique_ptr<DiskManager> dm_;
-    std::unique_ptr<Catalog> catalog_;
-    std::unique_ptr<StorageManager> storage_;
-    std::unique_ptr<CatalogPersistence> persistence_;
-    std::unique_ptr<QueryEngine> engine_;
-    std::unique_ptr<IndexManager> index_manager_;
-    Config config_;
 };
 
 TEST_F(Bm25IndexManagerTest, CreateBm25IndexPopulatesFromTableData) {
