@@ -2786,6 +2786,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_update(const UpdateStmt& stmt,
     auto iter = std::make_unique<UpdateOperator>(
         *storage->heap, storage->storage_schema, std::move(scan), std::move(assignments), bound);
     iter->bm25_targets_ = collect_bm25_targets(*table_schema);
+    iter->target_table_id_ = table_schema->table_id;
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
 }
 
@@ -2815,6 +2816,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_delete(const DeleteStmt& stmt,
     auto iter = std::make_unique<DeleteOperator>(*storage->heap, std::move(scan));
     iter->bm25_targets_ = collect_bm25_targets(*table_schema);
     iter->hnsw_targets_ = collect_hnsw_targets(*table_schema);
+    iter->target_table_id_ = table_schema->table_id;
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
 }
 

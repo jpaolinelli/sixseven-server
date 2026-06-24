@@ -36,6 +36,17 @@ Result<std::optional<Tuple>> DeleteOperator::do_next() {
             return make_error(StatusCode::INTERNAL_ERROR, "DELETE: tuple has no RID");
         }
 
+        // Acquire IX table + X row lock before deleting this version (GDB-930).
+        // lock_row auto-acquires the IX intent lock on the table, so a single
+        // call suffices here (no separate lock_table call needed per row).
+        if (lock_mgr_ != nullptr && txn_id_ != frozen_txn_id) {
+            if (auto lr = lock_mgr_->lock_row(
+                    txn_id_, lock_table_id_, tuple.rid->page_id, tuple.rid->slot_id, LockMode::X);
+                !lr) {
+                return tl::unexpected(lr.error());
+            }
+        }
+
         // MVCC heaps (GDB-747): logical delete — stamp xmax and leave the
         // version on the page so an aborted transaction undeletes it.
         // Legacy headerless heaps keep the physical delete.

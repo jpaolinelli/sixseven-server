@@ -7,6 +7,7 @@
 #include "sixseven/planner/binder.h"
 #include "sixseven/table/table_heap.h"
 #include "sixseven/table/tuple.h"
+#include "sixseven/txn/lock_manager.h"
 
 #include <cstdint>
 #include <memory>
@@ -47,10 +48,20 @@ public:
     /// BM25 indexes on this table to maintain on update. Set by the planner.
     std::vector<Bm25MaintenanceTarget> bm25_targets_;
 
+    /// Table id of the target table. Set by the planner; used for locking (GDB-930).
+    table_id_t target_table_id_ = 0;
+
     /// Set the transaction id used for version stamping (GDB-747): the old
     /// version's xmax and the new version's xmin. Defaults to frozen_txn_id
     /// (always-committed) when no transaction context is provided.
     void set_txn_id(txn_id_t txn_id) { txn_id_ = txn_id; }
+
+    /// Set the lock manager and table id for locking during UPDATE (GDB-930).
+    /// When set, acquires IX on the table + X on each row before mutation.
+    void set_lock_manager(LockManager* lock_mgr, table_id_t table_id) {
+        lock_mgr_ = lock_mgr;
+        lock_table_id_ = table_id;
+    }
 
     /// The heap this operator writes to (for executor-side bookkeeping).
     [[nodiscard]] TableHeap& target_heap() { return heap_; }
@@ -71,6 +82,10 @@ private:
     bool executed_ = false;
     /// Transaction id stamped into old (xmax) / new (xmin) versions (GDB-747).
     txn_id_t txn_id_ = frozen_txn_id;
+    /// Lock manager for acquiring IX table + X row locks on UPDATE (GDB-930).
+    LockManager* lock_mgr_ = nullptr;
+    /// Table id used for locking (GDB-930).
+    table_id_t lock_table_id_ = 0;
 };
 
 } // namespace sixseven

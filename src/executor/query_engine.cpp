@@ -2593,13 +2593,16 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
         }
         if (insert_op != nullptr) {
             insert_op->set_txn_id(stmt_txn_id);
+            insert_op->set_lock_manager(&txn_mgr_.lock_manager(), insert_op->embedding_table_id_);
             dml_heap = &insert_op->target_heap();
             dml_row_delta_sign = 1;
         } else if (update_op != nullptr) {
             update_op->set_txn_id(stmt_txn_id);
+            update_op->set_lock_manager(&txn_mgr_.lock_manager(), update_op->target_table_id_);
             dml_heap = &update_op->target_heap();
         } else {
             delete_op->set_txn_id(stmt_txn_id);
+            delete_op->set_lock_manager(&txn_mgr_.lock_manager(), delete_op->target_table_id_);
             dml_heap = &delete_op->target_heap();
             dml_row_delta_sign = -1;
         }
