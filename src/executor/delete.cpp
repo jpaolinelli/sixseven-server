@@ -58,22 +58,22 @@ Result<std::optional<Tuple>> DeleteOperator::do_next() {
 
         // Maintain BM25 indexes: remove the deleted document's postings so it
         // no longer matches (and its RID can't be wrongly reused by a later
-        // insert).
+        // insert). remove_document is a no-op for un-indexed RIDs (NULL text
+        // rows were never added), so no NOT_FOUND special-case is needed.
         for (const auto& target : bm25_targets_) {
             if (target.index != nullptr) {
                 auto r = target.index->remove_document(*tuple.rid);
                 if (!r) {
-                    SIXSEVEN_LOG_WARN("BM25 delete maintenance failed for rid=({},{}): {}",
-                                      tuple.rid->page_id,
-                                      tuple.rid->slot_id,
-                                      r.error().message);
+                    return tl::unexpected(r.error());
                 }
             }
         }
 
         // Maintain HNSW indexes: tombstone the node for the deleted RID so the
         // vector is removed from the graph (not merely skipped post-hoc).
-        // Removal is best-effort: errors are logged but never abort the DELETE.
+        // The rid_map linear scan guards entry: remove is only called when the
+        // RID is found in rid_map, so NOT_FOUND from HnswIndex::remove indicates
+        // a real internal inconsistency and is propagated as an error.
         for (auto& target : hnsw_targets_) {
             if (target.index == nullptr || target.rid_map == nullptr) {
                 continue;
@@ -86,10 +86,7 @@ Result<std::optional<Tuple>> DeleteOperator::do_next() {
                 if (rmap[node_id] == *tuple.rid) {
                     auto r = target.index->remove(static_cast<uint32_t>(node_id));
                     if (!r) {
-                        SIXSEVEN_LOG_WARN("HNSW delete maintenance failed for rid=({},{}): {}",
-                                          tuple.rid->page_id,
-                                          tuple.rid->slot_id,
-                                          r.error().message);
+                        return tl::unexpected(r.error());
                     }
                     // Tombstone the rid_map slot so nearest_scan's node->rid
                     // resolution returns invalid() and get_tuple fails cleanly.

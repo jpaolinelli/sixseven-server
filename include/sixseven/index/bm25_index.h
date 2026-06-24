@@ -96,6 +96,15 @@ public:
     [[nodiscard]] uint32_t doc_count() const;
     [[nodiscard]] double avg_doc_length() const;
 
+    // -- Test-only fault injection ---------------------------------------------
+
+    /// When set to true, the next call to add_document or remove_document
+    /// immediately returns an INTERNAL_ERROR instead of mutating state.
+    /// This field is intentionally public so test code can set it without
+    /// requiring a friendship declaration or a separate test-only subclass.
+    /// Production code never sets this flag.
+    bool fault_inject_ = false;
+
     // -- Persistence (mirrors BTreePersistence) --------------------------------
 
     /// Serialize an index to a freshly created index file via `bpm`.
