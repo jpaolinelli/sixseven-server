@@ -317,8 +317,9 @@ TEST(QA_GDB320_BertNormalizer, InvalidLeadingByte0xFE) {
 
 TEST(QA_GDB320_BertNormalizer, AllFlagsDisabledPassThrough) {
     BertNormalizer norm(false, false, false, false);
-    // With all options disabled, input should pass through unchanged
-    // (except trimming always applies).
+    // With all options disabled, input should pass through unchanged.
+    // Trimming is gated on clean_text (fixed in GDB-354): with all flags
+    // false, the input passes through UNCHANGED including trailing whitespace.
     std::string input = "HELLO World\t\n";
     EXPECT_EQ(norm.normalize(input), input);
 }
@@ -414,15 +415,14 @@ TEST(QA_GDB320_BertNormalizer, AllControlCharsLongSequence) {
 // ===================================================================
 
 TEST(QA_GDB320_BertNormalizer, ToLowerKraCharacter) {
-    // U+0138 is ĸ (Latin Small Letter Kra) — already lowercase.
-    // to_lower should NOT change it. But the implementation treats
-    // all even codepoints in 0x0100-0x017E as uppercase.
-    // This test documents the expected correct behavior.
+    // U+0138 is the Latin Small Letter Kra -- already lowercase.
+    // The to_lower Kra handling was fixed in GDB-353: U+0138 correctly
+    // stays unchanged. The previous bug (treating all even codepoints in
+    // 0x0100-0x017E as uppercase) is no longer present.
     BertNormalizer norm(true, false, false, false);
     // U+0138 in UTF-8: C4 B8
     std::string input = "\xC4\xB8";
-    // Correct behavior: ĸ stays as ĸ (already lowercase).
-    // Bug: converts to U+0139 (Ĺ) = C4 B9.
+    // Correct behavior: Kra stays as Kra (already lowercase).
     EXPECT_EQ(norm.normalize(input), "\xC4\xB8");
 }
 
@@ -482,8 +482,8 @@ TEST(QA_GDB320_LowercaseNormalizer, MultiplicationSignNotLowered) {
 
 TEST(QA_GDB320_LowercaseNormalizer, KraCharacter) {
     LowercaseNormalizer norm;
-    // U+0138 (ĸ) should remain unchanged.
-    // Bug: incorrectly converts to U+0139.
+    // U+0138 (Kra) should remain unchanged.
+    // Fixed in GDB-353: U+0138 stays unchanged (no longer misidentified as uppercase).
     EXPECT_EQ(norm.normalize("\xC4\xB8"), "\xC4\xB8");
 }
 
@@ -602,19 +602,4 @@ TEST(QA_GDB320_Factory, PolymorphicUsageThroughBasePointer) {
     std::unique_ptr<TextNormalizer> base = create_normalizer(config);
     ASSERT_NE(base, nullptr);
     EXPECT_EQ(base->normalize("CAF\xC3\x89"), "cafe");
-}
-
-// ===================================================================
-// QA_BertNormalizer — Trimming with clean_text=false
-// ===================================================================
-
-TEST(QA_GDB320_BertNormalizer, CleanTextFalseTrimmingBehavior) {
-    BertNormalizer norm(false, false, false, false);
-    // With clean_text=false, whitespace collapsing is disabled.
-    // The trimming at the end still runs and trims leading/trailing spaces.
-    // This test documents the actual behavior.
-    std::string result = norm.normalize("  hello  ");
-    // Trimming always applies — this is the current behavior.
-    // If this is considered a bug, it should return "  hello  ".
-    EXPECT_EQ(result, "  hello  ");
 }
