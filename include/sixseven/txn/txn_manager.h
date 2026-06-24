@@ -2,6 +2,7 @@
 
 #include "sixseven/common/result.h"
 #include "sixseven/index/rid.h"
+#include "sixseven/txn/lock_manager.h"
 #include "sixseven/txn/transaction.h"
 
 #include <cstdint>
@@ -94,10 +95,17 @@ public:
     /// Should be called periodically (e.g., by the auto-vacuum worker).
     void gc_completed_transactions();
 
+    /// Access the shared lock manager (GDB-930).
+    /// DML operators acquire row/table locks through this manager.
+    [[nodiscard]] LockManager& lock_manager() { return lock_mgr_; }
+
 private:
     mutable std::mutex mu_;
     txn_id_t next_txn_id_ = 1;
     IsolationLevel default_isolation_level_ = IsolationLevel::READ_COMMITTED;
+
+    /// Shared lock manager for row/table locking (GDB-930).
+    LockManager lock_mgr_;
 
     /// All transactions (active and recently completed).
     std::unordered_map<txn_id_t, std::unique_ptr<Transaction>> transactions_;

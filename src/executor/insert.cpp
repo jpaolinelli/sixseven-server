@@ -91,6 +91,18 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
     }
     executed_ = true;
 
+    // Acquire IX (Intent Exclusive) table lock before inserting any rows (GDB-930).
+    // An IX lock on the table signals intent to write individual rows; it is
+    // compatible with other IX holders (multiple concurrent inserters) but blocks
+    // an S or X table-level lock (e.g., a DDL ALTER TABLE).  A fresh row has no
+    // prior version, so no row-level X lock is needed at insert time — only the
+    // intent lock is required to participate in the locking protocol.
+    if (lock_mgr_ != nullptr && txn_id_ != frozen_txn_id) {
+        if (auto lr = lock_mgr_->lock_table(txn_id_, lock_table_id_, LockMode::IX); !lr) {
+            return tl::unexpected(lr.error());
+        }
+    }
+
     int64_t count = 0;
 
     if (child_) {

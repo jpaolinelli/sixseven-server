@@ -86,8 +86,28 @@ Result<std::optional<Tuple>> UpdateOperator::do_next() {
         pending.push_back(PendingUpdate{*tuple.rid, std::move(new_values), std::move(*bytes)});
     }
 
+    // Acquire IX table lock once before the mutation loop (GDB-930).
+    // Individual row X-locks are acquired inside the loop, just before each mutation.
+    if (lock_mgr_ != nullptr && txn_id_ != frozen_txn_id && !pending.empty()) {
+        if (auto lr = lock_mgr_->lock_table(txn_id_, lock_table_id_, LockMode::IX); !lr) {
+            return tl::unexpected(lr.error());
+        }
+    }
+
     for (auto& upd : pending) {
         RID bm25_rid = upd.old_rid;
+
+        // Acquire X row lock before mutating this version (GDB-930).
+        // Blocks a concurrent writer holding X on the same row, then lets
+        // MVCC conflict detection (mark_deleted) decide the outcome per
+        // isolation level (write-write conflict -> TXN_CONFLICT on commit).
+        if (lock_mgr_ != nullptr && txn_id_ != frozen_txn_id) {
+            if (auto lr = lock_mgr_->lock_row(
+                    txn_id_, lock_table_id_, upd.old_rid.page_id, upd.old_rid.slot_id, LockMode::X);
+                !lr) {
+                return tl::unexpected(lr.error());
+            }
+        }
 
         if (heap_.mvcc_headers()) {
             // MVCC update (GDB-747): insert a new version stamped with this

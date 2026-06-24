@@ -58,6 +58,11 @@ Result<void> TransactionManager::commit(txn_id_t txn_id) {
 
     txn.status = TransactionStatus::COMMITTED;
     SIXSEVEN_LOG_DEBUG("COMMIT txn_id={}", txn_id);
+
+    // Strict 2PL: release all locks at end of transaction (GDB-930).
+    // Must release *after* changing status so waiters see COMMITTED.
+    lock_mgr_.release_all(txn_id);
+
     return ok();
 }
 
@@ -76,6 +81,10 @@ Result<void> TransactionManager::abort(txn_id_t txn_id) {
 
     txn.status = TransactionStatus::ABORTED;
     SIXSEVEN_LOG_DEBUG("ABORT txn_id={}", txn_id);
+
+    // Strict 2PL: release all locks on abort so waiters can proceed (GDB-930).
+    lock_mgr_.release_all(txn_id);
+
     return ok();
 }
 
