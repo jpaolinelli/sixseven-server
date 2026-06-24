@@ -435,9 +435,9 @@ TEST(QA_GDB926_AdversarialWindow, TokenCursor_PrecedingAndFollowing_FullyConsume
 
 // MATCH with {min,max} followed by WHERE and RETURN -- cursor correctness.
 TEST(QA_GDB926_AdversarialNoRegression, HopQuantifier_StatementTail_Parsed) {
-    auto stmt = parse_ok_one(
-        "SELECT a.name, b.name FROM MATCH (a:Person)-[r:KNOWS]->{1,3}(b:Person) "
-        "WHERE a.age > 18");
+    auto stmt =
+        parse_ok_one("SELECT a.name, b.name FROM MATCH (a:Person)-[r:KNOWS]->{1,3}(b:Person) "
+                     "WHERE a.age > 18");
     ASSERT_NE(stmt, nullptr);
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
     ASSERT_NE(sel, nullptr);
@@ -457,8 +457,7 @@ TEST(QA_GDB926_AdversarialNoRegression, Backfill_BatchRateLimit_FullStatementPar
 
 // Window with N PRECEDING then ORDER BY -- cursor correctness.
 TEST(QA_GDB926_AdversarialNoRegression, WindowFrame_OrderBy_FullyParsed) {
-    auto stmt = parse_ok_one(
-        "SELECT ROW_NUMBER() OVER (ORDER BY score ROWS BETWEEN "
-        "10 PRECEDING AND CURRENT ROW) FROM results");
+    auto stmt = parse_ok_one("SELECT ROW_NUMBER() OVER (ORDER BY score ROWS BETWEEN "
+                             "10 PRECEDING AND CURRENT ROW) FROM results");
     ASSERT_NE(stmt, nullptr);
 }
