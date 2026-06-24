@@ -341,3 +341,205 @@ TEST_F(QA_GDB932, BenignNullTextUpdate_SucceedsAndRemovesOldPosting) {
     // Old posting must be gone (update removed old BM25 entry).
     EXPECT_EQ(idx->doc_count(), 0u) << "BM25 must have removed the old posting on NULL update";
 }
+
+// =============================================================================
+// Adversarial: retry-after-failure (INSERT)
+// =============================================================================
+
+// After a forced-failure rolls back an INSERT, clearing fault_inject_ and
+// re-running the same statement must succeed, leaving table and index
+// consistent with no leftover state from the aborted transaction.
+TEST_F(QA_GDB932, RetryAfterFailureInsert_SucceedsAndLeavesConsistentState) {
+    Bm25Index* idx = get_bm25();
+    ASSERT_NE(idx, nullptr);
+
+    // First attempt: forced failure.
+    idx->fault_inject_ = true;
+    auto fail_result = engine_->execute("INSERT INTO docs VALUES (30, 'retry test text')");
+    idx->fault_inject_ = false;
+    ASSERT_FALSE(fail_result.has_value()) << "First INSERT must fail under fault injection";
+
+    // Table must be empty (abort rolled back).
+    ASSERT_EQ(count_by_id(30), 0) << "Row must not be visible after failed INSERT";
+    // Index must be clean.
+    ASSERT_TRUE(idx->search("retry", 10).empty())
+        << "BM25 must have no orphan posting after failed INSERT";
+
+    // Second attempt: no fault injection -- must succeed.
+    exec_ok("INSERT INTO docs VALUES (30, 'retry test text')");
+
+    // Table must now contain the row.
+    EXPECT_EQ(count_by_id(30), 1) << "Row must be visible after successful retry INSERT";
+    // BM25 must reflect the inserted text.
+    auto hits = idx->search("retry", 10);
+    EXPECT_FALSE(hits.empty()) << "BM25 must index the text after successful retry INSERT";
+    // Exactly one document indexed (no duplicate from the aborted txn).
+    EXPECT_EQ(idx->doc_count(), 1u) << "BM25 must contain exactly one document after retry";
+}
+
+// =============================================================================
+// Adversarial: retry-after-failure (UPDATE)
+// =============================================================================
+
+// After a forced-failure rolls back an UPDATE, clearing fault_inject_ and
+// re-running the UPDATE must succeed. Table and index must be consistent with
+// the new value -- no leftover lock or state from the aborted transaction.
+TEST_F(QA_GDB932, RetryAfterFailureUpdate_SucceedsAndLeavesConsistentState) {
+    exec_ok("INSERT INTO docs VALUES (31, 'before update text')");
+
+    Bm25Index* idx = get_bm25();
+    ASSERT_NE(idx, nullptr);
+    ASSERT_FALSE(idx->search("before", 10).empty()) << "Precondition: original text indexed";
+
+    // First attempt: forced failure during UPDATE.
+    idx->fault_inject_ = true;
+    auto fail_result = engine_->execute("UPDATE docs SET body = 'after update text' WHERE id = 31");
+    idx->fault_inject_ = false;
+    ASSERT_FALSE(fail_result.has_value()) << "First UPDATE must fail under fault injection";
+
+    // Table must retain original value.
+    EXPECT_EQ(body_by_id(31), "before update text")
+        << "Row must keep original value after failed UPDATE";
+    // Index must still reflect original text.
+    EXPECT_FALSE(idx->search("before", 10).empty())
+        << "BM25 must still have original posting after failed UPDATE";
+    EXPECT_TRUE(idx->search("after", 10).empty())
+        << "BM25 must not have new posting after failed UPDATE";
+
+    // Second attempt: no fault injection -- must succeed.
+    exec_ok("UPDATE docs SET body = 'after update text' WHERE id = 31");
+
+    // Table must have new value.
+    EXPECT_EQ(body_by_id(31), "after update text")
+        << "Row must reflect new value after successful retry UPDATE";
+    // Index must have new text only.
+    EXPECT_FALSE(idx->search("after", 10).empty()) << "BM25 must index new text after retry UPDATE";
+    EXPECT_TRUE(idx->search("before", 10).empty())
+        << "BM25 must not retain old text after retry UPDATE";
+}
+
+// =============================================================================
+// Adversarial: multi-row DELETE -- ALL rows roll back on Nth failure
+// =============================================================================
+
+// When DELETE targets multiple rows and BM25 remove_document fails on the
+// first processed row, the whole statement must fail. All matching rows must
+// still be present (no partial delete). This verifies there is no
+// partial-write inconsistency where rows 1..N-1 are deleted but rows N..M are not.
+TEST_F(QA_GDB932, MultiRowDelete_FullRollbackOnFailure) {
+    // Seed three rows that will all match the DELETE.
+    exec_ok("INSERT INTO docs VALUES (40, 'bulk delete alpha')");
+    exec_ok("INSERT INTO docs VALUES (41, 'bulk delete beta')");
+    exec_ok("INSERT INTO docs VALUES (42, 'bulk delete gamma')");
+    ASSERT_EQ(count_by_id(40), 1) << "Precondition: row 40 present";
+    ASSERT_EQ(count_by_id(41), 1) << "Precondition: row 41 present";
+    ASSERT_EQ(count_by_id(42), 1) << "Precondition: row 42 present";
+
+    Bm25Index* idx = get_bm25();
+    ASSERT_NE(idx, nullptr);
+
+    // Arm fault injector: remove_document will fail on the first call.
+    idx->fault_inject_ = true;
+    // DELETE matches all three rows by body prefix.
+    auto result = engine_->execute("DELETE FROM docs WHERE body LIKE 'bulk delete%'");
+    idx->fault_inject_ = false;
+
+    // The DELETE must have returned an error.
+    ASSERT_FALSE(result.has_value()) << "Multi-row DELETE must fail when BM25 maintenance fails";
+
+    // All three rows must still be present (full rollback -- no partial delete).
+    EXPECT_EQ(count_by_id(40), 1) << "Row 40 must survive after failed multi-row DELETE";
+    EXPECT_EQ(count_by_id(41), 1) << "Row 41 must survive after failed multi-row DELETE";
+    EXPECT_EQ(count_by_id(42), 1) << "Row 42 must survive after failed multi-row DELETE";
+
+    // BM25 must still contain all three documents.
+    EXPECT_EQ(idx->doc_count(), 3u)
+        << "BM25 must retain all 3 documents after failed multi-row DELETE";
+}
+
+// =============================================================================
+// Adversarial: multi-row UPDATE -- ALL rows roll back on Nth failure
+// =============================================================================
+
+// When UPDATE targets multiple rows and BM25 maintenance fails, the whole
+// statement must fail. All rows must retain their original values. This
+// verifies no partial-write: rows processed before the failure are not left
+// with the updated value.
+TEST_F(QA_GDB932, MultiRowUpdate_FullRollbackOnFailure) {
+    // Seed three rows with distinctive non-stopword terms.
+    exec_ok("INSERT INTO docs VALUES (50, 'zeta corpus alpha')");
+    exec_ok("INSERT INTO docs VALUES (51, 'zeta corpus beta')");
+    exec_ok("INSERT INTO docs VALUES (52, 'zeta corpus gamma')");
+
+    Bm25Index* idx = get_bm25();
+    ASSERT_NE(idx, nullptr);
+    ASSERT_EQ(idx->doc_count(), 3u) << "Precondition: three docs indexed";
+    // Verify distinctive terms ARE indexed before the fault.
+    ASSERT_FALSE(idx->search("alpha", 10).empty()) << "Precondition: alpha indexed";
+    ASSERT_FALSE(idx->search("beta", 10).empty()) << "Precondition: beta indexed";
+    ASSERT_FALSE(idx->search("gamma", 10).empty()) << "Precondition: gamma indexed";
+
+    // Arm fault injector: the first add_document or remove_document in the
+    // UPDATE loop will fail.
+    idx->fault_inject_ = true;
+    auto result =
+        engine_->execute("UPDATE docs SET body = 'zeta corpus replaced' WHERE body LIKE 'zeta%'");
+    idx->fault_inject_ = false;
+
+    // UPDATE must have returned an error.
+    ASSERT_FALSE(result.has_value()) << "Multi-row UPDATE must fail when BM25 maintenance fails";
+
+    // All rows must retain their original values (full rollback).
+    EXPECT_EQ(body_by_id(50), "zeta corpus alpha")
+        << "Row 50 must keep original value after failed multi-row UPDATE";
+    EXPECT_EQ(body_by_id(51), "zeta corpus beta")
+        << "Row 51 must keep original value after failed multi-row UPDATE";
+    EXPECT_EQ(body_by_id(52), "zeta corpus gamma")
+        << "Row 52 must keep original value after failed multi-row UPDATE";
+
+    // BM25 must still contain the original texts (no partial re-indexing).
+    EXPECT_FALSE(idx->search("alpha", 10).empty())
+        << "BM25 must retain 'alpha' posting after failed multi-row UPDATE";
+    EXPECT_FALSE(idx->search("beta", 10).empty())
+        << "BM25 must retain 'beta' posting after failed multi-row UPDATE";
+    EXPECT_FALSE(idx->search("gamma", 10).empty())
+        << "BM25 must retain 'gamma' posting after failed multi-row UPDATE";
+    // None of the replacement text must appear.
+    EXPECT_TRUE(idx->search("replaced", 10).empty())
+        << "BM25 must not have 'replaced' posting after failed multi-row UPDATE";
+}
+
+// =============================================================================
+// Adversarial: post-rollback index/table cross-consistency (INSERT)
+// =============================================================================
+
+// After a forced INSERT failure, insert a DIFFERENT row successfully. The
+// successful row must be searchable. The failed row's terms must not appear.
+// This pins that the index and table are mutually consistent (no orphan
+// postings from the aborted transaction polluting the index).
+TEST_F(QA_GDB932, PostRollbackIndexTableConsistency_Insert) {
+    Bm25Index* idx = get_bm25();
+    ASSERT_NE(idx, nullptr);
+
+    // Forced failure for row 60.
+    idx->fault_inject_ = true;
+    auto fail_result = engine_->execute("INSERT INTO docs VALUES (60, 'orphan posting danger')");
+    idx->fault_inject_ = false;
+    ASSERT_FALSE(fail_result.has_value());
+
+    // Insert a different row successfully.
+    exec_ok("INSERT INTO docs VALUES (61, 'clean insert succeeds')");
+
+    // Table: row 60 absent, row 61 present.
+    EXPECT_EQ(count_by_id(60), 0) << "Failed row must not be visible";
+    EXPECT_EQ(count_by_id(61), 1) << "Successful row must be visible";
+
+    // Index: only row 61 terms are present, row 60 terms are absent.
+    auto orphan_hits = idx->search("orphan", 10);
+    EXPECT_TRUE(orphan_hits.empty()) << "BM25 must not contain orphan posting from failed INSERT";
+    auto clean_hits = idx->search("clean", 10);
+    EXPECT_FALSE(clean_hits.empty()) << "BM25 must have indexed the successful INSERT";
+
+    // Index size must equal the table row count.
+    EXPECT_EQ(idx->doc_count(), 1u) << "BM25 doc_count must match visible table row count";
+}
