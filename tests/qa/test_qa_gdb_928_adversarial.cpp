@@ -113,7 +113,8 @@ TEST(GDB928_Adversarial_Malformed, Utf16SurrogateInUtf8_NFKC) {
 TEST(GDB928_Adversarial_Malformed, MixedValidAndInvalid_NFC) {
     IcuNormalizer norm(IcuNormalizer::Form::NFC);
     // "a" + lone \x80 + "b"
-    const std::string input = "a\x80""b";
+    const std::string input = "a\x80"
+                              "b";
     std::string result;
     ASSERT_NO_FATAL_FAILURE(result = norm.normalize(input));
     // Result must contain "a" and "b" somewhere.
@@ -134,8 +135,8 @@ TEST(GDB928_Adversarial_EmbeddedNul, LengthCorrect_NFC) {
     ASSERT_NO_FATAL_FAILURE(result = norm.normalize(input));
     // ICU fromUTF8 uses StringPiece which is length-aware.
     // The NUL should be preserved (U+0000 is a valid codepoint in NFC).
-    EXPECT_EQ(result.size(), 3u)
-        << "Embedded NUL caused length truncation: got " << result.size() << " bytes";
+    EXPECT_EQ(result.size(), 3u) << "Embedded NUL caused length truncation: got " << result.size()
+                                 << " bytes";
     EXPECT_EQ(result[0], 'a');
     EXPECT_EQ(result[1], '\0');
     EXPECT_EQ(result[2], 'b');
@@ -147,8 +148,8 @@ TEST(GDB928_Adversarial_EmbeddedNul, LengthCorrect_NFKC) {
     ASSERT_EQ(input.size(), 3u);
     std::string result;
     ASSERT_NO_FATAL_FAILURE(result = norm.normalize(input));
-    EXPECT_EQ(result.size(), 3u)
-        << "Embedded NUL caused length truncation: got " << result.size() << " bytes";
+    EXPECT_EQ(result.size(), 3u) << "Embedded NUL caused length truncation: got " << result.size()
+                                 << " bytes";
     EXPECT_EQ(result[0], 'a');
     EXPECT_EQ(result[1], '\0');
     EXPECT_EQ(result[2], 'b');
@@ -171,12 +172,11 @@ TEST(GDB928_Adversarial_Large, RepeatedCombiningPairs_NFC) {
     std::string result;
     ASSERT_NO_FATAL_FAILURE(result = norm.normalize(input));
     // Each pair -> 2-byte composed form.
-    EXPECT_EQ(result.size(), 50000u * 2u)
-        << "Large NFC: unexpected output size " << result.size();
+    EXPECT_EQ(result.size(), 50000u * 2u) << "Large NFC: unexpected output size " << result.size();
     // Spot-check: every 2-byte group is the composed e-acute "\xC3\xA9".
     for (size_t i = 0; i < result.size(); i += 2) {
-        ASSERT_EQ(static_cast<unsigned char>(result[i]),   0xC3u);
-        ASSERT_EQ(static_cast<unsigned char>(result[i+1]), 0xA9u);
+        ASSERT_EQ(static_cast<unsigned char>(result[i]), 0xC3u);
+        ASSERT_EQ(static_cast<unsigned char>(result[i + 1]), 0xA9u);
     }
 }
 
@@ -192,11 +192,10 @@ TEST(GDB928_Adversarial_Large, RepeatedFiLigature_NFKC) {
     std::string result;
     ASSERT_NO_FATAL_FAILURE(result = norm.normalize(input));
     // Each fi-ligature -> "fi" (2 ASCII bytes).
-    EXPECT_EQ(result.size(), 50000u * 2u)
-        << "Large NFKC: unexpected output size " << result.size();
+    EXPECT_EQ(result.size(), 50000u * 2u) << "Large NFKC: unexpected output size " << result.size();
     for (size_t i = 0; i < result.size(); i += 2) {
-        EXPECT_EQ(result[i],   'f');
-        EXPECT_EQ(result[i+1], 'i');
+        EXPECT_EQ(result[i], 'f');
+        EXPECT_EQ(result[i + 1], 'i');
     }
 }
 
@@ -207,37 +206,35 @@ TEST(GDB928_Adversarial_Large, RepeatedFiLigature_NFKC) {
 TEST(GDB928_Adversarial_Idempotent, CombiningMarks_NFC) {
     IcuNormalizer norm(IcuNormalizer::Form::NFC);
     const std::string inputs[] = {
-        "e\xCC\x81",          // e + combining acute
-        "\xC3\xA9",           // pre-composed e-acute
-        "A\xCC\x8A",          // A + combining ring
-        "caf\xC3\xA9",        // "cafe" with pre-composed accent
-        "\xEF\xAC\x81",       // fi-ligature (NFC preserves)
+        "e\xCC\x81",    // e + combining acute
+        "\xC3\xA9",     // pre-composed e-acute
+        "A\xCC\x8A",    // A + combining ring
+        "caf\xC3\xA9",  // "cafe" with pre-composed accent
+        "\xEF\xAC\x81", // fi-ligature (NFC preserves)
         "hello world",
         "",
     };
     for (const auto& input : inputs) {
         const std::string once = norm.normalize(input);
         const std::string twice = norm.normalize(once);
-        EXPECT_EQ(once, twice)
-            << "NFC not idempotent for input of length " << input.size();
+        EXPECT_EQ(once, twice) << "NFC not idempotent for input of length " << input.size();
     }
 }
 
 TEST(GDB928_Adversarial_Idempotent, CompatChars_NFKC) {
     IcuNormalizer norm(IcuNormalizer::Form::NFKC);
     const std::string inputs[] = {
-        "\xEF\xAC\x81",       // fi-ligature
-        "\xEF\xBC\x91",       // fullwidth "1"
-        "e\xCC\x81",          // e + combining acute
-        "\xC3\xA9",           // pre-composed e-acute
+        "\xEF\xAC\x81", // fi-ligature
+        "\xEF\xBC\x91", // fullwidth "1"
+        "e\xCC\x81",    // e + combining acute
+        "\xC3\xA9",     // pre-composed e-acute
         "hello world",
         "",
     };
     for (const auto& input : inputs) {
         const std::string once = norm.normalize(input);
         const std::string twice = norm.normalize(once);
-        EXPECT_EQ(once, twice)
-            << "NFKC not idempotent for input of length " << input.size();
+        EXPECT_EQ(once, twice) << "NFKC not idempotent for input of length " << input.size();
     }
 }
 
@@ -253,16 +250,14 @@ TEST(GDB928_Adversarial_Hangul, JamoComposesToSyllable_NFC) {
     const std::string jamo = "\xE1\x84\x80\xE1\x85\xA1";
     // Expected composed syllable: U+AC00 "\xEA\xB0\x80"
     const std::string syllable = "\xEA\xB0\x80";
-    EXPECT_EQ(norm.normalize(jamo), syllable)
-        << "Hangul jamo not composed to syllable under NFC";
+    EXPECT_EQ(norm.normalize(jamo), syllable) << "Hangul jamo not composed to syllable under NFC";
 }
 
 TEST(GDB928_Adversarial_Hangul, JamoComposesToSyllable_NFKC) {
     IcuNormalizer norm(IcuNormalizer::Form::NFKC);
     const std::string jamo = "\xE1\x84\x80\xE1\x85\xA1";
     const std::string syllable = "\xEA\xB0\x80";
-    EXPECT_EQ(norm.normalize(jamo), syllable)
-        << "Hangul jamo not composed to syllable under NFKC";
+    EXPECT_EQ(norm.normalize(jamo), syllable) << "Hangul jamo not composed to syllable under NFKC";
 }
 
 // Precomposed syllable is idempotent under NFC.
