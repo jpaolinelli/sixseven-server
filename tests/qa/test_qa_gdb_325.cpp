@@ -731,14 +731,15 @@ TEST(QA_GDB325_HashTokenizer, MaxLengthZero) {
 }
 
 TEST(QA_GDB325_HashTokenizer, MaxLengthOne) {
-    // Only CLS fits, but the code pushes CLS first then SEP.
-    // With max_length=1, after CLS there's no room for content or SEP.
-    // The truncation path kicks in: resize to 1, set last to SEP.
+    // Canonical CLS-first contract (consistent with WordPiece/BPE, see
+    // QA_GDB322_Truncation.MaxLengthOneOnlyCLS and
+    // QA_GDB323_BPETokenizer.MaxLengthOneOnlyCLS): max_length=1 keeps only CLS;
+    // SEP is appended only when max_length >= 2.
     HashTokenizer tok;
     auto ids = tok.encode("hello", 1);
     ASSERT_EQ(ids.size(), 1u);
-    // After the truncation code: tokens resized to 1, tokens.back() = SEP.
-    EXPECT_EQ(ids[0], 102); // SEP replaces CLS via truncation
+    EXPECT_EQ(ids[0], 101); // CLS - only special token that fits
+    EXPECT_NE(ids[0], 102); // NOT SEP: matches WordPiece/BPE max_length=1
 }
 
 TEST(QA_GDB325_HashTokenizer, LongInput) {

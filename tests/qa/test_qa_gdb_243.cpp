@@ -105,12 +105,12 @@ TEST(QA_GDB_243_Tokenizer, MaxLengthZeroCrash) {
 }
 
 TEST(QA_GDB_243_Tokenizer, MaxLengthOne) {
-    // Only room for one token — should have SEP.
+    // Only room for one special token at max_length=1: CLS.
     HashTokenizer tok;
     auto tokens = tok.encode("hello", 1);
     ASSERT_EQ(tokens.size(), 1u);
-    // Last token should be SEP (102) due to truncation logic.
-    EXPECT_EQ(tokens[0], 102);
+    // max_length=1 keeps CLS only (canonical CLS-first contract; SEP only when max_length>=2).
+    EXPECT_EQ(tokens[0], 101);
 }
 
 TEST(QA_GDB_243_Tokenizer, MaxLengthTwo) {
