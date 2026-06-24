@@ -309,8 +309,7 @@ TEST_F(GDB923Test, TripleRerunNoAccumulation) {
             ++count;
         }
     }
-    EXPECT_EQ(count, 1) << "all_statuses() must have exactly 1 entry after 3 reruns; got "
-                        << count;
+    EXPECT_EQ(count, 1) << "all_statuses() must have exactly 1 entry after 3 reruns; got " << count;
 }
 
 // =============================================================================
@@ -488,8 +487,7 @@ TEST_F(GDB923Test, RapidCycleNoDeadlockAndNoAccumulation) {
             ++count;
         }
     }
-    EXPECT_EQ(count, 1)
-        << "No accumulation after 5 rapid cycles; expected 1 entry, got " << count;
+    EXPECT_EQ(count, 1) << "No accumulation after 5 rapid cycles; expected 1 entry, got " << count;
 }
 
 // =============================================================================
