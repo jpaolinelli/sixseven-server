@@ -1,5 +1,5 @@
 /// @file test_qa_gdb_325.cpp
-/// @brief QA adversarial tests for GDB-325: Unit Tests — Tokenizer Components.
+/// @brief QA adversarial tests for GDB-325: Unit Tests - Tokenizer Components.
 ///
 /// Tests adversarial edge cases across all tokenizer components:
 /// - TokenizerJsonLoader: malformed JSON, corrupt vocab, missing fields
@@ -126,7 +126,7 @@ TokenizerConfig make_bpe_config() {
 }
 
 // =====================================================================
-// QA_GDB325_JsonLoader — Adversarial JSON loading tests
+// QA_GDB325_JsonLoader - Adversarial JSON loading tests
 // =====================================================================
 
 TEST(QA_GDB325_JsonLoader, ModelNotObjectReturnsError) {
@@ -189,14 +189,14 @@ TEST(QA_GDB325_JsonLoader, RealMiniLMFixtureLoadAndRoundTrip) {
 }
 
 // =====================================================================
-// QA_GDB325_TextNormalizer — Adversarial normalization tests
+// QA_GDB325_TextNormalizer - Adversarial normalization tests
 // =====================================================================
 
 TEST(QA_GDB325_TextNormalizer, InvalidUtf8SingleByte) {
     BertNormalizer norm(/*lowercase=*/true);
     // 0xFF is not a valid UTF-8 leading byte.
     std::string input("\xFF", 1);
-    // Should not crash — produces replacement character or is handled gracefully.
+    // Should not crash - produces replacement character or is handled gracefully.
     auto result = norm.normalize(input);
     EXPECT_FALSE(result.empty() && input.size() > 0);
 }
@@ -325,7 +325,7 @@ TEST(QA_GDB325_TextNormalizer, FactoryCreateNormalizerAllTypes) {
 }
 
 // =====================================================================
-// QA_GDB325_PreTokenizer — Adversarial pre-tokenization tests
+// QA_GDB325_PreTokenizer - Adversarial pre-tokenization tests
 // =====================================================================
 
 TEST(QA_GDB325_PreTokenizer, SingleCharacterWord) {
@@ -414,7 +414,7 @@ TEST(QA_GDB325_PreTokenizer, NullPreTokenizerSingleSpan) {
 }
 
 // =====================================================================
-// QA_GDB325_WordPiece — Adversarial WordPiece tokenizer tests
+// QA_GDB325_WordPiece - Adversarial WordPiece tokenizer tests
 // =====================================================================
 
 class QA_GDB325_WordPieceTest : public ::testing::Test {
@@ -542,7 +542,7 @@ TEST_F(QA_GDB325_WordPieceTest, LongWordManySubwords) {
 }
 
 // =====================================================================
-// QA_GDB325_WordPiece_E2E — End-to-end with real fixture
+// QA_GDB325_WordPiece_E2E - End-to-end with real fixture
 // =====================================================================
 
 class QA_GDB325_WordPieceE2E : public ::testing::Test {
@@ -620,7 +620,7 @@ TEST_F(QA_GDB325_WordPieceE2E, ConsistentReEncoding) {
 }
 
 // =====================================================================
-// QA_GDB325_BPE — Adversarial BPE tokenizer tests
+// QA_GDB325_BPE - Adversarial BPE tokenizer tests
 // =====================================================================
 
 class QA_GDB325_BPETest : public ::testing::Test {
@@ -710,7 +710,7 @@ TEST_F(QA_GDB325_BPETest, ConsistentReEncoding) {
 }
 
 // =====================================================================
-// QA_GDB325_HashTokenizer — Adversarial HashTokenizer tests
+// QA_GDB325_HashTokenizer - Adversarial HashTokenizer tests
 // =====================================================================
 
 TEST(QA_GDB325_HashTokenizer, EmptyInput) {
@@ -731,14 +731,14 @@ TEST(QA_GDB325_HashTokenizer, MaxLengthZero) {
 }
 
 TEST(QA_GDB325_HashTokenizer, MaxLengthOne) {
-    // Only CLS fits, but the code pushes CLS first then SEP.
-    // With max_length=1, after CLS there's no room for content or SEP.
-    // The truncation path kicks in: resize to 1, set last to SEP.
+    // Canonical CLS-first contract (consistent with WordPiece/BPE, see
+    // QA_GDB322_Truncation.MaxLengthOneOnlyCLS and QA_GDB323_BPETokenizer.MaxLengthOneOnlyCLS):
+    // max_length=1 keeps only CLS; SEP is appended only when max_length >= 2.
     HashTokenizer tok;
     auto ids = tok.encode("hello", 1);
     ASSERT_EQ(ids.size(), 1u);
-    // After the truncation code: tokens resized to 1, tokens.back() = SEP.
-    EXPECT_EQ(ids[0], 102); // SEP replaces CLS via truncation
+    EXPECT_EQ(ids[0], 101); // CLS - only special token that fits
+    EXPECT_NE(ids[0], 102); // NOT SEP: consistent with WordPiece/BPE max_length=1 behaviour
 }
 
 TEST(QA_GDB325_HashTokenizer, LongInput) {

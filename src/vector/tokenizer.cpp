@@ -54,9 +54,13 @@ std::vector<int64_t> HashTokenizer::encode(const std::string& text, size_t max_l
     }
 
     // Truncate if somehow exceeded (shouldn't happen with the checks above).
+    // Only append SEP when max_length >= 2; at max_length == 1 only CLS fits,
+    // matching the WordPiece/BPE contract (CLS-first, SEP only when room exists).
     if (tokens.size() > max_length) {
         tokens.resize(max_length);
-        tokens.back() = special_tokens_.sep;
+        if (max_length >= 2) {
+            tokens.back() = special_tokens_.sep;
+        }
     }
 
     return tokens;
