@@ -2,27 +2,14 @@
 
 #include "sixseven/vector/tokenizer.h"
 
-#ifdef _WIN32
-// Windows SDK ICU C API (ships with Windows 10 RS3+ / Windows Kit 10).
-// icucommon.h exposes: unorm2_getNFCInstance, unorm2_getNFKCInstance,
-// unorm2_normalize, u_strFromUTF8, u_strToUTF8.
-// Suppress the deprecation notice that recommends switching to icu.h.
-#ifndef SUPPRESS_LEGACY_ICU_HEADER_WARNINGS
-#define SUPPRESS_LEGACY_ICU_HEADER_WARNINGS
-#endif
-#include <icucommon.h>
-#else
-// Full ICU C++ headers (non-Windows / vcpkg ICU).
 #include <unicode/normalizer2.h>
 #include <unicode/unistr.h>
 #include <unicode/utypes.h>
-#endif
 
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <string>
-#include <vector>
 
 namespace sixseven {
 
@@ -484,7 +471,6 @@ std::string BertNormalizer::normalize(const std::string& text) const {
             if (!result.empty() && result.back() != ' ') {
                 result.push_back(' ');
             }
-            // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores) — overwritten on next line.
             prev_was_space = false;
             encode_utf8(cp, result);
             result.push_back(' ');
@@ -552,71 +538,6 @@ std::string IcuNormalizer::normalize(const std::string& text) const {
     if (text.empty()) {
         return text;
     }
-
-#ifdef _WIN32
-    // Windows path: use ICU C API from the Windows SDK (Win10 RS3+).
-    // Pipeline: UTF-8 -> UTF-16 (UChar) -> normalize -> UTF-16 -> UTF-8.
-
-    UErrorCode status = U_ZERO_ERROR;
-
-    // 1. Get the normalizer singleton.
-    const UNormalizer2* norm = nullptr;
-    if (form_ == Form::NFC) {
-        norm = unorm2_getNFCInstance(&status);
-    } else {
-        norm = unorm2_getNFKCInstance(&status);
-    }
-    // NOLINTBEGIN(readability-implicit-bool-conversion) — U_FAILURE returns UBool (signed char).
-    if (U_FAILURE(status) || norm == nullptr) {
-        return text; // ICU data failure — pass through unchanged.
-    }
-
-    // 2. Convert UTF-8 -> UTF-16 (pre-flight to get required length).
-    int32_t u16_len = 0;
-    status = U_ZERO_ERROR;
-    u_strFromUTF8(nullptr, 0, &u16_len, text.c_str(), static_cast<int32_t>(text.size()), &status);
-    if (status != U_BUFFER_OVERFLOW_ERROR && U_FAILURE(status)) {
-        return text;
-    }
-    std::vector<UChar> u16(static_cast<size_t>(u16_len));
-    status = U_ZERO_ERROR;
-    u_strFromUTF8(
-        u16.data(), u16_len, nullptr, text.c_str(), static_cast<int32_t>(text.size()), &status);
-    if (U_FAILURE(status)) {
-        return text;
-    }
-
-    // 3. Normalize UTF-16 -> UTF-16 (pre-flight to get required length).
-    status = U_ZERO_ERROR;
-    int32_t norm16_len = unorm2_normalize(norm, u16.data(), u16_len, nullptr, 0, &status);
-    if (status != U_BUFFER_OVERFLOW_ERROR && U_FAILURE(status)) {
-        return text;
-    }
-    std::vector<UChar> norm16(static_cast<size_t>(norm16_len));
-    status = U_ZERO_ERROR;
-    unorm2_normalize(norm, u16.data(), u16_len, norm16.data(), norm16_len, &status);
-    if (U_FAILURE(status)) {
-        return text;
-    }
-
-    // 4. Convert UTF-16 -> UTF-8 (pre-flight to get required length).
-    int32_t u8_len = 0;
-    status = U_ZERO_ERROR;
-    u_strToUTF8(nullptr, 0, &u8_len, norm16.data(), norm16_len, &status);
-    if (status != U_BUFFER_OVERFLOW_ERROR && U_FAILURE(status)) {
-        return text;
-    }
-    std::string out(static_cast<size_t>(u8_len), '\0');
-    status = U_ZERO_ERROR;
-    u_strToUTF8(out.data(), u8_len, nullptr, norm16.data(), norm16_len, &status);
-    if (U_FAILURE(status)) {
-        return text;
-    }
-    // NOLINTEND(readability-implicit-bool-conversion)
-    return out;
-
-#else
-    // Non-Windows path: use ICU C++ API from vcpkg.
     UErrorCode status = U_ZERO_ERROR;
     const icu::Normalizer2* norm = nullptr;
     if (form_ == Form::NFC) {
@@ -625,18 +546,20 @@ std::string IcuNormalizer::normalize(const std::string& text) const {
         norm = icu::Normalizer2::getNFKCInstance(status);
     }
     if (U_FAILURE(status) || norm == nullptr) {
+        // ICU data failure — return input unchanged to avoid silent corruption.
         return text;
     }
+
     icu::UnicodeString u = icu::UnicodeString::fromUTF8(icu::StringPiece(text));
     status = U_ZERO_ERROR;
     icu::UnicodeString normalized = norm->normalize(u, status);
     if (U_FAILURE(status)) {
         return text;
     }
+
     std::string out;
     normalized.toUTF8String(out);
     return out;
-#endif
 }
 
 // --- Factory ---
