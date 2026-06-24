@@ -224,8 +224,8 @@ TEST(QA_GDB318_Encode, MaxLengthOneReturnsSingleToken) {
     HashTokenizer tok;
     auto tokens = tok.encode("hello", 1);
     ASSERT_EQ(tokens.size(), 1u);
-    // After truncation, the last token is always SEP.
-    EXPECT_EQ(tokens[0], 102);
+    // max_length=1 keeps CLS only (canonical CLS-first contract; SEP only when max_length>=2).
+    EXPECT_EQ(tokens[0], 101);
 }
 
 TEST(QA_GDB318_Encode, MaxLengthTwoOnlySpecialTokens) {
