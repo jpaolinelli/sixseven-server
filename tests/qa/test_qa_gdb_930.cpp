@@ -1,11 +1,11 @@
-/// test_qa_gdb_930.cpp — QA regression tests for GDB-930
+/// test_qa_gdb_930.cpp - QA regression tests for GDB-930
 ///
 /// Verifies that LockManager is correctly wired into the DML execution path:
 ///   AC1. Single-threaded INSERT/UPDATE/DELETE still works (locking is transparent).
 ///   AC2. Concurrent UPDATE same row: MVCC surfaced as write-write conflict at commit.
 ///   AC3. Deadlock between two transactions: exactly one victim aborted with clear error.
 ///   AC4. Lock release on ROLLBACK: a subsequent txn can lock the same row.
-///   AC5. TSan stress test (written; TSan verification DEFERRED — no local sanitizer).
+///   AC5. TSan stress test (written; TSan verification DEFERRED - no local sanitizer).
 
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/result.h"
@@ -67,7 +67,7 @@ protected:
 };
 
 // ---------------------------------------------------------------------------
-// AC1 — Single-threaded happy path: locking is transparent to lone transactions
+// AC1 - Single-threaded happy path: locking is transparent to lone transactions
 // ---------------------------------------------------------------------------
 
 TEST_F(GDB930EngineTest, SingleTxnInsertUpdateDeleteSucceeds) {
@@ -103,7 +103,7 @@ TEST_F(GDB930EngineTest, SingleTxnInsertUpdateDeleteSucceeds) {
 
 TEST_F(GDB930EngineTest, AutocommitDmlSucceeds) {
     exec_ok("CREATE TABLE t930b (id INT, val INT)");
-    // Autocommit DML (no BEGIN/COMMIT) must work — locking is implicit.
+    // Autocommit DML (no BEGIN/COMMIT) must work - locking is implicit.
     exec_ok("INSERT INTO t930b VALUES (42, 7)");
     exec_ok("UPDATE t930b SET val = 8 WHERE id = 42");
     exec_ok("DELETE FROM t930b WHERE id = 42");
@@ -112,7 +112,7 @@ TEST_F(GDB930EngineTest, AutocommitDmlSucceeds) {
 }
 
 // ---------------------------------------------------------------------------
-// AC4 — Lock release on ROLLBACK: next txn can update the same row
+// AC4 - Lock release on ROLLBACK: next txn can update the same row
 // ---------------------------------------------------------------------------
 
 TEST_F(GDB930EngineTest, LockReleasedAfterRollback) {
@@ -139,7 +139,7 @@ TEST_F(GDB930EngineTest, LockReleasedAfterRollback) {
 // Direct LockManager tests (no QueryEngine, deterministic via sync primitives)
 // ---------------------------------------------------------------------------
 
-// AC2 — Row X lock blocks a second waiter until released.
+// AC2 - Row X lock blocks a second waiter until released.
 TEST(GDB930LockManager, RowLockBlocksSecondWriter) {
     LockManager lock_mgr(std::chrono::seconds(5));
 
@@ -153,7 +153,7 @@ TEST(GDB930LockManager, RowLockBlocksSecondWriter) {
     auto lr1 = lock_mgr.lock_row(t1, tbl, page, slot, LockMode::X);
     ASSERT_TRUE(lr1.has_value()) << lr1.error().message;
 
-    // T2 tries to acquire X in a background thread — must block.
+    // T2 tries to acquire X in a background thread - must block.
     std::atomic<bool> t2_started{false};
     std::atomic<bool> t2_acquired{false};
 
@@ -182,7 +182,7 @@ TEST(GDB930LockManager, RowLockBlocksSecondWriter) {
     lock_mgr.release_all(t2);
 }
 
-// AC4 (direct) — After release_all, next txn acquires immediately.
+// AC4 (direct) - After release_all, next txn acquires immediately.
 TEST(GDB930LockManager, LockAcquiredAfterRelease) {
     LockManager lock_mgr(std::chrono::seconds(5));
 
@@ -197,14 +197,14 @@ TEST(GDB930LockManager, LockAcquiredAfterRelease) {
 
     lock_mgr.release_all(t1); // simulates ROLLBACK
 
-    // T2 acquires immediately — no blocking.
+    // T2 acquires immediately - no blocking.
     auto lr2 = lock_mgr.lock_row(t2, tbl, page, slot, LockMode::X);
     ASSERT_TRUE(lr2.has_value()) << lr2.error().message;
 
     lock_mgr.release_all(t2);
 }
 
-// AC3 — Deadlock: T1 locks A then waits B; T2 locks B then waits A.
+// AC3 - Deadlock: T1 locks A then waits B; T2 locks B then waits A.
 //        Exactly one victim is aborted with StatusCode::DEADLOCK.
 TEST(GDB930LockManager, DeadlockDetectedExactlyOneVictim) {
     LockManager lock_mgr(std::chrono::seconds(10));
@@ -222,7 +222,7 @@ TEST(GDB930LockManager, DeadlockDetectedExactlyOneVictim) {
     auto lr_t2_b = lock_mgr.lock_row(t2, tbl, page_b, slot, LockMode::X);
     ASSERT_TRUE(lr_t2_b.has_value());
 
-    // Phase 2: cross-lock — deadlock forms.
+    // Phase 2: cross-lock - deadlock forms.
     std::atomic<int> success_count{0};
     std::atomic<int> deadlock_count{0};
 
@@ -250,7 +250,7 @@ TEST(GDB930LockManager, DeadlockDetectedExactlyOneVictim) {
     EXPECT_EQ(success_count.load(), 1) << "expected exactly one survivor";
 }
 
-// AC3 (timeout) — Lock wait timeout returns TXN_ABORTED.
+// AC3 (timeout) - Lock wait timeout returns TXN_ABORTED.
 TEST(GDB930LockManager, LockWaitTimeoutReturnsError) {
     LockManager lock_mgr(std::chrono::milliseconds(100));
 
@@ -283,7 +283,7 @@ TEST(GDB930LockManager, TableIxBlocksTableS) {
     auto lr1 = lock_mgr.lock_table(t1, tbl, LockMode::IX);
     ASSERT_TRUE(lr1.has_value());
 
-    // IX and S are incompatible — t2 should timeout.
+    // IX and S are incompatible - t2 should timeout.
     auto lr2 = lock_mgr.lock_table(t2, tbl, LockMode::S);
     ASSERT_FALSE(lr2.has_value());
 
@@ -315,7 +315,7 @@ TEST(GDB930LockManager, MultipleIxCompatible) {
 }
 
 // ---------------------------------------------------------------------------
-// AC5 — TSan stress test: N concurrent writers, overlapping rows.
+// AC5 - TSan stress test: N concurrent writers, overlapping rows.
 //        TSan verification: DEFERRED (no local ThreadSanitizer on Windows box).
 //        This test validates functional correctness: no hang, no crash, all
 //        threads join, accounting is consistent.
@@ -368,12 +368,12 @@ TEST(GDB930LockManager, MultiWriterStressNoHangNoCrash) {
     EXPECT_EQ(successes.load() + deadlocks.load() + timeouts.load(), kThreads)
         << "some threads did not finish";
 
-    // TSan verification: DEFERRED — no local ThreadSanitizer on this Windows box.
+    // TSan verification: DEFERRED - no local ThreadSanitizer on this Windows box.
     // The test confirms: no hang, no crash, deterministic join, correct accounting.
 }
 
 // ---------------------------------------------------------------------------
-// QA-ADV-1 — Lock-leak adversarial: implicit txn that fails mid-statement
+// QA-ADV-1 - Lock-leak adversarial: implicit txn that fails mid-statement
 //            (lock_table IX acquired then DML hits error path) must release
 //            all locks via abort so a subsequent writer is NOT blocked.
 //
@@ -393,7 +393,7 @@ TEST_F(GDB930EngineTest, LockLeakOnImplicitTxnFailure) {
     // is aborted and release_all() must fire.
     // We produce a type error by inserting a string into an INT column.
     auto bad = engine_->execute("INSERT INTO t930_leak VALUES ('not_a_number', 2)");
-    // Expect failure (type/parse error) — NOT a success.
+    // Expect failure (type/parse error) - NOT a success.
     EXPECT_FALSE(bad.has_value()) << "Expected INSERT to fail but it succeeded";
 
     // After the failed implicit txn the lock MUST be released.
@@ -402,7 +402,7 @@ TEST_F(GDB930EngineTest, LockLeakOnImplicitTxnFailure) {
     exec_ok("INSERT INTO t930_leak VALUES (2, 200)");
     auto elapsed = std::chrono::steady_clock::now() - t_start;
     EXPECT_LT(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count(), 2)
-        << "Lock held after implicit txn abort — potential lock leak";
+        << "Lock held after implicit txn abort - potential lock leak";
 
     // Data integrity: only original row + the successful second insert.
     auto sel = exec_ok("SELECT id FROM t930_leak ORDER BY id");
@@ -412,7 +412,7 @@ TEST_F(GDB930EngineTest, LockLeakOnImplicitTxnFailure) {
 }
 
 // ---------------------------------------------------------------------------
-// QA-ADV-2 — Self-no-deadlock: one txn updates the SAME row twice must not
+// QA-ADV-2 - Self-no-deadlock: one txn updates the SAME row twice must not
 //            block on its own X lock (same-txn re-acquire is idempotent).
 // ---------------------------------------------------------------------------
 
@@ -422,7 +422,7 @@ TEST_F(GDB930EngineTest, SelfTxnUpdateSameRowTwiceNoDeadlock) {
 
     exec_ok("BEGIN");
     exec_ok("UPDATE t930_self SET val = 10 WHERE id = 1");
-    // Second update to same row within same txn — must not deadlock.
+    // Second update to same row within same txn - must not deadlock.
     exec_ok("UPDATE t930_self SET val = 20 WHERE id = 1");
     exec_ok("COMMIT");
 
@@ -432,7 +432,7 @@ TEST_F(GDB930EngineTest, SelfTxnUpdateSameRowTwiceNoDeadlock) {
 }
 
 // ---------------------------------------------------------------------------
-// QA-ADV-3 — Multi-row single-txn UPDATE: lock many rows then commit;
+// QA-ADV-3 - Multi-row single-txn UPDATE: lock many rows then commit;
 //            all locks released (subsequent writer acquires all rows).
 // ---------------------------------------------------------------------------
 
@@ -462,7 +462,7 @@ TEST_F(GDB930EngineTest, MultiRowTxnLocksAllReleasedOnCommit) {
 }
 
 // ---------------------------------------------------------------------------
-// QA-ADV-4 — Same-txn DELETE after UPDATE: re-acquires X on same row without
+// QA-ADV-4 - Same-txn DELETE after UPDATE: re-acquires X on same row without
 //            deadlock. Verifies that upgrade/idempotent path works for DELETE.
 // ---------------------------------------------------------------------------
 
@@ -480,12 +480,12 @@ TEST_F(GDB930EngineTest, SelfTxnUpdateThenDeleteSameRowNoDeadlock) {
 }
 
 // ---------------------------------------------------------------------------
-// QA-ADV-5 — Cross-session contention via two concurrent QueryEngines.
+// QA-ADV-5 - Cross-session contention via two concurrent QueryEngines.
 //
 // We can't drive two sessions through a single QueryEngine because it is
 // single-threaded per session. Instead we use two separate QueryEngine
 // instances sharing the same LockManager (via separate TransactionManagers
-// that each hold their own LockManager — the isolation level here is at the
+// that each hold their own LockManager - the isolation level here is at the
 // LockManager level).
 //
 // For the engine-level cross-session path we verify the observable contract:
@@ -493,8 +493,8 @@ TEST_F(GDB930EngineTest, SelfTxnUpdateThenDeleteSameRowNoDeadlock) {
 // corruption (no lost update visible in MVCC terms) and without hanging.
 //
 // Latch protocol:
-//   T1: BEGIN → UPDATE row → latch T2 in → COMMIT → signal T2
-//   T2: waits for T1 latch → UPDATE same row → verify
+//   T1: BEGIN -> UPDATE row -> latch T2 in -> COMMIT -> signal T2
+//   T2: waits for T1 latch -> UPDATE same row -> verify
 // ---------------------------------------------------------------------------
 
 TEST_F(GDB930EngineTest, AutocommitTwoEnginesConcurrentUpdateSameRow) {
@@ -503,7 +503,7 @@ TEST_F(GDB930EngineTest, AutocommitTwoEnginesConcurrentUpdateSameRow) {
 
     // Build a second QueryEngine backed by the same catalog and storage.
     // Each engine has its own TransactionManager (and thus its own LockManager).
-    // They therefore do NOT share row locks — this test pins the "two
+    // They therefore do NOT share row locks - this test pins the "two
     // autocommit sessions, each with their own engine" behavior: they execute
     // serially via MVCC (the second writer will see TXN_CONFLICT at SI or
     // succeed at RC depending on isolation); crucially no hang and no crash.
@@ -536,7 +536,7 @@ TEST_F(GDB930EngineTest, AutocommitTwoEnginesConcurrentUpdateSameRow) {
     t1.join();
     t2.join();
 
-    EXPECT_TRUE(t2_done.load()) << "T2 did not complete — possible hang";
+    EXPECT_TRUE(t2_done.load()) << "T2 did not complete - possible hang";
     // Both engines share catalog storage. At RC: second writer succeeds and
     // overwrites. At SI: second writer may conflict. Either is valid. What is
     // NOT valid is a hang (join timeout) or a crash.
@@ -549,7 +549,7 @@ TEST_F(GDB930EngineTest, AutocommitTwoEnginesConcurrentUpdateSameRow) {
 }
 
 // ---------------------------------------------------------------------------
-// QA-ADV-6 — Direct LockManager: self-deadlock (one txn waits on itself)
+// QA-ADV-6 - Direct LockManager: self-deadlock (one txn waits on itself)
 //            must NOT deadlock-detect or hang; same-txn re-acquire is a no-op.
 // ---------------------------------------------------------------------------
 
@@ -565,7 +565,7 @@ TEST(GDB930LockManager, SameTxnReacquireXNoDeadlock) {
     auto lr1 = lock_mgr.lock_row(t1, tbl, page, slot, LockMode::X);
     ASSERT_TRUE(lr1.has_value()) << lr1.error().message;
 
-    // Re-acquire X on the same resource within the same txn — must not block.
+    // Re-acquire X on the same resource within the same txn - must not block.
     auto lr2 = lock_mgr.lock_row(t1, tbl, page, slot, LockMode::X);
     ASSERT_TRUE(lr2.has_value()) << "Same-txn X re-acquire should be idempotent, got: "
                                  << lr2.error().message;
@@ -574,7 +574,7 @@ TEST(GDB930LockManager, SameTxnReacquireXNoDeadlock) {
 }
 
 // ---------------------------------------------------------------------------
-// QA-ADV-7 — Deadlock victim is youngest txn: T1 < T2 (lower id = older).
+// QA-ADV-7 - Deadlock victim is youngest txn: T1 < T2 (lower id = older).
 //            T2 must be the victim; T1 must survive.
 // ---------------------------------------------------------------------------
 
@@ -630,7 +630,7 @@ TEST(GDB930LockManager, DeadlockYoungestIsVictim) {
 }
 
 // ---------------------------------------------------------------------------
-// QA-ADV-8 — No double-abort: after a deadlock, release_all on the aborted
+// QA-ADV-8 - No double-abort: after a deadlock, release_all on the aborted
 //            victim does NOT panic / segfault on already-empty queues.
 // ---------------------------------------------------------------------------
 
@@ -653,7 +653,7 @@ TEST(GDB930LockManager, DoubleReleaseAfterDeadlockIsHarmless) {
 
     std::thread th1([&]() {
         auto lr = lock_mgr.lock_row(t1, tbl, page_b, slot, LockMode::X);
-        // May succeed or be a victim — either way, release.
+        // May succeed or be a victim - either way, release.
         lock_mgr.release_all(t1);
         // Double-release must be harmless.
         lock_mgr.release_all(t1);
@@ -672,7 +672,7 @@ TEST(GDB930LockManager, DoubleReleaseAfterDeadlockIsHarmless) {
 }
 
 // ---------------------------------------------------------------------------
-// QA-ADV-9 — Autocommit sequential UPDATE from two separate QueryEngines.
+// QA-ADV-9 - Autocommit sequential UPDATE from two separate QueryEngines.
 //            Each engine owns its own TransactionManager and LockManager.
 //            They share the Catalog and StorageManager. Two sequential
 //            autocommit UPDATEs must produce a consistent final state.
