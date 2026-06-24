@@ -1,6 +1,7 @@
 #include "sixseven/parser/parser.h"
 
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -209,6 +210,32 @@ std::string unquote_string(std::string_view lexeme) {
 Result<int> safe_stoi(std::string_view s) {
     try {
         return ok(std::stoi(std::string(s)));
+    } catch (const std::out_of_range&) {
+        return make_error(StatusCode::PARSE_ERROR, "integer literal out of range");
+    } catch (const std::invalid_argument&) {
+        return make_error(StatusCode::PARSE_ERROR, "invalid integer literal");
+    }
+}
+
+/// Safe std::stoll wrapper that returns a Result instead of throwing.
+Result<int64_t> safe_stoll(std::string_view s) {
+    try {
+        return ok(static_cast<int64_t>(std::stoll(std::string(s))));
+    } catch (const std::out_of_range&) {
+        return make_error(StatusCode::PARSE_ERROR, "integer literal out of range");
+    } catch (const std::invalid_argument&) {
+        return make_error(StatusCode::PARSE_ERROR, "invalid integer literal");
+    }
+}
+
+/// Safe uint32 parse: wraps std::stoull and range-checks against UINT32_MAX.
+Result<uint32_t> safe_stou32(std::string_view s) {
+    try {
+        uint64_t v = std::stoull(std::string(s));
+        if (v > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
+            return make_error(StatusCode::PARSE_ERROR, "integer literal out of range");
+        }
+        return ok(static_cast<uint32_t>(v));
     } catch (const std::out_of_range&) {
         return make_error(StatusCode::PARSE_ERROR, "integer literal out of range");
     } catch (const std::invalid_argument&) {
@@ -2484,7 +2511,10 @@ Result<std::vector<PathElement>> Parser::parse_match_pattern() {
                 if (!min_tok)
                     return tl::unexpected(min_tok.error());
 
-                int32_t min_val = static_cast<int32_t>(std::stoll(std::string(min_tok->lexeme)));
+                auto min_v = safe_stoi(min_tok->lexeme);
+                if (!min_v)
+                    return tl::unexpected(min_v.error());
+                int32_t min_val = *min_v;
                 edge.min_hops = min_val;
 
                 if (match(TokenType::COMMA)) {
@@ -2497,8 +2527,10 @@ Result<std::vector<PathElement>> Parser::parse_match_pattern() {
                             expect(TokenType::INTEGER_LITERAL, "expected integer for max hops");
                         if (!max_tok)
                             return tl::unexpected(max_tok.error());
-                        edge.max_hops =
-                            static_cast<int32_t>(std::stoll(std::string(max_tok->lexeme)));
+                        auto max_v = safe_stoi(max_tok->lexeme);
+                        if (!max_v)
+                            return tl::unexpected(max_v.error());
+                        edge.max_hops = *max_v;
                     }
                 } else {
                     // {n} — exact hop count.
@@ -3008,7 +3040,10 @@ Result<StmtPtr> Parser::parse_backfill() {
         if (!check(TokenType::INTEGER_LITERAL)) {
             return error("expected integer after BATCH");
         }
-        stmt->batch_size = static_cast<uint32_t>(std::stoul(std::string(peek().lexeme)));
+        auto bv = safe_stou32(peek().lexeme);
+        if (!bv)
+            return tl::unexpected(bv.error());
+        stmt->batch_size = *bv;
         advance();
     }
 
@@ -3018,7 +3053,10 @@ Result<StmtPtr> Parser::parse_backfill() {
         if (!check(TokenType::INTEGER_LITERAL)) {
             return error("expected integer after RATE_LIMIT");
         }
-        stmt->rate_limit = static_cast<uint32_t>(std::stoul(std::string(peek().lexeme)));
+        auto rv = safe_stou32(peek().lexeme);
+        if (!rv)
+            return tl::unexpected(rv.error());
+        stmt->rate_limit = *rv;
         advance();
     }
 
@@ -3897,7 +3935,11 @@ Result<ExprPtr> Parser::parse_primary() {
                                     "expected PRECEDING or FOLLOWING after UNBOUNDED");
                             }
                         } else if (check(TokenType::INTEGER_LITERAL)) {
-                            offset = std::stoll(std::string(advance().lexeme));
+                            auto tok_lexeme = advance().lexeme;
+                            auto ov = safe_stoll(tok_lexeme);
+                            if (!ov)
+                                return tl::unexpected(ov.error());
+                            offset = *ov;
                             if (match(TokenType::PRECEDING)) {
                                 bound = AstFrameBound::N_PRECEDING;
                             } else if (match(TokenType::FOLLOWING)) {
