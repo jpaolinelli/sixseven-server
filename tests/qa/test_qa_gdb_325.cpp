@@ -312,7 +312,8 @@ TEST(QA_GDB325_TextNormalizer, FactoryCreateNormalizerAllTypes) {
     for (auto type : {NormalizerType::NONE,
                       NormalizerType::LOWERCASE,
                       NormalizerType::BERT,
-                      NormalizerType::NFC}) {
+                      NormalizerType::NFC,
+                      NormalizerType::NFKC}) {
         TokenizerConfig config;
         config.normalizer = type;
         auto norm = create_normalizer(config);

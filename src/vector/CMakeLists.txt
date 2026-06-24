@@ -1,6 +1,7 @@
 # sixseven::vector sources
 find_package(httplib CONFIG REQUIRED)
 find_package(onnxruntime CONFIG REQUIRED)
+find_package(ICU REQUIRED COMPONENTS uc)
 
 add_library(sixseven_vector STATIC
     backfill_manager.cpp
@@ -23,4 +24,4 @@ add_library(sixseven_vector STATIC
     provider_registry.cpp
 )
 target_include_directories(sixseven_vector PUBLIC ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(sixseven_vector PUBLIC sixseven_common sixseven_storage sixseven_catalog httplib::httplib onnxruntime::onnxruntime)
+target_link_libraries(sixseven_vector PUBLIC sixseven_common sixseven_storage sixseven_catalog httplib::httplib onnxruntime::onnxruntime ICU::uc)

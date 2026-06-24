@@ -2,6 +2,10 @@
 
 #include "sixseven/vector/tokenizer.h"
 
+#include <unicode/normalizer2.h>
+#include <unicode/unistr.h>
+#include <unicode/utypes.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
@@ -526,21 +530,54 @@ std::string NullNormalizer::normalize(const std::string& text) const {
     return text;
 }
 
+// --- IcuNormalizer ---
+
+IcuNormalizer::IcuNormalizer(Form form) : form_(form) {}
+
+std::string IcuNormalizer::normalize(const std::string& text) const {
+    if (text.empty()) {
+        return text;
+    }
+    UErrorCode status = U_ZERO_ERROR;
+    const icu::Normalizer2* norm = nullptr;
+    if (form_ == Form::NFC) {
+        norm = icu::Normalizer2::getNFCInstance(status);
+    } else {
+        norm = icu::Normalizer2::getNFKCInstance(status);
+    }
+    if (U_FAILURE(status) || norm == nullptr) {
+        // ICU data failure — return input unchanged to avoid silent corruption.
+        return text;
+    }
+
+    icu::UnicodeString u = icu::UnicodeString::fromUTF8(icu::StringPiece(text));
+    status = U_ZERO_ERROR;
+    icu::UnicodeString normalized = norm->normalize(u, status);
+    if (U_FAILURE(status)) {
+        return text;
+    }
+
+    std::string out;
+    normalized.toUTF8String(out);
+    return out;
+}
+
 // --- Factory ---
 
 std::unique_ptr<TextNormalizer> create_normalizer(const TokenizerConfig& config) {
-    // NOLINTBEGIN(bugprone-branch-clone)
     switch (config.normalizer) {
     case NormalizerType::BERT:
         return std::make_unique<BertNormalizer>(config.normalizer_lowercase,
                                                 config.normalizer_strip_accents);
     case NormalizerType::LOWERCASE:
         return std::make_unique<LowercaseNormalizer>();
-    case NormalizerType::NONE:
     case NormalizerType::NFC:
+        return std::make_unique<IcuNormalizer>(IcuNormalizer::Form::NFC);
+    case NormalizerType::NFKC:
+        return std::make_unique<IcuNormalizer>(IcuNormalizer::Form::NFKC);
+    case NormalizerType::NONE:
         return std::make_unique<NullNormalizer>();
     }
-    // NOLINTEND(bugprone-branch-clone)
     return std::make_unique<NullNormalizer>(); // Unreachable, satisfies compiler.
 }
 

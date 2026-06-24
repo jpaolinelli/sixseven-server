@@ -314,13 +314,15 @@ TEST(CreateNormalizer, NoneType) {
     EXPECT_EQ(norm->normalize("Hello World"), "Hello World");
 }
 
-TEST(CreateNormalizer, NfcFallsBackToNull) {
+TEST(CreateNormalizer, NfcIsIcuBacked) {
     TokenizerConfig config;
     config.normalizer = NormalizerType::NFC;
 
     auto norm = create_normalizer(config);
     ASSERT_NE(norm, nullptr);
-    // NFC not implemented — pass-through.
+    // NFC composes e + combining acute (U+0301) -> U+00E9.
+    EXPECT_EQ(norm->normalize("e\xCC\x81"), "\xC3\xA9");
+    // ASCII pass-through unchanged.
     EXPECT_EQ(norm->normalize("Hello World"), "Hello World");
 }
 

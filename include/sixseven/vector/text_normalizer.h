@@ -58,13 +58,32 @@ public:
     [[nodiscard]] std::string normalize(const std::string& text) const override;
 };
 
+/// ICU-backed Unicode normalizer supporting NFC and NFKC forms.
+///
+/// Uses icu::Normalizer2 singletons (getNFCInstance / getNFKCInstance).
+/// The singleton pointer is owned by ICU and must not be deleted.
+class IcuNormalizer : public TextNormalizer {
+public:
+    /// Unicode normalization form.
+    enum class Form { NFC, NFKC };
+
+    /// Construct an IcuNormalizer for the given normalization form.
+    explicit IcuNormalizer(Form form);
+
+    [[nodiscard]] std::string normalize(const std::string& text) const override;
+
+private:
+    Form form_;
+};
+
 /// Create a normalizer from a TokenizerConfig.
 ///
 /// Routes on NormalizerType:
 ///   NONE      -> NullNormalizer
 ///   LOWERCASE -> LowercaseNormalizer
 ///   BERT      -> BertNormalizer (with config's lowercase/strip_accents flags)
-///   NFC       -> NullNormalizer (NFC not yet implemented)
+///   NFC       -> IcuNormalizer(NFC)  — ICU canonical composition
+///   NFKC      -> IcuNormalizer(NFKC) — ICU compatibility composition
 [[nodiscard]] std::unique_ptr<TextNormalizer> create_normalizer(const TokenizerConfig& config);
 
 } // namespace sixseven

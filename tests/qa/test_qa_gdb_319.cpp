@@ -426,7 +426,7 @@ TEST(QA_GDB319_Normalizer, NFKCNormalizerType) {
                       "nfkc");
     auto result = load_tokenizer_config(file.path());
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ(result->normalizer, NormalizerType::NFC);
+    EXPECT_EQ(result->normalizer, NormalizerType::NFKC);
 }
 
 TEST(QA_GDB319_Normalizer, UnknownNormalizerTypeDefaultsNone) {

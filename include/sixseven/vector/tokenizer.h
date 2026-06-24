@@ -20,7 +20,8 @@ enum class TokenizerModelType {
 enum class NormalizerType {
     NONE,      ///< No normalization.
     LOWERCASE, ///< Lowercase all characters.
-    NFC,       ///< Unicode NFC normalization.
+    NFC,       ///< Unicode NFC normalization (ICU-backed canonical composition).
+    NFKC,      ///< Unicode NFKC normalization (ICU-backed compatibility composition).
     BERT,      ///< BERT normalization (lowercase, accent strip, cleanup, CJK spacing).
 };
 
