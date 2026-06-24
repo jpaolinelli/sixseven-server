@@ -40,21 +40,19 @@ TEST(QA_Catalog, CreateTableEmptyName) {
     Catalog catalog;
     init_test_catalog(catalog);
     auto result = catalog.create_table(default_database_id, make_test_schema(""));
-    // Empty name should ideally be rejected, but if it succeeds,
-    // verify it's retrievable.
-    if (result.has_value()) {
-        auto get = catalog.get_table(default_database_id, "");
-        EXPECT_TRUE(get.has_value());
-    }
+    // Current behavior: empty table name IS accepted (no validation).
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto get = catalog.get_table(default_database_id, "");
+    EXPECT_TRUE(get.has_value());
 }
 
 TEST(QA_Catalog, CreateDatabaseEmptyName) {
     Catalog catalog;
     auto result = catalog.create_database("");
-    if (result.has_value()) {
-        auto get = catalog.get_database("");
-        EXPECT_TRUE(get.has_value());
-    }
+    // Current behavior: empty database name IS accepted (no validation).
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto get = catalog.get_database("");
+    EXPECT_TRUE(get.has_value());
 }
 
 TEST(QA_Catalog, CreateIndexEmptyName) {
@@ -70,10 +68,10 @@ TEST(QA_Catalog, CreateIndexEmptyName) {
     def.columns = "id";
 
     auto result = catalog.create_index(def);
-    if (result.has_value()) {
-        auto get = catalog.get_index(default_database_id, "");
-        EXPECT_TRUE(get.has_value());
-    }
+    // Current behavior: empty index name IS accepted (no validation).
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto get = catalog.get_index(default_database_id, "");
+    EXPECT_TRUE(get.has_value());
 }
 
 TEST(QA_Catalog, CreateEdgeTypeEmptyName) {
@@ -90,10 +88,10 @@ TEST(QA_Catalog, CreateEdgeTypeEmptyName) {
     def.target_table_id = *t2;
 
     auto result = catalog.create_edge_type(default_database_id, def);
-    if (result.has_value()) {
-        auto get = catalog.get_edge_type(default_database_id, "");
-        EXPECT_TRUE(get.has_value());
-    }
+    // Current behavior: empty edge type name IS accepted (no validation).
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto get = catalog.get_edge_type(default_database_id, "");
+    EXPECT_TRUE(get.has_value());
 }
 
 // =============================================================================
@@ -108,12 +106,11 @@ TEST(QA_Catalog, CreateTableZeroColumns) {
     // No columns at all.
 
     auto result = catalog.create_table(default_database_id, schema);
-    // A zero-column table is questionable but may be allowed.
-    if (result.has_value()) {
-        auto get = catalog.get_table(default_database_id, "empty_cols");
-        ASSERT_TRUE(get.has_value());
-        EXPECT_EQ(get->columns.size(), 0u);
-    }
+    // Current behavior: zero-column table IS accepted (no minimum column validation).
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto get = catalog.get_table(default_database_id, "empty_cols");
+    ASSERT_TRUE(get.has_value());
+    EXPECT_EQ(get->columns.size(), 0u);
 }
 
 // =============================================================================
@@ -134,12 +131,11 @@ TEST(QA_Catalog, RegisterEmbeddingColumnZeroDimension) {
     def.provider = "test";
 
     auto result = catalog.register_embedding_column(def);
-    // Documenting current behavior: no dimension validation.
-    if (result.has_value()) {
-        auto embs = catalog.list_embedding_columns(*tid);
-        ASSERT_EQ(embs.size(), 1u);
-        EXPECT_EQ(embs[0].dimension, 0);
-    }
+    // Current behavior: zero dimension IS accepted (no dimension validation).
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto embs = catalog.list_embedding_columns(*tid);
+    ASSERT_EQ(embs.size(), 1u);
+    EXPECT_EQ(embs[0].dimension, 0);
 }
 
 TEST(QA_Catalog, RegisterEmbeddingColumnNegativeDimension) {
@@ -156,11 +152,11 @@ TEST(QA_Catalog, RegisterEmbeddingColumnNegativeDimension) {
     def.provider = "test";
 
     auto result = catalog.register_embedding_column(def);
-    if (result.has_value()) {
-        auto embs = catalog.list_embedding_columns(*tid);
-        ASSERT_EQ(embs.size(), 1u);
-        EXPECT_EQ(embs[0].dimension, -1);
-    }
+    // Current behavior: negative dimension IS accepted (no dimension validation).
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto embs = catalog.list_embedding_columns(*tid);
+    ASSERT_EQ(embs.size(), 1u);
+    EXPECT_EQ(embs[0].dimension, -1);
 }
 
 TEST(QA_Catalog, RegisterEmbeddingColumnInvalidColumnId) {
@@ -177,12 +173,12 @@ TEST(QA_Catalog, RegisterEmbeddingColumnInvalidColumnId) {
     def.provider = "test";
 
     auto result = catalog.register_embedding_column(def);
-    // Documenting: no column_id validation against table schema.
-    if (result.has_value()) {
-        auto embs = catalog.list_embedding_columns(*tid);
-        ASSERT_EQ(embs.size(), 1u);
-        EXPECT_EQ(embs[0].column_id, 999);
-    }
+    // Current behavior: out-of-range column_id IS accepted (no column_id validation against
+    // schema).
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto embs = catalog.list_embedding_columns(*tid);
+    ASSERT_EQ(embs.size(), 1u);
+    EXPECT_EQ(embs[0].column_id, 999);
 }
 
 // =============================================================================
@@ -202,12 +198,11 @@ TEST(QA_Catalog, CreateIndexWithNonexistentColumns) {
     def.columns = "nonexistent_column"; // Column doesn't exist.
 
     auto result = catalog.create_index(def);
-    // Documenting: no column validation.
-    if (result.has_value()) {
-        auto get = catalog.get_index(default_database_id, "idx_bogus");
-        ASSERT_TRUE(get.has_value());
-        EXPECT_EQ(get->columns, "nonexistent_column");
-    }
+    // Current behavior: nonexistent column name IS accepted (no column validation).
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto get = catalog.get_index(default_database_id, "idx_bogus");
+    ASSERT_TRUE(get.has_value());
+    EXPECT_EQ(get->columns, "nonexistent_column");
 }
 
 TEST(QA_Catalog, CreateIndexWithEmptyColumns) {
@@ -223,12 +218,11 @@ TEST(QA_Catalog, CreateIndexWithEmptyColumns) {
     def.columns = ""; // No columns specified.
 
     auto result = catalog.create_index(def);
-    // Documenting: no empty column validation.
-    if (result.has_value()) {
-        auto get = catalog.get_index(default_database_id, "idx_empty_cols");
-        ASSERT_TRUE(get.has_value());
-        EXPECT_EQ(get->columns, "");
-    }
+    // Current behavior: empty columns string IS accepted (no column list validation).
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto get = catalog.get_index(default_database_id, "idx_empty_cols");
+    ASSERT_TRUE(get.has_value());
+    EXPECT_EQ(get->columns, "");
 }
 
 // =============================================================================
@@ -468,12 +462,11 @@ TEST(QA_Catalog, CreateTableVeryLongName) {
     std::string long_name(10000, 'x');
 
     auto result = catalog.create_table(default_database_id, make_test_schema(long_name));
-    // Should succeed (no length limit enforced).
-    if (result.has_value()) {
-        auto get = catalog.get_table(default_database_id, long_name);
-        ASSERT_TRUE(get.has_value());
-        EXPECT_EQ(get->name, long_name);
-    }
+    // Current behavior: very long table name (10000 chars) IS accepted (no length limit).
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto get = catalog.get_table(default_database_id, long_name);
+    ASSERT_TRUE(get.has_value());
+    EXPECT_EQ(get->name, long_name);
 }
 
 // =============================================================================
@@ -557,10 +550,10 @@ TEST(QA_Catalog, RegisterEmbeddingProviderEmptyName) {
     config.model = "test";
 
     auto result = catalog.register_embedding_provider(config);
-    if (result.has_value()) {
-        auto get = catalog.get_embedding_provider("");
-        EXPECT_TRUE(get.has_value());
-    }
+    // Current behavior: empty provider name IS accepted (no validation).
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    auto get = catalog.get_embedding_provider("");
+    EXPECT_TRUE(get.has_value());
 }
 
 TEST(QA_Catalog, RemoveEmbeddingProviderNotFound) {
