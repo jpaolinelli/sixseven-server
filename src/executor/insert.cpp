@@ -360,7 +360,7 @@ void InsertOperator::enqueue_embedding_jobs(const RID& rid, const std::vector<Va
 }
 
 Result<void> InsertOperator::maintain_secondary_indexes(const RID& rid,
-                                                         const std::vector<Value>& values) {
+                                                        const std::vector<Value>& values) {
     for (const auto& target : btree_targets_) {
         if (target.index == nullptr) {
             continue;

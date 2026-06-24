@@ -79,8 +79,8 @@ protected:
 
     void run_bootstrap() {
         Config cfg = Config::load_defaults();
-        auto r = SystemBootstrap::bootstrap(*engine_, *catalog_, *storage_, *persistence_, cfg,
-                                            data_dir_);
+        auto r = SystemBootstrap::bootstrap(
+            *engine_, *catalog_, *storage_, *persistence_, cfg, data_dir_);
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 
@@ -99,8 +99,8 @@ protected:
 
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
-        EXPECT_TRUE(result.has_value()) << "[SQL] " << sql << "\n[ERR] "
-                                        << (result ? "" : result.error().message);
+        EXPECT_TRUE(result.has_value())
+            << "[SQL] " << sql << "\n[ERR] " << (result ? "" : result.error().message);
         return result ? std::move(*result) : QueryResult{};
     }
 
