@@ -38,6 +38,13 @@ Result<void> BackfillManager::start(const BackfillStmt& stmt, database_id_t db_i
         }
     }
 
+    // Prune any finished (not running) jobs for this table so that status()
+    // and all_statuses() reflect only the current run, not stale prior runs.
+    // The erased jobs are guaranteed not running (the check above would have
+    // returned early otherwise), so their jthreads have already completed and
+    // joining on destruction is safe.
+    std::erase_if(jobs_, [&](const auto& j) { return j->table_name == stmt.table_name; });
+
     // Validate the table exists and has embedding columns.
     auto table_schema = catalog_.get_table(db_id, stmt.table_name);
     if (!table_schema) {
