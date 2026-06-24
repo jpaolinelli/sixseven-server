@@ -60,8 +60,10 @@ public:
 
 /// ICU-backed Unicode normalizer supporting NFC and NFKC forms.
 ///
-/// Uses icu::Normalizer2 singletons (getNFCInstance / getNFKCInstance).
-/// The singleton pointer is owned by ICU and must not be deleted.
+/// On Windows uses the Windows SDK ICU C API (unorm2_getNFCInstance /
+/// unorm2_getNFKCInstance) with a UTF-8 <-> UTF-16 round-trip.
+/// On other platforms uses the full ICU C++ API (icu::Normalizer2 singletons).
+/// In both cases the normalizer instance is owned by the ICU runtime.
 class IcuNormalizer : public TextNormalizer {
 public:
     /// Unicode normalization form.

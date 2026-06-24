@@ -121,7 +121,7 @@ TEST(GDB928_Distinction, FiLigatureDistinguishesNFCFromNFKC) {
     IcuNormalizer nfkc(IcuNormalizer::Form::NFKC);
     const std::string fi_ligature = "\xEF\xAC\x81";
     EXPECT_EQ(nfc.normalize(fi_ligature), fi_ligature); // NFC preserves
-    EXPECT_EQ(nfkc.normalize(fi_ligature), "fi");        // NFKC decomposes
+    EXPECT_EQ(nfkc.normalize(fi_ligature), "fi");       // NFKC decomposes
 }
 
 // ===========================================================================

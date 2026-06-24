@@ -35,9 +35,6 @@
     {
       "name": "onnxruntime",
       "version>=": "1.23.2"
-    },
-    {
-      "name": "icu"
     }
   ]
 }
