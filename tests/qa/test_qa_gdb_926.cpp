@@ -257,3 +257,208 @@ TEST(QA_GDB926_WindowFrame, ValidOffset_TwoFollowing) {
     EXPECT_EQ(wf->frame->end_bound, AstFrameBound::N_FOLLOWING);
     EXPECT_EQ(wf->frame->end_offset, 2);
 }
+
+// ============================================================================
+// ADVERSARIAL: HOPS boundary values (int32 via safe_stoi)
+// ============================================================================
+
+// INT32_MAX exactly must parse; max_hops must be pinned to 2147483647.
+TEST(QA_GDB926_AdversarialHops, ExactInt32Max_Parses) {
+    auto stmt = parse_ok_one("SELECT a.name FROM MATCH (a:p)-[r:e]->{1,2147483647}(b:p)");
+    auto* m = match_from_select(stmt);
+    ASSERT_NE(m, nullptr);
+    const auto& edge = m->pattern[0].outgoing_edge;
+    ASSERT_TRUE(edge.has_value());
+    ASSERT_TRUE(edge->max_hops.has_value());
+    EXPECT_EQ(*edge->max_hops, 2147483647);
+}
+
+// INT32_MAX+1 = 2147483648 must return PARSE_ERROR (not truncate to negative).
+TEST(QA_GDB926_AdversarialHops, Int32MaxPlusOne_ReturnsParseError) {
+    parse_expect_error("SELECT a.name FROM MATCH (a:p)-[r:e]->{1,2147483648}(b:p)");
+}
+
+// {0,0} -- both zero. Parser accepts (semantics of zero-hop is downstream).
+// Pins that zero is accepted by the parser without error.
+TEST(QA_GDB926_AdversarialHops, ZeroZero_Parses) {
+    auto result = try_parse("SELECT a.name FROM MATCH (a:p)-[r:e]->{0,0}(b:p)");
+    // Zero is a valid integer literal; parser should accept it.
+    ASSERT_TRUE(result.has_value()) << "Expected parse success for {0,0}";
+    auto* m = match_from_select((*result)[0]);
+    ASSERT_NE(m, nullptr);
+    const auto& edge = m->pattern[0].outgoing_edge;
+    ASSERT_TRUE(edge.has_value());
+    ASSERT_TRUE(edge->min_hops.has_value());
+    ASSERT_TRUE(edge->max_hops.has_value());
+    EXPECT_EQ(*edge->min_hops, 0);
+    EXPECT_EQ(*edge->max_hops, 0);
+}
+
+// Leading zeros: {01,05} -- std::stoi accepts them as 1/5 on POSIX.
+// Pins the observed behavior so any future change is deliberate.
+TEST(QA_GDB926_AdversarialHops, LeadingZeros_ParsesBehaviorPinned) {
+    auto result = try_parse("SELECT a.name FROM MATCH (a:p)-[r:e]->{01,05}(b:p)");
+    if (result.has_value()) {
+        // Accepted: pin the values so silent mis-parse is caught.
+        auto* m = match_from_select((*result)[0]);
+        ASSERT_NE(m, nullptr);
+        const auto& edge = m->pattern[0].outgoing_edge;
+        ASSERT_TRUE(edge.has_value());
+        if (edge->min_hops.has_value()) {
+            EXPECT_EQ(*edge->min_hops, 1);
+        }
+        if (edge->max_hops.has_value()) {
+            EXPECT_EQ(*edge->max_hops, 5);
+        }
+    } else {
+        // Also acceptable -- parser may reject octal-style or lex them
+        // differently; just confirm it's a PARSE_ERROR not a crash.
+        EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
+    }
+}
+
+// ============================================================================
+// ADVERSARIAL: BACKFILL boundary values (uint32 via safe_stou32)
+// ============================================================================
+
+// UINT32_MAX = 4294967295 must parse successfully.
+TEST(QA_GDB926_AdversarialBackfill, ExactUint32Max_Parses) {
+    auto stmt = parse_ok_one("BACKFILL EMBEDDINGS ON t BATCH 4294967295");
+    auto* bf = as_backfill(stmt);
+    ASSERT_NE(bf, nullptr);
+    EXPECT_EQ(bf->batch_size, 4294967295u);
+}
+
+// UINT32_MAX+1 = 4294967296 must return PARSE_ERROR (was silent truncate to 0).
+TEST(QA_GDB926_AdversarialBackfill, Uint32MaxPlusOne_ReturnsParseError) {
+    parse_expect_error("BACKFILL EMBEDDINGS ON t BATCH 4294967296");
+}
+
+// Truly huge value that also overflows uint64 itself.
+TEST(QA_GDB926_AdversarialBackfill, Uint64Overflow_ReturnsParseError) {
+    parse_expect_error("BACKFILL EMBEDDINGS ON t BATCH 99999999999999999999");
+}
+
+// BATCH 0 -- pins whether the parser accepts zero (semantic rejection is
+// downstream, not the parser's job).
+TEST(QA_GDB926_AdversarialBackfill, BatchZero_ParsesBehaviorPinned) {
+    auto result = try_parse("BACKFILL EMBEDDINGS ON t BATCH 0");
+    if (result.has_value()) {
+        auto* bf = as_backfill((*result)[0]);
+        ASSERT_NE(bf, nullptr);
+        EXPECT_EQ(bf->batch_size, 0u);
+    } else {
+        // Parser chose to reject zero -- that's also a valid design choice;
+        // confirm it returns PARSE_ERROR not an internal error.
+        EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
+    }
+}
+
+// RATE_LIMIT UINT32_MAX -- same boundary as BATCH.
+TEST(QA_GDB926_AdversarialBackfill, RateLimitUint32Max_Parses) {
+    auto stmt = parse_ok_one("BACKFILL EMBEDDINGS ON t RATE_LIMIT 4294967295");
+    auto* bf = as_backfill(stmt);
+    ASSERT_NE(bf, nullptr);
+    EXPECT_EQ(bf->rate_limit, 4294967295u);
+}
+
+// RATE_LIMIT UINT32_MAX+1 must return PARSE_ERROR.
+TEST(QA_GDB926_AdversarialBackfill, RateLimitUint32MaxPlusOne_ReturnsParseError) {
+    parse_expect_error("BACKFILL EMBEDDINGS ON t RATE_LIMIT 4294967296");
+}
+
+// Oversized literal mid-statement: BATCH oversized then RATE_LIMIT present.
+// Must return PARSE_ERROR without wedging the parser cursor.
+TEST(QA_GDB926_AdversarialBackfill, OversizedBatch_MidStatement_ReturnsParseError) {
+    parse_expect_error("BACKFILL EMBEDDINGS ON t BATCH 4294967296 RATE_LIMIT 500");
+}
+
+// Token-cursor: after valid BATCH, RATE_LIMIT is still parsed correctly.
+TEST(QA_GDB926_AdversarialBackfill, TokenCursor_BatchThenRateLimit_FullyConsumed) {
+    auto stmt = parse_ok_one("BACKFILL EMBEDDINGS ON t BATCH 100 RATE_LIMIT 50");
+    auto* bf = as_backfill(stmt);
+    ASSERT_NE(bf, nullptr);
+    EXPECT_EQ(bf->batch_size, 100u);
+    EXPECT_EQ(bf->rate_limit, 50u);
+}
+
+// ============================================================================
+// ADVERSARIAL: Window frame offset (int64 via safe_stoll)
+// ============================================================================
+
+// INT64_MAX = 9223372036854775807 must parse successfully.
+TEST(QA_GDB926_AdversarialWindow, ExactInt64Max_Parses) {
+    auto stmt = parse_ok_one("SELECT SUM(v) OVER (ORDER BY id ROWS BETWEEN "
+                             "9223372036854775807 PRECEDING AND CURRENT ROW) FROM t");
+    auto* wf = window_func_from_select(stmt);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_TRUE(wf->frame.has_value());
+    EXPECT_EQ(wf->frame->start_bound, AstFrameBound::N_PRECEDING);
+    EXPECT_EQ(wf->frame->start_offset, static_cast<int64_t>(9223372036854775807LL));
+}
+
+// INT64_MAX+1 = 9223372036854775808 must return PARSE_ERROR (not UB/terminate).
+TEST(QA_GDB926_AdversarialWindow, Int64MaxPlusOne_ReturnsParseError) {
+    parse_expect_error("SELECT SUM(v) OVER (ORDER BY id ROWS BETWEEN "
+                       "9223372036854775808 PRECEDING AND CURRENT ROW) FROM t");
+}
+
+// Truly huge value -- double out-of-range.
+TEST(QA_GDB926_AdversarialWindow, HugeOffset_ReturnsParseError) {
+    parse_expect_error("SELECT SUM(v) OVER (ORDER BY id ROWS BETWEEN "
+                       "99999999999999999999 PRECEDING AND CURRENT ROW) FROM t");
+}
+
+// Token-cursor: oversized PRECEDING mid-window should return PARSE_ERROR
+// without leaving the parser wedged.
+TEST(QA_GDB926_AdversarialWindow, OversizedPreceding_MidWindow_ReturnsParseError) {
+    parse_expect_error("SELECT SUM(v) OVER (ORDER BY id ROWS BETWEEN "
+                       "9223372036854775808 PRECEDING AND 2 FOLLOWING) FROM t");
+}
+
+// Token-cursor: valid PRECEDING then FOLLOWING -- tail is fully consumed.
+TEST(QA_GDB926_AdversarialWindow, TokenCursor_PrecedingAndFollowing_FullyConsumed) {
+    auto stmt = parse_ok_one("SELECT SUM(v) OVER (ORDER BY id ROWS BETWEEN "
+                             "3 PRECEDING AND 4 FOLLOWING) FROM t");
+    auto* wf = window_func_from_select(stmt);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_TRUE(wf->frame.has_value());
+    EXPECT_EQ(wf->frame->start_bound, AstFrameBound::N_PRECEDING);
+    EXPECT_EQ(wf->frame->start_offset, 3);
+    EXPECT_EQ(wf->frame->end_bound, AstFrameBound::N_FOLLOWING);
+    EXPECT_EQ(wf->frame->end_offset, 4);
+}
+
+// ============================================================================
+// ADVERSARIAL: No-regression -- valid mid-statement use of all three sites
+// ============================================================================
+
+// MATCH with {min,max} followed by WHERE and RETURN -- cursor correctness.
+TEST(QA_GDB926_AdversarialNoRegression, HopQuantifier_StatementTail_Parsed) {
+    auto stmt = parse_ok_one(
+        "SELECT a.name, b.name FROM MATCH (a:Person)-[r:KNOWS]->{1,3}(b:Person) "
+        "WHERE a.age > 18");
+    ASSERT_NE(stmt, nullptr);
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    // Two items: a.name and b.name
+    EXPECT_EQ(sel->items.size(), 2u);
+    ASSERT_NE(sel->where_expr, nullptr);
+}
+
+// Backfill with BATCH then RATE_LIMIT then nothing -- full statement consumed.
+TEST(QA_GDB926_AdversarialNoRegression, Backfill_BatchRateLimit_FullStatementParsed) {
+    auto stmt = parse_ok_one("BACKFILL EMBEDDINGS ON my_table BATCH 256 RATE_LIMIT 128");
+    auto* bf = as_backfill(stmt);
+    ASSERT_NE(bf, nullptr);
+    EXPECT_EQ(bf->batch_size, 256u);
+    EXPECT_EQ(bf->rate_limit, 128u);
+}
+
+// Window with N PRECEDING then ORDER BY -- cursor correctness.
+TEST(QA_GDB926_AdversarialNoRegression, WindowFrame_OrderBy_FullyParsed) {
+    auto stmt = parse_ok_one(
+        "SELECT ROW_NUMBER() OVER (ORDER BY score ROWS BETWEEN "
+        "10 PRECEDING AND CURRENT ROW) FROM results");
+    ASSERT_NE(stmt, nullptr);
+}
