@@ -26,9 +26,9 @@ namespace {
 // Special token constants (HashTokenizer defaults)
 // ---------------------------------------------------------------------------
 
-constexpr int64_t HASH_PAD  = 0;
-constexpr int64_t HASH_CLS  = 101;
-constexpr int64_t HASH_SEP  = 102;
+constexpr int64_t HASH_PAD = 0;
+constexpr int64_t HASH_CLS = 101;
+constexpr int64_t HASH_SEP = 102;
 
 // ---------------------------------------------------------------------------
 // WordPiece minimal config (same vocab pattern as gdb_322 tests)
@@ -37,15 +37,15 @@ constexpr int64_t HASH_SEP  = 102;
 TokenizerConfig make_wordpiece_config() {
     TokenizerConfig cfg;
     cfg.vocab = {
-        {"[PAD]",   0},
+        {"[PAD]", 0},
         {"[UNK]", 100},
         {"[CLS]", 101},
         {"[SEP]", 102},
-        {"hello",  200},
-        {"world",  201},
-        {"foo",    202},
-        {"bar",    203},
-        {"a",      204},
+        {"hello", 200},
+        {"world", 201},
+        {"foo", 202},
+        {"bar", 203},
+        {"a", 204},
     };
     cfg.special_tokens = {.pad = 0, .unk = 100, .cls = 101, .sep = 102, .mask = 103};
     cfg.model_type = TokenizerModelType::WORDPIECE;
@@ -66,10 +66,18 @@ const std::vector<std::string> GDB933_BPE_MERGES = {
 };
 
 const std::unordered_map<std::string, int64_t> GDB933_BPE_VOCAB = {
-    {"h", 400}, {"e", 401}, {"l", 402}, {"o", 403},
-    {"w", 404}, {"r", 405}, {"d", 406},
+    {"h", 400},
+    {"e", 401},
+    {"l", 402},
+    {"o", 403},
+    {"w", 404},
+    {"r", 405},
+    {"d", 406},
     {"\xC4\xA0", 407},
-    {"he", 500}, {"hel", 501}, {"hell", 502}, {"hello", 503},
+    {"he", 500},
+    {"hel", 501},
+    {"hell", 502},
+    {"hello", 503},
 };
 
 TokenizerConfig make_bpe_config() {
@@ -148,8 +156,7 @@ TEST(QA_GDB933_BehaviorPin, HashTokenizer_N10_PaddingAfterSEP) {
 TEST(QA_GDB933_Regression, HashTokenizer_N2_IsIdempotentAcrossInputs) {
     HashTokenizer tok;
     // Different inputs, same structure at N=2.
-    for (const auto& text : {"hello", "hello world", "a b c d e f g",
-                              "the quick brown fox", ""}) {
+    for (const auto& text : {"hello", "hello world", "a b c d e f g", "the quick brown fox", ""}) {
         auto ids = tok.encode(text, 2);
         ASSERT_EQ(ids.size(), 2u) << "text=\"" << text << "\"";
         EXPECT_EQ(ids[0], HASH_CLS) << "text=\"" << text << "\" ids[0]!=CLS";
