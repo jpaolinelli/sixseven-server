@@ -32,8 +32,11 @@ NormalizerType parse_normalizer_type(const std::string& type_str, bool lowercase
     if (type_str == "Lowercase") {
         return lowercase ? NormalizerType::LOWERCASE : NormalizerType::NONE;
     }
-    if (type_str == "NFC" || type_str == "NFKC") {
+    if (type_str == "NFC") {
         return NormalizerType::NFC;
+    }
+    if (type_str == "NFKC") {
+        return NormalizerType::NFKC;
     }
     return NormalizerType::NONE;
 }
