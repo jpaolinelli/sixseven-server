@@ -20,6 +20,7 @@
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/result.h"
 #include "sixseven/common/value.h"
+#include "sixseven/executor/expr_evaluator.h"
 #include "sixseven/executor/match_shortest_path.h"
 #include "sixseven/executor/shortest_path.h"
 #include "sixseven/executor/storage_manager.h"
@@ -777,12 +778,28 @@ TEST_F(QA_GDB424, PathValueVariantRoundTrip) {
 // ============================================================================
 
 TEST_F(QA_GDB424, PathFunctions_NullArgReturnsNull) {
-    // path_length(NULL) should return NULL.
-    // We test this via the Path struct — a null Value shouldn't crash.
-    Value null_val = Value::make_null();
-    EXPECT_TRUE(null_val.is_null());
-    // This is primarily testing that the evaluator handles null gracefully,
-    // which is tested through SQL execution. Here we just verify the Value API.
+    // Verify that path_length propagates a NULL argument to a NULL result.
+    // Build a tuple whose single column is a NULL value declared as PATH, then
+    // evaluate path_length() over it and assert the evaluator succeeds and
+    // returns a NULL Value (not an error, not a crash).
+    Tuple tuple;
+    tuple.values.push_back(Value::make_null());
+
+    std::vector<OutputColumn> cols;
+    cols.push_back({"", "p", TypeId::PATH, true, 0});
+    OutputSchema schema(std::move(cols));
+
+    auto col_ref = std::make_unique<ColumnRefExpr>();
+    col_ref->column = "p";
+
+    FunctionCallExpr fn_expr;
+    fn_expr.name = "path_length";
+    fn_expr.args.push_back(std::move(col_ref));
+
+    BoundStatement bound;
+    auto result = evaluate_expr(fn_expr, tuple, schema, bound);
+    ASSERT_TRUE(result.has_value()) << "path_length(NULL) should succeed";
+    EXPECT_TRUE(result->is_null()) << "path_length(NULL) should return a NULL Value";
 }
 
 // ============================================================================
