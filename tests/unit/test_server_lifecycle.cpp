@@ -1,8 +1,7 @@
+#include "sixseven/common/platform.h"
 #include "sixseven/server/server.h"
 
 #include <gtest/gtest.h>
-
-#include "sixseven/common/platform.h"
 
 #include <chrono>
 #include <csignal>
@@ -117,14 +116,21 @@ TEST_F(ServerLifecycleTest, NoNewConnectionsAfterShutdown) {
     server.shutdown();
     t.join();
 
-    // Connecting after shutdown should fail.
+    // After shutdown the accept loop has stopped: the server is no longer
+    // running and reports zero active connections. Any TCP connection that
+    // still completes (e.g. before the OS releases the port) is not served:
+    // the peer immediately sees end-of-stream (recv returns <= 0).
+    EXPECT_FALSE(server.is_running());
+    EXPECT_EQ(server.health().active_connections, 0u);
+
     int fd = connect_to(port);
     if (fd >= 0) {
-        // Connection may still succeed at TCP level if the OS hasn't released
-        // the port yet, but the server should not be handling it.
+        char buf[16];
+        EXPECT_LE(::recv(fd, reinterpret_cast<char*>(buf), sizeof(buf), 0), 0);
         sixseven_platform::socket_close(fd);
     }
-    EXPECT_FALSE(server.is_running());
+    // The post-shutdown connect attempt must never be accepted or handled.
+    EXPECT_EQ(server.health().active_connections, 0u);
 }
 
 TEST_F(ServerLifecycleTest, HealthCheckReturnsVersionAndUptime) {
