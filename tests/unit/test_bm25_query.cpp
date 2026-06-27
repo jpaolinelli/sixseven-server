@@ -1,25 +1,15 @@
-#include "sixseven/catalog/catalog.h"
-#include "sixseven/common/config.h"
 #include "sixseven/common/value.h"
-#include "sixseven/executor/catalog_persistence.h"
-#include "sixseven/executor/index_manager.h"
-#include "sixseven/executor/query_engine.h"
-#include "sixseven/executor/storage_manager.h"
-#include "sixseven/executor/system_bootstrap.h"
-#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
 #include <filesystem>
-#include <memory>
-#include <string>
 
-#include "test_catalog_helpers.h"
+#include "query_engine_fixture.h"
 
 using namespace sixseven;
 
 // End-to-end SQL coverage for the MATCH(col) TO 'q' full-text predicate.
-class Bm25QueryTest : public ::testing::Test {
+class Bm25QueryTest : public QueryEngineFixture {
 protected:
     void SetUp() override {
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_bm25_query";
@@ -35,45 +25,6 @@ protected:
         std::filesystem::remove_all(data_dir_);
     }
 
-    void make_stack() {
-        dm_ = std::make_unique<DiskManager>();
-        catalog_ = std::make_unique<Catalog>();
-        init_test_catalog(*catalog_);
-        storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
-        persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
-        engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
-        engine_->set_catalog_persistence(persistence_.get());
-        config_ = Config::load_defaults();
-    }
-
-    void reset_stack() {
-        index_manager_.reset();
-        engine_.reset();
-        persistence_.reset();
-        storage_.reset();
-        catalog_.reset();
-        dm_.reset();
-    }
-
-    void run_bootstrap() {
-        auto result = SystemBootstrap::bootstrap(
-            *engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
-        ASSERT_TRUE(result.has_value()) << result.error().message;
-    }
-
-    void rebuild_indexes() {
-        index_manager_ = std::make_unique<IndexManager>(*catalog_, *storage_);
-        index_manager_->set_catalog_persistence(persistence_.get());
-        ASSERT_TRUE(index_manager_->rebuild_all_indexes().has_value());
-        engine_->set_index_manager(index_manager_.get());
-    }
-
-    QueryResult exec_ok(const std::string& sql) {
-        auto result = engine_->execute(sql);
-        EXPECT_TRUE(result.has_value()) << result.error().message;
-        return result ? std::move(*result) : QueryResult{};
-    }
-
     void seed_articles() {
         exec_ok("CREATE TABLE articles (id INT, body VARCHAR)");
         exec_ok("INSERT INTO articles VALUES (1, 'the quick brown fox jumps')");
@@ -82,15 +33,6 @@ protected:
         exec_ok("INSERT INTO articles VALUES (4, 'machine learning models learn')");
         exec_ok("CREATE INDEX idx_body ON articles(body) USING bm25");
     }
-
-    std::filesystem::path data_dir_;
-    std::unique_ptr<DiskManager> dm_;
-    std::unique_ptr<Catalog> catalog_;
-    std::unique_ptr<StorageManager> storage_;
-    std::unique_ptr<CatalogPersistence> persistence_;
-    std::unique_ptr<QueryEngine> engine_;
-    std::unique_ptr<IndexManager> index_manager_;
-    Config config_;
 };
 
 TEST_F(Bm25QueryTest, MatchReturnsOnlyMatchingRows) {

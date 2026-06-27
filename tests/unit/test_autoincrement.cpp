@@ -1,23 +1,15 @@
 #include "sixseven/catalog/catalog.h"
-#include "sixseven/common/config.h"
+#include "sixseven/common/status.h"
 #include "sixseven/common/types.h"
 #include "sixseven/common/value.h"
-#include "sixseven/executor/catalog_persistence.h"
-#include "sixseven/executor/index_manager.h"
-#include "sixseven/executor/query_engine.h"
-#include "sixseven/executor/storage_manager.h"
-#include "sixseven/executor/system_bootstrap.h"
-#include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
 #include <filesystem>
 #include <limits>
-#include <memory>
-#include <string>
 
-#include "test_catalog_helpers.h"
+#include "query_engine_fixture.h"
 
 using namespace sixseven;
 
@@ -25,95 +17,31 @@ using namespace sixseven;
 // QueryEngine test fixture (with persistence support)
 // =============================================================================
 
-class AutoIncrementTest : public ::testing::Test {
+class AutoIncrementTest : public QueryEngineFixture {
 protected:
     void SetUp() override {
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_autoincrement";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
-
-        dm_ = std::make_unique<DiskManager>();
-        catalog_ = std::make_unique<Catalog>();
-        init_test_catalog(*catalog_);
-        storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
-        persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
-        engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
-        engine_->set_catalog_persistence(persistence_.get());
-        config_ = Config::load_defaults();
+        make_stack();
     }
 
     void TearDown() override {
-        index_manager_.reset();
-        engine_.reset();
-        persistence_.reset();
-        storage_.reset();
-        catalog_.reset();
-        dm_.reset();
+        reset_stack();
         std::filesystem::remove_all(data_dir_);
     }
 
-    void run_bootstrap() {
-        auto result = SystemBootstrap::bootstrap(
-            *engine_, *catalog_, *storage_, *persistence_, config_, data_dir_);
-        ASSERT_TRUE(result.has_value()) << result.error().message;
-    }
-
     /// Simulate a server restart: destroy all in-memory state and recreate.
+    /// Uses reset_stack()/make_stack()/run_bootstrap()/rebuild_indexes() directly
+    /// rather than restart_and_reload() because index_manager_ may be null at the
+    /// call site (the autoincrement tests do not call rebuild_indexes() in SetUp),
+    /// so flush_all_indexes() would fault.
     void restart() {
-        index_manager_.reset();
-        engine_.reset();
-        persistence_.reset();
-        storage_.reset();
-        catalog_.reset();
-        dm_.reset();
-
-        dm_ = std::make_unique<DiskManager>();
-        catalog_ = std::make_unique<Catalog>();
-        init_test_catalog(*catalog_);
-        storage_ = std::make_unique<StorageManager>(*dm_, data_dir_);
-        persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
-        engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
-        engine_->set_catalog_persistence(persistence_.get());
-
-        // Re-run bootstrap to load catalog from disk.
+        reset_stack();
+        make_stack();
         run_bootstrap();
-
-        // Rebuild indexes and initialize autoincrement counters.
-        index_manager_ = std::make_unique<IndexManager>(*catalog_, *storage_);
-        index_manager_->set_catalog_persistence(persistence_.get());
-        auto rebuild = index_manager_->rebuild_all_indexes();
-        ASSERT_TRUE(rebuild.has_value()) << rebuild.error().message;
-        engine_->set_index_manager(index_manager_.get());
+        rebuild_indexes();
     }
-
-    QueryResult exec_ok(const std::string& sql) {
-        auto result = engine_->execute(sql);
-        if (!result.has_value()) {
-            ADD_FAILURE() << "exec_ok failed for: " << sql
-                          << "\n  error: " << result.error().message;
-            return QueryResult{};
-        }
-        return std::move(*result);
-    }
-
-    void exec_error(const std::string& sql, StatusCode expected) {
-        auto result = engine_->execute(sql);
-        EXPECT_FALSE(result.has_value()) << "expected error but got success for: " << sql;
-        if (!result.has_value()) {
-            EXPECT_EQ(result.error().code, expected)
-                << "expected " << static_cast<int>(expected) << " but got "
-                << static_cast<int>(result.error().code) << ": " << result.error().message;
-        }
-    }
-
-    std::filesystem::path data_dir_;
-    std::unique_ptr<DiskManager> dm_;
-    std::unique_ptr<Catalog> catalog_;
-    std::unique_ptr<StorageManager> storage_;
-    std::unique_ptr<CatalogPersistence> persistence_;
-    std::unique_ptr<QueryEngine> engine_;
-    std::unique_ptr<IndexManager> index_manager_;
-    Config config_;
 };
 
 // =============================================================================
