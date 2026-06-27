@@ -559,16 +559,17 @@ TEST_F(QABufferPoolTest, FlusherShutdownFlushesAllDirtyPagesIncludingPinned) {
 // Section 3: BUG regression tests
 // =============================================================================
 
-/// BUG (HIGH): new_page() allocates a disk page ID before checking whether a
-/// buffer frame is available. When the pool is full (all frames pinned), the
-/// disk page allocation succeeds but no frame is found, so new_page() returns
-/// an error. The allocated page ID is permanently lost — it is incremented in
-/// the DiskManager's page count but never tracked anywhere.
+/// REGRESSION TEST: new_page() PREVIOUSLY allocated a disk page ID before
+/// checking whether a buffer frame was available. When the pool was full (all
+/// frames pinned), the disk allocation succeeded but no frame was found, so
+/// new_page() returned an error and the allocated page ID was permanently lost
+/// -- incremented in the DiskManager page count but never tracked anywhere.
 ///
-/// Expected behavior: file page count should NOT increase when new_page() fails.
-/// Actual behavior: file page count increases by 1 for each failed new_page().
+/// FIXED: buffer_pool.cpp new_page() now calls find_victim_frame() BEFORE
+/// allocating a disk page, so no disk page is allocated when the pool is full.
 ///
-/// This test FAILS with the current implementation, demonstrating the bug.
+/// Guards against regression: file_page_count must NOT increase when
+/// new_page() fails because all frames are pinned.
 TEST_F(QABufferPoolTest, BUG_NewPageLeaksDiskPageWhenPoolFull) {
     BufferPoolManager bpm(dm_, file_id_, 1);
 
@@ -586,26 +587,30 @@ TEST_F(QABufferPoolTest, BUG_NewPageLeaksDiskPageWhenPoolFull) {
     ASSERT_TRUE(count1.has_value());
     EXPECT_EQ(*count1, initial + 1) << "Successful new_page() should allocate exactly 1 disk page";
 
-    // Failed new_page() — pool is full (1 frame, 1 pinned page).
-    // Bug: allocate_page() is called before find_victim_frame(),
-    // so a disk page is allocated and then leaked.
+    // Failed new_page() -- pool is full (1 frame, 1 pinned page).
+    // Previously, allocate_page() was called before find_victim_frame(),
+    // so a disk page was allocated and then leaked. Now fixed.
     auto p2 = bpm.new_page();
     ASSERT_FALSE(p2.has_value())
         << "new_page() should fail when pool is full and all frames are pinned";
     EXPECT_EQ(p2.error().code, StatusCode::INTERNAL_ERROR);
 
-    // BUG: The file has grown by 2 even though only 1 page was successfully
-    // brought into the buffer pool.
+    // The file must NOT have grown: only 1 page was successfully brought into
+    // the buffer pool. Previously the file grew by 2 (leaked page ID on failure;
+    // actual was initial + 2 before the fix).
     auto count2 = dm_.file_page_count(file_id_);
     ASSERT_TRUE(count2.has_value());
-    // This assertion FAILS with the current implementation (actual: initial + 2).
+    // Guards regression: file_page_count must equal initial + 1 (no leak).
     EXPECT_EQ(*count2, initial + 1)
         << "REGRESSION: failed new_page() leaked a disk page ID "
         << "(file_page_count=" << *count2 << ", expected=" << initial + 1 << ")";
 }
 
-/// BUG (HIGH): verify that repeated failed new_page() calls cause the disk page
-/// count to grow unboundedly, demonstrating that each call leaks one page.
+/// REGRESSION TEST: PREVIOUSLY, each failed new_page() call leaked one disk
+/// page ID, causing the disk page count to accumulate with each repeated
+/// failure. FIXED by finding the victim frame before allocating a disk page.
+/// Guards against regression: file_page_count must NOT increase when
+/// new_page() fails because all frames are pinned.
 TEST_F(QABufferPoolTest, BUG_RepeatedFailedNewPageLeaksMultiplePages) {
     BufferPoolManager bpm(dm_, file_id_, 2);
 
@@ -630,9 +635,10 @@ TEST_F(QABufferPoolTest, BUG_RepeatedFailedNewPageLeaksMultiplePages) {
     auto count_final = dm_.file_page_count(file_id_);
     ASSERT_TRUE(count_final.has_value());
 
-    // BUG: Each failed new_page() call leaks a disk page.
-    // The file page count should not have changed (no successful allocations).
-    // This assertion FAILS: actual is count_filled + FAILED_CALLS.
+    // The file page count must not have changed: no successful allocations
+    // occurred. Previously each failed call leaked one page ID, so the actual
+    // count was count_filled + FAILED_CALLS before the fix.
+    // Guards regression: zero leak means count_final == count_filled.
     EXPECT_EQ(*count_final, count_filled)
         << "REGRESSION: " << FAILED_CALLS << " failed new_page() calls leaked "
         << (*count_final - count_filled) << " disk page IDs (expected 0 leaks)";
