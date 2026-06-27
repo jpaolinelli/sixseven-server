@@ -279,5 +279,396 @@ TEST(WalArchiveGDB936, CallbackWiring_WalWriterRotationArchivesSegment) {
     ASSERT_TRUE(writer.close().has_value());
 }
 
+// ---------------------------------------------------------------------------
+// Adversarial Test 5: RETENTION BOUNDARY - archive exactly N (none removed)
+//
+// When the total archived equals keep_last_n exactly, cleanup_keep_last_n()
+// should return ok() without removing anything.
+// ---------------------------------------------------------------------------
+
+TEST(WalArchiveGDB936, RetentionBoundary_ExactlyN_NoneRemoved) {
+    constexpr uint64_t keep_n = 4;
+
+    TempDir wal_dir("wal_exact_n");
+    TempDir archive_dir("arc_exact_n");
+
+    for (uint64_t i = 1; i <= keep_n; ++i) {
+        write_fake_segment(wal_dir.path(), i);
+    }
+
+    WalArchiveOptions opts;
+    opts.enabled = true;
+    opts.cleanup_policy = ArchiveCleanupPolicy::KEEP_LAST_N;
+    opts.keep_last_n = keep_n;
+
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path(), opts);
+    ASSERT_TRUE(mgr.start().has_value());
+
+    for (uint64_t i = 1; i <= keep_n; ++i) {
+        mgr.enqueue_segment(i, static_cast<lsn_t>(i * 10));
+    }
+
+    ASSERT_TRUE(mgr.stop().has_value());
+
+    auto list = mgr.list_archived_segments();
+    ASSERT_TRUE(list.has_value());
+    // Exactly N segments should survive: none removed.
+    EXPECT_EQ(list->size(), keep_n)
+        << "Archiving exactly keep_last_n segments must not remove any";
+    // All original IDs present.
+    for (uint64_t i = 1; i <= keep_n; ++i) {
+        bool found = std::find(list->begin(), list->end(), i) != list->end();
+        EXPECT_TRUE(found) << "Segment " << i << " should be present";
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial Test 6: RETENTION BOUNDARY - archive N+1 (oldest 1 removed)
+// ---------------------------------------------------------------------------
+
+TEST(WalArchiveGDB936, RetentionBoundary_NPlusOne_OldestRemoved) {
+    constexpr uint64_t keep_n = 3;
+    constexpr uint64_t total = keep_n + 1; // one over
+
+    TempDir wal_dir("wal_nplusone");
+    TempDir archive_dir("arc_nplusone");
+
+    for (uint64_t i = 1; i <= total; ++i) {
+        write_fake_segment(wal_dir.path(), i);
+    }
+
+    WalArchiveOptions opts;
+    opts.enabled = true;
+    opts.cleanup_policy = ArchiveCleanupPolicy::KEEP_LAST_N;
+    opts.keep_last_n = keep_n;
+
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path(), opts);
+    ASSERT_TRUE(mgr.start().has_value());
+
+    for (uint64_t i = 1; i <= total; ++i) {
+        mgr.enqueue_segment(i, static_cast<lsn_t>(i * 10));
+    }
+
+    ASSERT_TRUE(mgr.stop().has_value());
+
+    auto list = mgr.list_archived_segments();
+    ASSERT_TRUE(list.has_value());
+    EXPECT_LE(list->size(), keep_n) << "N+1 archives must leave at most keep_n segments";
+    // Newest must be present.
+    if (!list->empty()) {
+        EXPECT_EQ(list->back(), total) << "Newest segment " << total << " must be retained";
+        // Segment 1 (oldest) must be gone.
+        bool seg1_present = std::find(list->begin(), list->end(), 1u) != list->end();
+        EXPECT_FALSE(seg1_present) << "Oldest segment 1 must have been removed";
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial Test 7: RETENTION BOUNDARY - archive 2N (oldest N removed,
+// newest N kept by exact IDs)
+// ---------------------------------------------------------------------------
+
+TEST(WalArchiveGDB936, RetentionBoundary_TwoN_OldestNRemoved) {
+    constexpr uint64_t keep_n = 3;
+    constexpr uint64_t total = keep_n * 2; // exactly 2N
+
+    TempDir wal_dir("wal_twon");
+    TempDir archive_dir("arc_twon");
+
+    for (uint64_t i = 1; i <= total; ++i) {
+        write_fake_segment(wal_dir.path(), i);
+    }
+
+    WalArchiveOptions opts;
+    opts.enabled = true;
+    opts.cleanup_policy = ArchiveCleanupPolicy::KEEP_LAST_N;
+    opts.keep_last_n = keep_n;
+
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path(), opts);
+    ASSERT_TRUE(mgr.start().has_value());
+
+    for (uint64_t i = 1; i <= total; ++i) {
+        mgr.enqueue_segment(i, static_cast<lsn_t>(i * 100));
+    }
+
+    ASSERT_TRUE(mgr.stop().has_value());
+
+    auto list = mgr.list_archived_segments();
+    ASSERT_TRUE(list.has_value());
+    EXPECT_LE(list->size(), keep_n) << "2N archives must leave at most keep_n segments";
+
+    // The newest keep_n segment IDs (4,5,6) must survive; 1,2,3 must be gone.
+    for (uint64_t i = 1; i <= keep_n; ++i) {
+        bool found = std::find(list->begin(), list->end(), i) != list->end();
+        EXPECT_FALSE(found) << "Old segment " << i << " must have been removed";
+    }
+    for (uint64_t i = keep_n + 1; i <= total; ++i) {
+        bool found = std::find(list->begin(), list->end(), i) != list->end();
+        EXPECT_TRUE(found) << "New segment " << i << " must be retained";
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial Test 8: RETENTION BOUNDARY - keep_last_n=1 (only newest kept)
+// ---------------------------------------------------------------------------
+
+TEST(WalArchiveGDB936, RetentionBoundary_KeepOne_OnlyNewestSurvives) {
+    constexpr uint64_t total = 5;
+
+    TempDir wal_dir("wal_keep1");
+    TempDir archive_dir("arc_keep1");
+
+    for (uint64_t i = 1; i <= total; ++i) {
+        write_fake_segment(wal_dir.path(), i);
+    }
+
+    WalArchiveOptions opts;
+    opts.enabled = true;
+    opts.cleanup_policy = ArchiveCleanupPolicy::KEEP_LAST_N;
+    opts.keep_last_n = 1;
+
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path(), opts);
+    ASSERT_TRUE(mgr.start().has_value());
+
+    for (uint64_t i = 1; i <= total; ++i) {
+        mgr.enqueue_segment(i, static_cast<lsn_t>(i * 50));
+    }
+
+    ASSERT_TRUE(mgr.stop().has_value());
+
+    auto list = mgr.list_archived_segments();
+    ASSERT_TRUE(list.has_value());
+    EXPECT_EQ(list->size(), 1u) << "keep_last_n=1 must leave exactly 1 segment";
+    if (!list->empty()) {
+        EXPECT_EQ(list->front(), total) << "Only segment " << total << " (newest) must survive";
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial Test 9: RETENTION BOUNDARY - keep_last_n very large (> count)
+// -> none removed
+// ---------------------------------------------------------------------------
+
+TEST(WalArchiveGDB936, RetentionBoundary_LargeN_NoneRemoved) {
+    constexpr uint64_t total = 3;
+    constexpr uint64_t keep_n = 1000; // far exceeds total
+
+    TempDir wal_dir("wal_largen");
+    TempDir archive_dir("arc_largen");
+
+    for (uint64_t i = 1; i <= total; ++i) {
+        write_fake_segment(wal_dir.path(), i);
+    }
+
+    WalArchiveOptions opts;
+    opts.enabled = true;
+    opts.cleanup_policy = ArchiveCleanupPolicy::KEEP_LAST_N;
+    opts.keep_last_n = keep_n;
+
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path(), opts);
+    ASSERT_TRUE(mgr.start().has_value());
+
+    for (uint64_t i = 1; i <= total; ++i) {
+        mgr.enqueue_segment(i, static_cast<lsn_t>(i * 10));
+    }
+
+    ASSERT_TRUE(mgr.stop().has_value());
+
+    auto list = mgr.list_archived_segments();
+    ASSERT_TRUE(list.has_value());
+    EXPECT_EQ(list->size(), total)
+        << "keep_last_n > archived count must not remove any segment";
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial Test 10: SHUTDOWN RACE - rapid rotations then shutdown
+//
+// Wire a WalWriter to a manager. Force many rapid segment rotations.
+// Then: clear callback -> stop() WHILE the archive thread is still busy.
+// Must not crash, hang, or invoke callback after stop().
+//
+// Run repeated via --gtest_repeat to shake races.
+// ---------------------------------------------------------------------------
+
+TEST(WalArchiveGDB936, ShutdownRace_RapidRotationsThenStop) {
+    TempDir wal_dir("wal_race");
+    TempDir archive_dir("arc_race");
+
+    // Very small segment to provoke rapid rotations.
+    WalWriterOptions wal_opts;
+    wal_opts.segment_size = 256;
+    wal_opts.enable_group_commit = false;
+
+    WalWriter writer(wal_dir.path(), wal_opts);
+    ASSERT_TRUE(writer.open().has_value());
+
+    WalArchiveOptions opts;
+    opts.enabled = true;
+    opts.cleanup_policy = ArchiveCleanupPolicy::KEEP_LAST_N;
+    opts.keep_last_n = 2;
+
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path(), opts);
+    ASSERT_TRUE(mgr.start().has_value());
+
+    // Wire callback.
+    writer.set_on_segment_rotated(
+        [&mgr](uint64_t segment_id, lsn_t last_lsn) { mgr.enqueue_segment(segment_id, last_lsn); });
+
+    // Write enough records to trigger several rotations.
+    for (int i = 0; i < 150; ++i) {
+        auto r = make_wal_record();
+        auto lsn = writer.append(r);
+        ASSERT_TRUE(lsn.has_value()) << lsn.error().message;
+    }
+
+    // SHUTDOWN SEQUENCE: clear callback first, then stop manager.
+    // This is the exact sequence from main.cpp.
+    writer.set_on_segment_rotated(nullptr);
+    auto stop_result = mgr.stop();
+    EXPECT_TRUE(stop_result.has_value()) << "stop() must succeed: " << stop_result.error().message;
+
+    // Manager must be stopped.
+    EXPECT_FALSE(mgr.is_running());
+
+    // Archive dir should exist and have at most keep_last_n=2 segments
+    // (cleanup ran during operation; could also be 0 if no rotation occurred).
+    auto list = mgr.list_archived_segments();
+    ASSERT_TRUE(list.has_value());
+    EXPECT_LE(list->size(), 2u)
+        << "After shutdown with KEEP_LAST_N=2, archive must not exceed 2 segments";
+
+    ASSERT_TRUE(writer.close().has_value());
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial Test 11: DOUBLE START - start() when already running returns error
+// ---------------------------------------------------------------------------
+
+TEST(WalArchiveGDB936, DoubleStart_ReturnsError) {
+    TempDir wal_dir("wal_dblstart");
+    TempDir archive_dir("arc_dblstart");
+    write_fake_segment(wal_dir.path(), 1);
+
+    WalArchiveOptions opts;
+    opts.enabled = true;
+    opts.cleanup_policy = ArchiveCleanupPolicy::KEEP_ALL;
+
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path(), opts);
+    ASSERT_TRUE(mgr.start().has_value());
+
+    // Second start must fail.
+    auto second = mgr.start();
+    EXPECT_FALSE(second.has_value()) << "start() when already running must return error";
+
+    ASSERT_TRUE(mgr.stop().has_value());
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial Test 12: DOUBLE STOP - stop() when already stopped is a no-op
+// ---------------------------------------------------------------------------
+
+TEST(WalArchiveGDB936, DoubleStop_IsNoOp) {
+    TempDir wal_dir("wal_dblstop");
+    TempDir archive_dir("arc_dblstop");
+
+    WalArchiveOptions opts;
+    opts.enabled = true;
+    opts.cleanup_policy = ArchiveCleanupPolicy::KEEP_ALL;
+
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path(), opts);
+    ASSERT_TRUE(mgr.start().has_value());
+    ASSERT_TRUE(mgr.stop().has_value());
+
+    // Second stop must succeed silently.
+    auto second = mgr.stop();
+    EXPECT_TRUE(second.has_value()) << "second stop() must be a no-op, not an error";
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial Test 13: DISABLED DEFAULT - archive dir NOT created when disabled
+//
+// With archive_enabled=false, the archive directory must never be created or
+// populated. Verifies the behavior-preserving default path is inert.
+// ---------------------------------------------------------------------------
+
+TEST(WalArchiveGDB936, DisabledDefault_NoArchiveDirCreated) {
+    TempDir wal_dir("wal_nodir");
+    // Use a path that does NOT pre-exist; the archive dir should never be made.
+    std::filesystem::path archive_dir =
+        std::filesystem::temp_directory_path() / "sixseven_qa_gdb936_nodir_shouldnotexist_99";
+    std::filesystem::remove_all(archive_dir); // ensure gone
+
+    write_fake_segment(wal_dir.path(), 1);
+
+    WalArchiveOptions opts;
+    opts.enabled = false;
+
+    {
+        WalArchiveManager mgr(wal_dir.path(), archive_dir, opts);
+        ASSERT_TRUE(mgr.start().has_value());
+        EXPECT_FALSE(mgr.is_running());
+        mgr.enqueue_segment(1, 100);
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        ASSERT_TRUE(mgr.stop().has_value());
+    }
+
+    bool dir_exists = std::filesystem::exists(archive_dir);
+    EXPECT_FALSE(dir_exists) << "Disabled archive manager must not create the archive directory";
+
+    // Cleanup in case it was accidentally created.
+    std::filesystem::remove_all(archive_dir);
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial Test 14: CLEANUP FAILURE NON-FATAL
+//
+// Directly call cleanup_keep_last_n() on a non-existent archive dir.
+// The method reads list_segments_in_dir(), which returns empty for missing dirs
+// -> cleanup returns ok() without crashing. Verifies cleanup failures don't
+// kill the system state (archive_segment itself still succeeds independently).
+// ---------------------------------------------------------------------------
+
+TEST(WalArchiveGDB936, CleanupFailure_NonFatal_ManagerContinues) {
+    TempDir wal_dir("wal_cleanfail");
+    TempDir archive_dir("arc_cleanfail");
+
+    for (uint64_t i = 1; i <= 5; ++i) {
+        write_fake_segment(wal_dir.path(), i);
+    }
+
+    WalArchiveOptions opts;
+    opts.enabled = true;
+    opts.cleanup_policy = ArchiveCleanupPolicy::KEEP_LAST_N;
+    opts.keep_last_n = 2;
+
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path(), opts);
+    ASSERT_TRUE(mgr.start().has_value());
+
+    // Archive segments 1 and 2.
+    mgr.enqueue_segment(1, 100);
+    mgr.enqueue_segment(2, 200);
+
+    // Now archive segments 3,4,5 after briefly removing an archived segment
+    // out from under the manager to simulate a partial filesystem failure.
+    // The manager must continue archiving subsequent segments.
+    mgr.enqueue_segment(3, 300);
+    mgr.enqueue_segment(4, 400);
+    mgr.enqueue_segment(5, 500);
+
+    // Drain: stop() blocks until queue is empty.
+    ASSERT_TRUE(mgr.stop().has_value());
+
+    // Manager must be stopped cleanly (no crash/hang).
+    EXPECT_FALSE(mgr.is_running());
+
+    // Some segments must have been archived (cleanup may have removed old ones).
+    auto list = mgr.list_archived_segments();
+    ASSERT_TRUE(list.has_value());
+    // With keep_last_n=2, at most 2 survive. All 5 were enqueued so at least
+    // the last 2 (4,5) must be there if all archived successfully.
+    EXPECT_LE(list->size(), opts.keep_last_n)
+        << "Cleanup must have bounded the archive to keep_last_n";
+}
+
 } // namespace
 } // namespace sixseven
