@@ -116,6 +116,12 @@ private:
     /// Background thread entry point: processes the archive queue.
     void archive_loop();
 
+    /// Apply the configured cleanup policy after a successful archive.
+    /// Called from archive_loop() after each segment is successfully archived.
+    /// Logs a warning on cleanup failure but does NOT propagate the error -
+    /// a cleanup failure is non-fatal (the archive copy already succeeded).
+    void apply_cleanup_policy();
+
     /// Copy a WAL segment file to the archive directory with verification.
     [[nodiscard]] Result<void> copy_and_verify(uint64_t segment_id);
 

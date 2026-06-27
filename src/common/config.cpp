@@ -111,6 +111,12 @@ Result<Config> Config::load_from_file(const std::string& path) {
         return make_error(StatusCode::INVALID_ARGUMENT,
                           "archive_cleanup_policy must be a string, got wrong type");
     }
+    if (j.contains("archive_keep_last_n") && j["archive_keep_last_n"].is_number_unsigned()) {
+        config.archive_keep_last_n = j["archive_keep_last_n"].get<uint64_t>();
+    } else if (j.contains("archive_keep_last_n")) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "archive_keep_last_n must be an unsigned integer, got wrong type");
+    }
     if (j.contains("storage_double_write") && j["storage_double_write"].is_boolean()) {
         config.storage_double_write = j["storage_double_write"].get<bool>();
     } else if (j.contains("storage_double_write")) {
@@ -278,6 +284,14 @@ Result<Config> Config::load_from_file(const std::string& path) {
             return make_error(
                 StatusCode::INVALID_ARGUMENT,
                 "replication.disconnect_warning_threshold_ms must be a number, got wrong type");
+        }
+        if (repl.contains("archive_keep_last_n") &&
+            repl["archive_keep_last_n"].is_number_unsigned()) {
+            config.archive_keep_last_n = repl["archive_keep_last_n"].get<uint64_t>();
+        } else if (repl.contains("archive_keep_last_n")) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "replication.archive_keep_last_n must be an unsigned integer, "
+                              "got wrong type");
         }
     }
 
@@ -511,6 +525,12 @@ Result<void> Config::apply_setting(const std::string& key, const std::string& va
         archive_enabled = (value == "TRUE" || value == "true" || value == "1");
     } else if (key == "replication.archive_cleanup_policy") {
         archive_cleanup_policy = value;
+    } else if (key == "replication.archive_keep_last_n") {
+        auto r = parse_u64(key, value);
+        if (!r) {
+            return make_error(r.error().code, r.error().message);
+        }
+        archive_keep_last_n = *r;
     } else if (key == "replication.max_wal_senders") {
         auto r = parse_i32(key, value);
         if (!r) {

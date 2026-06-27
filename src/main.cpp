@@ -27,6 +27,7 @@
 #include "sixseven/storage/clean_shutdown_marker.h"
 #include "sixseven/storage/disk_manager.h"
 #include "sixseven/storage/wal.h"
+#include "sixseven/storage/wal_archive.h"
 #include "sixseven/storage/wal_recovery.h"
 #include "sixseven/table/table_wal.h"
 #include "sixseven/vector/backfill_manager.h"
@@ -269,6 +270,44 @@ int main(int argc, char* argv[]) {
         }
     }
     SIXSEVEN_LOG_INFO("WAL writer opened (wal_dir={})", wal_dir.string());
+
+    // -- WAL archive manager -------------------------------------------------------
+    //
+    // Constructed AFTER the WalWriter (so its destructor runs first on scope exit,
+    // ensuring stop() is called before the writer is closed - no dangling callback).
+    // When archive_enabled=false (the default), start() is a no-op and no thread is
+    // spawned: zero change to the default code path.
+    //
+    // Lifetime: archive_manager_ is an optional so we can skip construction entirely
+    // when disabled.  stop() is called explicitly before wal_writer.close() at
+    // shutdown to ensure the callback is deregistered before the writer goes away.
+    std::unique_ptr<sixseven::WalArchiveManager> wal_archive_manager;
+    if (config.archive_enabled) {
+        std::filesystem::path archive_dir = data_dir / "wal_archive";
+        sixseven::WalArchiveOptions archive_opts;
+        archive_opts.enabled = true;
+        archive_opts.cleanup_policy = sixseven::parse_cleanup_policy(config.archive_cleanup_policy);
+        archive_opts.keep_last_n = config.archive_keep_last_n;
+
+        wal_archive_manager =
+            std::make_unique<sixseven::WalArchiveManager>(wal_dir, archive_dir, archive_opts);
+
+        auto archive_start = wal_archive_manager->start();
+        if (!archive_start) {
+            SIXSEVEN_LOG_WARN("WAL archive manager start failed (non-fatal): {}",
+                              archive_start.error().message);
+            wal_archive_manager.reset(); // Disable archiving on failure.
+        } else {
+            // Register the segment-rotated callback so completed WAL segments
+            // are enqueued for archival automatically.
+            // OnSegmentRotated = std::function<void(uint64_t segment_id, lsn_t last_lsn)>
+            wal_writer.set_on_segment_rotated(
+                [&mgr = *wal_archive_manager](uint64_t segment_id, sixseven::lsn_t last_lsn) {
+                    mgr.enqueue_segment(segment_id, last_lsn);
+                });
+            SIXSEVEN_LOG_INFO("WAL archive manager running: archive_dir={}", archive_dir.string());
+        }
+    }
 
     // Propagate writer to every existing TableHeap (already open via bootstrap)
     // and to every heap created afterwards (CREATE TABLE during this session).
@@ -539,6 +578,19 @@ int main(int argc, char* argv[]) {
         auto flush = storage.flush_all();
         if (!flush) {
             SIXSEVEN_LOG_WARN("pre-marker storage flush failed: {}", flush.error().message);
+        }
+    }
+
+    // Stop the WAL archive manager BEFORE detaching/closing the writer.
+    // This deregisters the segment-rotated callback and drains any pending
+    // queue, ensuring no enqueue_segment call races with writer teardown.
+    if (wal_archive_manager) {
+        // Clear the callback first to prevent any in-flight rotation from
+        // enqueuing after we call stop() (which drains the queue).
+        wal_writer.set_on_segment_rotated(nullptr);
+        auto archive_stop = wal_archive_manager->stop();
+        if (!archive_stop) {
+            SIXSEVEN_LOG_WARN("WAL archive manager stop failed: {}", archive_stop.error().message);
         }
     }
 

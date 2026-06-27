@@ -99,6 +99,15 @@ Result<void> WalArchiveManager::start() {
         return make_error(StatusCode::INVALID_ARGUMENT, "archive manager already running");
     }
 
+    // Enabled gate: if archiving is disabled, start() is a no-op.
+    // No thread is spawned; enqueue_segment() will be a no-op because
+    // is_running() returns false. Preserves the default archive_enabled=false
+    // behavior exactly (zero threads, zero work).
+    if (!options_.enabled) {
+        SIXSEVEN_LOG_INFO("WAL archive manager: archiving disabled, start() is a no-op");
+        return ok();
+    }
+
     // Create the archive directory if it doesn't exist.
     std::error_code ec;
     std::filesystem::create_directories(archive_dir_, ec);
@@ -111,9 +120,12 @@ Result<void> WalArchiveManager::start() {
     running_.store(true, std::memory_order_release);
     archive_thread_ = std::thread([this] { archive_loop(); });
 
-    SIXSEVEN_LOG_INFO("WAL archive manager started: wal_dir={}, archive_dir={}",
+    SIXSEVEN_LOG_INFO("WAL archive manager started: wal_dir={}, archive_dir={}, "
+                      "cleanup_policy={}, keep_last_n={}",
                       wal_dir_.string(),
-                      archive_dir_.string());
+                      archive_dir_.string(),
+                      cleanup_policy_name(options_.cleanup_policy),
+                      options_.keep_last_n);
 
     return ok();
 }
@@ -139,6 +151,10 @@ Result<void> WalArchiveManager::stop() {
 }
 
 void WalArchiveManager::enqueue_segment(uint64_t segment_id, lsn_t last_lsn) {
+    // No-op when the manager is not running (archiving disabled or not started).
+    if (!running_.load(std::memory_order_acquire)) {
+        return;
+    }
     std::lock_guard<std::mutex> lock(queue_mutex_);
     pending_.push({segment_id, last_lsn});
     queue_cv_.notify_one();
@@ -324,6 +340,9 @@ void WalArchiveManager::archive_loop() {
                 SIXSEVEN_LOG_ERROR("WAL archive failed for segment {}: {}",
                                    item.segment_id,
                                    result.error().message);
+            } else {
+                // Archive succeeded - apply retention cleanup policy.
+                apply_cleanup_policy();
             }
         }
     }
@@ -339,7 +358,40 @@ void WalArchiveManager::archive_loop() {
             SIXSEVEN_LOG_ERROR("WAL archive (shutdown drain) failed for segment {}: {}",
                                item.segment_id,
                                result.error().message);
+        } else {
+            // Archive succeeded - apply retention cleanup policy on drain too.
+            apply_cleanup_policy();
         }
+    }
+}
+
+void WalArchiveManager::apply_cleanup_policy() {
+    switch (options_.cleanup_policy) {
+    case ArchiveCleanupPolicy::KEEP_LAST_N: {
+        auto r = cleanup_keep_last_n(options_.keep_last_n);
+        if (!r) {
+            SIXSEVEN_LOG_WARN("WAL archive cleanup (keep_last_n={}) failed: {}",
+                              options_.keep_last_n,
+                              r.error().message);
+        }
+        break;
+    }
+    case ArchiveCleanupPolicy::KEEP_SINCE_LSN: {
+        // Use the retention LSN provider if set; skip if none (safe default).
+        if (retention_lsn_provider_) {
+            lsn_t retention_lsn = retention_lsn_provider_();
+            auto r = cleanup_before(retention_lsn);
+            if (!r) {
+                SIXSEVEN_LOG_WARN("WAL archive cleanup (keep_since_lsn, lsn={}) failed: {}",
+                                  retention_lsn,
+                                  r.error().message);
+            }
+        }
+        break;
+    }
+    case ArchiveCleanupPolicy::KEEP_ALL:
+        // Nothing to do.
+        break;
     }
 }
 
