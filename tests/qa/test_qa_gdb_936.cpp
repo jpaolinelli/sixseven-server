@@ -313,8 +313,7 @@ TEST(WalArchiveGDB936, RetentionBoundary_ExactlyN_NoneRemoved) {
     auto list = mgr.list_archived_segments();
     ASSERT_TRUE(list.has_value());
     // Exactly N segments should survive: none removed.
-    EXPECT_EQ(list->size(), keep_n)
-        << "Archiving exactly keep_last_n segments must not remove any";
+    EXPECT_EQ(list->size(), keep_n) << "Archiving exactly keep_last_n segments must not remove any";
     // All original IDs present.
     for (uint64_t i = 1; i <= keep_n; ++i) {
         bool found = std::find(list->begin(), list->end(), i) != list->end();
@@ -476,8 +475,7 @@ TEST(WalArchiveGDB936, RetentionBoundary_LargeN_NoneRemoved) {
 
     auto list = mgr.list_archived_segments();
     ASSERT_TRUE(list.has_value());
-    EXPECT_EQ(list->size(), total)
-        << "keep_last_n > archived count must not remove any segment";
+    EXPECT_EQ(list->size(), total) << "keep_last_n > archived count must not remove any segment";
 }
 
 // ---------------------------------------------------------------------------

@@ -341,7 +341,7 @@ void WalArchiveManager::archive_loop() {
                                    item.segment_id,
                                    result.error().message);
             } else {
-                // Archive succeeded — apply retention cleanup policy.
+                // Archive succeeded - apply retention cleanup policy.
                 apply_cleanup_policy();
             }
         }
@@ -359,7 +359,7 @@ void WalArchiveManager::archive_loop() {
                                item.segment_id,
                                result.error().message);
         } else {
-            // Archive succeeded — apply retention cleanup policy on drain too.
+            // Archive succeeded - apply retention cleanup policy on drain too.
             apply_cleanup_policy();
         }
     }

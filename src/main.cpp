@@ -274,7 +274,7 @@ int main(int argc, char* argv[]) {
     // -- WAL archive manager -------------------------------------------------------
     //
     // Constructed AFTER the WalWriter (so its destructor runs first on scope exit,
-    // ensuring stop() is called before the writer is closed — no dangling callback).
+    // ensuring stop() is called before the writer is closed - no dangling callback).
     // When archive_enabled=false (the default), start() is a no-op and no thread is
     // spawned: zero change to the default code path.
     //

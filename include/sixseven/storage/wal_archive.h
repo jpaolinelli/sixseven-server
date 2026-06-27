@@ -118,7 +118,7 @@ private:
 
     /// Apply the configured cleanup policy after a successful archive.
     /// Called from archive_loop() after each segment is successfully archived.
-    /// Logs a warning on cleanup failure but does NOT propagate the error —
+    /// Logs a warning on cleanup failure but does NOT propagate the error -
     /// a cleanup failure is non-fatal (the archive copy already succeeded).
     void apply_cleanup_policy();
 
