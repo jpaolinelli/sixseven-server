@@ -18,6 +18,7 @@ struct Config {
     std::string master_key_path; // defaults to <data_dir>/master.key
     bool archive_enabled = false;
     std::string archive_cleanup_policy = "keep_all";
+    uint64_t archive_keep_last_n = 10;
     int32_t replication_max_wal_senders = 10;
     int32_t replication_keepalive_interval_ms = 10000;
     int32_t replication_sender_timeout_ms = 60000;
