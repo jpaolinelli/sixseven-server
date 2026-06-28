@@ -65,7 +65,7 @@ static PageStep compute_page(size_t total, size_t rows_sent, int32_t max_rows) {
 }
 
 // =============================================================================
-// Suite QA_GDB950_Boundary – off-by-one and boundary arithmetic.
+// Suite QA_GDB950_Boundary - off-by-one and boundary arithmetic.
 // =============================================================================
 
 // AC: max_rows == total rows -> all sent, NO PortalSuspended (off-by-one trap).
@@ -141,7 +141,7 @@ TEST(QA_GDB950_Boundary, OneRow_MaxRowsOne_NeverSuspended) {
 }
 
 // =============================================================================
-// Suite QA_GDB950_NegativeMaxRows – signed/unsigned safety.
+// Suite QA_GDB950_NegativeMaxRows - signed/unsigned safety.
 // =============================================================================
 
 // AC: max_rows < 0 -> treated as "no limit" (same as 0), all rows sent.
@@ -182,7 +182,7 @@ TEST(QA_GDB950_NegativeMaxRows, NaiveCastWouldProduceLargeSize) {
 }
 
 // =============================================================================
-// Suite QA_GDB950_Resume – multi-page accumulation correctness.
+// Suite QA_GDB950_Resume - multi-page accumulation correctness.
 // =============================================================================
 
 // AC: paginating 10 rows at 3 per Execute produces exactly the full row set
@@ -281,7 +281,7 @@ TEST(QA_GDB950_Resume, DrainedPortalReExecute_NoReRun_NullPage) {
 }
 
 // =============================================================================
-// Suite QA_GDB950_MaxRowsZero – byte-unchanged no-regression.
+// Suite QA_GDB950_MaxRowsZero - byte-unchanged no-regression.
 // =============================================================================
 
 // AC: max_rows == 0 -> "no limit" -> all rows in one Execute.
@@ -295,7 +295,7 @@ TEST(QA_GDB950_MaxRowsZero, ZeroMeansNoLimit_AllRowsOneExecution) {
 }
 
 // =============================================================================
-// Suite QA_GDB950_DML – non-row-returning never suspends.
+// Suite QA_GDB950_DML - non-row-returning never suspends.
 // =============================================================================
 
 // AC: DML portal (column_names empty) with max_rows > 0 -> CommandComplete, no suspend.
@@ -320,7 +320,7 @@ TEST(QA_GDB950_DML, UpdateZeroRows_NeverSuspended) {
 }
 
 // =============================================================================
-// Suite QA_GDB950_Lifecycle – portal state reset.
+// Suite QA_GDB950_Lifecycle - portal state reset.
 // =============================================================================
 
 // AC: re-Bind (add_portal with same name) resets executed/rows_sent to defaults.
@@ -414,7 +414,7 @@ TEST(QA_GDB950_Lifecycle, MultiplePortals_IndependentState) {
 }
 
 // =============================================================================
-// Suite QA_GDB950_WireEncoding – PortalSuspended message bytes.
+// Suite QA_GDB950_WireEncoding - PortalSuspended message bytes.
 // =============================================================================
 
 // AC: send_portal_suspended emits exactly {'s', 0x00, 0x00, 0x00, 0x04}.
@@ -441,7 +441,7 @@ TEST(QA_GDB950_WireEncoding, PortalSuspendedTypeByte_Is0x73) {
 }
 
 // =============================================================================
-// Suite QA_GDB950_PortalDefaults – new-portal field defaults.
+// Suite QA_GDB950_PortalDefaults - new-portal field defaults.
 // =============================================================================
 
 // AC: Portal default-constructed has executed=false, rows_sent=0, empty cache.
@@ -474,7 +474,7 @@ TEST(QA_GDB950_PortalDefaults, PortalRoundTripThroughSession) {
 }
 
 // =============================================================================
-// Suite QA_GDB950_Arithmetic_EdgeCases – additional arithmetic probes.
+// Suite QA_GDB950_Arithmetic_EdgeCases - additional arithmetic probes.
 // =============================================================================
 
 // Suspended condition: max_rows > 0 AND rows_sent_after < total.
