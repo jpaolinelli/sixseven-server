@@ -35,12 +35,34 @@ Storage Engine (Buffer Pool, WAL, B+ Trees)
 cmake --preset default
 cmake --build build/debug
 
-# Start the server
+# Start the server (default port 6767)
 ./build/debug/src/sixseven-server
 
-# Connect with psql (default port 6767, trust auth)
+# Connect with the built-in CLI
+./build/debug/src/sixseven-cli
+
+# Connect with psql
 psql -h localhost -p 6767 -U demo
 ```
+
+## CLI
+
+`sixseven-cli` is a native pg-wire v3 client. It connects directly to a running SixSevenDB server over TCP, executes SQL, and prints tabular results.
+
+```bash
+# Connect with defaults (localhost:6767, user=sixseven, db=sixseven)
+./build/debug/src/sixseven-cli
+
+# Connect to a specific host/port/user/database
+./build/debug/src/sixseven-cli -h myhost -p 6767 -U alice -d mydb
+
+# Execute a single SQL statement and exit (scriptable)
+./build/debug/src/sixseven-cli -c "SELECT * FROM users LIMIT 5;"
+```
+
+REPL meta-commands: `\q` to quit, `\help` for help. SQL statements must end with `;`.
+
+**Note:** The server defaults to `scram-sha-256` authentication. Configure `auth_method = "trust"` in `config.json` for local development, or run with a pg-wire client that supports SCRAM.
 
 ## Documentation
 
