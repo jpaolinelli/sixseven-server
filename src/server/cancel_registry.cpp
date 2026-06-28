@@ -1,4 +1,4 @@
-﻿#include "sixseven/server/cancel_registry.h"
+#include "sixseven/server/cancel_registry.h"
 
 #include "sixseven/common/logging.h"
 

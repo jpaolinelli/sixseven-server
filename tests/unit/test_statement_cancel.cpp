@@ -1,4 +1,4 @@
-﻿#include "sixseven/common/statement_deadline.h"
+#include "sixseven/common/statement_deadline.h"
 
 #include <gtest/gtest.h>
 

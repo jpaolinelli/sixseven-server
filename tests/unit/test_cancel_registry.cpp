@@ -1,4 +1,4 @@
-﻿#include "sixseven/server/cancel_registry.h"
+#include "sixseven/server/cancel_registry.h"
 
 #include <gtest/gtest.h>
 

@@ -300,14 +300,12 @@ void Server::accept_connection() {
     handler.set_auth(auth_method_, user_mgr_);
 
     // Wire cancellation callbacks (GDB-956).
-    handler.set_cancel_requester(
-        [this](int32_t cancel_pid, int32_t secret) {
-            cancel_registry_.request_cancel(cancel_pid, secret);
-        });
-    handler.set_cancel_connection_registrar(
-        [this](int32_t reg_pid, int32_t secret) {
-            cancel_registry_.register_connection(reg_pid, secret);
-        });
+    handler.set_cancel_requester([this](int32_t cancel_pid, int32_t secret) {
+        cancel_registry_.request_cancel(cancel_pid, secret);
+    });
+    handler.set_cancel_connection_registrar([this](int32_t reg_pid, int32_t secret) {
+        cancel_registry_.register_connection(reg_pid, secret);
+    });
     handler.set_cancel_flag_registrar(
         [this](int32_t reg_pid, std::shared_ptr<std::atomic<bool>> flag) {
             cancel_registry_.set_cancel_flag(reg_pid, std::move(flag));

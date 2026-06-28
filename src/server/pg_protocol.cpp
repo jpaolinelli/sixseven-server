@@ -1865,8 +1865,7 @@ void PgProtocolHandler::handle_simple_query(Connection& conn, std::string_view s
             return;
         }
 
-        CancelFlagScope cancel_scope(
-            backend_pid_, cancel_flag_registrar_, cancel_flag_clearer_);
+        CancelFlagScope cancel_scope(backend_pid_, cancel_flag_registrar_, cancel_flag_clearer_);
         StatementDeadlineGuard deadline_guard(session_->statement_timeout_ms());
         auto result = query_executor_(stmt, startup_database());
         if (!result) {
