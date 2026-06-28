@@ -2089,9 +2089,8 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
 
     auto portal_name = std::string(reader.read_cstring());
     int32_t max_rows = reader.read_int32(); // 0 = no limit.
-    (void)max_rows;                         // We execute all rows for now.
 
-    const auto* portal_ptr = session_->get_portal(portal_name);
+    auto* portal_ptr = session_->get_portal_mutable(portal_name);
     if (portal_ptr == nullptr) {
         send_error_response(
             conn, "ERROR", "34000", "portal \"" + portal_name + "\" does not exist");
@@ -2099,7 +2098,7 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
         return;
     }
 
-    const auto& portal = *portal_ptr;
+    Portal& portal = *portal_ptr;
 
     if (!query_executor_) {
         send_error_response(conn, "ERROR", "XX000", "no query executor configured");
@@ -2107,63 +2106,98 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
         return;
     }
 
-    // Decode binary-format parameters (format code 1) into their text
-    // representation per their type OID before substitution (GDB-712).
-    auto decoded_params =
-        decode_bind_parameters(portal.param_values, portal.param_format_codes, portal.param_oids);
-    if (!decoded_params) {
-        const auto& err = decoded_params.error();
-        send_error_response(conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
-        error_in_extended_ = true;
-        return;
-    }
+    if (!portal.executed) {
+        // First Execute: decode params, run the query, cache the result.
 
-    // Substitute parameter values into the SQL.
-    auto substituted = substitute_parameters(portal.sql, *decoded_params, portal.param_oids);
-    if (!substituted) {
-        const auto& err = substituted.error();
-        send_error_response(conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
-        error_in_extended_ = true;
-        return;
-    }
+        // Decode binary-format parameters (format code 1) into their text
+        // representation per their type OID before substitution (GDB-712).
+        auto decoded_params = decode_bind_parameters(
+            portal.param_values, portal.param_format_codes, portal.param_oids);
+        if (!decoded_params) {
+            const auto& err = decoded_params.error();
+            send_error_response(
+                conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+            error_in_extended_ = true;
+            return;
+        }
 
-    SIXSEVEN_LOG_DEBUG("Execute: portal='{}', sql='{}'", portal_name, *substituted);
+        // Substitute parameter values into the SQL.
+        auto substituted = substitute_parameters(portal.sql, *decoded_params, portal.param_oids);
+        if (!substituted) {
+            const auto& err = substituted.error();
+            send_error_response(
+                conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message);
+            error_in_extended_ = true;
+            return;
+        }
 
-    StatementDeadlineGuard deadline_guard(session_->statement_timeout_ms());
-    auto result = query_executor_(*substituted, startup_database());
-    if (!result) {
-        const auto& err = result.error();
-        send_error_response(
-            conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message, err.query_pos);
-        error_in_extended_ = true;
-        return;
-    }
+        SIXSEVEN_LOG_DEBUG("Execute: portal='{}', sql='{}'", portal_name, *substituted);
 
-    const auto& qr = *result;
+        // Reject binary result format (code 1) for unsupported types before
+        // sending any DataRow so the client sees a clean ErrorResponse (GDB-718).
+        // We must do the format check before executing to avoid a partial send,
+        // so instead we defer it until after execution when column types are known.
+        StatementDeadlineGuard deadline_guard(session_->statement_timeout_ms());
+        auto result = query_executor_(*substituted, startup_database());
+        if (!result) {
+            const auto& err = result.error();
+            send_error_response(conn,
+                                "ERROR",
+                                std::string(status_to_sqlstate(err.code)),
+                                err.message,
+                                err.query_pos);
+            error_in_extended_ = true;
+            return;
+        }
 
-    if (!qr.column_names.empty()) {
-        // Reject binary result format (code 1) for columns whose type has no
-        // faithful PostgreSQL binary encoding, instead of mislabeling text
-        // bytes as binary (GDB-718). Checked before any DataRow is sent so
-        // the client sees a clean ErrorResponse, not a truncated result set.
-        for (size_t i = 0; i < qr.column_types.size(); ++i) {
-            if (resolve_format_code(portal.result_format_codes, i) == 1 &&
-                !pg_binary_result_supported(qr.column_types[i])) {
-                send_error_response(conn,
-                                    "ERROR",
-                                    "0A000", // feature_not_supported.
-                                    "binary output of type " +
-                                        std::string(type_name(qr.column_types[i])) +
-                                        " is not supported");
-                error_in_extended_ = true;
-                return;
+        const QueryResult& qr = *result;
+
+        // GDB-718: Reject binary output for unsupported column types before
+        // any DataRow is sent.
+        if (!qr.column_names.empty()) {
+            for (size_t i = 0; i < qr.column_types.size(); ++i) {
+                if (resolve_format_code(portal.result_format_codes, i) == 1 &&
+                    !pg_binary_result_supported(qr.column_types[i])) {
+                    send_error_response(conn,
+                                        "ERROR",
+                                        "0A000", // feature_not_supported.
+                                        "binary output of type " +
+                                            std::string(type_name(qr.column_types[i])) +
+                                            " is not supported");
+                    error_in_extended_ = true;
+                    return;
+                }
             }
         }
-        // SELECT: send DataRows + CommandComplete (RowDescription already sent by Describe).
-        for (const auto& row : qr.rows) {
-            send_data_row(conn, row, qr.column_types, portal.result_format_codes);
-        }
+
+        portal.cached_result = std::move(*result);
+        portal.rows_sent = 0;
+        portal.executed = true;
     }
+
+    const QueryResult& qr = portal.cached_result;
+
+    if (!qr.column_names.empty()) {
+        // Row-returning query: honour max_rows paging.
+        const size_t total = qr.rows.size();
+        const size_t remaining = total - portal.rows_sent;
+        const size_t to_send =
+            (max_rows <= 0) ? remaining : std::min(static_cast<size_t>(max_rows), remaining);
+
+        for (size_t i = portal.rows_sent; i < portal.rows_sent + to_send; ++i) {
+            send_data_row(conn, qr.rows[i], qr.column_types, portal.result_format_codes);
+        }
+        portal.rows_sent += to_send;
+
+        if (max_rows > 0 && portal.rows_sent < total) {
+            // More rows remain: suspend the portal.
+            send_portal_suspended(conn);
+            return;
+        }
+        // All rows sent (or max_rows==0): fall through to CommandComplete.
+    }
+
+    // Non-row-returning queries (DML/utility) and fully-drained row queries.
     send_command_complete(conn, build_command_complete_tag(qr));
 }
 
@@ -2396,6 +2430,14 @@ void PgProtocolHandler::send_close_complete(Connection& conn) {
 void PgProtocolHandler::send_no_data(Connection& conn) {
     MessageWriter w;
     w.begin_message('n');
+    auto msg = w.finish();
+    conn.enqueue_write(msg.data(), msg.size());
+}
+
+void PgProtocolHandler::send_portal_suspended(Connection& conn) {
+    // PortalSuspended ('s'): type byte + int32 length=4, no body.
+    MessageWriter w;
+    w.begin_message('s');
     auto msg = w.finish();
     conn.enqueue_write(msg.data(), msg.size());
 }
