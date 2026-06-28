@@ -138,10 +138,16 @@ TEST_F(ServerLifecycleTest, HealthCheckReturnsVersionAndUptime) {
     std::thread t([&server] { (void)server.start(); });
     wait_for_running(server);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // Sleep past one second so the seconds-granularity uptime actually
+    // advances. HealthInfo::uptime is monotonic steady_clock seconds, so the
+    // old EXPECT_GE(..., 0) was tautological and an implementation that hard-
+    // coded uptime to 0 (or never updated start_time_) would have passed. With
+    // a >1s wait the cast is reliably >= 1, genuinely verifying the "AndUptime"
+    // half of the test name.
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
     auto info = server.health();
     EXPECT_EQ(info.version, Server::VERSION);
-    EXPECT_GE(info.uptime.count(), 0);
+    EXPECT_GE(info.uptime.count(), 1);
     EXPECT_EQ(info.active_connections, 0u);
     EXPECT_EQ(info.max_connections, 10u);
 
