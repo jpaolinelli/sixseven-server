@@ -8,6 +8,7 @@
 #include "sixseven/executor/pg_catalog_tables.h"
 #include "sixseven/executor/query_engine.h"
 #include "sixseven/executor/storage_manager.h"
+#include "sixseven/table/tuple.h"
 
 #include <fstream>
 #include <string>
@@ -147,6 +148,117 @@ Result<void> SystemBootstrap::bootstrap(QueryEngine& engine,
         auto load = persistence.load_catalog();
         if (!load) {
             return make_error(load.error().code, "failed to load catalog: " + load.error().message);
+        }
+
+        // Initialize autoincrement counters for every autoincrement table.
+        //
+        // IndexManager::rebuild_all_indexes() / start_async_load() also init
+        // these counters when the IndexManager is wired in (real server), but
+        // the test fixture and any lightweight bootstrap path does not use
+        // IndexManager.  We must guarantee every autoincrement table gets its
+        // counter set here so that the first INSERT after restart does not fail
+        // with "no autoincrement counter for table N".
+        //
+        // Strategy:
+        //   1. Read the persisted high-water-mark from the table-file header.
+        //   2. If persisted > 0 use it directly (fast path, preserves gaps).
+        //   3. Otherwise scan the heap to find the current max value and set
+        //      the counter to max+1 (slow path, first startup or no flush).
+        //      Write the result back to disk so the next restart takes the
+        //      fast path.
+        //
+        // The high-water-mark NEVER decreases: deleted rows do not lower the
+        // counter.  If the table is empty the counter starts at 1.
+        {
+            auto databases = catalog.list_databases();
+            for (const auto& db : databases) {
+                auto tables = catalog.list_tables(db.database_id);
+                for (const auto& tbl : tables) {
+                    for (const auto& col : tbl.columns) {
+                        if (!col.is_autoincrement) {
+                            continue;
+                        }
+
+                        auto persisted = storage.read_autoincrement(tbl.table_id);
+                        if (persisted && *persisted > 0) {
+                            // Fast path: counter was flushed on a prior shutdown.
+                            catalog.init_autoincrement(tbl.table_id, *persisted);
+                            SIXSEVEN_LOG_DEBUG("system bootstrap: autoincrement for table '{}' "
+                                               "restored from header: {}",
+                                               tbl.name,
+                                               *persisted);
+                        } else {
+                            // Slow path: counter was never written (e.g. no
+                            // clean shutdown / flush).  Scan the heap to find
+                            // the current maximum value.
+                            int64_t max_val = 0;
+                            auto ts = storage.get_table_storage(tbl.table_id);
+                            if (ts) {
+                                auto schema = StorageManager::build_storage_schema(tbl);
+                                auto it = (*ts)->heap->begin();
+                                if (it) {
+                                    for (;;) {
+                                        auto row_result = it->next();
+                                        if (!row_result || !row_result->has_value()) {
+                                            break;
+                                        }
+                                        auto& row = **row_result;
+                                        auto vals =
+                                            TupleSerializer::deserialize(row.second, schema);
+                                        if (!vals) {
+                                            continue;
+                                        }
+                                        auto& v = (*vals)[static_cast<size_t>(col.ordinal)];
+                                        if (!v.is_null()) {
+                                            int64_t rv = 0;
+                                            switch (col.type_id) {
+                                            case TypeId::INT8:
+                                                rv = v.as_int8();
+                                                break;
+                                            case TypeId::INT16:
+                                                rv = v.as_int16();
+                                                break;
+                                            case TypeId::INT32:
+                                                rv = v.as_int32();
+                                                break;
+                                            case TypeId::INT64:
+                                                rv = v.as_int64();
+                                                break;
+                                            case TypeId::UINT8:
+                                                rv = static_cast<int64_t>(v.as_uint8());
+                                                break;
+                                            case TypeId::UINT16:
+                                                rv = static_cast<int64_t>(v.as_uint16());
+                                                break;
+                                            case TypeId::UINT32:
+                                                rv = static_cast<int64_t>(v.as_uint32());
+                                                break;
+                                            case TypeId::UINT64:
+                                                rv = static_cast<int64_t>(v.as_uint64());
+                                                break;
+                                            default:
+                                                break;
+                                            }
+                                            if (rv > max_val) {
+                                                max_val = rv;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            int64_t next_val = max_val + 1;
+                            catalog.init_autoincrement(tbl.table_id, next_val);
+                            // Persist so the next restart takes the fast path.
+                            (void)storage.write_autoincrement(tbl.table_id, next_val);
+                            SIXSEVEN_LOG_DEBUG("system bootstrap: autoincrement for table '{}' "
+                                               "scanned, starts at {}",
+                                               tbl.name,
+                                               next_val);
+                        }
+                        break; // Only one autoincrement column per table.
+                    }
+                }
+            }
         }
 
         // Open sys_embedding_jobs for durable embedding job queue.
