@@ -1590,6 +1590,12 @@ Result<size_t> PgProtocolHandler::handle_auth_message(Connection& conn) {
         return ok(total_len);
     }
 
+    if (body_len < 4) {
+        send_error_response(conn, "FATAL", "08P01", "invalid message length");
+        state_ = ProtocolState::CLOSED;
+        return ok(total_len);
+    }
+
     const uint8_t* payload = buf.data() + 5;
     size_t payload_len = body_len - 4;
 
@@ -1719,6 +1725,12 @@ Result<size_t> PgProtocolHandler::handle_frontend_message(Connection& conn) {
     // Wait for the complete message.
     if (buf.size() < total_len) {
         return ok(static_cast<size_t>(0));
+    }
+
+    if (body_len < 4) {
+        send_error_response(conn, "FATAL", "08P01", "invalid message length");
+        state_ = ProtocolState::CLOSED;
+        return ok(total_len);
     }
 
     // Payload starts after type byte + 4-byte length.
