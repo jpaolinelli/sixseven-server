@@ -129,7 +129,8 @@ ProviderRegistry::create_provider(const EmbeddingProviderConfig& config) {
             {
                 // Preserve the existing trailing-character rejection: all
                 // characters must be ASCII digits (no "384abc").
-                bool all_digits = std::all_of(config.model.begin(), config.model.end(),
+                bool all_digits = std::all_of(config.model.begin(),
+                                              config.model.end(),
                                               [](unsigned char c) { return c >= '0' && c <= '9'; });
                 if (!all_digits) {
                     return make_error(
@@ -139,9 +140,10 @@ ProviderRegistry::create_provider(const EmbeddingProviderConfig& config) {
                 }
                 auto pv = safe_stoul(config.model);
                 if (!pv) {
-                    return make_error(StatusCode::INVALID_ARGUMENT,
-                                     "builtin provider dimension must be a positive integer, got: '" +
-                                         config.model + "'");
+                    return make_error(
+                        StatusCode::INVALID_ARGUMENT,
+                        "builtin provider dimension must be a positive integer, got: '" +
+                            config.model + "'");
                 }
                 dim = *pv;
             }

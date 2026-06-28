@@ -920,7 +920,8 @@ Result<void> GraphEngine::flush_edge_indexes() {
         auto parsed_id = safe_stoul(key.substr(0, colon));
         if (!parsed_id) {
             SIXSEVEN_LOG_WARN("failed to parse database_id from edge key '{}': {}",
-                              key, parsed_id.error().message);
+                              key,
+                              parsed_id.error().message);
             continue;
         }
         auto db_id = static_cast<database_id_t>(*parsed_id);
@@ -977,7 +978,8 @@ Result<void> GraphEngine::flush_edges() {
         auto parsed_id2 = safe_stoul(key.substr(0, colon));
         if (!parsed_id2) {
             SIXSEVEN_LOG_WARN("failed to parse database_id from edge key '{}': {}",
-                              key, parsed_id2.error().message);
+                              key,
+                              parsed_id2.error().message);
             continue;
         }
         auto db_id = static_cast<database_id_t>(*parsed_id2);

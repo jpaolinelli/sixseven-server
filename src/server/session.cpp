@@ -190,7 +190,8 @@ Result<int64_t> Session::parse_timeout_ms(const std::string& value) {
         auto pv = safe_stoll(trimmed.substr(0, pos));
         if (!pv) {
             return make_error(StatusCode::INVALID_ARGUMENT,
-                              "invalid value for parameter \"statement_timeout\": \"" + value + "\"");
+                              "invalid value for parameter \"statement_timeout\": \"" + value +
+                                  "\"");
         }
         ms = *pv;
     }

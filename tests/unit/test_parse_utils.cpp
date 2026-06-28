@@ -1,5 +1,4 @@
 #include "sixseven/common/parse_utils.h"
-
 #include "sixseven/common/status.h"
 
 #include <gtest/gtest.h>

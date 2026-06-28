@@ -34,7 +34,8 @@ namespace sixseven {
 // If safe_stoi rejects this it is a behavior regression.
 TEST(QA_GDB942_SafeStoi, TrailingGarbaceAccepted) {
     auto r = safe_stoi("12abc");
-    ASSERT_TRUE(r.has_value()) << "safe_stoi rejected \"12abc\" but std::stoi accepts it (returns 12)";
+    ASSERT_TRUE(r.has_value())
+        << "safe_stoi rejected \"12abc\" but std::stoi accepts it (returns 12)";
     EXPECT_EQ(*r, 12);
 }
 
@@ -56,7 +57,8 @@ TEST(QA_GDB942_SafeStoi, ExplicitPositiveSign) {
 // This must NOT be an error and must NOT return 16.
 TEST(QA_GDB942_SafeStoi, HexPrefixReadsZero) {
     auto r = safe_stoi("0x10");
-    ASSERT_TRUE(r.has_value()) << "safe_stoi rejected \"0x10\" but std::stoi(base 10) accepts it (returns 0)";
+    ASSERT_TRUE(r.has_value())
+        << "safe_stoi rejected \"0x10\" but std::stoi(base 10) accepts it (returns 0)";
     EXPECT_EQ(*r, 0);
 }
 
@@ -138,7 +140,8 @@ TEST(QA_GDB942_SafeStoll, Int64MinBoundary) {
 // "0x10": stoull base-10 reads 0, stops at 'x' -> returns 0 (within uint32 range).
 TEST(QA_GDB942_SafeStou32, HexPrefixReadsZero) {
     auto r = safe_stou32("0x10");
-    ASSERT_TRUE(r.has_value()) << "safe_stou32 rejected \"0x10\" but stoull base-10 accepts it (returns 0)";
+    ASSERT_TRUE(r.has_value())
+        << "safe_stou32 rejected \"0x10\" but stoull base-10 accepts it (returns 0)";
     EXPECT_EQ(*r, uint32_t{0});
 }
 
