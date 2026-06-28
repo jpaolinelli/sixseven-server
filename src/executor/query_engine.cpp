@@ -2389,6 +2389,11 @@ Result<QueryResult> QueryEngine::execute_explain(const ExplainStmt& stmt,
                 return make_error(StatusCode::QUERY_CANCELED,
                                   "canceling statement due to statement timeout");
             }
+            if (StatementCancel::requested()) {
+                (*iter)->close();
+                return make_error(StatusCode::QUERY_CANCELED,
+                                  "canceling statement due to user request");
+            }
             auto row = (*iter)->next();
             if (!row) {
                 (*iter)->close();
@@ -2652,13 +2657,20 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
     }
 
     // Drain. Between tuple pulls, enforce the session statement_timeout
-    // deadline armed by the protocol layer (GDB-721).
+    // deadline armed by the protocol layer (GDB-721) and any user-requested
+    // cancellation (GDB-956).
     while (true) {
         if (StatementDeadline::expired()) {
             (*iter)->close();
             abort_implicit_txn();
             return make_error(StatusCode::QUERY_CANCELED,
                               "canceling statement due to statement timeout");
+        }
+        if (StatementCancel::requested()) {
+            (*iter)->close();
+            abort_implicit_txn();
+            return make_error(StatusCode::QUERY_CANCELED,
+                              "canceling statement due to user request");
         }
         auto row = (*iter)->next();
         if (!row) {

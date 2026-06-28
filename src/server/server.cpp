@@ -3,8 +3,10 @@
 #include "sixseven/common/logging.h"
 #include "sixseven/common/platform.h"
 
+#include <atomic>
 #include <cerrno>
 #include <cstring>
+#include <memory>
 
 namespace sixseven {
 
@@ -297,6 +299,22 @@ void Server::accept_connection() {
     }
     handler.set_auth(auth_method_, user_mgr_);
 
+    // Wire cancellation callbacks (GDB-956).
+    handler.set_cancel_requester(
+        [this](int32_t cancel_pid, int32_t secret) {
+            cancel_registry_.request_cancel(cancel_pid, secret);
+        });
+    handler.set_cancel_connection_registrar(
+        [this](int32_t reg_pid, int32_t secret) {
+            cancel_registry_.register_connection(reg_pid, secret);
+        });
+    handler.set_cancel_flag_registrar(
+        [this](int32_t reg_pid, std::shared_ptr<std::atomic<bool>> flag) {
+            cancel_registry_.set_cancel_flag(reg_pid, std::move(flag));
+        });
+    handler.set_cancel_flag_clearer(
+        [this](int32_t clr_pid) { cancel_registry_.clear_cancel_flag(clr_pid); });
+
     std::lock_guard lock(connections_mutex_);
     connections_.emplace(client_fd, std::move(conn));
     protocol_handlers_.emplace(client_fd, std::move(handler));
@@ -456,6 +474,11 @@ void Server::close_connection(int fd) {
     inflight_fds_.erase(fd); // Clean up in case of shutdown while in-flight.
     (void)event_loop_->remove_fd(fd);
     connections_.erase(fd);
+    // Unregister from the cancel registry before erasing the handler (GDB-956).
+    auto handler_it = protocol_handlers_.find(fd);
+    if (handler_it != protocol_handlers_.end()) {
+        cancel_registry_.unregister_connection(handler_it->second.backend_pid());
+    }
     protocol_handlers_.erase(fd);
     SIXSEVEN_LOG_DEBUG("connection fd={} removed", fd);
 }

@@ -2,6 +2,7 @@
 
 #include "sixseven/common/config.h"
 #include "sixseven/common/result.h"
+#include "sixseven/server/cancel_registry.h"
 #include "sixseven/server/connection.h"
 #include "sixseven/server/event_loop.h"
 #include "sixseven/server/pg_protocol.h"
@@ -51,6 +52,10 @@ public:
     /// Set the user manager for authentication.
     void set_user_manager(UserManager* user_mgr);
 
+    /// Expose the cancel registry so external code (e.g. tests) can call
+    /// request_cancel directly without going through a live socket.
+    CancelRegistry& cancel_registry() { return cancel_registry_; }
+
     /// Bind, listen, and run the event loop. Blocks until shutdown is requested.
     [[nodiscard]] Result<void> start();
 
@@ -94,6 +99,10 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<int32_t> next_backend_pid_{1};
     std::chrono::steady_clock::time_point start_time_;
+
+    /// Registry mapping (backend_pid, secret_key) -> cancel flag.
+    /// Registered when a connection completes startup; unregistered on close.
+    CancelRegistry cancel_registry_;
 
     // -- Thread pool query offload state --
     // Connections whose queries are currently executing on the thread pool.

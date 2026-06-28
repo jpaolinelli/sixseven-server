@@ -7,6 +7,7 @@
 #include "sixseven/server/auth.h"
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -193,6 +194,24 @@ using QueryExecutor =
 using QueryDescriber = std::function<Result<std::vector<ColumnDescription>>(
     const std::string& sql, const std::string& database)>;
 
+/// Callback type for requesting cancellation of a query by (pid, secret).
+/// Installed on each handler by the Server so the CancelRequest branch can
+/// reach the Server's CancelRegistry without a back-pointer to Server itself.
+using CancelRequester = std::function<void(int32_t backend_pid, int32_t secret_key)>;
+
+/// Callback type for registering a per-statement cancel flag with the registry.
+/// Called just before query execution starts.
+using CancelFlagRegistrar =
+    std::function<void(int32_t backend_pid, std::shared_ptr<std::atomic<bool>> flag)>;
+
+/// Callback type for clearing a per-statement cancel flag from the registry.
+/// Called after query execution finishes.
+using CancelFlagClearer = std::function<void(int32_t backend_pid)>;
+
+/// Callback type for registering a connection with the cancel registry once
+/// startup is complete and BackendKeyData has been sent.
+using CancelConnectionRegistrar = std::function<void(int32_t backend_pid, int32_t secret_key)>;
+
 /// Protocol state machine phases.
 enum class ProtocolState : uint8_t {
     WAIT_FOR_STARTUP,
@@ -253,6 +272,21 @@ public:
 
     /// Set the authentication method and user manager for this handler.
     void set_auth(AuthMethod method, UserManager* user_mgr);
+
+    /// Set the callback used to forward CancelRequests to the Server registry.
+    void set_cancel_requester(CancelRequester requester);
+
+    /// Set the callback used to register a per-statement cancel flag before
+    /// executing a query (called by the worker thread).
+    void set_cancel_flag_registrar(CancelFlagRegistrar registrar);
+
+    /// Set the callback used to clear the per-statement cancel flag after a
+    /// query finishes (called by the worker thread).
+    void set_cancel_flag_clearer(CancelFlagClearer clearer);
+
+    /// Set the callback invoked once startup completes (BackendKeyData sent).
+    /// The Server uses this to register (pid, secret) in the cancel registry.
+    void set_cancel_connection_registrar(CancelConnectionRegistrar registrar);
 
     /// Process available data in the connection's read buffer.
     /// Handles message framing (partial-read reassembly) internally.
@@ -353,6 +387,10 @@ private:
     ProtocolState state_ = ProtocolState::WAIT_FOR_STARTUP;
     QueryExecutor query_executor_;
     QueryDescriber query_describer_;
+    CancelRequester cancel_requester_;
+    CancelFlagRegistrar cancel_flag_registrar_;
+    CancelFlagClearer cancel_flag_clearer_;
+    CancelConnectionRegistrar cancel_connection_registrar_;
     int32_t backend_pid_;
     int32_t secret_key_;
 
