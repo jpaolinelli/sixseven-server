@@ -105,23 +105,39 @@ TEST(JoinMethodTest, ChoosesBestMethod) {
     right.estimated_rows = 10000.0;
 
     auto [method, cost] = choose_join_method(left, right, 0.001, false, false, cm);
-    // Should choose hash join for large inner relation.
-    EXPECT_NE(method, JoinMethod::NESTED_LOOP);
+    // NL  = 10 + 100*200 + 100*10000*0.01 = 30010
+    // HJ  = (10 + 100*0.01) + 200 + 10000*0.01 + (100+10000)*0.0025 = 336.25
+    // SMJ = 10 + 200 + sort(100) + sort(10000) + (100+10000)*0.01 = 644.85
+    // Hash join wins by a wide margin for a large inner relation.
+    EXPECT_EQ(method, JoinMethod::HASH_JOIN);
     EXPECT_GT(cost.total_cost, 0.0);
 }
 
-TEST(JoinMethodTest, NestedLoopForSmallInner) {
+// When the outer side has exactly 1 row, nested loop pays inner.total only once
+// and skips the per-row hash-table or sort overhead that HJ and SMJ must pay.
+// Proof (cpu_tuple_cost=0.01, cpu_operator_cost=0.0025):
+//   NL  = o_t + 1*i_t + 1*i_r*0.01
+//   HJ  = (o_t + 1*0.01) + i_t + i_r*0.01 + (1+i_r)*0.0025
+//         NL < HJ iff 0 < 0.01 + (1+i_r)*0.0025 -- always true.
+//   SMJ = o_t + i_t + sort(1) + sort(i_r) + (1+i_r)*0.01; sort(1)=0 by formula.
+//         NL < SMJ iff 0 < sort(i_r) + 1*0.01 -- always true for i_r >= 1.
+TEST(JoinMethodTest, NestedLoopForSingleOuterRow) {
     CostModel cm;
     PlanCost outer;
-    outer.total_cost = 10.0;
-    outer.estimated_rows = 10.0;
+    outer.total_cost = 5.0;
+    outer.estimated_rows = 1.0;
 
     PlanCost inner;
-    inner.total_cost = 1.0;
-    inner.estimated_rows = 5.0;
+    inner.total_cost = 3.0;
+    inner.estimated_rows = 3.0;
 
-    auto [method, cost] = choose_join_method(outer, inner, 0.1, false, false, cm);
-    // For very small relations, nested loop should be competitive.
+    // NL  = 5 + 1*3 + 1*3*0.01  = 8.03
+    // HJ  = (5+0.01) + 3 + 3*0.01 + (1+3)*0.0025 = 8.05   (build=outer, 1 row)
+    // SMJ = 5 + 3 + 0 + sort(3) + (1+3)*0.01 = 8.05 + sort(3)
+    // Nested loop wins: the inner is scanned exactly once; hash-build and sort
+    // overhead are not amortised over multiple outer rows.
+    auto [method, cost] = choose_join_method(outer, inner, 0.5, false, false, cm);
+    EXPECT_EQ(method, JoinMethod::NESTED_LOOP);
     EXPECT_GT(cost.total_cost, 0.0);
 }
 
@@ -137,6 +153,11 @@ TEST(JoinMethodTest, OutputRowsReflectsSelectivity) {
 
     double sel = 0.001;
     auto [method, cost] = choose_join_method(left, right, sel, false, false, cm);
+    // NL  = 10 + 1000*10 + 1000*1000*0.01 = 20010
+    // HJ  = (10 + 1000*0.01) + 10 + 1000*0.01 + (1000+1000)*0.0025 = 45
+    // SMJ = 10 + 10 + sort(1000) + sort(1000) + (1000+1000)*0.01 = 89.83
+    // Hash join wins; output cardinality must reflect the join selectivity.
+    EXPECT_EQ(method, JoinMethod::HASH_JOIN);
     EXPECT_NEAR(cost.estimated_rows, 1000.0 * 1000.0 * sel, 1.0);
 }
 
