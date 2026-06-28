@@ -21,6 +21,8 @@
 #include <thread>
 #include <vector>
 
+#include "e2e_helpers.h"
+
 #ifndef _WIN32
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -38,87 +40,6 @@ namespace {
 
 #ifndef _WIN32
 
-/// Write a minimal JSON config for sixseven-server.
-void write_server_config(const fs::path& cfg_path, const fs::path& data_dir, int port) {
-    std::ofstream f(cfg_path);
-    f << "{\n"
-      << "  \"data_dir\": \"" << data_dir.string() << "\",\n"
-      << "  \"port\": " << port << ",\n"
-      << "  \"log_level\": \"warn\",\n"
-      << "  \"auth_method\": \"trust\",\n"
-      << "  \"buffer_pool_size_mb\": 32\n"
-      << "}\n";
-}
-
-/// Attempt to connect to host:port, retrying until timeout_ms elapses.
-/// Returns connected socket fd, or -1 on timeout/failure.
-int connect_with_retry(const char* host, int port, int timeout_ms) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-    while (std::chrono::steady_clock::now() < deadline) {
-        int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-        if (fd < 0) {
-            return -1;
-        }
-        sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(static_cast<uint16_t>(port));
-        ::inet_pton(AF_INET, host, &addr.sin_addr);
-        if (::connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == 0) {
-            return fd;
-        }
-        ::close(fd);
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-    return -1;
-}
-
-/// Blocking read until 'Z' (ReadyForQuery) appears or timeout expires.
-/// Accumulates all received bytes into out.
-bool wait_ready_for_query(int fd, std::vector<uint8_t>& out, int timeout_ms) {
-    std::vector<uint8_t> buf(4096);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-    while (std::chrono::steady_clock::now() < deadline) {
-        auto n = ::recv(fd, reinterpret_cast<char*>(buf.data()), static_cast<int>(buf.size()), 0);
-        if (n <= 0) {
-            return false;
-        }
-        out.insert(out.end(), buf.begin(), buf.begin() + n);
-        for (uint8_t b : out) {
-            if (b == 'Z') {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-/// Send startup + a SQL query on fd; collect the response into out.
-/// Returns true if ReadyForQuery was received for the query response.
-bool pg_exec(int fd, const std::string& sql, std::vector<uint8_t>& out) {
-    // Send startup.
-    auto startup = sixseven::cli::encode_startup_message("sixseven", "sixseven");
-    if (::send(fd,
-               reinterpret_cast<const char*>(startup.data()),
-               static_cast<int>(startup.size()),
-               0) < 0) {
-        return false;
-    }
-    // Wait for ReadyForQuery from startup phase.
-    if (!wait_ready_for_query(fd, out, /*ms=*/5000)) {
-        return false;
-    }
-
-    // Send query.
-    auto qmsg = sixseven::cli::encode_query_message(sql);
-    if (::send(fd, reinterpret_cast<const char*>(qmsg.data()), static_cast<int>(qmsg.size()), 0) <
-        0) {
-        return false;
-    }
-    // Wait for ReadyForQuery from query response.
-    out.clear();
-    return wait_ready_for_query(fd, out, /*ms=*/8000);
-}
-
 /// Launch server using the JSON config at cfg_path.  Returns child PID or -1.
 pid_t launch_server(const fs::path& cfg_path) {
     pid_t pid = ::fork();
@@ -134,6 +55,33 @@ pid_t launch_server(const fs::path& cfg_path) {
         ::_exit(127);
     }
     return pid;
+}
+
+/// Send startup + a SQL query on fd; collect the response into out.
+/// Returns true if ReadyForQuery was received for the query response.
+bool pg_exec(int fd, const std::string& sql, std::vector<uint8_t>& out) {
+    // Send startup.
+    auto startup = sixseven::cli::encode_startup_message("sixseven", "sixseven");
+    if (::send(fd,
+               reinterpret_cast<const char*>(startup.data()),
+               static_cast<int>(startup.size()),
+               0) < 0) {
+        return false;
+    }
+    // Wait for ReadyForQuery from startup phase.
+    if (!sixseven::e2e::wait_ready_for_query(fd, out, /*ms=*/5000)) {
+        return false;
+    }
+
+    // Send query.
+    auto qmsg = sixseven::cli::encode_query_message(sql);
+    if (::send(fd, reinterpret_cast<const char*>(qmsg.data()), static_cast<int>(qmsg.size()), 0) <
+        0) {
+        return false;
+    }
+    // Wait for ReadyForQuery from query response.
+    out.clear();
+    return sixseven::e2e::wait_ready_for_query(fd, out, /*ms=*/8000);
 }
 
 #endif // !_WIN32
@@ -171,7 +119,8 @@ protected:
     pid_t server_pid_ = -1;
 #endif
 
-    // Unique port for this test class.  Pick something unlikely to collide.
+    // Unique port for this test class.
+    // Static port registry: 16759=durability, 16760=replication-primary, 16761=replication-standby
     static constexpr int kPort = 16759;
 };
 
@@ -188,12 +137,12 @@ TEST_F(E2EDurabilityTest, CommittedRowsSurviveKillNine) {
     // Phase 1: Start server, insert committed rows, hard-kill.
     // ------------------------------------------------------------------
     fs::path cfg = data_dir_ / "server.json";
-    write_server_config(cfg, data_dir_, kPort);
+    sixseven::e2e::write_server_config(cfg, data_dir_, kPort);
 
     server_pid_ = launch_server(cfg);
     ASSERT_GT(server_pid_, 0) << "fork/exec failed";
 
-    int fd1 = connect_with_retry("127.0.0.1", kPort, /*timeout_ms=*/8000);
+    int fd1 = sixseven::e2e::connect_with_retry("127.0.0.1", kPort, /*timeout_ms=*/8000);
     ASSERT_GE(fd1, 0) << "server did not become ready within 8 s";
 
     std::vector<uint8_t> resp;
@@ -206,7 +155,7 @@ TEST_F(E2EDurabilityTest, CommittedRowsSurviveKillNine) {
     ::close(fd1);
 
     // Reconnect for INSERT (reuse the startup handshake each time).
-    fd1 = connect_with_retry("127.0.0.1", kPort, /*timeout_ms=*/2000);
+    fd1 = sixseven::e2e::connect_with_retry("127.0.0.1", kPort, /*timeout_ms=*/2000);
     ASSERT_GE(fd1, 0) << "reconnect for INSERT failed";
 
     resp.clear();
@@ -230,7 +179,7 @@ TEST_F(E2EDurabilityTest, CommittedRowsSurviveKillNine) {
     server_pid_ = launch_server(cfg);
     ASSERT_GT(server_pid_, 0) << "second fork/exec failed";
 
-    int fd2 = connect_with_retry("127.0.0.1", kPort, /*timeout_ms=*/10000);
+    int fd2 = sixseven::e2e::connect_with_retry("127.0.0.1", kPort, /*timeout_ms=*/10000);
     ASSERT_GE(fd2, 0) << "restarted server did not become ready within 10 s";
 
     std::vector<uint8_t> sel_resp;
