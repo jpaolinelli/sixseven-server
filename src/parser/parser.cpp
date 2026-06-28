@@ -1,8 +1,9 @@
 #include "sixseven/parser/parser.h"
 
+#include "sixseven/common/parse_utils.h"
+
 #include <algorithm>
 #include <limits>
-#include <stdexcept>
 #include <string>
 
 namespace sixseven {
@@ -204,43 +205,6 @@ std::string unquote_string(std::string_view lexeme) {
         }
     }
     return result;
-}
-
-/// Safe std::stoi wrapper that returns a Result instead of throwing.
-Result<int> safe_stoi(std::string_view s) {
-    try {
-        return ok(std::stoi(std::string(s)));
-    } catch (const std::out_of_range&) {
-        return make_error(StatusCode::PARSE_ERROR, "integer literal out of range");
-    } catch (const std::invalid_argument&) {
-        return make_error(StatusCode::PARSE_ERROR, "invalid integer literal");
-    }
-}
-
-/// Safe std::stoll wrapper that returns a Result instead of throwing.
-Result<int64_t> safe_stoll(std::string_view s) {
-    try {
-        return ok(static_cast<int64_t>(std::stoll(std::string(s))));
-    } catch (const std::out_of_range&) {
-        return make_error(StatusCode::PARSE_ERROR, "integer literal out of range");
-    } catch (const std::invalid_argument&) {
-        return make_error(StatusCode::PARSE_ERROR, "invalid integer literal");
-    }
-}
-
-/// Safe uint32 parse: wraps std::stoull and range-checks against UINT32_MAX.
-Result<uint32_t> safe_stou32(std::string_view s) {
-    try {
-        uint64_t v = std::stoull(std::string(s));
-        if (v > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
-            return make_error(StatusCode::PARSE_ERROR, "integer literal out of range");
-        }
-        return ok(static_cast<uint32_t>(v));
-    } catch (const std::out_of_range&) {
-        return make_error(StatusCode::PARSE_ERROR, "integer literal out of range");
-    } catch (const std::invalid_argument&) {
-        return make_error(StatusCode::PARSE_ERROR, "invalid integer literal");
-    }
 }
 
 } // namespace

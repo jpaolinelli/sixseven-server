@@ -1,6 +1,7 @@
 #include "sixseven/graph/graph_engine.h"
 
 #include "sixseven/common/logging.h"
+#include "sixseven/common/parse_utils.h"
 #include "sixseven/common/types.h"
 #include "sixseven/index/btree_persistence.h"
 #include "sixseven/storage/wal.h"
@@ -916,7 +917,13 @@ Result<void> GraphEngine::flush_edge_indexes() {
         // Extract database_id from the key (format: "database_id:name").
         auto colon = key.find(':');
         if (colon == std::string::npos) continue;
-        auto db_id = static_cast<database_id_t>(std::stoul(key.substr(0, colon)));
+        auto parsed_id = safe_stoul(key.substr(0, colon));
+        if (!parsed_id) {
+            SIXSEVEN_LOG_WARN("failed to parse database_id from edge key '{}': {}",
+                              key, parsed_id.error().message);
+            continue;
+        }
+        auto db_id = static_cast<database_id_t>(*parsed_id);
 
         auto r = persist_edge_indexes(key, db_id, cfg.edge_id);
         if (r) {
@@ -967,7 +974,13 @@ Result<void> GraphEngine::flush_edges() {
     for (auto& [key, table] : edge_tables_) {
         auto colon = key.find(':');
         if (colon == std::string::npos) continue;
-        auto db_id = static_cast<database_id_t>(std::stoul(key.substr(0, colon)));
+        auto parsed_id2 = safe_stoul(key.substr(0, colon));
+        if (!parsed_id2) {
+            SIXSEVEN_LOG_WARN("failed to parse database_id from edge key '{}': {}",
+                              key, parsed_id2.error().message);
+            continue;
+        }
+        auto db_id = static_cast<database_id_t>(*parsed_id2);
         auto r = persist_edge_indexes(key, db_id, table->config().edge_id);
         if (r) {
             ++flushed;

@@ -2,6 +2,7 @@
 
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/coercion.h"
+#include "sixseven/common/parse_utils.h"
 #include "sixseven/common/types.h"
 #include "sixseven/executor/planner.h"
 #include "sixseven/executor/seq_scan.h"
@@ -105,21 +106,19 @@ Result<Value> eval(const Expr& expr,
 Result<Value> eval_literal(const LiteralExpr& expr) {
     switch (expr.kind) {
     case LiteralKind::INTEGER: {
-        try {
-            int64_t v = std::stoll(expr.value);
-            return ok(Value(v));
-        } catch (...) {
+        auto v = safe_stoll(expr.value);
+        if (!v) {
             return make_error(StatusCode::TYPE_ERROR,
                               "cannot parse integer literal: " + expr.value);
         }
+        return ok(Value(*v));
     }
     case LiteralKind::FLOAT: {
-        try {
-            double v = std::stod(expr.value);
-            return ok(Value(v));
-        } catch (...) {
+        auto v = safe_stod(expr.value);
+        if (!v) {
             return make_error(StatusCode::TYPE_ERROR, "cannot parse float literal: " + expr.value);
         }
+        return ok(Value(*v));
     }
     case LiteralKind::STRING:
         return ok(Value(expr.value));

@@ -1,5 +1,7 @@
 #include "sixseven/planner/rewrite_rules.h"
 
+#include "sixseven/common/parse_utils.h"
+
 #include <cmath>
 #include <cstdlib>
 
@@ -351,8 +353,13 @@ ExprPtr fold_constants(const Expr& expr) {
         if (left_lit != nullptr && right_lit != nullptr) {
             // Integer arithmetic/comparison.
             if (left_lit->kind == LiteralKind::INTEGER && right_lit->kind == LiteralKind::INTEGER) {
-                int64_t l = std::stoll(left_lit->value);
-                int64_t r = std::stoll(right_lit->value);
+                auto lv = safe_stoll(left_lit->value);
+                auto rv = safe_stoll(right_lit->value);
+                if (!lv || !rv) {
+                    return nullptr;
+                }
+                int64_t l = *lv;
+                int64_t r = *rv;
 
                 auto arith = fold_int_arithmetic(bin->op, l, r);
                 if (arith) {
@@ -370,8 +377,13 @@ ExprPtr fold_constants(const Expr& expr) {
                  right_lit->kind == LiteralKind::INTEGER)) {
                 if (!(left_lit->kind == LiteralKind::INTEGER &&
                       right_lit->kind == LiteralKind::INTEGER)) {
-                    double l = std::stod(left_lit->value);
-                    double r = std::stod(right_lit->value);
+                    auto lv2 = safe_stod(left_lit->value);
+                    auto rv2 = safe_stod(right_lit->value);
+                    if (!lv2 || !rv2) {
+                        return nullptr;
+                    }
+                    double l = *lv2;
+                    double r = *rv2;
                     auto result = fold_float_arithmetic(bin->op, l, r);
                     if (result) {
                         return result;
@@ -455,15 +467,23 @@ ExprPtr fold_constants(const Expr& expr) {
 
         if (unary->op == UnaryOp::NEGATE && lit != nullptr) {
             if (lit->kind == LiteralKind::INTEGER) {
+                auto pv = safe_stoll(lit->value);
+                if (!pv) {
+                    return nullptr;
+                }
                 auto result = std::make_unique<LiteralExpr>();
                 result->kind = LiteralKind::INTEGER;
-                result->value = std::to_string(-std::stoll(lit->value));
+                result->value = std::to_string(-(*pv));
                 return result;
             }
             if (lit->kind == LiteralKind::FLOAT) {
+                auto pv = safe_stod(lit->value);
+                if (!pv) {
+                    return nullptr;
+                }
                 auto result = std::make_unique<LiteralExpr>();
                 result->kind = LiteralKind::FLOAT;
-                result->value = std::to_string(-std::stod(lit->value));
+                result->value = std::to_string(-(*pv));
                 return result;
             }
         }

@@ -2,6 +2,7 @@
 
 #include "sixseven/common/coercion.h"
 #include "sixseven/common/logging.h"
+#include "sixseven/common/parse_utils.h"
 #include "sixseven/common/value_hash.h"
 #include "sixseven/executor/algorithm_scan.h"
 #include "sixseven/executor/bitmap_scan.h"
@@ -1976,14 +1977,22 @@ Planner::plan_select(const SelectStmt& stmt,
             if ((desc.func == WindowFunc::LAG || desc.func == WindowFunc::LEAD) &&
                 wexpr->args.size() >= 2) {
                 if (auto* lit = dynamic_cast<const LiteralExpr*>(wexpr->args[1].get())) {
-                    desc.offset = std::stoll(lit->value);
+                    auto pv = safe_stoll(lit->value);
+                    if (!pv) {
+                        return tl::unexpected(pv.error());
+                    }
+                    desc.offset = *pv;
                 }
             }
 
             // NTILE bucket count (first argument).
             if (desc.func == WindowFunc::NTILE && !wexpr->args.empty()) {
                 if (auto* lit = dynamic_cast<const LiteralExpr*>(wexpr->args[0].get())) {
-                    desc.ntile_buckets = std::stoll(lit->value);
+                    auto pv = safe_stoll(lit->value);
+                    if (!pv) {
+                        return tl::unexpected(pv.error());
+                    }
+                    desc.ntile_buckets = *pv;
                 }
             }
 
@@ -2401,7 +2410,11 @@ Planner::plan_select(const SelectStmt& stmt,
     if (stmt.limit) {
         int64_t limit_val = 0;
         if (auto* lit = dynamic_cast<const LiteralExpr*>(stmt.limit.get())) {
-            limit_val = std::stoll(lit->value);
+            auto pv = safe_stoll(lit->value);
+            if (!pv) {
+                return tl::unexpected(pv.error());
+            }
+            limit_val = *pv;
         } else {
             return make_error(StatusCode::NOT_IMPLEMENTED,
                               "non-literal LIMIT is not yet supported");
@@ -2410,7 +2423,11 @@ Planner::plan_select(const SelectStmt& stmt,
         int64_t offset_val = 0;
         if (stmt.offset) {
             if (auto* olit = dynamic_cast<const LiteralExpr*>(stmt.offset.get())) {
-                offset_val = std::stoll(olit->value);
+                auto pv = safe_stoll(olit->value);
+                if (!pv) {
+                    return tl::unexpected(pv.error());
+                }
+                offset_val = *pv;
             }
         }
 
@@ -3371,9 +3388,17 @@ std::optional<SimpleComparison> extract_simple_comparison(const Expr* expr) {
 
         // Parse the literal value.
         if (lit->kind == LiteralKind::INTEGER) {
-            cmp.literal_value = Value(static_cast<int64_t>(std::stoll(lit->value)));
+            auto pv = safe_stoll(lit->value);
+            if (!pv) {
+                return std::nullopt;
+            }
+            cmp.literal_value = Value(static_cast<int64_t>(*pv));
         } else if (lit->kind == LiteralKind::FLOAT) {
-            cmp.literal_value = Value(std::stod(lit->value));
+            auto pv = safe_stod(lit->value);
+            if (!pv) {
+                return std::nullopt;
+            }
+            cmp.literal_value = Value(*pv);
         } else if (lit->kind == LiteralKind::STRING) {
             cmp.literal_value = Value(lit->value);
         } else {
@@ -3388,9 +3413,17 @@ std::optional<SimpleComparison> extract_simple_comparison(const Expr* expr) {
 
     // Parse the literal value.
     if (lit->kind == LiteralKind::INTEGER) {
-        cmp.literal_value = Value(static_cast<int64_t>(std::stoll(lit->value)));
+        auto pv = safe_stoll(lit->value);
+        if (!pv) {
+            return std::nullopt;
+        }
+        cmp.literal_value = Value(static_cast<int64_t>(*pv));
     } else if (lit->kind == LiteralKind::FLOAT) {
-        cmp.literal_value = Value(std::stod(lit->value));
+        auto pv = safe_stod(lit->value);
+        if (!pv) {
+            return std::nullopt;
+        }
+        cmp.literal_value = Value(*pv);
     } else if (lit->kind == LiteralKind::STRING) {
         cmp.literal_value = Value(lit->value);
     } else {

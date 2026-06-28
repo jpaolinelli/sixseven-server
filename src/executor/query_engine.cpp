@@ -3,6 +3,7 @@
 #include "sixseven/catalog/schema.h"
 #include "sixseven/common/coercion.h"
 #include "sixseven/common/logging.h"
+#include "sixseven/common/parse_utils.h"
 #include "sixseven/common/statement_deadline.h"
 #include "sixseven/common/types.h"
 #include "sixseven/executor/catalog_persistence.h"
@@ -74,24 +75,26 @@ std::optional<ConstFoldResult> try_fold_const_expr(const Expr& expr) {
     if (const auto* lit = dynamic_cast<const LiteralExpr*>(&expr)) {
         ConstFoldResult r;
         switch (lit->kind) {
-        case LiteralKind::INTEGER:
+        case LiteralKind::INTEGER: {
             r.type_id = TypeId::INT32;
-            try {
-                r.value = Value(static_cast<int32_t>(std::stoi(lit->value)));
-            } catch (...) {
+            auto pv = safe_stoi(lit->value);
+            if (!pv) {
                 return std::nullopt;
             }
+            r.value = Value(static_cast<int32_t>(*pv));
             r.default_name = lit->value;
             return r;
-        case LiteralKind::FLOAT:
+        }
+        case LiteralKind::FLOAT: {
             r.type_id = TypeId::FLOAT64;
-            try {
-                r.value = Value(std::stod(lit->value));
-            } catch (...) {
+            auto pv = safe_stod(lit->value);
+            if (!pv) {
                 return std::nullopt;
             }
+            r.value = Value(*pv);
             r.default_name = lit->value;
             return r;
+        }
         case LiteralKind::BOOLEAN:
             r.type_id = TypeId::BOOL;
             r.value = Value(lit->value == "true" || lit->value == "TRUE");

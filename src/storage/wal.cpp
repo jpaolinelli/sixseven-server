@@ -1,6 +1,7 @@
 #include "sixseven/storage/wal.h"
 
 #include "sixseven/common/logging.h"
+#include "sixseven/common/parse_utils.h"
 #include "sixseven/common/platform.h"
 #include "sixseven/storage/wal_record.h"
 #include "sixseven/storage/wal_recovery.h" // serialize_checkpoint_data()
@@ -29,7 +30,8 @@ uint64_t parse_segment_filename(const std::string& filename) {
     if (!all_digits) {
         return 0;
     }
-    return std::stoull(num_str);
+    auto pv = safe_stoull(num_str);
+    return pv ? *pv : 0;
 }
 
 /// List all WAL segment IDs found in a directory, sorted ascending.
