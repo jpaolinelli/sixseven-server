@@ -8,6 +8,7 @@ target_link_libraries(sixseven_unit_tests
         GTest::gtest
         GTest::gtest_main
         sixseven
+        sixseven_cli_lib
 )
 
 include(GoogleTest)

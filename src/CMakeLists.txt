@@ -22,6 +22,24 @@ target_link_libraries(sixseven INTERFACE sixseven_common sixseven_storage sixsev
 add_executable(sixseven-server main.cpp)
 target_link_libraries(sixseven-server PRIVATE sixseven)
 
-# CLI executable
-add_executable(sixseven-cli cli/main.cpp)
-target_link_libraries(sixseven-cli PRIVATE sixseven)
+# CLI library — socket-free units (codec + formatter + repl) used by both
+# the cli executable and the unit-test suite.
+add_library(sixseven_cli_lib STATIC
+    cli/pg_wire_codec.cpp
+    cli/result_formatter.cpp
+    cli/repl.cpp
+)
+target_include_directories(sixseven_cli_lib PUBLIC
+    "${PROJECT_SOURCE_DIR}/include"
+)
+target_link_libraries(sixseven_cli_lib PUBLIC sixseven_common)
+
+# CLI executable — adds the socket layer and main on top of the library.
+add_executable(sixseven-cli
+    cli/main.cpp
+    cli/socket_client.cpp
+)
+target_link_libraries(sixseven-cli PRIVATE sixseven_cli_lib)
+if (WIN32)
+    target_link_libraries(sixseven-cli PRIVATE ws2_32)
+endif()

@@ -57,9 +57,34 @@ ctest --test-dir build/debug -L qa --output-on-failure
 # Run server
 ./build/debug/src/sixseven-server [config.json]
 
-# Run CLI
+# Run CLI (connect to localhost:6767, user=sixseven, db=sixseven)
 ./build/debug/src/sixseven-cli
+
+# CLI with explicit flags
+./build/debug/src/sixseven-cli -h localhost -p 6767 -U alice -d mydb
+
+# CLI one-shot mode (no REPL; useful for scripts)
+./build/debug/src/sixseven-cli -c "SELECT 1;"
 ```
+
+## CLI (sixseven-cli)
+
+`sixseven-cli` is a raw pg-wire v3 client (no libpq; pure C++ TCP sockets).
+It connects to a running `sixseven-server`, executes SQL, and prints tabular results.
+
+Flags: `-h host` (default: localhost), `-p port` (default: 6767), `-U user` (default: sixseven), `-d database` (default: sixseven), `-c "SQL"` (one-shot, non-interactive).
+
+In the REPL: end statements with `;` to send; use `\q` to quit, `\help` for help.
+
+Auth scope: the client handles `AuthenticationOk` (trust). If the server requests MD5 or SCRAM-SHA-256, it surfaces a clear error. Configure `auth_method = "trust"` in `config.json` for local development.
+
+Source layout:
+- `include/sixseven/cli/pg_wire_codec.h` — pure encoder/decoder (no socket)
+- `include/sixseven/cli/result_formatter.h` — ASCII table formatter
+- `include/sixseven/cli/repl.h` — REPL + one-shot driver
+- `include/sixseven/cli/socket_client.h` — thin TCP socket layer
+- `src/cli/` — implementations + `main.cpp`
+- `tests/unit/test_cli_*.cpp` — socket-free unit tests (codec, formatter, REPL)
 
 ## Directory Layout
 
@@ -76,7 +101,7 @@ tools/                    — CLI and benchmark tools
 docs/                     — Documentation
 ```
 
-Modules: `common`, `storage`, `catalog`, `index`, `table`, `graph`, `vector`, `parser`, `planner`, `executor`, `txn`, `server`
+Modules: `common`, `storage`, `catalog`, `index`, `table`, `graph`, `vector`, `parser`, `planner`, `executor`, `txn`, `server`, `cli`
 
 ## Coding Conventions
 
