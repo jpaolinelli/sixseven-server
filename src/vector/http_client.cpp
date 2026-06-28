@@ -1,6 +1,7 @@
 #include "sixseven/vector/http_client.h"
 
 #include "sixseven/common/logging.h"
+#include "sixseven/common/parse_utils.h"
 
 #include <httplib.h>
 
@@ -32,7 +33,11 @@ Result<ParsedUrl> parse_url(const std::string& url) {
     parsed.host = match[2].str();
 
     if (match[3].matched) {
-        parsed.port = std::stoi(match[3].str());
+        auto pv = safe_stoi(match[3].str());
+        if (!pv) {
+            return tl::unexpected(pv.error());
+        }
+        parsed.port = *pv;
     } else {
         parsed.port = (parsed.scheme == "https") ? 443 : 80;
     }

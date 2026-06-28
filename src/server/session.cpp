@@ -1,6 +1,7 @@
 #include "sixseven/server/session.h"
 
 #include "sixseven/common/logging.h"
+#include "sixseven/common/parse_utils.h"
 #include "sixseven/executor/query_engine.h"
 
 #include <algorithm>
@@ -185,11 +186,14 @@ Result<int64_t> Session::parse_timeout_ms(const std::string& value) {
                           "invalid value for parameter \"statement_timeout\": \"" + value + "\"");
     }
     int64_t ms = 0;
-    try {
-        ms = std::stoll(trimmed.substr(0, pos));
-    } catch (const std::exception&) {
-        return make_error(StatusCode::INVALID_ARGUMENT,
-                          "invalid value for parameter \"statement_timeout\": \"" + value + "\"");
+    {
+        auto pv = safe_stoll(trimmed.substr(0, pos));
+        if (!pv) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "invalid value for parameter \"statement_timeout\": \"" + value +
+                                  "\"");
+        }
+        ms = *pv;
     }
     auto unit = to_lower(trim(trimmed.substr(pos)));
     if (unit == "s") {

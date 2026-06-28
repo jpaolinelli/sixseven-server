@@ -1,5 +1,6 @@
 #include "sixseven/executor/virtual_catalog_scan.h"
 
+#include "sixseven/common/parse_utils.h"
 #include "sixseven/common/value.h"
 
 namespace sixseven {
@@ -8,18 +9,26 @@ namespace {
 
 Value string_to_value(const std::string& s, TypeId type_id) {
     switch (type_id) {
-    case TypeId::INT16:
-        return Value(static_cast<int16_t>(std::stoi(s)));
-    case TypeId::INT32:
-        return Value(static_cast<int32_t>(std::stoi(s)));
-    case TypeId::INT64:
-        return Value(static_cast<int64_t>(std::stoll(s)));
+    case TypeId::INT16: {
+        auto pv = safe_stoi(s);
+        return pv ? Value(static_cast<int16_t>(*pv)) : Value(s);
+    }
+    case TypeId::INT32: {
+        auto pv = safe_stoi(s);
+        return pv ? Value(static_cast<int32_t>(*pv)) : Value(s);
+    }
+    case TypeId::INT64: {
+        auto pv = safe_stoll(s);
+        return pv ? Value(static_cast<int64_t>(*pv)) : Value(s);
+    }
     case TypeId::BOOL:
         return Value(s == "true" || s == "1");
     case TypeId::STRING:
         return Value(s);
-    case TypeId::FLOAT64:
-        return Value(std::stod(s));
+    case TypeId::FLOAT64: {
+        auto pv = safe_stod(s);
+        return pv ? Value(*pv) : Value(s);
+    }
     default:
         return Value(s);
     }

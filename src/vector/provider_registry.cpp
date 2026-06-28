@@ -1,6 +1,7 @@
 ﻿#include "sixseven/vector/provider_registry.h"
 
 #include "sixseven/common/logging.h"
+#include "sixseven/common/parse_utils.h"
 #include "sixseven/vector/builtin_provider.h"
 #include "sixseven/vector/ollama_provider.h"
 #include "sixseven/vector/onnx_provider.h"
@@ -125,20 +126,26 @@ ProviderRegistry::create_provider(const EmbeddingProviderConfig& config) {
                                   "builtin provider dimension must be a positive integer, got: '" +
                                       config.model + "'");
             }
-            try {
-                size_t pos = 0;
-                unsigned long parsed = std::stoul(config.model, &pos);
-                if (pos != config.model.size()) {
+            {
+                // Preserve the existing trailing-character rejection: all
+                // characters must be ASCII digits (no "384abc").
+                bool all_digits = std::all_of(config.model.begin(),
+                                              config.model.end(),
+                                              [](unsigned char c) { return c >= '0' && c <= '9'; });
+                if (!all_digits) {
                     return make_error(
                         StatusCode::INVALID_ARGUMENT,
                         "builtin provider dimension must be a positive integer, got: '" +
                             config.model + "'");
                 }
-                dim = parsed;
-            } catch (...) {
-                return make_error(StatusCode::INVALID_ARGUMENT,
-                                  "builtin provider dimension must be a positive integer, got: '" +
-                                      config.model + "'");
+                auto pv = safe_stoul(config.model);
+                if (!pv) {
+                    return make_error(
+                        StatusCode::INVALID_ARGUMENT,
+                        "builtin provider dimension must be a positive integer, got: '" +
+                            config.model + "'");
+                }
+                dim = *pv;
             }
         }
         auto provider = std::make_shared<BuiltinProvider>(dim);
