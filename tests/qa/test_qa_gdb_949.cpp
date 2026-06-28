@@ -364,10 +364,10 @@ TEST(QA_GDB949, PgAttributeJoinPgTypeReturnsOneRowPerColumn) {
     TableSchema ts;
     ts.name = "collided_types_table";
     ts.columns = {
-        {0, "col_int8",  TypeId::INT8,   false, ""},
-        {1, "col_int32", TypeId::INT32,  false, ""},
-        {2, "col_int64", TypeId::INT64,  false, ""},
-        {3, "col_str",   TypeId::STRING, true,  ""},
+        {0, "col_int8", TypeId::INT8, false, ""},
+        {1, "col_int32", TypeId::INT32, false, ""},
+        {2, "col_int64", TypeId::INT64, false, ""},
+        {3, "col_str", TypeId::STRING, true, ""},
     };
     ts.pk_columns = "col_int32";
     auto table_r = catalog.create_table(default_database_id, std::move(ts));
@@ -390,8 +390,7 @@ TEST(QA_GDB949, PgAttributeJoinPgTypeReturnsOneRowPerColumn) {
     // The result must be exactly one pg_type row (guaranteed by uniqueness above).
     for (const auto& attr : attr_rows) {
         EXPECT_NE(oid_to_typname.find(attr.atttypid), oid_to_typname.end())
-            << "pg_attribute.atttypid=" << attr.atttypid
-            << " for column '" << attr.attname
+            << "pg_attribute.atttypid=" << attr.atttypid << " for column '" << attr.attname
             << "' has no matching row in pg_type (join would produce 0 rows)";
     }
 }
@@ -449,10 +448,23 @@ TEST(QA_GDB949, AllExpectedTypnamesPresent) {
     }
 
     const std::unordered_set<std::string> expected = {
-        "bool", "int2", "int4", "int8", "numeric",
-        "float4", "float8", "text", "bytea",
-        "date", "time", "timestamp", "interval",
-        "point", "json", "uuid", "embedding",
+        "bool",
+        "int2",
+        "int4",
+        "int8",
+        "numeric",
+        "float4",
+        "float8",
+        "text",
+        "bytea",
+        "date",
+        "time",
+        "timestamp",
+        "interval",
+        "point",
+        "json",
+        "uuid",
+        "embedding",
     };
 
     for (const auto& name : expected) {
@@ -472,15 +484,27 @@ TEST(QA_GDB949, NoUnexpectedTypnames) {
     auto rows = scan_pg_type(catalog);
 
     const std::unordered_set<std::string> allowed = {
-        "bool", "int2", "int4", "int8", "numeric",
-        "float4", "float8", "text", "bytea",
-        "date", "time", "timestamp", "interval",
-        "point", "json", "uuid", "embedding",
+        "bool",
+        "int2",
+        "int4",
+        "int8",
+        "numeric",
+        "float4",
+        "float8",
+        "text",
+        "bytea",
+        "date",
+        "time",
+        "timestamp",
+        "interval",
+        "point",
+        "json",
+        "uuid",
+        "embedding",
     };
 
     for (const auto& r : rows) {
-        EXPECT_TRUE(allowed.count(r.typname))
-            << "Unexpected typname in pg_type: " << r.typname;
+        EXPECT_TRUE(allowed.count(r.typname)) << "Unexpected typname in pg_type: " << r.typname;
     }
 }
 
@@ -499,8 +523,7 @@ TEST(QA_GDB949, RowCountIsExactly17NotOldCount23) {
     auto raw_rows = vt->generator();
     EXPECT_EQ(raw_rows.size(), 17u)
         << "Old (unfixed) code emitted 23 rows; fixed code must emit 17";
-    EXPECT_NE(raw_rows.size(), 23u)
-        << "Still emitting 23 rows -- fix was not applied or regressed";
+    EXPECT_NE(raw_rows.size(), 23u) << "Still emitting 23 rows -- fix was not applied or regressed";
 }
 
 } // namespace
