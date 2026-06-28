@@ -23,7 +23,10 @@
 #include "sixseven/graph/strongly_connected_components.h"
 #include "sixseven/graph/triangle_count.h"
 #include "sixseven/server/auth.h"
+#include "sixseven/server/promotion_manager.h"
 #include "sixseven/server/server.h"
+#include "sixseven/server/tcp_replication_connection.h"
+#include "sixseven/server/wal_receiver.h"
 #include "sixseven/storage/clean_shutdown_marker.h"
 #include "sixseven/storage/disk_manager.h"
 #include "sixseven/storage/wal.h"
@@ -270,6 +273,115 @@ int main(int argc, char* argv[]) {
         }
     }
     SIXSEVEN_LOG_INFO("WAL writer opened (wal_dir={})", wal_dir.string());
+
+    // -- Standby / read-only mode -------------------------------------------------
+    //
+    // When config.standby_mode is set, this process is a hot standby that
+    // replicates from a primary server.  Wire the read-only enforcement flag
+    // into the query engine FIRST so that any connection arriving before the
+    // WAL receiver connects is still rejected for DML.
+    //
+    // Construction order (mirrors PostgreSQL startup):
+    //   1. Mark engine standby -> reject DML immediately.
+    //   2. Construct WalReceiver (no network activity yet).
+    //   3. Construct PromotionManager (no network activity).
+    //   4. Register the on-promoted callback so promotion toggles the engine
+    //      back to read-write mode.
+    //   5. Start the WAL receiver background thread (begins connecting).
+    //
+    // The WalReceiver, PromotionManager, and TableHeapRecoveryHandler are
+    // declared here and outlive the Server (main-function scope).  On
+    // shutdown the destructor order is: Server -> receiver.stop() ->
+    // receiver destroyed, which is safe because stop() joins the thread.
+    //
+    // NOTE on live replication (AC1): The WalReceiver connects via a
+    // ReplicationConnection to the primary.  The ConnectionFactory below
+    // constructs a TcpReplicationConnection.  On Windows the CRT fd-assert
+    // crash described in the ticket makes the live two-node path
+    // unverifiable locally; all socket-free construction/read-only/promotion
+    // tests pass.  The live round-trip is verified in CI (Linux) only.
+
+    std::unique_ptr<sixseven::TableHeapRecoveryHandler> standby_recovery_handler;
+    std::unique_ptr<sixseven::WalReceiver> wal_receiver;
+    std::unique_ptr<sixseven::PromotionManager> promotion_manager;
+
+    if (config.standby_mode) {
+        // 1. Enable read-only / recovery mode immediately.
+        engine.set_standby_mode(true);
+        SIXSEVEN_LOG_INFO("standby: read-only mode enabled");
+
+        // 2. Build the recovery handler so the receiver can replay WAL.
+        standby_recovery_handler = std::make_unique<sixseven::TableHeapRecoveryHandler>();
+        storage.for_each_table_heap(
+            [&rh = *standby_recovery_handler](sixseven::table_id_t tid, sixseven::TableHeap* heap) {
+                rh.register_table(tid, heap);
+            });
+
+        // 3. Construct the WalReceiver with retry/backoff from config.
+        sixseven::WalReceiverOptions recv_opts;
+        recv_opts.retry_interval = std::chrono::milliseconds(config.replication_retry_interval_ms);
+        recv_opts.max_retry_interval =
+            std::chrono::milliseconds(config.replication_max_retry_interval_ms);
+
+        // ConnectionFactory: returns an error when host is empty (no primary
+        // configured); otherwise opens a real blocking TCP socket to the
+        // primary via TcpReplicationConnection.  The read-only enforcement
+        // is independent and already active (step 1 above).
+        sixseven::ConnectionFactory conn_factory = [](const std::string& host, uint16_t port)
+            -> sixseven::Result<std::unique_ptr<sixseven::ReplicationConnection>> {
+            if (host.empty()) {
+                return sixseven::make_error(sixseven::StatusCode::INVALID_ARGUMENT,
+                                            "standby: primary_host is not configured; "
+                                            "WAL receiver will retry after backoff");
+            }
+            return sixseven::make_tcp_replication_connection(host, port);
+        };
+
+        wal_receiver = std::make_unique<sixseven::WalReceiver>(
+            std::move(conn_factory), wal_dir, *standby_recovery_handler, recv_opts);
+
+        // 4. Construct the PromotionManager.
+        promotion_manager = std::make_unique<sixseven::PromotionManager>(
+            config, wal_receiver.get(), wal_writer, disk_manager, wal_dir);
+
+        // Load persisted timeline if present.
+        {
+            auto tl = promotion_manager->load_timeline();
+            if (!tl) {
+                SIXSEVEN_LOG_WARN("standby: failed to load timeline: {}", tl.error().message);
+            }
+        }
+
+        // 4a. Register the on-promoted callback: toggle engine out of standby.
+        promotion_manager->set_on_promoted([&engine]() {
+            engine.set_standby_mode(false);
+            SIXSEVEN_LOG_INFO("standby: promoted to primary -- writes now accepted");
+        });
+
+        // Wire the receiver into the engine for SHOW STANDBY STATUS /
+        // pg_last_wal_replay_lsn().
+        engine.set_wal_receiver(wal_receiver.get());
+
+        // 5. Start the WAL receiver background thread.
+        if (!config.replication_primary_host.empty()) {
+            auto start_result = wal_receiver->start(config.replication_primary_host,
+                                                    config.replication_primary_port);
+            if (!start_result) {
+                SIXSEVEN_LOG_WARN("standby: WAL receiver failed to start: {}",
+                                  start_result.error().message);
+                // Non-fatal: server runs as a read-only standby with no live
+                // replication.  Operator can fix primary address and restart.
+            } else {
+                SIXSEVEN_LOG_INFO("standby: WAL receiver started (primary={}:{})",
+                                  config.replication_primary_host,
+                                  config.replication_primary_port);
+            }
+        } else {
+            SIXSEVEN_LOG_WARN(
+                "standby: replication_primary_host is empty -- "
+                "WAL receiver not started; server is read-only with no live replication");
+        }
+    }
 
     // -- WAL archive manager -------------------------------------------------------
     //
@@ -592,6 +704,13 @@ int main(int argc, char* argv[]) {
         if (!archive_stop) {
             SIXSEVEN_LOG_WARN("WAL archive manager stop failed: {}", archive_stop.error().message);
         }
+    }
+
+    // Stop the WAL receiver (standby) before detaching the WAL writer so the
+    // receiver thread cannot write WAL records after the writer is closed.
+    if (wal_receiver) {
+        wal_receiver->stop();
+        SIXSEVEN_LOG_INFO("standby: WAL receiver stopped");
     }
 
     // Detach WAL writer from all heaps and engine before closing it so no

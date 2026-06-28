@@ -605,6 +605,7 @@ Result<QueryResult> QueryEngine::execute(const std::string& sql) {
                         dynamic_cast<const CreateEdgeTypeStmt*>(raw) != nullptr ||
                         dynamic_cast<const DropEdgeTypeStmt*>(raw) != nullptr ||
                         dynamic_cast<const LinkStmt*>(raw) != nullptr ||
+                        dynamic_cast<const BulkLinkStmt*>(raw) != nullptr ||
                         dynamic_cast<const UnlinkStmt*>(raw) != nullptr ||
                         dynamic_cast<const BackfillStmt*>(raw) != nullptr ||
                         dynamic_cast<const ReembedStmt*>(raw) != nullptr ||
