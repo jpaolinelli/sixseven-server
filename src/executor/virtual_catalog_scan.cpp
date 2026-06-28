@@ -68,10 +68,10 @@ Result<std::optional<Tuple>> VirtualCatalogScanOperator::do_next() {
     tuple.values.reserve(def_.columns.size());
 
     for (size_t i = 0; i < def_.columns.size(); ++i) {
-        if (i >= row.size() || row[i].empty()) {
+        if (i >= row.size() || !row[i].has_value()) {
             tuple.values.emplace_back(Value::make_null());
         } else {
-            tuple.values.emplace_back(string_to_value(row[i], def_.columns[i].type_id));
+            tuple.values.emplace_back(string_to_value(*row[i], def_.columns[i].type_id));
         }
     }
 

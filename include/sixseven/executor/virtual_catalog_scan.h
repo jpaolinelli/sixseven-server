@@ -4,6 +4,7 @@
 #include "sixseven/executor/iterator.h"
 #include "sixseven/executor/tuple.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -27,7 +28,7 @@ protected:
 private:
     VirtualTableDef def_;
     OutputSchema schema_;
-    std::vector<std::vector<std::string>> raw_rows_;
+    std::vector<std::vector<std::optional<std::string>>> raw_rows_;
     size_t cursor_ = 0;
 };
 

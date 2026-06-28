@@ -4,6 +4,7 @@
 #include "sixseven/common/types.h"
 
 #include <array>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -188,8 +189,8 @@ VirtualTableDef make_pg_database(Catalog& catalog) {
         {2, "datdba", TypeId::INT32, false, ""},
         {3, "encoding", TypeId::INT32, false, ""},
     };
-    def.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
-        std::vector<std::vector<std::string>> rows;
+    def.generator = [&catalog]() -> std::vector<std::vector<std::optional<std::string>>> {
+        std::vector<std::vector<std::optional<std::string>>> rows;
         for (const auto& db : catalog.list_databases()) {
             rows.push_back({std::to_string(db.database_id), db.name, "10", "6"});
         }
@@ -206,7 +207,7 @@ VirtualTableDef make_pg_namespace() {
         {1, "nspname", TypeId::STRING, false, ""},
         {2, "nspowner", TypeId::INT32, false, ""},
     };
-    def.generator = []() -> std::vector<std::vector<std::string>> {
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
         return {
             {"11", "pg_catalog", "10"},
             {"2200", "public", "10"},
@@ -228,8 +229,8 @@ VirtualTableDef make_pg_type() {
         {6, "typrelid", TypeId::INT32, false, ""},
         {7, "typbasetype", TypeId::INT32, false, ""},
     };
-    def.generator = []() -> std::vector<std::vector<std::string>> {
-        std::vector<std::vector<std::string>> rows;
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
+        std::vector<std::vector<std::optional<std::string>>> rows;
         rows.reserve(all_types.size());
         std::unordered_set<uint32_t> seen_oids;
         for (auto t : all_types) {
@@ -265,8 +266,8 @@ VirtualTableDef make_pg_class(Catalog& catalog) {
         {5, "relhasindex", TypeId::BOOL, false, ""},
         {6, "relnatts", TypeId::INT32, false, ""},
     };
-    def.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
-        std::vector<std::vector<std::string>> rows;
+    def.generator = [&catalog]() -> std::vector<std::vector<std::optional<std::string>>> {
+        std::vector<std::vector<std::optional<std::string>>> rows;
         for (const auto& db : catalog.list_databases()) {
             for (const auto& table : catalog.list_tables(db.database_id)) {
                 if (table.table_id < first_user_table_id) {
@@ -301,8 +302,8 @@ VirtualTableDef make_pg_attribute(Catalog& catalog) {
         {5, "attnotnull", TypeId::BOOL, false, ""},
         {6, "attisdropped", TypeId::BOOL, false, ""},
     };
-    def.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
-        std::vector<std::vector<std::string>> rows;
+    def.generator = [&catalog]() -> std::vector<std::vector<std::optional<std::string>>> {
+        std::vector<std::vector<std::optional<std::string>>> rows;
         for (const auto& db : catalog.list_databases()) {
             for (const auto& table : catalog.list_tables(db.database_id)) {
                 if (table.table_id < first_user_table_id) {
@@ -337,8 +338,8 @@ VirtualTableDef make_pg_index(Catalog& catalog) {
         {4, "indisprimary", TypeId::BOOL, false, ""},
         {5, "indkey", TypeId::STRING, false, ""},
     };
-    def.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
-        std::vector<std::vector<std::string>> rows;
+    def.generator = [&catalog]() -> std::vector<std::vector<std::optional<std::string>>> {
+        std::vector<std::vector<std::optional<std::string>>> rows;
         for (const auto& idx : catalog.list_all_indexes()) {
             auto table_r = catalog.get_table_by_id(idx.table_id);
             if (!table_r.has_value()) {

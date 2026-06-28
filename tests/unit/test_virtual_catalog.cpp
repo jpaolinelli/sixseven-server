@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -43,7 +44,7 @@ TEST(VirtualCatalog, RegisterAndLookup) {
         {0, "oid", TypeId::INT32, false, ""},
         {1, "datname", TypeId::STRING, false, ""},
     };
-    def.generator = []() -> std::vector<std::vector<std::string>> {
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
         return {{"1", "demo"}, {"2", "sixseven_system"}};
     };
     catalog.register_virtual_table(std::move(def));
@@ -77,7 +78,7 @@ TEST(VirtualCatalog, IsVirtualTable) {
     VirtualTableDef def;
     def.name = "pg_type";
     def.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    def.generator = []() { return std::vector<std::vector<std::optional<std::string>>>{}; };
     catalog.register_virtual_table(std::move(def));
 
     auto vt = catalog.get_virtual_table("pg_type");
@@ -95,13 +96,13 @@ TEST(VirtualCatalog, IsVirtualTableIdSetStaysInSync) {
     VirtualTableDef def1;
     def1.name = "pg_tables";
     def1.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def1.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    def1.generator = []() { return std::vector<std::vector<std::optional<std::string>>>{}; };
     catalog.register_virtual_table(std::move(def1));
 
     VirtualTableDef def2;
     def2.name = "pg_indexes";
     def2.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def2.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    def2.generator = []() { return std::vector<std::vector<std::optional<std::string>>>{}; };
     catalog.register_virtual_table(std::move(def2));
 
     auto vt1 = catalog.get_virtual_table("pg_tables");
@@ -128,13 +129,13 @@ TEST(VirtualCatalog, ListVirtualTables) {
     VirtualTableDef def1;
     def1.name = "pg_database";
     def1.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def1.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    def1.generator = []() { return std::vector<std::vector<std::optional<std::string>>>{}; };
     catalog.register_virtual_table(std::move(def1));
 
     VirtualTableDef def2;
     def2.name = "pg_type";
     def2.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def2.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    def2.generator = []() { return std::vector<std::vector<std::optional<std::string>>>{}; };
     catalog.register_virtual_table(std::move(def2));
 
     auto tables = catalog.list_virtual_tables();
@@ -148,7 +149,7 @@ TEST(VirtualCatalog, VirtualTableIdsAreNegative) {
     VirtualTableDef def;
     def.name = "pg_database";
     def.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    def.generator = []() { return std::vector<std::vector<std::optional<std::string>>>{}; };
     catalog.register_virtual_table(std::move(def));
 
     auto vt = catalog.get_virtual_table("pg_database");
@@ -168,7 +169,7 @@ TEST(VirtualCatalogScan, ProducesExpectedRows) {
         {0, "oid", TypeId::INT32, false, ""},
         {1, "datname", TypeId::STRING, false, ""},
     };
-    def.generator = []() -> std::vector<std::vector<std::string>> {
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
         return {{"1", "db_one"}, {"2", "db_two"}, {"3", "db_three"}};
     };
 
@@ -209,7 +210,7 @@ TEST(VirtualCatalogScan, EmptyTable) {
     def.table_id = -1001;
     def.name = "pg_empty";
     def.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    def.generator = []() { return std::vector<std::vector<std::optional<std::string>>>{}; };
 
     OutputSchema schema(
         std::vector<OutputColumn>{{"pg_empty", "oid", TypeId::INT32, false, def.table_id}});
@@ -231,7 +232,7 @@ TEST(VirtualCatalogScan, PlanNodeMetadata) {
     def.table_id = -1000;
     def.name = "pg_database";
     def.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    def.generator = []() { return std::vector<std::vector<std::optional<std::string>>>{}; };
 
     OutputSchema schema(
         std::vector<OutputColumn>{{"pg_database", "oid", TypeId::INT32, false, def.table_id}});
@@ -258,7 +259,9 @@ protected:
             {0, "oid", TypeId::INT32, false, ""},
             {1, "datname", TypeId::STRING, false, ""},
         };
-        def.generator = []() -> std::vector<std::vector<std::string>> { return {{"1", "demo"}}; };
+        def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
+            return {{"1", "demo"}};
+        };
         catalog.register_virtual_table(std::move(def));
     }
 };

@@ -8,8 +8,8 @@
 
 #include <climits>
 #include <limits>
+#include <optional>`n#include <vector>
 #include <thread>
-#include <vector>
 
 #include "test_catalog_helpers.h"
 
@@ -23,7 +23,7 @@ static VirtualTableDef make_vtdef(const std::string& name) {
     VirtualTableDef def;
     def.name = name;
     def.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    def.generator = []() { return std::vector<std::vector<std::optional<std::string>>>{}; };
     return def;
 }
 
@@ -303,8 +303,7 @@ TEST(QA_GDB828, ConcurrentRegisterAndLookup) {
     for (int w = 0; w < kWriters; ++w) {
         threads.emplace_back([&catalog, w, &errors]() {
             for (int i = 0; i < kIterations; ++i) {
-                std::string name =
-                    "pg_concurrent_" + std::to_string(w) + "_" + std::to_string(i);
+                std::string name = "pg_concurrent_" + std::to_string(w) + "_" + std::to_string(i);
                 catalog.register_virtual_table(make_vtdef(name));
                 auto vt = catalog.get_virtual_table(name);
                 if (!vt.has_value()) {
