@@ -239,7 +239,14 @@ TEST_F(ServerTest, HealthReturnsCorrectInfo) {
 
     auto info = server.health();
     EXPECT_EQ(info.version, Server::VERSION);
-    EXPECT_GE(info.uptime.count(), 0);
+    // This is the fast path that checks the static fields (version, connection
+    // counts). A just-started server's uptime is well under a minute, so a
+    // bounded sanity check catches an uninitialized/garbage start_time_ without
+    // the tautology of EXPECT_GE(..., 0) on a monotonic seconds counter. The
+    // "uptime advances past 1s" semantics are owned by
+    // ServerLifecycleTest.HealthCheckReturnsVersionAndUptime, so the two health
+    // tests no longer assert the same vacuous thing.
+    EXPECT_LT(info.uptime.count(), 60);
     EXPECT_EQ(info.active_connections, 0u);
     EXPECT_EQ(info.max_connections, 50u);
 
