@@ -250,6 +250,11 @@ const Portal* Session::get_portal(const std::string& name) const {
     return it != portals_.end() ? &it->second : nullptr;
 }
 
+Portal* Session::get_portal_mutable(const std::string& name) {
+    auto it = portals_.find(name);
+    return it != portals_.end() ? &it->second : nullptr;
+}
+
 void Session::remove_portal(const std::string& name) {
     portals_.erase(name);
 }

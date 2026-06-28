@@ -89,6 +89,10 @@ public:
     /// Look up a portal by name. Returns nullptr if not found.
     [[nodiscard]] const Portal* get_portal(const std::string& name) const;
 
+    /// Look up a portal by name for mutation (e.g. updating execution state).
+    /// Returns nullptr if not found.
+    [[nodiscard]] Portal* get_portal_mutable(const std::string& name);
+
     /// Remove a portal by name.
     void remove_portal(const std::string& name);
 

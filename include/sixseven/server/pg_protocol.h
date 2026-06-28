@@ -3,6 +3,7 @@
 #include "sixseven/common/result.h"
 #include "sixseven/common/types.h"
 #include "sixseven/common/value.h"
+#include "sixseven/executor/query_engine.h"
 #include "sixseven/server/auth.h"
 
 #include <array>
@@ -215,6 +216,17 @@ struct Portal {
     std::vector<uint32_t> param_oids;                     ///< Type OIDs from Parse.
     std::vector<int16_t> param_format_codes;              ///< From Bind: 0 = text, 1 = binary.
     std::vector<int16_t> result_format_codes;
+
+    // -- Execution state (populated on first Execute, retained for paging) -----
+
+    /// True after the query has been executed at least once.
+    bool executed = false;
+
+    /// Materialized result from the first Execute call.
+    QueryResult cached_result;
+
+    /// Number of DataRows already sent to the client across all Execute calls.
+    size_t rows_sent = 0;
 };
 
 /// Per-connection PostgreSQL v3 protocol handler.
@@ -323,6 +335,7 @@ private:
     void send_close_complete(Connection& conn);
     void send_no_data(Connection& conn);
     void send_parameter_description(Connection& conn, const std::vector<uint32_t>& param_oids);
+    void send_portal_suspended(Connection& conn);
 
     // -- Auth message senders --
 
