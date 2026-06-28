@@ -59,6 +59,7 @@ After this plan is approved, we will create tickets for each work item.
 | JSON | `JSON` (binary-encoded, indexable paths) |
 | UUID | `UUID` (128-bit, auto-gen default) |
 | Vector | `EMBEDDING(dim, source_cols, provider)` |
+| Graph | `PATH` (graph traversal result path) |
 
 ### The EMBEDDING Type — Killer Feature
 
