@@ -66,8 +66,11 @@ Result<std::vector<float>> OllamaProvider::embed(const std::string& text) {
 
 Result<std::vector<std::vector<float>>>
 OllamaProvider::embed_batch(const std::vector<std::string>& texts) {
-    // Ollama does not natively support batch embedding.
-    // Process each text sequentially with connection reuse.
+    // Ollama does not natively support batch embedding, so process each text
+    // with a separate embed() call. Note: the HTTP client opens a new
+    // connection per request (it does not currently pool or keep-alive), so
+    // this loop pays full connection setup per text. See GDB-1278 for the
+    // keep-alive optimization follow-up.
     std::vector<std::vector<float>> results;
     results.reserve(texts.size());
 
