@@ -13,6 +13,7 @@ add_library(sixseven_server STATIC
     replication_message.cpp
     replication_slot.cpp
     sync_replication.cpp
+    tcp_replication_connection.cpp
     wal_receiver.cpp
     wal_sender.cpp
     wal_sender_manager.cpp
@@ -21,3 +22,7 @@ add_library(sixseven_server STATIC
 target_include_directories(sixseven_server PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
 target_link_libraries(sixseven_server PUBLIC sixseven_storage sixseven_common)
+
+if (WIN32)
+    target_link_libraries(sixseven_server PUBLIC ws2_32)
+endif()

@@ -25,6 +25,7 @@
 #include "sixseven/server/auth.h"
 #include "sixseven/server/promotion_manager.h"
 #include "sixseven/server/server.h"
+#include "sixseven/server/tcp_replication_connection.h"
 #include "sixseven/server/wal_receiver.h"
 #include "sixseven/storage/clean_shutdown_marker.h"
 #include "sixseven/storage/disk_manager.h"
@@ -322,21 +323,19 @@ int main(int argc, char* argv[]) {
         recv_opts.max_retry_interval =
             std::chrono::milliseconds(config.replication_max_retry_interval_ms);
 
-        // ConnectionFactory: returns nullptr-connection stub when host is empty
-        // (unit-test/no-primary scenario); otherwise defers to the real TCP
-        // path.  The TcpReplicationConnection is not yet implemented (Phase 6);
-        // an empty primary_host therefore results in a construction-only mode
-        // where the receiver starts but immediately fails every connect
-        // attempt and retries.  The read-only enforcement is independent and
-        // already active (step 1 above).
-        sixseven::ConnectionFactory conn_factory = [](const std::string& /*host*/,
-                                                      uint16_t /*port*/)
-            -> sixseven::Result<std::unique_ptr<sixseven::ReplicationConnection>> {
-            // Real TCP implementation goes here (Phase 6 / GDB-955).
-            // Return NOT_IMPLEMENTED so the receiver retries after backoff.
-            return sixseven::make_error(sixseven::StatusCode::NOT_IMPLEMENTED,
-                                        "TCP replication connection not yet implemented; "
-                                        "standby will retry until primary is reachable");
+        // ConnectionFactory: returns an error when host is empty (no primary
+        // configured); otherwise opens a real blocking TCP socket to the
+        // primary via TcpReplicationConnection.  The read-only enforcement
+        // is independent and already active (step 1 above).
+        sixseven::ConnectionFactory conn_factory =
+            [](const std::string& host,
+               uint16_t port) -> sixseven::Result<std::unique_ptr<sixseven::ReplicationConnection>> {
+            if (host.empty()) {
+                return sixseven::make_error(sixseven::StatusCode::INVALID_ARGUMENT,
+                                            "standby: primary_host is not configured; "
+                                            "WAL receiver will retry after backoff");
+            }
+            return sixseven::make_tcp_replication_connection(host, port);
         };
 
         wal_receiver = std::make_unique<sixseven::WalReceiver>(
