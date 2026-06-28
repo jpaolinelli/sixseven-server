@@ -11,6 +11,7 @@
 #include <charconv>
 #include <cstring>
 #include <iomanip>
+#include <optional>
 #include <random>
 #include <sstream>
 
@@ -1105,6 +1106,40 @@ Result<std::string> substitute_sql_expressions(const std::string& sql,
 
 } // namespace
 
+// -- Cancel flag RAII scope (GDB-956) -----------------------------------------
+
+/// RAII helper that installs a fresh per-statement cancel flag into the
+/// CancelRegistry (via the handler's registrar callback) before a query runs
+/// and clears it when the scope exits.  Also arms the thread-local
+/// StatementCancelGuard so the query executor can check cancellation cheaply.
+struct CancelFlagScope {
+    CancelFlagScope(int32_t pid,
+                    const CancelFlagRegistrar& registrar,
+                    const CancelFlagClearer& clearer)
+        : pid_(pid), clearer_(clearer), flag_(std::make_shared<std::atomic<bool>>(false)) {
+        if (registrar) {
+            registrar(pid_, flag_);
+        }
+        cancel_guard_.emplace(flag_);
+    }
+
+    ~CancelFlagScope() {
+        cancel_guard_.reset();
+        if (clearer_) {
+            clearer_(pid_);
+        }
+    }
+
+    CancelFlagScope(const CancelFlagScope&) = delete;
+    CancelFlagScope& operator=(const CancelFlagScope&) = delete;
+
+private:
+    int32_t pid_;
+    CancelFlagClearer clearer_; // Stored by value; member functions hold valid callbacks.
+    std::shared_ptr<std::atomic<bool>> flag_;
+    std::optional<StatementCancelGuard> cancel_guard_;
+};
+
 // -- SQL splitting ------------------------------------------------------------
 
 std::vector<std::string> split_sql_statements(std::string_view sql) {
@@ -1346,6 +1381,22 @@ void PgProtocolHandler::set_auth(AuthMethod method, UserManager* user_mgr) {
     user_mgr_ = user_mgr;
 }
 
+void PgProtocolHandler::set_cancel_requester(CancelRequester requester) {
+    cancel_requester_ = std::move(requester);
+}
+
+void PgProtocolHandler::set_cancel_flag_registrar(CancelFlagRegistrar registrar) {
+    cancel_flag_registrar_ = std::move(registrar);
+}
+
+void PgProtocolHandler::set_cancel_flag_clearer(CancelFlagClearer clearer) {
+    cancel_flag_clearer_ = std::move(clearer);
+}
+
+void PgProtocolHandler::set_cancel_connection_registrar(CancelConnectionRegistrar registrar) {
+    cancel_connection_registrar_ = std::move(registrar);
+}
+
 Result<void> PgProtocolHandler::process(Connection& conn) {
     // Process as many complete messages as are available.
     while (true) {
@@ -1407,9 +1458,21 @@ Result<size_t> PgProtocolHandler::handle_startup_message(Connection& conn) {
     }
 
     if (version == CANCEL_REQUEST_CODE) {
-        // Cancel request: 4-byte PID + 4-byte secret key.
-        // Not implemented yet — just consume the message.
-        SIXSEVEN_LOG_DEBUG("received cancel request (ignored)");
+        // Cancel request: 4-byte backend PID + 4-byte secret key (GDB-956).
+        // The cancel connection is closed immediately after -- no response
+        // is sent per the PostgreSQL protocol specification.
+        if (msg_len >= 16) {
+            int32_t cancel_pid = read_be_int32(buf.data() + 8);
+            int32_t cancel_secret = read_be_int32(buf.data() + 12);
+            SIXSEVEN_LOG_DEBUG("received cancel request for pid={}", cancel_pid);
+            if (cancel_requester_) {
+                cancel_requester_(cancel_pid, cancel_secret);
+            }
+        } else {
+            SIXSEVEN_LOG_WARN("cancel request too short: {} bytes (expected 16)", msg_len);
+        }
+        // Close the cancel connection immediately (no response per protocol).
+        state_ = ProtocolState::CLOSED;
         return ok(static_cast<size_t>(msg_len));
     }
 
@@ -1496,6 +1559,11 @@ void PgProtocolHandler::complete_startup(Connection& conn) {
     send_parameter_status(conn, "integer_datetimes", "on");
     send_parameter_status(conn, "standard_conforming_strings", "on");
     send_backend_key_data(conn);
+    // Register (pid, secret) with the cancel registry now that BackendKeyData
+    // has been sent to the client (GDB-956).
+    if (cancel_connection_registrar_) {
+        cancel_connection_registrar_(backend_pid_, secret_key_);
+    }
     send_ready_for_query(conn, 'I');
 }
 
@@ -1797,6 +1865,7 @@ void PgProtocolHandler::handle_simple_query(Connection& conn, std::string_view s
             return;
         }
 
+        CancelFlagScope cancel_scope(backend_pid_, cancel_flag_registrar_, cancel_flag_clearer_);
         StatementDeadlineGuard deadline_guard(session_->statement_timeout_ms());
         auto result = query_executor_(stmt, startup_database());
         if (!result) {
@@ -1893,6 +1962,7 @@ std::optional<Result<void>> PgProtocolHandler::try_handle_execute(Connection& co
 
     SIXSEVEN_LOG_DEBUG("EXECUTE: stmt='{}', sql='{}'", stmt_name, exec_sql);
 
+    CancelFlagScope cancel_scope(backend_pid_, cancel_flag_registrar_, cancel_flag_clearer_);
     StatementDeadlineGuard deadline_guard(session_->statement_timeout_ms());
     auto result = query_executor_(exec_sql, startup_database());
     if (!result) {
@@ -2137,6 +2207,7 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
         // sending any DataRow so the client sees a clean ErrorResponse (GDB-718).
         // We must do the format check before executing to avoid a partial send,
         // so instead we defer it until after execution when column types are known.
+        CancelFlagScope cancel_scope(backend_pid_, cancel_flag_registrar_, cancel_flag_clearer_);
         StatementDeadlineGuard deadline_guard(session_->statement_timeout_ms());
         auto result = query_executor_(*substituted, startup_database());
         if (!result) {

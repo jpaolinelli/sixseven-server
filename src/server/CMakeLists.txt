@@ -2,6 +2,7 @@
 
 add_library(sixseven_server STATIC
     auth.cpp
+    cancel_registry.cpp
     connection.cpp
     event_loop.cpp
     pg_protocol.cpp
