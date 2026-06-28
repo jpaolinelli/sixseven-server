@@ -126,9 +126,9 @@ TEST_F(QA_GDB947, MultipleTablesRestoredIndependentlyAcrossRestart) {
     exec_ok("CREATE TABLE t3 (id INT PRIMARY KEY AUTOINCREMENT, v VARCHAR)");
 
     // Drive each table to a distinct high-water mark.
-    exec_ok("INSERT INTO t1 (v) VALUES ('a'), ('b'), ('c')");       // max id = 3
-    exec_ok("INSERT INTO t2 (id, v) VALUES (100, 'x')");            // max id = 100
-    exec_ok("INSERT INTO t3 (id, v) VALUES (200, 'y'), (201, 'z')");// max id = 201
+    exec_ok("INSERT INTO t1 (v) VALUES ('a'), ('b'), ('c')");        // max id = 3
+    exec_ok("INSERT INTO t2 (id, v) VALUES (100, 'x')");             // max id = 100
+    exec_ok("INSERT INTO t3 (id, v) VALUES (200, 'y'), (201, 'z')"); // max id = 201
 
     restart();
 
@@ -225,7 +225,7 @@ TEST_F(QA_GDB947, DeleteMaxRowRestartNoDuplicateWithSurvivors) {
     exec_ok("CREATE TABLE t_del (id INT PRIMARY KEY AUTOINCREMENT, v VARCHAR)");
 
     exec_ok("INSERT INTO t_del (v) VALUES ('a'), ('b'), ('c'), ('d'), ('e')"); // ids 1-5
-    exec_ok("DELETE FROM t_del WHERE id = 5"); // delete max row
+    exec_ok("DELETE FROM t_del WHERE id = 5");                                 // delete max row
 
     auto q_before = exec_ok("SELECT id FROM t_del ORDER BY id");
     ASSERT_EQ(q_before.rows.size(), 4u); // 1,2,3,4 survive
@@ -302,7 +302,7 @@ TEST_F(QA_GDB947, EmptyTableAfterRestartStartsAtOne) {
     exec_ok("CREATE TABLE t_emp (id INT PRIMARY KEY AUTOINCREMENT, v VARCHAR)");
 
     exec_ok("INSERT INTO t_emp (v) VALUES ('a'), ('b'), ('c')"); // ids 1,2,3
-    exec_ok("DELETE FROM t_emp"); // empty the table
+    exec_ok("DELETE FROM t_emp");                                // empty the table
 
     restart();
 
