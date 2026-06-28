@@ -327,9 +327,8 @@ int main(int argc, char* argv[]) {
         // configured); otherwise opens a real blocking TCP socket to the
         // primary via TcpReplicationConnection.  The read-only enforcement
         // is independent and already active (step 1 above).
-        sixseven::ConnectionFactory conn_factory =
-            [](const std::string& host,
-               uint16_t port) -> sixseven::Result<std::unique_ptr<sixseven::ReplicationConnection>> {
+        sixseven::ConnectionFactory conn_factory = [](const std::string& host, uint16_t port)
+            -> sixseven::Result<std::unique_ptr<sixseven::ReplicationConnection>> {
             if (host.empty()) {
                 return sixseven::make_error(sixseven::StatusCode::INVALID_ARGUMENT,
                                             "standby: primary_host is not configured; "
@@ -356,7 +355,7 @@ int main(int argc, char* argv[]) {
         // 4a. Register the on-promoted callback: toggle engine out of standby.
         promotion_manager->set_on_promoted([&engine]() {
             engine.set_standby_mode(false);
-            SIXSEVEN_LOG_INFO("standby: promoted to primary — writes now accepted");
+            SIXSEVEN_LOG_INFO("standby: promoted to primary -- writes now accepted");
         });
 
         // Wire the receiver into the engine for SHOW STANDBY STATUS /
@@ -379,7 +378,7 @@ int main(int argc, char* argv[]) {
             }
         } else {
             SIXSEVEN_LOG_WARN(
-                "standby: replication_primary_host is empty — "
+                "standby: replication_primary_host is empty -- "
                 "WAL receiver not started; server is read-only with no live replication");
         }
     }
