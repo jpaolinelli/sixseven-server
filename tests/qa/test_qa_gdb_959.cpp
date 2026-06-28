@@ -212,10 +212,12 @@ TEST(QA_GDB959_FramingLogic, MultipleMessagesConsumedSequentially) {
         std::vector<uint8_t> slice(buf.begin() + static_cast<ptrdiff_t>(offset), buf.end());
         size_t consumed = 0;
         auto msg = decode_one_message(slice, consumed);
-        if (!msg.has_value()) break; // NOT_FOUND = no more complete messages
+        if (!msg.has_value())
+            break; // NOT_FOUND = no more complete messages
         tags.push_back(msg->tag);
         offset += consumed;
-        if (msg->tag == ServerMsgTag::ReadyForQuery) break;
+        if (msg->tag == ServerMsgTag::ReadyForQuery)
+            break;
     }
 
     ASSERT_EQ(tags.size(), 3u);
