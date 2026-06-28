@@ -7,6 +7,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace sixseven {
 
@@ -230,9 +231,14 @@ VirtualTableDef make_pg_type() {
     def.generator = []() -> std::vector<std::vector<std::string>> {
         std::vector<std::vector<std::string>> rows;
         rows.reserve(all_types.size());
+        std::unordered_set<uint32_t> seen_oids;
         for (auto t : all_types) {
+            uint32_t oid = pg_oid(t);
+            if (!seen_oids.insert(oid).second) {
+                continue;
+            }
             rows.push_back({
-                std::to_string(pg_oid(t)),
+                std::to_string(oid),
                 pg_typname(t),
                 "11",
                 std::to_string(pg_typlen(t)),
