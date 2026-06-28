@@ -24,14 +24,14 @@
 #include <vector>
 
 #ifndef _WIN32
-#include <csignal>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
+#include <csignal>
 #endif
 
 namespace fs = std::filesystem;
@@ -41,8 +41,11 @@ namespace {
 #ifndef _WIN32
 
 /// Write a minimal JSON config for a primary or standby server.
-void write_server_config(const fs::path& cfg_path, const fs::path& data_dir,
-                         int port, bool standby, const std::string& primary_host,
+void write_server_config(const fs::path& cfg_path,
+                         const fs::path& data_dir,
+                         int port,
+                         bool standby,
+                         const std::string& primary_host,
                          int primary_port) {
     std::ofstream f(cfg_path);
     f << "{\n"
@@ -64,8 +67,7 @@ void write_server_config(const fs::path& cfg_path, const fs::path& data_dir,
 /// Attempt to connect to host:port, retrying until timeout_ms elapses.
 /// Returns connected socket fd, or -1 on timeout/failure.
 int connect_with_retry(const char* host, int port, int timeout_ms) {
-    const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     while (std::chrono::steady_clock::now() < deadline) {
         int fd = ::socket(AF_INET, SOCK_STREAM, 0);
         if (fd < 0) {
@@ -75,8 +77,7 @@ int connect_with_retry(const char* host, int port, int timeout_ms) {
         addr.sin_family = AF_INET;
         addr.sin_port = htons(static_cast<uint16_t>(port));
         ::inet_pton(AF_INET, host, &addr.sin_addr);
-        if (::connect(fd, reinterpret_cast<const sockaddr*>(&addr),
-                      sizeof(addr)) == 0) {
+        if (::connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == 0) {
             return fd;
         }
         ::close(fd);
@@ -88,11 +89,9 @@ int connect_with_retry(const char* host, int port, int timeout_ms) {
 /// Blocking read until 'Z' (ReadyForQuery) byte appears or timeout expires.
 bool wait_ready_for_query(int fd, std::vector<uint8_t>& out, int timeout_ms) {
     std::vector<uint8_t> buf(4096);
-    const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     while (std::chrono::steady_clock::now() < deadline) {
-        auto n = ::recv(fd, reinterpret_cast<char*>(buf.data()),
-                        static_cast<int>(buf.size()), 0);
+        auto n = ::recv(fd, reinterpret_cast<char*>(buf.data()), static_cast<int>(buf.size()), 0);
         if (n <= 0) {
             return false;
         }
@@ -111,8 +110,10 @@ bool wait_ready_for_query(int fd, std::vector<uint8_t>& out, int timeout_ms) {
 bool pg_exec(int fd, const std::string& sql, std::vector<uint8_t>& out) {
     // Startup.
     auto startup = sixseven::cli::encode_startup_message("sixseven", "sixseven");
-    if (::send(fd, reinterpret_cast<const char*>(startup.data()),
-               static_cast<int>(startup.size()), 0) < 0) {
+    if (::send(fd,
+               reinterpret_cast<const char*>(startup.data()),
+               static_cast<int>(startup.size()),
+               0) < 0) {
         return false;
     }
     std::vector<uint8_t> startup_resp;
@@ -122,8 +123,8 @@ bool pg_exec(int fd, const std::string& sql, std::vector<uint8_t>& out) {
 
     // Query.
     auto qmsg = sixseven::cli::encode_query_message(sql);
-    if (::send(fd, reinterpret_cast<const char*>(qmsg.data()),
-               static_cast<int>(qmsg.size()), 0) < 0) {
+    if (::send(fd, reinterpret_cast<const char*>(qmsg.data()), static_cast<int>(qmsg.size()), 0) <
+        0) {
         return false;
     }
     return wait_ready_for_query(fd, out, /*ms=*/8000);
@@ -140,12 +141,16 @@ pid_t launch_server(const fs::path& cfg_path, bool standby_flag) {
     if (pid == 0) {
         std::string cfg_str = cfg_path.string();
         if (standby_flag) {
-            ::execlp(SIXSEVEN_SERVER_BINARY, SIXSEVEN_SERVER_BINARY,
-                     cfg_str.c_str(), "--standby",
+            ::execlp(SIXSEVEN_SERVER_BINARY,
+                     SIXSEVEN_SERVER_BINARY,
+                     cfg_str.c_str(),
+                     "--standby",
                      static_cast<char*>(nullptr));
         } else {
-            ::execlp(SIXSEVEN_SERVER_BINARY, SIXSEVEN_SERVER_BINARY,
-                     cfg_str.c_str(), static_cast<char*>(nullptr));
+            ::execlp(SIXSEVEN_SERVER_BINARY,
+                     SIXSEVEN_SERVER_BINARY,
+                     cfg_str.c_str(),
+                     static_cast<char*>(nullptr));
         }
         ::_exit(127);
     }
@@ -218,14 +223,17 @@ TEST_F(E2EReplicationTest, StandbyConnectsAndRejectsWrites) {
     // ------------------------------------------------------------------
     {
         fs::path cfg = base_dir_ / "primary.json";
-        write_server_config(cfg, primary_dir_, kPrimaryPort,
-                            /*standby=*/false, "", 0);
+        write_server_config(cfg,
+                            primary_dir_,
+                            kPrimaryPort,
+                            /*standby=*/false,
+                            "",
+                            0);
         primary_pid_ = launch_server(cfg, /*standby_flag=*/false);
         ASSERT_GT(primary_pid_, 0) << "fork/exec primary failed";
     }
 
-    int fd_primary =
-        connect_with_retry("127.0.0.1", kPrimaryPort, /*timeout_ms=*/8000);
+    int fd_primary = connect_with_retry("127.0.0.1", kPrimaryPort, /*timeout_ms=*/8000);
     ASSERT_GE(fd_primary, 0) << "primary did not become ready within 8 s";
 
     std::vector<uint8_t> resp;
@@ -236,14 +244,11 @@ TEST_F(E2EReplicationTest, StandbyConnectsAndRejectsWrites) {
         << "CREATE TABLE on primary failed";
     ::close(fd_primary);
 
-    fd_primary =
-        connect_with_retry("127.0.0.1", kPrimaryPort, /*timeout_ms=*/2000);
+    fd_primary = connect_with_retry("127.0.0.1", kPrimaryPort, /*timeout_ms=*/2000);
     ASSERT_GE(fd_primary, 0) << "reconnect to primary failed";
 
     resp.clear();
-    ASSERT_TRUE(pg_exec(fd_primary,
-                        "INSERT INTO rep_test VALUES (1, 'hello_from_primary');",
-                        resp))
+    ASSERT_TRUE(pg_exec(fd_primary, "INSERT INTO rep_test VALUES (1, 'hello_from_primary');", resp))
         << "INSERT on primary failed";
     ::close(fd_primary);
 
@@ -252,14 +257,17 @@ TEST_F(E2EReplicationTest, StandbyConnectsAndRejectsWrites) {
     // ------------------------------------------------------------------
     {
         fs::path cfg = base_dir_ / "standby.json";
-        write_server_config(cfg, standby_dir_, kStandbyPort,
-                            /*standby=*/true, "127.0.0.1", kPrimaryPort);
+        write_server_config(cfg,
+                            standby_dir_,
+                            kStandbyPort,
+                            /*standby=*/true,
+                            "127.0.0.1",
+                            kPrimaryPort);
         standby_pid_ = launch_server(cfg, /*standby_flag=*/true);
         ASSERT_GT(standby_pid_, 0) << "fork/exec standby failed";
     }
 
-    int fd_standby =
-        connect_with_retry("127.0.0.1", kStandbyPort, /*timeout_ms=*/10000);
+    int fd_standby = connect_with_retry("127.0.0.1", kStandbyPort, /*timeout_ms=*/10000);
     ASSERT_GE(fd_standby, 0) << "standby did not become ready within 10 s";
 
     // ------------------------------------------------------------------
@@ -273,16 +281,13 @@ TEST_F(E2EReplicationTest, StandbyConnectsAndRejectsWrites) {
     // ------------------------------------------------------------------
     // Phase 4: Standby must reject DML with an ErrorResponse.
     // ------------------------------------------------------------------
-    fd_standby =
-        connect_with_retry("127.0.0.1", kStandbyPort, /*timeout_ms=*/2000);
+    fd_standby = connect_with_retry("127.0.0.1", kStandbyPort, /*timeout_ms=*/2000);
     ASSERT_GE(fd_standby, 0) << "reconnect to standby failed";
 
     std::vector<uint8_t> ins_resp;
     // The server may close the connection on error; we don't require the
     // pg_exec return value to be true, only that an 'E' byte is present.
-    (void)pg_exec(fd_standby,
-                  "INSERT INTO rep_test VALUES (99, 'should_fail');",
-                  ins_resp);
+    (void)pg_exec(fd_standby, "INSERT INTO rep_test VALUES (99, 'should_fail');", ins_resp);
     ::close(fd_standby);
 
     // An ErrorResponse starts with 'E' followed by a 4-byte length.
@@ -293,9 +298,8 @@ TEST_F(E2EReplicationTest, StandbyConnectsAndRejectsWrites) {
             break;
         }
     }
-    EXPECT_TRUE(has_error_response)
-        << "standby did not return an ErrorResponse for a DML INSERT "
-           "(expected read-only rejection)";
+    EXPECT_TRUE(has_error_response) << "standby did not return an ErrorResponse for a DML INSERT "
+                                       "(expected read-only rejection)";
 
     // ------------------------------------------------------------------
     // Phase 5 (best-effort): Wait up to 5 s for replication to apply the
@@ -304,16 +308,12 @@ TEST_F(E2EReplicationTest, StandbyConnectsAndRejectsWrites) {
     // ------------------------------------------------------------------
     bool replicated = false;
     {
-        const auto rep_deadline =
-            std::chrono::steady_clock::now() + std::chrono::seconds(5);
-        while (!replicated &&
-               std::chrono::steady_clock::now() < rep_deadline) {
+        const auto rep_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!replicated && std::chrono::steady_clock::now() < rep_deadline) {
             int fd_chk = connect_with_retry("127.0.0.1", kStandbyPort, 500);
             if (fd_chk >= 0) {
                 std::vector<uint8_t> chk_resp;
-                if (pg_exec(fd_chk,
-                            "SELECT msg FROM rep_test WHERE id = 1;",
-                            chk_resp)) {
+                if (pg_exec(fd_chk, "SELECT msg FROM rep_test WHERE id = 1;", chk_resp)) {
                     std::string s(chk_resp.begin(), chk_resp.end());
                     if (s.find("hello_from_primary") != std::string::npos) {
                         replicated = true;

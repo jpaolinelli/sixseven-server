@@ -22,14 +22,14 @@
 #include <vector>
 
 #ifndef _WIN32
-#include <csignal>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
+#include <csignal>
 #endif
 
 namespace fs = std::filesystem;
@@ -39,8 +39,7 @@ namespace {
 #ifndef _WIN32
 
 /// Write a minimal JSON config for sixseven-server.
-void write_server_config(const fs::path& cfg_path, const fs::path& data_dir,
-                         int port) {
+void write_server_config(const fs::path& cfg_path, const fs::path& data_dir, int port) {
     std::ofstream f(cfg_path);
     f << "{\n"
       << "  \"data_dir\": \"" << data_dir.string() << "\",\n"
@@ -54,8 +53,7 @@ void write_server_config(const fs::path& cfg_path, const fs::path& data_dir,
 /// Attempt to connect to host:port, retrying until timeout_ms elapses.
 /// Returns connected socket fd, or -1 on timeout/failure.
 int connect_with_retry(const char* host, int port, int timeout_ms) {
-    const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     while (std::chrono::steady_clock::now() < deadline) {
         int fd = ::socket(AF_INET, SOCK_STREAM, 0);
         if (fd < 0) {
@@ -65,8 +63,7 @@ int connect_with_retry(const char* host, int port, int timeout_ms) {
         addr.sin_family = AF_INET;
         addr.sin_port = htons(static_cast<uint16_t>(port));
         ::inet_pton(AF_INET, host, &addr.sin_addr);
-        if (::connect(fd, reinterpret_cast<const sockaddr*>(&addr),
-                      sizeof(addr)) == 0) {
+        if (::connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == 0) {
             return fd;
         }
         ::close(fd);
@@ -79,11 +76,9 @@ int connect_with_retry(const char* host, int port, int timeout_ms) {
 /// Accumulates all received bytes into out.
 bool wait_ready_for_query(int fd, std::vector<uint8_t>& out, int timeout_ms) {
     std::vector<uint8_t> buf(4096);
-    const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     while (std::chrono::steady_clock::now() < deadline) {
-        auto n = ::recv(fd, reinterpret_cast<char*>(buf.data()),
-                        static_cast<int>(buf.size()), 0);
+        auto n = ::recv(fd, reinterpret_cast<char*>(buf.data()), static_cast<int>(buf.size()), 0);
         if (n <= 0) {
             return false;
         }
@@ -102,8 +97,10 @@ bool wait_ready_for_query(int fd, std::vector<uint8_t>& out, int timeout_ms) {
 bool pg_exec(int fd, const std::string& sql, std::vector<uint8_t>& out) {
     // Send startup.
     auto startup = sixseven::cli::encode_startup_message("sixseven", "sixseven");
-    if (::send(fd, reinterpret_cast<const char*>(startup.data()),
-               static_cast<int>(startup.size()), 0) < 0) {
+    if (::send(fd,
+               reinterpret_cast<const char*>(startup.data()),
+               static_cast<int>(startup.size()),
+               0) < 0) {
         return false;
     }
     // Wait for ReadyForQuery from startup phase.
@@ -113,8 +110,8 @@ bool pg_exec(int fd, const std::string& sql, std::vector<uint8_t>& out) {
 
     // Send query.
     auto qmsg = sixseven::cli::encode_query_message(sql);
-    if (::send(fd, reinterpret_cast<const char*>(qmsg.data()),
-               static_cast<int>(qmsg.size()), 0) < 0) {
+    if (::send(fd, reinterpret_cast<const char*>(qmsg.data()), static_cast<int>(qmsg.size()), 0) <
+        0) {
         return false;
     }
     // Wait for ReadyForQuery from query response.
@@ -130,8 +127,10 @@ pid_t launch_server(const fs::path& cfg_path) {
     }
     if (pid == 0) {
         std::string cfg_str = cfg_path.string();
-        ::execlp(SIXSEVEN_SERVER_BINARY, SIXSEVEN_SERVER_BINARY,
-                 cfg_str.c_str(), static_cast<char*>(nullptr));
+        ::execlp(SIXSEVEN_SERVER_BINARY,
+                 SIXSEVEN_SERVER_BINARY,
+                 cfg_str.c_str(),
+                 static_cast<char*>(nullptr));
         ::_exit(127);
     }
     return pid;
