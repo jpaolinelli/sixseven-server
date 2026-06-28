@@ -3,7 +3,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <memory>
+#include <vector>
 
 using namespace sixseven;
 
@@ -18,6 +20,27 @@ static std::unique_ptr<PhysicalPlanNode> make_test_scan(table_id_t id, double ro
     node->cost.estimated_rows = rows;
     node->cost.total_cost = cost;
     return node;
+}
+
+// Recursively walk a join plan, collecting the table_id of every TABLE_SCAN
+// leaf and counting the JOIN nodes, while validating that every JOIN node has
+// two children and every leaf is a TABLE_SCAN. Lets the join-order tests assert
+// the actual tree shape (no dropped, duplicated, or malformed nodes) instead of
+// only checking the root node type.
+static void collect_join_tree(const PhysicalPlanNode* node,
+                              std::vector<table_id_t>& leaf_ids,
+                              int& join_count) {
+    ASSERT_NE(node, nullptr);
+    if (node->type == PhysicalPlanNode::Type::JOIN) {
+        ++join_count;
+        ASSERT_NE(node->left, nullptr);
+        ASSERT_NE(node->right, nullptr);
+        collect_join_tree(node->left.get(), leaf_ids, join_count);
+        collect_join_tree(node->right.get(), leaf_ids, join_count);
+    } else {
+        EXPECT_EQ(node->type, PhysicalPlanNode::Type::TABLE_SCAN);
+        leaf_ids.push_back(node->table_id);
+    }
 }
 
 // =============================================================================
@@ -168,15 +191,37 @@ TEST(JoinMethodTest, OutputRowsReflectsSelectivity) {
 TEST(JoinOrderTest, TwoTableJoin) {
     CostModel cm;
 
+    const PlanCost cost0{0.0, 10.0, 100.0};
+    const PlanCost cost1{0.0, 20.0, 1000.0};
+
     std::vector<JoinRelation> rels;
-    rels.push_back({1ULL << 0, {0.0, 10.0, 100.0}, make_test_scan(0, 100.0, 10.0)});
-    rels.push_back({1ULL << 1, {0.0, 20.0, 1000.0}, make_test_scan(1, 1000.0, 20.0)});
+    rels.push_back({1ULL << 0, cost0, make_test_scan(0, 100.0, 10.0)});
+    rels.push_back({1ULL << 1, cost1, make_test_scan(1, 1000.0, 20.0)});
 
     std::vector<JoinEdge> edges = {{0, 1, 0.01}};
 
     auto plan = optimize_join_order(rels, edges, cm);
     ASSERT_NE(plan, nullptr);
     EXPECT_EQ(plan->type, PhysicalPlanNode::Type::JOIN);
+
+    // With exactly two relations the DP has a single legal split, so the
+    // children are fully determined: the lower dense bit (table 0) is the left
+    // child and the higher (table 1) the right. The old test asserted only the
+    // root type, so a reversed or dropped child would have passed.
+    ASSERT_NE(plan->left, nullptr);
+    ASSERT_NE(plan->right, nullptr);
+    EXPECT_EQ(plan->left->type, PhysicalPlanNode::Type::TABLE_SCAN);
+    EXPECT_EQ(plan->right->type, PhysicalPlanNode::Type::TABLE_SCAN);
+    EXPECT_EQ(plan->left->table_id, static_cast<table_id_t>(0));
+    EXPECT_EQ(plan->right->table_id, static_cast<table_id_t>(1));
+
+    // The single enumerated alternative is the source of truth for the chosen
+    // join method and root cost, so a wrong method or a mis-costed root is now
+    // caught instead of silently passing.
+    auto [expected_method, expected_cost] =
+        choose_join_method(cost0, cost1, 0.01, false, false, cm);
+    EXPECT_EQ(plan->join_method, expected_method);
+    EXPECT_DOUBLE_EQ(plan->cost.total_cost, expected_cost.total_cost);
 }
 
 TEST(JoinOrderTest, ThreeTableJoin) {
@@ -196,6 +241,20 @@ TEST(JoinOrderTest, ThreeTableJoin) {
     ASSERT_NE(plan, nullptr);
     EXPECT_EQ(plan->type, PhysicalPlanNode::Type::JOIN);
     EXPECT_GT(plan->cost.total_cost, 0.0);
+
+    // A correct 3-way plan is a binary tree with two JOIN nodes and three
+    // TABLE_SCAN leaves covering exactly tables {0,1,2}. The old test checked
+    // only the root type, so a plan that dropped or duplicated a table would
+    // have passed.
+    std::vector<table_id_t> leaf_ids;
+    int join_count = 0;
+    collect_join_tree(plan.get(), leaf_ids, join_count);
+    EXPECT_EQ(join_count, 2);
+    std::sort(leaf_ids.begin(), leaf_ids.end());
+    EXPECT_EQ(leaf_ids,
+              (std::vector<table_id_t>{static_cast<table_id_t>(0),
+                                       static_cast<table_id_t>(1),
+                                       static_cast<table_id_t>(2)}));
 }
 
 TEST(JoinOrderTest, FourTableJoinDP) {
@@ -216,6 +275,20 @@ TEST(JoinOrderTest, FourTableJoinDP) {
     auto plan = optimize_join_order(rels, edges, cm);
     ASSERT_NE(plan, nullptr);
     EXPECT_EQ(plan->type, PhysicalPlanNode::Type::JOIN);
+
+    // A correct 4-way DP plan is a binary tree with three JOIN nodes and four
+    // TABLE_SCAN leaves covering exactly tables {0,1,2,3}. Without this the DP
+    // could drop, duplicate, or malform a node and the test would still pass.
+    std::vector<table_id_t> leaf_ids;
+    int join_count = 0;
+    collect_join_tree(plan.get(), leaf_ids, join_count);
+    EXPECT_EQ(join_count, 3);
+    std::sort(leaf_ids.begin(), leaf_ids.end());
+    EXPECT_EQ(leaf_ids,
+              (std::vector<table_id_t>{static_cast<table_id_t>(0),
+                                       static_cast<table_id_t>(1),
+                                       static_cast<table_id_t>(2),
+                                       static_cast<table_id_t>(3)}));
 }
 
 TEST(JoinOrderTest, SingleTable) {
@@ -242,18 +315,56 @@ TEST(JoinOrderTest, EmptyRelations) {
 }
 
 TEST(JoinOrderTest, PrefersSmallerBuildSide) {
-    // Verify that the optimizer prefers plans with smaller build sides for hash joins.
+    // Verify that a hash join prefers the smaller relation as its build side.
+    // The physical plan node does not record which child is the build side
+    // (build-side selection lives entirely in the cost model), so the
+    // preference is asserted directly against the cost model: hashing the
+    // smaller relation has a strictly lower startup cost, and
+    // choose_join_method normalizes to that cheaper orientation regardless of
+    // the order its arguments are passed in.
     CostModel cm;
 
-    std::vector<JoinRelation> rels;
-    rels.push_back({1ULL << 0, {0.0, 10.0, 100.0}, make_test_scan(0, 100.0, 10.0)});
-    rels.push_back({1ULL << 1, {0.0, 200.0, 100000.0}, make_test_scan(1, 100000.0, 200.0)});
+    const PlanCost small{0.0, 10.0, 100.0};     // 100-row relation
+    const PlanCost large{0.0, 200.0, 100000.0}; // 100000-row relation
+    const double sel = 0.0001;
 
-    std::vector<JoinEdge> edges = {{0, 1, 0.0001}};
+    const PlanCost build_small = cm.hash_join_cost(small, large, sel);
+    const PlanCost build_large = cm.hash_join_cost(large, small, sel);
+    // Building the smaller side is cheaper to start (lower startup cost) and
+    // never more expensive overall.
+    EXPECT_LT(build_small.startup_cost, build_large.startup_cost);
+    EXPECT_LE(build_small.total_cost, build_large.total_cost);
+
+    // choose_join_method must pick the smaller-build orientation no matter which
+    // way the two relations are handed to it: the reported cost is identical and
+    // matches the smaller-build hash cost (its startup cost is the cheaper one).
+    auto [method_a, cost_a] = choose_join_method(small, large, sel, false, false, cm);
+    auto [method_b, cost_b] = choose_join_method(large, small, sel, false, false, cm);
+    EXPECT_EQ(method_a, method_b);
+    EXPECT_DOUBLE_EQ(cost_a.total_cost, cost_b.total_cost);
+    if (method_a == JoinMethod::HASH_JOIN) {
+        EXPECT_DOUBLE_EQ(cost_a.startup_cost, build_small.startup_cost);
+    }
+
+    // The optimizer still produces a join over exactly the two input tables.
+    std::vector<JoinRelation> rels;
+    rels.push_back({1ULL << 0, small, make_test_scan(0, 100.0, 10.0)});
+    rels.push_back({1ULL << 1, large, make_test_scan(1, 100000.0, 200.0)});
+
+    std::vector<JoinEdge> edges = {{0, 1, sel}};
 
     auto plan = optimize_join_order(rels, edges, cm);
     ASSERT_NE(plan, nullptr);
+    EXPECT_EQ(plan->type, PhysicalPlanNode::Type::JOIN);
     EXPECT_GT(plan->cost.total_cost, 0.0);
+
+    std::vector<table_id_t> leaf_ids;
+    int join_count = 0;
+    collect_join_tree(plan.get(), leaf_ids, join_count);
+    EXPECT_EQ(join_count, 1);
+    std::sort(leaf_ids.begin(), leaf_ids.end());
+    EXPECT_EQ(leaf_ids,
+              (std::vector<table_id_t>{static_cast<table_id_t>(0), static_cast<table_id_t>(1)}));
 }
 
 // =============================================================================
