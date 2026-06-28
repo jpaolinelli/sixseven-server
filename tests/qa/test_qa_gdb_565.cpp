@@ -165,7 +165,9 @@ TEST(QA_GDB565, AC1_PgTypeReturnsAllTypes) {
     catalog.register_virtual_table(make_pg_type());
 
     auto rows = scan_pg_type(catalog);
-    EXPECT_EQ(rows.size(), 23u) << "Should have one row per TypeId (22 base + PATH)";
+    // GDB-949: 23 internal types collapse to 17 distinct pg oids after deduplication.
+    EXPECT_EQ(rows.size(), 17u)
+        << "Should have one row per distinct pg oid (deduped from 23 internal types)";
 
     std::unordered_set<std::string> expected_names = {
         "bool",
@@ -788,7 +790,7 @@ TEST(QA_GDB565, Adversarial_PgTypeScanIteratorLifecycle) {
     scan.close();
 
     EXPECT_EQ(count1, count2) << "Re-scan should produce same number of rows";
-    EXPECT_EQ(count1, 23);
+    EXPECT_EQ(count1, 17); // GDB-949: 17 distinct pg oids after deduplication
 }
 
 } // namespace

@@ -399,7 +399,7 @@ TEST(QA_GDB898_PgDatabase, OtherGeneratorsUnaffectedByChange) {
     auto type_def = make_pg_type();
     EXPECT_EQ(type_def.name, "pg_type");
     auto type_rows = type_def.generator();
-    EXPECT_EQ(type_rows.size(), 23u);
+    EXPECT_EQ(type_rows.size(), 17u); // GDB-949: 17 distinct pg oids after deduplication
 }
 
 // ---------------------------------------------------------------------------

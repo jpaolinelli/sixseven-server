@@ -90,13 +90,14 @@ std::vector<TypeRow> scan_pg_type(Catalog& catalog) {
 // pg_type tests
 // =========================================================================
 
-TEST(PgType, ReturnsAllSixSevenTypes) {
+TEST(PgType, ReturnsDistinctOidRows) {
     Catalog catalog;
     init_test_catalog(catalog);
     register_pg_type(catalog);
 
+    // 23 internal types collapse to 17 distinct pg oids after deduplication.
     auto rows = scan_pg_type(catalog);
-    EXPECT_EQ(rows.size(), 23u);
+    EXPECT_EQ(rows.size(), 17u);
 }
 
 TEST(PgType, EmbeddingTypeHasOid100000) {
@@ -126,15 +127,91 @@ TEST(PgType, OidsMatchExpectedMapping) {
     EXPECT_EQ(name_to_oids["bool"].size(), 1u);
     EXPECT_EQ(name_to_oids["bool"][0], 16);
 
-    EXPECT_EQ(name_to_oids["int4"].size(), 2u);
-    for (auto oid : name_to_oids["int4"]) {
-        EXPECT_EQ(oid, 23);
-    }
+    // After deduplication each pg typname appears exactly once.
+    EXPECT_EQ(name_to_oids["int4"].size(), 1u);
+    EXPECT_EQ(name_to_oids["int4"][0], 23);
 
-    EXPECT_EQ(name_to_oids["text"].size(), 2u);
-    for (auto oid : name_to_oids["text"]) {
-        EXPECT_EQ(oid, 25);
+    EXPECT_EQ(name_to_oids["text"].size(), 1u);
+    EXPECT_EQ(name_to_oids["text"][0], 25);
+}
+
+// GDB-949: every pg_type oid must appear exactly once.
+TEST(PgType, OidsAreUnique) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    register_pg_type(catalog);
+
+    auto rows = scan_pg_type(catalog);
+    std::unordered_set<int32_t> seen;
+    for (const auto& r : rows) {
+        EXPECT_TRUE(seen.insert(r.oid).second)
+            << "duplicate oid=" << r.oid << " typname=" << r.typname;
     }
+    // Row count must equal number of distinct oids.
+    EXPECT_EQ(seen.size(), rows.size());
+}
+
+// GDB-949: collided oids appear exactly once with canonical postgres typname and typlen.
+TEST(PgType, CollisionOidsHaveCanonicalValues) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    register_pg_type(catalog);
+
+    auto rows = scan_pg_type(catalog);
+
+    auto find_oid = [&](int32_t target_oid) -> const TypeRow* {
+        for (const auto& r : rows) {
+            if (r.oid == target_oid)
+                return &r;
+        }
+        return nullptr;
+    };
+
+    // oid 21 = int2: canonical typlen 2.
+    auto* int2_row = find_oid(21);
+    ASSERT_NE(int2_row, nullptr) << "oid 21 (int2) must appear exactly once";
+    EXPECT_EQ(int2_row->typname, "int2");
+    EXPECT_EQ(int2_row->typlen, 2);
+
+    // oid 23 = int4: canonical typlen 4.
+    auto* int4_row = find_oid(23);
+    ASSERT_NE(int4_row, nullptr) << "oid 23 (int4) must appear exactly once";
+    EXPECT_EQ(int4_row->typname, "int4");
+    EXPECT_EQ(int4_row->typlen, 4);
+
+    // oid 20 = int8: canonical typlen 8.
+    auto* int8_row = find_oid(20);
+    ASSERT_NE(int8_row, nullptr) << "oid 20 (int8) must appear exactly once";
+    EXPECT_EQ(int8_row->typname, "int8");
+    EXPECT_EQ(int8_row->typlen, 8);
+
+    // oid 1700 = numeric: canonical typlen -1 (variable).
+    auto* numeric_row = find_oid(1700);
+    ASSERT_NE(numeric_row, nullptr) << "oid 1700 (numeric) must appear exactly once";
+    EXPECT_EQ(numeric_row->typname, "numeric");
+    EXPECT_EQ(numeric_row->typlen, -1);
+
+    // oid 25 = text: canonical typlen -1 (variable).
+    auto* text_row = find_oid(25);
+    ASSERT_NE(text_row, nullptr) << "oid 25 (text) must appear exactly once";
+    EXPECT_EQ(text_row->typname, "text");
+    EXPECT_EQ(text_row->typlen, -1);
+}
+
+// GDB-949: distinct oid count matches number of distinct pg_oid values across all_types.
+TEST(PgType, DistinctOidCountMatchesAllTypes) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+    register_pg_type(catalog);
+
+    auto rows = scan_pg_type(catalog);
+    std::unordered_set<int32_t> distinct_oids;
+    for (const auto& r : rows) {
+        distinct_oids.insert(r.oid);
+    }
+    // 23 internal types -> 17 distinct pg oids.
+    EXPECT_EQ(distinct_oids.size(), 17u);
+    EXPECT_EQ(rows.size(), distinct_oids.size());
 }
 
 TEST(PgType, AllRowsHaveNamespace11) {
