@@ -673,7 +673,7 @@ TEST(QA_GDB565, Adversarial_PgTypeNoNullValues) {
     auto raw_rows = vt->generator();
     for (size_t i = 0; i < raw_rows.size(); ++i) {
         for (size_t j = 0; j < raw_rows[i].size(); ++j) {
-            EXPECT_FALSE(raw_rows[i][j].empty())
+            EXPECT_FALSE(!raw_rows[i][j].has_value())
                 << "Row " << i << " col " << j << " should not be empty (would become NULL)";
         }
     }

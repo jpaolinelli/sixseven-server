@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -143,10 +144,11 @@ inline constexpr table_id_t first_virtual_table_id = -1000;
 /// The pg_catalog schema name.
 inline constexpr const char* pg_catalog_schema = "pg_catalog";
 
-/// A row generator that produces rows as vectors of string values.
+/// A row generator that produces rows as vectors of optional string values.
 /// Each inner vector corresponds to one row, with string representations
-/// of column values in ordinal order. Empty strings are treated as NULL.
-using VirtualTableGenerator = std::function<std::vector<std::vector<std::string>>()>;
+/// of column values in ordinal order. nullopt signals SQL NULL; a present
+/// string (including "") is the actual cell value (empty string is NOT NULL).
+using VirtualTableGenerator = std::function<std::vector<std::vector<std::optional<std::string>>>()>;
 
 /// Definition of a virtual catalog table (not persisted, registered at startup).
 struct VirtualTableDef {

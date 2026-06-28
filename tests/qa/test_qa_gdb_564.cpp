@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -46,7 +47,7 @@ static VirtualTableDef make_pg_database_def() {
         {0, "oid", TypeId::INT32, false, ""},
         {1, "datname", TypeId::STRING, false, ""},
     };
-    def.generator = []() -> std::vector<std::vector<std::string>> {
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
         return {{"1", "demo"}, {"2", "sixseven_system"}};
     };
     return def;
@@ -137,8 +138,8 @@ TEST(QA_GDB564, AC5_PgDatabaseReturnsCorrectRows) {
         {0, "oid", TypeId::INT32, false, ""},
         {1, "datname", TypeId::STRING, false, ""},
     };
-    def.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
-        std::vector<std::vector<std::string>> rows;
+    def.generator = [&catalog]() -> std::vector<std::vector<std::optional<std::string>>> {
+        std::vector<std::vector<std::optional<std::string>>> rows;
         for (const auto& db : catalog.list_databases()) {
             rows.push_back({std::to_string(db.database_id), db.name});
         }
@@ -181,7 +182,7 @@ TEST(QA_GDB564, Adversarial_RegisterDuplicateVirtualTable) {
     VirtualTableDef def1;
     def1.name = "pg_type";
     def1.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def1.generator = []() -> std::vector<std::vector<std::string>> {
+    def1.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
         return {{"1"}};
     };
     catalog.register_virtual_table(def1);
@@ -192,8 +193,9 @@ TEST(QA_GDB564, Adversarial_RegisterDuplicateVirtualTable) {
 
     VirtualTableDef def2;
     def2.name = "pg_type";
-    def2.columns = {{0, "oid", TypeId::INT32, false, ""}, {1, "typname", TypeId::STRING, false, ""}};
-    def2.generator = []() -> std::vector<std::vector<std::string>> {
+    def2.columns = {{0, "oid", TypeId::INT32, false, ""},
+                    {1, "typname", TypeId::STRING, false, ""}};
+    def2.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
         return {{"1", "integer"}};
     };
     catalog.register_virtual_table(def2);
@@ -213,7 +215,7 @@ TEST(QA_GDB564, Adversarial_RegisterTableWithNoColumns) {
     VirtualTableDef def;
     def.name = "pg_empty_cols";
     def.columns = {};
-    def.generator = []() -> std::vector<std::vector<std::string>> {
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
         return {{"should_be_ignored"}};
     };
     catalog.register_virtual_table(std::move(def));
@@ -233,7 +235,7 @@ TEST(QA_GDB564, Adversarial_RegisterTableWithEmptyName) {
     VirtualTableDef def;
     def.name = "";
     def.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    def.generator = []() { return std::vector<std::vector<std::optional<std::string>>>{}; };
     catalog.register_virtual_table(std::move(def));
 
     auto vt = catalog.get_virtual_table("");
@@ -248,13 +250,13 @@ TEST(QA_GDB564, Adversarial_VirtualTableIdsDecrementSequentially) {
     VirtualTableDef def1;
     def1.name = "pg_table_a";
     def1.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def1.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    def1.generator = []() { return std::vector<std::vector<std::optional<std::string>>>{}; };
     catalog.register_virtual_table(std::move(def1));
 
     VirtualTableDef def2;
     def2.name = "pg_table_b";
     def2.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def2.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    def2.generator = []() { return std::vector<std::vector<std::optional<std::string>>>{}; };
     catalog.register_virtual_table(std::move(def2));
 
     auto vt1 = catalog.get_virtual_table("pg_table_a");
@@ -298,7 +300,7 @@ TEST(QA_GDB564, Adversarial_ScanEmptyGenerator) {
     def.table_id = -1000;
     def.name = "pg_empty";
     def.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    def.generator = []() { return std::vector<std::vector<std::optional<std::string>>>{}; };
 
     auto schema = make_output_schema(def);
     VirtualCatalogScanOperator scan(std::move(def), std::move(schema));
@@ -315,7 +317,7 @@ TEST(QA_GDB564, Adversarial_ScanMultipleNextAfterEnd) {
     def.table_id = -1000;
     def.name = "pg_one_row";
     def.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def.generator = []() -> std::vector<std::vector<std::string>> {
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
         return {{"42"}};
     };
 
@@ -344,7 +346,7 @@ TEST(QA_GDB564, Adversarial_ScanReopen) {
     def.table_id = -1000;
     def.name = "pg_reopen";
     def.columns = {{0, "val", TypeId::INT32, false, ""}};
-    def.generator = [&call_count]() -> std::vector<std::vector<std::string>> {
+    def.generator = [&call_count]() -> std::vector<std::vector<std::optional<std::string>>> {
         ++call_count;
         return {{std::to_string(call_count)}};
     };
@@ -376,8 +378,8 @@ TEST(QA_GDB564, Adversarial_ScanRowWithFewerColumnsThanSchema) {
         {1, "col_b", TypeId::STRING, false, ""},
         {2, "col_c", TypeId::BOOL, false, ""},
     };
-    def.generator = []() -> std::vector<std::vector<std::string>> {
-        return {{"42"}};  // Only 1 value, schema expects 3.
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
+        return {{"42"}}; // Only 1 value, schema expects 3.
     };
 
     auto schema = make_output_schema(def);
@@ -401,7 +403,7 @@ TEST(QA_GDB564, Adversarial_ScanRowWithMoreColumnsThanSchema) {
     def.table_id = -1000;
     def.name = "pg_extra_col";
     def.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def.generator = []() -> std::vector<std::vector<std::string>> {
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
         return {{"1", "extra_value", "another_extra"}};
     };
 
@@ -419,7 +421,8 @@ TEST(QA_GDB564, Adversarial_ScanRowWithMoreColumnsThanSchema) {
     scan.close();
 }
 
-TEST(QA_GDB564, Adversarial_ScanEmptyStringTreatedAsNull) {
+TEST(QA_GDB564, Adversarial_ScanNulloptTreatedAsNull) {
+    // GDB-955: nullopt -> SQL NULL; present "" -> non-null empty string.
     VirtualTableDef def;
     def.table_id = -1000;
     def.name = "pg_nulls";
@@ -427,8 +430,8 @@ TEST(QA_GDB564, Adversarial_ScanEmptyStringTreatedAsNull) {
         {0, "name", TypeId::STRING, true, ""},
         {1, "count", TypeId::INT32, true, ""},
     };
-    def.generator = []() -> std::vector<std::vector<std::string>> {
-        return {{"", ""}};
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
+        return {{std::nullopt, std::nullopt}};
     };
 
     auto schema = make_output_schema(def);
@@ -440,8 +443,8 @@ TEST(QA_GDB564, Adversarial_ScanEmptyStringTreatedAsNull) {
     ASSERT_TRUE(r->has_value());
 
     auto& tuple = r->value();
-    EXPECT_TRUE(tuple.values[0].is_null()) << "Empty string should be NULL";
-    EXPECT_TRUE(tuple.values[1].is_null()) << "Empty string should be NULL for INT32 too";
+    EXPECT_TRUE(tuple.values[0].is_null()) << "nullopt should be NULL";
+    EXPECT_TRUE(tuple.values[1].is_null()) << "nullopt should be NULL for INT32 too";
     scan.close();
 }
 
@@ -450,7 +453,7 @@ TEST(QA_GDB564, Adversarial_ScanBoolConversion) {
     def.table_id = -1000;
     def.name = "pg_bools";
     def.columns = {{0, "flag", TypeId::BOOL, false, ""}};
-    def.generator = []() -> std::vector<std::vector<std::string>> {
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
         return {{"true"}, {"1"}, {"false"}, {"0"}, {"yes"}, {"TRUE"}};
     };
 
@@ -469,12 +472,12 @@ TEST(QA_GDB564, Adversarial_ScanBoolConversion) {
     }
 
     ASSERT_EQ(values.size(), 6u);
-    EXPECT_TRUE(values[0]);   // "true"
-    EXPECT_TRUE(values[1]);   // "1"
-    EXPECT_FALSE(values[2]);  // "false"
-    EXPECT_FALSE(values[3]);  // "0"
-    EXPECT_FALSE(values[4]);  // "yes" — not "true" or "1", so false
-    EXPECT_FALSE(values[5]);  // "TRUE" — case-sensitive, not "true"
+    EXPECT_TRUE(values[0]);  // "true"
+    EXPECT_TRUE(values[1]);  // "1"
+    EXPECT_FALSE(values[2]); // "false"
+    EXPECT_FALSE(values[3]); // "0"
+    EXPECT_FALSE(values[4]); // "yes" — not "true" or "1", so false
+    EXPECT_FALSE(values[5]); // "TRUE" — case-sensitive, not "true"
     scan.close();
 }
 
@@ -483,7 +486,7 @@ TEST(QA_GDB564, Adversarial_ScanFloat64Conversion) {
     def.table_id = -1000;
     def.name = "pg_floats";
     def.columns = {{0, "val", TypeId::FLOAT64, false, ""}};
-    def.generator = []() -> std::vector<std::vector<std::string>> {
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
         return {{"3.14"}, {"-0.001"}, {"0"}, {"1e10"}};
     };
 
@@ -517,8 +520,8 @@ TEST(QA_GDB564, Adversarial_ScanLargeNumberOfRows) {
         {0, "id", TypeId::INT32, false, ""},
         {1, "name", TypeId::STRING, false, ""},
     };
-    def.generator = []() -> std::vector<std::vector<std::string>> {
-        std::vector<std::vector<std::string>> rows;
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
+        std::vector<std::vector<std::optional<std::string>>> rows;
         rows.reserve(10000);
         for (int i = 0; i < 10000; ++i) {
             rows.push_back({std::to_string(i), "row_" + std::to_string(i)});
@@ -572,7 +575,7 @@ TEST(QA_GDB564, Adversarial_ParserSchemaQualifiedInJoin) {
         {0, "oid", TypeId::INT32, false, ""},
         {1, "datname", TypeId::STRING, false, ""},
     };
-    def.generator = []() -> std::vector<std::vector<std::string>> {
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
         return {{"1", "demo"}};
     };
     catalog.register_virtual_table(def);
@@ -580,14 +583,13 @@ TEST(QA_GDB564, Adversarial_ParserSchemaQualifiedInJoin) {
     VirtualTableDef def2;
     def2.name = "pg_type";
     def2.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def2.generator = []() -> std::vector<std::vector<std::string>> {
+    def2.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
         return {{"1"}};
     };
     catalog.register_virtual_table(std::move(def2));
 
-    auto stmt = parse_sql(
-        "SELECT d.datname, t.oid FROM pg_catalog.pg_database d "
-        "JOIN pg_catalog.pg_type t ON d.oid = t.oid");
+    auto stmt = parse_sql("SELECT d.datname, t.oid FROM pg_catalog.pg_database d "
+                          "JOIN pg_catalog.pg_type t ON d.oid = t.oid");
     ASSERT_NE(stmt, nullptr);
 
     Binder binder(catalog);
@@ -685,7 +687,7 @@ TEST(QA_GDB564, Adversarial_ToTableSchemaPreservesAllFields) {
         {1, "col_b", TypeId::STRING, true, ""},
         {2, "col_c", TypeId::BOOL, false, ""},
     };
-    def.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    def.generator = []() { return std::vector<std::vector<std::optional<std::string>>>{}; };
 
     auto ts = def.to_table_schema();
     EXPECT_EQ(ts.table_id, -1000);
@@ -708,7 +710,7 @@ TEST(QA_GDB564, Adversarial_Int32MaxMinValues) {
     def.table_id = -1000;
     def.name = "pg_int_boundary";
     def.columns = {{0, "val", TypeId::INT32, false, ""}};
-    def.generator = []() -> std::vector<std::vector<std::string>> {
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
         return {
             {std::to_string(std::numeric_limits<int32_t>::max())},
             {std::to_string(std::numeric_limits<int32_t>::min())},
@@ -744,7 +746,7 @@ TEST(QA_GDB564, Adversarial_Int64LargeValues) {
     def.table_id = -1000;
     def.name = "pg_int64";
     def.columns = {{0, "val", TypeId::INT64, false, ""}};
-    def.generator = []() -> std::vector<std::vector<std::string>> {
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
         return {
             {std::to_string(std::numeric_limits<int64_t>::max())},
             {std::to_string(std::numeric_limits<int64_t>::min())},
@@ -772,7 +774,7 @@ TEST(QA_GDB564, Adversarial_UnhandledTypeDefaultsToString) {
     def.table_id = -1000;
     def.name = "pg_uuid_type";
     def.columns = {{0, "val", TypeId::UUID, false, ""}};
-    def.generator = []() -> std::vector<std::vector<std::string>> {
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
         return {{"550e8400-e29b-41d4-a716-446655440000"}};
     };
 
@@ -797,7 +799,7 @@ TEST(QA_GDB564, Adversarial_GeneratorCalledAtOpenNotConstruction) {
     def.table_id = -1000;
     def.name = "pg_lazy";
     def.columns = {{0, "val", TypeId::INT32, false, ""}};
-    def.generator = [&gen_calls]() -> std::vector<std::vector<std::string>> {
+    def.generator = [&gen_calls]() -> std::vector<std::vector<std::optional<std::string>>> {
         ++gen_calls;
         return {{"1"}};
     };
@@ -817,8 +819,8 @@ TEST(QA_GDB564, Adversarial_CloseReleasesRowData) {
     def.table_id = -1000;
     def.name = "pg_data";
     def.columns = {{0, "val", TypeId::STRING, false, ""}};
-    def.generator = []() -> std::vector<std::vector<std::string>> {
-        std::vector<std::vector<std::string>> rows;
+    def.generator = []() -> std::vector<std::vector<std::optional<std::string>>> {
+        std::vector<std::vector<std::optional<std::string>>> rows;
         for (int i = 0; i < 100; ++i) {
             rows.push_back({std::string(1000, 'x')});
         }
@@ -864,8 +866,8 @@ TEST(QA_GDB564, Adversarial_GeneratorReflectsCatalogChanges) {
         {0, "oid", TypeId::INT32, false, ""},
         {1, "datname", TypeId::STRING, false, ""},
     };
-    def.generator = [&catalog]() -> std::vector<std::vector<std::string>> {
-        std::vector<std::vector<std::string>> rows;
+    def.generator = [&catalog]() -> std::vector<std::vector<std::optional<std::string>>> {
+        std::vector<std::vector<std::optional<std::string>>> rows;
         for (const auto& db : catalog.list_databases()) {
             rows.push_back({std::to_string(db.database_id), db.name});
         }
@@ -910,7 +912,7 @@ TEST(QA_GDB564, Adversarial_ListVirtualTablesConsistency) {
         VirtualTableDef def;
         def.name = "pg_table_" + std::to_string(i);
         def.columns = {{0, "oid", TypeId::INT32, false, ""}};
-        def.generator = []() { return std::vector<std::vector<std::string>>{}; };
+        def.generator = []() { return std::vector<std::vector<std::optional<std::string>>>{}; };
         catalog.register_virtual_table(std::move(def));
     }
 
@@ -935,7 +937,7 @@ TEST(QA_GDB564, Adversarial_PlanNodeNameAndDetail) {
     def.table_id = -1000;
     def.name = "pg_type";
     def.columns = {{0, "oid", TypeId::INT32, false, ""}};
-    def.generator = []() { return std::vector<std::vector<std::string>>{}; };
+    def.generator = []() { return std::vector<std::vector<std::optional<std::string>>>{}; };
 
     auto schema = make_output_schema(def);
     VirtualCatalogScanOperator scan(std::move(def), std::move(schema));
