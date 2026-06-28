@@ -149,21 +149,12 @@ TEST_F(ServerLifecycleTest, HealthCheckReturnsVersionAndUptime) {
     t.join();
 }
 
-TEST_F(ServerLifecycleTest, ShutdownTimeoutConfigRespected) {
-    auto cfg = make_config();
-    cfg.shutdown_timeout_s = 5;
-    Server server(std::move(cfg));
-    std::thread t([&server] { (void)server.start(); });
-    wait_for_running(server);
-
-    // Shutdown should complete quickly (no blocked work).
-    auto start = std::chrono::steady_clock::now();
-    server.shutdown();
-    auto elapsed = std::chrono::steady_clock::now() - start;
-    t.join();
-
-    // Should not have waited the full 5 seconds.
-    EXPECT_LT(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count(), 5);
-}
+// NOTE: a ShutdownTimeoutConfigRespected test was removed here (GDB-952). It
+// set shutdown_timeout_s = 5, opened zero connections, and only asserted that
+// shutdown returned in under 5 seconds -- true regardless of whether the
+// timeout is plumbed anywhere, so it exercised no timeout behavior. Verify-first
+// found that Server::do_shutdown() merely LOGS shutdown_timeout_s and never
+// enforces it (the thread-pool drain is unbounded); a real shutdown deadline
+// plus a meaningful regression test are tracked in GDB-1279.
 
 } // namespace sixseven
