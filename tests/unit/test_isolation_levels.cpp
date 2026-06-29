@@ -204,102 +204,15 @@ TEST_F(IsolationLevelTest, ReadCommittedSeesInterleavedCommit) {
 }
 
 // =============================================================================
-// SI differential: T1 does NOT see rows committed by T2 after T1's BEGIN
-// =============================================================================
-
-TEST_F(IsolationLevelTest, SnapshotIsolationFreezesBEGINSnapshot) {
-    // Set SI mode before the BEGIN.
-    engine_->set_session_isolation(IsolationLevel::SNAPSHOT_ISOLATION);
-
-    // T1: begin a SNAPSHOT ISOLATION transaction.  Snapshot is frozen here.
-    exec_ok(*engine_, "BEGIN");
-
-    // Verify T1 sees 2 rows at statement 1.
-    auto r1 = exec_ok(*engine_, "SELECT * FROM accounts");
-    ASSERT_EQ(r1.rows.size(), 2u);
-
-    // Simulate T2: commit a new row while T1 is still open.
-    // We close T1, insert, then re-open T1 as SI to demonstrate that the
-    // SI snapshot from the original BEGIN does not include T2's insert.
-    //
-    // Because a single-engine fixture shares one txn_id sequence, we drive
-    // T2 as an autocommit statement between two explicit T1 boundaries.
-    exec_ok(*engine_, "COMMIT"); // end T1 temporarily
-
-    // Switch to RC for the T2 insert so it runs outside any SI context.
-    engine_->set_session_isolation(IsolationLevel::READ_COMMITTED);
-    exec_ok(*engine_, "INSERT INTO accounts VALUES (4, 400)"); // autocommit T2
-
-    // Switch back to SI and open a NEW T1 to demonstrate snapshot freeze.
-    engine_->set_session_isolation(IsolationLevel::SNAPSHOT_ISOLATION);
-    exec_ok(*engine_, "BEGIN"); // T1 snapshot frozen AFTER T2 committed
-
-    // Under SI, the snapshot is frozen at BEGIN -- T1 was begun AFTER T2
-    // committed, so T1 WILL see the new row.  This confirms the snapshot
-    // mechanism is working correctly: a transaction started before T2
-    // would not see it; one started after would.
-    auto r2 = exec_ok(*engine_, "SELECT * FROM accounts");
-    EXPECT_EQ(r2.rows.size(), 3u) << "SI: txn begun after T2 commit should see T2's row";
-
-    exec_ok(*engine_, "COMMIT");
-}
-
-// =============================================================================
-// SI snapshot is truly frozen: a later statement sees no new rows committed
-// after BEGIN
-// =============================================================================
-
-TEST_F(IsolationLevelTest, SnapshotIsolationStatementsDontAdvanceSnapshot) {
-    // Pre-condition: 2 rows in accounts.
-    {
-        auto r = exec_ok(*engine_, "SELECT * FROM accounts");
-        ASSERT_EQ(r.rows.size(), 2u);
-    }
-
-    // Open T1 under SI -- snapshot frozen with xmax = current committed
-    // horizon (covers the 2 rows but not anything committed later).
-    engine_->set_session_isolation(IsolationLevel::SNAPSHOT_ISOLATION);
-    exec_ok(*engine_, "BEGIN");
-
-    // Verify T1 sees exactly 2 rows at statement 1.
-    auto s1 = exec_ok(*engine_, "SELECT * FROM accounts");
-    ASSERT_EQ(s1.rows.size(), 2u);
-
-    // Commit T1 temporarily and insert row 3 in autocommit RC mode.
-    exec_ok(*engine_, "COMMIT");
-    engine_->set_session_isolation(IsolationLevel::READ_COMMITTED);
-    exec_ok(*engine_, "INSERT INTO accounts VALUES (5, 500)");
-
-    // Open T2 as SI AFTER row 3 is committed.
-    engine_->set_session_isolation(IsolationLevel::SNAPSHOT_ISOLATION);
-    exec_ok(*engine_, "BEGIN");
-
-    // Statement 1 in T2: should see 3 rows (snapshot includes row 3).
-    auto t2s1 = exec_ok(*engine_, "SELECT * FROM accounts");
-    ASSERT_EQ(t2s1.rows.size(), 3u) << "T2 (SI) should see row committed before its BEGIN";
-
-    // Commit T2 temporarily and insert row 4 in autocommit RC mode.
-    exec_ok(*engine_, "COMMIT");
-    engine_->set_session_isolation(IsolationLevel::READ_COMMITTED);
-    exec_ok(*engine_, "INSERT INTO accounts VALUES (6, 600)");
-
-    // Now open T3 as SI.
-    engine_->set_session_isolation(IsolationLevel::SNAPSHOT_ISOLATION);
-    exec_ok(*engine_, "BEGIN");
-
-    // Statement 1 in T3: should see 4 rows.
-    auto t3s1 = exec_ok(*engine_, "SELECT * FROM accounts");
-    ASSERT_EQ(t3s1.rows.size(), 4u) << "T3 (SI) should see all rows committed before its BEGIN";
-
-    // Statement 2 in T3: snapshot is frozen -- still 4 rows even though
-    // nothing new was committed (just verifying no phantom advance).
-    auto t3s2 = exec_ok(*engine_, "SELECT * FROM accounts");
-    EXPECT_EQ(t3s2.rows.size(), 4u)
-        << "SI: second statement in same txn must not see more rows than first";
-
-    exec_ok(*engine_, "COMMIT");
-}
-
+// SI snapshot-freeze coverage lives in tests/qa/test_qa_gdb_978.cpp
+// (GDB978Fixture.SnapshotIsolationSnapshotIsFrozenBetweenStatements /
+// ReadCommittedSnapshotAdvancesBetweenStatements). Those drive a real second
+// transaction through transaction_manager() and compare the snapshot xmax
+// returned for the open explicit transaction, which actually distinguishes SI
+// (frozen at BEGIN) from RC (advances per statement). Earlier row-count tests
+// here could not: a single-engine fixture commits the competing writer only
+// while T1 is closed, so they passed regardless of the isolation level
+// (GDB-1281). They were removed rather than left vacuous.
 // =============================================================================
 // RC differential: a second statement inside the SAME BEGIN block sees new
 // rows committed (by an autocommit interleaved between statements)

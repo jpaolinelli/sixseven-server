@@ -18,8 +18,8 @@
 #include "sixseven/common/status.h"
 #include "sixseven/executor/query_engine.h"
 #include "sixseven/executor/storage_manager.h"
-#include "sixseven/storage/disk_manager.h"
 #include "sixseven/server/session.h"
+#include "sixseven/storage/disk_manager.h"
 #include "sixseven/txn/txn_manager.h"
 
 #include <gtest/gtest.h>
@@ -64,8 +64,8 @@ protected:
 
     QueryResult exec_ok(const std::string& sql) {
         auto r = engine_->execute(sql);
-        EXPECT_TRUE(r.has_value()) << "failed: " << sql << " :: "
-                                   << (r ? std::string{} : r.error().message);
+        EXPECT_TRUE(r.has_value())
+            << "failed: " << sql << " :: " << (r ? std::string{} : r.error().message);
         return r ? std::move(*r) : QueryResult{};
     }
 
