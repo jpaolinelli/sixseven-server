@@ -52,8 +52,7 @@ namespace {
 class QA_GDB1001 : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ =
-            std::filesystem::temp_directory_path() / "sixseven_qa_gdb1001";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb1001";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -82,8 +81,7 @@ protected:
 
             auto schema = catalog_->get_table(default_database_id, "persons");
             ASSERT_TRUE(schema.has_value());
-            auto sr =
-                storage_->create_table_storage(default_database_id, persons_id_, *schema);
+            auto sr = storage_->create_table_storage(default_database_id, persons_id_, *schema);
             ASSERT_TRUE(sr.has_value()) << sr.error().message;
         }
 
@@ -102,11 +100,9 @@ protected:
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         // 1->2, 2->3 only. Node 4 is isolated. Node 3 has no out-edges.
-        auto lr1 =
-            graph_->link(default_database_id, "knows", Value(int64_t{1}), Value(int64_t{2}));
+        auto lr1 = graph_->link(default_database_id, "knows", Value(int64_t{1}), Value(int64_t{2}));
         ASSERT_TRUE(lr1.has_value()) << lr1.error().message;
-        auto lr2 =
-            graph_->link(default_database_id, "knows", Value(int64_t{2}), Value(int64_t{3}));
+        auto lr2 = graph_->link(default_database_id, "knows", Value(int64_t{2}), Value(int64_t{3}));
         ASSERT_TRUE(lr2.has_value()) << lr2.error().message;
     }
 
@@ -258,13 +254,13 @@ TEST_F(QA_GDB1001, VarLenMatchIsolatedNodeSucceeds) {
 
     BoundStatement bound;
     VariableLengthMatchOperator op(*graph_,
-                                  *catalog_,
-                                  *storage_,
-                                  default_database_id,
-                                  std::move(config),
-                                  make_node_schema(),
-                                  nullptr,
-                                  bound);
+                                   *catalog_,
+                                   *storage_,
+                                   default_database_id,
+                                   std::move(config),
+                                   make_node_schema(),
+                                   nullptr,
+                                   bound);
 
     auto open_result = op.open();
     ASSERT_TRUE(open_result.has_value())
@@ -381,13 +377,13 @@ TEST_F(QA_GDB1001, VarLenMatchZeroHopSucceeds) {
 
     BoundStatement bound;
     VariableLengthMatchOperator op(*graph_,
-                                  *catalog_,
-                                  *storage_,
-                                  default_database_id,
-                                  std::move(config),
-                                  make_node_schema(),
-                                  nullptr,
-                                  bound);
+                                   *catalog_,
+                                   *storage_,
+                                   default_database_id,
+                                   std::move(config),
+                                   make_node_schema(),
+                                   nullptr,
+                                   bound);
 
     auto open_result = op.open();
     ASSERT_TRUE(open_result.has_value())
@@ -471,8 +467,7 @@ TEST_F(QA_GDB1001, PatternMatchUnknownEdgeTypeErrors) {
                             bound);
 
     auto result = op.open();
-    ASSERT_FALSE(result.has_value())
-        << "Unknown edge type must propagate an error in PatternMatch";
+    ASSERT_FALSE(result.has_value()) << "Unknown edge type must propagate an error in PatternMatch";
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
@@ -485,13 +480,13 @@ TEST_F(QA_GDB1001, VarLenMatchUnknownEdgeTypeErrors) {
 
     BoundStatement bound;
     VariableLengthMatchOperator op(*graph_,
-                                  *catalog_,
-                                  *storage_,
-                                  default_database_id,
-                                  std::move(config),
-                                  make_node_schema(),
-                                  nullptr,
-                                  bound);
+                                   *catalog_,
+                                   *storage_,
+                                   default_database_id,
+                                   std::move(config),
+                                   make_node_schema(),
+                                   nullptr,
+                                   bound);
 
     auto result = op.open();
     ASSERT_FALSE(result.has_value())
@@ -589,13 +584,13 @@ TEST_F(QA_GDB1001, VarLenMatchResultsDeterministic) {
         config.edges.push_back(MatchEdgeDef("r", "knows", TraverseDirection::OUT, 1, 3));
         BoundStatement bound;
         VariableLengthMatchOperator op(*graph_,
-                                      *catalog_,
-                                      *storage_,
-                                      default_database_id,
-                                      std::move(config),
-                                      make_node_schema(),
-                                      nullptr,
-                                      bound);
+                                       *catalog_,
+                                       *storage_,
+                                       default_database_id,
+                                       std::move(config),
+                                       make_node_schema(),
+                                       nullptr,
+                                       bound);
         return drain_varlen_match(op);
     };
 
