@@ -164,25 +164,10 @@ TEST_F(SeqScanTest, ScanMultipleRows) {
     scan.close();
 }
 
-TEST_F(SeqScanTest, ScanVerifiesAllValues) {
-    TableHeap heap(*bpm_, dm_, file_id_);
-    insert_row(heap, 42, "test_user", 99);
-
-    SeqScanOperator scan(heap, storage_schema_, output_schema_);
-    auto open = scan.open();
-    ASSERT_TRUE(open.has_value()) << open.error().message;
-
-    auto row = scan.next();
-    ASSERT_TRUE(row.has_value()) << row.error().message;
-    ASSERT_TRUE(row->has_value());
-
-    auto& t = row->value();
-    EXPECT_EQ(t.values[0].as_int32(), 42);
-    EXPECT_EQ(t.values[1].as_string(), "test_user");
-    EXPECT_EQ(t.values[2].as_int32(), 99);
-
-    scan.close();
-}
+// GDB-986: ScanVerifiesAllValues removed -- it inserted one row and asserted
+// the three column values, which ScanSingleRow already covers (and additionally
+// checks tuple width, rid.has_value(), and end-of-stream). It was a strict
+// subset duplicate that added no detection power.
 
 TEST_F(SeqScanTest, ScanWithPredicate) {
     TableHeap heap(*bpm_, dm_, file_id_);
