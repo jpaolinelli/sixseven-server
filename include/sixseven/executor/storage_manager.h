@@ -154,6 +154,9 @@ public:
     /// lightweight and must not call back into StorageManager.
     void for_each_table_heap(const std::function<void(table_id_t, TableHeap*)>& fn) const;
 
+    /// Access the shared DiskManager (e.g. for Vacuum construction).
+    [[nodiscard]] DiskManager& disk_manager() { return dm_; }
+
 private:
     /// Build the directory path for a database: {data_dir}/databases/{db_id}/
     [[nodiscard]] std::filesystem::path database_path(database_id_t db_id) const;

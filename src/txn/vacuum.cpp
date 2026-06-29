@@ -1,9 +1,41 @@
 #include "sixseven/txn/vacuum.h"
 
 #include "sixseven/common/logging.h"
+#include "sixseven/txn/mvcc.h"
 #include "sixseven/txn/mvcc_tuple.h"
 
 namespace sixseven {
+
+namespace {
+
+/// Map a transaction id unknown to the manager to frozen_txn_id so that vacuum
+/// treats rows persisted by a prior server process as committed-and-live,
+/// mirroring the read-path behaviour in table_heap.cpp::normalize_xid.
+/// TransactionManager::get_status conservatively returns ABORTED for any id it
+/// does not recognise; without this mapping vacuum would incorrectly reclaim
+/// live rows after a server restart (GDB-969 corruption hazard).
+txn_id_t vacuum_normalize_xid(const TransactionManager& mgr, txn_id_t xid) {
+    if (xid == invalid_txn_id || xid == frozen_txn_id) {
+        return xid;
+    }
+    return mgr.get_transaction(xid) != nullptr ? xid : frozen_txn_id;
+}
+
+/// Vacuum-safe deadness check (GDB-969).
+/// Applies the unknown-xid-as-committed mapping before calling is_dead so that:
+///   - tuples from a prior process (unknown xmin) are never reclaimed, and
+///   - tuples whose xmin is a real known-aborted txn ARE correctly reclaimed.
+/// Option (i): wrapper local to vacuum.cpp; is_dead shared semantics unchanged.
+bool vacuum_is_dead(const MvccTupleHeader& raw_header,
+                    txn_id_t xmin_horizon,
+                    const TransactionManager& txn_mgr) {
+    MvccTupleHeader h = raw_header;
+    h.xmin = vacuum_normalize_xid(txn_mgr, h.xmin);
+    h.xmax = vacuum_normalize_xid(txn_mgr, h.xmax);
+    return is_dead(h, xmin_horizon, txn_mgr);
+}
+
+} // namespace
 
 // =============================================================================
 // Vacuum
@@ -54,7 +86,8 @@ Result<VacuumStats> Vacuum::run_full() {
     for (uint32_t pid = 1; pid < total_pages; ++pid) {
         auto dead = vacuum_page(pid, horizon);
         if (!dead) {
-            SIXSEVEN_LOG_WARN("vacuum full: failed to process page {}: {}", pid, dead.error().message);
+            SIXSEVEN_LOG_WARN(
+                "vacuum full: failed to process page {}: {}", pid, dead.error().message);
             continue;
         }
         stats.pages_scanned++;
@@ -78,9 +111,9 @@ Result<VacuumStats> Vacuum::run_full() {
     }
 
     SIXSEVEN_LOG_DEBUG("vacuum full: scanned {} pages, removed {} dead tuples, reclaimed {} bytes",
-                    stats.pages_scanned,
-                    stats.dead_tuples,
-                    stats.bytes_reclaimed);
+                       stats.pages_scanned,
+                       stats.dead_tuples,
+                       stats.bytes_reclaimed);
     return ok(stats);
 }
 
@@ -107,7 +140,7 @@ Result<uint32_t> Vacuum::vacuum_page(PageId page_id, txn_id_t xmin_horizon) {
         }
 
         auto header = read_mvcc_header(tuple_data);
-        if (is_dead(header, xmin_horizon, txn_mgr_)) {
+        if (vacuum_is_dead(header, xmin_horizon, txn_mgr_)) {
             auto del = page->delete_tuple(slot);
             if (del) {
                 dead_count++;
@@ -222,7 +255,7 @@ Result<std::vector<VacuumStats>> AutoVacuumWorker::check_and_vacuum() {
                 auto data = *tuple_result;
                 if (data.size() >= mvcc_header_size) {
                     auto header = read_mvcc_header(data);
-                    if (is_dead(header, horizon, txn_mgr_)) {
+                    if (vacuum_is_dead(header, horizon, txn_mgr_)) {
                         dead_tuples++;
                     }
                 }
@@ -246,8 +279,8 @@ Result<std::vector<VacuumStats>> AutoVacuumWorker::check_and_vacuum() {
             if (stats) {
                 results.push_back(*stats);
                 SIXSEVEN_LOG_INFO("auto-vacuum: table file_id={} vacuumed, {} dead tuples removed",
-                               entry.file_id,
-                               stats->dead_tuples);
+                                  entry.file_id,
+                                  stats->dead_tuples);
             }
         }
     }
