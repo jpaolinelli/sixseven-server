@@ -594,16 +594,27 @@ TEST_F(BufferPoolTest, EvictionFollowsLRUKOrder) {
     ASSERT_TRUE(p4.has_value());
     ASSERT_TRUE(bpm.unpin_page((*p4)->page_id(), false).has_value());
 
-    // Page 1 should be evicted. Verify it's no longer in the pool.
-    // Fetch page 1: should need to read from disk.
-    // But page 1 was never written to disk (only new_page, no write_page),
-    // so the on-disk page is uninitialized -> checksum error.
-    // That confirms page 1 was evicted from the pool.
-    // Instead, let's verify that page 2 and 3 are still accessible.
+    // Page 1 should be evicted, and ONLY page 1. To uniquely pin the victim we
+    // must rule out both wrong choices:
+    //   - Pages 2 and 3 must still be resident (fetch hits the pool).
+    //   - Page 1 must be gone: it was never written to disk (new_page + clean
+    //     unpin, no write_page), so eviction did not flush it and re-fetching
+    //     forces a disk read of an uninitialized page -> checksum error.
+    // Asserting only that page 2 is resident would also pass if page 3 were
+    // wrongly evicted, so check page 3 explicitly and require page 1 to fail.
     auto check2 = bpm.fetch_page(pid2);
     ASSERT_TRUE(check2.has_value());
     EXPECT_EQ((*check2)->page_id(), pid2);
     ASSERT_TRUE(bpm.unpin_page(pid2, false).has_value());
+
+    auto check3 = bpm.fetch_page(pid3);
+    ASSERT_TRUE(check3.has_value());
+    EXPECT_EQ((*check3)->page_id(), pid3);
+    ASSERT_TRUE(bpm.unpin_page(pid3, false).has_value());
+
+    // Page 1 is the victim: it is no longer resident and cannot be re-read.
+    auto check1 = bpm.fetch_page(pid1);
+    EXPECT_FALSE(check1.has_value());
 }
 
 TEST_F(BufferPoolTest, MultiplePinsSamePageIncrementCount) {
