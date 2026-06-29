@@ -72,25 +72,84 @@ TEST(TokenizerConfig, DefaultValues) {
     EXPECT_TRUE(config.subword_prefix.empty());
 }
 
-TEST(TokenizerConfig, CustomValues) {
-    TokenizerConfig config;
-    config.vocab = {{"hello", 1}, {"world", 2}};
-    config.special_tokens.cls = 200;
-    config.model_type = TokenizerModelType::WORDPIECE;
-    config.normalizer = NormalizerType::NFC;
-    config.pre_tokenizer = PreTokenizerType::WHITESPACE;
-    config.subword_prefix = "##";
+// (TokenizerConfig CustomValues set-then-get was removed: it only re-read plain
+// aggregate fields it had just assigned, exercising no production logic.)
 
-    EXPECT_EQ(config.vocab.size(), 2u);
-    EXPECT_EQ(config.special_tokens.cls, 200);
-    EXPECT_EQ(config.model_type, TokenizerModelType::WORDPIECE);
-    EXPECT_EQ(config.normalizer, NormalizerType::NFC);
-    EXPECT_EQ(config.pre_tokenizer, PreTokenizerType::WHITESPACE);
-    EXPECT_EQ(config.subword_prefix, "##");
+// ---------------------------------------------------------------------------
+// Production tokenizer: HashTokenizer (the only concrete Tokenizer in
+// src/vector/tokenizer.cpp). The StubTokenizer tests further below cover only
+// the abstract-interface/polymorphism contract; these cover real encode logic.
+// ---------------------------------------------------------------------------
+
+TEST(HashTokenizer, EncodeProducesClsWordsSepPadding) {
+    HashTokenizer tok;
+    auto tokens = tok.encode("hello world", 10);
+    ASSERT_EQ(tokens.size(), 10u);
+    EXPECT_EQ(tokens[0], 101); // CLS
+    EXPECT_NE(tokens[1], 0);   // word "hello"
+    EXPECT_NE(tokens[2], 0);   // word "world"
+    EXPECT_EQ(tokens[3], 102); // SEP
+    for (size_t i = 4; i < 10; ++i) {
+        EXPECT_EQ(tokens[i], 0) << "position " << i << " should be padding";
+    }
+}
+
+TEST(HashTokenizer, EncodeIsDeterministicAndCaseInsensitive) {
+    HashTokenizer tok;
+    EXPECT_EQ(tok.encode("hello world", 10), tok.encode("hello world", 10));
+    // Lowercasing normalizer: same word token regardless of case.
+    EXPECT_EQ(tok.encode("hello", 10)[1], tok.encode("HELLO", 10)[1]);
+    // Distinct words hash to distinct token ids.
+    EXPECT_NE(tok.encode("hello", 10)[1], tok.encode("goodbye", 10)[1]);
+}
+
+TEST(HashTokenizer, EncodeEmptyTextIsClsSepThenPadding) {
+    HashTokenizer tok;
+    auto tokens = tok.encode("", 10);
+    ASSERT_EQ(tokens.size(), 10u);
+    EXPECT_EQ(tokens[0], 101); // CLS
+    EXPECT_EQ(tokens[1], 102); // SEP
+    for (size_t i = 2; i < 10; ++i) {
+        EXPECT_EQ(tokens[i], 0); // padding
+    }
+}
+
+TEST(HashTokenizer, EncodeTruncatesPreservingClsAndSep) {
+    std::string long_text;
+    for (int i = 0; i < 200; ++i) {
+        long_text += "word" + std::to_string(i) + " ";
+    }
+    HashTokenizer tok;
+    auto tokens = tok.encode(long_text, 10);
+    ASSERT_EQ(tokens.size(), 10u);
+    EXPECT_EQ(tokens[0], 101); // CLS preserved at the front
+    EXPECT_EQ(tokens[9], 102); // SEP preserved at the end on truncation
+}
+
+TEST(HashTokenizer, AttentionMaskIsOneForRealTokensZeroForPadding) {
+    HashTokenizer tok;
+    auto tokens = tok.encode("hello world", 10);
+    auto mask = tok.attention_mask(tokens);
+    ASSERT_EQ(mask.size(), tokens.size());
+    EXPECT_EQ(mask[0], 1); // CLS
+    EXPECT_EQ(mask[3], 1); // SEP
+    for (size_t i = 4; i < mask.size(); ++i) {
+        EXPECT_EQ(mask[i], 0) << "padding position " << i << " should be masked";
+    }
+}
+
+TEST(HashTokenizer, AccessorsReportVocabAndMaxSequenceLength) {
+    HashTokenizer def;
+    EXPECT_EQ(def.vocab_size(), HashTokenizer::VOCAB_SIZE);
+    EXPECT_EQ(def.max_sequence_length(), HashTokenizer::DEFAULT_MAX_SEQ_LENGTH);
+    HashTokenizer custom(256);
+    EXPECT_EQ(custom.max_sequence_length(), 256u);
 }
 
 // ---------------------------------------------------------------------------
-// Tokenizer interface via StubTokenizer
+// Tokenizer interface via StubTokenizer (abstract-interface / polymorphism
+// contract only -- real encode behavior is covered by the HashTokenizer tests
+// above and in test_onnx_provider.cpp).
 // ---------------------------------------------------------------------------
 
 TEST(Tokenizer, EncodeReturnsCorrectLength) {
