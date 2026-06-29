@@ -94,8 +94,8 @@ src/<module>/             — Implementation files
 tests/unit/               — Dev unit tests (Google Test)
 tests/qa/                 — QA regression tests (test_qa_*.cpp)
 tests/integration/        — Integration tests
-tests/e2e/                — End-to-end tests
-tests/fuzz/               — Fuzz tests
+tests/e2e/                — End-to-end tests (real tier: durability + replication scenarios; GTEST_SKIP on Windows -- POSIX/CI only; see GDB-959)
+tests/fuzz/               — Fuzz tests (directory stub only -- no targets wired into CMake yet)
 tests/benchmark/          — Benchmarks (Google Benchmark)
 tools/                    — CLI and benchmark tools
 docs/                     — Documentation
@@ -166,7 +166,7 @@ Initialize at startup: `sixseven::init_logging("info");`
 - **Volcano Iterator Model**: `open() → next() → close()` for query execution operators
 - **Buffer Pool**: Pin/unpin protocol for page access, LRU-K eviction
 - **WAL**: Write-ahead logging with group commit for crash recovery
-- **MVCC**: Tuple versioning with xmin/xmax for transaction isolation
+- **MVCC**: Tuple versioning with xmin/xmax for transaction isolation; Read Committed and Snapshot Isolation are wired into scans via MvccReadViewGuard; Serializable (SSI) is represented in the txn layer but rw-dependency tracking is not fully enforced end-to-end
 - **EMBEDDING type**: Native vector column type with auto-generation from source columns
 
 ## Type System (23 Types)
