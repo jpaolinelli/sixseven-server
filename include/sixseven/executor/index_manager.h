@@ -2,6 +2,7 @@
 
 #include "sixseven/catalog/schema.h"
 #include "sixseven/common/result.h"
+#include "sixseven/common/value.h"
 #include "sixseven/index/bm25_index.h"
 #include "sixseven/index/btree_index.h"
 #include "sixseven/index/hash_index.h"
@@ -11,6 +12,7 @@
 #include <atomic>
 #include <latch>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <thread>
 #include <unordered_map>
@@ -34,6 +36,7 @@ class StorageManager;
 ///   - Providing index pointer maps to the Planner for index scan planning.
 ///   - Async startup loading: server accepts connections while indexes load
 ///     in the background. Queries fall back to sequential scan until ready.
+///   - Per-row index maintenance: insert_entry / remove_entry for DML.
 ///
 /// Also handles autoincrement counter initialization during startup,
 /// using the persisted value from sys_tables when available, falling back
@@ -76,16 +79,84 @@ public:
     /// indexes on that table. Used by the REINDEX SQL command.
     [[nodiscard]] Result<void> reindex(const std::string& name, database_id_t db_id);
 
-    /// Accessor maps for Planner construction.
+    // -----------------------------------------------------------------------
+    // Per-row maintenance API (GDB-984)
+    //
+    // Thread-safety model: maintenance_latch_ (exclusive for write, shared for
+    // read) guards the per-table target vectors (maintenance_btree_,
+    // maintenance_hash_, maintenance_bm25_, maintenance_hnsw_).  The individual
+    // index objects (BTreeIndex, HashIndex, etc.) carry their own internal
+    // latches, so concurrent scan readers are safe while a writer holds only
+    // the index's own latch.  insert_entry / remove_entry acquire an exclusive
+    // lock on maintenance_latch_ before iterating the target lists, then
+    // release it before calling into each index's own locking methods.
+    // -----------------------------------------------------------------------
+
+    /// Register a B-tree maintenance target for a table.
+    /// The BTreeIndex pointer must remain valid for the lifetime of this
+    /// IndexManager (or until the target is dropped via drop_index).
+    void register_btree_target(table_id_t table_id, BtreeMaintenanceTarget target);
+
+    /// Register a hash index maintenance target for a table.
+    void register_hash_target(table_id_t table_id, HashMaintenanceTarget target);
+
+    /// Register a BM25 maintenance target for a table.
+    void register_bm25_target(table_id_t table_id, Bm25MaintenanceTarget target);
+
+    /// Register an HNSW maintenance target for a table.
+    /// The target's rid_map must point to the hnsw_rid_maps_ slot for this index.
+    void register_hnsw_target(table_id_t table_id, HnswMaintenanceTarget target);
+
+    /// Insert a row into all secondary indexes registered for @p table_id.
+    ///
+    /// For each registered target:
+    ///   - B-tree/hash: extract key columns from @p values via key_column_ordinals,
+    ///     build a KeyType, and call index->insert(key, rid).
+    ///   - BM25: extract the text column, call index->add_document(rid, text).
+    ///   - HNSW: extract the float vector from @p values[0] (the embedding column),
+    ///     call index->insert(vector) -> node_id, and record rid_map[node_id] = rid.
+    ///
+    /// On any sub-index failure the error is propagated immediately (fail-fast,
+    /// mirroring GDB-932 behavior in the executor).  Partial maintenance may
+    /// occur for the indexes processed before the failing one.
+    ///
+    /// @param table_id  Table whose indexes are maintained.
+    /// @param rid       Row identifier assigned by the heap.
+    /// @param values    Row values in storage-schema column order.
+    [[nodiscard]] Result<void>
+    insert_entry(table_id_t table_id, const RID& rid, const std::vector<Value>& values);
+
+    /// Remove a row from all secondary indexes registered for @p table_id.
+    ///
+    /// For each registered target:
+    ///   - B-tree: calls index->remove(key, rid) (RID-qualified delete).
+    ///   - Hash: calls index->remove(key, rid) (RID-qualified delete).
+    ///   - BM25: calls index->remove_document(rid).
+    ///   - HNSW: reverse-scans rid_map to find the node_id whose slot equals
+    ///     @p rid, calls index->remove(node_id), then sets rid_map[node_id] =
+    ///     RID::invalid() to tombstone the slot.
+    ///
+    /// Errors are propagated fail-fast (same as insert_entry).
+    ///
+    /// @param table_id  Table whose indexes are maintained.
+    /// @param rid       Row identifier to remove.
+    /// @param values    Row values used to reconstruct keys (btree/hash).
+    [[nodiscard]] Result<void>
+    remove_entry(table_id_t table_id, const RID& rid, const std::vector<Value>& values);
+
+    // -----------------------------------------------------------------------
+    // Accessor maps (for Planner construction)
+    // -----------------------------------------------------------------------
+
     [[nodiscard]] std::unordered_map<index_id_t, BTreeIndex*>* btree_map();
     [[nodiscard]] std::unordered_map<index_id_t, HashIndex*>* hash_map();
     [[nodiscard]] std::unordered_map<index_id_t, HnswIndex*>* hnsw_map();
     [[nodiscard]] std::unordered_map<index_id_t, Bm25Index*>* bm25_map();
 
-    /// HNSW node_id → RID maps for direct tuple lookup (avoids full table scan).
+    /// HNSW node_id -> RID maps for direct tuple lookup (avoids full table scan).
     [[nodiscard]] std::unordered_map<index_id_t, std::vector<RID>>* hnsw_rid_maps();
 
-    /// Append a RID to an HNSW index's node→RID mapping.
+    /// Append a RID to an HNSW index's node->RID mapping.
     /// Called from the embedding store callback after a new vector is inserted.
     void append_hnsw_rid(index_id_t index_id, RID rid);
 
@@ -154,7 +225,7 @@ private:
     /// BM25 pointer map keyed by index_id.
     std::unordered_map<index_id_t, Bm25Index*> bm25_indexes_;
 
-    /// HNSW node_id → heap RID mapping. node_id N maps to hnsw_rid_maps_[id][N].
+    /// HNSW node_id -> heap RID mapping. node_id N maps to hnsw_rid_maps_[id][N].
     /// Built during rebuild/load, extended during INSERT via append_hnsw_rid().
     std::unordered_map<index_id_t, std::vector<RID>> hnsw_rid_maps_;
 
@@ -163,6 +234,19 @@ private:
     std::vector<std::jthread> load_threads_;
     std::unique_ptr<std::latch> load_latch_;
     std::atomic<bool> async_load_done_{false};
+
+    // -----------------------------------------------------------------------
+    // Per-table maintenance target storage (GDB-984)
+    //
+    // Guarded by maintenance_latch_ (exclusive for register_*; exclusive for
+    // insert_entry / remove_entry while the target list is copied, then the
+    // latch is released before calling into each index's own locking layer).
+    // -----------------------------------------------------------------------
+    mutable std::mutex maintenance_latch_;
+    std::unordered_map<table_id_t, std::vector<BtreeMaintenanceTarget>> maintenance_btree_;
+    std::unordered_map<table_id_t, std::vector<HashMaintenanceTarget>> maintenance_hash_;
+    std::unordered_map<table_id_t, std::vector<Bm25MaintenanceTarget>> maintenance_bm25_;
+    std::unordered_map<table_id_t, std::vector<HnswMaintenanceTarget>> maintenance_hnsw_;
 };
 
 } // namespace sixseven
