@@ -271,7 +271,9 @@ TEST_F(UserPersistenceTest, ReloadedScramRecordAuthenticates) {
     auto record = users_->get_user("frank");
     ASSERT_TRUE(record.has_value());
 
-    std::string client_nonce = base64_encode(random_bytes(18));
+    auto client_nonce_bytes = random_bytes(18);
+    ASSERT_TRUE(client_nonce_bytes.has_value());
+    std::string client_nonce = base64_encode(*client_nonce_bytes);
     std::string client_first_bare = "n=frank,r=" + client_nonce;
     std::string client_first = "n,," + client_first_bare;
 

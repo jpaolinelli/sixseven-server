@@ -6,7 +6,6 @@
 #include <cctype>
 #include <cstring>
 #include <iomanip>
-#include <random>
 #include <sstream>
 
 // Use CommonCrypto on macOS, OpenSSL-compatible API elsewhere.
@@ -17,6 +16,7 @@
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/md5.h>
+#include <openssl/rand.h>
 #include <openssl/sha.h>
 #endif
 
@@ -123,15 +123,21 @@ std::vector<uint8_t> xor_bytes(const std::vector<uint8_t>& a, const std::vector<
     return result;
 }
 
-std::vector<uint8_t> random_bytes(size_t count) {
+Result<std::vector<uint8_t>> random_bytes(size_t count) {
     std::vector<uint8_t> bytes(count);
-    std::random_device rd;
-    std::mt19937 rng(rd());
-    std::uniform_int_distribution<int> dist(0, 255);
-    for (auto& b : bytes) {
-        b = static_cast<uint8_t>(dist(rng));
+    if (count == 0) {
+        return ok(bytes);
     }
-    return bytes;
+#if defined(__APPLE__)
+    // SecRandomCopyBytes is the macOS CSPRNG; fall back via arc4random_buf.
+    arc4random_buf(bytes.data(), count);
+    return ok(bytes);
+#else
+    if (RAND_bytes(bytes.data(), static_cast<int>(count)) != 1) {
+        return make_error(StatusCode::INTERNAL_ERROR, "CSPRNG failure: RAND_bytes returned != 1");
+    }
+    return ok(bytes);
+#endif
 }
 
 namespace {
@@ -259,8 +265,14 @@ UserRecord hash_password_scram(const std::string& username, const std::string& p
     record.username = username;
     record.iterations = 4096;
 
-    // Generate random salt.
-    auto salt = random_bytes(16);
+    // Generate random salt -- abort on CSPRNG failure; never use predictable bytes.
+    auto salt_result = random_bytes(16);
+    if (!salt_result) {
+        SIXSEVEN_LOG_FATAL("CSPRNG failure during SCRAM salt generation: {}",
+                           salt_result.error().message);
+        std::abort();
+    }
+    auto salt = std::move(*salt_result);
     record.salt = base64_encode(salt);
 
     // Derive keys using PBKDF2.
@@ -552,8 +564,11 @@ Result<std::string> scram_server_first(const std::string& client_first_message,
     }
 
     // Generate server nonce and combine.
-    auto server_nonce_bytes = random_bytes(18);
-    std::string server_nonce_part = base64_encode(server_nonce_bytes);
+    auto server_nonce_result = random_bytes(18);
+    if (!server_nonce_result) {
+        return make_error(server_nonce_result.error().code, server_nonce_result.error().message);
+    }
+    std::string server_nonce_part = base64_encode(*server_nonce_result);
     state.server_nonce = state.client_nonce + server_nonce_part;
 
     // Get salt and iterations from user record.
