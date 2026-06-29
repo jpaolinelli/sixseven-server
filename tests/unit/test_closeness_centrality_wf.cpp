@@ -10,54 +10,9 @@
 #include <unordered_map>
 
 #include "test_catalog_helpers.h"
+#include "test_graph_helpers.h"
 
 using namespace sixseven;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-namespace {
-
-static TableSchema make_table_schema(const std::string& name) {
-    TableSchema schema;
-    schema.name = name;
-    schema.columns = {
-        {0, "id", TypeId::INT64, false, ""},
-    };
-    schema.pk_columns = "id";
-    return schema;
-}
-
-static Value pk(int64_t v) {
-    return Value(v);
-}
-
-struct WFResult {
-    double closeness;
-    int64_t sum_farness;
-    int64_t reachable_count;
-    int64_t component_size;
-    double normalized_closeness;
-};
-
-std::unordered_map<int64_t, WFResult> to_wf_map(const std::vector<AlgorithmRow>& rows) {
-    std::unordered_map<int64_t, WFResult> result;
-    for (const auto& row : rows) {
-        EXPECT_EQ(row.values.size(), 6u);
-        auto node_id = std::get<int64_t>(row.values[0].data());
-        auto closeness = std::get<double>(row.values[1].data());
-        auto sum_farness = std::get<int64_t>(row.values[2].data());
-        auto reachable_count = std::get<int64_t>(row.values[3].data());
-        auto component_size = std::get<int64_t>(row.values[4].data());
-        auto normalized_closeness = std::get<double>(row.values[5].data());
-        result[node_id] = {
-            closeness, sum_farness, reachable_count, component_size, normalized_closeness};
-    }
-    return result;
-}
-
-} // namespace
 
 // ---------------------------------------------------------------------------
 // Test fixture
@@ -118,7 +73,7 @@ TEST_F(WassermanFaustTest, TwoDisconnectedComponents) {
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
-    auto scores = to_wf_map(*result);
+    auto scores = to_closeness_map(*result);
     EXPECT_EQ(scores.size(), 5u);
 
     // Component A has 3 nodes, Component B has 2 nodes, N=5.
@@ -167,7 +122,7 @@ TEST_F(WassermanFaustTest, LargerComponentScoresHigher) {
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
-    auto scores = to_wf_map(*result);
+    auto scores = to_closeness_map(*result);
 
     // Nodes in the larger component should have higher WF closeness.
     for (int64_t big : {1, 2, 3, 4}) {
@@ -223,7 +178,7 @@ TEST_F(WassermanFaustTest, FullyConnectedMatchesStandard) {
 
     auto wf_result = run_wf("knows");
     ASSERT_TRUE(wf_result.has_value()) << wf_result.error().message;
-    auto wf_scores = to_wf_map(*wf_result);
+    auto wf_scores = to_closeness_map(*wf_result);
 
     // On a fully connected graph, WF closeness should equal standard.
     // Each node: closeness = 3/3 = 1.0. WF = (3/3)*1.0 = 1.0.
@@ -241,7 +196,7 @@ TEST_F(WassermanFaustTest, FullyConnectedPathMatchesStandard) {
 
     auto wf_result = run_wf("knows");
     ASSERT_TRUE(wf_result.has_value()) << wf_result.error().message;
-    auto wf_scores = to_wf_map(*wf_result);
+    auto wf_scores = to_closeness_map(*wf_result);
 
     // Re-run as standard for comparison.
     // Need a new graph engine for the second run — just verify WF formula manually.
@@ -267,7 +222,7 @@ TEST_F(WassermanFaustTest, SingleDirectedEdgeIsolatedSink) {
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
-    auto scores = to_wf_map(*result);
+    auto scores = to_closeness_map(*result);
     EXPECT_EQ(scores.size(), 2u);
 
     // Node 1: reaches node 2 at d=1. sum_farness=1, reachable=2, n_c=2, N=2.
@@ -306,7 +261,7 @@ TEST_F(WassermanFaustTest, ComponentSizesThreeComponents) {
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
-    auto scores = to_wf_map(*result);
+    auto scores = to_closeness_map(*result);
     EXPECT_EQ(scores.size(), 9u);
 
     for (int64_t node : {1, 2, 3}) {
@@ -347,7 +302,7 @@ TEST_F(WassermanFaustTest, KnownAnalyticalValues) {
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
-    auto scores = to_wf_map(*result);
+    auto scores = to_closeness_map(*result);
 
     // Component A (triangle): each node reaches 2 others at d=1.
     // sum_farness = 2, reachable = 3.
@@ -389,7 +344,7 @@ TEST_F(WassermanFaustTest, AnalyticalValuesWithVaryingCentrality) {
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
-    auto scores = to_wf_map(*result);
+    auto scores = to_closeness_map(*result);
 
     // Node 1: reaches 2(d=1), 3(d=2). sum_farness=3, reachable=3.
     // normalized = (3-1)/3 = 2/3. WF = (3-1)/(5-1) * 2/3 = 2/4 * 2/3 = 1/3.
@@ -438,7 +393,7 @@ TEST_F(WassermanFaustTest, NormalizedClosenessIsWithinComponent) {
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
-    auto scores = to_wf_map(*result);
+    auto scores = to_closeness_map(*result);
 
     // Verify normalized_closeness = (reachable_count - 1) / sum_farness for reachable nodes.
     for (const auto& [node, r] : scores) {
@@ -487,7 +442,7 @@ TEST_F(WassermanFaustTest, ValuesNonNegativeAndFinite) {
     auto result = run_wf("knows");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
-    auto scores = to_wf_map(*result);
+    auto scores = to_closeness_map(*result);
     for (const auto& [node, r] : scores) {
         EXPECT_GE(r.closeness, 0.0) << "node " << node;
         EXPECT_FALSE(std::isnan(r.closeness)) << "node " << node << " closeness is NaN";
@@ -519,7 +474,7 @@ TEST_F(WassermanFaustTest, GDB862_DirectedReachNarrowerThanWeakComponent) {
     auto result = run_wf("reg862");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
-    auto scores = to_wf_map(*result);
+    auto scores = to_closeness_map(*result);
     ASSERT_EQ(scores.size(), 3u);
 
     // Universal invariant: every score must be in [0, 1].
@@ -569,7 +524,7 @@ TEST_F(WassermanFaustTest, GDB862_StarWithSinkLargeWeakComponent) {
     auto result = run_wf("reg862b");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
-    auto scores = to_wf_map(*result);
+    auto scores = to_closeness_map(*result);
     ASSERT_EQ(scores.size(), 5u);
 
     // Universal invariant: every score in [0, 1].

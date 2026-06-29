@@ -10,6 +10,7 @@
 #include <unordered_set>
 
 #include "test_catalog_helpers.h"
+#include "test_graph_helpers.h"
 
 using namespace sixseven;
 
@@ -18,20 +19,6 @@ using namespace sixseven;
 // ---------------------------------------------------------------------------
 
 namespace {
-
-static TableSchema make_table_schema(const std::string& name) {
-    TableSchema schema;
-    schema.name = name;
-    schema.columns = {
-        {0, "id", TypeId::INT64, false, ""},
-    };
-    schema.pk_columns = "id";
-    return schema;
-}
-
-static Value pk(int64_t v) {
-    return Value(v);
-}
 
 /// Extract (node_id, component_id) pairs from algorithm result rows.
 std::unordered_map<int64_t, int64_t> to_component_map(const std::vector<AlgorithmRow>& rows) {
