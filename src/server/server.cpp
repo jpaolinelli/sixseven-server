@@ -363,9 +363,14 @@ void Server::handle_read(int fd) {
     // the Connection or PgProtocolHandler while the flag is set.
     inflight_fds_.insert(fd);
 
-    // Disable READ monitoring while the thread pool processes the query.
-    // The fd stays registered so we don't lose EOF detection on write side.
-    (void)event_loop_->modify_fd(fd, EventType::WRITE);
+    // Remove the fd from the event loop entirely while the thread pool
+    // processes the query. Because a connected TCP socket with send-buffer
+    // space is always write-ready, leaving it registered (even as WRITE-only)
+    // causes a level-triggered busy-poll spin for the full query duration.
+    // Removing it means poll() does not return this fd until it is re-added
+    // in process_completed_queries(). EOF is detected on the next READ
+    // registration after the query completes.
+    (void)event_loop_->remove_fd(fd);
 
     // Submit protocol processing to the thread pool. Pointers into the
     // unordered_maps are stable because we never erase/insert while the
@@ -457,12 +462,14 @@ void Server::process_completed_queries() {
             continue;
         }
 
-        // Re-enable READ monitoring (and WRITE if there is response data to flush).
+        // Re-register the fd now that the query is complete. The fd was fully
+        // removed from the event loop in handle_read(), so we use add_fd here
+        // (not modify_fd). Also arm WRITE if there is buffered response data.
         auto& conn = it->second;
         EventType type = conn.has_pending_writes() ? EventType::READ_WRITE : EventType::READ;
-        auto mod_result = event_loop_->modify_fd(fd, type);
-        if (!mod_result) {
-            SIXSEVEN_LOG_WARN("failed to re-enable fd={}: {}", fd, mod_result.error().message);
+        auto add_result = event_loop_->add_fd(fd, type);
+        if (!add_result) {
+            SIXSEVEN_LOG_WARN("failed to re-register fd={}: {}", fd, add_result.error().message);
         }
     }
 }
