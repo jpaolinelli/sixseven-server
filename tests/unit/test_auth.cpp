@@ -135,11 +135,14 @@ TEST(CryptoHelpers, XorBytesSelfIsZero) {
 
 TEST(CryptoHelpers, RandomBytesCorrectLength) {
     auto bytes = random_bytes(32);
-    EXPECT_EQ(bytes.size(), 32u);
+    ASSERT_TRUE(bytes.has_value());
+    EXPECT_EQ(bytes->size(), 32u);
 }
 
 TEST(CryptoHelpers, RandomBytesNotAllZeroes) {
-    auto bytes = random_bytes(32);
+    auto bytes_result = random_bytes(32);
+    ASSERT_TRUE(bytes_result.has_value());
+    auto bytes = *bytes_result;
     bool all_zero = true;
     for (auto b : bytes) {
         if (b != 0) {
@@ -158,7 +161,9 @@ TEST(CryptoHelpers, Base64RoundTrip) {
 }
 
 TEST(CryptoHelpers, Base64RoundTripRandomData) {
-    auto original = random_bytes(64);
+    auto original_result = random_bytes(64);
+    ASSERT_TRUE(original_result.has_value());
+    auto original = *original_result;
     auto encoded = base64_encode(original);
     auto decoded = base64_decode(encoded);
     EXPECT_EQ(decoded, original);
@@ -299,7 +304,9 @@ TEST(ScramExchange, FullSuccessfulExchange) {
     auto record = hash_password_scram("alice", "secret");
 
     // Step 1: Client sends client-first-message.
-    std::string client_nonce = base64_encode(random_bytes(18));
+    auto client_nonce_bytes = random_bytes(18);
+    ASSERT_TRUE(client_nonce_bytes.has_value());
+    std::string client_nonce = base64_encode(*client_nonce_bytes);
     std::string client_first_bare = "n=alice,r=" + client_nonce;
     std::string client_first = "n,," + client_first_bare;
 
@@ -385,7 +392,9 @@ TEST(ScramExchange, InvalidClientFirstMessage) {
 TEST(ScramExchange, WrongProofFails) {
     auto record = hash_password_scram("alice", "secret");
 
-    std::string client_nonce = base64_encode(random_bytes(18));
+    auto client_nonce_bytes = random_bytes(18);
+    ASSERT_TRUE(client_nonce_bytes.has_value());
+    std::string client_nonce = base64_encode(*client_nonce_bytes);
     std::string client_first = "n,,n=alice,r=" + client_nonce;
 
     ScramServerState state;
@@ -393,8 +402,10 @@ TEST(ScramExchange, WrongProofFails) {
     ASSERT_TRUE(server_first.has_value()) << server_first.error().message;
 
     // Send a bogus proof.
+    auto bogus_proof_bytes = random_bytes(32);
+    ASSERT_TRUE(bogus_proof_bytes.has_value());
     std::string client_final =
-        "c=biws,r=" + state.server_nonce + ",p=" + base64_encode(random_bytes(32));
+        "c=biws,r=" + state.server_nonce + ",p=" + base64_encode(*bogus_proof_bytes);
 
     auto server_final = scram_server_final(client_final, state);
     ASSERT_FALSE(server_final.has_value());

@@ -43,8 +43,10 @@ std::vector<uint8_t> sha256(const std::vector<uint8_t>& data);
 /// XOR two equal-length byte arrays.
 std::vector<uint8_t> xor_bytes(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b);
 
-/// Generate cryptographically random bytes.
-std::vector<uint8_t> random_bytes(size_t count);
+/// Generate cryptographically random bytes via the OS CSPRNG.
+/// Returns INTERNAL_ERROR if the OS CSPRNG fails -- never falls back to a
+/// predictable source.
+[[nodiscard]] Result<std::vector<uint8_t>> random_bytes(size_t count);
 
 /// Base64-encode a byte array.
 std::string base64_encode(const std::vector<uint8_t>& data);

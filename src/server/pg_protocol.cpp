@@ -1521,8 +1521,13 @@ Result<size_t> PgProtocolHandler::handle_startup_message(Connection& conn) {
             return ok(static_cast<size_t>(msg_len));
         }
         // Generate random salt and send MD5 auth challenge.
-        auto salt_bytes = random_bytes(4);
-        std::copy_n(salt_bytes.begin(), 4, md5_salt_.begin());
+        auto salt_result = random_bytes(4);
+        if (!salt_result) {
+            send_error_response(conn, "FATAL", "XX000", "CSPRNG failure during authentication");
+            state_ = ProtocolState::CLOSED;
+            return make_error(salt_result.error().code, salt_result.error().message);
+        }
+        std::copy_n(salt_result->begin(), 4, md5_salt_.begin());
         send_auth_md5_password(conn, md5_salt_);
         state_ = ProtocolState::WAIT_FOR_AUTH;
         break;

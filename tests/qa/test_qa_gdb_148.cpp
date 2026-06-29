@@ -50,12 +50,14 @@ TEST(QA148Crypto, XorBytesEmptyVectors) {
 
 TEST(QA148Crypto, RandomBytesZeroLength) {
     auto r = random_bytes(0);
-    EXPECT_TRUE(r.empty());
+    ASSERT_TRUE(r.has_value());
+    EXPECT_TRUE(r->empty());
 }
 
 TEST(QA148Crypto, RandomBytesLargeAllocation) {
     auto r = random_bytes(1024);
-    EXPECT_EQ(r.size(), 1024u);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->size(), 1024u);
 }
 
 TEST(QA148Crypto, Base64RoundTripEmpty) {
@@ -220,7 +222,9 @@ TEST(QA148Scram, ServerFirstEmptyMessage) {
 TEST(QA148Scram, ServerFinalNonceMismatch) {
     auto record = hash_password_scram("user", "pass");
     ScramServerState state;
-    std::string nonce = base64_encode(random_bytes(18));
+    auto nonce_bytes = random_bytes(18);
+    ASSERT_TRUE(nonce_bytes.has_value());
+    std::string nonce = base64_encode(*nonce_bytes);
     auto sf = scram_server_first("n,,n=user,r=" + nonce, record, state);
     ASSERT_TRUE(sf.has_value());
 
@@ -233,7 +237,9 @@ TEST(QA148Scram, ServerFinalNonceMismatch) {
 TEST(QA148Scram, ServerFinalMissingProof) {
     auto record = hash_password_scram("user", "pass");
     ScramServerState state;
-    std::string nonce = base64_encode(random_bytes(18));
+    auto nonce_bytes = random_bytes(18);
+    ASSERT_TRUE(nonce_bytes.has_value());
+    std::string nonce = base64_encode(*nonce_bytes);
     auto sf = scram_server_first("n,,n=user,r=" + nonce, record, state);
     ASSERT_TRUE(sf.has_value());
 
@@ -246,7 +252,9 @@ TEST(QA148Scram, CorruptedPasswordHash) {
     UserRecord record;
     record.username = "user";
     record.password_hash = "SCRAM-SHA-256$4096:AAAA$INVALID"; // No colon in keys.
-    record.salt = base64_encode(random_bytes(16));
+    auto salt_bytes = random_bytes(16);
+    ASSERT_TRUE(salt_bytes.has_value());
+    record.salt = base64_encode(*salt_bytes);
     record.iterations = 4096;
 
     ScramServerState state;
