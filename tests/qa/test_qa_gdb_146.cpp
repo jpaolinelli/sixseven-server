@@ -662,7 +662,17 @@ TEST_F(QA146ProtocolTest, InvalidProtocolVersionClosesHandler) {
 TEST_F(QA146ProtocolTest, BackendPidAndSecretKeyAreSet) {
     PgProtocolHandler handler(42);
     EXPECT_EQ(handler.backend_pid(), 42);
-    // Secret key is randomly generated, just check it's set.
-    // (Could be any int32 value including 0, so just verify no crash.)
-    (void)handler.secret_key();
+
+    // The secret key is randomly generated per handler (mt19937 seeded from
+    // std::random_device) and is sent verbatim in BackendKeyData for the
+    // CancelRequest protocol. Assert the accessor is stable across calls...
+    const int32_t key = handler.secret_key();
+    EXPECT_EQ(handler.secret_key(), key);
+
+    // ...and that an independently constructed handler gets a *different* key.
+    // A handler whose secret_key_ was never initialized (stuck at 0, breaking
+    // CancelRequest) would make these collide -- the bug this test guards.
+    // The collision probability for two distinct int32 draws is ~1/2^32.
+    PgProtocolHandler other(43);
+    EXPECT_NE(other.secret_key(), key);
 }
