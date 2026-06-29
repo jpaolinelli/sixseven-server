@@ -190,8 +190,11 @@ Result<std::vector<Value>> MatchShortestPathOperator::fetch_node_data(const std:
                         return tl::unexpected(rid_result.error());
                     }
                     if (!rid_result->has_value()) {
-                        return make_error(StatusCode::NOT_FOUND,
-                                          "node with pk not found in table " + table_name);
+                        // Key absent from this index (e.g. partial/stale index);
+                        // fall through to the heap scan instead of reporting the
+                        // node missing -- the row may still be in the heap, which
+                        // is what the pre-index scan path would have returned.
+                        break;
                     }
                     auto data = (*ts)->heap->get_tuple(**rid_result);
                     if (!data) {
@@ -213,8 +216,11 @@ Result<std::vector<Value>> MatchShortestPathOperator::fetch_node_data(const std:
                         return tl::unexpected(rid_result.error());
                     }
                     if (!rid_result->has_value()) {
-                        return make_error(StatusCode::NOT_FOUND,
-                                          "node with pk not found in table " + table_name);
+                        // Key absent from this index (e.g. partial/stale index);
+                        // fall through to the heap scan instead of reporting the
+                        // node missing -- the row may still be in the heap, which
+                        // is what the pre-index scan path would have returned.
+                        break;
                     }
                     auto data = (*ts)->heap->get_tuple(**rid_result);
                     if (!data) {
