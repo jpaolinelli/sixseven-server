@@ -409,17 +409,23 @@ TEST_F(SelectivityTest, IsNotNull) {
 }
 
 TEST_F(SelectivityTest, RangeLess) {
-    // col < 50: should include some histogram buckets + MCVs < 50.
+    // col < 50, against the controlled distribution (null_fraction 0.1, MCVs
+    // {5:0.20, 10:0.15}, five count-13 buckets covering 1..100).
+    // hist_le(50) = (13 + 13 + 13*0.5) / 65 = 0.5; both MCVs (5, 10) are < 50.
+    // non_null = 0.9; hist_portion = 0.9*(1-0.35) = 0.585; mcv_portion = 0.9*0.35 = 0.315.
+    // sel = hist_portion*hist_le + mcv_portion = 0.585*0.5 + 0.315 = 0.6075.
+    // A fallback (0.1), an MCV-ignoring, a null-mishandling, or a LESS/GREATER
+    // swap all produce a different value and now fail.
     double sel = estimate_range_selectivity(stats_, BinaryOp::LESS, Value(int32_t{50}));
-    EXPECT_GT(sel, 0.0);
-    EXPECT_LT(sel, 1.0);
+    EXPECT_NEAR(sel, 0.6075, 0.0005);
 }
 
 TEST_F(SelectivityTest, RangeGreater) {
-    // col > 50: should be complement of col <= 50 (excluding nulls).
+    // col > 50: hist_le(50) = 0.5, no MCV (5, 10) is > 50.
+    // sel = hist_portion*(1-hist_le) + 0 = 0.585*0.5 = 0.2925.
+    // This is distinct from RangeLess (0.6075), so a LESS/GREATER swap fails.
     double sel = estimate_range_selectivity(stats_, BinaryOp::GREATER, Value(int32_t{50}));
-    EXPECT_GT(sel, 0.0);
-    EXPECT_LT(sel, 1.0);
+    EXPECT_NEAR(sel, 0.2925, 0.0005);
 }
 
 TEST_F(SelectivityTest, RangeLessEqual) {
@@ -435,9 +441,12 @@ TEST_F(SelectivityTest, RangeGreaterEqual) {
 }
 
 TEST_F(SelectivityTest, Between) {
+    // BETWEEN(20,40) = sel(>=20) + sel(<=40) - (1 - null_fraction).
+    // sel(>=20): hist_le(20) = 13/65 = 0.2, no MCV >= 20 -> 0.585*(1-0.2) = 0.468.
+    // sel(<=40): hist_le(40) = (13+13)/65 = 0.4, both MCVs <= 40 -> 0.585*0.4 + 0.315 = 0.549.
+    // between = 0.468 + 0.549 - 0.9 = 0.117. A fallback/MCV/null regression now fails.
     double sel = estimate_between_selectivity(stats_, Value(int32_t{20}), Value(int32_t{40}));
-    EXPECT_GT(sel, 0.0);
-    EXPECT_LT(sel, 1.0);
+    EXPECT_NEAR(sel, 0.117, 0.0005);
 }
 
 TEST_F(SelectivityTest, BetweenFullRange) {
