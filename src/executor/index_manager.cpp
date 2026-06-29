@@ -1650,4 +1650,281 @@ void IndexManager::append_hnsw_rid(index_id_t index_id, RID rid) {
     hnsw_rid_maps_[index_id].push_back(rid);
 }
 
+// ---------------------------------------------------------------------------
+// Per-row maintenance API (GDB-984)
+// ---------------------------------------------------------------------------
+
+void IndexManager::register_btree_target(table_id_t table_id, BtreeMaintenanceTarget target) {
+    std::unique_lock lk(maintenance_latch_);
+    maintenance_btree_[table_id].push_back(std::move(target));
+}
+
+void IndexManager::register_hash_target(table_id_t table_id, HashMaintenanceTarget target) {
+    std::unique_lock lk(maintenance_latch_);
+    maintenance_hash_[table_id].push_back(std::move(target));
+}
+
+void IndexManager::register_bm25_target(table_id_t table_id, Bm25MaintenanceTarget target) {
+    std::unique_lock lk(maintenance_latch_);
+    maintenance_bm25_[table_id].push_back(std::move(target));
+}
+
+void IndexManager::register_hnsw_target(table_id_t table_id, HnswMaintenanceTarget target) {
+    std::unique_lock lk(maintenance_latch_);
+    maintenance_hnsw_[table_id].push_back(std::move(target));
+}
+
+Result<void>
+IndexManager::insert_entry(table_id_t table_id, const RID& rid, const std::vector<Value>& values) {
+    // Copy targets under the lock so we do not hold it while calling into
+    // each index's own internal latch (avoids lock ordering issues).
+    std::vector<BtreeMaintenanceTarget> btrees;
+    std::vector<HashMaintenanceTarget> hashes;
+    std::vector<Bm25MaintenanceTarget> bm25s;
+    std::vector<HnswMaintenanceTarget> hnsws;
+    {
+        std::unique_lock lk(maintenance_latch_);
+        auto it_b = maintenance_btree_.find(table_id);
+        if (it_b != maintenance_btree_.end()) {
+            btrees = it_b->second;
+        }
+        auto it_h = maintenance_hash_.find(table_id);
+        if (it_h != maintenance_hash_.end()) {
+            hashes = it_h->second;
+        }
+        auto it_bm = maintenance_bm25_.find(table_id);
+        if (it_bm != maintenance_bm25_.end()) {
+            bm25s = it_bm->second;
+        }
+        auto it_hw = maintenance_hnsw_.find(table_id);
+        if (it_hw != maintenance_hnsw_.end()) {
+            hnsws = it_hw->second;
+        }
+    }
+
+    // B-tree indexes: build key from key_column_ordinals and insert.
+    for (const auto& target : btrees) {
+        if (target.index == nullptr) {
+            continue;
+        }
+        KeyType key;
+        key.reserve(target.key_column_ordinals.size());
+        for (size_t ordinal : target.key_column_ordinals) {
+            if (ordinal < values.size()) {
+                key.push_back(values[ordinal]);
+            }
+        }
+        auto r = target.index->insert(key, rid);
+        if (!r) {
+            return tl::unexpected(r.error());
+        }
+    }
+
+    // Hash indexes: build key from key_column_ordinals and insert.
+    for (const auto& target : hashes) {
+        if (target.index == nullptr) {
+            continue;
+        }
+        KeyType key;
+        key.reserve(target.key_column_ordinals.size());
+        for (size_t ordinal : target.key_column_ordinals) {
+            if (ordinal < values.size()) {
+                key.push_back(values[ordinal]);
+            }
+        }
+        auto r = target.index->insert(key, rid);
+        if (!r) {
+            return tl::unexpected(r.error());
+        }
+    }
+
+    // BM25 indexes: extract the text column value and add the document.
+    for (const auto& target : bm25s) {
+        if (target.index == nullptr || target.text_column_index >= values.size()) {
+            continue;
+        }
+        const auto& v = values[target.text_column_index];
+        if (v.is_null()) {
+            continue;
+        }
+        auto s = v.try_as_string();
+        if (!s) {
+            continue;
+        }
+        auto r = target.index->add_document(rid, **s);
+        if (!r) {
+            return tl::unexpected(r.error());
+        }
+    }
+
+    // HNSW indexes: the vector is expected as a FLOAT32/FLOAT64 or EMBEDDING
+    // Value.  We call index->insert(vector) -> node_id and record the mapping
+    // rid_map[node_id] = rid, growing the vector as needed.
+    for (auto& target : hnsws) {
+        if (target.index == nullptr || target.rid_map == nullptr) {
+            continue;
+        }
+        // The HNSW maintenance target stores the vector column ordinal implicitly
+        // through the rid_map reference.  For the per-row API, the caller places
+        // the float vector in values as a contiguous span.  We extract it from
+        // the first value that carries floats (EMBEDDING / FLOAT32 array).
+        // Concretely, the executor already serialises embedding values as a
+        // std::vector<float> variant in Value; use try_as_floats() if available,
+        // otherwise skip.
+        //
+        // NOTE: If the Value does not carry a float vector (e.g. it is a null or
+        // the column has not been embedded yet), this target is skipped silently,
+        // matching the executor's behavior where HNSW insertion is deferred to
+        // the embedding worker callback.
+        if (values.empty()) {
+            continue;
+        }
+        // Locate the float vector by scanning values for a non-null EMBEDDING.
+        std::span<const float> vec_span;
+        bool found = false;
+        for (const auto& v : values) {
+            if (v.is_null()) {
+                continue;
+            }
+            auto emb = v.try_as_embedding();
+            if (!emb) {
+                continue; // Not an EMBEDDING column -- skip.
+            }
+            const Embedding* ep = *emb;
+            if (ep == nullptr || ep->empty()) {
+                continue;
+            }
+            vec_span = std::span<const float>{ep->data(), ep->size()};
+            found = true;
+            break;
+        }
+        if (!found) {
+            continue;
+        }
+
+        auto r = target.index->insert(vec_span);
+        if (!r) {
+            return tl::unexpected(r.error());
+        }
+        uint32_t node_id = *r;
+
+        // Grow rid_map if necessary and record the mapping.
+        // Re-lock maintenance_latch_ to guard the rid_map write because
+        // append_hnsw_rid (called from the embedding worker) also mutates
+        // maps_latch_-protected hnsw_rid_maps_; here we directly mutate the
+        // target.rid_map pointer which points into that same map, so we use
+        // maintenance_latch_ for consistency.
+        {
+            std::unique_lock lk(maintenance_latch_);
+            auto& rmap = *target.rid_map;
+            if (node_id >= rmap.size()) {
+                rmap.resize(static_cast<size_t>(node_id) + 1, RID::invalid());
+            }
+            rmap[node_id] = rid;
+        }
+    }
+
+    return ok();
+}
+
+Result<void>
+IndexManager::remove_entry(table_id_t table_id, const RID& rid, const std::vector<Value>& values) {
+    // Copy targets under the lock (same reasoning as insert_entry).
+    std::vector<BtreeMaintenanceTarget> btrees;
+    std::vector<HashMaintenanceTarget> hashes;
+    std::vector<Bm25MaintenanceTarget> bm25s;
+    std::vector<HnswMaintenanceTarget> hnsws;
+    {
+        std::unique_lock lk(maintenance_latch_);
+        auto it_b = maintenance_btree_.find(table_id);
+        if (it_b != maintenance_btree_.end()) {
+            btrees = it_b->second;
+        }
+        auto it_h = maintenance_hash_.find(table_id);
+        if (it_h != maintenance_hash_.end()) {
+            hashes = it_h->second;
+        }
+        auto it_bm = maintenance_bm25_.find(table_id);
+        if (it_bm != maintenance_bm25_.end()) {
+            bm25s = it_bm->second;
+        }
+        auto it_hw = maintenance_hnsw_.find(table_id);
+        if (it_hw != maintenance_hnsw_.end()) {
+            hnsws = it_hw->second;
+        }
+    }
+
+    // B-tree: RID-qualified delete.
+    for (const auto& target : btrees) {
+        if (target.index == nullptr) {
+            continue;
+        }
+        KeyType key;
+        key.reserve(target.key_column_ordinals.size());
+        for (size_t ordinal : target.key_column_ordinals) {
+            if (ordinal < values.size()) {
+                key.push_back(values[ordinal]);
+            }
+        }
+        auto r = target.index->remove(key, rid);
+        if (!r) {
+            return tl::unexpected(r.error());
+        }
+    }
+
+    // Hash: RID-qualified delete.
+    for (const auto& target : hashes) {
+        if (target.index == nullptr) {
+            continue;
+        }
+        KeyType key;
+        key.reserve(target.key_column_ordinals.size());
+        for (size_t ordinal : target.key_column_ordinals) {
+            if (ordinal < values.size()) {
+                key.push_back(values[ordinal]);
+            }
+        }
+        auto r = target.index->remove(key, rid);
+        if (!r) {
+            return tl::unexpected(r.error());
+        }
+    }
+
+    // BM25: remove the document.
+    for (const auto& target : bm25s) {
+        if (target.index == nullptr) {
+            continue;
+        }
+        auto r = target.index->remove_document(rid);
+        if (!r) {
+            return tl::unexpected(r.error());
+        }
+    }
+
+    // HNSW: reverse-scan rid_map to find the node_id, tombstone node + slot.
+    for (auto& target : hnsws) {
+        if (target.index == nullptr || target.rid_map == nullptr) {
+            continue;
+        }
+        std::unique_lock lk(maintenance_latch_);
+        auto& rmap = *target.rid_map;
+        for (size_t node_id = 0; node_id < rmap.size(); ++node_id) {
+            if (rmap[node_id] == rid) {
+                // Release the lock before calling into the index (its own latch).
+                lk.unlock();
+                auto r = target.index->remove(static_cast<uint32_t>(node_id));
+                if (!r) {
+                    return tl::unexpected(r.error());
+                }
+                // Re-acquire to tombstone the slot.
+                lk.lock();
+                rmap[node_id] = RID::invalid();
+                break;
+            }
+        }
+    }
+
+    return ok();
+}
+
 } // namespace sixseven
