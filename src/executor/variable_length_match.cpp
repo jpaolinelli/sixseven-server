@@ -416,20 +416,22 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                     edge_def.direction == TraverseDirection::BOTH) {
                     auto fwd =
                         graph_engine_.get_edges_from(database_id_, edge_def.edge_type, it->second);
-                    if (fwd) {
-                        for (auto& e : *fwd) {
-                            tagged_edge_rows.emplace_back(std::move(e), false);
-                        }
+                    if (!fwd) {
+                        return tl::unexpected(fwd.error());
+                    }
+                    for (auto& e : *fwd) {
+                        tagged_edge_rows.emplace_back(std::move(e), false);
                     }
                 }
                 if (edge_def.direction == TraverseDirection::IN ||
                     edge_def.direction == TraverseDirection::BOTH) {
                     auto rev =
                         graph_engine_.get_edges_to(database_id_, edge_def.edge_type, it->second);
-                    if (rev) {
-                        for (auto& e : *rev) {
-                            tagged_edge_rows.emplace_back(std::move(e), true);
-                        }
+                    if (!rev) {
+                        return tl::unexpected(rev.error());
+                    }
+                    for (auto& e : *rev) {
+                        tagged_edge_rows.emplace_back(std::move(e), true);
                     }
                 }
 
@@ -537,20 +539,22 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                             edge_def.direction == TraverseDirection::BOTH) {
                             auto fwd = graph_engine_.get_edges_from(
                                 database_id_, edge_def.edge_type, entry.current_pk);
-                            if (fwd) {
-                                for (auto& e : *fwd) {
-                                    tagged_bfs_rows.emplace_back(std::move(e), false);
-                                }
+                            if (!fwd) {
+                                return tl::unexpected(fwd.error());
+                            }
+                            for (auto& e : *fwd) {
+                                tagged_bfs_rows.emplace_back(std::move(e), false);
                             }
                         }
                         if (edge_def.direction == TraverseDirection::IN ||
                             edge_def.direction == TraverseDirection::BOTH) {
                             auto rev = graph_engine_.get_edges_to(
                                 database_id_, edge_def.edge_type, entry.current_pk);
-                            if (rev) {
-                                for (auto& e : *rev) {
-                                    tagged_bfs_rows.emplace_back(std::move(e), true);
-                                }
+                            if (!rev) {
+                                return tl::unexpected(rev.error());
+                            }
+                            for (auto& e : *rev) {
+                                tagged_bfs_rows.emplace_back(std::move(e), true);
                             }
                         }
 

@@ -162,21 +162,23 @@ Result<void> PatternMatchOperator::execute_single_hop() {
         if (edge_def.direction == TraverseDirection::OUT ||
             edge_def.direction == TraverseDirection::BOTH) {
             auto fwd = graph_engine_.get_edges_from(database_id_, edge_def.edge_type, src_pk);
-            if (fwd) {
-                for (auto& e : *fwd) {
-                    Value nbr = e.target_pk;
-                    edges_with_neighbor.emplace_back(std::move(e), std::move(nbr));
-                }
+            if (!fwd) {
+                return tl::unexpected(fwd.error());
+            }
+            for (auto& e : *fwd) {
+                Value nbr = e.target_pk;
+                edges_with_neighbor.emplace_back(std::move(e), std::move(nbr));
             }
         }
         if (edge_def.direction == TraverseDirection::IN ||
             edge_def.direction == TraverseDirection::BOTH) {
             auto rev = graph_engine_.get_edges_to(database_id_, edge_def.edge_type, src_pk);
-            if (rev) {
-                for (auto& e : *rev) {
-                    Value nbr = e.source_pk;
-                    edges_with_neighbor.emplace_back(std::move(e), std::move(nbr));
-                }
+            if (!rev) {
+                return tl::unexpected(rev.error());
+            }
+            for (auto& e : *rev) {
+                Value nbr = e.source_pk;
+                edges_with_neighbor.emplace_back(std::move(e), std::move(nbr));
             }
         }
 
@@ -368,21 +370,23 @@ Result<void> PatternMatchOperator::execute_multi_hop() {
             if (edge_def.direction == TraverseDirection::OUT ||
                 edge_def.direction == TraverseDirection::BOTH) {
                 auto fwd = graph_engine_.get_edges_from(database_id_, edge_def.edge_type, src_pk);
-                if (fwd) {
-                    for (auto& e : *fwd) {
-                        Value nbr = e.target_pk;
-                        edges_with_neighbor.emplace_back(std::move(e), std::move(nbr));
-                    }
+                if (!fwd) {
+                    return tl::unexpected(fwd.error());
+                }
+                for (auto& e : *fwd) {
+                    Value nbr = e.target_pk;
+                    edges_with_neighbor.emplace_back(std::move(e), std::move(nbr));
                 }
             }
             if (edge_def.direction == TraverseDirection::IN ||
                 edge_def.direction == TraverseDirection::BOTH) {
                 auto rev = graph_engine_.get_edges_to(database_id_, edge_def.edge_type, src_pk);
-                if (rev) {
-                    for (auto& e : *rev) {
-                        Value nbr = e.source_pk;
-                        edges_with_neighbor.emplace_back(std::move(e), std::move(nbr));
-                    }
+                if (!rev) {
+                    return tl::unexpected(rev.error());
+                }
+                for (auto& e : *rev) {
+                    Value nbr = e.source_pk;
+                    edges_with_neighbor.emplace_back(std::move(e), std::move(nbr));
                 }
             }
 
