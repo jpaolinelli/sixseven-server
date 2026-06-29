@@ -314,32 +314,11 @@ TEST_F(QA_GDB555, AllShortest_Diamond_EqualWeights) {
         << "Diamond with equal weights: 2 shortest paths 1->2->4 and 1->3->4";
 }
 
-// ============================================================================
-// Edge case: unequal weights, only one shortest path
-// ============================================================================
-
-TEST_F(QA_GDB555, AllShortest_UnequalWeights_OnlyReturnsShortestPaths) {
-    // Fixed by GDB-559: ALL_SHORTEST with weighted paths now correctly filters
-    // destination arrivals by cost. Only shortest paths are returned.
-    //
-    // 1--(1)-->2--(1)-->4 (cost 2, shortest)
-    // 1--(5)-->3--(5)-->4 (cost 10, NOT shortest)
-    for (int64_t id : {1, 2, 3, 4})
-        insert_node(id);
-    create_edge_type("road");
-    link(1, 2, 1.0);
-    link(2, 4, 1.0);
-    link(1, 3, 5.0);
-    link(3, 4, 5.0);
-
-    auto w = make_weight_expr();
-    auto results = run(PathSelector::ALL_SHORTEST, w.get());
-    auto from_1_to_4 = filter_pair(results, 1, 4);
-
-    EXPECT_EQ(from_1_to_4.size(), 1u)
-        << "ALL_SHORTEST should only return the shortest path (cost 2)";
-    EXPECT_DOUBLE_EQ(from_1_to_4[0]->values[2].as_path().total_weight, 2.0);
-}
+// Edge case: unequal weights, only one shortest path.
+// The "1->2->4 (cost 2) vs 1->3->4 (cost 10), expect only the shortest" repro
+// lives in test_qa_gdb_559.cpp as QA_GDB559.AllShortest_TicketRepro_OnlyShortestReturned
+// (GDB-559 owns the ALL_SHORTEST cost-filtering fix). It was a verbatim duplicate
+// here and was removed to avoid lockstep maintenance (GDB-1010).
 
 // ============================================================================
 // Edge case: zero-weight edges with shared intermediate
