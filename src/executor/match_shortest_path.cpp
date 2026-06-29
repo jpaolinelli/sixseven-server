@@ -334,7 +334,7 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
 
             auto neighbors = get_neighbors(edge_type, entry.current_node.pk, direction);
             if (!neighbors) {
-                continue;
+                return tl::unexpected(neighbors.error());
             }
 
             // Neighbors of a src-table node arrive in the tgt table (OUT), and vice
@@ -494,12 +494,7 @@ Result<void> MatchShortestPathOperator::execute_shortest_paths() {
                                                             min_hops,
                                                             max_depth);
             if (!paths) {
-                // For weighted paths, propagate errors (e.g., negative weight).
-                // For unweighted BFS, continue on failure (legacy behavior).
-                if (weight_expr_) {
-                    return tl::unexpected(paths.error());
-                }
-                continue;
+                return tl::unexpected(paths.error());
             }
 
             for (auto& path : *paths) {
@@ -594,34 +589,34 @@ MatchShortestPathOperator::get_neighbors_with_weight(const std::string& edge_typ
 
     if (direction == TraverseDirection::OUT || direction == TraverseDirection::BOTH) {
         auto fwd = graph_engine_.get_edges_from(database_id_, edge_type, pk);
-        if (fwd) {
-            for (auto& e : *fwd) {
-                if (static_cast<size_t>(prop_idx) >= e.properties.size()) {
-                    return make_error(StatusCode::INTERNAL_ERROR, "edge missing weight property");
-                }
-                auto w = value_to_weight(e.properties[static_cast<size_t>(prop_idx)]);
-                if (!w) {
-                    return tl::unexpected(w.error());
-                }
-                neighbors.emplace_back(
-                    std::move(e.target_pk), static_cast<int64_t>(e.edge_row_id), *w);
+        if (!fwd) {
+            return tl::unexpected(fwd.error());
+        }
+        for (auto& e : *fwd) {
+            if (static_cast<size_t>(prop_idx) >= e.properties.size()) {
+                return make_error(StatusCode::INTERNAL_ERROR, "edge missing weight property");
             }
+            auto w = value_to_weight(e.properties[static_cast<size_t>(prop_idx)]);
+            if (!w) {
+                return tl::unexpected(w.error());
+            }
+            neighbors.emplace_back(std::move(e.target_pk), static_cast<int64_t>(e.edge_row_id), *w);
         }
     }
     if (direction == TraverseDirection::IN || direction == TraverseDirection::BOTH) {
         auto rev = graph_engine_.get_edges_to(database_id_, edge_type, pk);
-        if (rev) {
-            for (auto& e : *rev) {
-                if (static_cast<size_t>(prop_idx) >= e.properties.size()) {
-                    return make_error(StatusCode::INTERNAL_ERROR, "edge missing weight property");
-                }
-                auto w = value_to_weight(e.properties[static_cast<size_t>(prop_idx)]);
-                if (!w) {
-                    return tl::unexpected(w.error());
-                }
-                neighbors.emplace_back(
-                    std::move(e.source_pk), static_cast<int64_t>(e.edge_row_id), *w);
+        if (!rev) {
+            return tl::unexpected(rev.error());
+        }
+        for (auto& e : *rev) {
+            if (static_cast<size_t>(prop_idx) >= e.properties.size()) {
+                return make_error(StatusCode::INTERNAL_ERROR, "edge missing weight property");
             }
+            auto w = value_to_weight(e.properties[static_cast<size_t>(prop_idx)]);
+            if (!w) {
+                return tl::unexpected(w.error());
+            }
+            neighbors.emplace_back(std::move(e.source_pk), static_cast<int64_t>(e.edge_row_id), *w);
         }
     }
 
