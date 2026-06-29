@@ -225,10 +225,11 @@ TEST(QA146MessageReader, RoundTripInt32) {
 TEST(QA146ValueText, NullValue) {
     Value null_val;
     EXPECT_TRUE(null_val.is_null());
-    // NULL values should produce empty string (handled by protocol as -1 length).
-    auto text = value_to_pg_text(null_val);
-    // Implementation-defined, but should not crash.
-    SUCCEED();
+    // value_to_pg_text documents an exact contract: NULL -> empty string (the
+    // wire layer signals NULL via a -1 column length, not via this text). Pin it
+    // so a regression returning e.g. "NULL" (which would render the literal text
+    // 'NULL' on the wire) fails here.
+    EXPECT_EQ(value_to_pg_text(null_val), "");
 }
 
 TEST(QA146ValueText, EmptyString) {
@@ -236,11 +237,14 @@ TEST(QA146ValueText, EmptyString) {
 }
 
 TEST(QA146ValueText, StringWithNullByte) {
-    // Strings containing embedded null bytes.
+    // Strings containing embedded null bytes. value_to_pg_text returns
+    // value.as_string() for STRING values, which preserves the full byte
+    // sequence (no truncation at the embedded NUL). Pin all 3 bytes so a
+    // regression that C-string-truncates at the NUL (yielding "a") fails.
     std::string s("a\0b", 3);
     auto text = value_to_pg_text(Value(s));
-    // Should not crash. Text representation may truncate at null.
-    SUCCEED();
+    EXPECT_EQ(text.size(), 3u);
+    EXPECT_EQ(text, s);
 }
 
 TEST(QA146ValueText, MaxInt64) {
