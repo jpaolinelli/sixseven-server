@@ -11,6 +11,7 @@
 #include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
+#include <spdlog/spdlog.h>
 
 #include <filesystem>
 #include <memory>
@@ -100,8 +101,23 @@ protected:
 // =============================================================================
 
 TEST_F(SetShowTest, SetLoggingLevelChangesAndPersists) {
+    // spdlog's active level is process-global; capture it so we can restore it
+    // and not pollute other tests in this process. Force a known non-debug
+    // baseline first so the post-SET assertion is meaningful regardless of
+    // whatever level the test harness initialized logging at.
+    const auto prev_level = spdlog::get_level();
+    spdlog::set_level(spdlog::level::warn);
+
     auto qr = exec_ok("SET logging.level = 'debug'");
     EXPECT_EQ(qr.message, "SET");
+
+    // Verify the "immediately" half of the contract: SET must apply the runtime
+    // change (QueryEngine::execute_set -> SettingsCache::apply_runtime_change ->
+    // spdlog::set_level), not merely write the cache + sys_settings row. With the
+    // baseline forced to warn above, this fails if apply_runtime_change is dropped.
+    EXPECT_EQ(spdlog::get_level(), spdlog::level::debug);
+    // Restore immediately, before any later ASSERT can abort and skip cleanup.
+    spdlog::set_level(prev_level);
 
     // Verify the cache was updated.
     auto entry = cache_->get("logging.level");
