@@ -187,12 +187,22 @@ TEST_F(CreateDropIndexTest, CreateIndexOnTableWithData) {
     exec_ok("INSERT INTO users VALUES (1, 'alice@example.com', 25)");
     exec_ok("INSERT INTO users VALUES (2, 'bob@example.com', 30)");
 
-    // Creating an index on a table with existing data should succeed.
+    // CREATE INDEX over a populated table must register the index in the catalog
+    // with the correct target column. This fixture wires no IndexManager
+    // (engine_ is built without set_index_manager), so it deliberately covers
+    // only the catalog-bookkeeping half of the lifecycle; the physical backfill
+    // of pre-existing rows is covered end to end by
+    // IndexManagerTest.CreateAndPopulateAtRuntime in test_index_manager.cpp.
     auto qr = exec_ok("CREATE INDEX idx_email ON users(email)");
     EXPECT_EQ(qr.message, "CREATE INDEX");
 
     auto idx = catalog_.get_index(default_database_id, "idx_email");
     ASSERT_TRUE(idx.has_value()) << idx.error().message;
+    // Pin the metadata so a regression that records the wrong column/table (not
+    // just "an index exists") fails here.
+    EXPECT_EQ(idx->name, "idx_email");
+    EXPECT_EQ(idx->columns, "email");
+    EXPECT_EQ(idx->table_id, catalog_.get_table(default_database_id, "users")->table_id);
 }
 
 TEST_F(CreateDropIndexTest, MultipleIndexesOnSameTable) {
