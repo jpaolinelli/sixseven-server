@@ -102,7 +102,7 @@ TEST_F(QA_GDB984_BtreeCompositeKey, OrdinalOutOfBoundsSilentlyTruncatesKey) {
     // beyond the values vector, the key is silently shorter.  A 2-ordinal target
     // with ordinals [0, 99] on a 2-value row produces a 1-element key.
     BtreeMaintenanceTarget tgt;
-    tgt.index = btree_.get(); // expects 2-column INT32 key
+    tgt.index = btree_.get();          // expects 2-column INT32 key
     tgt.key_column_ordinals = {0, 99}; // ordinal 99 is out-of-bounds
 
     auto rid = qa_rid(2, 0);
@@ -116,8 +116,7 @@ TEST_F(QA_GDB984_BtreeCompositeKey, OrdinalOutOfBoundsSilentlyTruncatesKey) {
         }
     }
     // Only ordinal 0 is in-bounds: key has 1 element, not 2.
-    EXPECT_EQ(key.size(), 1u)
-        << "Gap: out-of-bounds ordinal silently produces a shorter key";
+    EXPECT_EQ(key.size(), 1u) << "Gap: out-of-bounds ordinal silently produces a shorter key";
     // Inserting a 1-element key into a 2-key-type index may produce inconsistent state.
     // We do not assert success here -- the important thing is it does not crash.
     (void)tgt.index->insert(key, rid);
@@ -133,8 +132,7 @@ TEST_F(QA_GDB984_BtreeCompositeKey, OrdinalOutOfBoundsSilentlyTruncatesKey) {
 class QA_GDB984_BtreeRealInsertEntry : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ =
-            std::filesystem::temp_directory_path() / "sixseven_qa_984_btree_real";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_984_btree_real";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -201,7 +199,8 @@ TEST_F(QA_GDB984_BtreeRealInsertEntry, RemoveEntryActuallyRemovesFromBtree) {
 
     auto after = btree_->search({Value(int32_t{456})});
     ASSERT_TRUE(after.has_value());
-    EXPECT_FALSE(after->has_value()) << "Real remove_entry must remove from btree (was it a no-op?)";
+    EXPECT_FALSE(after->has_value())
+        << "Real remove_entry must remove from btree (was it a no-op?)";
 }
 
 TEST_F(QA_GDB984_BtreeRealInsertEntry, UnregisteredTableIdIsNoOp) {
@@ -221,8 +220,7 @@ TEST_F(QA_GDB984_BtreeRealInsertEntry, UnregisteredTableIdIsNoOp) {
 class QA_GDB984_HashRealInsertEntry : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ =
-            std::filesystem::temp_directory_path() / "sixseven_qa_984_hash_real";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_984_hash_real";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -268,8 +266,7 @@ TEST_F(QA_GDB984_HashRealInsertEntry, InsertEntryActuallyInsertsIntoHash) {
 
     auto found = hash_->search({Value(int32_t{777})});
     ASSERT_TRUE(found.has_value());
-    ASSERT_TRUE(found->has_value())
-        << "Real insert_entry must insert into hash (was it a no-op?)";
+    ASSERT_TRUE(found->has_value()) << "Real insert_entry must insert into hash (was it a no-op?)";
     EXPECT_EQ(**found, rid);
 }
 
@@ -283,8 +280,7 @@ TEST_F(QA_GDB984_HashRealInsertEntry, RemoveEntryActuallyRemovesFromHash) {
 
     auto after = hash_->search({Value(int32_t{888})});
     ASSERT_TRUE(after.has_value());
-    EXPECT_FALSE(after->has_value())
-        << "Real remove_entry must remove from hash (was it a no-op?)";
+    EXPECT_FALSE(after->has_value()) << "Real remove_entry must remove from hash (was it a no-op?)";
 }
 
 // ===========================================================================
@@ -295,8 +291,7 @@ TEST_F(QA_GDB984_HashRealInsertEntry, RemoveEntryActuallyRemovesFromHash) {
 class QA_GDB984_Bm25RealInsertEntry : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ =
-            std::filesystem::temp_directory_path() / "sixseven_qa_984_bm25_real";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_984_bm25_real";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -375,8 +370,7 @@ TEST_F(QA_GDB984_Bm25RealInsertEntry, RemoveEntryRemovesDocument) {
 class QA_GDB984_HnswDuplicateVector : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ =
-            std::filesystem::temp_directory_path() / "sixseven_qa_984_hnsw_dup";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_984_hnsw_dup";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
@@ -471,8 +465,7 @@ TEST_F(QA_GDB984_HnswDuplicateVector, RemoveOneLeavesSibling) {
     ASSERT_TRUE(maintenance_remove(rid_a).has_value());
 
     // rid_a slot must be invalidated.
-    EXPECT_EQ(rid_map_[node_a], RID::invalid())
-        << "Removed RID slot must be tombstoned";
+    EXPECT_EQ(rid_map_[node_a], RID::invalid()) << "Removed RID slot must be tombstoned";
 
     // rid_b slot must still be valid.
     EXPECT_EQ(rid_map_[node_b], rid_b)
@@ -488,8 +481,7 @@ TEST_F(QA_GDB984_HnswDuplicateVector, RemoveOneLeavesSibling) {
 // ===========================================================================
 
 TEST(QA_GDB984_HnswDuplicate, SameRidInsertedTwiceCreatesOrphan) {
-    auto data_dir =
-        std::filesystem::temp_directory_path() / "sixseven_qa_984_hnsw_samerid";
+    auto data_dir = std::filesystem::temp_directory_path() / "sixseven_qa_984_hnsw_samerid";
     std::filesystem::remove_all(data_dir);
     std::filesystem::create_directories(data_dir);
 
@@ -571,8 +563,7 @@ TEST(QA_GDB984_ErrorPropagation, BtreeInsertFailurePropagates) {
 }
 
 TEST(QA_GDB984_ErrorPropagation, RealInsertEntryPropagatesUniqueConstraintViolation) {
-    auto data_dir =
-        std::filesystem::temp_directory_path() / "sixseven_qa_984_errprop";
+    auto data_dir = std::filesystem::temp_directory_path() / "sixseven_qa_984_errprop";
     std::filesystem::remove_all(data_dir);
     std::filesystem::create_directories(data_dir);
 
@@ -614,8 +605,7 @@ TEST(QA_GDB984_ErrorPropagation, RealInsertEntryPropagatesUniqueConstraintViolat
 // ===========================================================================
 
 TEST(QA_GDB984_ConcurrentReal, InsertRemoveConcurrentNoRace) {
-    auto data_dir =
-        std::filesystem::temp_directory_path() / "sixseven_qa_984_concurrent";
+    auto data_dir = std::filesystem::temp_directory_path() / "sixseven_qa_984_concurrent";
     std::filesystem::remove_all(data_dir);
     std::filesystem::create_directories(data_dir);
 
@@ -674,8 +664,7 @@ TEST(QA_GDB984_ConcurrentReal, InsertRemoveConcurrentNoRace) {
 // ===========================================================================
 
 TEST(QA_GDB984_MultipleTargets, TwoBtreeTargetsBothMaintained) {
-    auto data_dir =
-        std::filesystem::temp_directory_path() / "sixseven_qa_984_multi";
+    auto data_dir = std::filesystem::temp_directory_path() / "sixseven_qa_984_multi";
     std::filesystem::remove_all(data_dir);
     std::filesystem::create_directories(data_dir);
 
@@ -739,8 +728,7 @@ TEST(QA_GDB984_MultipleTargets, TwoBtreeTargetsBothMaintained) {
 // ===========================================================================
 
 TEST(QA_GDB984_EdgeCases, EmptyValuesNoOp) {
-    auto data_dir =
-        std::filesystem::temp_directory_path() / "sixseven_qa_984_empty";
+    auto data_dir = std::filesystem::temp_directory_path() / "sixseven_qa_984_empty";
     std::filesystem::remove_all(data_dir);
     std::filesystem::create_directories(data_dir);
 
