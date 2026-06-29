@@ -3485,7 +3485,7 @@ Result<ExprPtr> Parser::parse_primary() {
     }
 
     // Vector similarity predicate:
-    //   NEAREST(column, k) TO target [USING COSINE|L2|DOT] [WITHIN TRAVERSE ...].
+    //   NEAREST(column, k) TO target [WITHIN TRAVERSE ...] [USING COSINE|L2|DOT].
     //
     // Unambiguous: vector search is only a WHERE predicate now, so a bare
     // NEAREST token in expression context is always this form. The target is a

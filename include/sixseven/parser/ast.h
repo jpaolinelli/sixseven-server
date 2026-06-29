@@ -414,7 +414,7 @@ struct MatchExpr : Expr {
 };
 
 /// Vector similarity search predicate: NEAREST(column, k) TO target
-///   [USING COSINE|L2|DOT] [WITHIN TRAVERSE ...].
+///   [WITHIN TRAVERSE ...] [USING COSINE|L2|DOT].
 ///
 /// Planned into a NearestScanOperator that returns the k nearest rows by
 /// distance and injects a synthetic `_distance` column. `column` is a
