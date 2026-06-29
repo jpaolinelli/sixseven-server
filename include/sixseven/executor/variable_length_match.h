@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -37,15 +38,18 @@ public:
     /// Default maximum number of visited nodes before aborting (memory bound).
     static constexpr size_t DEFAULT_MAX_VISITED = 100'000;
 
-    VariableLengthMatchOperator(GraphEngine& graph_engine,
-                                const Catalog& catalog,
-                                StorageManager& storage,
-                                database_id_t database_id,
-                                MatchConfig config,
-                                OutputSchema schema,
-                                const Expr* where_expr,
-                                const BoundStatement& bound,
-                                size_t max_visited = DEFAULT_MAX_VISITED);
+    VariableLengthMatchOperator(
+        GraphEngine& graph_engine,
+        const Catalog& catalog,
+        StorageManager& storage,
+        database_id_t database_id,
+        MatchConfig config,
+        OutputSchema schema,
+        const Expr* where_expr,
+        const BoundStatement& bound,
+        size_t max_visited = DEFAULT_MAX_VISITED,
+        const std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes = nullptr,
+        const std::unordered_map<index_id_t, HashIndex*>* hash_indexes = nullptr);
 
     const OutputSchema& output_schema() const override;
 
@@ -97,6 +101,8 @@ private:
     const Expr* where_expr_;
     const BoundStatement& bound_;
     size_t max_visited_;
+    const std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes_;
+    const std::unordered_map<index_id_t, HashIndex*>* hash_indexes_;
 
     std::vector<Tuple> results_;
     size_t cursor_ = 0;

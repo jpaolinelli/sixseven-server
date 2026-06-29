@@ -13,18 +13,22 @@
 
 namespace sixseven {
 
-VariableLengthMatchOperator::VariableLengthMatchOperator(GraphEngine& graph_engine,
-                                                         const Catalog& catalog,
-                                                         StorageManager& storage,
-                                                         database_id_t database_id,
-                                                         MatchConfig config,
-                                                         OutputSchema schema,
-                                                         const Expr* where_expr,
-                                                         const BoundStatement& bound,
-                                                         size_t max_visited)
+VariableLengthMatchOperator::VariableLengthMatchOperator(
+    GraphEngine& graph_engine,
+    const Catalog& catalog,
+    StorageManager& storage,
+    database_id_t database_id,
+    MatchConfig config,
+    OutputSchema schema,
+    const Expr* where_expr,
+    const BoundStatement& bound,
+    size_t max_visited,
+    const std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes,
+    const std::unordered_map<index_id_t, HashIndex*>* hash_indexes)
     : graph_engine_(graph_engine), catalog_(catalog), storage_(storage), database_id_(database_id),
       config_(std::move(config)), schema_(std::move(schema)), where_expr_(where_expr),
-      bound_(bound), max_visited_(max_visited) {}
+      bound_(bound), max_visited_(max_visited), btree_indexes_(btree_indexes),
+      hash_indexes_(hash_indexes) {}
 
 std::string VariableLengthMatchOperator::plan_node_name() const {
     return "Variable Length Match";
@@ -161,6 +165,69 @@ VariableLengthMatchOperator::fetch_node_data(const std::string& table_name, cons
                           "table " + table_name + " has no primary key");
     }
 
+    // Index point-lookup path: use the PK index when available.
+    if (btree_indexes_ != nullptr || hash_indexes_ != nullptr) {
+        auto indexes = catalog_.list_indexes(schema->table_id);
+        for (const auto& idx_def : indexes) {
+            if (idx_def.columns != schema->pk_columns) {
+                continue;
+            }
+            if (idx_def.index_type == "btree" && btree_indexes_ != nullptr) {
+                auto it = btree_indexes_->find(idx_def.index_id);
+                if (it != btree_indexes_->end()) {
+                    KeyType key = {pk};
+                    auto rid_result = it->second->search(key);
+                    if (!rid_result) {
+                        return tl::unexpected(rid_result.error());
+                    }
+                    if (!rid_result->has_value()) {
+                        // Key absent from this index (e.g. partial/stale index);
+                        // fall through to the heap scan instead of reporting the
+                        // node missing -- the row may still be in the heap, which
+                        // is what the pre-index scan path would have returned.
+                        break;
+                    }
+                    auto data = (*ts)->heap->get_tuple(**rid_result);
+                    if (!data) {
+                        break;
+                    }
+                    auto deserialized = TupleSerializer::deserialize(*data, (*ts)->storage_schema);
+                    if (!deserialized) {
+                        break;
+                    }
+                    return ok(std::move(*deserialized));
+                }
+            }
+            if (idx_def.index_type == "hash" && hash_indexes_ != nullptr) {
+                auto it = hash_indexes_->find(idx_def.index_id);
+                if (it != hash_indexes_->end()) {
+                    KeyType key = {pk};
+                    auto rid_result = it->second->search(key);
+                    if (!rid_result) {
+                        return tl::unexpected(rid_result.error());
+                    }
+                    if (!rid_result->has_value()) {
+                        // Key absent from this index (e.g. partial/stale index);
+                        // fall through to the heap scan instead of reporting the
+                        // node missing -- the row may still be in the heap, which
+                        // is what the pre-index scan path would have returned.
+                        break;
+                    }
+                    auto data = (*ts)->heap->get_tuple(**rid_result);
+                    if (!data) {
+                        break;
+                    }
+                    auto deserialized = TupleSerializer::deserialize(*data, (*ts)->storage_schema);
+                    if (!deserialized) {
+                        break;
+                    }
+                    return ok(std::move(*deserialized));
+                }
+            }
+        }
+    }
+
+    // Fallback: full heap scan when no usable PK index is available.
     auto iter = (*ts)->heap->begin();
     if (!iter) {
         return tl::unexpected(iter.error());

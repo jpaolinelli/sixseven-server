@@ -1,17 +1,21 @@
 #pragma once
 
 #include "sixseven/catalog/catalog.h"
+#include "sixseven/catalog/schema.h"
 #include "sixseven/common/result.h"
 #include "sixseven/executor/iterator.h"
 #include "sixseven/executor/storage_manager.h"
 #include "sixseven/executor/tuple.h"
 #include "sixseven/graph/graph_engine.h"
+#include "sixseven/index/btree_index.h"
+#include "sixseven/index/hash_index.h"
 #include "sixseven/parser/ast.h"
 #include "sixseven/planner/binder.h"
 
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace sixseven {
@@ -74,7 +78,9 @@ public:
                          MatchConfig config,
                          OutputSchema schema,
                          const Expr* where_expr,
-                         const BoundStatement& bound);
+                         const BoundStatement& bound,
+                         const std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes = nullptr,
+                         const std::unordered_map<index_id_t, HashIndex*>* hash_indexes = nullptr);
 
     const OutputSchema& output_schema() const override;
 
@@ -113,6 +119,8 @@ private:
     OutputSchema schema_;
     const Expr* where_expr_;
     const BoundStatement& bound_;
+    const std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes_;
+    const std::unordered_map<index_id_t, HashIndex*>* hash_indexes_;
 
     std::vector<Tuple> results_;
     size_t cursor_ = 0;

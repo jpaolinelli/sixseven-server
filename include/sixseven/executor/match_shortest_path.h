@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace sixseven {
@@ -33,19 +34,22 @@ class MatchShortestPathOperator : public Iterator {
 public:
     static constexpr size_t DEFAULT_MAX_VISITED = 100'000;
 
-    MatchShortestPathOperator(GraphEngine& graph_engine,
-                              const Catalog& catalog,
-                              StorageManager& storage,
-                              database_id_t database_id,
-                              MatchConfig config,
-                              OutputSchema schema,
-                              const Expr* where_expr,
-                              const BoundStatement& bound,
-                              PathSelector path_selector,
-                              std::string path_variable,
-                              int32_t shortest_k,
-                              size_t max_visited = DEFAULT_MAX_VISITED,
-                              const Expr* weight_expr = nullptr);
+    MatchShortestPathOperator(
+        GraphEngine& graph_engine,
+        const Catalog& catalog,
+        StorageManager& storage,
+        database_id_t database_id,
+        MatchConfig config,
+        OutputSchema schema,
+        const Expr* where_expr,
+        const BoundStatement& bound,
+        PathSelector path_selector,
+        std::string path_variable,
+        int32_t shortest_k,
+        size_t max_visited = DEFAULT_MAX_VISITED,
+        const Expr* weight_expr = nullptr,
+        const std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes = nullptr,
+        const std::unordered_map<index_id_t, HashIndex*>* hash_indexes = nullptr);
 
     const OutputSchema& output_schema() const override;
 
@@ -114,6 +118,8 @@ private:
     int32_t shortest_k_;
     const Expr* weight_expr_;
     size_t max_visited_;
+    const std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes_;
+    const std::unordered_map<index_id_t, HashIndex*>* hash_indexes_;
 
     std::vector<Tuple> results_;
     size_t cursor_ = 0;
