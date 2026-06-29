@@ -10,7 +10,9 @@
 
 namespace sixseven {
 
-/// Connection lifecycle states.
+/// Connection lifecycle tag (set at construction and on close). The running
+/// server tracks protocol progress via PgProtocolHandler's ProtocolState; this
+/// enum is retained only as a coarse lifecycle marker on the Connection.
 enum class ConnectionState : uint8_t {
     INIT,
     AUTH,
@@ -18,9 +20,6 @@ enum class ConnectionState : uint8_t {
     QUERY,
     CLOSED,
 };
-
-/// Returns a human-readable name for a ConnectionState.
-const char* connection_state_name(ConnectionState state);
 
 /// Per-client connection holding socket, state, and I/O buffers.
 class Connection {
@@ -32,9 +31,6 @@ public:
     Connection& operator=(const Connection&) = delete;
     Connection(Connection&& other) noexcept;
     Connection& operator=(Connection&& other) noexcept;
-
-    /// Transition to a new state. Returns error on invalid transitions.
-    [[nodiscard]] Result<void> transition_to(ConnectionState new_state);
 
     /// Read available data from the socket into the read buffer.
     /// Returns std::nullopt on EAGAIN (no data available, try later),

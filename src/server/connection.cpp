@@ -8,22 +8,6 @@
 
 namespace sixseven {
 
-const char* connection_state_name(ConnectionState state) {
-    switch (state) {
-    case ConnectionState::INIT:
-        return "INIT";
-    case ConnectionState::AUTH:
-        return "AUTH";
-    case ConnectionState::READY:
-        return "READY";
-    case ConnectionState::QUERY:
-        return "QUERY";
-    case ConnectionState::CLOSED:
-        return "CLOSED";
-    }
-    return "UNKNOWN";
-}
-
 Connection::Connection(int fd) : fd_(fd), state_(ConnectionState::INIT) {}
 
 Connection::~Connection() {
@@ -52,47 +36,6 @@ Connection& Connection::operator=(Connection&& other) noexcept {
         other.state_ = ConnectionState::CLOSED;
     }
     return *this;
-}
-
-Result<void> Connection::transition_to(ConnectionState new_state) {
-    // Valid transitions:
-    //   INIT  -> AUTH
-    //   AUTH  -> READY, CLOSED
-    //   READY -> QUERY, CLOSED
-    //   QUERY -> READY, CLOSED
-    //   CLOSED -> (none)
-    bool valid = false;
-    switch (state_) {
-    case ConnectionState::INIT:
-        valid = (new_state == ConnectionState::AUTH);
-        break;
-    case ConnectionState::AUTH:
-        valid = (new_state == ConnectionState::READY || new_state == ConnectionState::CLOSED);
-        break;
-    case ConnectionState::READY:
-        valid = (new_state == ConnectionState::QUERY || new_state == ConnectionState::CLOSED);
-        break;
-    case ConnectionState::QUERY:
-        valid = (new_state == ConnectionState::READY || new_state == ConnectionState::CLOSED);
-        break;
-    case ConnectionState::CLOSED:
-        valid = false;
-        break;
-    }
-
-    if (!valid) {
-        return make_error(StatusCode::INVALID_ARGUMENT,
-                          std::string("invalid connection state transition: ") +
-                              connection_state_name(state_) + " -> " +
-                              connection_state_name(new_state));
-    }
-
-    SIXSEVEN_LOG_DEBUG("connection fd={} state {} -> {}",
-                       fd_,
-                       connection_state_name(state_),
-                       connection_state_name(new_state));
-    state_ = new_state;
-    return ok();
 }
 
 Result<std::optional<size_t>> Connection::read_from_socket() {
