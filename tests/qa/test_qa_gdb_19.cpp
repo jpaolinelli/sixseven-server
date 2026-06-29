@@ -951,3 +951,41 @@ TEST(QA_Lexer, TokenTypeNameAllPunctuation) {
     EXPECT_EQ(token_type_name(TokenType::LBRACKET), "LBRACKET");
     EXPECT_EQ(token_type_name(TokenType::RBRACKET), "RBRACKET");
 }
+
+// =============================================================================
+// Trivial / empty inputs (consolidated here from test_qa_gdb_20.cpp, the parser
+// ticket -- these exercise only the Lexer and belong in the lexer suite;
+// GDB-1008).
+// =============================================================================
+
+TEST(QA_Lexer, EmptyInput) {
+    auto tokens = tokenize_ok("");
+    ASSERT_EQ(tokens.size(), 1u);
+    EXPECT_EQ(tokens[0].type, TokenType::END_OF_FILE);
+}
+
+TEST(QA_Lexer, OnlyWhitespace) {
+    auto tokens = tokenize_ok("   \n\t  \n  ");
+    ASSERT_EQ(tokens.size(), 1u);
+    EXPECT_EQ(tokens[0].type, TokenType::END_OF_FILE);
+}
+
+TEST(QA_Lexer, OnlyComments) {
+    auto tokens = tokenize_ok("-- just a comment\n/* block */");
+    ASSERT_EQ(tokens.size(), 1u);
+    EXPECT_EQ(tokens[0].type, TokenType::END_OF_FILE);
+}
+
+TEST(QA_Lexer, EmptyStringLiteral) {
+    auto tokens = tokenize_ok("''");
+    ASSERT_GE(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::STRING_LITERAL);
+    EXPECT_EQ(tokens[0].lexeme, "''");
+}
+
+TEST(QA_Lexer, IntegerZero) {
+    auto tokens = tokenize_ok("0");
+    ASSERT_GE(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::INTEGER_LITERAL);
+    EXPECT_EQ(tokens[0].lexeme, "0");
+}
