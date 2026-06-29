@@ -324,10 +324,16 @@ TEST(DistanceBatch, SingleCandidate) {
 }
 
 // =============================================================================
-// Batch performance: batch should be faster than sequential single calls.
+// Batch performance guard: compute_distance_batch must not be pathologically
+// slower than a sequential loop of compute_distance calls. This only catches a
+// gross (>2x) dispatch regression -- it does NOT assert a speedup (a wall-clock
+// speedup ratio would be flaky in the unit suite). Output correctness is
+// covered separately and deterministically by DistanceBatch.MatchesSingleCalls.
+// A real batch-vs-sequential speedup belongs in tests/benchmark/ (Google
+// Benchmark), not a pass/fail unit assertion.
 // =============================================================================
 
-TEST(DistanceBatch, FasterThanSequential) {
+TEST(DistanceBatch, BatchNotPathologicallySlower) {
     std::mt19937 rng(7);
     const uint32_t dim = 768;
     const uint32_t count = 1000;
@@ -364,9 +370,9 @@ TEST(DistanceBatch, FasterThanSequential) {
     auto batch_us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     auto seq_us = std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
 
-    // Batch should not be significantly slower than sequential.
-    // The main overhead difference is dispatch + span construction in sequential.
-    // For very optimized builds, batch is at least comparable.
+    // Guard against a gross batch regression only: batch must stay within 2x of
+    // the sequential loop. This is deliberately a loose upper bound, not a
+    // speedup assertion (see the header comment above).
     EXPECT_LE(batch_us, seq_us * 2) << "batch_us=" << batch_us << " seq_us=" << seq_us;
 }
 
