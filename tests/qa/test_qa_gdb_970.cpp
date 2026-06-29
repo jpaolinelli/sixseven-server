@@ -65,8 +65,7 @@ TEST(QA970CspRng, TwoDrawsMustDiffer) {
     auto r2 = random_bytes(32);
     ASSERT_TRUE(r1.has_value());
     ASSERT_TRUE(r2.has_value());
-    EXPECT_NE(*r1, *r2)
-        << "Two 32-byte CSPRNG draws must not be equal (would indicate RNG broken)";
+    EXPECT_NE(*r1, *r2) << "Two 32-byte CSPRNG draws must not be equal (would indicate RNG broken)";
 }
 
 /// Verify that the output is not all-zero (trivial sanity: a zero-initialized
@@ -106,8 +105,7 @@ TEST(QA970ScramSalt, HashPasswordScramSaltIsNonEmpty) {
     EXPECT_FALSE(rec.salt.empty())
         << "SCRAM salt must be non-empty; empty means random_bytes result was ignored";
     // Base64 of 16 bytes is 24 chars (with padding).
-    EXPECT_EQ(rec.salt.size(), 24u)
-        << "16-byte salt base64-encodes to 24 chars";
+    EXPECT_EQ(rec.salt.size(), 24u) << "16-byte salt base64-encodes to 24 chars";
 }
 
 /// Two calls to hash_password_scram must produce different salts -- proving
