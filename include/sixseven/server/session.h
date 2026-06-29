@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -58,6 +59,16 @@ public:
     /// Return the current statement_timeout in milliseconds (0 = disabled).
     /// The value is validated at SET time, so parsing here cannot fail.
     [[nodiscard]] int64_t statement_timeout_ms() const;
+
+    /// Callback invoked when default_transaction_isolation is changed via SET.
+    /// The argument is the normalized lowercase isolation level string.
+    /// Used by the server layer to propagate the new level to QueryEngine
+    /// (GDB-978).
+    using IsolationChangeCallback = std::function<void(const std::string&)>;
+
+    /// Register a callback invoked on every successful SET
+    /// default_transaction_isolation. Pass nullptr to clear.
+    void set_isolation_change_callback(IsolationChangeCallback cb);
 
     /// Parse a statement_timeout value ("0", "5000", "250ms", "5s", "2min")
     /// into milliseconds. Returns an error for negative or malformed values.
@@ -173,6 +184,7 @@ private:
     std::unordered_map<std::string, Portal> portals_;
     TransactionState txn_state_ = TransactionState::IDLE;
     std::deque<std::string> savepoints_;
+    IsolationChangeCallback isolation_change_cb_;
 
     /// Default values for built-in session variables.
     static const std::unordered_map<std::string, std::string> DEFAULT_VARIABLES;
