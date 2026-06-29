@@ -61,9 +61,13 @@ protected:
         ASSERT_TRUE(tid.has_value()) << tid.error().message;
         table_id_ = *tid;
 
-        auto eid = graph_->create_edge_type(
-            default_database_id, "qa995_links", table_id_, table_id_,
-            TypeId::INT64, TypeId::INT64, {});
+        auto eid = graph_->create_edge_type(default_database_id,
+                                            "qa995_links",
+                                            table_id_,
+                                            table_id_,
+                                            TypeId::INT64,
+                                            TypeId::INT64,
+                                            {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
 
         // Star: 1->2, 1->3, 1->4
@@ -78,8 +82,8 @@ protected:
         ASSERT_TRUE(r.has_value()) << r.error().message;
     }
 
-    ShortestPathConfig make_config(int64_t from, int64_t to, size_t max_visited,
-                                   int32_t max_depth = 10) {
+    ShortestPathConfig
+    make_config(int64_t from, int64_t to, size_t max_visited, int32_t max_depth = 10) {
         ShortestPathConfig cfg;
         cfg.database_id = default_database_id;
         cfg.edge_type = "qa995_links";
@@ -114,8 +118,7 @@ TEST_F(QA_GDB995, ExceedMaxVisitedReturnsInvalidArgument) {
     auto cfg = make_config(1, 4, 1);
     ShortestPathOperator op(*graph_, std::move(cfg), make_schema());
     auto result = op.open();
-    ASSERT_FALSE(result.has_value())
-        << "Expected INVALID_ARGUMENT when max_visited=1 exceeded";
+    ASSERT_FALSE(result.has_value()) << "Expected INVALID_ARGUMENT when max_visited=1 exceeded";
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
     EXPECT_NE(result.error().message.find("max_visited"), std::string::npos)
         << "Error message missing 'max_visited': " << result.error().message;
@@ -132,8 +135,7 @@ TEST_F(QA_GDB995, MaxVisitedZeroErrorsCleanly) {
     auto cfg = make_config(1, 4, 0);
     ShortestPathOperator op(*graph_, std::move(cfg), make_schema());
     auto result = op.open();
-    ASSERT_FALSE(result.has_value())
-        << "max_visited=0 should always error (seeds alone exceed it)";
+    ASSERT_FALSE(result.has_value()) << "max_visited=0 should always error (seeds alone exceed it)";
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
     // Sanity: no crash / no UB from size_t arithmetic
 }
@@ -173,7 +175,8 @@ TEST_F(QA_GDB995, MaxVisitedAtNaturalCountSucceeds) {
     while (true) {
         auto next_result = op.next();
         ASSERT_TRUE(next_result.has_value());
-        if (!next_result->has_value()) break;
+        if (!next_result->has_value())
+            break;
         const auto& tup = **next_result;
         ASSERT_EQ(tup.values.size(), 2u);
         path.emplace_back(tup.values[0].as_int64(), tup.values[1].as_int64());
@@ -219,7 +222,8 @@ TEST_F(QA_GDB995, DisconnectedGraphGenerousMaxVisitedReturnsEmpty) {
     while (true) {
         auto next_result = op.next();
         ASSERT_TRUE(next_result.has_value());
-        if (!next_result->has_value()) break;
+        if (!next_result->has_value())
+            break;
         ++row_count;
     }
     op.close();
@@ -265,8 +269,7 @@ TEST_F(QA_GDB995, DeterministicErrorOnRepeatedCall) {
         auto cfg = make_config(1, 4, 1);
         ShortestPathOperator op(*graph_, std::move(cfg), make_schema());
         auto result = op.open();
-        ASSERT_FALSE(result.has_value())
-            << "Run " << run << ": expected error";
+        ASSERT_FALSE(result.has_value()) << "Run " << run << ": expected error";
         EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT)
             << "Run " << run << ": wrong status code";
         EXPECT_NE(result.error().message.find("max_visited"), std::string::npos)
@@ -291,7 +294,8 @@ TEST_F(QA_GDB995, DeterministicSuccessOnRepeatedCall) {
         while (true) {
             auto next_result = op.next();
             ASSERT_TRUE(next_result.has_value());
-            if (!next_result->has_value()) break;
+            if (!next_result->has_value())
+                break;
             const auto& tup = **next_result;
             path.emplace_back(tup.values[0].as_int64(), tup.values[1].as_int64());
         }
@@ -316,8 +320,7 @@ TEST_F(QA_GDB995, ErrorMessageContainsLimitValue) {
     ASSERT_FALSE(result.has_value())
         << "max_visited=2 should error (seeds=2, first expansion->3>2)";
     EXPECT_NE(result.error().message.find("2"), std::string::npos)
-        << "Error message should contain the configured limit (2): "
-        << result.error().message;
+        << "Error message should contain the configured limit (2): " << result.error().message;
 }
 
 // ---------------------------------------------------------------------------
@@ -335,7 +338,8 @@ TEST_F(QA_GDB995, NormalPathNotAffectedByGuard) {
     while (true) {
         auto next_result = op.next();
         ASSERT_TRUE(next_result.has_value());
-        if (!next_result->has_value()) break;
+        if (!next_result->has_value())
+            break;
         const auto& tup = **next_result;
         ASSERT_EQ(tup.values.size(), 2u);
         path.emplace_back(tup.values[0].as_int64(), tup.values[1].as_int64());
