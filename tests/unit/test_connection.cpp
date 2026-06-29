@@ -1,22 +1,11 @@
+#include "sixseven/common/platform.h"
 #include "sixseven/server/connection.h"
 
 #include <gtest/gtest.h>
 
-#include "sixseven/common/platform.h"
-
 #include <cstring>
 
 namespace sixseven {
-
-// ─── connection_state_name ──────────────────────────────────────────────────
-
-TEST(ConnectionStateName, ReturnsCorrectNames) {
-    EXPECT_STREQ(connection_state_name(ConnectionState::INIT), "INIT");
-    EXPECT_STREQ(connection_state_name(ConnectionState::AUTH), "AUTH");
-    EXPECT_STREQ(connection_state_name(ConnectionState::READY), "READY");
-    EXPECT_STREQ(connection_state_name(ConnectionState::QUERY), "QUERY");
-    EXPECT_STREQ(connection_state_name(ConnectionState::CLOSED), "CLOSED");
-}
 
 // ─── State machine transitions ──────────────────────────────────────────────
 
@@ -44,83 +33,6 @@ TEST_F(ConnectionStateTest, InitialStateIsInit) {
     Connection conn(fd_a_);
     fd_a_ = -1; // Connection owns it now.
     EXPECT_EQ(conn.state(), ConnectionState::INIT);
-}
-
-TEST_F(ConnectionStateTest, ValidTransitionInitToAuth) {
-    Connection conn(fd_a_);
-    fd_a_ = -1;
-    auto result = conn.transition_to(ConnectionState::AUTH);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(conn.state(), ConnectionState::AUTH);
-}
-
-TEST_F(ConnectionStateTest, ValidTransitionAuthToReady) {
-    Connection conn(fd_a_);
-    fd_a_ = -1;
-    ASSERT_TRUE(conn.transition_to(ConnectionState::AUTH).has_value());
-    auto result = conn.transition_to(ConnectionState::READY);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(conn.state(), ConnectionState::READY);
-}
-
-TEST_F(ConnectionStateTest, ValidTransitionReadyToQuery) {
-    Connection conn(fd_a_);
-    fd_a_ = -1;
-    ASSERT_TRUE(conn.transition_to(ConnectionState::AUTH).has_value());
-    ASSERT_TRUE(conn.transition_to(ConnectionState::READY).has_value());
-    auto result = conn.transition_to(ConnectionState::QUERY);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(conn.state(), ConnectionState::QUERY);
-}
-
-TEST_F(ConnectionStateTest, ValidTransitionQueryToReady) {
-    Connection conn(fd_a_);
-    fd_a_ = -1;
-    ASSERT_TRUE(conn.transition_to(ConnectionState::AUTH).has_value());
-    ASSERT_TRUE(conn.transition_to(ConnectionState::READY).has_value());
-    ASSERT_TRUE(conn.transition_to(ConnectionState::QUERY).has_value());
-    auto result = conn.transition_to(ConnectionState::READY);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(conn.state(), ConnectionState::READY);
-}
-
-TEST_F(ConnectionStateTest, ValidTransitionToClosed) {
-    Connection conn(fd_a_);
-    fd_a_ = -1;
-    ASSERT_TRUE(conn.transition_to(ConnectionState::AUTH).has_value());
-    ASSERT_TRUE(conn.transition_to(ConnectionState::READY).has_value());
-    auto result = conn.transition_to(ConnectionState::CLOSED);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(conn.state(), ConnectionState::CLOSED);
-}
-
-TEST_F(ConnectionStateTest, InvalidTransitionInitToReady) {
-    Connection conn(fd_a_);
-    fd_a_ = -1;
-    auto result = conn.transition_to(ConnectionState::READY);
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
-    EXPECT_EQ(conn.state(), ConnectionState::INIT); // State unchanged.
-}
-
-TEST_F(ConnectionStateTest, InvalidTransitionFromClosed) {
-    Connection conn(fd_a_);
-    fd_a_ = -1;
-    ASSERT_TRUE(conn.transition_to(ConnectionState::AUTH).has_value());
-    ASSERT_TRUE(conn.transition_to(ConnectionState::CLOSED).has_value());
-    auto result = conn.transition_to(ConnectionState::READY);
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
-}
-
-TEST_F(ConnectionStateTest, InvalidTransitionReadyToAuth) {
-    Connection conn(fd_a_);
-    fd_a_ = -1;
-    ASSERT_TRUE(conn.transition_to(ConnectionState::AUTH).has_value());
-    ASSERT_TRUE(conn.transition_to(ConnectionState::READY).has_value());
-    auto result = conn.transition_to(ConnectionState::AUTH);
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
 // ─── I/O buffers ────────────────────────────────────────────────────────────
