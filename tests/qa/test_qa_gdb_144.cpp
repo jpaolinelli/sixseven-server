@@ -489,7 +489,10 @@ TEST_F(QA144ServerTest, HealthUptimeIncreases) {
     auto h1 = server.health();
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
     auto h2 = server.health();
-    EXPECT_GE(h2.uptime.count(), h1.uptime.count());
+    // uptime is seconds-granularity; the >1s sleep guarantees it advances by at
+    // least one second, so assert a STRICT increase. EXPECT_GE would pass for an
+    // implementation whose uptime is permanently frozen at a constant (0 >= 0).
+    EXPECT_GT(h2.uptime.count(), h1.uptime.count());
 
     server.shutdown();
     t.join();
