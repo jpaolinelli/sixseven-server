@@ -737,41 +737,13 @@ TEST_F(QA_GDB424, OperatorReopenProducesSameResults) {
     EXPECT_GT(count1, 0u);
 }
 
-// ============================================================================
-// Adversarial: Path struct edge cases
-// ============================================================================
-
-TEST_F(QA_GDB424, PathLengthEmptyPath) {
-    Path p;
-    EXPECT_EQ(p.length(), 0);
-}
-
-TEST_F(QA_GDB424, PathLengthSingleStep) {
-    Path p;
-    p.steps.push_back({42, -1});
-    EXPECT_EQ(p.length(), 0);
-}
-
-TEST_F(QA_GDB424, PathLengthMultiStep) {
-    Path p;
-    p.steps.push_back({1, 100});
-    p.steps.push_back({2, 101});
-    p.steps.push_back({3, -1});
-    EXPECT_EQ(p.length(), 2);
-}
-
-TEST_F(QA_GDB424, PathValueVariantRoundTrip) {
-    Path p;
-    p.steps.push_back({1, 100});
-    p.steps.push_back({2, -1});
-    Value v(std::move(p));
-    EXPECT_EQ(v.type_id(), TypeId::PATH);
-    EXPECT_EQ(v.as_path().length(), 1);
-
-    auto ptr = v.try_as_path();
-    ASSERT_TRUE(ptr.has_value());
-    EXPECT_EQ((*ptr)->steps.size(), 2u);
-}
+// GDB-977: the pure Path-struct edge-case tests that previously lived here
+// (PathLengthEmptyPath, PathLengthSingleStep, PathLengthMultiStep,
+// PathValueVariantRoundTrip) were exact duplicates of the fixture-free
+// QA_GDB422_Path.{EmptyPathLength,SingleNodePathLength,LongPathLength,
+// PathValueRoundTrip} cases in test_qa_gdb_422.cpp. They were removed: they
+// touched no QA_GDB424 fixture state yet paid the full heavyweight SetUp.
+// Path-struct coverage is retained by those QA_GDB422_Path tests.
 
 // ============================================================================
 // Adversarial: Path functions on non-path values
