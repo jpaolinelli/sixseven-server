@@ -10,58 +10,9 @@
 #include <unordered_map>
 
 #include "test_catalog_helpers.h"
+#include "test_graph_helpers.h"
 
 using namespace sixseven;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-namespace {
-
-static TableSchema make_table_schema(const std::string& name) {
-    TableSchema schema;
-    schema.name = name;
-    schema.columns = {
-        {0, "id", TypeId::INT64, false, ""},
-    };
-    schema.pk_columns = "id";
-    return schema;
-}
-
-static Value pk(int64_t v) {
-    return Value(v);
-}
-
-/// Result row: (node_id, closeness, sum_farness, reachable_count,
-///              component_size, normalized_closeness).
-struct ClosenessResult {
-    double closeness;
-    int64_t sum_farness;
-    int64_t reachable_count;
-    int64_t component_size;
-    double normalized_closeness;
-};
-
-/// Extract per-node results from algorithm output rows.
-std::unordered_map<int64_t, ClosenessResult>
-to_closeness_map(const std::vector<AlgorithmRow>& rows) {
-    std::unordered_map<int64_t, ClosenessResult> result;
-    for (const auto& row : rows) {
-        EXPECT_EQ(row.values.size(), 6u);
-        auto node_id = std::get<int64_t>(row.values[0].data());
-        auto closeness = std::get<double>(row.values[1].data());
-        auto sum_farness = std::get<int64_t>(row.values[2].data());
-        auto reachable_count = std::get<int64_t>(row.values[3].data());
-        auto component_size = std::get<int64_t>(row.values[4].data());
-        auto normalized_closeness = std::get<double>(row.values[5].data());
-        result[node_id] = {
-            closeness, sum_farness, reachable_count, component_size, normalized_closeness};
-    }
-    return result;
-}
-
-} // namespace
 
 // ---------------------------------------------------------------------------
 // Algorithm definition tests

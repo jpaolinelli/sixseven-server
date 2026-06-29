@@ -10,6 +10,7 @@
 #include <unordered_map>
 
 #include "test_catalog_helpers.h"
+#include "test_graph_helpers.h"
 
 using namespace sixseven;
 
@@ -18,20 +19,6 @@ using namespace sixseven;
 // ---------------------------------------------------------------------------
 
 namespace {
-
-static TableSchema make_table_schema(const std::string& name) {
-    TableSchema schema;
-    schema.name = name;
-    schema.columns = {
-        {0, "id", TypeId::INT64, false, ""},
-    };
-    schema.pk_columns = "id";
-    return schema;
-}
-
-static Value pk(int64_t v) {
-    return Value(v);
-}
 
 /// Result row: (node_id, local_coefficient, triangles, degree).
 struct ClusteringResult {
