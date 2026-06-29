@@ -132,8 +132,8 @@ int main(int argc, char* argv[]) {
 
     // Size the embedding worker pool from the machine's core count. At
     // >10M-row ingest, a 2-worker pool (the old default) cannot keep up
-    // and the queue grows until we OOM. Use half the logical cores
-    // (floor 4) so the embedders have headroom without starving the
+    // and the queue grows until we OOM. Use a quarter of the logical
+    // cores (floor 2) so the embedders have headroom without starving the
     // SQL executor.
     sixseven::EmbeddingWorkerConfig embedding_config;
     {
@@ -467,7 +467,8 @@ int main(int argc, char* argv[]) {
     // Set up authentication. Resolve the configured method before `config` is
     // moved into the Server below. Users are persisted in sys_users so they
     // survive restart; on first run (or empty store) we seed the default admin
-    // 'sixseven'/'sixseven'. ensure_users_table() runs after bootstrap so the
+    // 'demo'/'demo' (see UserManager::ensure_default_admin). ensure_users_table()
+    // runs after bootstrap so the
     // table-id collision guard can see any loaded user tables.
     sixseven::AuthMethod auth_method = sixseven::AuthMethod::SCRAM_SHA_256;
     if (auto m = sixseven::parse_auth_method(config.auth_method)) {
