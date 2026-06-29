@@ -91,13 +91,6 @@ protected:
         return closeness_centrality_execute(ctx);
     }
 
-    Result<std::vector<AlgorithmRow>> run_standard(const std::string& edge_type) {
-        std::unordered_map<std::string, Value> args;
-        args["variant"] = Value(std::string("standard"));
-        AlgorithmContext ctx{engine_, default_database_id, edge_type, args};
-        return closeness_centrality_execute(ctx);
-    }
-
     Catalog catalog_;
     GraphEngine engine_{catalog_};
     table_id_t table_id_ = 0;
