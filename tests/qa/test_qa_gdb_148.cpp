@@ -5,13 +5,12 @@
 /// base64 padding, corrupted hashes, concurrent user ops, wire-protocol
 /// auth flows for MD5 and SCRAM, invalid SASL mechanisms, wrong password.
 
+#include "sixseven/common/platform.h"
 #include "sixseven/server/auth.h"
 #include "sixseven/server/connection.h"
 #include "sixseven/server/pg_protocol.h"
 
 #include <gtest/gtest.h>
-
-#include "sixseven/common/platform.h"
 
 #include <cstdint>
 #include <cstring>
@@ -36,11 +35,27 @@ TEST(QA148Crypto, Md5EmptyString) {
 TEST(QA148Crypto, Sha256EmptyData) {
     auto h = sha256({});
     EXPECT_EQ(h.size(), 32u);
+    // FIPS-180 known answer: SHA-256("") =
+    // e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.
+    // Pin the content, not just the length -- a sha256 returning 32 zero bytes
+    // would pass a length-only check yet break SCRAM-SHA-256 interop.
+    const std::vector<uint8_t> expected = {0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14,
+                                           0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24,
+                                           0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c,
+                                           0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55};
+    EXPECT_EQ(h, expected);
 }
 
 TEST(QA148Crypto, HmacSha256EmptyKeyAndMessage) {
     auto m = hmac_sha256({}, "");
     EXPECT_EQ(m.size(), 32u);
+    // RFC 4231-style known answer: HMAC-SHA-256(key="", msg="") =
+    // b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad.
+    const std::vector<uint8_t> expected = {0xb6, 0x13, 0x67, 0x9a, 0x08, 0x14, 0xd9, 0xec,
+                                           0x77, 0x2f, 0x95, 0xd7, 0x78, 0xc3, 0x5f, 0xc5,
+                                           0xff, 0x16, 0x97, 0xc4, 0x93, 0x71, 0x56, 0x53,
+                                           0xc6, 0xc7, 0x12, 0x14, 0x42, 0x92, 0xc5, 0xad};
+    EXPECT_EQ(m, expected);
 }
 
 TEST(QA148Crypto, XorBytesEmptyVectors) {
