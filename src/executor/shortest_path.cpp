@@ -155,6 +155,14 @@ Result<void> ShortestPathOperator::run_bidirectional_bfs() {
                 visited.insert(nbr);
                 parent[nbr] = current;
 
+                // Enforce max_visited budget (GDB-995).
+                if (fwd_visited.size() + bwd_visited.size() > config_.max_visited) {
+                    return tl::unexpected(make_error(StatusCode::INVALID_ARGUMENT,
+                                                     "shortest path exceeded max_visited limit (" +
+                                                         std::to_string(config_.max_visited) +
+                                                         ")"));
+                }
+
                 // Check if this node was visited by the other BFS.
                 // GDB-842 defect 2: with bare-pk keying a node from one table
                 // could falsely match a node from the other table with the
