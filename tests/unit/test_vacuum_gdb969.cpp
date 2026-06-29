@@ -1,4 +1,4 @@
-// GDB-969: Vacuum-safe deadness — regression tests for the MVCC corruption
+// GDB-969: Vacuum-safe deadness -- regression tests for the MVCC corruption
 // hazard where a live row persisted by a prior server process could be
 // incorrectly reclaimed because TransactionManager::get_status returns ABORTED
 // for any xmin id it does not recognise.
@@ -143,7 +143,7 @@ TEST_F(VacuumGDB969Test, CorruptionGuard_UnknownXminSurvivesVacuum) {
     auto stats = vac.run();
     ASSERT_TRUE(stats.has_value()) << stats.error().message;
 
-    // The row MUST survive — it was live, just written by an older process.
+    // The row MUST survive -- it was live, just written by an older process.
     EXPECT_EQ(stats->dead_tuples, 0u) << "vacuum must NOT reclaim a live row with unknown xmin";
     EXPECT_EQ(count_live_tuples(pid), 1u) << "row must still be readable after vacuum";
 }
@@ -173,12 +173,12 @@ TEST_F(VacuumGDB969Test, CorruptionGuard_UnknownXminWithUnknownXmaxSurvivesVacuu
     // the safe conservative behaviour: the old version of a cross-restart
     // update is treated as a committed delete, which is correct.
     // The key safety property: xmin unknown -> NOT reclaimed via Case 1.
-    // (It may still be reclaimed if xmax maps to frozen_txn_id — that is
+    // (It may still be reclaimed if xmax maps to frozen_txn_id -- that is
     // intentional and safe: an old version of an update is dead.)
     //
     // We just verify the call does not crash / panic and returns a result.
     // Whether this specific tuple counts as dead depends on horizon; that is
-    // fine — the corruption hazard is Case 1 (xmin-only), not xmax.
+    // fine -- the corruption hazard is Case 1 (xmin-only), not xmax.
     EXPECT_TRUE(stats.has_value());
 }
 

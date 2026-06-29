@@ -55,8 +55,7 @@ protected:
     }
 
     /// Insert a raw MVCC tuple with the given xmin/xmax.
-    std::pair<PageId, SlotId> insert_mvcc_tuple(txn_id_t xmin,
-                                                txn_id_t xmax = invalid_txn_id) {
+    std::pair<PageId, SlotId> insert_mvcc_tuple(txn_id_t xmin, txn_id_t xmax = invalid_txn_id) {
         MvccTupleHeader header;
         header.xmin = xmin;
         header.xmax = xmax;
@@ -70,7 +69,8 @@ protected:
         if (!page_result) {
             auto new_page = bpm_->new_page();
             EXPECT_TRUE(new_page.has_value());
-            if (!new_page.has_value()) return {};
+            if (!new_page.has_value())
+                return {};
             page = *new_page;
         } else {
             page = *page_result;
@@ -78,7 +78,8 @@ protected:
 
         auto slot_result = page->insert_tuple(combined);
         EXPECT_TRUE(slot_result.has_value());
-        if (!slot_result.has_value()) return {};
+        if (!slot_result.has_value())
+            return {};
         SlotId slot = *slot_result;
         PageId pid = page->page_id();
         auto unpin = bpm_->unpin_page(pid, true);
@@ -89,11 +90,13 @@ protected:
     /// Count live (non-deleted) slots on a page.
     uint32_t count_live_tuples(PageId page_id) {
         auto pr = bpm_->fetch_page(page_id);
-        if (!pr) return 0;
+        if (!pr)
+            return 0;
         Page* page = *pr;
         uint32_t count = 0;
         for (uint16_t slot = 0; slot < page->slot_count(); ++slot) {
-            if (page->get_tuple(slot).has_value()) count++;
+            if (page->get_tuple(slot).has_value())
+                count++;
         }
         auto unpin = bpm_->unpin_page(page_id, false);
         (void)unpin;
@@ -114,7 +117,7 @@ protected:
 
 // =============================================================================
 // F1 - Unknown xmin, xmax=invalid: row is live from a prior process.
-//      MUST survive vacuum — this is the headline corruption guard.
+//      MUST survive vacuum -- this is the headline corruption guard.
 // =============================================================================
 
 TEST_F(QA_VacuumGDB969, F1_UnknownXminNoXmax_MustSurvive) {
@@ -179,8 +182,7 @@ TEST_F(QA_VacuumGDB969, F2a_UnknownXminUnknownXmax_Consistent_With_ReadPath) {
 // =============================================================================
 
 TEST_F(QA_VacuumGDB969, F2b_UnknownXminWithActiveXmax_MustSurvive) {
-    ASSERT_EQ(txn_mgr_.get_status(kPriorXmin), TransactionStatus::ABORTED)
-        << "pre-condition";
+    ASSERT_EQ(txn_mgr_.get_status(kPriorXmin), TransactionStatus::ABORTED) << "pre-condition";
 
     // Start a real transaction whose delete has not yet committed.
     auto* t_del = txn_mgr_.begin().value();
@@ -242,8 +244,7 @@ TEST_F(QA_VacuumGDB969, F3_CommittedXmax_AtHorizonBoundary_MustSurvive) {
     Vacuum vac(*bpm_, dm_, file_id_, txn_mgr_);
     auto stats = vac.run();
     ASSERT_TRUE(stats.has_value()) << stats.error().message;
-    EXPECT_EQ(stats->dead_tuples, 1u)
-        << "committed delete below horizon must be reclaimed";
+    EXPECT_EQ(stats->dead_tuples, 1u) << "committed delete below horizon must be reclaimed";
     EXPECT_EQ(count_live_tuples(pid), 0u);
 }
 
@@ -257,11 +258,10 @@ TEST_F(QA_VacuumGDB969, F3_CommittedXmax_AtHorizonBoundary_MustSurvive) {
 // =============================================================================
 
 TEST_F(QA_VacuumGDB969, F4_HorizonConsistencyCodeRead_SkipConcurrencyAssertion) {
-    GTEST_SKIP()
-        << "Concurrency assertion skipped (flaky on Windows single-process unit tests). "
-           "Code-read confirms: xmin_horizon computed once at Vacuum::run() start; "
-           "is_dead Case 6 (xmax < xmin_horizon) is the reclaim gate; any tuple "
-           "whose xmax >= horizon at run() start is guaranteed to survive vacuum.";
+    GTEST_SKIP() << "Concurrency assertion skipped (flaky on Windows single-process unit tests). "
+                    "Code-read confirms: xmin_horizon computed once at Vacuum::run() start; "
+                    "is_dead Case 6 (xmax < xmin_horizon) is the reclaim gate; any tuple "
+                    "whose xmax >= horizon at run() start is guaranteed to survive vacuum.";
 }
 
 // =============================================================================
@@ -344,8 +344,7 @@ TEST_F(QA_VacuumGDB969, F5_BatchMixed_ExactDeadCount) {
 
 TEST_F(QA_VacuumGDB969, F6_AutoVacuumWorker_DoesNotReclaimPriorProcessRows) {
     // Plant a prior-process live row.
-    ASSERT_EQ(txn_mgr_.get_status(kPriorXmin), TransactionStatus::ABORTED)
-        << "pre-condition";
+    ASSERT_EQ(txn_mgr_.get_status(kPriorXmin), TransactionStatus::ABORTED) << "pre-condition";
     auto [pid, slot] = insert_mvcc_tuple(kPriorXmin, invalid_txn_id);
     ASSERT_GT(pid, 0u);
 
@@ -388,8 +387,7 @@ TEST_F(QA_VacuumGDB969, F6_AutoVacuumWorker_DoesNotReclaimPriorProcessRows) {
 // =============================================================================
 
 TEST_F(QA_VacuumGDB969, F7_RunFull_DoesNotReclaimPriorProcessRows) {
-    ASSERT_EQ(txn_mgr_.get_status(kPriorXmin), TransactionStatus::ABORTED)
-        << "pre-condition";
+    ASSERT_EQ(txn_mgr_.get_status(kPriorXmin), TransactionStatus::ABORTED) << "pre-condition";
 
     auto [pid, slot] = insert_mvcc_tuple(kPriorXmin, invalid_txn_id);
     ASSERT_GT(pid, 0u);
@@ -422,8 +420,7 @@ TEST_F(QA_VacuumGDB969, F8_FrozenXmax_AlwaysDeadRegardlessOfHorizon) {
     ASSERT_TRUE(stats.has_value()) << stats.error().message;
 
     // frozen xmax -> is_dead returns true (dead for every snapshot).
-    EXPECT_EQ(stats->dead_tuples, 1u)
-        << "frozen-xmax tuple must always be reclaimed by vacuum";
+    EXPECT_EQ(stats->dead_tuples, 1u) << "frozen-xmax tuple must always be reclaimed by vacuum";
     EXPECT_EQ(count_live_tuples(pid), 0u);
 }
 
@@ -441,7 +438,6 @@ TEST_F(QA_VacuumGDB969, F9_FrozenXmin_NoXmax_MustSurvive) {
     auto stats = vac.run();
     ASSERT_TRUE(stats.has_value()) << stats.error().message;
 
-    EXPECT_EQ(stats->dead_tuples, 0u)
-        << "frozen-xmin live row (xmax=invalid) must survive vacuum";
+    EXPECT_EQ(stats->dead_tuples, 0u) << "frozen-xmin live row (xmax=invalid) must survive vacuum";
     EXPECT_EQ(count_live_tuples(pid), 1u);
 }
