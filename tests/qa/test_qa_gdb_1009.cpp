@@ -63,15 +63,14 @@ namespace {
 class GDB1009Base : public ::testing::Test {
 protected:
     void SetUp() override {
-        data_dir_ =
-            std::filesystem::temp_directory_path() / "sixseven_qa_gdb1009";
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb1009";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
         catalog_ = std::make_unique<Catalog>();
         init_test_catalog(*catalog_);
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
-        graph_   = std::make_unique<GraphEngine>(*catalog_);
+        graph_ = std::make_unique<GraphEngine>(*catalog_);
 
         auto db_r = storage_->create_database_storage(default_database_id);
         ASSERT_TRUE(db_r.has_value()) << db_r.error().message;
@@ -101,9 +100,15 @@ protected:
         TableSchema ts;
         ts.name = "persons";
         CatalogColumnDef c0;
-        c0.ordinal = 0; c0.name = "id"; c0.type_id = TypeId::INT64; c0.nullable = false;
+        c0.ordinal = 0;
+        c0.name = "id";
+        c0.type_id = TypeId::INT64;
+        c0.nullable = false;
         CatalogColumnDef c1;
-        c1.ordinal = 1; c1.name = "name"; c1.type_id = TypeId::STRING; c1.nullable = false;
+        c1.ordinal = 1;
+        c1.name = "name";
+        c1.type_id = TypeId::STRING;
+        c1.nullable = false;
         ts.columns = {c0, c1};
         ts.pk_columns = "id";
         auto tid = catalog_->create_table(default_database_id, ts);
@@ -116,9 +121,9 @@ protected:
 
         IndexDef def;
         def.table_id = persons_id_;
-        def.name     = "persons_pk";
+        def.name = "persons_pk";
         def.index_type = "btree";
-        def.columns  = "id";
+        def.columns = "id";
         def.is_unique = true;
         auto r = catalog_->create_index(def);
         ASSERT_TRUE(r.has_value()) << r.error().message;
@@ -134,9 +139,15 @@ protected:
         TableSchema ts;
         ts.name = "orgs";
         CatalogColumnDef c0;
-        c0.ordinal = 0; c0.name = "id"; c0.type_id = TypeId::INT64; c0.nullable = false;
+        c0.ordinal = 0;
+        c0.name = "id";
+        c0.type_id = TypeId::INT64;
+        c0.nullable = false;
         CatalogColumnDef c1;
-        c1.ordinal = 1; c1.name = "org_name"; c1.type_id = TypeId::STRING; c1.nullable = false;
+        c1.ordinal = 1;
+        c1.name = "org_name";
+        c1.type_id = TypeId::STRING;
+        c1.nullable = false;
         ts.columns = {c0, c1};
         ts.pk_columns = "id";
         auto tid = catalog_->create_table(default_database_id, ts);
@@ -149,9 +160,9 @@ protected:
 
         IndexDef def;
         def.table_id = orgs_id_;
-        def.name     = "orgs_pk";
+        def.name = "orgs_pk";
         def.index_type = "btree";
-        def.columns  = "id";
+        def.columns = "id";
         def.is_unique = true;
         auto r = catalog_->create_index(def);
         ASSERT_TRUE(r.has_value()) << r.error().message;
@@ -218,22 +229,28 @@ protected:
     // Run a single-hop MATCH (persons)-[works_at]->(orgs) and return row pairs.
     std::vector<std::pair<std::string, std::string>>
     run_single_hop(const std::unordered_map<index_id_t, BTreeIndex*>* btree_map,
-                   const std::unordered_map<index_id_t, HashIndex*>*  hash_map) {
+                   const std::unordered_map<index_id_t, HashIndex*>* hash_map) {
         MatchConfig config;
         config.nodes.push_back({"p", "persons"});
         config.nodes.push_back({"o", "orgs"});
         config.edges.push_back({"r", "works_at", TraverseDirection::OUT});
 
         std::vector<OutputColumn> out_cols;
-        out_cols.push_back({"p", "name",     TypeId::STRING, false, persons_id_});
+        out_cols.push_back({"p", "name", TypeId::STRING, false, persons_id_});
         out_cols.push_back({"o", "org_name", TypeId::STRING, false, orgs_id_});
         OutputSchema schema(std::move(out_cols));
 
         BoundStatement bound;
-        PatternMatchOperator op(*graph_, *catalog_, *storage_,
+        PatternMatchOperator op(*graph_,
+                                *catalog_,
+                                *storage_,
                                 default_database_id,
-                                std::move(config), std::move(schema),
-                                nullptr, bound, btree_map, hash_map);
+                                std::move(config),
+                                std::move(schema),
+                                nullptr,
+                                bound,
+                                btree_map,
+                                hash_map);
 
         auto open_r = op.open();
         if (!open_r) {
@@ -242,11 +259,11 @@ protected:
         std::vector<std::pair<std::string, std::string>> rows;
         while (true) {
             auto next_r = op.next();
-            if (!next_r || !next_r->has_value()) break;
+            if (!next_r || !next_r->has_value())
+                break;
             auto& row = **next_r;
             if (row.values.size() >= 2) {
-                rows.emplace_back(row.values[0].as_string(),
-                                  row.values[1].as_string());
+                rows.emplace_back(row.values[0].as_string(), row.values[1].as_string());
             }
         }
         op.close();
@@ -259,9 +276,9 @@ protected:
     std::unique_ptr<StorageManager> storage_;
     std::unique_ptr<GraphEngine> graph_;
     table_id_t persons_id_ = 0;
-    table_id_t orgs_id_    = 0;
+    table_id_t orgs_id_ = 0;
     index_id_t persons_idx_id_ = 0;
-    index_id_t orgs_idx_id_    = 0;
+    index_id_t orgs_idx_id_ = 0;
     std::unique_ptr<BTreeIndex> persons_btree_;
     std::unique_ptr<BTreeIndex> orgs_btree_;
 };
@@ -295,10 +312,10 @@ TEST_F(GDB1009Base, GDB1009_IndexMissesRow) {
     // Wire up index maps -- persons_btree_ does NOT contain id=99.
     std::unordered_map<index_id_t, BTreeIndex*> btree_map;
     btree_map[persons_idx_id_] = persons_btree_.get();
-    btree_map[orgs_idx_id_]    = orgs_btree_.get();
+    btree_map[orgs_idx_id_] = orgs_btree_.get();
 
     auto rows_with_index = run_single_hop(&btree_map, nullptr);
-    auto rows_no_index   = run_single_hop(nullptr,    nullptr);
+    auto rows_no_index = run_single_hop(nullptr, nullptr);
 
     // Both paths must agree on row count.
     EXPECT_EQ(rows_with_index.size(), rows_no_index.size())
@@ -308,7 +325,7 @@ TEST_F(GDB1009Base, GDB1009_IndexMissesRow) {
 
     // Sort and compare element-by-element.
     std::sort(rows_with_index.begin(), rows_with_index.end());
-    std::sort(rows_no_index.begin(),   rows_no_index.end());
+    std::sort(rows_no_index.begin(), rows_no_index.end());
     for (size_t i = 0; i < std::min(rows_with_index.size(), rows_no_index.size()); ++i) {
         EXPECT_EQ(rows_with_index[i], rows_no_index[i])
             << "Row " << i << " differs between index and heap-scan paths";
@@ -323,12 +340,12 @@ TEST_F(GDB1009Base, GDB1009_EmptyTableWithIndex) {
     // No persons or orgs inserted; no edges.
     std::unordered_map<index_id_t, BTreeIndex*> btree_map;
     btree_map[persons_idx_id_] = persons_btree_.get();
-    btree_map[orgs_idx_id_]    = orgs_btree_.get();
+    btree_map[orgs_idx_id_] = orgs_btree_.get();
 
-    auto rows_idx  = run_single_hop(&btree_map, nullptr);
-    auto rows_scan = run_single_hop(nullptr,    nullptr);
+    auto rows_idx = run_single_hop(&btree_map, nullptr);
+    auto rows_scan = run_single_hop(nullptr, nullptr);
 
-    EXPECT_EQ(rows_idx.size(),  0u) << "Expected zero rows from index path on empty tables";
+    EXPECT_EQ(rows_idx.size(), 0u) << "Expected zero rows from index path on empty tables";
     EXPECT_EQ(rows_scan.size(), 0u) << "Expected zero rows from heap path on empty tables";
 }
 
@@ -350,17 +367,17 @@ TEST_F(GDB1009Base, GDB1009_IndexAndFallbackAgreeOnAllRows) {
 
     std::unordered_map<index_id_t, BTreeIndex*> btree_map;
     btree_map[persons_idx_id_] = persons_btree_.get();
-    btree_map[orgs_idx_id_]    = orgs_btree_.get();
+    btree_map[orgs_idx_id_] = orgs_btree_.get();
 
-    auto rows_idx  = run_single_hop(&btree_map, nullptr);
-    auto rows_scan = run_single_hop(nullptr,    nullptr);
+    auto rows_idx = run_single_hop(&btree_map, nullptr);
+    auto rows_scan = run_single_hop(nullptr, nullptr);
 
     ASSERT_EQ(rows_idx.size(), 4u)
         << "Index path should return 4 rows for 4 persons all linked to Acme";
     ASSERT_EQ(rows_scan.size(), 4u)
         << "Heap-scan path should return 4 rows for 4 persons all linked to Acme";
 
-    std::sort(rows_idx.begin(),  rows_idx.end());
+    std::sort(rows_idx.begin(), rows_idx.end());
     std::sort(rows_scan.begin(), rows_scan.end());
     for (size_t i = 0; i < 4u; ++i) {
         EXPECT_EQ(rows_idx[i], rows_scan[i])
@@ -379,22 +396,22 @@ TEST_F(GDB1009Base, GDB1009_IndexAndFallbackAgreeOnAllRows) {
 TEST_F(GDB1009Base, GDB1009_PartialIndexMissesOneRow) {
     insert_person_indexed(1, "Alice");
     insert_person_indexed(2, "Bob");
-    insert_person_heap_only(3, "Carol");  // deliberately NOT in index
+    insert_person_heap_only(3, "Carol"); // deliberately NOT in index
     insert_org_indexed(10, "Acme");
 
     link("works_at", 1, 10);
     link("works_at", 2, 10);
-    link("works_at", 3, 10);  // Carol -> Acme; Carol is not in persons index
+    link("works_at", 3, 10); // Carol -> Acme; Carol is not in persons index
 
     std::unordered_map<index_id_t, BTreeIndex*> btree_map;
     btree_map[persons_idx_id_] = persons_btree_.get();
-    btree_map[orgs_idx_id_]    = orgs_btree_.get();
+    btree_map[orgs_idx_id_] = orgs_btree_.get();
 
-    auto rows_idx  = run_single_hop(&btree_map, nullptr);
-    auto rows_scan = run_single_hop(nullptr,    nullptr);
+    auto rows_idx = run_single_hop(&btree_map, nullptr);
+    auto rows_scan = run_single_hop(nullptr, nullptr);
 
     // Both paths must agree on which rows are returned.
-    std::sort(rows_idx.begin(),  rows_idx.end());
+    std::sort(rows_idx.begin(), rows_idx.end());
     std::sort(rows_scan.begin(), rows_scan.end());
 
     EXPECT_EQ(rows_idx.size(), rows_scan.size())
@@ -419,7 +436,7 @@ TEST_F(GDB1009Base, GDB1009_FallbackNoIndexMap) {
     // Provide null maps -> fallback path.
     auto rows_scan = run_single_hop(nullptr, nullptr);
     ASSERT_EQ(rows_scan.size(), 1u);
-    EXPECT_EQ(rows_scan[0].first,  "Alice");
+    EXPECT_EQ(rows_scan[0].first, "Alice");
     EXPECT_EQ(rows_scan[0].second, "Acme");
 }
 
@@ -467,23 +484,30 @@ protected:
         OutputSchema schema(std::move(out_cols));
 
         BoundStatement bound;
-        VariableLengthMatchOperator op(
-            *graph_, *catalog_, *storage_, default_database_id,
-            std::move(config), std::move(schema), nullptr, bound,
-            VariableLengthMatchOperator::DEFAULT_MAX_VISITED,
-            btree_map, nullptr);
+        VariableLengthMatchOperator op(*graph_,
+                                       *catalog_,
+                                       *storage_,
+                                       default_database_id,
+                                       std::move(config),
+                                       std::move(schema),
+                                       nullptr,
+                                       bound,
+                                       VariableLengthMatchOperator::DEFAULT_MAX_VISITED,
+                                       btree_map,
+                                       nullptr);
 
         auto open_r = op.open();
-        if (!open_r) return {};
+        if (!open_r)
+            return {};
 
         std::vector<std::pair<std::string, std::string>> rows;
         while (true) {
             auto next_r = op.next();
-            if (!next_r || !next_r->has_value()) break;
+            if (!next_r || !next_r->has_value())
+                break;
             auto& row = **next_r;
             if (row.values.size() >= 2) {
-                rows.emplace_back(row.values[0].as_string(),
-                                  row.values[1].as_string());
+                rows.emplace_back(row.values[0].as_string(), row.values[1].as_string());
             }
         }
         op.close();
@@ -495,18 +519,17 @@ TEST_F(GDB1009VL, GDB1009_VLIndexAndFallbackAgree) {
     std::unordered_map<index_id_t, BTreeIndex*> btree_map;
     btree_map[persons_idx_id_] = persons_btree_.get();
 
-    auto rows_idx  = run_vl(&btree_map);
+    auto rows_idx = run_vl(&btree_map);
     auto rows_scan = run_vl(nullptr);
 
     ASSERT_EQ(rows_idx.size(), rows_scan.size())
-        << "VL index path returned " << rows_idx.size()
-        << " rows but heap-scan returned " << rows_scan.size();
+        << "VL index path returned " << rows_idx.size() << " rows but heap-scan returned "
+        << rows_scan.size();
 
-    std::sort(rows_idx.begin(),  rows_idx.end());
+    std::sort(rows_idx.begin(), rows_idx.end());
     std::sort(rows_scan.begin(), rows_scan.end());
     for (size_t i = 0; i < rows_idx.size(); ++i) {
-        EXPECT_EQ(rows_idx[i], rows_scan[i])
-            << "VL mismatch at row " << i;
+        EXPECT_EQ(rows_idx[i], rows_scan[i]) << "VL mismatch at row " << i;
     }
 }
 
@@ -528,7 +551,7 @@ TEST_F(GDB1009VL, GDB1009_VLIndexMissesNode) {
     // Carol(3) and Dave(4) are in the heap but NOT in this index.
     BTreeConfig bcfg;
     bcfg.key_types = {TypeId::INT64};
-    bcfg.is_unique  = true;
+    bcfg.is_unique = true;
     BTreeIndex partial_btree(bcfg);
 
     {
@@ -540,13 +563,16 @@ TEST_F(GDB1009VL, GDB1009_VLIndexMissesNode) {
         while (true) {
             auto row_r = iter->next();
             ASSERT_TRUE(row_r.has_value());
-            if (!row_r->has_value()) break;
+            if (!row_r->has_value())
+                break;
             auto [rid, raw] = **row_r;
             auto vals = TupleSerializer::deserialize(raw, (*ts)->storage_schema);
-            if (!vals || (*vals).empty()) continue;
+            if (!vals || (*vals).empty())
+                continue;
             // Column 0 is 'id' (INT64).
             auto id_r = (*vals)[0].try_as_int64();
-            if (!id_r) continue;
+            if (!id_r)
+                continue;
             int64_t id = **id_r;
             if (id == 1 || id == 2) {
                 auto r = partial_btree.insert({Value(id)}, rid);
@@ -561,8 +587,7 @@ TEST_F(GDB1009VL, GDB1009_VLIndexMissesNode) {
 
     // Heap-scan path: collect all (src_name, dst_name) pairs safely.
     auto rows_scan = run_vl(nullptr);
-    ASSERT_FALSE(rows_scan.empty())
-        << "Heap-scan path must return results for a 4-node chain";
+    ASSERT_FALSE(rows_scan.empty()) << "Heap-scan path must return results for a 4-node chain";
 
     // Index path: when nodes are absent from the index, binding_to_tuple emits
     // null Values for those columns.  Calling as_string() on a null Value
@@ -584,11 +609,17 @@ TEST_F(GDB1009VL, GDB1009_VLIndexMissesNode) {
         OutputSchema schema(std::move(out_cols));
 
         BoundStatement bound;
-        VariableLengthMatchOperator op(
-            *graph_, *catalog_, *storage_, default_database_id,
-            std::move(config), std::move(schema), nullptr, bound,
-            VariableLengthMatchOperator::DEFAULT_MAX_VISITED,
-            &btree_map, nullptr);
+        VariableLengthMatchOperator op(*graph_,
+                                       *catalog_,
+                                       *storage_,
+                                       default_database_id,
+                                       std::move(config),
+                                       std::move(schema),
+                                       nullptr,
+                                       bound,
+                                       VariableLengthMatchOperator::DEFAULT_MAX_VISITED,
+                                       &btree_map,
+                                       nullptr);
 
         auto open_r = op.open();
         ASSERT_TRUE(open_r.has_value()) << open_r.error().message;
@@ -598,7 +629,8 @@ TEST_F(GDB1009VL, GDB1009_VLIndexMissesNode) {
         while (true) {
             auto next_r = op.next();
             ASSERT_TRUE(next_r.has_value()) << next_r.error().message;
-            if (!next_r->has_value()) break;
+            if (!next_r->has_value())
+                break;
             ++total_rows;
             auto& row = **next_r;
             ASSERT_GE(row.values.size(), 2u);
@@ -662,44 +694,51 @@ TEST_F(GDB1009VL, GDB1009_ShortestPathIndexAndFallbackAgree) {
         OutputSchema schema(std::move(out_cols));
 
         BoundStatement bound;
-        MatchShortestPathOperator op(
-            *graph_, *catalog_, *storage_, default_database_id,
-            std::move(config), std::move(schema), nullptr, bound,
-            PathSelector::ANY_SHORTEST, path_var,
-            1,
-            MatchShortestPathOperator::DEFAULT_MAX_VISITED,
-            nullptr,
-            bm, nullptr);
+        MatchShortestPathOperator op(*graph_,
+                                     *catalog_,
+                                     *storage_,
+                                     default_database_id,
+                                     std::move(config),
+                                     std::move(schema),
+                                     nullptr,
+                                     bound,
+                                     PathSelector::ANY_SHORTEST,
+                                     path_var,
+                                     1,
+                                     MatchShortestPathOperator::DEFAULT_MAX_VISITED,
+                                     nullptr,
+                                     bm,
+                                     nullptr);
 
         auto open_r = op.open();
-        if (!open_r) return {};
+        if (!open_r)
+            return {};
 
         std::vector<std::pair<std::string, std::string>> rows;
         while (true) {
             auto next_r = op.next();
-            if (!next_r || !next_r->has_value()) break;
+            if (!next_r || !next_r->has_value())
+                break;
             auto& row = **next_r;
             if (row.values.size() >= 2) {
-                rows.emplace_back(row.values[0].as_string(),
-                                  row.values[1].as_string());
+                rows.emplace_back(row.values[0].as_string(), row.values[1].as_string());
             }
         }
         op.close();
         return rows;
     };
 
-    auto rows_idx  = run_sp(&btree_map);
+    auto rows_idx = run_sp(&btree_map);
     auto rows_scan = run_sp(nullptr);
 
     ASSERT_EQ(rows_idx.size(), rows_scan.size())
         << "ShortestPath: index path returned " << rows_idx.size()
         << " rows but heap-scan returned " << rows_scan.size();
 
-    std::sort(rows_idx.begin(),  rows_idx.end());
+    std::sort(rows_idx.begin(), rows_idx.end());
     std::sort(rows_scan.begin(), rows_scan.end());
     for (size_t i = 0; i < rows_idx.size(); ++i) {
-        EXPECT_EQ(rows_idx[i], rows_scan[i])
-            << "ShortestPath mismatch at row " << i;
+        EXPECT_EQ(rows_idx[i], rows_scan[i]) << "ShortestPath mismatch at row " << i;
     }
     // Sanity: must get at least one result from a 4-node chain.
     EXPECT_FALSE(rows_idx.empty()) << "ShortestPath returned no results on a connected chain";
