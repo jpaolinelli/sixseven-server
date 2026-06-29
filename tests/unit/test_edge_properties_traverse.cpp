@@ -116,15 +116,24 @@ TEST_F(EdgePropsTraverseTest, EdgePropertyCorrespondsToTraversedEdge) {
     ASSERT_GE(qr.rows.size(), 2u);
 
     // Depth-1 nodes: Bob reached via edge weight=1.5, Jane via weight=2.5.
+    // Count the rows that actually matched the guards so a regression that
+    // returns wrong depths (all 0 or 2) or mangled names makes zero EXPECTs run
+    // and is caught by the verified-count assertion below, rather than passing
+    // vacuously.
+    int verified = 0;
     for (const auto& row : qr.rows) {
         if (row[2].as_int64() == 1) {
             if (row[0].as_string() == "Bob") {
                 EXPECT_DOUBLE_EQ(row[1].as_float64(), 1.5);
+                ++verified;
             } else if (row[0].as_string() == "Jane") {
                 EXPECT_DOUBLE_EQ(row[1].as_float64(), 2.5);
+                ++verified;
             }
         }
     }
+    // Both depth-1 name->weight correspondences must have been checked.
+    EXPECT_EQ(verified, 2);
 }
 
 // ============================================================================
