@@ -73,7 +73,10 @@ bool starts_with_ci(std::string_view str, std::string_view prefix) {
 //   work_mem                       INERT — ExternalSort/HashJoin take memory
 //                                  budgets, but the planner wires fixed
 //                                  defaults; session plumbing is future work.
-//   default_transaction_isolation  INERT — single isolation level today.
+//   default_transaction_isolation  HONORED — validated at SET time; consumed
+//                                  by QueryEngine::set_session_isolation()
+//                                  (GDB-978). The value is stored here for
+//                                  SHOW and driver compatibility.
 //   search_path                    INERT — no schema namespaces.
 //   embedding_provider_url         INERT — providers come from sys_providers
 //                                  (ProviderCache), not a session URL.
@@ -125,6 +128,23 @@ Result<void> Session::set_variable(const std::string& name, const std::string& v
             return make_error(parsed.error().code, parsed.error().message);
         }
     }
+    // default_transaction_isolation is validated at SET time so drivers that
+    // pass unsupported values get a clear error (GDB-978).
+    if (lower_name == "default_transaction_isolation") {
+        auto lv = to_lower(value);
+        if (lv != "read committed" && lv != "snapshot isolation" && lv != "repeatable read" &&
+            lv != "serializable") {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "invalid value for parameter \"default_transaction_isolation\": \"" +
+                                  value +
+                                  "\"; expected \"read committed\", \"snapshot isolation\", "
+                                  "\"repeatable read\", or \"serializable\"");
+        }
+        if (isolation_change_cb_) {
+            // Notify the engine (or any consumer) of the new level.
+            isolation_change_cb_(lv);
+        }
+    }
     variables_[lower_name] = value;
     SIXSEVEN_LOG_DEBUG("session {}: SET {} = '{}'", backend_pid_, lower_name, value);
     return ok();
@@ -169,6 +189,10 @@ std::vector<std::pair<std::string, std::string>> Session::get_all_variables() co
 
 bool Session::is_session_variable(const std::string& name) const {
     return DEFAULT_VARIABLES.find(to_lower(name)) != DEFAULT_VARIABLES.end();
+}
+
+void Session::set_isolation_change_callback(IsolationChangeCallback cb) {
+    isolation_change_cb_ = std::move(cb);
 }
 
 Result<int64_t> Session::parse_timeout_ms(const std::string& value) {

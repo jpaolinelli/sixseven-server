@@ -196,6 +196,20 @@ public:
     /// when the engine is in autocommit mode.
     [[nodiscard]] txn_id_t active_transaction_id() const { return active_txn_id_; }
 
+    /// Set the session-level default isolation level used by subsequent BEGIN
+    /// statements (GDB-978). RC = statement-level snapshot; SI = transaction-
+    /// level snapshot frozen at BEGIN. SERIALIZABLE is accepted but rw-
+    /// dependency enforcement is out of scope (GDB-966/968).
+    void set_session_isolation(IsolationLevel level);
+
+    /// Return the current session isolation level (GDB-978).
+    [[nodiscard]] IsolationLevel session_isolation() const;
+
+    /// Parse an isolation level string ("read committed", "snapshot isolation",
+    /// "repeatable read", "serializable") into an IsolationLevel enum value.
+    /// Returns an error for unrecognized strings. Case-insensitive (GDB-978).
+    [[nodiscard]] static Result<IsolationLevel> parse_isolation_level(const std::string& value);
+
 private:
     /// Execute BEGIN: open an explicit transaction (GDB-747).
     [[nodiscard]] Result<QueryResult> execute_begin();
@@ -329,6 +343,9 @@ private:
 
     /// Explicit transaction opened by BEGIN (invalid_txn_id = autocommit).
     txn_id_t active_txn_id_ = invalid_txn_id;
+
+    /// Session-level isolation level, applied by the next BEGIN (GDB-978).
+    IsolationLevel session_isolation_ = IsolationLevel::READ_COMMITTED;
 
     /// Per-heap live-row-count deltas accumulated by the explicit transaction
     /// (+inserts, -deletes). Applied in reverse on ROLLBACK so COUNT(*) stays

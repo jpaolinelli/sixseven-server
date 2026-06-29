@@ -38,6 +38,7 @@
 #include "sixseven/vector/hnsw_index.h"
 #include "sixseven/vector/provider_registry.h"
 
+#include <cctype>
 #include <chrono>
 #include <span>
 #include <sstream>
@@ -2465,7 +2466,8 @@ Result<QueryResult> QueryEngine::execute_begin() {
                           active_txn_id_);
         return ok(std::move(qr));
     }
-    auto txn = txn_mgr_.begin();
+    // GDB-978: honor the session isolation level set via set_session_isolation().
+    auto txn = txn_mgr_.begin(session_isolation_);
     if (!txn) {
         return make_error(txn.error().code, txn.error().message);
     }
@@ -2511,6 +2513,55 @@ Result<QueryResult> QueryEngine::execute_rollback() {
     active_txn_id_ = invalid_txn_id;
     active_txn_row_deltas_.clear();
     return ok(std::move(qr));
+}
+
+// ---------------------------------------------------------------------------
+// Session isolation level (GDB-978)
+// ---------------------------------------------------------------------------
+
+void QueryEngine::set_session_isolation(IsolationLevel level) {
+    session_isolation_ = level;
+    SIXSEVEN_LOG_DEBUG("session isolation set to {}", isolation_level_name(level));
+}
+
+IsolationLevel QueryEngine::session_isolation() const {
+    return session_isolation_;
+}
+
+Result<IsolationLevel> QueryEngine::parse_isolation_level(const std::string& value) {
+    // Normalize: lowercase, collapse runs of whitespace to a single space.
+    std::string norm;
+    norm.reserve(value.size());
+    bool in_space = false;
+    for (unsigned char c : value) {
+        if (std::isspace(c)) {
+            if (!in_space && !norm.empty()) {
+                norm += ' ';
+                in_space = true;
+            }
+        } else {
+            norm += static_cast<char>(std::tolower(c));
+            in_space = false;
+        }
+    }
+    // Trim trailing space.
+    if (!norm.empty() && norm.back() == ' ') {
+        norm.pop_back();
+    }
+
+    if (norm == "read committed") {
+        return ok(IsolationLevel::READ_COMMITTED);
+    }
+    if (norm == "snapshot isolation" || norm == "repeatable read") {
+        return ok(IsolationLevel::SNAPSHOT_ISOLATION);
+    }
+    if (norm == "serializable") {
+        return ok(IsolationLevel::SERIALIZABLE);
+    }
+    return make_error(StatusCode::INVALID_ARGUMENT,
+                      "invalid isolation level: \"" + value +
+                          "\"; expected \"read committed\", \"snapshot isolation\", "
+                          "\"repeatable read\", or \"serializable\"");
 }
 
 // ---------------------------------------------------------------------------
