@@ -31,6 +31,7 @@
 #include "sixseven/storage/wal.h"
 #include "sixseven/table/tuple.h"
 #include "sixseven/txn/read_view.h"
+#include "sixseven/txn/vacuum.h"
 #include "sixseven/vector/backfill_manager.h"
 #include "sixseven/vector/embedding_column.h"
 #include "sixseven/vector/embedding_worker.h"
@@ -1965,16 +1966,57 @@ Result<QueryResult> QueryEngine::execute_vacuum(const VacuumStmt& stmt) {
         targets = catalog_.list_tables(current_database_id_);
     }
 
-    // Validated no-op (GDB-1230): txn::Vacuum must not run over the executor's
-    // heap pages yet. Tuples now carry MVCC headers (GDB-714), but there is
-    // still no shared TransactionManager to supply a vacuum horizon — the
-    // executor stamps frozen_txn_id, and a fresh manager resolves real txn
-    // ids as ABORTED, so running Vacuum could still reclaim live rows.
-    // Targets are resolved above so VACUUM keeps PostgreSQL-compatible
-    // error behavior.
-    SIXSEVEN_LOG_INFO("VACUUM: validated {} table(s); reclamation deferred until MVCC "
-                      "integration (GDB-1230)",
-                      targets.size());
+    // GDB-969: wire real reclamation.  The corruption hazard (GDB-1230) has
+    // been resolved in vacuum.cpp via vacuum_is_dead(), which maps xmin ids
+    // unknown to this manager to frozen_txn_id (committed) before calling
+    // is_dead(), mirroring the read-path normalize_xid() in table_heap.cpp.
+    // We use the shared txn_mgr_ (never a fresh manager) so the horizon and
+    // status tables are consistent with the live transaction state.
+    uint32_t total_pages_scanned = 0;
+    uint32_t total_dead_tuples = 0;
+
+    for (const auto& schema : targets) {
+        // Ensure the table's storage is open (mirrors execute_analyze).
+        auto ts = storage_.get_table_storage(schema.table_id);
+        if (!ts) {
+            if (storage_.table_file_exists(current_database_id_, schema.table_id)) {
+                auto opened =
+                    storage_.open_table_storage(current_database_id_, schema.table_id, schema);
+                if (!opened) {
+                    return make_error(opened.error().code, opened.error().message);
+                }
+                ts = storage_.get_table_storage(schema.table_id);
+            }
+            if (!ts) {
+                return make_error(ts.error().code, ts.error().message);
+            }
+        }
+        auto* table_storage = *ts;
+
+        Vacuum vac(*table_storage->bpm, storage_.disk_manager(), table_storage->file_id, txn_mgr_);
+
+        // VacuumStmt does not yet carry a FULL flag (no grammar change in this
+        // ticket); VACUUM FULL compaction is deferred to a follow-up.
+        Result<VacuumStats> stats_result = vac.run();
+
+        if (!stats_result) {
+            SIXSEVEN_LOG_WARN(
+                "VACUUM: table {} failed: {}", schema.name, stats_result.error().message);
+            continue;
+        }
+        total_pages_scanned += stats_result->pages_scanned;
+        total_dead_tuples += stats_result->dead_tuples;
+
+        SIXSEVEN_LOG_INFO("VACUUM: table {} scanned {} pages, removed {} dead tuples",
+                          schema.name,
+                          stats_result->pages_scanned,
+                          stats_result->dead_tuples);
+    }
+
+    SIXSEVEN_LOG_INFO("VACUUM: complete: {} table(s), {} pages scanned, {} dead tuples removed",
+                      targets.size(),
+                      total_pages_scanned,
+                      total_dead_tuples);
 
     QueryResult qr;
     qr.message = "VACUUM";
