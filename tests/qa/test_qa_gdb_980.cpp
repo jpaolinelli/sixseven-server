@@ -49,12 +49,12 @@ TEST_F(QA_GDB980EventLoop, DoubleRemoveFdIsNoOp) {
     // remove_fd on an fd we never registered must not fail.
     // Use an obviously bogus fd value (99999) that will never be in the loop.
     auto r1 = loop_->remove_fd(99999);
-    EXPECT_TRUE(r1.has_value())
-        << "first remove_fd on absent fd must be ok: " << r1.error().message;
+    EXPECT_TRUE(r1.has_value()) << "first remove_fd on absent fd must be ok: "
+                                << r1.error().message;
 
     auto r2 = loop_->remove_fd(99999);
-    EXPECT_TRUE(r2.has_value())
-        << "second remove_fd (double-remove) must be ok: " << r2.error().message;
+    EXPECT_TRUE(r2.has_value()) << "second remove_fd (double-remove) must be ok: "
+                                << r2.error().message;
 }
 
 // ---------------------------------------------------------------------------
@@ -67,8 +67,7 @@ TEST_F(QA_GDB980EventLoop, PollWithNoFdsReturnsEmptyImmediately) {
     auto r = loop_->poll(0);
     ASSERT_TRUE(r.has_value()) << r.error().message;
     // The wakeup fd is internal; no client events should appear.
-    EXPECT_TRUE(r->empty())
-        << "poll with no registered fds must return empty events";
+    EXPECT_TRUE(r->empty()) << "poll with no registered fds must return empty events";
 }
 
 // ---------------------------------------------------------------------------
@@ -124,8 +123,7 @@ TEST_F(QA_GDB980EventLoop, GDB980_RemoveFdSilencesBusyPollSpin) {
     // ---- Double-remove tolerance on the close path.
     {
         auto r = loop_->remove_fd(socks[0]);
-        EXPECT_TRUE(r.has_value())
-            << "double-remove must be a no-op: " << r.error().message;
+        EXPECT_TRUE(r.has_value()) << "double-remove must be a no-op: " << r.error().message;
     }
 
     ::close(socks[0]);
@@ -163,8 +161,7 @@ TEST_F(QA_GDB980EventLoop, GDB980_ReAddAfterRemoveRestoresPolling) {
     // process_completed_queries). This must not fail with EEXIST or similar.
     {
         auto r = loop_->add_fd(socks[0], EventType::READ_WRITE);
-        ASSERT_TRUE(r.has_value())
-            << "re-add after remove must succeed: " << r.error().message;
+        ASSERT_TRUE(r.has_value()) << "re-add after remove must succeed: " << r.error().message;
     }
 
     // Confirm the fd is now polled (it's writable, so WRITE event expected).
@@ -178,8 +175,7 @@ TEST_F(QA_GDB980EventLoop, GDB980_ReAddAfterRemoveRestoresPolling) {
                 break;
             }
         }
-        EXPECT_TRUE(found)
-            << "re-added fd must appear in poll()";
+        EXPECT_TRUE(found) << "re-added fd must appear in poll()";
     }
 
     // Clean up.
