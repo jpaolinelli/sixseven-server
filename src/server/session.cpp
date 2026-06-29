@@ -661,14 +661,43 @@ std::optional<Result<QueryResult>> Session::try_handle_rollback_to(const std::st
 void Session::update_transaction_state(const std::string& sql, bool success) {
     auto trimmed = to_lower(trim(sql));
 
-    if (trimmed == "begin" || trimmed == "start transaction") {
+    // Strip a single trailing statement terminator so "BEGIN;" is classified the
+    // same as "BEGIN".
+    if (!trimmed.empty() && trimmed.back() == ';') {
+        trimmed = trim(trimmed.substr(0, trimmed.size() - 1));
+    }
+
+    // Classify by the leading keyword(s) rather than whole-string equality. The
+    // parser accepts the optional TRANSACTION/WORK suffix and transaction modes
+    // (e.g. "BEGIN TRANSACTION", "BEGIN WORK", "COMMIT TRANSACTION",
+    // "START TRANSACTION ISOLATION LEVEL ..."), so equality on the full text
+    // missed every spelling but the bare keyword and left ReadyForQuery status
+    // desynchronized from the engine's actual transaction.
+    const auto first_space = trimmed.find(' ');
+    const std::string first =
+        (first_space == std::string::npos) ? trimmed : trimmed.substr(0, first_space);
+    const std::string rest =
+        (first_space == std::string::npos) ? "" : trim(trimmed.substr(first_space + 1));
+    const auto second_space = rest.find(' ');
+    const std::string second =
+        (second_space == std::string::npos) ? rest : rest.substr(0, second_space);
+
+    // BEGIN [WORK|TRANSACTION] [mode...] or START TRANSACTION [mode...].
+    const bool is_begin = (first == "begin") || (first == "start" && second == "transaction");
+    // COMMIT/END [WORK|TRANSACTION].
+    const bool is_commit = (first == "commit" || first == "end");
+    // ROLLBACK/ABORT [WORK|TRANSACTION], but NOT "ROLLBACK TO <savepoint>", which
+    // only unwinds to a savepoint and must leave the transaction open.
+    const bool is_rollback = (first == "rollback" || first == "abort") && second != "to";
+
+    if (is_begin) {
         if (success) {
             txn_state_ = TransactionState::IN_TRANSACTION;
         }
         return;
     }
 
-    if (trimmed == "commit" || trimmed == "end") {
+    if (is_commit) {
         if (success) {
             txn_state_ = TransactionState::IDLE;
             savepoints_.clear();
@@ -676,7 +705,7 @@ void Session::update_transaction_state(const std::string& sql, bool success) {
         return;
     }
 
-    if (trimmed == "rollback" || trimmed == "abort") {
+    if (is_rollback) {
         // Rollback always resets to idle (even from FAILED state).
         txn_state_ = TransactionState::IDLE;
         savepoints_.clear();

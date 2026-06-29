@@ -300,6 +300,74 @@ TEST(Session, ErrorOutsideTransactionStaysIdle) {
     EXPECT_EQ(session.transaction_state(), TransactionState::IDLE);
 }
 
+// GDB-976: the optional TRANSACTION/WORK suffix and transaction modes are legal
+// SQL; classification must key off the leading keyword, not whole-string
+// equality (which left ReadyForQuery status desynchronized).
+TEST(Session, BeginTransactionKeywordSetsInTransaction) {
+    Session session(1);
+    session.update_transaction_state("BEGIN TRANSACTION", true);
+    EXPECT_EQ(session.transaction_state(), TransactionState::IN_TRANSACTION);
+    EXPECT_EQ(session.ready_for_query_status(), 'T');
+}
+
+TEST(Session, BeginWorkSetsInTransaction) {
+    Session session(1);
+    session.update_transaction_state("BEGIN WORK", true);
+    EXPECT_EQ(session.transaction_state(), TransactionState::IN_TRANSACTION);
+}
+
+TEST(Session, BeginWithTrailingSemicolonSetsInTransaction) {
+    Session session(1);
+    session.update_transaction_state("BEGIN;", true);
+    EXPECT_EQ(session.transaction_state(), TransactionState::IN_TRANSACTION);
+}
+
+TEST(Session, StartTransactionWithIsolationModeSetsInTransaction) {
+    Session session(1);
+    session.update_transaction_state("START TRANSACTION ISOLATION LEVEL SERIALIZABLE", true);
+    EXPECT_EQ(session.transaction_state(), TransactionState::IN_TRANSACTION);
+}
+
+TEST(Session, CommitTransactionKeywordResetsToIdle) {
+    Session session(1);
+    session.update_transaction_state("BEGIN TRANSACTION", true);
+    session.update_transaction_state("COMMIT TRANSACTION", true);
+    EXPECT_EQ(session.transaction_state(), TransactionState::IDLE);
+    EXPECT_EQ(session.ready_for_query_status(), 'I');
+}
+
+TEST(Session, EndTransactionKeywordResetsToIdle) {
+    Session session(1);
+    session.update_transaction_state("BEGIN", true);
+    session.update_transaction_state("END TRANSACTION", true);
+    EXPECT_EQ(session.transaction_state(), TransactionState::IDLE);
+}
+
+TEST(Session, RollbackWorkKeywordResetsToIdle) {
+    Session session(1);
+    session.update_transaction_state("BEGIN", true);
+    session.update_transaction_state("ROLLBACK WORK", true);
+    EXPECT_EQ(session.transaction_state(), TransactionState::IDLE);
+}
+
+TEST(Session, FailureAfterBeginTransactionKeywordSetsFailed) {
+    Session session(1);
+    session.update_transaction_state("BEGIN TRANSACTION", true);
+    session.update_transaction_state("SELECT bad", false);
+    EXPECT_EQ(session.transaction_state(), TransactionState::FAILED);
+    EXPECT_EQ(session.ready_for_query_status(), 'E');
+}
+
+// ROLLBACK TO <savepoint> only unwinds to a savepoint; it must NOT end the
+// transaction (status stays 'T'), unlike a bare ROLLBACK.
+TEST(Session, RollbackToSavepointKeepsTransactionOpen) {
+    Session session(1);
+    session.update_transaction_state("BEGIN", true);
+    session.update_transaction_state("ROLLBACK TO SAVEPOINT sp1", true);
+    EXPECT_EQ(session.transaction_state(), TransactionState::IN_TRANSACTION);
+    EXPECT_EQ(session.ready_for_query_status(), 'T');
+}
+
 // =============================================================================
 // Cleanup test
 // =============================================================================
