@@ -107,6 +107,7 @@ TEST_F(ConcurrentHeapScanUpdate, ScannerNeverObservesTornTuple) {
     std::atomic<bool> stop{false};
     std::atomic<size_t> reads{0};
     std::atomic<size_t> updates{0};
+    std::atomic<size_t> successful_updates{0};
     std::atomic<size_t> torn_reads{0};
 
     // Writer: cycle through rids, rewriting each with a different length
@@ -126,8 +127,10 @@ TEST_F(ConcurrentHeapScanUpdate, ScannerNeverObservesTornTuple) {
             // INVALID_ARGUMENT when the page is full — just skip and keep
             // going. What is NOT legitimate is a torn read on the scanner
             // side, which the reader thread asserts on.
-            (void)r;
             updates.fetch_add(1, std::memory_order_relaxed);
+            if (r.has_value()) {
+                successful_updates.fetch_add(1, std::memory_order_relaxed);
+            }
             ++idx;
         }
     });
@@ -164,6 +167,11 @@ TEST_F(ConcurrentHeapScanUpdate, ScannerNeverObservesTornTuple) {
 
     EXPECT_GT(reads.load(), 0u) << "scanner never read anything";
     EXPECT_GT(updates.load(), 0u) << "writer never updated anything";
+    // Vacuity guard: at least one update must actually SUCCEED, not merely be
+    // attempted. If update_tuple regressed to fail on every call, zero
+    // concurrent rewrites would occur, torn_reads would be trivially 0, and the
+    // torn-read check below would pass vacuously (GDB-967).
+    EXPECT_GT(successful_updates.load(), 0u) << "writer never updated anything successfully";
     EXPECT_EQ(torn_reads.load(), 0u)
         << "observed torn reads — the page latch is not protecting scanners";
 }
