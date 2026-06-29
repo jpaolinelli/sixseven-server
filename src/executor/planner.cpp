@@ -948,7 +948,10 @@ Planner::plan_from_source(const TableRef& table_ref,
                 std::move(match_config),
                 std::move(scope_schema),
                 nullptr, // WHERE handled by outer SELECT
-                bound);
+                bound,
+                VariableLengthMatchOperator::DEFAULT_MAX_VISITED,
+                btree_indexes_,
+                hash_indexes_);
         } else {
             iter = std::make_unique<PatternMatchOperator>(*graph_engine_,
                                                           catalog_,
@@ -957,7 +960,9 @@ Planner::plan_from_source(const TableRef& table_ref,
                                                           std::move(match_config),
                                                           std::move(scope_schema),
                                                           nullptr, // WHERE handled by outer SELECT
-                                                          bound);
+                                                          bound,
+                                                          btree_indexes_,
+                                                          hash_indexes_);
         }
 
         auto out_schema = iter->output_schema();
@@ -3083,16 +3088,22 @@ Result<std::unique_ptr<Iterator>> Planner::plan_match(const MatchStmt& stmt,
             stmt.path_variable,
             stmt.shortest_k,
             MatchShortestPathOperator::DEFAULT_MAX_VISITED,
-            stmt.weight_expr.get());
+            stmt.weight_expr.get(),
+            btree_indexes_,
+            hash_indexes_);
     } else if (has_variable_length) {
-        child = std::make_unique<VariableLengthMatchOperator>(*graph_engine_,
-                                                              catalog_,
-                                                              storage_,
-                                                              database_id_,
-                                                              std::move(match_config),
-                                                              std::move(scope_schema),
-                                                              nullptr, // WHERE handled below
-                                                              bound);
+        child = std::make_unique<VariableLengthMatchOperator>(
+            *graph_engine_,
+            catalog_,
+            storage_,
+            database_id_,
+            std::move(match_config),
+            std::move(scope_schema),
+            nullptr, // WHERE handled below
+            bound,
+            VariableLengthMatchOperator::DEFAULT_MAX_VISITED,
+            btree_indexes_,
+            hash_indexes_);
     } else {
         child = std::make_unique<PatternMatchOperator>(*graph_engine_,
                                                        catalog_,
@@ -3101,7 +3112,9 @@ Result<std::unique_ptr<Iterator>> Planner::plan_match(const MatchStmt& stmt,
                                                        std::move(match_config),
                                                        std::move(scope_schema),
                                                        nullptr, // WHERE handled below
-                                                       bound);
+                                                       bound,
+                                                       btree_indexes_,
+                                                       hash_indexes_);
     }
 
     // Correlated MATCH: prepend the fixed outer row so the WHERE / pattern
