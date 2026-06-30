@@ -2,14 +2,200 @@
 
 #include "sixseven/common/uuid.h"
 
+#include <charconv>
+#include <chrono>
 #include <cmath>
 #include <compare>
 #include <cstdint>
 #include <limits>
+#include <string_view>
 
 namespace sixseven {
 
 namespace {
+
+// -- Temporal string parsers --------------------------------------------------
+
+// Parse exactly N decimal digits from sv starting at offset, advancing offset.
+// Returns false if fewer than N digits are available or any char is non-digit.
+static bool parse_digits(std::string_view sv, size_t& offset, int n, int& out) {
+    if (offset + static_cast<size_t>(n) > sv.size()) {
+        return false;
+    }
+    int val = 0;
+    for (int i = 0; i < n; ++i) {
+        char c = sv[offset + static_cast<size_t>(i)];
+        if (c < '0' || c > '9') {
+            return false;
+        }
+        val = val * 10 + (c - '0');
+    }
+    offset += static_cast<size_t>(n);
+    out = val;
+    return true;
+}
+
+// Parse "YYYY-MM-DD" from sv, producing a Date.
+// Returns make_error on any format or calendar violation.
+static Result<Date> parse_date_sv(std::string_view sv) {
+    // Require exactly "YYYY-MM-DD" (10 chars, zero-padded).
+    if (sv.size() < 10) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "invalid input syntax for type date: \"" + std::string(sv) + "\"");
+    }
+    size_t off = 0;
+    int y = 0;
+    int m = 0;
+    int d = 0;
+    if (!parse_digits(sv, off, 4, y) || sv[off] != '-') {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "invalid input syntax for type date: \"" + std::string(sv) + "\"");
+    }
+    ++off;
+    if (!parse_digits(sv, off, 2, m) || sv[off] != '-') {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "invalid input syntax for type date: \"" + std::string(sv) + "\"");
+    }
+    ++off;
+    if (!parse_digits(sv, off, 2, d)) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "invalid input syntax for type date: \"" + std::string(sv) + "\"");
+    }
+    // No trailing characters allowed (for date-only parsing).
+    if (off != sv.size()) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "invalid input syntax for type date: \"" + std::string(sv) + "\"");
+    }
+    // Calendar validation via chrono (catches leap years, invalid months/days).
+    auto ymd = std::chrono::year{y} / std::chrono::month{static_cast<unsigned>(m)} /
+               std::chrono::day{static_cast<unsigned>(d)};
+    if (!ymd.ok()) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "invalid input syntax for type date: \"" + std::string(sv) + "\"");
+    }
+    int32_t days = static_cast<int32_t>(std::chrono::sys_days{ymd}.time_since_epoch().count());
+    return ok(Date{days});
+}
+
+// Parse "HH:MM:SS" or "HH:MM:SS.ffffff" from sv at offset, producing Time
+// microseconds. offset is advanced past the parsed portion.
+// Returns false on parse failure, true on success.
+static bool parse_time_part(std::string_view sv, size_t& off, int64_t& out_us) {
+    int h = 0;
+    int mi = 0;
+    int s = 0;
+    if (!parse_digits(sv, off, 2, h) || off >= sv.size() || sv[off] != ':') {
+        return false;
+    }
+    ++off;
+    if (!parse_digits(sv, off, 2, mi) || off >= sv.size() || sv[off] != ':') {
+        return false;
+    }
+    ++off;
+    if (!parse_digits(sv, off, 2, s)) {
+        return false;
+    }
+    if (h < 0 || h > 23 || mi < 0 || mi > 59 || s < 0 || s > 59) {
+        return false;
+    }
+    int64_t us =
+        (static_cast<int64_t>(h) * 3600 + static_cast<int64_t>(mi) * 60 + static_cast<int64_t>(s)) *
+        1000000LL;
+    // Optional fractional seconds: up to 6 digits (microseconds).
+    if (off < sv.size() && sv[off] == '.') {
+        ++off;
+        int frac_digits = 0;
+        int64_t frac = 0;
+        while (off < sv.size() && sv[off] >= '0' && sv[off] <= '9' && frac_digits < 6) {
+            frac = frac * 10 + (sv[off] - '0');
+            ++off;
+            ++frac_digits;
+        }
+        // Pad to microseconds (6 digits).
+        for (int i = frac_digits; i < 6; ++i) {
+            frac *= 10;
+        }
+        us += frac;
+    }
+    out_us = us;
+    return true;
+}
+
+// Parse "HH:MM:SS[.ffffff]" from sv (entire string).
+static Result<Time> parse_time_sv(std::string_view sv) {
+    if (sv.size() < 8) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "invalid input syntax for type time: \"" + std::string(sv) + "\"");
+    }
+    size_t off = 0;
+    int64_t us = 0;
+    if (!parse_time_part(sv, off, us) || off != sv.size()) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "invalid input syntax for type time: \"" + std::string(sv) + "\"");
+    }
+    return ok(Time{us});
+}
+
+// Parse "YYYY-MM-DD[ T]HH:MM:SS[.ffffff]" or "YYYY-MM-DD" (midnight) from sv.
+static Result<Timestamp> parse_timestamp_sv(std::string_view sv) {
+    if (sv.size() < 10) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "invalid input syntax for type timestamp: \"" + std::string(sv) + "\"");
+    }
+    // Parse date portion (first 10 chars).
+    std::string_view date_part = sv.substr(0, 10);
+    size_t off = 0;
+    int y = 0;
+    int m = 0;
+    int d = 0;
+    if (!parse_digits(date_part, off, 4, y) || off >= date_part.size() || date_part[off] != '-') {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "invalid input syntax for type timestamp: \"" + std::string(sv) + "\"");
+    }
+    ++off;
+    if (!parse_digits(date_part, off, 2, m) || off >= date_part.size() || date_part[off] != '-') {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "invalid input syntax for type timestamp: \"" + std::string(sv) + "\"");
+    }
+    ++off;
+    if (!parse_digits(date_part, off, 2, d)) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "invalid input syntax for type timestamp: \"" + std::string(sv) + "\"");
+    }
+    auto ymd = std::chrono::year{y} / std::chrono::month{static_cast<unsigned>(m)} /
+               std::chrono::day{static_cast<unsigned>(d)};
+    if (!ymd.ok()) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "invalid input syntax for type timestamp: \"" + std::string(sv) + "\"");
+    }
+    int64_t date_us =
+        static_cast<int64_t>(std::chrono::sys_days{ymd}.time_since_epoch().count()) * 86400000000LL;
+
+    // If the string ends after the date portion, treat as midnight.
+    if (sv.size() == 10) {
+        return ok(Timestamp{date_us});
+    }
+
+    // Expect separator: space or 'T'.
+    char sep = sv[10];
+    if (sep != ' ' && sep != 'T') {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "invalid input syntax for type timestamp: \"" + std::string(sv) + "\"");
+    }
+
+    std::string_view time_sv = sv.substr(11);
+    if (time_sv.size() < 8) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "invalid input syntax for type timestamp: \"" + std::string(sv) + "\"");
+    }
+    size_t toff = 0;
+    int64_t time_us = 0;
+    if (!parse_time_part(time_sv, toff, time_us) || toff != time_sv.size()) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "invalid input syntax for type timestamp: \"" + std::string(sv) + "\"");
+    }
+    return ok(Timestamp{date_us + time_us});
+}
 
 // -- Numeric rank for coercion promotion --------------------------------------
 
@@ -284,6 +470,12 @@ bool can_coerce(TypeId from, TypeId to) {
         return true;
     }
 
+    // STRING -> temporal types: allow implicit coercion from string literals.
+    if (from == TypeId::STRING &&
+        (to == TypeId::DATE || to == TypeId::TIME || to == TypeId::TIMESTAMP)) {
+        return true;
+    }
+
     return false;
 }
 
@@ -348,6 +540,29 @@ Result<Value> coerce(const Value& value, TypeId target) {
     // STRING → UUID
     if (from == TypeId::STRING && target == TypeId::UUID) {
         auto parsed = parse_uuid(value.as_string());
+        if (!parsed) {
+            return tl::unexpected(parsed.error());
+        }
+        return ok(Value(*parsed));
+    }
+
+    // STRING -> DATE / TIME / TIMESTAMP
+    if (from == TypeId::STRING && target == TypeId::DATE) {
+        auto parsed = parse_date_sv(value.as_string());
+        if (!parsed) {
+            return tl::unexpected(parsed.error());
+        }
+        return ok(Value(*parsed));
+    }
+    if (from == TypeId::STRING && target == TypeId::TIME) {
+        auto parsed = parse_time_sv(value.as_string());
+        if (!parsed) {
+            return tl::unexpected(parsed.error());
+        }
+        return ok(Value(*parsed));
+    }
+    if (from == TypeId::STRING && target == TypeId::TIMESTAMP) {
+        auto parsed = parse_timestamp_sv(value.as_string());
         if (!parsed) {
             return tl::unexpected(parsed.error());
         }
