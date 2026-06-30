@@ -10,6 +10,7 @@ add_library(sixseven_common STATIC
     config.cpp
     coercion.cpp
     crash_handler.cpp
+    decimal_math.cpp
     parse_utils.cpp
     uuid.cpp
     secrets_manager.cpp

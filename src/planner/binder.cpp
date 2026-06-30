@@ -1025,6 +1025,27 @@ Result<ExprType> Binder::bind_binary(const BinaryExpr& expr, Scope& scope, Bound
                                   std::string(type_name(*ct)));
         }
         et.type_id = *ct;
+        // Propagate decimal_scale for DECIMAL arithmetic results.
+        if (*ct == TypeId::DECIMAL) {
+            int32_t s1 = lhs->decimal_scale;
+            int32_t s2 = rhs->decimal_scale;
+            switch (expr.op) {
+            case BinaryOp::ADD:
+            case BinaryOp::SUBTRACT:
+            case BinaryOp::MODULO:
+                et.decimal_scale = (s1 >= s2) ? s1 : s2;
+                break;
+            case BinaryOp::MULTIPLY:
+                et.decimal_scale = s1 + s2;
+                break;
+            case BinaryOp::DIVIDE:
+                et.decimal_scale = s1 + 6;
+                break;
+            default:
+                et.decimal_scale = s1;
+                break;
+            }
+        }
         break;
     }
     case BinaryOp::EQUAL:
@@ -1238,6 +1259,10 @@ Result<ExprType> Binder::bind_cast(const CastExpr& expr, Scope& scope, BoundStat
     et.type_id = *target;
     et.nullable = inner->nullable;
     et.is_aggregate = inner->is_aggregate;
+    // Propagate DECIMAL scale from CAST(x AS DECIMAL(p,s)).
+    if (*target == TypeId::DECIMAL && expr.target_type.param2.has_value()) {
+        et.decimal_scale = *expr.target_type.param2;
+    }
     return ok(et);
 }
 
