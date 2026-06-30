@@ -362,11 +362,15 @@ TEST(QA_GDB202_Null, NullProducesEmptyVector) {
 
 TEST(QA_GDB202_Null, NullTextAlsoWorks) {
     Value null_val;
-    // value_to_pg_text should handle NULL gracefully too.
+    ASSERT_TRUE(null_val.is_null());
+    // value_to_pg_text returns an empty string for NULL. On the wire, a NULL
+    // column value is signaled by a -1 length field, not by this string, so the
+    // empty string here is unambiguous (it is never written as actual bytes for
+    // a NULL). The previous version discarded the result and only checked
+    // "doesn't crash", which is vacuous because value_to_pg_text returns
+    // std::string and cannot throw under project conventions.
     auto text = value_to_pg_text(null_val);
-    // The text representation of NULL is typically empty or special.
-    // Just verify it doesn't crash.
-    (void)text;
+    EXPECT_EQ(text, "");
 }
 
 // =============================================================================
