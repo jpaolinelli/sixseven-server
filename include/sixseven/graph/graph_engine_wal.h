@@ -51,8 +51,7 @@ struct EdgeWalPayload {
 
 /// Deserialize an edge WAL payload from bytes.
 /// Returns INVALID_ARGUMENT if the buffer is too short or malformed.
-[[nodiscard]] Result<EdgeWalPayload>
-deserialize_edge_wal_payload(std::span<const uint8_t> data);
+[[nodiscard]] Result<EdgeWalPayload> deserialize_edge_wal_payload(std::span<const uint8_t> data);
 
 // -- Recovery handler ----------------------------------------------------------
 
@@ -97,8 +96,7 @@ private:
     // Key: "database_id:edge_type_name"
     std::unordered_map<std::string, EdgeTableEntry> tables_;
 
-    static std::string make_key(database_id_t database_id,
-                                const std::string& edge_type_name);
+    static std::string make_key(database_id_t database_id, const std::string& edge_type_name);
 };
 
 // -- Composite recovery handler ------------------------------------------------
@@ -111,8 +109,7 @@ private:
 /// both the table heap and the graph engine are recovered correctly.
 class CompositeRecoveryHandler : public RecoveryHandler {
 public:
-    CompositeRecoveryHandler(RecoveryHandler& table_handler,
-                             RecoveryHandler& graph_handler);
+    CompositeRecoveryHandler(RecoveryHandler& table_handler, RecoveryHandler& graph_handler);
 
     [[nodiscard]] Result<void> redo(const WalRecord& record) override;
     [[nodiscard]] Result<void> undo(const WalRecord& record) override;

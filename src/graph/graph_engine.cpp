@@ -23,11 +23,13 @@ GraphEngine::GraphEngine(Catalog& catalog,
 GraphEngine::~GraphEngine() {
     // Flush and close all edge storage files (heap + index files).
     for (auto& [key, storage] : edge_storage_) {
-        if (!storage) continue;
+        if (!storage)
+            continue;
 
         // Close edge index BPMs.
         auto close_idx = [&](std::unique_ptr<EdgeIndexStorage>& idx) {
-            if (!idx) return;
+            if (!idx)
+                return;
             (void)idx->bpm->flush_all();
             if (dm_ != nullptr) {
                 (void)dm_->close_file(idx->file_id);
@@ -465,8 +467,8 @@ Result<uint64_t> GraphEngine::link(database_id_t database_id,
 }
 
 Result<uint64_t> GraphEngine::link_batch(database_id_t database_id,
-                                        const std::string& edge_type,
-                                        const std::vector<EdgeInsertRequest>& edges) {
+                                         const std::string& edge_type,
+                                         const std::vector<EdgeInsertRequest>& edges) {
     if (edges.empty()) {
         return ok(static_cast<uint64_t>(0));
     }
@@ -740,8 +742,8 @@ std::vector<std::string> GraphEngine::list_edge_types(database_id_t database_id)
 // -- Edge index persistence ---------------------------------------------------
 
 Result<void> GraphEngine::persist_edge_indexes(const std::string& edge_key,
-                                                database_id_t database_id,
-                                                edge_id_t edge_id) {
+                                               database_id_t database_id,
+                                               edge_id_t edge_id) {
     auto tit = edge_tables_.find(edge_key);
     if (tit == edge_tables_.end()) {
         return ok(); // Edge table no longer exists.
@@ -806,13 +808,16 @@ Result<void> GraphEngine::persist_edge_indexes(const std::string& edge_key,
     auto& uniq_ref = sit != edge_storage_.end() ? sit->second->uniq_idx : dummy_uniq;
 
     auto r1 = persist_one(edge_table.forward_index(), "fwd", fwd_ref);
-    if (!r1) return r1;
+    if (!r1)
+        return r1;
 
     auto r2 = persist_one(edge_table.reverse_index(), "rev", rev_ref);
-    if (!r2) return r2;
+    if (!r2)
+        return r2;
 
     auto r3 = persist_one(edge_table.unique_index(), "uniq", uniq_ref);
-    if (!r3) return r3;
+    if (!r3)
+        return r3;
 
     // Store edge count and next_row_id in the heap file header extension for staleness detection.
     if (sit != edge_storage_.end()) {
@@ -825,9 +830,9 @@ Result<void> GraphEngine::persist_edge_indexes(const std::string& edge_key,
 }
 
 Result<bool> GraphEngine::load_edge_indexes(const std::string& edge_key,
-                                             database_id_t database_id,
-                                             edge_id_t edge_id,
-                                             EdgeTable& edge_table) {
+                                            database_id_t database_id,
+                                            edge_id_t edge_id,
+                                            EdgeTable& edge_table) {
     // Check that all expected index files exist.
     auto fwd_path = edge_index_path(database_id, edge_id, "fwd");
     auto rev_path = edge_index_path(database_id, edge_id, "rev");
@@ -871,9 +876,9 @@ Result<bool> GraphEngine::load_edge_indexes(const std::string& edge_key,
     }
 
     // Helper to load one index from disk.
-    auto load_one = [&](const std::filesystem::path& path,
-                        std::unique_ptr<EdgeIndexStorage>& out_storage)
-        -> Result<std::unique_ptr<BTreeIndex>> {
+    auto load_one =
+        [&](const std::filesystem::path& path,
+            std::unique_ptr<EdgeIndexStorage>& out_storage) -> Result<std::unique_ptr<BTreeIndex>> {
         auto fid = dm_->open_file(path);
         if (!fid) {
             return make_error(fid.error().code, fid.error().message);
@@ -945,8 +950,11 @@ Result<bool> GraphEngine::load_edge_indexes(const std::string& edge_key,
     // Staleness check: compare loaded index size vs persisted edge count.
     uint64_t fwd_size = (*fwd_idx)->size();
     if (fwd_size != *persisted_count) {
-        SIXSEVEN_LOG_WARN("edge index staleness detected for '{}': index size {} != persisted count {}",
-                          edge_key, fwd_size, *persisted_count);
+        SIXSEVEN_LOG_WARN(
+            "edge index staleness detected for '{}': index size {} != persisted count {}",
+            edge_key,
+            fwd_size,
+            *persisted_count);
         // Clean up loaded indexes.
         if (heap_storage.fwd_idx) {
             (void)dm_->close_file(heap_storage.fwd_idx->file_id);
@@ -990,7 +998,8 @@ Result<void> GraphEngine::flush_edge_indexes() {
 
         // Extract database_id from the key (format: "database_id:name").
         auto colon = key.find(':');
-        if (colon == std::string::npos) continue;
+        if (colon == std::string::npos)
+            continue;
         auto parsed_id = safe_stoul(key.substr(0, colon));
         if (!parsed_id) {
             SIXSEVEN_LOG_WARN("failed to parse database_id from edge key '{}': {}",
@@ -1004,8 +1013,8 @@ Result<void> GraphEngine::flush_edge_indexes() {
         if (r) {
             ++flushed;
         } else {
-            SIXSEVEN_LOG_WARN("failed to persist edge indexes for '{}': {}",
-                              cfg.name, r.error().message);
+            SIXSEVEN_LOG_WARN(
+                "failed to persist edge indexes for '{}': {}", cfg.name, r.error().message);
         }
     }
 
@@ -1029,7 +1038,8 @@ Result<void> GraphEngine::flush_edges() {
     //    in-memory edge. load_edges() rebuilds adjacency by scanning the heap,
     //    so the heap is the durability-critical piece.
     for (auto& [key, storage] : edge_storage_) {
-        if (!storage) continue;
+        if (!storage)
+            continue;
         if (storage->bpm) {
             (void)storage->bpm->flush_all();
         }
@@ -1048,7 +1058,8 @@ Result<void> GraphEngine::flush_edges() {
     size_t flushed = 0;
     for (auto& [key, table] : edge_tables_) {
         auto colon = key.find(':');
-        if (colon == std::string::npos) continue;
+        if (colon == std::string::npos)
+            continue;
         auto parsed_id2 = safe_stoul(key.substr(0, colon));
         if (!parsed_id2) {
             SIXSEVEN_LOG_WARN("failed to parse database_id from edge key '{}': {}",
@@ -1062,14 +1073,15 @@ Result<void> GraphEngine::flush_edges() {
             ++flushed;
         } else {
             SIXSEVEN_LOG_WARN("failed to persist edge indexes for '{}': {}",
-                              table->config().name, r.error().message);
+                              table->config().name,
+                              r.error().message);
         }
     }
 
     auto elapsed = std::chrono::steady_clock::now() - t_start;
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
-    SIXSEVEN_LOG_INFO("graph engine: flushed edge heaps + {} index set(s) to disk in {}ms",
-                      flushed, ms);
+    SIXSEVEN_LOG_INFO(
+        "graph engine: flushed edge heaps + {} index set(s) to disk in {}ms", flushed, ms);
 
     return ok();
 }
@@ -1275,8 +1287,8 @@ void GraphEngine::log_edge_wal(WalRecordType type,
     // Use the new EDGE_INSERT/EDGE_DELETE record types so the recovery
     // dispatcher can route them to GraphEngineRecoveryHandler without
     // table_id collisions.
-    record.type = (type == WalRecordType::INSERT) ? WalRecordType::EDGE_INSERT
-                                                  : WalRecordType::EDGE_DELETE;
+    record.type =
+        (type == WalRecordType::INSERT) ? WalRecordType::EDGE_INSERT : WalRecordType::EDGE_DELETE;
     record.table_id = static_cast<uint32_t>(edge_id);
     // Use frozen_txn_id (autocommit sentinel) so WalRecovery includes this
     // record in the redo set without requiring an explicit BEGIN/COMMIT pair.

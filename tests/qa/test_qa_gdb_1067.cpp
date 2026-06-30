@@ -36,12 +36,13 @@
 #include "sixseven/storage/disk_manager.h"
 #include "sixseven/storage/serialization.h"
 #include "sixseven/storage/wal.h"
-#include "sixseven/storage/wal_recovery.h"
 #include "sixseven/storage/wal_record.h"
+#include "sixseven/storage/wal_recovery.h"
 #include "sixseven/table/tuple.h"
 
-#include <filesystem>
 #include <gtest/gtest.h>
+
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -108,8 +109,7 @@ protected:
     // Create edge type "follows" (INT64->INT64, no properties).
     edge_id_t create_follows_edge() {
         auto res = graph_engine_->create_edge_type(
-            db_id_, "follows", src_table_id_, tgt_table_id_,
-            TypeId::INT64, TypeId::INT64, {});
+            db_id_, "follows", src_table_id_, tgt_table_id_, TypeId::INT64, TypeId::INT64, {});
         EXPECT_TRUE(res) << res.error().message;
         return res ? *res : -1;
     }
@@ -119,9 +119,13 @@ protected:
         ColumnDef prop_col;
         prop_col.name = "score";
         prop_col.type = TypeId::FLOAT64;
-        auto res = graph_engine_->create_edge_type(
-            db_id_, "rated", src_table_id_, tgt_table_id_,
-            TypeId::INT64, TypeId::INT64, {prop_col});
+        auto res = graph_engine_->create_edge_type(db_id_,
+                                                   "rated",
+                                                   src_table_id_,
+                                                   tgt_table_id_,
+                                                   TypeId::INT64,
+                                                   TypeId::INT64,
+                                                   {prop_col});
         EXPECT_TRUE(res) << res.error().message;
         return res ? *res : -1;
     }
@@ -295,8 +299,7 @@ TEST_F(QA_GDB1067, DeleteReplay_EdgeAbsentAfterReplay) {
     EdgeTable pre_loaded_table(cfg);
 
     // Pre-populate the edge as if the heap file had it.
-    auto restore_res =
-        pre_loaded_table.restore_edge(1, src_pk, tgt_pk, {});
+    auto restore_res = pre_loaded_table.restore_edge(1, src_pk, tgt_pk, {});
     ASSERT_TRUE(restore_res) << restore_res.error().message;
     ASSERT_EQ(pre_loaded_table.size(), 1u) << "pre-condition: edge must be present";
 
@@ -593,10 +596,38 @@ TEST_F(QA_GDB1067, AdversarialPKType_NegativeAndBoundaryInt64PKs) {
 // ---------------------------------------------------------------------------
 
 TEST_F(QA_GDB1067, AdversarialPKType_UuidPKRoundTrip) {
-    Uuid src_uuid = {0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
-                     0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10};
-    Uuid tgt_uuid = {0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88,
-                     0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00};
+    Uuid src_uuid = {0x01,
+                     0x23,
+                     0x45,
+                     0x67,
+                     0x89,
+                     0xab,
+                     0xcd,
+                     0xef,
+                     0xfe,
+                     0xdc,
+                     0xba,
+                     0x98,
+                     0x76,
+                     0x54,
+                     0x32,
+                     0x10};
+    Uuid tgt_uuid = {0xff,
+                     0xee,
+                     0xdd,
+                     0xcc,
+                     0xbb,
+                     0xaa,
+                     0x99,
+                     0x88,
+                     0x77,
+                     0x66,
+                     0x55,
+                     0x44,
+                     0x33,
+                     0x22,
+                     0x11,
+                     0x00};
 
     EdgeWalPayload p;
     p.edge_row_id = 42;
@@ -654,11 +685,7 @@ TEST_F(QA_GDB1067, AdversarialProperties_ManyMixedTypeProperties) {
     // Varied property types: INT32, FLOAT64, BOOL, STRING
     p.property_types = {TypeId::INT32, TypeId::FLOAT64, TypeId::BOOL, TypeId::STRING};
     p.properties = {
-        Value(static_cast<int32_t>(42)),
-        Value(3.14159),
-        Value(true),
-        Value(std::string("hello"))
-    };
+        Value(static_cast<int32_t>(42)), Value(3.14159), Value(true), Value(std::string("hello"))};
 
     auto bytes = serialize_edge_wal_payload(p);
     auto result = deserialize_edge_wal_payload(bytes);
@@ -685,7 +712,7 @@ TEST_F(QA_GDB1067, AdversarialProperties_EmptyStringPropertyValue) {
     p.target_pk_type = TypeId::INT64;
     p.target_pk = Value(static_cast<int64_t>(2));
     p.property_types = {TypeId::STRING};
-    p.properties = {Value(std::string(""))};  // Empty string property
+    p.properties = {Value(std::string(""))}; // Empty string property
 
     auto bytes = serialize_edge_wal_payload(p);
     auto result = deserialize_edge_wal_payload(bytes);
@@ -735,7 +762,8 @@ TEST_F(QA_GDB1067, AdversarialSequence_InsertThenDeleteSameEdge) {
     auto edges = fresh_table.get_edges_from(src_pk);
     ASSERT_TRUE(edges) << edges.error().message;
     EXPECT_EQ(edges->size(), 0u)
-        << "INSERT-then-DELETE: edge must be absent after replay (edge_row_id=" << edge_row_id << ")";
+        << "INSERT-then-DELETE: edge must be absent after replay (edge_row_id=" << edge_row_id
+        << ")";
 }
 
 // ---------------------------------------------------------------------------
@@ -820,8 +848,8 @@ TEST_F(QA_GDB1067, AdversarialIdempotency_DoubleRecovery) {
 
     // Second recovery pass over the same WAL -- must be idempotent.
     run_recovery(*handler);
-    EXPECT_EQ(fresh_table.size(), 1u)
-        << "After second (double) recovery: must still have exactly 1 edge -- ALREADY_EXISTS must be a no-op";
+    EXPECT_EQ(fresh_table.size(), 1u) << "After second (double) recovery: must still have exactly "
+                                         "1 edge -- ALREADY_EXISTS must be a no-op";
 }
 
 // ---------------------------------------------------------------------------
@@ -908,8 +936,7 @@ TEST_F(QA_GDB1067, AdversarialMigration_PayloadTruncatedAfterName) {
     // NO database_id, NO PKs -- exactly the legacy short format.
 
     auto result = deserialize_edge_wal_payload(data);
-    EXPECT_FALSE(result)
-        << "Payload truncated after name must fail with INVALID_ARGUMENT";
+    EXPECT_FALSE(result) << "Payload truncated after name must fail with INVALID_ARGUMENT";
     EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
@@ -955,8 +982,7 @@ TEST_F(QA_GDB1067, AdversarialDuplicates_PreventDuplicatesIdempotent) {
     // Create edge type WITH prevent_duplicates.
     ColumnDef no_props_placeholder; // unused but API requires vector
     auto et_res = graph_engine_->create_edge_type(
-        db_id_, "unique_edge", src_table_id_, tgt_table_id_,
-        TypeId::INT64, TypeId::INT64, {});
+        db_id_, "unique_edge", src_table_id_, tgt_table_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(et_res) << et_res.error().message;
 
     Value src_pk = Value(static_cast<int64_t>(1));
@@ -1083,8 +1109,7 @@ TEST_F(QA_GDB1067, AdversarialRecovery_UnregisteredEdgeTypeSkipped) {
     // Handler with NO registered edge tables.
     GraphEngineRecoveryHandler empty_handler;
     auto res = empty_handler.redo(record);
-    EXPECT_TRUE(res)
-        << "Unregistered edge type must be silently skipped (no crash, no error)";
+    EXPECT_TRUE(res) << "Unregistered edge type must be silently skipped (no crash, no error)";
 }
 
 // ---------------------------------------------------------------------------
@@ -1125,8 +1150,14 @@ TEST_F(QA_GDB1067, AdversarialComposite_RoutingCorrect) {
     struct CountingHandler : RecoveryHandler {
         int redo_calls = 0;
         int undo_calls = 0;
-        Result<void> redo(const WalRecord&) override { ++redo_calls; return ok(); }
-        Result<void> undo(const WalRecord&) override { ++undo_calls; return ok(); }
+        Result<void> redo(const WalRecord&) override {
+            ++redo_calls;
+            return ok();
+        }
+        Result<void> undo(const WalRecord&) override {
+            ++undo_calls;
+            return ok();
+        }
     };
 
     CountingHandler table_handler;

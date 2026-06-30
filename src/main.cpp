@@ -244,10 +244,9 @@ int main(int argc, char* argv[]) {
                 for (const auto& et : all_edge_types) {
                     auto et_result = graph_engine.get_edge_table(et.database_id, et.name);
                     if (!et_result) {
-                        SIXSEVEN_LOG_WARN(
-                            "WAL recovery: could not find EdgeTable for '{}': {}",
-                            et.name,
-                            et_result.error().message);
+                        SIXSEVEN_LOG_WARN("WAL recovery: could not find EdgeTable for '{}': {}",
+                                          et.name,
+                                          et_result.error().message);
                         continue;
                     }
                     sixseven::EdgeTable* edge_table = *et_result;
@@ -263,7 +262,7 @@ int main(int argc, char* argv[]) {
             }
 
             sixseven::CompositeRecoveryHandler composite_handler(recovery_handler,
-                                                                  graph_recovery_handler);
+                                                                 graph_recovery_handler);
             sixseven::WalRecovery wal_recovery(wal_dir, composite_handler);
             auto recover_result = wal_recovery.recover();
             if (!recover_result) {
