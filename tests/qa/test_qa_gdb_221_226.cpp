@@ -21,6 +21,8 @@
 #include <filesystem>
 #include <string>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 
 // ===========================================================================
@@ -33,6 +35,12 @@ protected:
     std::unique_ptr<Binder> binder;
 
     void SetUp() override {
+        // Register the default database (id=1); a bare Catalog only has the
+        // system database (id=2), so create_table(default_database_id, ...)
+        // would otherwise fail "database with id 1 not found" and every test in
+        // this fixture would die at SetUp (GDB-713 / GDB-1277 bootstrap).
+        bootstrap_qa_catalog(catalog);
+
         // Table: users(id INT32, name STRING, email STRING, age INT32, active BOOL)
         {
             TableSchema s;
@@ -481,6 +489,10 @@ protected:
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb221_226";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
+
+        // Register the default database (id=1) so CREATE TABLE resolves; a bare
+        // Catalog only has the system database (id=2) (GDB-713 bootstrap).
+        bootstrap_qa_catalog(catalog_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
