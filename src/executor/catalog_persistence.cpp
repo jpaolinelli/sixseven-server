@@ -271,6 +271,8 @@ Result<void> CatalogPersistence::load_catalog() {
             col.nullable = v[4].as_bool();
             col.default_expr = v[5].is_null() ? "" : v[5].as_string();
             col.is_autoincrement = v.size() > 6 && !v[6].is_null() && v[6].as_bool();
+            col.precision = (v.size() > 7 && !v[7].is_null()) ? v[7].as_int32() : 0;
+            col.scale = (v.size() > 8 && !v[8].is_null()) ? v[8].as_int32() : 0;
             table_it->second.columns.push_back(std::move(col));
         }
     }
@@ -594,7 +596,9 @@ Result<void> CatalogPersistence::persist_table(database_id_t db_id, const TableS
                              Value(static_cast<int32_t>(col.type_id)),
                              Value(col.nullable),
                              col.default_expr.empty() ? Value() : Value(col.default_expr),
-                             Value(col.is_autoincrement)});
+                             Value(col.is_autoincrement),
+                             Value(col.precision),
+                             Value(col.scale)});
         if (!r) {
             return r;
         }
@@ -707,7 +711,9 @@ Result<void> CatalogPersistence::persist_columns_update(const TableSchema& schem
                              Value(static_cast<int32_t>(col.type_id)),
                              Value(col.nullable),
                              col.default_expr.empty() ? Value() : Value(col.default_expr),
-                             Value(col.is_autoincrement)});
+                             Value(col.is_autoincrement),
+                             Value(col.precision),
+                             Value(col.scale)});
         if (!r) {
             return r;
         }

@@ -43,6 +43,10 @@ struct Database {
 
 /// Describes a column in a catalog table schema.
 /// Richer than the tuple-level ColumnDef (which only has name + type).
+///
+/// precision and scale are catalog metadata only (stored in sys_columns
+/// cols 7 and 8). They are not yet enforced or rounded during value storage.
+/// Enforcement is deferred to GDB-1047/GDB-1048. Default 0 = unspecified.
 struct CatalogColumnDef {
     int32_t ordinal = 0;
     std::string name;
@@ -50,6 +54,8 @@ struct CatalogColumnDef {
     bool nullable = true;
     std::string default_expr;
     bool is_autoincrement = false;
+    int32_t precision = 0;
+    int32_t scale = 0;
 };
 
 /// Full metadata for a table in the system catalog.
@@ -288,6 +294,8 @@ inline TableSchema sys_columns_schema() {
         {4, "nullable", TypeId::BOOL, false, ""},
         {5, "default_expr", TypeId::STRING, true, ""},
         {6, "is_autoincrement", TypeId::BOOL, false, ""},
+        {7, "precision", TypeId::INT32, false, ""},
+        {8, "scale", TypeId::INT32, false, ""},
     };
     schema.pk_columns = "table_id,ordinal";
     return schema;
