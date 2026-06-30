@@ -14,6 +14,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -31,6 +33,12 @@ protected:
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb_238";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
+
+        // Register the default database (id=1); a bare Catalog only has the
+        // system database (id=2), so CREATE TABLE below would otherwise fail
+        // "database with id 1 not found" and every test would die at SetUp
+        // (GDB-713 / GDB-1277 bootstrap).
+        bootstrap_qa_catalog(catalog_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
@@ -613,4 +621,47 @@ TEST_F(QA_GDB238, ExistsInsideOr_WithCountAggregate) {
     // dept 30.
     auto count = qr.rows[0][0].as_int64();
     EXPECT_EQ(count, 2);
+}
+
+// =============================================================================
+// Negative paths: malformed EXISTS-inside-OR queries must error cleanly, not
+// crash or silently return wrong rows. These exercise the exec_error helper.
+// =============================================================================
+
+TEST_F(QA_GDB238, ExistsInsideOr_NonexistentInnerTable) {
+    // EXISTS over a table that does not exist must fail to bind.
+    exec_error("SELECT users.name FROM users "
+               "WHERE (users.dept_id = 10 OR EXISTS (SELECT 1 FROM no_such_table))");
+}
+
+TEST_F(QA_GDB238, ExistsInsideOr_NonexistentCorrelationColumn) {
+    // Correlated EXISTS referencing a column that does not exist must fail.
+    exec_error("SELECT users.name FROM users "
+               "WHERE (users.dept_id = 10 OR EXISTS (SELECT 1 FROM orders WHERE "
+               "orders.no_such_col = users.id))");
+}
+
+TEST_F(QA_GDB238, InSubqueryMultipleColumnsRejected) {
+    // The IN subquery combined with the OR-nested EXISTS must project exactly
+    // one column; a two-column projection is rejected at bind time.
+    exec_error("SELECT users.name FROM users "
+               "WHERE users.dept_id IN "
+               "(SELECT departments.id, departments.dept_name FROM departments)");
+}
+
+// =============================================================================
+// Positive path exercising collect_ints: project an INT column rather than a
+// name, and assert the integer id set.
+// =============================================================================
+
+TEST_F(QA_GDB238, ExistsInsideOr_ProjectIntColumn) {
+    auto qr = exec_ok("SELECT users.id FROM users "
+                      "WHERE (users.dept_id = 10 OR EXISTS (SELECT 1 FROM orders WHERE "
+                      "orders.user_id = users.id))");
+
+    auto ids = collect_ints(qr);
+    // alice (id 1: dept 10 and has orders), charlie (id 3: dept 10 and has orders).
+    EXPECT_EQ(ids.size(), 2u);
+    EXPECT_TRUE(ids.count(1));
+    EXPECT_TRUE(ids.count(3));
 }
