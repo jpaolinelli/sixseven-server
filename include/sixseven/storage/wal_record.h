@@ -47,6 +47,12 @@ enum class WalRecordType : uint8_t {
     CREATE_TABLE = 8,
     DROP_TABLE = 9,
     PROMOTE = 10,
+    /// Graph edge insert: payload encodes edge_id, edge_row_id, source_pk,
+    /// target_pk, and properties via the storage serialization codec (GDB-1067).
+    EDGE_INSERT = 11,
+    /// Graph edge delete: same payload layout as EDGE_INSERT so replay can
+    /// locate the edge_row_id and remove it idempotently (GDB-1067).
+    EDGE_DELETE = 12,
 };
 
 /// Return a human-readable name for a WalRecordType.
@@ -74,6 +80,10 @@ inline const char* wal_record_type_name(WalRecordType type) {
         return "DROP_TABLE";
     case WalRecordType::PROMOTE:
         return "PROMOTE";
+    case WalRecordType::EDGE_INSERT:
+        return "EDGE_INSERT";
+    case WalRecordType::EDGE_DELETE:
+        return "EDGE_DELETE";
     }
     return "UNKNOWN";
 }

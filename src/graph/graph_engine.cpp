@@ -3,6 +3,7 @@
 #include "sixseven/common/logging.h"
 #include "sixseven/common/parse_utils.h"
 #include "sixseven/common/types.h"
+#include "sixseven/graph/graph_engine_wal.h"
 #include "sixseven/index/btree_persistence.h"
 #include "sixseven/storage/wal.h"
 
@@ -191,12 +192,12 @@ Result<void> GraphEngine::persist_edge(const std::string& edge_key,
 
     storage.rid_map[edge_row_id] = *rid;
 
-    // NOTE: intentionally NOT calling bpm->flush_all() here. Durability of edge inserts comes
-    // from log_edge_wal() in GraphEngine::link() (see call site at ~line 440), which records
-    // WalRecordType::INSERT right after this persist_edge returns. The edge heap is a normal
-    // TableHeap; its dirty pages are flushed on eviction, checkpoint, and clean shutdown —
-    // symmetric with regular row INSERTs. A per-edge flush_all walks all 64 buffer pool shards
-    // and was the primary LINK throughput bottleneck (capped us at ~1-10 edges/sec).
+    // NOTE: intentionally NOT calling bpm->flush_all() here.  Crash durability
+    // comes from the EDGE_INSERT WAL record written by log_edge_wal() after this
+    // call returns (GDB-1067).  On crash recovery, GraphEngineRecoveryHandler
+    // replays EDGE_INSERT records to reconstruct any edges whose heap pages were
+    // not yet evicted/flushed to disk.  A per-edge flush_all() would walk all 64
+    // buffer pool shards and was the primary LINK throughput bottleneck.
     return ok();
 }
 
@@ -220,9 +221,10 @@ Result<void> GraphEngine::delete_persisted_edge(const std::string& edge_key, uin
 
     storage.rid_map.erase(rid_it);
 
-    // NOTE: intentionally NOT calling bpm->flush_all() here (see persist_edge for rationale).
-    // Durability comes from log_edge_wal() in GraphEngine::unlink(); the dirty heap page is
-    // flushed on eviction/checkpoint/shutdown like any other table row.
+    // NOTE: intentionally NOT calling bpm->flush_all() here (see persist_edge for
+    // rationale).  Crash durability comes from the EDGE_DELETE WAL record written by
+    // log_edge_wal() after this call returns (GDB-1067); GraphEngineRecoveryHandler
+    // replays EDGE_DELETE records to remove edges whose deletion was not yet flushed.
     return ok();
 }
 
@@ -437,8 +439,26 @@ Result<uint64_t> GraphEngine::link(database_id_t database_id,
         }
     }
 
-    // Log to WAL for durability.
-    log_edge_wal(WalRecordType::INSERT, it->second->config().edge_id, *result, edge_type);
+    // Log to WAL for durability (GDB-1067: full payload for crash recovery).
+    {
+        const auto& cfg = it->second->config();
+        std::vector<TypeId> prop_types;
+        prop_types.reserve(cfg.property_columns.size());
+        for (const auto& col : cfg.property_columns) {
+            prop_types.push_back(col.type);
+        }
+        log_edge_wal(WalRecordType::INSERT,
+                     database_id,
+                     cfg.edge_id,
+                     *result,
+                     edge_type,
+                     source_pk,
+                     target_pk,
+                     properties,
+                     cfg.source_pk_type,
+                     cfg.target_pk_type,
+                     prop_types);
+    }
 
     SIXSEVEN_LOG_DEBUG("LINK via '{}': edge_row_id={}", edge_type, *result);
     return ok(*result);
@@ -479,7 +499,25 @@ Result<uint64_t> GraphEngine::link_batch(database_id_t database_id,
             }
         }
 
-        log_edge_wal(WalRecordType::INSERT, it->second->config().edge_id, row_id, edge_type);
+        {
+            const auto& cfg = it->second->config();
+            std::vector<TypeId> prop_types;
+            prop_types.reserve(cfg.property_columns.size());
+            for (const auto& col : cfg.property_columns) {
+                prop_types.push_back(col.type);
+            }
+            log_edge_wal(WalRecordType::INSERT,
+                         database_id,
+                         cfg.edge_id,
+                         row_id,
+                         edge_type,
+                         e.source_pk,
+                         e.target_pk,
+                         e.properties,
+                         cfg.source_pk_type,
+                         cfg.target_pk_type,
+                         prop_types);
+        }
     }
 
     SIXSEVEN_LOG_DEBUG("LINK BATCH via '{}': {} edges", edge_type, row_ids->size());
@@ -524,8 +562,27 @@ Result<void> GraphEngine::unlink(database_id_t database_id,
         }
     }
 
-    // Log to WAL for durability.
-    log_edge_wal(WalRecordType::DELETE, it->second->config().edge_id, edge_row_id, edge_type);
+    // Log to WAL for durability (GDB-1067: full payload for crash recovery).
+    {
+        const auto& cfg = it->second->config();
+        const auto& found_edge = **found;
+        std::vector<TypeId> prop_types;
+        prop_types.reserve(cfg.property_columns.size());
+        for (const auto& col : cfg.property_columns) {
+            prop_types.push_back(col.type);
+        }
+        log_edge_wal(WalRecordType::DELETE,
+                     database_id,
+                     cfg.edge_id,
+                     edge_row_id,
+                     edge_type,
+                     found_edge.source_pk,
+                     found_edge.target_pk,
+                     found_edge.properties,
+                     cfg.source_pk_type,
+                     cfg.target_pk_type,
+                     prop_types);
+    }
 
     SIXSEVEN_LOG_DEBUG("UNLINK via '{}': removed edge_row_id={}", edge_type, edge_row_id);
     return ok();
@@ -553,9 +610,9 @@ Result<uint64_t> GraphEngine::unlink_where(database_id_t database_id,
         return tl::unexpected(edges.error());
     }
 
-    // Collect matching edge row IDs first, then delete in a second pass.
+    // Collect matching edges first, then delete in a second pass.
     // This avoids partial deletion: we validate all candidates before mutating.
-    std::vector<uint64_t> to_delete;
+    std::vector<EdgeRow> to_delete;
     for (const auto& edge : *edges) {
         KeyType lhs = {edge.target_pk};
         KeyType rhs = {target_pk};
@@ -566,19 +623,26 @@ Result<uint64_t> GraphEngine::unlink_where(database_id_t database_id,
         if (!predicate(edge)) {
             continue;
         }
-        to_delete.push_back(edge.edge_row_id);
+        to_delete.push_back(edge);
     }
 
     // Delete all matching edges.
-    for (uint64_t row_id : to_delete) {
-        auto del = table.delete_edge(row_id);
+    const auto& cfg = table.config();
+    std::vector<TypeId> prop_types;
+    prop_types.reserve(cfg.property_columns.size());
+    for (const auto& col : cfg.property_columns) {
+        prop_types.push_back(col.type);
+    }
+
+    for (const auto& edge_row : to_delete) {
+        auto del = table.delete_edge(edge_row.edge_row_id);
         if (!del.has_value()) {
             return tl::unexpected(del.error());
         }
 
         // Delete from persistent storage.
         if (has_persistence()) {
-            auto persist_del = delete_persisted_edge(key, row_id);
+            auto persist_del = delete_persisted_edge(key, edge_row.edge_row_id);
             if (!persist_del) {
                 SIXSEVEN_LOG_WARN("edge persist delete failed for '{}': {}",
                                   edge_type,
@@ -586,8 +650,18 @@ Result<uint64_t> GraphEngine::unlink_where(database_id_t database_id,
             }
         }
 
-        // Log to WAL for durability.
-        log_edge_wal(WalRecordType::DELETE, table.config().edge_id, row_id, edge_type);
+        // Log to WAL for durability (GDB-1067: full payload for crash recovery).
+        log_edge_wal(WalRecordType::DELETE,
+                     database_id,
+                     cfg.edge_id,
+                     edge_row.edge_row_id,
+                     edge_type,
+                     edge_row.source_pk,
+                     edge_row.target_pk,
+                     edge_row.properties,
+                     cfg.source_pk_type,
+                     cfg.target_pk_type,
+                     prop_types);
     }
 
     SIXSEVEN_LOG_DEBUG("UNLINK WHERE via '{}': removed {} edges", edge_type, to_delete.size());
@@ -1170,27 +1244,44 @@ Result<void> GraphEngine::load_edges() {
 }
 
 void GraphEngine::log_edge_wal(WalRecordType type,
+                               database_id_t database_id,
                                edge_id_t edge_id,
                                uint64_t edge_row_id,
-                               const std::string& edge_type_name) {
+                               const std::string& edge_type_name,
+                               const Value& source_pk,
+                               const Value& target_pk,
+                               const std::vector<Value>& properties,
+                               TypeId source_pk_type,
+                               TypeId target_pk_type,
+                               const std::vector<TypeId>& property_types) {
     if (wal_ == nullptr) {
         return;
     }
 
-    // Encode edge_row_id and edge type name into data payload.
-    std::vector<uint8_t> data;
-    data.resize(sizeof(uint64_t) + sizeof(uint32_t) + edge_type_name.size());
-    std::memcpy(data.data(), &edge_row_id, sizeof(uint64_t));
-    auto name_len = static_cast<uint32_t>(edge_type_name.size());
-    std::memcpy(data.data() + sizeof(uint64_t), &name_len, sizeof(uint32_t));
-    std::memcpy(data.data() + sizeof(uint64_t) + sizeof(uint32_t),
-                edge_type_name.data(),
-                edge_type_name.size());
+    // Encode the full edge payload so WAL replay can reconstruct or remove the
+    // edge without reading the on-disk heap file (GDB-1067).
+    EdgeWalPayload payload;
+    payload.edge_row_id = edge_row_id;
+    payload.edge_type_name = edge_type_name;
+    payload.database_id = database_id;
+    payload.source_pk_type = source_pk_type;
+    payload.source_pk = source_pk;
+    payload.target_pk_type = target_pk_type;
+    payload.target_pk = target_pk;
+    payload.property_types = property_types;
+    payload.properties = properties;
 
     WalRecord record;
-    record.type = type;
+    // Use the new EDGE_INSERT/EDGE_DELETE record types so the recovery
+    // dispatcher can route them to GraphEngineRecoveryHandler without
+    // table_id collisions.
+    record.type = (type == WalRecordType::INSERT) ? WalRecordType::EDGE_INSERT
+                                                  : WalRecordType::EDGE_DELETE;
     record.table_id = static_cast<uint32_t>(edge_id);
-    record.data = std::move(data);
+    // Use frozen_txn_id (autocommit sentinel) so WalRecovery includes this
+    // record in the redo set without requiring an explicit BEGIN/COMMIT pair.
+    record.txn_id = frozen_txn_id;
+    record.data = serialize_edge_wal_payload(payload);
 
     auto result = wal_->append(record);
     if (!result.has_value()) {
