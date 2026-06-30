@@ -252,16 +252,16 @@ TEST(ExprEvaluator, MultiplyIntegers) {
     EXPECT_EQ(result->as_int64(), 42);
 }
 
-TEST(ExprEvaluator, DivideProducesFloat) {
+TEST(ExprEvaluator, DivideIntegersTruncatesTowardZero) {
     auto bound = empty_bound();
     OutputSchema schema;
     Tuple tuple{{}, std::nullopt};
 
+    // GDB-1049: integer / integer stays integer (PostgreSQL semantics), not a float.
     auto expr = binary(BinaryOp::DIVIDE, lit_int("10"), lit_int("3"));
     auto result = evaluate_expr(*expr, tuple, schema, bound);
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    // Division always goes through float path.
-    EXPECT_NEAR(result->as_float64(), 3.333, 0.01);
+    EXPECT_EQ(result->as_int64(), 3);
 }
 
 TEST(ExprEvaluator, ModuloIntegers) {
