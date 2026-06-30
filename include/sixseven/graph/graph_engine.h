@@ -184,11 +184,20 @@ private:
     [[nodiscard]] static std::string make_edge_key(database_id_t database_id,
                                                    const std::string& name);
 
-    /// Log a LINK or UNLINK operation to the WAL.
+    /// Log a LINK or UNLINK operation to the WAL (GDB-1067).
+    /// Encodes the full edge (source_pk, target_pk, properties) so WAL replay
+    /// can reconstruct the edge without the on-disk heap file.
     void log_edge_wal(WalRecordType type,
+                      database_id_t database_id,
                       edge_id_t edge_id,
                       uint64_t edge_row_id,
-                      const std::string& edge_type_name);
+                      const std::string& edge_type_name,
+                      const Value& source_pk,
+                      const Value& target_pk,
+                      const std::vector<Value>& properties,
+                      TypeId source_pk_type,
+                      TypeId target_pk_type,
+                      const std::vector<TypeId>& property_types);
 
     /// Build the storage schema for an edge type.
     /// Schema: (edge_row_id:INT64, source_pk, target_pk, prop0, prop1, ...).

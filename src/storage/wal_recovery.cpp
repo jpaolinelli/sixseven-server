@@ -69,6 +69,8 @@ bool WalRecovery::is_data_record(WalRecordType type) {
     case WalRecordType::PAGE_SPLIT:
     case WalRecordType::CREATE_TABLE:
     case WalRecordType::DROP_TABLE:
+    case WalRecordType::EDGE_INSERT:
+    case WalRecordType::EDGE_DELETE:
         return true;
     case WalRecordType::BEGIN:
     case WalRecordType::COMMIT:

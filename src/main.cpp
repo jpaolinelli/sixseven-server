@@ -17,6 +17,7 @@
 #include "sixseven/graph/degree_centrality.h"
 #include "sixseven/graph/eigenvector_centrality.h"
 #include "sixseven/graph/graph_engine.h"
+#include "sixseven/graph/graph_engine_wal.h"
 #include "sixseven/graph/harmonic_centrality.h"
 #include "sixseven/graph/louvain.h"
 #include "sixseven/graph/pagerank.h"
@@ -219,13 +220,50 @@ int main(int argc, char* argv[]) {
             SIXSEVEN_LOG_INFO("no clean shutdown marker — running WAL recovery (wal_dir={})",
                               wal_dir.string());
 
+            // Load edge data from disk first so EdgeTables are populated and
+            // can be registered with the graph recovery handler (GDB-1067).
+            // This is the same work the background jthread does after recovery;
+            // the flag below prevents the jthread from repeating it.
+            auto edge_preload = graph_engine.load_edges();
+            if (!edge_preload) {
+                SIXSEVEN_LOG_WARN("edge pre-load before WAL recovery failed (non-fatal): {}",
+                                  edge_preload.error().message);
+            }
+
             sixseven::TableHeapRecoveryHandler recovery_handler;
             storage.for_each_table_heap(
                 [&recovery_handler](sixseven::table_id_t tid, sixseven::TableHeap* heap) {
                     recovery_handler.register_table(tid, heap);
                 });
 
-            sixseven::WalRecovery wal_recovery(wal_dir, recovery_handler);
+            // Register all edge types with the graph recovery handler so
+            // EDGE_INSERT/EDGE_DELETE WAL records are replayed (GDB-1067).
+            sixseven::GraphEngineRecoveryHandler graph_recovery_handler;
+            {
+                auto all_edge_types = catalog.list_all_edge_types();
+                for (const auto& et : all_edge_types) {
+                    auto et_result = graph_engine.get_edge_table(et.database_id, et.name);
+                    if (!et_result) {
+                        SIXSEVEN_LOG_WARN("WAL recovery: could not find EdgeTable for '{}': {}",
+                                          et.name,
+                                          et_result.error().message);
+                        continue;
+                    }
+                    sixseven::EdgeTable* edge_table = *et_result;
+                    const auto& cfg = edge_table->config();
+                    std::vector<sixseven::TypeId> prop_types;
+                    prop_types.reserve(cfg.property_columns.size());
+                    for (const auto& col : cfg.property_columns) {
+                        prop_types.push_back(col.type);
+                    }
+                    graph_recovery_handler.register_edge_table(
+                        et.database_id, et.name, edge_table, std::move(prop_types));
+                }
+            }
+
+            sixseven::CompositeRecoveryHandler composite_handler(recovery_handler,
+                                                                 graph_recovery_handler);
+            sixseven::WalRecovery wal_recovery(wal_dir, composite_handler);
             auto recover_result = wal_recovery.recover();
             if (!recover_result) {
                 SIXSEVEN_LOG_ERROR("WAL recovery failed — cannot start server: {}",
