@@ -108,6 +108,13 @@ public:
     /// Set by the planner alongside child_col_map_.
     std::vector<std::string> col_names_for_null_check_;
 
+    /// DECIMAL scale per storage column (from CatalogColumnDef::scale), in
+    /// storage-column order. Populated by the planner for all tables that have
+    /// at least one DECIMAL column. When empty or shorter than the column list,
+    /// scale defaults to 0 (round-to-nearest-integer) for missing entries.
+    /// Used by fit_to_storage() to compute the scaled coefficient (GDB-1047).
+    std::vector<int32_t> col_scales_;
+
     /// Set the transaction id stamped as xmin on inserted versions (GDB-747).
     /// Defaults to frozen_txn_id (always-committed) when no transaction
     /// context is provided.

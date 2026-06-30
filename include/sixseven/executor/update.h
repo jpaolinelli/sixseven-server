@@ -48,6 +48,12 @@ public:
     /// BM25 indexes on this table to maintain on update. Set by the planner.
     std::vector<Bm25MaintenanceTarget> bm25_targets_;
 
+    /// DECIMAL scale per storage column (from CatalogColumnDef::scale), in
+    /// storage-column order. Populated by the planner for tables with DECIMAL
+    /// columns. When empty or shorter than the column list, scale defaults to 0.
+    /// Used by fit_to_storage() to compute the scaled coefficient (GDB-1047).
+    std::vector<int32_t> col_scales_;
+
     /// Table id of the target table. Set by the planner; used for locking (GDB-930).
     table_id_t target_table_id_ = 0;
 

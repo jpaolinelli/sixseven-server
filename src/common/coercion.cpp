@@ -428,15 +428,74 @@ Result<Value> explicit_cast(const Value& value, TypeId target) {
 
 // -- fit_to_storage -----------------------------------------------------------
 
-Result<Value> fit_to_storage(const Value& val, TypeId target) {
+// Compute 10^exp as a double. Safe for exp in [0, 22]; for larger values
+// (DECIMAL scale can be up to ~38) the double result may not be exact, but
+// the scaling is still far more accurate than the old truncate-to-integer
+// path. If the scaled value overflows int64_t we return a TYPE_ERROR rather
+// than silently wrapping.
+static double pow10(int32_t exp) {
+    // Use a lookup table for the common range to avoid floating-point error.
+    static const double table[] = {
+        1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,  1e8,  1e9,
+        1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18,
+    };
+    if (exp >= 0 && exp <= 18) {
+        return table[static_cast<size_t>(exp)];
+    }
+    // Fallback for scale > 18 (unusual but valid in SQL DECIMAL).
+    double result = 1.0;
+    for (int32_t i = 0; i < exp; ++i) {
+        result *= 10.0;
+    }
+    return result;
+}
+
+Result<Value> fit_to_storage(const Value& val, TypeId target, int32_t scale) {
     if (val.is_null() || val.type_id() == target) {
         return ok(val);
     }
+
+    // DECIMAL target: produce a scaled coefficient using round-half-away-from-zero
+    // (llround semantics). The coefficient stored in Decimal128 represents the
+    // exact integer mantissa; scale lives in column metadata (CatalogColumnDef).
+    //
+    // coefficient = llround(value * 10^scale)
+    //
+    // Examples (scale=2): 3.7->370, 1.5->150, 3.14159->314, -2.5->-250
+    // Examples (scale=0): 3.7->4, -2.5->-3 (round-half-away-from-zero)
+    //
+    // If scale < 0 we treat it as 0 (unspecified / not-yet-set default).
+    if (target == TypeId::DECIMAL && is_numeric(val.type_id())) {
+        const int32_t s = (scale > 0) ? scale : 0;
+        const double multiplier = pow10(s);
+        const double d = to_double(val);
+        if (std::isnan(d) || std::isinf(d)) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              "cannot store NaN or infinity into DECIMAL column");
+        }
+        const double scaled = d * multiplier;
+        // Guard overflow before calling llround: llround is UB if the result
+        // does not fit in long long. Use INT64 limits as the coefficient range.
+        constexpr double kMaxCoef = 9223372036854775807.0;  // INT64_MAX as double
+        constexpr double kMinCoef = -9223372036854775808.0; // INT64_MIN as double
+        if (scaled > kMaxCoef || scaled < kMinCoef) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              "DECIMAL coefficient overflow: value out of range for scale " +
+                                  std::to_string(s));
+        }
+        const int64_t coef = llround(scaled);
+        if (coef >= 0) {
+            return ok(Value(Decimal128{0, static_cast<uint64_t>(coef)}));
+        }
+        // Negative: hi = -1 (sign extension), lo = two's-complement bit pattern.
+        return ok(Value(Decimal128{-1, static_cast<uint64_t>(coef)}));
+    }
+
     // Try standard widening coercion first.
     if (can_coerce(val.type_id(), target)) {
         return coerce(val, target);
     }
-    // Allow numeric narrowing (e.g. INT64 → INT32). Delegate to the validated
+    // Allow numeric narrowing (e.g. INT64 -> INT32). Delegate to the validated
     // explicit_cast path for every numeric source:
     //   - float/decimal sources truncate toward zero with NaN/inf/out-of-range
     //     checks (floats) or a loud TYPE_ERROR (decimals), rather than to_int64

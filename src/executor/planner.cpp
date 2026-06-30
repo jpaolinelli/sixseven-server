@@ -2602,6 +2602,15 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
                 }
             }
         }
+        // Populate column scales for DECIMAL-aware fit_to_storage (GDB-1047).
+        {
+            std::vector<int32_t> scales;
+            scales.reserve(table_schema->columns.size());
+            for (const auto& col : table_schema->columns) {
+                scales.push_back(col.scale);
+            }
+            iter->col_scales_ = std::move(scales);
+        }
         iter->bm25_targets_ = collect_bm25_targets(*table_schema);
         iter->btree_targets_ = collect_btree_targets(*table_schema);
         iter->hash_targets_ = collect_hash_targets(*table_schema);
@@ -2730,6 +2739,15 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
                 }
             }
         }
+        // Populate column scales for DECIMAL-aware fit_to_storage (GDB-1047).
+        {
+            std::vector<int32_t> scales;
+            scales.reserve(table_schema->columns.size());
+            for (const auto& col : table_schema->columns) {
+                scales.push_back(col.scale);
+            }
+            iter->col_scales_ = std::move(scales);
+        }
         iter->bm25_targets_ = collect_bm25_targets(*table_schema);
         iter->btree_targets_ = collect_btree_targets(*table_schema);
         iter->hash_targets_ = collect_hash_targets(*table_schema);
@@ -2755,6 +2773,15 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
                 iter->column_names_.push_back(col.name);
             }
         }
+    }
+    // Populate column scales for DECIMAL-aware fit_to_storage (GDB-1047).
+    {
+        std::vector<int32_t> scales;
+        scales.reserve(table_schema->columns.size());
+        for (const auto& col : table_schema->columns) {
+            scales.push_back(col.scale);
+        }
+        iter->col_scales_ = std::move(scales);
     }
     iter->bm25_targets_ = collect_bm25_targets(*table_schema);
     iter->btree_targets_ = collect_btree_targets(*table_schema);
@@ -2807,6 +2834,15 @@ Result<std::unique_ptr<Iterator>> Planner::plan_update(const UpdateStmt& stmt,
 
     auto iter = std::make_unique<UpdateOperator>(
         *storage->heap, storage->storage_schema, std::move(scan), std::move(assignments), bound);
+    // Populate column scales for DECIMAL-aware fit_to_storage (GDB-1047).
+    {
+        std::vector<int32_t> scales;
+        scales.reserve(table_schema->columns.size());
+        for (const auto& col : table_schema->columns) {
+            scales.push_back(col.scale);
+        }
+        iter->col_scales_ = std::move(scales);
+    }
     iter->bm25_targets_ = collect_bm25_targets(*table_schema);
     iter->target_table_id_ = table_schema->table_id;
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
