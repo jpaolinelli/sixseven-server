@@ -348,16 +348,14 @@ TEST_F(QA_Binder, NullLiteral) {
 }
 
 TEST_F(QA_Binder, NullInArithmetic) {
-    // BUG: NULL literal is typed as STRING (placeholder). NULL + 1 tries
-    // common_type(STRING, INT64) which fails because STRING and INT have
-    // no common type. NULL should be polymorphic and coerce to any type.
-    auto stmt = parse("SELECT NULL + 1 FROM users");
-    ASSERT_NE(stmt, nullptr);
-    auto result = binder->bind(*stmt);
-    // Currently fails with TYPE_ERROR because NULL is typed as STRING.
-    // TODO: Fix NULL to be polymorphic in type coercion.
-    // For now, document the behavior.
-    EXPECT_FALSE(result.has_value()) << "NULL + 1 fails because NULL is typed as STRING";
+    // GDB-1142: a NULL literal is polymorphic in arithmetic. `NULL + 1` is a
+    // valid SQL expression that evaluates to NULL and is typed as the non-NULL
+    // operand (INT64 here), with a nullable result. Previously the NULL literal
+    // was bound as a STRING placeholder and common_type(STRING, INT64) failed.
+    auto bound = bind_ok("SELECT NULL + 1 FROM users");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+    EXPECT_EQ(bound.output_columns[0].type_id, TypeId::INT64);
+    EXPECT_TRUE(bound.output_columns[0].nullable);
 }
 
 TEST_F(QA_Binder, NullComparison) {

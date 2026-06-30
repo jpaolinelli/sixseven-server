@@ -470,6 +470,24 @@ TEST_F(BinderTest, ArithmeticPromotion) {
     EXPECT_EQ(bound.output_columns[0].type_id, TypeId::INT64);
 }
 
+TEST_F(BinderTest, NullLiteralIsPolymorphicInArithmetic) {
+    // GDB-1142: a NULL literal is polymorphic in arithmetic. `NULL + 1` is a
+    // valid SQL expression evaluating to NULL, typed as the non-NULL operand.
+    // Before the fix the NULL literal was bound as a STRING placeholder and
+    // common_type(STRING, INT64) failed, rejecting the expression.
+    auto bound = bind_ok("SELECT NULL + 1 FROM users");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+    EXPECT_EQ(bound.output_columns[0].type_id, TypeId::INT64);
+    EXPECT_TRUE(bound.output_columns[0].nullable);
+
+    // Symmetric: NULL on the right-hand side binds the same way, taking the
+    // non-NULL operand's type (id is INT32).
+    auto bound_rhs = bind_ok("SELECT id * NULL FROM users");
+    ASSERT_EQ(bound_rhs.output_columns.size(), 1u);
+    EXPECT_EQ(bound_rhs.output_columns[0].type_id, TypeId::INT32);
+    EXPECT_TRUE(bound_rhs.output_columns[0].nullable);
+}
+
 TEST_F(BinderTest, ComparisonReturnsBool) {
     auto bound = bind_ok("SELECT id > 5 FROM users");
     ASSERT_EQ(bound.output_columns.size(), 1u);

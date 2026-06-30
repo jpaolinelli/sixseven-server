@@ -1053,6 +1053,37 @@ Result<ExprType> Binder::bind_binary(const BinaryExpr& expr, Scope& scope, Bound
     case BinaryOp::MULTIPLY:
     case BinaryOp::DIVIDE:
     case BinaryOp::MODULO: {
+        // NULL literal is polymorphic in arithmetic (SQL: NULL + 1 evaluates to
+        // NULL, typed as the other operand). Without this special case, a NULL
+        // literal is bound as a STRING placeholder and common_type(STRING, INT)
+        // would fail, rejecting a valid expression (GDB-1142). Mirrors the
+        // NULL-literal handling in the comparison case below.
+        {
+            auto* lhs_lit = dynamic_cast<const LiteralExpr*>(expr.lhs.get());
+            auto* rhs_lit = dynamic_cast<const LiteralExpr*>(expr.rhs.get());
+            bool lhs_null = lhs_lit && lhs_lit->kind == LiteralKind::NULL_LITERAL;
+            bool rhs_null = rhs_lit && rhs_lit->kind == LiteralKind::NULL_LITERAL;
+            if (lhs_null || rhs_null) {
+                // Both operands NULL: the result is an untyped nullable NULL.
+                if (lhs_null && rhs_null) {
+                    et.nullable = true;
+                    break;
+                }
+                // Exactly one NULL: the non-NULL operand determines the result
+                // type, which must be numeric for arithmetic. Result is nullable.
+                TypeId other = lhs_null ? rhs->type_id : lhs->type_id;
+                if (!is_numeric(other)) {
+                    return make_error(StatusCode::TYPE_ERROR,
+                                      "operator not supported for types " +
+                                          std::string(type_name(lhs->type_id)) + " and " +
+                                          std::string(type_name(rhs->type_id)));
+                }
+                et.type_id = other;
+                et.nullable = true;
+                et.decimal_scale = lhs_null ? rhs->decimal_scale : lhs->decimal_scale;
+                break;
+            }
+        }
         auto ct = common_type(lhs->type_id, rhs->type_id);
         if (!ct) {
             return make_error(
