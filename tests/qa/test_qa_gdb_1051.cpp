@@ -780,8 +780,9 @@ TEST(QA_GDB1051_TemporalAdversarial, Jan31PlusOneMonthClampsToFeb) {
 }
 
 // 2020-01-31 + 1 month = 2020-02-29 (2020 is leap year).
-// 2020-01-31 in days: 2020 is 50 years from 1970, with leap years 72,76,80,84,88,92,96,2000,04,08,12,16 = 12 leap years.
-// Days to 2020-01-01 = 50*365 + 12 = 18250 + 12 = 18262. +30 days = 18292 for Jan 31.
+// 2020-01-31 in days: 2020 is 50 years from 1970, with leap years
+// 72,76,80,84,88,92,96,2000,04,08,12,16 = 12 leap years. Days to 2020-01-01 = 50*365 + 12 = 18250 +
+// 12 = 18262. +30 days = 18292 for Jan 31.
 TEST(QA_GDB1051_TemporalAdversarial, Jan31PlusOneMonthLeapYearClampsToFeb29) {
     static constexpr int32_t JAN31_2020 = 18292;
     static constexpr int64_t USEC_PER_DAY = 86400LL * 1000000LL;
@@ -796,7 +797,8 @@ TEST(QA_GDB1051_TemporalAdversarial, Jan31PlusOneMonthLeapYearClampsToFeb29) {
 }
 
 // Negative interval months: DATE - 1 month (Jan -> Dec of prior year).
-// 2023-01-15 = 19388 - 16 = 19372? Let's use days: Jan 15, 2023 = Jan 31, 2023 - 16 = 19388-16=19372.
+// 2023-01-15 = 19388 - 16 = 19372? Let's use days: Jan 15, 2023 = Jan 31, 2023 - 16 =
+// 19388-16=19372.
 TEST(QA_GDB1051_TemporalAdversarial, DateMinusOneMonthCrossesYear) {
     static constexpr int32_t JAN15_2023 = 19372;
     static constexpr int64_t USEC_PER_DAY = 86400LL * 1000000LL;
@@ -897,15 +899,34 @@ TEST(QA_GDB1051_TemporalAdversarial, IntervalPlusTimeIsCommutative) {
 // sign = (op == ADD) ? 1 : -1 = -1, treating it as SUBTRACT.
 // This test documents the bug: expected TYPE_ERROR, actual success with wrong result.
 // TODO: update this test to ASSERT_FALSE once the bug is fixed.
-TEST(QA_GDB1051_TemporalAdversarial, TimestampMultiplyIntervalErrors_BUG) {
+TEST(QA_GDB1051_TemporalAdversarial, TimestampMultiplyIntervalErrors) {
+    // GDB-1283: TIMESTAMP * INTERVAL (and any non-ADD/SUBTRACT temporal op) must error
+    // cleanly, not silently fall through to a subtraction. eval_temporal_arithmetic now
+    // rejects ops other than ADD/SUBTRACT up front.
     static constexpr int64_t USEC_PER_DAY = 86400LL * 1000000LL;
     Value ts(Timestamp{5 * USEC_PER_DAY});
     Value iv(Interval{1, 0});
     auto r = eval_binary_vals(BinaryOp::MULTIPLY, std::move(ts), std::move(iv));
-    // BUG: this should be ASSERT_FALSE(r.has_value()), but it currently succeeds.
-    // When fixed, remove this EXPECT_TRUE and replace with ASSERT_FALSE + TYPE_ERROR check.
-    EXPECT_TRUE(r.has_value()) << "Bug: TIMESTAMP * INTERVAL should fail with TYPE_ERROR "
-                                  "but currently returns a value (treated as TIMESTAMP - INTERVAL)";
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(QA_GDB1051_TemporalAdversarial, IntervalMultiplyIntervalErrors) {
+    // GDB-1283 sibling: INTERVAL * INTERVAL would have fallen through to the SUBTRACT
+    // branch; it must error cleanly.
+    Value a(Interval{1, 1000});
+    Value b(Interval{2, 2000});
+    auto r = eval_binary_vals(BinaryOp::MULTIPLY, std::move(a), std::move(b));
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(QA_GDB1051_TemporalAdversarial, TimeModuloIntervalErrors) {
+    Value t(Time{1000});
+    Value iv(Interval{0, 500});
+    auto r = eval_binary_vals(BinaryOp::MODULO, std::move(t), std::move(iv));
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
 }
 
 // Overflow guard at boundary: INT64_MAX us - 1 + 1 = INT64_MAX (should succeed).

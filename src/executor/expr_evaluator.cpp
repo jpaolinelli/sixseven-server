@@ -146,6 +146,15 @@ Result<Value> eval_temporal_arithmetic(BinaryOp op, const Value& lhs, const Valu
     TypeId lt = lhs.type_id();
     TypeId rt = rhs.type_id();
 
+    // Only ADD and SUBTRACT are ever defined for temporal types. The branches below
+    // derive a sign from (op == ADD), so MULTIPLY/DIVIDE/MODULO must be rejected up
+    // front -- otherwise they would silently fall through as a subtraction.
+    if (op != BinaryOp::ADD && op != BinaryOp::SUBTRACT) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          std::string("operator not supported for types ") +
+                              std::string(type_name(lt)) + " and " + std::string(type_name(rt)));
+    }
+
     // INTERVAL +/- INTERVAL -> INTERVAL (component-wise with overflow check).
     if (lt == TypeId::INTERVAL && rt == TypeId::INTERVAL) {
         const auto& a = lhs.as_interval();
