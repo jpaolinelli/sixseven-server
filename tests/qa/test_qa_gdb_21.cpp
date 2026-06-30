@@ -152,10 +152,10 @@ protected:
 };
 
 // ===========================================================================
-// BUG CANDIDATE 1: Comparison operators don't validate type compatibility
-// The AC says "Type mismatches are caught (e.g., comparing STRING to INT)".
-// But the binder does not check operand type compatibility for comparison
-// operators — it just sets the result type to BOOL.
+// Comparison operator type-compatibility validation (fixed under GDB-219):
+// the binder rejects comparisons between incompatible operand types (e.g.
+// STRING vs INT) instead of silently setting the result to BOOL. These cases
+// pin that behavior locally; QA_BugfixBinder has the exhaustive coverage.
 // ===========================================================================
 
 TEST_F(QA_Binder, CompareStringToIntShouldFail) {
@@ -204,9 +204,9 @@ TEST_F(QA_Binder, CompareStringToStringOk) {
 }
 
 // ===========================================================================
-// BUG CANDIDATE 2: same_column_ref is case-sensitive
-// The binder uses to_upper() everywhere for name resolution, but
-// same_column_ref compares column names case-sensitively.
+// Case-insensitive GROUP BY column matching (fixed under GDB-220):
+// same_column_ref matches column names case-insensitively, consistent with the
+// rest of name resolution.
 // ===========================================================================
 
 TEST_F(QA_Binder, GroupByDifferentCaseColumn) {
@@ -222,8 +222,8 @@ TEST_F(QA_Binder, GroupByDifferentCaseColumn) {
 }
 
 // ===========================================================================
-// BUG CANDIDATE 3: UPDATE/DELETE WHERE clauses don't validate boolean type
-// SELECT validates WHERE is BOOL, but UPDATE and DELETE do not.
+// UPDATE/DELETE WHERE boolean-type validation (fixed under GDB-220): UPDATE and
+// DELETE validate that the WHERE clause is BOOL, just like SELECT does.
 // ===========================================================================
 
 TEST_F(QA_Binder, UpdateWhereNonBoolShouldFail) {
@@ -257,26 +257,19 @@ TEST_F(QA_Binder, DeleteWhereBoolOk) {
 }
 
 // ===========================================================================
-// BUG CANDIDATE 4: TRAVERSE doesn't validate FROM table matches edge type
-// LINK validates source/target table match, but TRAVERSE doesn't.
+// TRAVERSE FROM-table validation (fixed under GDB-221): TRAVERSE validates that
+// the FROM table is an endpoint of the edge type. The exhaustive coverage lives
+// in QA_BugfixBinder (tests/qa/test_qa_gdb_221_226.cpp, GDB221_* tests); the
+// formerly-duplicated TraverseFromUnrelatedTable case was removed from here.
 // ===========================================================================
 
-TEST_F(QA_Binder, TraverseFromUnrelatedTable) {
-    // TRAVERSE purchased FROM orders — edge is users→products, not orders.
-    // This should fail because orders is not an endpoint of the purchased edge.
-    bind_error("TRAVERSE purchased FROM orders(1)", StatusCode::TYPE_ERROR);
-}
-
 // ===========================================================================
-// BUG CANDIDATE 5: validate_aggregates only checks ColumnRefExpr
-// Complex expressions containing ungrouped columns pass through unchecked.
+// Aggregate validation in complex expressions (fixed under GDB-222):
+// validate_aggregates checks ungrouped columns inside binary/unary/CASE
+// expressions, not just bare column refs. Exhaustive coverage lives in
+// QA_BugfixBinder (GDB222_* tests); the duplicated
+// AggregateExprWithUngroupedColumnInExpression case was removed from here.
 // ===========================================================================
-
-TEST_F(QA_Binder, AggregateExprWithUngroupedColumnInExpression) {
-    // id + 1 contains 'id' which is not in GROUP BY (age) —
-    // should fail like a bare column ref would.
-    bind_error("SELECT id + 1, COUNT(*) FROM users GROUP BY age", StatusCode::TYPE_ERROR);
-}
 
 TEST_F(QA_Binder, AggregateExprWithGroupedColumnInExpressionOk) {
     // age + 1 contains 'age' which is in GROUP BY — should succeed.
@@ -414,10 +407,9 @@ TEST_F(QA_Binder, CoercionInInsert) {
     bind_ok("INSERT INTO users (id, name) VALUES (42, 'test')");
 }
 
-TEST_F(QA_Binder, StringSubtractFails) {
-    // STRING - STRING should fail — arithmetic requires numeric types.
-    bind_error("SELECT name - email FROM users", StatusCode::TYPE_ERROR);
-}
+// Note: STRING - STRING rejection is covered by QA_BugfixBinder (GDB-223,
+// tests/qa/test_qa_gdb_221_226.cpp); the duplicated StringSubtractFails case
+// ("SELECT name - email FROM users") was removed from here.
 
 TEST_F(QA_Binder, StringMultiplyFails) {
     bind_error("SELECT name * 2 FROM users", StatusCode::TYPE_ERROR);
@@ -766,13 +758,10 @@ TEST_F(QA_Binder, SelfJoin) {
 }
 
 // ===========================================================================
-// UNION edge cases
+// UNION column-type validation (fixed under GDB-224): exhaustive coverage lives
+// in QA_BugfixBinder (tests/qa/test_qa_gdb_221_226.cpp, GDB224_* tests); the
+// duplicated UnionTypeMismatch case was removed from here.
 // ===========================================================================
-
-TEST_F(QA_Binder, UnionTypeMismatch) {
-    // UNION of INT32 column and STRING column should fail type check.
-    bind_error("SELECT id FROM users UNION SELECT name FROM users", StatusCode::TYPE_ERROR);
-}
 
 // ===========================================================================
 // Stress tests
