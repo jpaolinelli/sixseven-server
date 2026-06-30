@@ -438,6 +438,17 @@ Result<Value> fit_to_storage(const Value& val, TypeId target) {
     }
     // Allow numeric narrowing (e.g. INT64 → INT32).
     if (is_numeric(val.type_id()) && is_integer(target)) {
+        // Float/decimal sources must go through the validated explicit_cast path
+        // (truncate-toward-zero with NaN/inf/out-of-range checks for floats; a
+        // loud TYPE_ERROR for decimals) rather than to_int64, whose default
+        // branch silently yields 0 for any non-integer source -- which made
+        // INSERT INTO t(int_col) VALUES (3.7) store 0 instead of 3 or erroring
+        // (GDB-1044, also reachable via UPDATE). This keeps the implicit storage
+        // narrowing consistent with an explicit CAST. Integer sources keep the
+        // existing int64 narrowing.
+        if (!is_integer(val.type_id())) {
+            return explicit_cast(val, target);
+        }
         int64_t v = to_int64(val);
         return ok(int64_to_value(v, target));
     }
