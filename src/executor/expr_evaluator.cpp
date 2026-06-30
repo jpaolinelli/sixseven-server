@@ -246,6 +246,32 @@ bool both_integer(const Value& a, const Value& b) {
     return !a.is_null() && !b.is_null() && is_integer(a.type_id()) && is_integer(b.type_id());
 }
 
+// Portable checked signed-64-bit arithmetic. MSVC lacks __builtin_*_overflow, so these
+// detect overflow without relying on signed wraparound (which is undefined behavior).
+// Each returns true when the operation would overflow the int64 range.
+bool add_overflows(int64_t a, int64_t b) {
+    return (b > 0 && a > INT64_MAX - b) || (b < 0 && a < INT64_MIN - b);
+}
+
+bool sub_overflows(int64_t a, int64_t b) {
+    return (b < 0 && a > INT64_MAX + b) || (b > 0 && a < INT64_MIN + b);
+}
+
+bool mul_overflows(int64_t a, int64_t b) {
+    if (a == 0 || b == 0) {
+        return false;
+    }
+    // INT64_MIN * anything but 0 or 1 overflows (its magnitude has no positive
+    // counterpart), and the division check below would itself overflow for it.
+    if (a == INT64_MIN || b == INT64_MIN) {
+        return !(a == 1 || b == 1);
+    }
+    // Compute the product in unsigned (well-defined wraparound), then verify by
+    // dividing back: if it differs, the signed product did not fit.
+    int64_t result = static_cast<int64_t>(static_cast<uint64_t>(a) * static_cast<uint64_t>(b));
+    return result / b != a;
+}
+
 Result<Value> eval_arithmetic(BinaryOp op, const Value& lhs, const Value& rhs) {
     // NULL propagation: any arithmetic with NULL yields NULL.
     if (lhs.is_null() || rhs.is_null()) {
@@ -264,10 +290,19 @@ Result<Value> eval_arithmetic(BinaryOp op, const Value& lhs, const Value& rhs) {
         int64_t r = *ra;
         switch (op) {
         case BinaryOp::ADD:
+            if (add_overflows(l, r)) {
+                return make_error(StatusCode::TYPE_ERROR, "integer out of range");
+            }
             return ok(Value(static_cast<int64_t>(l + r)));
         case BinaryOp::SUBTRACT:
+            if (sub_overflows(l, r)) {
+                return make_error(StatusCode::TYPE_ERROR, "integer out of range");
+            }
             return ok(Value(static_cast<int64_t>(l - r)));
         case BinaryOp::MULTIPLY:
+            if (mul_overflows(l, r)) {
+                return make_error(StatusCode::TYPE_ERROR, "integer out of range");
+            }
             return ok(Value(static_cast<int64_t>(l * r)));
         case BinaryOp::DIVIDE:
             if (r == 0) {
