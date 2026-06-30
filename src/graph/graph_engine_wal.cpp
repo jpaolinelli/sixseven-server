@@ -38,28 +38,32 @@ static void append_bytes(std::vector<uint8_t>& buf, const std::vector<uint8_t>& 
 
 // Read helpers that advance an offset pointer.  Each returns false on underflow.
 static bool read_u8(std::span<const uint8_t> data, size_t& off, uint8_t& out) {
-    if (off + 1 > data.size()) return false;
+    if (off + 1 > data.size())
+        return false;
     out = data[off];
     off += 1;
     return true;
 }
 
 static bool read_u32(std::span<const uint8_t> data, size_t& off, uint32_t& out) {
-    if (off + 4 > data.size()) return false;
+    if (off + 4 > data.size())
+        return false;
     std::memcpy(&out, data.data() + off, 4);
     off += 4;
     return true;
 }
 
 static bool read_u64(std::span<const uint8_t> data, size_t& off, uint64_t& out) {
-    if (off + 8 > data.size()) return false;
+    if (off + 8 > data.size())
+        return false;
     std::memcpy(&out, data.data() + off, 8);
     off += 8;
     return true;
 }
 
 static bool read_i32(std::span<const uint8_t> data, size_t& off, int32_t& out) {
-    if (off + 4 > data.size()) return false;
+    if (off + 4 > data.size())
+        return false;
     std::memcpy(&out, data.data() + off, 4);
     off += 4;
     return true;
@@ -232,8 +236,7 @@ void GraphEngineRecoveryHandler::register_edge_table(database_id_t database_id,
 }
 
 Result<void> GraphEngineRecoveryHandler::redo(const WalRecord& record) {
-    if (record.type != WalRecordType::EDGE_INSERT &&
-        record.type != WalRecordType::EDGE_DELETE) {
+    if (record.type != WalRecordType::EDGE_INSERT && record.type != WalRecordType::EDGE_DELETE) {
         return ok(); // Not an edge record -- pass through.
     }
 
@@ -261,18 +264,22 @@ Result<void> GraphEngineRecoveryHandler::redo(const WalRecord& record) {
     EdgeTable* table = it->second.table;
 
     if (record.type == WalRecordType::EDGE_INSERT) {
-        // restore_edge is idempotent: if edge_row_id already exists (because
-        // the heap file was flushed and load_edges() already loaded it), it
-        // updates next_row_id_ and returns ok() without double-inserting.
-        auto res = table->restore_edge(payload->edge_row_id,
-                                       payload->source_pk,
-                                       payload->target_pk,
-                                       payload->properties);
+        // restore_edge is idempotent: if the edge_row_id already exists in the
+        // table (heap file was flushed before crash and load_edges() loaded it),
+        // treat ALREADY_EXISTS as success so we don't double-insert.
+        auto res = table->restore_edge(
+            payload->edge_row_id, payload->source_pk, payload->target_pk, payload->properties);
         if (!res) {
-            return make_error(res.error().code,
-                              "edge WAL redo INSERT edge_row_id=" +
-                                  std::to_string(payload->edge_row_id) +
-                                  ": " + res.error().message);
+            if (res.error().code == StatusCode::ALREADY_EXISTS) {
+                SIXSEVEN_LOG_DEBUG(
+                    "edge WAL redo INSERT: edge_row_id={} already present -- idempotent ok",
+                    payload->edge_row_id);
+                return ok();
+            }
+            return make_error(
+                res.error().code,
+                "edge WAL redo INSERT edge_row_id=" + std::to_string(payload->edge_row_id) + ": " +
+                    res.error().message);
         }
         SIXSEVEN_LOG_DEBUG("edge WAL redo: restored edge_row_id={} for '{}'",
                            payload->edge_row_id,
@@ -283,15 +290,14 @@ Result<void> GraphEngineRecoveryHandler::redo(const WalRecord& record) {
         auto res = table->delete_edge(payload->edge_row_id);
         if (!res) {
             if (res.error().code == StatusCode::NOT_FOUND) {
-                SIXSEVEN_LOG_DEBUG(
-                    "edge WAL redo DELETE: edge_row_id={} already absent -- ok",
-                    payload->edge_row_id);
+                SIXSEVEN_LOG_DEBUG("edge WAL redo DELETE: edge_row_id={} already absent -- ok",
+                                   payload->edge_row_id);
                 return ok();
             }
-            return make_error(res.error().code,
-                              "edge WAL redo DELETE edge_row_id=" +
-                                  std::to_string(payload->edge_row_id) +
-                                  ": " + res.error().message);
+            return make_error(
+                res.error().code,
+                "edge WAL redo DELETE edge_row_id=" + std::to_string(payload->edge_row_id) + ": " +
+                    res.error().message);
         }
         SIXSEVEN_LOG_DEBUG("edge WAL redo: deleted edge_row_id={} for '{}'",
                            payload->edge_row_id,
@@ -305,8 +311,7 @@ Result<void> GraphEngineRecoveryHandler::undo(const WalRecord& record) {
     // Edge operations use frozen_txn_id (autocommit).  The WAL recovery
     // analysis phase never adds frozen_txn_id to aborted_txns, so undo()
     // is never called for edge records in practice.  Guard defensively.
-    if (record.type == WalRecordType::EDGE_INSERT ||
-        record.type == WalRecordType::EDGE_DELETE) {
+    if (record.type == WalRecordType::EDGE_INSERT || record.type == WalRecordType::EDGE_DELETE) {
         SIXSEVEN_LOG_WARN("edge WAL undo called unexpectedly for lsn={} -- no-op", record.lsn);
     }
     return ok();
@@ -319,16 +324,14 @@ CompositeRecoveryHandler::CompositeRecoveryHandler(RecoveryHandler& table_handle
     : table_handler_(table_handler), graph_handler_(graph_handler) {}
 
 Result<void> CompositeRecoveryHandler::redo(const WalRecord& record) {
-    if (record.type == WalRecordType::EDGE_INSERT ||
-        record.type == WalRecordType::EDGE_DELETE) {
+    if (record.type == WalRecordType::EDGE_INSERT || record.type == WalRecordType::EDGE_DELETE) {
         return graph_handler_.redo(record);
     }
     return table_handler_.redo(record);
 }
 
 Result<void> CompositeRecoveryHandler::undo(const WalRecord& record) {
-    if (record.type == WalRecordType::EDGE_INSERT ||
-        record.type == WalRecordType::EDGE_DELETE) {
+    if (record.type == WalRecordType::EDGE_INSERT || record.type == WalRecordType::EDGE_DELETE) {
         return graph_handler_.undo(record);
     }
     return table_handler_.undo(record);
