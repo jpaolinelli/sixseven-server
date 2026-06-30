@@ -265,6 +265,23 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
         count = static_cast<int64_t>(rids->size());
     }
 
+    // Durably persist the auto-increment counter after every INSERT statement so
+    // that a crash-like (no-flush) restart never reissues a previously-issued ID.
+    // This mirrors the value written by the flush path (index_manager.cpp flush
+    // loop), which also writes get_autoincrement_counter() -- the next-to-issue
+    // value. Per-statement (rather than per-row) is sufficient: the statement is
+    // atomic, so if any row fails the whole statement is rolled back and the
+    // counter is not advanced.
+    if (catalog_ != nullptr && storage_manager_ != nullptr && !autoincrement_cols_.empty()) {
+        for (const auto& ai : autoincrement_cols_) {
+            int64_t counter = catalog_->get_autoincrement_counter(ai.table_id);
+            if (counter > 0) {
+                (void)storage_manager_->write_autoincrement(ai.table_id, counter);
+            }
+            break; // one counter per table; all ai_cols share the same table_id
+        }
+    }
+
     Tuple result;
     result.values.push_back(Value(count));
     return ok(std::optional<Tuple>(std::move(result)));
