@@ -242,29 +242,31 @@ TEST_F(QA_ConfigFile, PortExactly65536) {
 }
 
 TEST_F(QA_ConfigFile, PortNegative) {
-    // Negative port should be silently ignored (not is_number_unsigned).
+    // A wrong-typed port (negative -> not is_number_unsigned) is rejected with an
+    // explicit error rather than silently dropped. GDB-853 (#308) replaced the old
+    // silently-ignore behavior with strict wrong-type rejection (no silent drops).
     write_file(R"({"port": -1})");
     auto result = Config::load_from_file(tmp_path_);
-    ASSERT_TRUE(result.has_value());
-    // Port should remain at default since -1 is not unsigned.
-    EXPECT_EQ(result->port, 6767);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_NE(result.error().message.find("port"), std::string::npos);
 }
 
 TEST_F(QA_ConfigFile, PortAsString) {
-    // String port should be silently ignored (type mismatch).
+    // A string port is a type mismatch and is rejected with an explicit error
+    // (GDB-853 #308 strict wrong-type handling), not silently ignored.
     write_file(R"({"port": "8080"})");
     auto result = Config::load_from_file(tmp_path_);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->port, 6767);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_NE(result.error().message.find("port"), std::string::npos);
 }
 
 TEST_F(QA_ConfigFile, PortAsFloat) {
-    // Float port should be silently ignored (not is_number_unsigned for float).
+    // A float port is not is_number_unsigned, so it is rejected with an explicit
+    // error (GDB-853 #308 strict wrong-type handling), not silently ignored.
     write_file(R"({"port": 8080.5})");
     auto result = Config::load_from_file(tmp_path_);
-    ASSERT_TRUE(result.has_value());
-    // Float is not unsigned, so should use default.
-    EXPECT_EQ(result->port, 6767);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_NE(result.error().message.find("port"), std::string::npos);
 }
 
 TEST_F(QA_ConfigFile, BufferPoolSizeZero) {
