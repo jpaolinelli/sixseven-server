@@ -23,6 +23,8 @@
 #include <string_view>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -1270,6 +1272,13 @@ protected:
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
+        // Register the default database (id=1) so the binder/storage can
+        // resolve default-database references; a bare Catalog only has the
+        // system database (id=2). Without this the fixture's CREATE TABLE
+        // fails "database with id 1 not found" and every test dies at SetUp
+        // (GDB-713 / GDB-1277 bootstrap pattern).
+        bootstrap_qa_catalog(catalog_);
+
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
 
@@ -1411,9 +1420,15 @@ TEST_F(QA_GDB201_QueryEngine, DescribeDoesNotModifyData) {
 }
 
 TEST_F(QA_GDB201_QueryEngine, DescribeSelectExpressionColumn) {
-    // Describe a SELECT with a literal expression.
+    // Describe a FROM-less SELECT of a bare integer literal. Per PostgreSQL,
+    // an unnamed expression column is reported as a single column named
+    // "?column?"; the integer literal binds to INT64. The previous version of
+    // this test discarded the Result and only checked "doesn't crash" (which
+    // is vacuous: describe() returns Result<T> and never throws), so it passed
+    // under any behavior. Pin the actual contract instead.
     auto result = engine_->describe("SELECT 1");
-    // This may or may not work depending on binder support for bare literals.
-    // We just verify it doesn't crash.
-    (void)result;
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->size(), 1u);
+    EXPECT_EQ((*result)[0].name, "?column?");
+    EXPECT_EQ((*result)[0].type_id, TypeId::INT64);
 }
