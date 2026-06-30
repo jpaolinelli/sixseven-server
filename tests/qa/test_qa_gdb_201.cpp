@@ -1239,7 +1239,7 @@ TEST(QA_GDB201_Protocol, PortalDescribeDoesNotIncludeParameterDescription) {
     ASSERT_TRUE(find_message(response, pos, '1', payload, payload_len)); // ParseComplete
     ASSERT_TRUE(find_message(response, pos, '2', payload, payload_len)); // BindComplete
 
-    // A portal Describe ('P') must NOT emit ParameterDescription ('t') — that
+    // A portal Describe ('P') must NOT emit ParameterDescription ('t') -- that
     // message is reserved for statement Describe ('S'). Assert this directly
     // rather than relying on find_message('T'), which skips over any stray 't'
     // while scanning and would therefore pass even if the server regressed to
