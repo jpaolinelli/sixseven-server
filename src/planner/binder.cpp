@@ -1006,8 +1006,51 @@ Result<ExprType> Binder::bind_binary(const BinaryExpr& expr, Scope& scope, Bound
     et.is_aggregate = lhs->is_aggregate || rhs->is_aggregate;
 
     switch (expr.op) {
+    // -- GDB-1051: temporal arithmetic (DATE/TIMESTAMP/INTERVAL/TIME + INTERVAL) ----------
     case BinaryOp::ADD:
-    case BinaryOp::SUBTRACT:
+    case BinaryOp::SUBTRACT: {
+        TypeId lt = lhs->type_id;
+        TypeId rt = rhs->type_id;
+        // INTERVAL +/- INTERVAL -> INTERVAL
+        if (lt == TypeId::INTERVAL && rt == TypeId::INTERVAL) {
+            et.type_id = TypeId::INTERVAL;
+            return ok(et);
+        }
+        // DATE/TIMESTAMP +/- INTERVAL -> TIMESTAMP (PostgreSQL semantics)
+        if ((lt == TypeId::DATE || lt == TypeId::TIMESTAMP) && rt == TypeId::INTERVAL) {
+            et.type_id = TypeId::TIMESTAMP;
+            return ok(et);
+        }
+        // INTERVAL + DATE/TIMESTAMP -> TIMESTAMP (commutative for addition only)
+        if (lt == TypeId::INTERVAL && (rt == TypeId::DATE || rt == TypeId::TIMESTAMP) &&
+            expr.op == BinaryOp::ADD) {
+            et.type_id = TypeId::TIMESTAMP;
+            return ok(et);
+        }
+        // TIME +/- INTERVAL -> TIME (microseconds component only; months error at eval)
+        if (lt == TypeId::TIME && rt == TypeId::INTERVAL) {
+            et.type_id = TypeId::TIME;
+            return ok(et);
+        }
+        // INTERVAL + TIME -> TIME (commutative for addition only)
+        if (lt == TypeId::INTERVAL && rt == TypeId::TIME && expr.op == BinaryOp::ADD) {
+            et.type_id = TypeId::TIME;
+            return ok(et);
+        }
+        // DATE - DATE -> INTERVAL (day difference)
+        if (expr.op == BinaryOp::SUBTRACT && lt == TypeId::DATE && rt == TypeId::DATE) {
+            et.type_id = TypeId::INTERVAL;
+            return ok(et);
+        }
+        // TIMESTAMP - TIMESTAMP -> INTERVAL (microsecond difference)
+        if (expr.op == BinaryOp::SUBTRACT && lt == TypeId::TIMESTAMP &&
+            rt == TypeId::TIMESTAMP) {
+            et.type_id = TypeId::INTERVAL;
+            return ok(et);
+        }
+        // Fall through to numeric arithmetic below.
+        [[fallthrough]];
+    }
     case BinaryOp::MULTIPLY:
     case BinaryOp::DIVIDE:
     case BinaryOp::MODULO: {
@@ -1018,11 +1061,12 @@ Result<ExprType> Binder::bind_binary(const BinaryExpr& expr, Scope& scope, Bound
                 "incompatible types for arithmetic: " + std::string(type_name(lhs->type_id)) +
                     " and " + std::string(type_name(rhs->type_id)));
         }
-        // Arithmetic requires numeric operands — reject STRING, BOOL, etc.
+        // Arithmetic requires numeric operands — reject STRING, BOOL, temporal, etc.
         if (!is_numeric(*ct)) {
             return make_error(StatusCode::TYPE_ERROR,
-                              "arithmetic requires numeric types, got " +
-                                  std::string(type_name(*ct)));
+                              "operator not supported for types " +
+                                  std::string(type_name(lhs->type_id)) + " and " +
+                                  std::string(type_name(rhs->type_id)));
         }
         et.type_id = *ct;
         // Propagate decimal_scale for DECIMAL arithmetic results.
@@ -1081,6 +1125,21 @@ Result<ExprType> Binder::bind_binary(const BinaryExpr& expr, Scope& scope, Bound
         break;
     case BinaryOp::CONCAT:
         et.type_id = TypeId::STRING;
+        break;
+    // -- GDB-1051: new operators -------------------------------------------------
+    case BinaryOp::JSON_EXTRACT:
+        // json -> key returns JSON; LHS must be JSON (checked at eval time).
+        et.type_id = TypeId::JSON;
+        et.nullable = true; // missing key returns NULL
+        break;
+    case BinaryOp::JSON_EXTRACT_TEXT:
+        // json ->> key returns STRING; missing key returns NULL.
+        et.type_id = TypeId::STRING;
+        et.nullable = true;
+        break;
+    case BinaryOp::POINT_DISTANCE:
+        // point <-> point returns FLOAT64.
+        et.type_id = TypeId::FLOAT64;
         break;
     }
 

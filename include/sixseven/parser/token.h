@@ -176,6 +176,9 @@ enum class TokenType : uint8_t {
     PIPE_PIPE,     // ||  (string concatenation)
     COLON_COLON,   // ::  (type cast)
     COLON_EQUAL,   // :=  (named parameter assignment)
+    ARROW,         // ->  (JSON field extraction, returns JSON)
+    ARROW_TEXT,    // ->> (JSON field extraction, returns STRING)
+    DISTANCE,      // <-> (POINT Euclidean distance, returns FLOAT64)
 
     // -- Punctuation ----------------------------------------------------------
 
@@ -508,6 +511,12 @@ constexpr std::string_view token_type_name(TokenType type) {
         return "COLON_COLON";
     case TokenType::COLON_EQUAL:
         return "COLON_EQUAL";
+    case TokenType::ARROW:
+        return "ARROW";
+    case TokenType::ARROW_TEXT:
+        return "ARROW_TEXT";
+    case TokenType::DISTANCE:
+        return "DISTANCE";
     case TokenType::COMMA:
         return "COMMA";
     case TokenType::SEMICOLON:

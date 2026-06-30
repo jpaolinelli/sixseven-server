@@ -840,3 +840,76 @@ TEST(Lexer, TabInPositionTracking) {
     // Tab advances column by 1 (single character).
     EXPECT_EQ(tokens[0].column, 2u);
 }
+
+// -- GDB-1051: new operator tokens --------------------------------------------
+
+TEST(Lexer, ArrowToken) {
+    auto tokens = tokenize_ok("->");
+    ASSERT_EQ(tokens.size(), 2u); // ARROW + EOF
+    EXPECT_EQ(tokens[0].type, TokenType::ARROW);
+    EXPECT_EQ(tokens[0].lexeme, "->");
+}
+
+TEST(Lexer, ArrowTextToken) {
+    auto tokens = tokenize_ok("->>");
+    ASSERT_EQ(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::ARROW_TEXT);
+    EXPECT_EQ(tokens[0].lexeme, "->>");
+}
+
+TEST(Lexer, DistanceToken) {
+    auto tokens = tokenize_ok("<->");
+    ASSERT_EQ(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::DISTANCE);
+    EXPECT_EQ(tokens[0].lexeme, "<->");
+}
+
+TEST(Lexer, ArrowTextMaximalMunchOverArrow) {
+    // ->> must produce ARROW_TEXT (not ARROW then GREATER).
+    auto tokens = tokenize_ok("->>");
+    ASSERT_EQ(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::ARROW_TEXT);
+}
+
+TEST(Lexer, MinusStillMinus) {
+    // Plain a - b must still produce MINUS.
+    auto tokens = tokenize_ok("a - b");
+    ASSERT_EQ(tokens.size(), 4u); // IDENTIFIER MINUS IDENTIFIER EOF
+    EXPECT_EQ(tokens[1].type, TokenType::MINUS);
+}
+
+TEST(Lexer, LessStillLess) {
+    auto tokens = tokenize_ok("a < b");
+    ASSERT_EQ(tokens.size(), 4u);
+    EXPECT_EQ(tokens[1].type, TokenType::LESS);
+}
+
+TEST(Lexer, LessEqualNotAffected) {
+    auto tokens = tokenize_ok("<=");
+    ASSERT_EQ(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::LESS_EQUAL);
+}
+
+TEST(Lexer, NotEqualDiamondNotAffected) {
+    auto tokens = tokenize_ok("<>");
+    ASSERT_EQ(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::NOT_EQUAL);
+}
+
+TEST(Lexer, DistanceInExpression) {
+    // col <-> other_col
+    auto tokens = tokenize_ok("col <-> other_col");
+    ASSERT_EQ(tokens.size(), 4u);
+    EXPECT_EQ(tokens[0].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[1].type, TokenType::DISTANCE);
+    EXPECT_EQ(tokens[2].type, TokenType::IDENTIFIER);
+}
+
+TEST(Lexer, ArrowInExpression) {
+    // data->'key'
+    auto tokens = tokenize_ok("data->'key'");
+    ASSERT_EQ(tokens.size(), 4u);
+    EXPECT_EQ(tokens[0].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[1].type, TokenType::ARROW);
+    EXPECT_EQ(tokens[2].type, TokenType::STRING_LITERAL);
+}

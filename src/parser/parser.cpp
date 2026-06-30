@@ -2406,67 +2406,89 @@ Result<std::vector<PathElement>> Parser::parse_match_pattern() {
         PathElement elem;
         elem.node = std::move(node);
 
-        if (check(TokenType::MINUS) || check(TokenType::LESS)) {
+        // ARROW token covers '->' (JSON op in expressions; graph arrow in MATCH patterns).
+        // Accept MINUS (start of undirected or outgoing edge), LESS (incoming prefix <-),
+        // or ARROW (the '->' lexed as a single token, representing an outgoing edge ->[...]).
+        if (check(TokenType::MINUS) || check(TokenType::LESS) || check(TokenType::ARROW)) {
             EdgePatternDef edge;
             bool incoming_prefix = false;
+            bool arrow_consumed = false; // true when ARROW token was consumed as '->'
 
             if (match(TokenType::LESS)) {
                 incoming_prefix = true;
                 auto dash = expect(TokenType::MINUS, "expected '-' after '<'");
                 if (!dash)
                     return tl::unexpected(dash.error());
+            } else if (match(TokenType::ARROW)) {
+                // '->' consumed as a single token — shorthand for undirected-open + outgoing.
+                // No bracket body is possible here; set direction immediately and finish the
+                // edge so the next node can be parsed.
+                arrow_consumed = true;
             } else {
                 advance(); // consume -
             }
 
-            if (match(TokenType::LBRACKET)) {
-                if (check(TokenType::COLON)) {
-                    advance(); // consume :
-                    auto etype = parse_name("edge type");
-                    if (!etype)
-                        return tl::unexpected(etype.error());
-                    edge.edge_type = std::move(*etype);
-                } else if (!check(TokenType::RBRACKET) && is_name_token(peek().type)) {
-                    auto name = parse_name("edge variable or type");
-                    if (!name)
-                        return tl::unexpected(name.error());
-
-                    if (match(TokenType::COLON)) {
-                        edge.variable = std::move(*name);
+            // When '->' was consumed as a single ARROW token, skip bracket body and
+            // trailing arrow — direction is already OUT.
+            if (arrow_consumed) {
+                edge.direction = TraverseDirection::OUT;
+            } else {
+                if (match(TokenType::LBRACKET)) {
+                    if (check(TokenType::COLON)) {
+                        advance(); // consume :
                         auto etype = parse_name("edge type");
                         if (!etype)
                             return tl::unexpected(etype.error());
                         edge.edge_type = std::move(*etype);
-                    } else {
-                        edge.edge_type = std::move(*name);
+                    } else if (!check(TokenType::RBRACKET) && is_name_token(peek().type)) {
+                        auto name = parse_name("edge variable or type");
+                        if (!name)
+                            return tl::unexpected(name.error());
+
+                        if (match(TokenType::COLON)) {
+                            edge.variable = std::move(*name);
+                            auto etype = parse_name("edge type");
+                            if (!etype)
+                                return tl::unexpected(etype.error());
+                            edge.edge_type = std::move(*etype);
+                        } else {
+                            edge.edge_type = std::move(*name);
+                        }
                     }
+
+                    // Parse optional inline WHERE predicate: [r:type WHERE expr]
+                    if (match(TokenType::WHERE)) {
+                        auto filter = parse_expression();
+                        if (!filter)
+                            return tl::unexpected(filter.error());
+                        edge.filter_expr = std::move(*filter);
+                    }
+
+                    auto rb = expect(TokenType::RBRACKET, "expected ']'");
+                    if (!rb)
+                        return tl::unexpected(rb.error());
                 }
 
-                // Parse optional inline WHERE predicate: [r:type WHERE expr]
-                if (match(TokenType::WHERE)) {
-                    auto filter = parse_expression();
-                    if (!filter)
-                        return tl::unexpected(filter.error());
-                    edge.filter_expr = std::move(*filter);
+                // The trailing edge arrow is either '->' (now a single ARROW token)
+                // or '-' optionally followed by '>'. Accept both forms.
+                bool outgoing_suffix = false;
+                if (match(TokenType::ARROW)) {
+                    // Lexer merged -> into a single ARROW token.
+                    outgoing_suffix = true;
+                } else {
+                    auto dash = expect(TokenType::MINUS, "expected '-' in edge pattern");
+                    if (!dash)
+                        return tl::unexpected(dash.error());
+                    outgoing_suffix = match(TokenType::GREATER);
                 }
 
-                auto rb = expect(TokenType::RBRACKET, "expected ']'");
-                if (!rb)
-                    return tl::unexpected(rb.error());
-            }
-
-            auto dash = expect(TokenType::MINUS, "expected '-' in edge pattern");
-            if (!dash)
-                return tl::unexpected(dash.error());
-
-            bool outgoing_suffix = match(TokenType::GREATER);
-
-            if (incoming_prefix && !outgoing_suffix) {
-                edge.direction = TraverseDirection::IN;
-            } else if (!incoming_prefix && outgoing_suffix) {
-                edge.direction = TraverseDirection::OUT;
-            } else {
-                edge.direction = TraverseDirection::BOTH;
+                if (incoming_prefix && !outgoing_suffix) {
+                    edge.direction = TraverseDirection::IN;
+                } else if (!incoming_prefix && outgoing_suffix) {
+                    edge.direction = TraverseDirection::OUT;
+                } else {
+                    edge.direction = TraverseDirection::BOTH;
+                }
             }
 
             // Parse optional hop quantifier: {min,max}, {n}, +, *
@@ -3439,6 +3461,49 @@ Result<ExprPtr> Parser::parse_postfix() {
         cast->line = line;
         cast->col = col;
         expr = ok(ExprPtr(std::move(cast)));
+    }
+
+    // JSON extraction: json -> key, json ->> key.
+    // These are high-precedence left-associative postfix operators (chains are allowed).
+    while (check(TokenType::ARROW) || check(TokenType::ARROW_TEXT)) {
+        Token op_tok = advance();
+        uint32_t line = op_tok.line;
+        uint32_t col = op_tok.column;
+
+        // RHS is a string key or integer index (primary, not a full expression, to
+        // avoid consuming unintended trailing operators).
+        auto rhs = parse_primary();
+        if (!rhs)
+            return tl::unexpected(rhs.error());
+
+        auto bin = std::make_unique<BinaryExpr>();
+        bin->op = (op_tok.type == TokenType::ARROW) ? BinaryOp::JSON_EXTRACT
+                                                     : BinaryOp::JSON_EXTRACT_TEXT;
+        bin->lhs = std::move(*expr);
+        bin->rhs = std::move(*rhs);
+        bin->line = line;
+        bin->col = col;
+        expr = ok(ExprPtr(std::move(bin)));
+    }
+
+    // POINT distance: point <-> point.
+    // Same precedence level as JSON extraction (both are postfix/high-precedence ops).
+    while (check(TokenType::DISTANCE)) {
+        Token op_tok = advance();
+        uint32_t line = op_tok.line;
+        uint32_t col = op_tok.column;
+
+        auto rhs = parse_primary();
+        if (!rhs)
+            return tl::unexpected(rhs.error());
+
+        auto bin = std::make_unique<BinaryExpr>();
+        bin->op = BinaryOp::POINT_DISTANCE;
+        bin->lhs = std::move(*expr);
+        bin->rhs = std::move(*rhs);
+        bin->line = line;
+        bin->col = col;
+        expr = ok(ExprPtr(std::move(bin)));
     }
 
     return expr;
