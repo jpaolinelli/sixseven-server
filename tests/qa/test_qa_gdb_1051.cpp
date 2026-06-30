@@ -22,6 +22,7 @@
 #include "sixseven/executor/tuple.h"
 #include "sixseven/parser/ast.h"
 #include "sixseven/parser/lexer.h"
+#include "sixseven/parser/parser.h"
 #include "sixseven/parser/token.h"
 #include "sixseven/planner/binder.h"
 
