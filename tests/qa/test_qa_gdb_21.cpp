@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 
 // ===========================================================================
@@ -21,6 +23,12 @@ protected:
     std::unique_ptr<Binder> binder;
 
     void SetUp() override {
+        // Register the default database (id=1); a bare Catalog only has the
+        // system database (id=2), so create_table(default_database_id, ...)
+        // would otherwise fail "database with id 1 not found" and every test in
+        // this fixture would die at SetUp (GDB-713 / GDB-1277 bootstrap).
+        bootstrap_qa_catalog(catalog);
+
         // Table: users(id INT32, name STRING, email STRING, age INT32, active BOOL)
         {
             TableSchema s;
@@ -378,14 +386,16 @@ TEST_F(QA_Binder, IsNotNull) {
 }
 
 TEST_F(QA_Binder, InsertNullIntoNonNullableColumn) {
-    // id is NOT NULL — inserting NULL should be caught.
-    // The binder does null bypass for type checking but may not catch
-    // null-into-not-null violations.
+    // id is NOT NULL, but NOT NULL is a storage-time constraint: the binder
+    // accepts an explicit NULL literal here and the violation is caught later
+    // at execution. Pin that the bind SUCCEEDS (the previous version discarded
+    // the result, so it passed whether the binder accepted or rejected NULL).
     auto stmt = parse("INSERT INTO users (id, name) VALUES (NULL, 'test')");
     ASSERT_NE(stmt, nullptr);
     auto result = binder->bind(*stmt);
-    // This might pass binder (constraint check happens at execution).
-    // Not a binder-level bug if it passes — just documenting behavior.
+    EXPECT_TRUE(result.has_value())
+        << "binder should accept NULL into a NOT NULL column (enforced at execution): "
+        << (result.has_value() ? "" : result.error().message);
 }
 
 // ===========================================================================
@@ -623,8 +633,12 @@ TEST_F(QA_Binder, BetweenTypeMismatch) {
     auto stmt = parse("SELECT age BETWEEN 'a' AND 'z' FROM users");
     ASSERT_NE(stmt, nullptr);
     auto result = binder->bind(*stmt);
-    // Note: BETWEEN doesn't validate type compatibility between expr and bounds.
-    // This is documenting current behavior.
+    // Current behavior: BETWEEN does not validate type compatibility between the
+    // tested expression (INT32 age) and its STRING bounds; it binds to a BOOL
+    // result. Pin that contract (the previous version discarded the result).
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->output_columns.size(), 1u);
+    EXPECT_EQ(result->output_columns[0].type_id, TypeId::BOOL);
 }
 
 // ===========================================================================
@@ -652,7 +666,12 @@ TEST_F(QA_Binder, LikeOnNonStringColumn) {
     auto stmt = parse("SELECT id LIKE '%1%' FROM users");
     ASSERT_NE(stmt, nullptr);
     auto result = binder->bind(*stmt);
-    // Documenting: LIKE doesn't validate that the operand is a string type.
+    // Current behavior: LIKE does not validate that its left operand is a string
+    // type (id is INT32); it binds to a BOOL result. Pin that contract (the
+    // previous version discarded the result).
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->output_columns.size(), 1u);
+    EXPECT_EQ(result->output_columns[0].type_id, TypeId::BOOL);
 }
 
 // ===========================================================================
