@@ -93,6 +93,10 @@ Result<RecoveryStats> WalRecovery::recover() {
     //   - We only buffer data records from the *last* checkpoint onward,
     //     keeping memory proportional to the post-checkpoint window.
     //   - Transaction state is rebuilt from the last checkpoint.
+    //
+    // GDB-1077: transactions that were active AT the checkpoint and never
+    // committed need their pre-checkpoint records undone.  We carry those
+    // records in carried_undo_records so the undo phase can reach them.
 
     WalReader reader(wal_dir_);
     auto open_result = reader.open();
@@ -104,6 +108,13 @@ Result<RecoveryStats> WalRecovery::recover() {
 
     // Buffered data records from the last checkpoint onward (only data types).
     std::vector<WalRecord> post_checkpoint_records;
+
+    // Pre-checkpoint data records for transactions that were active at the
+    // checkpoint.  These must be retained so that undo can reverse their
+    // effects if the transaction never commits.  Records are accumulated
+    // before the checkpoint is processed, then the subset belonging to
+    // in-flight transactions is moved here; the rest are discarded.
+    std::vector<WalRecord> carried_undo_records;
 
     // Transaction state (rebuilt from the last checkpoint).
     std::set<txn_id_t> committed_txns;
@@ -128,25 +139,49 @@ Result<RecoveryStats> WalRecovery::recover() {
         if (record->type == WalRecordType::CHECKPOINT) {
             last_checkpoint_lsn = record->lsn;
 
-            // Discard everything buffered before this checkpoint.
-            post_checkpoint_records.clear();
-            committed_txns.clear();
-            aborted_txns.clear();
-            active_txns.clear();
-
-            // Seed active_txns with the transactions that were in-flight at
-            // the time of the checkpoint (decoded from its data payload).
+            // Decode the active-txn set from the checkpoint payload before
+            // discarding buffered state, so we know which pre-checkpoint
+            // records must be carried forward for undo.
+            std::set<txn_id_t> checkpoint_active;
             if (!record->data.empty()) {
                 auto active = deserialize_checkpoint_data(record->data);
                 if (active) {
                     for (auto txn_id : *active) {
-                        active_txns.insert(txn_id);
+                        checkpoint_active.insert(txn_id);
                     }
                 } else {
                     SIXSEVEN_LOG_WARN("WAL recovery: failed to decode checkpoint data: {}",
                                       active.error().message);
                 }
             }
+
+            // Retain pre-checkpoint records belonging to transactions that
+            // were still active at the checkpoint; discard the rest.
+            // Records already carried from an earlier checkpoint are also
+            // filtered: only keep those whose txn is still active now.
+            std::vector<WalRecord> next_carried;
+            for (auto& r : carried_undo_records) {
+                if (checkpoint_active.count(r.txn_id) != 0) {
+                    next_carried.push_back(std::move(r));
+                }
+            }
+            for (auto& r : post_checkpoint_records) {
+                if (checkpoint_active.count(r.txn_id) != 0) {
+                    next_carried.push_back(std::move(r));
+                }
+            }
+            carried_undo_records = std::move(next_carried);
+
+            post_checkpoint_records.clear();
+            committed_txns.clear();
+            aborted_txns.clear();
+            active_txns.clear();
+
+            // Seed active_txns from the checkpoint payload.
+            for (auto txn_id : checkpoint_active) {
+                active_txns.insert(txn_id);
+            }
+
             continue; // Don't buffer the checkpoint record itself.
         }
 
@@ -224,6 +259,9 @@ Result<RecoveryStats> WalRecovery::recover() {
 
     // ---- Phase 2: Redo ------------------------------------------------------
     // Replay data records of committed transactions in forward order.
+    // Only post-checkpoint records are redone; the pre-checkpoint effects of
+    // committed transactions are already durable on disk per the checkpoint.
+    // carried_undo_records are intentionally excluded from redo.
 
     for (const auto& rec : post_checkpoint_records) {
         // Frozen records (GDB-714) are autocommit operations: always redone.
@@ -242,15 +280,34 @@ Result<RecoveryStats> WalRecovery::recover() {
     SIXSEVEN_LOG_INFO("WAL recovery redo: {} records replayed", stats.records_redone);
 
     // ---- Phase 3: Undo ------------------------------------------------------
-    // Reverse data records of aborted/in-progress transactions in reverse
-    // (LSN) order.
+    // Reverse data records of aborted/in-progress (loser) transactions in
+    // reverse LSN order.  For each loser txn we must undo BOTH its
+    // post-checkpoint records AND any pre-checkpoint records that were carried
+    // forward (GDB-1077).  Build a combined list sorted by LSN descending so
+    // that the most-recent effect is undone first, regardless of whether the
+    // record originated before or after the checkpoint.
 
-    for (auto it = post_checkpoint_records.rbegin(); it != post_checkpoint_records.rend(); ++it) {
-        if (aborted_txns.find(it->txn_id) == aborted_txns.end()) {
-            continue; // Not an aborted transaction.
+    std::vector<const WalRecord*> undo_candidates;
+    undo_candidates.reserve(carried_undo_records.size() + post_checkpoint_records.size());
+
+    for (const auto& rec : carried_undo_records) {
+        if (aborted_txns.count(rec.txn_id) != 0) {
+            undo_candidates.push_back(&rec);
         }
+    }
+    for (const auto& rec : post_checkpoint_records) {
+        if (aborted_txns.count(rec.txn_id) != 0) {
+            undo_candidates.push_back(&rec);
+        }
+    }
 
-        auto result = handler_.undo(*it);
+    // Sort descending by LSN so the most recent record is undone first.
+    std::sort(undo_candidates.begin(),
+              undo_candidates.end(),
+              [](const WalRecord* a, const WalRecord* b) { return a->lsn > b->lsn; });
+
+    for (const auto* rec : undo_candidates) {
+        auto result = handler_.undo(*rec);
         if (!result) {
             return tl::unexpected(result.error());
         }
