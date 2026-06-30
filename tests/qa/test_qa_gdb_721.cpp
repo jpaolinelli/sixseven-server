@@ -209,8 +209,12 @@ TEST(QA721SessionVariables, ResetRestoresDisabledTimeout) {
 
 TEST(QA721SessionVariables, InertVariablesStillAcceptedAndEchoed) {
     Session s(1);
+    // Note: default_transaction_isolation is NOT in this list. It started as
+    // inert here but was promoted to HONORED + validated-at-SET-time by GDB-978
+    // (engine consumes it via QueryEngine::set_session_isolation), so setting it
+    // to a bogus value like "qa721" is now correctly rejected. Its honored
+    // behavior is covered by test_qa_gdb_978.cpp / test_isolation_levels.cpp.
     const char* inert_vars[] = {"work_mem",
-                                "default_transaction_isolation",
                                 "search_path",
                                 "embedding_provider_url",
                                 "embedding_api_key",
