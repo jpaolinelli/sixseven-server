@@ -1,6 +1,7 @@
 #include "sixseven/executor/hash_join.h"
 
 #include "sixseven/common/coercion.h"
+#include "sixseven/common/value_hash.h"
 #include "sixseven/executor/expr_evaluator.h"
 
 #include <functional>
@@ -28,28 +29,11 @@ HashJoinOperator::HashJoinOperator(std::unique_ptr<Iterator> probe,
 // ---------------------------------------------------------------------------
 
 size_t HashJoinOperator::hash_value(const Value& v) {
-    if (v.is_null()) {
-        return 0;
-    }
-    // Hash based on the variant index + value content.
-    const auto& data = v.data();
-    return std::visit(
-        [](const auto& val) -> size_t {
-            using T = std::decay_t<decltype(val)>;
-            if constexpr (std::is_same_v<T, std::monostate>) {
-                return 0;
-            } else if constexpr (std::is_same_v<T, std::string>) {
-                return std::hash<std::string>{}(val);
-            } else if constexpr (std::is_same_v<T, bool>) {
-                return std::hash<bool>{}(val);
-            } else if constexpr (std::is_arithmetic_v<T>) {
-                return std::hash<T>{}(val);
-            } else {
-                // For complex types (Blob, Date, etc.), use a simple approach.
-                return 0;
-            }
-        },
-        data);
+    // Delegate to the shared ValueHash so temporal/decimal/uuid/etc keys hash
+    // distinctly instead of all colliding to 0 (GDB-1042/GDB-1043). This used to
+    // be a private copy of the old broken ValueHash, so joins on those key types
+    // degraded to a single hash bucket.
+    return ValueHash{}(v);
 }
 
 bool HashJoinOperator::values_equal(const Value& a, const Value& b) {
