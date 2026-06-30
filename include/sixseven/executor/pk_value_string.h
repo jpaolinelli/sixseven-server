@@ -9,8 +9,12 @@ namespace sixseven {
 /// Serialize a primary-key Value to a deterministic string suitable for hash
 /// set lookup (e.g. by QueryEngine::pk_cache_).
 ///
-/// Handles the common PK types: integers, strings, and UUIDs. For unsupported
-/// types, falls back to a "?<type_id>" prefix.
+/// Serializes every scalar PK type injectively (distinct values of the same
+/// type map to distinct strings): the integer family, FLOAT32/FLOAT64 (keyed by
+/// IEEE-754 bit pattern), DECIMAL, BOOL, DATE/TIME/TIMESTAMP/INTERVAL, POINT,
+/// JSON, BLOB, STRING, and UUID. EMBEDDING and PATH are composite, non-scalar
+/// types that cannot serve as a primary key; they fall back to a non-injective
+/// "?<type_id>" sentinel that must never be relied on for a real PK.
 ///
 /// NULL handling: NULL values return a fixed sentinel string ("\x01NULL") that
 /// cannot collide with any legal PK string representation. Callers should

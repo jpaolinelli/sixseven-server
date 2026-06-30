@@ -49,21 +49,18 @@ TEST(PkValueToString, IntegerTypesRoundTripToDecimalString) {
     EXPECT_EQ(pk_value_to_string(Value{int8_t{-128}}), "-128");
     EXPECT_EQ(pk_value_to_string(Value{int16_t{32767}}), "32767");
     EXPECT_EQ(pk_value_to_string(Value{int32_t{-1}}), "-1");
-    EXPECT_EQ(pk_value_to_string(Value{int64_t{9223372036854775807LL}}),
-              "9223372036854775807");
+    EXPECT_EQ(pk_value_to_string(Value{int64_t{9223372036854775807LL}}), "9223372036854775807");
 
     EXPECT_EQ(pk_value_to_string(Value{uint8_t{255}}), "255");
     EXPECT_EQ(pk_value_to_string(Value{uint16_t{65535}}), "65535");
     EXPECT_EQ(pk_value_to_string(Value{uint32_t{4294967295U}}), "4294967295");
-    EXPECT_EQ(pk_value_to_string(Value{uint64_t{18446744073709551615ULL}}),
-              "18446744073709551615");
+    EXPECT_EQ(pk_value_to_string(Value{uint64_t{18446744073709551615ULL}}), "18446744073709551615");
 }
 
 TEST(PkValueToString, StringIsReturnedAsIs) {
     EXPECT_EQ(pk_value_to_string(Value{std::string{"hello"}}), "hello");
     EXPECT_EQ(pk_value_to_string(Value{std::string{}}), "");
-    EXPECT_EQ(pk_value_to_string(Value{std::string{"with spaces and !@#"}}),
-              "with spaces and !@#");
+    EXPECT_EQ(pk_value_to_string(Value{std::string{"with spaces and !@#"}}), "with spaces and !@#");
 }
 
 TEST(PkValueToString, UuidIsHexEncoded32Chars) {
@@ -84,11 +81,66 @@ TEST(PkValueToString, DistinctUuidsProduceDistinctStrings) {
     EXPECT_NE(pk_value_to_string(Value{a}), pk_value_to_string(Value{b}));
 }
 
-TEST(PkValueToString, BoolFallsThroughToTypePrefixSentinel) {
-    // BOOL is intentionally not a supported PK type — verify the default
-    // branch produces a "?<type_id>" string and never throws.
-    std::string s;
-    ASSERT_NO_THROW({ s = pk_value_to_string(Value{true}); });
-    EXPECT_FALSE(s.empty());
-    EXPECT_EQ(s.front(), '?');
+// GDB-1011: before the fix, every non-int/string/UUID PK type fell through to
+// "?<type_id>", so all values of such a type collided to one key and
+// verify_pk_exists (LINK referential integrity) returned true for any probed
+// PK. These tests assert each scalar type now serializes injectively: distinct
+// values of the same type produce DISTINCT keys. Each EXPECT_NE FAILS under the
+// old colliding fallback (both sides were "?<type_id>") and PASSES with the
+// per-type serialization -- the mutation guard for this fix.
+
+using sixseven::Blob;
+using sixseven::Date;
+using sixseven::Decimal128;
+using sixseven::Interval;
+using sixseven::JsonString;
+using sixseven::Point;
+using sixseven::Time;
+using sixseven::Timestamp;
+
+TEST(PkValueToString, BoolSerializesDistinctly) {
+    EXPECT_EQ(pk_value_to_string(Value{true}), "1");
+    EXPECT_EQ(pk_value_to_string(Value{false}), "0");
+    EXPECT_NE(pk_value_to_string(Value{true}), pk_value_to_string(Value{false}));
+}
+
+TEST(PkValueToString, FloatTypesKeyByBitPatternNotRoundedDecimals) {
+    // Two doubles that std::to_string would both render as "1.000000" must key
+    // distinctly -- the old "?<id>" fallback collided every double.
+    EXPECT_NE(pk_value_to_string(Value{1.0000001}), pk_value_to_string(Value{1.0000002}));
+    EXPECT_EQ(pk_value_to_string(Value{1.0}), pk_value_to_string(Value{1.0}));
+    EXPECT_NE(pk_value_to_string(Value{1.0f}), pk_value_to_string(Value{2.0f}));
+}
+
+TEST(PkValueToString, DecimalIsInjectiveAcrossHiAndLo) {
+    EXPECT_NE(pk_value_to_string(Value{Decimal128{1, 2}}),
+              pk_value_to_string(Value{Decimal128{2, 1}}));
+    EXPECT_NE(pk_value_to_string(Value{Decimal128{0, 0}}),
+              pk_value_to_string(Value{Decimal128{0, 1}}));
+}
+
+TEST(PkValueToString, DateTimeTimestampIntervalAreDistinctPerValue) {
+    EXPECT_NE(pk_value_to_string(Value{Date{19000}}), pk_value_to_string(Value{Date{19001}}));
+    EXPECT_NE(pk_value_to_string(Value{Time{1}}), pk_value_to_string(Value{Time{2}}));
+    EXPECT_NE(pk_value_to_string(Value{Timestamp{1}}), pk_value_to_string(Value{Timestamp{2}}));
+    EXPECT_NE(pk_value_to_string(Value{Interval{1, 0}}), pk_value_to_string(Value{Interval{0, 1}}));
+}
+
+TEST(PkValueToString, PointJsonBlobAreDistinctPerValue) {
+    EXPECT_NE(pk_value_to_string(Value{Point{1.0, 2.0}}),
+              pk_value_to_string(Value{Point{2.0, 1.0}}));
+    EXPECT_NE(pk_value_to_string(Value{JsonString{"a"}}),
+              pk_value_to_string(Value{JsonString{"b"}}));
+    EXPECT_NE(pk_value_to_string(Value{Blob{1, 2}}), pk_value_to_string(Value{Blob{2, 1}}));
+    // Length-prefix guards against a short blob colliding with a longer one.
+    EXPECT_NE(pk_value_to_string(Value{Blob{0x12}}), pk_value_to_string(Value{Blob{0x01, 0x02}}));
+}
+
+TEST(PkValueToString, ScalarPkTypesNeverHitTheNonInjectiveSentinel) {
+    // None of the scalar PK types should fall through to the "?<id>" branch.
+    EXPECT_NE(pk_value_to_string(Value{true}).front(), '?');
+    EXPECT_NE(pk_value_to_string(Value{1.5}).front(), '?');
+    EXPECT_NE(pk_value_to_string(Value{Date{0}}).front(), '?');
+    EXPECT_NE(pk_value_to_string(Value{Decimal128{0, 0}}).front(), '?');
+    EXPECT_NE(pk_value_to_string(Value{Point{0.0, 0.0}}).front(), '?');
 }
