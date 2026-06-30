@@ -159,7 +159,8 @@ TEST_F(CatalogPersistenceTest, SystemCatalogTablesHaveCorrectSchemas) {
 
     auto sys_columns = catalog_->get_table(system_database_id, "sys_columns");
     ASSERT_TRUE(sys_columns.has_value());
-    ASSERT_EQ(sys_columns->columns.size(), 7u);
+    ASSERT_EQ(sys_columns->columns.size(),
+              9u); // GDB-1046: grew from 7 to 9 (added precision, scale)
     EXPECT_EQ(sys_columns->columns[0].name, "table_id");
     EXPECT_EQ(sys_columns->columns[1].name, "ordinal");
     EXPECT_EQ(sys_columns->columns[2].name, "name");
@@ -167,6 +168,8 @@ TEST_F(CatalogPersistenceTest, SystemCatalogTablesHaveCorrectSchemas) {
     EXPECT_EQ(sys_columns->columns[4].name, "nullable");
     EXPECT_EQ(sys_columns->columns[5].name, "default_expr");
     EXPECT_EQ(sys_columns->columns[6].name, "is_autoincrement");
+    EXPECT_EQ(sys_columns->columns[7].name, "precision");
+    EXPECT_EQ(sys_columns->columns[8].name, "scale");
 }
 
 // =============================================================================

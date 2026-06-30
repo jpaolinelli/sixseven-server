@@ -1091,6 +1091,8 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
         ccd.type_id = *type_result;
         ccd.nullable = col.nullable;
         ccd.is_autoincrement = col.is_autoincrement;
+        ccd.precision = col.type.param1.value_or(0);
+        ccd.scale = col.type.param2.value_or(0);
         if (col.default_expr) {
             ccd.default_expr = expr_to_sql(*col.default_expr);
         }
