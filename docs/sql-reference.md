@@ -198,6 +198,63 @@ Correlation is supported for `TRAVERSE` (start key) and `MATCH` (its `WHERE` cla
 outer columns referenced in inline node / edge pattern filters of a `MATCH` are not yet
 supported — put the correlation in the `WHERE` clause.
 
+## Operators for INTERVAL, POINT, and JSON (GDB-1051)
+
+### INTERVAL Arithmetic
+
+| Expression              | Result   | Notes                                           |
+|-------------------------|----------|-------------------------------------------------|
+| INTERVAL + INTERVAL     | INTERVAL | Adds months and microseconds component-wise.    |
+| INTERVAL - INTERVAL     | INTERVAL | Subtracts months and microseconds component-wise.|
+| DATE + INTERVAL         | TIMESTAMP | Calendar-aware month addition; clamps to last   |
+|                         |          | day of month (e.g. Jan 31 + 1 month = Feb 28). |
+|                         |          | Then adds microseconds.                         |
+| DATE - INTERVAL         | TIMESTAMP | Same as DATE + INTERVAL with negated interval.  |
+| INTERVAL + DATE         | TIMESTAMP | Commutative form of DATE + INTERVAL.            |
+| TIMESTAMP + INTERVAL    | TIMESTAMP | Adds months calendar-aware, then microseconds.  |
+| TIMESTAMP - INTERVAL    | TIMESTAMP | Subtracts interval from timestamp.              |
+| INTERVAL + TIMESTAMP    | TIMESTAMP | Commutative form of TIMESTAMP + INTERVAL.       |
+| TIME + INTERVAL         | TIME      | Adds microseconds only; wraps mod 24h.          |
+|                         |          | Error if INTERVAL has months != 0.              |
+| TIME - INTERVAL         | TIME      | Subtracts microseconds only; wraps mod 24h.     |
+| INTERVAL + TIME         | TIME      | Commutative form of TIME + INTERVAL.            |
+| DATE - DATE             | INTERVAL  | Returns interval with months=0 and              |
+|                         |          | microseconds = day_diff * 86400000000.          |
+| TIMESTAMP - TIMESTAMP   | INTERVAL  | Returns interval with months=0 and              |
+|                         |          | microseconds = microsecond difference.          |
+| DATE + DATE             | ERROR    | Not supported; returns TYPE_ERROR.              |
+| TIMESTAMP + TIMESTAMP   | ERROR    | Not supported; returns TYPE_ERROR.              |
+| INTERVAL * x            | ERROR    | Not supported; returns TYPE_ERROR.              |
+
+Comparison operators (=, <, >, <=, >=) work for all temporal types via
+lexicographic comparison (already implemented before GDB-1051).
+
+### POINT Distance
+
+| Expression        | Result  | Notes                                                |
+|-------------------|---------|------------------------------------------------------|
+| POINT <-> POINT   | FLOAT64 | Euclidean distance: sqrt((x2-x1)^2 + (y2-y1)^2).   |
+| POINT <-> non-POINT | ERROR | Returns TYPE_ERROR.                                 |
+| POINT + POINT     | ERROR   | Not supported; returns TYPE_ERROR.                   |
+
+### JSON Extraction
+
+| Expression           | Result  | Notes                                              |
+|----------------------|---------|----------------------------------------------------|
+| JSON -> 'key'        | JSON    | Extract object field by string key.                |
+|                      |         | Missing key returns SQL NULL.                      |
+| JSON -> integer      | JSON    | Extract array element by 0-based integer index.   |
+|                      |         | Missing index or non-array returns SQL NULL.       |
+| JSON ->> 'key'       | STRING  | Same as ->, but returns the value as plain text.  |
+|                      |         | String values are unquoted; missing key = NULL.    |
+| JSON ->> integer     | STRING  | Same as -> integer but returns plain text.         |
+| non-JSON -> key      | ERROR   | Returns TYPE_ERROR.                                |
+| JSON -> non-str/int  | ERROR   | Returns TYPE_ERROR.                                |
+| JSON -> NULL         | NULL    | NULL right operand propagates to NULL result.      |
+
+JSON extraction chains left-associatively:
+  SELECT data -> 'address' -> 'city' ->> 'zip_code' FROM t;
+
 ## Aggregate Functions
 
 `COUNT(*)`, `COUNT(col)`, `COUNT(DISTINCT col)`, `SUM`, `AVG`, `MIN`, `MAX`, `STRING_AGG`

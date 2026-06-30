@@ -14,6 +14,8 @@
 #include "sixseven/server/wal_receiver.h"
 #include "sixseven/storage/wal.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -88,6 +90,229 @@ Time current_time() {
     auto time_of_day =
         std::chrono::duration_cast<std::chrono::microseconds>(since_epoch - today).count();
     return Time{time_of_day};
+}
+
+// ---------------------------------------------------------------------------
+// GDB-1051: Temporal arithmetic helpers
+// ---------------------------------------------------------------------------
+
+// Forward declaration: to_int64 is defined later in this TU.
+Result<int64_t> to_int64(const Value& v);
+
+// Add months to a Date (calendar-aware: clamp to last day of month if needed).
+// Returns days_since_epoch for the resulting date.
+int32_t date_add_months(int32_t days_since_epoch, int64_t months) {
+    // Convert days_since_epoch to calendar date using chrono.
+    auto tp = std::chrono::sys_days{std::chrono::days{days_since_epoch}};
+    auto ymd = std::chrono::year_month_day{tp};
+
+    // Add months step by step.
+    // std::chrono::month uses unsigned arithmetic; cast accordingly.
+    int64_t total_months = static_cast<int64_t>(static_cast<unsigned>(ymd.month())) + months;
+    // Normalize into year+month range.
+    int64_t year_delta = (total_months - 1) / 12;
+    int32_t new_month = static_cast<int32_t>((total_months - 1) % 12 + 1);
+    if (new_month < 1) {
+        new_month += 12;
+        year_delta--;
+    }
+    int32_t new_year = static_cast<int32_t>(ymd.year()) + static_cast<int32_t>(year_delta);
+
+    // Clamp day to last day of the resulting month (e.g. Jan 31 + 1 month = Feb 28/29).
+    // year_month_day_last is constructed via year_month / last (C++20 operator/).
+    auto new_ym_last = std::chrono::year{new_year} /
+                       std::chrono::month{static_cast<unsigned>(new_month)} / std::chrono::last;
+    unsigned day_val = static_cast<unsigned>(ymd.day());
+    unsigned last_day = static_cast<unsigned>(new_ym_last.day());
+    unsigned clamped_day = (day_val <= last_day) ? day_val : last_day;
+
+    std::chrono::year_month_day result_ymd{std::chrono::year{new_year},
+                                           std::chrono::month{static_cast<unsigned>(new_month)},
+                                           std::chrono::day{clamped_day}};
+    std::chrono::sys_days result_days{result_ymd};
+    return static_cast<int32_t>(result_days.time_since_epoch().count());
+}
+
+// Microseconds per day constant.
+static constexpr int64_t USEC_PER_DAY = 86400LL * 1000000LL;
+
+// Portable checked-arithmetic helpers (defined below, near the integer fast path).
+bool add_overflows(int64_t a, int64_t b);
+bool sub_overflows(int64_t a, int64_t b);
+
+// Evaluate temporal arithmetic (ADD or SUBTRACT involving Date/Timestamp/Interval/Time).
+// Returns a Value or make_error if the combination is unsupported.
+Result<Value> eval_temporal_arithmetic(BinaryOp op, const Value& lhs, const Value& rhs) {
+    TypeId lt = lhs.type_id();
+    TypeId rt = rhs.type_id();
+
+    // Only ADD and SUBTRACT are ever defined for temporal types. The branches below
+    // derive a sign from (op == ADD), so MULTIPLY/DIVIDE/MODULO must be rejected up
+    // front -- otherwise they would silently fall through as a subtraction.
+    if (op != BinaryOp::ADD && op != BinaryOp::SUBTRACT) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          std::string("operator not supported for types ") +
+                              std::string(type_name(lt)) + " and " + std::string(type_name(rt)));
+    }
+
+    // INTERVAL +/- INTERVAL -> INTERVAL (component-wise with overflow check).
+    if (lt == TypeId::INTERVAL && rt == TypeId::INTERVAL) {
+        const auto& a = lhs.as_interval();
+        const auto& b = rhs.as_interval();
+        if (op == BinaryOp::ADD) {
+            if (add_overflows(a.months, b.months) ||
+                add_overflows(a.microseconds, b.microseconds)) {
+                return make_error(StatusCode::TYPE_ERROR, "interval out of range");
+            }
+            return ok(Value(Interval{a.months + b.months, a.microseconds + b.microseconds}));
+        }
+        // SUBTRACT
+        if (sub_overflows(a.months, b.months) || sub_overflows(a.microseconds, b.microseconds)) {
+            return make_error(StatusCode::TYPE_ERROR, "interval out of range");
+        }
+        return ok(Value(Interval{a.months - b.months, a.microseconds - b.microseconds}));
+    }
+
+    // DATE/TIMESTAMP +/- INTERVAL -> TIMESTAMP
+    if ((lt == TypeId::DATE || lt == TypeId::TIMESTAMP) && rt == TypeId::INTERVAL) {
+        const auto& iv = rhs.as_interval();
+        int64_t sign = (op == BinaryOp::ADD) ? 1 : -1;
+        // Get base timestamp in microseconds.
+        int64_t base_us = 0;
+        if (lt == TypeId::DATE) {
+            base_us = static_cast<int64_t>(lhs.as_date().days_since_epoch) * USEC_PER_DAY;
+        } else {
+            base_us = lhs.as_timestamp().microseconds;
+        }
+        // Apply months (calendar-aware on the date part).
+        if (iv.months != 0) {
+            int64_t day = base_us / USEC_PER_DAY;
+            int64_t rem = base_us % USEC_PER_DAY;
+            day =
+                static_cast<int64_t>(date_add_months(static_cast<int32_t>(day), sign * iv.months));
+            base_us = day * USEC_PER_DAY + rem;
+        }
+        base_us += sign * iv.microseconds;
+        return ok(Value(Timestamp{base_us}));
+    }
+
+    // INTERVAL + DATE/TIMESTAMP -> TIMESTAMP (commutative for addition).
+    if (lt == TypeId::INTERVAL && (rt == TypeId::DATE || rt == TypeId::TIMESTAMP) &&
+        op == BinaryOp::ADD) {
+        // Swap and recurse.
+        return eval_temporal_arithmetic(op, rhs, lhs);
+    }
+
+    // TIME +/- INTERVAL -> TIME (microseconds component only; error if months != 0).
+    if (lt == TypeId::TIME && rt == TypeId::INTERVAL) {
+        const auto& iv = rhs.as_interval();
+        if (iv.months != 0) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              "INTERVAL with months component cannot be applied to TIME");
+        }
+        int64_t sign = (op == BinaryOp::ADD) ? 1 : -1;
+        int64_t us = lhs.as_time().microseconds + sign * iv.microseconds;
+        // Normalize to [0, USEC_PER_DAY).
+        us = ((us % USEC_PER_DAY) + USEC_PER_DAY) % USEC_PER_DAY;
+        return ok(Value(Time{us}));
+    }
+
+    // INTERVAL + TIME -> TIME (commutative for addition).
+    if (lt == TypeId::INTERVAL && rt == TypeId::TIME && op == BinaryOp::ADD) {
+        return eval_temporal_arithmetic(op, rhs, lhs);
+    }
+
+    // DATE - DATE -> INTERVAL (day difference; months = 0).
+    if (op == BinaryOp::SUBTRACT && lt == TypeId::DATE && rt == TypeId::DATE) {
+        int64_t diff_days = static_cast<int64_t>(lhs.as_date().days_since_epoch) -
+                            static_cast<int64_t>(rhs.as_date().days_since_epoch);
+        return ok(Value(Interval{0, diff_days * USEC_PER_DAY}));
+    }
+
+    // TIMESTAMP - TIMESTAMP -> INTERVAL (microsecond difference; months = 0).
+    if (op == BinaryOp::SUBTRACT && lt == TypeId::TIMESTAMP && rt == TypeId::TIMESTAMP) {
+        int64_t diff = lhs.as_timestamp().microseconds - rhs.as_timestamp().microseconds;
+        return ok(Value(Interval{0, diff}));
+    }
+
+    return make_error(StatusCode::TYPE_ERROR,
+                      std::string("operator not supported for types ") +
+                          std::string(type_name(lt)) + " and " + std::string(type_name(rt)));
+}
+
+// ---------------------------------------------------------------------------
+// GDB-1051: JSON extraction helpers
+// ---------------------------------------------------------------------------
+
+// Navigate a JSON value by string key or integer index.
+// Returns JSON null Value on missing key (PostgreSQL ->) or make_error on non-JSON LHS.
+Result<Value> eval_json_extract(const Value& lhs, const Value& rhs, bool as_text) {
+    if (lhs.is_null()) {
+        return ok(Value::make_null());
+    }
+    if (lhs.type_id() != TypeId::JSON) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "left operand of -> / ->> must be JSON, got " +
+                              std::string(type_name(lhs.type_id())));
+    }
+    if (rhs.is_null()) {
+        return ok(Value::make_null());
+    }
+
+    // Parse the JSON string.
+    nlohmann::json parsed;
+    try {
+        parsed = nlohmann::json::parse(lhs.as_json().data);
+    } catch (const nlohmann::json::exception& e) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          std::string("invalid JSON in -> / ->> operand: ") + e.what());
+    }
+
+    nlohmann::json result;
+    bool found = false;
+
+    // Key navigation: string key on object, integer index on array.
+    if (rhs.type_id() == TypeId::STRING) {
+        const std::string& key = rhs.as_string();
+        if (parsed.is_object() && parsed.contains(key)) {
+            result = parsed[key];
+            found = true;
+        }
+    } else if (is_integer(rhs.type_id())) {
+        auto idx_r = to_int64(rhs);
+        if (!idx_r) {
+            return make_error(idx_r.error().code, idx_r.error().message);
+        }
+        int64_t idx = *idx_r;
+        if (parsed.is_array()) {
+            // Support negative indexing like PostgreSQL does not, but allow 0-based positive.
+            if (idx >= 0 && static_cast<size_t>(idx) < parsed.size()) {
+                result = parsed[static_cast<size_t>(idx)];
+                found = true;
+            }
+        }
+    } else {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "right operand of -> / ->> must be STRING or integer, got " +
+                              std::string(type_name(rhs.type_id())));
+    }
+
+    if (!found) {
+        return ok(Value::make_null()); // missing key/index -> NULL (PostgreSQL semantics)
+    }
+
+    if (as_text) {
+        // ->> returns the scalar as TEXT, or JSON serialization for objects/arrays.
+        std::string text;
+        if (result.is_string()) {
+            text = result.get<std::string>(); // unquoted string
+        } else {
+            text = result.dump(); // JSON serialization for scalars, objects, arrays
+        }
+        return ok(Value(std::move(text)));
+    }
+    // -> returns result as JSON value.
+    return ok(Value(JsonString{result.dump()}));
 }
 
 // ---------------------------------------------------------------------------
@@ -585,6 +810,20 @@ Result<Value> eval_binary(const BinaryExpr& expr,
             }
             return ok(Value(dr->coeff));
         }
+        // GDB-1051: temporal arithmetic (DATE/TIMESTAMP/INTERVAL/TIME operands).
+        {
+            bool lhs_temporal =
+                (!lhs->is_null() &&
+                 (lhs->type_id() == TypeId::DATE || lhs->type_id() == TypeId::TIMESTAMP ||
+                  lhs->type_id() == TypeId::INTERVAL || lhs->type_id() == TypeId::TIME));
+            bool rhs_temporal =
+                (!rhs->is_null() &&
+                 (rhs->type_id() == TypeId::DATE || rhs->type_id() == TypeId::TIMESTAMP ||
+                  rhs->type_id() == TypeId::INTERVAL || rhs->type_id() == TypeId::TIME));
+            if (lhs_temporal || rhs_temporal) {
+                return eval_temporal_arithmetic(expr.op, *lhs, *rhs);
+            }
+        }
         return eval_arithmetic(expr.op, *lhs, *rhs);
     }
     default:
@@ -650,6 +889,32 @@ Result<Value> eval_binary(const BinaryExpr& expr,
     }
     default:
         break;
+    }
+
+    // GDB-1051: JSON extraction.
+    if (expr.op == BinaryOp::JSON_EXTRACT || expr.op == BinaryOp::JSON_EXTRACT_TEXT) {
+        if (lhs->is_null() || rhs->is_null()) {
+            return ok(Value::make_null());
+        }
+        return eval_json_extract(*lhs, *rhs, expr.op == BinaryOp::JSON_EXTRACT_TEXT);
+    }
+
+    // GDB-1051: POINT Euclidean distance.
+    if (expr.op == BinaryOp::POINT_DISTANCE) {
+        if (lhs->is_null() || rhs->is_null()) {
+            return ok(Value::make_null());
+        }
+        if (lhs->type_id() != TypeId::POINT || rhs->type_id() != TypeId::POINT) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              "<-> requires POINT operands, got " +
+                                  std::string(type_name(lhs->type_id())) + " and " +
+                                  std::string(type_name(rhs->type_id())));
+        }
+        const auto& p1 = lhs->as_point();
+        const auto& p2 = rhs->as_point();
+        double dx = p1.x - p2.x;
+        double dy = p1.y - p2.y;
+        return ok(Value(std::sqrt(dx * dx + dy * dy)));
     }
 
     return make_error(StatusCode::INTERNAL_ERROR, "unhandled binary op");

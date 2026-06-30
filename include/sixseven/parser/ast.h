@@ -42,6 +42,10 @@ enum class BinaryOp : uint8_t {
     AND,
     OR,
     CONCAT,
+    // -- GDB-1051: new operators -----------------------------------------------
+    JSON_EXTRACT,      // json -> key/index  (returns JSON)
+    JSON_EXTRACT_TEXT, // json ->> key/index (returns STRING)
+    POINT_DISTANCE,    // point <-> point    (returns FLOAT64)
 };
 
 /// Unary operators.

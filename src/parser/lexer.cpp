@@ -192,7 +192,10 @@ Result<std::vector<Token>> Lexer::tokenize() {
         }
 
         if (at_end()) {
-            tokens.push_back(Token{TokenType::END_OF_FILE, {}, line_, column_,
+            tokens.push_back(Token{TokenType::END_OF_FILE,
+                                   {},
+                                   line_,
+                                   column_,
                                    static_cast<uint32_t>(source_.size() + 1)});
             break;
         }
@@ -311,6 +314,15 @@ Result<Token> Lexer::scan_token() {
     case '+':
         return make_token(TokenType::PLUS);
     case '-':
+        // Maximal-munch: ->> before -> before plain -.
+        if (!at_end() && peek() == '>') {
+            advance(); // consume >
+            if (!at_end() && peek() == '>') {
+                advance();                                // consume second >
+                return make_token(TokenType::ARROW_TEXT); // ->>
+            }
+            return make_token(TokenType::ARROW); // ->
+        }
         return make_token(TokenType::MINUS);
     case '*':
         return make_token(TokenType::STAR);
@@ -366,6 +378,14 @@ Result<Token> Lexer::scan_token() {
     }
 
     if (c == '<') {
+        // <-> (POINT distance): peek ahead two chars to avoid consuming <- then
+        // failing and leaving current_ mis-positioned. peek() is '-' and
+        // peek_next() is '>' means we have exactly '<' '-' '>'.
+        if (!at_end() && peek() == '-' && peek_next() == '>') {
+            advance();                              // consume -
+            advance();                              // consume >
+            return make_token(TokenType::DISTANCE); // <->
+        }
         if (!at_end() && peek() == '=') {
             advance();
             return make_token(TokenType::LESS_EQUAL);
