@@ -73,8 +73,7 @@ static Result<Date> parse_date_sv(std::string_view sv) {
         return make_error(StatusCode::TYPE_ERROR,
                           "invalid input syntax for type date: \"" + std::string(sv) + "\"");
     }
-    int32_t days =
-        static_cast<int32_t>(std::chrono::sys_days{ymd}.time_since_epoch().count());
+    int32_t days = static_cast<int32_t>(std::chrono::sys_days{ymd}.time_since_epoch().count());
     return ok(Date{days});
 }
 
@@ -99,9 +98,9 @@ static bool parse_time_part(std::string_view sv, size_t& off, int64_t& out_us) {
     if (h < 0 || h > 23 || mi < 0 || mi > 59 || s < 0 || s > 59) {
         return false;
     }
-    int64_t us = (static_cast<int64_t>(h) * 3600 + static_cast<int64_t>(mi) * 60 +
-                  static_cast<int64_t>(s)) *
-                 1000000LL;
+    int64_t us =
+        (static_cast<int64_t>(h) * 3600 + static_cast<int64_t>(mi) * 60 + static_cast<int64_t>(s)) *
+        1000000LL;
     // Optional fractional seconds: up to 6 digits (microseconds).
     if (off < sv.size() && sv[off] == '.') {
         ++off;
@@ -149,14 +148,12 @@ static Result<Timestamp> parse_timestamp_sv(std::string_view sv) {
     int y = 0;
     int m = 0;
     int d = 0;
-    if (!parse_digits(date_part, off, 4, y) || off >= date_part.size() ||
-        date_part[off] != '-') {
+    if (!parse_digits(date_part, off, 4, y) || off >= date_part.size() || date_part[off] != '-') {
         return make_error(StatusCode::TYPE_ERROR,
                           "invalid input syntax for type timestamp: \"" + std::string(sv) + "\"");
     }
     ++off;
-    if (!parse_digits(date_part, off, 2, m) || off >= date_part.size() ||
-        date_part[off] != '-') {
+    if (!parse_digits(date_part, off, 2, m) || off >= date_part.size() || date_part[off] != '-') {
         return make_error(StatusCode::TYPE_ERROR,
                           "invalid input syntax for type timestamp: \"" + std::string(sv) + "\"");
     }
@@ -172,8 +169,7 @@ static Result<Timestamp> parse_timestamp_sv(std::string_view sv) {
                           "invalid input syntax for type timestamp: \"" + std::string(sv) + "\"");
     }
     int64_t date_us =
-        static_cast<int64_t>(std::chrono::sys_days{ymd}.time_since_epoch().count()) *
-        86400000000LL;
+        static_cast<int64_t>(std::chrono::sys_days{ymd}.time_since_epoch().count()) * 86400000000LL;
 
     // If the string ends after the date portion, treat as midnight.
     if (sv.size() == 10) {
@@ -474,7 +470,7 @@ bool can_coerce(TypeId from, TypeId to) {
         return true;
     }
 
-    // STRING → temporal types: allow implicit coercion from string literals.
+    // STRING -> temporal types: allow implicit coercion from string literals.
     if (from == TypeId::STRING &&
         (to == TypeId::DATE || to == TypeId::TIME || to == TypeId::TIMESTAMP)) {
         return true;
@@ -550,7 +546,7 @@ Result<Value> coerce(const Value& value, TypeId target) {
         return ok(Value(*parsed));
     }
 
-    // STRING → DATE / TIME / TIMESTAMP
+    // STRING -> DATE / TIME / TIMESTAMP
     if (from == TypeId::STRING && target == TypeId::DATE) {
         auto parsed = parse_date_sv(value.as_string());
         if (!parsed) {

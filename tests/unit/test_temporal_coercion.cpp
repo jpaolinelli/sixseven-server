@@ -156,8 +156,7 @@ TEST(TemporalCoercion, Timestamp_2024_Jan_01) {
     // Round-trip: parse "2024-01-01 00:00:00" and verify via Date epoch alignment.
     auto date_r = coerce(str("2024-01-01"), TypeId::DATE);
     ASSERT_TRUE(date_r.has_value()) << date_r.error().message;
-    int64_t expected_us =
-        static_cast<int64_t>(date_r->as_date().days_since_epoch) * 86400000000LL;
+    int64_t expected_us = static_cast<int64_t>(date_r->as_date().days_since_epoch) * 86400000000LL;
 
     auto ts_r = coerce(str("2024-01-01 00:00:00"), TypeId::TIMESTAMP);
     ASSERT_TRUE(ts_r.has_value()) << ts_r.error().message;
