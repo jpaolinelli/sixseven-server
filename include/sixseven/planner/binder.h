@@ -35,6 +35,9 @@ struct ExprType {
     bool nullable = true;
     bool is_aggregate = false; ///< True if this expression contains an aggregate call.
     bool is_window = false;    ///< True if this expression is a window function call.
+    /// For DECIMAL expressions, the declared scale (e.g. 2 for DECIMAL(10,2)).
+    /// 0 means scale-0 or unknown (integer-like). Only meaningful when type_id == DECIMAL.
+    int32_t decimal_scale = 0;
 };
 
 // ---------------------------------------------------------------------------

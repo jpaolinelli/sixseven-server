@@ -2,6 +2,7 @@
 
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/coercion.h"
+#include "sixseven/common/decimal_math.h"
 #include "sixseven/common/parse_utils.h"
 #include "sixseven/common/types.h"
 #include "sixseven/executor/planner.h"
@@ -446,8 +447,98 @@ Result<Value> eval_binary(const BinaryExpr& expr,
     case BinaryOp::SUBTRACT:
     case BinaryOp::MULTIPLY:
     case BinaryOp::DIVIDE:
-    case BinaryOp::MODULO:
+    case BinaryOp::MODULO: {
+        // DECIMAL exact path: when both operands are DECIMAL, or one is DECIMAL
+        // and the other is an integer (treated as scale-0 DECIMAL).
+        // If EITHER operand is FLOAT32/FLOAT64, fall through to the double path
+        // (DECIMAL exactness is only required when no float is involved).
+        bool lhs_float = (lhs->type_id() == TypeId::FLOAT32 || lhs->type_id() == TypeId::FLOAT64);
+        bool rhs_float = (rhs->type_id() == TypeId::FLOAT32 || rhs->type_id() == TypeId::FLOAT64);
+        bool lhs_dec = (lhs->type_id() == TypeId::DECIMAL);
+        bool rhs_dec = (rhs->type_id() == TypeId::DECIMAL);
+        bool lhs_int = is_integer(lhs->type_id());
+        bool rhs_int = is_integer(rhs->type_id());
+
+        if (!lhs_float && !rhs_float && (lhs_dec || rhs_dec) && (lhs_dec || lhs_int) &&
+            (rhs_dec || rhs_int)) {
+            // Retrieve scales from the binding side-map (set by Binder for
+            // CAST nodes, or zero for integer literals/columns).
+            int32_t s1 = 0;
+            int32_t s2 = 0;
+            {
+                auto it = bound.expr_types.find(expr.lhs.get());
+                if (it != bound.expr_types.end()) {
+                    s1 = it->second.decimal_scale;
+                }
+            }
+            {
+                auto it = bound.expr_types.find(expr.rhs.get());
+                if (it != bound.expr_types.end()) {
+                    s2 = it->second.decimal_scale;
+                }
+            }
+
+            // Convert integer operand to a scale-0 Decimal128 coefficient.
+            auto to_dec128 = [](const Value& v) -> Result<Decimal128> {
+                if (v.type_id() == TypeId::DECIMAL) {
+                    return ok(v.as_decimal());
+                }
+                // Integer: map to signed 128-bit coefficient at scale 0.
+                if (v.type_id() == TypeId::UINT64) {
+                    uint64_t u = v.as_uint64();
+                    if (u > static_cast<uint64_t>(INT64_MAX)) {
+                        return make_error(StatusCode::TYPE_ERROR,
+                                          "UINT64 value too large for DECIMAL arithmetic");
+                    }
+                    return ok(Decimal128{0, u});
+                }
+                auto i64 = to_int64(v);
+                if (!i64) {
+                    return make_error(i64.error().code, i64.error().message);
+                }
+                int64_t iv = *i64;
+                if (iv >= 0) {
+                    return ok(Decimal128{0, static_cast<uint64_t>(iv)});
+                }
+                return ok(Decimal128{-1, static_cast<uint64_t>(iv)});
+            };
+
+            auto c1 = to_dec128(*lhs);
+            if (!c1) {
+                return make_error(c1.error().code, c1.error().message);
+            }
+            auto c2 = to_dec128(*rhs);
+            if (!c2) {
+                return make_error(c2.error().code, c2.error().message);
+            }
+
+            Result<DecimalResult> dr = make_error(StatusCode::INTERNAL_ERROR, "unreachable");
+            switch (expr.op) {
+            case BinaryOp::ADD:
+                dr = decimal_add(*c1, s1, *c2, s2);
+                break;
+            case BinaryOp::SUBTRACT:
+                dr = decimal_sub(*c1, s1, *c2, s2);
+                break;
+            case BinaryOp::MULTIPLY:
+                dr = decimal_mul(*c1, s1, *c2, s2);
+                break;
+            case BinaryOp::DIVIDE:
+                dr = decimal_div(*c1, s1, *c2, s2);
+                break;
+            case BinaryOp::MODULO:
+                dr = decimal_mod(*c1, s1, *c2, s2);
+                break;
+            default:
+                break;
+            }
+            if (!dr) {
+                return make_error(dr.error().code, dr.error().message);
+            }
+            return ok(Value(dr->coeff));
+        }
         return eval_arithmetic(expr.op, *lhs, *rhs);
+    }
     default:
         break;
     }
@@ -459,8 +550,56 @@ Result<Value> eval_binary(const BinaryExpr& expr,
     case BinaryOp::LESS:
     case BinaryOp::GREATER:
     case BinaryOp::LESS_EQUAL:
-    case BinaryOp::GREATER_EQUAL:
+    case BinaryOp::GREATER_EQUAL: {
+        // Scale-aware DECIMAL comparison: align scales before comparing.
+        bool lhs_dec = (lhs->type_id() == TypeId::DECIMAL);
+        bool rhs_dec = (rhs->type_id() == TypeId::DECIMAL);
+        if (lhs_dec && rhs_dec) {
+            int32_t s1 = 0;
+            int32_t s2 = 0;
+            {
+                auto it = bound.expr_types.find(expr.lhs.get());
+                if (it != bound.expr_types.end()) {
+                    s1 = it->second.decimal_scale;
+                }
+            }
+            {
+                auto it = bound.expr_types.find(expr.rhs.get());
+                if (it != bound.expr_types.end()) {
+                    s2 = it->second.decimal_scale;
+                }
+            }
+            auto cmp = decimal_compare(lhs->as_decimal(), s1, rhs->as_decimal(), s2);
+            if (!cmp) {
+                return make_error(cmp.error().code, cmp.error().message);
+            }
+            bool result = false;
+            switch (expr.op) {
+            case BinaryOp::EQUAL:
+                result = (*cmp == 0);
+                break;
+            case BinaryOp::NOT_EQUAL:
+                result = (*cmp != 0);
+                break;
+            case BinaryOp::LESS:
+                result = (*cmp < 0);
+                break;
+            case BinaryOp::GREATER:
+                result = (*cmp > 0);
+                break;
+            case BinaryOp::LESS_EQUAL:
+                result = (*cmp <= 0);
+                break;
+            case BinaryOp::GREATER_EQUAL:
+                result = (*cmp >= 0);
+                break;
+            default:
+                break;
+            }
+            return ok(Value(result));
+        }
         return eval_comparison(expr.op, *lhs, *rhs);
+    }
     default:
         break;
     }
@@ -534,6 +673,12 @@ Result<Value> eval_cast(const CastExpr& expr,
     auto target = resolve_type_spec(expr.target_type);
     if (!target) {
         return make_error(target.error().code, target.error().message);
+    }
+    // For CAST(x AS DECIMAL(p,s)) use fit_to_storage so the coefficient is
+    // correctly scaled (e.g. 0.1 -> coefficient 10 at scale 2, not 0).
+    if (*target == TypeId::DECIMAL) {
+        int32_t scale = expr.target_type.param2.value_or(0);
+        return fit_to_storage(*val, TypeId::DECIMAL, scale);
     }
     return explicit_cast(*val, *target);
 }
