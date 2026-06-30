@@ -2420,7 +2420,7 @@ Result<std::vector<PathElement>> Parser::parse_match_pattern() {
                 if (!dash)
                     return tl::unexpected(dash.error());
             } else if (match(TokenType::ARROW)) {
-                // '->' consumed as a single token — shorthand for undirected-open + outgoing.
+                // '->' consumed as a single token -- shorthand for undirected-open + outgoing.
                 // No bracket body is possible here; set direction immediately and finish the
                 // edge so the next node can be parsed.
                 arrow_consumed = true;
@@ -2429,7 +2429,7 @@ Result<std::vector<PathElement>> Parser::parse_match_pattern() {
             }
 
             // When '->' was consumed as a single ARROW token, skip bracket body and
-            // trailing arrow — direction is already OUT.
+            // trailing arrow -- direction is already OUT.
             if (arrow_consumed) {
                 edge.direction = TraverseDirection::OUT;
             } else {
@@ -3478,7 +3478,7 @@ Result<ExprPtr> Parser::parse_postfix() {
 
         auto bin = std::make_unique<BinaryExpr>();
         bin->op = (op_tok.type == TokenType::ARROW) ? BinaryOp::JSON_EXTRACT
-                                                     : BinaryOp::JSON_EXTRACT_TEXT;
+                                                    : BinaryOp::JSON_EXTRACT_TEXT;
         bin->lhs = std::move(*expr);
         bin->rhs = std::move(*rhs);
         bin->line = line;
