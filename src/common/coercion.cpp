@@ -436,21 +436,20 @@ Result<Value> fit_to_storage(const Value& val, TypeId target) {
     if (can_coerce(val.type_id(), target)) {
         return coerce(val, target);
     }
-    // Allow numeric narrowing (e.g. INT64 → INT32).
+    // Allow numeric narrowing (e.g. INT64 → INT32). Delegate to the validated
+    // explicit_cast path for every numeric source:
+    //   - float/decimal sources truncate toward zero with NaN/inf/out-of-range
+    //     checks (floats) or a loud TYPE_ERROR (decimals), rather than to_int64
+    //     silently yielding 0 -- which made INSERT INTO t(int_col) VALUES (3.7)
+    //     store 0 instead of 3 (GDB-1044);
+    //   - integer sources are range-checked via fits_in_integer, rather than
+    //     int64_to_value wrapping silently -- which made INSERT 300 into an INT8
+    //     column store 44 and -1 into a UINT32 column store 4294967295
+    //     (GDB-1045).
+    // Both are reachable from INSERT (insert.cpp) and UPDATE (update.cpp); this
+    // keeps implicit storage narrowing as safe as an explicit CAST.
     if (is_numeric(val.type_id()) && is_integer(target)) {
-        // Float/decimal sources must go through the validated explicit_cast path
-        // (truncate-toward-zero with NaN/inf/out-of-range checks for floats; a
-        // loud TYPE_ERROR for decimals) rather than to_int64, whose default
-        // branch silently yields 0 for any non-integer source -- which made
-        // INSERT INTO t(int_col) VALUES (3.7) store 0 instead of 3 or erroring
-        // (GDB-1044, also reachable via UPDATE). This keeps the implicit storage
-        // narrowing consistent with an explicit CAST. Integer sources keep the
-        // existing int64 narrowing.
-        if (!is_integer(val.type_id())) {
-            return explicit_cast(val, target);
-        }
-        int64_t v = to_int64(val);
-        return ok(int64_to_value(v, target));
+        return explicit_cast(val, target);
     }
     if (is_numeric(val.type_id()) && is_floating(target)) {
         double d = to_double(val);
