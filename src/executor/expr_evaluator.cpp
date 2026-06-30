@@ -252,8 +252,9 @@ Result<Value> eval_arithmetic(BinaryOp op, const Value& lhs, const Value& rhs) {
         return ok(Value::make_null());
     }
 
-    // Integer path: if both sides are integers, stay in int64.
-    if (both_integer(lhs, rhs) && op != BinaryOp::DIVIDE) {
+    // Integer path: if both sides are integers, stay in int64 (PostgreSQL semantics:
+    // integer / integer = integer truncated toward zero, not a float).
+    if (both_integer(lhs, rhs)) {
         auto la = to_int64(lhs);
         auto ra = to_int64(rhs);
         if (!la || !ra) {
@@ -268,6 +269,18 @@ Result<Value> eval_arithmetic(BinaryOp op, const Value& lhs, const Value& rhs) {
             return ok(Value(static_cast<int64_t>(l - r)));
         case BinaryOp::MULTIPLY:
             return ok(Value(static_cast<int64_t>(l * r)));
+        case BinaryOp::DIVIDE:
+            if (r == 0) {
+                return make_error(StatusCode::INVALID_ARGUMENT, "division by zero");
+            }
+            // INT64_MIN / -1 overflows the int64 range (signed-division UB); reject
+            // loudly rather than wrap or crash.
+            if (l == INT64_MIN && r == -1) {
+                return make_error(StatusCode::TYPE_ERROR, "integer out of range");
+            }
+            // C++ integer division already truncates toward zero (e.g. -7 / 2 == -3),
+            // matching PostgreSQL integer division.
+            return ok(Value(static_cast<int64_t>(l / r)));
         case BinaryOp::MODULO:
             if (r == 0) {
                 return make_error(StatusCode::INVALID_ARGUMENT, "division by zero");
