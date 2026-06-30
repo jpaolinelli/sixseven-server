@@ -1238,13 +1238,20 @@ TEST(QA_GDB201_Protocol, PortalDescribeDoesNotIncludeParameterDescription) {
 
     ASSERT_TRUE(find_message(response, pos, '1', payload, payload_len)); // ParseComplete
     ASSERT_TRUE(find_message(response, pos, '2', payload, payload_len)); // BindComplete
-    // Portal Describe should send RowDescription, NOT ParameterDescription.
-    ASSERT_TRUE(find_message(response, pos, 'T', payload, payload_len)); // RowDescription
 
-    // Count ParameterDescription messages — should be 0 after BindComplete.
-    // (The only 't' in the response might be from Parse, but after '2' there shouldn't be one.)
-    // We just verify we got 'T' (RowDescription) not 't' after BindComplete.
-    // The find_message above already succeeded for 'T', confirming correct behavior.
+    // A portal Describe ('P') must NOT emit ParameterDescription ('t') — that
+    // message is reserved for statement Describe ('S'). Assert this directly
+    // rather than relying on find_message('T'), which skips over any stray 't'
+    // while scanning and would therefore pass even if the server regressed to
+    // emit one. Slice the response from just after BindComplete and count: a
+    // regressed portal Describe sending 't' here makes this EXPECT_EQ fail.
+    const std::vector<uint8_t> after_bind(response.begin() + static_cast<std::ptrdiff_t>(pos),
+                                          response.end());
+    EXPECT_EQ(count_messages(after_bind, 't'), 0)
+        << "portal Describe must not send ParameterDescription";
+
+    // RowDescription is still present after BindComplete (it's a SELECT).
+    ASSERT_TRUE(find_message(response, pos, 'T', payload, payload_len)); // RowDescription
 
     ASSERT_TRUE(find_message(response, pos, 'Z', payload, payload_len));
 
