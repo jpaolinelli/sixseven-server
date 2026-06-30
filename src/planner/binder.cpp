@@ -1043,8 +1043,7 @@ Result<ExprType> Binder::bind_binary(const BinaryExpr& expr, Scope& scope, Bound
             return ok(et);
         }
         // TIMESTAMP - TIMESTAMP -> INTERVAL (microsecond difference)
-        if (expr.op == BinaryOp::SUBTRACT && lt == TypeId::TIMESTAMP &&
-            rt == TypeId::TIMESTAMP) {
+        if (expr.op == BinaryOp::SUBTRACT && lt == TypeId::TIMESTAMP && rt == TypeId::TIMESTAMP) {
             et.type_id = TypeId::INTERVAL;
             return ok(et);
         }
@@ -1138,8 +1137,9 @@ Result<ExprType> Binder::bind_binary(const BinaryExpr& expr, Scope& scope, Bound
         et.nullable = true;
         break;
     case BinaryOp::POINT_DISTANCE:
-        // point <-> point returns FLOAT64.
+        // point <-> point returns FLOAT64 (NULL if either operand is NULL).
         et.type_id = TypeId::FLOAT64;
+        et.nullable = true;
         break;
     }
 

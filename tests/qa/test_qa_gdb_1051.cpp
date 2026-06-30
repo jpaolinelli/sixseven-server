@@ -195,6 +195,31 @@ TEST(QA_GDB1051_Interval, AddIntervals) {
     EXPECT_EQ(r->as_interval().microseconds, 3000);
 }
 
+TEST(QA_GDB1051_Interval, AddOverflowErrorsNotUB) {
+    // INT64_MAX microseconds + 1 us must error (no signed-overflow UB / silent wrap).
+    Value a(Interval{0, INT64_MAX});
+    Value b(Interval{0, 1});
+    auto r = eval_binary_vals(BinaryOp::ADD, std::move(a), std::move(b));
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(QA_GDB1051_Interval, MonthsAddOverflowErrors) {
+    Value a(Interval{INT64_MAX, 0});
+    Value b(Interval{1, 0});
+    auto r = eval_binary_vals(BinaryOp::ADD, std::move(a), std::move(b));
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST(QA_GDB1051_Interval, SubtractUnderflowErrors) {
+    Value a(Interval{0, INT64_MIN});
+    Value b(Interval{0, 1});
+    auto r = eval_binary_vals(BinaryOp::SUBTRACT, std::move(a), std::move(b));
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
 TEST(QA_GDB1051_Interval, SubtractIntervals) {
     // INTERVAL{5, 10000} - INTERVAL{2, 3000} = INTERVAL{3, 7000}
     Value a(Interval{5, 10000});
@@ -209,7 +234,7 @@ TEST(QA_GDB1051_Interval, SubtractIntervals) {
 TEST(QA_GDB1051_Interval, DatePlusIntervalMicrosecondsOnly) {
     // 1970-01-01 (days=0) + INTERVAL{0 months, 1 day in us} = TIMESTAMP for 1970-01-02.
     static constexpr int64_t USEC_PER_DAY = 86400LL * 1000000LL;
-    Value date(Date{0}); // 1970-01-01
+    Value date(Date{0});                 // 1970-01-01
     Value iv(Interval{0, USEC_PER_DAY}); // exactly 1 day
     auto r = eval_binary_vals(BinaryOp::ADD, std::move(date), std::move(iv));
     ASSERT_TRUE(r.has_value()) << r.error().message;
@@ -219,7 +244,7 @@ TEST(QA_GDB1051_Interval, DatePlusIntervalMicrosecondsOnly) {
 
 TEST(QA_GDB1051_Interval, DateMinusIntervalMicroseconds) {
     static constexpr int64_t USEC_PER_DAY = 86400LL * 1000000LL;
-    Value date(Date{10}); // day 10
+    Value date(Date{10});                // day 10
     Value iv(Interval{0, USEC_PER_DAY}); // 1 day
     auto r = eval_binary_vals(BinaryOp::SUBTRACT, std::move(date), std::move(iv));
     ASSERT_TRUE(r.has_value()) << r.error().message;

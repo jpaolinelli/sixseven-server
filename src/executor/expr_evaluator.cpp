@@ -121,8 +121,7 @@ int32_t date_add_months(int32_t days_since_epoch, int64_t months) {
     // Clamp day to last day of the resulting month (e.g. Jan 31 + 1 month = Feb 28/29).
     // year_month_day_last is constructed via year_month / last (C++20 operator/).
     auto new_ym_last = std::chrono::year{new_year} /
-                       std::chrono::month{static_cast<unsigned>(new_month)} /
-                       std::chrono::last;
+                       std::chrono::month{static_cast<unsigned>(new_month)} / std::chrono::last;
     unsigned day_val = static_cast<unsigned>(ymd.day());
     unsigned last_day = static_cast<unsigned>(new_ym_last.day());
     unsigned clamped_day = (day_val <= last_day) ? day_val : last_day;
@@ -137,6 +136,10 @@ int32_t date_add_months(int32_t days_since_epoch, int64_t months) {
 // Microseconds per day constant.
 static constexpr int64_t USEC_PER_DAY = 86400LL * 1000000LL;
 
+// Portable checked-arithmetic helpers (defined below, near the integer fast path).
+bool add_overflows(int64_t a, int64_t b);
+bool sub_overflows(int64_t a, int64_t b);
+
 // Evaluate temporal arithmetic (ADD or SUBTRACT involving Date/Timestamp/Interval/Time).
 // Returns a Value or make_error if the combination is unsupported.
 Result<Value> eval_temporal_arithmetic(BinaryOp op, const Value& lhs, const Value& rhs) {
@@ -148,14 +151,17 @@ Result<Value> eval_temporal_arithmetic(BinaryOp op, const Value& lhs, const Valu
         const auto& a = lhs.as_interval();
         const auto& b = rhs.as_interval();
         if (op == BinaryOp::ADD) {
-            int64_t m = a.months + b.months;
-            int64_t u = a.microseconds + b.microseconds;
-            return ok(Value(Interval{m, u}));
+            if (add_overflows(a.months, b.months) ||
+                add_overflows(a.microseconds, b.microseconds)) {
+                return make_error(StatusCode::TYPE_ERROR, "interval out of range");
+            }
+            return ok(Value(Interval{a.months + b.months, a.microseconds + b.microseconds}));
         }
         // SUBTRACT
-        int64_t m = a.months - b.months;
-        int64_t u = a.microseconds - b.microseconds;
-        return ok(Value(Interval{m, u}));
+        if (sub_overflows(a.months, b.months) || sub_overflows(a.microseconds, b.microseconds)) {
+            return make_error(StatusCode::TYPE_ERROR, "interval out of range");
+        }
+        return ok(Value(Interval{a.months - b.months, a.microseconds - b.microseconds}));
     }
 
     // DATE/TIMESTAMP +/- INTERVAL -> TIMESTAMP
@@ -173,8 +179,8 @@ Result<Value> eval_temporal_arithmetic(BinaryOp op, const Value& lhs, const Valu
         if (iv.months != 0) {
             int64_t day = base_us / USEC_PER_DAY;
             int64_t rem = base_us % USEC_PER_DAY;
-            day = static_cast<int64_t>(date_add_months(static_cast<int32_t>(day),
-                                                       sign * iv.months));
+            day =
+                static_cast<int64_t>(date_add_months(static_cast<int32_t>(day), sign * iv.months));
             base_us = day * USEC_PER_DAY + rem;
         }
         base_us += sign * iv.microseconds;
@@ -209,9 +215,8 @@ Result<Value> eval_temporal_arithmetic(BinaryOp op, const Value& lhs, const Valu
 
     // DATE - DATE -> INTERVAL (day difference; months = 0).
     if (op == BinaryOp::SUBTRACT && lt == TypeId::DATE && rt == TypeId::DATE) {
-        int64_t diff_days =
-            static_cast<int64_t>(lhs.as_date().days_since_epoch) -
-            static_cast<int64_t>(rhs.as_date().days_since_epoch);
+        int64_t diff_days = static_cast<int64_t>(lhs.as_date().days_since_epoch) -
+                            static_cast<int64_t>(rhs.as_date().days_since_epoch);
         return ok(Value(Interval{0, diff_days * USEC_PER_DAY}));
     }
 
@@ -798,16 +803,14 @@ Result<Value> eval_binary(const BinaryExpr& expr,
         }
         // GDB-1051: temporal arithmetic (DATE/TIMESTAMP/INTERVAL/TIME operands).
         {
-            bool lhs_temporal = (!lhs->is_null() &&
-                                 (lhs->type_id() == TypeId::DATE ||
-                                  lhs->type_id() == TypeId::TIMESTAMP ||
-                                  lhs->type_id() == TypeId::INTERVAL ||
-                                  lhs->type_id() == TypeId::TIME));
-            bool rhs_temporal = (!rhs->is_null() &&
-                                 (rhs->type_id() == TypeId::DATE ||
-                                  rhs->type_id() == TypeId::TIMESTAMP ||
-                                  rhs->type_id() == TypeId::INTERVAL ||
-                                  rhs->type_id() == TypeId::TIME));
+            bool lhs_temporal =
+                (!lhs->is_null() &&
+                 (lhs->type_id() == TypeId::DATE || lhs->type_id() == TypeId::TIMESTAMP ||
+                  lhs->type_id() == TypeId::INTERVAL || lhs->type_id() == TypeId::TIME));
+            bool rhs_temporal =
+                (!rhs->is_null() &&
+                 (rhs->type_id() == TypeId::DATE || rhs->type_id() == TypeId::TIMESTAMP ||
+                  rhs->type_id() == TypeId::INTERVAL || rhs->type_id() == TypeId::TIME));
             if (lhs_temporal || rhs_temporal) {
                 return eval_temporal_arithmetic(expr.op, *lhs, *rhs);
             }
