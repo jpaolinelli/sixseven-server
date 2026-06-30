@@ -969,26 +969,28 @@ TEST_F(QA_CatalogPersistence, DropTableRemovesEdgeTypesFromPersistence) {
 }
 
 // =============================================================================
-// Boundary: Create table in system db context should fail
+// Boundary: Create table in the system database context
 // =============================================================================
 
-TEST_F(QA_CatalogPersistence, CreateTableInSystemDatabaseFails) {
+TEST_F(QA_CatalogPersistence, CreateTableInSystemDatabasePersists) {
     run_bootstrap();
     engine_->set_current_database(system_database_id);
 
-    // Creating user tables in the system database should fail because
-    // "sys_tables" (and other system table names) are reserved.
-    // But creating a non-system-named table should work.
+    // Current contract: a non-system-named user table CAN be created in the
+    // system database (only the reserved system table names are protected), and
+    // it survives a restart. The previous version of this test accepted BOTH
+    // success and failure (its failure branch had no assertions), so it could
+    // never catch a regression in either direction despite its "...Fails" name.
     auto result = engine_->execute("CREATE TABLE user_in_sys (id INT)");
-    if (result.has_value()) {
-        // If it succeeds, verify it persists.
-        restart();
-        run_bootstrap();
-        auto restored = catalog_->get_table(system_database_id, "user_in_sys");
-        // This is acceptable behavior — the table was created in the system database.
-        EXPECT_TRUE(restored.has_value());
-    }
-    // If it fails, that's also acceptable — system database may be restricted.
+    ASSERT_TRUE(result.has_value())
+        << "user DDL in the system database is currently allowed: " << result.error().message;
+
+    // The table persists across a restart + re-bootstrap.
+    restart();
+    run_bootstrap();
+    auto restored = catalog_->get_table(system_database_id, "user_in_sys");
+    EXPECT_TRUE(restored.has_value())
+        << "table created in the system database should survive restart";
 }
 
 // =============================================================================
