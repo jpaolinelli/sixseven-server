@@ -146,7 +146,8 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
             for (size_t i = 0; i < values.size() && i < storage_schema_.column_count(); ++i) {
                 auto target = storage_schema_.column(i).type;
                 if (values[i].type_id() != target && !values[i].is_null()) {
-                    auto fitted = fit_to_storage(values[i], target);
+                    int32_t scale = (i < col_scales_.size()) ? col_scales_[i] : 0;
+                    auto fitted = fit_to_storage(values[i], target, scale);
                     if (!fitted) {
                         return make_error(fitted.error().code, fitted.error().message);
                     }
@@ -194,7 +195,8 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
                 if (i < storage_schema_.column_count()) {
                     auto target = storage_schema_.column(i).type;
                     if (val->type_id() != target && !val->is_null()) {
-                        auto fitted = fit_to_storage(*val, target);
+                        int32_t scale = (i < col_scales_.size()) ? col_scales_[i] : 0;
+                        auto fitted = fit_to_storage(*val, target, scale);
                         if (!fitted) {
                             return make_error(fitted.error().code, fitted.error().message);
                         }

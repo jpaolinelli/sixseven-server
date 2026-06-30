@@ -69,7 +69,10 @@ Result<std::optional<Tuple>> UpdateOperator::do_next() {
             // TupleSerializer::serialize() sees the expected variant alternative.
             auto target_type = storage_schema_.column(assign.column_index).type;
             if (val->type_id() != target_type && !val->is_null()) {
-                auto fitted = fit_to_storage(*val, target_type);
+                int32_t scale = (assign.column_index < col_scales_.size())
+                                    ? col_scales_[assign.column_index]
+                                    : 0;
+                auto fitted = fit_to_storage(*val, target_type, scale);
                 if (!fitted) {
                     return make_error(fitted.error().code, fitted.error().message);
                 }
