@@ -535,13 +535,14 @@ TEST_F(QA_PlannerBugs, CrossBug_AllFourFixes_GDB229_230_231_232) {
 
 TEST_F(QA_PlannerBugs, ScalarSubqueryReturningMultipleColumnsFails) {
     // A scalar subquery in WHERE must project exactly one column.
-    exec_should_fail(
-        "SELECT users.name FROM users WHERE users.id = (SELECT orders.id, orders.amount FROM orders)");
+    exec_should_fail("SELECT users.name FROM users WHERE users.id = (SELECT orders.id, "
+                     "orders.amount FROM orders)");
 }
 
 TEST_F(QA_PlannerBugs, InSubqueryOverNonexistentTableFails) {
     // IN subquery referencing a table that does not exist must fail to plan.
-    exec_should_fail("SELECT users.name FROM users WHERE users.dept_id IN (SELECT id FROM no_such_table)");
+    exec_should_fail(
+        "SELECT users.name FROM users WHERE users.dept_id IN (SELECT id FROM no_such_table)");
 }
 
 TEST_F(QA_PlannerBugs, InSubqueryReferencingUndefinedCteFails) {
