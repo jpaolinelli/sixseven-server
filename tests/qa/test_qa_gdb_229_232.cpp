@@ -15,6 +15,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -31,6 +33,12 @@ protected:
         data_dir_ = std::filesystem::temp_directory_path() / "sixseven_qa_gdb_229_232";
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
+
+        // Register the default database (id=1); a bare Catalog only has the
+        // system database (id=2), so CREATE TABLE below would otherwise fail
+        // "database with id 1 not found" and every test would die at SetUp
+        // (GDB-713 / GDB-1277 bootstrap).
+        bootstrap_qa_catalog(catalog_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
@@ -517,4 +525,28 @@ TEST_F(QA_PlannerBugs, CrossBug_AllFourFixes_GDB229_230_231_232) {
     // Expected: only charlie.
     EXPECT_EQ(names.size(), 1u);
     EXPECT_TRUE(names.count("charlie"));
+}
+
+// =============================================================================
+// Negative paths: malformed subqueries must fail cleanly. These exercise the
+// status-code-agnostic exec_should_fail helper, where the precise StatusCode is
+// not the property under test (only that the query does not succeed).
+// =============================================================================
+
+TEST_F(QA_PlannerBugs, ScalarSubqueryReturningMultipleColumnsFails) {
+    // A scalar subquery in WHERE must project exactly one column.
+    exec_should_fail(
+        "SELECT users.name FROM users WHERE users.id = (SELECT orders.id, orders.amount FROM orders)");
+}
+
+TEST_F(QA_PlannerBugs, InSubqueryOverNonexistentTableFails) {
+    // IN subquery referencing a table that does not exist must fail to plan.
+    exec_should_fail("SELECT users.name FROM users WHERE users.dept_id IN (SELECT id FROM no_such_table)");
+}
+
+TEST_F(QA_PlannerBugs, InSubqueryReferencingUndefinedCteFails) {
+    // GDB-232 fixed CTEs referenced inside subqueries; referencing a CTE name
+    // that was never defined must still fail to plan (not silently bind).
+    exec_should_fail("WITH t AS (SELECT id FROM departments) SELECT users.name FROM users "
+                     "WHERE users.dept_id IN (SELECT id FROM no_such_cte)");
 }
