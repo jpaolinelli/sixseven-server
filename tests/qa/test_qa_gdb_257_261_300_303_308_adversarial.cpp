@@ -109,11 +109,14 @@ TEST(QA_GDB257_Adv, DuplicateProviderParameter) {
                 "vec EMBEDDING(384, provider='a', provider='b'))");
 }
 
-// Only one named param (missing second) should error.
-TEST(QA_GDB257_Adv, OnlyOneNamedParam) {
-    // Only source, missing provider — parser loop tries to parse second param.
+// Mixing a named EMBEDDING parameter with a subsequent positional one should
+// error. (The plain "only source, missing provider" case -- EMBEDDING(384,
+// source='title') -- is already covered by QA_GDB257.MissingProviderParameter
+// in test_qa_gdb_257.cpp, so this adversarial slot exercises the distinct
+// named-then-positional mix instead of duplicating it.)
+TEST(QA_GDB257_Adv, MixedNamedThenPositionalParam) {
     parse_error("CREATE TABLE t (id INT PRIMARY KEY, "
-                "vec EMBEDDING(384, source='title'))");
+                "vec EMBEDDING(384, source='title', 'openai'))");
 }
 
 // Dimension 0 with named params should parse (dimension validation is downstream).
