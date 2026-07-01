@@ -1060,7 +1060,8 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
                                                              JoinType::SEMI,
                                                              on_expr,
                                                              bound,
-                                                             std::move(combined));
+                                                             std::move(combined),
+                                                             &subquery_ctx_);
             return ok(static_cast<const Expr*>(nullptr)); // Consumed the predicate.
         }
     }
@@ -1102,7 +1103,8 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
                                                                      JoinType::ANTI,
                                                                      on_expr,
                                                                      bound,
-                                                                     std::move(combined));
+                                                                     std::move(combined),
+                                                                     &subquery_ctx_);
                     return ok(static_cast<const Expr*>(nullptr));
                 }
             }
@@ -1202,7 +1204,8 @@ Result<const Expr*> Planner::rewrite_subquery_predicates(
                                                                         jtype,
                                                                         on_ptr,
                                                                         bound,
-                                                                        std::move(combined));
+                                                                        std::move(combined),
+                                                                        &subquery_ctx_);
                 // NOT IN requires null-aware ANTI join semantics.
                 if (in_expr->negated) {
                     join_op->set_null_aware_anti(true);
@@ -1845,7 +1848,8 @@ Planner::plan_select(const SelectStmt& stmt,
                                                                  join_clause.type,
                                                                  on_expr,
                                                                  bound,
-                                                                 std::move(combined));
+                                                                 std::move(combined),
+                                                                 &subquery_ctx_);
             }
             if (join_cost.has_value()) {
                 child->set_estimated_cost(*join_cost);

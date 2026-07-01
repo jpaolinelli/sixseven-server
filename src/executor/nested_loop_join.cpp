@@ -9,9 +9,11 @@ NestedLoopJoinOperator::NestedLoopJoinOperator(std::unique_ptr<Iterator> left,
                                                JoinType type,
                                                const Expr* on_expr,
                                                const BoundStatement& bound,
-                                               OutputSchema schema)
+                                               OutputSchema schema,
+                                               const SubqueryContext* subquery_ctx)
     : left_(std::move(left)), right_(std::move(right)), type_(type), on_expr_(on_expr),
-      bound_(bound), schema_(std::move(schema)), output_schema_(schema_) {
+      bound_(bound), subquery_ctx_(subquery_ctx), schema_(std::move(schema)),
+      output_schema_(schema_) {
     // SEMI/ANTI joins only output left-side columns, so build a trimmed schema.
     if (type_ == JoinType::SEMI || type_ == JoinType::ANTI) {
         size_t left_count = left_->output_schema().column_count();
@@ -297,7 +299,7 @@ Tuple NestedLoopJoinOperator::null_left_with_right(const Tuple& right) const {
 }
 
 Result<bool> NestedLoopJoinOperator::matches(const Tuple& combined) const {
-    return evaluate_predicate(*on_expr_, combined, schema_, bound_);
+    return evaluate_predicate(*on_expr_, combined, schema_, bound_, subquery_ctx_);
 }
 
 } // namespace sixseven

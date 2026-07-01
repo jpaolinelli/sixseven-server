@@ -304,14 +304,74 @@ TEST_F(SubqueryTest, DerivedTableWithAggregation) {
 // Nested subquery tests
 // =============================================================================
 
-TEST_F(SubqueryTest, NestedExistsInSubquery) {
-    // EXISTS with a condition that references a subquery result.
-    // Users who have orders, tested via an inner table lookup.
+TEST_F(SubqueryTest, NestedScalarInsideExists) {
+    // Scalar subquery nested inside an EXISTS predicate.
+    // EXISTS(SELECT 1 FROM orders WHERE orders.user_id = users.id
+    //        AND orders.amount > (SELECT orders.amount FROM orders WHERE orders.id = 101))
+    // The scalar subquery returns 300 (order id=101 has amount=300).
+    // alice has orders 500 and 300; 500 > 300 is true -> alice passes.
+    // charlie has order 200; 200 > 300 is false -> charlie fails.
+    // bob and diana have no orders at all -> fail.
+    // Expected: {alice} only -- discriminates from ExistsBasic ({alice, charlie}).
     auto qr = exec_ok("SELECT users.name FROM users "
-                      "WHERE EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)");
+                      "WHERE EXISTS (SELECT 1 FROM orders "
+                      "WHERE orders.user_id = users.id "
+                      "AND orders.amount > "
+                      "(SELECT orders.amount FROM orders WHERE orders.id = 101))");
 
-    // Same as ExistsBasic — verifies the pattern works correctly.
-    EXPECT_EQ(qr.rows.size(), 2u);
+    auto names = collect_column_strings(qr, 0);
+    EXPECT_EQ(names.size(), 1u);
+    EXPECT_TRUE(names.count("alice"));
+    EXPECT_FALSE(names.count("charlie"));
+    EXPECT_FALSE(names.count("bob"));
+    EXPECT_FALSE(names.count("diana"));
+}
+
+TEST_F(SubqueryTest, NestedExistsInsideExists) {
+    // EXISTS nested inside another EXISTS predicate.
+    // Outer EXISTS: does the user's department have dept_name = 'engineering'?
+    // Inner EXISTS: does the user have at least one order?
+    // Both conditions must hold.
+    // alice: dept=10=engineering, has orders -> YES.
+    // bob: dept=20=sales, not engineering -> NO.
+    // charlie: dept=10=engineering, has orders -> YES.
+    // diana: dept=30=hr, not engineering -> NO.
+    // Expected: {alice, charlie} -- same count as ExistsBasic but filters on dept name,
+    // proving the nested path runs (not the outer-only path).
+    auto qr = exec_ok("SELECT users.name FROM users "
+                      "WHERE EXISTS (SELECT 1 FROM departments "
+                      "WHERE departments.id = users.dept_id "
+                      "AND departments.dept_name = 'engineering' "
+                      "AND EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id))");
+
+    auto names = collect_column_strings(qr, 0);
+    EXPECT_EQ(names.size(), 2u);
+    EXPECT_TRUE(names.count("alice"));
+    EXPECT_TRUE(names.count("charlie"));
+    EXPECT_FALSE(names.count("bob"));
+    EXPECT_FALSE(names.count("diana"));
+}
+
+TEST_F(SubqueryTest, NestedScalarInsideScalar) {
+    // Scalar subquery nested inside another scalar subquery comparison.
+    // users.dept_id = (SELECT departments.id FROM departments
+    //                  WHERE departments.dept_name =
+    //                    (SELECT departments.dept_name FROM departments WHERE departments.id = 10))
+    // Innermost scalar: returns 'engineering' (dept id=10).
+    // Outer scalar: returns id where dept_name='engineering' = 10.
+    // Filter: users with dept_id = 10 -> alice and charlie.
+    auto qr = exec_ok("SELECT users.name FROM users "
+                      "WHERE users.dept_id = "
+                      "(SELECT departments.id FROM departments "
+                      "WHERE departments.dept_name = "
+                      "(SELECT departments.dept_name FROM departments WHERE departments.id = 10))");
+
+    auto names = collect_column_strings(qr, 0);
+    EXPECT_EQ(names.size(), 2u);
+    EXPECT_TRUE(names.count("alice"));
+    EXPECT_TRUE(names.count("charlie"));
+    EXPECT_FALSE(names.count("bob"));
+    EXPECT_FALSE(names.count("diana"));
 }
 
 TEST_F(SubqueryTest, CTEWithExists) {

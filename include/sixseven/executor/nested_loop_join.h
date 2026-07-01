@@ -1,5 +1,6 @@
 #pragma once
 
+#include "sixseven/executor/expr_evaluator.h"
 #include "sixseven/executor/iterator.h"
 #include "sixseven/executor/tuple.h"
 #include "sixseven/parser/ast.h"
@@ -19,18 +20,20 @@ namespace sixseven {
 /// The right child is materialised in memory on open().
 class NestedLoopJoinOperator : public Iterator {
 public:
-    /// @param left     Left (outer) child iterator.
-    /// @param right    Right (inner) child iterator.
-    /// @param type     Join type (INNER, LEFT, RIGHT, FULL, CROSS, SEMI, ANTI).
-    /// @param on_expr  Join predicate (nullptr for CROSS JOIN).
-    /// @param bound    BoundStatement with expr_types map.
-    /// @param schema   Combined output schema (left columns + right columns).
+    /// @param left          Left (outer) child iterator.
+    /// @param right         Right (inner) child iterator.
+    /// @param type          Join type (INNER, LEFT, RIGHT, FULL, CROSS, SEMI, ANTI).
+    /// @param on_expr       Join predicate (nullptr for CROSS JOIN).
+    /// @param bound         BoundStatement with expr_types map.
+    /// @param schema        Combined output schema (left columns + right columns).
+    /// @param subquery_ctx  Optional context for inline subquery evaluation in the ON predicate.
     NestedLoopJoinOperator(std::unique_ptr<Iterator> left,
                            std::unique_ptr<Iterator> right,
                            JoinType type,
                            const Expr* on_expr,
                            const BoundStatement& bound,
-                           OutputSchema schema);
+                           OutputSchema schema,
+                           const SubqueryContext* subquery_ctx = nullptr);
 
     const OutputSchema& output_schema() const override;
     std::string plan_node_name() const override;
@@ -61,6 +64,7 @@ private:
     JoinType type_;
     const Expr* on_expr_;
     const BoundStatement& bound_;
+    const SubqueryContext* subquery_ctx_;
     OutputSchema schema_;        // Combined schema for ON condition evaluation.
     OutputSchema output_schema_; // Actual output schema (left-only for SEMI/ANTI).
 
