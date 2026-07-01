@@ -407,25 +407,38 @@ TEST_F(SubqueryTest, CTEWithExists) {
 // =============================================================================
 
 TEST_F(SubqueryTest, CorrelatedExistsDecorrelatedToSemiJoin) {
-    // Standard correlated EXISTS — decorrelated into a semi join.
+    // Standard correlated EXISTS -- decorrelated into a semi join. The subquery
+    // predicate uses a DISCRIMINATING threshold (>= 300): alice has orders 500
+    // and 300 (both qualify); charlie's only order is 200 (does not). So the
+    // result must be {alice} alone -- distinct from ExistsBasic ({alice,
+    // charlie}). A previous version used >= 200, which every seeded order
+    // satisfies, so a dropped/mishandled decorrelated predicate was undetectable.
     auto qr = exec_ok("SELECT users.name FROM users "
                       "WHERE EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id AND "
-                      "orders.amount >= 200)");
+                      "orders.amount >= 300)");
 
     auto names = collect_column_strings(qr, 0);
-    EXPECT_EQ(names.size(), 2u);
+    EXPECT_EQ(names.size(), 1u);
     EXPECT_TRUE(names.count("alice"));
-    EXPECT_TRUE(names.count("charlie"));
+    EXPECT_FALSE(names.count("charlie"));
+    EXPECT_FALSE(names.count("bob"));
+    EXPECT_FALSE(names.count("diana"));
 }
 
 TEST_F(SubqueryTest, CorrelatedNotExistsDecorrelatedToAntiJoin) {
-    // Standard correlated NOT EXISTS — decorrelated into an anti join.
+    // Standard correlated NOT EXISTS -- decorrelated into an anti join. With the
+    // discriminating threshold (>= 300), the users with NO qualifying order are
+    // bob (no orders), charlie (only a 200 order), and diana (no orders); alice
+    // is excluded (she has orders >= 300). This differs from the >= 200 case
+    // ({bob, diana}), so a dropped anti-join predicate now fails the test.
     auto qr = exec_ok("SELECT users.name FROM users "
                       "WHERE NOT EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id AND "
-                      "orders.amount >= 200)");
+                      "orders.amount >= 300)");
 
     auto names = collect_column_strings(qr, 0);
-    EXPECT_EQ(names.size(), 2u);
+    EXPECT_EQ(names.size(), 3u);
     EXPECT_TRUE(names.count("bob"));
+    EXPECT_TRUE(names.count("charlie"));
     EXPECT_TRUE(names.count("diana"));
+    EXPECT_FALSE(names.count("alice"));
 }
