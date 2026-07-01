@@ -22,6 +22,62 @@ std::string format_cost_estimate(const sixseven::PlanCostEstimate& cost) {
 
 namespace sixseven {
 
+std::string expr_to_sql(const Expr& expr) {
+    if (auto* lit = dynamic_cast<const LiteralExpr*>(&expr)) {
+        switch (lit->kind) {
+        case LiteralKind::STRING: {
+            // Escape embedded single quotes by doubling them so the output
+            // can be re-lexed as a valid SQL string literal.
+            std::string escaped;
+            escaped.reserve(lit->value.size());
+            for (char c : lit->value) {
+                if (c == '\'')
+                    escaped += "''";
+                else
+                    escaped += c;
+            }
+            return "'" + escaped + "'";
+        }
+        case LiteralKind::NULL_LITERAL:
+            return "NULL";
+        default:
+            return lit->value;
+        }
+    }
+    if (auto* fn = dynamic_cast<const FunctionCallExpr*>(&expr)) {
+        std::string s = fn->name + "(";
+        for (size_t i = 0; i < fn->args.size(); ++i) {
+            if (i > 0)
+                s += ", ";
+            s += expr_to_sql(*fn->args[i]);
+        }
+        s += ")";
+        return s;
+    }
+    if (auto* col_ref = dynamic_cast<const ColumnRefExpr*>(&expr)) {
+        // Bare identifiers like CURRENT_TIMESTAMP are parsed as column refs.
+        if (!col_ref->table.empty())
+            return col_ref->table + "." + col_ref->column;
+        return col_ref->column;
+    }
+    if (auto* bin = dynamic_cast<const BinaryExpr*>(&expr)) {
+        static constexpr std::string_view ops[] = {
+            "+", "-", "*", "/", "%", "=", "!=", "<", ">", "<=", ">=", "AND", "OR", "||"};
+        auto idx = static_cast<size_t>(bin->op);
+        std::string op_str = idx < std::size(ops) ? std::string(ops[idx]) : "?";
+        return "(" + expr_to_sql(*bin->lhs) + " " + op_str + " " + expr_to_sql(*bin->rhs) + ")";
+    }
+    if (auto* un = dynamic_cast<const UnaryExpr*>(&expr)) {
+        if (un->op == UnaryOp::NEGATE)
+            return "-" + expr_to_sql(*un->operand);
+        return "NOT " + expr_to_sql(*un->operand);
+    }
+    if (auto* cast = dynamic_cast<const CastExpr*>(&expr)) {
+        return "CAST(" + expr_to_sql(*cast->expr) + " AS " + cast->target_type.name + ")";
+    }
+    return "NULL"; // Fallback for unsupported expression types.
+}
+
 // ---------------------------------------------------------------------------
 // Text format
 // ---------------------------------------------------------------------------

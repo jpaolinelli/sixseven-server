@@ -116,10 +116,17 @@ TEST_F(ExplainTest, ExplainWithWhereShowsFilter) {
         plan += row[0].as_string() + "\n";
     }
 
-    // Should show either a Filter or a Seq Scan (with pushed-down predicate).
-    bool has_scan_or_filter =
-        plan.find("Seq Scan") != std::string::npos || plan.find("Filter") != std::string::npos;
-    EXPECT_TRUE(has_scan_or_filter) << "Expected plan with Seq Scan or Filter, got:\n" << plan;
+    // The WHERE predicate is pushed into the Seq Scan; EXPLAIN must surface it
+    // in the scan's detail so the plan actually reflects the filter. Asserting
+    // only "Seq Scan || Filter" was tautological (Seq Scan is always present),
+    // so a silently-dropped predicate annotation would have gone unnoticed.
+    EXPECT_NE(plan.find("Seq Scan"), std::string::npos) << plan;
+    EXPECT_NE(plan.find("filter:"), std::string::npos)
+        << "EXPLAIN did not surface the WHERE predicate:\n"
+        << plan;
+    EXPECT_NE(plan.find("age > 25"), std::string::npos)
+        << "EXPLAIN did not show the predicate expression:\n"
+        << plan;
 }
 
 TEST_F(ExplainTest, ExplainJoinShowsJoinOperator) {

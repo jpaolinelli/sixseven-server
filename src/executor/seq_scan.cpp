@@ -1,5 +1,6 @@
 #include "sixseven/executor/seq_scan.h"
 
+#include "sixseven/executor/explain.h"
 #include "sixseven/executor/expr_evaluator.h"
 #include "sixseven/table/tuple.h"
 
@@ -81,10 +82,19 @@ std::string SeqScanOperator::plan_node_name() const {
 }
 
 std::string SeqScanOperator::plan_node_detail() const {
+    std::string detail;
     if (!schema_.columns().empty() && !schema_.columns()[0].table_name.empty()) {
-        return "on " + schema_.columns()[0].table_name;
+        detail = "on " + schema_.columns()[0].table_name;
     }
-    return "";
+    // Surface the pushed-down WHERE predicate so EXPLAIN actually shows the
+    // filter rather than hiding it inside the scan.
+    if (predicate_ != nullptr) {
+        if (!detail.empty()) {
+            detail += "  ";
+        }
+        detail += "(filter: " + expr_to_sql(*predicate_) + ")";
+    }
+    return detail;
 }
 
 } // namespace sixseven
