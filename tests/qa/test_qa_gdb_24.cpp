@@ -263,6 +263,53 @@ TEST_F(QA_HashAggregate, SumCancelsToZero) {
     EXPECT_EQ(rows[0].values[1].as_int64(), 0);
 }
 
+// Aggregate over a COMPUTED EXPRESSION argument (val + 1) rather than a bare
+// column ref -- exercises the lit_int + binary_expr AST builders that the rest
+// of the suite never used.
+TEST_F(QA_HashAggregate, SumOverExpressionArg) {
+    std::vector<Tuple> data = {
+        Tuple{{Value(std::string("x")), Value(int32_t(10))}, {}},
+        Tuple{{Value(std::string("x")), Value(int32_t(20))}, {}},
+        Tuple{{Value(std::string("x")), Value(int32_t(30))}, {}},
+    };
+
+    BoundStatement bound;
+    AggTestBuilder builder;
+    builder.add_group_by(col_ref("t", "grp"), {"t", "grp", TypeId::STRING, false, 1});
+    builder.add_agg(AggFunc::SUM, binary_expr(BinaryOp::ADD, col_ref("t", "val"), lit_int(1)));
+
+    auto child = std::make_unique<VectorIterator>(int_schema(), std::move(data));
+    auto agg = builder.build(std::move(child), bound);
+
+    auto rows = run(*agg);
+    ASSERT_EQ(rows.size(), 1u);
+    // (10+1) + (20+1) + (30+1) = 63.
+    EXPECT_EQ(rows[0].values[1].as_int64(), 63);
+}
+
+// MAX over a computed expression argument (val * 2).
+TEST_F(QA_HashAggregate, MaxOverExpressionArg) {
+    std::vector<Tuple> data = {
+        Tuple{{Value(std::string("x")), Value(int32_t(10))}, {}},
+        Tuple{{Value(std::string("x")), Value(int32_t(30))}, {}},
+        Tuple{{Value(std::string("x")), Value(int32_t(20))}, {}},
+    };
+
+    BoundStatement bound;
+    AggTestBuilder builder;
+    builder.add_group_by(col_ref("t", "grp"), {"t", "grp", TypeId::STRING, false, 1});
+    // val*2 arithmetic widens to INT64, so the aggregate result type is INT64.
+    builder.add_agg(AggFunc::MAX, binary_expr(BinaryOp::MULTIPLY, col_ref("t", "val"), lit_int(2)));
+
+    auto child = std::make_unique<VectorIterator>(int_schema(), std::move(data));
+    auto agg = builder.build(std::move(child), bound);
+
+    auto rows = run(*agg);
+    ASSERT_EQ(rows.size(), 1u);
+    // MAX(val*2) over {20, 60, 40} = 60.
+    EXPECT_EQ(rows[0].values[1].as_int64(), 60);
+}
+
 // SUM with single row
 TEST_F(QA_HashAggregate, SumSingleRow) {
     std::vector<Tuple> data = {
