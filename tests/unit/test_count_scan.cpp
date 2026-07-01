@@ -187,4 +187,17 @@ TEST_F(CountScanTest, OutputSchemaHasSingleInt64Column) {
     CountScanOperator scan(heap, count_output_schema());
     EXPECT_EQ(scan.output_schema().column_count(), 1u);
     EXPECT_EQ(scan.output_schema().column(0).type_id, TypeId::INT64);
+
+    // Asserting the schema shape alone is vacuous -- the caller supplies the
+    // schema, so it only echoes back what the test constructed. Drive next()
+    // and verify the emitted tuple actually conforms to output_schema(): a
+    // single, INT64-typed value. This catches a regression where CountScan
+    // produced a value whose arity or type disagreed with its declared schema.
+    ASSERT_TRUE(scan.open().has_value());
+    auto row = scan.next();
+    ASSERT_TRUE(row.has_value()) << row.error().message;
+    ASSERT_TRUE(row->has_value()) << "count scan produced no row";
+    EXPECT_EQ(row->value().values.size(), 1u);
+    EXPECT_EQ(row->value().values[0].type_id(), TypeId::INT64);
+    scan.close();
 }
