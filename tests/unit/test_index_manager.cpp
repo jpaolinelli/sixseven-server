@@ -759,10 +759,18 @@ TEST_F(HnswIndexManagerTest, ReindexRebuildsHnsw) {
     ASSERT_NE(it, hnsw_map->end());
     EXPECT_EQ(it->second->node_count(), 2u);
 
-    // REINDEX should rebuild the index from table data.
+    // Perturb the in-memory index so a genuine rebuild is observable: tombstone
+    // one node, dropping the live count to 1. Without this, asserting count==2
+    // both before and after REINDEX only proves REINDEX is non-destructive -- a
+    // regression that turned REINDEX into a silent no-op would still pass.
+    ASSERT_TRUE(it->second->remove(0).has_value());
+    EXPECT_EQ(it->second->node_count(), 1u);
+
+    // REINDEX must rebuild the index from table data, restoring both nodes.
     exec_ok("REINDEX docs");
 
-    // After REINDEX, the map should have a (potentially new) index with 2 nodes.
+    // After REINDEX, the map should have a (potentially new) index rebuilt back
+    // to 2 nodes. If REINDEX had skipped the rebuild, the count would still be 1.
     it = hnsw_map->find(key);
     ASSERT_NE(it, hnsw_map->end());
     EXPECT_EQ(it->second->node_count(), 2u);
@@ -784,9 +792,18 @@ TEST_F(HnswIndexManagerTest, ReindexByIndexName) {
 
     auto index_name = EmbeddingColumnManager::make_index_name("items", "desc_vec");
 
+    auto* hnsw_map = index_manager_->hnsw_map();
+    auto before = hnsw_map->find(hnsw_index_id(index_name));
+    ASSERT_NE(before, hnsw_map->end());
+    ASSERT_EQ(before->second->node_count(), 1u);
+
+    // Perturb before REINDEX so the rebuild is observable: tombstone the only
+    // node, dropping the count to 0. A no-op REINDEX would leave it at 0.
+    ASSERT_TRUE(before->second->remove(0).has_value());
+    EXPECT_EQ(before->second->node_count(), 0u);
+
     exec_ok("REINDEX " + index_name);
 
-    auto* hnsw_map = index_manager_->hnsw_map();
     auto it = hnsw_map->find(hnsw_index_id(index_name));
     ASSERT_NE(it, hnsw_map->end());
     EXPECT_EQ(it->second->node_count(), 1u);
