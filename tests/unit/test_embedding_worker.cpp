@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <mutex>
 #include <span>
 #include <thread>
@@ -55,6 +56,61 @@ private:
     bool should_fail_;
     std::atomic<int> call_count_{0};
     std::atomic<int> batch_call_count_{0};
+};
+
+// -- Provider that blocks inside embed_batch until released --------------------
+//
+// Lets a test park a worker mid-batch so shutdown can be exercised with jobs
+// still in flight and still queued.
+class GatedProvider : public EmbeddingProvider {
+public:
+    explicit GatedProvider(int32_t dimension) : dimension_(dimension) {}
+
+    Result<std::vector<float>> embed(const std::string& /*text*/) override {
+        return ok(std::vector<float>(static_cast<size_t>(dimension_), 1.0F));
+    }
+
+    Result<std::vector<std::vector<float>>>
+    embed_batch(const std::vector<std::string>& texts) override {
+        entered_.store(true);
+        {
+            std::unique_lock lock(mu_);
+            cv_.wait(lock, [this] { return released_; });
+        }
+        std::vector<std::vector<float>> result;
+        result.reserve(texts.size());
+        for (size_t i = 0; i < texts.size(); ++i) {
+            result.emplace_back(static_cast<size_t>(dimension_), 1.0F);
+        }
+        return ok(std::move(result));
+    }
+
+    std::string name() const override { return "test"; }
+    size_t dimension() const override { return static_cast<size_t>(dimension_); }
+    Result<void> health_check() override { return ok(); }
+
+    // Block the caller until a worker has entered embed_batch.
+    void wait_until_entered() {
+        while (!entered_.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+
+    // Unblock the parked embed_batch call.
+    void release() {
+        {
+            std::lock_guard lock(mu_);
+            released_ = true;
+        }
+        cv_.notify_all();
+    }
+
+private:
+    int32_t dimension_;
+    std::mutex mu_;
+    std::condition_variable cv_;
+    bool released_ = false;
+    std::atomic<bool> entered_{false};
 };
 
 // -- Helper to build an embedding job -----------------------------------------
@@ -406,15 +462,55 @@ TEST(EmbeddingWorker, InsertJobsPrioritizedOverUpdate) {
 // -- Graceful shutdown --------------------------------------------------------
 
 TEST(EmbeddingWorker, GracefulShutdownPreservesUnprocessedJobs) {
-    EmbeddingWorkerPool pool({.num_workers = 0}); // No workers.
+    // Actually exercise stop(): a single worker with a gated provider parks on
+    // the first job's batch, leaving the rest queued. We flip the pool to
+    // not-running (stop()) BEFORE releasing the gate, so once the in-flight
+    // batch finishes the worker's loop condition is already false and it exits
+    // without draining the remaining jobs. This proves stop() neither drops nor
+    // corrupts the pending queues -- the previous version never called start()
+    // or stop(), so a shutdown that cleared the queue would have passed.
+    auto provider = std::make_shared<GatedProvider>(128);
+
+    std::atomic<int> store_count{0};
+    EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = 1});
+    pool.register_provider("test", provider);
+    pool.set_store_callback(
+        [&](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> {
+            store_count.fetch_add(1);
+            return ok();
+        });
+
+    ASSERT_TRUE(pool.start().has_value());
 
     ASSERT_TRUE(pool.enqueue(make_insert_job(1, 1, 0, "a")).has_value());
     ASSERT_TRUE(pool.enqueue(make_insert_job(1, 2, 0, "b")).has_value());
     ASSERT_TRUE(pool.enqueue(make_update_job(1, 3, 0, "c")).has_value());
 
-    // Drain preserves all jobs.
+    // Wait until the worker is parked inside embed_batch for the first job.
+    provider->wait_until_entered();
+
+    // Stop from another thread: stop() sets running_=false, then joins the
+    // worker (which is still parked in the gated batch).
+    Result<void> stop_result = ok();
+    std::thread stopper([&] { stop_result = pool.stop(); });
+
+    // Once the pool reports not-running, release the gate so the in-flight batch
+    // completes and the worker exits without picking up the remaining jobs.
+    while (pool.is_running()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    provider->release();
+    stopper.join();
+
+    ASSERT_TRUE(stop_result.has_value()) << stop_result.error().message;
+    EXPECT_FALSE(pool.is_running());
+
+    // Exactly the first job was processed; the other two survived shutdown and
+    // are still retrievable via drain(). No job is lost or duplicated.
     auto remaining = pool.drain();
-    EXPECT_EQ(remaining.size(), 3u);
+    EXPECT_EQ(store_count.load(), 1);
+    EXPECT_EQ(remaining.size(), 2u);
+    EXPECT_EQ(static_cast<int>(store_count.load()) + static_cast<int>(remaining.size()), 3);
     EXPECT_EQ(pool.pending_count(), 0u);
 }
 
