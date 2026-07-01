@@ -263,12 +263,28 @@ TEST_F(SubqueryTest, CTEWithJoin) {
 }
 
 TEST_F(SubqueryTest, CTEReferencedMultipleTimes) {
-    // The same CTE referenced in both parts of a CROSS JOIN (or separate queries).
-    // For this test, just verify a CTE can be used as a FROM source.
-    auto qr = exec_ok("WITH eng_users AS (SELECT users.name FROM users WHERE users.dept_id = 10) "
-                      "SELECT eng_users.name FROM eng_users");
+    // The same CTE (eng = engineering users {alice, charlie}) is consumed at two
+    // points in one query. This exercises the behavior the test name promises --
+    // alias resolution and double-open/materialization of a single CTE -- which
+    // the previous version did NOT: it referenced the CTE exactly once and only
+    // checked a row count, duplicating CTEBasic.
 
-    EXPECT_EQ(qr.rows.size(), 2u);
+    // Self-join of the CTE with two distinct aliases; a.name = b.name pairs each
+    // engineering user with itself, yielding exactly the CTE's own rows.
+    auto self_join = exec_ok("WITH eng AS (SELECT users.name FROM users WHERE users.dept_id = 10) "
+                             "SELECT a.name FROM eng AS a JOIN eng AS b ON a.name = b.name");
+    auto names = collect_column_strings(self_join, 0);
+    EXPECT_EQ(self_join.rows.size(), 2u);
+    EXPECT_EQ(names.size(), 2u);
+    EXPECT_TRUE(names.count("alice"));
+    EXPECT_TRUE(names.count("charlie"));
+
+    // Cross-join of the CTE with itself: both references are materialized, so the
+    // result is the 2x2 Cartesian product (4 rows). This fails if a second
+    // reference to the CTE is dropped or shares a single exhausted iterator.
+    auto cross_join = exec_ok("WITH eng AS (SELECT users.name FROM users WHERE users.dept_id = 10) "
+                              "SELECT eng.name FROM eng JOIN eng ON 1 = 1");
+    EXPECT_EQ(cross_join.rows.size(), 4u);
 }
 
 // =============================================================================
