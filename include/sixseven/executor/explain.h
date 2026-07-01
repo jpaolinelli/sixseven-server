@@ -9,6 +9,12 @@
 
 namespace sixseven {
 
+/// Render an expression tree back to a SQL-like string (e.g. "(age > 25)").
+/// Used both for catalog round-tripping of default expressions and for
+/// surfacing WHERE predicates in EXPLAIN plan output. Unsupported node types
+/// fall back to "NULL".
+[[nodiscard]] std::string expr_to_sql(const Expr& expr);
+
 /// Formats an iterator tree as EXPLAIN or EXPLAIN ANALYZE output.
 ///
 /// Walks the tree using plan_node_name(), plan_node_detail(), and
