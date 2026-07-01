@@ -12,13 +12,9 @@
 /// Adversarial categories: boundary values, error paths, graph topology
 /// edge cases, numerical stability, stress tests, mathematical invariants.
 
-#include "sixseven/catalog/catalog.h"
 #include "sixseven/common/result.h"
-#include "sixseven/common/types.h"
-#include "sixseven/common/value.h"
 #include "sixseven/graph/algorithm_registry.h"
 #include "sixseven/graph/closeness_centrality.h"
-#include "sixseven/graph/graph_engine.h"
 
 #include <gtest/gtest.h>
 
@@ -28,26 +24,12 @@
 #include <unordered_map>
 #include <vector>
 
+#include "graph_qa_fixture.h"
+
 namespace sixseven {
 namespace {
 
-// ============================================================================
-// Helpers
-// ============================================================================
-
-static TableSchema make_table_schema(const std::string& name) {
-    TableSchema schema;
-    schema.name = name;
-    schema.columns = {
-        {0, "id", TypeId::INT64, false, ""},
-    };
-    schema.pk_columns = "id";
-    return schema;
-}
-
-static Value pk(int64_t v) {
-    return Value(v);
-}
+using graph_qa::GraphQaFixtureBase;
 
 struct WFInfo {
     double closeness;
@@ -77,26 +59,8 @@ std::unordered_map<int64_t, WFInfo> to_wf_map(const std::vector<AlgorithmRow>& r
 // Test fixture
 // ============================================================================
 
-class GDB519_WassermanFaust : public ::testing::Test {
+class GDB519_WassermanFaust : public GraphQaFixtureBase {
 protected:
-    void SetUp() override {
-        auto t = catalog_.create_table(default_database_id, make_table_schema("nodes"));
-        ASSERT_TRUE(t.has_value()) << t.error().message;
-        table_id_ = *t;
-    }
-
-    void build_graph(const std::string& edge_type,
-                     const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(
-            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
-        ASSERT_TRUE(et.has_value()) << et.error().message;
-
-        for (auto [src, tgt] : edges) {
-            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
-            ASSERT_TRUE(link.has_value()) << link.error().message;
-        }
-    }
-
     Result<std::vector<AlgorithmRow>> run_wf(const std::string& edge_type) {
         std::unordered_map<std::string, Value> args;
         args["variant"] = Value(std::string("wasserman_faust"));
@@ -110,10 +74,6 @@ protected:
         AlgorithmContext ctx{engine_, default_database_id, edge_type, args};
         return closeness_centrality_execute(ctx);
     }
-
-    Catalog catalog_;
-    GraphEngine engine_{catalog_};
-    table_id_t table_id_ = 0;
 };
 
 // ============================================================================

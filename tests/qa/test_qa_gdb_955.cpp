@@ -508,7 +508,8 @@ TEST(QA_GDB955_NoRegression, PgTypeNullContract) {
     auto def = make_pg_type();
 
     // Find column indices
-    int oid_idx = -1, typname_idx = -1, typbyval_idx = -1;
+    int oid_idx = -1, typname_idx = -1;
+    [[maybe_unused]] int typbyval_idx = -1;
     for (size_t i = 0; i < def.columns.size(); ++i) {
         if (def.columns[i].name == "oid")
             oid_idx = static_cast<int>(i);

@@ -712,6 +712,38 @@ TEST(QA_GDB1051_JsonAdversarial, JsonPlusIntErrors) {
 }
 
 // ===========================================================================
+// AST literal construction helpers: verify lit_int / lit_str / binary build
+// correct AST nodes and evaluate correctly via evaluate_expr.
+// ===========================================================================
+
+// lit_int + lit_int via binary() AST -> integer addition result.
+TEST(QA_GDB1051_AstHelpers, LitIntAdditionViaAst) {
+    auto expr = binary(BinaryOp::ADD, lit_int("3"), lit_int("4"));
+    Tuple empty_tuple;
+    OutputSchema empty_schema(std::vector<OutputColumn>{});
+    BoundStatement bound{};
+    auto r = evaluate_expr(*expr, empty_tuple, empty_schema, bound);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    // 3 + 4 = 7 (INTEGER literal -> INT64)
+    ASSERT_EQ(r->type_id(), TypeId::INT64);
+    EXPECT_EQ(std::get<int64_t>(r->data()), 7);
+}
+
+// lit_str produces a STRING-kinded literal; binary(ADD) on two strings
+// is not defined -> TYPE_ERROR (the helpers must at least construct nodes).
+TEST(QA_GDB1051_AstHelpers, LitStrNodeIsString) {
+    // Evaluate a standalone string literal (no binary op).
+    auto e = lit_str("hello");
+    Tuple empty_tuple;
+    OutputSchema empty_schema(std::vector<OutputColumn>{});
+    BoundStatement bound{};
+    auto r = evaluate_expr(*e, empty_tuple, empty_schema, bound);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    ASSERT_EQ(r->type_id(), TypeId::STRING);
+    EXPECT_EQ(r->as_string(), "hello");
+}
+
+// ===========================================================================
 // GDB-1051 ADVERSARIAL: POINT distance edge cases
 // ===========================================================================
 

@@ -15,8 +15,6 @@
 // ASan: unavailable on Windows/MSVC. Concurrency tests use std::barrier + joins for
 // determinism (no sleeps) to compensate for the missing race detector.
 
-#pragma once
-
 #include "sixseven/common/statement_deadline.h"
 #include "sixseven/server/cancel_registry.h"
 
@@ -385,8 +383,6 @@ TEST(QA_GDB956_Concurrency, RegisterUnregisterCancelChurn) {
     constexpr int ITERS = 200;
     constexpr int N_CANCEL = 4;
     constexpr int N_REG = 4;
-
-    std::atomic<bool> stop{false};
 
     // Canceller threads: repeatedly call request_cancel (may be no-op).
     std::vector<std::thread> cancellers;
