@@ -11,7 +11,6 @@
 #include "sixseven/index/hash_index.h"
 #include "sixseven/index/rid.h"
 #include "sixseven/server/thread_pool.h"
-#include "sixseven/vector/http_client.h"
 #include "sixseven/vector/openai_provider.h"
 
 #include <gtest/gtest.h>
@@ -25,6 +24,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#include "openai_mock_http_client.h"
 
 using namespace sixseven;
 
@@ -51,38 +52,8 @@ RID rid(uint32_t p, uint16_t s = 0) {
     return {p, s};
 }
 
-class MockHttpClient : public HttpClient {
-public:
-    void set_post_response(int status, const std::string& body) {
-        post_status_ = status;
-        post_body_ = body;
-    }
-
-    Result<HttpResponse>
-    post(const std::string& /*url*/,
-         const std::string& /*body*/,
-         const std::vector<std::pair<std::string, std::string>>& /*headers*/) override {
-        HttpResponse r;
-        r.status_code = post_status_;
-        r.body = post_body_;
-        r.content_type = "application/json";
-        return ok(std::move(r));
-    }
-
-    Result<HttpResponse>
-    get(const std::string& /*url*/,
-        const std::vector<std::pair<std::string, std::string>>& /*headers*/) override {
-        HttpResponse r;
-        r.status_code = 200;
-        r.body = "{}";
-        r.content_type = "application/json";
-        return ok(std::move(r));
-    }
-
-private:
-    int post_status_ = 200;
-    std::string post_body_;
-};
+// MockHttpClient is provided by openai_mock_http_client.h (GDB-1154).
+using sixseven::MockHttpClient;
 
 } // namespace
 
@@ -399,124 +370,19 @@ TEST(QA_GDB_245, DoubleShutdownIsSafe) {
 // =============================================================================
 // GDB-246: OpenAIProvider non-numeric embedding values
 // =============================================================================
+// Canonical coverage lives in QA_GDB_242 (test_qa_gdb_242.cpp). Unique
+// scenarios (EmptyStringValue, HealthCheckWithNonNumericEmbedding) were moved
+// to QA_GDB_242 during GDB-1154 de-duplication. One representative regression
+// test is retained here to tie ticket GDB-246 to the behavior.
 
-// Array value in embedding array.
-TEST(QA_GDB_246, NestedArrayValue) {
-    auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200,
-                            R"({"data": [{"embedding": [0.1, [0.2, 0.3], 0.4], "index": 0}]})");
-
-    OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
-    auto result = provider.embed("hello");
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
-    EXPECT_NE(result.error().message.find("non-numeric"), std::string::npos);
-}
-
-// Non-numeric at first position.
-TEST(QA_GDB_246, NonNumericAtFirstPosition) {
+// GDB-246 regression marker: non-numeric string value returns PARSE_ERROR.
+// (Equivalent scenario covered by QA_GDB_242.EmbeddingWithStringValue.)
+TEST(QA_GDB_246, NonNumericStringValueRegressionGDB246) {
     auto mock = std::make_unique<MockHttpClient>();
     mock->set_post_response(200, R"({"data": [{"embedding": ["bad", 0.2, 0.3], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
-    EXPECT_NE(result.error().message.find("index 0"), std::string::npos);
-}
-
-// Non-numeric at last position.
-TEST(QA_GDB_246, NonNumericAtLastPosition) {
-    auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, 0.2, null], "index": 0}]})");
-
-    OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
-    auto result = provider.embed("hello");
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
-    EXPECT_NE(result.error().message.find("index 2"), std::string::npos);
-}
-
-// All non-numeric values.
-TEST(QA_GDB_246, AllNonNumericValues) {
-    auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200, R"({"data": [{"embedding": ["a", "b", "c"], "index": 0}]})");
-
-    OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
-    auto result = provider.embed("hello");
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
-    EXPECT_NE(result.error().message.find("index 0"), std::string::npos);
-}
-
-// Valid integer embedding values accepted.
-TEST(QA_GDB_246, ValidIntegerValuesAccepted) {
-    auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200, R"({"data": [{"embedding": [1, 2, 3], "index": 0}]})");
-
-    OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
-    auto result = provider.embed("hello");
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    ASSERT_EQ(result->size(), 3u);
-    EXPECT_FLOAT_EQ((*result)[0], 1.0F);
-    EXPECT_FLOAT_EQ((*result)[1], 2.0F);
-    EXPECT_FLOAT_EQ((*result)[2], 3.0F);
-}
-
-// Valid negative float values accepted.
-TEST(QA_GDB_246, ValidNegativeFloatsAccepted) {
-    auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200, R"({"data": [{"embedding": [-0.5, -1.0, -0.001], "index": 0}]})");
-
-    OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
-    auto result = provider.embed("hello");
-    ASSERT_TRUE(result.has_value()) << result.error().message;
-    ASSERT_EQ(result->size(), 3u);
-    EXPECT_FLOAT_EQ((*result)[0], -0.5F);
-}
-
-// embed_batch with non-numeric in one embedding.
-TEST(QA_GDB_246, BatchEmbedWithNonNumeric) {
-    auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(
-        200,
-        R"({"data": [{"embedding": [0.1, 0.2, 0.3], "index": 0}, {"embedding": [0.4, true, 0.6], "index": 1}]})");
-
-    OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
-    auto result = provider.embed_batch({"hello", "world"});
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
-}
-
-// Boolean false value (would be silently coerced to 0.0 without the fix).
-TEST(QA_GDB_246, BooleanFalseValue) {
-    auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, false, 0.3], "index": 0}]})");
-
-    OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
-    auto result = provider.embed("hello");
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
-}
-
-// Empty string value.
-TEST(QA_GDB_246, EmptyStringValue) {
-    auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, "", 0.3], "index": 0}]})");
-
-    OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
-    auto result = provider.embed("hello");
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
-}
-
-// health_check path also goes through request_embeddings validation.
-TEST(QA_GDB_246, HealthCheckWithNonNumericEmbedding) {
-    auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, "bad", 0.3], "index": 0}]})");
-
-    OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
-    auto result = provider.health_check();
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }
