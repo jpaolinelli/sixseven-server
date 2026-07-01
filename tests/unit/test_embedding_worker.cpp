@@ -354,17 +354,25 @@ TEST(EmbeddingWorker, StatsQueueDepth) {
 // -- Backoff delay ------------------------------------------------------------
 
 TEST(EmbeddingWorker, BackoffDelayExponential) {
-    // Use the pool's backoff_delay method indirectly by checking retry behavior.
-    // We verify exponential backoff by checking the config values are correct.
     EmbeddingWorkerConfig config;
     config.base_backoff = std::chrono::milliseconds(100);
     config.max_backoff = std::chrono::milliseconds(1600);
-
-    // backoff: 100, 200, 400, 800, 1600, 1600 (capped)
-    // Just verify the config is stored correctly.
     EmbeddingWorkerPool pool(config);
-    auto s = pool.stats();
-    EXPECT_EQ(s.jobs_processed, 0u);
+
+    using ms = std::chrono::milliseconds;
+    // Exponential schedule: base * 2^(retry-1), capped at max_backoff.
+    // retry_count 0 and 1 both yield the base delay; each subsequent retry
+    // doubles until it saturates at max_backoff and stays there. Asserting the
+    // exact schedule catches an off-by-one in the loop bound, a missing cap, or
+    // a degenerate 0 delay -- none of which the old constant-only test could.
+    EXPECT_EQ(pool.backoff_delay(0), ms(100));
+    EXPECT_EQ(pool.backoff_delay(1), ms(100));
+    EXPECT_EQ(pool.backoff_delay(2), ms(200));
+    EXPECT_EQ(pool.backoff_delay(3), ms(400));
+    EXPECT_EQ(pool.backoff_delay(4), ms(800));
+    EXPECT_EQ(pool.backoff_delay(5), ms(1600));
+    EXPECT_EQ(pool.backoff_delay(6), ms(1600));  // capped
+    EXPECT_EQ(pool.backoff_delay(7), ms(1600));  // stays capped
 }
 
 // -- INSERT priority over UPDATE -----------------------------------------------

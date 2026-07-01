@@ -193,6 +193,11 @@ public:
     /// Check if the worker pool is running.
     [[nodiscard]] bool is_running() const;
 
+    /// Compute the exponential backoff delay (base * 2^(retry-1), capped at
+    /// max_backoff) for a given retry count. Exposed for unit testing of the
+    /// backoff schedule; also used internally by retry_job().
+    [[nodiscard]] std::chrono::milliseconds backoff_delay(int32_t retry_count) const;
+
 private:
     /// Main loop executed by each worker thread.
     void worker_loop();
@@ -205,9 +210,6 @@ private:
 
     /// Re-enqueue a job with incremented retry count.
     void retry_job(EmbeddingJob job);
-
-    /// Compute the backoff delay for a given retry count.
-    [[nodiscard]] std::chrono::milliseconds backoff_delay(int32_t retry_count) const;
 
     /// Background recovery loop that re-enqueues persisted jobs when the
     /// in-memory queue is empty. Runs in recovery_thread_.
