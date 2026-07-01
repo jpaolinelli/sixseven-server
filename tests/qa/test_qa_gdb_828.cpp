@@ -8,7 +8,8 @@
 
 #include <climits>
 #include <limits>
-#include <optional>`n#include <vector>
+#include <optional>
+#include <vector>
 #include <thread>
 
 #include "test_catalog_helpers.h"

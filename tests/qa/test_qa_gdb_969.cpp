@@ -12,8 +12,6 @@
 //   F6 - AutoVacuumWorker scan path uses vacuum_is_dead (wired correctly).
 //   F7 - run_full() does not reclaim live rows (VACUUM FULL path).
 
-#pragma once
-
 #include "sixseven/storage/buffer_pool.h"
 #include "sixseven/storage/disk_manager.h"
 #include "sixseven/storage/page.h"
@@ -277,11 +275,11 @@ TEST_F(QA_VacuumGDB969, F5_BatchMixed_ExactDeadCount) {
     ASSERT_GT(pid, 0u);
 
     // Row B: another prior-process live row -> SURVIVE
-    auto [pB, sB] = insert_mvcc_tuple(kPriorXmin2, invalid_txn_id);
+    [[maybe_unused]] auto [pB, sB] = insert_mvcc_tuple(kPriorXmin2, invalid_txn_id);
 
     // Row C: normal committed live row -> SURVIVE
     auto* t_live = txn_mgr_.begin().value();
-    auto [pC, sC] = insert_mvcc_tuple(t_live->txn_id);
+    [[maybe_unused]] auto [pC, sC] = insert_mvcc_tuple(t_live->txn_id);
     ASSERT_TRUE(txn_mgr_.commit(t_live->txn_id).has_value());
 
     // Row D: autocommit-deleted -> DEAD
@@ -320,7 +318,7 @@ TEST_F(QA_VacuumGDB969, F5_BatchMixed_ExactDeadCount) {
 
     // Row F: aborted xmin -> DEAD
     auto* t_abort = txn_mgr_.begin().value();
-    auto [pF, sF] = insert_mvcc_tuple(t_abort->txn_id);
+    [[maybe_unused]] auto [pF, sF] = insert_mvcc_tuple(t_abort->txn_id);
     ASSERT_TRUE(txn_mgr_.abort(t_abort->txn_id).has_value());
 
     // All rows should be on page 1 given our fixture.
