@@ -490,6 +490,35 @@ TEST_F(QA_AutoIncrement, PersistenceDeleteMultipleTopIdsNoReuse) {
     EXPECT_EQ(qr.rows[3][0].as_int32(), 6); // 4 and 5 not reused
 }
 
+// GDB-1284 regression: INSERT...SELECT with explicit autoincrement ids must
+// advance the counter so a crash-restart never reuses a deleted max id.
+// Reproducer: INSERT...SELECT ids 10,20,30; delete id=30; crash-restart;
+// next auto-insert -> id must be 31, never 20 or 30.
+// MUTATION NOTE: FAILS on the unfixed INSERT...SELECT path (advance_autoincrement
+// was never called in the child/SELECT branch), PASSES with the fix.
+TEST_F(QA_AutoIncrement, PersistenceInsertSelectExplicitIdsNoReuse) {
+    run_bootstrap();
+    exec_ok("CREATE TABLE src_gdb1284 (sid INT, v VARCHAR)");
+    exec_ok("INSERT INTO src_gdb1284 (sid, v) VALUES (10, 'x'), (20, 'y'), (30, 'z')");
+    exec_ok("CREATE TABLE dst_gdb1284 (id INT PRIMARY KEY AUTOINCREMENT, v VARCHAR)");
+
+    // INSERT...SELECT providing explicit id values advances counter to 31.
+    exec_ok("INSERT INTO dst_gdb1284 (id, v) SELECT sid, v FROM src_gdb1284");
+
+    // Delete max row so max-scan fallback would wrongly yield 21.
+    exec_ok("DELETE FROM dst_gdb1284 WHERE id = 30");
+
+    restart(); // no-flush crash-like restart
+
+    // Counter must be 31 (persisted after INSERT...SELECT advance), never 20 or 30.
+    exec_ok("INSERT INTO dst_gdb1284 (v) VALUES ('new')");
+    auto qr = exec_ok("SELECT id FROM dst_gdb1284 ORDER BY id");
+    ASSERT_EQ(qr.rows.size(), 3u); // rows 10, 20, 31
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 10);
+    EXPECT_EQ(qr.rows[1][0].as_int32(), 20);
+    EXPECT_EQ(qr.rows[2][0].as_int32(), 31); // id=31: deleted max 30 is never reused
+}
+
 // =============================================================================
 // Stress tests
 // =============================================================================

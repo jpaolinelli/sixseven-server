@@ -154,6 +154,23 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
                     values[i] = std::move(*fitted);
                 }
             }
+            // Advance autoincrement counters for explicit values in the SELECT
+            // output, mirroring the VALUES path (insert.cpp lines ~226-231).
+            // If the child row contains an explicit value for an autoincrement
+            // column, catalog_->advance_autoincrement() bumps the counter past
+            // that value so the per-statement persist below (and the max-scan
+            // fallback on restart) never reissues an already-used ID.
+            // GDB-1284: without this, INSERT...SELECT with explicit ids leaves
+            // the counter stale and a crash-restart can reuse a deleted max id.
+            if (catalog_ != nullptr) {
+                for (const auto& ai : autoincrement_cols_) {
+                    if (ai.col_idx < values.size() && !values[ai.col_idx].is_null()) {
+                        int64_t explicit_val = value_to_int64(values[ai.col_idx]);
+                        catalog_->advance_autoincrement(ai.table_id, explicit_val);
+                    }
+                }
+            }
+
             auto bytes = TupleSerializer::serialize(values, storage_schema_);
             if (!bytes) {
                 return make_error(bytes.error().code, bytes.error().message);
