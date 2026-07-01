@@ -163,13 +163,12 @@ TEST(QA_GDB564, AC5_PgDatabaseReturnsCorrectRows) {
     EXPECT_TRUE(found_sixseven_system);
 }
 
-// ===========================================================================
-// AC6: Unit test coverage verified (dev tests exist in test_virtual_catalog.cpp)
-// ===========================================================================
-
-TEST(QA_GDB564, AC6_DevTestsExist) {
-    SUCCEED() << "Dev unit tests verified in tests/unit/test_virtual_catalog.cpp";
-}
+// AC6 ("dev unit test coverage exists in tests/unit/test_virtual_catalog.cpp")
+// was a SUCCEED()-only placeholder that executed no code and asserted nothing --
+// it inflated the pass count and could not detect the referenced coverage being
+// removed. That criterion is a code-review/CI concern, not a runtime assertion;
+// the actual virtual-catalog behavior is exercised by AC1-AC5 above and the
+// adversarial tests below (plus tests/unit/test_virtual_catalog.cpp). Removed.
 
 // ===========================================================================
 // Adversarial: Catalog registration edge cases
