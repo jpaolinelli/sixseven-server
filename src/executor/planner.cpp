@@ -2589,6 +2589,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
         if (!ai_cols.empty()) {
             iter->autoincrement_cols_ = std::move(ai_cols);
             iter->catalog_ = &catalog_;
+            iter->storage_manager_ = &storage_;
         }
 
         if (embedding_pool_ != nullptr) {
@@ -2725,6 +2726,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
         if (!ai_cols.empty()) {
             iter->autoincrement_cols_ = std::move(ai_cols);
             iter->catalog_ = &catalog_;
+            iter->storage_manager_ = &storage_;
         }
 
         // Wire embedding infrastructure if the table has EMBEDDING columns.
@@ -2760,6 +2762,7 @@ Result<std::unique_ptr<Iterator>> Planner::plan_insert(const InsertStmt& stmt,
     if (!ai_cols.empty()) {
         iter->autoincrement_cols_ = std::move(ai_cols);
         iter->catalog_ = &catalog_;
+        iter->storage_manager_ = &storage_;
     }
 
     // Wire embedding infrastructure if the table has EMBEDDING columns.

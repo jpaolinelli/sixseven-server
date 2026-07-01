@@ -3,6 +3,7 @@
 #include "sixseven/catalog/schema.h"
 #include "sixseven/common/types.h"
 #include "sixseven/executor/iterator.h"
+#include "sixseven/executor/storage_manager.h"
 #include "sixseven/executor/tuple.h"
 #include "sixseven/index/bm25_index.h"
 #include "sixseven/index/btree_index.h"
@@ -70,6 +71,12 @@ public:
     /// Catalog reference for auto-increment counter management.
     /// Set by the planner if the table has auto-increment columns.
     Catalog* catalog_ = nullptr;
+
+    /// StorageManager reference for durable auto-increment persistence.
+    /// Set by the planner alongside catalog_ when the table has auto-increment columns.
+    /// After each INSERT statement the counter is written durably so that a
+    /// crash-like (no-flush) restart never reissues a previously-issued ID.
+    StorageManager* storage_manager_ = nullptr;
 
     /// Table ID for embedding job creation. Set by the planner.
     table_id_t embedding_table_id_ = 0;

@@ -418,44 +418,105 @@ TEST_F(QA_AutoIncrement, PersistenceAfterMultipleRestarts) {
     EXPECT_EQ(qr.rows[2][0].as_int32(), 3);
 }
 
-TEST_F(QA_AutoIncrement, PersistenceWithDeletedRowsPreservesMaxCounter) {
+// GDB-1153: counter is durably persisted on every INSERT so a crash-like
+// (no-flush) restart never reissues a previously-issued ID.
+// MUTATION NOTE: the assertion below (id=4) FAILS on origin/main because the
+// unfixed code falls back to max(id)+1 scan on restart (yielding id=3 after
+// deleting row 3). It passes once per-INSERT persistence is wired in.
+TEST_F(QA_AutoIncrement, PersistenceWithDeletedRowsDoesNotReuseMaxId) {
     run_bootstrap();
     exec_ok("CREATE TABLE t_pdel (id INT PRIMARY KEY AUTOINCREMENT, v VARCHAR)");
 
     exec_ok("INSERT INTO t_pdel (v) VALUES ('a'), ('b'), ('c')"); // ids 1,2,3
     exec_ok("DELETE FROM t_pdel WHERE id = 3");                   // delete max row
 
-    restart();
+    restart(); // no-flush: simulates crash restart
 
-    // After restart, max existing is 2, so counter should be 3.
-    // But we need to ensure gaps from deletes are not reused.
+    // The counter was durably persisted as 4 (next-to-issue) during the INSERT
+    // that produced id=3. On restart the persisted counter is preferred over the
+    // max-scan fallback, so the next INSERT yields id=4 -- not the reused id=3.
     exec_ok("INSERT INTO t_pdel (v) VALUES ('d')");
     auto qr = exec_ok("SELECT id FROM t_pdel ORDER BY id");
     ASSERT_EQ(qr.rows.size(), 3u);
     EXPECT_EQ(qr.rows[0][0].as_int32(), 1);
     EXPECT_EQ(qr.rows[1][0].as_int32(), 2);
-    EXPECT_EQ(qr.rows[2][0].as_int32(), 3); // Reuses 3 because max surviving was 2
-    // Note: this is correct if the counter scans max on restart.
-    // The ticket says gaps are acceptable and values should never be reused.
-    // After restart, the max surviving value is 2, so counter = 3.
-    // This is technically correct but may surprise users who deleted row 3.
+    EXPECT_EQ(qr.rows[2][0].as_int32(), 4); // id=4: deleted max is never reused
 }
 
-TEST_F(QA_AutoIncrement, PersistenceEmptyTableAfterRestart) {
+// GDB-1153: when ALL rows are deleted the counter must still continue from the
+// durably persisted value -- not reset to 1.
+// MUTATION NOTE: the assertion below (id=4) FAILS on origin/main because the
+// unfixed code does a max(id) heap scan on restart, finds no rows (max=0), and
+// starts the counter at 1. It passes once per-INSERT persistence is wired in.
+TEST_F(QA_AutoIncrement, PersistenceEmptyTableAfterRestartDoesNotReuse) {
     run_bootstrap();
     exec_ok("CREATE TABLE t_empty (id INT PRIMARY KEY AUTOINCREMENT, v VARCHAR)");
 
-    exec_ok("INSERT INTO t_empty (v) VALUES ('a'), ('b'), ('c')");
-    exec_ok("DELETE FROM t_empty");
+    exec_ok("INSERT INTO t_empty (v) VALUES ('a'), ('b'), ('c')"); // ids 1,2,3
+    exec_ok("DELETE FROM t_empty");                                // delete all rows
 
-    restart();
+    restart(); // no-flush: simulates crash restart
 
-    // After restart with empty table, counter should be 1 (max_val=0, start=1).
+    // Even though the table is now empty, the counter was durably persisted as 4
+    // during the INSERT. On restart the persisted value is preferred over the
+    // heap scan (which would see no rows and return 1).
     exec_ok("INSERT INTO t_empty (v) VALUES ('fresh')");
     auto qr = exec_ok("SELECT id FROM t_empty");
     ASSERT_EQ(qr.rows.size(), 1u);
-    // Counter restarted from 1 because table was empty.
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 4); // id=4: counter continues from pre-restart value
+}
+
+// GDB-1153 regression: delete multiple top IDs, verify none are reused.
+// insert 1..5, delete 4 and 5 (two highest), restart (no flush), insert -> id=6.
+TEST_F(QA_AutoIncrement, PersistenceDeleteMultipleTopIdsNoReuse) {
+    run_bootstrap();
+    exec_ok("CREATE TABLE t_top (id INT PRIMARY KEY AUTOINCREMENT, v VARCHAR)");
+
+    exec_ok("INSERT INTO t_top (v) VALUES ('a'), ('b'), ('c'), ('d'), ('e')"); // ids 1..5
+    exec_ok("DELETE FROM t_top WHERE id = 4");
+    exec_ok("DELETE FROM t_top WHERE id = 5");
+
+    restart(); // no-flush crash-like restart
+
+    // Counter was persisted as 6 after the INSERT of 5 rows. Deleting rows 4
+    // and 5 does not roll back the counter. On restart the persisted value 6 is
+    // used, so the next INSERT yields id=6 -- never 4 or 5.
+    exec_ok("INSERT INTO t_top (v) VALUES ('f')");
+    auto qr = exec_ok("SELECT id FROM t_top ORDER BY id");
+    ASSERT_EQ(qr.rows.size(), 4u); // rows 1,2,3,6
     EXPECT_EQ(qr.rows[0][0].as_int32(), 1);
+    EXPECT_EQ(qr.rows[1][0].as_int32(), 2);
+    EXPECT_EQ(qr.rows[2][0].as_int32(), 3);
+    EXPECT_EQ(qr.rows[3][0].as_int32(), 6); // 4 and 5 not reused
+}
+
+// GDB-1284 regression: INSERT...SELECT with explicit autoincrement ids must
+// advance the counter so a crash-restart never reuses a deleted max id.
+// Reproducer: INSERT...SELECT ids 10,20,30; delete id=30; crash-restart;
+// next auto-insert -> id must be 31, never 20 or 30.
+// MUTATION NOTE: FAILS on the unfixed INSERT...SELECT path (advance_autoincrement
+// was never called in the child/SELECT branch), PASSES with the fix.
+TEST_F(QA_AutoIncrement, PersistenceInsertSelectExplicitIdsNoReuse) {
+    run_bootstrap();
+    exec_ok("CREATE TABLE src_gdb1284 (sid INT, v VARCHAR)");
+    exec_ok("INSERT INTO src_gdb1284 (sid, v) VALUES (10, 'x'), (20, 'y'), (30, 'z')");
+    exec_ok("CREATE TABLE dst_gdb1284 (id INT PRIMARY KEY AUTOINCREMENT, v VARCHAR)");
+
+    // INSERT...SELECT providing explicit id values advances counter to 31.
+    exec_ok("INSERT INTO dst_gdb1284 (id, v) SELECT sid, v FROM src_gdb1284");
+
+    // Delete max row so max-scan fallback would wrongly yield 21.
+    exec_ok("DELETE FROM dst_gdb1284 WHERE id = 30");
+
+    restart(); // no-flush crash-like restart
+
+    // Counter must be 31 (persisted after INSERT...SELECT advance), never 20 or 30.
+    exec_ok("INSERT INTO dst_gdb1284 (v) VALUES ('new')");
+    auto qr = exec_ok("SELECT id FROM dst_gdb1284 ORDER BY id");
+    ASSERT_EQ(qr.rows.size(), 3u); // rows 10, 20, 31
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 10);
+    EXPECT_EQ(qr.rows[1][0].as_int32(), 20);
+    EXPECT_EQ(qr.rows[2][0].as_int32(), 31); // id=31: deleted max 30 is never reused
 }
 
 // =============================================================================
