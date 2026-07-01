@@ -6,7 +6,6 @@
 /// return PARSE_ERROR via Result<T> instead of throwing exceptions.
 /// Also probes additional edge cases around the fix boundaries.
 
-#include "sixseven/vector/http_client.h"
 #include "sixseven/vector/openai_provider.h"
 
 #include <gtest/gtest.h>
@@ -17,48 +16,11 @@
 #include <string>
 #include <vector>
 
+#include "openai_mock_http_client.h"
+
 using namespace sixseven;
 
 namespace {
-
-class MockHttpClient : public HttpClient {
-public:
-    void set_post_response(int status, const std::string& body) {
-        post_status_ = status;
-        post_body_ = body;
-    }
-    void set_get_response(int status, const std::string& body) {
-        get_status_ = status;
-        get_body_ = body;
-    }
-
-    Result<HttpResponse>
-    post(const std::string& /*url*/,
-         const std::string& /*body*/,
-         const std::vector<std::pair<std::string, std::string>>& /*headers*/) override {
-        HttpResponse r;
-        r.status_code = post_status_;
-        r.body = post_body_;
-        r.content_type = "application/json";
-        return ok(std::move(r));
-    }
-
-    Result<HttpResponse>
-    get(const std::string& /*url*/,
-        const std::vector<std::pair<std::string, std::string>>& /*headers*/) override {
-        HttpResponse r;
-        r.status_code = get_status_;
-        r.body = get_body_;
-        r.content_type = "application/json";
-        return ok(std::move(r));
-    }
-
-private:
-    int post_status_ = 200;
-    std::string post_body_;
-    int get_status_ = 200;
-    std::string get_body_;
-};
 
 /// Helper: build a valid OpenAI response JSON with given embeddings.
 std::string make_response(const std::vector<std::vector<float>>& embeddings) {
@@ -528,4 +490,30 @@ TEST(QA_GDB_242, HealthCheckWithValidResponseStillWorks) {
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.health_check();
     ASSERT_TRUE(result.has_value()) << result.error().message;
+}
+
+// ===========================================================================
+// Unique scenarios moved from QA_GDB_246 (GDB-1154: de-duplication)
+// ===========================================================================
+
+// Empty string in the embedding array (unique to GDB-246 suite).
+TEST(QA_GDB_242, EmbeddingWithEmptyStringValue) {
+    auto mock = std::make_unique<MockHttpClient>();
+    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, "", 0.3], "index": 0}]})");
+
+    OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
+    auto result = provider.embed("hello");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
+}
+
+// health_check path with non-numeric embedding (unique to GDB-246 suite).
+TEST(QA_GDB_242, HealthCheckWithNonNumericEmbedding) {
+    auto mock = std::make_unique<MockHttpClient>();
+    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, "bad", 0.3], "index": 0}]})");
+
+    OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
+    auto result = provider.health_check();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
 }

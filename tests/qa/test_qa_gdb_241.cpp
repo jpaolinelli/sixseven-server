@@ -5,7 +5,6 @@
 /// Tests the is_number() validation added to OllamaProvider::embed().
 /// Also probes OpenAIProvider for the same vulnerability pattern.
 
-#include "sixseven/vector/http_client.h"
 #include "sixseven/vector/ollama_provider.h"
 #include "sixseven/vector/openai_provider.h"
 
@@ -14,50 +13,11 @@
 #include <string>
 #include <vector>
 
+#include "openai_mock_http_client.h"
+
 using namespace sixseven;
 
-namespace {
-
-class MockHttpClient : public HttpClient {
-public:
-    void set_post_response(int status, const std::string& body) {
-        post_status_ = status;
-        post_body_ = body;
-    }
-    void set_get_response(int status, const std::string& body) {
-        get_status_ = status;
-        get_body_ = body;
-    }
-
-    Result<HttpResponse>
-    post(const std::string& /*url*/,
-         const std::string& /*body*/,
-         const std::vector<std::pair<std::string, std::string>>& /*headers*/) override {
-        HttpResponse r;
-        r.status_code = post_status_;
-        r.body = post_body_;
-        r.content_type = "application/json";
-        return ok(std::move(r));
-    }
-
-    Result<HttpResponse>
-    get(const std::string& /*url*/,
-        const std::vector<std::pair<std::string, std::string>>& /*headers*/) override {
-        HttpResponse r;
-        r.status_code = get_status_;
-        r.body = get_body_;
-        r.content_type = "application/json";
-        return ok(std::move(r));
-    }
-
-private:
-    int post_status_ = 200;
-    std::string post_body_;
-    int get_status_ = 200;
-    std::string get_body_;
-};
-
-} // namespace
+// MockHttpClient is provided by openai_mock_http_client.h (GDB-1154).
 
 // ---------------------------------------------------------------------------
 // OllamaProvider: non-numeric embedding value validation (the fix under test)
@@ -214,43 +174,18 @@ TEST(QA_GDB_241_Ollama, SingleNonNumericElement) {
 // ---------------------------------------------------------------------------
 // OpenAIProvider: same vulnerability pattern — no is_number() check
 // ---------------------------------------------------------------------------
+// Canonical coverage lives in QA_GDB_242 (test_qa_gdb_242.cpp). One
+// representative regression test is retained here to tie ticket GDB-241 to
+// the OpenAIProvider behavior (GDB-1154 de-duplication).
 
-TEST(QA_GDB_241_OpenAI, NonNumericStringValue) {
+// GDB-241 regression marker: non-numeric string in OpenAI embedding returns
+// PARSE_ERROR. (Equivalent scenario covered by QA_GDB_242.EmbeddingWithStringValue.)
+TEST(QA_GDB_241_OpenAI, NonNumericStringValueRegressionGDB241) {
     auto mock = std::make_unique<MockHttpClient>();
     mock->set_post_response(200, R"({"data": [{"embedding": [0.1, "bad", 0.3], "index": 0}]})");
 
     OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     // This should return a Result error, not throw an exception.
-    auto result = provider.embed("hello");
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
-}
-
-TEST(QA_GDB_241_OpenAI, BooleanValue) {
-    auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, true, 0.3], "index": 0}]})");
-
-    OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
-    auto result = provider.embed("hello");
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
-}
-
-TEST(QA_GDB_241_OpenAI, NullValue) {
-    auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, null, 0.3], "index": 0}]})");
-
-    OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
-    auto result = provider.embed("hello");
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
-}
-
-TEST(QA_GDB_241_OpenAI, NestedObjectValue) {
-    auto mock = std::make_unique<MockHttpClient>();
-    mock->set_post_response(200, R"({"data": [{"embedding": [0.1, {"x": 1}, 0.3], "index": 0}]})");
-
-    OpenAIProvider provider("sk-test", "test", 3, std::move(mock));
     auto result = provider.embed("hello");
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
