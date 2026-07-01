@@ -217,14 +217,11 @@ TEST_F(DiskManagerTest, OpenFileWithVersionMismatchFails) {
     uint32_t pc = 1;
     std::memcpy(&header[fh_page_count_offset], &pc, sizeof(uint32_t));
 
-    // Compute a valid checksum for this (bad-version) header so we reach
-    // the version check rather than failing on checksum.
+    // Compute a valid checksum for this (bad-version) header so we reach the
+    // version check rather than failing on checksum. The checksum field is
+    // still zero (the header was zero-initialized), which matches how
+    // open_file recomputes the CRC with that field treated as zero.
     uint32_t cksum = crc32c(header.data(), page_size);
-    // Re-compute with skip region like the real code does.
-    // We need to zero the checksum field, compute, then write.
-    std::memset(&header[fh_checksum_offset], 0, sizeof(uint32_t));
-    // Use crc32c on the whole buffer with the checksum field zeroed.
-    cksum = crc32c(header.data(), page_size);
     std::memcpy(&header[fh_checksum_offset], &cksum, sizeof(uint32_t));
 
     {
