@@ -9,8 +9,8 @@
 #include <climits>
 #include <limits>
 #include <optional>
-#include <vector>
 #include <thread>
+#include <vector>
 
 #include "test_catalog_helpers.h"
 

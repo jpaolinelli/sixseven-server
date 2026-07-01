@@ -92,8 +92,8 @@ std::vector<uint8_t> build_data_row(const std::vector<std::optional<std::string>
 
 // Build an ErrorResponse with the standard fields.
 [[maybe_unused]] std::vector<uint8_t> build_error_response(const std::string& severity,
-                                          const std::string& sqlstate,
-                                          const std::string& message) {
+                                                           const std::string& sqlstate,
+                                                           const std::string& message) {
     std::vector<uint8_t> body;
     body.push_back('S');
     wb_push_cstr(body, severity);
