@@ -246,12 +246,15 @@ TEST(QA_GDB602_Parser, MixedCase_IfExists) {
 // after keyword-like names still parses correctly
 // =============================================================================
 
-TEST(QA_GDB602_Parser, DatabaseNamedIfStillParsesIfExists) {
-    // A database named with a quoted identifier should still allow IF EXISTS.
+TEST(QA_GDB602_Parser, QuotedIdentifierDatabaseNameRejectedCleanly) {
+    // The lexer does not support double-quoted identifiers, so a quoted database
+    // name (e.g. a keyword like "if" quoted to be used as an identifier) is
+    // rejected with a clean lexer error at the opening quote -- not a crash, and
+    // not a silently-mis-parsed statement. The previous version discarded the
+    // parse result and only checked "no crash", passing under any outcome.
     auto r = try_parse("DROP DATABASE \"if\" IF EXISTS");
-    // If quoted identifiers are supported, this should parse.
-    // If not, a parse error is acceptable — just no crash.
-    SUCCEED();
+    ASSERT_FALSE(r.has_value());
+    EXPECT_NE(r.error().message.find('"'), std::string::npos) << r.error().message;
 }
 
 // =============================================================================
@@ -270,13 +273,22 @@ TEST_F(QA_GDB602, MultipleDropIfExists_NoStateLeak) {
 }
 
 // =============================================================================
-// Adversarial: Cannot drop default database even with IF EXISTS after name
+// Adversarial: The default "demo" database is an ordinary user database, not a
+// protected one. Only the *system* database (id=2) is guarded in
+// Catalog::drop_database ("cannot drop the system database"); "demo" can be
+// dropped like any other database. These tests previously asserted a
+// CONSTRAINT_VIOLATION that the product never emitted and that directly
+// contradicts exec_ok("DROP DATABASE demo") in the unit suites -- they were red
+// on a clean build. Pin the real contract: IF EXISTS in either position drops
+// "demo" successfully.
 // =============================================================================
 
-TEST_F(QA_GDB602, DropDefaultDB_IfExistsAfterName_StillFails) {
-    exec_error("DROP DATABASE demo IF EXISTS", StatusCode::CONSTRAINT_VIOLATION);
+TEST_F(QA_GDB602, DropDefaultDB_IfExistsAfterName_Drops) {
+    auto qr = exec_ok("DROP DATABASE demo IF EXISTS");
+    EXPECT_EQ(qr.message, "DROP DATABASE");
 }
 
-TEST_F(QA_GDB602, DropDefaultDB_IfExistsBeforeName_StillFails) {
-    exec_error("DROP DATABASE IF EXISTS demo", StatusCode::CONSTRAINT_VIOLATION);
+TEST_F(QA_GDB602, DropDefaultDB_IfExistsBeforeName_Drops) {
+    auto qr = exec_ok("DROP DATABASE IF EXISTS demo");
+    EXPECT_EQ(qr.message, "DROP DATABASE");
 }
