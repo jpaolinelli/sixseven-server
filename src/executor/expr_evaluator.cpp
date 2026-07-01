@@ -1698,8 +1698,8 @@ Result<Value> eval_exists(const ExistsExpr& expr,
 
         // Evaluate the subquery WHERE against the combined row.
         if (sel->where_expr) {
-            auto pass =
-                evaluate_predicate(*sel->where_expr, combined, combined_schema, outer_bound);
+            auto pass = evaluate_predicate(
+                *sel->where_expr, combined, combined_schema, outer_bound, subquery_ctx);
             if (!pass) {
                 scan.close();
                 return make_error(pass.error().code, pass.error().message);
