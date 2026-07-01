@@ -296,13 +296,13 @@ TEST(QA_GDB565, AC5_WhereFilteringBindsSuccessfully) {
     EXPECT_EQ(result->output_columns.size(), 2u);
 }
 
-// ===========================================================================
-// AC6: Unit tests exist
-// ===========================================================================
-
-TEST(QA_GDB565, AC6_UnitTestsExist) {
-    SUCCEED() << "Dev unit tests verified in tests/unit/test_pg_catalog_tables.cpp";
-}
+// AC6 ("dev unit tests exist in tests/unit/test_pg_catalog_tables.cpp") was a
+// SUCCEED()-only placeholder that executed no code and asserted nothing -- it
+// inflated the pass count and could not detect the referenced coverage being
+// removed. That criterion is a code-review/CI concern, not a runtime assertion;
+// the actual pg_catalog table behavior is exercised by the AC1-AC5 and
+// adversarial tests in this file (plus tests/unit/test_pg_catalog_tables.cpp).
+// Removed.
 
 // ===========================================================================
 // Adversarial: pg_type column structure
