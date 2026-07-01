@@ -616,6 +616,11 @@ TEST(QA_GDB240, TwoEntriesSameKeyNoSplit) {
 TEST(QA_GDB240, ExactlyOneSplitDuplicates) {
     // leaf_max=4, insert 5 duplicates -> exactly one split.
     // This is the minimal case where the backward walk is needed.
+    // Unlike GDB240.DuplicatesSpanTwoLeaves (test_qa_gdb_240_impl.cpp), which
+    // only checks the entry COUNT, this asserts RID COMPLETENESS: the split +
+    // backward walk must return all five distinct RIDs (page_ids 0..4), so a
+    // regression that drops one RID and double-counts another would be caught
+    // even though the count stays 5.
     auto tree = make_test_index(4, 4, false);
 
     for (int i = 0; i < 5; ++i) {
@@ -626,7 +631,15 @@ TEST(QA_GDB240, ExactlyOneSplitDuplicates) {
     ASSERT_TRUE(scan.has_value());
     auto entries = collect_scan(*scan);
     ASSERT_TRUE(entries.has_value());
-    EXPECT_EQ(entries->size(), 5u);
+    ASSERT_EQ(entries->size(), 5u);
+
+    std::vector<uint32_t> rid_pages;
+    for (const auto& e : *entries) {
+        EXPECT_EQ(key_val(e.first), 42);
+        rid_pages.push_back(static_cast<uint32_t>(e.second.page_id));
+    }
+    std::sort(rid_pages.begin(), rid_pages.end());
+    EXPECT_EQ(rid_pages, (std::vector<uint32_t>{0, 1, 2, 3, 4}));
 }
 
 // =============================================================================
