@@ -74,8 +74,7 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         if (!result.has_value()) {
-            ADD_FAILURE() << "exec_ok failed: " << sql
-                          << "\n  error: " << result.error().message;
+            ADD_FAILURE() << "exec_ok failed: " << sql << "\n  error: " << result.error().message;
             return QueryResult{};
         }
         return std::move(*result);
@@ -379,8 +378,8 @@ TEST_F(QA_GDB1153, ThreeTables_AllDurableIndependently) {
     exec_ok("CREATE TABLE tc2 (id BIGINT PRIMARY KEY AUTOINCREMENT, v VARCHAR)");
     exec_ok("CREATE TABLE tc3 (id INT PRIMARY KEY AUTOINCREMENT, v VARCHAR)");
 
-    exec_ok("INSERT INTO tc1 (v) VALUES ('a')");     // id=1
-    exec_ok("INSERT INTO tc2 (v) VALUES ('x'), ('y')"); // ids 1,2
+    exec_ok("INSERT INTO tc1 (v) VALUES ('a')");         // id=1
+    exec_ok("INSERT INTO tc2 (v) VALUES ('x'), ('y')");  // ids 1,2
     exec_ok("INSERT INTO tc3 (id, v) VALUES (99, 'z')"); // explicit id=99
 
     exec_ok("DELETE FROM tc1 WHERE id = 1");
