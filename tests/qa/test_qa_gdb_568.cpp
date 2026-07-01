@@ -523,7 +523,12 @@ TEST(QA_GDB568_Parser, SavepointNamePreservesCase) {
     auto stmt = parse_one("SAVEPOINT MyMixedCaseName");
     auto* sp = dynamic_cast<SavepointStmt*>(stmt.get());
     ASSERT_NE(sp, nullptr);
-    EXPECT_FALSE(sp->name.empty());
+    // Parser::parse_name returns the raw lexeme verbatim, so a mixed-case
+    // savepoint name must be preserved exactly. A regression that lowercased
+    // (or otherwise mangled) the name would break ROLLBACK TO / RELEASE
+    // matching for names created through the parser path, yet still pass a
+    // mere non-empty check.
+    EXPECT_EQ(sp->name, "MyMixedCaseName");
 }
 
 TEST(QA_GDB568_Parser, SavepointNameNumeric) {
