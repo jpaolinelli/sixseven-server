@@ -370,8 +370,12 @@ TEST_F(TableHeapTest, PageCountEmpty) {
 
     auto pc = heap.page_count();
     ASSERT_TRUE(pc.has_value());
-    // A fresh file has 128 pages (1MB pre-allocation), minus page 0.
-    EXPECT_GE(*pc, 0u);
+    // An empty heap has zero data pages. page_count() returns the logical data
+    // page count (file page_count minus the header page); create_file sets the
+    // logical page_count to 1 (header only), so the result is 0. (Physical
+    // pre-allocation grows the file on disk but does not change the logical
+    // count.) The old EXPECT_GE(*pc, 0u) was a tautology for an unsigned value.
+    EXPECT_EQ(*pc, 0u);
 }
 
 TEST_F(TableHeapTest, PageCountGrowsWithInserts) {
