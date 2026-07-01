@@ -431,33 +431,12 @@ TEST(EmbeddingWorker, BackoffDelayExponential) {
     EXPECT_EQ(pool.backoff_delay(7), ms(1600));  // stays capped
 }
 
-// -- INSERT priority over UPDATE -----------------------------------------------
-
-TEST(EmbeddingWorker, InsertJobsPrioritizedOverUpdate) {
-    auto provider = std::make_shared<TestProvider>(128);
-
-    [[maybe_unused]] std::mutex order_mu;
-    [[maybe_unused]] std::vector<EmbeddingJob::Type> processing_order;
-
-    EmbeddingWorkerPool pool({.num_workers = 1, .max_batch_size = 1});
-    pool.register_provider("test", provider);
-    pool.set_store_callback(
-        [&](table_id_t, int64_t, int32_t, std::span<const float>) -> Result<void> { return ok(); });
-
-    // Enqueue updates first, then inserts. Inserts should be processed first.
-    ASSERT_TRUE(pool.enqueue(make_update_job(1, 1, 0, "u1")).has_value());
-    ASSERT_TRUE(pool.enqueue(make_update_job(1, 2, 0, "u2")).has_value());
-    ASSERT_TRUE(pool.enqueue(make_insert_job(1, 3, 0, "i1")).has_value());
-    ASSERT_TRUE(pool.enqueue(make_insert_job(1, 4, 0, "i2")).has_value());
-
-    // Drain to verify priority order without processing.
-    auto drained = pool.drain();
-    ASSERT_EQ(drained.size(), 4u);
-    EXPECT_EQ(drained[0].type, EmbeddingJob::Type::INSERT);
-    EXPECT_EQ(drained[1].type, EmbeddingJob::Type::INSERT);
-    EXPECT_EQ(drained[2].type, EmbeddingJob::Type::UPDATE);
-    EXPECT_EQ(drained[3].type, EmbeddingJob::Type::UPDATE);
-}
+// NOTE: A dedicated INSERT-before-UPDATE priority test lived here but only
+// re-verified drain() order (already covered by DrainReturnsJobsInPriorityOrder
+// above, which asserts the same INSERT-first ordering) while carrying unused
+// scaffolding and never actually starting the pool. It was removed as a
+// duplicate; the queue-priority contract it named is exercised by
+// DrainReturnsJobsInPriorityOrder.
 
 // -- Graceful shutdown --------------------------------------------------------
 
