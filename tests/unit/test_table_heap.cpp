@@ -383,11 +383,12 @@ TEST_F(TableHeapTest, PageCountGrowsWithInserts) {
 
     auto pc_before = heap.page_count();
     ASSERT_TRUE(pc_before.has_value());
+    EXPECT_EQ(*pc_before, 0u); // Empty heap: no data pages yet.
 
-    // Fill up all existing pages and trigger new allocations.
-    // Each page is ~8KB. With 128 pre-allocated data pages and ~8KB usable per page,
-    // we need to insert more than 128 * ~8KB of data. Use large tuples.
-    // Actually, with 128 pages pre-allocated, we just need to verify the count.
+    // Insert enough data to force at least one new data page. Usable space per
+    // page is page_size (8192) - page_header_size (24) = 8168 bytes; each
+    // 2000-byte tuple consumes 2000 + slot_entry_size (4) = 2004 bytes, so
+    // 4 tuples fit per page. Five tuples therefore require a second page.
     for (int i = 0; i < 5; ++i) {
         auto r = heap.insert_tuple(make_tuple(2000, static_cast<uint8_t>(i)));
         ASSERT_TRUE(r.has_value());
@@ -395,7 +396,11 @@ TEST_F(TableHeapTest, PageCountGrowsWithInserts) {
 
     auto pc_after = heap.page_count();
     ASSERT_TRUE(pc_after.has_value());
-    EXPECT_GE(*pc_after, *pc_before);
+    // Must strictly grow -- EXPECT_GE permitted zero allocation and so passed
+    // even for an implementation that never grew the heap. Five 2000-byte
+    // tuples span two data pages.
+    EXPECT_GT(*pc_after, *pc_before);
+    EXPECT_EQ(*pc_after, 2u);
 }
 
 // -- Insert fallback when hint page is full (GDB-625) -------------------------
