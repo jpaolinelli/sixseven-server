@@ -791,15 +791,29 @@ TEST_F(TableHeapTest, RowCountPersistsAfterDeletes) {
 TEST_F(TableHeapTest, UpdateTuplesBatchMultiPage) {
     TableHeap heap(*bpm_, dm_, file_id_);
 
-    // Insert enough tuples to span multiple pages (~4000 bytes each → 1 per page
-    // on a 4096-byte page after header overhead).
+    // Insert enough tuples to genuinely span multiple pages so the batch update
+    // exercises the per-page grouping / fetch-unpin-per-page path. Usable space
+    // per page is page_size (8192) - page_header_size (24) = 8168 bytes; each
+    // 2000-byte tuple consumes 2000 + slot_entry_size (4) = 2004 bytes, so only
+    // 4 fit per page. Eight tuples therefore occupy at least two pages.
+    // (The old test used 200-byte tuples, all of which fit on a single page, so
+    // it never touched the multi-page path despite its name.)
+    constexpr size_t kTupleSize = 2000;
     std::vector<RID> rids;
     for (int i = 0; i < 8; ++i) {
-        auto tuple = make_tuple(200, static_cast<uint8_t>(i));
+        auto tuple = make_tuple(kTupleSize, static_cast<uint8_t>(i));
         auto rid = heap.insert_tuple(tuple);
         ASSERT_TRUE(rid.has_value()) << rid.error().message;
         rids.push_back(*rid);
     }
+
+    // Confirm the batch really spans more than one page before we test it.
+    std::unordered_set<PageId> distinct_pages;
+    for (const auto& rid : rids) {
+        distinct_pages.insert(rid.page_id);
+    }
+    ASSERT_GT(distinct_pages.size(), 1u)
+        << "expected inserts to span multiple pages, got " << distinct_pages.size();
 
     // Batch update all tuples with new content.
     std::vector<std::vector<uint8_t>> new_data;
@@ -808,7 +822,7 @@ TEST_F(TableHeapTest, UpdateTuplesBatchMultiPage) {
     updates.reserve(rids.size());
 
     for (size_t i = 0; i < rids.size(); ++i) {
-        new_data.push_back(make_tuple(200, static_cast<uint8_t>(0xF0 + i)));
+        new_data.push_back(make_tuple(kTupleSize, static_cast<uint8_t>(0xF0 + i)));
         updates.push_back(
             TableHeap::TupleUpdate{rids[i], std::span<const uint8_t>(new_data.back())});
     }
@@ -821,7 +835,7 @@ TEST_F(TableHeapTest, UpdateTuplesBatchMultiPage) {
     for (size_t i = 0; i < rids.size(); ++i) {
         auto data = heap.get_tuple(rids[i]);
         ASSERT_TRUE(data.has_value()) << data.error().message;
-        ASSERT_EQ(data->size(), 200u);
+        ASSERT_EQ(data->size(), kTupleSize);
         EXPECT_EQ((*data)[0], static_cast<uint8_t>(0xF0 + i));
     }
 }
