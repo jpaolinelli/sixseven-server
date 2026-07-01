@@ -297,12 +297,13 @@ TEST_F(QA_GDB569_Engine, SelectFromNonExistentTableStillErrors) {
 }
 
 TEST_F(QA_GDB569_Engine, SelectFromPgAttributeUnqualified) {
-    // pg_attribute should also be accessible without schema qualifier.
+    // pg_attribute is registered by register_pg_catalog_tables() in SetUp, so
+    // an unqualified reference must resolve and the query must succeed -- the
+    // same contract the sibling SelectFromPgClassUnqualified test asserts. The
+    // previous version discarded the result and only checked "no crash", which
+    // passed even if unqualified pg_catalog resolution regressed.
     auto result = engine_->execute("SELECT attname FROM pg_attribute");
-    // If pg_attribute is a virtual table, this should succeed.
-    // If not, it should give a clean error, not crash.
-    // Just verify no crash.
-    (void)result;
+    ASSERT_TRUE(result.has_value()) << result.error().message;
 }
 
 // =============================================================================
