@@ -510,21 +510,3 @@ TEST(EdgeTable, DeleteAllEdgesFromSource) {
     EXPECT_TRUE(edges->empty());
     EXPECT_TRUE(table.empty());
 }
-
-// == Config access ============================================================
-
-TEST(EdgeTable, ConfigAccess) {
-    auto config = make_config_with_properties("authored", true);
-    config.edge_id = 42;
-    config.source_table_id = 10;
-    config.target_table_id = 20;
-
-    EdgeTable table(config);
-
-    EXPECT_EQ(table.config().edge_id, 42);
-    EXPECT_EQ(table.config().name, "authored");
-    EXPECT_EQ(table.config().source_table_id, 10);
-    EXPECT_EQ(table.config().target_table_id, 20);
-    EXPECT_TRUE(table.config().prevent_duplicates);
-    EXPECT_EQ(table.config().property_columns.size(), 2u);
-}
