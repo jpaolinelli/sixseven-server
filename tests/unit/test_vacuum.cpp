@@ -221,19 +221,80 @@ TEST_F(VacuumTest, VacuumRemovesAbortedTuples) {
 }
 
 TEST_F(VacuumTest, VacuumFullCompactsAllPages) {
-    // Insert several tuples, then delete some.
+    // Insert several tuples, then shrink the middle one in place. Page::
+    // update_tuple() overwrites a tuple in place when the new payload is no
+    // longer than the old one, keeping the same slot offset and simply
+    // shrinking its recorded length — this leaves a gap of stale bytes
+    // between tuples that is NOT a dead MVCC tuple (no xmax is set, no
+    // regular vacuum would ever touch it) and is only reclaimed by
+    // Page::compact(), which physically repacks all live tuples. This is
+    // exactly the fragmentation scenario VACUUM FULL exists to fix, and it
+    // cannot be produced by dead-tuple removal alone.
     auto* t1 = txn_mgr_.begin().value();
-    insert_mvcc_tuple(t1->txn_id);
-    insert_mvcc_tuple(t1->txn_id);
-    insert_mvcc_tuple(t1->txn_id);
+    auto [pid, slot0] = insert_mvcc_tuple(t1->txn_id);
+    auto [pid1, slot1] = insert_mvcc_tuple(t1->txn_id);
+    auto [pid2, slot2] = insert_mvcc_tuple(t1->txn_id);
+    (void)pid1;
+    (void)pid2;
+    (void)slot2;
     ASSERT_TRUE(txn_mgr_.commit(t1->txn_id).has_value());
 
-    // VACUUM FULL should compact even with no dead tuples.
+    // Shrink the middle tuple (slot0's neighbor) in place, leaving a hole.
+    {
+        auto page_result = bpm_->fetch_page(pid);
+        ASSERT_TRUE(page_result.has_value());
+        Page* page = *page_result;
+        auto tuple = page->get_tuple(slot1);
+        ASSERT_TRUE(tuple.has_value());
+        ASSERT_GT(tuple->size(), mvcc_header_size + 4u);
+        // Keep the MVCC header, shrink the user payload down to 4 bytes.
+        std::vector<uint8_t> shrunk(tuple->begin(),
+                                    tuple->begin() + static_cast<long>(mvcc_header_size) + 4);
+        ASSERT_TRUE(page->update_tuple(slot1, shrunk).has_value());
+        auto unpin = bpm_->unpin_page(pid, true);
+        (void)unpin;
+    }
+
+    // Confirm no dead tuples exist yet — the hole is pure fragmentation,
+    // not something a regular (non-FULL) vacuum pass would reclaim.
+    Vacuum pre_vac(*bpm_, dm_, file_id_, txn_mgr_);
+    auto pre_stats = pre_vac.run();
+    ASSERT_TRUE(pre_stats.has_value());
+    ASSERT_EQ(pre_stats->dead_tuples, 0u);
+
+    size_t free_before_full = 0;
+    {
+        auto page_result = bpm_->fetch_page(pid);
+        ASSERT_TRUE(page_result.has_value());
+        free_before_full = (*page_result)->free_space();
+        auto unpin = bpm_->unpin_page(pid, false);
+        (void)unpin;
+    }
+
+    // VACUUM FULL should compact the page and genuinely reclaim the hole
+    // left by the in-place shrink, even though there were no dead tuples.
     Vacuum vac(*bpm_, dm_, file_id_, txn_mgr_);
     auto stats = vac.run_full();
     ASSERT_TRUE(stats.has_value());
     EXPECT_GE(stats->pages_scanned, 1u);
     EXPECT_EQ(stats->dead_tuples, 0u);
+    EXPECT_GE(stats->pages_compacted, 1u);
+    EXPECT_GT(stats->bytes_reclaimed, 0u);
+
+    // The page's reported free space should have grown as a direct result
+    // of compaction (this is what discriminates against a no-op run_full).
+    {
+        auto page_result = bpm_->fetch_page(pid);
+        ASSERT_TRUE(page_result.has_value());
+        size_t free_after_full = (*page_result)->free_space();
+        auto unpin = bpm_->unpin_page(pid, false);
+        (void)unpin;
+        EXPECT_GT(free_after_full, free_before_full);
+    }
+
+    // All three tuples must still be present and live after compaction
+    // rewrote the page.
+    EXPECT_EQ(count_live_tuples(pid), 3u);
 }
 
 // =============================================================================
