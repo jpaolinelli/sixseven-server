@@ -473,10 +473,12 @@ TEST_F(TriangleCountTest, BowTieGraph) {
 }
 
 // ---------------------------------------------------------------------------
-// Non-negative triangle counts
+// Single triangle plus a non-triangle tail — exact per-node counts
 // ---------------------------------------------------------------------------
 
-TEST_F(TriangleCountTest, CountsAreNonNegative) {
+TEST_F(TriangleCountTest, CountsMatchKnownTriangle) {
+    // Triangle {1,2,3} (bidirectional edges), plus a tail 1->4, 4->5 that
+    // participates in no triangle.
     build_graph("knows",
                 {
                     {1, 2},
@@ -493,7 +495,15 @@ TEST_F(TriangleCountTest, CountsAreNonNegative) {
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     auto counts = to_triangle_map(*result);
-    for (const auto& [node, c] : counts) {
-        EXPECT_GE(c, 0) << "node " << node << " count must be non-negative";
-    }
+
+    // Nodes 1, 2, 3 each participate in exactly the one triangle {1,2,3}.
+    EXPECT_EQ(counts[1], 1);
+    EXPECT_EQ(counts[2], 1);
+    EXPECT_EQ(counts[3], 1);
+    // Nodes 4 and 5 are on the non-triangle tail and must have zero count.
+    EXPECT_EQ(counts[4], 0);
+    EXPECT_EQ(counts[5], 0);
+
+    // Exactly one triangle exists in the whole graph.
+    EXPECT_EQ(total_triangles(counts), 1);
 }
