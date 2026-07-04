@@ -316,6 +316,11 @@ bool WalArchiveManager::is_running() const {
     return running_.load(std::memory_order_acquire);
 }
 
+void WalArchiveManager::set_test_post_copy_hook(
+    std::function<void(const std::filesystem::path&)> hook) {
+    test_post_copy_hook_ = std::move(hook);
+}
+
 // -- Private ------------------------------------------------------------------
 
 void WalArchiveManager::archive_loop() {
@@ -432,6 +437,14 @@ Result<void> WalArchiveManager::copy_and_verify(uint64_t segment_id) {
         return make_error(StatusCode::IO_ERROR,
                           "failed to copy WAL segment to archive: " + src.string() + " -> " +
                               dst.string() + ": " + ec.message());
+    }
+
+    // Test-only: allow a test to deterministically corrupt the just-written
+    // copy (same size, different bytes) so the checksum-mismatch failure
+    // path below can be exercised without a race condition. No-op unless a
+    // test has installed a hook via set_test_post_copy_hook() (GDB-1194).
+    if (test_post_copy_hook_) {
+        test_post_copy_hook_(dst);
     }
 
     // Verify the copy by computing checksum of the destination.
