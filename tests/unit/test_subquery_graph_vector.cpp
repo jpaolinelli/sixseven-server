@@ -1,9 +1,13 @@
 /// @file test_subquery_graph_vector.cpp
-/// @brief Tests for TRAVERSE (graph) and NEAREST (vector) queries used inside
-///        subqueries — derived tables, IN, EXISTS, and scalar positions.
+/// @brief Tests for TRAVERSE (graph) queries used inside subqueries — derived
+///        tables, IN, EXISTS, and scalar positions — plus coverage of the
+///        NEAREST vector-search WHERE predicate. NEAREST is no longer a
+///        standalone statement or subquery form (see the *Rejected tests
+///        below); NearestPredicateReturnsTopK covers the single-table
+///        WHERE-predicate form that replaced it.
 ///
-/// This is the core "blend" feature: graph traversal and vector search compose
-/// with relational SQL via subqueries. Phase 1 covers non-correlated nesting.
+/// This is the core "blend" feature: graph traversal composes with relational
+/// SQL via subqueries. Phase 1 covers non-correlated nesting.
 
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/types.h"
@@ -144,51 +148,47 @@ protected:
 };
 
 // =============================================================================
-// Derived tables: FROM (NEAREST ...) / FROM (TRAVERSE ...)
+// NEAREST vector-search WHERE predicate, and derived tables: FROM (TRAVERSE ...)
 // =============================================================================
 
-TEST_F(SubqueryGraphVectorTest, DerivedTableNearest) {
-    // The two nearest docs to [1,0,0,0] are docs 1 and 2. Vector search is now a
-    // WHERE predicate (the NEAREST derived-table form was removed).
-    auto qr = exec_ok(
-        "SELECT id FROM docs WHERE NEAREST(body_vec, 2) TO [1.0, 0.0, 0.0, 0.0]");
+TEST_F(SubqueryGraphVectorTest, NearestPredicateReturnsTopK) {
+    // The two nearest docs to [1,0,0,0] are docs 1 (alpha) and 2 (beta). Vector
+    // search is a single-table WHERE predicate (the NEAREST derived-table and
+    // IN-subquery forms were both removed; this test covers that one path via
+    // both an id projection and a qualified-column projection).
+    auto qr_ids = exec_ok("SELECT id FROM docs WHERE NEAREST(body_vec, 2) TO [1.0, 0.0, 0.0, 0.0]");
 
-    ASSERT_EQ(qr.rows.size(), 2u);
-    auto ids = collect_column_ints(qr, 0);
+    ASSERT_EQ(qr_ids.rows.size(), 2u);
+    auto ids = collect_column_ints(qr_ids, 0);
     EXPECT_TRUE(ids.count(1));
     EXPECT_TRUE(ids.count(2));
-}
 
-TEST_F(SubqueryGraphVectorTest, DerivedTableTraverse) {
-    // Traversing refs OUT from doc 1 (depth 2) reaches nodes {2, 3} — the start
-    // node itself is not emitted by a standalone TRAVERSE.
-    auto qr = exec_ok(
-        "SELECT t.* FROM (TRAVERSE refs FROM docs(1) DIRECTION OUT MAX_DEPTH 2) AS t");
+    auto qr_bodies = exec_ok("SELECT docs.body FROM docs "
+                             "WHERE NEAREST(body_vec, 2) TO [1.0, 0.0, 0.0, 0.0]");
 
-    EXPECT_EQ(qr.rows.size(), 2u);
-}
-
-// =============================================================================
-// IN (subquery): WHERE x IN (NEAREST ...) / IN (TRAVERSE ...)
-// =============================================================================
-
-TEST_F(SubqueryGraphVectorTest, InNearest) {
-    // Bodies of the two docs nearest to [1,0,0,0]: alpha and beta. Vector search
-    // is now a WHERE predicate (the NEAREST IN-subquery form was removed).
-    auto qr = exec_ok("SELECT docs.body FROM docs "
-                      "WHERE NEAREST(body_vec, 2) TO [1.0, 0.0, 0.0, 0.0]");
-
-    auto bodies = collect_column_strings(qr, 0);
+    auto bodies = collect_column_strings(qr_bodies, 0);
     EXPECT_EQ(bodies.size(), 2u);
     EXPECT_TRUE(bodies.count("alpha"));
     EXPECT_TRUE(bodies.count("beta"));
 }
 
+TEST_F(SubqueryGraphVectorTest, DerivedTableTraverse) {
+    // Traversing refs OUT from doc 1 (depth 2) reaches nodes {2, 3} — the start
+    // node itself is not emitted by a standalone TRAVERSE.
+    auto qr =
+        exec_ok("SELECT t.* FROM (TRAVERSE refs FROM docs(1) DIRECTION OUT MAX_DEPTH 2) AS t");
+
+    EXPECT_EQ(qr.rows.size(), 2u);
+}
+
+// =============================================================================
+// IN (subquery): WHERE x IN (TRAVERSE ...)
+// =============================================================================
+
 TEST_F(SubqueryGraphVectorTest, InTraverse) {
     // Nodes reached from doc 1 via refs OUT (depth 2): {2, 3} = beta, gamma.
-    auto qr = exec_ok(
-        "SELECT docs.body FROM docs "
-        "WHERE docs.id IN (TRAVERSE refs FROM docs(1) DIRECTION OUT MAX_DEPTH 2)");
+    auto qr = exec_ok("SELECT docs.body FROM docs "
+                      "WHERE docs.id IN (TRAVERSE refs FROM docs(1) DIRECTION OUT MAX_DEPTH 2)");
 
     auto bodies = collect_column_strings(qr, 0);
     EXPECT_EQ(bodies.size(), 2u);
@@ -200,9 +200,9 @@ TEST_F(SubqueryGraphVectorTest, InTraverse) {
 
 TEST_F(SubqueryGraphVectorTest, NotInTraverse) {
     // Docs NOT reached from doc 1: doc 1 (start, not emitted) and doc 4 = alpha, delta.
-    auto qr = exec_ok(
-        "SELECT docs.body FROM docs "
-        "WHERE docs.id NOT IN (TRAVERSE refs FROM docs(1) DIRECTION OUT MAX_DEPTH 2)");
+    auto qr =
+        exec_ok("SELECT docs.body FROM docs "
+                "WHERE docs.id NOT IN (TRAVERSE refs FROM docs(1) DIRECTION OUT MAX_DEPTH 2)");
 
     auto bodies = collect_column_strings(qr, 0);
     EXPECT_EQ(bodies.size(), 2u);
@@ -250,9 +250,8 @@ TEST_F(SubqueryGraphVectorTest, ScalarNearestRejected) {
 TEST_F(SubqueryGraphVectorTest, CorrelatedExistsTraverse) {
     // For each doc, does it have an outgoing refs edge? The start node is the
     // OUTER doc's id. Only docs 1 (->2) and 2 (->3) have outgoing edges.
-    auto qr = exec_ok(
-        "SELECT docs.body FROM docs "
-        "WHERE EXISTS (TRAVERSE refs FROM docs(docs.id) DIRECTION OUT MAX_DEPTH 1)");
+    auto qr = exec_ok("SELECT docs.body FROM docs "
+                      "WHERE EXISTS (TRAVERSE refs FROM docs(docs.id) DIRECTION OUT MAX_DEPTH 1)");
 
     auto bodies = collect_column_strings(qr, 0);
     EXPECT_EQ(bodies.size(), 2u);
@@ -265,9 +264,8 @@ TEST_F(SubqueryGraphVectorTest, CorrelatedExistsTraverse) {
 TEST_F(SubqueryGraphVectorTest, CorrelatedInTraverse) {
     // For each doc, is node 3 reachable from it (OUT, depth 2)? doc 1 reaches
     // {2,3}; doc 2 reaches {3}; docs 3 and 4 reach nothing.
-    auto qr = exec_ok(
-        "SELECT docs.body FROM docs "
-        "WHERE 3 IN (TRAVERSE refs FROM docs(docs.id) DIRECTION OUT MAX_DEPTH 2)");
+    auto qr = exec_ok("SELECT docs.body FROM docs "
+                      "WHERE 3 IN (TRAVERSE refs FROM docs(docs.id) DIRECTION OUT MAX_DEPTH 2)");
 
     auto bodies = collect_column_strings(qr, 0);
     EXPECT_EQ(bodies.size(), 2u);
@@ -300,8 +298,7 @@ TEST_F(SubqueryGraphVectorTest, CorrelatedNearestRejected) {
 
 TEST_F(SubqueryGraphVectorTest, DerivedTableMatch) {
     // Pattern matches the refs edges: (1->2) and (2->3); the source ids are {1, 2}.
-    auto qr =
-        exec_ok("SELECT m.id FROM (MATCH (a:docs)-[r:refs]->(b:docs) RETURN a.id) AS m");
+    auto qr = exec_ok("SELECT m.id FROM (MATCH (a:docs)-[r:refs]->(b:docs) RETURN a.id) AS m");
 
     auto ids = collect_column_ints(qr, 0);
     EXPECT_EQ(ids.size(), 2u);
