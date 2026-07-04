@@ -77,13 +77,37 @@ TEST(WalWriter, CloseIdempotent) {
 
 TEST(WalWriter, DestructorClosesWriter) {
     TempWalDir dir;
+    WalRecord r = make_test_record(WalRecordType::BEGIN, 1);
     {
-        WalWriter writer(dir.path());
+        WalWriterOptions opts;
+        opts.enable_group_commit = false;
+        WalWriter writer(dir.path(), opts);
         ASSERT_TRUE(writer.open().has_value());
-        // Destructor should handle close.
+        ASSERT_TRUE(writer.append(r).has_value());
+        // No explicit close() call: the destructor must flush/close the
+        // segment on scope exit for this test to discriminate a real
+        // close() from a no-op destructor.
     }
-    // If we get here without a crash, the destructor worked.
-    SUCCEED();
+
+    // The destructor's close() should have flushed and truncated the
+    // segment to exactly the written size (mirrors SegmentTruncatedToWrittenSize).
+    // A destructor that skips close() would leave the segment pre-allocated
+    // at its full configured size instead, failing this check.
+    auto seg_path = dir.path() / "wal_000001";
+    ASSERT_TRUE(std::filesystem::exists(seg_path));
+    auto file_size = std::filesystem::file_size(seg_path);
+    size_t expected_size = serialized_wal_record_size(r);
+    EXPECT_EQ(file_size, expected_size);
+
+    // Reopening a writer against the same directory should resume at the
+    // next LSN, confirming the prior record was durably persisted rather
+    // than lost because the destructor never flushed it.
+    WalWriterOptions reopen_opts;
+    reopen_opts.enable_group_commit = false;
+    WalWriter reopened(dir.path(), reopen_opts);
+    ASSERT_TRUE(reopened.open().has_value());
+    EXPECT_EQ(reopened.current_lsn(), r.lsn + 1);
+    ASSERT_TRUE(reopened.close().has_value());
 }
 
 // -- Append -------------------------------------------------------------------
