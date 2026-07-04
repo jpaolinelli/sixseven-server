@@ -244,6 +244,17 @@ TEST_F(SystemBootstrapTest, SecondBootstrapSkipsSeedButCreatesTable) {
     run_bootstrap();
     EXPECT_TRUE(SystemBootstrap::is_bootstrapped(data_dir_));
 
+    // Modify a setting to a value that would NEVER come from seed_default_settings
+    // (which only ever writes config_.port, i.e. "6767"). If the second bootstrap
+    // re-seeds, this value gets clobbered back to the default.
+    use_database(system_database_name);
+    exec_ok("UPDATE sys_settings SET value = '9999' WHERE key = 'server.port'");
+
+    // Count rows before the simulated restart so we can detect duplicate-insert
+    // re-seeding as well as value clobbering.
+    auto count_before = exec_ok("SELECT key FROM sys_settings");
+    const size_t rows_before = count_before.rows.size();
+
     // Simulate "restart" by recreating all components.
     // (The catalog is in-memory, so it gets a fresh sixseven_system DB.)
     engine_.reset();
@@ -255,12 +266,28 @@ TEST_F(SystemBootstrapTest, SecondBootstrapSkipsSeedButCreatesTable) {
     persistence_ = std::make_unique<CatalogPersistence>(*catalog_, *storage_);
     engine_ = std::make_unique<QueryEngine>(*catalog_, *storage_);
 
-    // Second bootstrap: should still create the table (in-memory catalog is fresh).
+    // Second bootstrap: should still create the table (in-memory catalog is fresh)
+    // but must NOT re-seed, since is_bootstrapped() is now true.
     run_bootstrap();
 
     // sys_settings table should exist.
     auto schema = catalog_->get_table(system_database_id, "sys_settings");
     ASSERT_TRUE(schema.has_value()) << schema.error().message;
+
+    // The user-modified value must have survived the second bootstrap. If the
+    // skip-seed guard regressed and defaults were re-inserted, this would either
+    // fail (value reverted to config_.port's default) or the row count would grow
+    // (duplicate insert), so we check both.
+    use_database(system_database_name);
+    auto qr = exec_ok("SELECT value FROM sys_settings WHERE key = 'server.port'");
+    ASSERT_EQ(qr.rows.size(), 1u) << "expected exactly one server.port row after second bootstrap "
+                                     "(duplicate would indicate re-seeding)";
+    EXPECT_EQ(qr.rows[0][0].as_string(), "9999")
+        << "server.port was reverted to a default value; seeding was not skipped on restart";
+
+    auto count_after = exec_ok("SELECT key FROM sys_settings");
+    EXPECT_EQ(count_after.rows.size(), rows_before)
+        << "sys_settings row count changed across restart; seeding likely ran again";
 }
 
 // =============================================================================
