@@ -693,10 +693,49 @@ TEST(WalArchiveManager, CleanupRespectsRetentionProvider) {
     ASSERT_TRUE(mgr.cleanup_before(999999).has_value());
 
     // Segment 0 should be removed (last_lsn < retention_lsn),
-    // but segments 1 and 2 should be retained.
+    // but segments 1 and 2 should be retained -- exactly, not just "at least
+    // 2 remain". A weaker size-only check would pass even if cleanup were a
+    // no-op (all 3 retained) or if it wrongly removed segment 1 or 2 instead
+    // of segment 0 (the GDB-196 replication-slot-retention failure mode).
     auto remaining = mgr.list_archived_segments();
     ASSERT_TRUE(remaining.has_value());
-    EXPECT_GE(remaining->size(), 2u);
+    ASSERT_EQ(remaining->size(), 2u);
+    EXPECT_EQ((*remaining)[0], segments[1].segment_id);
+    EXPECT_EQ((*remaining)[1], segments[2].segment_id);
+
+    ASSERT_TRUE(writer.close().has_value());
+}
+
+// Fault-injection sibling: confirms the strengthened assertions above would
+// actually catch a no-op cleanup. If cleanup_before() is never invoked, all 3
+// archived segments remain -- demonstrating that the exact-size/exact-id
+// checks in CleanupRespectsRetentionProvider discriminate a no-op from a
+// correctly-clamped cleanup (the old EXPECT_GE(size, 2) would not have).
+TEST(WalArchiveManager, CleanupBeforeNoOpLeavesAllSegments) {
+    TempWalDir wal_dir;
+    TempArchiveDir archive_dir;
+
+    WalWriterOptions opts;
+    opts.segment_size = 256;
+    opts.enable_group_commit = false;
+    WalWriter writer(wal_dir.path(), opts);
+    ASSERT_TRUE(writer.open().has_value());
+
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path());
+
+    std::vector<CompletedSegment> segments;
+    for (int i = 0; i < 3; ++i) {
+        auto seg = write_and_rotate(writer);
+        segments.push_back(seg);
+        ASSERT_TRUE(mgr.archive_segment(seg.segment_id, seg.last_lsn).has_value());
+    }
+
+    // Deliberately do NOT call cleanup_before(). This simulates the no-op
+    // failure mode: all 3 segments remain, which must NOT satisfy the exact
+    // expectations asserted in CleanupRespectsRetentionProvider above.
+    auto remaining = mgr.list_archived_segments();
+    ASSERT_TRUE(remaining.has_value());
+    EXPECT_EQ(remaining->size(), 3u);
 
     ASSERT_TRUE(writer.close().has_value());
 }
