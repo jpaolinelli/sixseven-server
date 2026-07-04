@@ -218,7 +218,7 @@ TEST(WalArchiveManager, ArchiveSegmentFailsWhenMetaSidecarUnwritable) {
     ASSERT_TRUE(writer.close().has_value());
 }
 
-TEST(WalArchiveManager, ArchiveSegmentVerifiesChecksum) {
+TEST(WalArchiveManager, ArchiveSegmentCopiesIntactFile) {
     TempWalDir wal_dir;
     TempArchiveDir archive_dir;
 
@@ -244,6 +244,55 @@ TEST(WalArchiveManager, ArchiveSegmentVerifiesChecksum) {
                      std::to_string(completed.segment_id));
     auto archived_path = *mgr.get_archived_segment(completed.segment_id);
     EXPECT_EQ(std::filesystem::file_size(src_path), std::filesystem::file_size(archived_path));
+
+    ASSERT_TRUE(writer.close().has_value());
+}
+
+// GDB-1194: the checksum-verification failure path (CRC32C mismatch between
+// source and archived copy) was never actually exercised anywhere in the
+// suite -- the old ArchiveSegmentVerifiesChecksum test only compared file
+// sizes, which a same-size-but-corrupted copy would also pass. This test
+// uses a test-only hook (set_test_post_copy_hook) to deterministically
+// corrupt the archived copy's bytes -- same size, different content -- right
+// after the file copy and before the destination checksum is computed, so
+// archive_segment() must detect the CRC32C mismatch and fail.
+TEST(WalArchiveManager, ArchiveSegmentFailsOnCorruptedCopy) {
+    TempWalDir wal_dir;
+    TempArchiveDir archive_dir;
+
+    WalWriterOptions opts;
+    opts.segment_size = 256;
+    opts.enable_group_commit = false;
+    WalWriter writer(wal_dir.path(), opts);
+    ASSERT_TRUE(writer.open().has_value());
+
+    auto completed = write_and_rotate(writer);
+    ASSERT_TRUE(writer.flush().has_value());
+
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path());
+
+    // Flip a byte in the destination file right after the copy completes,
+    // without changing its size, so a size-only check would still pass but
+    // the CRC32C comparison must catch it.
+    mgr.set_test_post_copy_hook([](const std::filesystem::path& dst) {
+        std::fstream f(dst, std::ios::in | std::ios::out | std::ios::binary);
+        ASSERT_TRUE(f.is_open());
+        f.seekp(0);
+        char byte = 0;
+        f.read(&byte, 1);
+        f.seekp(0);
+        char flipped = static_cast<char>(~byte);
+        f.write(&flipped, 1);
+    });
+
+    auto result = mgr.archive_segment(completed.segment_id, completed.last_lsn);
+    ASSERT_FALSE(result.has_value())
+        << "archive_segment should fail when the copied bytes differ from the source "
+           "even though the file size matches";
+    EXPECT_EQ(result.error().code, StatusCode::IO_ERROR);
+
+    // The corrupted copy must be removed so a retry can re-archive cleanly.
+    EXPECT_FALSE(mgr.get_archived_segment(completed.segment_id).has_value());
 
     ASSERT_TRUE(writer.close().has_value());
 }

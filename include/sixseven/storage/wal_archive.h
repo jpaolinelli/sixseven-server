@@ -112,6 +112,13 @@ public:
     /// Return whether the archive manager is running.
     [[nodiscard]] bool is_running() const;
 
+    /// Test-only hook: if set, invoked on the destination path immediately
+    /// after the file copy in copy_and_verify() and before the destination
+    /// checksum is computed. Lets tests deterministically corrupt the copy
+    /// (same size, different bytes) to exercise the CRC32C mismatch failure
+    /// path without any race condition (GDB-1194). Never set in production.
+    void set_test_post_copy_hook(std::function<void(const std::filesystem::path&)> hook);
+
 private:
     /// Background thread entry point: processes the archive queue.
     void archive_loop();
@@ -140,6 +147,10 @@ private:
 
     /// Optional callback returning the minimum LSN needed by replication slots.
     std::function<lsn_t()> retention_lsn_provider_;
+
+    /// Test-only hook invoked post-copy in copy_and_verify(). See
+    /// set_test_post_copy_hook(). Empty (no-op) in production.
+    std::function<void(const std::filesystem::path&)> test_post_copy_hook_;
 
     /// Protects the pending queue.
     mutable std::mutex queue_mutex_;
