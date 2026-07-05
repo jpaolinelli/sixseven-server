@@ -358,6 +358,20 @@ Result<StmtPtr> Parser::error(const std::string& message) {
                             tok.byte_offset);
 }
 
+tl::unexpected<Error> Parser::parse_error_here(const std::string& message) {
+    const auto& tok = peek();
+    return make_parse_error(message + " at line " + std::to_string(tok.line) + ", column " +
+                                std::to_string(tok.column),
+                            tok.byte_offset);
+}
+
+// static
+tl::unexpected<Error> Parser::annotate_error_at(const Error& err, const Token& tok) {
+    return make_parse_error(err.message + " at line " + std::to_string(tok.line) + ", column " +
+                                std::to_string(tok.column),
+                            tok.byte_offset);
+}
+
 // -- Statement dispatch -------------------------------------------------------
 
 Result<StmtPtr> Parser::parse_statement() {
@@ -661,7 +675,7 @@ Result<TypeSpec> Parser::parse_type_spec() {
             return tl::unexpected(dim.error());
         auto dim_val = safe_stoi(dim->lexeme);
         if (!dim_val)
-            return tl::unexpected(dim_val.error());
+            return annotate_error_at(dim_val.error(), *dim);
         ts.param1 = *dim_val;
 
         auto c1 = expect(TokenType::COMMA, "expected ',' after dimension");
@@ -707,20 +721,18 @@ Result<TypeSpec> Parser::parse_type_spec() {
 
                 if (name_lower == "source") {
                     if (got_source) {
-                        return make_error(StatusCode::PARSE_ERROR, "duplicate 'source' parameter");
+                        return parse_error_here("duplicate 'source' parameter");
                     }
                     ts.source = unquote_string(param_val->lexeme);
                     got_source = true;
                 } else if (name_lower == "provider") {
                     if (got_provider) {
-                        return make_error(StatusCode::PARSE_ERROR,
-                                          "duplicate 'provider' parameter");
+                        return parse_error_here("duplicate 'provider' parameter");
                     }
                     ts.provider = unquote_string(param_val->lexeme);
                     got_provider = true;
                 } else {
-                    return make_error(StatusCode::PARSE_ERROR,
-                                      "unknown EMBEDDING parameter '" + *param_name + "'");
+                    return parse_error_here("unknown EMBEDDING parameter '" + *param_name + "'");
                 }
 
                 if (param_count == 0) {
@@ -731,12 +743,10 @@ Result<TypeSpec> Parser::parse_type_spec() {
             }
 
             if (!got_source) {
-                return make_error(StatusCode::PARSE_ERROR,
-                                  "EMBEDDING missing required 'source' parameter");
+                return parse_error_here("EMBEDDING missing required 'source' parameter");
             }
             if (!got_provider) {
-                return make_error(StatusCode::PARSE_ERROR,
-                                  "EMBEDDING missing required 'provider' parameter");
+                return parse_error_here("EMBEDDING missing required 'provider' parameter");
             }
         } else {
             // Positional syntax: source_column, 'provider'
@@ -769,7 +779,7 @@ Result<TypeSpec> Parser::parse_type_spec() {
             return tl::unexpected(p1.error());
         auto p1_val = safe_stoi(p1->lexeme);
         if (!p1_val)
-            return tl::unexpected(p1_val.error());
+            return annotate_error_at(p1_val.error(), *p1);
         ts.param1 = *p1_val;
 
         if (match(TokenType::COMMA)) {
@@ -778,7 +788,7 @@ Result<TypeSpec> Parser::parse_type_spec() {
                 return tl::unexpected(p2.error());
             auto p2_val = safe_stoi(p2->lexeme);
             if (!p2_val)
-                return tl::unexpected(p2_val.error());
+                return annotate_error_at(p2_val.error(), *p2);
             ts.param2 = *p2_val;
         }
 
@@ -2049,7 +2059,7 @@ Result<TableRef> Parser::parse_table_ref() {
                     return tl::unexpected(k.error());
                 auto k_val = safe_stoi(k->lexeme);
                 if (!k_val)
-                    return tl::unexpected(k_val.error());
+                    return annotate_error_at(k_val.error(), *k);
                 if (*k_val < 1) {
                     return make_error(StatusCode::PARSE_ERROR, "SHORTEST K requires K >= 1");
                 }
@@ -2257,7 +2267,7 @@ Result<StmtPtr> Parser::parse_traverse() {
             return tl::unexpected(depth.error());
         auto depth_val = safe_stoi(depth->lexeme);
         if (!depth_val)
-            return tl::unexpected(depth_val.error());
+            return annotate_error_at(depth_val.error(), *depth);
         stmt->max_depth = *depth_val;
     }
 
@@ -2357,7 +2367,7 @@ Result<StmtPtr> Parser::parse_within_traverse() {
             return tl::unexpected(depth.error());
         auto depth_val = safe_stoi(depth->lexeme);
         if (!depth_val)
-            return tl::unexpected(depth_val.error());
+            return annotate_error_at(depth_val.error(), *depth);
         trav->max_depth = *depth_val;
     }
 
@@ -2528,7 +2538,7 @@ Result<std::vector<PathElement>> Parser::parse_match_pattern() {
 
                 auto min_v = safe_stoi(min_tok->lexeme);
                 if (!min_v)
-                    return tl::unexpected(min_v.error());
+                    return annotate_error_at(min_v.error(), *min_tok);
                 int32_t min_val = *min_v;
                 edge.min_hops = min_val;
 
@@ -2544,7 +2554,7 @@ Result<std::vector<PathElement>> Parser::parse_match_pattern() {
                             return tl::unexpected(max_tok.error());
                         auto max_v = safe_stoi(max_tok->lexeme);
                         if (!max_v)
-                            return tl::unexpected(max_v.error());
+                            return annotate_error_at(max_v.error(), *max_tok);
                         edge.max_hops = *max_v;
                     }
                 } else {
@@ -2606,7 +2616,7 @@ Result<StmtPtr> Parser::parse_match() {
                 return tl::unexpected(k.error());
             auto k_val = safe_stoi(k->lexeme);
             if (!k_val)
-                return tl::unexpected(k_val.error());
+                return annotate_error_at(k_val.error(), *k);
             if (*k_val < 1) {
                 return error("SHORTEST K requires K >= 1");
             }
@@ -2741,7 +2751,7 @@ Result<StmtPtr> Parser::parse_shortest_path() {
             return tl::unexpected(depth.error());
         auto depth_val = safe_stoi(depth->lexeme);
         if (!depth_val)
-            return tl::unexpected(depth_val.error());
+            return annotate_error_at(depth_val.error(), *depth);
         stmt->max_depth = *depth_val;
     }
 
@@ -3563,7 +3573,7 @@ Result<ExprPtr> Parser::parse_primary() {
             return tl::unexpected(rp.error());
 
         if (!match_ident_ci(peek(), "TO")) {
-            return make_error(StatusCode::PARSE_ERROR, "expected TO after MATCH(column)");
+            return parse_error_here("expected TO after MATCH(column)");
         }
         advance();
         auto query = parse_primary();
@@ -3606,7 +3616,7 @@ Result<ExprPtr> Parser::parse_primary() {
             return tl::unexpected(rp.error());
 
         if (!match_ident_ci(peek(), "TO")) {
-            return make_error(StatusCode::PARSE_ERROR, "expected TO after NEAREST(column, k)");
+            return parse_error_here("expected TO after NEAREST(column, k)");
         }
         advance();
         auto target = parse_primary();
@@ -3698,7 +3708,7 @@ Result<ExprPtr> Parser::parse_primary() {
         auto lexeme = previous().lexeme;
         auto idx = safe_stoi(lexeme.substr(1));
         if (!idx) {
-            return make_error(idx.error().code, idx.error().message);
+            return annotate_error_at(idx.error(), previous());
         }
         param->index = *idx;
         param->line = previous().line;
