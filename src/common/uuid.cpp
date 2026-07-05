@@ -64,4 +64,28 @@ Result<Uuid> parse_uuid(const std::string& s) {
     return ok(uuid);
 }
 
+std::string to_hex(const uint8_t* data, size_t len) {
+    static const char digits[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(len * 2);
+    for (size_t i = 0; i < len; ++i) {
+        const uint8_t byte = data[i];
+        out += digits[(byte >> 4) & 0xF];
+        out += digits[byte & 0xF];
+    }
+    return out;
+}
+
+std::string format_uuid(const Uuid& uuid) {
+    std::string out;
+    out.reserve(36);
+    for (size_t i = 0; i < 16; ++i) {
+        if (i == 4 || i == 6 || i == 8 || i == 10) {
+            out += '-';
+        }
+        out += to_hex(&uuid[i], 1);
+    }
+    return out;
+}
+
 } // namespace sixseven
