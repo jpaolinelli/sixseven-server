@@ -74,3 +74,51 @@ TEST(StringUtil, ToLowerHighBitBytesNoUb) {
     std::string result = to_lower(input);
     EXPECT_EQ(result.size(), input.size());
 }
+
+// ---------------------------------------------------------------------------
+// starts_with_ci
+// ---------------------------------------------------------------------------
+
+TEST(StringUtil, StartsWithCiBasicMatch) {
+    EXPECT_TRUE(starts_with_ci("SELECT * FROM t", "SELECT "));
+}
+
+TEST(StringUtil, StartsWithCiCaseInsensitiveMatch) {
+    EXPECT_TRUE(starts_with_ci("select * from t", "SELECT "));
+    EXPECT_TRUE(starts_with_ci("SeLeCt * from t", "sElEcT "));
+}
+
+TEST(StringUtil, StartsWithCiNoMatch) {
+    EXPECT_FALSE(starts_with_ci("INSERT INTO t", "SELECT "));
+}
+
+TEST(StringUtil, StartsWithCiEmptyPrefixAlwaysMatches) {
+    EXPECT_TRUE(starts_with_ci("anything", ""));
+    EXPECT_TRUE(starts_with_ci("", ""));
+}
+
+TEST(StringUtil, StartsWithCiPrefixLongerThanStrFails) {
+    EXPECT_FALSE(starts_with_ci("SEL", "SELECT "));
+}
+
+TEST(StringUtil, StartsWithCiEmptyStrWithNonEmptyPrefixFails) {
+    EXPECT_FALSE(starts_with_ci("", "SELECT "));
+}
+
+TEST(StringUtil, StartsWithCiExactMatch) {
+    EXPECT_TRUE(starts_with_ci("SELECT", "SELECT"));
+}
+
+TEST(StringUtil, StartsWithCiHighBitByteSafety) {
+    // High-bit bytes must not trigger UB when passed through
+    // static_cast<unsigned char> into std::tolower.
+    std::string str;
+    std::string prefix;
+    for (int c = 128; c < 160; ++c) {
+        str.push_back(static_cast<char>(static_cast<unsigned char>(c)));
+        prefix.push_back(static_cast<char>(static_cast<unsigned char>(c)));
+    }
+    // Should not crash; identical bytes should compare equal regardless of
+    // tolower's (locale-dependent, but well-defined for unsigned char) result.
+    EXPECT_TRUE(starts_with_ci(str, prefix));
+}

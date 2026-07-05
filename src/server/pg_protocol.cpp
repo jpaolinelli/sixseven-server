@@ -2,6 +2,7 @@
 
 #include "sixseven/common/logging.h"
 #include "sixseven/common/statement_deadline.h"
+#include "sixseven/common/string_util.h"
 #include "sixseven/executor/query_engine.h"
 #include "sixseven/server/connection.h"
 #include "sixseven/server/session.h"
@@ -96,20 +97,6 @@ int16_t resolve_format_code(const std::vector<int16_t>& format_codes, size_t col
         return format_codes[col_index];
     }
     return 0;
-}
-
-/// Case-insensitive string prefix check.
-bool starts_with_ci(std::string_view str, std::string_view prefix) {
-    if (str.size() < prefix.size()) {
-        return false;
-    }
-    for (size_t i = 0; i < prefix.size(); ++i) {
-        if (std::tolower(static_cast<unsigned char>(str[i])) !=
-            std::tolower(static_cast<unsigned char>(prefix[i]))) {
-            return false;
-        }
-    }
-    return true;
 }
 
 /// Build a PostgreSQL CommandComplete tag from a QueryResult.
