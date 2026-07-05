@@ -284,9 +284,21 @@ TEST_F(QA_GDB548_Binder, EdgeCase_ManyColumnsNamedRef) {
 }
 
 TEST_F(QA_GDB548_Binder, EdgeCase_ZeroOutputColumnsSelectStar) {
-    // no_output failed registration (empty schema violates node_id-first requirement).
-    // The binder must therefore reject any query referencing it.
-    bind_error("SELECT * FROM no_output('e')", StatusCode::NOT_FOUND);
+    // no_output failed registration (empty schema violates node_id-first
+    // requirement), so registry.find("no_output") returns nullptr.
+    //
+    // GDB-1224: Binder::build_algorithm_scope() (src/planner/binder.cpp) does
+    // NOT raise an error when an algorithm name is unknown to the registry --
+    // by design, it silently builds a scope table with zero output columns,
+    // deferring the "unknown algorithm" rejection to plan time (see
+    // Planner::plan_table_source's StatusCode::NOT_FOUND check in
+    // src/executor/planner.cpp, exercised end-to-end by
+    // QA_GDB480_E2E.UnknownAlgorithmFails). This QA fixture only calls
+    // Binder::bind() directly, so it cannot observe the planner's later
+    // rejection -- it must assert the binder's own (successful, zero-column)
+    // behavior instead of a bind-time error.
+    auto bound = bind_ok("SELECT * FROM no_output('e')");
+    EXPECT_EQ(bound.output_columns.size(), 0u);
 }
 
 // ---------------------------------------------------------------------------

@@ -159,13 +159,7 @@ TEST_F(LouvainParamQATest, ResolutionAffectsAssignment) {
     // Star-like graph with center connected to multiple leaves.
     // Different resolutions may assign leaves to different communities.
     build_graph("knows",
-                {{1, 2},
-                 {1, 3},
-                 {1, 4},
-                 {1, 5},
-                 {1, 6},
-                 {2, 3},
-                 {4, 5}}); // Some leaf connectivity
+                {{1, 2}, {1, 3}, {1, 4}, {1, 5}, {1, 6}, {2, 3}, {4, 5}}); // Some leaf connectivity
 
     auto result_1 = run_cd("knows", 1.0, 100);
     ASSERT_TRUE(result_1.has_value()) << result_1.error().message;
@@ -195,19 +189,34 @@ TEST_F(LouvainParamQATest, ResolutionAffectsAssignment) {
 // ---------------------------------------------------------------------------
 
 TEST_F(LouvainParamQATest, MaxIterationsAffectsConvergence) {
-    // Use a graph complex enough that iteration limit matters.
-    // A larger graph with multiple possible partitions.
-    build_graph("knows",
-                {{1, 2},
-                 {2, 3},
-                 {3, 4},
-                 {4, 5},
-                 {5, 6},
-                 {6, 7},
-                 {7, 8},
-                 {8, 1}, // Ring
-                 {1, 5}, // Cross link to create tension
-                 {3, 7}}); // Another cross link
+    // GDB-1224: the original 8-node ring (with two cross-links) converges to
+    // its final local optimum in a SINGLE louvain_phase1 pass regardless of
+    // max_iterations, because Louvain's per-pass node moves (Blondel et al.
+    // 2008; see src/graph/louvain.cpp's canonical "stop when no node moved in
+    // a full pass" early-exit) already cascade through all 8 nodes within one
+    // pass on a graph this small and well-connected. That made the test
+    // graph-sensitive rather than a genuine test of max_iterations: max_
+    // iterations=1 and max_iterations=100 produced byte-identical output even
+    // though src/graph/louvain.cpp:158 does correctly bound the loop by
+    // max_iterations (confirmed by reading the implementation directly).
+    //
+    // A long path (chain) graph is used instead: greedy node-by-node
+    // reassignment along a chain requires information to propagate one hop
+    // per full pass in the worst case (a node can only join a neighbor's
+    // community once that neighbor's own community has locally stabilized),
+    // so a single pass is far less likely to reach the same fixed point that
+    // many passes converge to. Two dense clusters bridge a long weak chain to
+    // make the mid-chain boundary genuinely take multiple passes to settle.
+    std::vector<std::pair<int64_t, int64_t>> edges;
+    // Cluster A: nodes 1-4, densely connected.
+    edges.insert(edges.end(), {{1, 2}, {2, 3}, {3, 4}, {4, 1}, {1, 3}, {2, 4}});
+    // Long weak chain bridging the two clusters: 4-5-6-...-15.
+    for (int64_t i = 4; i <= 14; ++i) {
+        edges.push_back({i, i + 1});
+    }
+    // Cluster B: nodes 15-18, densely connected.
+    edges.insert(edges.end(), {{15, 16}, {16, 17}, {17, 18}, {18, 15}, {15, 17}, {16, 18}});
+    build_graph("knows", edges);
 
     // Run with just 1 iteration - algorithm hasn't converged.
     auto result_1 = run_cd("knows", 1.0, 1);
@@ -236,14 +245,7 @@ TEST_F(LouvainParamQATest, MaxIterationsAffectsConvergence) {
 
 // Verify that with enough iterations, the algorithm converges (same result on repeated runs).
 TEST_F(LouvainParamQATest, IterationsConvergeToStableState) {
-    build_graph("knows",
-                {{1, 2},
-                 {2, 3},
-                 {3, 1},
-                 {4, 5},
-                 {5, 6},
-                 {6, 4},
-                 {3, 4}});
+    build_graph("knows", {{1, 2}, {2, 3}, {3, 1}, {4, 5}, {5, 6}, {6, 4}, {3, 4}});
 
     // Run twice with max_iterations.
     auto result_a = run_cd("knows", 1.0, 50);

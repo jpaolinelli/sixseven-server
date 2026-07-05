@@ -248,10 +248,19 @@ TEST_F(QA_GDB850, ExecuteReturnsManyRowsExactValues) {
 TEST_F(QA_GDB850, MetadataIndependenceAcrossEntries) {
     AlgorithmRegistry reg;
 
+    // GDB-1224: AlgorithmRegistry::register_algorithm() (src/graph/algorithm_registry.cpp)
+    // enforces that every algorithm's first output column must be "node_id"
+    // INT64 (required so NearestScanOperator and graph result-projection code
+    // can assume column 0 is always the node identity). def_b originally
+    // started with "source"/"target"/"weight" (no node_id column at all),
+    // predating that invariant, so registration always failed here -- this
+    // test never actually reached its "metadata independence" assertions.
+    // Reshaped def_b to keep node_id first while still differing from def_a
+    // in column count/names/nullability, preserving the test's real intent.
     AlgorithmDef def_a =
         make_def("meta_a", {{"node_id", TypeId::INT64, false}, {"rank", TypeId::FLOAT64, false}});
     AlgorithmDef def_b = make_def("meta_b",
-                                  {{"source", TypeId::INT64, false},
+                                  {{"node_id", TypeId::INT64, false},
                                    {"target", TypeId::INT64, false},
                                    {"weight", TypeId::FLOAT64, true}});
 
@@ -274,7 +283,7 @@ TEST_F(QA_GDB850, MetadataIndependenceAcrossEntries) {
 
     // meta_b: 3 columns, third is nullable
     ASSERT_EQ(eb->def.output_columns.size(), 3u);
-    EXPECT_EQ(eb->def.output_columns[0].name, "source");
+    EXPECT_EQ(eb->def.output_columns[0].name, "node_id");
     EXPECT_EQ(eb->def.output_columns[1].name, "target");
     EXPECT_EQ(eb->def.output_columns[2].name, "weight");
     EXPECT_TRUE(eb->def.output_columns[2].nullable);

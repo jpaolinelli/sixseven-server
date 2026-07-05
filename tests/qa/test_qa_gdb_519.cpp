@@ -176,13 +176,25 @@ TEST_F(GDB519_WassermanFaust, AC1_ScalingFactorAlgebraicCheck) {
 
     const int64_t N = 6;
 
-    // For every reachable node, verify WF = [(nc-1)/(N-1)] * [(nc-1)/sum_farness]
+    // GDB-1224: this originally used r.component_size (nc, the weak-component
+    // size) in the WF formula below. src/graph/closeness_centrality.cpp
+    // (lines ~176-192) deliberately uses `r = reachable_count - 1` -- the
+    // DIRECTED-reachable count from that specific source node, excluding
+    // itself -- not the weak-component size, precisely BECAUSE using nc
+    // produces scores > 1.0 whenever directed reachability is narrower than
+    // the weak component (documented fix for GDB-862). On this test's
+    // directed path 1->2->3->4, node 2 only reaches {3,4} (r=2), not all 3
+    // other component members (nc-1=3), so the nc-based formula here was
+    // asserting the pre-GDB-862 formula the product code explicitly moved
+    // away from. Fixed to use reachable_count, matching the algorithm's own
+    // documented contract.
+    //
+    // Verify WF = [r/(N-1)] * [r/sum_farness] where r = reachable_count - 1.
     for (const auto& [node, r] : scores) {
-        if (r.sum_farness > 0 && r.component_size > 1) {
-            double expected_norm =
-                static_cast<double>(r.component_size - 1) / static_cast<double>(r.sum_farness);
-            double expected_scaling =
-                static_cast<double>(r.component_size - 1) / static_cast<double>(N - 1);
+        if (r.sum_farness > 0 && r.reachable_count > 1) {
+            int64_t reach = r.reachable_count - 1;
+            double expected_norm = static_cast<double>(reach) / static_cast<double>(r.sum_farness);
+            double expected_scaling = static_cast<double>(reach) / static_cast<double>(N - 1);
             double expected_wf = expected_scaling * expected_norm;
 
             EXPECT_NEAR(r.normalized_closeness, expected_norm, 1e-10)
