@@ -119,8 +119,17 @@ Result<void> TraversalOperator::run_bfs() {
         }
 
         for (auto& [neighbor_pk, edge] : *neighbors) {
-            // Check memory bound.
+            // Check memory bound. TraversalOperator materializes results_
+            // incrementally as nodes are dequeued (unlike the two-phase
+            // Edge/Enriched/MatchShortestPath operators), so by the time
+            // this limit trips, results_ may already hold rows for nodes
+            // dequeued earlier in this same run_bfs() call. Clear results_
+            // before returning the error so do_next() can never yield a
+            // leaked partial row after a failed open() (GDB-1288).
             if (visited.size() >= config_.max_visited) {
+                results_.clear();
+                edges_.clear();
+                parent_map_.clear();
                 return tl::unexpected(make_error(StatusCode::INVALID_ARGUMENT,
                                                  "graph traversal exceeded max_visited limit (" +
                                                      std::to_string(config_.max_visited) + ")"));
