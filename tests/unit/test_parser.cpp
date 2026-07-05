@@ -932,6 +932,66 @@ TEST(Parser, SelectBasic) {
     EXPECT_EQ(sel->from[0].name, "users");
 }
 
+TEST(Parser, SelectQuotedIdentifiers) {
+    // The audit's motivating PG-wire-compat example.
+    auto stmt = parse_one("SELECT \"id\" FROM \"users\"");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->items.size(), 1u);
+    auto* c0 = dynamic_cast<ColumnRefExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(c0, nullptr);
+    EXPECT_EQ(c0->column, "id");
+    ASSERT_EQ(sel->from.size(), 1u);
+    EXPECT_EQ(sel->from[0].name, "users");
+}
+
+TEST(Parser, SelectQuotedKeywordAsColumnName) {
+    // A quoted keyword ("select") is a plain column reference, not a
+    // re-parse of the SELECT keyword.
+    auto stmt = parse_one("SELECT \"select\" FROM t");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->items.size(), 1u);
+    auto* c0 = dynamic_cast<ColumnRefExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(c0, nullptr);
+    EXPECT_EQ(c0->column, "select");
+}
+
+TEST(Parser, SelectQuotedIdentifierPreservesCase) {
+    // Quoted identifiers are case-sensitive/case-preserving, matching the
+    // engine's existing case-preserving unquoted-identifier behavior.
+    auto stmt = parse_one("SELECT \"MixedCase\" FROM t");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* c0 = dynamic_cast<ColumnRefExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(c0, nullptr);
+    EXPECT_EQ(c0->column, "MixedCase");
+}
+
+TEST(Parser, SelectQuotedIdentifierEscapedQuoteUnescaped) {
+    // "a""b" -> column name a"b (the "" is unescaped to a literal ").
+    auto stmt = parse_one("SELECT \"a\"\"b\" FROM t");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* c0 = dynamic_cast<ColumnRefExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(c0, nullptr);
+    EXPECT_EQ(c0->column, "a\"b");
+}
+
+TEST(Parser, SelectQuotedIdentifierQualifiedColumn) {
+    auto stmt = parse_one("SELECT \"u\".\"id\" FROM \"users\" AS \"u\"");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* c0 = dynamic_cast<ColumnRefExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(c0, nullptr);
+    EXPECT_EQ(c0->table, "u");
+    EXPECT_EQ(c0->column, "id");
+}
+
+TEST(Parser, UnterminatedQuotedIdentifierIsParseError) {
+    expect_parse_error("SELECT \"unterminated FROM t");
+}
+
 TEST(Parser, SelectStar) {
     auto stmt = parse_one("SELECT * FROM users");
     auto* sel = dynamic_cast<SelectStmt*>(stmt.get());

@@ -427,6 +427,11 @@ Result<Token> Lexer::scan_token() {
         return scan_string();
     }
 
+    // Double-quoted (delimited) identifier.
+    if (c == '"') {
+        return scan_quoted_identifier();
+    }
+
     // Number literal.
     if (std::isdigit(static_cast<unsigned char>(c))) {
         return scan_number();
@@ -514,6 +519,37 @@ Result<Token> Lexer::scan_string() {
             }
             // End of string.
             return make_token(TokenType::STRING_LITERAL);
+        }
+    }
+}
+
+Result<Token> Lexer::scan_quoted_identifier() {
+    // Opening quote already consumed.
+    while (true) {
+        if (at_end()) {
+            return make_error(StatusCode::PARSE_ERROR,
+                              "unterminated quoted identifier starting at line " +
+                                  std::to_string(token_start_line_) + ", column " +
+                                  std::to_string(token_start_column_));
+        }
+        char c = advance();
+        if (c == '"') {
+            // Check for escaped quote ("").
+            if (!at_end() && peek() == '"') {
+                advance(); // consume second quote
+                continue;
+            }
+            // End of quoted identifier. Reject the empty form "" (per SQL
+            // standard, a delimited identifier must contain at least one
+            // character) with a clear error rather than a silently-empty name.
+            if (current_ - start_ == 2) {
+                return make_error(StatusCode::PARSE_ERROR,
+                                  "zero-length delimited identifier at line " +
+                                      std::to_string(token_start_line_) + ", column " +
+                                      std::to_string(token_start_column_));
+            }
+            // Quoted identifiers bypass keyword lookup and case-folding.
+            return make_token(TokenType::IDENTIFIER);
         }
     }
 }

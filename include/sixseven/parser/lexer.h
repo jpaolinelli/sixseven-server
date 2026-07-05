@@ -14,6 +14,16 @@ namespace sixseven {
 /// NEAREST, MATCH, EMBEDDING, LINK, UNLINK, etc.), operators, literals,
 /// identifiers, and punctuation. Keywords are case-insensitive.
 ///
+/// Identifiers may be unquoted (`users`, `id`) or double-quoted/delimited
+/// (`"users"`, `"Weird Col"`). Both produce an IDENTIFIER token; the raw
+/// lexeme retains the surrounding quotes and any `""` escapes for delimited
+/// identifiers, exactly as STRING_LITERAL retains its surrounding `'` quotes.
+/// Callers that materialize an identifier's text (see
+/// `Parser::parse_name`/`unquote_identifier` in parser.cpp) must strip the
+/// quotes and un-escape `""` -> `"` when the lexeme is quoted. Quoted
+/// identifiers bypass keyword lookup, so `"select"` is an IDENTIFIER, not the
+/// SELECT keyword.
+///
 /// The returned tokens contain string_view lexemes that reference the
 /// original input string. The caller must keep the input alive for the
 /// lifetime of the token vector.
@@ -67,6 +77,11 @@ private:
 
     /// Scan an identifier or keyword.
     [[nodiscard]] Token scan_identifier();
+
+    /// Scan a double-quoted (delimited) identifier, with "" escape for an
+    /// embedded double quote. Always produces an IDENTIFIER token — quoted
+    /// identifiers bypass keyword lookup, per SQL/PostgreSQL semantics.
+    [[nodiscard]] Result<Token> scan_quoted_identifier();
 
     /// Check if current position has a valid exponent (e/E followed by digits).
     [[nodiscard]] bool has_valid_exponent() const;
