@@ -36,13 +36,14 @@ public:
     /// @param schema        Edge output schema (__from, __to, __depth, props...).
     /// @param where_expr    Optional WHERE predicate (post-filter).
     /// @param bound         BoundStatement for expression evaluation.
-    /// @param heterogeneous True when edge connects different tables.
+    ///
+    /// Whether the edge connects different tables is read from
+    /// config.heterogeneous (single source of truth; see TraversalConfig).
     EdgeTraversalOperator(GraphEngine& graph_engine,
                           TraversalConfig config,
                           OutputSchema schema,
                           const Expr* where_expr,
-                          const BoundStatement& bound,
-                          bool heterogeneous);
+                          const BoundStatement& bound);
 
     [[nodiscard]] const OutputSchema& output_schema() const override;
 
@@ -82,8 +83,6 @@ private:
     OutputSchema schema_;
     const Expr* where_expr_;
     const BoundStatement& bound_;
-
-    bool heterogeneous_;
 
     std::vector<TraversalResult> bfs_results_;
     std::vector<Tuple> edge_results_;

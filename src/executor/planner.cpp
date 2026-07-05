@@ -818,6 +818,7 @@ Planner::plan_from_source(const TableRef& table_ref,
         const auto& trav_alias = alias.empty() ? trav->edge_type : alias;
 
         const bool heterogeneous = edge_def->source_table_id != edge_def->target_table_id;
+        config.heterogeneous = heterogeneous;
         const Expr* trav_where = trav->where_expr ? trav->where_expr.get() : nullptr;
 
         // For heterogeneous edges (different source/target tables), depth > 1 is
@@ -885,7 +886,7 @@ Planner::plan_from_source(const TableRef& table_ref,
             auto edge_schema = OutputSchema(std::move(out_cols));
 
             auto op = std::make_unique<EdgeTraversalOperator>(
-                *graph_engine_, std::move(config), edge_schema, trav_where, bound, heterogeneous);
+                *graph_engine_, std::move(config), edge_schema, trav_where, bound);
 
             return ok(PlannedSource{std::move(op), std::move(edge_schema)});
         }
@@ -922,8 +923,7 @@ Planner::plan_from_source(const TableRef& table_ref,
                                                               *target_storage->heap,
                                                               target_storage->storage_schema,
                                                               pk_col_idx,
-                                                              target_schema->columns.size(),
-                                                              heterogeneous);
+                                                              target_schema->columns.size());
 
         return ok(PlannedSource{std::move(op), std::move(enriched_schema)});
     }
