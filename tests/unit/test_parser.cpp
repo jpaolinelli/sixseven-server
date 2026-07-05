@@ -1395,6 +1395,34 @@ TEST(Parser, SelectWithMultipleCTEs) {
     EXPECT_EQ(sel->ctes[1].name, "b");
 }
 
+TEST(Parser, SelectWithCTENamedRecursiveIsNotConfusedWithKeyword) {
+    // A CTE legitimately named something other than "recursive" following a
+    // plain WITH must still parse normally (regression guard for GDB-1205).
+    auto stmt = parse_one("WITH recursively_named AS (SELECT 1) "
+                          "SELECT * FROM recursively_named");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->ctes.size(), 1u);
+    EXPECT_EQ(sel->ctes[0].name, "recursively_named");
+}
+
+TEST(Parser, WithRecursiveReturnsClearParseError) {
+    // GDB-1205: WITH RECURSIVE must produce an explicit, actionable parse
+    // error instead of silently treating RECURSIVE as the CTE name.
+    Lexer lexer("WITH RECURSIVE t AS (SELECT 1) SELECT * FROM t");
+    auto tokens = lexer.tokenize();
+    ASSERT_TRUE(tokens.has_value()) << tokens.error().message;
+
+    Parser parser(std::move(*tokens));
+    auto stmts = parser.parse_all();
+    ASSERT_FALSE(stmts.has_value());
+    EXPECT_EQ(stmts.error().code, StatusCode::PARSE_ERROR);
+    EXPECT_NE(stmts.error().message.find("recursive"), std::string::npos)
+        << "actual message: " << stmts.error().message;
+    EXPECT_NE(stmts.error().message.find("not supported"), std::string::npos)
+        << "actual message: " << stmts.error().message;
+}
+
 // -- Subquery in FROM ---------------------------------------------------------
 
 TEST(Parser, SelectSubqueryInFrom) {
