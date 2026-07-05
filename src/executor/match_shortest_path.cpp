@@ -396,7 +396,9 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
             ++total_visited;
 
             if (total_visited > max_visited_) {
-                return ok(std::move(result_paths));
+                return tl::unexpected(make_error(StatusCode::INVALID_ARGUMENT,
+                                                 "shortest path exceeded max_visited limit (" +
+                                                     std::to_string(max_visited_) + ")"));
             }
 
             auto neighbors = get_neighbors(edge_type, entry.current_node.pk, direction);
@@ -751,7 +753,9 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
         ++total_visited;
 
         if (total_visited > max_visited_) {
-            break;
+            return tl::unexpected(make_error(StatusCode::INVALID_ARGUMENT,
+                                             "shortest path exceeded max_visited limit (" +
+                                                 std::to_string(max_visited_) + ")"));
         }
 
         // If we've already found a path to the destination, check whether

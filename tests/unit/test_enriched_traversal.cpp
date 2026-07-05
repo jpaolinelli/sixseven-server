@@ -2,6 +2,7 @@
 #include "sixseven/common/result.h"
 #include "sixseven/common/types.h"
 #include "sixseven/common/value.h"
+#include "sixseven/executor/enriched_traversal.h"
 #include "sixseven/executor/query_engine.h"
 #include "sixseven/executor/storage_manager.h"
 #include "sixseven/graph/graph_engine.h"
@@ -331,6 +332,69 @@ TEST_F(EnrichedTraversalTest, NoTraceNoPathColumn) {
     for (const auto& name : qr.column_names) {
         EXPECT_NE(name, "__path") << "__path must not appear without WITH TRACE";
     }
+}
+
+// ============================================================================
+// GDB-1214: max_visited exceeded -> explicit error (unified across graph ops)
+// ============================================================================
+
+TEST_F(EnrichedTraversalTest, ExceedingMaxVisitedReturnsError) {
+    // The users graph reaches 5 nodes from user 1 (1,2,3,4,5). A max_visited
+    // of 2 is exceeded during BFS expansion, so open() must fail with an
+    // explicit error rather than silently truncating the enrichment results.
+    auto target_schema = catalog_.get_table(default_database_id, "users");
+    ASSERT_TRUE(target_schema.has_value()) << target_schema.error().message;
+    auto target_storage_result = storage_->get_table_storage(target_schema->table_id);
+    ASSERT_TRUE(target_storage_result.has_value()) << target_storage_result.error().message;
+    auto* target_storage = *target_storage_result;
+
+    size_t pk_col_idx = 0;
+    for (size_t i = 0; i < target_schema->columns.size(); ++i) {
+        if (target_schema->columns[i].name == target_schema->pk_columns) {
+            pk_col_idx = i;
+            break;
+        }
+    }
+
+    TraversalConfig config;
+    config.edge_type = "follows";
+    config.start_key = Value(int64_t{1});
+    config.direction = TraverseDirection::OUT;
+    config.max_depth = 100;
+    config.max_visited = 2;
+
+    std::vector<OutputColumn> cols;
+    for (const auto& col : target_schema->columns) {
+        cols.push_back({"", col.name, col.type_id, col.nullable, target_schema->table_id});
+    }
+    cols.push_back({"", "__node", TypeId::INT64, false, 0});
+    cols.push_back({"", "__depth", TypeId::INT64, false, 0});
+    cols.push_back({"", "__source", TypeId::INT64, true, 0});
+    OutputSchema schema(std::move(cols));
+
+    BoundStatement bound;
+    EnrichedTraversalOperator op(*graph_engine_,
+                                 std::move(config),
+                                 std::move(schema),
+                                 nullptr,
+                                 bound,
+                                 *target_storage->heap,
+                                 target_storage->storage_schema,
+                                 pk_col_idx,
+                                 target_schema->columns.size());
+
+    auto open_result = op.open();
+    ASSERT_FALSE(open_result.has_value());
+    EXPECT_EQ(open_result.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_NE(open_result.error().message.find("exceeded max_visited limit (2)"), std::string::npos)
+        << open_result.error().message;
+}
+
+TEST_F(EnrichedTraversalTest, UnderMaxVisitedLimitReturnsCompleteResults) {
+    // Regression guard: a generous max_visited budget must not affect
+    // correctness. Node 1 reaches 4 descendants (2,3,4,5) via BFS.
+    auto qr = exec_ok("SELECT id FROM TRAVERSE follows FROM users(1) DIRECTION OUT");
+    EXPECT_EQ(qr.rows.size(), 4u);
 }
 
 } // namespace

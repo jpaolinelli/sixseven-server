@@ -121,7 +121,9 @@ Result<void> TraversalOperator::run_bfs() {
         for (auto& [neighbor_pk, edge] : *neighbors) {
             // Check memory bound.
             if (visited.size() >= config_.max_visited) {
-                break;
+                return tl::unexpected(make_error(StatusCode::INVALID_ARGUMENT,
+                                                 "graph traversal exceeded max_visited limit (" +
+                                                     std::to_string(config_.max_visited) + ")"));
             }
 
             // Cycle detection: skip already-visited nodes.

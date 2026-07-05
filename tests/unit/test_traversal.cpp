@@ -179,10 +179,42 @@ TEST_F(TraversalTest, CycleHandling) {
     EXPECT_EQ(nodes[3], 5);
 }
 
-TEST_F(TraversalTest, MemoryBoundedVisitedSet) {
-    auto nodes = run_bfs(1, TraverseDirection::OUT, 100, 3);
-    // max_visited=3: start node (1) + at most 2 more nodes
-    EXPECT_LE(nodes.size(), 2u);
+TEST_F(TraversalTest, MemoryBoundedVisitedSetReturnsError) {
+    // GDB-1214: exceeding max_visited is now an explicit error, not a silent
+    // truncation. Node 1 has 4 reachable descendants (2,3,4,5); a budget of 3
+    // is exceeded during BFS expansion.
+    TraversalConfig config;
+    config.edge_type = "follows";
+    config.start_key = Value(static_cast<int64_t>(1));
+    config.direction = TraverseDirection::OUT;
+    config.max_depth = 100;
+    config.max_visited = 3;
+
+    std::vector<OutputColumn> cols;
+    cols.push_back({"", "node", TypeId::INT64, false, 0});
+    cols.push_back({"", "depth", TypeId::INT64, false, 0});
+    OutputSchema schema(std::move(cols));
+
+    BoundStatement bound;
+    TraversalOperator op(*graph_, std::move(config), std::move(schema), nullptr, bound);
+
+    auto open_result = op.open();
+    ASSERT_FALSE(open_result.has_value());
+    EXPECT_EQ(open_result.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_NE(open_result.error().message.find("exceeded max_visited limit (3)"), std::string::npos)
+        << open_result.error().message;
+}
+
+TEST_F(TraversalTest, UnderMaxVisitedLimitReturnsCompleteResults) {
+    // Regression guard: a generous max_visited budget must not affect
+    // correctness. Node 1 reaches 2,3,4,5 (4 nodes), well under the limit.
+    auto nodes = run_bfs(1, TraverseDirection::OUT, 100, 100000);
+    ASSERT_EQ(nodes.size(), 4u);
+    std::sort(nodes.begin(), nodes.end());
+    EXPECT_EQ(nodes[0], 2);
+    EXPECT_EQ(nodes[1], 3);
+    EXPECT_EQ(nodes[2], 4);
+    EXPECT_EQ(nodes[3], 5);
 }
 
 TEST_F(TraversalTest, TraversalResultsIncludeDepth) {
