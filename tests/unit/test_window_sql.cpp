@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "test_catalog_helpers.h"
@@ -115,23 +116,53 @@ TEST_F(WindowFunctionSQLTest, SelectStarWithRowNumber) {
 // =============================================================================
 
 TEST_F(WindowFunctionSQLTest, RankPartitionByDept) {
+    // Seeded salaries: Alice(Eng,80k), Bob(Eng,90k), Eve(Eng,95k), Charlie(Sales,70k),
+    // Dave(Sales,85k). RANK() PARTITION BY department ORDER BY salary DESC gives, per
+    // partition (descending salary; all salaries within each partition are distinct,
+    // so there are no ties to skip over):
+    //   Engineering: Eve=1, Bob=2, Alice=3
+    //   Sales:       Dave=1, Charlie=2
     auto qr = exec_ok("SELECT name, department, salary, "
                       "RANK() OVER (PARTITION BY department ORDER BY salary DESC) AS rnk "
                       "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5);
+
+    // Build a name -> rank map so the assertions are robust to output row order.
+    std::unordered_map<std::string, int64_t> rank_by_name;
     for (auto& row : qr.rows) {
-        EXPECT_GE(row[3].as_int64(), 1);
+        rank_by_name[row[0].as_string()] = row[3].as_int64();
     }
+    ASSERT_EQ(rank_by_name.size(), 5u);
+
+    EXPECT_EQ(rank_by_name.at("Eve"), 1);
+    EXPECT_EQ(rank_by_name.at("Bob"), 2);
+    EXPECT_EQ(rank_by_name.at("Alice"), 3);
+
+    EXPECT_EQ(rank_by_name.at("Dave"), 1);
+    EXPECT_EQ(rank_by_name.at("Charlie"), 2);
 }
 
 TEST_F(WindowFunctionSQLTest, DenseRank) {
+    // Seeded salaries (ascending, all distinct -- no ties):
+    // Charlie(70k), Alice(80k), Dave(85k), Bob(90k), Eve(95k).
+    // DENSE_RANK() OVER (ORDER BY salary) assigns consecutive ranks with no gaps
+    // since there are no ties: Charlie=1, Alice=2, Dave=3, Bob=4, Eve=5.
     auto qr = exec_ok("SELECT name, salary, "
                       "DENSE_RANK() OVER (ORDER BY salary) AS dr "
                       "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5);
+
+    std::unordered_map<std::string, int64_t> dr_by_name;
     for (auto& row : qr.rows) {
-        EXPECT_GE(row[2].as_int64(), 1);
+        dr_by_name[row[0].as_string()] = row[2].as_int64();
     }
+    ASSERT_EQ(dr_by_name.size(), 5u);
+
+    EXPECT_EQ(dr_by_name.at("Charlie"), 1);
+    EXPECT_EQ(dr_by_name.at("Alice"), 2);
+    EXPECT_EQ(dr_by_name.at("Dave"), 3);
+    EXPECT_EQ(dr_by_name.at("Bob"), 4);
+    EXPECT_EQ(dr_by_name.at("Eve"), 5);
 }
 
 // =============================================================================
