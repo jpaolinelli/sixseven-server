@@ -701,6 +701,11 @@ Result<TypeSpec> Parser::parse_type_spec() {
             bool got_source = false;
             bool got_provider = false;
             for (int param_count = 0; param_count < 2; ++param_count) {
+                // Capture the parameter-name token's position before consuming
+                // '=' and the value, so that duplicate/unknown-parameter
+                // errors point at the offending parameter rather than at
+                // whatever token happens to follow it once it's consumed.
+                Token name_tok = peek();
                 auto param_name = parse_name("parameter name");
                 if (!param_name)
                     return tl::unexpected(param_name.error());
@@ -721,18 +726,25 @@ Result<TypeSpec> Parser::parse_type_spec() {
 
                 if (name_lower == "source") {
                     if (got_source) {
-                        return parse_error_here("duplicate 'source' parameter");
+                        return annotate_error_at(
+                            Error(StatusCode::PARSE_ERROR, "duplicate 'source' parameter"),
+                            name_tok);
                     }
                     ts.source = unquote_string(param_val->lexeme);
                     got_source = true;
                 } else if (name_lower == "provider") {
                     if (got_provider) {
-                        return parse_error_here("duplicate 'provider' parameter");
+                        return annotate_error_at(
+                            Error(StatusCode::PARSE_ERROR, "duplicate 'provider' parameter"),
+                            name_tok);
                     }
                     ts.provider = unquote_string(param_val->lexeme);
                     got_provider = true;
                 } else {
-                    return parse_error_here("unknown EMBEDDING parameter '" + *param_name + "'");
+                    return annotate_error_at(
+                        Error(StatusCode::PARSE_ERROR,
+                              "unknown EMBEDDING parameter '" + *param_name + "'"),
+                        name_tok);
                 }
 
                 if (param_count == 0) {

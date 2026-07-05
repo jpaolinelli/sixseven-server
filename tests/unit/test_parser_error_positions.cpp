@@ -33,6 +33,15 @@ std::string parse_error_message(std::string_view sql) {
 
 } // namespace
 
+// Asserts that `msg` contains the exact "at line L, column C" substring.
+#define EXPECT_HAS_POSITION(msg, expected_line, expected_column)                                   \
+    do {                                                                                           \
+        std::string needle = "at line " + std::to_string(expected_line) + ", column " +            \
+                             std::to_string(expected_column);                                      \
+        EXPECT_NE((msg).find(needle), std::string::npos)                                           \
+            << "expected \"" << needle << "\" in: " << (msg);                                      \
+    } while (0)
+
 // -- MATCH(column) missing TO --------------------------------------------------
 
 TEST(ParserErrorPositions, MatchMissingToHasPosition) {
@@ -54,24 +63,42 @@ TEST(ParserErrorPositions, NearestMissingToHasPosition) {
 // -- EMBEDDING named-parameter errors -------------------------------------------
 
 TEST(ParserErrorPositions, EmbeddingDuplicateSourceHasPosition) {
+    // "CREATE TABLE t (e EMBEDDING(384, source='a', source='b'))"
+    //  123456789012345678901234567890123456789012345678901234567890
+    //           1         2         3         4         5
+    // The second `source='b'` starts at column 46 -- the error must
+    // point at the offending parameter, not at the trailing ')'.
     auto msg = parse_error_message("CREATE TABLE t (e EMBEDDING(384, source='a', source='b'))");
     EXPECT_NE(msg.find("duplicate 'source' parameter"), std::string::npos) << msg;
-    EXPECT_NE(msg.find("line"), std::string::npos) << msg;
-    EXPECT_NE(msg.find("column"), std::string::npos) << msg;
+    EXPECT_HAS_POSITION(msg, 1, 46);
 }
 
 TEST(ParserErrorPositions, EmbeddingDuplicateProviderHasPosition) {
+    // "CREATE TABLE t (e EMBEDDING(384, provider='a', provider='b'))"
+    // The second `provider='b'` starts at column 48.
     auto msg = parse_error_message("CREATE TABLE t (e EMBEDDING(384, provider='a', provider='b'))");
     EXPECT_NE(msg.find("duplicate 'provider' parameter"), std::string::npos) << msg;
-    EXPECT_NE(msg.find("line"), std::string::npos) << msg;
-    EXPECT_NE(msg.find("column"), std::string::npos) << msg;
+    EXPECT_HAS_POSITION(msg, 1, 48);
 }
 
 TEST(ParserErrorPositions, EmbeddingUnknownParameterHasPosition) {
+    // "CREATE TABLE t (e EMBEDDING(384, bogus='a'))"
+    // `bogus` starts at column 34.
     auto msg = parse_error_message("CREATE TABLE t (e EMBEDDING(384, bogus='a'))");
     EXPECT_NE(msg.find("unknown EMBEDDING parameter"), std::string::npos) << msg;
-    EXPECT_NE(msg.find("line"), std::string::npos) << msg;
-    EXPECT_NE(msg.find("column"), std::string::npos) << msg;
+    EXPECT_HAS_POSITION(msg, 1, 34);
+}
+
+TEST(ParserErrorPositions, EmbeddingDuplicateSourceMultilineHasPosition) {
+    // Split across lines so that the offending `source='b'` sits on line 3;
+    // if the position were wrong (pointing at the trailing ')' on line 4)
+    // this would fail.
+    auto msg = parse_error_message("CREATE TABLE t (\n"
+                                   "  e EMBEDDING(384, source='a',\n"
+                                   "  source='b'\n"
+                                   "))");
+    EXPECT_NE(msg.find("duplicate 'source' parameter"), std::string::npos) << msg;
+    EXPECT_HAS_POSITION(msg, 3, 3);
 }
 
 // Note: the "EMBEDDING missing required 'source'/'provider' parameter" checks
