@@ -12,6 +12,8 @@
 #include <set>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // -- Helpers ------------------------------------------------------------------
@@ -668,6 +670,7 @@ static TableSchema make_table_schema(const std::string& name) {
 class QA_GraphEngine : public ::testing::Test {
 protected:
     void SetUp() override {
+        bootstrap_qa_catalog(catalog_);
         auto t1 = catalog_.create_table(default_database_id, make_table_schema("users"));
         ASSERT_TRUE(t1.has_value()) << t1.error().message;
         users_id_ = *t1;

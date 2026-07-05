@@ -38,6 +38,8 @@
 #include <string>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -88,6 +90,7 @@ protected:
         std::filesystem::create_directories(data_dir_);
 
         catalog_ = std::make_unique<Catalog>();
+        bootstrap_qa_catalog(*catalog_);
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         graph_ = std::make_unique<GraphEngine>(*catalog_);
 

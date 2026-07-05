@@ -23,6 +23,8 @@
 #include <string>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -38,6 +40,7 @@ protected:
         std::filesystem::create_directories(data_dir_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
+        bootstrap_qa_catalog(catalog_);
         graph_engine_ = std::make_unique<GraphEngine>(catalog_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_, graph_engine_.get());
 
@@ -117,8 +120,7 @@ protected:
 
 TEST_F(QA_GDB549, SelectStarReturnsCorrectColumnCount) {
     auto result = exec_ok("SELECT * FROM pagerank('knows')");
-    EXPECT_EQ(result.column_names.size(), 2u)
-        << "SELECT * should return 2 columns (node_id, rank)";
+    EXPECT_EQ(result.column_names.size(), 2u) << "SELECT * should return 2 columns (node_id, rank)";
     EXPECT_EQ(result.rows.size(), 2u);
 }
 
@@ -198,8 +200,8 @@ TEST_F(QA_GDB549, OrderByNodeIdAsc) {
 // ============================================================================
 
 TEST_F(QA_GDB549, NamedParamsWithColumnAccess) {
-    auto result = exec_ok(
-        "SELECT node_id, rank FROM pagerank('knows', damping := 0.5) ORDER BY node_id");
+    auto result =
+        exec_ok("SELECT node_id, rank FROM pagerank('knows', damping := 0.5) ORDER BY node_id");
     EXPECT_EQ(result.column_names.size(), 2u);
     EXPECT_EQ(result.rows.size(), 2u);
 }

@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -28,6 +30,7 @@ static TableSchema make_table(const std::string& name) {
 
 TEST(QA_GDB99_Edge, CreateEdgeType) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto src = catalog.create_table(default_database_id, make_table("person"));
     auto tgt = catalog.create_table(default_database_id, make_table("company"));
     ASSERT_TRUE(src.has_value());
@@ -52,6 +55,7 @@ TEST(QA_GDB99_Edge, CreateEdgeType) {
 
 TEST(QA_GDB99_Edge, SelfReferenceEdge) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto t = catalog.create_table(default_database_id, make_table("person"));
     ASSERT_TRUE(t.has_value());
 
@@ -66,6 +70,7 @@ TEST(QA_GDB99_Edge, SelfReferenceEdge) {
 
 TEST(QA_GDB99_Edge, DuplicateEdgeTypeName) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto t = catalog.create_table(default_database_id, make_table("t"));
     ASSERT_TRUE(t.has_value());
 
@@ -82,6 +87,7 @@ TEST(QA_GDB99_Edge, DuplicateEdgeTypeName) {
 
 TEST(QA_GDB99_Edge, MissingSourceTable) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto t = catalog.create_table(default_database_id, make_table("t"));
     ASSERT_TRUE(t.has_value());
 
@@ -93,6 +99,7 @@ TEST(QA_GDB99_Edge, MissingSourceTable) {
 
 TEST(QA_GDB99_Edge, MissingTargetTable) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto t = catalog.create_table(default_database_id, make_table("t"));
     ASSERT_TRUE(t.has_value());
 
@@ -108,6 +115,7 @@ TEST(QA_GDB99_Edge, MissingTargetTable) {
 
 TEST(QA_GDB99_Edge, DropEdgeType) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto t = catalog.create_table(default_database_id, make_table("t"));
     ASSERT_TRUE(t.has_value());
 
@@ -122,6 +130,7 @@ TEST(QA_GDB99_Edge, DropEdgeType) {
 
 TEST(QA_GDB99_Edge, DropNonexistentEdgeType) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto r = catalog.drop_edge_type(default_database_id, "nonexistent");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::NOT_FOUND);
@@ -129,6 +138,7 @@ TEST(QA_GDB99_Edge, DropNonexistentEdgeType) {
 
 TEST(QA_GDB99_Edge, CascadeDropSourceTable) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto src = catalog.create_table(default_database_id, make_table("src"));
     auto tgt = catalog.create_table(default_database_id, make_table("tgt"));
     ASSERT_TRUE(src.has_value());
@@ -147,6 +157,7 @@ TEST(QA_GDB99_Edge, CascadeDropSourceTable) {
 
 TEST(QA_GDB99_Edge, CascadeDropTargetTable) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto src = catalog.create_table(default_database_id, make_table("src"));
     auto tgt = catalog.create_table(default_database_id, make_table("tgt"));
     ASSERT_TRUE(src.has_value());
@@ -164,6 +175,7 @@ TEST(QA_GDB99_Edge, CascadeDropTargetTable) {
 
 TEST(QA_GDB99_Edge, CascadeSelfRefOnDrop) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto t = catalog.create_table(default_database_id, make_table("t"));
     ASSERT_TRUE(t.has_value());
 
@@ -182,6 +194,7 @@ TEST(QA_GDB99_Edge, CascadeSelfRefOnDrop) {
 
 TEST(QA_GDB99_Edge, ListEdgeTypes) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto t1 = catalog.create_table(default_database_id, make_table("t1"));
     auto t2 = catalog.create_table(default_database_id, make_table("t2"));
     ASSERT_TRUE(t1.has_value());
@@ -202,6 +215,7 @@ TEST(QA_GDB99_Edge, ListEdgeTypes) {
 
 TEST(QA_GDB99_Edge, ListEdgeTypesEmpty) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto edges = catalog.list_edge_types(default_database_id);
     EXPECT_TRUE(edges.empty());
 }
@@ -260,6 +274,7 @@ TEST(QA_GDB99_SysSchema, SysEmbeddingColumnsSchema) {
 
 TEST(QA_GDB99_Embedding, RegisterColumn) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto t = catalog.create_table(default_database_id, make_table("docs"));
     ASSERT_TRUE(t.has_value());
 
@@ -282,6 +297,7 @@ TEST(QA_GDB99_Embedding, RegisterColumn) {
 
 TEST(QA_GDB99_Embedding, RegisterDuplicate) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto t = catalog.create_table(default_database_id, make_table("docs"));
     ASSERT_TRUE(t.has_value());
 
@@ -297,6 +313,7 @@ TEST(QA_GDB99_Embedding, RegisterDuplicate) {
 
 TEST(QA_GDB99_Embedding, RegisterOnNonexistentTable) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     EmbeddingColumnDef def{9999, 0, 128, "text", "provider"};
     auto r = catalog.register_embedding_column(def);
     ASSERT_FALSE(r.has_value());
@@ -305,6 +322,7 @@ TEST(QA_GDB99_Embedding, RegisterOnNonexistentTable) {
 
 TEST(QA_GDB99_Embedding, CascadeDropTable) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto t = catalog.create_table(default_database_id, make_table("docs"));
     ASSERT_TRUE(t.has_value());
 
@@ -323,6 +341,7 @@ TEST(QA_GDB99_Embedding, CascadeDropTable) {
 
 TEST(QA_GDB99_Embedding, MultipleColumnsOneTable) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto t = catalog.create_table(default_database_id, make_table("docs"));
     ASSERT_TRUE(t.has_value());
 
@@ -336,6 +355,7 @@ TEST(QA_GDB99_Embedding, MultipleColumnsOneTable) {
 
 TEST(QA_GDB99_Embedding, ListAllAcrossTables) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto t1 = catalog.create_table(default_database_id, make_table("t1"));
     auto t2 = catalog.create_table(default_database_id, make_table("t2"));
     ASSERT_TRUE(t1.has_value());
@@ -354,6 +374,7 @@ TEST(QA_GDB99_Embedding, ListAllAcrossTables) {
 
 TEST(QA_GDB99_Provider, RegisterAndGet) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
 
     EmbeddingProviderConfig cfg;
     cfg.name = "ollama/all-minilm";
@@ -374,6 +395,7 @@ TEST(QA_GDB99_Provider, RegisterAndGet) {
 
 TEST(QA_GDB99_Provider, DuplicateProvider) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     EmbeddingProviderConfig cfg{"p1", "ollama", "", "", "", 384};
 
     auto r1 = catalog.register_embedding_provider(cfg);
@@ -386,6 +408,7 @@ TEST(QA_GDB99_Provider, DuplicateProvider) {
 
 TEST(QA_GDB99_Provider, RemoveProvider) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     (void)catalog.register_embedding_provider({"p1", "ollama", "", "", "", 384});
 
     auto dr = catalog.remove_embedding_provider("p1");
@@ -397,6 +420,7 @@ TEST(QA_GDB99_Provider, RemoveProvider) {
 
 TEST(QA_GDB99_Provider, RemoveNonexistent) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto r = catalog.remove_embedding_provider("nonexistent");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::NOT_FOUND);
@@ -404,6 +428,7 @@ TEST(QA_GDB99_Provider, RemoveNonexistent) {
 
 TEST(QA_GDB99_Provider, ListProviders) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     (void)catalog.register_embedding_provider({"z_provider", "ollama", "", "", "", 384});
     (void)catalog.register_embedding_provider({"a_provider", "openai", "", "", "", 768});
     (void)catalog.register_embedding_provider({"m_provider", "onnx", "", "", "", 128});
@@ -423,6 +448,7 @@ TEST(QA_GDB99_Provider, ListProviders) {
 
 TEST(QA_GDB99_Stress, ManyEdgeTypesAndEmbeddings) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
 
     // Create 10 tables
     std::vector<table_id_t> table_ids;

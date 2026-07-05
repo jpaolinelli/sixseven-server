@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 
 // ===========================================================================
@@ -148,6 +150,7 @@ protected:
     std::unique_ptr<Binder> binder;
 
     void SetUp() override {
+        bootstrap_qa_catalog(catalog);
         // Table: users(id INT32, name STRING, age INT32, active BOOL)
         {
             TableSchema s;

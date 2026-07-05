@@ -24,6 +24,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -39,6 +41,7 @@ protected:
         std::filesystem::create_directories(data_dir_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
+        bootstrap_qa_catalog(catalog_);
         graph_engine_ = std::make_unique<GraphEngine>(catalog_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_, graph_engine_.get());
 
@@ -91,27 +94,24 @@ protected:
 TEST_F(QA_GDB553, FromMatchVariableLength_ReturnsMultiHopResults) {
     // FROM MATCH with {1,3} should return 1, 2, and 3 hop results.
     // Starting from node 1: should reach 2 (1 hop), 3 (2 hops), 4 (3 hops).
-    auto result = exec_ok(
-        "SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->{1,3}(b:persons) "
-        "WHERE a.id = 1");
+    auto result = exec_ok("SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->{1,3}(b:persons) "
+                          "WHERE a.id = 1");
     EXPECT_GE(result.rows.size(), 3u)
         << "Variable-length {1,3} from node 1 should return at least 3 results";
 }
 
 TEST_F(QA_GDB553, FromMatchVariableLength_ExactHops) {
     // {2,2} should return exactly 2-hop results.
-    auto result = exec_ok(
-        "SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->{2,2}(b:persons) "
-        "WHERE a.id = 1");
+    auto result = exec_ok("SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->{2,2}(b:persons) "
+                          "WHERE a.id = 1");
     // From node 1: 2 hops reaches node 3. Should get exactly 1 result.
     EXPECT_GE(result.rows.size(), 1u);
 }
 
 TEST_F(QA_GDB553, FromMatchVariableLength_LargeRange) {
     // {1,6} should reach all nodes in the chain from node 1.
-    auto result = exec_ok(
-        "SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->{1,6}(b:persons) "
-        "WHERE a.id = 1");
+    auto result = exec_ok("SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->{1,6}(b:persons) "
+                          "WHERE a.id = 1");
     // Should reach nodes 2,3,4,5,6 = 5 results.
     EXPECT_EQ(result.rows.size(), 5u)
         << "Variable-length {1,6} from node 1 should reach all 5 other nodes";
@@ -119,40 +119,34 @@ TEST_F(QA_GDB553, FromMatchVariableLength_LargeRange) {
 
 TEST_F(QA_GDB553, FromMatchFixedLength_StillWorks) {
     // Non-variable-length FROM MATCH should still use PatternMatchOperator.
-    auto result = exec_ok(
-        "SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->(b:persons) "
-        "WHERE a.id = 1");
+    auto result = exec_ok("SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->(b:persons) "
+                          "WHERE a.id = 1");
     // Single hop from node 1 should reach node 2.
     EXPECT_GE(result.rows.size(), 1u);
 }
 
 TEST_F(QA_GDB553, FromMatchPlusShorthand) {
     // `+` should be equivalent to {1,inf}.
-    auto result = exec_ok(
-        "SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->+(b:persons) "
-        "WHERE a.id = 1");
-    EXPECT_GE(result.rows.size(), 5u)
-        << "+ should reach all reachable nodes";
+    auto result = exec_ok("SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->+(b:persons) "
+                          "WHERE a.id = 1");
+    EXPECT_GE(result.rows.size(), 5u) << "+ should reach all reachable nodes";
 }
 
 TEST_F(QA_GDB553, FromMatchStarShorthand) {
     // `*` should be equivalent to {0,inf}.
-    auto result = exec_ok(
-        "SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->*(b:persons) "
-        "WHERE a.id = 1");
+    auto result = exec_ok("SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->*(b:persons) "
+                          "WHERE a.id = 1");
     // Should include self (0 hops) + all reachable = 6 results.
-    EXPECT_GE(result.rows.size(), 6u)
-        << "* should include self + all reachable nodes";
+    EXPECT_GE(result.rows.size(), 6u) << "* should include self + all reachable nodes";
 }
 
 TEST_F(QA_GDB553, FromMatch_VsStandaloneMatch_SameResults) {
     // FROM MATCH and standalone MATCH RETURN should give the same variable-length results.
-    auto from_result = exec_ok(
-        "SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->{1,3}(b:persons) "
-        "WHERE a.id = 1 ORDER BY b.id");
-    auto match_result = exec_ok(
-        "MATCH (a:persons)-[r:knows]->{1,3}(b:persons) "
-        "WHERE a.id = 1 RETURN a.id, b.id ORDER BY b.id");
+    auto from_result =
+        exec_ok("SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->{1,3}(b:persons) "
+                "WHERE a.id = 1 ORDER BY b.id");
+    auto match_result = exec_ok("MATCH (a:persons)-[r:knows]->{1,3}(b:persons) "
+                                "WHERE a.id = 1 RETURN a.id, b.id ORDER BY b.id");
 
     EXPECT_EQ(from_result.rows.size(), match_result.rows.size())
         << "FROM MATCH and standalone MATCH should return the same number of results";
@@ -163,9 +157,8 @@ TEST_F(QA_GDB553, FromMatch_VsStandaloneMatch_SameResults) {
 // ============================================================================
 
 TEST_F(QA_GDB553, FromMatchZeroMin_IncludesSelf) {
-    auto result = exec_ok(
-        "SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->{0,1}(b:persons) "
-        "WHERE a.id = 1");
+    auto result = exec_ok("SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->{0,1}(b:persons) "
+                          "WHERE a.id = 1");
     // Should include: self (0 hops, a.id=1 b.id=1) + 1-hop (b.id=2).
     EXPECT_GE(result.rows.size(), 2u);
 }

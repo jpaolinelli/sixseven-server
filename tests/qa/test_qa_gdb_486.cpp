@@ -24,6 +24,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // ---------------------------------------------------------------------------
@@ -112,6 +114,7 @@ void verify_communities(const std::unordered_map<int64_t, int64_t>& communities,
 class QA_GDB486 : public ::testing::Test {
 protected:
     void SetUp() override {
+        bootstrap_qa_catalog(catalog_);
         auto t = catalog_.create_table(default_database_id, make_table_schema("nodes"));
         ASSERT_TRUE(t.has_value()) << t.error().message;
         table_id_ = *t;

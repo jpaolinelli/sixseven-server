@@ -25,6 +25,8 @@
 #include <string>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -39,6 +41,7 @@ protected:
         std::filesystem::create_directories(data_dir_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
+        bootstrap_qa_catalog(catalog_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
         provider_registry_ = std::make_unique<ProviderRegistry>(catalog_);
     }

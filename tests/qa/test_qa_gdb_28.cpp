@@ -26,6 +26,8 @@
 #include <string>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -37,6 +39,7 @@ class QA_Traversal : public ::testing::Test {
 protected:
     void SetUp() override {
         catalog_ = std::make_unique<Catalog>();
+        bootstrap_qa_catalog(*catalog_);
         graph_ = std::make_unique<GraphEngine>(*catalog_);
 
         TableSchema ts;
@@ -393,6 +396,7 @@ class QA_ShortestPath : public ::testing::Test {
 protected:
     void SetUp() override {
         catalog_ = std::make_unique<Catalog>();
+        bootstrap_qa_catalog(*catalog_);
         graph_ = std::make_unique<GraphEngine>(*catalog_);
 
         TableSchema ts;
@@ -704,6 +708,7 @@ protected:
         std::filesystem::create_directories(data_dir_);
 
         catalog_ = std::make_unique<Catalog>();
+        bootstrap_qa_catalog(*catalog_);
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         graph_ = std::make_unique<GraphEngine>(*catalog_);
 

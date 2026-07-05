@@ -23,6 +23,8 @@
 #include <set>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // -- Helpers ------------------------------------------------------------------
@@ -413,6 +415,7 @@ private:
 /// (backward compatibility).
 TEST(QA_GraphEngineWAL, NullptrWalBackwardCompat) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine engine(catalog, nullptr);
 
     auto t1 = catalog.create_table(default_database_id, make_table_schema("users"));
@@ -455,6 +458,7 @@ TEST(QA_GraphEngineWAL, LinkWritesWalRecord) {
     lsn_t lsn_before = wal_writer->current_lsn();
 
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine engine(catalog, wal_writer.get());
 
     auto t1 = catalog.create_table(default_database_id, make_table_schema("nodes"));
@@ -505,6 +509,7 @@ TEST(QA_GraphEngineWAL, UnlinkWritesWalRecord) {
     ASSERT_TRUE(wal_writer->open().has_value());
 
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine engine(catalog, wal_writer.get());
 
     auto t1 = catalog.create_table(default_database_id, make_table_schema("nodes"));
@@ -560,6 +565,7 @@ TEST(QA_GraphEngineWAL, MultipleLinkUnlinkAccumulateWalRecords) {
     ASSERT_TRUE(wal_writer->open().has_value());
 
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine engine(catalog, wal_writer.get());
 
     auto t1 = catalog.create_table(default_database_id, make_table_schema("nodes"));
@@ -622,6 +628,7 @@ TEST(QA_GraphEngineWAL, FailedLinkDoesNotWriteWalRecord) {
     ASSERT_TRUE(wal_writer->open().has_value());
 
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine engine(catalog, wal_writer.get());
 
     auto t1 = catalog.create_table(default_database_id, make_table_schema("nodes"));

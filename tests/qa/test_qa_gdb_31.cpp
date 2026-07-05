@@ -20,6 +20,8 @@
 #include <thread>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // =============================================================================
@@ -232,6 +234,7 @@ static EmbeddingJob make_qa31_update_job(table_id_t table_id,
 
 TEST(QA_EmbeddingColumn, NegativeDimensionFails) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_qa31_schema("neg_dim"));
@@ -250,6 +253,7 @@ TEST(QA_EmbeddingColumn, NegativeDimensionFails) {
 
 TEST(QA_EmbeddingColumn, EmptyEmbeddingDefsSucceeds) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_qa31_schema("empty_defs"));
@@ -267,6 +271,7 @@ TEST(QA_EmbeddingColumn, EmptyEmbeddingDefsSucceeds) {
 
 TEST(QA_EmbeddingColumn, InsertJobsNoMatchingSourceText) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_qa31_schema("no_match"));
@@ -289,6 +294,7 @@ TEST(QA_EmbeddingColumn, InsertJobsNoMatchingSourceText) {
 
 TEST(QA_EmbeddingColumn, UpdateJobsCaseSensitiveSourceExpr) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_qa31_schema("case_test"));
@@ -310,6 +316,7 @@ TEST(QA_EmbeddingColumn, UpdateJobsCaseSensitiveSourceExpr) {
 
 TEST(QA_EmbeddingColumn, UpdateJobsSourceExprWithExtraWhitespace) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_qa31_schema("ws_test"));
@@ -330,6 +337,7 @@ TEST(QA_EmbeddingColumn, UpdateJobsSourceExprWithExtraWhitespace) {
 
 TEST(QA_EmbeddingColumn, UpdateJobsSourceExprPartialColumnNameNoMatch) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_qa31_schema("partial_test"));
@@ -350,6 +358,7 @@ TEST(QA_EmbeddingColumn, UpdateJobsSourceExprPartialColumnNameNoMatch) {
 
 TEST(QA_EmbeddingColumn, DescribeNonExistentTableReturnsEmpty) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     // Table ID 99999 doesn't exist — describe should return empty, not crash.
@@ -368,6 +377,7 @@ TEST(QA_EmbeddingColumn, MakeIndexNameWithSpecialChars) {
 
 TEST(QA_EmbeddingColumn, RegisterWithVeryLargeDimension) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_qa31_schema("large_dim"));
@@ -715,6 +725,7 @@ TEST(QA_BuiltinProvider, RepeatedWordProducesValidVector) {
 
 TEST(QA_ProviderRegistry, ResolveEmptyNameFails) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     ProviderRegistry registry(catalog);
 
     auto result = registry.resolve("");
@@ -724,6 +735,7 @@ TEST(QA_ProviderRegistry, ResolveEmptyNameFails) {
 
 TEST(QA_ProviderRegistry, ResolveSlashOnlyFails) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     ProviderRegistry registry(catalog);
 
     auto result = registry.resolve("/");
@@ -733,6 +745,7 @@ TEST(QA_ProviderRegistry, ResolveSlashOnlyFails) {
 
 TEST(QA_ProviderRegistry, ResolveLeadingSlashFails) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     ProviderRegistry registry(catalog);
 
     auto result = registry.resolve("/model");
@@ -742,6 +755,7 @@ TEST(QA_ProviderRegistry, ResolveLeadingSlashFails) {
 
 TEST(QA_ProviderRegistry, ResolveTrailingSlashFails) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     ProviderRegistry registry(catalog);
 
     auto result = registry.resolve("type/");
@@ -751,6 +765,7 @@ TEST(QA_ProviderRegistry, ResolveTrailingSlashFails) {
 
 TEST(QA_ProviderRegistry, ResolveMultipleSlashesRejected) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     ProviderRegistry registry(catalog);
 
     // "builtin/128/extra" → type="builtin", model="128/extra".
@@ -763,6 +778,7 @@ TEST(QA_ProviderRegistry, ResolveMultipleSlashesRejected) {
 
 TEST(QA_ProviderRegistry, ResolveBuiltinNonNumericModelRejected) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     ProviderRegistry registry(catalog);
 
     // "builtin/abc" → model="abc", stoul fails; the corrected impl returns
@@ -774,6 +790,7 @@ TEST(QA_ProviderRegistry, ResolveBuiltinNonNumericModelRejected) {
 
 TEST(QA_ProviderRegistry, OllamaWithoutBaseUrlFails) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
 
     EmbeddingProviderConfig config;
     config.name = "test-ollama";
@@ -790,6 +807,7 @@ TEST(QA_ProviderRegistry, OllamaWithoutBaseUrlFails) {
 
 TEST(QA_ProviderRegistry, ConcurrentResolve) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     ProviderRegistry registry(catalog);
 
     // Resolve from multiple threads simultaneously — tests cache thread safety.
@@ -922,6 +940,7 @@ TEST(QA_OpenAIProvider, EmptyApiKey) {
 
 TEST(QA_EmbeddingColumnE2E, RegisterThenDropTableCleanup) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_qa31_schema("cleanup_test"));
@@ -950,6 +969,7 @@ TEST(QA_EmbeddingColumnE2E, FullPipeline) {
     // Simulate the full flow: register embedding → create insert jobs →
     // enqueue → process → verify stored.
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_qa31_schema("pipeline_test"));
@@ -1008,6 +1028,7 @@ TEST(QA_EmbeddingColumnE2E, FullPipeline) {
 TEST(QA_EmbeddingColumnE2E, UpdateThenInsertPriority) {
     // Verify that insert jobs are processed before update jobs.
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     EmbeddingColumnManager mgr(catalog);
 
     auto tid = catalog.create_table(default_database_id, make_qa31_schema("priority_test"));
