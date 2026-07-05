@@ -6,6 +6,7 @@
 /// idempotency, error-in-batch skip-until-Sync, Flush no-op, NULL params,
 /// overwrite semantics, multiple Syncs, etc.
 
+#include "sixseven/common/platform.h"
 #include "sixseven/common/result.h"
 #include "sixseven/common/types.h"
 #include "sixseven/common/value.h"
@@ -14,8 +15,6 @@
 #include "sixseven/server/pg_protocol.h"
 
 #include <gtest/gtest.h>
-
-#include "sixseven/common/platform.h"
 
 #include <cstdint>
 #include <cstring>
@@ -290,18 +289,32 @@ void append(std::vector<uint8_t>& dest, const std::vector<uint8_t>& src) {
 class QA147ExtendedTest : public ::testing::Test {
 protected:
     void SetUp() override {
+#if defined(_WIN32)
+        // write_to_fd147()/read_from_fd147() use raw ::write()/::read() (CRT
+        // lowio) on a socketpair-derived handle. On POSIX that handle is a
+        // plain fd, so this works; on Windows,
+        // sixseven_platform::socketpair() returns a real SOCKET (emulated via
+        // loopback TCP), and CRT ::write()/::read() assert "invalid file
+        // handle" when given a SOCKET instead of a CRT fd. Skip the whole
+        // fixture on Windows rather than reworking every helper to route
+        // through winsock send()/recv(), matching the POSIX-only guard idiom
+        // used elsewhere in this suite (e.g. test_qa_gdb_145.cpp).
+        GTEST_SKIP() << "raw ::write()/::read() on a socketpair SOCKET handle is POSIX-only";
+        return;
+#endif
         server_fd_ = create_socketpair147(client_fd_);
         conn_ = std::make_unique<Connection>(server_fd_);
         handler_ = std::make_unique<PgProtocolHandler>(42);
 
         call_count_ = 0;
-        handler_->set_query_executor([this](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
-            ++call_count_;
-            last_sql_ = sql;
-            QueryResult qr;
-            qr.message = "OK";
-            return ok(std::move(qr));
-        });
+        handler_->set_query_executor(
+            [this](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
+                ++call_count_;
+                last_sql_ = sql;
+                QueryResult qr;
+                qr.message = "OK";
+                return ok(std::move(qr));
+            });
 
         // Complete startup handshake.
         auto startup = build_startup147({{"user", "test"}, {"database", "testdb"}});
@@ -318,6 +331,11 @@ protected:
     }
 
     void TearDown() override {
+#if defined(_WIN32)
+        // SetUp() skipped before conn_/client_fd_ were initialized; nothing
+        // to tear down.
+        return;
+#endif
         conn_->close();
         sixseven_platform::socket_close(client_fd_);
     }
@@ -846,9 +864,10 @@ TEST_F(QA147ExtendedTest, MultipleNamedStatementsCoexist) {
 // =============================================================================
 
 TEST_F(QA147ExtendedTest, ExecuteWithFailingQueryExecutor) {
-    handler_->set_query_executor([](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
-        return Result<QueryResult>(make_error(StatusCode::PARSE_ERROR, "syntax error near X"));
-    });
+    handler_->set_query_executor(
+        [](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
+            return Result<QueryResult>(make_error(StatusCode::PARSE_ERROR, "syntax error near X"));
+        });
 
     std::vector<uint8_t> batch;
     append(batch, build_parse147("", "BAD SQL"));

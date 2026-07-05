@@ -223,6 +223,47 @@ TEST(TupleSerializer, EmptyString) {
     EXPECT_EQ((*result)[0].as_string(), "");
 }
 
+// Regression test: a trailing zero-length variable-length field (e.g. the
+// last of several empty STRING columns) has a serialized offset equal to
+// data.size() (one past the last valid index). deserialize()/get_field()
+// must form a pointer to that offset without indexing through
+// std::span::operator[], which asserts on out-of-range access even though
+// forming a one-past-the-end pointer and reading zero bytes from it is
+// well-defined. Pre-fix, this crashed with "span subscript out of range"
+// under MSVC's checked STL.
+TEST(TupleSerializer, MultipleEmptyStringsRoundTrip) {
+    Schema schema({
+        {"a", TypeId::STRING},
+        {"b", TypeId::STRING},
+        {"c", TypeId::STRING},
+    });
+
+    std::vector<Value> values = {
+        Value(std::string{""}),
+        Value(std::string{""}),
+        Value(std::string{""}),
+    };
+
+    auto buf = TupleSerializer::serialize(values, schema);
+    ASSERT_TRUE(buf.has_value()) << buf.error().message;
+
+    auto result = TupleSerializer::deserialize(*buf, schema);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->size(), 3u);
+
+    for (size_t i = 0; i < 3; ++i) {
+        ASSERT_FALSE((*result)[i].is_null()) << "column " << i << " should not be null";
+        EXPECT_EQ((*result)[i].as_string(), "") << "column " << i;
+    }
+
+    // get_field() on the trailing (last) column exercises the same
+    // one-past-the-end offset via a different code path.
+    auto last_field = TupleSerializer::get_field(*buf, schema, 2);
+    ASSERT_TRUE(last_field.has_value()) << last_field.error().message;
+    ASSERT_FALSE(last_field->is_null());
+    EXPECT_EQ(last_field->as_string(), "");
+}
+
 TEST(TupleSerializer, ValueCountMismatch) {
     Schema schema({{"a", TypeId::INT32}, {"b", TypeId::STRING}});
     std::vector<Value> values = {Value(int32_t{1})};
