@@ -75,10 +75,6 @@ private:
     /// Get all source PKs from a table.
     Result<std::vector<Value>> get_all_pks(const std::string& table_name) const;
 
-    /// Get neighbors of a node via an edge type, respecting direction.
-    Result<std::vector<std::pair<Value, int64_t>>>
-    get_neighbors(const std::string& edge_type, const Value& pk, TraverseDirection direction) const;
-
     /// Convert a binding (variable -> PK map) + path to an output tuple.
     Result<Tuple> binding_to_tuple(const std::unordered_map<std::string, Value>& binding,
                                    const Path* path_value) const;
