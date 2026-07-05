@@ -1,7 +1,8 @@
 #include "sixseven/vector/builtin_provider.h"
 
+#include "sixseven/vector/word_tokenizer.h"
+
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <numeric>
@@ -101,23 +102,7 @@ void BuiltinProvider::hash_word_into(const std::string& word, std::vector<float>
 
 std::vector<std::string> BuiltinProvider::tokenize(const std::string& text) {
     std::vector<std::string> words;
-    std::string current_word;
-
-    for (char c : text) {
-        if (std::isalnum(static_cast<unsigned char>(c))) {
-            current_word += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        } else {
-            if (!current_word.empty()) {
-                words.push_back(std::move(current_word));
-                current_word.clear();
-            }
-        }
-    }
-
-    if (!current_word.empty()) {
-        words.push_back(std::move(current_word));
-    }
-
+    for_each_lower_word(text, [&](const std::string& word) { words.push_back(word); });
     return words;
 }
 

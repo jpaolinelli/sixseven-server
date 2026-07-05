@@ -1,6 +1,7 @@
 #include "sixseven/vector/tokenizer.h"
 
-#include <cctype>
+#include "sixseven/vector/word_tokenizer.h"
+
 #include <functional>
 #include <string>
 
@@ -26,25 +27,12 @@ std::vector<int64_t> HashTokenizer::encode(const std::string& text, size_t max_l
     std::vector<int64_t> tokens;
     tokens.push_back(special_tokens_.cls);
 
-    std::string current_word;
-    for (char c : text) {
-        if (std::isalnum(static_cast<unsigned char>(c))) {
-            current_word += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        } else {
-            if (!current_word.empty()) {
-                if (tokens.size() < max_length - 1) {
-                    auto hash = std::hash<std::string>{}(current_word);
-                    tokens.push_back(static_cast<int64_t>(hash % VOCAB_SIZE) + VOCAB_OFFSET);
-                }
-                current_word.clear();
-            }
+    for_each_lower_word(text, [&](const std::string& word) {
+        if (tokens.size() < max_length - 1) {
+            auto hash = std::hash<std::string>{}(word);
+            tokens.push_back(static_cast<int64_t>(hash % VOCAB_SIZE) + VOCAB_OFFSET);
         }
-    }
-    // Flush the last word.
-    if (!current_word.empty() && tokens.size() < max_length - 1) {
-        auto hash = std::hash<std::string>{}(current_word);
-        tokens.push_back(static_cast<int64_t>(hash % VOCAB_SIZE) + VOCAB_OFFSET);
-    }
+    });
 
     tokens.push_back(special_tokens_.sep);
 
