@@ -1,6 +1,7 @@
 #include "sixseven/server/auth.h"
 
 #include "sixseven/common/logging.h"
+#include "sixseven/common/string_util.h"
 
 #include <algorithm>
 #include <cctype>
@@ -25,11 +26,7 @@ namespace sixseven {
 // -- Auth method parsing ------------------------------------------------------
 
 Result<AuthMethod> parse_auth_method(const std::string& name) {
-    std::string lower;
-    lower.reserve(name.size());
-    for (char c : name) {
-        lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
+    std::string lower = to_lower(name);
 
     if (lower == "trust") {
         return ok(AuthMethod::TRUST);

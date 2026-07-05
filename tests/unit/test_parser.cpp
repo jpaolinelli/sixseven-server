@@ -217,6 +217,32 @@ TEST(Parser, CreateTableEmbedding) {
     EXPECT_EQ(ct->columns[2].type.provider, "openai");
 }
 
+// GDB-1221: named-parameter keys for EMBEDDING (source=/provider=) must be
+// matched case-insensitively, mirroring the shared sixseven::to_lower helper.
+TEST(Parser, CreateTableEmbeddingNamedParamsCaseInsensitive) {
+    auto stmt = parse_one("CREATE TABLE products ("
+                          "  id INT,"
+                          "  vec EMBEDDING(384, SOURCE='title', PROVIDER='openai')"
+                          ")");
+    auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
+    ASSERT_NE(ct, nullptr);
+    ASSERT_EQ(ct->columns.size(), 2u);
+    EXPECT_EQ(ct->columns[1].type.source, "title");
+    EXPECT_EQ(ct->columns[1].type.provider, "openai");
+}
+
+TEST(Parser, CreateTableEmbeddingNamedParamsMixedCase) {
+    auto stmt = parse_one("CREATE TABLE products ("
+                          "  id INT,"
+                          "  vec EMBEDDING(384, Source='title', Provider='openai')"
+                          ")");
+    auto* ct = dynamic_cast<CreateTableStmt*>(stmt.get());
+    ASSERT_NE(ct, nullptr);
+    ASSERT_EQ(ct->columns.size(), 2u);
+    EXPECT_EQ(ct->columns[1].type.source, "title");
+    EXPECT_EQ(ct->columns[1].type.provider, "openai");
+}
+
 TEST(Parser, CreateTableMultipleConstraints) {
     auto stmt = parse_one("CREATE TABLE t ("
                           "  id INT NOT NULL UNIQUE DEFAULT 0,"

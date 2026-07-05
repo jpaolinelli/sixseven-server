@@ -3656,11 +3656,7 @@ Result<QueryResult> QueryEngine::execute_create_index(const CreateIndexStmt& stm
 
     // Normalize the index method to lowercase so "USING BM25" and "USING bm25"
     // resolve to the same index_type the IndexManager dispatches on.
-    std::string method_lower = stmt.method;
-    std::transform(method_lower.begin(),
-                   method_lower.end(),
-                   method_lower.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::string method_lower = to_lower(stmt.method);
 
     // BM25 full-text indexes require exactly one STRING column.
     if (method_lower == "bm25") {

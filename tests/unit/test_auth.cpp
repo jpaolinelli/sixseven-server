@@ -58,6 +58,23 @@ TEST(AuthMethodParsing, InvalidMethodReturnsError) {
     EXPECT_EQ(method.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
+TEST(AuthMethodParsing, EmptyStringReturnsError) {
+    auto method = parse_auth_method("");
+    ASSERT_FALSE(method.has_value());
+    EXPECT_EQ(method.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+// GDB-1221: parse_auth_method's case-folding must handle high-bit (non-ASCII)
+// bytes safely (no UB from signed-char promotion to std::tolower) and must
+// still reject the input since no known auth method contains such bytes.
+TEST(AuthMethodParsing, HighBitByteDoesNotCrashAndIsRejected) {
+    std::string input = "md5";
+    input += static_cast<char>(0xFF);
+    auto method = parse_auth_method(input);
+    ASSERT_FALSE(method.has_value());
+    EXPECT_EQ(method.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
 // =============================================================================
 // Crypto helpers
 // =============================================================================

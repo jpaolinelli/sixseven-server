@@ -1,6 +1,7 @@
 #include "sixseven/parser/parser.h"
 
 #include "sixseven/common/parse_utils.h"
+#include "sixseven/common/string_util.h"
 
 #include <algorithm>
 #include <limits>
@@ -718,11 +719,7 @@ Result<TypeSpec> Parser::parse_type_spec() {
                 if (!param_val)
                     return tl::unexpected(param_val.error());
 
-                std::string name_lower = *param_name;
-                std::transform(name_lower.begin(),
-                               name_lower.end(),
-                               name_lower.begin(),
-                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                std::string name_lower = to_lower(*param_name);
 
                 if (name_lower == "source") {
                     if (got_source) {

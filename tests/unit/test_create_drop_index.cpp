@@ -105,6 +105,26 @@ TEST_F(CreateDropIndexTest, CreateIndexUsingMethod) {
     EXPECT_EQ(idx->index_type, "hash");
 }
 
+// GDB-1221: index method normalization (query_engine.cpp) must fold case the
+// same way regardless of how the user writes the USING clause.
+TEST_F(CreateDropIndexTest, CreateIndexUsingMethodUppercase) {
+    auto qr = exec_ok("CREATE INDEX idx_hash_upper ON users(email) USING HASH");
+    EXPECT_EQ(qr.message, "CREATE INDEX");
+
+    auto idx = catalog_.get_index(default_database_id, "idx_hash_upper");
+    ASSERT_TRUE(idx.has_value()) << idx.error().message;
+    EXPECT_EQ(idx->index_type, "hash");
+}
+
+TEST_F(CreateDropIndexTest, CreateIndexUsingMethodMixedCase) {
+    auto qr = exec_ok("CREATE INDEX idx_hash_mixed ON users(email) USING HaSh");
+    EXPECT_EQ(qr.message, "CREATE INDEX");
+
+    auto idx = catalog_.get_index(default_database_id, "idx_hash_mixed");
+    ASSERT_TRUE(idx.has_value()) << idx.error().message;
+    EXPECT_EQ(idx->index_type, "hash");
+}
+
 TEST_F(CreateDropIndexTest, CreateIndexIfNotExistsNew) {
     auto qr = exec_ok("CREATE INDEX IF NOT EXISTS idx_email ON users(email)");
     EXPECT_EQ(qr.message, "CREATE INDEX");
