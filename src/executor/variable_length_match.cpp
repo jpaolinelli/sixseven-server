@@ -136,11 +136,6 @@ VariableLengthMatchOperator::get_all_pks(const std::string& table_name) const {
     return ok(std::move(pks));
 }
 
-Result<std::vector<std::pair<Value, int64_t>>> VariableLengthMatchOperator::get_neighbors(
-    const std::string& edge_type, const Value& pk, TraverseDirection direction) const {
-    return expand_neighbors_ids(graph_engine_, database_id_, edge_type, pk, direction);
-}
-
 Result<std::vector<Value>>
 VariableLengthMatchOperator::fetch_node_data(const std::string& table_name, const Value& pk) const {
     auto schema = catalog_.get_table(database_id_, table_name);
