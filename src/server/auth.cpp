@@ -2,12 +2,11 @@
 
 #include "sixseven/common/logging.h"
 #include "sixseven/common/string_util.h"
+#include "sixseven/common/uuid.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cstring>
-#include <iomanip>
-#include <sstream>
 
 // Use CommonCrypto on macOS, OpenSSL-compatible API elsewhere.
 #if defined(__APPLE__)
@@ -72,12 +71,7 @@ std::string md5_hex(const std::string& input) {
     EVP_MD_CTX_free(ctx);
 #endif
 
-    std::ostringstream hex;
-    hex << std::hex << std::setfill('0');
-    for (unsigned char byte : digest) {
-        hex << std::setw(2) << static_cast<int>(byte);
-    }
-    return hex.str();
+    return to_hex(reinterpret_cast<const uint8_t*>(digest), sizeof(digest));
 }
 
 std::vector<uint8_t> sha256(const std::vector<uint8_t>& data) {
@@ -464,13 +458,9 @@ bool verify_md5_password(const std::string& stored_hash,
     std::string inner_hash = stored_hash.substr(3);
 
     // The client computes: "md5" + md5(inner_hash + salt_hex).
-    std::ostringstream salt_hex;
-    salt_hex << std::hex << std::setfill('0');
-    for (auto b : salt) {
-        salt_hex << std::setw(2) << static_cast<int>(b);
-    }
+    std::string salt_hex = to_hex(salt.data(), salt.size());
 
-    std::string expected = "md5" + md5_hex(inner_hash + salt_hex.str());
+    std::string expected = "md5" + md5_hex(inner_hash + salt_hex);
     return expected == client_response;
 }
 

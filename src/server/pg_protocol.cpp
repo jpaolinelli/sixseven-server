@@ -3,6 +3,7 @@
 #include "sixseven/common/logging.h"
 #include "sixseven/common/statement_deadline.h"
 #include "sixseven/common/string_util.h"
+#include "sixseven/common/uuid.h"
 #include "sixseven/executor/query_engine.h"
 #include "sixseven/server/connection.h"
 #include "sixseven/server/session.h"
@@ -404,18 +405,8 @@ std::string value_to_pg_text(const Value& value) {
     }
     case TypeId::JSON:
         return value.as_json().data;
-    case TypeId::UUID: {
-        const auto& uuid = value.as_uuid();
-        std::ostringstream oss;
-        oss << std::hex << std::setfill('0');
-        for (size_t i = 0; i < 16; ++i) {
-            if (i == 4 || i == 6 || i == 8 || i == 10) {
-                oss << '-';
-            }
-            oss << std::setw(2) << static_cast<unsigned>(uuid[i]);
-        }
-        return oss.str();
-    }
+    case TypeId::UUID:
+        return format_uuid(value.as_uuid());
     case TypeId::EMBEDDING: {
         const auto& emb = value.as_embedding();
         std::ostringstream oss;
