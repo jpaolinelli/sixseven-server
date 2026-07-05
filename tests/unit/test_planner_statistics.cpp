@@ -161,6 +161,45 @@ TEST_F(PlannerStatisticsTest, DropTableRemovesStatistics) {
     EXPECT_EQ(engine_->statistics().get_table_stats(tid), nullptr);
 }
 
+// GDB-1209: ANALYZE is dispatched end-to-end from QueryEngine::execute (wired
+// in GDB-711) into the existing, fully-tested planner::analyze_table(). This
+// regression pins that ANALYZE on an unknown table surfaces a proper
+// NOT_FOUND error rather than falling through to a generic NOT_IMPLEMENTED /
+// "planner does not support this statement type" error or crashing.
+TEST_F(PlannerStatisticsTest, AnalyzeNonexistentTableReturnsNotFound) {
+    auto result = engine_->execute("ANALYZE no_such_table");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
+}
+
+// GDB-1209: VACUUM is likewise dispatched end-to-end (GDB-711) into the real
+// reclamation machinery (GDB-969). This regression pins that VACUUM on a live
+// table succeeds through the full SQL pipeline (no NOT_IMPLEMENTED) and that
+// the table's rows remain intact and queryable afterward.
+TEST_F(PlannerStatisticsTest, VacuumTableSucceedsEndToEnd) {
+    exec_ok("CREATE TABLE t (id INT, name VARCHAR)");
+    exec_ok("INSERT INTO t VALUES (1, 'a'), (2, 'b'), (3, 'c')");
+    exec_ok("DELETE FROM t WHERE id = 2");
+
+    auto qr = exec_ok("VACUUM t");
+    EXPECT_EQ(qr.message, "VACUUM");
+
+    auto after = exec_ok("SELECT * FROM t");
+    EXPECT_EQ(after.rows.size(), 2u);
+}
+
+// GDB-1209: bare VACUUM (no table name) sweeps every user table and still
+// reports success end-to-end.
+TEST_F(PlannerStatisticsTest, BareVacuumSucceedsAcrossAllTables) {
+    exec_ok("CREATE TABLE a (id INT)");
+    exec_ok("CREATE TABLE b (id INT)");
+    exec_ok("INSERT INTO a VALUES (1), (2)");
+    exec_ok("INSERT INTO b VALUES (10)");
+
+    auto qr = exec_ok("VACUUM");
+    EXPECT_EQ(qr.message, "VACUUM");
+}
+
 // -- EXPLAIN cost annotations -------------------------------------------------
 
 TEST_F(PlannerStatisticsTest, ExplainShowsCostsOnlyAfterAnalyze) {
