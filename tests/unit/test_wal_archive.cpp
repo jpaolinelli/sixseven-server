@@ -139,16 +139,60 @@ TEST(WalArchiveManager, StopIdempotent) {
     ASSERT_TRUE(mgr.stop().has_value()); // Second stop is OK.
 }
 
+// GDB-1197: the original version of this test enqueued nothing and ended
+// with a bare SUCCEED(), so it could not distinguish a destructor that
+// correctly drains/joins the background archival thread from one that leaks
+// it (UB that frequently doesn't crash in a non-sanitizer build). This
+// version enqueues real segments (mirroring StopDrainsQueue), lets the
+// manager go out of scope, and then -- after destruction -- opens a second,
+// independent WalArchiveManager over the same archive directory and asserts
+// the segments are actually present on disk. That is only possible if the
+// destructor synchronously drained the queue and joined the worker before
+// returning; a leaked/detached thread racing the destructor would not
+// reliably have finished the copy+fsync+rename by the time we re-open here.
 TEST(WalArchiveManager, DestructorStopsCleanly) {
     TempWalDir wal_dir;
     TempArchiveDir archive_dir;
 
+    WalWriterOptions opts;
+    opts.segment_size = 256;
+    opts.enable_group_commit = false;
+    WalWriter writer(wal_dir.path(), opts);
+    ASSERT_TRUE(writer.open().has_value());
+
+    WalArchiveOptions archive_opts;
+    archive_opts.enabled = true;
+
+    std::vector<CompletedSegment> segments;
     {
-        WalArchiveManager mgr(wal_dir.path(), archive_dir.path());
+        WalArchiveManager mgr(wal_dir.path(), archive_dir.path(), archive_opts);
         ASSERT_TRUE(mgr.start().has_value());
-        // Destructor should stop cleanly.
+        ASSERT_TRUE(mgr.is_running());
+
+        for (int i = 0; i < 3; ++i) {
+            auto seg = write_and_rotate(writer);
+            segments.push_back(seg);
+            mgr.enqueue_segment(seg.segment_id, seg.last_lsn);
+        }
+
+        // Destructor runs here (no explicit stop()) and must drain the
+        // queue and join the background thread before returning.
     }
-    SUCCEED();
+
+    // A fresh manager reading the same archive directory should see all
+    // segments archived -- proving the destructor's drain/join completed
+    // synchronously rather than leaking the thread.
+    WalArchiveManager verify_mgr(wal_dir.path(), archive_dir.path());
+    auto list = verify_mgr.list_archived_segments();
+    ASSERT_TRUE(list.has_value()) << list.error().message;
+    ASSERT_EQ(list->size(), 3u);
+    for (const auto& seg : segments) {
+        auto archived = verify_mgr.get_archived_segment(seg.segment_id);
+        ASSERT_TRUE(archived.has_value()) << archived.error().message;
+        EXPECT_TRUE(std::filesystem::exists(*archived));
+    }
+
+    ASSERT_TRUE(writer.close().has_value());
 }
 
 // -- Synchronous archive_segment ----------------------------------------------
