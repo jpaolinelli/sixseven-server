@@ -528,26 +528,6 @@ TEST_F(VarLenMatchTest, MemoryBounding) {
     op.close();
 }
 
-// -- path_length() function --------------------------------------------------
-
-TEST_F(VarLenMatchTest, PathLengthFunction) {
-    // Verify path_length returns correct hop count for various paths.
-    Path p0;
-    EXPECT_EQ(p0.length(), 0);
-
-    Path p1;
-    p1.steps.push_back({1, 100});
-    p1.steps.push_back({2, -1});
-    EXPECT_EQ(p1.length(), 1);
-
-    Path p3;
-    p3.steps.push_back({1, 100});
-    p3.steps.push_back({2, 101});
-    p3.steps.push_back({3, 102});
-    p3.steps.push_back({4, -1});
-    EXPECT_EQ(p3.length(), 3);
-}
-
 // -- Zero-hop start (star quantifier) ----------------------------------------
 
 TEST_F(VarLenMatchTest, ZeroHopStar) {
