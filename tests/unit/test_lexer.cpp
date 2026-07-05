@@ -371,6 +371,84 @@ TEST(Lexer, StringLiteralWithNewline) {
     EXPECT_EQ(tokens[0].type, TokenType::STRING_LITERAL);
 }
 
+// -- Double-quoted (delimited) identifiers ------------------------------------
+
+TEST(Lexer, QuotedIdentifierBasic) {
+    auto tokens = tokenize_ok("\"id\"");
+    ASSERT_GE(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[0].lexeme, "\"id\"");
+}
+
+TEST(Lexer, QuotedIdentifierInSelectFromQuery) {
+    // The audit's motivating example: SELECT "id" FROM "users"
+    auto tokens = tokenize_ok("SELECT \"id\" FROM \"users\"");
+    ASSERT_GE(tokens.size(), 5u);
+    EXPECT_EQ(tokens[0].type, TokenType::SELECT);
+    EXPECT_EQ(tokens[1].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[1].lexeme, "\"id\"");
+    EXPECT_EQ(tokens[2].type, TokenType::FROM);
+    EXPECT_EQ(tokens[3].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[3].lexeme, "\"users\"");
+}
+
+TEST(Lexer, QuotedKeywordBypassesKeywordLookup) {
+    // "select" quoted must be an IDENTIFIER, not the SELECT keyword.
+    auto tokens = tokenize_ok("\"select\"");
+    ASSERT_GE(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[0].lexeme, "\"select\"");
+}
+
+TEST(Lexer, QuotedIdentifierPreservesCase) {
+    auto tokens = tokenize_ok("\"MixedCase\"");
+    ASSERT_GE(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[0].lexeme, "\"MixedCase\"");
+}
+
+TEST(Lexer, QuotedIdentifierWithSpace) {
+    auto tokens = tokenize_ok("\"Weird Column Name\"");
+    ASSERT_GE(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[0].lexeme, "\"Weird Column Name\"");
+}
+
+TEST(Lexer, QuotedIdentifierEscapedQuote) {
+    // "" inside a delimited identifier is an escaped embedded double quote.
+    auto tokens = tokenize_ok("\"a\"\"b\"");
+    ASSERT_GE(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[0].lexeme, "\"a\"\"b\"");
+}
+
+TEST(Lexer, UnterminatedQuotedIdentifierFails) {
+    Lexer lexer("\"unterminated");
+    auto result = lexer.tokenize();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
+}
+
+TEST(Lexer, EmptyQuotedIdentifierFails) {
+    // Per SQL standard, a zero-length delimited identifier is not allowed.
+    Lexer lexer("\"\"");
+    auto result = lexer.tokenize();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
+}
+
+TEST(Lexer, QuotedIdentifierDoesNotBreakStringLiterals) {
+    // Regression: ensure adding '"' handling doesn't disturb '\'' string scanning.
+    auto tokens = tokenize_ok("SELECT 'hello', \"col\" FROM t");
+    ASSERT_GE(tokens.size(), 7u);
+    EXPECT_EQ(tokens[0].type, TokenType::SELECT);
+    EXPECT_EQ(tokens[1].type, TokenType::STRING_LITERAL);
+    EXPECT_EQ(tokens[1].lexeme, "'hello'");
+    EXPECT_EQ(tokens[2].type, TokenType::COMMA);
+    EXPECT_EQ(tokens[3].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[3].lexeme, "\"col\"");
+}
+
 // -- Operators ----------------------------------------------------------------
 
 TEST(Lexer, ArithmeticOperators) {

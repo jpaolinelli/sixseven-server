@@ -207,6 +207,29 @@ std::string unquote_string(std::string_view lexeme) {
     return result;
 }
 
+/// Materialize the name text of an IDENTIFIER token's lexeme. If the lexeme
+/// is a double-quoted (delimited) identifier, strips the surrounding quotes
+/// and unescapes "" -> ". Unquoted identifier lexemes pass through unchanged,
+/// preserving their original case (identifiers are case-preserving/
+/// case-sensitive throughout the engine — see catalog lookups).
+std::string identifier_text(std::string_view lexeme) {
+    if (lexeme.size() >= 2 && lexeme.front() == '"' && lexeme.back() == '"') {
+        lexeme = lexeme.substr(1, lexeme.size() - 2);
+        std::string result;
+        result.reserve(lexeme.size());
+        for (size_t i = 0; i < lexeme.size(); ++i) {
+            if (lexeme[i] == '"' && i + 1 < lexeme.size() && lexeme[i + 1] == '"') {
+                result += '"';
+                ++i;
+            } else {
+                result += lexeme[i];
+            }
+        }
+        return result;
+    }
+    return std::string(lexeme);
+}
+
 } // namespace
 
 // -- Constructor --------------------------------------------------------------
@@ -309,7 +332,7 @@ bool Parser::at_end() const {
 
 Result<std::string> Parser::parse_name(const std::string& context) {
     if (is_name_token(peek().type)) {
-        return ok(std::string(advance().lexeme));
+        return ok(identifier_text(advance().lexeme));
     }
     const auto& tok = peek();
     return make_parse_error("expected " + context + " at line " + std::to_string(tok.line) +
@@ -1913,7 +1936,7 @@ Result<SelectItem> Parser::parse_select_item() {
         tokens_[current_ + 1].type == TokenType::DOT &&
         tokens_[current_ + 2].type == TokenType::STAR) {
         item.is_star = true;
-        item.table_star = std::string(advance().lexeme);
+        item.table_star = identifier_text(advance().lexeme);
         advance(); // consume DOT
         advance(); // consume STAR
         return ok(std::move(item));
@@ -1932,7 +1955,7 @@ Result<SelectItem> Parser::parse_select_item() {
         item.alias = std::move(*alias);
     } else if (is_name_token(peek().type) && !is_clause_keyword(peek().type)) {
         // Implicit alias (without AS).
-        item.alias = std::string(advance().lexeme);
+        item.alias = identifier_text(advance().lexeme);
     }
 
     return ok(std::move(item));
@@ -1988,7 +2011,7 @@ Result<TableRef> Parser::parse_table_ref() {
                 return tl::unexpected(alias.error());
             ref.alias = std::move(*alias);
         } else if (is_name_token(peek().type) && !is_clause_keyword(peek().type)) {
-            ref.alias = std::string(advance().lexeme);
+            ref.alias = identifier_text(advance().lexeme);
         }
 
         return ok(std::move(ref));
@@ -2002,7 +2025,7 @@ Result<TableRef> Parser::parse_table_ref() {
         // Parse optional path selector.
         if (is_name_token(peek().type) && current_ + 1 < tokens_.size() &&
             tokens_[current_ + 1].type == TokenType::EQUAL) {
-            match_stmt->path_variable = std::string(advance().lexeme);
+            match_stmt->path_variable = identifier_text(advance().lexeme);
             advance(); // consume =
 
             if (check(TokenType::ANY)) {
@@ -2063,7 +2086,7 @@ Result<TableRef> Parser::parse_table_ref() {
                 return tl::unexpected(alias.error());
             ref.alias = std::move(*alias);
         } else if (is_name_token(peek().type) && !is_clause_keyword(peek().type)) {
-            ref.alias = std::string(advance().lexeme);
+            ref.alias = identifier_text(advance().lexeme);
         }
 
         return ok(std::move(ref));
@@ -2083,7 +2106,7 @@ Result<TableRef> Parser::parse_table_ref() {
                 return tl::unexpected(alias.error());
             ref.alias = std::move(*alias);
         } else if (is_name_token(peek().type) && !is_clause_keyword(peek().type)) {
-            ref.alias = std::string(advance().lexeme);
+            ref.alias = identifier_text(advance().lexeme);
         }
 
         return ok(std::move(ref));
@@ -2114,7 +2137,7 @@ Result<TableRef> Parser::parse_table_ref() {
 
                 if (seen_named && is_name_token(peek().type) && current_ + 1 < tokens_.size() &&
                     tokens_[current_ + 1].type == TokenType::COLON_EQUAL) {
-                    auto param_name = std::string(advance().lexeme);
+                    auto param_name = identifier_text(advance().lexeme);
                     advance(); // consume :=
                     auto val = parse_expression();
                     if (!val)
@@ -2148,7 +2171,7 @@ Result<TableRef> Parser::parse_table_ref() {
                 return tl::unexpected(alias.error());
             ref.alias = std::move(*alias);
         } else if (is_name_token(peek().type) && !is_clause_keyword(peek().type)) {
-            ref.alias = std::string(advance().lexeme);
+            ref.alias = identifier_text(advance().lexeme);
         }
 
         return ok(std::move(ref));
@@ -2173,7 +2196,7 @@ Result<TableRef> Parser::parse_table_ref() {
             return tl::unexpected(alias.error());
         ref.alias = std::move(*alias);
     } else if (is_name_token(peek().type) && !is_clause_keyword(peek().type)) {
-        ref.alias = std::string(advance().lexeme);
+        ref.alias = identifier_text(advance().lexeme);
     }
 
     return ok(std::move(ref));
@@ -2559,7 +2582,7 @@ Result<StmtPtr> Parser::parse_match() {
     if (is_name_token(peek().type) && current_ + 1 < tokens_.size() &&
         tokens_[current_ + 1].type == TokenType::EQUAL) {
         // Path variable binding: p = ...
-        stmt->path_variable = std::string(advance().lexeme); // consume variable name
+        stmt->path_variable = identifier_text(advance().lexeme); // consume variable name
         advance();                                           // consume =
 
         if (check(TokenType::ANY)) {
@@ -3808,11 +3831,15 @@ Result<ExprPtr> Parser::parse_primary() {
 
     // Identifier, column reference, function call, or CAST.
     if (is_name_token(tok.type)) {
-        std::string name(advance().lexeme);
+        bool was_quoted = tok.type == TokenType::IDENTIFIER && tok.lexeme.size() >= 2 &&
+                           tok.lexeme.front() == '"';
+        std::string name = identifier_text(advance().lexeme);
         uint32_t line = previous().line;
         uint32_t col = previous().column;
 
-        // Normalize to uppercase for keyword-like checks.
+        // Normalize to uppercase for keyword-like checks. Quoted identifiers
+        // are literal data (e.g. a column genuinely named "cast") and must
+        // never be reinterpreted as the CAST pseudo-function.
         std::string name_upper;
         name_upper.reserve(name.size());
         for (char c : name) {
@@ -3820,7 +3847,7 @@ Result<ExprPtr> Parser::parse_primary() {
         }
 
         // CAST(expr AS type)
-        if (name_upper == "CAST" && check(TokenType::LPAREN)) {
+        if (!was_quoted && name_upper == "CAST" && check(TokenType::LPAREN)) {
             advance(); // consume (
             auto expr = parse_expression();
             if (!expr)
@@ -3877,7 +3904,7 @@ Result<ExprPtr> Parser::parse_primary() {
 
                     if (seen_named && is_name_token(peek().type) && current_ + 1 < tokens_.size() &&
                         tokens_[current_ + 1].type == TokenType::COLON_EQUAL) {
-                        auto param_name = std::string(advance().lexeme);
+                        auto param_name = identifier_text(advance().lexeme);
                         advance(); // consume :=
                         auto val = parse_expression();
                         if (!val)
