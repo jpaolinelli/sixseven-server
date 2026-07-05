@@ -1672,6 +1672,10 @@ Result<std::vector<SelectItem>> Parser::parse_returning() {
 
 Result<StmtPtr> Parser::parse_with() {
     advance(); // consume WITH
+    if (match(TokenType::RECURSIVE)) {
+        return make_error(StatusCode::PARSE_ERROR,
+                          "recursive CTEs (WITH RECURSIVE) are not supported");
+    }
     std::vector<SelectStmt::CTE> ctes;
 
     do {
