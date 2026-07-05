@@ -110,26 +110,18 @@ TEST(QA_GDB1208, EmbeddingDuplicateSourceReportsPosition) {
     EXPECT_EQ(count_position_clauses(msg), 1) << "message: " << msg;
 }
 
-// BUG (see QA findings): parse_error_here() is called in the named-EMBEDDING
-// parameter loop AFTER the offending "source='b'" token has already been
-// fully consumed via expect(). By the time parse_error_here() calls peek(),
-// the cursor sits on the NEXT token (the closing ')'), so the reported
-// position is off by one token -- not "poor accuracy" but flatly wrong: it
-// points at unrelated punctuation, not the duplicate parameter itself.
-// This test pins the CURRENT (buggy) behavior so a regression (or a fix) is
-// visible; see EmbeddingDuplicateSourcePositionPointsPastOffendingToken.
-TEST(QA_GDB1208, EmbeddingDuplicateSourcePositionPointsPastOffendingToken) {
+// FIXED (GDB-1286 / commit 6000d8d): the parser now captures the
+// parameter-name token's position BEFORE consuming '=' and the value, so
+// duplicate/unknown-parameter errors point at the offending parameter
+// itself rather than at the token that follows it. This test asserts the
+// corrected position.
+TEST(QA_GDB1208, EmbeddingDuplicateSourcePositionPointsAtOffendingToken) {
     std::string sql = "CREATE TABLE t (v EMBEDDING(384, source='a', source='b'));";
     auto msg = parse_expect_error(sql);
     auto [line, col] = extract_position(msg);
     // The offending token "source='b'" starts at 1-based column 46.
-    // The reported column is 56, which is the closing ')' -- one token past
-    // the actual error location.
     EXPECT_EQ(line, 1);
-    EXPECT_NE(col, 46) << "if this now equals 46, the position bug has been "
-                          "fixed and this test should be updated to assert "
-                          "col == 46 instead; message: "
-                       << msg;
+    EXPECT_EQ(col, 46) << "message: " << msg;
 }
 
 TEST(QA_GDB1208, EmbeddingDuplicateProviderReportsPosition) {
@@ -140,12 +132,44 @@ TEST(QA_GDB1208, EmbeddingDuplicateProviderReportsPosition) {
     EXPECT_EQ(count_position_clauses(msg), 1) << "message: " << msg;
 }
 
+// FIXED (GDB-1286 / commit 6000d8d): duplicate 'provider' error position,
+// per the scoped re-QA repro: "EMBEDDING(384, provider='x', provider='y')".
+// Note: the named-param loop is hardcoded to exactly 2 iterations (a
+// preexisting, separately-tracked limitation -- see
+// EmbeddingMissingSourceReportsPosition above), so a 3-parameter list such as
+// "source='a', provider='x', provider='y'" never reaches the second
+// provider token; this test sticks to exactly 2 params to stay in the
+// loop's supported range.
+TEST(QA_GDB1208, EmbeddingDuplicateProviderPositionPointsAtOffendingToken) {
+    std::string sql =
+        "CREATE TABLE t (v EMBEDDING(384, provider='x', provider='y'));";
+    auto msg = parse_expect_error(sql);
+    auto [line, col] = extract_position(msg);
+    EXPECT_EQ(line, 1);
+    // Column of the second "provider='y'" token.
+    auto pos = sql.rfind("provider='y'");
+    ASSERT_NE(pos, std::string::npos);
+    EXPECT_EQ(col, static_cast<int>(pos) + 1) << "message: " << msg;
+}
+
 TEST(QA_GDB1208, EmbeddingUnknownParameterReportsPosition) {
     auto msg = parse_expect_error(
         "CREATE TABLE t (v EMBEDDING(384, source='a', bogus='x'));");
     EXPECT_NE(msg.find("unknown EMBEDDING parameter"), std::string::npos) << msg;
     EXPECT_TRUE(has_position(msg)) << "message: " << msg;
     EXPECT_EQ(count_position_clauses(msg), 1) << "message: " << msg;
+}
+
+// FIXED (GDB-1286 / commit 6000d8d): unknown-parameter position, per the
+// scoped re-QA repro: "EMBEDDING(384, bogus='x')".
+TEST(QA_GDB1208, EmbeddingUnknownParameterPositionPointsAtOffendingToken) {
+    std::string sql = "CREATE TABLE t (v EMBEDDING(384, bogus='x'));";
+    auto msg = parse_expect_error(sql);
+    auto [line, col] = extract_position(msg);
+    EXPECT_EQ(line, 1);
+    auto pos = sql.find("bogus='x'");
+    ASSERT_NE(pos, std::string::npos);
+    EXPECT_EQ(col, static_cast<int>(pos) + 1) << "message: " << msg;
 }
 
 TEST(QA_GDB1208, EmbeddingMissingSourceReportsPosition) {
@@ -258,13 +282,10 @@ TEST(QA_GDB1208, NearestMissingToMultiLineReportsCorrectLine) {
     (void)col;
 }
 
-// NOTE: These pin the CURRENT (buggy) behavior -- see
-// EmbeddingDuplicateSourcePositionPointsPastOffendingToken and the QA
-// findings. The offending "source='b'" / "bogus='x'" token is on line 5, but
-// because parse_error_here() runs after the token is already consumed, the
-// parser cursor -- and therefore the reported position -- has moved to the
-// ')' on line 6. A correct implementation would report line 5.
-TEST(QA_GDB1208, EmbeddingDuplicateSourceMultiLineReportsWrongLineBug) {
+// FIXED (GDB-1286 / commit 6000d8d): the offending "source='b'" / "bogus='x'"
+// token is on line 5; the parser now reports line 5 (the parameter itself),
+// not line 6 (the closing ')').
+TEST(QA_GDB1208, EmbeddingDuplicateSourceMultiLineReportsCorrectLine) {
     std::string sql =
         "CREATE TABLE t (\n"
         "  v EMBEDDING(\n"
@@ -275,14 +296,11 @@ TEST(QA_GDB1208, EmbeddingDuplicateSourceMultiLineReportsWrongLineBug) {
         ");\n";
     auto msg = parse_expect_error(sql);
     auto [line, col] = extract_position(msg);
-    EXPECT_EQ(line, 6) << "actual offending token is on line 5 -- this "
-                          "documents the current off-by-one-token bug; "
-                          "message: "
-                       << msg;
+    EXPECT_EQ(line, 5) << "message: " << msg;
     (void)col;
 }
 
-TEST(QA_GDB1208, EmbeddingUnknownParameterMultiLineReportsWrongLineBug) {
+TEST(QA_GDB1208, EmbeddingUnknownParameterMultiLineReportsCorrectLine) {
     std::string sql =
         "CREATE TABLE t (\n"
         "  v EMBEDDING(\n"
@@ -293,10 +311,7 @@ TEST(QA_GDB1208, EmbeddingUnknownParameterMultiLineReportsWrongLineBug) {
         ");\n";
     auto msg = parse_expect_error(sql);
     auto [line, col] = extract_position(msg);
-    EXPECT_EQ(line, 6) << "actual offending token is on line 5 -- this "
-                          "documents the current off-by-one-token bug; "
-                          "message: "
-                       << msg;
+    EXPECT_EQ(line, 5) << "message: " << msg;
     (void)col;
 }
 
