@@ -820,5 +820,212 @@ TEST_F(VarLenMatchTest, BothDirectionFixedHopCorrectRowBindings) {
         EXPECT_TRUE(found_pairs.count(p) > 0) << "Missing expected pair: " << p;
     }
 }
+
+// ============================================================================
+// GDB-1213: Non-integer (STRING) primary keys must error, not silently drop
+// path steps / misalign edge_ids.
+// ============================================================================
+
+/// Test fixture with a STRING-PK 'persons' table, mirroring VarLenMatchTest's
+/// linear chain (A -> B -> C -> D -> E) but keyed by non-integer primary keys.
+class VarLenMatchStringPkTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        data_dir_ = std::filesystem::temp_directory_path() / "sixseven_test_var_len_match_strpk";
+        std::filesystem::remove_all(data_dir_);
+        std::filesystem::create_directories(data_dir_);
+
+        catalog_ = std::make_unique<Catalog>();
+        init_test_catalog(*catalog_);
+        storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
+        graph_ = std::make_unique<GraphEngine>(*catalog_);
+
+        auto db_storage = storage_->create_database_storage(default_database_id);
+        ASSERT_TRUE(db_storage.has_value()) << db_storage.error().message;
+
+        // Create 'persons' table with a STRING primary key.
+        {
+            TableSchema ts;
+            ts.name = "persons";
+            CatalogColumnDef id_col;
+            id_col.ordinal = 0;
+            id_col.name = "id";
+            id_col.type_id = TypeId::STRING;
+            id_col.nullable = false;
+            ts.columns.push_back(id_col);
+            CatalogColumnDef name_col;
+            name_col.ordinal = 1;
+            name_col.name = "name";
+            name_col.type_id = TypeId::STRING;
+            name_col.nullable = false;
+            ts.columns.push_back(name_col);
+            ts.pk_columns = "id";
+            auto tid = catalog_->create_table(default_database_id, std::move(ts));
+            ASSERT_TRUE(tid.has_value()) << tid.error().message;
+            persons_id_ = *tid;
+
+            auto schema = catalog_->get_table(default_database_id, "persons");
+            ASSERT_TRUE(schema.has_value());
+            auto sr = storage_->create_table_storage(default_database_id, persons_id_, *schema);
+            ASSERT_TRUE(sr.has_value()) << sr.error().message;
+        }
+
+        // Insert persons keyed by string PK: "a" -> "b" -> "c" -> "d" -> "e".
+        insert_person("a", "Alice");
+        insert_person("b", "Bob");
+        insert_person("c", "Charlie");
+        insert_person("d", "Diana");
+        insert_person("e", "Eve");
+
+        // Create 'knows' edge type: persons -> persons, string PKs on both sides.
+        auto eid = graph_->create_edge_type(default_database_id,
+                                            "knows",
+                                            persons_id_,
+                                            persons_id_,
+                                            TypeId::STRING,
+                                            TypeId::STRING,
+                                            {});
+        ASSERT_TRUE(eid.has_value()) << eid.error().message;
+
+        link("knows", "a", "b");
+        link("knows", "b", "c");
+        link("knows", "c", "d");
+        link("knows", "d", "e");
+    }
+
+    void TearDown() override {
+        storage_.reset();
+        std::filesystem::remove_all(data_dir_);
+    }
+
+    void link(const std::string& edge_type, const std::string& from, const std::string& to) {
+        auto r = graph_->link(default_database_id, edge_type, Value(from), Value(to));
+        ASSERT_TRUE(r.has_value()) << r.error().message;
+    }
+
+    void insert_person(const std::string& id, const std::string& name) {
+        auto ts = storage_->get_table_storage(persons_id_);
+        ASSERT_TRUE(ts.has_value()) << ts.error().message;
+        auto schema = catalog_->get_table(default_database_id, "persons");
+        ASSERT_TRUE(schema.has_value());
+
+        std::vector<Value> vals = {Value(id), Value(name)};
+        auto data = TupleSerializer::serialize(vals, (*ts)->storage_schema);
+        ASSERT_TRUE(data.has_value()) << data.error().message;
+        auto rid = (*ts)->heap->insert_tuple(*data);
+        ASSERT_TRUE(rid.has_value()) << rid.error().message;
+    }
+
+    DiskManager dm_;
+    std::filesystem::path data_dir_;
+    std::unique_ptr<Catalog> catalog_;
+    std::unique_ptr<StorageManager> storage_;
+    std::unique_ptr<GraphEngine> graph_;
+    table_id_t persons_id_ = 0;
+};
+
+TEST_F(VarLenMatchStringPkTest, VariableLengthReturnsClearErrorInsteadOfSilentlyDroppingSteps) {
+    // (a:persons)-[r:knows]->{1,3}(b:persons) over a STRING-PK table.
+    // Before GDB-1213, pk_to_int64 failures inside the BFS path-building
+    // blocks were silently discarded, producing paths with missing or
+    // misaligned steps instead of a clear error.
+    MatchConfig config;
+    config.nodes.push_back({"a", "persons"});
+    config.nodes.push_back({"b", "persons"});
+    config.edges.push_back(MatchEdgeDef("r", "knows", TraverseDirection::OUT, 1, 3));
+
+    std::vector<OutputColumn> out_cols;
+    out_cols.push_back({"a", "name", TypeId::STRING, false, persons_id_});
+    out_cols.push_back({"b", "name", TypeId::STRING, false, persons_id_});
+    OutputSchema schema(std::move(out_cols));
+
+    BoundStatement bound;
+    VariableLengthMatchOperator op(*graph_,
+                                   *catalog_,
+                                   *storage_,
+                                   default_database_id,
+                                   std::move(config),
+                                   std::move(schema),
+                                   nullptr,
+                                   bound);
+    auto open_result = op.open();
+    ASSERT_FALSE(open_result.has_value())
+        << "expected variable-length MATCH over STRING-PK table to fail cleanly";
+    EXPECT_EQ(open_result.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_NE(open_result.error().message.find("integer primary key"), std::string::npos)
+        << "unexpected error message: " << open_result.error().message;
+}
+
+TEST_F(VarLenMatchStringPkTest,
+       FixedLengthSingleHopReturnsClearErrorInsteadOfSilentlyDroppingSteps) {
+    // (a:persons)-[r:knows]->{1}(b:persons) — the fixed-length single-hop
+    // block also builds path steps via pk_to_int64 and must error the same way.
+    MatchConfig config;
+    config.nodes.push_back({"a", "persons"});
+    config.nodes.push_back({"b", "persons"});
+    config.edges.push_back(MatchEdgeDef("r", "knows", TraverseDirection::OUT, 1, 1));
+
+    std::vector<OutputColumn> out_cols;
+    out_cols.push_back({"a", "name", TypeId::STRING, false, persons_id_});
+    out_cols.push_back({"b", "name", TypeId::STRING, false, persons_id_});
+    OutputSchema schema(std::move(out_cols));
+
+    BoundStatement bound;
+    VariableLengthMatchOperator op(*graph_,
+                                   *catalog_,
+                                   *storage_,
+                                   default_database_id,
+                                   std::move(config),
+                                   std::move(schema),
+                                   nullptr,
+                                   bound);
+    auto open_result = op.open();
+    ASSERT_FALSE(open_result.has_value())
+        << "expected fixed-length single-hop MATCH over STRING-PK table to fail cleanly";
+    EXPECT_EQ(open_result.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_NE(open_result.error().message.find("integer primary key"), std::string::npos)
+        << "unexpected error message: " << open_result.error().message;
+}
+
+// ============================================================================
+// GDB-1213: Integer-PK behavior must be entirely unaffected by the fix above.
+// ============================================================================
+
+TEST_F(VarLenMatchTest, IntegerPkPathsRemainCompleteAndCorrectlyAligned) {
+    // (a:persons)-[r:knows]->{1,4}(b:persons) over the standard INT64-PK
+    // 'persons' fixture. Regression guard: integer-PK tables must still
+    // produce complete, correctly-aligned path steps (no behavior change).
+    MatchConfig config;
+    config.nodes.push_back({"a", "persons"});
+    config.nodes.push_back({"b", "persons"});
+    config.edges.push_back(MatchEdgeDef("r", "knows", TraverseDirection::OUT, 1, 4));
+
+    std::vector<OutputColumn> out_cols;
+    out_cols.push_back({"a", "id", TypeId::INT64, false, persons_id_});
+    out_cols.push_back({"b", "id", TypeId::INT64, false, persons_id_});
+    OutputSchema schema(std::move(out_cols));
+
+    auto results = run_vl_match(std::move(config), std::move(schema));
+
+    // Linear chain 1->2->3->4->5, quantifier {1,4}: expect paths of length
+    // 1..4 starting from each node where such a path exists.
+    // From 1: {2},{3},{4},{5} -- 4 paths.
+    // From 2: {3},{4},{5}     -- 3 paths.
+    // From 3: {4},{5}         -- 2 paths.
+    // From 4: {5}             -- 1 path.
+    // Total: 10 paths, none dropped or misaligned.
+    EXPECT_EQ(results.size(), 10u);
+
+    for (const auto& t : results) {
+        ASSERT_GE(t.values.size(), 2u);
+        int64_t src = t.values[0].as_int64();
+        int64_t tgt = t.values[1].as_int64();
+        EXPECT_GE(src, 1);
+        EXPECT_LE(src, 4);
+        EXPECT_GT(tgt, src) << "path target must be strictly downstream of source in this chain";
+        EXPECT_LE(tgt, 5);
+    }
+}
+
 } // namespace
 } // namespace sixseven
