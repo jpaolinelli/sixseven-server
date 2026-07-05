@@ -258,11 +258,21 @@ private:
 /// Usage:
 /// ```
 ///   auto it = heap.begin().value();
-///   while (auto result = it.next()) {
-///       auto& [rid, data] = *result;
+///   while (true) {
+///       auto result = it.next();
+///       if (!result.has_value()) { /* handle error */ break; }
+///       if (!result->has_value()) break;  // end of scan
+///       auto& [rid, data] = **result;
 ///       // process tuple...
 ///   }
 /// ```
+///
+/// IMPORTANT: `next()` returns Result<optional<...>>. At end-of-scan it
+/// returns ok(nullopt) -- a *successful* Result holding no value -- so
+/// checking only the Result's truthiness (`while (auto result = it.next())`,
+/// relying on tl::expected::operator bool() i.e. has_value()) never observes
+/// the end of the scan and loops forever. Always check both result.has_value()
+/// (I/O error) and (*result).has_value() (end of scan) explicitly.
 class TableIterator {
 public:
     TableIterator(BufferPoolManager& bpm,

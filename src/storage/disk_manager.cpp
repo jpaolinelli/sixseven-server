@@ -366,6 +366,14 @@ Result<void> DiskManager::close_file(FileId file_id) {
     return ok();
 }
 
+void DiskManager::close_all_files() {
+    for (FileId id = 0; id < files_.size(); ++id) {
+        if (files_[id].fd >= 0) {
+            (void)close_file(id);
+        }
+    }
+}
+
 Result<void> DiskManager::read_page(FileId file_id, PageId page_id, Page& page) {
     auto file_result = get_open_file(file_id);
     if (!file_result) {

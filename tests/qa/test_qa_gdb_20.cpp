@@ -578,7 +578,15 @@ TEST(QA_ExprEdge, ArrayWithExpressions) {
 }
 
 TEST(QA_ExprEdge, DeeplyNestedParentheses) {
-    // Test deeply nested parenthesized expressions don't crash.
+    // GDB-1224: 100 levels of nesting previously stack-overflowed the
+    // recursive-descent parser (a crash, not a Result<T> error). The fix
+    // added Parser::expression_depth_ / kMaxExpressionDepth (see
+    // parse_expression() in src/parser/parser.cpp), which caps recursion
+    // and returns a clean PARSE_ERROR once the limit is exceeded. 100 levels
+    // is now expected to fail gracefully rather than crash; the important
+    // assertion is EXPECT_NO_THROW (proving no crash) plus a specific
+    // PARSE_ERROR with the "too deep" message (proving it's the depth guard,
+    // not some unrelated parse failure).
     std::string expr = "SELECT ";
     for (int i = 0; i < 100; ++i)
         expr += "(";
@@ -588,8 +596,26 @@ TEST(QA_ExprEdge, DeeplyNestedParentheses) {
 
     EXPECT_NO_THROW({
         auto r = try_parse(expr);
-        EXPECT_TRUE(r.has_value()) << (r.has_value() ? "" : r.error().message);
+        ASSERT_FALSE(r.has_value()) << "100 levels of nesting should exceed the depth limit";
+        EXPECT_EQ(r.error().code, StatusCode::PARSE_ERROR);
+        EXPECT_NE(r.error().message.find("too deep"), std::string::npos) << r.error().message;
     });
+}
+
+TEST(QA_ExprEdge, ModeratelyNestedParenthesesStillParse) {
+    // Complements DeeplyNestedParentheses: confirms the depth limit does not
+    // reject reasonable, real-world nesting depths -- only pathological
+    // ones. 10 levels is far more than any hand-written or generated SQL
+    // expression is likely to use.
+    std::string expr = "SELECT ";
+    for (int i = 0; i < 10; ++i)
+        expr += "(";
+    expr += "1";
+    for (int i = 0; i < 10; ++i)
+        expr += ")";
+
+    auto r = try_parse(expr);
+    ASSERT_TRUE(r.has_value()) << (r.has_value() ? "" : r.error().message);
 }
 
 // =============================================================================

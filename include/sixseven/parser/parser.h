@@ -170,6 +170,13 @@ private:
 
     std::vector<Token> tokens_;
     size_t current_ = 0;
+
+    /// Current expression-parser recursion depth. Incremented/decremented
+    /// around every call to parse_expression() so that deeply nested
+    /// expressions (e.g. hundreds of parenthesized sub-expressions) fail
+    /// with a clean PARSE_ERROR instead of overflowing the call stack. See
+    /// kMaxExpressionDepth in parser.cpp for the limit.
+    int expression_depth_ = 0;
 };
 
 } // namespace sixseven

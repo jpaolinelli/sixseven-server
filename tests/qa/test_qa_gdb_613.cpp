@@ -46,7 +46,16 @@ protected:
         std::filesystem::create_directories(data_dir_);
     }
 
-    void TearDown() override { std::filesystem::remove_all(data_dir_); }
+    void TearDown() override {
+        // GDB-1224: gtest destroys the fixture's member fields (including
+        // dm_) only *after* TearDown() returns, so dm_'s open file handles
+        // are still held here. On Windows, remove_all() on a directory
+        // containing an open file fails with "process cannot access the
+        // file because it is being used by another process." Close every
+        // handle dm_ still owns before removing the directory tree.
+        dm_.close_all_files();
+        std::filesystem::remove_all(data_dir_);
+    }
 
     TableSchema make_schema(table_id_t tid, const std::string& name) {
         TableSchema ts;
