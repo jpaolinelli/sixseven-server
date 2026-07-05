@@ -5,6 +5,7 @@
 #include "sixseven/common/logging.h"
 #include "sixseven/common/parse_utils.h"
 #include "sixseven/common/statement_deadline.h"
+#include "sixseven/common/string_util.h"
 #include "sixseven/common/types.h"
 #include "sixseven/executor/catalog_persistence.h"
 #include "sixseven/executor/delete.h"
@@ -48,14 +49,6 @@
 namespace sixseven {
 
 namespace {
-
-/// Convert a string to uppercase for case-insensitive comparisons.
-std::string to_upper(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
-        return static_cast<char>(std::toupper(c));
-    });
-    return s;
-}
 
 /// Result of folding a constant expression for the SELECT-without-FROM fast path.
 struct ConstFoldResult {

@@ -1,7 +1,6 @@
 #include "sixseven/graph/algorithm_registry.h"
 
-#include <algorithm>
-#include <cctype>
+#include "sixseven/common/string_util.h"
 
 namespace sixseven {
 
@@ -106,14 +105,6 @@ AlgorithmRegistry::resolve_params(const AlgorithmDef& def,
     }
 
     return ok(std::move(resolved));
-}
-
-std::string AlgorithmRegistry::to_upper(const std::string& s) {
-    std::string result = s;
-    std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) {
-        return static_cast<char>(std::toupper(c));
-    });
-    return result;
 }
 
 } // namespace sixseven
