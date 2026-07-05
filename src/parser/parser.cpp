@@ -1466,8 +1466,10 @@ Result<StmtPtr> Parser::parse_link() {
     if (!src_tbl)
         return tl::unexpected(src_tbl.error());
 
-    // Bulk form: next token is TO (identifier), not '('.
-    if (match_ident_ci(peek(), "TO") && !check(TokenType::LPAREN)) {
+    // Bulk form: next token is the TO identifier. match_ident_ci already
+    // requires TokenType::IDENTIFIER, which is mutually exclusive with
+    // TokenType::LPAREN, so no further disambiguation is needed here.
+    if (match_ident_ci(peek(), "TO")) {
         return parse_bulk_link(std::move(*src_tbl));
     }
 

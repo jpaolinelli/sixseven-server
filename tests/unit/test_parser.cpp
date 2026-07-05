@@ -898,6 +898,24 @@ TEST(Parser, SingleLinkStillWorks) {
     EXPECT_EQ(lnk->edge_type, "follows");
 }
 
+TEST(Parser, LinkBulkToDisambiguationVsParenForm) {
+    // Regression test for GDB-1207: parse_link disambiguates the bulk form
+    // (LINK table TO ...) from the single-edge form (LINK table(key) TO ...)
+    // using a single-token lookahead on the token following the source table
+    // name. Verify both forms still resolve to the correct statement type.
+    auto bulk_stmt = parse_one("LINK accounts TO accounts VIA linked_to VALUES ('x', 'y')");
+    auto* blk = dynamic_cast<BulkLinkStmt*>(bulk_stmt.get());
+    ASSERT_NE(blk, nullptr) << "LINK table TO ... should parse as BulkLinkStmt";
+    EXPECT_EQ(blk->source_table, "accounts");
+    EXPECT_EQ(blk->target_table, "accounts");
+
+    auto single_stmt = parse_one("LINK accounts(1) TO accounts(2) VIA linked_to");
+    auto* lnk = dynamic_cast<LinkStmt*>(single_stmt.get());
+    ASSERT_NE(lnk, nullptr) << "LINK table(key) TO ... should parse as LinkStmt";
+    EXPECT_EQ(lnk->source_table, "accounts");
+    EXPECT_EQ(lnk->target_table, "accounts");
+}
+
 // -- UNLINK tests -------------------------------------------------------------
 
 TEST(Parser, UnlinkBasic) {
