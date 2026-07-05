@@ -2583,7 +2583,7 @@ Result<StmtPtr> Parser::parse_match() {
         tokens_[current_ + 1].type == TokenType::EQUAL) {
         // Path variable binding: p = ...
         stmt->path_variable = identifier_text(advance().lexeme); // consume variable name
-        advance();                                           // consume =
+        advance();                                               // consume =
 
         if (check(TokenType::ANY)) {
             advance(); // consume ANY
@@ -3832,7 +3832,7 @@ Result<ExprPtr> Parser::parse_primary() {
     // Identifier, column reference, function call, or CAST.
     if (is_name_token(tok.type)) {
         bool was_quoted = tok.type == TokenType::IDENTIFIER && tok.lexeme.size() >= 2 &&
-                           tok.lexeme.front() == '"';
+                          tok.lexeme.front() == '"';
         std::string name = identifier_text(advance().lexeme);
         uint32_t line = previous().line;
         uint32_t col = previous().column;
