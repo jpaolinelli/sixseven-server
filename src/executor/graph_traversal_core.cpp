@@ -9,12 +9,42 @@ namespace sixseven {
 // ---------------------------------------------------------------------------
 
 Result<int64_t> pk_to_int64(const Value& pk) {
+    // GDB-1224: widened to accept every integer PK width (INT8/INT16/INT32/
+    // INT64, UINT8/UINT16/UINT32/UINT64), not just INT32/INT64. All of these
+    // losslessly represent as int64_t except UINT64 values above INT64_MAX,
+    // which wrap via static_cast the same way the rest of the codebase's
+    // integer-to-int64 conversion path (to_int64() in
+    // src/common/coercion.cpp) already accepts -- PathStep::node_pk (see
+    // include/sixseven/common/value.h) is used for path identity/display,
+    // not arithmetic, so this matches existing precedent rather than
+    // introducing a new tradeoff. STRING and other non-integer PK types
+    // remain explicitly rejected: widening PathStep::node_pk itself to a
+    // generic Value would be a much larger, separately-scoped change
+    // (touches PATH serialization/WAL format), not a mechanical bug fix.
     if (!pk.is_null()) {
         if (const auto* p = std::get_if<int64_t>(&pk.data())) {
             return ok(*p);
         }
         if (const auto* p32 = std::get_if<int32_t>(&pk.data())) {
             return ok(static_cast<int64_t>(*p32));
+        }
+        if (const auto* p16 = std::get_if<int16_t>(&pk.data())) {
+            return ok(static_cast<int64_t>(*p16));
+        }
+        if (const auto* p8 = std::get_if<int8_t>(&pk.data())) {
+            return ok(static_cast<int64_t>(*p8));
+        }
+        if (const auto* u8 = std::get_if<uint8_t>(&pk.data())) {
+            return ok(static_cast<int64_t>(*u8));
+        }
+        if (const auto* u16 = std::get_if<uint16_t>(&pk.data())) {
+            return ok(static_cast<int64_t>(*u16));
+        }
+        if (const auto* u32 = std::get_if<uint32_t>(&pk.data())) {
+            return ok(static_cast<int64_t>(*u32));
+        }
+        if (const auto* u64 = std::get_if<uint64_t>(&pk.data())) {
+            return ok(static_cast<int64_t>(*u64));
         }
     }
     return make_error(StatusCode::INVALID_ARGUMENT,

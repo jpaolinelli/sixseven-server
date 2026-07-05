@@ -214,6 +214,21 @@ Result<RID> TableHeap::insert_tuple(std::span<const uint8_t> data, txn_id_t xmin
         }
     }
 
+    // GDB-1224: reject a tuple that can never fit on ANY page (even a
+    // completely fresh, empty one) before entering the retry loop below.
+    // Without this upfront check, such a tuple fails Page::insert_tuple()
+    // with the same StatusCode::INVALID_ARGUMENT used for the transient
+    // "another thread raced us onto this fresh page" case (GDB-1267), so
+    // the retry loop cannot tell them apart -- it retries kMaxAllocRetries
+    // times (every attempt guaranteed to fail identically) and returns the
+    // wrong, misleading StatusCode::INTERNAL_ERROR ("exceeded retry limit")
+    // instead of the correct, immediate INVALID_ARGUMENT the caller actually
+    // needs to detect an oversized tuple. Mirrors the exact bound used by
+    // Page::insert_tuple()'s own absolute-capacity check.
+    if (on_page.size() > page_size - page_header_size - slot_entry_size) {
+        return make_error(StatusCode::INVALID_ARGUMENT, "tuple too large for a page");
+    }
+
     // No existing page has room — allocate a new one and retry in a bounded
     // loop.  Under concurrency, a newly allocated page may be filled by another
     // thread before we pin it (GDB-1267: the "not enough free space" race that

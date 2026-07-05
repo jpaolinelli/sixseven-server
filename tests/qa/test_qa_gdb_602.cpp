@@ -246,15 +246,23 @@ TEST(QA_GDB602_Parser, MixedCase_IfExists) {
 // after keyword-like names still parses correctly
 // =============================================================================
 
-TEST(QA_GDB602_Parser, QuotedIdentifierDatabaseNameRejectedCleanly) {
-    // The lexer does not support double-quoted identifiers, so a quoted database
-    // name (e.g. a keyword like "if" quoted to be used as an identifier) is
-    // rejected with a clean lexer error at the opening quote -- not a crash, and
-    // not a silently-mis-parsed statement. The previous version discarded the
-    // parse result and only checked "no crash", passing under any outcome.
+TEST(QA_GDB602_Parser, QuotedIdentifierDatabaseNameParsesCleanly) {
+    // GDB-1224: the lexer DOES support double-quoted identifiers (see the
+    // "unterminated quoted identifier" / "zero-length delimited identifier"
+    // handling in src/parser/lexer.cpp) -- this test's prior comment and
+    // expectation (that quoting is unsupported and must be rejected) was
+    // simply wrong about current lexer capabilities. A quoted database name
+    // like "if" (quoting the keyword IF to use it as a plain identifier) is
+    // valid SQL and must parse successfully into database_name == "if", not
+    // be rejected. The previous version of this test discarded the parse
+    // result and only checked "no crash", so it passed under any outcome
+    // and never caught that its own assertion direction was backwards.
     auto r = try_parse("DROP DATABASE \"if\" IF EXISTS");
-    ASSERT_FALSE(r.has_value());
-    EXPECT_NE(r.error().message.find('"'), std::string::npos) << r.error().message;
+    ASSERT_TRUE(r.has_value()) << (r.has_value() ? "" : r.error().message);
+    auto* drop = dynamic_cast<DropDatabaseStmt*>(r->get());
+    ASSERT_NE(drop, nullptr);
+    EXPECT_EQ(drop->database_name, "if");
+    EXPECT_TRUE(drop->if_exists);
 }
 
 // =============================================================================

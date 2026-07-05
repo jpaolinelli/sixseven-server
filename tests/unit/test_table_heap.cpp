@@ -234,7 +234,8 @@ TEST_F(TableHeapTest, SequentialScanEmpty) {
     ASSERT_TRUE(it_result.has_value()) << it_result.error().message;
     auto it = std::move(*it_result);
     auto result = it.next();
-    ASSERT_TRUE(result.has_value()) << "next() returned error on empty heap: " << result.error().message;
+    ASSERT_TRUE(result.has_value())
+        << "next() returned error on empty heap: " << result.error().message;
     EXPECT_FALSE(result->has_value());
 }
 
@@ -514,6 +515,21 @@ TEST_F(TableHeapTest, UpdateExceedingPageCapacityFails) {
     // Max tuple = 8164 bytes. Use 8165 to exceed capacity.
     auto upd = heap.update_tuple(*rid, make_tuple(8165, 0x22));
     EXPECT_FALSE(upd.has_value());
+}
+
+// GDB-1224: insert_tuple() must reject an oversized tuple with INVALID_ARGUMENT
+// immediately, not INTERNAL_ERROR after exhausting the GDB-1267 retry loop.
+// Page is 8192 bytes with 24-byte header + 4-byte slot entry = 28 bytes
+// overhead, so max tuple = 8164 bytes; 8165 can never fit on any page (fresh
+// or otherwise), so every retry-loop attempt fails identically and, before
+// this fix, the loop exhausted and returned the misleading INTERNAL_ERROR
+// "exceeded retry limit" instead of the real INVALID_ARGUMENT.
+TEST_F(TableHeapTest, InsertOneByteOverPageCapacityFailsWithInvalidArgument) {
+    TableHeap heap(*bpm_, dm_, file_id_);
+
+    auto rid = heap.insert_tuple(make_tuple(8165, 0x33));
+    ASSERT_FALSE(rid.has_value());
+    EXPECT_EQ(rid.error().code, StatusCode::INVALID_ARGUMENT);
 }
 
 // -- begin() returns Result ---------------------------------------------------

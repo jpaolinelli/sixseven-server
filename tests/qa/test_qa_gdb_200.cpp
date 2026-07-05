@@ -490,12 +490,19 @@ TEST(QA_GDB200_Range, FewerOidsThanParams) {
 }
 
 TEST(QA_GDB200_Range, EmptyOidsVector) {
+    // GDB-1224: GDB-569 (psqlODBC integration) deliberately made OID 0
+    // ("unspecified", including when param_oids is shorter than
+    // param_values, or entirely empty) infer text vs. numeric from the
+    // value's own content -- see format_param_as_sql()'s "OID 0 means
+    // unspecified -- infer from value content" comment in
+    // src/server/pg_protocol.cpp. "42" is a valid numeric literal, so with
+    // no OID supplied it is emitted unquoted, not defaulted to quoted text.
+    // This test's prior expectation predated/ignored that GDB-569 change.
     std::vector<std::optional<std::string>> params = {"42"};
     std::vector<uint32_t> oids = {};
     auto result = substitute_parameters("SELECT $1", params, oids);
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    // No OIDs → default to text (quoted).
-    EXPECT_EQ(*result, "SELECT '42'");
+    EXPECT_EQ(*result, "SELECT 42");
 }
 
 // =============================================================================

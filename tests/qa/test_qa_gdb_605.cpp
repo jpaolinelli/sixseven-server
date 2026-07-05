@@ -503,6 +503,7 @@ protected:
         std::filesystem::remove_all(data_dir_);
         std::filesystem::create_directories(data_dir_);
 
+        init_test_catalog(catalog_);
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         graph_engine_ = std::make_unique<GraphEngine>(catalog_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_, graph_engine_.get());
