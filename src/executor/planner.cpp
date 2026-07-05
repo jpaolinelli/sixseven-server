@@ -3,6 +3,7 @@
 #include "sixseven/common/coercion.h"
 #include "sixseven/common/logging.h"
 #include "sixseven/common/parse_utils.h"
+#include "sixseven/common/string_util.h"
 #include "sixseven/common/value_hash.h"
 #include "sixseven/executor/algorithm_scan.h"
 #include "sixseven/executor/bitmap_scan.h"
@@ -75,13 +76,6 @@ struct NearestJoinPlan {
     std::string owner_table;        ///< physical table name of that owner.
     const Expr* residual = nullptr; ///< owned AND-chain: NEAREST + owner's sibling conjuncts.
 };
-
-std::string to_upper(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
-        return static_cast<char>(std::toupper(c));
-    });
-    return s;
-}
 
 /// Walk down a single-child operator chain (e.g. Filter -> Seq Scan) looking
 /// for the first node that carries an optimizer cost estimate. Returns

@@ -141,9 +141,6 @@ public:
 private:
     mutable std::mutex mu_;
     std::unordered_map<std::string, Entry> algorithms_;
-
-    /// Normalise a name to uppercase for case-insensitive lookup.
-    [[nodiscard]] static std::string to_upper(const std::string& s);
 };
 
 } // namespace sixseven

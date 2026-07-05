@@ -2,6 +2,7 @@
 
 #include "sixseven/common/logging.h"
 #include "sixseven/common/parse_utils.h"
+#include "sixseven/common/string_util.h"
 #include "sixseven/executor/query_engine.h"
 
 #include <algorithm>
@@ -11,15 +12,6 @@
 namespace sixseven {
 
 namespace {
-
-/// Convert a string to lowercase.
-std::string to_lower(std::string_view sv) {
-    std::string result(sv);
-    std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return result;
-}
 
 /// Trim leading and trailing whitespace from a string.
 std::string trim(std::string_view sv) {
