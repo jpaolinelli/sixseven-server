@@ -69,6 +69,64 @@ TEST(TypeResolver, ResolveCaseInsensitive) {
     EXPECT_EQ(*resolve_type_spec(make_spec("bOOL")), TypeId::BOOL);
 }
 
+// GDB-1220: exhaustive name -> TypeId table locking the SQL DDL path's
+// accepted domain (canonical names layered with SQL aliases) after
+// type_name_map() was rebuilt on top of parse_type_id's canonical set. Every
+// canonical name from common/types.h::type_name must still resolve, and every
+// pre-existing SQL alias must still resolve to the same TypeId as before.
+TEST(TypeResolver, ResolveAllCanonicalAndAliasNames) {
+    static const std::vector<std::pair<std::string, TypeId>> cases = {
+        // Canonical names (must match parse_type_id's domain exactly).
+        {"INT8", TypeId::INT8},
+        {"INT16", TypeId::INT16},
+        {"INT32", TypeId::INT32},
+        {"INT64", TypeId::INT64},
+        {"UINT8", TypeId::UINT8},
+        {"UINT16", TypeId::UINT16},
+        {"UINT32", TypeId::UINT32},
+        {"UINT64", TypeId::UINT64},
+        {"FLOAT32", TypeId::FLOAT32},
+        {"FLOAT64", TypeId::FLOAT64},
+        {"DECIMAL", TypeId::DECIMAL},
+        {"BOOL", TypeId::BOOL},
+        {"STRING", TypeId::STRING},
+        {"BLOB", TypeId::BLOB},
+        {"DATE", TypeId::DATE},
+        {"TIME", TypeId::TIME},
+        {"TIMESTAMP", TypeId::TIMESTAMP},
+        {"INTERVAL", TypeId::INTERVAL},
+        {"POINT", TypeId::POINT},
+        {"JSON", TypeId::JSON},
+        {"UUID", TypeId::UUID},
+        {"EMBEDDING", TypeId::EMBEDDING},
+        {"PATH", TypeId::PATH},
+        // SQL-only aliases (not accepted by parse_type_id).
+        {"TINYINT", TypeId::INT8},
+        {"SMALLINT", TypeId::INT16},
+        {"INT", TypeId::INT32},
+        {"INTEGER", TypeId::INT32},
+        {"BIGINT", TypeId::INT64},
+        {"FLOAT", TypeId::FLOAT32},
+        {"REAL", TypeId::FLOAT32},
+        {"DOUBLE", TypeId::FLOAT64},
+        {"DOUBLE PRECISION", TypeId::FLOAT64},
+        {"NUMERIC", TypeId::DECIMAL},
+        {"BOOLEAN", TypeId::BOOL},
+        {"TEXT", TypeId::STRING},
+        {"VARCHAR", TypeId::STRING},
+        {"CHAR", TypeId::STRING},
+        {"CHARACTER VARYING", TypeId::STRING},
+        {"BYTEA", TypeId::BLOB},
+        {"JSONB", TypeId::JSON},
+    };
+
+    for (const auto& [name, expected] : cases) {
+        auto result = resolve_type_spec(make_spec(name));
+        ASSERT_TRUE(result.has_value()) << "name: " << name;
+        EXPECT_EQ(*result, expected) << "name: " << name;
+    }
+}
+
 TEST(TypeResolver, ResolveUnknownTypeReturnsError) {
     auto result = resolve_type_spec(make_spec("FOOBAR"));
     ASSERT_FALSE(result.has_value());

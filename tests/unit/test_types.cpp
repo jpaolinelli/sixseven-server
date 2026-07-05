@@ -152,6 +152,74 @@ TEST(TypeId, IsComparable) {
     EXPECT_FALSE(is_comparable(TypeId::EMBEDDING));
 }
 
+// -- parse_type_id --------------------------------------------------------------
+// GDB-1220: parse_type_id is the canonical-name parser used directly by the
+// graph edge-property deserializer (src/graph/graph_engine.cpp). Unlike the
+// SQL DDL type resolver (planner/type_resolver.cpp), it must accept ONLY the
+// canonical type names below and must NOT accept SQL aliases (INT, SMALLINT,
+// BOOLEAN, VARCHAR, etc.). These tests lock that domain so a future
+// consolidation of the two type-name maps cannot silently let SQL aliases
+// leak into graph edge-property persistence.
+
+TEST(ParseTypeId, AcceptsEveryCanonicalName) {
+    EXPECT_EQ(parse_type_id("INT8"), TypeId::INT8);
+    EXPECT_EQ(parse_type_id("INT16"), TypeId::INT16);
+    EXPECT_EQ(parse_type_id("INT32"), TypeId::INT32);
+    EXPECT_EQ(parse_type_id("INT64"), TypeId::INT64);
+    EXPECT_EQ(parse_type_id("UINT8"), TypeId::UINT8);
+    EXPECT_EQ(parse_type_id("UINT16"), TypeId::UINT16);
+    EXPECT_EQ(parse_type_id("UINT32"), TypeId::UINT32);
+    EXPECT_EQ(parse_type_id("UINT64"), TypeId::UINT64);
+    EXPECT_EQ(parse_type_id("FLOAT32"), TypeId::FLOAT32);
+    EXPECT_EQ(parse_type_id("FLOAT64"), TypeId::FLOAT64);
+    EXPECT_EQ(parse_type_id("DECIMAL"), TypeId::DECIMAL);
+    EXPECT_EQ(parse_type_id("BOOL"), TypeId::BOOL);
+    EXPECT_EQ(parse_type_id("STRING"), TypeId::STRING);
+    EXPECT_EQ(parse_type_id("BLOB"), TypeId::BLOB);
+    EXPECT_EQ(parse_type_id("DATE"), TypeId::DATE);
+    EXPECT_EQ(parse_type_id("TIME"), TypeId::TIME);
+    EXPECT_EQ(parse_type_id("TIMESTAMP"), TypeId::TIMESTAMP);
+    EXPECT_EQ(parse_type_id("INTERVAL"), TypeId::INTERVAL);
+    EXPECT_EQ(parse_type_id("POINT"), TypeId::POINT);
+    EXPECT_EQ(parse_type_id("JSON"), TypeId::JSON);
+    EXPECT_EQ(parse_type_id("UUID"), TypeId::UUID);
+    EXPECT_EQ(parse_type_id("EMBEDDING"), TypeId::EMBEDDING);
+    EXPECT_EQ(parse_type_id("PATH"), TypeId::PATH);
+}
+
+TEST(ParseTypeId, IsCaseInsensitiveForCanonicalNames) {
+    EXPECT_EQ(parse_type_id("int32"), TypeId::INT32);
+    EXPECT_EQ(parse_type_id("String"), TypeId::STRING);
+    EXPECT_EQ(parse_type_id("bOoL"), TypeId::BOOL);
+}
+
+TEST(ParseTypeId, RejectsSqlAliases) {
+    // These are valid in the SQL DDL type resolver (type_name_map) but must
+    // NOT be accepted by the canonical graph-facing parser.
+    EXPECT_FALSE(parse_type_id("INT").has_value());
+    EXPECT_FALSE(parse_type_id("INTEGER").has_value());
+    EXPECT_FALSE(parse_type_id("TINYINT").has_value());
+    EXPECT_FALSE(parse_type_id("SMALLINT").has_value());
+    EXPECT_FALSE(parse_type_id("BIGINT").has_value());
+    EXPECT_FALSE(parse_type_id("FLOAT").has_value());
+    EXPECT_FALSE(parse_type_id("REAL").has_value());
+    EXPECT_FALSE(parse_type_id("DOUBLE").has_value());
+    EXPECT_FALSE(parse_type_id("DOUBLE PRECISION").has_value());
+    EXPECT_FALSE(parse_type_id("NUMERIC").has_value());
+    EXPECT_FALSE(parse_type_id("BOOLEAN").has_value());
+    EXPECT_FALSE(parse_type_id("TEXT").has_value());
+    EXPECT_FALSE(parse_type_id("VARCHAR").has_value());
+    EXPECT_FALSE(parse_type_id("CHAR").has_value());
+    EXPECT_FALSE(parse_type_id("CHARACTER VARYING").has_value());
+    EXPECT_FALSE(parse_type_id("BYTEA").has_value());
+    EXPECT_FALSE(parse_type_id("JSONB").has_value());
+}
+
+TEST(ParseTypeId, RejectsUnknownName) {
+    EXPECT_FALSE(parse_type_id("NOT_A_TYPE").has_value());
+    EXPECT_FALSE(parse_type_id("").has_value());
+}
+
 // -- is_variable_length -------------------------------------------------------
 
 TEST(TypeId, IsVariableLength) {

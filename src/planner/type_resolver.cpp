@@ -13,60 +13,52 @@ namespace sixseven {
 namespace {
 
 /// Map from uppercase SQL type name → TypeId.
+///
+/// Built by layering SQL-only aliases on top of the canonical name set
+/// accepted by `parse_type_id` (see include/sixseven/common/types.h), so the
+/// canonical names recognized here always stay in sync with that single
+/// source of truth -- adding a new TypeId only requires updating types.h
+/// (type_name / parse_type_id / fixed_size switches) and this alias list, not
+/// a second independent canonical-name table.
+///
+/// `parse_type_id` itself is also used directly by the graph edge-property
+/// parser (src/graph/graph_engine.cpp), which must keep accepting ONLY
+/// canonical type names. The SQL-only aliases below (INT, SMALLINT, BOOLEAN,
+/// VARCHAR, etc.) are intentionally NOT added to parse_type_id -- they exist
+/// solely for this SQL DDL-facing map.
 const std::unordered_map<std::string, TypeId>& type_name_map() {
-    static const std::unordered_map<std::string, TypeId> map = {
-        // Integer types
-        {"TINYINT", TypeId::INT8},
-        {"INT8", TypeId::INT8},
-        {"SMALLINT", TypeId::INT16},
-        {"INT16", TypeId::INT16},
-        {"INT", TypeId::INT32},
-        {"INTEGER", TypeId::INT32},
-        {"INT32", TypeId::INT32},
-        {"BIGINT", TypeId::INT64},
-        {"INT64", TypeId::INT64},
-        // Unsigned integer types
-        {"UINT8", TypeId::UINT8},
-        {"UINT16", TypeId::UINT16},
-        {"UINT32", TypeId::UINT32},
-        {"UINT64", TypeId::UINT64},
-        // Floating-point types
-        {"FLOAT", TypeId::FLOAT32},
-        {"FLOAT32", TypeId::FLOAT32},
-        {"REAL", TypeId::FLOAT32},
-        {"DOUBLE", TypeId::FLOAT64},
-        {"FLOAT64", TypeId::FLOAT64},
-        {"DOUBLE PRECISION", TypeId::FLOAT64},
-        // Decimal
-        {"DECIMAL", TypeId::DECIMAL},
-        {"NUMERIC", TypeId::DECIMAL},
-        // Boolean
-        {"BOOL", TypeId::BOOL},
-        {"BOOLEAN", TypeId::BOOL},
-        // String types
-        {"TEXT", TypeId::STRING},
-        {"STRING", TypeId::STRING},
-        {"VARCHAR", TypeId::STRING},
-        {"CHAR", TypeId::STRING},
-        {"CHARACTER VARYING", TypeId::STRING},
-        // Binary
-        {"BLOB", TypeId::BLOB},
-        {"BYTEA", TypeId::BLOB},
-        // Temporal
-        {"DATE", TypeId::DATE},
-        {"TIME", TypeId::TIME},
-        {"TIMESTAMP", TypeId::TIMESTAMP},
-        {"INTERVAL", TypeId::INTERVAL},
-        // Spatial
-        {"POINT", TypeId::POINT},
-        // Semi-structured
-        {"JSON", TypeId::JSON},
-        {"JSONB", TypeId::JSON},
-        // Identifiers
-        {"UUID", TypeId::UUID},
-        // Vector
-        {"EMBEDDING", TypeId::EMBEDDING},
-    };
+    static const std::unordered_map<std::string, TypeId> map = [] {
+        std::unordered_map<std::string, TypeId> m;
+
+        // Seed with every canonical name recognized by parse_type_id, so a
+        // new TypeId added there is automatically resolvable here too.
+        for (uint8_t raw = 0; raw <= static_cast<uint8_t>(TypeId::PATH); ++raw) {
+            auto id = static_cast<TypeId>(raw);
+            m.emplace(std::string(type_name(id)), id);
+        }
+
+        // SQL-only aliases layered on top. Accepted by the SQL DDL path
+        // (this map) but NOT by parse_type_id (graph edge-property path).
+        m.emplace("TINYINT", TypeId::INT8);
+        m.emplace("SMALLINT", TypeId::INT16);
+        m.emplace("INT", TypeId::INT32);
+        m.emplace("INTEGER", TypeId::INT32);
+        m.emplace("BIGINT", TypeId::INT64);
+        m.emplace("FLOAT", TypeId::FLOAT32);
+        m.emplace("REAL", TypeId::FLOAT32);
+        m.emplace("DOUBLE", TypeId::FLOAT64);
+        m.emplace("DOUBLE PRECISION", TypeId::FLOAT64);
+        m.emplace("NUMERIC", TypeId::DECIMAL);
+        m.emplace("BOOLEAN", TypeId::BOOL);
+        m.emplace("TEXT", TypeId::STRING);
+        m.emplace("VARCHAR", TypeId::STRING);
+        m.emplace("CHAR", TypeId::STRING);
+        m.emplace("CHARACTER VARYING", TypeId::STRING);
+        m.emplace("BYTEA", TypeId::BLOB);
+        m.emplace("JSONB", TypeId::JSON);
+
+        return m;
+    }();
     return map;
 }
 
