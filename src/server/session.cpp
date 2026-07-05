@@ -31,20 +31,6 @@ std::string strip_quotes(const std::string& val) {
     return val;
 }
 
-/// Case-insensitive string prefix check.
-bool starts_with_ci(std::string_view str, std::string_view prefix) {
-    if (str.size() < prefix.size()) {
-        return false;
-    }
-    for (size_t i = 0; i < prefix.size(); ++i) {
-        if (std::tolower(static_cast<unsigned char>(str[i])) !=
-            std::tolower(static_cast<unsigned char>(prefix[i]))) {
-            return false;
-        }
-    }
-    return true;
-}
-
 } // namespace
 
 // -- Default session variable values ------------------------------------------
