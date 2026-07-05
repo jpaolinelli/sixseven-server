@@ -200,9 +200,6 @@ protected:
     std::unique_ptr<TempWalDir> wal_dir_;
     std::unique_ptr<MockRecoveryHandler> handler_;
     std::unique_ptr<WalReceiver> receiver_;
-
-    // The "primary side" connection for injecting data.
-    InMemoryReplicationConnection* primary_conn_ = nullptr;
 };
 
 TEST_F(WalReceiverTest, StartAndStop) {
@@ -210,8 +207,8 @@ TEST_F(WalReceiverTest, StartAndStop) {
     auto factory = [this](const std::string& /*host*/,
                           uint16_t /*port*/) -> Result<std::unique_ptr<ReplicationConnection>> {
         auto [standby_conn, primary_conn] = create_connection_pair();
-        primary_conn_ = primary_conn.get();
-        // Keep primary_conn alive by storing it — but for this test we don't need it.
+        // The primary side isn't needed for this test; it is dropped here and
+        // only the standby side is kept alive by the receiver.
         return ok(std::unique_ptr<ReplicationConnection>(std::move(standby_conn)));
     };
 
