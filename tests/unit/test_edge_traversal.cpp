@@ -2,8 +2,10 @@
 #include "sixseven/common/result.h"
 #include "sixseven/common/types.h"
 #include "sixseven/common/value.h"
+#include "sixseven/executor/edge_traversal.h"
 #include "sixseven/executor/query_engine.h"
 #include "sixseven/executor/storage_manager.h"
+#include "sixseven/executor/traversal.h"
 #include "sixseven/graph/graph_engine.h"
 #include "sixseven/storage/disk_manager.h"
 
@@ -524,6 +526,69 @@ TEST_F(EdgeTraversalTest, NoTraceNoPathColumn) {
     for (const auto& name : qr.column_names) {
         EXPECT_NE(name, "__path") << "__path must not appear without WITH TRACE";
     }
+}
+
+// ============================================================================
+// GDB-1214: max_visited exceeded -> explicit error (unified across graph ops)
+// ============================================================================
+
+TEST_F(EdgeTraversalTest, ExceedingMaxVisitedReturnsError) {
+    // The users graph reaches 5 nodes from user 1 (1,2,3,4,5). A max_visited
+    // of 2 is exceeded during BFS expansion, so open() must fail with an
+    // explicit error rather than silently truncating the edge scan.
+    TraversalConfig config;
+    config.edge_type = "follows";
+    config.start_key = Value(int64_t{1});
+    config.direction = TraverseDirection::OUT;
+    config.max_depth = 100;
+    config.max_visited = 2;
+
+    std::vector<OutputColumn> cols;
+    cols.push_back({"", "__from", TypeId::INT64, false, 0});
+    cols.push_back({"", "__to", TypeId::INT64, false, 0});
+    OutputSchema schema(std::move(cols));
+
+    BoundStatement bound;
+    EdgeTraversalOperator op(*graph_engine_, std::move(config), std::move(schema), nullptr, bound);
+
+    auto open_result = op.open();
+    ASSERT_FALSE(open_result.has_value());
+    EXPECT_EQ(open_result.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_NE(open_result.error().message.find("exceeded max_visited limit (2)"), std::string::npos)
+        << open_result.error().message;
+}
+
+TEST_F(EdgeTraversalTest, UnderMaxVisitedLimitReturnsCompleteEdges) {
+    // Regression guard: a generous max_visited budget must not affect
+    // correctness -- same expectation as BasicEdgeOutput.
+    TraversalConfig config;
+    config.edge_type = "follows";
+    config.start_key = Value(int64_t{1});
+    config.direction = TraverseDirection::OUT;
+    config.max_depth = 100;
+    config.max_visited = 100000;
+
+    std::vector<OutputColumn> cols;
+    cols.push_back({"", "__from", TypeId::INT64, false, 0});
+    cols.push_back({"", "__to", TypeId::INT64, false, 0});
+    OutputSchema schema(std::move(cols));
+
+    BoundStatement bound;
+    EdgeTraversalOperator op(*graph_engine_, std::move(config), std::move(schema), nullptr, bound);
+
+    auto open_result = op.open();
+    ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
+
+    size_t count = 0;
+    while (true) {
+        auto row = op.next();
+        ASSERT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value())
+            break;
+        ++count;
+    }
+    op.close();
+    EXPECT_EQ(count, 5u);
 }
 
 } // namespace

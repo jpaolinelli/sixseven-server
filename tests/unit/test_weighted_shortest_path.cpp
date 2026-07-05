@@ -695,3 +695,83 @@ TEST(WeightParser, WeightAsColumnName) {
     ASSERT_NE(sel, nullptr);
     EXPECT_EQ(sel->items.size(), 1u);
 }
+
+// ===========================================================================
+// GDB-1214: max_visited exceeded -> explicit error (unified across graph ops)
+// ===========================================================================
+
+// Unweighted BFS path (find_shortest_paths, match_shortest_path.cpp) must
+// return an explicit INVALID_ARGUMENT error -- not a silent partial-paths
+// return -- when max_visited is exceeded.
+TEST_F(WeightedShortestPathTest, UnweightedBfsExceedingMaxVisitedReturnsError) {
+    MatchConfig config = make_config();
+
+    BoundStatement bound;
+    MatchShortestPathOperator op(*graph_,
+                                 *catalog_,
+                                 *storage_,
+                                 default_database_id,
+                                 std::move(config),
+                                 make_schema(),
+                                 nullptr,
+                                 bound,
+                                 PathSelector::ANY_SHORTEST,
+                                 "p",
+                                 0,
+                                 /*max_visited=*/1,
+                                 /*weight_expr=*/nullptr);
+    auto result = op.open();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_NE(result.error().message.find("exceeded max_visited limit (1)"), std::string::npos)
+        << result.error().message;
+}
+
+// Weighted Dijkstra path (find_weighted_shortest_paths) must also return the
+// same explicit error when max_visited is exceeded.
+TEST_F(WeightedShortestPathTest, DijkstraExceedingMaxVisitedReturnsError) {
+    auto weight = make_weight_expr();
+    MatchConfig config = make_config();
+
+    BoundStatement bound;
+    MatchShortestPathOperator op(*graph_,
+                                 *catalog_,
+                                 *storage_,
+                                 default_database_id,
+                                 std::move(config),
+                                 make_schema(),
+                                 nullptr,
+                                 bound,
+                                 PathSelector::ANY_SHORTEST,
+                                 "p",
+                                 0,
+                                 /*max_visited=*/1,
+                                 weight.get());
+    auto result = op.open();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_NE(result.error().message.find("exceeded max_visited limit (1)"), std::string::npos)
+        << result.error().message;
+}
+
+// Regression guard: a generous max_visited budget must not affect
+// correctness for the Dijkstra path -- same assertion as
+// DijkstraFindsWeightedShortestPath, but explicitly re-checked here in the
+// context of the GDB-1214 unification to confirm no under-limit regression.
+TEST_F(WeightedShortestPathTest, DijkstraUnderMaxVisitedLimitReturnsCompleteResults) {
+    auto weight = make_weight_expr();
+    auto results =
+        run_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST, weight.get());
+
+    std::vector<Tuple> from_1_to_5;
+    for (auto& t : results) {
+        if (t.values[0].as_int64() == 1 && t.values[1].as_int64() == 5) {
+            from_1_to_5.push_back(std::move(t));
+        }
+    }
+
+    ASSERT_EQ(from_1_to_5.size(), 1u);
+    const auto& path = from_1_to_5[0].values[2].as_path();
+    EXPECT_EQ(path.length(), 3);
+    EXPECT_DOUBLE_EQ(path.total_weight, 10.0);
+}

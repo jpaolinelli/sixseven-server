@@ -111,7 +111,10 @@ Result<void> EdgeTraversalOperator::run_bfs() {
 
         for (auto& [neighbor_pk, edge] : *neighbors) {
             if (visited.size() >= config_.max_visited) {
-                break;
+                return tl::unexpected(
+                    make_error(StatusCode::INVALID_ARGUMENT,
+                               "edge graph traversal exceeded max_visited limit (" +
+                                   std::to_string(config_.max_visited) + ")"));
             }
 
             if (visited.count(neighbor_pk) > 0) {
