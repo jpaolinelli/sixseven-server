@@ -142,5 +142,31 @@ TEST_F(UnlinkWhereTest, WithoutWhereUnchanged) {
     EXPECT_EQ(edges.rows.size(), 0u);
 }
 
+// ============================================================================
+// 5. UNLINK WHERE — error paths (binder-level rejections)
+// ============================================================================
+
+TEST_F(UnlinkWhereTest, UnknownEdgePropertyInWhereFails) {
+    // "bogus" is not a declared property of the "rated" edge type, so the
+    // WHERE clause cannot resolve it and the binder must reject the statement.
+    exec_err("UNLINK users(1) FROM products(10) VIA rated WHERE bogus = 1");
+}
+
+TEST_F(UnlinkWhereTest, UnknownEdgeTypeFails) {
+    // The edge type itself does not exist in the catalog.
+    exec_err("UNLINK users(1) FROM products(10) VIA not_an_edge_type WHERE score < 1.0");
+}
+
+TEST_F(UnlinkWhereTest, SourceTableMismatchFails) {
+    // "products" is not the declared source table of the "rated" edge type
+    // (users -> products), so the binder must reject the mismatched source.
+    exec_err("UNLINK products(10) FROM products(20) VIA rated WHERE score < 1.0");
+}
+
+TEST_F(UnlinkWhereTest, TargetTableMismatchFails) {
+    // "users" is not the declared target table of the "rated" edge type.
+    exec_err("UNLINK users(1) FROM users(2) VIA rated WHERE score < 1.0");
+}
+
 } // namespace
 } // namespace sixseven
