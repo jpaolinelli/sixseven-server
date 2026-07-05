@@ -73,3 +73,32 @@ TEST(ValueHash, EqualValuesProduceEqualHashes) {
     Uuid copy = u;
     EXPECT_EQ(H(Value{u}), H(Value{copy}));
 }
+
+// GDB-1224: ValueHash used to hash the raw variant alternative (one std::hash<T>
+// per concrete C++ type), so e.g. int32_t(2) and int64_t(2) hashed to different
+// buckets even though sixseven::compare() (and therefore ValueEqual) treats them
+// as numerically equal after cross-width promotion. That hash/equal contract
+// violation silently dropped matching rows from a hash join, hash-based GROUP
+// BY, or a hash index probe whenever the two sides of a numeric comparison had
+// different (but value-compatible) integer or float widths.
+TEST(ValueHash, MixedWidthIntegersWithEqualValueHashEqual) {
+    EXPECT_EQ(H(Value{static_cast<int32_t>(2)}), H(Value{static_cast<int64_t>(2)}));
+    EXPECT_EQ(H(Value{static_cast<int8_t>(7)}), H(Value{static_cast<int64_t>(7)}));
+    EXPECT_EQ(H(Value{static_cast<uint16_t>(9)}), H(Value{static_cast<int64_t>(9)}));
+    EXPECT_EQ(H(Value{static_cast<uint32_t>(0)}), H(Value{static_cast<int32_t>(0)}));
+}
+
+TEST(ValueHash, MixedWidthFloatsWithEqualValueHashEqual) {
+    EXPECT_EQ(H(Value{static_cast<float>(3.5)}), H(Value{static_cast<double>(3.5)}));
+}
+
+TEST(ValueHash, IntegerAndFloatWithEqualValueHashEqual) {
+    EXPECT_EQ(H(Value{static_cast<int32_t>(4)}), H(Value{static_cast<double>(4.0)}));
+}
+
+// Distinct numeric values (even across widths) must still be allowed to hash
+// differently (not a strict requirement, but guards against a degenerate "hash
+// everything the same" fix).
+TEST(ValueHash, DistinctMixedWidthIntegersUsuallyHashDifferently) {
+    EXPECT_NE(H(Value{static_cast<int32_t>(2)}), H(Value{static_cast<int64_t>(3)}));
+}
