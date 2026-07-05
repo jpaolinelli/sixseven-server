@@ -65,9 +65,7 @@ struct RefReplacer {
         }
     }
 
-    void set_evictable(FrameId frame_id, bool evictable) {
-        frames[frame_id].evictable = evictable;
-    }
+    void set_evictable(FrameId frame_id, bool evictable) { frames[frame_id].evictable = evictable; }
 
     void remove(FrameId frame_id) {
         frames[frame_id].history.clear();
@@ -130,9 +128,7 @@ struct RefReplacer {
         return v;
     }
 
-    std::optional<FrameId> evict() {
-        return evict_with_skip(nullptr);
-    }
+    std::optional<FrameId> evict() { return evict_with_skip(nullptr); }
 };
 
 } // namespace
@@ -551,6 +547,12 @@ protected:
         const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
         temp_dir_ = std::filesystem::temp_directory_path() /
                     ("sixseven_qa_gdb620_" + std::string(info->name()));
+        // GDB-1224: remove any stale directory (and test.gdb file inside it)
+        // left behind by a prior crashed/interrupted run before creating
+        // fresh -- without this, DiskManager::create_file() below fails with
+        // "file already exists" on a second run against the same temp path.
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
         std::filesystem::create_directories(temp_dir_);
 
         auto create_result = dm_.create_file(temp_dir_ / "test.gdb");
