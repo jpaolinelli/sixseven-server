@@ -15,10 +15,9 @@ EdgeTraversalOperator::EdgeTraversalOperator(GraphEngine& graph_engine,
                                              TraversalConfig config,
                                              OutputSchema schema,
                                              const Expr* where_expr,
-                                             const BoundStatement& bound,
-                                             bool heterogeneous)
+                                             const BoundStatement& bound)
     : graph_engine_(graph_engine), config_(std::move(config)), schema_(std::move(schema)),
-      where_expr_(where_expr), bound_(bound), heterogeneous_(heterogeneous) {}
+      where_expr_(where_expr), bound_(bound) {}
 
 std::string EdgeTraversalOperator::plan_node_name() const {
     return "Edge Graph Traverse";
@@ -86,7 +85,7 @@ Result<void> EdgeTraversalOperator::run_bfs() {
     // For heterogeneous edges the start node lives in a different table than
     // the target nodes, so adding its PK to the visited set would incorrectly
     // suppress target nodes whose PK happens to match.
-    if (!heterogeneous_) {
+    if (!config_.heterogeneous) {
         visited.insert(config_.start_key);
     }
     queue.push_back({config_.start_key, 0, Value(), -1, {}});
@@ -190,7 +189,7 @@ Result<void> EdgeTraversalOperator::collect_edges() {
         return ok();
     };
 
-    if (!heterogeneous_) {
+    if (!config_.heterogeneous) {
         // Homogeneous: single depth map, no PK collision risk.
         DepthMap depths;
         depths[config_.start_key] = 0;

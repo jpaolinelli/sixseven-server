@@ -41,7 +41,9 @@ public:
     /// @param target_storage_schema Byte-level schema for deserialization.
     /// @param target_pk_col_idx     PK column index in target table.
     /// @param target_column_count   Number of target table columns in schema.
-    /// @param heterogeneous         True when edge connects different tables.
+    ///
+    /// Whether the edge connects different tables is read from
+    /// config.heterogeneous (single source of truth; see TraversalConfig).
     EnrichedTraversalOperator(GraphEngine& graph_engine,
                               TraversalConfig config,
                               OutputSchema schema,
@@ -50,8 +52,7 @@ public:
                               TableHeap& target_heap,
                               const Schema& target_storage_schema,
                               size_t target_pk_col_idx,
-                              size_t target_column_count,
-                              bool heterogeneous);
+                              size_t target_column_count);
 
     [[nodiscard]] const OutputSchema& output_schema() const override;
 
@@ -97,8 +98,6 @@ private:
     const Schema& target_storage_schema_;
     size_t target_pk_col_idx_;
     size_t target_column_count_;
-
-    bool heterogeneous_;
 
     std::vector<TraversalResult> bfs_results_;
     std::vector<Tuple> enriched_results_;

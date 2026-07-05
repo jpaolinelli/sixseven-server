@@ -54,8 +54,8 @@ protected:
         ASSERT_TRUE(tid.has_value()) << tid.error().message;
         table_id_ = *tid;
 
-        auto eid = graph_->create_edge_type(default_database_id, "follows", table_id_, table_id_,
-                                            TypeId::INT64, TypeId::INT64, {});
+        auto eid = graph_->create_edge_type(
+            default_database_id, "follows", table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
         ASSERT_TRUE(eid.has_value()) << eid.error().message;
     }
 
@@ -306,12 +306,14 @@ TEST_F(QA_Gdb678, NonIntegerPkWithTraceReturnsError) {
     auto stid = catalog_->create_table(default_database_id, std::move(ts));
     ASSERT_TRUE(stid.has_value()) << stid.error().message;
 
-    auto eid = graph_->create_edge_type(default_database_id, "sfollows", *stid, *stid,
-                                        TypeId::STRING, TypeId::STRING, {});
+    auto eid = graph_->create_edge_type(
+        default_database_id, "sfollows", *stid, *stid, TypeId::STRING, TypeId::STRING, {});
     ASSERT_TRUE(eid.has_value()) << eid.error().message;
-    ASSERT_TRUE(graph_->link(default_database_id, "sfollows", Value(std::string("a")),
-                             Value(std::string("b")))
-                    .has_value());
+    ASSERT_TRUE(
+        graph_
+            ->link(
+                default_database_id, "sfollows", Value(std::string("a")), Value(std::string("b")))
+            .has_value());
 
     TraversalConfig config;
     config.edge_type = "sfollows";
@@ -368,8 +370,7 @@ TEST_F(QA_Gdb678, EdgeTraversalTracePathToFromNode) {
     OutputSchema schema(std::move(cols));
 
     BoundStatement bound;
-    EdgeTraversalOperator op(*graph_, std::move(config), std::move(schema), nullptr, bound,
-                             /*heterogeneous=*/false);
+    EdgeTraversalOperator op(*graph_, std::move(config), std::move(schema), nullptr, bound);
     auto open_result = op.open();
     ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
 
@@ -416,7 +417,7 @@ TEST_F(QA_Gdb678, EdgeTraversalTraceOffNoPathColumn) {
     OutputSchema schema(std::move(cols));
 
     BoundStatement bound;
-    EdgeTraversalOperator op(*graph_, std::move(config), std::move(schema), nullptr, bound, false);
+    EdgeTraversalOperator op(*graph_, std::move(config), std::move(schema), nullptr, bound);
     ASSERT_TRUE(op.open().has_value());
     auto row = op.next();
     ASSERT_TRUE(row.has_value());
