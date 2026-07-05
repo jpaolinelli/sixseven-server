@@ -97,9 +97,16 @@ void WalReceiver::receiver_loop() {
         auto connect_result = connect();
         if (!connect_result) {
             SIXSEVEN_LOG_WARN("WAL receiver: connection to {}:{} failed: {}",
-                           primary_host_,
-                           primary_port_,
-                           connect_result.error().message);
+                              primary_host_,
+                              primary_port_,
+                              connect_result.error().message);
+
+            // Test-only observation hook: report the delay we are about to
+            // wait for before actually waiting on it. Inert in production
+            // (defaulted empty).
+            if (options_.on_retry_delay_computed) {
+                options_.on_retry_delay_computed(retry_interval);
+            }
 
             // Wait with exponential backoff before retrying.
             {
@@ -130,7 +137,7 @@ void WalReceiver::receiver_loop() {
 
         if (!process_result) {
             SIXSEVEN_LOG_WARN("WAL receiver: streaming interrupted: {}",
-                           process_result.error().message);
+                              process_result.error().message);
         }
 
         // Close the connection before retrying.
@@ -245,8 +252,8 @@ Result<void> WalReceiver::handle_wal_data(const WalDataMessage& msg) {
         auto record = deserialize_wal_record(remaining.subspan(0, total_size));
         if (!record) {
             SIXSEVEN_LOG_WARN("WAL receiver: failed to deserialize record at offset {}: {}",
-                           offset,
-                           record.error().message);
+                              offset,
+                              record.error().message);
             break;
         }
 
@@ -358,8 +365,8 @@ Result<void> WalReceiver::replay_records(const std::vector<WalRecord>& records) 
             auto result = handler_.redo(record);
             if (!result) {
                 SIXSEVEN_LOG_WARN("WAL receiver: redo failed for record LSN {}: {}",
-                               record.lsn,
-                               result.error().message);
+                                  record.lsn,
+                                  result.error().message);
                 // Continue replaying — redo must be idempotent.
             }
             break;

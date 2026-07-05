@@ -39,6 +39,14 @@ struct WalReceiverOptions {
 
     /// Timeout for receiving messages from the primary.
     std::chrono::milliseconds receive_timeout{30000};
+
+    /// Test-only observation hook: invoked with each computed backoff delay
+    /// immediately before the receiver sleeps for it. Defaulted empty, so it
+    /// is inert in production. Lets tests assert on the exact backoff
+    /// sequence the receiver schedules (e.g. 50, 100, 200, 200...) without
+    /// depending on wall-clock timing, which is fragile under scheduler
+    /// contention.
+    std::function<void(std::chrono::milliseconds)> on_retry_delay_computed;
 };
 
 /// Factory for creating connections to the primary server.

@@ -411,93 +411,104 @@ TEST_F(WalReceiverTest, ReconnectsOnConnectionFailure) {
 
 TEST_F(WalReceiverTest, ExponentialBackoff) {
     std::atomic<int> connect_count{0};
-    std::mutex timestamps_mutex;
-    std::vector<std::chrono::steady_clock::time_point> attempt_times;
 
-    // Factory that always fails — to test backoff behavior. Records the wall
-    // clock time of each connection attempt so we can inspect the gaps
-    // between retries directly, rather than inferring backoff from a loose
-    // total-attempt-count bound (see GDB-1200: a bound of "< 10" sits exactly
-    // on the no-backoff attempt count and does not reliably catch a
-    // regression that removes the doubling).
+    // Factory that always fails — to test backoff behavior.
     auto factory = [&](const std::string& /*host*/,
                        uint16_t /*port*/) -> Result<std::unique_ptr<ReplicationConnection>> {
         ++connect_count;
-        {
-            std::lock_guard lock(timestamps_mutex);
-            attempt_times.push_back(std::chrono::steady_clock::now());
-        }
         return make_error(StatusCode::NETWORK_ERROR, "connection refused");
     };
 
+    // Deterministic observation seam (see GDB-1200): rather than inferring
+    // backoff from wall-clock inter-attempt gaps -- which QA found flakes
+    // under CPU contention, since gaps can compress below any fixed
+    // wall-clock threshold when the scheduler is saturated -- capture the
+    // exact backoff delay sequence the receiver *computes and schedules*
+    // (via WalReceiverOptions::on_retry_delay_computed, an inert-in-production
+    // test hook invoked right before each wait_for). This lets us assert on
+    // the receiver's actual intended behavior directly, with no dependency
+    // on wall-clock elapsed time at all.
+    std::mutex delays_mutex;
+    std::condition_variable delays_cv;
+    std::vector<std::chrono::milliseconds> observed_delays;
+    constexpr size_t kDelaysToCapture = 5;
+
     const auto initial_interval = std::chrono::milliseconds(50);
+    const auto max_interval = std::chrono::milliseconds(200);
+
     WalReceiverOptions opts;
     opts.retry_interval = initial_interval;
-    opts.max_retry_interval = std::chrono::milliseconds(200);
+    opts.max_retry_interval = max_interval;
     opts.receive_timeout = std::chrono::milliseconds(100);
+    opts.on_retry_delay_computed = [&](std::chrono::milliseconds delay) {
+        std::lock_guard lock(delays_mutex);
+        if (observed_delays.size() < kDelaysToCapture) {
+            observed_delays.push_back(delay);
+            if (observed_delays.size() == kDelaysToCapture) {
+                delays_cv.notify_all();
+            }
+        }
+    };
     receiver_ = std::make_unique<WalReceiver>(factory, wal_dir_->path(), *handler_, opts);
 
     auto result = receiver_->start("localhost", 6767);
     ASSERT_TRUE(result.has_value());
 
-    // With 50ms initial interval and 200ms max, over 500ms we should see
-    // fewer attempts than if there were no backoff.
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
-    int attempts = connect_count.load();
-    // With no backoff at 50ms interval we'd get ~10 attempts.
-    // With backoff (50, 100, 200, 200...) we'd get around 4-6.
-    EXPECT_GT(attempts, 1);
-    EXPECT_LT(attempts, 10);
-
-    // Strengthened assertion: inspect the actual inter-attempt gaps rather
-    // than relying solely on the total attempt count, which is only a weak
-    // proxy for backoff (a regression that removes the doubling in
-    // wal_receiver.cpp still produces ~9 attempts in 500ms, comfortably
-    // under the "< 10" bound above). We instead assert directly that the
-    // gaps grow, and that at least one gap is clearly larger than the
-    // initial retry interval -- proof the doubling actually happened.
-    //
-    // Timing-based, not fully deterministic (the factory records real
-    // wall-clock timestamps rather than injected/mocked sleep durations,
-    // since WalReceiver does not expose a fake-clock seam). Tolerances are
-    // deliberately generous to stay robust to scheduler jitter on this
-    // Windows box:
-    //   - "non-decreasing" allows a small negative slack (25% of the
-    //     initial interval) so a gap that is marginally shorter than the
-    //     previous one due to scheduling noise doesn't fail the test.
-    //   - the "backoff happened" check only requires a gap >= 1.5x the
-    //     initial interval (not the full theoretical 2x), and only for ONE
-    //     gap among all recorded gaps.
-    std::vector<std::chrono::milliseconds> gaps;
+    // Wait for the hook to observe kDelaysToCapture computed delays, rather
+    // than sleeping a fixed wall-clock duration and hoping enough retries
+    // happened by then. Generous timeout purely as a safety net against a
+    // hung test; it does not gate correctness of the assertions below.
     {
-        std::lock_guard lock(timestamps_mutex);
-        ASSERT_GE(attempt_times.size(), 3u)
-            << "need at least 3 attempts to observe two gaps and confirm backoff growth";
-        for (size_t i = 1; i < attempt_times.size(); ++i) {
-            gaps.push_back(std::chrono::duration_cast<std::chrono::milliseconds>(
-                attempt_times[i] - attempt_times[i - 1]));
-        }
+        std::unique_lock lock(delays_mutex);
+        bool got_enough = delays_cv.wait_for(lock, std::chrono::seconds(10), [&] {
+            return observed_delays.size() >= kDelaysToCapture;
+        });
+        ASSERT_TRUE(got_enough) << "timed out waiting for " << kDelaysToCapture
+                                << " retry delays to be observed (got " << observed_delays.size()
+                                << ")";
     }
 
-    const auto slack =
-        std::chrono::milliseconds(static_cast<long long>(initial_interval.count() / 4));
-    for (size_t i = 1; i < gaps.size(); ++i) {
-        EXPECT_GE(gaps[i] + slack, gaps[i - 1])
-            << "gap[" << i << "]=" << gaps[i].count() << "ms should be roughly "
-            << ">= gap[" << (i - 1) << "]=" << gaps[i - 1].count()
-            << "ms (allowing jitter slack), demonstrating non-decreasing backoff";
+    receiver_->stop();
+
+    std::vector<std::chrono::milliseconds> delays;
+    {
+        std::lock_guard lock(delays_mutex);
+        delays = observed_delays;
+    }
+    ASSERT_EQ(delays.size(), kDelaysToCapture);
+
+    // The exact expected sequence for retry_interval=50ms, max=200ms is:
+    // 50, 100, 200, 200, 200 (each step is min(prev * 2, max)).
+    EXPECT_EQ(delays[0], initial_interval) << "first retry delay should equal the initial interval";
+
+    // Delays must be non-decreasing -- this is a deterministic computation,
+    // so no jitter tolerance is needed (unlike the previous wall-clock
+    // version).
+    for (size_t i = 1; i < delays.size(); ++i) {
+        EXPECT_GE(delays[i], delays[i - 1])
+            << "delay[" << i << "]=" << delays[i].count() << "ms should be >= delay[" << (i - 1)
+            << "]=" << delays[i - 1].count()
+            << "ms; if this fails, backoff growth (wal_receiver.cpp retry_interval *= 2) is broken";
     }
 
-    const auto backoff_threshold =
-        std::chrono::milliseconds(static_cast<long long>(initial_interval.count() * 3 / 2));
-    bool saw_backoff_growth = std::any_of(
-        gaps.begin(), gaps.end(), [&](const auto& gap) { return gap >= backoff_threshold; });
-    EXPECT_TRUE(saw_backoff_growth)
-        << "expected at least one inter-attempt gap >= " << backoff_threshold.count()
-        << "ms (1.5x the " << initial_interval.count()
-        << "ms initial interval), proving the retry interval doubled; if this "
-           "fails, backoff growth (wal_receiver.cpp retry_interval *= 2) may be broken";
+    // At least one delay must be >= 2x the initial interval -- proof the
+    // doubling actually happened (not just that later delays happen to be
+    // >= earlier ones, e.g. if backoff were removed and delays were all
+    // exactly equal to retry_interval, the non-decreasing check alone would
+    // still pass).
+    const auto doubled = initial_interval * 2;
+    bool saw_doubling =
+        std::any_of(delays.begin(), delays.end(), [&](const auto& d) { return d >= doubled; });
+    EXPECT_TRUE(saw_doubling) << "expected at least one computed retry delay >= " << doubled.count()
+                              << "ms (2x the " << initial_interval.count()
+                              << "ms initial interval), proving the retry interval doubled; if "
+                                 "this fails, backoff growth (wal_receiver.cpp retry_interval *= "
+                                 "2) may be broken";
+
+    // The sequence must plateau at max_retry_interval once the cap is hit.
+    EXPECT_EQ(delays.back(), max_interval)
+        << "by the " << kDelaysToCapture
+        << "th retry, the backoff should have reached and plateaued at max_retry_interval";
 }
 
 TEST_F(WalReceiverTest, GetStateInitial) {
