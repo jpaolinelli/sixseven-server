@@ -156,13 +156,37 @@ TEST_F(QA_Traversal, DepthEqualsChainLength) {
 
 // -- Boundary: max_visited = 1 limits to just the start node --
 TEST_F(QA_Traversal, MaxVisitedOne) {
+    // GDB-1214 unified max_visited-exceeded semantics across all graph
+    // operators (including TraversalOperator) to return an explicit
+    // StatusCode::INVALID_ARGUMENT error from open() instead of silently
+    // returning a truncated/empty result. This test previously asserted the
+    // old truncate-and-continue behavior and was never updated when
+    // GDB-1214 landed. See tests/qa/test_qa_gdb_1214.cpp for the ticket's
+    // own pinning tests of this exact contract.
     link(1, 2);
     link(1, 3);
 
-    auto results = run_bfs(1, TraverseDirection::OUT, 100, 1);
-    // max_visited=1: start node is inserted (size=1), then no expansion
-    // because visited.size() >= max_visited.
-    EXPECT_TRUE(results.empty());
+    TraversalConfig config;
+    config.edge_type = "follows";
+    config.start_key = Value(int64_t{1});
+    config.direction = TraverseDirection::OUT;
+    config.max_depth = 100;
+    config.max_visited = 1;
+
+    std::vector<OutputColumn> cols;
+    cols.push_back({"", "node", TypeId::INT64, false, 0});
+    cols.push_back({"", "depth", TypeId::INT64, false, 0});
+    OutputSchema schema(std::move(cols));
+
+    BoundStatement bound;
+    TraversalOperator op(*graph_, std::move(config), std::move(schema), nullptr, bound);
+
+    auto open_result = op.open();
+    ASSERT_FALSE(open_result.has_value())
+        << "expected max_visited to be exceeded with a budget of only 1 node";
+    EXPECT_EQ(open_result.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_NE(open_result.error().message.find("max_visited limit (1)"), std::string::npos)
+        << open_result.error().message;
 }
 
 // -- Isolated node with no edges --

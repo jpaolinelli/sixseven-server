@@ -16,7 +16,19 @@ namespace sixseven {
 // Helper: tokenize and assert success
 // ===========================================================================
 
-static std::vector<Token> tokenize_ok(const std::string& src) {
+// GDB-1224: Token::lexeme is a non-owning std::string_view into the Lexer's
+// source buffer. The parameter here MUST be std::string_view (not
+// `const std::string&`): a `const std::string&` parameter still binds to a
+// temporary std::string materialized from a string literal argument (e.g.
+// tokenize_ok(".0e0")), and that temporary is destroyed at the end of the
+// full expression -- after tokenize_ok() returns but its Token::lexeme
+// views are still referenced by the caller. That produced a genuine
+// use-after-free (observed as the leading byte of every returned lexeme
+// silently becoming NUL, e.g. ".0e0" read back as "\00e0"). Taking
+// std::string_view directly binds to the string literal's static storage
+// instead, which lives for the entire program -- matching the safe idiom
+// already used by tests/unit/test_lexer.cpp's tokenize_ok().
+static std::vector<Token> tokenize_ok(std::string_view src) {
     Lexer lexer(src);
     auto result = lexer.tokenize();
     if (!result.has_value()) {

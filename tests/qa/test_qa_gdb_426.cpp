@@ -156,11 +156,12 @@ protected:
         return expr;
     }
 
-    MatchConfig make_config(const std::string& edge = "road", int32_t max_hops = 100) {
+    MatchConfig
+    make_config(const std::string& edge = "road", int32_t max_hops = 100, int32_t min_hops = 1) {
         MatchConfig config;
         config.nodes.push_back({"a", "nodes"});
         config.nodes.push_back({"b", "nodes"});
-        config.edges.push_back(MatchEdgeDef("r", edge, TraverseDirection::OUT, 1, max_hops));
+        config.edges.push_back(MatchEdgeDef("r", edge, TraverseDirection::OUT, min_hops, max_hops));
         return config;
     }
 
@@ -177,13 +178,14 @@ protected:
                            const Expr* weight,
                            const std::string& edge = "road",
                            int32_t k = 0,
-                           int32_t max_hops = 100) {
+                           int32_t max_hops = 100,
+                           int32_t min_hops = 1) {
         BoundStatement bound;
         MatchShortestPathOperator op(*graph_,
                                      *catalog_,
                                      *storage_,
                                      default_database_id,
-                                     make_config(edge, max_hops),
+                                     make_config(edge, max_hops, min_hops),
                                      make_schema(),
                                      nullptr,
                                      bound,
@@ -310,11 +312,15 @@ TEST_F(GDB426_WeightedSP, AC2_PathCostCorrect) {
 
 /// AC2: path_cost for same-node path should be 0.
 TEST_F(GDB426_WeightedSP, AC2_SameNodeCostZero) {
+    // Requires min_hops=0: per src/executor/match_shortest_path.cpp
+    // (GDB-851/GDB-1272), the trivial zero-hop same-node path is only ever
+    // emitted when min_hops == 0. The other tests in this file use the
+    // default min_hops=1 and are correctly unaffected by this.
     insert_node(1);
     create_edge_type("road");
 
     auto w = make_weight_expr();
-    auto results = run(PathSelector::ANY_SHORTEST, w.get());
+    auto results = run(PathSelector::ANY_SHORTEST, w.get(), "road", 0, 100, /*min_hops=*/0);
     auto from_1_to_1 = filter_pair(results, 1, 1);
     ASSERT_EQ(from_1_to_1.size(), 1u);
     EXPECT_DOUBLE_EQ(from_1_to_1[0]->values[2].as_path().total_weight, 0.0);

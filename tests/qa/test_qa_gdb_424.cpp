@@ -227,6 +227,21 @@ protected:
         return config;
     }
 
+    /// Same as make_config(), but with min_hops=0. Per
+    /// src/executor/match_shortest_path.cpp (documented, referencing
+    /// GDB-851/GDB-1272), the trivial zero-hop same-node path is only ever
+    /// emitted when min_hops == 0; with min_hops >= 1 (make_config()'s
+    /// default of 1) a same-node pair is correctly excluded even though the
+    /// source and target happen to be identical. Tests that specifically
+    /// probe the same-node trivial-path behavior must use this variant.
+    MatchConfig make_config_min_hop_zero() {
+        MatchConfig config;
+        config.nodes.push_back({"a", "persons"});
+        config.nodes.push_back({"b", "persons"});
+        config.edges.push_back(MatchEdgeDef("", "knows", TraverseDirection::OUT, 0, 10));
+        return config;
+    }
+
     /// Build output schema with source id, target id, and path.
     OutputSchema make_schema() {
         std::vector<OutputColumn> cols;
@@ -375,8 +390,11 @@ TEST_F(QA_GDB424, AC3_ShortestK_K2ReturnsBothDiamondPaths) {
 // ============================================================================
 
 TEST_F(QA_GDB424, AC4_PathLengthZeroForSameNode) {
-    // Path from 1 to 1 should have length 0.
-    auto results = run_shortest_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST);
+    // Path from 1 to 1 should have length 0. Requires min_hops=0: with
+    // make_config()'s default min_hops=1, a same-node pair is deliberately
+    // excluded per src/executor/match_shortest_path.cpp (GDB-851/GDB-1272).
+    auto results =
+        run_shortest_match(make_config_min_hop_zero(), make_schema(), PathSelector::ANY_SHORTEST);
     auto filtered = filter_pair(results, 1, 1);
     ASSERT_EQ(filtered.size(), 1u);
     EXPECT_EQ(filtered[0].values[2].as_path().length(), 0);
@@ -416,8 +434,10 @@ TEST_F(QA_GDB424, AC5_NodesContainsCorrectPKs) {
 }
 
 TEST_F(QA_GDB424, AC5_NodesSingleNodePath) {
-    // Path from 1 to 1: 1 node.
-    auto results = run_shortest_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST);
+    // Path from 1 to 1: 1 node. Requires min_hops=0 (see
+    // AC4_PathLengthZeroForSameNode).
+    auto results =
+        run_shortest_match(make_config_min_hop_zero(), make_schema(), PathSelector::ANY_SHORTEST);
     auto filtered = filter_pair(results, 1, 1);
     ASSERT_EQ(filtered.size(), 1u);
     const auto& path = filtered[0].values[2].as_path();
@@ -445,8 +465,10 @@ TEST_F(QA_GDB424, AC6_EdgesCountMatchesPathLength) {
 }
 
 TEST_F(QA_GDB424, AC6_EdgesEmptyForSameNodePath) {
-    // Path from 1 to 1: no edges.
-    auto results = run_shortest_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST);
+    // Path from 1 to 1: no edges. Requires min_hops=0 (see
+    // AC4_PathLengthZeroForSameNode).
+    auto results =
+        run_shortest_match(make_config_min_hop_zero(), make_schema(), PathSelector::ANY_SHORTEST);
     auto filtered = filter_pair(results, 1, 1);
     ASSERT_EQ(filtered.size(), 1u);
     const auto& path = filtered[0].values[2].as_path();
@@ -586,7 +608,9 @@ TEST_F(QA_GDB424, Parser_SelectFromMatchShortestK) {
 // ============================================================================
 
 TEST_F(QA_GDB424, SameNodePath_AnyShortestReturnsZeroLength) {
-    auto results = run_shortest_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST);
+    // Requires min_hops=0 (see AC4_PathLengthZeroForSameNode).
+    auto results =
+        run_shortest_match(make_config_min_hop_zero(), make_schema(), PathSelector::ANY_SHORTEST);
     auto filtered = filter_pair(results, 5, 5);
     ASSERT_EQ(filtered.size(), 1u);
     EXPECT_EQ(filtered[0].values[2].as_path().length(), 0);
@@ -594,7 +618,9 @@ TEST_F(QA_GDB424, SameNodePath_AnyShortestReturnsZeroLength) {
 }
 
 TEST_F(QA_GDB424, SameNodePath_AllShortestReturnsOneZeroLength) {
-    auto results = run_shortest_match(make_config(), make_schema(), PathSelector::ALL_SHORTEST);
+    // Requires min_hops=0 (see AC4_PathLengthZeroForSameNode).
+    auto results =
+        run_shortest_match(make_config_min_hop_zero(), make_schema(), PathSelector::ALL_SHORTEST);
     auto filtered = filter_pair(results, 5, 5);
     ASSERT_EQ(filtered.size(), 1u);
     EXPECT_EQ(filtered[0].values[2].as_path().length(), 0);
@@ -629,8 +655,13 @@ TEST_F(QA_GDB424, DisconnectedNodeReturnsEmptyResult_ShortestK) {
 
 TEST_F(QA_GDB424, SelfLoopNodeSameNodePath) {
     // Node 10 has a self-loop. Path from 10 to 10 should be zero-length
-    // (same node trivial case), not a 1-hop self-loop path.
-    auto results = run_shortest_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST);
+    // (same node trivial case), not a 1-hop self-loop path. Requires
+    // min_hops=0 (see AC4_PathLengthZeroForSameNode): with min_hops=1 the
+    // self-loop edge itself would be a valid 1-hop path (10->10 via the
+    // self-loop), which is a different, also-legitimate scenario this test
+    // is not the one probing.
+    auto results =
+        run_shortest_match(make_config_min_hop_zero(), make_schema(), PathSelector::ANY_SHORTEST);
     auto filtered = filter_pair(results, 10, 10);
     ASSERT_EQ(filtered.size(), 1u);
     EXPECT_EQ(filtered[0].values[2].as_path().length(), 0)
@@ -681,15 +712,33 @@ TEST_F(QA_GDB424, ReverseDirectionNoPathForward) {
 // Adversarial: max_visited limit
 // ============================================================================
 
-TEST_F(QA_GDB424, MaxVisitedLimitTruncatesResults) {
-    // With very small max_visited, results are truncated (not error).
-    auto results =
-        run_shortest_match(make_config(), make_schema(), PathSelector::ANY_SHORTEST, "p", 0, 2);
-    // Should not crash, may return fewer results.
-    // Just verify it terminates and produces valid tuples.
-    for (const auto& t : results) {
-        EXPECT_GE(t.values.size(), 3u);
-    }
+TEST_F(QA_GDB424, MaxVisitedLimitExceededReturnsExplicitError) {
+    // GDB-1214 unified max_visited-exceeded semantics across all graph
+    // operators (including MatchShortestPathOperator) to return an explicit
+    // StatusCode::INVALID_ARGUMENT error instead of silently truncating
+    // results. This test previously asserted the old truncate-and-continue
+    // behavior ("MaxVisitedLimitTruncatesResults") and was never updated
+    // when GDB-1214 landed. See tests/qa/test_qa_gdb_1214.cpp for the
+    // ticket's own pinning tests of this exact contract.
+    BoundStatement bound;
+    MatchShortestPathOperator op(*graph_,
+                                 *catalog_,
+                                 *storage_,
+                                 default_database_id,
+                                 make_config(),
+                                 make_schema(),
+                                 nullptr,
+                                 bound,
+                                 PathSelector::ANY_SHORTEST,
+                                 "p",
+                                 0,
+                                 /*max_visited=*/2);
+    auto open_result = op.open();
+    ASSERT_FALSE(open_result.has_value())
+        << "expected max_visited to be exceeded with a budget of only 2 nodes";
+    EXPECT_EQ(open_result.error().code, StatusCode::INVALID_ARGUMENT);
+    EXPECT_NE(open_result.error().message.find("max_visited limit (2)"), std::string::npos)
+        << open_result.error().message;
 }
 
 // ============================================================================
