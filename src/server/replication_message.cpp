@@ -1,5 +1,6 @@
 #include "sixseven/server/replication_message.h"
 
+#include "sixseven/common/byte_io.h"
 #include "sixseven/storage/disk_manager.h" // crc32c()
 
 #include <cstring>
@@ -9,20 +10,6 @@ namespace sixseven {
 // -- Helpers ------------------------------------------------------------------
 
 namespace {
-
-template <typename T>
-void write_native(std::vector<uint8_t>& buf, size_t& offset, T value) {
-    std::memcpy(buf.data() + offset, &value, sizeof(T));
-    offset += sizeof(T);
-}
-
-template <typename T>
-T read_native(std::span<const uint8_t> buf, size_t& offset) {
-    T value{};
-    std::memcpy(&value, buf.data() + offset, sizeof(T));
-    offset += sizeof(T);
-    return value;
-}
 
 /// Write the common header: [type: uint8][payload_length: uint32].
 void write_header(std::vector<uint8_t>& buf,

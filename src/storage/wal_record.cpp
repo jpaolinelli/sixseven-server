@@ -1,35 +1,11 @@
 #include "sixseven/storage/wal_record.h"
 
+#include "sixseven/common/byte_io.h"
 #include "sixseven/storage/disk_manager.h" // crc32c()
 
 #include <cstring>
 
 namespace sixseven {
-
-// -- Serialization helpers ----------------------------------------------------
-
-namespace {
-
-/// Write a value to a byte buffer at the given offset using memcpy (safe,
-/// unaligned-friendly, native byte order). Advances offset by sizeof(T).
-template <typename T>
-void write_native(std::vector<uint8_t>& buf, size_t& offset, T value) {
-    std::memcpy(buf.data() + offset, &value, sizeof(T));
-    offset += sizeof(T);
-}
-
-/// Read a value from a byte span at the given offset using memcpy (native
-/// byte order). Advances offset by sizeof(T). Caller must ensure
-/// offset + sizeof(T) <= buf.size().
-template <typename T>
-T read_native(std::span<const uint8_t> buf, size_t& offset) {
-    T value{};
-    std::memcpy(&value, buf.data() + offset, sizeof(T));
-    offset += sizeof(T);
-    return value;
-}
-
-} // namespace
 
 // -- Serialize ----------------------------------------------------------------
 
