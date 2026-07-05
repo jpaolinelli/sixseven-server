@@ -403,6 +403,33 @@ ExprPtr rewrite_expr(const Expr& expr,
     return cr;
 }
 
+/// Apply constant folding / boolean simplification to a FilterOperator
+/// predicate before it is attached to the plan (GDB-1210).
+///
+/// `simplify_boolean` (which falls back to `fold_constants`) only ever
+/// replaces a subtree when it can prove the replacement is equivalent:
+/// it pattern-matches literal-literal arithmetic/comparisons and
+/// true/false/NULL short-circuiting for AND/OR/NOT. Any subtree containing
+/// a column reference, aggregate, subquery, or function call (including
+/// volatile ones like now()/random()) is left untouched, so this can never
+/// change the type, precision, or side effects of the original expression.
+/// NEAREST/MATCH predicates are unaffected: `fold_constants` only descends
+/// into BinaryExpr/UnaryExpr nodes and never inspects NearestExpr/MatchExpr.
+///
+/// If folding produces a new node, it is pushed into `owned_exprs` so the
+/// non-owning `const Expr&` held by FilterOperator stays valid for the
+/// query's lifetime, and a pointer to it is returned. If no folding applies,
+/// the original expression pointer is returned unchanged.
+const Expr* fold_predicate_for_filter(const Expr& original, std::vector<ExprPtr>& owned_exprs) {
+    auto folded = simplify_boolean(original);
+    if (!folded) {
+        return &original;
+    }
+    const Expr* result = folded.get();
+    owned_exprs.push_back(std::move(folded));
+    return result;
+}
+
 } // anonymous namespace
 
 Planner::Planner(Catalog& catalog,
@@ -1645,8 +1672,10 @@ Planner::plan_select(const SelectStmt& stmt,
             for (size_t i = 0; i < where_conjuncts.size(); ++i) {
                 if (!conjunct_consumed[i] &&
                     is_single_table_predicate(*where_conjuncts[i], alias)) {
+                    const Expr* folded_pred =
+                        fold_predicate_for_filter(*where_conjuncts[i], owned_exprs);
                     child = std::make_unique<FilterOperator>(
-                        std::move(child), *where_conjuncts[i], bound, &subquery_ctx_);
+                        std::move(child), *folded_pred, bound, &subquery_ctx_);
                     conjunct_consumed[i] = true;
                 }
             }
@@ -1706,11 +1735,10 @@ Planner::plan_select(const SelectStmt& stmt,
                 for (size_t i = 0; i < where_conjuncts.size(); ++i) {
                     if (!conjunct_consumed[i] &&
                         is_single_table_predicate(*where_conjuncts[i], join_alias)) {
-                        join_source->iter =
-                            std::make_unique<FilterOperator>(std::move(join_source->iter),
-                                                             *where_conjuncts[i],
-                                                             bound,
-                                                             &subquery_ctx_);
+                        const Expr* folded_pred =
+                            fold_predicate_for_filter(*where_conjuncts[i], owned_exprs);
+                        join_source->iter = std::make_unique<FilterOperator>(
+                            std::move(join_source->iter), *folded_pred, bound, &subquery_ctx_);
                         conjunct_consumed[i] = true;
                     }
                 }
@@ -1905,8 +1933,9 @@ Planner::plan_select(const SelectStmt& stmt,
                 }
                 // Simpler approach: chain FilterOperators for each remaining predicate.
                 for (const Expr* pred : remaining) {
+                    const Expr* folded_pred = fold_predicate_for_filter(*pred, owned_exprs);
                     child = std::make_unique<FilterOperator>(
-                        std::move(child), *pred, bound, &subquery_ctx_);
+                        std::move(child), *folded_pred, bound, &subquery_ctx_);
                 }
                 pushed_where = true;
                 remaining_where = nullptr;
@@ -1923,8 +1952,9 @@ Planner::plan_select(const SelectStmt& stmt,
 
     // -- 2d. Apply remaining WHERE as a filter ---------------------------------
     if (remaining_where) {
-        child = std::make_unique<FilterOperator>(
-            std::move(child), *remaining_where, bound, &subquery_ctx_);
+        const Expr* folded_pred = fold_predicate_for_filter(*remaining_where, owned_exprs);
+        child =
+            std::make_unique<FilterOperator>(std::move(child), *folded_pred, bound, &subquery_ctx_);
     }
 
     // -- 2e. Window functions -------------------------------------------------
@@ -2211,10 +2241,11 @@ Planner::plan_select(const SelectStmt& stmt,
             // -- 3e. Apply HAVING filter ------------------------------------------
             if (stmt.having_expr) {
                 auto having_rewritten = rewrite_expr(*stmt.having_expr, agg_map);
-                auto* having_ptr = having_rewritten.get();
+                const Expr* having_ptr = having_rewritten.get();
                 owned_exprs.push_back(std::move(having_rewritten));
+                const Expr* folded_having = fold_predicate_for_filter(*having_ptr, owned_exprs);
                 child = std::make_unique<FilterOperator>(
-                    std::move(child), *having_ptr, bound, &subquery_ctx_);
+                    std::move(child), *folded_having, bound, &subquery_ctx_);
             }
 
             // -- 3f. ORDER BY (before projection, with aggregate rewriting) --------
