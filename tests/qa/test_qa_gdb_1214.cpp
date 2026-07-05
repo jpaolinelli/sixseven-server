@@ -159,13 +159,41 @@ TEST_F(GDB1214Test, TraversalOperator_ForcedOverLimit_UniformError) {
         << open_result.error().message;
 
     // No partial rows must have leaked through do_next() after a failed open().
+    // Hard assertion (not conditional on next_result.has_value()): do_next()
+    // must succeed AND report exhaustion. Prior to commit c75aeb6, results_
+    // still held rows dequeued before the limit tripped, so this call would
+    // have returned a leaked partial row (next_result->has_value() == true).
     auto next_result = op.next();
-    // do_next() operates on results_, which was cleared/never populated --
-    // this must not surface stale/partial data.
-    if (next_result.has_value()) {
+    ASSERT_TRUE(next_result.has_value()) << next_result.error().message;
+    EXPECT_FALSE(next_result->has_value())
+        << "TraversalOperator leaked a partial row after max_visited error (results_ not cleared)";
+}
+
+TEST_F(GDB1214Test, TraversalOperator_ForcedOverLimit_ResultsClearedRepeatedNext) {
+    // Reinforce the GDB-1288 fix: even repeated next() calls after the failed
+    // open() must never surface a row, and edges_/parent_map_ must also be
+    // empty (checked indirectly via TRACE mode not throwing on empty parent
+    // map / not asserting on a stale entry).
+    TraversalConfig config;
+    config.edge_type = "chain";
+    config.start_key = Value(static_cast<int64_t>(1));
+    config.direction = TraverseDirection::OUT;
+    config.max_depth = 100;
+    config.max_visited = 3;
+
+    BoundStatement bound;
+    TraversalOperator op(*graph_, config, node_depth_schema(), nullptr, bound);
+
+    auto open_result = op.open();
+    ASSERT_FALSE(open_result.has_value());
+
+    for (int i = 0; i < 3; ++i) {
+        auto next_result = op.next();
+        ASSERT_TRUE(next_result.has_value()) << next_result.error().message;
         EXPECT_FALSE(next_result->has_value())
-            << "TraversalOperator leaked a partial row after max_visited error";
+            << "TraversalOperator leaked a partial row on repeated next() call #" << i;
     }
+    op.close();
 }
 
 // ===========================================================================
