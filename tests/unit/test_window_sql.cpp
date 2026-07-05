@@ -89,14 +89,27 @@ TEST_F(WindowFunctionSQLTest, LagOverOrderBySalary) {
 
     // WindowOperator preserves original insertion order but computes LAG in salary order.
     // Salary order: Charlie(70k), Alice(80k), Dave(85k), Bob(90k), Eve(95k).
-    // Exactly one row should have NULL LAG (the lowest salary row in sorted order).
-    int null_count = 0;
+    // Each row's LAG(salary) should equal the salary of the row immediately preceding it
+    // in ascending-salary order; the lowest-salary row (Charlie) should have a NULL LAG.
+    // A LAG/LEAD swap would instead put the NULL on the highest-salary row (Eve) and shift
+    // every value to the *next* higher salary rather than the previous (lower) one, so this
+    // pins down the direction as well as the NULL placement.
+    std::unordered_map<std::string, Value> lag_by_name;
     for (auto& row : qr.rows) {
-        if (row[2].is_null()) {
-            ++null_count;
-        }
+        lag_by_name.emplace(row[0].as_string(), row[2]);
     }
-    EXPECT_EQ(null_count, 1);
+    ASSERT_EQ(lag_by_name.size(), 5u);
+
+    ASSERT_TRUE(lag_by_name.at("Charlie").is_null());
+    ASSERT_FALSE(lag_by_name.at("Alice").is_null());
+    ASSERT_FALSE(lag_by_name.at("Dave").is_null());
+    ASSERT_FALSE(lag_by_name.at("Bob").is_null());
+    ASSERT_FALSE(lag_by_name.at("Eve").is_null());
+
+    EXPECT_DOUBLE_EQ(lag_by_name.at("Alice").as_float64(), 70000.0);
+    EXPECT_DOUBLE_EQ(lag_by_name.at("Dave").as_float64(), 80000.0);
+    EXPECT_DOUBLE_EQ(lag_by_name.at("Bob").as_float64(), 85000.0);
+    EXPECT_DOUBLE_EQ(lag_by_name.at("Eve").as_float64(), 90000.0);
 }
 
 TEST_F(WindowFunctionSQLTest, SelectStarWithRowNumber) {
