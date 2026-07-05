@@ -1,6 +1,7 @@
 #include "sixseven/graph/louvain.h"
 
 #include "sixseven/graph/graph_engine.h"
+#include "sixseven/graph/value_extract.h"
 
 #include <algorithm>
 #include <cmath>
@@ -13,47 +14,6 @@
 namespace sixseven {
 
 namespace {
-
-/// Convert a Value holding an integer type to int64_t.
-Result<int64_t> value_to_int64(const Value& v) {
-    if (v.is_null()) {
-        return make_error(StatusCode::INVALID_ARGUMENT, "NULL node key in edge");
-    }
-    return std::visit(
-        [](const auto& val) -> Result<int64_t> {
-            using T = std::decay_t<decltype(val)>;
-            if constexpr (std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
-                          std::is_same_v<T, int32_t> || std::is_same_v<T, int64_t>) {
-                return ok(static_cast<int64_t>(val));
-            } else if constexpr (std::is_same_v<T, uint8_t> || std::is_same_v<T, uint16_t> ||
-                                 std::is_same_v<T, uint32_t>) {
-                return ok(static_cast<int64_t>(val));
-            } else if constexpr (std::is_same_v<T, uint64_t>) {
-                return ok(static_cast<int64_t>(val));
-            } else {
-                return make_error(StatusCode::TYPE_ERROR,
-                                  "community_detect requires integer node keys");
-            }
-        },
-        v.data());
-}
-
-/// Extract a double from a Value that may hold an integer or floating-point type.
-Result<double> value_to_double(const Value& v) {
-    if (v.is_null()) {
-        return make_error(StatusCode::INVALID_ARGUMENT, "NULL parameter value");
-    }
-    return std::visit(
-        [](const auto& val) -> Result<double> {
-            using T = std::decay_t<decltype(val)>;
-            if constexpr (std::is_arithmetic_v<T>) {
-                return ok(static_cast<double>(val));
-            } else {
-                return make_error(StatusCode::TYPE_ERROR, "expected numeric value for parameter");
-            }
-        },
-        v.data());
-}
 
 /// Extract an int64_t from a Value for integer parameters.
 Result<int64_t> value_to_iterations(const Value& v) {
@@ -383,7 +343,7 @@ Result<std::vector<AlgorithmRow>> community_detect_execute(const AlgorithmContex
     int64_t max_iterations = 10;
 
     if (auto it = ctx.named_args.find("resolution"); it != ctx.named_args.end()) {
-        auto r = value_to_double(it->second);
+        auto r = value_to_double(it->second, "parameter");
         if (!r.has_value()) {
             return tl::unexpected(r.error());
         }
@@ -413,11 +373,11 @@ Result<std::vector<AlgorithmRow>> community_detect_execute(const AlgorithmContex
     std::set<std::pair<int64_t, int64_t>> seen_edges;
 
     for (const auto& edge : *edges) {
-        auto src = value_to_int64(edge.source_pk);
+        auto src = value_to_int64(edge.source_pk, "community_detect");
         if (!src.has_value()) {
             return tl::unexpected(src.error());
         }
-        auto tgt = value_to_int64(edge.target_pk);
+        auto tgt = value_to_int64(edge.target_pk, "community_detect");
         if (!tgt.has_value()) {
             return tl::unexpected(tgt.error());
         }

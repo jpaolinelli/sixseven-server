@@ -12,6 +12,7 @@ add_library(sixseven_graph STATIC
     pagerank.cpp
     strongly_connected_components.cpp
     triangle_count.cpp
+    value_extract.cpp
     edge_table.cpp
     graph_engine.cpp
     graph_engine_wal.cpp

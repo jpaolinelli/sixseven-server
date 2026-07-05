@@ -1,6 +1,7 @@
 #include "sixseven/graph/harmonic_centrality.h"
 
 #include "sixseven/graph/graph_engine.h"
+#include "sixseven/graph/value_extract.h"
 
 #include <algorithm>
 #include <queue>
@@ -10,34 +11,6 @@
 #include <vector>
 
 namespace sixseven {
-
-namespace {
-
-/// Convert a Value holding an integer type to int64_t.
-Result<int64_t> value_to_int64(const Value& v) {
-    if (v.is_null()) {
-        return make_error(StatusCode::INVALID_ARGUMENT, "NULL node key in edge");
-    }
-    return std::visit(
-        [](const auto& val) -> Result<int64_t> {
-            using T = std::decay_t<decltype(val)>;
-            if constexpr (std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
-                          std::is_same_v<T, int32_t> || std::is_same_v<T, int64_t>) {
-                return ok(static_cast<int64_t>(val));
-            } else if constexpr (std::is_same_v<T, uint8_t> || std::is_same_v<T, uint16_t> ||
-                                 std::is_same_v<T, uint32_t>) {
-                return ok(static_cast<int64_t>(val));
-            } else if constexpr (std::is_same_v<T, uint64_t>) {
-                return ok(static_cast<int64_t>(val));
-            } else {
-                return make_error(StatusCode::TYPE_ERROR,
-                                  "harmonic centrality requires integer node keys");
-            }
-        },
-        v.data());
-}
-
-} // namespace
 
 AlgorithmDef make_harmonic_centrality_def() {
     AlgorithmDef def;
@@ -63,11 +36,11 @@ Result<std::vector<AlgorithmRow>> harmonic_centrality_execute(const AlgorithmCon
     std::unordered_set<int64_t> all_nodes;
 
     for (const auto& edge : *edges) {
-        auto src = value_to_int64(edge.source_pk);
+        auto src = value_to_int64(edge.source_pk, "harmonic centrality");
         if (!src.has_value()) {
             return tl::unexpected(src.error());
         }
-        auto tgt = value_to_int64(edge.target_pk);
+        auto tgt = value_to_int64(edge.target_pk, "harmonic centrality");
         if (!tgt.has_value()) {
             return tl::unexpected(tgt.error());
         }
