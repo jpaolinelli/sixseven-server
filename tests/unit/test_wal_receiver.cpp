@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -410,16 +411,28 @@ TEST_F(WalReceiverTest, ReconnectsOnConnectionFailure) {
 
 TEST_F(WalReceiverTest, ExponentialBackoff) {
     std::atomic<int> connect_count{0};
+    std::mutex timestamps_mutex;
+    std::vector<std::chrono::steady_clock::time_point> attempt_times;
 
-    // Factory that always fails — to test backoff behavior.
+    // Factory that always fails — to test backoff behavior. Records the wall
+    // clock time of each connection attempt so we can inspect the gaps
+    // between retries directly, rather than inferring backoff from a loose
+    // total-attempt-count bound (see GDB-1200: a bound of "< 10" sits exactly
+    // on the no-backoff attempt count and does not reliably catch a
+    // regression that removes the doubling).
     auto factory = [&](const std::string& /*host*/,
                        uint16_t /*port*/) -> Result<std::unique_ptr<ReplicationConnection>> {
         ++connect_count;
+        {
+            std::lock_guard lock(timestamps_mutex);
+            attempt_times.push_back(std::chrono::steady_clock::now());
+        }
         return make_error(StatusCode::NETWORK_ERROR, "connection refused");
     };
 
+    const auto initial_interval = std::chrono::milliseconds(50);
     WalReceiverOptions opts;
-    opts.retry_interval = std::chrono::milliseconds(50);
+    opts.retry_interval = initial_interval;
     opts.max_retry_interval = std::chrono::milliseconds(200);
     opts.receive_timeout = std::chrono::milliseconds(100);
     receiver_ = std::make_unique<WalReceiver>(factory, wal_dir_->path(), *handler_, opts);
@@ -436,6 +449,55 @@ TEST_F(WalReceiverTest, ExponentialBackoff) {
     // With backoff (50, 100, 200, 200...) we'd get around 4-6.
     EXPECT_GT(attempts, 1);
     EXPECT_LT(attempts, 10);
+
+    // Strengthened assertion: inspect the actual inter-attempt gaps rather
+    // than relying solely on the total attempt count, which is only a weak
+    // proxy for backoff (a regression that removes the doubling in
+    // wal_receiver.cpp still produces ~9 attempts in 500ms, comfortably
+    // under the "< 10" bound above). We instead assert directly that the
+    // gaps grow, and that at least one gap is clearly larger than the
+    // initial retry interval -- proof the doubling actually happened.
+    //
+    // Timing-based, not fully deterministic (the factory records real
+    // wall-clock timestamps rather than injected/mocked sleep durations,
+    // since WalReceiver does not expose a fake-clock seam). Tolerances are
+    // deliberately generous to stay robust to scheduler jitter on this
+    // Windows box:
+    //   - "non-decreasing" allows a small negative slack (25% of the
+    //     initial interval) so a gap that is marginally shorter than the
+    //     previous one due to scheduling noise doesn't fail the test.
+    //   - the "backoff happened" check only requires a gap >= 1.5x the
+    //     initial interval (not the full theoretical 2x), and only for ONE
+    //     gap among all recorded gaps.
+    std::vector<std::chrono::milliseconds> gaps;
+    {
+        std::lock_guard lock(timestamps_mutex);
+        ASSERT_GE(attempt_times.size(), 3u)
+            << "need at least 3 attempts to observe two gaps and confirm backoff growth";
+        for (size_t i = 1; i < attempt_times.size(); ++i) {
+            gaps.push_back(std::chrono::duration_cast<std::chrono::milliseconds>(
+                attempt_times[i] - attempt_times[i - 1]));
+        }
+    }
+
+    const auto slack =
+        std::chrono::milliseconds(static_cast<long long>(initial_interval.count() / 4));
+    for (size_t i = 1; i < gaps.size(); ++i) {
+        EXPECT_GE(gaps[i] + slack, gaps[i - 1])
+            << "gap[" << i << "]=" << gaps[i].count() << "ms should be roughly "
+            << ">= gap[" << (i - 1) << "]=" << gaps[i - 1].count()
+            << "ms (allowing jitter slack), demonstrating non-decreasing backoff";
+    }
+
+    const auto backoff_threshold =
+        std::chrono::milliseconds(static_cast<long long>(initial_interval.count() * 3 / 2));
+    bool saw_backoff_growth = std::any_of(
+        gaps.begin(), gaps.end(), [&](const auto& gap) { return gap >= backoff_threshold; });
+    EXPECT_TRUE(saw_backoff_growth)
+        << "expected at least one inter-attempt gap >= " << backoff_threshold.count()
+        << "ms (1.5x the " << initial_interval.count()
+        << "ms initial interval), proving the retry interval doubled; if this "
+           "fails, backoff growth (wal_receiver.cpp retry_interval *= 2) may be broken";
 }
 
 TEST_F(WalReceiverTest, GetStateInitial) {
