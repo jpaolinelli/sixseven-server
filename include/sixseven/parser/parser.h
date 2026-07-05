@@ -55,6 +55,21 @@ private:
     void synchronize();
     [[nodiscard]] Result<StmtPtr> error(const std::string& message);
 
+    /// Expression-context analogue of error(): builds a PARSE_ERROR annotated
+    /// with the current token's line/column (and byte offset), in the exact
+    /// same "at line X, column Y" format as error()/expect()/parse_name().
+    /// Returns tl::unexpected<Error> so it can be used as any Result<T> (e.g.
+    /// Result<ExprPtr>, Result<TypeSpec>) via implicit conversion.
+    [[nodiscard]] tl::unexpected<Error> parse_error_here(const std::string& message);
+
+    /// Re-annotates an existing Error's message with the given token's
+    /// line/column (and byte offset), in the same "at line X, column Y"
+    /// format as error()/expect()/parse_name(). Used to add position info to
+    /// errors bubbled up from context-free helpers (e.g. safe_stoi) that have
+    /// no notion of parser position themselves.
+    [[nodiscard]] static tl::unexpected<Error> annotate_error_at(const Error& err,
+                                                                 const Token& tok);
+
     // -- Statement dispatch -------------------------------------------------
 
     [[nodiscard]] Result<StmtPtr> parse_statement();
