@@ -339,18 +339,48 @@ TEST(WalSender, ConnectionErrorStopsSender) {
     WalSender sender(std::move(primary_conn), dir.path(), nullptr, writer, opts);
     ASSERT_TRUE(sender.start_streaming(1).has_value());
 
-    // Wait for catch-up.
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // Wait for catch-up to complete (sender reaches STREAMING) before severing the
+    // connection, so the closure below is unambiguously what drives the later
+    // state transition rather than racing initial catch-up.
+    {
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (sender.state() != WalSender::State::STREAMING &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        ASSERT_EQ(sender.state(), WalSender::State::STREAMING);
+    }
 
-    // Close the connection from the outside.
+    // Close the connection from the outside. Do NOT call sender.stop() here --
+    // stop() unconditionally drives the sender to STOPPED regardless of whether
+    // the sender itself ever detected the closed connection, which would make
+    // the final assertion pass vacuously even if connection-close detection were
+    // removed. Instead, poll state() with a deadline and require that the sender
+    // transitions to STOPPED on its own, as a *result* of detecting the closed
+    // connection inside its streaming loop (see streaming_loop() in
+    // wal_sender.cpp: run_streaming() returns an error once send()/receive()
+    // fail on the closed connection, and the loop then stores State::STOPPED).
     primary_raw->close();
 
-    // Wait for sender to notice.
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    constexpr auto poll_interval = std::chrono::milliseconds(10);
+    constexpr auto poll_timeout = std::chrono::seconds(5);
+    auto deadline = std::chrono::steady_clock::now() + poll_timeout;
+    WalSender::State observed = sender.state();
+    while (observed != WalSender::State::STOPPED && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(poll_interval);
+        observed = sender.state();
+    }
 
-    // Sender should eventually stop.
+    // The sender must have detected the closed connection and stopped itself
+    // without any external stop() call. If connection-close detection regresses,
+    // the sender stays STREAMING forever and this poll times out, failing the test.
+    EXPECT_EQ(observed, WalSender::State::STOPPED)
+        << "WalSender did not autonomously detect the closed connection within "
+        << poll_timeout.count() << "s";
+
+    // Bring the background thread down cleanly; state is already STOPPED so this
+    // only joins the thread.
     sender.stop();
-    EXPECT_EQ(sender.state(), WalSender::State::STOPPED);
 
     ASSERT_TRUE(writer.close().has_value());
 }
