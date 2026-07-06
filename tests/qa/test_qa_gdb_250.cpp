@@ -759,10 +759,11 @@ TEST_F(QA_GDB250, ZeroIntDefault) {
 // E2E: Empty string default
 // =============================================================================
 
-// DISABLED: empty-string defaults crash INSERT with a span-subscript assertion
-// in the zero-length variable-field path (pre-existing, unmasked by the
-// fixture bootstrap added in GDB-758). Re-enable when GDB-1245 is fixed.
-TEST_F(QA_GDB250, DISABLED_EmptyStringDefault) {
+// Previously DISABLED: empty-string defaults crashed INSERT with a
+// span-subscript assertion in the zero-length variable-field path. Fixed by
+// GDB-1224 (well-defined zero-length var-field reads) and verified here as
+// part of GDB-1245.
+TEST_F(QA_GDB250, EmptyStringDefault) {
     exec_ok("CREATE TABLE empty_str ("
             "  id INT,"
             "  tag TEXT DEFAULT ''"
