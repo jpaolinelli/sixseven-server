@@ -139,6 +139,37 @@ TEST_F(CommitDurabilityTest, MultipleSequentialCommitsEachDurableOnAck) {
     }
 }
 
+TEST_F(CommitDurabilityTest, AutocommitInsertAckImpliesFlushedLsnCoversCommitLsn) {
+    attach_wal();
+
+    exec_ok("CREATE TABLE t (id INT)");
+
+    // No explicit BEGIN: this INSERT runs under an implicit/autocommit
+    // statement transaction (QueryEngine::execute_plan()'s implicit_txn
+    // path), which commits at a separate call site from execute_commit().
+    // GDB-1246 initially only fixed the explicit COMMIT path; this exercises
+    // the autocommit path, which is the common case for the majority of
+    // writes (any DML without an explicit BEGIN). CREATE TABLE is DDL and
+    // does not itself append data WAL records (only TableHeap::log_wal-backed
+    // INSERT/UPDATE/DELETE do), so the pre-INSERT watermark may legitimately
+    // still be invalid_lsn here -- that's fine, we only need it as a
+    // baseline to prove the INSERT below advanced the WAL.
+    lsn_t before_insert_lsn = writer_->current_lsn() - 1;
+
+    auto result = engine_->execute("INSERT INTO t VALUES (1)");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    // The autocommit statement's own INSERT WAL record is the new watermark.
+    lsn_t insert_commit_lsn = writer_->current_lsn() - 1;
+    ASSERT_GT(insert_commit_lsn, before_insert_lsn)
+        << "INSERT should have appended new WAL records";
+
+    // Core AC for the autocommit path: once execute() has returned success
+    // for the implicit-txn INSERT, the WAL must already be durably flushed
+    // at least to the statement's own commit_lsn.
+    EXPECT_GE(writer_->flushed_lsn(), insert_commit_lsn);
+}
+
 // -----------------------------------------------------------------------
 // WAL-disabled configs must still commit successfully, without crashing.
 // -----------------------------------------------------------------------

@@ -2418,6 +2418,51 @@ Result<QueryResult> QueryEngine::execute_begin() {
     return ok(std::move(qr));
 }
 
+lsn_t QueryEngine::commit_lsn_watermark() const {
+    // GDB-1246: the WAL tail LSN to flush up to before acking a commit.
+    // There is no dedicated COMMIT WAL record today -- src/txn/txn_manager.cpp
+    // never appends one, and WAL recovery's COMMIT handling
+    // (src/storage/wal_recovery.cpp) is currently unreachable dead code for
+    // that reason. Recovery instead relies purely on the data records' MVCC
+    // stamps (see TransactionManager::get_status: an unknown xid with no
+    // in-memory transaction record is treated as COMMITTED). All of the
+    // committing transaction/statement's data WAL (INSERT/UPDATE/DELETE,
+    // appended synchronously by TableHeap::log_wal during DML) is therefore
+    // already part of the WAL by the time commit is requested, so the
+    // last-assigned LSN is a safe, sufficient commit_lsn: flushing up to it
+    // durably persists everything that was written. Note
+    // WalWriter::current_lsn() returns the NEXT LSN to be assigned (not yet
+    // appended), so we must subtract one -- a waiter on the unappended LSN
+    // would error out of flush_until() immediately. If WAL is disabled
+    // (wal_writer_ == nullptr, e.g. some in-memory/test configs), there is
+    // nothing to flush.
+    if (!wal_writer_) {
+        return invalid_lsn;
+    }
+    lsn_t next_lsn = wal_writer_->current_lsn();
+    return next_lsn > invalid_lsn ? next_lsn - 1 : invalid_lsn;
+}
+
+Result<void> QueryEngine::wait_for_commit_durability(lsn_t commit_lsn) {
+    if (!wal_writer_) {
+        return ok();
+    }
+    // Durability wait: do not acknowledge the commit to the caller until the
+    // WAL is durably flushed at least to commit_lsn. flush_until() (GDB-769)
+    // is group-commit aware -- concurrent committers share a single fsync --
+    // and is called here with no lock held across it, so it cannot serialize
+    // committers against each other.
+    auto flushed = wal_writer_->flush_until(commit_lsn);
+    if (!flushed) {
+        // The transaction/statement is already marked COMMITTED in memory
+        // and its locks released, but its WAL is not confirmed durable
+        // (flush failed or the writer shut down). We must not report success
+        // to the caller.
+        return make_error(flushed.error().code, flushed.error().message);
+    }
+    return ok();
+}
+
 Result<QueryResult> QueryEngine::execute_commit() {
     QueryResult qr;
     qr.message = "COMMIT";
@@ -2426,28 +2471,9 @@ Result<QueryResult> QueryEngine::execute_commit() {
         return ok(std::move(qr));
     }
 
-    // GDB-1246: capture the WAL tail LSN *before* releasing the transaction's
-    // locks / marking it COMMITTED. There is no dedicated COMMIT WAL record
-    // today -- src/txn/txn_manager.cpp never appends one, and WAL recovery's
-    // COMMIT handling (src/storage/wal_recovery.cpp) is currently unreachable
-    // dead code for that reason. Recovery instead relies purely on the data
-    // records' MVCC stamps (see TransactionManager::get_status: an unknown
-    // xid with no in-memory transaction record is treated as COMMITTED).
-    // All of this transaction's data WAL (INSERT/UPDATE/DELETE, appended
-    // synchronously by TableHeap::log_wal during DML) is therefore already
-    // part of the WAL by this point, so the last-assigned LSN is a safe,
-    // sufficient commit_lsn: flushing up to it durably persists everything
-    // this transaction wrote. Note WalWriter::current_lsn() returns the NEXT
-    // LSN to be assigned (not yet appended), so we must subtract one -- a
-    // waiter on the unappended LSN would error out of flush_until()
-    // immediately. If WAL is disabled (wal_writer_ == nullptr, e.g. some
-    // in-memory/test configs), there is nothing to flush and commit proceeds
-    // without waiting.
-    lsn_t commit_lsn = invalid_lsn;
-    if (wal_writer_) {
-        lsn_t next_lsn = wal_writer_->current_lsn();
-        commit_lsn = next_lsn > invalid_lsn ? next_lsn - 1 : invalid_lsn;
-    }
+    // Capture the WAL tail LSN *before* releasing the transaction's locks /
+    // marking it COMMITTED (GDB-1246; see commit_lsn_watermark()).
+    lsn_t commit_lsn = commit_lsn_watermark();
 
     auto committed = txn_mgr_.commit(active_txn_id_);
     active_txn_id_ = invalid_txn_id;
@@ -2456,20 +2482,9 @@ Result<QueryResult> QueryEngine::execute_commit() {
         return make_error(committed.error().code, committed.error().message);
     }
 
-    // Durability wait: do not acknowledge the commit to the client until the
-    // WAL is durably flushed at least to commit_lsn. flush_until() (GDB-769)
-    // is group-commit aware -- concurrent committers share a single fsync --
-    // and is called here with no lock held across it, so it cannot serialize
-    // committers against each other.
-    if (wal_writer_) {
-        auto flushed = wal_writer_->flush_until(commit_lsn);
-        if (!flushed) {
-            // The transaction is already marked COMMITTED in memory and its
-            // locks released, but its WAL is not confirmed durable (flush
-            // failed or the writer shut down). We must not tell the client
-            // the commit succeeded.
-            return make_error(flushed.error().code, flushed.error().message);
-        }
+    auto durable = wait_for_commit_durability(commit_lsn);
+    if (!durable) {
+        return make_error(durable.error().code, durable.error().message);
     }
 
     return ok(std::move(qr));
@@ -2825,6 +2840,14 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
     // Finish the statement transaction (GDB-747).
     if (stmt_txn_id != invalid_txn_id) {
         if (implicit_txn) {
+            // GDB-1246: capture the WAL watermark before commit, exactly as
+            // execute_commit() does for explicit COMMIT -- this is the
+            // autocommit path (the common case: any INSERT/UPDATE/DELETE
+            // without an explicit BEGIN) and needs the identical durability
+            // guarantee: the statement's success must not be acknowledged
+            // before its WAL is durably flushed.
+            lsn_t commit_lsn = commit_lsn_watermark();
+
             auto committed = txn_mgr_.commit(stmt_txn_id);
             if (!committed) {
                 auto aborted = txn_mgr_.abort(stmt_txn_id);
@@ -2844,6 +2867,16 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                 }
                 compensate_row_deltas_and_clear();
                 return make_error(committed.error().code, committed.error().message);
+            }
+
+            // GDB-1246: do not report the statement as successful until its
+            // WAL is durably flushed. The in-memory txn is already COMMITTED
+            // at this point (same accepted semantic as execute_commit()): if
+            // the flush fails, the statement result becomes an error even
+            // though the data is technically committed in memory.
+            auto durable = wait_for_commit_durability(commit_lsn);
+            if (!durable) {
+                return make_error(durable.error().code, durable.error().message);
             }
         } else if (dml_heap != nullptr && dml_row_delta_sign != 0 && qr.rows.size() == 1 &&
                    !qr.rows[0].empty()) {

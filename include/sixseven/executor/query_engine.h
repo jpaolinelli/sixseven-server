@@ -7,6 +7,7 @@
 #include "sixseven/executor/storage_manager.h"
 #include "sixseven/graph/graph_engine.h"
 #include "sixseven/planner/statistics.h"
+#include "sixseven/storage/wal_record.h"
 #include "sixseven/txn/txn_manager.h"
 
 #include <cstdint>
@@ -366,6 +367,24 @@ private:
     /// silently skipped (their storage no longer exists, so there is nothing
     /// to compensate and no freed pointer is ever touched).
     void compensate_row_deltas_and_clear();
+
+    /// GDB-1246: compute the WAL LSN that must be durably flushed before a
+    /// commit (explicit or implicit/autocommit) may be acknowledged. Returns
+    /// invalid_lsn if wal_writer_ is null (WAL disabled) or nothing has been
+    /// appended yet. See the .cpp for why the last-appended LSN (not a
+    /// dedicated COMMIT record) is the correct watermark.
+    [[nodiscard]] lsn_t commit_lsn_watermark() const;
+
+    /// GDB-1246: block until the WAL is durably flushed at least to
+    /// commit_lsn, so a commit ack always implies durability. Shared by both
+    /// the explicit COMMIT path (execute_commit()) and the implicit/
+    /// autocommit statement-transaction commit path (execute_plan()), since
+    /// both need the identical null-guard + flush_until + error-mapping
+    /// behavior. No-op (returns ok()) if wal_writer_ is null (WAL disabled)
+    /// or commit_lsn is invalid_lsn (nothing was appended). Does not hold any
+    /// lock across the call, so WalWriter's group-commit fsync batching
+    /// (GDB-769) across concurrent committers is preserved.
+    [[nodiscard]] Result<void> wait_for_commit_durability(lsn_t commit_lsn);
 
     database_id_t current_database_id_ = default_database_id;
     int skip_masking_depth_ = 0;
