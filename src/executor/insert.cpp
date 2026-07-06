@@ -90,6 +90,7 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
         return ok(std::optional<Tuple>(std::nullopt));
     }
     executed_ = true;
+    row_delta_so_far_ = 0;
 
     // Acquire IX (Intent Exclusive) table lock before inserting any rows (GDB-930).
     // An IX lock on the table signals intent to write individual rows; it is
@@ -179,6 +180,10 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
             if (!rid) {
                 return make_error(rid.error().code, rid.error().message);
             }
+            // row_count_ was already incremented inside insert_tuple; track it
+            // here so a later error in this row's index maintenance still
+            // leaves an accurate partial delta for the caller to compensate.
+            ++row_delta_so_far_;
             enqueue_embedding_jobs(*rid, values);
             if (auto r = maintain_bm25(*rid, values); !r) {
                 return tl::unexpected(r.error());
@@ -268,6 +273,10 @@ Result<std::optional<Tuple>> InsertOperator::do_next() {
         if (!rids) {
             return make_error(rids.error().code, rids.error().message);
         }
+        // The whole batch is already committed to row_count_ atomically
+        // (TableHeap::insert_batch), so the partial delta is the full batch
+        // size even if a later row's index maintenance fails below.
+        row_delta_so_far_ += static_cast<int64_t>(rids->size());
 
         // Enqueue embedding jobs and maintain BM25 indexes for each inserted row.
         for (size_t i = 0; i < rids->size(); ++i) {

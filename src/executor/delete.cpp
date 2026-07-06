@@ -21,6 +21,7 @@ Result<std::optional<Tuple>> DeleteOperator::do_next() {
     executed_ = true;
 
     int64_t count = 0;
+    row_delta_so_far_ = 0;
 
     while (true) {
         auto row = child_->next();
@@ -55,6 +56,11 @@ Result<std::optional<Tuple>> DeleteOperator::do_next() {
         if (!del) {
             return make_error(del.error().code, del.error().message);
         }
+        // Row is now physically/logically deleted from the heap's live count
+        // (row_count_ was already decremented inside mark_deleted/delete_tuple).
+        // Track it here so a later error in this same row's index maintenance
+        // still leaves an accurate partial delta for the caller to compensate.
+        --row_delta_so_far_;
 
         // Maintain BM25 indexes: remove the deleted document's postings so it
         // no longer matches (and its RID can't be wrongly reused by a later

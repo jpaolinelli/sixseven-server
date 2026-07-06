@@ -28,6 +28,7 @@ Result<std::optional<Tuple>> UpdateOperator::do_next() {
     executed_ = true;
 
     int64_t count = 0;
+    row_delta_so_far_ = 0;
 
     // Materialize all target rows before mutating the heap (GDB-747). UPDATE
     // now inserts new tuple versions; draining the child first prevents the
@@ -122,10 +123,17 @@ Result<std::optional<Tuple>> UpdateOperator::do_next() {
             if (!new_rid) {
                 return make_error(new_rid.error().code, new_rid.error().message);
             }
+            // row_count_ was already incremented inside insert_tuple. If
+            // mark_deleted below fails, this +1 is a real leak that must be
+            // compensated by the caller (GDB-1243).
+            ++row_delta_so_far_;
             auto marked = heap_.mark_deleted(upd.old_rid, txn_id_, *new_rid);
             if (!marked) {
                 return make_error(marked.error().code, marked.error().message);
             }
+            // Old version's row_count_ was decremented inside mark_deleted;
+            // net effect of this row is now zero.
+            --row_delta_so_far_;
             bm25_rid = *new_rid;
 
             // Maintain BM25 indexes: the row moved to a new RID, so drop the
