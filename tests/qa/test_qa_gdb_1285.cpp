@@ -99,9 +99,8 @@ protected:
 // reproducing the *exact* original bug for this input shape, with no error
 // surfaced to the user. This is the highest-value adversarial case.
 TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, NonLiteralArithmeticDefaultDoesNotSilentlyReturnNull) {
-    auto qr =
-        exec_ok("SELECT name, salary, LAG(salary, 100, 1+1) OVER (ORDER BY salary) AS prev "
-                "FROM employees");
+    auto qr = exec_ok("SELECT name, salary, LAG(salary, 100, 1+1) OVER (ORDER BY salary) AS prev "
+                      "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
     for (auto& row : qr.rows) {
         // Whatever the "correct" behavior should be, the default must NOT be
@@ -140,9 +139,8 @@ TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, DoubleUnaryMinusDefaultResolvesToPos
     // desc.default_value stays NULL -- this is the *exact* GDB-1285 bug
     // reappearing for a nested-unary-minus default. Confirmed via QA: this
     // assertion fails (default is silently NULL instead of 5).
-    auto qr = exec_ok(
-        "SELECT name, salary, LAG(salary, 100, -(-5)) OVER (ORDER BY salary) AS prev "
-        "FROM employees");
+    auto qr = exec_ok("SELECT name, salary, LAG(salary, 100, -(-5)) OVER (ORDER BY salary) AS prev "
+                      "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
     ASSERT_FALSE(qr.rows.empty());
     ASSERT_FALSE(qr.rows[0][2].is_null())
@@ -156,17 +154,15 @@ TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, DoubleUnaryMinusDefaultResolvesToPos
 TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, DoubleDashIsRejectedAsCommentNotDoubleNegation) {
     // Documents the `--` lexer-comment ambiguity discovered above: this must
     // be a clean parse error, never a crash or a silently wrong default.
-    auto result = exec(
-        "SELECT name, salary, LAG(salary, 100, --5) OVER (ORDER BY salary) AS prev "
-        "FROM employees");
+    auto result = exec("SELECT name, salary, LAG(salary, 100, --5) OVER (ORDER BY salary) AS prev "
+                       "FROM employees");
     ASSERT_FALSE(result.has_value());
     EXPECT_FALSE(result.error().message.empty());
 }
 
 TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, SingleUnaryMinusDefaultIsNegative) {
-    auto qr = exec_ok(
-        "SELECT name, salary, LAG(salary, 100, -5) OVER (ORDER BY salary) AS prev "
-        "FROM employees");
+    auto qr = exec_ok("SELECT name, salary, LAG(salary, 100, -5) OVER (ORDER BY salary) AS prev "
+                      "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
     for (auto& row : qr.rows) {
         ASSERT_FALSE(row[2].is_null());
@@ -177,9 +173,8 @@ TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, SingleUnaryMinusDefaultIsNegative) {
 // ---- STRING-typed LAG/LEAD column with numeric default literal ----
 
 TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, StringColumnWithNumericDefaultCoercesOrErrorsCleanly) {
-    auto result =
-        exec("SELECT name, LAG(department, 100, 42) OVER (ORDER BY salary) AS prevdept "
-             "FROM employees");
+    auto result = exec("SELECT name, LAG(department, 100, 42) OVER (ORDER BY salary) AS prevdept "
+                       "FROM employees");
     if (result.has_value()) {
         // If it succeeds, the numeric default must have been coerced to a
         // sensible string ("42"), not silently left NULL and not garbage.
@@ -222,8 +217,8 @@ TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, UnaryMinusOnStringLiteralDefaultErro
     // -'abc' is nonsensical; the implementation should either reject it at
     // parse/bind time or surface a clean TYPE_ERROR -- never crash or
     // silently coerce to a garbage numeric value.
-    auto result = exec(
-        "SELECT name, LAG(salary, 100, -'abc') OVER (ORDER BY salary) AS prev FROM employees");
+    auto result =
+        exec("SELECT name, LAG(salary, 100, -'abc') OVER (ORDER BY salary) AS prev FROM employees");
     if (result.has_value()) {
         // If somehow accepted, must not silently produce NULL (the original
         // bug) nor a non-numeric garbage value in a DOUBLE column.
@@ -244,9 +239,9 @@ TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, UnaryMinusOnStringLiteralDefaultErro
 // ---- Explicit NULL vs omitted 3rd arg ----
 
 TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, ExplicitNullDefaultMatchesOmittedDefault) {
-    auto qr_explicit = exec_ok(
-        "SELECT name, salary, LAG(salary, 100, NULL) OVER (ORDER BY salary) AS prev "
-        "FROM employees");
+    auto qr_explicit =
+        exec_ok("SELECT name, salary, LAG(salary, 100, NULL) OVER (ORDER BY salary) AS prev "
+                "FROM employees");
     auto qr_omitted = exec_ok(
         "SELECT name, salary, LAG(salary, 100) OVER (ORDER BY salary) AS prev FROM employees");
     ASSERT_EQ(qr_explicit.rows.size(), 5u);
@@ -290,9 +285,9 @@ TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, OneArgFormStillWorks) {
 TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, VeryLargeOffsetWithDefaultFillsDefaultNoOverflow) {
     // Offset near INT32 range boundary combined with a default to make sure
     // there's no integer overflow/UB in the (pos - offset) arithmetic.
-    auto qr = exec_ok(
-        "SELECT name, salary, LAG(salary, 2000000000, -99) OVER (ORDER BY salary) AS prev "
-        "FROM employees");
+    auto qr =
+        exec_ok("SELECT name, salary, LAG(salary, 2000000000, -99) OVER (ORDER BY salary) AS prev "
+                "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
     for (auto& row : qr.rows) {
         ASSERT_FALSE(row[2].is_null());
@@ -338,10 +333,9 @@ TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, NegativeOffsetWithDefaultIfParserAll
 TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, LagOffsetExactlyAtPartitionBoundaryUsesDefault) {
     // Engineering has 3 rows; offset 3 from any row in Engineering is exactly
     // out of range and must use the default, never leak into Sales.
-    auto qr = exec_ok(
-        "SELECT name, department, salary, "
-        "LAG(salary, 3, -7) OVER (PARTITION BY department ORDER BY salary) AS prev "
-        "FROM employees");
+    auto qr = exec_ok("SELECT name, department, salary, "
+                      "LAG(salary, 3, -7) OVER (PARTITION BY department ORDER BY salary) AS prev "
+                      "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
     auto m = by_name(qr, 0, 3);
     // Every row's offset-3 target is out of its own partition (max partition
@@ -356,10 +350,9 @@ TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, LagOffsetExactlyAtPartitionBoundaryU
 TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, LeadOffsetOneBeyondPartitionBoundaryUsesDefault) {
     // Sales partition (Charlie 70k, Dave 85k) has 2 rows. LEAD(salary, 2, -3)
     // is one beyond the boundary for both rows in Sales.
-    auto qr = exec_ok(
-        "SELECT name, department, salary, "
-        "LEAD(salary, 2, -3) OVER (PARTITION BY department ORDER BY salary) AS nxt "
-        "FROM employees");
+    auto qr = exec_ok("SELECT name, department, salary, "
+                      "LEAD(salary, 2, -3) OVER (PARTITION BY department ORDER BY salary) AS nxt "
+                      "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
     auto m = by_name(qr, 0, 3);
     ASSERT_FALSE(m.at("Charlie").is_null());
@@ -373,10 +366,9 @@ TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, DefaultNeverLeaksAcrossPartitionBoun
     // up a real value from the *other* partition instead of the default.
     // Verify Charlie (first in Sales, smallest global salary too) doesn't
     // pick up any Engineering value via LAG across the global order.
-    auto qr = exec_ok(
-        "SELECT name, department, salary, "
-        "LAG(salary, 1, -123) OVER (PARTITION BY department ORDER BY salary) AS prev "
-        "FROM employees");
+    auto qr = exec_ok("SELECT name, department, salary, "
+                      "LAG(salary, 1, -123) OVER (PARTITION BY department ORDER BY salary) AS prev "
+                      "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
     auto m = by_name(qr, 0, 3);
     // Charlie is first in Sales partition -> must be the default, not
@@ -391,10 +383,9 @@ TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, DefaultNeverLeaksAcrossPartitionBoun
 // ---- Mixed: LEAD with offset+default across multiple partitions simultaneously ----
 
 TEST_F(QA_GDB1285_WindowLagLeadDefaultTest, LeadOffsetAndDefaultAcrossMultiplePartitions) {
-    auto qr = exec_ok(
-        "SELECT name, department, salary, "
-        "LEAD(salary, 1, -999) OVER (PARTITION BY department ORDER BY salary) AS nxt "
-        "FROM employees");
+    auto qr = exec_ok("SELECT name, department, salary, "
+                      "LEAD(salary, 1, -999) OVER (PARTITION BY department ORDER BY salary) AS nxt "
+                      "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
     auto m = by_name(qr, 0, 3);
     // Engineering: Alice(80k)->Bob(90k), Bob(90k)->Eve(95k), Eve(95k)->default.
@@ -424,11 +415,10 @@ protected:
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
 
-        auto create_result =
-            engine_->execute("CREATE TABLE accounts ("
-                             "id INT PRIMARY KEY, "
-                             "name TEXT NOT NULL, "
-                             "balance DECIMAL(10,2))");
+        auto create_result = engine_->execute("CREATE TABLE accounts ("
+                                              "id INT PRIMARY KEY, "
+                                              "name TEXT NOT NULL, "
+                                              "balance DECIMAL(10,2))");
         ASSERT_TRUE(create_result.has_value()) << create_result.error().message;
 
         for (auto& sql : {"INSERT INTO accounts VALUES (1, 'A', 100.50)",
