@@ -839,9 +839,26 @@ Result<Value> eval_binary(const BinaryExpr& expr,
     case BinaryOp::LESS_EQUAL:
     case BinaryOp::GREATER_EQUAL: {
         // Scale-aware DECIMAL comparison: align scales before comparing.
+        //
+        // GDB-1287: This fast path must trigger whenever AT LEAST ONE side is
+        // DECIMAL and the other is any numeric type (INT*/UINT*/FLOAT32/
+        // FLOAT64) -- not only when both sides are already DECIMAL-typed.
+        // Numeric literals (e.g. `10.00`) bind as FLOAT64 (see
+        // Binder::bind_literal), so `amount > 10.00` previously fell through
+        // to the generic cross-type compare() path, which converts DECIMAL to
+        // double via the *unscaled* coefficient (coercion.cpp to_double),
+        // silently comparing the wrong magnitude and corrupting every
+        // comparison operator (=, !=, <, <=, >, >=).
+        //
+        // The non-DECIMAL side is promoted to a Decimal128 coefficient at the
+        // DECIMAL side's scale via fit_to_storage(), the same rounding used
+        // for INSERT/UPDATE/CAST, so the literal is compared at the column's
+        // scale and no lossy float comparison ever takes place.
         bool lhs_dec = (lhs->type_id() == TypeId::DECIMAL);
         bool rhs_dec = (rhs->type_id() == TypeId::DECIMAL);
-        if (lhs_dec && rhs_dec) {
+        bool lhs_numeric = is_numeric(lhs->type_id());
+        bool rhs_numeric = is_numeric(rhs->type_id());
+        if ((lhs_dec || rhs_dec) && lhs_numeric && rhs_numeric) {
             int32_t s1 = 0;
             int32_t s2 = 0;
             {
@@ -856,7 +873,38 @@ Result<Value> eval_binary(const BinaryExpr& expr,
                     s2 = it->second.decimal_scale;
                 }
             }
-            auto cmp = decimal_compare(lhs->as_decimal(), s1, rhs->as_decimal(), s2);
+            // A non-DECIMAL side's ExprType.decimal_scale is meaningless (it
+            // is only populated for DECIMAL-typed expressions). Coerce it to
+            // the *other* side's DECIMAL scale so fit_to_storage() rounds it
+            // consistently with INSERT/UPDATE/CAST semantics. When both sides
+            // are already DECIMAL, each keeps its own real scale and
+            // decimal_compare() performs the alignment (unchanged from the
+            // pre-GDB-1287 behavior -- no regression for DECIMAL vs DECIMAL
+            // at differing scales).
+            int32_t lhs_scale = lhs_dec ? s1 : s2;
+            int32_t rhs_scale = rhs_dec ? s2 : s1;
+
+            auto coerce_side =
+                [&](const Value& v, bool is_dec, int32_t scale) -> Result<Decimal128> {
+                if (is_dec) {
+                    return ok(v.as_decimal());
+                }
+                auto fitted = fit_to_storage(v, TypeId::DECIMAL, scale);
+                if (!fitted) {
+                    return make_error(fitted.error().code, fitted.error().message);
+                }
+                return ok(fitted->as_decimal());
+            };
+
+            auto c1 = coerce_side(*lhs, lhs_dec, lhs_scale);
+            if (!c1) {
+                return make_error(c1.error().code, c1.error().message);
+            }
+            auto c2 = coerce_side(*rhs, rhs_dec, rhs_scale);
+            if (!c2) {
+                return make_error(c2.error().code, c2.error().message);
+            }
+            auto cmp = decimal_compare(*c1, lhs_scale, *c2, rhs_scale);
             if (!cmp) {
                 return make_error(cmp.error().code, cmp.error().message);
             }
