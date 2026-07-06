@@ -1,14 +1,81 @@
 #include "sixseven/txn/txn_manager.h"
 
 #include "sixseven/common/logging.h"
+#include "sixseven/storage/wal.h"
 
 #include <algorithm>
 #include <limits>
 
 namespace sixseven {
 
+void TransactionManager::set_wal_writer(WalWriter* writer) {
+    std::lock_guard lock(mu_);
+    wal_writer_ = writer;
+}
+
+void TransactionManager::init_next_txn_id(txn_id_t min_next_id) {
+    std::lock_guard lock(mu_);
+    if (min_next_id > next_txn_id_) {
+        next_txn_id_ = min_next_id;
+    }
+    // The recovered watermark is itself a persisted ceiling (or derived from
+    // one) -- it is always >= any id that could have been handed out, so it
+    // is a valid starting point for reserved_ceiling_ too. This means the
+    // first begin() after restart does not need to immediately persist a
+    // fresh batch unless next_txn_id_ has already reached it.
+    if (min_next_id > reserved_ceiling_) {
+        reserved_ceiling_ = min_next_id;
+    }
+}
+
+Result<void> TransactionManager::ensure_batch_reserved_locked() {
+    if (next_txn_id_ <= reserved_ceiling_) {
+        return ok(); // Still inside the currently reserved batch.
+    }
+    if (wal_writer_ == nullptr) {
+        // No durable store configured (in-memory/test config): fall back to
+        // the pre-existing behavior. Not crash-safe, but must not crash.
+        return ok();
+    }
+
+    // Reserve the next batch. The ceiling must be persisted BEFORE any id in
+    // the new batch is handed out -- this ordering is the crux of
+    // correctness (a crash after this append, before any id past the old
+    // ceiling is used, simply wastes the unused tail of the previous
+    // reservation on restart; a crash BEFORE this append would be fine too,
+    // since no id past the old ceiling has been handed out yet).
+    txn_id_t new_ceiling = reserved_ceiling_ + txn_id_batch_size;
+    // Guard against handing out an id that still wouldn't fit a single
+    // batch increment (e.g. batch size misconfigured smaller than a jump);
+    // extend to cover next_txn_id_ if needed.
+    while (new_ceiling < next_txn_id_) {
+        new_ceiling += txn_id_batch_size;
+    }
+
+    auto append_result = wal_writer_->write_txn_id_watermark(new_ceiling);
+    if (!append_result) {
+        return make_error(append_result.error().code,
+                          "failed to persist txn id watermark: " + append_result.error().message);
+    }
+    auto flush_result = wal_writer_->flush_until(*append_result);
+    if (!flush_result) {
+        return make_error(flush_result.error().code,
+                          "failed to durably flush txn id watermark: " +
+                              flush_result.error().message);
+    }
+
+    reserved_ceiling_ = new_ceiling;
+    SIXSEVEN_LOG_DEBUG("persisted txn id watermark ceiling={}", reserved_ceiling_);
+    return ok();
+}
+
 Result<Transaction*> TransactionManager::begin(IsolationLevel level) {
     std::lock_guard lock(mu_);
+
+    auto reserve_result = ensure_batch_reserved_locked();
+    if (!reserve_result) {
+        return tl::unexpected(reserve_result.error());
+    }
 
     auto txn = std::make_unique<Transaction>();
     txn->txn_id = next_txn_id_++;

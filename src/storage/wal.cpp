@@ -507,6 +507,16 @@ Result<lsn_t> WalWriter::write_checkpoint(const std::vector<txn_id_t>& active_tx
     return append(record);
 }
 
+Result<lsn_t> WalWriter::write_txn_id_watermark(txn_id_t ceiling) {
+    WalRecord record;
+    record.type = WalRecordType::TXN_ID_WATERMARK;
+    record.txn_id = 0;
+    record.data.resize(sizeof(uint64_t));
+    std::memcpy(record.data.data(), &ceiling, sizeof(uint64_t));
+
+    return append(record);
+}
+
 Result<void> WalWriter::truncate_before(uint64_t min_segment_id) {
     std::lock_guard<std::mutex> lock(latch_);
 

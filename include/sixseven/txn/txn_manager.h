@@ -14,6 +14,10 @@
 
 namespace sixseven {
 
+// Forward declaration -- avoids a hard dependency from txn/ on storage/ in
+// the header; only a pointer is stored (GDB-1247).
+class WalWriter;
+
 /// Manages transaction lifecycles, snapshots, and status tracking.
 ///
 /// Thread-safe: all public methods are protected by a mutex.
@@ -123,10 +127,59 @@ public:
     /// DML operators acquire row/table locks through this manager.
     [[nodiscard]] LockManager& lock_manager() { return lock_mgr_; }
 
+    /// Wire in a durable store for persisting the txn-id high-water mark
+    /// (GDB-1247). Optional: if never called (in-memory/test configs), the
+    /// manager falls back to the pre-existing behavior -- start at 1, never
+    /// persist a watermark -- WITHOUT crashing. That fallback is not
+    /// crash-safe: a process using it can reuse ids after a restart. Must be
+    /// called before any begin() whose durability matters; safe to call at
+    /// any time otherwise (affects only subsequently reserved batches).
+    void set_wal_writer(WalWriter* writer);
+
+    /// Initialize next_txn_id_ from a durably recovered watermark (GDB-1247).
+    /// Callers (main.cpp, after WAL recovery) should pass
+    /// RecoveryStats::max_txn_id_seen + 1, or skip the call entirely when no
+    /// recovery ran / no watermark was ever observed (next_txn_id_ keeps its
+    /// default of 1). Only raises the counter: never lowers it below its
+    /// current value, so calling it more than once, or after begin() has
+    /// already been used, is safe (though callers should call it once at
+    /// startup before any real transaction begins).
+    void init_next_txn_id(txn_id_t min_next_id);
+
+    /// Batch size for reserving a block of txn ids per persisted watermark
+    /// write (GDB-1247), mirroring PostgreSQL's XID allocation: persisting
+    /// on every begin() would add a WAL round-trip to every transaction
+    /// start, so instead we persist the CEILING of a batch of this many ids
+    /// up front and hand out ids from that batch without further I/O until
+    /// it is exhausted. A crash mid-batch merely skips the unused tail on
+    /// restart -- acceptable, since ids are cheap and unbounded (64-bit).
+    static constexpr txn_id_t txn_id_batch_size = 1024;
+
 private:
     mutable std::mutex mu_;
     txn_id_t next_txn_id_ = 1;
     IsolationLevel default_isolation_level_ = IsolationLevel::READ_COMMITTED;
+
+    /// Durable store for the txn-id watermark (GDB-1247). Null when no
+    /// durable store is configured (in-memory/test configs); guarded by
+    /// null checks everywhere it is used -- see set_wal_writer() doc.
+    WalWriter* wal_writer_ = nullptr;
+
+    /// The highest txn id that may be handed out without persisting a new
+    /// watermark first (GDB-1247): next_txn_id_ may advance up to and
+    /// including this value using only in-memory increments. When
+    /// next_txn_id_ would exceed it, a new ceiling (reserved_ceiling_ +
+    /// txn_id_batch_size) is persisted BEFORE any id past the old ceiling is
+    /// handed out. 0 means no batch has been reserved yet (forces a persist
+    /// on the very first begin() when wal_writer_ is configured).
+    txn_id_t reserved_ceiling_ = 0;
+
+    /// Reserve (persist) a new batch ceiling so next_txn_id_ can advance past
+    /// reserved_ceiling_. Caller holds mu_. No-op (returns ok()) if
+    /// wal_writer_ is null -- the in-memory/test fallback. On success,
+    /// reserved_ceiling_ is updated to the new ceiling BEFORE returning, so
+    /// the caller may then safely hand out any id up to and including it.
+    [[nodiscard]] Result<void> ensure_batch_reserved_locked();
 
     /// Shared lock manager for row/table locking (GDB-930).
     LockManager lock_mgr_;

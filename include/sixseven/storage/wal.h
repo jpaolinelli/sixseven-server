@@ -115,6 +115,14 @@ public:
     /// external synchronization to obtain a consistent snapshot.
     [[nodiscard]] Result<lsn_t> write_checkpoint(const std::vector<txn_id_t>& active_txns);
 
+    /// Write a TXN_ID_WATERMARK record (GDB-1247). The payload is the
+    /// ceiling of a reserved batch of transaction ids. Callers (namely
+    /// TransactionManager) MUST call this -- and wait for it to durably
+    /// flush -- BEFORE handing out any id in the newly reserved batch, so a
+    /// crash can never leave a handed-out id above the persisted watermark.
+    /// Returns the LSN assigned to the watermark record.
+    [[nodiscard]] Result<lsn_t> write_txn_id_watermark(txn_id_t ceiling);
+
     /// Remove WAL segment files with IDs strictly less than min_segment_id.
     /// Used after a checkpoint to reclaim disk space from segments that are
     /// no longer needed for recovery.

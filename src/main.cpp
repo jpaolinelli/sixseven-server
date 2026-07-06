@@ -204,6 +204,15 @@ int main(int argc, char* argv[]) {
     // Recovery MUST run BEFORE the server accepts any connections so that
     // committed data is visible and uncommitted writes are rolled back.
     // A recovery failure is FATAL — we must never serve stale state.
+    //
+    // recovered_max_txn_id survives the block below (GDB-1247): it is the
+    // highest transaction id observed anywhere in the WAL during recovery
+    // (0 if recovery was skipped or no such id was ever written), and is used
+    // after the WAL writer opens to seed TransactionManager's next_txn_id_
+    // strictly above every id a prior process could have handed out --
+    // otherwise a live transaction in this process could reuse an id already
+    // stamped into xmin/xmax on some persisted tuple, breaking visibility.
+    sixseven::txn_id_t recovered_max_txn_id = 0;
     {
         std::filesystem::path wal_dir = data_dir / "wal";
         sixseven::CleanShutdownMarker marker(data_dir);
@@ -272,13 +281,15 @@ int main(int argc, char* argv[]) {
             }
             const auto& stats = *recover_result;
             SIXSEVEN_LOG_INFO("WAL recovery complete: scanned={} redone={} undone={} "
-                              "committed_txns={} aborted_txns={} max_lsn={}",
+                              "committed_txns={} aborted_txns={} max_lsn={} max_txn_id_seen={}",
                               stats.records_scanned,
                               stats.records_redone,
                               stats.records_undone,
                               stats.committed_txns,
                               stats.aborted_txns,
-                              stats.max_lsn);
+                              stats.max_lsn,
+                              stats.max_txn_id_seen);
+            recovered_max_txn_id = stats.max_txn_id_seen;
         }
     }
 
@@ -465,6 +476,17 @@ int main(int argc, char* argv[]) {
 
     // Wire into QueryEngine so pg_current_wal_lsn() reflects real WAL position.
     engine.set_wal_writer(&wal_writer);
+
+    // GDB-1247: wire the WAL writer into TransactionManager so it can persist
+    // the txn-id high-water mark, and seed next_txn_id_ strictly above every
+    // id observed during recovery (0 if recovery was skipped -- clean
+    // shutdown -- or this is a fresh data directory, in which case
+    // TransactionManager keeps its default start-at-1 behavior). Must happen
+    // AFTER WalWriter::open() (a valid writer is required to persist
+    // batches) and is safe to do before any connection is accepted, since no
+    // transaction can have begun yet.
+    engine.transaction_manager().set_wal_writer(&wal_writer);
+    engine.transaction_manager().init_next_txn_id(recovered_max_txn_id + 1);
 
     // Load B+ tree and hash indexes asynchronously from persisted disk files.
     // Indexes are loaded in background threads; queries fall back to sequential
