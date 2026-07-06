@@ -96,6 +96,31 @@ Result<void> StorageManager::create_database_storage(database_id_t db_id) {
 Result<void> StorageManager::drop_database_storage(database_id_t db_id) {
     std::lock_guard lock(mu_);
 
+    // Flush and close every table/index file belonging to this database
+    // before removing its directory. Mirrors drop_table_storage /
+    // drop_index_storage's flush-then-close idiom; failures are ignored the
+    // same way the destructor ignores them, since directory removal must not
+    // be blocked by an individual flush/close error (matches GDB-1226).
+    for (auto it = tables_.begin(); it != tables_.end();) {
+        if (it->second->db_id == db_id) {
+            (void)it->second->bpm->flush_all();
+            (void)dm_.close_file(it->second->file_id);
+            it = tables_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    for (auto it = indexes_.begin(); it != indexes_.end();) {
+        if (it->second->db_id == db_id) {
+            (void)it->second->bpm->flush_all();
+            (void)dm_.close_file(it->second->file_id);
+            it = indexes_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
     auto db_dir = database_path(db_id);
 
     std::error_code ec;
@@ -127,6 +152,7 @@ Result<void> StorageManager::create_table_storage(database_id_t db_id,
     }
 
     auto storage = std::make_unique<TableStorage>();
+    storage->db_id = db_id;
     storage->file_id = *fid;
     storage->bpm = std::make_unique<BufferPoolManager>(dm_, *fid, pool_size_);
     if (dwb_enabled_) {
@@ -170,6 +196,7 @@ Result<void> StorageManager::open_table_storage(database_id_t db_id,
     }
 
     auto storage = std::make_unique<TableStorage>();
+    storage->db_id = db_id;
     storage->file_id = *fid;
     storage->bpm = std::make_unique<BufferPoolManager>(dm_, *fid, pool_size_);
     if (dwb_enabled_) {
@@ -299,6 +326,7 @@ Result<IndexStorage*> StorageManager::create_index_storage(database_id_t db_id,
     }
 
     auto storage = std::make_unique<IndexStorage>();
+    storage->db_id = db_id;
     storage->file_id = *fid;
     storage->bpm = std::make_unique<BufferPoolManager>(dm_, *fid, index_pool_size_);
 
@@ -325,6 +353,7 @@ Result<IndexStorage*> StorageManager::open_index_storage(database_id_t db_id, in
     }
 
     auto storage = std::make_unique<IndexStorage>();
+    storage->db_id = db_id;
     storage->file_id = *fid;
     storage->bpm = std::make_unique<BufferPoolManager>(dm_, *fid, index_pool_size_);
 
