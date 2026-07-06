@@ -1,5 +1,6 @@
 #include "sixseven/catalog/catalog.h"
 
+#include "sixseven/common/string_util.h"
 #include "sixseven/common/types.h"
 
 #include <algorithm>
@@ -116,7 +117,7 @@ Result<void> Catalog::drop_database(database_id_t database_id, bool cascade) {
             // Remove from the owning database's name map.
             auto owner_it = edge_name_to_id_.find(edef.database_id);
             if (owner_it != edge_name_to_id_.end()) {
-                owner_it->second.erase(edef.name);
+                owner_it->second.erase(to_lower(edef.name));
             }
             edge_types_by_id_.erase(eid);
         }
@@ -261,7 +262,7 @@ Result<void> Catalog::drop_table_locked(database_id_t database_id, const std::st
     }
     auto& edge_name_map = edge_name_to_id_[database_id];
     for (auto& ename : edge_names_to_remove) {
-        auto ename_it = edge_name_map.find(ename);
+        auto ename_it = edge_name_map.find(to_lower(ename));
         if (ename_it != edge_name_map.end()) {
             edge_types_by_id_.erase(ename_it->second);
             edge_name_map.erase(ename_it);
@@ -598,7 +599,7 @@ Result<edge_id_t> Catalog::create_edge_type(database_id_t database_id, EdgeTypeD
     std::lock_guard lock(mu_);
 
     auto& name_map = edge_name_to_id_[database_id];
-    if (name_map.contains(def.name)) {
+    if (name_map.contains(to_lower(def.name))) {
         return make_error(StatusCode::ALREADY_EXISTS,
                           "edge type '" + def.name + "' already exists");
     }
@@ -621,7 +622,7 @@ Result<edge_id_t> Catalog::create_edge_type(database_id_t database_id, EdgeTypeD
     def.edge_id = id;
     def.database_id = database_id;
 
-    name_map[def.name] = id;
+    name_map[to_lower(def.name)] = id;
     edge_types_by_id_[id] = std::move(def);
 
     return ok(id);
@@ -636,7 +637,7 @@ Result<void> Catalog::drop_edge_type(database_id_t database_id, const std::strin
     }
 
     auto& name_map = db_map_it->second;
-    auto name_it = name_map.find(name);
+    auto name_it = name_map.find(to_lower(name));
     if (name_it == name_map.end()) {
         return make_error(StatusCode::NOT_FOUND, "edge type '" + name + "' not found");
     }
@@ -657,7 +658,7 @@ Result<EdgeTypeDef> Catalog::get_edge_type(database_id_t database_id,
     }
 
     auto& name_map = db_map_it->second;
-    auto name_it = name_map.find(name);
+    auto name_it = name_map.find(to_lower(name));
     if (name_it == name_map.end()) {
         return make_error(StatusCode::NOT_FOUND, "edge type '" + name + "' not found");
     }
@@ -879,14 +880,14 @@ Result<void> Catalog::restore_edge_type(database_id_t database_id, EdgeTypeDef d
     std::lock_guard lock(mu_);
 
     auto& name_map = edge_name_to_id_[database_id];
-    if (name_map.contains(def.name)) {
+    if (name_map.contains(to_lower(def.name))) {
         return make_error(StatusCode::ALREADY_EXISTS,
                           "edge type '" + def.name + "' already exists");
     }
 
     edge_id_t id = def.edge_id;
     def.database_id = database_id;
-    name_map[def.name] = id;
+    name_map[to_lower(def.name)] = id;
     edge_types_by_id_[id] = std::move(def);
 
     if (id >= next_edge_id_) {
