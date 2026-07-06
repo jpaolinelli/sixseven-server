@@ -268,17 +268,28 @@ TEST_F(QA_GDB807, GDB807_TraverseOrderByCaseInsensitiveProperty) {
     EXPECT_DOUBLE_EQ(qr.rows[2][1].as_float64(), 4.5);
 }
 
-// Bug: edge type name in TRAVERSE FROM is case-sensitive (not fixed by GDB-610).
-// GDB-610 fixed OutputSchema::find_column (property access) but the TRAVERSE
-// FROM edge type lookup does a case-sensitive catalog lookup.
-// TRAVERSE RATED (uppercase) fails with "edge type 'RATED' not found".
-// This test documents the current (broken) behavior.
-// Filed as QA finding — see GDB-807 QA report.
-TEST_F(QA_GDB807, GDB807_TraverseFromUppercaseEdgeTypeName_KnownBug) {
-    // Currently fails because edge type lookup in TRAVERSE FROM is case-sensitive.
-    // When this bug is fixed, this test should change to exec_ok + ASSERT_EQ(3u).
-    exec_err("SELECT rated.score "
-             "FROM TRAVERSE RATED FROM users(1) DIRECTION OUT FETCH AS t");
+// Fixed by GDB-1263: edge type name in TRAVERSE FROM is now case-insensitive,
+// matching GDB-610's case-insensitive property access. TRAVERSE RATED (uppercase)
+// now resolves to the 'rated' edge type declared in SetUp().
+TEST_F(QA_GDB807, GDB807_TraverseFromUppercaseEdgeTypeName) {
+    auto qr = exec_ok("SELECT rated.score "
+                      "FROM TRAVERSE RATED FROM users(1) DIRECTION OUT FETCH AS t");
+    ASSERT_EQ(3u, qr.rows.size());
+}
+
+// Mixed-case edge type name in TRAVERSE FROM must also resolve.
+TEST_F(QA_GDB807, GDB807_TraverseFromMixedCaseEdgeTypeName) {
+    auto qr = exec_ok("SELECT Rated.score "
+                      "FROM TRAVERSE Rated FROM users(1) DIRECTION OUT FETCH AS t");
+    ASSERT_EQ(3u, qr.rows.size());
+}
+
+// Symmetric case: uppercase property access with lowercase edge type name in
+// TRAVERSE FROM must continue to work (GDB-610 behavior unaffected by GDB-1263).
+TEST_F(QA_GDB807, GDB807_TraverseFromLowercaseEdgeTypeNameUppercaseProperty) {
+    auto qr = exec_ok("SELECT RATED.SCORE "
+                      "FROM TRAVERSE rated FROM users(1) DIRECTION OUT FETCH AS t");
+    ASSERT_EQ(3u, qr.rows.size());
 }
 
 // ============================================================================

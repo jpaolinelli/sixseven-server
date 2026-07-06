@@ -706,6 +706,100 @@ TEST(Catalog, CreateEdgeTypeSelfReference) {
     ASSERT_TRUE(eid.has_value()) << eid.error().message;
 }
 
+TEST(Catalog, GetEdgeTypeCaseInsensitiveUppercase) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+
+    auto t1 = catalog.create_table(default_database_id, make_schema("users"));
+    auto t2 = catalog.create_table(default_database_id, make_schema("posts"));
+    ASSERT_TRUE(t1.has_value());
+    ASSERT_TRUE(t2.has_value());
+
+    EdgeTypeDef def;
+    def.name = "rated";
+    def.source_table_id = *t1;
+    def.target_table_id = *t2;
+    ASSERT_TRUE(catalog.create_edge_type(default_database_id, def).has_value());
+
+    // Looking up with an uppercase name must resolve to the lowercase-declared edge type.
+    auto retrieved = catalog.get_edge_type(default_database_id, "RATED");
+    ASSERT_TRUE(retrieved.has_value()) << retrieved.error().message;
+    // Display name preserves the original casing used at creation time.
+    EXPECT_EQ(retrieved->name, "rated");
+}
+
+TEST(Catalog, GetEdgeTypeCaseInsensitiveMixedCase) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+
+    auto t1 = catalog.create_table(default_database_id, make_schema("users"));
+    auto t2 = catalog.create_table(default_database_id, make_schema("posts"));
+    ASSERT_TRUE(t1.has_value());
+    ASSERT_TRUE(t2.has_value());
+
+    EdgeTypeDef def;
+    def.name = "rated";
+    def.source_table_id = *t1;
+    def.target_table_id = *t2;
+    ASSERT_TRUE(catalog.create_edge_type(default_database_id, def).has_value());
+
+    auto retrieved = catalog.get_edge_type(default_database_id, "Rated");
+    ASSERT_TRUE(retrieved.has_value()) << retrieved.error().message;
+    EXPECT_EQ(retrieved->name, "rated");
+}
+
+TEST(Catalog, CreateEdgeTypeCaseInsensitiveDuplicateFails) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+
+    auto t1 = catalog.create_table(default_database_id, make_schema("users"));
+    auto t2 = catalog.create_table(default_database_id, make_schema("posts"));
+    ASSERT_TRUE(t1.has_value());
+    ASSERT_TRUE(t2.has_value());
+
+    EdgeTypeDef def;
+    def.name = "rated";
+    def.source_table_id = *t1;
+    def.target_table_id = *t2;
+    ASSERT_TRUE(catalog.create_edge_type(default_database_id, def).has_value());
+
+    // Creating the same edge type name in a different case must collide, not create a
+    // second, unreachable edge type differing only in case.
+    EdgeTypeDef dup_def;
+    dup_def.name = "RATED";
+    dup_def.source_table_id = *t1;
+    dup_def.target_table_id = *t2;
+    auto dup = catalog.create_edge_type(default_database_id, dup_def);
+    ASSERT_FALSE(dup.has_value());
+    EXPECT_EQ(dup.error().code, StatusCode::ALREADY_EXISTS);
+
+    // Only one edge type should exist in total.
+    EXPECT_EQ(catalog.list_edge_types(default_database_id).size(), 1u);
+}
+
+TEST(Catalog, DropEdgeTypeCaseInsensitive) {
+    Catalog catalog;
+    init_test_catalog(catalog);
+
+    auto t1 = catalog.create_table(default_database_id, make_schema("a"));
+    auto t2 = catalog.create_table(default_database_id, make_schema("b"));
+    ASSERT_TRUE(t1.has_value());
+    ASSERT_TRUE(t2.has_value());
+
+    EdgeTypeDef def;
+    def.name = "follows";
+    def.source_table_id = *t1;
+    def.target_table_id = *t2;
+    ASSERT_TRUE(catalog.create_edge_type(default_database_id, def).has_value());
+
+    // Drop using a different case than the one used at creation time.
+    auto drop = catalog.drop_edge_type(default_database_id, "FOLLOWS");
+    ASSERT_TRUE(drop.has_value()) << drop.error().message;
+
+    EXPECT_FALSE(catalog.get_edge_type(default_database_id, "follows").has_value());
+    EXPECT_FALSE(catalog.get_edge_type(default_database_id, "FOLLOWS").has_value());
+}
+
 // -- Embedding column operations ----------------------------------------------
 
 TEST(Catalog, RegisterEmbeddingColumn) {

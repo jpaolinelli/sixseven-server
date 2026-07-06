@@ -2,6 +2,7 @@
 
 #include "sixseven/common/logging.h"
 #include "sixseven/common/parse_utils.h"
+#include "sixseven/common/string_util.h"
 #include "sixseven/common/types.h"
 #include "sixseven/graph/graph_engine_wal.h"
 #include "sixseven/index/btree_persistence.h"
@@ -53,7 +54,10 @@ GraphEngine::~GraphEngine() {
 }
 
 std::string GraphEngine::make_edge_key(database_id_t database_id, const std::string& name) {
-    return std::to_string(database_id) + ":" + name;
+    // Edge type names are case-insensitive (matching Catalog::get_edge_type and
+    // GDB-610's case-insensitive property access), so normalize the key here.
+    // This is the single choke point for all edge_tables_/edge_storage_ access.
+    return std::to_string(database_id) + ":" + to_lower(name);
 }
 
 bool GraphEngine::has_persistence() const {
