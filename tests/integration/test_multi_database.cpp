@@ -164,12 +164,16 @@ TEST_F(MultiDatabaseTest, DropDatabaseIfExistsOnNonExistentSucceeds) {
     EXPECT_EQ(qr.message, "DROP DATABASE");
 }
 
-TEST_F(MultiDatabaseTest, CannotDropDefaultDatabase) {
-    exec_error("DROP DATABASE demo", StatusCode::CONSTRAINT_VIOLATION);
+TEST_F(MultiDatabaseTest, DropDefaultDatabaseSucceeds) {
+    // GDB-1225 (Won't Fix): "demo" is an ordinary, droppable database — the
+    // Catalog only protects the system database (system_database_id), not
+    // the default user database. DROP DATABASE demo must succeed and demo
+    // must no longer exist afterward (mirrors the unit test
+    // DropDefaultDatabaseSucceeds and the QA DropDefaultDB_*_Drops tests).
+    exec_ok("DROP DATABASE demo");
 
-    // Default database should still exist.
     auto db = catalog_.get_database("demo");
-    EXPECT_TRUE(db.has_value());
+    EXPECT_FALSE(db.has_value());
 }
 
 // =============================================================================
