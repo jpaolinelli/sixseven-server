@@ -160,7 +160,43 @@ TEST_F(ServerLifecycleTest, HealthCheckReturnsVersionAndUptime) {
 // shutdown returned in under 5 seconds -- true regardless of whether the
 // timeout is plumbed anywhere, so it exercised no timeout behavior. Verify-first
 // found that Server::do_shutdown() merely LOGS shutdown_timeout_s and never
-// enforces it (the thread-pool drain is unbounded); a real shutdown deadline
-// plus a meaningful regression test are tracked in GDB-1279.
+// enforces it (the thread-pool drain is unbounded).
+//
+// GDB-1279 fixes this: shutdown_timeout_s is now wired into a bounded
+// ThreadPool::shutdown(deadline) call from Server::do_shutdown(). The
+// substantive regression coverage for the finish-then-hard-cap deadline
+// behavior lives in tests/unit/test_thread_pool.cpp (BoundedShutdown*
+// tests), which exercise the timeout directly against real long-running
+// thread-pool work without needing a live client connection (avoiding the
+// Windows blocking-socket CRT assert). The test below is the server-level
+// sanity check that do_shutdown() actually returns promptly (doesn't hang)
+// when driven through the public Server API.
+TEST_F(ServerLifecycleTest, ShutdownReturnsPromptlyWithNoInFlightWork) {
+    Config cfg = make_config();
+    cfg.shutdown_timeout_s = 2;
+    Server server(cfg);
+
+    std::thread t([&server] {
+        auto result = server.start();
+        EXPECT_TRUE(result.has_value());
+    });
+
+    // Wait for the server to actually start listening.
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (server.bound_port() == 0 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_NE(server.bound_port(), 0u);
+
+    auto start = std::chrono::steady_clock::now();
+    server.shutdown();
+    t.join();
+    auto elapsed = std::chrono::steady_clock::now() - start;
+
+    // With no in-flight thread-pool work, shutdown should complete almost
+    // immediately -- far under the 2s configured timeout, and nowhere near
+    // hanging indefinitely.
+    EXPECT_LT(elapsed, std::chrono::seconds(2));
+}
 
 } // namespace sixseven

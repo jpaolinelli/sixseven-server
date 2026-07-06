@@ -144,7 +144,20 @@ void Server::shutdown() {
 }
 
 void Server::do_shutdown() {
-    SIXSEVEN_LOG_INFO("initiating graceful shutdown (timeout={}s)", config_.shutdown_timeout_s);
+    // shutdown_timeout_s contract (GDB-1279): "finish-then-hard-cap". In-flight
+    // and queued thread-pool work is allowed to finish, but only up to this
+    // many seconds after do_shutdown() starts draining. Whatever hasn't
+    // completed by the deadline is force-abandoned (see
+    // ThreadPool::shutdown(std::chrono::seconds)) so this function returns
+    // promptly at ~the deadline instead of hanging on a blocked/long-running
+    // task. shutdown_timeout_s == 0 is treated as an immediate hard cap (drain
+    // nothing, abandon whatever is in flight right away) -- it is never
+    // treated as "unbounded"/"wait forever".
+    auto timeout_s = config_.shutdown_timeout_s;
+    if (timeout_s < 0) {
+        timeout_s = 0;
+    }
+    SIXSEVEN_LOG_INFO("initiating graceful shutdown (timeout={}s)", timeout_s);
 
     // Step 1: Stop accepting new connections.
     if (listen_fd_ >= 0) {
@@ -154,15 +167,19 @@ void Server::do_shutdown() {
         SIXSEVEN_LOG_INFO("shutdown: stopped accepting new connections");
     }
 
-    // Step 2: Wait for the thread pool to drain pending work.
+    // Step 2: Wait for the thread pool to drain pending work, bounded by
+    // shutdown_timeout_s. Tasks still running or queued past the deadline are
+    // force-abandoned rather than awaited.
     if (thread_pool_) {
-        SIXSEVEN_LOG_INFO("shutdown: draining thread pool ({} pending tasks)",
-                          thread_pool_->pending_tasks());
-        thread_pool_->shutdown();
-        SIXSEVEN_LOG_INFO("shutdown: thread pool drained");
+        SIXSEVEN_LOG_INFO("shutdown: draining thread pool ({} pending tasks, timeout={}s)",
+                          thread_pool_->pending_tasks(),
+                          timeout_s);
+        thread_pool_->shutdown(std::chrono::seconds(timeout_s));
+        SIXSEVEN_LOG_INFO("shutdown: thread pool drained (or deadline reached)");
     }
 
-    // Step 3: Close all client connections.
+    // Step 3: Force-close all client connections (any still in flight past
+    // the deadline are dropped here, per the finish-then-hard-cap contract).
     {
         std::lock_guard lock(connections_mutex_);
         inflight_fds_.clear();
