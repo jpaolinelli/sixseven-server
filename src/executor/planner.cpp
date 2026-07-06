@@ -217,6 +217,40 @@ bool is_window_expr(const Expr& expr, const BoundStatement& bound) {
     return it != bound.expr_types.end() && it->second.is_window;
 }
 
+/// True if `expr` is foldable to a single Value at plan time with no
+/// per-row state: literals, unary/binary operators over constants, CAST,
+/// and NULL checks over constants. False for anything that needs a row
+/// (column refs), a caller-supplied parameter, or a per-row/aggregate
+/// evaluation context (aggregates, window functions, subqueries, EXISTS).
+/// Used to validate the LAG/LEAD default-value (3rd) argument, which must
+/// be evaluable once, independent of any particular row.
+bool is_constant_expr(const Expr& expr) {
+    if (dynamic_cast<const LiteralExpr*>(&expr) != nullptr) {
+        return true;
+    }
+    if (auto* un = dynamic_cast<const UnaryExpr*>(&expr)) {
+        return un->operand && is_constant_expr(*un->operand);
+    }
+    if (auto* bin = dynamic_cast<const BinaryExpr*>(&expr)) {
+        return bin->lhs && bin->rhs && is_constant_expr(*bin->lhs) && is_constant_expr(*bin->rhs);
+    }
+    if (auto* cast = dynamic_cast<const CastExpr*>(&expr)) {
+        return cast->expr && is_constant_expr(*cast->expr);
+    }
+    if (auto* is_null = dynamic_cast<const IsNullExpr*>(&expr)) {
+        return is_null->expr && is_constant_expr(*is_null->expr);
+    }
+    if (auto* between = dynamic_cast<const BetweenExpr*>(&expr)) {
+        return between->expr && between->low && between->high && is_constant_expr(*between->expr) &&
+               is_constant_expr(*between->low) && is_constant_expr(*between->high);
+    }
+    // ColumnRefExpr, ParamRefExpr, WindowFunctionExpr, FunctionCallExpr
+    // (may be an aggregate or a non-deterministic builtin), CaseExpr,
+    // ExistsExpr, SubqueryExpr, ArrayExpr, InExpr, LikeExpr, MatchExpr, and
+    // NearestExpr are all rejected: none of them are guaranteed constant.
+    return false;
+}
+
 /// Resolve a window function name to the WindowFunc enum.
 WindowFunc resolve_window_func(const std::string& name) {
     std::string upper = to_upper(name);
@@ -2065,6 +2099,55 @@ Planner::plan_select(const SelectStmt& stmt,
                     }
                     desc.offset = *pv;
                 }
+            }
+
+            // LAG/LEAD default value (third argument), used when the offset
+            // target falls outside the partition. The default must be a
+            // CONSTANT expression (no column refs, parameters, aggregates, or
+            // window functions) so it can be folded to a Value once at plan
+            // time. Reuse the same evaluate_expr() machinery used elsewhere
+            // in the planner to fold constant expressions (e.g. DEFAULT
+            // column values, algorithm named-args): calling it with an empty
+            // tuple/schema means any ColumnRefExpr fails cleanly with
+            // NOT_FOUND instead of silently resolving to garbage or NULL,
+            // and it already understands literals, unary minus (including
+            // nested), arithmetic, and CAST.
+            if ((desc.func == WindowFunc::LAG || desc.func == WindowFunc::LEAD) &&
+                wexpr->args.size() >= 3) {
+                const Expr* default_expr = wexpr->args[2].get();
+
+                if (!is_constant_expr(*default_expr)) {
+                    return make_error(StatusCode::INVALID_ARGUMENT,
+                                      "LAG/LEAD default value (3rd argument) must be a "
+                                      "constant expression, not a column reference, "
+                                      "parameter, aggregate, or window function");
+                }
+
+                Tuple empty_tuple;
+                OutputSchema empty_schema;
+                auto folded = evaluate_expr(*default_expr, empty_tuple, empty_schema, bound);
+                if (!folded) {
+                    return make_error(StatusCode::INVALID_ARGUMENT,
+                                      "failed to evaluate LAG/LEAD default value (3rd "
+                                      "argument) as a constant expression: " +
+                                          folded.error().message);
+                }
+                Value parsed = std::move(*folded);
+
+                // Coerce the parsed default to the arg column's declared
+                // type (from the bound expr type of the window expr
+                // itself, which mirrors the source column's type).
+                if (!parsed.is_null()) {
+                    auto type_it = bound.expr_types.find(wexpr);
+                    if (type_it != bound.expr_types.end()) {
+                        auto coerced = explicit_cast(parsed, type_it->second.type_id);
+                        if (!coerced) {
+                            return tl::unexpected(coerced.error());
+                        }
+                        parsed = *coerced;
+                    }
+                }
+                desc.default_value = std::move(parsed);
             }
 
             // NTILE bucket count (first argument).
