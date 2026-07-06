@@ -264,14 +264,23 @@ Result<uint32_t> HnswIndex::insert(std::span<const float> vector) {
                 // Room available — just add.
                 nlist.push_back({new_id, neighbor.distance});
             } else {
-                // Check if new node is closer than the farthest neighbor.
-                auto farthest = std::max_element(
-                    nlist.begin(), nlist.end(), [](const HnswNeighbor& a, const HnswNeighbor& b) {
-                        return a.distance < b.distance;
-                    });
-                if (farthest != nlist.end() && neighbor.distance <= farthest->distance) {
-                    *farthest = {new_id, neighbor.distance};
-                }
+                // Grow the list to include the new candidate, then prune back
+                // down to max_neighbors using select_neighbors_heuristic. This
+                // mirrors the standard HNSW neighbor-selection heuristic
+                // (Malkov & Yashunin, Algorithm 4): pruning considers the
+                // *entire* candidate set (existing neighbors + the new node)
+                // together, rather than evicting a single "farthest" element
+                // one at a time. That one-at-a-time approach is what caused
+                // GDB-1235: with many equidistant (tied) candidates,
+                // std::max_element always resolved the tie to the same
+                // position, so the newest arrival perpetually evicted the
+                // *previous* newest arrival while the original occupants of
+                // every other slot were never touched — permanently
+                // stranding a whole class of nodes with zero in-edges from
+                // the reachable component.
+                std::vector<HnswNeighbor> grown = nlist;
+                grown.push_back({new_id, neighbor.distance});
+                nlist = select_neighbors_heuristic(grown, max_neighbors);
             }
 
             (void)update_node(neighbor_loc_result.value(), neighbor_node);
@@ -1011,6 +1020,97 @@ std::vector<HnswNeighbor> HnswIndex::select_neighbors(const std::vector<Candidat
         selected.push_back({candidates[i].node_id, candidates[i].distance});
     }
     return selected;
+}
+
+std::vector<HnswNeighbor>
+HnswIndex::select_neighbors_heuristic(const std::vector<HnswNeighbor>& grown,
+                                      uint16_t max_neighbors) {
+    if (grown.size() <= max_neighbors) {
+        return grown;
+    }
+
+    // The newly linked candidate is always the last element (see insert()).
+    const HnswNeighbor new_candidate = grown.back();
+    std::vector<HnswNeighbor> existing(grown.begin(), grown.end() - 1);
+    size_t keep_count = static_cast<size_t>(max_neighbors) - 1;
+
+    if (existing.size() <= keep_count) {
+        existing.push_back(new_candidate);
+        return existing;
+    }
+
+    if (keep_count == 0) {
+        // max_neighbors == 1: only one slot total. Ordinary keep-closest:
+        // the new candidate wins only if it's at least as close as the
+        // sole existing neighbor.
+        const HnswNeighbor& sole = existing.front();
+        return {new_candidate.distance <= sole.distance ? new_candidate : sole};
+    }
+
+    // Sort existing neighbors by distance and find the eviction boundary:
+    // the farthest distance among the (keep_count) closest existing
+    // entries. Anything strictly farther than this boundary is always
+    // dropped; anything strictly closer is always kept.
+    std::vector<HnswNeighbor> sorted = existing;
+    std::stable_sort(
+        sorted.begin(), sorted.end(), [](const HnswNeighbor& a, const HnswNeighbor& b) {
+            return a.distance < b.distance;
+        });
+    float boundary_distance = sorted[keep_count - 1].distance;
+
+    // GDB-1235 fix, correctly gated (per review): if the new candidate is
+    // STRICTLY FARTHER than the eviction boundary, it does not qualify for
+    // any slot at all -- preserve ordinary "keep the M closest" behavior so
+    // normal (non-tied) recall is unaffected; a worse new node must never
+    // evict a genuinely closer existing neighbor.
+    //
+    // The fair-tie-rotation only kicks in when the new candidate is AT or
+    // WITHIN the boundary (tied with, or closer than, the current farthest
+    // kept neighbor) -- exactly the many-way-tie scenario that caused
+    // GDB-1235: with candidates tied at the boundary distance (e.g.
+    // identical vectors), a fixed tie-break (std::max_element on all-equal
+    // distances) always resolved to the same slot, so each new insert's
+    // back-edge perpetually evicted only the *previous* insert's back-edge,
+    // permanently stranding a whole class of nodes with zero in-edges from
+    // the reachable component. Rotating which tied entry survives (keyed on
+    // the new node's strictly-increasing id) spreads eviction fairly
+    // instead.
+    if (new_candidate.distance > boundary_distance) {
+        // Reject the new candidate outright and leave the existing
+        // neighbor list untouched (still at full capacity: `existing` has
+        // exactly max_neighbors entries here, since select_neighbors_heuristic
+        // is only invoked when a full list is being grown by one). Returning
+        // anything short of `existing` unchanged would shrink the list below
+        // capacity, letting a later, possibly-worse candidate slip in
+        // through the "list not full yet" fast path in insert() instead of
+        // competing for a slot -- this was the review-caught regression: a
+        // rejected far candidate must not leave room behind it.
+        return existing;
+    }
+
+    std::vector<HnswNeighbor> kept;
+    kept.reserve(keep_count);
+    std::vector<HnswNeighbor> tied;
+    for (const auto& n : sorted) {
+        if (n.distance < boundary_distance) {
+            kept.push_back(n);
+        } else if (n.distance == boundary_distance) {
+            tied.push_back(n);
+        }
+        // Strictly farther than boundary_distance: dropped outright.
+    }
+
+    size_t tied_slots = keep_count - kept.size();
+    // Rotate which tied entries survive using the new node's id (strictly
+    // increasing across inserts), so a fixed tie-break doesn't always
+    // resolve the same way for every subsequent insert.
+    size_t offset = tied.empty() ? 0 : (new_candidate.node_id % tied.size());
+    for (size_t i = 0; i < tied_slots; ++i) {
+        kept.push_back(tied[(offset + i) % tied.size()]);
+    }
+
+    kept.push_back(new_candidate);
+    return kept;
 }
 
 } // namespace sixseven

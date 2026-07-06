@@ -983,6 +983,153 @@ TEST(HnswInsertSearch, InsertManySmallDimension) {
 }
 
 // =============================================================================
+// GDB-1235: Reachability under many-way distance ties with small M.
+//
+// Root cause: the reverse/bidirectional-link maintenance in insert() used to
+// evict a single "farthest" neighbor via std::max_element when a neighbor's
+// list was full. With many candidates tied at distance 0 (identical or
+// near-identical vectors), std::max_element always resolved the tie to the
+// same slot, so each new insert's back-edge perpetually evicted only the
+// *previous* insert's back-edge -- the earlier, still-resident neighbors
+// were never touched. Later-inserted nodes ended up with zero in-edges from
+// the reachable component and were unreachable from the entry point, even
+// though every insert() call itself succeeded. Fixed by
+// HnswIndex::select_neighbors_heuristic, which always keeps the newly
+// linked candidate and rotates eviction fairly across existing ties.
+// =============================================================================
+
+TEST(HnswInsertSearch, AllIdenticalVectorsReachableWithSmallM) {
+    TestFixture fix;
+
+    HnswIndex index(*fix.bpm);
+    HnswIndexConfig config;
+    config.dimension = 4;
+    config.m = 4;
+    config.ef_construction = 64;
+    config.ef_search = 64;
+    auto cr = index.create(config);
+    ASSERT_TRUE(cr.has_value()) << cr.error().message;
+
+    std::vector<float> vec = {0.5F, 0.5F, 0.5F, 0.5F};
+    for (int i = 0; i < 20; ++i) {
+        auto ir = index.insert(vec);
+        ASSERT_TRUE(ir.has_value()) << "Insert " << i << ": " << ir.error().message;
+    }
+    EXPECT_EQ(index.node_count(), 20u);
+
+    auto sr = index.search(vec, 20);
+    ASSERT_TRUE(sr.has_value()) << sr.error().message;
+    EXPECT_EQ(sr.value().size(), 20u)
+        << "All 20 identical vectors must be reachable from the entry point despite M=4";
+    for (const auto& r : sr.value()) {
+        EXPECT_FLOAT_EQ(r.distance, 0.0F);
+    }
+}
+
+TEST(HnswInsertSearch, ManyIdenticalVectorsReachableWithSmallMStress) {
+    TestFixture fix;
+
+    HnswIndex index(*fix.bpm);
+    HnswIndexConfig config;
+    config.dimension = 3;
+    config.m = 4;
+    config.ef_construction = 64;
+    config.ef_search = 128;
+    auto cr = index.create(config);
+    ASSERT_TRUE(cr.has_value()) << cr.error().message;
+
+    std::vector<float> vec = {1.0F, 1.0F, 1.0F};
+    constexpr uint32_t total = 80;
+    for (uint32_t i = 0; i < total; ++i) {
+        auto ir = index.insert(vec);
+        ASSERT_TRUE(ir.has_value()) << "Insert " << i << ": " << ir.error().message;
+    }
+    EXPECT_EQ(index.node_count(), total);
+
+    auto sr = index.search(vec, total);
+    ASSERT_TRUE(sr.has_value()) << sr.error().message;
+    EXPECT_EQ(sr.value().size(), total)
+        << "All " << total << " identical vectors must remain reachable with M=4";
+}
+
+// NOTE: a two-cluster variant of this test (15 identical vectors in each of
+// two widely separated clusters) was evaluated here and dropped. It failed
+// intermittently on BOTH this fix and unmodified main, driven by a separate,
+// pre-existing issue in upper-layer entry-point/greedy-descent selection
+// with small per-cluster node counts (multi-layer topology occasionally
+// routes the entry point through a sparsely-populated upper layer before
+// enough of a cluster's own nodes exist to anchor it) -- unrelated to the
+// reverse-edge eviction-fairness bug this file's other GDB-1235 tests cover.
+// Tracked separately; out of scope for this ticket's reverse-edge fix.
+
+// Regression for the review fix on top of GDB-1235: select_neighbors_heuristic
+// must not force-admit a new candidate that is STRICTLY FARTHER than every
+// existing neighbor once a list is full -- doing so would evict a genuinely
+// closer neighbor and degrade recall for ordinary (non-tied) vector data.
+// Distinct, strictly increasing distances mean there are no ties at the
+// eviction boundary, so this exercises the plain "keep the M closest" path
+// rather than the tie-rotation path exercised by the identical-vector tests
+// above.
+TEST(HnswInsertSearch, StrictlyFartherCandidateDoesNotEvictCloserNeighbor) {
+    TestFixture fix;
+
+    HnswIndex index(*fix.bpm);
+    HnswIndexConfig config;
+    config.dimension = 1;
+    config.m = 4; // layer-0 cap = m*2 = 8
+    config.ef_construction = 64;
+    config.ef_search = 64;
+    auto cr = index.create(config);
+    ASSERT_TRUE(cr.has_value()) << cr.error().message;
+
+    // Base point at the origin.
+    std::vector<float> origin = {0.0F};
+    ASSERT_TRUE(index.insert(origin).has_value());
+
+    // Fill the base node's layer-0 neighbor list (capacity 8) with 8 points
+    // at strictly increasing distances from the origin: 1, 2, 3, ..., 8.
+    for (int i = 1; i <= 8; ++i) {
+        std::vector<float> pt = {static_cast<float>(i)};
+        ASSERT_TRUE(index.insert(pt).has_value());
+    }
+    EXPECT_EQ(index.node_count(), 9u);
+
+    // A query at the origin should return the base node plus the 8 closest
+    // among {1..8} -- i.e. all of them, since there are exactly 8.
+    auto before = index.search(origin, 9);
+    ASSERT_TRUE(before.has_value()) << before.error().message;
+    EXPECT_EQ(before.value().size(), 9u);
+
+    // Now insert a point at distance 100 from the origin -- strictly
+    // farther than every existing point (1..8). It must not evict any of
+    // the genuinely-closer neighbors 1..8 from the base node's list; it
+    // simply fails to gain a slot there.
+    std::vector<float> far_point = {100.0F};
+    ASSERT_TRUE(index.insert(far_point).has_value());
+    EXPECT_EQ(index.node_count(), 10u);
+
+    auto after = index.search(origin, 9);
+    ASSERT_TRUE(after.has_value()) << after.error().message;
+    ASSERT_EQ(after.value().size(), 9u)
+        << "The base node and points 1..8 must still all be reachable/closest "
+           "to the origin -- the far point (100) must not have evicted any of them";
+    // Distances are squared L2, so point i (at coordinate i) is at distance
+    // i*i from the origin; the farthest of the 9 closest points (i=8) is at
+    // distance 64. The outlier at 100 is at distance 10000.
+    for (const auto& r : after.value()) {
+        EXPECT_LE(r.distance, 64.0F) << "node " << r.node_id
+                                     << " should be one of the 9 closest-to-origin points, "
+                                        "not displaced by the far outlier";
+    }
+
+    // The far point itself should not appear in the top-9 closest to the
+    // origin (it's the 10th-closest by construction).
+    for (const auto& r : after.value()) {
+        EXPECT_NE(r.distance, 10000.0F);
+    }
+}
+
+// =============================================================================
 // HNSW Delete and Compaction Tests (GDB-124/125)
 // =============================================================================
 

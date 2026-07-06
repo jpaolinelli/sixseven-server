@@ -195,6 +195,17 @@ private:
     [[nodiscard]] static std::vector<HnswNeighbor>
     select_neighbors(const std::vector<Candidate>& candidates, uint16_t max_neighbors);
 
+    /// Prune a "grown" neighbor list (existing neighbors + a newly linked
+    /// candidate) back down to max_neighbors. Used for reverse/bidirectional
+    /// link maintenance during insert. Unlike a naive "keep closest, evict
+    /// single farthest" rule, this considers the whole candidate set at once
+    /// and rotates which tied-at-cutoff-distance entries survive so that
+    /// many-way distance ties (e.g. duplicate vectors) don't let a fixed
+    /// tie-break rule permanently strand some nodes without an in-edge
+    /// (GDB-1235).
+    [[nodiscard]] static std::vector<HnswNeighbor>
+    select_neighbors_heuristic(const std::vector<HnswNeighbor>& grown, uint16_t max_neighbors);
+
     BufferPoolManager& buffer_pool_;
 
     PageId meta_page_id_ = 0;
