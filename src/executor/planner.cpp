@@ -1332,6 +1332,42 @@ Planner::plan_select(const SelectStmt& stmt,
                                   "NEAREST(...) is not supported inside a JOIN ON clause");
             }
         }
+        // MATCH(...) inside a join ON clause is not supported (GDB-1252, mirrors
+        // the NEAREST-in-JOIN-ON handling above). This is independent of
+        // whether the ON clause also contains NEAREST -- either predicate alone
+        // is unsupported in an ON clause, so there is no ordering ambiguity
+        // versus the NEAREST check above.
+        for (const auto& join_clause : stmt.joins) {
+            if (expr_contains_match(join_clause.on_expr.get())) {
+                return make_error(StatusCode::INVALID_ARGUMENT,
+                                  "MATCH(...) is not supported inside a JOIN ON clause");
+            }
+        }
+    }
+    // MATCH(...) full-text search in a query with a JOIN is not supported
+    // (GDB-1252, mirrors GDB-1250's NEAREST-in-JOIN pushdown restriction).
+    // try_plan_bm25_scan only runs in the !has_joins WHERE-pushdown path below,
+    // so a residual MatchExpr here would otherwise silently evaluate to TRUE
+    // ("satisfied by construction" -- only valid when the scan really is a BM25
+    // scan) and the query would return the full join output with no ranking,
+    // no `_score`, and no error.
+    //
+    // This check is placed BEFORE the NEAREST+JOIN block below and guarded on
+    // `!expr_contains_nearest` so a query that combines NEAREST + MATCH + JOIN
+    // still gets the more specific "cannot combine NEAREST and MATCH" error
+    // emitted by that block (below), rather than this more generic MATCH+JOIN
+    // error masking it. expr_contains_match only recurses into BinaryExpr/
+    // UnaryExpr (not into subqueries), so this does NOT reject the derived-
+    // table workaround `FROM (SELECT ..., _score FROM t WHERE MATCH(...)) sub
+    // JOIN ...` -- the MATCH there lives in the derived table's own
+    // stmt.where_expr, planned by a separate, joinless recursive call to
+    // plan_select, not the outer query's stmt.where_expr checked here.
+    if (has_joins && expr_contains_match(stmt.where_expr.get()) &&
+        !expr_contains_nearest(stmt.where_expr.get())) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "MATCH(...) full-text search is not supported in a query with a JOIN; "
+                          "wrap the full-text search in a derived table: FROM (SELECT ..., "
+                          "_score FROM <table> WHERE MATCH(...)) sub JOIN ...");
     }
     if (has_joins && expr_contains_nearest(stmt.where_expr.get())) {
         auto nearest_conjuncts = extract_conjuncts(*stmt.where_expr);
