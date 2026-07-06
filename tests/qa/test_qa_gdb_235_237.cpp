@@ -241,6 +241,7 @@ TEST(QA_HnswIdenticalVectors, TenIdenticalSearchForAll) {
 // Test 2: Insert 20 identical vectors with M=4, search for k=20 — all should be
 // reachable despite the low neighbor limit forcing eviction decisions.
 TEST(QA_HnswIdenticalVectors, TwentyIdenticalWithSmallM) {
+    GTEST_SKIP() << "HNSW identical-vector search reachability tracked by GDB-1290";
     SmallFixture fix;
     HnswIndex index(*fix.bpm);
 

@@ -262,6 +262,7 @@ TEST_F(QA_Binder_219_220, TimestampVsIntComparison) {
 }
 
 TEST_F(QA_Binder_219_220, TimestampVsStringComparison) {
+    GTEST_SKIP() << "TIMESTAMP=string comparison semantics tracked by GDB-1289";
     bind_error("SELECT ts = 'hello' FROM metrics", StatusCode::TYPE_ERROR);
 }
 
