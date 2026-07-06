@@ -27,6 +27,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -93,6 +95,7 @@ void verify_sorted_by_node_id(const std::vector<AlgorithmRow>& rows) {
 class QA_GDB483_PageRank : public ::testing::Test {
 protected:
     void SetUp() override {
+        bootstrap_qa_catalog(catalog_);
         auto t = catalog_.create_table(default_database_id, make_table_schema("nodes"));
         ASSERT_TRUE(t.has_value()) << t.error().message;
         table_id_ = *t;

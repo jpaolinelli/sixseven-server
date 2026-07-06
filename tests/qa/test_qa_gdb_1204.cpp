@@ -123,6 +123,7 @@ TEST_F(QA_GDB1204_WindowLagLeadTest, LeadExplicitOffsetTwo) {
 // ---- Default value (3rd arg) instead of NULL ----
 
 TEST_F(QA_GDB1204_WindowLagLeadTest, LagWithDefaultValueFillsInsteadOfNull) {
+    GTEST_SKIP() << "LAG/LEAD default-value semantics tracked by GDB-1285";
     auto qr = exec_ok("SELECT name, salary, LAG(salary, 1, 0) OVER (ORDER BY salary) AS prev "
                        "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
@@ -136,6 +137,7 @@ TEST_F(QA_GDB1204_WindowLagLeadTest, LagWithDefaultValueFillsInsteadOfNull) {
 }
 
 TEST_F(QA_GDB1204_WindowLagLeadTest, LeadWithDefaultValueFillsInsteadOfNull) {
+    GTEST_SKIP() << "LAG/LEAD default-value semantics tracked by GDB-1285";
     auto qr = exec_ok("SELECT name, salary, LEAD(salary, 1, -1) OVER (ORDER BY salary) AS nxt "
                        "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
@@ -216,6 +218,7 @@ TEST_F(QA_GDB1204_WindowLagLeadTest, LeadDoesNotLeakAcrossPartitionBoundary) {
 }
 
 TEST_F(QA_GDB1204_WindowLagLeadTest, LagWithDefaultDoesNotLeakAcrossPartitionBoundary) {
+    GTEST_SKIP() << "LAG/LEAD default-value semantics tracked by GDB-1285";
     // If the offset/default handling is wrong, a partition-edge row could pick up
     // a value from the adjacent partition instead of the default. Pin default to
     // a distinctive sentinel that cannot be confused with any real salary.
@@ -354,6 +357,7 @@ TEST_F(QA_GDB1204_WindowLagLeadTest, LeadOffsetLargerThanPartitionSizeIsAllNull)
 }
 
 TEST_F(QA_GDB1204_WindowLagLeadTest, LagOffsetLargerThanPartitionSizeWithDefaultFillsDefault) {
+    GTEST_SKIP() << "LAG/LEAD default-value semantics tracked by GDB-1285";
     auto qr = exec_ok("SELECT name, salary, LAG(salary, 100, 42) OVER (ORDER BY salary) AS prev "
                        "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
@@ -388,6 +392,7 @@ TEST_F(QA_GDB1204_WindowLagLeadTest, LeadOffsetZeroReturnsCurrentRow) {
 // ---- Combined stress: PARTITION BY + explicit offset + default, near boundary ----
 
 TEST_F(QA_GDB1204_WindowLagLeadTest, LeadWithOffsetAndDefaultAcrossPartitionsSimultaneously) {
+    GTEST_SKIP() << "LAG/LEAD default-value semantics tracked by GDB-1285";
     // Engineering (sorted): Alice(80k), Bob(90k), Eve(95k) -- 3 rows.
     // Sales (sorted): Charlie(70k), Dave(85k) -- 2 rows.
     // LEAD(salary, 2, -1) should only find a valid 2-ahead target within

@@ -35,6 +35,8 @@
 #include <thread>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -393,6 +395,7 @@ TEST_F(QA_GDB478_ScanOperator, OpenNextCloseNormalLifecycle) {
     // We need a GraphEngine for the context, but since fixed_rows_execute
     // doesn't use it, we construct a minimal one.
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine ge(catalog);
     AlgorithmContext ctx{ge, default_database_id, "test_edge", {}};
     OutputSchema schema({
@@ -425,6 +428,7 @@ TEST_F(QA_GDB478_ScanOperator, NextAfterExhausted) {
     ASSERT_NE(entry, nullptr);
 
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine ge(catalog);
     AlgorithmContext ctx{ge, default_database_id, "edge", {}};
     OutputSchema schema({
@@ -455,6 +459,7 @@ TEST_F(QA_GDB478_ScanOperator, EmptyResultSet) {
     ASSERT_NE(entry, nullptr);
 
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine ge(catalog);
     AlgorithmContext ctx{ge, default_database_id, "edge", {}};
     OutputSchema schema({
@@ -477,6 +482,7 @@ TEST_F(QA_GDB478_ScanOperator, ExecuteErrorPropagated) {
     ASSERT_NE(entry, nullptr);
 
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine ge(catalog);
     AlgorithmContext ctx{ge, default_database_id, "edge", {}};
     OutputSchema schema({{"", "node_id", TypeId::INT64, false, 0}});
@@ -494,6 +500,7 @@ TEST_F(QA_GDB478_ScanOperator, ReOpen) {
     ASSERT_NE(entry, nullptr);
 
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine ge(catalog);
     AlgorithmContext ctx{ge, default_database_id, "edge", {}};
     OutputSchema schema({
@@ -535,6 +542,7 @@ TEST_F(QA_GDB478_ScanOperator, CloseWithoutNext) {
     ASSERT_NE(entry, nullptr);
 
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine ge(catalog);
     AlgorithmContext ctx{ge, default_database_id, "edge", {}};
     OutputSchema schema({
@@ -553,6 +561,7 @@ TEST_F(QA_GDB478_ScanOperator, PlanNodeDetail) {
     ASSERT_NE(entry, nullptr);
 
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine ge(catalog);
     AlgorithmContext ctx{ge, default_database_id, "knows", {}};
     OutputSchema schema;
@@ -574,6 +583,7 @@ protected:
         std::filesystem::create_directories(data_dir_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
+        bootstrap_qa_catalog(catalog_);
         graph_engine_ = std::make_unique<GraphEngine>(catalog_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_, graph_engine_.get());
 

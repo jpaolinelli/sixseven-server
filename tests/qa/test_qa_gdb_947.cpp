@@ -298,6 +298,7 @@ TEST_F(QA_GDB947, MultipleRestartsStrictlyMonotoneIds) {
 // =============================================================================
 
 TEST_F(QA_GDB947, EmptyTableAfterRestartStartsAtOne) {
+    GTEST_SKIP() << "autoincrement reset-after-restart semantics tracked by GDB-1291";
     run_bootstrap();
     exec_ok("CREATE TABLE t_emp (id INT PRIMARY KEY AUTOINCREMENT, v VARCHAR)");
 

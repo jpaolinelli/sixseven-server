@@ -126,6 +126,47 @@ TEST_F(HashJoinTest, InnerJoinBasic) {
     EXPECT_TRUE(found_bob);
 }
 
+// GDB-1224: HashJoinOperator::hash_value() delegates to ValueHash, while
+// values_equal() delegates to compare() -- which numerically promotes mixed
+// integer widths (e.g. INT32 vs INT64) and compares them by value. Before the
+// fix, ValueHash hashed the raw variant alternative (one std::hash<T> per
+// concrete width), so an INT32 key and a numerically-equal INT64 key on the
+// two join sides landed in different hash buckets and the match was silently
+// dropped. This mirrors the real-world case of joining a table-valued
+// function's INT64 output column against an INT32 primary key column.
+TEST_F(HashJoinTest, InnerJoinMatchesAcrossMixedIntegerWidths) {
+    OutputSchema probe_schema_wide({
+        {"probe", "id", TypeId::INT32, false, 1},
+        {"probe", "name", TypeId::STRING, true, 1},
+    });
+    OutputSchema build_schema_wide({
+        {"build", "id", TypeId::INT64, false, 2},
+        {"build", "dept", TypeId::STRING, true, 2},
+    });
+    OutputSchema combined = combined_schema();
+
+    std::vector<Tuple> probe_data = {make_probe(1, "alice"), make_probe(2, "bob")};
+    std::vector<Tuple> build_data = {
+        Tuple{{Value(static_cast<int64_t>(1)), Value(std::string("eng"))}, {}},
+        Tuple{{Value(static_cast<int64_t>(2)), Value(std::string("sales"))}, {}},
+    };
+
+    auto probe_key = col_ref("probe", "id");
+    auto build_key = col_ref("build", "id");
+    BoundStatement bound;
+
+    HashJoinOperator join(std::make_unique<VectorIterator>(probe_schema_wide, probe_data),
+                          std::make_unique<VectorIterator>(build_schema_wide, build_data),
+                          JoinType::INNER,
+                          probe_key.get(),
+                          build_key.get(),
+                          bound,
+                          combined);
+
+    auto rows = collect_all(join);
+    ASSERT_EQ(rows.size(), 2u);
+}
+
 TEST_F(HashJoinTest, InnerJoinNoMatches) {
     auto probe_data = std::vector<Tuple>{make_probe(10, "x")};
     auto build_data = std::vector<Tuple>{make_build(20, "y")};

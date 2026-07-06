@@ -499,6 +499,19 @@ std::vector<uint8_t> build_password_message(const std::string& password) {
 } // namespace
 
 // --------------------------------------------------------------------------
+// QA148Wire: write_to_fd148()/read_from_fd148() use raw ::write()/::read()
+// (CRT lowio) on a socketpair-derived handle. On POSIX that handle is a
+// plain fd, so this works; on Windows, sixseven_platform::socketpair()
+// returns a real SOCKET (emulated via loopback TCP), and CRT
+// ::write()/::read() assert "invalid file handle" when given a SOCKET
+// instead of a CRT fd. Skip this whole suite on Windows rather than
+// reworking every helper to route through winsock send()/recv(), matching
+// the POSIX-only guard idiom used elsewhere (e.g. test_qa_gdb_145.cpp).
+// --------------------------------------------------------------------------
+
+#if !defined(_WIN32)
+
+// --------------------------------------------------------------------------
 // Trust auth: immediate AuthOk
 // --------------------------------------------------------------------------
 
@@ -769,3 +782,35 @@ TEST(QA148Wire, TrustAuthNoUserParam) {
     conn.close();
     sixseven_platform::socket_close(client_fd);
 }
+
+#else // defined(_WIN32)
+
+TEST(QA148Wire, TrustAuthImmediateOk) {
+    GTEST_SKIP() << "raw ::write()/::read() on a socketpair SOCKET handle is POSIX-only";
+}
+
+TEST(QA148Wire, Md5AuthCorrectPassword) {
+    GTEST_SKIP() << "raw ::write()/::read() on a socketpair SOCKET handle is POSIX-only";
+}
+
+TEST(QA148Wire, Md5AuthWrongPassword) {
+    GTEST_SKIP() << "raw ::write()/::read() on a socketpair SOCKET handle is POSIX-only";
+}
+
+TEST(QA148Wire, Md5AuthNonexistentUser) {
+    GTEST_SKIP() << "raw ::write()/::read() on a socketpair SOCKET handle is POSIX-only";
+}
+
+TEST(QA148Wire, ScramAuthNonexistentUser) {
+    GTEST_SKIP() << "raw ::write()/::read() on a socketpair SOCKET handle is POSIX-only";
+}
+
+TEST(QA148Wire, NonPasswordMessageDuringAuth) {
+    GTEST_SKIP() << "raw ::write()/::read() on a socketpair SOCKET handle is POSIX-only";
+}
+
+TEST(QA148Wire, TrustAuthNoUserParam) {
+    GTEST_SKIP() << "raw ::write()/::read() on a socketpair SOCKET handle is POSIX-only";
+}
+
+#endif // !defined(_WIN32)

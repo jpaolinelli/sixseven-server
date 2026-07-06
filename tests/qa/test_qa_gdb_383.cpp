@@ -5,6 +5,7 @@
 /// parameter numbers from $N placeholders. When N exceeds INT_MAX, std::stoi throws
 /// std::out_of_range, crashing the server. The fix replaces std::stoi with std::from_chars.
 
+#include "sixseven/common/platform.h"
 #include "sixseven/common/result.h"
 #include "sixseven/common/types.h"
 #include "sixseven/common/value.h"
@@ -13,8 +14,6 @@
 #include "sixseven/server/pg_protocol.h"
 
 #include <gtest/gtest.h>
-
-#include "sixseven/common/platform.h"
 
 #include <climits>
 #include <cstdint>
@@ -291,6 +290,19 @@ void do_startup_for_test(int client_fd, Connection& conn, PgProtocolHandler& han
 TEST(QA_GDB383_WireExecute, OverflowParamInSqlExecuteDoesNotCrash) {
     // Tests that substitute_sql_expressions() handles overflow param numbers
     // via the SQL-level EXECUTE path (PREPARE + EXECUTE with $N overflow).
+#if defined(_WIN32)
+    // create_socketpair_for_test()/write_to_fd_for_test()/
+    // read_from_fd_for_test() use raw ::write()/::read() (CRT lowio) on a
+    // socketpair-derived handle. On POSIX that handle is a plain fd, so this
+    // works; on Windows, sixseven_platform::socketpair() returns a real
+    // SOCKET (emulated via loopback TCP), and CRT ::write()/::read() assert
+    // "invalid file handle" when given a SOCKET instead of a CRT fd. Skip on
+    // Windows rather than reworking every helper to route through winsock
+    // send()/recv(), matching the POSIX-only guard idiom used elsewhere
+    // (e.g. test_qa_gdb_145.cpp, test_qa_gdb_965.cpp).
+    GTEST_SKIP() << "raw ::write()/::read() on a socketpair SOCKET handle is POSIX-only";
+    return;
+#endif
     int client_fd = -1;
     int server_fd = create_socketpair_for_test(client_fd);
 
@@ -298,19 +310,21 @@ TEST(QA_GDB383_WireExecute, OverflowParamInSqlExecuteDoesNotCrash) {
     PgProtocolHandler handler(383);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
-        received_sql = sql;
-        QueryResult qr;
-        qr.column_names = {"id"};
-        qr.column_types = {TypeId::INT32};
-        qr.rows = {{Value(static_cast<int32_t>(42))}};
-        return ok(std::move(qr));
-    });
+    handler.set_query_executor(
+        [&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
+            received_sql = sql;
+            QueryResult qr;
+            qr.column_names = {"id"};
+            qr.column_types = {TypeId::INT32};
+            qr.rows = {{Value(static_cast<int32_t>(42))}};
+            return ok(std::move(qr));
+        });
 
     do_startup_for_test(client_fd, conn, handler);
 
     // PREPARE a statement with $1 placeholder.
-    auto prepare_msg = build_query_msg("PREPARE overflow_test (int) AS SELECT * FROM t WHERE id = $1");
+    auto prepare_msg =
+        build_query_msg("PREPARE overflow_test (int) AS SELECT * FROM t WHERE id = $1");
     write_to_fd_for_test(client_fd, prepare_msg);
     (void)conn.read_from_socket();
     (void)handler.process(conn);
@@ -335,20 +349,34 @@ TEST(QA_GDB383_WireExecute, OverflowParamInSqlExecuteDoesNotCrash) {
 
 TEST(QA_GDB383_WireExecute, IntMaxPlusOneParamInSqlExecuteDoesNotCrash) {
     // Tests INT_MAX+1 through the substitute_sql_expressions() path.
+#if defined(_WIN32)
+    // create_socketpair_for_test()/write_to_fd_for_test()/
+    // read_from_fd_for_test() use raw ::write()/::read() (CRT lowio) on a
+    // socketpair-derived handle. On POSIX that handle is a plain fd, so this
+    // works; on Windows, sixseven_platform::socketpair() returns a real
+    // SOCKET (emulated via loopback TCP), and CRT ::write()/::read() assert
+    // "invalid file handle" when given a SOCKET instead of a CRT fd. Skip on
+    // Windows rather than reworking every helper to route through winsock
+    // send()/recv(), matching the POSIX-only guard idiom used elsewhere
+    // (e.g. test_qa_gdb_145.cpp, test_qa_gdb_965.cpp).
+    GTEST_SKIP() << "raw ::write()/::read() on a socketpair SOCKET handle is POSIX-only";
+    return;
+#endif
     int client_fd = -1;
     int server_fd = create_socketpair_for_test(client_fd);
 
     Connection conn(server_fd);
     PgProtocolHandler handler(384);
 
-    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
-        (void)sql;
-        QueryResult qr;
-        qr.column_names = {"id"};
-        qr.column_types = {TypeId::INT32};
-        qr.rows = {{Value(static_cast<int32_t>(1))}};
-        return ok(std::move(qr));
-    });
+    handler.set_query_executor(
+        [&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
+            (void)sql;
+            QueryResult qr;
+            qr.column_names = {"id"};
+            qr.column_types = {TypeId::INT32};
+            qr.rows = {{Value(static_cast<int32_t>(1))}};
+            return ok(std::move(qr));
+        });
 
     do_startup_for_test(client_fd, conn, handler);
 

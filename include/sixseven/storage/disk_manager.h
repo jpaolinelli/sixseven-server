@@ -109,6 +109,20 @@ public:
     /// Close a file handle. The FileId may be reused by future open/create calls.
     [[nodiscard]] Result<void> close_file(FileId file_id);
 
+    /// Close every currently-open file handle owned by this DiskManager.
+    ///
+    /// Intended for callers (notably test fixtures) that need every
+    /// underlying OS handle released deterministically *before* some later
+    /// action -- e.g. std::filesystem::remove_all() on the containing
+    /// directory, which fails on Windows with "process cannot access the
+    /// file" if any handle under that directory is still open. Simply
+    /// letting the DiskManager go out of scope is not sufficient when the
+    /// remove_all() call happens earlier in the same scope (e.g. a gtest
+    /// TearDown() body, which runs before the fixture's member destructors).
+    /// Already-closed slots are silently skipped. Best-effort: individual
+    /// close failures are ignored so every file still gets a close attempt.
+    void close_all_files();
+
     /// Read page from disk with CRC32C verification.
     /// page_id must be >= 1 and < file page count.
     [[nodiscard]] Result<void> read_page(FileId file_id, PageId page_id, Page& page);

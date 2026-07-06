@@ -191,9 +191,17 @@ TEST_F(QA_GDB711_Adversarial, TableNamesAreCaseSensitive) {
 
 // Double-quoted identifiers are not supported by the lexer; the statement must
 // fail cleanly (parse error) and leave the engine usable.
-TEST_F(QA_GDB711_Adversarial, QuotedIdentifierFailsCleanly) {
+TEST_F(QA_GDB711_Adversarial, QuotedIdentifierParsesCleanly) {
+    // GDB-1224: the lexer DOES support double-quoted identifiers (see the
+    // "unterminated quoted identifier" / "zero-length delimited identifier"
+    // handling in src/parser/lexer.cpp), so ANALYZE "widgets" is valid SQL
+    // that resolves to the same "widgets" table as the unquoted form. This
+    // test's prior expectation (rejection) was simply wrong about current
+    // lexer capabilities -- matches the identical fix in
+    // tests/qa/test_qa_gdb_602.cpp's QuotedIdentifierDatabaseNameParsesCleanly.
     auto result = engine_->execute("ANALYZE \"widgets\"");
-    EXPECT_FALSE(result.has_value()) << "double-quoted identifiers unexpectedly accepted";
+    ASSERT_TRUE(result.has_value()) << (result.has_value() ? "" : result.error().message);
+    EXPECT_EQ(result->message, "ANALYZE");
 
     // Engine still works afterwards.
     EXPECT_EQ(exec_ok("ANALYZE widgets").message, "ANALYZE");
@@ -378,8 +386,17 @@ TEST_F(QA_GDB711_Adversarial, PhantomTableWithoutStorageFile) {
     auto aerr = exec_err("ANALYZE phantom_t");
     EXPECT_EQ(aerr.code, StatusCode::NOT_FOUND);
 
-    // VACUUM resolves the name only -> succeeds per the validated-no-op design.
-    EXPECT_EQ(exec_ok("VACUUM phantom_t").message, "VACUUM");
+    // GDB-1224: GDB-969 ("Wire VACUUM to txn::Vacuum with safe deadness
+    // check") wired real reclamation into VACUUM, which requires opening the
+    // table's storage the same way ANALYZE does (see execute_vacuum() in
+    // src/executor/query_engine.cpp) -- it is no longer a validated no-op
+    // for tables lacking a storage file. StorageManager::get_table_storage()
+    // returns the same StatusCode::NOT_FOUND for the missing-storage case as
+    // ANALYZE's equivalent path, so VACUUM and ANALYZE are consistent with
+    // each other; this test's prior expectation (unconditional no-op
+    // success) simply predates GDB-969's behavior change.
+    auto verr = exec_err("VACUUM phantom_t");
+    EXPECT_EQ(verr.code, StatusCode::NOT_FOUND);
 
     // Bare ANALYZE currently fails wholesale when any catalog table lacks a
     // storage file (it does not skip the phantom). Pin the no-crash behavior.
@@ -478,12 +495,8 @@ protected:
     }
 
     Result<void> analyze_into(const Target& t, StatisticsStore& store, AnalyzeConfig config = {}) {
-        return analyze_table(t.table_id,
-                             t.schema,
-                             *t.storage->heap,
-                             t.storage->storage_schema,
-                             store,
-                             config);
+        return analyze_table(
+            t.table_id, t.schema, *t.storage->heap, t.storage->storage_schema, store, config);
     }
 };
 

@@ -365,11 +365,14 @@ TEST_F(QA_GDB680_Trace, StringPkTraceFailsCleanlyAndWithoutTraceWorks) {
         << "actual message: " << err.message;
 }
 
-// Operator-level: UINT32 PKs are integers but are rejected by TRACE's
-// pk_to_int64 (only int32/int64 variants are handled). Pins the current
-// behavior: a clean INVALID_ARGUMENT error, not a crash. See QA report
-// (Medium finding) — arguably these should be supported.
-TEST(QA_GDB680_TraceOperator, Uint32PkTraceFailsCleanly) {
+// Operator-level: UINT32 PKs are integers and are now accepted by TRACE.
+// GDB-1224 widened graph_traversal_core.cpp's pk_to_int64() to accept all 8
+// integer Value variants (previously only int32_t/int64_t), resolving the
+// "arguably these should be supported" QA finding this test originally
+// pinned as a known limitation (a clean INVALID_ARGUMENT, not a crash).
+// Updated to assert the operator now succeeds and reports a correct
+// single-hop path for a UINT32 PK.
+TEST(QA_GDB680_TraceOperator, Uint32PkTraceSucceeds) {
     Catalog catalog;
     init_test_catalog(catalog);
     GraphEngine graph(catalog);
@@ -411,10 +414,36 @@ TEST(QA_GDB680_TraceOperator, Uint32PkTraceFailsCleanly) {
     TraversalOperator op(graph, std::move(config), std::move(schema), nullptr, bound);
 
     auto open_result = op.open();
-    ASSERT_FALSE(open_result.has_value())
-        << "UINT32 PKs are currently unsupported by TRACE and must fail at open()";
-    EXPECT_EQ(open_result.error().code, StatusCode::INVALID_ARGUMENT);
+    ASSERT_TRUE(open_result.has_value()) << open_result.error().message;
+
+    std::vector<uint32_t> visited_nodes;
+    while (true) {
+        auto row = op.next();
+        ASSERT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value()) {
+            break;
+        }
+        auto& vals = row->value().values;
+        ASSERT_EQ(vals.size(), 3u);
+        ASSERT_EQ(vals[0].type_id(), TypeId::UINT32);
+        visited_nodes.push_back(vals[0].as_uint32());
+        ASSERT_EQ(vals[2].type_id(), TypeId::PATH);
+        const auto& path = vals[2].as_path();
+        ASSERT_FALSE(path.steps.empty());
+        // GDB-1224: node_pk (PathStep, always int64_t) must equal the
+        // widened UINT32 node id -- every step's PK is one of {1, 2}.
+        for (const auto& step : path.steps) {
+            EXPECT_TRUE(step.node_pk == 1 || step.node_pk == 2)
+                << "unexpected node_pk in path: " << step.node_pk;
+        }
+    }
     op.close();
+
+    // The start node (depth 0) is never itself emitted as a result row (see
+    // run_bfs() in src/executor/traversal.cpp: "skip depth 0 = the start node
+    // itself"); only its neighbor, node 2, is emitted at depth 1.
+    ASSERT_EQ(visited_nodes.size(), 1u);
+    EXPECT_EQ(visited_nodes[0], 2u);
 }
 
 // ---------------------------------------------------------------------------

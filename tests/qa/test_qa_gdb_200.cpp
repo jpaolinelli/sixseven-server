@@ -1,6 +1,7 @@
 /// @file test_qa_gdb_200.cpp
 /// @brief QA adversarial tests for GDB-200: Parameter substitution in extended query Execute.
 
+#include "sixseven/common/platform.h"
 #include "sixseven/common/result.h"
 #include "sixseven/common/types.h"
 #include "sixseven/common/value.h"
@@ -9,8 +10,6 @@
 #include "sixseven/server/pg_protocol.h"
 
 #include <gtest/gtest.h>
-
-#include "sixseven/common/platform.h"
 
 #include <climits>
 #include <cstdint>
@@ -429,8 +428,7 @@ TEST(QA_GDB200_Dollar, ParamInMixedQuoteContext) {
     // Single quote opened, double quote inside (not special), then close.
     std::vector<std::optional<std::string>> params = {"42"};
     std::vector<uint32_t> oids = {OID_INT4};
-    auto result =
-        substitute_parameters("SELECT 'he said \"$1\"' AS col, $1 AS val", params, oids);
+    auto result = substitute_parameters("SELECT 'he said \"$1\"' AS col, $1 AS val", params, oids);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     // $1 inside single quotes is NOT substituted; $1 outside IS.
     EXPECT_EQ(*result, "SELECT 'he said \"$1\"' AS col, 42 AS val");
@@ -492,12 +490,19 @@ TEST(QA_GDB200_Range, FewerOidsThanParams) {
 }
 
 TEST(QA_GDB200_Range, EmptyOidsVector) {
+    // GDB-1224: GDB-569 (psqlODBC integration) deliberately made OID 0
+    // ("unspecified", including when param_oids is shorter than
+    // param_values, or entirely empty) infer text vs. numeric from the
+    // value's own content -- see format_param_as_sql()'s "OID 0 means
+    // unspecified -- infer from value content" comment in
+    // src/server/pg_protocol.cpp. "42" is a valid numeric literal, so with
+    // no OID supplied it is emitted unquoted, not defaulted to quoted text.
+    // This test's prior expectation predated/ignored that GDB-569 change.
     std::vector<std::optional<std::string>> params = {"42"};
     std::vector<uint32_t> oids = {};
     auto result = substitute_parameters("SELECT $1", params, oids);
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    // No OIDs → default to text (quoted).
-    EXPECT_EQ(*result, "SELECT '42'");
+    EXPECT_EQ(*result, "SELECT 42");
 }
 
 // =============================================================================
@@ -598,7 +603,8 @@ TEST(QA_GDB200_EdgeCase, VeryLongSql) {
     auto result = substitute_parameters(sql, params, oids);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     // Spot-check: first and last values.
-    EXPECT_TRUE(result->find("SELECT 1,") != std::string::npos || result->find("SELECT 1, ") != std::string::npos);
+    EXPECT_TRUE(result->find("SELECT 1,") != std::string::npos ||
+                result->find("SELECT 1, ") != std::string::npos);
     EXPECT_TRUE(result->find("100") != std::string::npos);
 }
 
@@ -677,8 +683,7 @@ TEST(QA_GDB200_AC, SelectParameterized) {
     auto result = substitute_parameters(
         "SELECT name, email FROM users WHERE status = $1 AND age >= $2", params, oids);
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ(*result,
-              "SELECT name, email FROM users WHERE status = 'active' AND age >= 21");
+    EXPECT_EQ(*result, "SELECT name, email FROM users WHERE status = 'active' AND age >= 21");
 }
 
 TEST(QA_GDB200_AC, InsertParameterized) {
@@ -693,8 +698,7 @@ TEST(QA_GDB200_AC, InsertParameterized) {
 TEST(QA_GDB200_AC, UpdateParameterized) {
     std::vector<std::optional<std::string>> params = {"new_email@test.com", "5"};
     std::vector<uint32_t> oids = {OID_TEXT, OID_INT4};
-    auto result =
-        substitute_parameters("UPDATE users SET email = $1 WHERE id = $2", params, oids);
+    auto result = substitute_parameters("UPDATE users SET email = $1 WHERE id = $2", params, oids);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(*result, "UPDATE users SET email = 'new_email@test.com' WHERE id = 5");
 }
@@ -702,8 +706,7 @@ TEST(QA_GDB200_AC, UpdateParameterized) {
 TEST(QA_GDB200_AC, DeleteParameterized) {
     std::vector<std::optional<std::string>> params = {"2023-01-01"};
     std::vector<uint32_t> oids = {OID_DATE};
-    auto result =
-        substitute_parameters("DELETE FROM logs WHERE created_at < $1", params, oids);
+    auto result = substitute_parameters("DELETE FROM logs WHERE created_at < $1", params, oids);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(*result, "DELETE FROM logs WHERE created_at < '2023-01-01'");
 }
@@ -836,8 +839,7 @@ build_bind_msg_qa(std::string_view portal_name,
     return msg;
 }
 
-std::vector<uint8_t> build_execute_msg_qa(std::string_view portal_name,
-                                          int32_t max_rows = 0) {
+std::vector<uint8_t> build_execute_msg_qa(std::string_view portal_name, int32_t max_rows = 0) {
     std::vector<uint8_t> msg;
     msg.push_back('E');
     uint32_t body_len = static_cast<uint32_t>(4 + portal_name.size() + 1 + 4);
@@ -871,6 +873,19 @@ void do_startup_qa(int client_fd, Connection& conn, PgProtocolHandler& handler) 
 } // namespace
 
 TEST(QA_GDB200_Wire, InjectionViaWireProtocolTextParam) {
+#if defined(_WIN32)
+    // create_socketpair_qa()/write_to_fd()/read_from_fd() use raw ::write()/
+    // ::read() (CRT lowio) on a socketpair-derived handle. On POSIX that
+    // handle is a plain fd, so this works; on Windows,
+    // sixseven_platform::socketpair() returns a real SOCKET (emulated via
+    // loopback TCP), and CRT ::write()/::read() assert "invalid file handle"
+    // when given a SOCKET instead of a CRT fd. Skip on Windows rather than
+    // reworking every helper to route through winsock send()/recv(),
+    // matching the POSIX-only guard idiom used elsewhere (e.g.
+    // test_qa_gdb_145.cpp, test_qa_gdb_965.cpp).
+    GTEST_SKIP() << "raw ::write()/::read() on a socketpair SOCKET handle is POSIX-only";
+    return;
+#endif
     int client_fd = -1;
     int server_fd = create_socketpair_qa(client_fd);
 
@@ -878,22 +893,22 @@ TEST(QA_GDB200_Wire, InjectionViaWireProtocolTextParam) {
     PgProtocolHandler handler(200);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
-        received_sql = sql;
-        QueryResult qr;
-        qr.column_names = {"name"};
-        qr.column_types = {TypeId::STRING};
-        qr.rows = {};
-        return ok(std::move(qr));
-    });
+    handler.set_query_executor(
+        [&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
+            received_sql = sql;
+            QueryResult qr;
+            qr.column_names = {"name"};
+            qr.column_types = {TypeId::STRING};
+            qr.rows = {};
+            return ok(std::move(qr));
+        });
 
     do_startup_qa(client_fd, conn, handler);
 
     // Send a SQL injection attempt as a text parameter.
     std::vector<uint8_t> batch;
     auto parse = build_parse_msg_qa("", "SELECT * FROM users WHERE name = $1", {OID_TEXT});
-    auto bind =
-        build_bind_msg_qa("", "", {std::optional<std::string>("'; DROP TABLE users; --")});
+    auto bind = build_bind_msg_qa("", "", {std::optional<std::string>("'; DROP TABLE users; --")});
     auto execute = build_execute_msg_qa("");
     auto sync = build_sync_msg_qa();
 
@@ -910,8 +925,7 @@ TEST(QA_GDB200_Wire, InjectionViaWireProtocolTextParam) {
     // The SQL injection must be escaped, not injected raw.
     // "DROP TABLE" text appears inside a properly escaped string literal — that's safe.
     // The key check is that the single quote at the injection boundary is doubled.
-    EXPECT_EQ(received_sql,
-              "SELECT * FROM users WHERE name = '''; DROP TABLE users; --'");
+    EXPECT_EQ(received_sql, "SELECT * FROM users WHERE name = '''; DROP TABLE users; --'");
     EXPECT_NE(received_sql.find("'''"), std::string::npos);
 
     conn.close();
@@ -919,6 +933,19 @@ TEST(QA_GDB200_Wire, InjectionViaWireProtocolTextParam) {
 }
 
 TEST(QA_GDB200_Wire, AllNullParamsViaWire) {
+#if defined(_WIN32)
+    // create_socketpair_qa()/write_to_fd()/read_from_fd() use raw ::write()/
+    // ::read() (CRT lowio) on a socketpair-derived handle. On POSIX that
+    // handle is a plain fd, so this works; on Windows,
+    // sixseven_platform::socketpair() returns a real SOCKET (emulated via
+    // loopback TCP), and CRT ::write()/::read() assert "invalid file handle"
+    // when given a SOCKET instead of a CRT fd. Skip on Windows rather than
+    // reworking every helper to route through winsock send()/recv(),
+    // matching the POSIX-only guard idiom used elsewhere (e.g.
+    // test_qa_gdb_145.cpp, test_qa_gdb_965.cpp).
+    GTEST_SKIP() << "raw ::write()/::read() on a socketpair SOCKET handle is POSIX-only";
+    return;
+#endif
     int client_fd = -1;
     int server_fd = create_socketpair_qa(client_fd);
 
@@ -926,13 +953,14 @@ TEST(QA_GDB200_Wire, AllNullParamsViaWire) {
     PgProtocolHandler handler(201);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
-        received_sql = sql;
-        QueryResult qr;
-        qr.affected_rows = 1;
-        qr.message = "INSERT";
-        return ok(std::move(qr));
-    });
+    handler.set_query_executor(
+        [&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
+            received_sql = sql;
+            QueryResult qr;
+            qr.affected_rows = 1;
+            qr.message = "INSERT";
+            return ok(std::move(qr));
+        });
 
     do_startup_qa(client_fd, conn, handler);
 
@@ -960,6 +988,19 @@ TEST(QA_GDB200_Wire, AllNullParamsViaWire) {
 }
 
 TEST(QA_GDB200_Wire, MixedTypeParamsViaWire) {
+#if defined(_WIN32)
+    // create_socketpair_qa()/write_to_fd()/read_from_fd() use raw ::write()/
+    // ::read() (CRT lowio) on a socketpair-derived handle. On POSIX that
+    // handle is a plain fd, so this works; on Windows,
+    // sixseven_platform::socketpair() returns a real SOCKET (emulated via
+    // loopback TCP), and CRT ::write()/::read() assert "invalid file handle"
+    // when given a SOCKET instead of a CRT fd. Skip on Windows rather than
+    // reworking every helper to route through winsock send()/recv(),
+    // matching the POSIX-only guard idiom used elsewhere (e.g.
+    // test_qa_gdb_145.cpp, test_qa_gdb_965.cpp).
+    GTEST_SKIP() << "raw ::write()/::read() on a socketpair SOCKET handle is POSIX-only";
+    return;
+#endif
     int client_fd = -1;
     int server_fd = create_socketpair_qa(client_fd);
 
@@ -967,24 +1008,28 @@ TEST(QA_GDB200_Wire, MixedTypeParamsViaWire) {
     PgProtocolHandler handler(202);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
-        received_sql = sql;
-        QueryResult qr;
-        qr.affected_rows = 1;
-        qr.message = "INSERT";
-        return ok(std::move(qr));
-    });
+    handler.set_query_executor(
+        [&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
+            received_sql = sql;
+            QueryResult qr;
+            qr.affected_rows = 1;
+            qr.message = "INSERT";
+            return ok(std::move(qr));
+        });
 
     do_startup_qa(client_fd, conn, handler);
 
     std::vector<uint8_t> batch;
-    auto parse = build_parse_msg_qa(
-        "", "INSERT INTO t (id, name, active, score) VALUES ($1, $2, $3, $4)",
-        {OID_INT4, OID_TEXT, OID_BOOL, OID_FLOAT8});
-    auto bind = build_bind_msg_qa(
-        "", "",
-        {std::optional<std::string>("42"), std::optional<std::string>("hello"),
-         std::optional<std::string>("t"), std::optional<std::string>("3.14")});
+    auto parse =
+        build_parse_msg_qa("",
+                           "INSERT INTO t (id, name, active, score) VALUES ($1, $2, $3, $4)",
+                           {OID_INT4, OID_TEXT, OID_BOOL, OID_FLOAT8});
+    auto bind = build_bind_msg_qa("",
+                                  "",
+                                  {std::optional<std::string>("42"),
+                                   std::optional<std::string>("hello"),
+                                   std::optional<std::string>("t"),
+                                   std::optional<std::string>("3.14")});
     auto execute = build_execute_msg_qa("");
     auto sync = build_sync_msg_qa();
 
@@ -1006,6 +1051,19 @@ TEST(QA_GDB200_Wire, MixedTypeParamsViaWire) {
 }
 
 TEST(QA_GDB200_Wire, InvalidNumericParamViaWireReturnsError) {
+#if defined(_WIN32)
+    // create_socketpair_qa()/write_to_fd()/read_from_fd() use raw ::write()/
+    // ::read() (CRT lowio) on a socketpair-derived handle. On POSIX that
+    // handle is a plain fd, so this works; on Windows,
+    // sixseven_platform::socketpair() returns a real SOCKET (emulated via
+    // loopback TCP), and CRT ::write()/::read() assert "invalid file handle"
+    // when given a SOCKET instead of a CRT fd. Skip on Windows rather than
+    // reworking every helper to route through winsock send()/recv(),
+    // matching the POSIX-only guard idiom used elsewhere (e.g.
+    // test_qa_gdb_145.cpp, test_qa_gdb_965.cpp).
+    GTEST_SKIP() << "raw ::write()/::read() on a socketpair SOCKET handle is POSIX-only";
+    return;
+#endif
     int client_fd = -1;
     int server_fd = create_socketpair_qa(client_fd);
 
@@ -1013,11 +1071,12 @@ TEST(QA_GDB200_Wire, InvalidNumericParamViaWireReturnsError) {
     PgProtocolHandler handler(203);
 
     bool executor_called = false;
-    handler.set_query_executor([&](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
-        executor_called = true;
-        QueryResult qr;
-        return ok(std::move(qr));
-    });
+    handler.set_query_executor(
+        [&](const std::string& /*sql*/, const std::string& /*database*/) -> Result<QueryResult> {
+            executor_called = true;
+            QueryResult qr;
+            return ok(std::move(qr));
+        });
 
     do_startup_qa(client_fd, conn, handler);
 
@@ -1046,6 +1105,19 @@ TEST(QA_GDB200_Wire, InvalidNumericParamViaWireReturnsError) {
 }
 
 TEST(QA_GDB200_Wire, NoParamsNoSubstitution) {
+#if defined(_WIN32)
+    // create_socketpair_qa()/write_to_fd()/read_from_fd() use raw ::write()/
+    // ::read() (CRT lowio) on a socketpair-derived handle. On POSIX that
+    // handle is a plain fd, so this works; on Windows,
+    // sixseven_platform::socketpair() returns a real SOCKET (emulated via
+    // loopback TCP), and CRT ::write()/::read() assert "invalid file handle"
+    // when given a SOCKET instead of a CRT fd. Skip on Windows rather than
+    // reworking every helper to route through winsock send()/recv(),
+    // matching the POSIX-only guard idiom used elsewhere (e.g.
+    // test_qa_gdb_145.cpp, test_qa_gdb_965.cpp).
+    GTEST_SKIP() << "raw ::write()/::read() on a socketpair SOCKET handle is POSIX-only";
+    return;
+#endif
     int client_fd = -1;
     int server_fd = create_socketpair_qa(client_fd);
 
@@ -1053,14 +1125,15 @@ TEST(QA_GDB200_Wire, NoParamsNoSubstitution) {
     PgProtocolHandler handler(204);
 
     std::string received_sql;
-    handler.set_query_executor([&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
-        received_sql = sql;
-        QueryResult qr;
-        qr.column_names = {"x"};
-        qr.column_types = {TypeId::INT32};
-        qr.rows = {{Value(static_cast<int32_t>(1))}};
-        return ok(std::move(qr));
-    });
+    handler.set_query_executor(
+        [&](const std::string& sql, const std::string& /*database*/) -> Result<QueryResult> {
+            received_sql = sql;
+            QueryResult qr;
+            qr.column_names = {"x"};
+            qr.column_types = {TypeId::INT32};
+            qr.rows = {{Value(static_cast<int32_t>(1))}};
+            return ok(std::move(qr));
+        });
 
     do_startup_qa(client_fd, conn, handler);
 

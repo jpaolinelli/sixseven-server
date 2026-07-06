@@ -42,6 +42,7 @@ static CatalogColumnDef make_col(int32_t ordinal,
 
 TEST(QA_GDB98_Tables, CreateTableEmptyName) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto schema = make_schema("");
     auto result = catalog.create_table(default_database_id, schema);
     // Should either succeed (empty name is technically valid) or fail gracefully
@@ -54,6 +55,7 @@ TEST(QA_GDB98_Tables, CreateTableEmptyName) {
 
 TEST(QA_GDB98_Tables, CreateTableWithSpecialCharacters) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto schema = make_schema("table with spaces & special! chars @#$");
     auto result = catalog.create_table(default_database_id, schema);
     ASSERT_TRUE(result.has_value());
@@ -65,6 +67,7 @@ TEST(QA_GDB98_Tables, CreateTableWithSpecialCharacters) {
 
 TEST(QA_GDB98_Tables, CreateTableVeryLongName) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     std::string long_name(1000, 'a');
     auto schema = make_schema(long_name);
     auto result = catalog.create_table(default_database_id, schema);
@@ -77,6 +80,7 @@ TEST(QA_GDB98_Tables, CreateTableVeryLongName) {
 
 TEST(QA_GDB98_Tables, CreateTableNoColumns) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto schema = make_schema("empty_cols");
     auto result = catalog.create_table(default_database_id, schema);
     ASSERT_TRUE(result.has_value());
@@ -88,6 +92,7 @@ TEST(QA_GDB98_Tables, CreateTableNoColumns) {
 
 TEST(QA_GDB98_Tables, CreateTableManyColumns) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     std::vector<CatalogColumnDef> cols;
     for (int i = 0; i < 100; ++i) {
         cols.push_back(make_col(i, "col_" + std::to_string(i), TypeId::INT64));
@@ -179,6 +184,7 @@ TEST(QA_GDB98_Tables, CreateTableDistinctColumnsSucceeds) {
 
 TEST(QA_GDB98_Tables, CreateTableInvalidDatabaseId) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto schema = make_schema("test");
     auto result = catalog.create_table(999, schema);
     ASSERT_FALSE(result.has_value());
@@ -187,6 +193,7 @@ TEST(QA_GDB98_Tables, CreateTableInvalidDatabaseId) {
 
 TEST(QA_GDB98_Tables, CreateDuplicateTableName) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto s1 = make_schema("users");
     auto s2 = make_schema("users");
 
@@ -200,6 +207,7 @@ TEST(QA_GDB98_Tables, CreateDuplicateTableName) {
 
 TEST(QA_GDB98_Tables, SameNameDifferentDatabases) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto db = catalog.create_database("other_db");
     ASSERT_TRUE(db.has_value());
 
@@ -222,6 +230,7 @@ TEST(QA_GDB98_Tables, SameNameDifferentDatabases) {
 
 TEST(QA_GDB98_Tables, IdsAreSequential) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     std::vector<table_id_t> ids;
     for (int i = 0; i < 5; ++i) {
         auto schema = make_schema("t" + std::to_string(i));
@@ -237,6 +246,7 @@ TEST(QA_GDB98_Tables, IdsAreSequential) {
 
 TEST(QA_GDB98_Tables, DroppedIdNotReused) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto r1 = catalog.create_table(default_database_id, make_schema("t1"));
     ASSERT_TRUE(r1.has_value());
     table_id_t first_id = *r1;
@@ -254,6 +264,7 @@ TEST(QA_GDB98_Tables, DroppedIdNotReused) {
 
 TEST(QA_GDB98_Tables, GetTableNotFound) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto r = catalog.get_table(default_database_id, "nonexistent");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::NOT_FOUND);
@@ -261,6 +272,7 @@ TEST(QA_GDB98_Tables, GetTableNotFound) {
 
 TEST(QA_GDB98_Tables, GetTableByIdNotFound) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto r = catalog.get_table_by_id(9999);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::NOT_FOUND);
@@ -268,6 +280,7 @@ TEST(QA_GDB98_Tables, GetTableByIdNotFound) {
 
 TEST(QA_GDB98_Tables, GetTableByIdAfterDrop) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto r1 = catalog.create_table(default_database_id, make_schema("t1"));
     ASSERT_TRUE(r1.has_value());
     table_id_t id = *r1;
@@ -285,6 +298,7 @@ TEST(QA_GDB98_Tables, GetTableByIdAfterDrop) {
 
 TEST(QA_GDB98_Tables, DropNonexistentTable) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto r = catalog.drop_table(default_database_id, "nonexistent");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::NOT_FOUND);
@@ -292,6 +306,7 @@ TEST(QA_GDB98_Tables, DropNonexistentTable) {
 
 TEST(QA_GDB98_Tables, DropAndRecreate) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto r1 = catalog.create_table(default_database_id, make_schema("t"));
     ASSERT_TRUE(r1.has_value());
 
@@ -305,6 +320,7 @@ TEST(QA_GDB98_Tables, DropAndRecreate) {
 
 TEST(QA_GDB98_Tables, DropTableTwice) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     (void)catalog.create_table(default_database_id, make_schema("t"));
 
     auto d1 = catalog.drop_table(default_database_id, "t");
@@ -321,6 +337,7 @@ TEST(QA_GDB98_Tables, DropTableTwice) {
 
 TEST(QA_GDB98_Columns, ColumnOrdinalPreserved) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     std::vector<CatalogColumnDef> cols;
     cols.push_back(make_col(0, "id", TypeId::INT32, false));
     cols.push_back(make_col(1, "name", TypeId::STRING));
@@ -350,6 +367,7 @@ TEST(QA_GDB98_Columns, ColumnOrdinalPreserved) {
 
 TEST(QA_GDB98_Columns, AllTypeIds) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     // Test all standard column types work
     TypeId types[] = {
         TypeId::INT8,
@@ -393,6 +411,7 @@ TEST(QA_GDB98_Columns, AllTypeIds) {
 
 TEST(QA_GDB98_Indexes, CreateAndRetrieve) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto tid = catalog.create_table(default_database_id,
                                     make_schema("users", {make_col(0, "id", TypeId::INT32)}));
     ASSERT_TRUE(tid.has_value());
@@ -417,6 +436,7 @@ TEST(QA_GDB98_Indexes, CreateAndRetrieve) {
 
 TEST(QA_GDB98_Indexes, DuplicateIndexName) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto tid = catalog.create_table(default_database_id, make_schema("t"));
     ASSERT_TRUE(tid.has_value());
 
@@ -433,6 +453,7 @@ TEST(QA_GDB98_Indexes, DuplicateIndexName) {
 
 TEST(QA_GDB98_Indexes, IndexOnNonexistentTable) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     IndexDef def{0, 9999, "idx", "btree", "col1", false};
     auto r = catalog.create_index(def);
     ASSERT_FALSE(r.has_value());
@@ -441,6 +462,7 @@ TEST(QA_GDB98_Indexes, IndexOnNonexistentTable) {
 
 TEST(QA_GDB98_Indexes, CascadeDropWithTable) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto tid = catalog.create_table(default_database_id, make_schema("t"));
     ASSERT_TRUE(tid.has_value());
 
@@ -465,6 +487,7 @@ TEST(QA_GDB98_Indexes, CascadeDropWithTable) {
 
 TEST(QA_GDB98_Indexes, DropNonexistentIndex) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto r = catalog.drop_index(default_database_id, "nonexistent");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::NOT_FOUND);
@@ -472,6 +495,7 @@ TEST(QA_GDB98_Indexes, DropNonexistentIndex) {
 
 TEST(QA_GDB98_Indexes, ListAllIndexes) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto t1 = catalog.create_table(default_database_id, make_schema("t1"));
     auto t2 = catalog.create_table(default_database_id, make_schema("t2"));
     ASSERT_TRUE(t1.has_value());
@@ -554,6 +578,7 @@ TEST(QA_GDB98_SysSchema, SysIndexesSchema) {
 
 TEST(QA_GDB98_Restore, RestoreTablePreservesId) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
 
     TableSchema schema;
     schema.table_id = 42; // Pre-assigned
@@ -570,6 +595,7 @@ TEST(QA_GDB98_Restore, RestoreTablePreservesId) {
 
 TEST(QA_GDB98_Restore, RestoreIndexPreservesId) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto tid = catalog.create_table(default_database_id, make_schema("t"));
     ASSERT_TRUE(tid.has_value());
 
@@ -591,6 +617,7 @@ TEST(QA_GDB98_Restore, RestoreIndexPreservesId) {
 
 TEST(QA_GDB98_Restore, SetNextIdAdvancesSequence) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     catalog.set_next_table_id(100);
 
     auto tid = catalog.create_table(default_database_id, make_schema("t"));
@@ -604,12 +631,14 @@ TEST(QA_GDB98_Restore, SetNextIdAdvancesSequence) {
 
 TEST(QA_GDB98_List, ListTablesEmpty) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     auto tables = catalog.list_tables(default_database_id);
     EXPECT_TRUE(tables.empty());
 }
 
 TEST(QA_GDB98_List, ListTablesSorted) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     // Create in reverse order
     for (int i = 5; i >= 1; --i) {
         (void)catalog.create_table(default_database_id, make_schema("t" + std::to_string(i)));
@@ -630,6 +659,7 @@ TEST(QA_GDB98_List, ListTablesSorted) {
 
 TEST(QA_GDB98_Stress, ManyTablesAndIndexes) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
 
     // Create 50 tables with 3 columns each
     for (int i = 0; i < 50; ++i) {

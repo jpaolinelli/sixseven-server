@@ -3167,7 +3167,25 @@ Result<StmtPtr> Parser::parse_analyze_stmt() {
 // -- Expression parsing -------------------------------------------------------
 
 Result<ExprPtr> Parser::parse_expression() {
-    return parse_or();
+    // Guard against unbounded recursion: parse_expression() is the single
+    // entry point re-entered by every nested parenthesized sub-expression
+    // (parse_primary's `(` case), array element, function argument, CASE
+    // branch, etc. A pathological input such as 100+ nested parentheses
+    // otherwise recurses through the full parse_or -> ... -> parse_primary
+    // chain per nesting level and overflows the call stack (a crash, not a
+    // Result<T> error). kMaxExpressionDepth is chosen generously above any
+    // legitimate hand-written or generated SQL expression while staying well
+    // under the point where recursion would exhaust the thread stack.
+    constexpr int kMaxExpressionDepth = 32;
+    if (expression_depth_ >= kMaxExpressionDepth) {
+        return parse_error_here("expression nesting too deep (max " +
+                                std::to_string(kMaxExpressionDepth) + " levels)");
+    }
+
+    ++expression_depth_;
+    auto result = parse_or();
+    --expression_depth_;
+    return result;
 }
 
 Result<ExprPtr> Parser::parse_or() {

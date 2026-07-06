@@ -177,7 +177,16 @@ TEST_F(GDB614HeapInsertOptimization, AC3_SequentialScanReturnsAllRows) {
     ASSERT_TRUE(it_result.has_value()) << it_result.error().message;
     auto it = std::move(*it_result);
     int count = 0;
-    while (auto result = it.next()) {
+    // GDB-1224: next() returns Result<optional<...>>. At end-of-scan it
+    // returns ok(nullopt) -- a *successful* Result -- so `while (result)`
+    // alone (relying on tl::expected::operator bool(), i.e. has_value())
+    // never sees the scan end and loops forever. Must check both that
+    // next() succeeded AND that it produced a tuple.
+    while (true) {
+        auto result = it.next();
+        ASSERT_TRUE(result.has_value()) << result.error().message;
+        if (!result->has_value())
+            break;
         count++;
     }
     EXPECT_EQ(count, total) << "Sequential scan must return all inserted rows";
@@ -198,8 +207,8 @@ TEST_F(GDB614HeapInsertOptimization, AC4_InsertAfterManyFullPages) {
     for (int p = 0; p < 10; ++p) {
         for (int t = 0; t < tpp; ++t) {
             auto r = heap.insert_tuple(make_tuple(tuple_size, static_cast<uint8_t>(p)));
-            ASSERT_TRUE(r.has_value()) << "Page " << p << " tuple " << t
-                                       << " failed: " << r.error().message;
+            ASSERT_TRUE(r.has_value())
+                << "Page " << p << " tuple " << t << " failed: " << r.error().message;
         }
     }
 
@@ -265,8 +274,7 @@ TEST_F(GDB614HeapInsertOptimization, Adversarial_MaxTupleThenOverflow) {
     // Next insert (even 1 byte) must go to a new page since hint page is full.
     auto r2 = heap.insert_tuple(make_tuple(1, 0x22));
     ASSERT_TRUE(r2.has_value()) << r2.error().message;
-    EXPECT_NE(r1->page_id, r2->page_id)
-        << "Second tuple must be on a different page";
+    EXPECT_NE(r1->page_id, r2->page_id) << "Second tuple must be on a different page";
 
     // Both readable.
     auto g1 = heap.get_tuple(*r1);
@@ -313,8 +321,8 @@ TEST_F(GDB614HeapInsertOptimization, Adversarial_UniqueRIDs) {
         auto r = heap.insert_tuple(make_tuple(100, static_cast<uint8_t>(i)));
         ASSERT_TRUE(r.has_value()) << "Insert " << i << " failed: " << r.error().message;
         auto [_, inserted] = rid_set.insert({r->page_id, r->slot_id});
-        EXPECT_TRUE(inserted) << "Duplicate RID at insert " << i << ": ("
-                              << r->page_id << ", " << r->slot_id << ")";
+        EXPECT_TRUE(inserted) << "Duplicate RID at insert " << i << ": (" << r->page_id << ", "
+                              << r->slot_id << ")";
     }
 }
 
@@ -374,7 +382,8 @@ TEST_F(GDB614HeapInsertOptimization, Adversarial_InsertDeleteInsertPattern) {
     std::vector<RID> new_rids;
     for (int i = 0; i < 20; ++i) {
         auto r = heap.insert_tuple(make_tuple(tuple_size, static_cast<uint8_t>(0xD0 + i)));
-        ASSERT_TRUE(r.has_value()) << "Post-delete insert " << i << " failed: " << r.error().message;
+        ASSERT_TRUE(r.has_value())
+            << "Post-delete insert " << i << " failed: " << r.error().message;
         new_rids.push_back(*r);
     }
 
@@ -402,7 +411,14 @@ TEST_F(GDB614HeapInsertOptimization, Adversarial_InsertDeleteInsertPattern) {
     ASSERT_TRUE(it_result.has_value()) << it_result.error().message;
     auto it = std::move(*it_result);
     int scan_count = 0;
-    while (auto result = it.next()) {
+    // GDB-1224: see the identical fix + comment in AC3_SequentialScanReturnsAllRows
+    // above -- `while (result)` alone never observes end-of-scan because
+    // next() returns ok(nullopt) (a successful Result) when exhausted.
+    while (true) {
+        auto result = it.next();
+        ASSERT_TRUE(result.has_value()) << result.error().message;
+        if (!result->has_value())
+            break;
         scan_count++;
     }
     EXPECT_EQ(scan_count, 50 - 17 + 20);

@@ -27,6 +27,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -68,8 +70,8 @@ std::unordered_map<int64_t, ClosenessInfo> to_closeness_map(const std::vector<Al
         auto reachable_count = std::get<int64_t>(row.values[3].data());
         auto component_size = std::get<int64_t>(row.values[4].data());
         auto normalized_closeness = std::get<double>(row.values[5].data());
-        result[node_id] = {closeness, sum_farness, reachable_count,
-                           component_size, normalized_closeness};
+        result[node_id] = {
+            closeness, sum_farness, reachable_count, component_size, normalized_closeness};
     }
     return result;
 }
@@ -133,6 +135,7 @@ void verify_basic_constraints(const std::unordered_map<int64_t, ClosenessInfo>& 
 class QA_GDB518_ClosenessCentrality : public ::testing::Test {
 protected:
     void SetUp() override {
+        bootstrap_qa_catalog(catalog_);
         auto t = catalog_.create_table(default_database_id, make_table_schema("nodes"));
         ASSERT_TRUE(t.has_value()) << t.error().message;
         table_id_ = *t;

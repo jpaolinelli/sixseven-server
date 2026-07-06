@@ -895,7 +895,21 @@ TEST_F(QA_GDB718_Adversarial, SimpleQueryProtocolAlwaysTextNeverBinary) {
     EXPECT_EQ(std::string(f[0]->begin(), f[0]->end()), "2000-01-01 00:00:00");
 }
 
-TEST_F(QA_GDB718_Adversarial, RepeatedExecuteSamePortalProducesTwoBinaryRows) {
+TEST_F(QA_GDB718_Adversarial, RepeatedExecuteOnExhaustedPortalSendsNoMoreRows) {
+    // GDB-1224: this test previously asserted that a second Execute on the
+    // SAME portal re-runs the query and emits a second DataRow. That is not
+    // how the PostgreSQL extended query protocol works: build_execute()
+    // sends max_rows=0 (unlimited), so the FIRST Execute already drains the
+    // portal's entire cached result (portal.rows_sent == total rows) --
+    // see PgProtocolHandler::handle_execute() in src/server/pg_protocol.cpp,
+    // which honors max_rows paging against a cached result rather than
+    // re-invoking the query executor on every Execute. A second Execute on
+    // an already-exhausted, unlimited-fetch portal must therefore send ZERO
+    // additional DataRows and just emit CommandComplete again -- the
+    // executor must NOT be invoked a second time. (The previous version of
+    // this test's wrong expectation, combined with unconditionally indexing
+    // a second DataRow that was never sent, crashed with "vector subscript
+    // out of range" once the QA binary ran far enough to reach it.)
     set_single_column_result("d", TypeId::DATE, Value(Date{10958}));
     std::vector<uint8_t> batch;
     auto append = [&batch](const std::vector<uint8_t>& m) {
@@ -904,13 +918,45 @@ TEST_F(QA_GDB718_Adversarial, RepeatedExecuteSamePortalProducesTwoBinaryRows) {
     append(build_parse("", "SELECT c FROM t"));
     append(build_bind_result_formats("", "", {1}));
     append(build_execute(""));
-    append(build_execute("")); // second Execute on same portal
+    append(build_execute("")); // second Execute on the same, now-exhausted portal
     append(build_sync());
     pump_to_handler(batch);
     auto r = drain_until_ready();
     EXPECT_FALSE(has_message(r, 'E'));
-    EXPECT_EQ(count_messages(r, 'D'), 2u) << "portal should be re-executable";
-    EXPECT_EQ(executor_calls_, 2) << "executor invoked once per Execute";
+    ASSERT_EQ(count_messages(r, 'D'), 1u)
+        << "portal already sent all rows on the first Execute; the second Execute "
+           "(still max_rows=0) has nothing left to send";
+    EXPECT_EQ(executor_calls_, 1)
+        << "query executor must run once per portal, not once per Execute";
+    ASSERT_EQ(count_messages(r, 'C'), 2u)
+        << "each Execute -- including the no-op second one -- still gets its own CommandComplete";
+
+    auto row0 = extract_data_row(r, 0);
+    ASSERT_TRUE(row0[0].has_value());
+    EXPECT_EQ(read_be32(*row0[0]), 1) << "the single row must still be the binary-encoded date";
+}
+
+TEST_F(QA_GDB718_Adversarial, ReBindAndExecuteSamePortalNameProducesTwoBinaryRows) {
+    // Complement to RepeatedExecuteOnExhaustedPortalSendsNoMoreRows: to
+    // legitimately get a second DataRow for the same portal name, the client
+    // must Bind again (which resets portal.executed / rows_sent), not just
+    // send a second bare Execute.
+    set_single_column_result("d", TypeId::DATE, Value(Date{10958}));
+    std::vector<uint8_t> batch;
+    auto append = [&batch](const std::vector<uint8_t>& m) {
+        batch.insert(batch.end(), m.begin(), m.end());
+    };
+    append(build_parse("", "SELECT c FROM t"));
+    append(build_bind_result_formats("", "", {1}));
+    append(build_execute(""));
+    append(build_bind_result_formats("", "", {1})); // re-Bind resets the portal
+    append(build_execute(""));
+    append(build_sync());
+    pump_to_handler(batch);
+    auto r = drain_until_ready();
+    EXPECT_FALSE(has_message(r, 'E'));
+    EXPECT_EQ(count_messages(r, 'D'), 2u) << "re-Bind + Execute must produce a fresh row each time";
+    EXPECT_EQ(executor_calls_, 2) << "re-Bind must cause the query executor to run again";
     auto row0 = extract_data_row(r, 0);
     auto row1 = extract_data_row(r, 1);
     ASSERT_TRUE(row0[0].has_value());

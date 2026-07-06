@@ -23,6 +23,8 @@
 #include <set>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 using namespace sixseven;
 
 // -- Helpers ------------------------------------------------------------------
@@ -413,6 +415,7 @@ private:
 /// (backward compatibility).
 TEST(QA_GraphEngineWAL, NullptrWalBackwardCompat) {
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine engine(catalog, nullptr);
 
     auto t1 = catalog.create_table(default_database_id, make_table_schema("users"));
@@ -455,6 +458,7 @@ TEST(QA_GraphEngineWAL, LinkWritesWalRecord) {
     lsn_t lsn_before = wal_writer->current_lsn();
 
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine engine(catalog, wal_writer.get());
 
     auto t1 = catalog.create_table(default_database_id, make_table_schema("nodes"));
@@ -480,18 +484,26 @@ TEST(QA_GraphEngineWAL, LinkWritesWalRecord) {
     WalReader reader(wal_dir.path());
     ASSERT_TRUE(reader.open().has_value());
 
+    // GDB-1224: GraphEngine::log_edge_wal() deliberately writes the
+    // more-specific EDGE_INSERT/EDGE_DELETE record types (not plain
+    // INSERT/DELETE) "so the recovery dispatcher can route them to
+    // GraphEngineRecoveryHandler without table_id collisions" (see
+    // src/graph/graph_engine.cpp). This test predates that GDB-1067 design
+    // and was checking for the wrong record type, so it never found a match
+    // and always failed once bootstrap_qa_catalog let this file's tests
+    // actually run.
     bool found_insert = false;
     while (true) {
         auto rec = reader.next();
         if (!rec.has_value()) {
             break; // End of WAL or error.
         }
-        if (rec->type == WalRecordType::INSERT) {
+        if (rec->type == WalRecordType::EDGE_INSERT) {
             found_insert = true;
             break;
         }
     }
-    EXPECT_TRUE(found_insert) << "No INSERT WAL record found after LINK";
+    EXPECT_TRUE(found_insert) << "No EDGE_INSERT WAL record found after LINK";
     ASSERT_TRUE(reader.close().has_value());
 }
 
@@ -505,6 +517,7 @@ TEST(QA_GraphEngineWAL, UnlinkWritesWalRecord) {
     ASSERT_TRUE(wal_writer->open().has_value());
 
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine engine(catalog, wal_writer.get());
 
     auto t1 = catalog.create_table(default_database_id, make_table_schema("nodes"));
@@ -535,18 +548,20 @@ TEST(QA_GraphEngineWAL, UnlinkWritesWalRecord) {
     WalReader reader(wal_dir.path());
     ASSERT_TRUE(reader.open().has_value());
 
+    // GDB-1224: see the identical fix + comment in LinkWritesWalRecord above
+    // -- GraphEngine writes EDGE_DELETE (not plain DELETE) for edge removal.
     bool found_delete = false;
     while (true) {
         auto rec = reader.next();
         if (!rec.has_value()) {
             break;
         }
-        if (rec->type == WalRecordType::DELETE) {
+        if (rec->type == WalRecordType::EDGE_DELETE) {
             found_delete = true;
             break;
         }
     }
-    EXPECT_TRUE(found_delete) << "No DELETE WAL record found after UNLINK";
+    EXPECT_TRUE(found_delete) << "No EDGE_DELETE WAL record found after UNLINK";
     ASSERT_TRUE(reader.close().has_value());
 }
 
@@ -560,6 +575,7 @@ TEST(QA_GraphEngineWAL, MultipleLinkUnlinkAccumulateWalRecords) {
     ASSERT_TRUE(wal_writer->open().has_value());
 
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine engine(catalog, wal_writer.get());
 
     auto t1 = catalog.create_table(default_database_id, make_table_schema("nodes"));
@@ -587,7 +603,8 @@ TEST(QA_GraphEngineWAL, MultipleLinkUnlinkAccumulateWalRecords) {
     ASSERT_TRUE(wal_writer->flush().has_value());
     ASSERT_TRUE(wal_writer->close().has_value());
 
-    // Read WAL and count INSERT/DELETE records.
+    // Read WAL and count EDGE_INSERT/EDGE_DELETE records. GDB-1224: see the
+    // identical fix + comment in LinkWritesWalRecord above.
     WalReader reader(wal_dir.path());
     ASSERT_TRUE(reader.open().has_value());
 
@@ -598,18 +615,18 @@ TEST(QA_GraphEngineWAL, MultipleLinkUnlinkAccumulateWalRecords) {
         if (!rec.has_value()) {
             break;
         }
-        if (rec->type == WalRecordType::INSERT) {
+        if (rec->type == WalRecordType::EDGE_INSERT) {
             ++insert_count;
-        } else if (rec->type == WalRecordType::DELETE) {
+        } else if (rec->type == WalRecordType::EDGE_DELETE) {
             ++delete_count;
         }
     }
     ASSERT_TRUE(reader.close().has_value());
 
     EXPECT_EQ(insert_count, link_count)
-        << "Expected " << link_count << " INSERT WAL records, got " << insert_count;
+        << "Expected " << link_count << " EDGE_INSERT WAL records, got " << insert_count;
     EXPECT_EQ(delete_count, link_count)
-        << "Expected " << link_count << " DELETE WAL records, got " << delete_count;
+        << "Expected " << link_count << " EDGE_DELETE WAL records, got " << delete_count;
 }
 
 /// LINK duplicate edge with WAL -- a failed LINK should NOT write a WAL record.
@@ -622,6 +639,7 @@ TEST(QA_GraphEngineWAL, FailedLinkDoesNotWriteWalRecord) {
     ASSERT_TRUE(wal_writer->open().has_value());
 
     Catalog catalog;
+    bootstrap_qa_catalog(catalog);
     GraphEngine engine(catalog, wal_writer.get());
 
     auto t1 = catalog.create_table(default_database_id, make_table_schema("nodes"));
@@ -653,7 +671,8 @@ TEST(QA_GraphEngineWAL, FailedLinkDoesNotWriteWalRecord) {
     ASSERT_TRUE(wal_writer->flush().has_value());
     ASSERT_TRUE(wal_writer->close().has_value());
 
-    // Double-check: read WAL and count INSERT records.
+    // Double-check: read WAL and count EDGE_INSERT records. GDB-1224: see
+    // the identical fix + comment in LinkWritesWalRecord above.
     WalReader reader(wal_dir.path());
     ASSERT_TRUE(reader.open().has_value());
 
@@ -663,11 +682,11 @@ TEST(QA_GraphEngineWAL, FailedLinkDoesNotWriteWalRecord) {
         if (!rec.has_value()) {
             break;
         }
-        if (rec->type == WalRecordType::INSERT) {
+        if (rec->type == WalRecordType::EDGE_INSERT) {
             ++insert_count;
         }
     }
     ASSERT_TRUE(reader.close().has_value());
 
-    EXPECT_EQ(insert_count, 1) << "Expected exactly 1 INSERT WAL record (not 2)";
+    EXPECT_EQ(insert_count, 1) << "Expected exactly 1 EDGE_INSERT WAL record (not 2)";
 }

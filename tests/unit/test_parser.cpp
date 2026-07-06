@@ -2621,3 +2621,72 @@ TEST(SubqueryStmt, NonQueryStatementInExistsIsError) {
     // EXISTS ( must be followed by a query statement, not an arbitrary expression.
     expect_parse_error("SELECT * FROM docs WHERE EXISTS (1 + 1)");
 }
+
+// -- Expression recursion depth guard ------------------------------------------
+//
+// GDB-1224: parse_expression() is re-entered by every nested parenthesized
+// sub-expression (and array elements, function arguments, CASE branches,
+// etc.). Deeply nested input (e.g. 100 levels of parens) previously
+// recursed through the full parse_or -> parse_and -> ... -> parse_primary
+// chain per level and overflowed the call stack -- a crash, not a Result<T>
+// error. Parser::expression_depth_ / kMaxExpressionDepth in parse_expression()
+// now caps the recursion and returns a clean PARSE_ERROR instead.
+
+static std::string nested_parens_expr(int depth) {
+    std::string expr = "SELECT ";
+    for (int i = 0; i < depth; ++i)
+        expr += "(";
+    expr += "1";
+    for (int i = 0; i < depth; ++i)
+        expr += ")";
+    return expr;
+}
+
+TEST(ExpressionDepthGuard, DeeplyNestedParensReturnsCleanParseErrorNotCrash) {
+    // 200 levels is far beyond the guard's limit and would have stack-
+    // overflowed the pre-fix parser. Reaching this EXPECT at all (rather
+    // than crashing the test process) is itself part of the regression
+    // guard; the assertions below additionally pin the specific error.
+    std::string sql = nested_parens_expr(200);
+    Lexer lexer(sql);
+    auto tokens = lexer.tokenize();
+    ASSERT_TRUE(tokens.has_value()) << tokens.error().message;
+
+    Parser parser(std::move(*tokens));
+    auto result = parser.parse();
+
+    ASSERT_FALSE(result.has_value()) << "expected a graceful PARSE_ERROR for 200 levels of nesting";
+    EXPECT_EQ(result.error().code, StatusCode::PARSE_ERROR);
+    EXPECT_NE(result.error().message.find("too deep"), std::string::npos)
+        << "expected a 'nesting too deep' message, got: " << result.error().message;
+}
+
+TEST(ExpressionDepthGuard, ModerateNestingStillParsesSuccessfully) {
+    // The guard must not reject reasonable real-world nesting depths.
+    auto stmts = parse_ok(nested_parens_expr(10));
+    ASSERT_EQ(stmts.size(), 1u);
+    auto* sel = dynamic_cast<SelectStmt*>(stmts[0].get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_FALSE(sel->items.empty());
+    auto* lit = dynamic_cast<LiteralExpr*>(sel->items[0].expr.get());
+    ASSERT_NE(lit, nullptr);
+}
+
+TEST(ExpressionDepthGuard, DepthResetsBetweenTopLevelParseCalls) {
+    // expression_depth_ is per-Parser-instance state that increments and
+    // decrements around each parse_expression() call. A moderately nested
+    // expression must not leave the counter in a state that corrupts
+    // parsing of a second, independent expression in the same statement
+    // (e.g. two SELECT items).
+    std::string first = nested_parens_expr(5).substr(7); // strip leading "SELECT "
+    std::string second = nested_parens_expr(5).substr(7);
+    std::string expr = "SELECT " + first + ", " + second;
+
+    auto stmts = parse_ok(expr);
+    ASSERT_EQ(stmts.size(), 1u);
+    auto* sel = dynamic_cast<SelectStmt*>(stmts[0].get());
+    ASSERT_NE(sel, nullptr);
+    ASSERT_EQ(sel->items.size(), 2u);
+    EXPECT_NE(dynamic_cast<LiteralExpr*>(sel->items[0].expr.get()), nullptr);
+    EXPECT_NE(dynamic_cast<LiteralExpr*>(sel->items[1].expr.get()), nullptr);
+}

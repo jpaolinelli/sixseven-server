@@ -537,7 +537,13 @@ Result<std::vector<Value>> deserialize(std::span<const uint8_t> data, const Sche
                                       std::to_string(i));
             }
 
-            values.push_back(read_var_value(&data[offset], length, schema.column(i).type));
+            // Use data.data() + offset rather than data[offset]: when the
+            // variable-length field is zero-length and happens to be the last
+            // one written, offset can legitimately equal data.size() (one
+            // past the end). std::span::operator[] asserts on that index
+            // even though forming a pointer to one-past-the-end and reading
+            // zero bytes from it is well-defined.
+            values.push_back(read_var_value(data.data() + offset, length, schema.column(i).type));
         }
     }
 
@@ -605,7 +611,10 @@ Result<Value> get_field(std::span<const uint8_t> data, const Schema& schema, siz
                               std::to_string(col_index));
     }
 
-    return ok(read_var_value(&data[offset], length, schema.column(col_index).type));
+    // See the equivalent comment in deserialize(): offset may legitimately
+    // equal data.size() for a trailing zero-length variable field, so index
+    // via the raw pointer rather than std::span::operator[].
+    return ok(read_var_value(data.data() + offset, length, schema.column(col_index).type));
 }
 
 size_t compute_tuple_size(const std::vector<Value>& values, const Schema& schema) {

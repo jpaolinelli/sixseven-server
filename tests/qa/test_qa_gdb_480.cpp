@@ -33,6 +33,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -110,6 +112,7 @@ void verify_components(const std::unordered_map<int64_t, int64_t>& components,
 class QA_GDB480_CC : public ::testing::Test {
 protected:
     void SetUp() override {
+        bootstrap_qa_catalog(catalog_);
         auto t = catalog_.create_table(default_database_id, make_table_schema("nodes"));
         ASSERT_TRUE(t.has_value()) << t.error().message;
         table_id_ = *t;
@@ -503,6 +506,7 @@ protected:
         std::filesystem::create_directories(data_dir_);
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
+        bootstrap_qa_catalog(catalog_);
         graph_engine_ = std::make_unique<GraphEngine>(catalog_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_, graph_engine_.get());
 

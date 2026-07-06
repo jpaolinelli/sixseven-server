@@ -26,6 +26,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "test_qa_helpers.h"
+
 namespace sixseven {
 namespace {
 
@@ -104,6 +106,7 @@ void verify_degree_equals_in_plus_out(const std::unordered_map<int64_t, DegreeIn
 class QA_GDB517_DegreeCentrality : public ::testing::Test {
 protected:
     void SetUp() override {
+        bootstrap_qa_catalog(catalog_);
         auto t = catalog_.create_table(default_database_id, make_table_schema("nodes"));
         ASSERT_TRUE(t.has_value()) << t.error().message;
         table_id_ = *t;
