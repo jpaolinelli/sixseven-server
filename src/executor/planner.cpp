@@ -2067,6 +2067,68 @@ Planner::plan_select(const SelectStmt& stmt,
                 }
             }
 
+            // LAG/LEAD default value (third argument), used when the offset
+            // target falls outside the partition. Parse the literal and
+            // coerce it to the result column's type so comparisons against
+            // the source column (e.g. LAG(salary DOUBLE, 1, 0)) behave
+            // sensibly instead of leaving a mismatched-type Value around.
+            if ((desc.func == WindowFunc::LAG || desc.func == WindowFunc::LEAD) &&
+                wexpr->args.size() >= 3) {
+                // A negative default (e.g. LAG(x, 1, -1)) is parsed as a
+                // UnaryExpr(NEGATE) wrapping a LiteralExpr, not a bare
+                // LiteralExpr. Unwrap it so numeric literals with a leading
+                // minus sign are recognised too.
+                const Expr* default_expr = wexpr->args[2].get();
+                bool negate = false;
+                if (auto* un = dynamic_cast<const UnaryExpr*>(default_expr)) {
+                    if (un->op == UnaryOp::NEGATE) {
+                        negate = true;
+                        default_expr = un->operand.get();
+                    }
+                }
+                if (auto* lit = dynamic_cast<const LiteralExpr*>(default_expr)) {
+                    Value parsed;
+                    if (lit->kind == LiteralKind::NULL_LITERAL) {
+                        parsed = Value::make_null();
+                    } else if (lit->kind == LiteralKind::INTEGER) {
+                        auto pv = safe_stoll(lit->value);
+                        if (!pv) {
+                            return tl::unexpected(pv.error());
+                        }
+                        int64_t iv = *pv;
+                        parsed = Value(negate ? -iv : iv);
+                    } else if (lit->kind == LiteralKind::FLOAT) {
+                        auto pv = safe_stod(lit->value);
+                        if (!pv) {
+                            return tl::unexpected(pv.error());
+                        }
+                        double dv = *pv;
+                        parsed = Value(negate ? -dv : dv);
+                    } else if (lit->kind == LiteralKind::STRING) {
+                        parsed = Value(lit->value);
+                    } else if (lit->kind == LiteralKind::BOOLEAN) {
+                        parsed = Value(lit->value == "true");
+                    } else {
+                        parsed = Value::make_null();
+                    }
+
+                    // Coerce the parsed default to the arg column's declared
+                    // type (from the bound expr type of the window expr
+                    // itself, which mirrors the source column's type).
+                    if (!parsed.is_null()) {
+                        auto type_it = bound.expr_types.find(wexpr);
+                        if (type_it != bound.expr_types.end()) {
+                            auto coerced = explicit_cast(parsed, type_it->second.type_id);
+                            if (!coerced) {
+                                return tl::unexpected(coerced.error());
+                            }
+                            parsed = *coerced;
+                        }
+                    }
+                    desc.default_value = std::move(parsed);
+                }
+            }
+
             // NTILE bucket count (first argument).
             if (desc.func == WindowFunc::NTILE && !wexpr->args.empty()) {
                 if (auto* lit = dynamic_cast<const LiteralExpr*>(wexpr->args[0].get())) {

@@ -65,9 +65,8 @@ protected:
         return result ? std::move(*result) : QueryResult{};
     }
 
-    static std::unordered_map<std::string, Value> by_name(const QueryResult& qr,
-                                                            size_t name_col,
-                                                            size_t val_col) {
+    static std::unordered_map<std::string, Value>
+    by_name(const QueryResult& qr, size_t name_col, size_t val_col) {
         std::unordered_map<std::string, Value> m;
         for (auto& row : qr.rows) {
             m.emplace(row[name_col].as_string(), row[val_col]);
@@ -98,9 +97,9 @@ TEST_F(QA_GDB1204_WindowLagLeadTest, LagExplicitOffsetTwo) {
     ASSERT_FALSE(m.at("Dave").is_null());
     ASSERT_FALSE(m.at("Bob").is_null());
     ASSERT_FALSE(m.at("Eve").is_null());
-    EXPECT_DOUBLE_EQ(m.at("Dave").as_float64(), 70000.0);  // 2 back from Dave = Charlie
-    EXPECT_DOUBLE_EQ(m.at("Bob").as_float64(), 80000.0);   // 2 back from Bob = Alice
-    EXPECT_DOUBLE_EQ(m.at("Eve").as_float64(), 85000.0);   // 2 back from Eve = Dave
+    EXPECT_DOUBLE_EQ(m.at("Dave").as_float64(), 70000.0); // 2 back from Dave = Charlie
+    EXPECT_DOUBLE_EQ(m.at("Bob").as_float64(), 80000.0);  // 2 back from Bob = Alice
+    EXPECT_DOUBLE_EQ(m.at("Eve").as_float64(), 85000.0);  // 2 back from Eve = Dave
 }
 
 TEST_F(QA_GDB1204_WindowLagLeadTest, LeadExplicitOffsetTwo) {
@@ -115,17 +114,16 @@ TEST_F(QA_GDB1204_WindowLagLeadTest, LeadExplicitOffsetTwo) {
     ASSERT_FALSE(m.at("Charlie").is_null());
     ASSERT_FALSE(m.at("Alice").is_null());
     ASSERT_FALSE(m.at("Dave").is_null());
-    EXPECT_DOUBLE_EQ(m.at("Charlie").as_float64(), 85000.0);  // 2 ahead of Charlie = Dave
-    EXPECT_DOUBLE_EQ(m.at("Alice").as_float64(), 90000.0);    // 2 ahead of Alice = Bob
-    EXPECT_DOUBLE_EQ(m.at("Dave").as_float64(), 95000.0);     // 2 ahead of Dave = Eve
+    EXPECT_DOUBLE_EQ(m.at("Charlie").as_float64(), 85000.0); // 2 ahead of Charlie = Dave
+    EXPECT_DOUBLE_EQ(m.at("Alice").as_float64(), 90000.0);   // 2 ahead of Alice = Bob
+    EXPECT_DOUBLE_EQ(m.at("Dave").as_float64(), 95000.0);    // 2 ahead of Dave = Eve
 }
 
 // ---- Default value (3rd arg) instead of NULL ----
 
 TEST_F(QA_GDB1204_WindowLagLeadTest, LagWithDefaultValueFillsInsteadOfNull) {
-    GTEST_SKIP() << "LAG/LEAD default-value semantics tracked by GDB-1285";
     auto qr = exec_ok("SELECT name, salary, LAG(salary, 1, 0) OVER (ORDER BY salary) AS prev "
-                       "FROM employees");
+                      "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
     auto m = by_name(qr, 0, 2);
 
@@ -137,9 +135,8 @@ TEST_F(QA_GDB1204_WindowLagLeadTest, LagWithDefaultValueFillsInsteadOfNull) {
 }
 
 TEST_F(QA_GDB1204_WindowLagLeadTest, LeadWithDefaultValueFillsInsteadOfNull) {
-    GTEST_SKIP() << "LAG/LEAD default-value semantics tracked by GDB-1285";
     auto qr = exec_ok("SELECT name, salary, LEAD(salary, 1, -1) OVER (ORDER BY salary) AS nxt "
-                       "FROM employees");
+                      "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
     auto m = by_name(qr, 0, 2);
 
@@ -153,12 +150,12 @@ TEST_F(QA_GDB1204_WindowLagLeadTest, LeadWithDefaultValueFillsInsteadOfNull) {
 // ---- LEAD mirrors LAG ----
 
 TEST_F(QA_GDB1204_WindowLagLeadTest, LeadDefaultOffsetOverSalary) {
-    auto qr = exec_ok(
-        "SELECT name, salary, LEAD(salary) OVER (ORDER BY salary) AS nxt FROM employees");
+    auto qr =
+        exec_ok("SELECT name, salary, LEAD(salary) OVER (ORDER BY salary) AS nxt FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
     auto m = by_name(qr, 0, 2);
 
-    ASSERT_TRUE(m.at("Eve").is_null());  // highest salary -> no next row
+    ASSERT_TRUE(m.at("Eve").is_null()); // highest salary -> no next row
     ASSERT_FALSE(m.at("Charlie").is_null());
     ASSERT_FALSE(m.at("Alice").is_null());
     ASSERT_FALSE(m.at("Dave").is_null());
@@ -176,8 +173,8 @@ TEST_F(QA_GDB1204_WindowLagLeadTest, LagDoesNotLeakAcrossPartitionBoundary) {
     // Sales partition sorted by salary: Charlie(70k), Dave(85k).
     // Engineering partition sorted by salary: Alice(80k), Bob(90k), Eve(95k).
     auto qr = exec_ok("SELECT name, department, salary, "
-                       "LAG(salary) OVER (PARTITION BY department ORDER BY salary) AS prev "
-                       "FROM employees");
+                      "LAG(salary) OVER (PARTITION BY department ORDER BY salary) AS prev "
+                      "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
     auto m = by_name(qr, 0, 3);
 
@@ -187,19 +184,19 @@ TEST_F(QA_GDB1204_WindowLagLeadTest, LagDoesNotLeakAcrossPartitionBoundary) {
     EXPECT_TRUE(m.at("Alice").is_null()) << "Alice is first in Engineering partition";
 
     ASSERT_FALSE(m.at("Dave").is_null());
-    EXPECT_DOUBLE_EQ(m.at("Dave").as_float64(), 70000.0);  // Charlie, within Sales
+    EXPECT_DOUBLE_EQ(m.at("Dave").as_float64(), 70000.0); // Charlie, within Sales
 
     ASSERT_FALSE(m.at("Bob").is_null());
-    EXPECT_DOUBLE_EQ(m.at("Bob").as_float64(), 80000.0);  // Alice, within Engineering
+    EXPECT_DOUBLE_EQ(m.at("Bob").as_float64(), 80000.0); // Alice, within Engineering
 
     ASSERT_FALSE(m.at("Eve").is_null());
-    EXPECT_DOUBLE_EQ(m.at("Eve").as_float64(), 90000.0);  // Bob, within Engineering
+    EXPECT_DOUBLE_EQ(m.at("Eve").as_float64(), 90000.0); // Bob, within Engineering
 }
 
 TEST_F(QA_GDB1204_WindowLagLeadTest, LeadDoesNotLeakAcrossPartitionBoundary) {
     auto qr = exec_ok("SELECT name, department, salary, "
-                       "LEAD(salary) OVER (PARTITION BY department ORDER BY salary) AS nxt "
-                       "FROM employees");
+                      "LEAD(salary) OVER (PARTITION BY department ORDER BY salary) AS nxt "
+                      "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
     auto m = by_name(qr, 0, 3);
 
@@ -208,24 +205,22 @@ TEST_F(QA_GDB1204_WindowLagLeadTest, LeadDoesNotLeakAcrossPartitionBoundary) {
     EXPECT_TRUE(m.at("Eve").is_null()) << "Eve is last in Engineering partition";
 
     ASSERT_FALSE(m.at("Charlie").is_null());
-    EXPECT_DOUBLE_EQ(m.at("Charlie").as_float64(), 85000.0);  // Dave, within Sales
+    EXPECT_DOUBLE_EQ(m.at("Charlie").as_float64(), 85000.0); // Dave, within Sales
 
     ASSERT_FALSE(m.at("Alice").is_null());
-    EXPECT_DOUBLE_EQ(m.at("Alice").as_float64(), 90000.0);  // Bob, within Engineering
+    EXPECT_DOUBLE_EQ(m.at("Alice").as_float64(), 90000.0); // Bob, within Engineering
 
     ASSERT_FALSE(m.at("Bob").is_null());
-    EXPECT_DOUBLE_EQ(m.at("Bob").as_float64(), 95000.0);  // Eve, within Engineering
+    EXPECT_DOUBLE_EQ(m.at("Bob").as_float64(), 95000.0); // Eve, within Engineering
 }
 
 TEST_F(QA_GDB1204_WindowLagLeadTest, LagWithDefaultDoesNotLeakAcrossPartitionBoundary) {
-    GTEST_SKIP() << "LAG/LEAD default-value semantics tracked by GDB-1285";
     // If the offset/default handling is wrong, a partition-edge row could pick up
     // a value from the adjacent partition instead of the default. Pin default to
     // a distinctive sentinel that cannot be confused with any real salary.
-    auto qr = exec_ok(
-        "SELECT name, department, salary, "
-        "LAG(salary, 1, -999) OVER (PARTITION BY department ORDER BY salary) AS prev "
-        "FROM employees");
+    auto qr = exec_ok("SELECT name, department, salary, "
+                      "LAG(salary, 1, -999) OVER (PARTITION BY department ORDER BY salary) AS prev "
+                      "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
     auto m = by_name(qr, 0, 3);
 
@@ -246,7 +241,7 @@ TEST_F(QA_GDB1204_WindowLagLeadTest, LagOverDescendingOrderBySalary) {
     ASSERT_EQ(qr.rows.size(), 5u);
     auto m = by_name(qr, 0, 2);
 
-    EXPECT_TRUE(m.at("Eve").is_null());  // first row in DESC order
+    EXPECT_TRUE(m.at("Eve").is_null()); // first row in DESC order
     ASSERT_FALSE(m.at("Bob").is_null());
     EXPECT_DOUBLE_EQ(m.at("Bob").as_float64(), 95000.0);
     ASSERT_FALSE(m.at("Dave").is_null());
@@ -308,8 +303,8 @@ TEST_F(QA_GDB1204_WindowLagLeadTiesTest, LagWithTiesProducesConsistentOffsetPosi
     // (the first row overall), and the row's LAG value must equal SOME row's salary
     // that actually exists in the partition -- never a value that leaked from
     // outside the partition/table, and the count of NULLs must be exactly 1.
-    auto qr = exec_ok(
-        "SELECT name, salary, LAG(salary) OVER (ORDER BY salary) AS prev FROM employees");
+    auto qr =
+        exec_ok("SELECT name, salary, LAG(salary) OVER (ORDER BY salary) AS prev FROM employees");
     ASSERT_EQ(qr.rows.size(), 3u);
 
     int null_count = 0;
@@ -357,9 +352,8 @@ TEST_F(QA_GDB1204_WindowLagLeadTest, LeadOffsetLargerThanPartitionSizeIsAllNull)
 }
 
 TEST_F(QA_GDB1204_WindowLagLeadTest, LagOffsetLargerThanPartitionSizeWithDefaultFillsDefault) {
-    GTEST_SKIP() << "LAG/LEAD default-value semantics tracked by GDB-1285";
     auto qr = exec_ok("SELECT name, salary, LAG(salary, 100, 42) OVER (ORDER BY salary) AS prev "
-                       "FROM employees");
+                      "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
     for (auto& row : qr.rows) {
         ASSERT_FALSE(row[2].is_null());
@@ -392,30 +386,28 @@ TEST_F(QA_GDB1204_WindowLagLeadTest, LeadOffsetZeroReturnsCurrentRow) {
 // ---- Combined stress: PARTITION BY + explicit offset + default, near boundary ----
 
 TEST_F(QA_GDB1204_WindowLagLeadTest, LeadWithOffsetAndDefaultAcrossPartitionsSimultaneously) {
-    GTEST_SKIP() << "LAG/LEAD default-value semantics tracked by GDB-1285";
     // Engineering (sorted): Alice(80k), Bob(90k), Eve(95k) -- 3 rows.
     // Sales (sorted): Charlie(70k), Dave(85k) -- 2 rows.
     // LEAD(salary, 2, -1) should only find a valid 2-ahead target within
     // Engineering (Alice -> Eve); everywhere else falls back to default -1,
     // and must never pull a value from the other partition.
-    auto qr = exec_ok(
-        "SELECT name, department, salary, "
-        "LEAD(salary, 2, -1) OVER (PARTITION BY department ORDER BY salary) AS nxt2 "
-        "FROM employees");
+    auto qr = exec_ok("SELECT name, department, salary, "
+                      "LEAD(salary, 2, -1) OVER (PARTITION BY department ORDER BY salary) AS nxt2 "
+                      "FROM employees");
     ASSERT_EQ(qr.rows.size(), 5u);
     auto m = by_name(qr, 0, 3);
 
     ASSERT_FALSE(m.at("Alice").is_null());
-    EXPECT_DOUBLE_EQ(m.at("Alice").as_float64(), 95000.0);  // Eve, 2 ahead within Engineering
+    EXPECT_DOUBLE_EQ(m.at("Alice").as_float64(), 95000.0); // Eve, 2 ahead within Engineering
 
     ASSERT_FALSE(m.at("Bob").is_null());
-    EXPECT_DOUBLE_EQ(m.at("Bob").as_float64(), -1.0);  // no 2-ahead in Engineering
+    EXPECT_DOUBLE_EQ(m.at("Bob").as_float64(), -1.0); // no 2-ahead in Engineering
 
     ASSERT_FALSE(m.at("Eve").is_null());
     EXPECT_DOUBLE_EQ(m.at("Eve").as_float64(), -1.0);
 
     ASSERT_FALSE(m.at("Charlie").is_null());
-    EXPECT_DOUBLE_EQ(m.at("Charlie").as_float64(), -1.0);  // Sales only has 2 rows
+    EXPECT_DOUBLE_EQ(m.at("Charlie").as_float64(), -1.0); // Sales only has 2 rows
 
     ASSERT_FALSE(m.at("Dave").is_null());
     EXPECT_DOUBLE_EQ(m.at("Dave").as_float64(), -1.0);
