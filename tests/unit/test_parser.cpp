@@ -2067,6 +2067,69 @@ TEST(Parser, NearestWithinTraverseAndResidualUsing) {
     EXPECT_EQ(n->metric, NearestMetric::L2);
 }
 
+// GDB-1241: USING metric written *before* WITHIN TRAVERSE must NOT silently
+// discard the graph scope. The parser accepts both clause orders.
+TEST(Parser, NearestUsingBeforeWithinTraversePreservesScope) {
+    auto stmt =
+        parse_one("SELECT * FROM articles WHERE NEAREST(content_vec, 5) TO 'machine learning' "
+                  "USING DOT WITHIN TRAVERSE cites FROM articles('abc-123') DIRECTION OUT "
+                  "MAX_DEPTH 3");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* n = find_nearest(sel->where_expr.get());
+    ASSERT_NE(n, nullptr);
+    EXPECT_EQ(n->metric, NearestMetric::DOT);
+    ASSERT_NE(n->within_traverse, nullptr);
+    auto* t = dynamic_cast<TraverseStmt*>(n->within_traverse.get());
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(t->edge_type, "cites");
+    EXPECT_EQ(t->from_table, "articles");
+    EXPECT_EQ(t->direction, TraverseDirection::OUT);
+    ASSERT_TRUE(t->max_depth.has_value());
+    EXPECT_EQ(*t->max_depth, 3);
+}
+
+// Mirror of NearestWithinTraverseAndResidualUsing but with a residual filter
+// after the reversed clause order, confirming the trailing AND is not
+// swallowed either way.
+TEST(Parser, NearestUsingBeforeWithinTraverseWithResidualFilter) {
+    auto stmt =
+        parse_one("SELECT * FROM posts WHERE NEAREST(body_vec, 10) TO 'data analysis' "
+                  "USING L2 WITHIN TRAVERSE authored FROM users('u1') DIRECTION OUT MAX_DEPTH 1 "
+                  "AND score > 0.5");
+    auto* sel = dynamic_cast<SelectStmt*>(stmt.get());
+    ASSERT_NE(sel, nullptr);
+    auto* n = find_nearest(sel->where_expr.get());
+    ASSERT_NE(n, nullptr);
+    EXPECT_NE(n->within_traverse, nullptr);
+    EXPECT_EQ(n->metric, NearestMetric::L2);
+}
+
+TEST(Parser, NearestDuplicateWithinClauseIsParseError) {
+    Lexer lexer("SELECT * FROM articles WHERE NEAREST(content_vec, 5) TO 'x' "
+                "WITHIN TRAVERSE cites FROM articles('a') "
+                "WITHIN TRAVERSE cites FROM articles('b')");
+    auto tokens = lexer.tokenize();
+    ASSERT_TRUE(tokens.has_value()) << tokens.error().message;
+
+    Parser parser(std::move(*tokens));
+    auto stmts = parser.parse_all();
+    ASSERT_FALSE(stmts.has_value());
+    EXPECT_EQ(stmts.error().code, StatusCode::PARSE_ERROR);
+}
+
+TEST(Parser, NearestDuplicateUsingClauseIsParseError) {
+    Lexer lexer("SELECT * FROM items WHERE NEAREST(embedding, 5) TO [1.0, 2.0] "
+                "USING L2 USING COSINE");
+    auto tokens = lexer.tokenize();
+    ASSERT_TRUE(tokens.has_value()) << tokens.error().message;
+
+    Parser parser(std::move(*tokens));
+    auto stmts = parser.parse_all();
+    ASSERT_FALSE(stmts.has_value());
+    EXPECT_EQ(stmts.error().code, StatusCode::PARSE_ERROR);
+}
+
 // =============================================================================
 // TCL statement tests (GDB-106)
 // =============================================================================

@@ -3657,17 +3657,40 @@ Result<ExprPtr> Parser::parse_primary() {
         nearest_expr->line = line;
         nearest_expr->col = col;
 
-        // Optional WITHIN TRAVERSE graph scope, then optional USING metric.
-        if (match_ident_ci(peek(), "WITHIN")) {
-            auto trav = parse_within_traverse();
-            if (!trav)
-                return tl::unexpected(trav.error());
-            nearest_expr->within_traverse = std::move(*trav);
+        // Optional WITHIN TRAVERSE graph scope and optional USING metric clause,
+        // accepted in either order: `WITHIN TRAVERSE ... USING ...` or
+        // `USING ... WITHIN TRAVERSE ...`. Each clause may appear at most once;
+        // a repeated clause is a parse error. This prevents a mis-ordered
+        // `USING ... WITHIN TRAVERSE ...` from silently discarding the graph
+        // scope (see GDB-1241).
+        bool saw_within = false;
+        bool saw_using = false;
+        nearest_expr->metric = NearestMetric::COSINE;
+        while (true) {
+            if (match_ident_ci(peek(), "WITHIN")) {
+                if (saw_within) {
+                    return parse_error_here("duplicate WITHIN clause in NEAREST expression");
+                }
+                saw_within = true;
+                auto trav = parse_within_traverse();
+                if (!trav)
+                    return tl::unexpected(trav.error());
+                nearest_expr->within_traverse = std::move(*trav);
+                continue;
+            }
+            if (match_ident_ci(peek(), "USING")) {
+                if (saw_using) {
+                    return parse_error_here("duplicate USING clause in NEAREST expression");
+                }
+                saw_using = true;
+                auto metric = parse_nearest_metric();
+                if (!metric)
+                    return tl::unexpected(metric.error());
+                nearest_expr->metric = *metric;
+                continue;
+            }
+            break;
         }
-        auto metric = parse_nearest_metric();
-        if (!metric)
-            return tl::unexpected(metric.error());
-        nearest_expr->metric = *metric;
 
         return ok(ExprPtr(std::move(nearest_expr)));
     }
