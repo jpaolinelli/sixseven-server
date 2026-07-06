@@ -983,6 +983,111 @@ TEST(HnswInsertSearch, InsertManySmallDimension) {
 }
 
 // =============================================================================
+// GDB-1235: Reachability under many-way distance ties with small M.
+//
+// Root cause: the reverse/bidirectional-link maintenance in insert() used to
+// evict a single "farthest" neighbor via std::max_element when a neighbor's
+// list was full. With many candidates tied at distance 0 (identical or
+// near-identical vectors), std::max_element always resolved the tie to the
+// same slot, so each new insert's back-edge perpetually evicted only the
+// *previous* insert's back-edge -- the earlier, still-resident neighbors
+// were never touched. Later-inserted nodes ended up with zero in-edges from
+// the reachable component and were unreachable from the entry point, even
+// though every insert() call itself succeeded. Fixed by
+// HnswIndex::select_neighbors_heuristic, which always keeps the newly
+// linked candidate and rotates eviction fairly across existing ties.
+// =============================================================================
+
+TEST(HnswInsertSearch, AllIdenticalVectorsReachableWithSmallM) {
+    TestFixture fix;
+
+    HnswIndex index(*fix.bpm);
+    HnswIndexConfig config;
+    config.dimension = 4;
+    config.m = 4;
+    config.ef_construction = 64;
+    config.ef_search = 64;
+    auto cr = index.create(config);
+    ASSERT_TRUE(cr.has_value()) << cr.error().message;
+
+    std::vector<float> vec = {0.5F, 0.5F, 0.5F, 0.5F};
+    for (int i = 0; i < 20; ++i) {
+        auto ir = index.insert(vec);
+        ASSERT_TRUE(ir.has_value()) << "Insert " << i << ": " << ir.error().message;
+    }
+    EXPECT_EQ(index.node_count(), 20u);
+
+    auto sr = index.search(vec, 20);
+    ASSERT_TRUE(sr.has_value()) << sr.error().message;
+    EXPECT_EQ(sr.value().size(), 20u)
+        << "All 20 identical vectors must be reachable from the entry point despite M=4";
+    for (const auto& r : sr.value()) {
+        EXPECT_FLOAT_EQ(r.distance, 0.0F);
+    }
+}
+
+TEST(HnswInsertSearch, ManyIdenticalVectorsReachableWithSmallMStress) {
+    TestFixture fix;
+
+    HnswIndex index(*fix.bpm);
+    HnswIndexConfig config;
+    config.dimension = 3;
+    config.m = 4;
+    config.ef_construction = 64;
+    config.ef_search = 128;
+    auto cr = index.create(config);
+    ASSERT_TRUE(cr.has_value()) << cr.error().message;
+
+    std::vector<float> vec = {1.0F, 1.0F, 1.0F};
+    constexpr uint32_t total = 80;
+    for (uint32_t i = 0; i < total; ++i) {
+        auto ir = index.insert(vec);
+        ASSERT_TRUE(ir.has_value()) << "Insert " << i << ": " << ir.error().message;
+    }
+    EXPECT_EQ(index.node_count(), total);
+
+    auto sr = index.search(vec, total);
+    ASSERT_TRUE(sr.has_value()) << sr.error().message;
+    EXPECT_EQ(sr.value().size(), total)
+        << "All " << total << " identical vectors must remain reachable with M=4";
+}
+
+TEST(HnswInsertSearch, DuplicateClustersRemainReachableWithSmallM) {
+    TestFixture fix;
+
+    HnswIndex index(*fix.bpm);
+    HnswIndexConfig config;
+    config.dimension = 2;
+    config.m = 4;
+    config.ef_construction = 32;
+    config.ef_search = 64;
+    auto cr = index.create(config);
+    ASSERT_TRUE(cr.has_value()) << cr.error().message;
+
+    // Two distinct clusters of 15 identical vectors each; every member of
+    // both clusters is tied at distance 0 within its own cluster, exercising
+    // the same eviction-fairness path as the fully-identical case while
+    // also covering a non-degenerate (multi-cluster) layout.
+    std::vector<float> cluster_a = {0.0F, 0.0F};
+    std::vector<float> cluster_b = {100.0F, 100.0F};
+    for (int i = 0; i < 15; ++i) {
+        ASSERT_TRUE(index.insert(cluster_a).has_value());
+    }
+    for (int i = 0; i < 15; ++i) {
+        ASSERT_TRUE(index.insert(cluster_b).has_value());
+    }
+    EXPECT_EQ(index.node_count(), 30u);
+
+    auto sr_a = index.search(cluster_a, 15);
+    ASSERT_TRUE(sr_a.has_value()) << sr_a.error().message;
+    EXPECT_EQ(sr_a.value().size(), 15u) << "All 15 cluster-A vectors must be reachable";
+
+    auto sr_b = index.search(cluster_b, 15);
+    ASSERT_TRUE(sr_b.has_value()) << sr_b.error().message;
+    EXPECT_EQ(sr_b.value().size(), 15u) << "All 15 cluster-B vectors must be reachable";
+}
+
+// =============================================================================
 // HNSW Delete and Compaction Tests (GDB-124/125)
 // =============================================================================
 
