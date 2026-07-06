@@ -168,3 +168,102 @@ TEST_F(QA_GDB1245, MixedRowsRoundTripStableOnReRead) {
     EXPECT_EQ(qr2.rows[1][1].as_string(), "");
     EXPECT_TRUE(qr2.rows[2][1].is_null());
 }
+
+// =============================================================================
+// Adversarial: empty string in a NON-NULLABLE column (TEXT NOT NULL DEFAULT
+// ''). Must insert "" cleanly -- no crash, and no spurious NOT NULL
+// constraint violation (empty string is not NULL).
+// =============================================================================
+
+TEST_F(QA_GDB1245, NotNullColumnAcceptsEmptyStringDefault) {
+    exec_ok("CREATE TABLE t1245_notnull (id INT, tag TEXT NOT NULL DEFAULT '')");
+    exec_ok("INSERT INTO t1245_notnull (id) VALUES (1)");
+
+    auto qr = exec_ok("SELECT tag FROM t1245_notnull WHERE id = 1");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_FALSE(qr.rows[0][0].is_null());
+    EXPECT_EQ(qr.rows[0][0].as_string(), "");
+}
+
+TEST_F(QA_GDB1245, NotNullColumnAcceptsExplicitEmptyString) {
+    exec_ok("CREATE TABLE t1245_notnull_explicit (id INT, tag TEXT NOT NULL)");
+    exec_ok("INSERT INTO t1245_notnull_explicit VALUES (1, '')");
+
+    auto qr = exec_ok("SELECT tag FROM t1245_notnull_explicit WHERE id = 1");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_FALSE(qr.rows[0][0].is_null());
+    EXPECT_EQ(qr.rows[0][0].as_string(), "");
+}
+
+// =============================================================================
+// Adversarial: empty string as a PRIMARY KEY / UNIQUE / indexed column value.
+// Must not crash. '' should round-trip and be findable by a lookup on the PK
+// value.
+//
+// NOTE: duplicate-key rejection for PRIMARY KEY / UNIQUE is a pre-existing,
+// general gap unrelated to empty strings -- confirmed via a non-empty-key
+// duplicate insert on this build (also silently accepted). That is out of
+// scope for GDB-1245 (which targets the empty-string OOB crash specifically)
+// and is not asserted here to avoid conflating an unrelated defect with this
+// ticket's verdict.
+// =============================================================================
+
+TEST_F(QA_GDB1245, EmptyStringPrimaryKeyRoundTripsOrCleanlyErrors) {
+    exec_ok("CREATE TABLE t1245_pk (tag TEXT PRIMARY KEY, id INT)");
+
+    auto insert_result = engine_->execute("INSERT INTO t1245_pk VALUES ('', 1)");
+    if (!insert_result.has_value()) {
+        // Acceptable: clean rejection, not a crash.
+        SUCCEED() << "empty-string PK cleanly rejected: " << insert_result.error().message;
+        return;
+    }
+
+    // If accepted, it must round-trip as empty (not NULL) and be findable by
+    // lookup on the PK value. No crash either way.
+    auto qr = exec_ok("SELECT id FROM t1245_pk WHERE tag = ''");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 1);
+}
+
+TEST_F(QA_GDB1245, EmptyStringUniqueColumnRoundTripsOrCleanlyErrors) {
+    exec_ok("CREATE TABLE t1245_unique (id INT, tag TEXT UNIQUE)");
+
+    auto insert_result = engine_->execute("INSERT INTO t1245_unique VALUES (1, '')");
+    if (!insert_result.has_value()) {
+        SUCCEED() << "empty-string UNIQUE value cleanly rejected: "
+                  << insert_result.error().message;
+        return;
+    }
+
+    auto qr = exec_ok("SELECT id FROM t1245_unique WHERE tag = ''");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 1);
+}
+
+// =============================================================================
+// Multiple variable-length fields with a trailing empty -- exercises the
+// original OOB trigger path with two distinct row shapes.
+// =============================================================================
+
+TEST_F(QA_GDB1245, TwoVarLenColumnsOneNonEmptyOneEmptyRoundTrip) {
+    exec_ok("CREATE TABLE t1245_two_varlen (id INT, a TEXT, b TEXT)");
+    exec_ok("INSERT INTO t1245_two_varlen VALUES (1, 'a', '')");
+
+    auto qr = exec_ok("SELECT a, b FROM t1245_two_varlen WHERE id = 1");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "a");
+    EXPECT_FALSE(qr.rows[0][1].is_null());
+    EXPECT_EQ(qr.rows[0][1].as_string(), "");
+}
+
+TEST_F(QA_GDB1245, TwoVarLenColumnsBothEmptyRoundTrip) {
+    exec_ok("CREATE TABLE t1245_two_varlen_both (id INT, a TEXT, b TEXT)");
+    exec_ok("INSERT INTO t1245_two_varlen_both VALUES (1, '', '')");
+
+    auto qr = exec_ok("SELECT a, b FROM t1245_two_varlen_both WHERE id = 1");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_FALSE(qr.rows[0][0].is_null());
+    EXPECT_EQ(qr.rows[0][0].as_string(), "");
+    EXPECT_FALSE(qr.rows[0][1].is_null());
+    EXPECT_EQ(qr.rows[0][1].as_string(), "");
+}
