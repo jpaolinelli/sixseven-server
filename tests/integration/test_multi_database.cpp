@@ -1,10 +1,14 @@
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/catalog/schema.h"
+#include "sixseven/common/config.h"
 #include "sixseven/common/result.h"
 #include "sixseven/common/types.h"
 #include "sixseven/common/value.h"
+#include "sixseven/executor/catalog_persistence.h"
 #include "sixseven/executor/query_engine.h"
+#include "sixseven/executor/settings_cache.h"
 #include "sixseven/executor/storage_manager.h"
+#include "sixseven/executor/system_bootstrap.h"
 #include "sixseven/storage/disk_manager.h"
 
 #include <gtest/gtest.h>
@@ -29,10 +33,26 @@ protected:
 
         storage_ = std::make_unique<StorageManager>(dm_, data_dir_);
         engine_ = std::make_unique<QueryEngine>(catalog_, *storage_);
+
+        config_ = Config::load_defaults();
+        persistence_ = std::make_unique<CatalogPersistence>(catalog_, *storage_);
+        auto boot = SystemBootstrap::bootstrap(
+            *engine_, catalog_, *storage_, *persistence_, config_, data_dir_);
+        ASSERT_TRUE(boot.has_value()) << boot.error().message;
+
+        settings_cache_ = std::make_unique<SettingsCache>();
+        ASSERT_TRUE(settings_cache_->load(*engine_).has_value());
+        engine_->set_settings_cache(settings_cache_.get());
+
+        auto db = catalog_.get_database("demo");
+        ASSERT_TRUE(db.has_value()) << "default database 'demo' not found after bootstrap";
+        engine_->set_current_database(db->database_id);
     }
 
     void TearDown() override {
         engine_.reset();
+        settings_cache_.reset();
+        persistence_.reset();
         storage_.reset();
         fs::remove_all(data_dir_);
     }
@@ -89,6 +109,9 @@ protected:
     fs::path data_dir_;
     std::unique_ptr<StorageManager> storage_;
     std::unique_ptr<QueryEngine> engine_;
+    Config config_;
+    std::unique_ptr<CatalogPersistence> persistence_;
+    std::unique_ptr<SettingsCache> settings_cache_;
 };
 
 // =============================================================================
