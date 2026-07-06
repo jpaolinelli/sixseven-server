@@ -20,9 +20,18 @@
 
 namespace pg_wire_test {
 
+/// Ensure platform-level socket init (e.g. Winsock WSAStartup) has run before
+/// any socket operation. Safe to call repeatedly; the underlying init runs
+/// exactly once (static-local initialization is thread-safe and lazy).
+inline bool ensure_platform_init() {
+    static const bool initialized = sixseven::platform_init();
+    return initialized;
+}
+
 /// Create a Unix-domain socketpair.  Returns the server-side fd; stores the
 /// client-side fd in client_fd_out.
 inline int create_socketpair(int& client_fd_out) {
+    ensure_platform_init();
     int fds[2];
     int rc = sixseven_platform::socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
     EXPECT_EQ(rc, 0);
@@ -30,20 +39,28 @@ inline int create_socketpair(int& client_fd_out) {
     return fds[0]; // Server side.
 }
 
-/// Write all bytes in data to fd (retrying on short writes).
+/// Write all bytes in data to fd (retrying on short sends). Uses ::send
+/// instead of the CRT ::write because on Windows create_socketpair() returns
+/// raw SOCKET handles (via loopback TCP emulation), which are NOT CRT file
+/// descriptors -- calling ::write on them aborts the process
+/// (write.cpp(50): fh >= 0 && (unsigned)fh < (unsigned)_nhandle).
 inline void write_to_fd(int fd, const std::vector<uint8_t>& data) {
     size_t written = 0;
     while (written < data.size()) {
-        auto n = ::write(fd, data.data() + written, data.size() - written);
+        auto n = ::send(fd,
+                        reinterpret_cast<const char*>(data.data() + written),
+                        static_cast<int>(data.size() - written),
+                        0);
         ASSERT_GT(n, 0);
         written += static_cast<size_t>(n);
     }
 }
 
-/// Read up to max_bytes from fd into a vector.
+/// Read up to max_bytes from fd into a vector. Uses ::recv instead of the CRT
+/// ::read for the same reason as write_to_fd above.
 inline std::vector<uint8_t> read_from_fd(int fd, size_t max_bytes = 8192) {
     std::vector<uint8_t> buf(max_bytes);
-    auto n = ::read(fd, buf.data(), buf.size());
+    auto n = ::recv(fd, reinterpret_cast<char*>(buf.data()), static_cast<int>(buf.size()), 0);
     if (n <= 0) {
         return {};
     }
