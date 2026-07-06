@@ -214,4 +214,55 @@ TEST(ThreadPool, BoundedDoubleShutdownIsSafe) {
     EXPECT_FALSE(pool.is_running());
 }
 
+// Regression test for a use-after-free found in code review: when a bounded
+// shutdown() force-abandons (detaches) a worker still stuck in a
+// long-running task, that detached thread must NEVER touch the ThreadPool
+// again once detached -- only its own independently-owned control block.
+// This test destroys the ThreadPool object immediately after a bounded
+// shutdown() returns, while the abandoned task is still sleeping in the
+// background, and confirms the task is later (safely) able to finish and
+// write to memory it independently owns. If the fix regresses (the detached
+// worker re-touches `this`/mutex_/cv_/tasks_ after the pool is gone), this
+// is exactly the shape of use-after-free the reviewer reproduced; running
+// under ASan would catch it directly; here we at minimum verify the pool
+// destroys cleanly and the process does not crash or hang while the
+// detached thread is still outstanding.
+TEST(ThreadPool, DetachedWorkerOutlivingPoolDestructionIsSafe) {
+    // A flag on the heap, independent of the ThreadPool's lifetime, that the
+    // abandoned task writes to once it (eventually) finishes. Verifies the
+    // detached thread's task body itself is unaffected by the pool's
+    // destruction (it never touched pool state to begin with).
+    auto task_finished = std::make_shared<std::atomic<bool>>(false);
+
+    {
+        ThreadPool pool(1);
+        pool.submit([task_finished] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            task_finished->store(true, std::memory_order_release);
+        });
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+        // Immediate hard cap (0s): the worker is still mid-sleep, so this
+        // is guaranteed to force-abandon (detach) it rather than join.
+        pool.shutdown(std::chrono::seconds(0));
+        EXPECT_FALSE(pool.is_running());
+
+        // `pool` is destroyed here (end of scope) while the detached
+        // worker's task is still sleeping in the background. The fix
+        // ensures the detached worker's thread function never dereferences
+        // `this`/mutex_/cv_/tasks_ after being abandoned, so this
+        // destruction must not crash or hang.
+    }
+
+    // Give the detached thread's task time to actually complete in the
+    // background; this only checks the task's own (pool-independent) side
+    // effect, not any ThreadPool state.
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!task_finished->load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_TRUE(task_finished->load(std::memory_order_acquire));
+}
+
 } // namespace sixseven
