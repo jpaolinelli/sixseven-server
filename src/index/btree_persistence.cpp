@@ -49,6 +49,22 @@ deserialize_key(const uint8_t*& p, const uint8_t* end, const std::vector<TypeId>
 // ~32 TB of 8 KB pages — well beyond any practical database size.
 constexpr uint32_t NODE_OVERFLOW_SENTINEL = 0xFFFFFFFFu;
 
+// Magic number written at the start of a V2 META page (little-endian uint32).
+//
+// Value: 0xFF42544DU => LE bytes [0x4D, 0x54, 0x42, 0xFF] ("MTB" + 0xFF).
+//
+// Collision-free with V1: a V1 meta page begins with root_page_id as a
+// uint32 LE. The most-significant byte of 0xFF42544D is 0xFF, so for this to
+// match a V1 root_page_id, the id would have to be >= 0xFF000000 =
+// 4,278,190,080. That would require ~34 PB of 8 KB index pages —
+// astronomically beyond any practical database size. No realistic V1
+// meta page can ever produce these leading bytes.
+//
+// This replaces the old, unsound 2-byte sentinel [0x00, 0x02] (GDB-1266):
+// that sentinel collided with a V1 meta whose root_page_id == 512 (LE bytes
+// [0x00, 0x02, 0x00, 0x00]), which is trivially reachable (~4 MB index).
+constexpr uint32_t BTREE_META_V2_MAGIC = 0xFF42544DU;
+
 // Maximum bytes of node payload that fit in one page tuple.
 // 8192-byte page, 24-byte page header, 4-byte slot entry → ~8164 bytes usable.
 constexpr size_t NODE_MAX_INLINE_SIZE = 8100;
@@ -355,9 +371,8 @@ Result<PageId> BTreePersistence::persist(BufferPoolManager& bpm, const BTreeInde
     auto build_header = [&](bool include_directory) {
         header_buf.clear();
         if (!include_directory) {
-            // Version 2 sentinel: first byte 0 signals multi-page format.
-            write_u8(header_buf, 0); // sentinel
-            write_u8(header_buf, 2); // version
+            // Version 2 magic: collision-free 4-byte tag (see BTREE_META_V2_MAGIC).
+            write_u32(header_buf, BTREE_META_V2_MAGIC);
         }
         write_u32(header_buf, index.root_page_id_);
         write_u64(header_buf, index.size_);
@@ -502,13 +517,23 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
                           "btree load: failed to read meta tuple: " + meta_data.error().message);
     }
 
-    // Detect format version. Version 2 starts with sentinel byte 0 + version byte 2.
-    // Legacy format starts with root_page_id (u32 LE). When root_page_id is 0 (empty tree),
-    // the first two bytes are [0x00, 0x00], which differs from v2's [0x00, 0x02].
+    // Detect format version. Version 2 pages begin with the 4-byte
+    // BTREE_META_V2_MAGIC (0xFF42544D, LE bytes [0x4D, 0x54, 0x42, 0xFF]).
+    // Legacy (V1) pages begin with root_page_id as a u32 LE and cannot ever
+    // produce these leading bytes (see BTREE_META_V2_MAGIC comment above for
+    // why this is collision-free — unlike the old 2-byte [0x00, 0x02]
+    // sentinel, which collided with a V1 meta whose root_page_id == 512).
     index_encoding::Reader meta_r(std::span<const uint8_t>(meta_data->data(), meta_data->size()));
-    bool is_v2 = (meta_data->size() >= 2 && (*meta_data)[0] == 0 && (*meta_data)[1] == 2);
+    bool is_v2 = false;
+    if (meta_data->size() >= 4) {
+        uint32_t leading = static_cast<uint32_t>((*meta_data)[0]) |
+                           (static_cast<uint32_t>((*meta_data)[1]) << 8) |
+                           (static_cast<uint32_t>((*meta_data)[2]) << 16) |
+                           (static_cast<uint32_t>((*meta_data)[3]) << 24);
+        is_v2 = (leading == BTREE_META_V2_MAGIC);
+    }
     if (is_v2) {
-        auto skip_r = meta_r.skip(2);
+        auto skip_r = meta_r.skip(4);
         if (!skip_r) {
             (void)bpm.unpin_page(meta_page_id, false);
             return make_error(skip_r.error().code, "btree load: truncated meta header");
