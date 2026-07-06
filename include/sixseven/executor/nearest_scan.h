@@ -23,6 +23,9 @@
 
 namespace sixseven {
 
+// Forward declaration.
+struct SubqueryContext;
+
 /// Configuration for a NEAREST scan operation.
 struct NearestScanConfig {
     /// Number of nearest neighbors to return.
@@ -94,6 +97,10 @@ public:
     /// @param bound           BoundStatement for expression evaluation.
     /// @param hnsw_index      Optional HNSW index for accelerated search.
     /// @param hnsw_rid_map    Optional node_id → RID map for direct tuple lookups.
+    /// @param subquery_ctx    Optional context so the residual WHERE filter can
+    ///                        evaluate IN/EXISTS subquery predicates ANDed with
+    ///                        NEAREST (GDB-1229). Without it, a subquery
+    ///                        conjunct in the residual fails to evaluate.
     NearestScanOperator(TableHeap& heap,
                         const Schema& storage_schema,
                         NearestScanConfig config,
@@ -101,7 +108,8 @@ public:
                         const Expr* where_expr,
                         const BoundStatement& bound,
                         HnswIndex* hnsw_index = nullptr,
-                        std::vector<RID>* hnsw_rid_map = nullptr);
+                        std::vector<RID>* hnsw_rid_map = nullptr,
+                        const SubqueryContext* subquery_ctx = nullptr);
 
     const OutputSchema& output_schema() const override;
 
@@ -139,6 +147,24 @@ private:
     /// Returns the number of results emitted (0 or 1).
     Result<size_t> filter_and_emit(Tuple& candidate_tuple, float distance);
 
+    /// Candidate: a scored row awaiting the top-k / WHERE decision.
+    struct Candidate {
+        float distance;
+        Tuple tuple;
+    };
+
+    /// Given `candidates` already sorted by distance ASC (most similar first),
+    /// consider only the true top-k DISTINCT rows and apply the WHERE
+    /// post-filter (if any) as a strict intersection over that fixed window.
+    ///
+    /// This does NOT widen past the k-th distinct candidate to "backfill" rows
+    /// rejected by WHERE — NEAREST(col, k) combined with other WHERE
+    /// conjuncts must return the intersection of the two predicates, which can
+    /// be fewer than k rows (GDB-1229). A duplicate RID (the same physical row
+    /// scored twice, e.g. from double-embedding) does not consume a top-k slot
+    /// — it is skipped and does not advance the distinct-row count.
+    Result<void> emit_top_k_window(std::vector<Candidate>& candidates);
+
     TableHeap& heap_;
     const Schema& storage_schema_;
     NearestScanConfig config_;
@@ -147,6 +173,7 @@ private:
     const BoundStatement& bound_;
     HnswIndex* hnsw_index_;
     std::vector<RID>* hnsw_rid_map_;
+    const SubqueryContext* subquery_ctx_;
 
     /// Output schema for WHERE predicate evaluation (excludes _distance).
     /// Built once in open() to avoid per-row allocation.

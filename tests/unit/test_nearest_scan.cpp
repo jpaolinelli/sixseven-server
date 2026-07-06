@@ -315,13 +315,18 @@ TEST_F(NearestScanTest, BruteForceDistanceColumnIncluded) {
 // WHERE filter tests
 // =============================================================================
 
+// The WHERE post-filter intersects with the fixed top-k window; it must not
+// widen past the k-th nearest candidate to backfill a slot rejected by the
+// filter (GDB-1229). Top-2 by distance are {row1(alpha), row2(beta)};
+// name='beta' excludes row1 from that fixed window, leaving only row2 — NOT
+// {row2, row4}, since row4 is the 4th nearest and outside the top-2 window.
 TEST_F(NearestScanTest, BruteForceWithWhereFilter) {
     TableHeap heap(*table_bpm_, dm_, table_file_id_);
 
     insert_row(heap, 1, "alpha", {1.0F, 0.0F, 0.0F}); // closest, name=alpha
     insert_row(heap, 2, "beta", {0.9F, 0.1F, 0.0F});  // 2nd closest, name=beta
     insert_row(heap, 3, "alpha", {0.5F, 0.5F, 0.0F}); // 3rd closest, name=alpha
-    insert_row(heap, 4, "beta", {0.0F, 1.0F, 0.0F});  // further, name=beta
+    insert_row(heap, 4, "beta", {0.0F, 1.0F, 0.0F});  // 4th closest (outside top-2), name=beta
 
     // WHERE name = 'beta' â€” should skip alpha rows.
     auto where = binary_expr(BinaryOp::EQUAL, col_ref("name"), lit_string("beta"));
@@ -353,14 +358,10 @@ TEST_F(NearestScanTest, BruteForceWithWhereFilter) {
     ASSERT_TRUE(op.open().has_value());
     auto results = drain(op);
 
-    // Should get only beta rows.
-    ASSERT_EQ(results.size(), 2u);
+    // Only row 2 survives: it's the sole beta row within the top-2 window.
+    ASSERT_EQ(results.size(), 1u);
     EXPECT_EQ(results[0].values[1].as_string(), "beta");
-    EXPECT_EQ(results[1].values[1].as_string(), "beta");
-
-    // Sorted by distance: row 2 should be closer than row 4.
     EXPECT_EQ(results[0].values[0].as_int32(), 2);
-    EXPECT_EQ(results[1].values[0].as_int32(), 4);
 
     op.close();
 }
@@ -838,6 +839,11 @@ TEST_F(NearestScanTest, PrefilteredEmptyVectorFallsThroughToScan) {
     op.close();
 }
 
+// The WHERE post-filter intersects with the fixed top-k window; it must not
+// widen past the k-th nearest candidate to backfill a slot rejected by the
+// filter (GDB-1229). Top-2 by distance are {rid1(alpha), rid2(beta)};
+// name='beta' excludes rid1 from that fixed window, leaving only rid2 — NOT
+// {rid2, rid4}, since rid4 is the 4th nearest and outside the top-2 window.
 TEST_F(NearestScanTest, PrefilteredWithWherePostFilter) {
     TableHeap heap(*table_bpm_, dm_, table_file_id_);
 
@@ -872,13 +878,11 @@ TEST_F(NearestScanTest, PrefilteredWithWherePostFilter) {
 
     ASSERT_TRUE(op.open().has_value());
     auto results = drain(op);
-    ASSERT_EQ(results.size(), 2u);
+    ASSERT_EQ(results.size(), 1u);
 
-    // Only beta rows: rid2 (closer) and rid4 (further).
+    // Only rid2 survives: it's the sole beta row within the top-2 window.
     EXPECT_EQ(results[0].values[1].as_string(), "beta");
-    EXPECT_EQ(results[1].values[1].as_string(), "beta");
     EXPECT_EQ(results[0].values[0].as_int32(), 2);
-    EXPECT_EQ(results[1].values[0].as_int32(), 4);
 
     op.close();
 }

@@ -29,10 +29,11 @@ NearestScanOperator::NearestScanOperator(TableHeap& heap,
                                          const Expr* where_expr,
                                          const BoundStatement& bound,
                                          HnswIndex* hnsw_index,
-                                         std::vector<RID>* hnsw_rid_map)
+                                         std::vector<RID>* hnsw_rid_map,
+                                         const SubqueryContext* subquery_ctx)
     : heap_(heap), storage_schema_(storage_schema), config_(std::move(config)),
       schema_(std::move(schema)), where_expr_(where_expr), bound_(bound), hnsw_index_(hnsw_index),
-      hnsw_rid_map_(hnsw_rid_map) {}
+      hnsw_rid_map_(hnsw_rid_map), subquery_ctx_(subquery_ctx) {}
 
 std::string NearestScanOperator::plan_node_name() const {
     return "Nearest Scan";
@@ -119,11 +120,6 @@ Result<void> NearestScanOperator::execute_brute_force() {
         return make_error(it.error().code, it.error().message);
     }
 
-    // Candidate: (distance, tuple with all table columns).
-    struct Candidate {
-        float distance;
-        Tuple tuple;
-    };
     std::vector<Candidate> candidates;
 
     std::span<const float> query_span(config_.query_vector);
@@ -171,21 +167,7 @@ Result<void> NearestScanOperator::execute_brute_force() {
         return a.distance < b.distance;
     });
 
-    // Take top-k and apply WHERE filter.
-    size_t count = 0;
-    for (auto& cand : candidates) {
-        if (count >= config_.k) {
-            break;
-        }
-
-        auto emitted = filter_and_emit(cand.tuple, display_distance(cand.distance));
-        if (!emitted) {
-            return make_error(emitted.error().code, emitted.error().message);
-        }
-        count += *emitted;
-    }
-
-    return ok();
+    return emit_top_k_window(candidates);
 }
 
 // ---------------------------------------------------------------------------
@@ -193,10 +175,6 @@ Result<void> NearestScanOperator::execute_brute_force() {
 // ---------------------------------------------------------------------------
 
 Result<void> NearestScanOperator::execute_prefiltered_search() {
-    struct Candidate {
-        float distance;
-        Tuple tuple;
-    };
     std::vector<Candidate> candidates;
 
     std::span<const float> query_span(config_.query_vector);
@@ -237,21 +215,14 @@ Result<void> NearestScanOperator::execute_prefiltered_search() {
         return a.distance < b.distance;
     });
 
-    // Take top-k and apply WHERE filter.
-    size_t count = 0;
-    for (auto& cand : candidates) {
-        if (count >= config_.k) {
-            break;
-        }
-        auto emitted = filter_and_emit(cand.tuple, display_distance(cand.distance));
-        if (!emitted) {
-            return make_error(emitted.error().code, emitted.error().message);
-        }
-        count += *emitted;
+    auto result = emit_top_k_window(candidates);
+    if (!result) {
+        return result;
     }
 
-    SIXSEVEN_LOG_DEBUG(
-        "NEAREST prefiltered: {} candidates, {} results emitted", candidates.size(), count);
+    SIXSEVEN_LOG_DEBUG("NEAREST prefiltered: {} candidates, {} results emitted",
+                       candidates.size(),
+                       results_.size());
     return ok();
 }
 
@@ -286,11 +257,6 @@ Result<void> NearestScanOperator::execute_hnsw_search() {
         search_k = std::min(config_.k * 10, total_nodes);
     }
 
-    struct MatchedRow {
-        float distance;
-        Tuple tuple;
-    };
-
     while (true) {
         Result<std::vector<HnswSearchResult>> search_results;
         if (predicate) {
@@ -308,7 +274,7 @@ Result<void> NearestScanOperator::execute_hnsw_search() {
         SIXSEVEN_LOG_DEBUG(
             "NEAREST: HNSW returned {} candidates (search_k={})", search_results->size(), search_k);
 
-        std::vector<MatchedRow> matched;
+        std::vector<Candidate> matched;
 
         // Fast path: use node_id → RID map for direct tuple lookups (O(k)).
         if (hnsw_rid_map_ != nullptr && !hnsw_rid_map_->empty()) {
@@ -390,27 +356,26 @@ Result<void> NearestScanOperator::execute_hnsw_search() {
         // Sort by distance ASC. The HNSW path only runs when the index metric
         // matches the query's sort metric (GDB-723), so index distances are
         // already sort-form values (lower = more similar) for this metric.
-        std::sort(matched.begin(), matched.end(), [](const MatchedRow& a, const MatchedRow& b) {
+        std::sort(matched.begin(), matched.end(), [](const Candidate& a, const Candidate& b) {
             return a.distance < b.distance;
         });
 
-        // Apply WHERE filter and take top-k.
-        size_t count = 0;
-        for (auto& m : matched) {
-            if (count >= config_.k) {
-                break;
-            }
-
-            auto emitted = filter_and_emit(m.tuple, display_distance(m.distance));
-            if (!emitted) {
-                return make_error(emitted.error().code, emitted.error().message);
-            }
-            count += *emitted;
+        // Consider only the true top-k DISTINCT candidates within this
+        // (possibly over-fetched) window and apply WHERE as a strict
+        // intersection — never backfill past the k-th distinct candidate
+        // (GDB-1229).
+        auto window_result = emit_top_k_window(matched);
+        if (!window_result) {
+            return window_result;
         }
+        size_t count = results_.size();
 
         // If we found enough results, or we've already searched the entire
-        // index, we're done. We widen on any under-fill — a WHERE filter or
-        // de-duplicated rows can both leave us short of k.
+        // index, we're done. Widening only helps when the over-fetched
+        // window (search_k) was itself too small to contain the true k
+        // nearest DISTINCT rows — once search_k >= total_nodes, `matched`
+        // already reflects the full, exact distance order, so the top-k
+        // window above is final and no further widening can change it.
         if (count >= config_.k || search_k >= total_nodes) {
             break;
         }
@@ -469,7 +434,8 @@ Result<size_t> NearestScanOperator::filter_and_emit(Tuple& candidate_tuple, floa
 
     // Apply WHERE post-filter if present.
     if (where_expr_ != nullptr) {
-        auto pass = evaluate_predicate(*where_expr_, candidate_tuple, where_filter_schema_, bound_);
+        auto pass = evaluate_predicate(
+            *where_expr_, candidate_tuple, where_filter_schema_, bound_, subquery_ctx_);
         if (!pass) {
             return make_error(pass.error().code, pass.error().message);
         }
@@ -488,6 +454,37 @@ Result<size_t> NearestScanOperator::filter_and_emit(Tuple& candidate_tuple, floa
     }
     results_.push_back(std::move(result));
     return ok(size_t{1});
+}
+
+Result<void> NearestScanOperator::emit_top_k_window(std::vector<Candidate>& candidates) {
+    // Walk candidates in distance order. `distinct_rank` counts DISTINCT rows
+    // considered so far (duplicate RIDs — the same physical row scored more
+    // than once — don't consume a slot). Once distinct_rank reaches k, no
+    // further candidates are considered: NEAREST(col, k) fixes the candidate
+    // window to the k nearest DISTINCT rows, and WHERE is applied as a strict
+    // intersection over that fixed window rather than a backfill source
+    // (GDB-1229). Rejecting a candidate on WHERE must NOT pull in the
+    // (k+1)-th, (k+2)-th, ... nearest row to compensate.
+    size_t distinct_rank = 0;
+    for (auto& cand : candidates) {
+        if (distinct_rank >= config_.k) {
+            break;
+        }
+
+        const bool is_duplicate =
+            cand.tuple.rid.has_value() && seen_rids_.count(*cand.tuple.rid) > 0;
+
+        auto emitted = filter_and_emit(cand.tuple, display_distance(cand.distance));
+        if (!emitted) {
+            return make_error(emitted.error().code, emitted.error().message);
+        }
+
+        if (!is_duplicate) {
+            ++distinct_rank;
+        }
+    }
+
+    return ok();
 }
 
 } // namespace sixseven

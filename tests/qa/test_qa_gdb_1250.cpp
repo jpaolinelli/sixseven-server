@@ -167,18 +167,26 @@ TEST_F(QA_GDB1250, VectorTableAsRightSourceWithAliases) {
 }
 
 // AC: filtered-kNN consistency — sibling predicate on the vector table is
-// applied BEFORE top-k and matches the single-table result.
+// applied to the top-k window as a strict intersection and matches between
+// the single-table and JOIN-pushdown paths.
+//
+// description_vec distances to kVec ([1,0,0,0]): Alpha(1)=0, Apex(2)=~0.1,
+// Gamma(3)=further. The top-2 nearest are {Alpha, Apex}; `title <> 'Alpha'`
+// excludes Alpha from that fixed window, leaving only Apex(2). NEAREST(col,k)
+// ANDed with another predicate must NOT widen past the k-th nearest row to
+// backfill a rejected slot with the (k+1)-th nearest (Gamma) — the result is
+// the intersection, which can be smaller than k (GDB-1229).
 TEST_F(QA_GDB1250, FilteredKnnMatchesSingleTable) {
     auto single = run_ok(std::string("SELECT id FROM books "
                                      "WHERE NEAREST(description_vec, 2) TO ") +
                          kVec + " AND title <> 'Alpha'");
-    EXPECT_EQ(sorted_int_col(single, 0), (std::vector<int32_t>{2, 3}));
+    EXPECT_EQ(sorted_int_col(single, 0), (std::vector<int32_t>{2}));
 
     auto joined = run_ok(std::string("SELECT b.id FROM books b "
                                      "INNER JOIN reviews r ON r.book_id = b.id "
                                      "WHERE NEAREST(b.description_vec, 2) TO ") +
                          kVec + " AND b.title <> 'Alpha'");
-    EXPECT_EQ(sorted_int_col(joined, 0), (std::vector<int32_t>{2, 3}));
+    EXPECT_EQ(sorted_int_col(joined, 0), (std::vector<int32_t>{2}));
 }
 
 // AC: other-table predicate filters reviews without re-ranking; count may drop.
@@ -203,8 +211,8 @@ TEST_F(QA_GDB1250, NearestOnPreservedLeftSideWorks) {
 // AC: NEAREST on the nullable side of a LEFT JOIN -> clean error.
 TEST_F(QA_GDB1250, NearestOnNullableSideRejected) {
     assert_invalid(engine_->execute(std::string("SELECT b.id FROM reviews r "
-                                                 "LEFT JOIN books b ON r.book_id = b.id "
-                                                 "WHERE NEAREST(b.description_vec, 2) TO ") +
+                                                "LEFT JOIN books b ON r.book_id = b.id "
+                                                "WHERE NEAREST(b.description_vec, 2) TO ") +
                                     kVec),
                    "nullable side");
 }
@@ -260,9 +268,10 @@ TEST_F(QA_GDB1250, WithinTraverseScopesBeforeJoin) {
 
 // AC: GDB-1249 derived-table workaround still plans and executes.
 TEST_F(QA_GDB1250, DerivedTableWorkaroundStillWorks) {
-    auto qr = run_ok(std::string("SELECT nb.id FROM "
-                                 "(SELECT id, _distance FROM books WHERE NEAREST(description_vec, 2) TO ") +
-                     kVec + ") nb JOIN reviews r ON nb.id = r.book_id");
+    auto qr = run_ok(
+        std::string("SELECT nb.id FROM "
+                    "(SELECT id, _distance FROM books WHERE NEAREST(description_vec, 2) TO ") +
+        kVec + ") nb JOIN reviews r ON nb.id = r.book_id");
     EXPECT_EQ(sorted_int_col(qr, 0), (std::vector<int32_t>{1, 2}));
 }
 

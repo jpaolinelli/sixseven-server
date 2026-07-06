@@ -1518,7 +1518,19 @@ Planner::plan_select(const SelectStmt& stmt,
         };
         bool has_subquery_predicate = contains_subquery(stmt.where_expr.get());
 
-        if (!has_subquery_predicate) {
+        // NEAREST(...) pushdown is safe even when a sibling conjunct is a
+        // subquery predicate (e.g. `NEAREST(col,k) TO ... AND id IN
+        // (TRAVERSE ...)`): NearestScanOperator's residual WHERE filter is
+        // evaluated with the planner's SubqueryContext, so it can resolve
+        // IN/EXISTS subqueries the same way the generic Filter operator does.
+        // Skipping the pushdown here previously left the base scan as a plain
+        // SeqScan, and the vacuous "NEAREST is TRUE by construction" residual
+        // rule meant the vector predicate was silently dropped, leaving only
+        // the subquery predicate in effect (GDB-1229).
+        bool nearest_needs_pushdown =
+            has_subquery_predicate && expr_contains_nearest(stmt.where_expr.get());
+
+        if (!has_subquery_predicate || nearest_needs_pushdown) {
             // Re-create the scan with the predicate pushed down.
             auto table_schema = catalog_.get_table(database_id_, table_ref.name);
             if (table_schema) {
@@ -1548,7 +1560,8 @@ Planner::plan_select(const SelectStmt& stmt,
                         source->schema = (*vec_scan)->output_schema();
                         source->iter = std::move(*vec_scan);
                         pushed_where = true;
-                    } else if (expr_contains_match(stmt.where_expr.get())) {
+                    } else if (!has_subquery_predicate &&
+                               expr_contains_match(stmt.where_expr.get())) {
                         // BM25 full-text predicate: build a relevance-ranked scan
                         // that appends a synthetic _score column.
                         std::vector<OutputColumn> score_cols = table_output.columns();
@@ -1566,7 +1579,7 @@ Planner::plan_select(const SelectStmt& stmt,
                         source->iter = std::move(*bm25_scan);
                         source->schema = std::move(score_output);
                         pushed_where = true;
-                    } else {
+                    } else if (!has_subquery_predicate) {
                         // Cost-based access path selection (GDB-754): when
                         // ANALYZE statistics exist for this table, let the
                         // optimizer decide between index scan and seq scan.
@@ -3984,7 +3997,8 @@ Result<std::unique_ptr<Iterator>> Planner::plan_nearest_impl(const std::string& 
                                                       where_expr,
                                                       bound,
                                                       hnsw_index,
-                                                      rid_map);
+                                                      rid_map,
+                                                      &subquery_ctx_);
 
     return ok(std::unique_ptr<Iterator>(std::move(iter)));
 }

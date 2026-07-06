@@ -237,6 +237,11 @@ TEST_F(QANearestPrefilterTest, PrefilteredWithNullEmbeddingsSkipped) {
     op.close();
 }
 
+// The WHERE post-filter intersects with the fixed top-k window; it must not
+// widen past the k-th nearest candidate to backfill a slot rejected by the
+// filter (GDB-1229). Top-2 by L2 distance are {row1(A), row2(B)}; category=B
+// excludes row1 from that fixed window, leaving only row2 — NOT {row2, row4},
+// since row4 is the 4th nearest and outside the top-2 window.
 TEST_F(QANearestPrefilterTest, PrefilteredWithWherePostFilter) {
     TableHeap heap(*table_bpm_, dm_, table_fid_);
 
@@ -245,7 +250,7 @@ TEST_F(QANearestPrefilterTest, PrefilteredWithWherePostFilter) {
     auto rid1 = insert_row(heap, 1, "A", {1.0F, 0.0F, 0.0F}); // closest
     auto rid2 = insert_row(heap, 2, "B", {0.9F, 0.1F, 0.0F}); // 2nd closest, cat=B
     auto rid3 = insert_row(heap, 3, "A", {0.5F, 0.5F, 0.0F});
-    auto rid4 = insert_row(heap, 4, "B", {0.0F, 1.0F, 0.0F}); // cat=B
+    auto rid4 = insert_row(heap, 4, "B", {0.0F, 1.0F, 0.0F}); // cat=B, outside top-2
 
     auto where = binary_expr(BinaryOp::EQUAL, col_ref("category"), lit_string("B"));
     BoundStatement bound;
@@ -271,11 +276,9 @@ TEST_F(QANearestPrefilterTest, PrefilteredWithWherePostFilter) {
 
     ASSERT_TRUE(op.open().has_value());
     auto results = drain(op);
-    ASSERT_EQ(results.size(), 2u);
+    ASSERT_EQ(results.size(), 1u);
     EXPECT_EQ(results[0].values[1].as_string(), "B");
-    EXPECT_EQ(results[1].values[1].as_string(), "B");
     EXPECT_EQ(results[0].values[0].as_int32(), 2); // closer B
-    EXPECT_EQ(results[1].values[0].as_int32(), 4); // further B
 
     op.close();
 }

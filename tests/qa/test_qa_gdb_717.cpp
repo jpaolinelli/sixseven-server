@@ -174,17 +174,20 @@ TEST_F(QA717NearestDotEndToEndTest, UsingDotDistanceColumnIsRawDotProduct) {
     EXPECT_NEAR(qr.rows[4][1].as_float64(), -1.0, 1e-5);
 }
 
-// A sibling AND conjunct post-filters the candidates; ordering among the
-// surviving rows must still be highest-dot-first.
+// A sibling AND conjunct post-filters the top-k window as a strict
+// intersection: it must not widen past the k-th nearest candidate to
+// backfill a slot rejected by the filter (GDB-1229). Top-2 by dot similarity
+// are {best(id=1), good(id=2)}; `id > 1` excludes best from that fixed
+// window, leaving only good — NOT {good, weak}, since weak is the 3rd
+// nearest and outside the top-2 window.
 TEST_F(QA717NearestDotEndToEndTest, UsingDotWithWherePostFilter) {
     auto qr = exec_ok("SELECT name FROM items "
                       "WHERE NEAREST(vec, 2) TO [1.0, 0.0, 0.0, 0.0] USING DOT "
                       "AND id > 1");
 
     auto got = names_in_order(qr);
-    ASSERT_EQ(got.size(), 2u);
+    ASSERT_EQ(got.size(), 1u);
     EXPECT_EQ(got[0], "good");
-    EXPECT_EQ(got[1], "weak");
 }
 
 // Guard: USING L2 ordering is untouched by the DOT fix (lower L2 first).
