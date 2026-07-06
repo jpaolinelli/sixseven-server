@@ -20,6 +20,7 @@ class WalWriter;
 
 /// Physical storage state for a single table.
 struct TableStorage {
+    database_id_t db_id = 0; ///< Owning database (for db-scoped cleanup).
     FileId file_id = 0;
     std::unique_ptr<BufferPoolManager> bpm;
     std::unique_ptr<TableHeap> heap;
@@ -28,6 +29,7 @@ struct TableStorage {
 
 /// Physical storage state for a single index (one file per index).
 struct IndexStorage {
+    database_id_t db_id = 0; ///< Owning database (for db-scoped cleanup).
     FileId file_id = 0;
     std::unique_ptr<BufferPoolManager> bpm;
 };
