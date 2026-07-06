@@ -1030,18 +1030,6 @@ HnswIndex::select_neighbors_heuristic(const std::vector<HnswNeighbor>& grown,
     }
 
     // The newly linked candidate is always the last element (see insert()).
-    // It must never be silently dropped here: this reverse edge is its only
-    // chance at an in-edge from this particular neighbor, and a fixed
-    // tie-break rule that sometimes discards it (rather than an existing,
-    // already-linked neighbor) is exactly what caused GDB-1235 -- with many
-    // equidistant candidates, evicting "the farthest, ties broken
-    // arbitrarily" kept picking the same slot, so later arrivals never
-    // gained a stable in-edge anywhere and were left unreachable from the
-    // entry point. Instead: keep the new candidate unconditionally, and
-    // choose which *existing* neighbor to evict by rotating through the
-    // existing entries tied at the farthest distance, so eviction pressure
-    // is spread fairly across the whole set over successive inserts rather
-    // than perpetually landing on the same node.
     const HnswNeighbor new_candidate = grown.back();
     std::vector<HnswNeighbor> existing(grown.begin(), grown.end() - 1);
     size_t keep_count = static_cast<size_t>(max_neighbors) - 1;
@@ -1052,21 +1040,53 @@ HnswIndex::select_neighbors_heuristic(const std::vector<HnswNeighbor>& grown,
     }
 
     if (keep_count == 0) {
-        // max_neighbors == 1: no room for any existing neighbor alongside
-        // the new candidate. Keep only the new candidate.
-        return {new_candidate};
+        // max_neighbors == 1: only one slot total. Ordinary keep-closest:
+        // the new candidate wins only if it's at least as close as the
+        // sole existing neighbor.
+        const HnswNeighbor& sole = existing.front();
+        return {new_candidate.distance <= sole.distance ? new_candidate : sole};
     }
 
-    // Partition `existing` into strictly-closer-than-boundary (always kept),
-    // tied-at-boundary (compete for remaining slots, rotated fairly), and
-    // strictly-farther (always dropped). The boundary distance is the
-    // `keep_count`-th smallest distance among the existing entries.
+    // Sort existing neighbors by distance and find the eviction boundary:
+    // the farthest distance among the (keep_count) closest existing
+    // entries. Anything strictly farther than this boundary is always
+    // dropped; anything strictly closer is always kept.
     std::vector<HnswNeighbor> sorted = existing;
     std::stable_sort(
         sorted.begin(), sorted.end(), [](const HnswNeighbor& a, const HnswNeighbor& b) {
             return a.distance < b.distance;
         });
     float boundary_distance = sorted[keep_count - 1].distance;
+
+    // GDB-1235 fix, correctly gated (per review): if the new candidate is
+    // STRICTLY FARTHER than the eviction boundary, it does not qualify for
+    // any slot at all -- preserve ordinary "keep the M closest" behavior so
+    // normal (non-tied) recall is unaffected; a worse new node must never
+    // evict a genuinely closer existing neighbor.
+    //
+    // The fair-tie-rotation only kicks in when the new candidate is AT or
+    // WITHIN the boundary (tied with, or closer than, the current farthest
+    // kept neighbor) -- exactly the many-way-tie scenario that caused
+    // GDB-1235: with candidates tied at the boundary distance (e.g.
+    // identical vectors), a fixed tie-break (std::max_element on all-equal
+    // distances) always resolved to the same slot, so each new insert's
+    // back-edge perpetually evicted only the *previous* insert's back-edge,
+    // permanently stranding a whole class of nodes with zero in-edges from
+    // the reachable component. Rotating which tied entry survives (keyed on
+    // the new node's strictly-increasing id) spreads eviction fairly
+    // instead.
+    if (new_candidate.distance > boundary_distance) {
+        // Reject the new candidate outright and leave the existing
+        // neighbor list untouched (still at full capacity: `existing` has
+        // exactly max_neighbors entries here, since select_neighbors_heuristic
+        // is only invoked when a full list is being grown by one). Returning
+        // anything short of `existing` unchanged would shrink the list below
+        // capacity, letting a later, possibly-worse candidate slip in
+        // through the "list not full yet" fast path in insert() instead of
+        // competing for a slot -- this was the review-caught regression: a
+        // rejected far candidate must not leave room behind it.
+        return existing;
+    }
 
     std::vector<HnswNeighbor> kept;
     kept.reserve(keep_count);

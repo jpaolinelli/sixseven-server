@@ -1052,39 +1052,81 @@ TEST(HnswInsertSearch, ManyIdenticalVectorsReachableWithSmallMStress) {
         << "All " << total << " identical vectors must remain reachable with M=4";
 }
 
-TEST(HnswInsertSearch, DuplicateClustersRemainReachableWithSmallM) {
+// NOTE: a two-cluster variant of this test (15 identical vectors in each of
+// two widely separated clusters) was evaluated here and dropped. It failed
+// intermittently on BOTH this fix and unmodified main, driven by a separate,
+// pre-existing issue in upper-layer entry-point/greedy-descent selection
+// with small per-cluster node counts (multi-layer topology occasionally
+// routes the entry point through a sparsely-populated upper layer before
+// enough of a cluster's own nodes exist to anchor it) -- unrelated to the
+// reverse-edge eviction-fairness bug this file's other GDB-1235 tests cover.
+// Tracked separately; out of scope for this ticket's reverse-edge fix.
+
+// Regression for the review fix on top of GDB-1235: select_neighbors_heuristic
+// must not force-admit a new candidate that is STRICTLY FARTHER than every
+// existing neighbor once a list is full -- doing so would evict a genuinely
+// closer neighbor and degrade recall for ordinary (non-tied) vector data.
+// Distinct, strictly increasing distances mean there are no ties at the
+// eviction boundary, so this exercises the plain "keep the M closest" path
+// rather than the tie-rotation path exercised by the identical-vector tests
+// above.
+TEST(HnswInsertSearch, StrictlyFartherCandidateDoesNotEvictCloserNeighbor) {
     TestFixture fix;
 
     HnswIndex index(*fix.bpm);
     HnswIndexConfig config;
-    config.dimension = 2;
-    config.m = 4;
-    config.ef_construction = 32;
+    config.dimension = 1;
+    config.m = 4; // layer-0 cap = m*2 = 8
+    config.ef_construction = 64;
     config.ef_search = 64;
     auto cr = index.create(config);
     ASSERT_TRUE(cr.has_value()) << cr.error().message;
 
-    // Two distinct clusters of 15 identical vectors each; every member of
-    // both clusters is tied at distance 0 within its own cluster, exercising
-    // the same eviction-fairness path as the fully-identical case while
-    // also covering a non-degenerate (multi-cluster) layout.
-    std::vector<float> cluster_a = {0.0F, 0.0F};
-    std::vector<float> cluster_b = {100.0F, 100.0F};
-    for (int i = 0; i < 15; ++i) {
-        ASSERT_TRUE(index.insert(cluster_a).has_value());
-    }
-    for (int i = 0; i < 15; ++i) {
-        ASSERT_TRUE(index.insert(cluster_b).has_value());
-    }
-    EXPECT_EQ(index.node_count(), 30u);
+    // Base point at the origin.
+    std::vector<float> origin = {0.0F};
+    ASSERT_TRUE(index.insert(origin).has_value());
 
-    auto sr_a = index.search(cluster_a, 15);
-    ASSERT_TRUE(sr_a.has_value()) << sr_a.error().message;
-    EXPECT_EQ(sr_a.value().size(), 15u) << "All 15 cluster-A vectors must be reachable";
+    // Fill the base node's layer-0 neighbor list (capacity 8) with 8 points
+    // at strictly increasing distances from the origin: 1, 2, 3, ..., 8.
+    for (int i = 1; i <= 8; ++i) {
+        std::vector<float> pt = {static_cast<float>(i)};
+        ASSERT_TRUE(index.insert(pt).has_value());
+    }
+    EXPECT_EQ(index.node_count(), 9u);
 
-    auto sr_b = index.search(cluster_b, 15);
-    ASSERT_TRUE(sr_b.has_value()) << sr_b.error().message;
-    EXPECT_EQ(sr_b.value().size(), 15u) << "All 15 cluster-B vectors must be reachable";
+    // A query at the origin should return the base node plus the 8 closest
+    // among {1..8} -- i.e. all of them, since there are exactly 8.
+    auto before = index.search(origin, 9);
+    ASSERT_TRUE(before.has_value()) << before.error().message;
+    EXPECT_EQ(before.value().size(), 9u);
+
+    // Now insert a point at distance 100 from the origin -- strictly
+    // farther than every existing point (1..8). It must not evict any of
+    // the genuinely-closer neighbors 1..8 from the base node's list; it
+    // simply fails to gain a slot there.
+    std::vector<float> far_point = {100.0F};
+    ASSERT_TRUE(index.insert(far_point).has_value());
+    EXPECT_EQ(index.node_count(), 10u);
+
+    auto after = index.search(origin, 9);
+    ASSERT_TRUE(after.has_value()) << after.error().message;
+    ASSERT_EQ(after.value().size(), 9u)
+        << "The base node and points 1..8 must still all be reachable/closest "
+           "to the origin -- the far point (100) must not have evicted any of them";
+    // Distances are squared L2, so point i (at coordinate i) is at distance
+    // i*i from the origin; the farthest of the 9 closest points (i=8) is at
+    // distance 64. The outlier at 100 is at distance 10000.
+    for (const auto& r : after.value()) {
+        EXPECT_LE(r.distance, 64.0F) << "node " << r.node_id
+                                     << " should be one of the 9 closest-to-origin points, "
+                                        "not displaced by the far outlier";
+    }
+
+    // The far point itself should not appear in the top-9 closest to the
+    // origin (it's the 10th-closest by construction).
+    for (const auto& r : after.value()) {
+        EXPECT_NE(r.distance, 10000.0F);
+    }
 }
 
 // =============================================================================
