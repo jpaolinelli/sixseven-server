@@ -2425,12 +2425,53 @@ Result<QueryResult> QueryEngine::execute_commit() {
         // PostgreSQL warns; committing outside a transaction is a no-op.
         return ok(std::move(qr));
     }
+
+    // GDB-1246: capture the WAL tail LSN *before* releasing the transaction's
+    // locks / marking it COMMITTED. There is no dedicated COMMIT WAL record
+    // today -- src/txn/txn_manager.cpp never appends one, and WAL recovery's
+    // COMMIT handling (src/storage/wal_recovery.cpp) is currently unreachable
+    // dead code for that reason. Recovery instead relies purely on the data
+    // records' MVCC stamps (see TransactionManager::get_status: an unknown
+    // xid with no in-memory transaction record is treated as COMMITTED).
+    // All of this transaction's data WAL (INSERT/UPDATE/DELETE, appended
+    // synchronously by TableHeap::log_wal during DML) is therefore already
+    // part of the WAL by this point, so the last-assigned LSN is a safe,
+    // sufficient commit_lsn: flushing up to it durably persists everything
+    // this transaction wrote. Note WalWriter::current_lsn() returns the NEXT
+    // LSN to be assigned (not yet appended), so we must subtract one -- a
+    // waiter on the unappended LSN would error out of flush_until()
+    // immediately. If WAL is disabled (wal_writer_ == nullptr, e.g. some
+    // in-memory/test configs), there is nothing to flush and commit proceeds
+    // without waiting.
+    lsn_t commit_lsn = invalid_lsn;
+    if (wal_writer_) {
+        lsn_t next_lsn = wal_writer_->current_lsn();
+        commit_lsn = next_lsn > invalid_lsn ? next_lsn - 1 : invalid_lsn;
+    }
+
     auto committed = txn_mgr_.commit(active_txn_id_);
     active_txn_id_ = invalid_txn_id;
     active_txn_row_deltas_.clear();
     if (!committed) {
         return make_error(committed.error().code, committed.error().message);
     }
+
+    // Durability wait: do not acknowledge the commit to the client until the
+    // WAL is durably flushed at least to commit_lsn. flush_until() (GDB-769)
+    // is group-commit aware -- concurrent committers share a single fsync --
+    // and is called here with no lock held across it, so it cannot serialize
+    // committers against each other.
+    if (wal_writer_) {
+        auto flushed = wal_writer_->flush_until(commit_lsn);
+        if (!flushed) {
+            // The transaction is already marked COMMITTED in memory and its
+            // locks released, but its WAL is not confirmed durable (flush
+            // failed or the writer shut down). We must not tell the client
+            // the commit succeeded.
+            return make_error(flushed.error().code, flushed.error().message);
+        }
+    }
+
     return ok(std::move(qr));
 }
 
