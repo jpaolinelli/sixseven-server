@@ -513,15 +513,16 @@ TEST_F(QA_GDB714_StorageAdversarial, ConcurrentInsertsProduceNoTornHeaders) {
     EXPECT_EQ(count_seed, 1u);
 }
 
-/// PRE-EXISTING BUG GDB-1234 (present on main before GDB-714; filed during
-/// GDB-714 QA): TableHeap::insert_tuple re-reads the
-/// shared last_insert_page_ hint after the page mutation, so a concurrent
-/// insert that advances the hint makes the first thread unpin the WRONG page
-/// ("page N is not pinned" error + a leaked pin on the real page) and can
+/// GDB-1234: TableHeap::insert_tuple used to re-read the shared
+/// last_insert_page_ hint after the page mutation, so a concurrent insert
+/// that advanced the hint made the first thread unpin the WRONG page
+/// ("page N is not pinned" error + a leaked pin on the real page) and could
 /// return a RID pointing at the wrong page. Multi-page concurrent inserts
-/// trip it readily. Enable once the hint is captured into a local (or made
-/// atomic) for the whole operation.
-TEST_F(QA_GDB714_StorageAdversarial, DISABLED_ConcurrentInsertsAcrossPages) {
+/// tripped it readily. Fixed by capturing the hint into a local once per
+/// operation (insert_tuple and insert_batch) and using that local
+/// consistently for fetch/RID/unpin; last_insert_page_ is now
+/// std::atomic<PageId>. Re-enabled as a regression guard.
+TEST_F(QA_GDB714_StorageAdversarial, ConcurrentInsertsAcrossPages) {
     constexpr size_t kThreads = 2;
     constexpr size_t kPerThread = 300;
 
