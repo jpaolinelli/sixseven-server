@@ -180,16 +180,17 @@ TEST_F(NearestJoinTest, FilteredKnnAppliesSiblingPredicateBeforeTopK) {
     EXPECT_EQ(sorted_int_col(joined, 0), (std::vector<int32_t>{1, 2}));
 }
 
-// AC: filtered-kNN where the sibling predicate changes the result set. With
-// title LIKE 'A%' removed and instead title <> 'Alpha', the 2 nearest of the
-// remaining books are {2, 3} (Apex then Gamma), proving the filter runs before
-// top-k rather than after.
+// AC: filtered-kNN intersects the sibling predicate with the fixed top-k
+// window rather than backfilling past it (GDB-1229). The 2 nearest books to
+// the query vector are {1 (Alpha), 2 (Apex)}; `title <> 'Alpha'` excludes
+// book 1 from that fixed window, leaving only book 2 — NOT {2, 3}, since
+// book 3 (Gamma) is the 3rd nearest and outside the top-2 window.
 TEST_F(NearestJoinTest, FilteredKnnChangesResultSetBeforeTopK) {
     auto joined = run_ok("SELECT b.id "
                          "FROM books b INNER JOIN reviews r ON r.book_id = b.id "
                          "WHERE NEAREST(b.description_vec, 2) TO [1.0, 0.0, 0.0, 0.0] "
                          "AND b.title <> 'Alpha'");
-    EXPECT_EQ(sorted_int_col(joined, 0), (std::vector<int32_t>{2, 3}));
+    EXPECT_EQ(sorted_int_col(joined, 0), (std::vector<int32_t>{2}));
 }
 
 // AC: other-table predicate filters the joined table without re-ranking the

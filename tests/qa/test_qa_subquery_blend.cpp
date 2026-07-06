@@ -130,7 +130,6 @@ protected:
 // A single statement filtering relational rows by BOTH a graph traversal and a
 // vector similarity search, each nested as a subquery.
 TEST_F(QASubqueryBlendTest, RelationalGraphVectorBlendInOneQuery) {
-    GTEST_SKIP() << "NEAREST(k)+WHERE backfill-vs-strict-intersect semantics tracked by GDB-1293";
     // Articles authored by bob (user 2) AND close to [1,0,0,0]:
     //   authored OUT from bob -> {10, 11}; the 2 nearest to [1,0,0,0] are the
     //   distance-0 articles {10, 12} (11 is far); ∩ -> {10}.
@@ -157,7 +156,6 @@ TEST_F(QASubqueryBlendTest, CorrelatedVectorPerUserRejected) {
 
 // Graph pattern (MATCH) nested as an IN subquery, intersected with a vector match.
 TEST_F(QASubqueryBlendTest, MatchAndVectorBlend) {
-    GTEST_SKIP() << "NEAREST(k)+WHERE backfill-vs-strict-intersect semantics tracked by GDB-1293";
     // Articles authored by a user that alice follows, near [0,1,0,0]:
     //   MATCH alice-follows->u-authored->art  => bob's articles {10,11};
     //   the single nearest to [0,1,0,0] => {11};  ∩ => {11} = 'db'.
