@@ -259,6 +259,42 @@ std::string_view status_to_sqlstate(StatusCode code) {
     return "XX000"; // Fallback.
 }
 
+// -- Byte offset -> character index conversion --------------------------------
+
+/// Convert a 1-based UTF-8 BYTE offset into a query string to a 1-based
+/// CHARACTER index, per the PostgreSQL wire protocol's definition of the
+/// ErrorResponse 'P' (Position) field: "an index into the original query
+/// string... measured in characters, not bytes."
+///
+/// For ASCII-only prefixes the byte offset and character index are identical,
+/// so this is a no-op for ASCII queries (GDB-750 behavior is preserved).
+///
+/// Counts UTF-8 lead bytes (bytes where (b & 0xC0) != 0x80, i.e. not a
+/// continuation byte) in query[0 .. byte_offset_1based - 1). Handles
+/// defensively: an offset at/past the end of the string is clamped to
+/// query.size(); malformed/truncated multibyte sequences are simply counted
+/// byte-by-byte (each non-continuation byte counts as one character), which
+/// never reads out of bounds.
+uint32_t byte_offset_to_char_index_1based(std::string_view query, uint32_t byte_offset_1based) {
+    if (byte_offset_1based == 0) {
+        return 1;
+    }
+    // byte_offset_1based is 1-based; the number of bytes strictly before the
+    // error byte is (byte_offset_1based - 1).
+    size_t bytes_before = static_cast<size_t>(byte_offset_1based - 1);
+    if (bytes_before > query.size()) {
+        bytes_before = query.size();
+    }
+    uint32_t char_count = 0;
+    for (size_t i = 0; i < bytes_before; ++i) {
+        auto b = static_cast<unsigned char>(query[i]);
+        if ((b & 0xC0) != 0x80) {
+            ++char_count;
+        }
+    }
+    return char_count + 1;
+}
+
 // -- Value text formatting ----------------------------------------------------
 
 std::string value_to_pg_text(const Value& value) {
@@ -1824,11 +1860,15 @@ void PgProtocolHandler::handle_simple_query(Connection& conn, std::string_view s
         if (session_result) {
             if (!*session_result) {
                 const auto& err = session_result->error();
+                std::optional<uint32_t> char_pos;
+                if (err.query_pos.has_value()) {
+                    char_pos = byte_offset_to_char_index_1based(stmt, *err.query_pos);
+                }
                 send_error_response(conn,
                                     "ERROR",
                                     std::string(status_to_sqlstate(err.code)),
                                     err.message,
-                                    err.query_pos);
+                                    char_pos);
                 session_->update_transaction_state(stmt, false);
                 send_ready_for_query(conn, session_->ready_for_query_status());
                 return;
@@ -1866,11 +1906,12 @@ void PgProtocolHandler::handle_simple_query(Connection& conn, std::string_view s
         if (!result) {
             // On error, send ErrorResponse and stop processing remaining statements.
             const auto& err = result.error();
-            send_error_response(conn,
-                                "ERROR",
-                                std::string(status_to_sqlstate(err.code)),
-                                err.message,
-                                err.query_pos);
+            std::optional<uint32_t> char_pos;
+            if (err.query_pos.has_value()) {
+                char_pos = byte_offset_to_char_index_1based(stmt, *err.query_pos);
+            }
+            send_error_response(
+                conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message, char_pos);
             session_->update_transaction_state(stmt, false);
             send_ready_for_query(conn, session_->ready_for_query_status());
             return;
@@ -2099,11 +2140,15 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
             auto columns = query_describer_(stmt->sql, startup_database());
             if (!columns) {
                 const auto& err = columns.error();
+                std::optional<uint32_t> char_pos;
+                if (err.query_pos.has_value()) {
+                    char_pos = byte_offset_to_char_index_1based(stmt->sql, *err.query_pos);
+                }
                 send_error_response(conn,
                                     "ERROR",
                                     std::string(status_to_sqlstate(err.code)),
                                     err.message,
-                                    err.query_pos);
+                                    char_pos);
                 error_in_extended_ = true;
                 return;
             }
@@ -2127,11 +2172,15 @@ void PgProtocolHandler::handle_describe(Connection& conn, const uint8_t* payload
             auto columns = query_describer_(portal->sql, startup_database());
             if (!columns) {
                 const auto& err = columns.error();
+                std::optional<uint32_t> char_pos;
+                if (err.query_pos.has_value()) {
+                    char_pos = byte_offset_to_char_index_1based(portal->sql, *err.query_pos);
+                }
                 send_error_response(conn,
                                     "ERROR",
                                     std::string(status_to_sqlstate(err.code)),
                                     err.message,
-                                    err.query_pos);
+                                    char_pos);
                 error_in_extended_ = true;
                 return;
             }
@@ -2207,11 +2256,12 @@ void PgProtocolHandler::handle_execute(Connection& conn, const uint8_t* payload,
         auto result = query_executor_(*substituted, startup_database());
         if (!result) {
             const auto& err = result.error();
-            send_error_response(conn,
-                                "ERROR",
-                                std::string(status_to_sqlstate(err.code)),
-                                err.message,
-                                err.query_pos);
+            std::optional<uint32_t> char_pos;
+            if (err.query_pos.has_value()) {
+                char_pos = byte_offset_to_char_index_1based(*substituted, *err.query_pos);
+            }
+            send_error_response(
+                conn, "ERROR", std::string(status_to_sqlstate(err.code)), err.message, char_pos);
             error_in_extended_ = true;
             return;
         }
@@ -2446,6 +2496,11 @@ void PgProtocolHandler::send_error_response(Connection& conn,
                                             std::string_view sqlstate,
                                             std::string_view message,
                                             std::optional<uint32_t> position) {
+    // `position`, if set, is expected to already be a 1-based CHARACTER index
+    // into the original query string (per the PostgreSQL wire protocol's
+    // definition of the 'P' field). Callers with the query text available
+    // must convert from Error::query_pos (a 1-based byte offset) via
+    // byte_offset_to_char_index_1based() before calling this function.
     MessageWriter w;
     w.begin_message('E');
     w.write_byte('S');
@@ -2458,7 +2513,7 @@ void PgProtocolHandler::send_error_response(Connection& conn,
     w.write_cstring(message); // Message.
     if (position.has_value()) {
         w.write_byte('P');
-        w.write_cstring(std::to_string(*position)); // Position (1-based byte offset).
+        w.write_cstring(std::to_string(*position)); // Position (1-based character index).
     }
     w.write_byte(0); // Terminator.
     auto msg = w.finish();
