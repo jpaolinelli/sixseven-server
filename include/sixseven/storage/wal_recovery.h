@@ -53,6 +53,16 @@ struct RecoveryStats {
     std::set<txn_id_t> committed_txn_ids;
     /// Txn IDs that were aborted or in-progress at crash (diagnostics).
     std::set<txn_id_t> aborted_txn_ids;
+
+    /// Highest transaction id observed anywhere in the WAL (GDB-1247): any
+    /// record's txn_id field (BEGIN/COMMIT/ABORT/data records, excluding the
+    /// invalid_txn_id sentinel and frozen_txn_id), every txn id listed in a
+    /// CHECKPOINT record's active-txn payload, and the ceiling of every
+    /// TXN_ID_WATERMARK record. 0 if no such id was ever observed.
+    /// TransactionManager::init_next_txn_id() should be seeded with
+    /// max(this value + 1, its default) on startup so no id handed out by a
+    /// prior process can ever be reused by a live transaction.
+    txn_id_t max_txn_id_seen = 0;
 };
 
 // -- WAL Recovery -------------------------------------------------------------

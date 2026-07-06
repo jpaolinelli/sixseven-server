@@ -77,6 +77,7 @@ bool WalRecovery::is_data_record(WalRecordType type) {
     case WalRecordType::ABORT:
     case WalRecordType::CHECKPOINT:
     case WalRecordType::PROMOTE:
+    case WalRecordType::TXN_ID_WATERMARK:
         return false;
     }
     return false; // Unreachable — silences compiler warning.
@@ -121,6 +122,11 @@ Result<RecoveryStats> WalRecovery::recover() {
     std::set<txn_id_t> aborted_txns;
     std::set<txn_id_t> active_txns;
 
+    // GDB-1247: highest txn id observed anywhere in the WAL (survives
+    // checkpoint resets, unlike the sets above -- it is a monotonic max over
+    // the entire scan, not just the post-checkpoint window).
+    txn_id_t max_txn_id_seen = 0;
+
     while (true) {
         auto record = reader.next();
         if (!record) {
@@ -148,6 +154,9 @@ Result<RecoveryStats> WalRecovery::recover() {
                 if (active) {
                     for (auto txn_id : *active) {
                         checkpoint_active.insert(txn_id);
+                        if (txn_id > max_txn_id_seen) {
+                            max_txn_id_seen = txn_id;
+                        }
                     }
                 } else {
                     SIXSEVEN_LOG_WARN("WAL recovery: failed to decode checkpoint data: {}",
@@ -185,10 +194,32 @@ Result<RecoveryStats> WalRecovery::recover() {
             continue; // Don't buffer the checkpoint record itself.
         }
 
+        // --- Handle TXN_ID_WATERMARK: track the persisted ceiling ------------
+        // (GDB-1247). These carry txn_id=0 (they are not associated with any
+        // particular transaction) so they are decoded here, before the
+        // general txn_id tracking below, and never buffered as data records.
+        if (record->type == WalRecordType::TXN_ID_WATERMARK) {
+            if (record->data.size() >= sizeof(uint64_t)) {
+                txn_id_t ceiling = 0;
+                std::memcpy(&ceiling, record->data.data(), sizeof(uint64_t));
+                if (ceiling > max_txn_id_seen) {
+                    max_txn_id_seen = ceiling;
+                }
+            } else {
+                SIXSEVEN_LOG_WARN(
+                    "WAL recovery: TXN_ID_WATERMARK record at lsn={} has truncated payload",
+                    record->lsn);
+            }
+            continue;
+        }
+
         // --- Track transaction state -----------------------------------------
         // Frozen records (GDB-714) represent autocommit operations: they are
         // committed by definition and never tracked as in-flight.
         if (record->txn_id != 0 && record->txn_id != frozen_txn_id) {
+            if (record->txn_id > max_txn_id_seen) {
+                max_txn_id_seen = record->txn_id;
+            }
             switch (record->type) {
             case WalRecordType::BEGIN:
                 active_txns.insert(record->txn_id);
@@ -248,14 +279,16 @@ Result<RecoveryStats> WalRecovery::recover() {
     stats.aborted_txns = aborted_txns.size();
     stats.committed_txn_ids = committed_txns;
     stats.aborted_txn_ids = aborted_txns;
+    stats.max_txn_id_seen = max_txn_id_seen;
 
     SIXSEVEN_LOG_INFO("WAL recovery analysis: {} records scanned, checkpoint_lsn={}, max_lsn={}, "
-                      "{} committed, {} aborted/in-progress",
+                      "{} committed, {} aborted/in-progress, max_txn_id_seen={}",
                       stats.records_scanned,
                       last_checkpoint_lsn,
                       stats.max_lsn,
                       stats.committed_txns,
-                      stats.aborted_txns);
+                      stats.aborted_txns,
+                      stats.max_txn_id_seen);
 
     // ---- Phase 2: Redo ------------------------------------------------------
     // Replay data records of committed transactions in forward order.

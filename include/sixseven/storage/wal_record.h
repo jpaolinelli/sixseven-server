@@ -53,6 +53,15 @@ enum class WalRecordType : uint8_t {
     /// Graph edge delete: same payload layout as EDGE_INSERT so replay can
     /// locate the edge_row_id and remove it idempotently (GDB-1067).
     EDGE_DELETE = 12,
+    /// Txn-id high-water mark (GDB-1247): payload is a single uint64 giving
+    /// the CEILING of a reserved batch of transaction ids. Written by
+    /// TransactionManager BEFORE handing out any id in the batch (never
+    /// after), so that on restart WAL recovery can compute
+    /// next_txn_id_ >= the highest id that could ever have been allocated,
+    /// even if the process crashed mid-batch. Not a data record: it carries
+    /// no table/page/slot target and is neither redone nor undone -- WAL
+    /// recovery only inspects it to derive the watermark.
+    TXN_ID_WATERMARK = 13,
 };
 
 /// Return a human-readable name for a WalRecordType.
@@ -84,6 +93,8 @@ inline const char* wal_record_type_name(WalRecordType type) {
         return "EDGE_INSERT";
     case WalRecordType::EDGE_DELETE:
         return "EDGE_DELETE";
+    case WalRecordType::TXN_ID_WATERMARK:
+        return "TXN_ID_WATERMARK";
     }
     return "UNKNOWN";
 }
