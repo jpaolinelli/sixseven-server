@@ -130,8 +130,31 @@ TransactionStatus TransactionManager::get_status(txn_id_t txn_id) const {
         return TransactionStatus::COMMITTED;
     }
 
-    // Unknown transactions are treated as aborted (conservative).
-    return TransactionStatus::ABORTED;
+    // Check if this was an ABORTED transaction that was garbage-collected
+    // (GDB-1242). This must be checked -- and win -- before falling back to
+    // the unknown-xid convention below: a GC'd abort is DEFINITIVELY
+    // aborted, never "unknown".
+    if (pruned_aborted_.count(txn_id) > 0) {
+        return TransactionStatus::ABORTED;
+    }
+
+    // Genuinely unknown transactions (never registered with this manager --
+    // e.g. a row persisted by a previous process with no durable commit
+    // log) are treated as COMMITTED. This is the one documented unknown-xid
+    // convention shared by every layer (table_heap::effective_status and
+    // mvcc.cpp both delegate here); it preserves the cross-restart
+    // compromise so existing data stays readable.
+    return TransactionStatus::COMMITTED;
+}
+
+bool TransactionManager::is_registered(txn_id_t txn_id) const {
+    if (txn_id == frozen_txn_id) {
+        return true;
+    }
+
+    std::lock_guard lock(mu_);
+    return transactions_.count(txn_id) > 0 || pruned_committed_.count(txn_id) > 0 ||
+           pruned_aborted_.count(txn_id) > 0;
 }
 
 Transaction* TransactionManager::get_transaction(txn_id_t txn_id) const {
@@ -294,6 +317,11 @@ void TransactionManager::gc_completed_transactions_locked() {
         if (txn.status != TransactionStatus::ACTIVE && txn.txn_id < horizon) {
             if (txn.status == TransactionStatus::COMMITTED) {
                 pruned_committed_.insert(txn.txn_id);
+            } else if (txn.status == TransactionStatus::ABORTED) {
+                // GDB-1242: remember GC'd aborts too, so get_status() does not
+                // fall through to the unknown-xid convention (COMMITTED) for
+                // them -- that would resurrect the aborted txn's writes.
+                pruned_aborted_.insert(txn.txn_id);
             }
             it = transactions_.erase(it);
         } else {

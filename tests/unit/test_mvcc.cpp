@@ -181,9 +181,15 @@ TEST(TransactionManager, CommitNotFound) {
     EXPECT_EQ(result.error().code, StatusCode::NOT_FOUND);
 }
 
-TEST(TransactionManager, UnknownStatusTreatedAsAborted) {
+TEST(TransactionManager, UnknownStatusTreatedAsCommitted) {
+    // GDB-1242: a genuinely unregistered xid is treated as COMMITTED (the
+    // cross-restart compromise), not ABORTED -- the old ABORTED convention
+    // contradicted table_heap's effective_status and caused GC'd aborted
+    // transactions to resurrect. is_registered() is the correct way to ask
+    // "is this xid unknown", not get_status()'s return value.
     TransactionManager mgr;
-    EXPECT_EQ(mgr.get_status(999), TransactionStatus::ABORTED);
+    EXPECT_EQ(mgr.get_status(999), TransactionStatus::COMMITTED);
+    EXPECT_FALSE(mgr.is_registered(999));
 }
 
 TEST(TransactionManager, GetTransaction) {

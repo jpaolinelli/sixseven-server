@@ -51,8 +51,32 @@ public:
     /// Returns the snapshot that should be used for the current statement.
     [[nodiscard]] Snapshot get_statement_snapshot(txn_id_t txn_id);
 
-    /// Get the status of a transaction.
+    /// Get the status of a transaction. This is the SINGLE authoritative
+    /// resolver for transaction status (GDB-1242) -- every layer that needs
+    /// to interpret an xid (table_heap's visibility check, mvcc.cpp's
+    /// snapshot-based is_visible/is_dead, vacuum) MUST delegate to this
+    /// rather than re-deriving status from get_transaction()/pruned sets.
+    ///
+    /// Convention (documented here as the one shared source of truth):
+    ///   - xid == frozen_txn_id                    -> COMMITTED (GDB-714).
+    ///   - xid live in transactions_                -> its current status.
+    ///   - xid in pruned_committed_ (GC'd, was COMMITTED) -> COMMITTED.
+    ///   - xid in pruned_aborted_   (GC'd, was ABORTED)   -> ABORTED.
+    ///   - genuinely unknown xid (never registered; e.g. a row persisted by
+    ///     a prior process with no commit log) -> COMMITTED. This preserves
+    ///     the no-clog cross-restart compromise: existing data stays
+    ///     readable. It does NOT apply to GC'd aborted transactions, which
+    ///     are definitively ABORTED via pruned_aborted_ above.
     [[nodiscard]] TransactionStatus get_status(txn_id_t txn_id) const;
+
+    /// True iff this xid is definitely known to the manager: either a live
+    /// transaction, or a GC'd transaction remembered in pruned_committed_ /
+    /// pruned_aborted_. False means the xid was never registered (e.g. a row
+    /// persisted by a prior server process). Use this -- not get_status's
+    /// return value -- to ask "is this xid unknown/unregistered"; get_status
+    /// deliberately returns COMMITTED for unregistered ids (see its doc
+    /// comment), so it cannot be used as an unknown-xid proxy.
+    [[nodiscard]] bool is_registered(txn_id_t txn_id) const;
 
     /// Get a transaction by ID (returns nullptr if not found).
     [[nodiscard]] Transaction* get_transaction(txn_id_t txn_id) const;
@@ -113,6 +137,19 @@ private:
     /// Committed txn_ids that have been garbage-collected from transactions_.
     /// Needed so get_status() can still return COMMITTED for pruned transactions.
     std::unordered_set<txn_id_t> pruned_committed_;
+
+    /// Aborted txn_ids that have been garbage-collected from transactions_
+    /// (GDB-1242). Needed so get_status() can still return ABORTED for GC'd
+    /// aborted transactions -- without this, their tuples would resurrect
+    /// (deletes reverted, inserts made visible) the moment GC/auto-vacuum
+    /// runs, because an untracked xid falls back to the unknown-xid
+    /// convention (COMMITTED). Same memory-growth characteristics as
+    /// pruned_committed_ above: both are unbounded-until-restart sets keyed
+    /// by txn_id; neither currently has an eviction policy. This mirrors the
+    /// existing (pre-GDB-1242) behavior of pruned_committed_ rather than
+    /// introducing a new bound -- follow-up if unconstrained growth becomes
+    /// an issue in practice.
+    std::unordered_set<txn_id_t> pruned_aborted_;
 
     /// Take a snapshot while holding the lock.
     [[nodiscard]] Snapshot take_snapshot_locked() const;

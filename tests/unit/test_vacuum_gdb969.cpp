@@ -113,14 +113,10 @@ protected:
 // Test (a): CORRUPTION GUARD
 //
 // Simulate a row written by a prior server process: stamp a concrete numeric
-// xmin that was never registered in txn_mgr_.  get_status() returns ABORTED
-// for this id, so naive is_dead(Case 1) would wrongly reclaim it.
-// With vacuum_is_dead() the unknown xmin is mapped to frozen_txn_id
-// (COMMITTED) and the row must survive.
-//
-// NOTE: without the vacuum_normalize_xid / vacuum_is_dead fix this test
-// would fail because vacuum_page would call is_dead with the raw xmin, see
-// ABORTED, and delete the slot.
+// xmin that was never registered in txn_mgr_ (is_registered() is false for
+// it). Without normalization, is_dead(Case 1) would call get_status() on the
+// raw xmin; vacuum_is_dead() instead maps unregistered ids to frozen_txn_id
+// (COMMITTED) via vacuum_normalize_xid, and the row must survive.
 // =============================================================================
 
 TEST_F(VacuumGDB969Test, CorruptionGuard_UnknownXminSurvivesVacuum) {
@@ -129,8 +125,10 @@ TEST_F(VacuumGDB969Test, CorruptionGuard_UnknownXminSurvivesVacuum) {
     // from 1 in a fresh TransactionManager.
     const txn_id_t prior_process_xmin = 999'000'001;
 
-    // Verify the manager indeed does not know about this id.
-    ASSERT_EQ(txn_mgr_.get_status(prior_process_xmin), TransactionStatus::ABORTED)
+    // Verify the manager indeed does not know about this id (GDB-1242: use
+    // is_registered, not get_status's return value, as the unknown-xid
+    // predicate -- get_status(unregistered) now returns COMMITTED).
+    ASSERT_FALSE(txn_mgr_.is_registered(prior_process_xmin))
         << "pre-condition: manager must not know this xmin";
 
     // Insert the live row (xmax not set).
@@ -155,9 +153,10 @@ TEST_F(VacuumGDB969Test, CorruptionGuard_UnknownXminWithUnknownXmaxSurvivesVacuu
     const txn_id_t old_xmin = 999'000'002;
     const txn_id_t old_xmax = 999'000'003;
 
-    // Neither id known to this manager.
-    ASSERT_EQ(txn_mgr_.get_status(old_xmin), TransactionStatus::ABORTED);
-    ASSERT_EQ(txn_mgr_.get_status(old_xmax), TransactionStatus::ABORTED);
+    // Neither id known to this manager (GDB-1242: is_registered is the
+    // correct unknown-xid predicate).
+    ASSERT_FALSE(txn_mgr_.is_registered(old_xmin));
+    ASSERT_FALSE(txn_mgr_.is_registered(old_xmax));
 
     // Insert a row whose xmax is also an unknown id (simulating an updated
     // version from a prior process session).

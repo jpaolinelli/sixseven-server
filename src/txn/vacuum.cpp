@@ -8,17 +8,20 @@ namespace sixseven {
 
 namespace {
 
-/// Map a transaction id unknown to the manager to frozen_txn_id so that vacuum
-/// treats rows persisted by a prior server process as committed-and-live,
-/// mirroring the read-path behaviour in table_heap.cpp::normalize_xid.
-/// TransactionManager::get_status conservatively returns ABORTED for any id it
-/// does not recognise; without this mapping vacuum would incorrectly reclaim
-/// live rows after a server restart (GDB-969 corruption hazard).
+/// Map a transaction id genuinely UNREGISTERED with the manager to
+/// frozen_txn_id so that vacuum treats rows persisted by a prior server
+/// process as committed-and-live, mirroring the read-path behaviour in
+/// table_heap.cpp::normalize_xid. Uses TransactionManager::is_registered
+/// (GDB-1242) rather than get_transaction() != nullptr: get_transaction only
+/// sees LIVE transactions, so a GC'd ABORTED transaction (remembered in
+/// pruned_aborted_, tracked by is_registered) would otherwise be wrongly
+/// normalized to frozen_txn_id here and have its dead tuples treated as
+/// live/committed forever -- the exact resurrection bug this ticket fixes.
 txn_id_t vacuum_normalize_xid(const TransactionManager& mgr, txn_id_t xid) {
     if (xid == invalid_txn_id || xid == frozen_txn_id) {
         return xid;
     }
-    return mgr.get_transaction(xid) != nullptr ? xid : frozen_txn_id;
+    return mgr.is_registered(xid) ? xid : frozen_txn_id;
 }
 
 /// Vacuum-safe deadness check (GDB-969).

@@ -119,9 +119,11 @@ protected:
 // =============================================================================
 
 TEST_F(QA_VacuumGDB969, F1_UnknownXminNoXmax_MustSurvive) {
-    // Precondition: manager does not know kPriorXmin.
-    ASSERT_EQ(txn_mgr_.get_status(kPriorXmin), TransactionStatus::ABORTED)
-        << "pre-condition: kPriorXmin must be unknown";
+    // Precondition: manager does not know kPriorXmin. (GDB-1242: is_registered
+    // is the correct unknown-xid predicate; get_status(unregistered) now
+    // returns COMMITTED per the unified convention.)
+    ASSERT_FALSE(txn_mgr_.is_registered(kPriorXmin))
+        << "pre-condition: kPriorXmin must be unknown/unregistered";
 
     auto [pid, slot] = insert_mvcc_tuple(kPriorXmin, invalid_txn_id);
     ASSERT_GT(pid, 0u);
@@ -146,9 +148,10 @@ TEST_F(QA_VacuumGDB969, F1_UnknownXminNoXmax_MustSurvive) {
 // =============================================================================
 
 TEST_F(QA_VacuumGDB969, F2a_UnknownXminUnknownXmax_Consistent_With_ReadPath) {
-    // Both ids are unknown to this manager.
-    ASSERT_EQ(txn_mgr_.get_status(kPriorXmin), TransactionStatus::ABORTED);
-    ASSERT_EQ(txn_mgr_.get_status(kPriorXmax), TransactionStatus::ABORTED);
+    // Both ids are unknown to this manager (GDB-1242: is_registered is the
+    // correct unknown-xid predicate).
+    ASSERT_FALSE(txn_mgr_.is_registered(kPriorXmin));
+    ASSERT_FALSE(txn_mgr_.is_registered(kPriorXmax));
 
     auto [pid, slot] = insert_mvcc_tuple(kPriorXmin, kPriorXmax);
     ASSERT_GT(pid, 0u);
@@ -180,7 +183,8 @@ TEST_F(QA_VacuumGDB969, F2a_UnknownXminUnknownXmax_Consistent_With_ReadPath) {
 // =============================================================================
 
 TEST_F(QA_VacuumGDB969, F2b_UnknownXminWithActiveXmax_MustSurvive) {
-    ASSERT_EQ(txn_mgr_.get_status(kPriorXmin), TransactionStatus::ABORTED) << "pre-condition";
+    // GDB-1242: is_registered is the correct unknown-xid predicate.
+    ASSERT_FALSE(txn_mgr_.is_registered(kPriorXmin)) << "pre-condition";
 
     // Start a real transaction whose delete has not yet committed.
     auto* t_del = txn_mgr_.begin().value();
@@ -341,8 +345,9 @@ TEST_F(QA_VacuumGDB969, F5_BatchMixed_ExactDeadCount) {
 // =============================================================================
 
 TEST_F(QA_VacuumGDB969, F6_AutoVacuumWorker_DoesNotReclaimPriorProcessRows) {
-    // Plant a prior-process live row.
-    ASSERT_EQ(txn_mgr_.get_status(kPriorXmin), TransactionStatus::ABORTED) << "pre-condition";
+    // Plant a prior-process live row. (GDB-1242: is_registered is the correct
+    // unknown-xid predicate.)
+    ASSERT_FALSE(txn_mgr_.is_registered(kPriorXmin)) << "pre-condition";
     auto [pid, slot] = insert_mvcc_tuple(kPriorXmin, invalid_txn_id);
     ASSERT_GT(pid, 0u);
 
@@ -385,7 +390,8 @@ TEST_F(QA_VacuumGDB969, F6_AutoVacuumWorker_DoesNotReclaimPriorProcessRows) {
 // =============================================================================
 
 TEST_F(QA_VacuumGDB969, F7_RunFull_DoesNotReclaimPriorProcessRows) {
-    ASSERT_EQ(txn_mgr_.get_status(kPriorXmin), TransactionStatus::ABORTED) << "pre-condition";
+    // GDB-1242: is_registered is the correct unknown-xid predicate.
+    ASSERT_FALSE(txn_mgr_.is_registered(kPriorXmin)) << "pre-condition";
 
     auto [pid, slot] = insert_mvcc_tuple(kPriorXmin, invalid_txn_id);
     ASSERT_GT(pid, 0u);
