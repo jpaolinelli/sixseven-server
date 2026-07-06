@@ -297,4 +297,126 @@ TEST_F(QA_GDB1252, MatchInOnAndWhereRejected) {
     expect_invalid(engine_->execute(sql), "ON clause", sql);
 }
 
+// =============================================================================
+// QA additions: adversarial coverage beyond the implementer's own test file.
+// =============================================================================
+
+// NEAREST + MATCH + JOIN, executed end-to-end (not just parsed), must produce
+// the specific "cannot combine NEAREST and MATCH" error -- NOT the generic
+// MATCH+JOIN stopgap error, NOT a crash, NOT a silent no-op. This is the exact
+// three-way combination named in the handoff as item 4.
+TEST_F(QA_GDB1252, NearestAndMatchAndJoinGivesSpecificCombinationError) {
+    exec_ok("CREATE TABLE vecbooks (id INT PRIMARY KEY, title VARCHAR, "
+             "vec EMBEDDING(4, title, 'builtin/4'))");
+    exec_ok("CREATE INDEX idx_vectitle ON vecbooks(title) USING bm25");
+    exec_ok("INSERT INTO vecbooks (id, title) VALUES (1, 'consciousness and the brain')");
+
+    const std::string sql =
+        "SELECT v.id FROM vecbooks v JOIN reviews r ON r.book_id = v.id "
+        "WHERE NEAREST(v.vec, 5) TO [1.0, 2.0, 3.0, 4.0] AND MATCH(v.title) TO 'consciousness'";
+    auto result = engine_->execute(sql);
+    ASSERT_FALSE(result.has_value()) << "NEAREST+MATCH+JOIN must not silently succeed: " << sql;
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    const std::string& msg = result.error().message;
+    EXPECT_NE(msg.find("NEAREST"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("MATCH"), std::string::npos) << msg;
+    // Must be the specific combination error, not the generic MATCH+JOIN
+    // stopgap message (which would mask the more precise diagnosis).
+    EXPECT_EQ(msg.find("wrap the full-text search in a derived table"), std::string::npos)
+        << "NEAREST+MATCH+JOIN should surface the NEAREST/MATCH combination error, "
+           "not the generic MATCH+JOIN derived-table message: " << msg;
+}
+
+// NEAREST-only + JOIN (no MATCH at all) must still succeed via pushdown --
+// confirms the new MATCH+JOIN guard does not regress the existing NEAREST
+// join-pushdown feature (GDB-1250) by mis-firing on NEAREST expressions.
+TEST_F(QA_GDB1252, NearestOnlyWithJoinStillWorks) {
+    exec_ok("CREATE TABLE vecbooks2 (id INT PRIMARY KEY, title VARCHAR, "
+             "vec EMBEDDING(4, title, 'builtin/4'))");
+    exec_ok("INSERT INTO vecbooks2 (id, title) VALUES (1, 'consciousness and the brain')");
+    exec_ok("INSERT INTO vecbooks2 (id, title) VALUES (2, 'a history of gardening')");
+
+    exec_ok("CREATE TABLE vreviews (id INT PRIMARY KEY, book_id INT, stars INT)");
+    exec_ok("INSERT INTO vreviews VALUES (100, 1, 5)");
+    exec_ok("INSERT INTO vreviews VALUES (200, 2, 4)");
+
+    const std::string sql =
+        "SELECT v.id, r.stars FROM vecbooks2 v JOIN vreviews r ON r.book_id = v.id "
+        "WHERE NEAREST(v.vec, 5) TO [1.0, 2.0, 3.0, 4.0]";
+    auto result = engine_->execute(sql);
+    ASSERT_TRUE(result.has_value()) << "NEAREST-only+JOIN pushdown must still work: "
+                                     << (result ? "" : result.error().message);
+}
+
+// Exact error message wording check for the WHERE-clause MATCH+JOIN rejection:
+// must name MATCH, JOIN, and the derived-table workaround verbatim enough to
+// be actionable (not just a generic "unsupported" message).
+TEST_F(QA_GDB1252, MatchJoinErrorMessageIsActionable) {
+    const std::string sql = "SELECT b.id, r.stars FROM books b "
+                            "INNER JOIN reviews r ON r.book_id = b.id "
+                            "WHERE MATCH(b.title) TO 'consciousness'";
+    auto result = engine_->execute(sql);
+    ASSERT_FALSE(result.has_value());
+    const std::string& msg = result.error().message;
+    EXPECT_NE(msg.find("MATCH(...)"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("JOIN"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("derived table"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("FROM ("), std::string::npos)
+        << "error message should show a concrete derived-table example: " << msg;
+    EXPECT_FALSE(msg.empty());
+}
+
+// The derived-table workaround with a RIGHT/multi-level join: derived table
+// joined to a table (not another derived table), confirming the workaround is
+// not narrowly special-cased to only derived-table-to-derived-table shapes.
+TEST_F(QA_GDB1252, DerivedTableMatchJoinedToPlainTableSucceeds) {
+    const std::string sql =
+        "SELECT nb.id, r.stars FROM reviews r "
+        "JOIN (SELECT id, _score FROM books WHERE MATCH(title) TO 'consciousness') nb "
+        "ON nb.id = r.book_id";
+    auto result = engine_->execute(sql);
+    ASSERT_TRUE(result.has_value()) << sql << " failed: " << result.error().message;
+    auto ids = sorted_first_col(*result);
+    // reviews joined on book_id in {1,3}: review rows 10 (book 1) and 30 (book 3).
+    std::vector<int32_t> stars;
+    for (const auto& row : result->rows) {
+        stars.push_back(row[1].as_int32());
+    }
+    std::sort(stars.begin(), stars.end());
+    std::vector<int32_t> expected_stars = {3, 5};
+    EXPECT_EQ(stars, expected_stars)
+        << "derived-table MATCH joined FROM the other side must still filter correctly";
+}
+
+// Zero-result MATCH inside the derived-table workaround, joined: must return
+// an empty result set, not an error and not the full unfiltered join.
+TEST_F(QA_GDB1252, DerivedTableMatchNoResultsJoinReturnsEmpty) {
+    const std::string sql =
+        "SELECT nb.id, r.stars FROM "
+        "(SELECT id, _score FROM books WHERE MATCH(title) TO 'zzz_no_such_term') nb "
+        "JOIN reviews r ON nb.id = r.book_id";
+    auto result = engine_->execute(sql);
+    ASSERT_TRUE(result.has_value()) << sql << " failed: " << result.error().message;
+    EXPECT_EQ(result->rows.size(), 0u);
+}
+
+// Empty MATCH query string combined with a JOIN in WHERE: must still be
+// rejected by the MATCH+JOIN guard (not bypass it via an edge-case empty
+// literal), and must not crash.
+TEST_F(QA_GDB1252, MatchEmptyQueryStringWithJoinStillRejected) {
+    const std::string sql = "SELECT b.id FROM books b "
+                            "JOIN reviews r ON r.book_id = b.id "
+                            "WHERE MATCH(b.title) TO ''";
+    expect_match_join_rejected(engine_->execute(sql), sql);
+}
+
+// Self-join with MATCH in WHERE: same table aliased twice, still a JOIN, must
+// still be rejected.
+TEST_F(QA_GDB1252, MatchWithSelfJoinRejected) {
+    const std::string sql = "SELECT b1.id FROM books b1 "
+                            "JOIN books b2 ON b2.id = b1.id + 1 "
+                            "WHERE MATCH(b1.title) TO 'consciousness'";
+    expect_match_join_rejected(engine_->execute(sql), sql);
+}
+
 } // namespace
