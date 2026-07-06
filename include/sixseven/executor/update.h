@@ -72,6 +72,13 @@ public:
     /// The heap this operator writes to (for executor-side bookkeeping).
     [[nodiscard]] TableHeap& target_heap() { return heap_; }
 
+    /// Net live-row-count delta applied to the heap so far by this statement
+    /// (GDB-1243). Each successful update is a new-version insert (+1)
+    /// followed by an old-version mark_deleted (-1), net zero; but if the
+    /// insert succeeds and the mark_deleted fails, this reflects the +1
+    /// leak so the caller can compensate row_count_ exactly.
+    [[nodiscard]] int64_t row_delta_so_far() const { return row_delta_so_far_; }
+
 protected:
     Result<void> do_open() override;
     Result<std::optional<Tuple>> do_next() override;
@@ -92,6 +99,8 @@ private:
     LockManager* lock_mgr_ = nullptr;
     /// Table id used for locking (GDB-930).
     table_id_t lock_table_id_ = 0;
+    /// Net row_count_ delta applied so far by this statement (GDB-1243).
+    int64_t row_delta_so_far_ = 0;
 };
 
 } // namespace sixseven

@@ -347,10 +347,25 @@ private:
     /// Session-level isolation level, applied by the next BEGIN (GDB-978).
     IsolationLevel session_isolation_ = IsolationLevel::READ_COMMITTED;
 
-    /// Per-heap live-row-count deltas accumulated by the explicit transaction
-    /// (+inserts, -deletes). Applied in reverse on ROLLBACK so COUNT(*) stays
-    /// accurate after aborted logical inserts/deletes.
-    std::unordered_map<TableHeap*, int64_t> active_txn_row_deltas_;
+    /// Per-table live-row-count deltas accumulated by the current transaction
+    /// (+inserts, -deletes), keyed by table_id_t rather than TableHeap*
+    /// (GDB-1243): a raw heap pointer can be freed by DROP TABLE before the
+    /// transaction ends (e.g. DROP TABLE inside an explicit txn followed by
+    /// ROLLBACK), which would otherwise be a use-after-free when compensating.
+    /// Applied in reverse on ROLLBACK / implicit-txn abort so COUNT(*) stays
+    /// accurate after aborted logical inserts/deletes. See
+    /// compensate_row_deltas_and_clear().
+    std::unordered_map<table_id_t, int64_t> active_txn_row_deltas_;
+
+    /// Reverse every accumulated per-table row-count delta in
+    /// active_txn_row_deltas_ (restoring row_count_ to what it was before the
+    /// failed/rolled-back statement(s)), then clear the map. Shared by the
+    /// explicit ROLLBACK path and the implicit-transaction abort path
+    /// (GDB-1243) so both compensate identically. Resolves each table_id to
+    /// its live TableHeap via storage_; tables dropped mid-transaction are
+    /// silently skipped (their storage no longer exists, so there is nothing
+    /// to compensate and no freed pointer is ever touched).
+    void compensate_row_deltas_and_clear();
 
     database_id_t current_database_id_ = default_database_id;
     int skip_masking_depth_ = 0;

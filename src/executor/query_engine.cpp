@@ -2434,6 +2434,28 @@ Result<QueryResult> QueryEngine::execute_commit() {
     return ok(std::move(qr));
 }
 
+void QueryEngine::compensate_row_deltas_and_clear() {
+    // Compensate live-row counters: the transaction's logical inserts and
+    // deletes moved the per-table counters, but its versions are now
+    // invisible. Resolve each table_id to its live heap at compensation time
+    // (GDB-1243) rather than caching a TableHeap* -- a DROP TABLE earlier in
+    // the same transaction may have already freed that heap, and dereferencing
+    // it here would be a use-after-free. Tables that no longer exist are
+    // skipped: their storage (and row_count_) is gone, so there is nothing
+    // left to compensate.
+    for (auto& [table_id, delta] : active_txn_row_deltas_) {
+        if (delta == 0) {
+            continue;
+        }
+        auto ts = storage_.get_table_storage(table_id);
+        if (!ts || *ts == nullptr || (*ts)->heap == nullptr) {
+            continue;
+        }
+        (*ts)->heap->adjust_row_count(-delta);
+    }
+    active_txn_row_deltas_.clear();
+}
+
 Result<QueryResult> QueryEngine::execute_rollback() {
     QueryResult qr;
     qr.message = "ROLLBACK";
@@ -2445,15 +2467,8 @@ Result<QueryResult> QueryEngine::execute_rollback() {
         SIXSEVEN_LOG_WARN(
             "ROLLBACK: abort of txn {} failed: {}", active_txn_id_, aborted.error().message);
     }
-    // Compensate live-row counters: the transaction's logical inserts and
-    // deletes moved the per-heap counters, but its versions are now invisible.
-    for (auto& [heap, delta] : active_txn_row_deltas_) {
-        if (heap != nullptr && delta != 0) {
-            heap->adjust_row_count(-delta);
-        }
-    }
+    compensate_row_deltas_and_clear();
     active_txn_id_ = invalid_txn_id;
-    active_txn_row_deltas_.clear();
     return ok(std::move(qr));
 }
 
@@ -2619,6 +2634,7 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
     txn_id_t stmt_txn_id = invalid_txn_id;
     bool implicit_txn = false;
     TableHeap* dml_heap = nullptr;
+    table_id_t dml_table_id = 0;
     int64_t dml_row_delta_sign = 0; // +1 INSERT, -1 DELETE, 0 UPDATE/queries.
 
     InsertOperator* insert_op = dynamic_cast<InsertOperator*>(iter->get());
@@ -2636,24 +2652,62 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
             implicit_txn = true;
         }
         if (insert_op != nullptr) {
+            // Resolve the target table_id independently of
+            // insert_op->embedding_table_id_ (GDB-1243): that field is only
+            // populated when the table has EMBEDDING columns (see planner.cpp),
+            // so it is unreliable (stays 0) for ordinary tables and must not be
+            // used to key row-count compensation or table locking.
+            table_id_t insert_table_id = 0;
+            if (auto* ins = dynamic_cast<const InsertStmt*>(bound.stmt)) {
+                auto ins_schema = catalog_.get_table(current_database_id_, ins->table_name);
+                if (ins_schema) {
+                    insert_table_id = ins_schema->table_id;
+                }
+            }
             insert_op->set_txn_id(stmt_txn_id);
-            insert_op->set_lock_manager(&txn_mgr_.lock_manager(), insert_op->embedding_table_id_);
+            insert_op->set_lock_manager(&txn_mgr_.lock_manager(), insert_table_id);
             dml_heap = &insert_op->target_heap();
+            dml_table_id = insert_table_id;
             dml_row_delta_sign = 1;
         } else if (update_op != nullptr) {
             update_op->set_txn_id(stmt_txn_id);
             update_op->set_lock_manager(&txn_mgr_.lock_manager(), update_op->target_table_id_);
             dml_heap = &update_op->target_heap();
+            dml_table_id = update_op->target_table_id_;
         } else {
             delete_op->set_txn_id(stmt_txn_id);
             delete_op->set_lock_manager(&txn_mgr_.lock_manager(), delete_op->target_table_id_);
             dml_heap = &delete_op->target_heap();
+            dml_table_id = delete_op->target_table_id_;
             dml_row_delta_sign = -1;
         }
     }
+    // Read whatever partial row_count_ delta the DML operator has applied to
+    // the heap so far (GDB-1243). Unlike the statement's "count" result row --
+    // which is only produced on successful completion -- this reflects rows
+    // already committed to row_count_ by a statement that errors mid-scan, so
+    // aborting the transaction can compensate the counter for exactly the
+    // partial work done (no undercount on a failed DELETE, no overcount on a
+    // failed INSERT...SELECT, no +1 leak on a failed UPDATE).
+    auto dml_partial_delta = [&]() -> int64_t {
+        if (insert_op != nullptr) {
+            return insert_op->row_delta_so_far();
+        }
+        if (update_op != nullptr) {
+            return update_op->row_delta_so_far();
+        }
+        if (delete_op != nullptr) {
+            return delete_op->row_delta_so_far();
+        }
+        return 0;
+    };
 
     // Abort the implicit statement transaction when execution fails so its
-    // partial writes become invisible (xmin aborted / xmax aborted).
+    // partial writes become invisible (xmin aborted / xmax aborted), and
+    // compensate the per-table row_count_ for exactly the partial progress
+    // this statement made (GDB-1243). Mirrors the explicit-ROLLBACK
+    // compensation in execute_rollback() via the same shared helper so both
+    // paths restore COUNT(*) identically.
     auto abort_implicit_txn = [&]() {
         if (implicit_txn) {
             auto aborted = txn_mgr_.abort(stmt_txn_id);
@@ -2661,6 +2715,11 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                 SIXSEVEN_LOG_WARN(
                     "abort of implicit txn {} failed: {}", stmt_txn_id, aborted.error().message);
             }
+            const int64_t partial = dml_partial_delta();
+            if (partial != 0) {
+                active_txn_row_deltas_[dml_table_id] += partial;
+            }
+            compensate_row_deltas_and_clear();
         }
     };
 
@@ -2733,13 +2792,25 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                                       stmt_txn_id,
                                       aborted.error().message);
                 }
+                // GDB-1243: the statement's writes already moved row_count_
+                // (per-row, as they were applied), but the commit that would
+                // have made them durable/visible just failed and the txn was
+                // aborted above -- compensate exactly as abort_implicit_txn()
+                // would, so COUNT(*) is not left drifted.
+                const int64_t partial = dml_partial_delta();
+                if (partial != 0) {
+                    active_txn_row_deltas_[dml_table_id] += partial;
+                }
+                compensate_row_deltas_and_clear();
                 return make_error(committed.error().code, committed.error().message);
             }
         } else if (dml_heap != nullptr && dml_row_delta_sign != 0 && qr.rows.size() == 1 &&
                    !qr.rows[0].empty()) {
             // Explicit transaction: remember the live-row-count delta so
-            // ROLLBACK can compensate the heap counter.
-            active_txn_row_deltas_[dml_heap] += dml_row_delta_sign * qr.rows[0][0].as_int64();
+            // ROLLBACK can compensate the heap counter (keyed by table_id,
+            // not the raw heap pointer, so a later DROP TABLE + ROLLBACK in
+            // the same transaction can't dereference a freed heap; GDB-1243).
+            active_txn_row_deltas_[dml_table_id] += dml_row_delta_sign * qr.rows[0][0].as_int64();
         }
     }
 
