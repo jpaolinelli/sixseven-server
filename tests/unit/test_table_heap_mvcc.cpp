@@ -469,8 +469,11 @@ TEST_F(TableHeapMvccTest, DeleteRawTupleIsIdempotent) {
 TEST(FrozenTxnId, StatusIsCommitted) {
     TransactionManager txn_mgr;
     EXPECT_EQ(txn_mgr.get_status(frozen_txn_id), TransactionStatus::COMMITTED);
-    // Unknown real ids remain conservatively aborted.
-    EXPECT_EQ(txn_mgr.get_status(123456), TransactionStatus::ABORTED);
+    // GDB-1242: unknown/unregistered real ids are treated as COMMITTED (the
+    // cross-restart compromise), not ABORTED. is_registered() is the correct
+    // predicate for "is this xid unknown".
+    EXPECT_EQ(txn_mgr.get_status(123456), TransactionStatus::COMMITTED);
+    EXPECT_FALSE(txn_mgr.is_registered(123456));
 }
 
 TEST(FrozenTxnId, FrozenTupleIsVisibleToFreshSnapshot) {

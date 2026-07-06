@@ -19,15 +19,17 @@ static constexpr size_t kRowCountExtOffset = 0;
 namespace {
 
 /// Resolve a transaction id's status for visibility checks (GDB-747).
-/// Frozen stamps and ids unknown to the manager (rows persisted by a previous
-/// process — there is no persistent commit log yet) are treated as COMMITTED
-/// so existing data stays readable across restarts.
+/// Delegates to TransactionManager::get_status (GDB-1242), the single
+/// authoritative resolver shared by every layer: live status for registered
+/// transactions, COMMITTED/ABORTED for GC'd transactions per which they were,
+/// and COMMITTED for genuinely unregistered ids (rows persisted by a
+/// previous process — there is no persistent commit log yet) so existing
+/// data stays readable across restarts.
 TransactionStatus effective_status(const TransactionManager* mgr, txn_id_t xid) {
-    if (xid == frozen_txn_id || mgr == nullptr) {
+    if (mgr == nullptr) {
         return TransactionStatus::COMMITTED;
     }
-    const Transaction* txn = mgr->get_transaction(xid);
-    return txn != nullptr ? txn->status : TransactionStatus::COMMITTED;
+    return mgr->get_status(xid);
 }
 
 /// Status-based tuple visibility (GDB-747): a version is visible unless its
@@ -47,16 +49,22 @@ bool tuple_visible(const MvccTupleHeader& header, const TransactionManager* mgr)
     return true;
 }
 
-/// Map transaction ids unknown to the manager to frozen_txn_id so that
-/// snapshot-based is_visible() treats them as always-committed — the same
-/// restart-durability semantics effective_status() gives the status-based
-/// path (TransactionManager::get_status treats unknown ids as ABORTED, which
-/// would make rows persisted by a previous process vanish).
+/// Map transaction ids genuinely UNREGISTERED with the manager to
+/// frozen_txn_id so that snapshot-based is_visible() treats them as
+/// always-committed — the same restart-durability semantics
+/// effective_status() gives the status-based path. Uses
+/// TransactionManager::is_registered (GDB-1242) rather than
+/// get_transaction() != nullptr, because get_transaction only sees LIVE
+/// transactions: a GC'd aborted transaction is registered (remembered in
+/// pruned_aborted_) but no longer live, and must NOT be normalized away here
+/// -- doing so would resurrect its writes by making is_visible() treat its
+/// xmin/xmax as an always-committed frozen stamp instead of resolving through
+/// get_status()/pruned_aborted_.
 txn_id_t normalize_xid(const TransactionManager& mgr, txn_id_t xid) {
     if (xid == invalid_txn_id || xid == frozen_txn_id) {
         return xid;
     }
-    return mgr.get_transaction(xid) != nullptr ? xid : frozen_txn_id;
+    return mgr.is_registered(xid) ? xid : frozen_txn_id;
 }
 
 /// Tuple version visibility (GDB-777): when the executor has installed a
