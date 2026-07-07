@@ -170,6 +170,11 @@ TEST_F(QA_GDB549, WhereOnNodeId) {
 TEST_F(QA_GDB549, WhereOnRank) {
     auto result = exec_ok("SELECT * FROM pagerank('knows') WHERE rank > 0.5");
     EXPECT_EQ(result.column_names.size(), 2u);
+    // Fixture ranks are (node_id=1, rank=0.85) and (node_id=2, rank=0.15);
+    // only the first row satisfies rank > 0.5.
+    ASSERT_EQ(result.rows.size(), 1u);
+    EXPECT_EQ(std::get<int64_t>(result.rows[0][0].data()), 1);
+    EXPECT_GT(std::get<double>(result.rows[0][1].data()), 0.5);
 }
 
 // ============================================================================
