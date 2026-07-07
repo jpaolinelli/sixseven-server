@@ -112,6 +112,28 @@ static const LiteralExpr* as_literal(const Expr& expr) {
     return dynamic_cast<const LiteralExpr*>(&expr);
 }
 
+// GDB-1301: negate a numeric literal's *source text* exactly, without ever
+// round-tripping through a float/double. Folding `NEGATE(LiteralExpr)` via
+// safe_stod()/std::to_string() loses precision for literals with more
+// fractional digits than a double's %g-style round-trip preserves cleanly
+// (e.g. "10.001" -> -10.000999999999999...), which reintroduces exactly the
+// DECIMAL-comparison rounding bug that GDB-1301 exists to fix, since the
+// DECIMAL comparison fast path in expr_evaluator.cpp relies on recovering an
+// EXACT literal scale/coefficient from LiteralExpr::value.
+//
+// Toggling the leading sign character on the digit string is exact for both
+// INTEGER and FLOAT literals and cannot overflow (unlike negating an int64
+// coefficient at INT64_MIN).
+static std::string negate_literal_text_exact(const std::string& text) {
+    if (!text.empty() && text[0] == '-') {
+        return text.substr(1);
+    }
+    if (!text.empty() && text[0] == '+') {
+        return "-" + text.substr(1);
+    }
+    return "-" + text;
+}
+
 static bool is_literal_true(const Expr& expr) {
     auto* lit = as_literal(expr);
     return lit != nullptr && lit->kind == LiteralKind::BOOLEAN && lit->value == "true";
@@ -467,23 +489,32 @@ ExprPtr fold_constants(const Expr& expr) {
 
         if (unary->op == UnaryOp::NEGATE && lit != nullptr) {
             if (lit->kind == LiteralKind::INTEGER) {
+                // Validate the literal parses (rejects malformed/overflowing
+                // text exactly as before), but negate the TEXT, not the
+                // parsed int64 -- this also sidesteps INT64_MIN negation
+                // overflow, since no arithmetic negation ever occurs.
                 auto pv = safe_stoll(lit->value);
                 if (!pv) {
                     return nullptr;
                 }
                 auto result = std::make_unique<LiteralExpr>();
                 result->kind = LiteralKind::INTEGER;
-                result->value = std::to_string(-(*pv));
+                result->value = negate_literal_text_exact(lit->value);
                 return result;
             }
             if (lit->kind == LiteralKind::FLOAT) {
+                // GDB-1301: validate via safe_stod() (rejects malformed
+                // literals exactly as before), but negate the literal's
+                // TEXT directly rather than round-tripping through a
+                // double -- this preserves exact fractional digits (e.g.
+                // "10.001" -> "-10.001", not "-10.000999999999999...").
                 auto pv = safe_stod(lit->value);
                 if (!pv) {
                     return nullptr;
                 }
                 auto result = std::make_unique<LiteralExpr>();
                 result->kind = LiteralKind::FLOAT;
-                result->value = std::to_string(-(*pv));
+                result->value = negate_literal_text_exact(lit->value);
                 return result;
             }
         }

@@ -22,8 +22,10 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <random>
 #include <string>
+#include <utility>
 
 namespace sixseven {
 
@@ -582,6 +584,141 @@ Result<Value> eval_arithmetic(BinaryOp op, const Value& lhs, const Value& rhs) {
 }
 
 // ---------------------------------------------------------------------------
+// GDB-1301: exact decimal-literal parsing for DECIMAL comparisons
+// ---------------------------------------------------------------------------
+
+// Parse a numeric literal's raw source text into an exact Decimal128
+// coefficient and its true (non-rounded) scale, using only integer
+// arithmetic -- no FLOAT64 round-trip.
+//
+// This exists because bind_literal() binds numeric literals as FLOAT64
+// regardless of their source text, so a literal like "10.001" or "9.995" may
+// already have lost precision by the time it reaches a Value. Parsing the
+// original LiteralExpr::value string directly sidesteps that: a literal with
+// N fractional digits parses to scale N exactly, with no IEEE-754 error.
+//
+// Accepts optional leading '-'/'+', digits, and an optional '.' followed by
+// digits (the grammar produced by the lexer for INTEGER/FLOAT literals).
+// Returns an error for anything else (should not happen for literals coming
+// from the parser, but never silently misparses).
+Result<std::pair<Decimal128, int32_t>> exact_decimal_from_literal_text(const std::string& text) {
+    size_t i = 0;
+    bool negative = false;
+    if (i < text.size() && (text[i] == '+' || text[i] == '-')) {
+        negative = (text[i] == '-');
+        ++i;
+    }
+    std::string digits;
+    int32_t scale = 0;
+    bool seen_dot = false;
+    bool any_digit = false;
+    for (; i < text.size(); ++i) {
+        char c = text[i];
+        if (c == '.') {
+            if (seen_dot) {
+                return make_error(StatusCode::PARSE_ERROR,
+                                  "invalid numeric literal for DECIMAL comparison: " + text);
+            }
+            seen_dot = true;
+            continue;
+        }
+        if (c < '0' || c > '9') {
+            return make_error(StatusCode::PARSE_ERROR,
+                              "invalid numeric literal for DECIMAL comparison: " + text);
+        }
+        digits.push_back(c);
+        any_digit = true;
+        if (seen_dot) {
+            ++scale;
+        }
+    }
+    if (!any_digit) {
+        return make_error(StatusCode::PARSE_ERROR,
+                          "invalid numeric literal for DECIMAL comparison: " + text);
+    }
+    // Strip leading zeros (keep at least one digit) so the coefficient parse
+    // below does not need to worry about them.
+    size_t first_nonzero = digits.find_first_not_of('0');
+    if (first_nonzero == std::string::npos) {
+        digits = "0";
+    } else {
+        digits = digits.substr(first_nonzero);
+    }
+
+    // Build the Decimal128 coefficient from the decimal digit string via
+    // repeated multiply-by-10-and-add, checked for overflow at every step.
+    Decimal128 coeff{0, 0};
+    for (char c : digits) {
+        auto mul10 = dec128_mul_pow10(coeff, 1);
+        if (!mul10) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              "numeric literal too large for DECIMAL comparison: " + text);
+        }
+        auto added = dec128_add(*mul10, Decimal128{0, static_cast<uint64_t>(c - '0')});
+        if (!added) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              "numeric literal too large for DECIMAL comparison: " + text);
+        }
+        coeff = *added;
+    }
+    if (negative) {
+        auto negated = dec128_sub(Decimal128{0, 0}, coeff);
+        if (!negated) {
+            return make_error(StatusCode::TYPE_ERROR,
+                              "numeric literal too large for DECIMAL comparison: " + text);
+        }
+        coeff = *negated;
+    }
+    return ok(std::make_pair(coeff, scale));
+}
+
+// If `expr` is a LiteralExpr of kind INTEGER or FLOAT, or a UnaryExpr{NEGATE,
+// LiteralExpr} (a negative literal that has not yet been constant-folded --
+// e.g. an expression that bypasses fold_predicate_for_filter), parse the
+// literal's source text into an exact (coefficient, scale) pair, applying
+// the NEGATE at the Decimal128 level (never through a float). Returns
+// std::nullopt for any other expression kind (column refs, casts, computed
+// expressions, etc.), which the caller falls back to a scale-preserving
+// Value-based conversion for.
+//
+// GDB-1301: negative literals like `-10.001` are normally constant-folded by
+// Planner::fold_predicate_for_filter() (rewrite_rules.cpp fold_constants())
+// before this ever runs, and that fold now negates the literal's TEXT
+// directly (see negate_literal_text_exact() in rewrite_rules.cpp) rather
+// than round-tripping through a double, so the folded LiteralExpr::value
+// this function sees is already exact ("-10.001", not
+// "-10.000999999999999..."). This UnaryExpr-unwrapping path is a second,
+// independent line of defense for the (currently believed unreachable, but
+// not exhaustively proven for every future call site) case where a negative
+// literal reaches eval_binary() BEFORE constant folding runs.
+std::optional<Result<std::pair<Decimal128, int32_t>>> exact_decimal_if_literal(const Expr* expr) {
+    bool negate = false;
+    const Expr* inner = expr;
+    if (const auto* un = dynamic_cast<const UnaryExpr*>(inner);
+        un != nullptr && un->op == UnaryOp::NEGATE) {
+        negate = true;
+        inner = un->operand.get();
+    }
+    const auto* lit = dynamic_cast<const LiteralExpr*>(inner);
+    if (lit == nullptr) {
+        return std::nullopt;
+    }
+    if (lit->kind != LiteralKind::INTEGER && lit->kind != LiteralKind::FLOAT) {
+        return std::nullopt;
+    }
+    auto parsed = exact_decimal_from_literal_text(lit->value);
+    if (!negate || !parsed.has_value()) {
+        return parsed;
+    }
+    auto negated = dec128_sub(Decimal128{0, 0}, (*parsed).first);
+    if (!negated) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "numeric literal too large for DECIMAL comparison: " + lit->value);
+    }
+    return ok(std::make_pair(*negated, (*parsed).second));
+}
+
+// ---------------------------------------------------------------------------
 // Comparison
 // ---------------------------------------------------------------------------
 
@@ -839,9 +976,48 @@ Result<Value> eval_binary(const BinaryExpr& expr,
     case BinaryOp::LESS_EQUAL:
     case BinaryOp::GREATER_EQUAL: {
         // Scale-aware DECIMAL comparison: align scales before comparing.
+        //
+        // GDB-1287: This fast path must trigger whenever AT LEAST ONE side is
+        // DECIMAL and the other is any numeric type (INT*/UINT*/FLOAT32/
+        // FLOAT64) -- not only when both sides are already DECIMAL-typed.
+        // Numeric literals (e.g. `10.00`) bind as FLOAT64 (see
+        // Binder::bind_literal), so `amount > 10.00` previously fell through
+        // to the generic cross-type compare() path, which converts DECIMAL to
+        // double via the *unscaled* coefficient (coercion.cpp to_double),
+        // silently comparing the wrong magnitude and corrupting every
+        // comparison operator (=, !=, <, <=, >, >=).
+        //
+        // GDB-1301: the non-DECIMAL side must NOT be rounded down to the
+        // DECIMAL side's scale before comparing -- that silently discards
+        // precision (e.g. DECIMAL(10,2) 10.00 vs literal 10.001 would round
+        // 10.001 to 10.00 and wrongly report equality). Instead each side
+        // keeps its own true scale, and decimal_compare() scales up the
+        // COARSER side to match the finer side (a lossless multiply), then
+        // compares exact integer mantissas. Scaling up is checked for
+        // Decimal128 overflow and returns a clean TYPE_ERROR rather than a
+        // silent wrong answer (see dec128_mul_pow10 / decimal_compare).
+        //
+        // The finer side's true scale is recovered as follows:
+        //   - DECIMAL operand: its real declared scale (ExprType.decimal_scale).
+        //   - Literal operand (10.00, 10.001, -5, ...): parsed EXACTLY from
+        //     the literal's own source text via
+        //     exact_decimal_from_literal_text(), counting its fractional
+        //     digits as the scale. This sidesteps bind_literal's FLOAT64
+        //     binding entirely, so no IEEE-754 rounding of the literal's
+        //     digits ever occurs.
+        //   - Any other non-DECIMAL numeric operand (a computed expression,
+        //     not a bare literal -- e.g. a FLOAT64 column or the result of
+        //     arithmetic): there is no source text to recover exact digits
+        //     from, so it is converted via fit_to_storage() at the DECIMAL
+        //     side's scale. This is a residual, upstream limitation of
+        //     bind_literal/FLOAT64 representation, not a rounding bug
+        //     introduced by this comparison path; it only affects computed
+        //     FLOAT64 expressions compared to DECIMAL, not literals.
         bool lhs_dec = (lhs->type_id() == TypeId::DECIMAL);
         bool rhs_dec = (rhs->type_id() == TypeId::DECIMAL);
-        if (lhs_dec && rhs_dec) {
+        bool lhs_numeric = is_numeric(lhs->type_id());
+        bool rhs_numeric = is_numeric(rhs->type_id());
+        if ((lhs_dec || rhs_dec) && lhs_numeric && rhs_numeric) {
             int32_t s1 = 0;
             int32_t s2 = 0;
             {
@@ -856,7 +1032,51 @@ Result<Value> eval_binary(const BinaryExpr& expr,
                     s2 = it->second.decimal_scale;
                 }
             }
-            auto cmp = decimal_compare(lhs->as_decimal(), s1, rhs->as_decimal(), s2);
+            // A non-DECIMAL side's ExprType.decimal_scale is meaningless (it
+            // is only populated for DECIMAL-typed expressions); use the
+            // *other* side's DECIMAL scale as the fit_to_storage() fallback
+            // scale for the "not a literal" residual case below.
+            int32_t lhs_fallback_scale = lhs_dec ? s1 : s2;
+            int32_t rhs_fallback_scale = rhs_dec ? s2 : s1;
+
+            // Resolve (coefficient, true scale) for one side: DECIMAL values
+            // keep their own scale; literals are parsed exactly from source
+            // text; anything else falls back to fit_to_storage() rounding
+            // (see the comment above the fast path for why that residual
+            // case is acceptable).
+            auto resolve_side =
+                [&](const Value& v,
+                    bool is_dec,
+                    const Expr* side_expr,
+                    int32_t fallback_scale) -> Result<std::pair<Decimal128, int32_t>> {
+                if (is_dec) {
+                    int32_t scale = 0;
+                    auto it = bound.expr_types.find(side_expr);
+                    if (it != bound.expr_types.end()) {
+                        scale = it->second.decimal_scale;
+                    }
+                    return ok(std::make_pair(v.as_decimal(), scale));
+                }
+                auto lit_exact = exact_decimal_if_literal(side_expr);
+                if (lit_exact.has_value()) {
+                    return *lit_exact;
+                }
+                auto fitted = fit_to_storage(v, TypeId::DECIMAL, fallback_scale);
+                if (!fitted) {
+                    return make_error(fitted.error().code, fitted.error().message);
+                }
+                return ok(std::make_pair(fitted->as_decimal(), fallback_scale));
+            };
+
+            auto c1 = resolve_side(*lhs, lhs_dec, expr.lhs.get(), lhs_fallback_scale);
+            if (!c1) {
+                return make_error(c1.error().code, c1.error().message);
+            }
+            auto c2 = resolve_side(*rhs, rhs_dec, expr.rhs.get(), rhs_fallback_scale);
+            if (!c2) {
+                return make_error(c2.error().code, c2.error().message);
+            }
+            auto cmp = decimal_compare(c1->first, c1->second, c2->first, c2->second);
             if (!cmp) {
                 return make_error(cmp.error().code, cmp.error().message);
             }
