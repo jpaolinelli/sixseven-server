@@ -814,11 +814,52 @@ TEST_F(QA_GDB425, MinHopsZeroWithNodeFilter) {
 
     auto results = run_var_length(std::move(config), two_col_schema());
 
-    // At depth 0, every source emits itself (tgt_node filter not applied at depth 0).
-    // At depth 1+, only active nodes are emitted AND expanded.
-    // Depth 0: all 6 nodes emit.
-    // Depth 1+: filtered by active.
-    EXPECT_GE(results.size(), 6u); // At least the 6 depth-0 self-results.
+    // Fixture: nodes 1..6 = Alice, Bob, Charlie, Diana, Eve, Frank.
+    // Active: Alice(1), Charlie(3), Eve(5), Frank(6). Inactive: Bob(2), Diana(4).
+    // Edges: 1->2, 2->3, 3->4, 4->5, 5->6, 1->3 (shortcut).
+    //
+    // Depth 0: every source node emits itself regardless of the target filter
+    //   (the filter must NOT apply at depth 0) -> 6 self-results, one per node,
+    //   including the inactive nodes Bob and Diana.
+    // Depth 1: b.active = TRUE prunes targets -> only active targets are emitted/expanded.
+    //   Alice: 1->2(Bob, inactive, pruned), 1->3(Charlie, active, emit).
+    //   Bob:   2->3(Charlie, active, emit).
+    //   Charlie: 3->4(Diana, inactive, pruned).
+    //   Diana: 4->5(Eve, active, emit).
+    //   Eve:   5->6(Frank, active, emit).
+    //   Frank: no outgoing edges.
+    //   -> 4 depth-1 results: (Alice,Charlie), (Bob,Charlie), (Diana,Eve), (Eve,Frank).
+    // Depth 2 (only expanded from active depth-1 targets, i.e. Charlie, Eve, Frank):
+    //   From Charlie (via Alice, Bob): 3->4(Diana, inactive, pruned).
+    //   From Eve (via Diana): 5->6(Frank, active, emit) -> (Diana, Frank).
+    //   From Frank (via Eve): no outgoing edges.
+    //   -> 1 depth-2 result: (Diana, Frank).
+    // Total verified ground truth: 6 + 4 + 1 = 11 results.
+    ASSERT_EQ(results.size(), 11u);
+
+    // The single most intention-revealing assertion for this regression: an
+    // INACTIVE node's depth-0 self-match must be present. Such a pair can only
+    // appear in the result set if the target filter (b.active = TRUE) was
+    // correctly skipped at depth 0 -- if the filter were wrongly applied at
+    // depth 0 (the regression this test targets), inactive self-matches like
+    // (Bob, Bob) and (Diana, Diana) would be silently dropped, and the total
+    // count would fall from 11 to 9 while remaining >= 6.
+    auto has_self_pair = [&results](const std::string& name) {
+        for (const auto& t : results) {
+            auto* s = std::get_if<std::string>(&t.values[0].data());
+            auto* d = std::get_if<std::string>(&t.values[1].data());
+            if (s != nullptr && d != nullptr && *s == name && *d == name) {
+                return true;
+            }
+        }
+        return false;
+    };
+    EXPECT_TRUE(has_self_pair("Bob"))
+        << "inactive node Bob's depth-0 self-match is missing; "
+           "target filter was likely (incorrectly) applied at depth 0";
+    EXPECT_TRUE(has_self_pair("Diana"))
+        << "inactive node Diana's depth-0 self-match is missing; "
+           "target filter was likely (incorrectly) applied at depth 0";
 }
 
 // ============================================================================
