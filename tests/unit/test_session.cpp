@@ -1,3 +1,4 @@
+#include "sixseven/common/platform.h"
 #include "sixseven/common/result.h"
 #include "sixseven/common/types.h"
 #include "sixseven/common/value.h"
@@ -7,8 +8,6 @@
 #include "sixseven/server/session.h"
 
 #include <gtest/gtest.h>
-
-#include "sixseven/common/platform.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -883,54 +882,44 @@ TEST(Session, ProtocolTransactionStateTracking) {
 
     do_startup(client_fd, conn, handler);
 
+    // Scans `response` for all ReadyForQuery ('Z') messages, asserting that
+    // each one's transaction-status byte equals `expected_status`. Returns
+    // the number of 'Z' messages found so the caller can assert at least one
+    // was present -- otherwise the status-byte EXPECT_EQ below would never
+    // execute and the test would pass vacuously.
+    auto count_ready_for_query_with_status = [](const std::vector<uint8_t>& resp,
+                                                uint8_t expected_status) -> size_t {
+        size_t z_count = 0;
+        size_t scan_pos = 0;
+        while (scan_pos + 5 <= resp.size()) {
+            uint8_t msg_type = resp[scan_pos];
+            uint32_t length = (static_cast<uint32_t>(resp[scan_pos + 1]) << 24) |
+                              (static_cast<uint32_t>(resp[scan_pos + 2]) << 16) |
+                              (static_cast<uint32_t>(resp[scan_pos + 3]) << 8) |
+                              static_cast<uint32_t>(resp[scan_pos + 4]);
+            size_t total = 1 + static_cast<size_t>(length);
+            if (scan_pos + total > resp.size()) {
+                break;
+            }
+            if (msg_type == 'Z') {
+                ++z_count;
+                EXPECT_EQ(resp[scan_pos + 5], expected_status)
+                    << "ReadyForQuery status byte mismatch at offset " << scan_pos;
+            }
+            scan_pos += total;
+        }
+        return z_count;
+    };
+
     // After BEGIN, ReadyForQuery should be 'T'.
     auto response = send_query(client_fd, conn, handler, "BEGIN");
-    size_t pos = 0;
-    const uint8_t* payload = nullptr;
-    size_t payload_len = 0;
-    // Find the ReadyForQuery at the end.
-    pos = 0;
-    size_t last_z_pos = 0;
-    while (find_message(response, pos, 'Z', payload, payload_len)) {
-        last_z_pos = pos;
-    }
-    (void)last_z_pos;
-    // Re-scan from start for the last 'Z'.
-    pos = 0;
-    while (pos + 5 <= response.size()) {
-        uint8_t msg_type = response[pos];
-        uint32_t length = (static_cast<uint32_t>(response[pos + 1]) << 24) |
-                          (static_cast<uint32_t>(response[pos + 2]) << 16) |
-                          (static_cast<uint32_t>(response[pos + 3]) << 8) |
-                          static_cast<uint32_t>(response[pos + 4]);
-        size_t total = 1 + static_cast<size_t>(length);
-        if (pos + total > response.size()) {
-            break;
-        }
-        if (msg_type == 'Z') {
-            EXPECT_EQ(response[pos + 5], 'T') << "ReadyForQuery after BEGIN should be 'T'";
-        }
-        pos += total;
-    }
+    size_t z_count = count_ready_for_query_with_status(response, 'T');
+    ASSERT_GE(z_count, 1u) << "expected at least one ReadyForQuery ('Z') message after BEGIN";
 
     // After COMMIT, ReadyForQuery should be 'I'.
     response = send_query(client_fd, conn, handler, "COMMIT");
-    pos = 0;
-    while (pos + 5 <= response.size()) {
-        uint8_t msg_type = response[pos];
-        uint32_t length = (static_cast<uint32_t>(response[pos + 1]) << 24) |
-                          (static_cast<uint32_t>(response[pos + 2]) << 16) |
-                          (static_cast<uint32_t>(response[pos + 3]) << 8) |
-                          static_cast<uint32_t>(response[pos + 4]);
-        size_t total = 1 + static_cast<size_t>(length);
-        if (pos + total > response.size()) {
-            break;
-        }
-        if (msg_type == 'Z') {
-            EXPECT_EQ(response[pos + 5], 'I') << "ReadyForQuery after COMMIT should be 'I'";
-        }
-        pos += total;
-    }
+    z_count = count_ready_for_query_with_status(response, 'I');
+    ASSERT_GE(z_count, 1u) << "expected at least one ReadyForQuery ('Z') message after COMMIT";
 
     conn.close();
     sixseven_platform::socket_close(client_fd);
