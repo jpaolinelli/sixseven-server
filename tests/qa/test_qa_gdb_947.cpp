@@ -17,7 +17,12 @@
 ///      with a currently existing row).
 ///   4. Multiple restarts with interleaved inserts: IDs are strictly
 ///      monotonically increasing and never duplicate.
-///   5. Empty table after full restart: first INSERT gets base id = 1.
+///   5. Empty table after full restart (GDB-1291 ruling): the counter
+///      CONTINUES from the persisted high-water mark -- it never resets to 1
+///      just because the table is empty (PostgreSQL SERIAL semantics).
+///   6. Repeated empty-table restarts never regress the counter.
+///   7. Partial delete + restart continues from the persisted HWM, not the
+///      surviving max(id).
 
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/config.h"
@@ -293,12 +298,19 @@ TEST_F(QA_GDB947, MultipleRestartsStrictlyMonotoneIds) {
 }
 
 // =============================================================================
-// Test 5: Empty table after full delete -> restart -> counter resets to 1.
-// (Edge: slow-path scan sees max_val=0, sets next=1).
+// Test 5: Empty table after full delete -> restart -> counter CONTINUES from
+// the prior high-water mark (PostgreSQL SERIAL semantics -- GDB-1291 ruling).
+//
+// The autoincrement high-water mark is durably persisted in the table file's
+// header extension (StorageManager::write_autoincrement(), written after
+// every INSERT statement -- see insert.cpp) independently of the row data.
+// DELETE never touches this persisted counter, and SystemBootstrap's restart
+// path always prefers the persisted value (fast path) over a max(id) scan of
+// the (now-empty) table. The counter therefore NEVER resets to 1 just because
+// the table is empty -- it only ever increases.
 // =============================================================================
 
-TEST_F(QA_GDB947, EmptyTableAfterRestartStartsAtOne) {
-    GTEST_SKIP() << "autoincrement reset-after-restart semantics tracked by GDB-1291";
+TEST_F(QA_GDB947, EmptyTableAfterRestartContinuesFromHighWaterMark) {
     run_bootstrap();
     exec_ok("CREATE TABLE t_emp (id INT PRIMARY KEY AUTOINCREMENT, v VARCHAR)");
 
@@ -307,11 +319,64 @@ TEST_F(QA_GDB947, EmptyTableAfterRestartStartsAtOne) {
 
     restart();
 
-    // Slow path: table is empty, max_val=0, next=1.
+    // Fast path: persisted high-water mark (3) is restored even though the
+    // table is empty; the next id issued must be 4, not 1.
     exec_ok("INSERT INTO t_emp (v) VALUES ('fresh')");
 
     auto qr = exec_ok("SELECT id FROM t_emp");
     ASSERT_EQ(qr.rows.size(), 1u);
-    // Per spec: empty table on restart yields counter=1 (slow path scans 0, next=1).
-    EXPECT_EQ(qr.rows[0][0].as_int32(), 1);
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 4)
+        << "AUTOINCREMENT must continue from the persisted high-water mark, "
+           "never reset to 1 due to DELETE + restart on an empty table";
+}
+
+// =============================================================================
+// Test 6: Multiple restarts on an emptied table never regress the counter,
+// and it keeps advancing across each restart cycle.
+// =============================================================================
+
+TEST_F(QA_GDB947, EmptyTableMultipleRestartsNeverRegresses) {
+    run_bootstrap();
+    exec_ok("CREATE TABLE t_emp2 (id INT PRIMARY KEY AUTOINCREMENT, v VARCHAR)");
+
+    exec_ok("INSERT INTO t_emp2 (v) VALUES ('a'), ('b')"); // ids 1,2
+    exec_ok("DELETE FROM t_emp2");                         // empty the table
+    restart();
+
+    exec_ok("INSERT INTO t_emp2 (v) VALUES ('c')"); // expect id 3
+    exec_ok("DELETE FROM t_emp2");                  // empty again
+    restart();
+
+    exec_ok("INSERT INTO t_emp2 (v) VALUES ('d')"); // expect id 4
+
+    auto qr = exec_ok("SELECT id FROM t_emp2");
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_int32(), 4)
+        << "Counter must keep advancing across repeated empty-table restarts, "
+           "never reset or regress";
+}
+
+// =============================================================================
+// Test 7: Partial delete (some rows survive) + restart still continues past
+// the prior high-water mark, not just past the surviving max(id).
+// =============================================================================
+
+TEST_F(QA_GDB947, PartialDeleteRestartContinuesFromHighWaterMark) {
+    run_bootstrap();
+    exec_ok("CREATE TABLE t_partial (id INT PRIMARY KEY AUTOINCREMENT, v VARCHAR)");
+
+    exec_ok("INSERT INTO t_partial (v) VALUES ('a'), ('b'), ('c'), ('d')"); // ids 1-4
+    exec_ok("DELETE FROM t_partial WHERE id IN (3, 4)");                    // 1,2 survive
+
+    restart();
+
+    // Persisted high-water mark is 4 -- next id must be 5, even though the
+    // surviving max(id) is only 2.
+    exec_ok("INSERT INTO t_partial (v) VALUES ('e')");
+
+    auto qr = exec_ok("SELECT id FROM t_partial ORDER BY id");
+    ASSERT_EQ(qr.rows.size(), 3u);
+    EXPECT_EQ(qr.rows.back()[0].as_int32(), 5)
+        << "Counter must continue from the persisted HWM (4), not the "
+           "surviving max(id) (2)";
 }
