@@ -1,142 +1,52 @@
 /// @file test_qa_gdb_495.cpp
-/// QA adversarial tests for GDB-495: Betweenness Centrality.
+/// QA adversarial tests for GDB-495: Betweenness Centrality (Brandes' algorithm).
+///
+/// GDB-495 is the canonical ticket for Betweenness Centrality QA coverage.
+/// GDB-489 originally tracked overlapping coverage for the same feature and
+/// redirects to GDB-495; per GDB-958 (consolidation), this file absorbs every
+/// scenario from GDB-489's test_qa_gdb_489.cpp that was not already a
+/// behavioral duplicate of a GDB-495 test. GDB-489's true duplicates were
+/// dropped; its genuinely unique cases were ported below (renamed to fit this
+/// suite) so no coverage is lost. test_qa_gdb_489.cpp has been deleted.
 ///
 /// Verifies:
 ///   AC1: Brandes' algorithm implementation.
 ///   AC2: Output schema: (node_id INT64, centrality FLOAT64).
 ///   AC3: Correct values on known graphs.
-///   AC4: Unit tests passing.
+///   AC4: Unit tests passing / registration.
 ///
 /// Adversarial categories: graph topology edge cases, parallel paths,
-/// duplicate edges, boundary node IDs, normalization boundaries,
-/// analytical formula verification, multiple edge types, stress tests.
+/// duplicate edges, self-loops, boundary node IDs, normalization boundaries,
+/// analytical formula verification, multiple edge types, stress tests,
+/// error paths, numerical stability.
 
-#include "sixseven/catalog/catalog.h"
-#include "sixseven/common/result.h"
 #include "sixseven/common/types.h"
-#include "sixseven/common/value.h"
 #include "sixseven/graph/algorithm_registry.h"
 #include "sixseven/graph/betweenness_centrality.h"
-#include "sixseven/graph/graph_engine.h"
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
-#include <cmath>
-#include <limits>
-#include <numeric>
-#include <unordered_map>
+#include <cstdint>
+#include <string>
+#include <utility>
 #include <vector>
 
-#include "test_qa_helpers.h"
+#include "betweenness_qa_helpers.h"
 
 namespace sixseven {
 namespace {
 
-// ============================================================================
-// Helpers
-// ============================================================================
-
-static TableSchema make_table_schema(const std::string& name) {
-    TableSchema schema;
-    schema.name = name;
-    schema.columns = {
-        {0, "id", TypeId::INT64, false, ""},
-    };
-    schema.pk_columns = "id";
-    return schema;
-}
-
-static Value pk(int64_t v) {
-    return Value(v);
-}
-
-/// Extract (node_id, centrality) pairs from algorithm result rows.
-std::unordered_map<int64_t, double> to_centrality_map(const std::vector<AlgorithmRow>& rows) {
-    std::unordered_map<int64_t, double> result;
-    for (const auto& row : rows) {
-        EXPECT_EQ(row.values.size(), 2u);
-        auto node_id = std::get<int64_t>(row.values[0].data());
-        auto centrality = std::get<double>(row.values[1].data());
-        result[node_id] = centrality;
-    }
-    return result;
-}
-
-/// Verify that all centrality scores are non-negative.
-void verify_scores_non_negative(const std::unordered_map<int64_t, double>& scores) {
-    for (const auto& [node, score] : scores) {
-        EXPECT_GE(score, 0.0) << "node " << node << " should have non-negative centrality";
-    }
-}
-
-/// Verify that no score is NaN or Inf.
-void verify_scores_finite(const std::unordered_map<int64_t, double>& scores) {
-    for (const auto& [node, score] : scores) {
-        EXPECT_FALSE(std::isnan(score)) << "node " << node << " has NaN centrality";
-        EXPECT_FALSE(std::isinf(score)) << "node " << node << " has Inf centrality";
-    }
-}
-
-/// Verify output rows are sorted by node_id.
-void verify_sorted_by_node_id(const std::vector<AlgorithmRow>& rows) {
-    for (size_t i = 1; i < rows.size(); ++i) {
-        auto prev = std::get<int64_t>(rows[i - 1].values[0].data());
-        auto curr = std::get<int64_t>(rows[i].values[0].data());
-        EXPECT_LT(prev, curr) << "results should be sorted by node_id";
-    }
-}
+using betweenness_qa::BetweennessQaFixtureBase;
+using betweenness_qa::to_centrality_map;
+using betweenness_qa::verify_scores_finite;
+using betweenness_qa::verify_scores_non_negative;
+using betweenness_qa::verify_sorted_by_node_id;
 
 // ============================================================================
 // Test fixture
 // ============================================================================
 
-class QA_GDB495_Betweenness : public ::testing::Test {
-protected:
-    void SetUp() override {
-        bootstrap_qa_catalog(catalog_);
-        auto t = catalog_.create_table(default_database_id, make_table_schema("nodes"));
-        ASSERT_TRUE(t.has_value()) << t.error().message;
-        table_id_ = *t;
-    }
-
-    void build_graph(const std::string& edge_type,
-                     const std::vector<std::pair<int64_t, int64_t>>& edges) {
-        auto et = engine_.create_edge_type(
-            default_database_id, edge_type, table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
-        ASSERT_TRUE(et.has_value()) << et.error().message;
-
-        for (auto [src, tgt] : edges) {
-            auto link = engine_.link(default_database_id, edge_type, pk(src), pk(tgt));
-            ASSERT_TRUE(link.has_value()) << link.error().message;
-        }
-    }
-
-    /// Run betweenness centrality with normalized=true (default).
-    Result<std::vector<AlgorithmRow>> run_betweenness(const std::string& edge_type) {
-        AlgorithmContext ctx{
-            engine_, default_database_id, edge_type, {{"normalized", Value(true)}}};
-        return betweenness_centrality_execute(ctx);
-    }
-
-    /// Run betweenness centrality with normalized=false.
-    Result<std::vector<AlgorithmRow>> run_betweenness_unnormalized(const std::string& edge_type) {
-        AlgorithmContext ctx{
-            engine_, default_database_id, edge_type, {{"normalized", Value(false)}}};
-        return betweenness_centrality_execute(ctx);
-    }
-
-    /// Run betweenness centrality with raw named_args.
-    Result<std::vector<AlgorithmRow>>
-    run_betweenness_raw(const std::string& edge_type, std::unordered_map<std::string, Value> args) {
-        AlgorithmContext ctx{engine_, default_database_id, edge_type, std::move(args)};
-        return betweenness_centrality_execute(ctx);
-    }
-
-    Catalog catalog_;
-    GraphEngine engine_{catalog_};
-    table_id_t table_id_ = 0;
-};
+class QA_GDB495_Betweenness : public BetweennessQaFixtureBase {};
 
 // ============================================================================
 // AC1: Brandes' algorithm implementation
@@ -262,6 +172,80 @@ TEST_F(QA_GDB495_Betweenness, AC1_DirectedFourCycleSymmetry) {
     EXPECT_NEAR(scores[4], expected, 1e-10);
 }
 
+TEST_F(QA_GDB495_Betweenness, AC1_LinearChainUnnormalized) {
+    // Ported from GDB-489. 1 -> 2 -> 3: node 2 is on the only shortest path
+    // from 1 to 3.
+    build_graph("knows", {{1, 2}, {2, 3}});
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    EXPECT_DOUBLE_EQ(scores[1], 0.0);
+    EXPECT_DOUBLE_EQ(scores[2], 1.0);
+    EXPECT_DOUBLE_EQ(scores[3], 0.0);
+}
+
+TEST_F(QA_GDB495_Betweenness, AC1_DiamondSplitsBetweenness) {
+    // Ported from GDB-489. Diamond: 1->2, 1->3, 2->4, 3->4.
+    // Two shortest paths from 1 to 4. Nodes 2 and 3 each get 0.5.
+    build_graph("knows", {{1, 2}, {1, 3}, {2, 4}, {3, 4}});
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    EXPECT_DOUBLE_EQ(scores[1], 0.0);
+    EXPECT_NEAR(scores[2], 0.5, 1e-10);
+    EXPECT_NEAR(scores[3], 0.5, 1e-10);
+    EXPECT_DOUBLE_EQ(scores[4], 0.0);
+}
+
+TEST_F(QA_GDB495_Betweenness, AC1_DirectedThreeCycleSymmetric) {
+    // Ported from GDB-489 (AC1_DirectedCycleSymmetric).
+    // 1->2->3->1: directed 3-cycle. All nodes symmetric.
+    build_graph("knows", {{1, 2}, {2, 3}, {3, 1}});
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    EXPECT_EQ(scores.size(), 3u);
+    // All nodes should have the same betweenness due to symmetry.
+    EXPECT_NEAR(scores[1], scores[2], 1e-10);
+    EXPECT_NEAR(scores[2], scores[3], 1e-10);
+}
+
+TEST_F(QA_GDB495_Betweenness, AC1_LongerChainScores) {
+    // Ported from GDB-489. 1->2->3->4: inner nodes 2 and 3 each lie on 2
+    // shortest paths.
+    build_graph("knows", {{1, 2}, {2, 3}, {3, 4}});
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    EXPECT_DOUBLE_EQ(scores[1], 0.0);
+    EXPECT_DOUBLE_EQ(scores[2], 2.0);
+    EXPECT_DOUBLE_EQ(scores[3], 2.0);
+    EXPECT_DOUBLE_EQ(scores[4], 0.0);
+}
+
+TEST_F(QA_GDB495_Betweenness, AC1_BridgeNodeHighest) {
+    // Ported from GDB-489. Two clusters connected by bridge node 3.
+    // 1->3, 2->3, 3->4, 3->5
+    build_graph("knows", {{1, 3}, {2, 3}, {3, 4}, {3, 5}});
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    // Node 3 should have the highest betweenness.
+    for (int64_t node : {1, 2, 4, 5}) {
+        EXPECT_GT(scores[3], scores[node]) << "bridge node 3 should outrank node " << node;
+    }
+}
+
 // ============================================================================
 // AC2: Output schema: (node_id INT64, centrality FLOAT64)
 // ============================================================================
@@ -308,6 +292,38 @@ TEST_F(QA_GDB495_Betweenness, AC2_AlgorithmDefSchema) {
     EXPECT_EQ(def.output_columns[1].name, "centrality");
     EXPECT_EQ(def.output_columns[1].type_id, TypeId::FLOAT64);
     EXPECT_FALSE(def.output_columns[1].nullable);
+}
+
+TEST_F(QA_GDB495_Betweenness, AC2_OutputRowStructure) {
+    // Ported from GDB-489. Explicit per-row variant-type check, distinct from
+    // AC2_EveryRowHasTwoColumns's loop-with-index style.
+    build_graph("knows", {{1, 2}, {2, 3}});
+
+    auto result = run_betweenness("knows");
+    ASSERT_TRUE(result.has_value());
+
+    for (const auto& row : *result) {
+        ASSERT_EQ(row.values.size(), 2u) << "each row must have exactly 2 columns";
+        EXPECT_TRUE(std::holds_alternative<int64_t>(row.values[0].data()));
+        EXPECT_TRUE(std::holds_alternative<double>(row.values[1].data()));
+    }
+}
+
+TEST_F(QA_GDB495_Betweenness, AC2_AlgorithmName) {
+    // Ported from GDB-489.
+    auto def = make_betweenness_centrality_def();
+    EXPECT_EQ(def.name, "betweenness");
+}
+
+TEST_F(QA_GDB495_Betweenness, AC2_ParameterDefinition) {
+    // Ported from GDB-489.
+    auto def = make_betweenness_centrality_def();
+    ASSERT_EQ(def.params.size(), 1u);
+    EXPECT_EQ(def.params[0].name, "normalized");
+    EXPECT_EQ(def.params[0].type_id, TypeId::BOOL);
+    EXPECT_FALSE(def.params[0].required);
+    ASSERT_TRUE(def.params[0].default_value.has_value());
+    EXPECT_EQ(std::get<bool>(def.params[0].default_value->data()), true);
 }
 
 // ============================================================================
@@ -393,6 +409,93 @@ TEST_F(QA_GDB495_Betweenness, AC3_ThreeDisconnectedTriangles) {
     EXPECT_NEAR(scores[4], scores[7], 1e-10);
 }
 
+TEST_F(QA_GDB495_Betweenness, AC3_SingleEdgeZeroCentrality) {
+    // Ported from GDB-489. With only 2 nodes, no node can be between any
+    // pair.
+    build_graph("knows", {{1, 2}});
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    EXPECT_DOUBLE_EQ(scores[1], 0.0);
+    EXPECT_DOUBLE_EQ(scores[2], 0.0);
+}
+
+TEST_F(QA_GDB495_Betweenness, AC3_StarGraphAllZero) {
+    // Ported from GDB-489. Hub 1 -> {2,3,4,5}: no intermediate nodes on any
+    // shortest path.
+    build_graph("knows", {{1, 2}, {1, 3}, {1, 4}, {1, 5}});
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    for (const auto& [node, score] : scores) {
+        EXPECT_DOUBLE_EQ(score, 0.0) << "node " << node << " in star should have zero";
+    }
+}
+
+TEST_F(QA_GDB495_Betweenness, AC3_DisconnectedComponentsAllZero) {
+    // Ported from GDB-489. Two disconnected pairs: no node is between any
+    // other pair.
+    build_graph("knows", {{1, 2}, {3, 4}});
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    EXPECT_EQ(scores.size(), 4u);
+    for (const auto& [node, score] : scores) {
+        EXPECT_DOUBLE_EQ(score, 0.0) << "node " << node << " in disconnected graph";
+    }
+}
+
+TEST_F(QA_GDB495_Betweenness, AC3_BidirectionalChain) {
+    // Ported from GDB-489. 1<->2<->3 (bidirectional).
+    build_graph("knows", {{1, 2}, {2, 1}, {2, 3}, {3, 2}});
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    EXPECT_EQ(scores.size(), 3u);
+    verify_scores_non_negative(scores);
+
+    // Node 2 is between (1,3) and (3,1). Endpoints should be symmetric.
+    EXPECT_GT(scores[2], scores[1]);
+    EXPECT_GT(scores[2], scores[3]);
+    EXPECT_NEAR(scores[1], scores[3], 1e-10);
+}
+
+// ============================================================================
+// AC4: Registration
+// ============================================================================
+
+TEST(QA_GDB495_Def, Registration) {
+    // Ported from GDB-489.
+    AlgorithmRegistry registry;
+    auto result = registry.register_algorithm(make_betweenness_centrality_def(),
+                                              betweenness_centrality_execute);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto* entry = registry.find("betweenness");
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(entry->def.name, "betweenness");
+}
+
+TEST(QA_GDB495_Def, CaseInsensitiveLookup) {
+    // Ported from GDB-489.
+    AlgorithmRegistry registry;
+    (void)registry.register_algorithm(make_betweenness_centrality_def(),
+                                      betweenness_centrality_execute);
+
+    EXPECT_NE(registry.find("BETWEENNESS"), nullptr);
+    EXPECT_NE(registry.find("Betweenness"), nullptr);
+    EXPECT_NE(registry.find("betweenness"), nullptr);
+    EXPECT_NE(registry.find("bEtWeEnNeSs"), nullptr);
+}
+
 // ============================================================================
 // Graph topology edge cases
 // ============================================================================
@@ -468,6 +571,89 @@ TEST_F(QA_GDB495_Betweenness, LongDiamondChain) {
     EXPECT_GT(scores[4], scores[5]);
 }
 
+TEST_F(QA_GDB495_Betweenness, SelfLoop) {
+    // Ported from GDB-489. Self-loop should not inflate betweenness of the
+    // self-looping node. Graph: 1->1, 1->2, 2->3.
+    build_graph("knows", {{1, 1}, {1, 2}, {2, 3}});
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    EXPECT_EQ(scores.size(), 3u);
+    verify_scores_non_negative(scores);
+    verify_scores_finite(scores);
+
+    // Compare with the same graph without the self-loop.
+    // Node 2 should still have centrality = 1.0 (on path 1->3).
+    EXPECT_DOUBLE_EQ(scores[2], 1.0);
+    // Self-loop on node 1 should NOT give it betweenness.
+    EXPECT_DOUBLE_EQ(scores[1], 0.0);
+}
+
+TEST_F(QA_GDB495_Betweenness, PureSelfLoop) {
+    // Ported from GDB-489. Single node with a self-loop only.
+    build_graph("knows", {{1, 1}});
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    EXPECT_EQ(scores.size(), 1u);
+    EXPECT_DOUBLE_EQ(scores[1], 0.0);
+}
+
+TEST_F(QA_GDB495_Betweenness, MultipleSelfLoops) {
+    // Ported from GDB-489. All nodes have self-loops.
+    build_graph("knows", {{1, 1}, {2, 2}, {3, 3}, {1, 2}, {2, 3}});
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    verify_scores_non_negative(scores);
+    verify_scores_finite(scores);
+
+    // Self-loops should not affect betweenness. Node 2 is on path 1->3.
+    EXPECT_DOUBLE_EQ(scores[2], 1.0);
+}
+
+TEST_F(QA_GDB495_Betweenness, DuplicateEdges) {
+    // Ported from GDB-489. Multiple identical edges 1->2 should not inflate
+    // centrality. Graph: 1->2 (x3), 2->3.
+    build_graph("knows", {{1, 2}, {1, 2}, {1, 2}, {2, 3}});
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    verify_scores_non_negative(scores);
+    verify_scores_finite(scores);
+
+    // Node 2 should have centrality = 1.0 regardless of duplicate edges.
+    // If duplicates inflate sigma, this will fail.
+    EXPECT_NEAR(scores[2], 1.0, 1e-10)
+        << "duplicate edges should not inflate betweenness centrality";
+}
+
+TEST_F(QA_GDB495_Betweenness, DuplicateEdgesOnDiamond) {
+    // Ported from GDB-489. Diamond with duplicate edges on one path.
+    // 1->2 (x3), 1->3, 2->4, 3->4
+    build_graph("knows", {{1, 2}, {1, 2}, {1, 2}, {1, 3}, {2, 4}, {3, 4}});
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    verify_scores_non_negative(scores);
+    verify_scores_finite(scores);
+
+    // In a correct implementation, duplicate edges should not create
+    // additional shortest paths. Nodes 2 and 3 should still split evenly.
+    EXPECT_NEAR(scores[2], scores[3], 0.1)
+        << "duplicate edges should not skew betweenness between parallel paths";
+}
+
 // ============================================================================
 // Normalization boundary values
 // ============================================================================
@@ -521,6 +707,39 @@ TEST_F(QA_GDB495_Betweenness, NormalizedScoresInZeroOneRange) {
     }
 }
 
+TEST_F(QA_GDB495_Betweenness, NormalizationSkippedForOneNode) {
+    // Ported from GDB-489. Edge: 1->1 (self-loop creates 1 node).
+    // Normalization should be skipped.
+    build_graph("knows", {{1, 1}});
+
+    auto result = run_betweenness("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    // n=1, normalization skipped, centrality=0 for single node.
+    EXPECT_DOUBLE_EQ(scores[1], 0.0);
+}
+
+TEST_F(QA_GDB495_Betweenness, NormalizationForLargeN) {
+    // Ported from GDB-489. 1->2->3->4->5->6: chain of 6.
+    // Normalization factor: 1/((6-1)(6-2)) = 1/20.
+    build_graph("knows", {{1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}});
+
+    auto unnorm = run_betweenness_unnormalized("knows");
+    auto norm = run_betweenness("knows");
+    ASSERT_TRUE(unnorm.has_value());
+    ASSERT_TRUE(norm.has_value());
+
+    auto unnorm_scores = to_centrality_map(*unnorm);
+    auto norm_scores = to_centrality_map(*norm);
+
+    double factor = 1.0 / (5.0 * 4.0); // 1/((n-1)(n-2)) = 1/20
+    for (const auto& [node, unnorm_score] : unnorm_scores) {
+        EXPECT_NEAR(norm_scores[node], unnorm_score * factor, 1e-10)
+            << "normalized score for node " << node << " should be unnormalized * 1/20";
+    }
+}
+
 // ============================================================================
 // Error paths
 // ============================================================================
@@ -553,6 +772,50 @@ TEST_F(QA_GDB495_Betweenness, DefaultNormalizedWhenOmitted) {
     EXPECT_DOUBLE_EQ(scores[2], 0.5);
 }
 
+TEST_F(QA_GDB495_Betweenness, StringNormalizedValueFails) {
+    // Ported from GDB-489.
+    build_graph("knows", {{1, 2}});
+
+    auto result = run_betweenness_raw("knows", {{"normalized", Value(std::string("true"))}});
+    ASSERT_FALSE(result.has_value()) << "string value for 'normalized' should fail with type error";
+    EXPECT_EQ(result.error().code, StatusCode::TYPE_ERROR);
+}
+
+TEST_F(QA_GDB495_Betweenness, NullNormalizedValueFails) {
+    // Ported from GDB-489.
+    build_graph("knows", {{1, 2}});
+
+    auto result = run_betweenness_raw("knows", {{"normalized", Value()}});
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+TEST_F(QA_GDB495_Betweenness, IntegerNormalizedCoercion) {
+    // Ported from GDB-489. Pass integer 1 for normalized (should coerce to
+    // true).
+    build_graph("knows", {{1, 2}, {2, 3}});
+
+    auto result = run_betweenness_raw("knows", {{"normalized", Value(static_cast<int64_t>(1))}});
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    // Should behave like normalized=true.
+    EXPECT_DOUBLE_EQ(scores[2], 0.5);
+}
+
+TEST_F(QA_GDB495_Betweenness, IntegerZeroNormalizedCoercion) {
+    // Ported from GDB-489. Pass integer 0 for normalized (should coerce to
+    // false).
+    build_graph("knows", {{1, 2}, {2, 3}});
+
+    auto result = run_betweenness_raw("knows", {{"normalized", Value(static_cast<int64_t>(0))}});
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    // Should behave like normalized=false.
+    EXPECT_DOUBLE_EQ(scores[2], 1.0);
+}
+
 // ============================================================================
 // Multiple edge types
 // ============================================================================
@@ -566,7 +829,8 @@ TEST_F(QA_GDB495_Betweenness, OnlyUsesSpecifiedEdgeType) {
     auto et2 = engine_.create_edge_type(
         default_database_id, "follows", table_id_, table_id_, TypeId::INT64, TypeId::INT64, {});
     ASSERT_TRUE(et2.has_value()) << et2.error().message;
-    auto link = engine_.link(default_database_id, "follows", pk(1), pk(3));
+    auto link =
+        engine_.link(default_database_id, "follows", betweenness_qa::pk(1), betweenness_qa::pk(3));
     ASSERT_TRUE(link.has_value()) << link.error().message;
 
     // Run betweenness on "knows" — should only see the knows graph.
@@ -607,6 +871,52 @@ TEST_F(QA_GDB495_Betweenness, ConsecutiveNegativeIds) {
     EXPECT_DOUBLE_EQ(scores[-3], 0.0);
     EXPECT_DOUBLE_EQ(scores[-2], 1.0);
     EXPECT_DOUBLE_EQ(scores[-1], 0.0);
+}
+
+TEST_F(QA_GDB495_Betweenness, LargeNodeIds) {
+    // Ported from GDB-489. Use large (but valid) int64_t node IDs.
+    constexpr int64_t A = 1000000000LL;
+    constexpr int64_t B = 2000000000LL;
+    constexpr int64_t C = 3000000000LL;
+    build_graph("knows", {{A, B}, {B, C}});
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    EXPECT_EQ(scores.size(), 3u);
+    verify_scores_non_negative(scores);
+
+    // Node B is on the shortest path A->C.
+    EXPECT_DOUBLE_EQ(scores[A], 0.0);
+    EXPECT_DOUBLE_EQ(scores[B], 1.0);
+    EXPECT_DOUBLE_EQ(scores[C], 0.0);
+}
+
+TEST_F(QA_GDB495_Betweenness, NegativeNodeIds) {
+    // Ported from GDB-489. Negative node IDs should work correctly.
+    build_graph("knows", {{-10, -5}, {-5, 0}});
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    EXPECT_EQ(scores.size(), 3u);
+    EXPECT_DOUBLE_EQ(scores[-10], 0.0);
+    EXPECT_DOUBLE_EQ(scores[-5], 1.0);
+    EXPECT_DOUBLE_EQ(scores[0], 0.0);
+}
+
+TEST_F(QA_GDB495_Betweenness, MixedPositiveNegativeNodeIds) {
+    // Ported from GDB-489.
+    build_graph("knows", {{-1, 0}, {0, 1}});
+
+    auto result = run_betweenness("knows");
+    ASSERT_TRUE(result.has_value());
+    verify_sorted_by_node_id(*result);
+
+    auto scores = to_centrality_map(*result);
+    EXPECT_DOUBLE_EQ(scores[0], 0.5); // normalized: 1 / (2*1) = 0.5
 }
 
 // ============================================================================
@@ -659,6 +969,53 @@ TEST_F(QA_GDB495_Betweenness, PathGraphFormulaVerification) {
         double expected = static_cast<double>(i) * static_cast<double>(N - 1 - i);
         EXPECT_DOUBLE_EQ(scores[i], expected) << "node " << i << " in path graph P_" << N;
     }
+}
+
+// ============================================================================
+// Numerical stability
+// ============================================================================
+
+TEST_F(QA_GDB495_Betweenness, LargeSparseGraphFiniteScores) {
+    // Ported from GDB-489. Grid-like structure: chain of 100 nodes with
+    // shortcuts every 10. This creates many alternative shortest paths but
+    // shouldn't overflow.
+    std::vector<std::pair<int64_t, int64_t>> edges;
+    for (int64_t i = 0; i < 99; ++i) {
+        edges.push_back({i, i + 1});
+    }
+    // Add shortcuts.
+    for (int64_t i = 0; i < 90; i += 10) {
+        edges.push_back({i, i + 10});
+    }
+    build_graph("knows", edges);
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    EXPECT_EQ(scores.size(), 100u);
+    verify_scores_finite(scores);
+    verify_scores_non_negative(scores);
+}
+
+TEST_F(QA_GDB495_Betweenness, HighDegreeNodeFiniteScores) {
+    // Ported from GDB-489. Hub node 0 connects to 200 leaf nodes. Each leaf
+    // also connects to the next. This creates many paths through the hub.
+    std::vector<std::pair<int64_t, int64_t>> edges;
+    for (int64_t i = 1; i <= 200; ++i) {
+        edges.push_back({0, i});
+    }
+    for (int64_t i = 1; i < 200; ++i) {
+        edges.push_back({i, i + 1});
+    }
+    build_graph("knows", edges);
+
+    auto result = run_betweenness("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    verify_scores_finite(scores);
+    verify_scores_non_negative(scores);
 }
 
 // ============================================================================
@@ -769,6 +1126,121 @@ TEST_F(QA_GDB495_Betweenness, StressPathGraph50WithNormalization) {
     // Endpoints should have zero.
     EXPECT_DOUBLE_EQ(scores[0], 0.0);
     EXPECT_DOUBLE_EQ(scores[N - 1], 0.0);
+}
+
+TEST_F(QA_GDB495_Betweenness, StressRingGraph300) {
+    // Ported from GDB-489 (StressRingGraph). Directed ring of 300 nodes.
+    // All scores should be symmetric (equal). Distinct from
+    // StressBidirectionalRing200 above (directed vs bidirectional, different
+    // size).
+    constexpr int64_t N = 300;
+    std::vector<std::pair<int64_t, int64_t>> edges;
+    edges.reserve(N);
+    for (int64_t i = 0; i < N; ++i) {
+        edges.push_back({i, (i + 1) % N});
+    }
+    build_graph("knows", edges);
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    EXPECT_EQ(scores.size(), static_cast<size_t>(N));
+    verify_scores_finite(scores);
+    verify_scores_non_negative(scores);
+
+    // All nodes in a directed ring should have the same betweenness.
+    double first_score = scores[0];
+    for (const auto& [node, score] : scores) {
+        EXPECT_NEAR(score, first_score, 1e-10) << "node " << node << " in ring should match node 0";
+    }
+}
+
+TEST_F(QA_GDB495_Betweenness, StressLinearChain100) {
+    // Ported from GDB-489. Linear chain of 100 nodes.
+    constexpr int64_t N = 100;
+    std::vector<std::pair<int64_t, int64_t>> edges;
+    for (int64_t i = 0; i < N - 1; ++i) {
+        edges.push_back({i, i + 1});
+    }
+    build_graph("knows", edges);
+
+    auto result = run_betweenness_unnormalized("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    EXPECT_EQ(scores.size(), static_cast<size_t>(N));
+    verify_scores_finite(scores);
+    verify_scores_non_negative(scores);
+
+    // Endpoints should have zero betweenness.
+    EXPECT_DOUBLE_EQ(scores[0], 0.0);
+    EXPECT_DOUBLE_EQ(scores[N - 1], 0.0);
+
+    // Middle node should have the highest betweenness in a chain.
+    // (symmetric distribution: scores increase toward center)
+    for (int64_t i = 1; i < N / 2; ++i) {
+        EXPECT_LE(scores[i - 1], scores[i] + 1e-10)
+            << "scores should increase toward center: node " << i;
+    }
+}
+
+TEST_F(QA_GDB495_Betweenness, StressBinaryTree) {
+    // Ported from GDB-489. Full binary tree with depth 6 (63 nodes), directed
+    // downward only. Root->children: 1->2, 1->3, 2->4, 2->5, 3->6, 3->7, etc.
+    std::vector<std::pair<int64_t, int64_t>> edges;
+    for (int64_t i = 1; i <= 31; ++i) {
+        edges.push_back({i, 2 * i});
+        edges.push_back({i, 2 * i + 1});
+    }
+    build_graph("knows", edges);
+
+    auto result = run_betweenness("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    verify_scores_finite(scores);
+    verify_scores_non_negative(scores);
+
+    // In a directed tree with only downward edges:
+    // - Root (1) is only a source, never an intermediate => betweenness = 0.
+    // - Leaf nodes (32-63) are only destinations => betweenness = 0.
+    // - Inner nodes (2-31) are intermediates on paths from ancestors to descendants.
+    EXPECT_DOUBLE_EQ(scores[1], 0.0) << "root has zero betweenness in directed tree";
+
+    for (int64_t leaf = 32; leaf <= 63; ++leaf) {
+        EXPECT_DOUBLE_EQ(scores[leaf], 0.0)
+            << "leaf " << leaf << " has zero betweenness in directed tree";
+    }
+
+    // Inner nodes at shallower depths should have higher betweenness
+    // (they're on more paths). Node 2 and 3 (depth 1) should outrank
+    // nodes at depth 2+ because they mediate more ancestor-to-descendant paths.
+    for (int64_t inner = 4; inner <= 31; ++inner) {
+        EXPECT_GE(scores[2], scores[inner] - 1e-10)
+            << "depth-1 node 2 should have >= betweenness than node " << inner;
+    }
+}
+
+TEST_F(QA_GDB495_Betweenness, StressManyDisconnectedPairs) {
+    // Ported from GDB-489. 100 disconnected pairs: {(1,2), (3,4), (5,6), ...}.
+    std::vector<std::pair<int64_t, int64_t>> edges;
+    for (int64_t i = 0; i < 200; i += 2) {
+        edges.push_back({i, i + 1});
+    }
+    build_graph("knows", edges);
+
+    auto result = run_betweenness("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_centrality_map(*result);
+    EXPECT_EQ(scores.size(), 200u);
+    verify_scores_finite(scores);
+
+    // All scores should be zero (no intermediate nodes).
+    for (const auto& [node, score] : scores) {
+        EXPECT_DOUBLE_EQ(score, 0.0) << "node " << node;
+    }
 }
 
 } // namespace
