@@ -166,13 +166,34 @@ TEST_F(QA143ExplainTest, ExplainInsertDoesNotExecute) {
 
 TEST_F(QA143ExplainTest, ExplainAnalyzeInsertExecutes) {
     exec_ok("CREATE TABLE t2 (id INT, name VARCHAR)");
-    exec_ok("INSERT INTO t2 VALUES (1, 'existing')");
 
-    auto plan = plan_text("EXPLAIN ANALYZE DELETE FROM t2 WHERE id = 1");
+    auto plan = plan_text("EXPLAIN ANALYZE INSERT INTO t2 VALUES (1, 'inserted')");
+    EXPECT_NE(plan.find("actual rows="), std::string::npos)
+        << "Expected ANALYZE actual-execution stats in plan, got:\n"
+        << plan;
+    EXPECT_NE(plan.find(" time="), std::string::npos)
+        << "Expected ANALYZE actual-time stats in plan, got:\n"
+        << plan;
+
+    // ANALYZE should have executed the INSERT exactly once (guards against
+    // both dry-run -- row missing -- and double-insert -- row present twice).
+    auto qr = exec_ok("SELECT * FROM t2 WHERE id = 1 AND name = 'inserted'");
+    EXPECT_EQ(qr.rows.size(), 1u);
+}
+
+// =============================================================================
+// EXPLAIN ANALYZE on DELETE does execute
+// =============================================================================
+
+TEST_F(QA143ExplainTest, ExplainAnalyzeDeleteExecutes) {
+    exec_ok("CREATE TABLE t2b (id INT, name VARCHAR)");
+    exec_ok("INSERT INTO t2b VALUES (1, 'existing')");
+
+    auto plan = plan_text("EXPLAIN ANALYZE DELETE FROM t2b WHERE id = 1");
     EXPECT_NE(plan.find("actual rows="), std::string::npos);
 
     // ANALYZE should have executed the DELETE.
-    auto qr = exec_ok("SELECT * FROM t2");
+    auto qr = exec_ok("SELECT * FROM t2b");
     EXPECT_EQ(qr.rows.size(), 0u);
 }
 
