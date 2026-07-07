@@ -334,11 +334,9 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
 
     std::vector<Path> result_paths;
 
-    // Validate that PKs are integer types (PathStep stores int64_t).
-    auto src_int = pk_to_int64(src_pk);
-    if (!src_int) {
-        return tl::unexpected(src_int.error());
-    }
+    // GDB-1292: PathStep::node_pk is a Value, so any PK type (including
+    // STRING) is stored directly -- no int64 conversion or integer-only
+    // validation gate is required to build path steps.
 
     // Check trivial case: source == target.
     // Requires BOTH the same table AND the same PK — GDB-851.
@@ -353,7 +351,7 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
     // VariableLengthMatchOperator — GDB-858).
     if (src_table_id == tgt_table_id && ValueEqual{}(src_pk, tgt_pk) && min_hops == 0) {
         Path p;
-        p.steps.push_back({*src_int, -1});
+        p.steps.push_back({src_pk, -1});
         result_paths.push_back(std::move(p));
         return ok(std::move(result_paths));
     }
@@ -375,7 +373,7 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
     NodeId src_node{src_table_id, src_pk};
     BfsEntry start;
     start.current_node = src_node;
-    start.path_so_far.steps.push_back({*src_int, -1});
+    start.path_so_far.steps.push_back({src_pk, -1});
     queue.push_back(std::move(start));
     globally_visited.insert(src_node);
 
@@ -413,11 +411,6 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
                 (entry.current_node.table_id == src_table_id) ? tgt_table_id : src_table_id;
 
             for (auto& [nbr_pk, edge_id] : *neighbors) {
-                auto nbr_int = pk_to_int64(nbr_pk);
-                if (!nbr_int) {
-                    return tl::unexpected(nbr_int.error());
-                }
-
                 NodeId nbr_node{nbr_table_id, nbr_pk};
 
                 // Build new path.
@@ -425,7 +418,7 @@ MatchShortestPathOperator::find_shortest_paths(const Value& src_pk,
                 // Update the last step's edge_id (the edge FROM previous node TO this one).
                 new_path.steps.back().edge_id = edge_id;
                 // Add the new node.
-                new_path.steps.push_back({*nbr_int, -1});
+                new_path.steps.push_back({nbr_pk, -1});
 
                 // Check if we've reached the target (table AND pk must match).
                 // Enforce quantifier bounds inclusively (matching VariableLengthMatch
@@ -703,10 +696,9 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
                                                         int32_t max_depth) {
     std::vector<Path> result_paths;
 
-    auto src_int = pk_to_int64(src_pk);
-    if (!src_int) {
-        return tl::unexpected(src_int.error());
-    }
+    // GDB-1292: PathStep::node_pk is a Value, so any PK type (including
+    // STRING) is stored directly -- no int64 conversion or integer-only
+    // validation gate is required to build path steps.
 
     // Trivial case: source == target — requires same table AND same pk (GDB-851).
     // Only emit the 0-hop self-path when min_hops == 0; if min_hops >= 1 the
@@ -714,7 +706,7 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
     // only valid if reached via a real cycle (GDB-858).
     if (src_table_id == tgt_table_id && ValueEqual{}(src_pk, tgt_pk) && min_hops == 0) {
         Path p;
-        p.steps.push_back({*src_int, -1});
+        p.steps.push_back({src_pk, -1});
         p.total_weight = 0.0;
         result_paths.push_back(std::move(p));
         return ok(std::move(result_paths));
@@ -742,7 +734,7 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
     DijkstraEntry start;
     start.cost = 0.0;
     start.current_node = src_node;
-    start.path_so_far.steps.push_back({*src_int, -1});
+    start.path_so_far.steps.push_back({src_pk, -1});
     start.path_so_far.total_weight = 0.0;
     pq.push(std::move(start));
     best_cost[src_node] = 0.0;
@@ -817,17 +809,12 @@ MatchShortestPathOperator::find_weighted_shortest_paths(const Value& src_pk,
         for (auto& [nbr_pk, edge_id, weight] : *neighbors) {
             double new_cost = entry.cost + weight;
 
-            auto nbr_int = pk_to_int64(nbr_pk);
-            if (!nbr_int) {
-                return tl::unexpected(nbr_int.error());
-            }
-
             NodeId nbr_node{nbr_table_id, nbr_pk};
 
             // Build new path.
             Path new_path = entry.path_so_far;
             new_path.steps.back().edge_id = edge_id;
-            new_path.steps.push_back({*nbr_int, -1});
+            new_path.steps.push_back({nbr_pk, -1});
             new_path.total_weight = new_cost;
 
             // Check if we've reached the target (table AND pk must match — GDB-851).

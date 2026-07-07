@@ -57,19 +57,22 @@ protected:
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_TRUE(result.has_value()) << sql << ": " << result.error().message;
-        if (!result.has_value()) return QueryResult{};
+        if (!result.has_value())
+            return QueryResult{};
         return std::move(*result);
     }
 
     Error exec_err(const std::string& sql) {
         auto result = engine_->execute(sql);
         EXPECT_FALSE(result.has_value()) << sql << ": expected error but query succeeded";
-        if (result.has_value()) return Error{StatusCode::OK, "unexpectedly succeeded"};
+        if (result.has_value())
+            return Error{StatusCode::OK, "unexpectedly succeeded"};
         return result.error();
     }
 
     static int64_t val_to_int64(const Value& v) {
-        if (v.type_id() == TypeId::INT32) return static_cast<int64_t>(v.as_int32());
+        if (v.type_id() == TypeId::INT32)
+            return static_cast<int64_t>(v.as_int32());
         return v.as_int64();
     }
 
@@ -91,24 +94,26 @@ protected:
 // Confirm that a traversal returning a 2-step path [1, 10] (distinct PKs) is
 // detected as different from a 2-step path [1, 1] (same-PK collision).
 // This is a meta-test: if the original test checked [1, 1] and we had a bug
-// producing [1, 10], EXPECT_EQ(p.steps[1].node_pk, 1) would catch it.
+// producing [1, 10], EXPECT_EQ(p.steps[1].node_pk_as_int64(), 1) would catch it.
 TEST_F(QA_GDB820, AssertionsDistinguishSamePkFromDistinctPk) {
     exec_ok("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR)");
     exec_ok("INSERT INTO users VALUES (1, 'Alice')");
     exec_ok("CREATE TABLE posts (id INT PRIMARY KEY, title VARCHAR)");
-    exec_ok("INSERT INTO posts VALUES (1, 'Hello')");   // same PK
-    exec_ok("INSERT INTO posts VALUES (10, 'World')");  // distinct PK
+    exec_ok("INSERT INTO posts VALUES (1, 'Hello')");  // same PK
+    exec_ok("INSERT INTO posts VALUES (10, 'World')"); // distinct PK
     exec_ok("CREATE EDGE TYPE authored FROM users TO posts");
 
     // Link to distinct-PK target: path should be [1, 10]
     exec_ok("LINK users(1) TO posts(10) VIA authored");
-    auto qr = exec_ok("SELECT __node, __path FROM TRAVERSE authored FROM users(1) DIRECTION OUT WITH TRACE");
+    auto qr = exec_ok(
+        "SELECT __node, __path FROM TRAVERSE authored FROM users(1) DIRECTION OUT WITH TRACE");
     ASSERT_EQ(qr.rows.size(), 1u);
     ASSERT_EQ(qr.rows[0][1].type_id(), TypeId::PATH);
     const Path& p_distinct = qr.rows[0][1].as_path();
     ASSERT_EQ(p_distinct.steps.size(), 2u);
-    EXPECT_EQ(p_distinct.steps[0].node_pk, 1)  << "start node should be users.id=1";
-    EXPECT_EQ(p_distinct.steps[1].node_pk, 10) << "target node should be posts.id=10 (distinct PK)";
+    EXPECT_EQ(p_distinct.steps[0].node_pk_as_int64(), 1) << "start node should be users.id=1";
+    EXPECT_EQ(p_distinct.steps[1].node_pk_as_int64(), 10)
+        << "target node should be posts.id=10 (distinct PK)";
     EXPECT_EQ(p_distinct.length(), 1);
 }
 
@@ -137,13 +142,13 @@ TEST_F(QA_GDB820, DeepSamePkChainThreeHopsTerminatesAndPathIsCorrectLength) {
                          "FROM TRAVERSE a_to_b FROM a(1) DIRECTION OUT WITH TRACE");
     ASSERT_EQ(qr_ab.rows.size(), 1u) << "should reach exactly b(1)";
     EXPECT_EQ(qr_ab.rows[0][0].as_string(), "nodeB");
-    EXPECT_EQ(val_to_int64(qr_ab.rows[0][1]), 1);  // __node == b.id == 1
-    EXPECT_EQ(val_to_int64(qr_ab.rows[0][2]), 1);  // depth == 1
+    EXPECT_EQ(val_to_int64(qr_ab.rows[0][1]), 1); // __node == b.id == 1
+    EXPECT_EQ(val_to_int64(qr_ab.rows[0][2]), 1); // depth == 1
     ASSERT_EQ(qr_ab.rows[0][3].type_id(), TypeId::PATH);
     const Path& p_ab = qr_ab.rows[0][3].as_path();
     ASSERT_EQ(p_ab.steps.size(), 2u) << "path: a(1) -> b(1), 2 steps";
-    EXPECT_EQ(p_ab.steps[0].node_pk, 1);
-    EXPECT_EQ(p_ab.steps[1].node_pk, 1);
+    EXPECT_EQ(p_ab.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(p_ab.steps[1].node_pk_as_int64(), 1);
     EXPECT_EQ(p_ab.length(), 1);
 }
 
@@ -176,8 +181,8 @@ TEST_F(QA_GDB820, FanOutSamePkMultipleTargetsAllTerminateWithCorrectPaths) {
     ASSERT_EQ(qr.rows[0][3].type_id(), TypeId::PATH);
     const Path& p = qr.rows[0][3].as_path();
     ASSERT_EQ(p.steps.size(), 2u) << "fan-out same-PK path must have 2 steps";
-    EXPECT_EQ(p.steps[0].node_pk, 1);
-    EXPECT_EQ(p.steps[1].node_pk, 1);
+    EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(p.steps[1].node_pk_as_int64(), 1);
     EXPECT_EQ(p.length(), 1);
 }
 
@@ -209,14 +214,16 @@ TEST_F(QA_GDB820, HeterogeneousSamePkSelfLoopOnTargetTraversalTerminates) {
     // so the traversal stays within authored and returns exactly 1 row.
     auto qr = exec_ok("SELECT title, __node, __depth, __path "
                       "FROM TRAVERSE authored FROM users(1) DIRECTION OUT WITH TRACE");
-    ASSERT_EQ(qr.rows.size(), 1u) << "only posts(1) reachable via authored; self-loop is a different edge type";
+    ASSERT_EQ(qr.rows.size(), 1u)
+        << "only posts(1) reachable via authored; self-loop is a different edge type";
     const Path& p = qr.rows[0][3].as_path();
     // Two steps: start node (users.id=1) -> target (posts.id=1).
     // The depth-bounded reconstruct_path prevents an infinite chain even though
     // both share node_pk=1.
-    ASSERT_EQ(p.steps.size(), 2u) << "path must be exactly 2 steps (start->target), not an infinite chain";
-    EXPECT_EQ(p.steps[0].node_pk, 1);
-    EXPECT_EQ(p.steps[1].node_pk, 1);
+    ASSERT_EQ(p.steps.size(), 2u)
+        << "path must be exactly 2 steps (start->target), not an infinite chain";
+    EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(p.steps[1].node_pk_as_int64(), 1);
     EXPECT_EQ(p.length(), 1);
 }
 
@@ -243,13 +250,13 @@ TEST_F(QA_GDB820, BidirectionalSamePkEdgesTraversalTerminatesCorrectly) {
     auto qr = exec_ok("SELECT title, __node, __depth, __path "
                       "FROM TRAVERSE authored FROM users(1) DIRECTION OUT WITH TRACE");
     ASSERT_EQ(qr.rows.size(), 1u) << "only posts(1) reachable via authored";
-    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 1);  // __node == 1
-    EXPECT_EQ(val_to_int64(qr.rows[0][2]), 1);  // depth == 1
+    EXPECT_EQ(val_to_int64(qr.rows[0][1]), 1); // __node == 1
+    EXPECT_EQ(val_to_int64(qr.rows[0][2]), 1); // depth == 1
     ASSERT_EQ(qr.rows[0][3].type_id(), TypeId::PATH);
     const Path& p = qr.rows[0][3].as_path();
     ASSERT_EQ(p.steps.size(), 2u);
-    EXPECT_EQ(p.steps[0].node_pk, 1) << "start=users(1)";
-    EXPECT_EQ(p.steps[1].node_pk, 1) << "target=posts(1)";
+    EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1) << "start=users(1)";
+    EXPECT_EQ(p.steps[1].node_pk_as_int64(), 1) << "target=posts(1)";
     EXPECT_EQ(p.length(), 1);
 }
 
@@ -275,7 +282,7 @@ TEST_F(QA_GDB820, BidirectionalSamePkEdgeModePathIsTrivial) {
     const Path& p = qr.rows[0][2].as_path();
     // Edge-mode path leads to the source of the edge (start node), trivial = 1 step.
     ASSERT_EQ(p.steps.size(), 1u) << "edge-mode same-PK path must be trivial [1]";
-    EXPECT_EQ(p.steps[0].node_pk, 1);
+    EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -319,7 +326,7 @@ TEST_F(QA_GDB820, SamePkTraversalMaxDepthOneLimitsResults) {
         ASSERT_EQ(row[2].type_id(), TypeId::PATH);
         const Path& p = row[2].as_path();
         ASSERT_EQ(p.steps.size(), 2u);
-        EXPECT_EQ(p.steps[0].node_pk, 1);
+        EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
         EXPECT_EQ(p.length(), 1);
     }
 }
@@ -338,7 +345,8 @@ TEST_F(QA_GDB820, SamePkHeterogeneousDepthIsCorrectlyOne) {
     exec_ok("CREATE EDGE TYPE authored FROM users TO posts");
     exec_ok("LINK users(1) TO posts(1) VIA authored");
 
-    auto qr = exec_ok("SELECT __depth FROM TRAVERSE authored FROM users(1) DIRECTION OUT WITH TRACE");
+    auto qr =
+        exec_ok("SELECT __depth FROM TRAVERSE authored FROM users(1) DIRECTION OUT WITH TRACE");
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(val_to_int64(qr.rows[0][0]), 1)
         << "__depth must be 1 for a single-hop same-PK traversal";

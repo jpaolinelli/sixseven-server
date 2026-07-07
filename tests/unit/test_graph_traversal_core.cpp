@@ -127,13 +127,13 @@ TEST(GraphTraversalCore, ReconstructPathLinearChain) {
 
     const auto& steps = result->steps;
     ASSERT_EQ(steps.size(), 4u);
-    EXPECT_EQ(steps[0].node_pk, int64_t{1});
+    EXPECT_EQ(steps[0].node_pk_as_int64(), int64_t{1});
     EXPECT_EQ(steps[0].edge_id, int64_t{10}); // outgoing: edge to step[1]
-    EXPECT_EQ(steps[1].node_pk, int64_t{2});
+    EXPECT_EQ(steps[1].node_pk_as_int64(), int64_t{2});
     EXPECT_EQ(steps[1].edge_id, int64_t{11}); // outgoing: edge to step[2]
-    EXPECT_EQ(steps[2].node_pk, int64_t{3});
+    EXPECT_EQ(steps[2].node_pk_as_int64(), int64_t{3});
     EXPECT_EQ(steps[2].edge_id, int64_t{12}); // outgoing: edge to step[3]
-    EXPECT_EQ(steps[3].node_pk, int64_t{4});
+    EXPECT_EQ(steps[3].node_pk_as_int64(), int64_t{4});
     EXPECT_EQ(steps[3].edge_id, int64_t{-1}); // terminal step: no outgoing
 }
 
@@ -143,7 +143,7 @@ TEST(GraphTraversalCore, ReconstructPathDepthZeroSelf) {
     auto result = reconstruct_path(Value(int64_t{1}), 0, pm);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     ASSERT_EQ(result->steps.size(), 1u);
-    EXPECT_EQ(result->steps[0].node_pk, int64_t{1});
+    EXPECT_EQ(result->steps[0].node_pk_as_int64(), int64_t{1});
     EXPECT_EQ(result->steps[0].edge_id, int64_t{-1});
 }
 
@@ -153,9 +153,9 @@ TEST(GraphTraversalCore, ReconstructPathSingleHop) {
     auto result = reconstruct_path(Value(int64_t{2}), 1, pm);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     ASSERT_EQ(result->steps.size(), 2u);
-    EXPECT_EQ(result->steps[0].node_pk, int64_t{1});
+    EXPECT_EQ(result->steps[0].node_pk_as_int64(), int64_t{1});
     EXPECT_EQ(result->steps[0].edge_id, int64_t{5});
-    EXPECT_EQ(result->steps[1].node_pk, int64_t{2});
+    EXPECT_EQ(result->steps[1].node_pk_as_int64(), int64_t{2});
     EXPECT_EQ(result->steps[1].edge_id, int64_t{-1});
 }
 
@@ -175,8 +175,8 @@ TEST(GraphTraversalCore, ReconstructPathDepthGuardPreventsLoop) {
     auto result = reconstruct_path(Value(int64_t{2}), 1, pm);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     ASSERT_EQ(result->steps.size(), 2u);
-    EXPECT_EQ(result->steps[0].node_pk, int64_t{1});
-    EXPECT_EQ(result->steps[1].node_pk, int64_t{2});
+    EXPECT_EQ(result->steps[0].node_pk_as_int64(), int64_t{1});
+    EXPECT_EQ(result->steps[1].node_pk_as_int64(), int64_t{2});
 }
 
 // H11 (GDB-694): the max_steps guard catches an actual cycle in the parent
@@ -202,8 +202,8 @@ TEST(GraphTraversalCore, ReconstructPathInt32Pks) {
     ASSERT_TRUE(result.has_value()) << result.error().message;
     ASSERT_EQ(result->steps.size(), 2u);
     // pk_to_int64 widens int32 → int64.
-    EXPECT_EQ(result->steps[0].node_pk, int64_t{1});
-    EXPECT_EQ(result->steps[1].node_pk, int64_t{2});
+    EXPECT_EQ(result->steps[0].node_pk_as_int64(), int64_t{1});
+    EXPECT_EQ(result->steps[1].node_pk_as_int64(), int64_t{2});
 }
 
 } // namespace

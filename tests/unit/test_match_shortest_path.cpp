@@ -270,9 +270,9 @@ TEST_F(MatchShortestPathTest, PathContainsCorrectNodes) {
     const auto& path = from_1_to_3[0].values[2].as_path();
     EXPECT_EQ(path.length(), 2);
     ASSERT_EQ(path.steps.size(), 3u);
-    EXPECT_EQ(path.steps[0].node_pk, 1);
-    EXPECT_EQ(path.steps[1].node_pk, 2);
-    EXPECT_EQ(path.steps[2].node_pk, 3);
+    EXPECT_EQ(path.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(path.steps[1].node_pk_as_int64(), 2);
+    EXPECT_EQ(path.steps[2].node_pk_as_int64(), 3);
 }
 
 // Each PathSelector must map to a distinct plan_node_name() string.  This
@@ -524,10 +524,10 @@ TEST_F(WeightedShortestPathTest, DijkstraFindsWeightedShortestPath) {
     // Should be 1->3->4->5 (3 hops, cost 10).
     EXPECT_EQ(path.length(), 3);
     ASSERT_EQ(path.steps.size(), 4u);
-    EXPECT_EQ(path.steps[0].node_pk, 1);
-    EXPECT_EQ(path.steps[1].node_pk, 3);
-    EXPECT_EQ(path.steps[2].node_pk, 4);
-    EXPECT_EQ(path.steps[3].node_pk, 5);
+    EXPECT_EQ(path.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(path.steps[1].node_pk_as_int64(), 3);
+    EXPECT_EQ(path.steps[2].node_pk_as_int64(), 4);
+    EXPECT_EQ(path.steps[3].node_pk_as_int64(), 5);
 }
 
 TEST_F(WeightedShortestPathTest, PathCostReturnsCorrectTotal) {
@@ -640,10 +640,10 @@ TEST_F(WeightedShortestPathTest, AllShortestOnlyReturnsCheapestPaths) {
     const auto& path = from_1_to_5[0].values[2].as_path();
     EXPECT_DOUBLE_EQ(path.total_weight, 10.0);
     ASSERT_EQ(path.steps.size(), 4u);
-    EXPECT_EQ(path.steps[0].node_pk, 1);
-    EXPECT_EQ(path.steps[1].node_pk, 3);
-    EXPECT_EQ(path.steps[2].node_pk, 4);
-    EXPECT_EQ(path.steps[3].node_pk, 5);
+    EXPECT_EQ(path.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(path.steps[1].node_pk_as_int64(), 3);
+    EXPECT_EQ(path.steps[2].node_pk_as_int64(), 4);
+    EXPECT_EQ(path.steps[3].node_pk_as_int64(), 5);
 }
 
 TEST_F(WeightedShortestPathTest, ShortestKOnlyReturnsCheapestPaths) {
@@ -749,9 +749,9 @@ TEST_F(LateCheaperArrivalTest, AllShortestPurgesExpensivePathOnCheaperArrival) {
     const auto& path = from_1_to_4[0].values[2].as_path();
     EXPECT_DOUBLE_EQ(path.total_weight, 51.0);
     ASSERT_EQ(path.steps.size(), 3u);
-    EXPECT_EQ(path.steps[0].node_pk, 1);
-    EXPECT_EQ(path.steps[1].node_pk, 3);
-    EXPECT_EQ(path.steps[2].node_pk, 4);
+    EXPECT_EQ(path.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(path.steps[1].node_pk_as_int64(), 3);
+    EXPECT_EQ(path.steps[2].node_pk_as_int64(), 4);
 }
 
 TEST_F(LateCheaperArrivalTest, AnyShortestReturnsCheapestNotFirstArrival) {

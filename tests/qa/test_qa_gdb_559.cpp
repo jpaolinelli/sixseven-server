@@ -153,9 +153,9 @@ TEST_F(QA_GDB559, AllShortest_LateCheaperArrival_PurgesExpensive) {
     // Verify it's the correct path (through node 3, not node 2).
     const auto& path = from_1_to_4[0]->values[2].as_path();
     ASSERT_EQ(path.steps.size(), 3u);
-    EXPECT_EQ(path.steps[0].node_pk, 1);
-    EXPECT_EQ(path.steps[1].node_pk, 3);
-    EXPECT_EQ(path.steps[2].node_pk, 4);
+    EXPECT_EQ(path.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(path.steps[1].node_pk_as_int64(), 3);
+    EXPECT_EQ(path.steps[2].node_pk_as_int64(), 4);
 }
 
 TEST_F(QA_GDB559, AllShortest_MultiplePurges_OnlyCheapestSurvives) {
@@ -553,9 +553,9 @@ TEST_F(QA_GDB559, AllShortest_PathCostCorrectAfterPurge) {
     // Verify path step count matches expected hops.
     EXPECT_EQ(path.steps.size(), 3u);
     // Verify total_weight is consistent with the actual path structure.
-    EXPECT_EQ(path.steps[0].node_pk, 1);
-    EXPECT_EQ(path.steps[1].node_pk, 4);
-    EXPECT_EQ(path.steps[2].node_pk, 3);
+    EXPECT_EQ(path.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(path.steps[1].node_pk_as_int64(), 4);
+    EXPECT_EQ(path.steps[2].node_pk_as_int64(), 3);
 }
 
 } // namespace

@@ -494,12 +494,12 @@ TEST_F(EdgeTraversalTest, TraceAddsPathToFromNode) {
     // Edge 1→2: __from = 1 (the start node), so the path is just [1].
     const Path& p_1_2 = paths.at(std::make_pair(1L, 2L));
     ASSERT_EQ(p_1_2.steps.size(), 1u);
-    EXPECT_EQ(p_1_2.steps[0].node_pk, 1);
+    EXPECT_EQ(p_1_2.steps[0].node_pk_as_int64(), 1);
 
     // Edge 4→5: __from = 4, reached via 1 → (2 or 3) → 4, so the path ends at 4.
     const Path& p_4_5 = paths.at(std::make_pair(4L, 5L));
-    EXPECT_EQ(p_4_5.steps.front().node_pk, 1);
-    EXPECT_EQ(p_4_5.steps.back().node_pk, 4);
+    EXPECT_EQ(p_4_5.steps.front().node_pk_as_int64(), 1);
+    EXPECT_EQ(p_4_5.steps.back().node_pk_as_int64(), 4);
     EXPECT_EQ(p_4_5.length(), 2); // two hops from 1 to 4
 }
 
@@ -515,8 +515,8 @@ TEST_F(EdgeTraversalTest, TracePathsAreCycleFree) {
         const Path& p = row[1].as_path();
         std::set<int64_t> seen;
         for (const auto& step : p.steps) {
-            EXPECT_TRUE(seen.insert(step.node_pk).second)
-                << "path contains a repeated node: " << step.node_pk;
+            EXPECT_TRUE(seen.insert(step.node_pk_as_int64()).second)
+                << "path contains a repeated node: " << step.node_pk_as_int64();
         }
     }
 }

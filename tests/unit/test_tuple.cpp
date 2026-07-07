@@ -877,11 +877,11 @@ TEST(TupleSerializer, PathRoundTripWithTotalWeight) {
     const auto& restored = (*result)[0].as_path();
     EXPECT_EQ(restored.total_weight, 42.5) << "total_weight should be preserved";
     ASSERT_EQ(restored.steps.size(), 3u);
-    EXPECT_EQ(restored.steps[0].node_pk, 1);
+    EXPECT_EQ(restored.steps[0].node_pk_as_int64(), 1);
     EXPECT_EQ(restored.steps[0].edge_id, 100);
-    EXPECT_EQ(restored.steps[1].node_pk, 2);
+    EXPECT_EQ(restored.steps[1].node_pk_as_int64(), 2);
     EXPECT_EQ(restored.steps[1].edge_id, 101);
-    EXPECT_EQ(restored.steps[2].node_pk, 3);
+    EXPECT_EQ(restored.steps[2].node_pk_as_int64(), 3);
     EXPECT_EQ(restored.steps[2].edge_id, -1);
 }
 

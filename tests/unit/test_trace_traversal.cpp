@@ -150,8 +150,8 @@ protected:
 void expect_cycle_free(const Path& path) {
     std::unordered_set<int64_t> seen;
     for (const auto& step : path.steps) {
-        EXPECT_TRUE(seen.insert(step.node_pk).second)
-            << "path contains a repeated node: " << step.node_pk;
+        EXPECT_TRUE(seen.insert(step.node_pk_as_int64()).second)
+            << "path contains a repeated node: " << step.node_pk_as_int64();
     }
 }
 
@@ -179,9 +179,9 @@ TEST_F(TraceTraversalTest, StartNodeIsFirstStepInEveryPath) {
     ASSERT_EQ(rows.size(), 4u);
     for (const auto& [node, traced] : rows) {
         ASSERT_FALSE(traced.path.steps.empty());
-        EXPECT_EQ(traced.path.steps.front().node_pk, 1)
+        EXPECT_EQ(traced.path.steps.front().node_pk_as_int64(), 1)
             << "path for node " << node << " must start at the BFS origin";
-        EXPECT_EQ(traced.path.steps.back().node_pk, node)
+        EXPECT_EQ(traced.path.steps.back().node_pk_as_int64(), node)
             << "path must terminate at the result node";
         EXPECT_EQ(traced.path.steps.back().edge_id, -1)
             << "terminal step must carry no outgoing edge";
@@ -232,7 +232,7 @@ TEST_F(TraceTraversalTest, MaxDepthOneYieldsSingleHopPaths) {
     ASSERT_EQ(rows.size(), 2u);
     for (const auto& [node, traced] : rows) {
         ASSERT_EQ(traced.path.steps.size(), 2u) << "node " << node;
-        EXPECT_EQ(traced.path.steps.front().node_pk, 1);
+        EXPECT_EQ(traced.path.steps.front().node_pk_as_int64(), 1);
         EXPECT_EQ(traced.path.length(), 1);
         // The non-terminal step must reference a real edge row.
         EXPECT_GE(traced.path.steps.front().edge_id, 0);
@@ -250,14 +250,15 @@ TEST_F(TraceTraversalTest, FetchWithTraceEmitsSourceAndPath) {
     for (const auto& [node, traced] : rows) {
         // FETCH adds the source column; TRACE still appends a valid path.
         EXPECT_EQ(traced.path.length(), traced.depth) << "node " << node;
-        EXPECT_EQ(traced.path.steps.front().node_pk, 1);
-        EXPECT_EQ(traced.path.steps.back().node_pk, node);
+        EXPECT_EQ(traced.path.steps.front().node_pk_as_int64(), 1);
+        EXPECT_EQ(traced.path.steps.back().node_pk_as_int64(), node);
 
         // The FETCH source is the BFS parent: it must be the second-to-last
         // step of the traced path.
         ASSERT_FALSE(traced.source.is_null()) << "node " << node << ": source must be populated";
         ASSERT_GE(traced.path.steps.size(), 2u);
-        EXPECT_EQ(traced.source.as_int64(), traced.path.steps[traced.path.steps.size() - 2].node_pk)
+        EXPECT_EQ(traced.source.as_int64(),
+                  traced.path.steps[traced.path.steps.size() - 2].node_pk_as_int64())
             << "node " << node << ": FETCH source must match the path's penultimate step";
     }
 }
@@ -277,7 +278,7 @@ TEST_F(TraceTraversalTest, CycleEdgeProducesCycleFreePaths) {
     for (const auto& [node, traced] : rows) {
         expect_cycle_free(traced.path);
         EXPECT_EQ(traced.path.length(), traced.depth) << "node " << node;
-        EXPECT_EQ(traced.path.steps.front().node_pk, 1);
+        EXPECT_EQ(traced.path.steps.front().node_pk_as_int64(), 1);
     }
 }
 
@@ -308,9 +309,9 @@ TEST_F(TraceTraversalTest, DirectionInProducesReversePaths) {
     EXPECT_EQ(rows.at(1).depth, 3);
 
     for (const auto& [node, traced] : rows) {
-        EXPECT_EQ(traced.path.steps.front().node_pk, 5)
+        EXPECT_EQ(traced.path.steps.front().node_pk_as_int64(), 5)
             << "reverse path for node " << node << " must start at the BFS origin";
-        EXPECT_EQ(traced.path.steps.back().node_pk, node);
+        EXPECT_EQ(traced.path.steps.back().node_pk_as_int64(), node);
         EXPECT_EQ(traced.path.length(), traced.depth);
         expect_cycle_free(traced.path);
     }
@@ -318,11 +319,11 @@ TEST_F(TraceTraversalTest, DirectionInProducesReversePaths) {
     // The reverse path to 1 must run 5 -> 4 -> (2 or 3) -> 1.
     const Path& p1 = rows.at(1).path;
     ASSERT_EQ(p1.steps.size(), 4u);
-    EXPECT_EQ(p1.steps[0].node_pk, 5);
-    EXPECT_EQ(p1.steps[1].node_pk, 4);
-    EXPECT_TRUE(p1.steps[2].node_pk == 2 || p1.steps[2].node_pk == 3)
-        << "unexpected intermediate node: " << p1.steps[2].node_pk;
-    EXPECT_EQ(p1.steps[3].node_pk, 1);
+    EXPECT_EQ(p1.steps[0].node_pk_as_int64(), 5);
+    EXPECT_EQ(p1.steps[1].node_pk_as_int64(), 4);
+    EXPECT_TRUE(p1.steps[2].node_pk_as_int64() == 2 || p1.steps[2].node_pk_as_int64() == 3)
+        << "unexpected intermediate node: " << p1.steps[2].node_pk_as_int64();
+    EXPECT_EQ(p1.steps[3].node_pk_as_int64(), 1);
 }
 
 TEST_F(TraceTraversalTest, DirectionBothPathsStayRootedAtStart) {
@@ -336,9 +337,9 @@ TEST_F(TraceTraversalTest, DirectionBothPathsStayRootedAtStart) {
     EXPECT_EQ(rows.at(1).depth, 2);
 
     for (const auto& [node, traced] : rows) {
-        EXPECT_EQ(traced.path.steps.front().node_pk, 4)
+        EXPECT_EQ(traced.path.steps.front().node_pk_as_int64(), 4)
             << "BOTH-direction path for node " << node << " must start at the BFS origin";
-        EXPECT_EQ(traced.path.steps.back().node_pk, node);
+        EXPECT_EQ(traced.path.steps.back().node_pk_as_int64(), node);
         EXPECT_EQ(traced.path.length(), traced.depth);
         expect_cycle_free(traced.path);
     }

@@ -33,11 +33,16 @@ namespace sixseven {
 // pk_to_int64
 // ---------------------------------------------------------------------------
 
-/// Convert a Value PK to int64_t for PathStep storage.
+/// Widen an integer-typed Value PK to int64_t.
 ///
-/// Returns an error if the PK is null or not an integer type (INT32 / INT64).
-/// Previously duplicated as a file-local function in five operator .cpp files;
-/// now lives here once (H9/H11, GDB-694/GDB-696).
+/// Returns an error if the PK is null or not an integer type (INT8..INT64 /
+/// UINT8..UINT64). Previously duplicated as a file-local function in five
+/// operator .cpp files; now lives here once (H9/H11, GDB-694/GDB-696).
+///
+/// GDB-1292: PathStep::node_pk is now a Value (not int64_t), so path-building
+/// call sites no longer need this conversion -- STRING and other
+/// non-integer PKs flow through as Value directly. This function is kept for
+/// callers that specifically need a genuine int64_t (numeric-only contexts).
 [[nodiscard]] Result<int64_t> pk_to_int64(const Value& pk);
 
 // ---------------------------------------------------------------------------

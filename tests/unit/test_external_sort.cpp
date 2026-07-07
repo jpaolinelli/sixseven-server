@@ -780,20 +780,20 @@ TEST_F(ExternalSortTest, PathRoundTripWithTotalWeight) {
     const auto& restored1 = results[0].values[1].as_path();
     EXPECT_EQ(restored1.total_weight, 10.5) << "total_weight for path 1 must survive spill";
     ASSERT_EQ(restored1.steps.size(), 2u);
-    EXPECT_EQ(restored1.steps[0].node_pk, 1);
+    EXPECT_EQ(restored1.steps[0].node_pk_as_int64(), 1);
     EXPECT_EQ(restored1.steps[0].edge_id, 100);
-    EXPECT_EQ(restored1.steps[1].node_pk, 2);
+    EXPECT_EQ(restored1.steps[1].node_pk_as_int64(), 2);
     EXPECT_EQ(restored1.steps[1].edge_id, -1);
 
     // sort_key=2 comes second
     const auto& restored2 = results[1].values[1].as_path();
     EXPECT_EQ(restored2.total_weight, 5.25) << "total_weight for path 2 must survive spill";
     ASSERT_EQ(restored2.steps.size(), 3u);
-    EXPECT_EQ(restored2.steps[0].node_pk, 3);
+    EXPECT_EQ(restored2.steps[0].node_pk_as_int64(), 3);
     EXPECT_EQ(restored2.steps[0].edge_id, 200);
-    EXPECT_EQ(restored2.steps[1].node_pk, 4);
+    EXPECT_EQ(restored2.steps[1].node_pk_as_int64(), 4);
     EXPECT_EQ(restored2.steps[1].edge_id, 201);
-    EXPECT_EQ(restored2.steps[2].node_pk, 5);
+    EXPECT_EQ(restored2.steps[2].node_pk_as_int64(), 5);
     EXPECT_EQ(restored2.steps[2].edge_id, -1);
 }
 

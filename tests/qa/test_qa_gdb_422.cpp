@@ -277,9 +277,9 @@ TEST(QA_GDB422_Path, PathValueRoundTrip) {
     auto retrieved = v.try_as_path();
     ASSERT_TRUE(retrieved.has_value()) << retrieved.error().message;
     EXPECT_EQ((*retrieved)->length(), 2);
-    EXPECT_EQ((*retrieved)->steps[0].node_pk, 1);
-    EXPECT_EQ((*retrieved)->steps[1].node_pk, 2);
-    EXPECT_EQ((*retrieved)->steps[2].node_pk, 3);
+    EXPECT_EQ((*retrieved)->steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ((*retrieved)->steps[1].node_pk_as_int64(), 2);
+    EXPECT_EQ((*retrieved)->steps[2].node_pk_as_int64(), 3);
 }
 
 TEST(QA_GDB422_Path, PathInequalityDifferentLengths) {
@@ -898,7 +898,7 @@ TEST(QA_GDB422_Serialization, PathRoundTrip) {
     auto p2 = v2.try_as_path();
     ASSERT_TRUE(p2.has_value()) << p2.error().message;
     EXPECT_EQ((*p2)->steps.size(), 3u);
-    EXPECT_EQ((*p2)->steps[0].node_pk, 100);
+    EXPECT_EQ((*p2)->steps[0].node_pk_as_int64(), 100);
     EXPECT_EQ((*p2)->steps[2].edge_id, -1);
 }
 

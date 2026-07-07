@@ -102,8 +102,8 @@ protected:
     static void expect_cycle_free(const Path& path) {
         std::unordered_set<int64_t> seen;
         for (const auto& step : path.steps) {
-            EXPECT_TRUE(seen.insert(step.node_pk).second)
-                << "path contains a repeated node: " << step.node_pk;
+            EXPECT_TRUE(seen.insert(step.node_pk_as_int64()).second)
+                << "path contains a repeated node: " << step.node_pk_as_int64();
         }
     }
 
@@ -163,8 +163,9 @@ TEST_F(TraceEnrichedTest, StartNodeIsFirstStepInEveryPath) {
         ASSERT_EQ(row[1].type_id(), TypeId::PATH);
         const Path& p = row[1].as_path();
         ASSERT_FALSE(p.steps.empty());
-        EXPECT_EQ(p.steps.front().node_pk, 1) << "path must start at the traversal origin";
-        EXPECT_EQ(p.steps.back().node_pk, val_to_int64(row[0]))
+        EXPECT_EQ(p.steps.front().node_pk_as_int64(), 1)
+            << "path must start at the traversal origin";
+        EXPECT_EQ(p.steps.back().node_pk_as_int64(), val_to_int64(row[0]))
             << "path must terminate at the result node";
     }
 }
@@ -186,7 +187,7 @@ TEST_F(TraceEnrichedTest, CycleEdgeKeepsPathsAcyclic) {
         const Path& p = row[2].as_path();
         expect_cycle_free(p);
         EXPECT_EQ(p.length(), val_to_int64(row[1]));
-        EXPECT_EQ(p.steps.front().node_pk, 1);
+        EXPECT_EQ(p.steps.front().node_pk_as_int64(), 1);
     }
 }
 
@@ -208,11 +209,11 @@ TEST_F(TraceEnrichedTest, WhereOnTableColumnKeepsCompletePath) {
     ASSERT_EQ(qr.rows[0][2].type_id(), TypeId::PATH);
     const Path& p = qr.rows[0][2].as_path();
     ASSERT_EQ(p.steps.size(), 4u) << "filtered-out intermediate hops must remain in the path";
-    EXPECT_EQ(p.steps[0].node_pk, 1);
-    EXPECT_TRUE(p.steps[1].node_pk == 2 || p.steps[1].node_pk == 3)
-        << "unexpected intermediate node: " << p.steps[1].node_pk;
-    EXPECT_EQ(p.steps[2].node_pk, 4);
-    EXPECT_EQ(p.steps[3].node_pk, 5);
+    EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
+    EXPECT_TRUE(p.steps[1].node_pk_as_int64() == 2 || p.steps[1].node_pk_as_int64() == 3)
+        << "unexpected intermediate node: " << p.steps[1].node_pk_as_int64();
+    EXPECT_EQ(p.steps[2].node_pk_as_int64(), 4);
+    EXPECT_EQ(p.steps[3].node_pk_as_int64(), 5);
     EXPECT_EQ(p.length(), 3);
 }
 
@@ -229,8 +230,8 @@ TEST_F(TraceEnrichedTest, WhereOnDepthKeepsCompletePaths) {
     ASSERT_EQ(qr.rows[0][1].type_id(), TypeId::PATH);
     const Path& p = qr.rows[0][1].as_path();
     ASSERT_EQ(p.steps.size(), 3u);
-    EXPECT_EQ(p.steps.front().node_pk, 1);
-    EXPECT_EQ(p.steps.back().node_pk, 4);
+    EXPECT_EQ(p.steps.front().node_pk_as_int64(), 1);
+    EXPECT_EQ(p.steps.back().node_pk_as_int64(), 4);
     EXPECT_EQ(p.length(), 2);
 }
 
@@ -256,13 +257,13 @@ TEST_F(TraceEnrichedTest, StandaloneFetchWithTrace) {
     for (const auto& row : qr.rows) {
         ASSERT_EQ(row[*path_idx].type_id(), TypeId::PATH);
         const Path& p = row[*path_idx].as_path();
-        EXPECT_EQ(p.steps.front().node_pk, 1);
-        EXPECT_EQ(p.steps.back().node_pk, val_to_int64(row[*node_idx]));
+        EXPECT_EQ(p.steps.front().node_pk_as_int64(), 1);
+        EXPECT_EQ(p.steps.back().node_pk_as_int64(), val_to_int64(row[*node_idx]));
         EXPECT_EQ(p.length(), val_to_int64(row[*depth_idx]));
 
         // The FETCH source is the BFS parent: the path's penultimate step.
         ASSERT_GE(p.steps.size(), 2u);
-        EXPECT_EQ(val_to_int64(row[*source_idx]), p.steps[p.steps.size() - 2].node_pk)
+        EXPECT_EQ(val_to_int64(row[*source_idx]), p.steps[p.steps.size() - 2].node_pk_as_int64())
             << "FETCH source must match the path's penultimate step";
     }
 }
@@ -281,8 +282,9 @@ TEST_F(TraceEnrichedTest, EdgeModeTracePathEndsAtFromNode) {
         ASSERT_EQ(row[3].type_id(), TypeId::PATH);
         const Path& p = row[3].as_path();
         ASSERT_FALSE(p.steps.empty());
-        EXPECT_EQ(p.steps.front().node_pk, 1) << "edge-mode path must start at the origin";
-        EXPECT_EQ(p.steps.back().node_pk, val_to_int64(row[0]))
+        EXPECT_EQ(p.steps.front().node_pk_as_int64(), 1)
+            << "edge-mode path must start at the origin";
+        EXPECT_EQ(p.steps.back().node_pk_as_int64(), val_to_int64(row[0]))
             << "edge-mode path must end at the edge's __from node";
         expect_cycle_free(p);
     }
@@ -302,7 +304,7 @@ TEST_F(TraceEnrichedTest, EdgeModeTraceFromStartNodeIsTrivialPath) {
         ASSERT_EQ(row[1].type_id(), TypeId::PATH);
         const Path& p = row[1].as_path();
         ASSERT_EQ(p.steps.size(), 1u);
-        EXPECT_EQ(p.steps[0].node_pk, 1);
+        EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
         EXPECT_EQ(p.length(), 0);
     }
     EXPECT_EQ(start_edges, 2u) << "edges 1->2 and 1->3 must originate at the start node";
@@ -342,8 +344,9 @@ TEST_F(TraceEnrichedTest, DirectionInProducesReversePaths) {
     for (const auto& row : qr.rows) {
         ASSERT_EQ(row[2].type_id(), TypeId::PATH);
         const Path& p = row[2].as_path();
-        EXPECT_EQ(p.steps.front().node_pk, 5) << "reverse paths must start at the BFS origin";
-        EXPECT_EQ(p.steps.back().node_pk, val_to_int64(row[0]));
+        EXPECT_EQ(p.steps.front().node_pk_as_int64(), 5)
+            << "reverse paths must start at the BFS origin";
+        EXPECT_EQ(p.steps.back().node_pk_as_int64(), val_to_int64(row[0]));
         EXPECT_EQ(p.length(), val_to_int64(row[1]));
         expect_cycle_free(p);
 
@@ -351,9 +354,9 @@ TEST_F(TraceEnrichedTest, DirectionInProducesReversePaths) {
             saw_node_1 = true;
             // The reverse path to 1 must run 5 -> 4 -> (2 or 3) -> 1.
             ASSERT_EQ(p.steps.size(), 4u);
-            EXPECT_EQ(p.steps[1].node_pk, 4);
-            EXPECT_TRUE(p.steps[2].node_pk == 2 || p.steps[2].node_pk == 3)
-                << "unexpected intermediate node: " << p.steps[2].node_pk;
+            EXPECT_EQ(p.steps[1].node_pk_as_int64(), 4);
+            EXPECT_TRUE(p.steps[2].node_pk_as_int64() == 2 || p.steps[2].node_pk_as_int64() == 3)
+                << "unexpected intermediate node: " << p.steps[2].node_pk_as_int64();
         }
     }
     EXPECT_TRUE(saw_node_1) << "reverse BFS from 5 must reach node 1";

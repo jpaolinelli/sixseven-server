@@ -424,20 +424,20 @@ TEST_F(TraversalTest, TraceEmitsPathColumn) {
     // Path to node 2 (depth 1): start at 1, end at 2.
     const Path& p2 = paths.at(2);
     ASSERT_EQ(p2.steps.size(), 2u);
-    EXPECT_EQ(p2.steps.front().node_pk, 1);
-    EXPECT_EQ(p2.steps.back().node_pk, 2);
+    EXPECT_EQ(p2.steps.front().node_pk_as_int64(), 1);
+    EXPECT_EQ(p2.steps.back().node_pk_as_int64(), 2);
     EXPECT_EQ(p2.steps.back().edge_id, -1); // terminal step has no outgoing edge
     EXPECT_EQ(p2.length(), 1);
 
     // Path to node 5 (depth 3): 1 → ... → 5, four nodes, three hops.
     const Path& p5 = paths.at(5);
     ASSERT_EQ(p5.steps.size(), 4u);
-    EXPECT_EQ(p5.steps.front().node_pk, 1);
-    EXPECT_EQ(p5.steps.back().node_pk, 5);
+    EXPECT_EQ(p5.steps.front().node_pk_as_int64(), 1);
+    EXPECT_EQ(p5.steps.back().node_pk_as_int64(), 5);
     EXPECT_EQ(p5.length(), 3);
     // The node-4 hop in the chain is the second-to-last node.
-    EXPECT_EQ(p5.steps[3].node_pk, 5);
-    EXPECT_EQ(p5.steps[2].node_pk, 4);
+    EXPECT_EQ(p5.steps[3].node_pk_as_int64(), 5);
+    EXPECT_EQ(p5.steps[2].node_pk_as_int64(), 4);
 }
 
 TEST_F(TraversalTest, TracePathEdgeIdsAreValid) {
@@ -470,7 +470,7 @@ TEST_F(TraversalTest, TracePathEdgeIdsAreValid) {
         ++rows;
         const Path& p = row->value().values[2].as_path();
         ASSERT_EQ(p.steps.size(), 2u);
-        EXPECT_EQ(p.steps[0].node_pk, 1);
+        EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
         // The start step carries the outgoing edge id used to reach the neighbor.
         EXPECT_GE(p.steps[0].edge_id, 0);
         EXPECT_EQ(p.steps[1].edge_id, -1);
@@ -511,8 +511,8 @@ TEST_F(TraversalTest, TracePathsAreCycleFree) {
         // No node PK may repeat within a single path.
         std::unordered_set<int64_t> seen;
         for (const auto& step : p.steps) {
-            EXPECT_TRUE(seen.insert(step.node_pk).second)
-                << "path contains a repeated node: " << step.node_pk;
+            EXPECT_TRUE(seen.insert(step.node_pk_as_int64()).second)
+                << "path contains a repeated node: " << step.node_pk_as_int64();
         }
     }
     op.close();

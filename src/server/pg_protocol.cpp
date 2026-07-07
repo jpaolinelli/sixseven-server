@@ -457,6 +457,12 @@ std::string value_to_pg_text(const Value& value) {
         return oss.str();
     }
     case TypeId::PATH: {
+        // GDB-1292: node_pk is now a Value (any PK-eligible type, including
+        // STRING), not a fixed-width int64_t. Render it via the same
+        // value_to_pg_text() recursion used elsewhere (STRING is emitted
+        // unquoted here, consistent with the STRING case above -- this
+        // matches pg-wire text format, where quoting is a client/psql
+        // display convention, not part of the wire text itself).
         const auto& path = value.as_path();
         std::ostringstream oss;
         oss << "[";
@@ -464,7 +470,7 @@ std::string value_to_pg_text(const Value& value) {
             if (i > 0) {
                 oss << ",";
             }
-            oss << path.steps[i].node_pk;
+            oss << value_to_pg_text(path.steps[i].node_pk());
             if (path.steps[i].edge_id >= 0) {
                 oss << "-(" << path.steps[i].edge_id << ")->";
             }

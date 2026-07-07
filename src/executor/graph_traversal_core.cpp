@@ -14,13 +14,15 @@ Result<int64_t> pk_to_int64(const Value& pk) {
     // losslessly represent as int64_t except UINT64 values above INT64_MAX,
     // which wrap via static_cast the same way the rest of the codebase's
     // integer-to-int64 conversion path (to_int64() in
-    // src/common/coercion.cpp) already accepts -- PathStep::node_pk (see
-    // include/sixseven/common/value.h) is used for path identity/display,
-    // not arithmetic, so this matches existing precedent rather than
-    // introducing a new tradeoff. STRING and other non-integer PK types
-    // remain explicitly rejected: widening PathStep::node_pk itself to a
-    // generic Value would be a much larger, separately-scoped change
-    // (touches PATH serialization/WAL format), not a mechanical bug fix.
+    // src/common/coercion.cpp) already accepts.
+    //
+    // GDB-1292: PathStep::node_pk is now a Value (see
+    // include/sixseven/common/value.h), so this function is no longer used to
+    // build PathStep entries -- STRING and other non-integer PK types flow
+    // through as Value directly. pk_to_int64 is retained for call sites that
+    // still need a genuine int64_t (e.g. table-aware NodeId hashing paths
+    // that pre-date GDB-1292) and continues to reject non-integer PKs for
+    // those numeric-only use sites.
     if (!pk.is_null()) {
         if (const auto* p = std::get_if<int64_t>(&pk.data())) {
             return ok(*p);
@@ -132,6 +134,16 @@ Result<std::vector<std::pair<Value, int64_t>>> expand_neighbors_ids(GraphEngine&
 
 Result<Path>
 reconstruct_path(const Value& target, int32_t target_depth, const ParentMap& parent_map) {
+    // A node can never legitimately have a NULL primary key, so reject it up
+    // front. Prior to GDB-1292 this validation happened implicitly as a side
+    // effect of pk_to_int64() (which erred on NULL); since PathStep::node_pk
+    // is now a Value and no longer requires that conversion, the NULL check
+    // must be explicit here to preserve the existing error contract.
+    if (target.is_null()) {
+        return make_error(StatusCode::INVALID_ARGUMENT,
+                          "TRACE path reconstruction requires a non-NULL target primary key");
+    }
+
     // Walk parent pointers backward from target to the start node, collecting
     // (node_pk, incoming_edge_row_id) pairs, then reverse to get start->target.
     std::vector<PathStep> reversed;
@@ -149,29 +161,32 @@ reconstruct_path(const Value& target, int32_t target_depth, const ParentMap& par
                               "TRACE path reconstruction detected a cycle in the parent map");
         }
 
-        auto cursor_int = pk_to_int64(cursor);
-        if (!cursor_int) {
-            return tl::unexpected(cursor_int.error());
-        }
+        // GDB-1292: PathStep::node_pk is a Value, so the PK is stored
+        // directly -- no int64 conversion (and no integer-only restriction)
+        // is needed to build a path step.
 
         // H9 (GDB-694): after target_depth hops the cursor must be the start
         // node.  The depth guard terminates the walk even when the parent map
         // contains a cross-table PK collision that would otherwise make the
         // start node appear to have a parent, causing an infinite loop.
         if (remaining <= 0) {
-            reversed.push_back({*cursor_int, -1});
+            reversed.push_back({cursor, -1});
             break;
         }
 
         auto it = parent_map.find(cursor);
         if (it == parent_map.end()) {
             // Reached the start node (no parent entry): no incoming edge.
-            reversed.push_back({*cursor_int, -1});
+            reversed.push_back({cursor, -1});
             break;
         }
 
-        reversed.push_back({*cursor_int, it->second.edge_row_id});
+        reversed.push_back({cursor, it->second.edge_row_id});
         cursor = it->second.parent_pk;
+        if (cursor.is_null()) {
+            return make_error(StatusCode::INVALID_ARGUMENT,
+                              "TRACE path reconstruction encountered a NULL parent primary key");
+        }
         --remaining;
     }
 
@@ -185,7 +200,7 @@ reconstruct_path(const Value& target, int32_t target_depth, const ParentMap& par
     path.steps.reserve(reversed.size());
     for (size_t i = 0; i < reversed.size(); ++i) {
         int64_t outgoing = (i + 1 < reversed.size()) ? reversed[i + 1].edge_id : -1;
-        path.steps.push_back({reversed[i].node_pk, outgoing});
+        path.steps.push_back({reversed[i].node_pk(), outgoing});
     }
 
     return ok(std::move(path));

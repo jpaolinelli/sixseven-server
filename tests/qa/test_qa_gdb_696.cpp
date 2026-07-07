@@ -221,8 +221,8 @@ TEST_F(QA_GDB696_StandaloneTraverse, FetchWithTraceCollisionEmitsAllColumns) {
         ASSERT_EQ(row[3].type_id(), TypeId::PATH);
         const Path& p = row[3].as_path();
         ASSERT_EQ(p.steps.size(), 2u) << "path must be start -> target, not a self-chain";
-        EXPECT_EQ(p.steps[0].node_pk, 1);
-        EXPECT_EQ(p.steps[1].node_pk, val_to_int64(row[0]));
+        EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
+        EXPECT_EQ(p.steps[1].node_pk_as_int64(), val_to_int64(row[0]));
         if (val_to_int64(row[0]) == 1) {
             saw_collider = true;
         }
@@ -242,8 +242,8 @@ TEST_F(QA_GDB696_StandaloneTraverse, TraceCollisionPathEdgeIdsWellFormed) {
     ASSERT_EQ(qr.rows[0][2].type_id(), TypeId::PATH);
     const Path& p = qr.rows[0][2].as_path();
     ASSERT_EQ(p.steps.size(), 2u);
-    EXPECT_EQ(p.steps[0].node_pk, 1);
-    EXPECT_EQ(p.steps[1].node_pk, 1);
+    EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(p.steps[1].node_pk_as_int64(), 1);
     EXPECT_GE(p.steps[0].edge_id, 0) << "start step must carry the outgoing edge id";
     EXPECT_EQ(p.steps[1].edge_id, -1) << "terminal step has no outgoing edge";
 }
@@ -364,8 +364,8 @@ TEST_F(QA_GDB696_StandaloneTraverse, HomogeneousCycleTraceStillBounded) {
     ASSERT_EQ(qr.rows[0][2].type_id(), TypeId::PATH);
     const Path& p = qr.rows[0][2].as_path();
     ASSERT_EQ(p.steps.size(), 2u);
-    EXPECT_EQ(p.steps[0].node_pk, 1);
-    EXPECT_EQ(p.steps[1].node_pk, 2);
+    EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(p.steps[1].node_pk_as_int64(), 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -404,8 +404,8 @@ TEST_F(QA_GDB696_StandaloneTraverse, DirectionBothHeterogeneousTraceBoundedPaths
     ASSERT_EQ(qr.rows[0][2].type_id(), TypeId::PATH);
     const Path& p = qr.rows[0][2].as_path();
     ASSERT_EQ(p.steps.size(), 2u) << "collision path must stay bounded under BOTH";
-    EXPECT_EQ(p.steps[0].node_pk, 1);
-    EXPECT_EQ(p.steps[1].node_pk, 1);
+    EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(p.steps[1].node_pk_as_int64(), 1);
 }
 
 // ---------------------------------------------------------------------------
