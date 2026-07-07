@@ -578,10 +578,27 @@ TEST_F(QA143ExplainTest, ExplainMultiJoin) {
 
     auto plan = plan_text("EXPLAIN SELECT * FROM a JOIN b ON a.id = b.aid JOIN c ON b.id = c.bid");
 
-    // Should have at least two join operators or nested join structure.
     EXPECT_FALSE(plan.empty());
-    // At least 3 table references should appear in the plan.
+
+    // Two JOIN clauses over three tables should produce two join operators
+    // (the engine emits "Hash Join" for equi-joins). Count occurrences to
+    // ensure a regression that collapses/drops a join is caught.
+    auto count_occurrences = [](const std::string& haystack, const std::string& needle) {
+        size_t count = 0;
+        size_t pos = 0;
+        while ((pos = haystack.find(needle, pos)) != std::string::npos) {
+            ++count;
+            pos += needle.size();
+        }
+        return count;
+    };
+    EXPECT_GE(count_occurrences(plan, "Join"), 2u);
+
+    // All three table references should appear in the plan's Scan nodes.
     EXPECT_NE(plan.find("Scan"), std::string::npos);
+    EXPECT_NE(plan.find("on a"), std::string::npos);
+    EXPECT_NE(plan.find("on b"), std::string::npos);
+    EXPECT_NE(plan.find("on c"), std::string::npos);
 }
 
 // =============================================================================
