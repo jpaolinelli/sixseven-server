@@ -1052,15 +1052,46 @@ TEST(HnswInsertSearch, ManyIdenticalVectorsReachableWithSmallMStress) {
         << "All " << total << " identical vectors must remain reachable with M=4";
 }
 
-// NOTE: a two-cluster variant of this test (15 identical vectors in each of
-// two widely separated clusters) was evaluated here and dropped. It failed
-// intermittently on BOTH this fix and unmodified main, driven by a separate,
-// pre-existing issue in upper-layer entry-point/greedy-descent selection
-// with small per-cluster node counts (multi-layer topology occasionally
-// routes the entry point through a sparsely-populated upper layer before
-// enough of a cluster's own nodes exist to anchor it) -- unrelated to the
-// reverse-edge eviction-fairness bug this file's other GDB-1235 tests cover.
-// Tracked separately; out of scope for this ticket's reverse-edge fix.
+// Regression for GDB-1295: with multiple identical-vector clusters and a
+// small M, the multi-layer greedy descent (entry point at the top layer,
+// routed down to layer 0 in HnswIndex::search) could get trapped in a single
+// cluster's zero-distance basin and never reach a second, equally-valid
+// duplicate cluster. This is distinct from GDB-1235's reverse-edge eviction
+// fairness bug at layer 0.
+TEST(HnswInsertSearch, DuplicateClustersRemainReachableWithSmallM) {
+    TestFixture fix;
+
+    HnswIndex index(*fix.bpm);
+    HnswIndexConfig config;
+    config.dimension = 2;
+    config.m = 4;
+    config.ef_construction = 32;
+    config.ef_search = 64;
+    auto cr = index.create(config);
+    ASSERT_TRUE(cr.has_value()) << cr.error().message;
+
+    // Two distinct clusters of 15 identical vectors each; every member of
+    // both clusters is tied at distance 0 within its own cluster, exercising
+    // the same eviction-fairness path as the fully-identical case while
+    // also covering a non-degenerate (multi-cluster) layout.
+    std::vector<float> cluster_a = {0.0F, 0.0F};
+    std::vector<float> cluster_b = {100.0F, 100.0F};
+    for (int i = 0; i < 15; ++i) {
+        ASSERT_TRUE(index.insert(cluster_a).has_value());
+    }
+    for (int i = 0; i < 15; ++i) {
+        ASSERT_TRUE(index.insert(cluster_b).has_value());
+    }
+    EXPECT_EQ(index.node_count(), 30u);
+
+    auto sr_a = index.search(cluster_a, 15);
+    ASSERT_TRUE(sr_a.has_value()) << sr_a.error().message;
+    EXPECT_EQ(sr_a.value().size(), 15u) << "All 15 cluster-A vectors must be reachable";
+
+    auto sr_b = index.search(cluster_b, 15);
+    ASSERT_TRUE(sr_b.has_value()) << sr_b.error().message;
+    EXPECT_EQ(sr_b.value().size(), 15u) << "All 15 cluster-B vectors must be reachable";
+}
 
 // Regression for the review fix on top of GDB-1235: select_neighbors_heuristic
 // must not force-admit a new candidate that is STRICTLY FARTHER than every
