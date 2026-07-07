@@ -165,8 +165,8 @@ TEST_F(QA_GDB695_TraverseWhere, OrPredicateAcrossDepths) {
 }
 
 TEST_F(QA_GDB695_TraverseWhere, ParenthesizedCompoundPredicate) {
-    auto qr = exec_ok(
-        "TRAVERSE follows FROM users(1) WHERE (depth = 1 AND node = 2) OR (depth = 3)");
+    auto qr =
+        exec_ok("TRAVERSE follows FROM users(1) WHERE (depth = 1 AND node = 2) OR (depth = 3)");
     EXPECT_EQ(sorted_column(qr, "node"), (std::vector<int64_t>{2, 5}));
 }
 
@@ -201,8 +201,7 @@ TEST_F(QA_GDB695_TraverseWhere, NegativeDepthYieldsEmpty) {
 }
 
 TEST_F(QA_GDB695_TraverseWhere, Int64MaxDepthLiteralYieldsEmpty) {
-    auto qr =
-        exec_ok("TRAVERSE follows FROM users(1) WHERE depth = 9223372036854775807");
+    auto qr = exec_ok("TRAVERSE follows FROM users(1) WHERE depth = 9223372036854775807");
     EXPECT_TRUE(qr.rows.empty());
 }
 
@@ -257,8 +256,7 @@ TEST_F(QA_GDB695_TraverseWhere, StringComparedToDepthFailsGracefully) {
 }
 
 TEST_F(QA_GDB695_TraverseWhere, PathComparedToIntegerFailsGracefully) {
-    auto result =
-        engine_->execute("TRAVERSE follows FROM users(1) WHERE __path = 1 WITH TRACE");
+    auto result = engine_->execute("TRAVERSE follows FROM users(1) WHERE __path = 1 WITH TRACE");
     ASSERT_FALSE(result.has_value()) << "PATH vs INTEGER comparison must not succeed";
     EXPECT_FALSE(result.error().message.empty());
 }
@@ -307,8 +305,8 @@ TEST_F(QA_GDB695_TraverseWhere, AllClausesCombinedWithSatisfiableFilter) {
     ASSERT_EQ(qr.rows[0][*path_idx].type_id(), TypeId::PATH);
     const Path& p = qr.rows[0][*path_idx].as_path();
     ASSERT_EQ(p.steps.size(), 4u) << "depth-3 hit must keep its full three-hop path";
-    EXPECT_EQ(p.steps.front().node_pk, 1);
-    EXPECT_EQ(p.steps.back().node_pk, 5);
+    EXPECT_EQ(p.steps.front().node_pk_as_int64(), 1);
+    EXPECT_EQ(p.steps.back().node_pk_as_int64(), 5);
 
     auto source_idx = col_index(qr, "source");
     ASSERT_TRUE(source_idx.has_value()) << "FETCH must surface source";
@@ -401,8 +399,7 @@ TEST_F(QA_GDB695_TraverseWhere, DeepChainDepthFilterFindsOnlyTail) {
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(sorted_column(qr, "node"), (std::vector<int64_t>{100}));
 
-    auto qr2 =
-        exec_ok("TRAVERSE next_link FROM chain(0) MAX_DEPTH 150 WHERE depth > 100");
+    auto qr2 = exec_ok("TRAVERSE next_link FROM chain(0) MAX_DEPTH 150 WHERE depth > 100");
     EXPECT_TRUE(qr2.rows.empty());
 }
 

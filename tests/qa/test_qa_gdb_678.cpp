@@ -110,13 +110,13 @@ protected:
     // node, and every non-terminal edge_id is a real (>= 0) edge row id.
     static void check_path(const Path& p, int64_t start, int64_t target) {
         ASSERT_FALSE(p.steps.empty());
-        EXPECT_EQ(p.steps.front().node_pk, start);
-        EXPECT_EQ(p.steps.back().node_pk, target);
+        EXPECT_EQ(p.steps.front().node_pk_as_int64(), start);
+        EXPECT_EQ(p.steps.back().node_pk_as_int64(), target);
         EXPECT_EQ(p.steps.back().edge_id, -1) << "terminal step must have edge_id -1";
         std::unordered_set<int64_t> seen;
         for (size_t i = 0; i < p.steps.size(); ++i) {
-            EXPECT_TRUE(seen.insert(p.steps[i].node_pk).second)
-                << "repeated node in path: " << p.steps[i].node_pk;
+            EXPECT_TRUE(seen.insert(p.steps[i].node_pk_as_int64()).second)
+                << "repeated node in path: " << p.steps[i].node_pk_as_int64();
             if (i + 1 < p.steps.size()) {
                 EXPECT_GE(p.steps[i].edge_id, 0)
                     << "non-terminal step " << i << " must reference a real edge";
@@ -190,7 +190,7 @@ TEST_F(QA_Gdb678, DiamondShortestPathIsTwoHops) {
     check_path(paths.at(4), 1, 4);
     EXPECT_EQ(paths.at(4).length(), 2) << "node 4 is two hops away in the diamond";
     // The middle node must be either 2 or 3.
-    int64_t mid = paths.at(4).steps[1].node_pk;
+    int64_t mid = paths.at(4).steps[1].node_pk_as_int64();
     EXPECT_TRUE(mid == 2 || mid == 3);
 }
 
@@ -206,7 +206,7 @@ TEST_F(QA_Gdb678, DeepChainPathAlignment) {
     check_path(p, 1, depth + 1);
     ASSERT_EQ(p.steps.size(), static_cast<size_t>(depth + 1));
     for (int64_t i = 0; i < depth + 1; ++i) {
-        EXPECT_EQ(p.steps[i].node_pk, i + 1) << "node at step " << i << " misaligned";
+        EXPECT_EQ(p.steps[i].node_pk_as_int64(), i + 1) << "node at step " << i << " misaligned";
     }
 }
 
@@ -292,7 +292,7 @@ TEST_F(QA_Gdb678, ReopenAfterCloseIsConsistent) {
 }
 
 // --- Non-integer PK with trace: reconstruct_path must error, not crash. ------
-TEST_F(QA_Gdb678, NonIntegerPkWithTraceReturnsError) {
+TEST_F(QA_Gdb678, NonIntegerPkWithTraceSucceeds) {
     // Build a separate STRING-keyed edge type.
     TableSchema ts;
     ts.name = "snodes";
@@ -331,8 +331,22 @@ TEST_F(QA_Gdb678, NonIntegerPkWithTraceReturnsError) {
     BoundStatement bound;
     TraversalOperator op(*graph_, std::move(config), std::move(schema), nullptr, bound);
     auto open_result = op.open();
-    ASSERT_FALSE(open_result.has_value()) << "string PK + trace must produce an error, not a path";
-    EXPECT_EQ(open_result.error().code, StatusCode::INVALID_ARGUMENT);
+    // GDB-1292: PathStep::node_pk is a Value, so a STRING PK now encodes into
+    // PathStep directly and TRACE succeeds (previously this was a documented
+    // limitation: a clean INVALID_ARGUMENT rather than a crash).
+    ASSERT_TRUE(open_result.has_value())
+        << "string PK + trace should succeed: " << open_result.error().message;
+
+    size_t count = 0;
+    while (true) {
+        auto row = op.next();
+        ASSERT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value())
+            break;
+        ++count;
+    }
+    op.close();
+    EXPECT_EQ(count, 1u) << "expected exactly one a->b hop";
 }
 
 // --- IN direction trace: path is start -> ... -> target along reverse edges. -

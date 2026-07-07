@@ -81,7 +81,7 @@ TEST_F(QA_GDB555, AllShortest_SharedIntermediate_CorrectPaths) {
     for (const auto* t : from_1_to_4) {
         const auto& path = t->values[2].as_path();
         ASSERT_GE(path.steps.size(), 2u);
-        second_nodes.insert(path.steps[1].node_pk);
+        second_nodes.insert(path.steps[1].node_pk_as_int64());
     }
     EXPECT_TRUE(second_nodes.count(2)) << "Path through node 2 should be found";
     EXPECT_TRUE(second_nodes.count(5)) << "Path through node 5 should be found";

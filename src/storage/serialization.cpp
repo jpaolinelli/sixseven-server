@@ -91,8 +91,21 @@ size_t payload_size(const Value& value) {
         return 4 + value.as_json().data.size();
     case TypeId::EMBEDDING:
         return 4 + value.as_embedding().size() * sizeof(float);
-    case TypeId::PATH:
-        return 4 + value.as_path().steps.size() * (sizeof(int64_t) * 2);
+    case TypeId::PATH: {
+        // GDB-1292: each step is now [1-byte tag][serialized Value PK][int64
+        // edge_id] -- variable size, since node_pk may be a STRING. The
+        // nested Value's own serialized size is 1 byte (null flag) plus
+        // payload_size(pk) when non-null (payload_size is called
+        // recursively here; this is the same pattern serialize()/
+        // serialized_size() use for the top-level null flag).
+        size_t size = 4;
+        for (const auto& step : value.as_path().steps) {
+            const Value& pk = step.node_pk();
+            size_t pk_size = pk.is_null() ? 1 : 1 + payload_size(pk);
+            size += 1 + pk_size + sizeof(int64_t);
+        }
+        return size;
+    }
     }
     return 0;
 }
@@ -196,10 +209,26 @@ std::vector<uint8_t> serialize(const Value& value) {
         break;
     }
     case TypeId::PATH: {
+        // GDB-1292: node_pk is now a Value (any PK-eligible type, including
+        // STRING), not a fixed-width int64_t, so each step is written as a
+        // 1-byte TypeId tag followed by the nested Value's own serialize()
+        // payload (which is already self-contained: null flag + data --
+        // deserialize() checks the null flag before consulting the tag, so
+        // the tag value for a NULL pk is never actually inspected on the
+        // read side). This is a deliberate format break from the previous
+        // fixed 16-bytes-per-step layout -- PATH is a query-runtime result
+        // type (produced by graph traversal operators), not long-lived
+        // durable table data, so no backward-compat reader is provided for
+        // old PATH bytes. See PR description for details.
         const auto& p = value.as_path();
         write_le<uint32_t>(buf, static_cast<uint32_t>(p.steps.size()));
         for (const auto& step : p.steps) {
-            write_le(buf, step.node_pk);
+            const Value& pk = step.node_pk();
+            auto tag = pk.is_null() ? static_cast<uint8_t>(TypeId::INT8)
+                                    : static_cast<uint8_t>(pk.type_id());
+            buf.push_back(tag);
+            auto pk_bytes = serialize(pk);
+            buf.insert(buf.end(), pk_bytes.begin(), pk_bytes.end());
             write_le(buf, step.edge_id);
         }
         break;
@@ -385,20 +414,46 @@ Result<Value> deserialize(std::span<const uint8_t> data, TypeId type_id) {
         return ok(Value(std::move(e)));
     }
     case TypeId::PATH: {
+        // GDB-1292: mirrors the writer in serialize() -- each step is
+        // [1-byte TypeId tag][serialized Value PK][int64 edge_id]. The tag
+        // is only consulted when the nested Value is non-null (deserialize()
+        // checks the null flag byte first and ignores the type for NULLs).
         if (!check_size(4)) {
             break;
         }
         uint32_t count = read_le<uint32_t>(p);
-        constexpr size_t step_size = sizeof(int64_t) * 2;
-        if (!check_size(4 + count * step_size)) {
-            break;
-        }
+        size_t off = 4;
         Path path;
-        path.steps.resize(count);
-        for (uint32_t i = 0; i < count; ++i) {
-            size_t off = 4 + i * step_size;
-            path.steps[i].node_pk = read_le<int64_t>(p + off);
-            path.steps[i].edge_id = read_le<int64_t>(p + off + sizeof(int64_t));
+        path.steps.reserve(count);
+        bool ok_so_far = true;
+        for (uint32_t i = 0; i < count && ok_so_far; ++i) {
+            if (!check_size(off + 1)) {
+                ok_so_far = false;
+                break;
+            }
+            auto step_type = static_cast<TypeId>(p[off]);
+            ++off;
+
+            auto remaining_span = std::span<const uint8_t>(p + off, remaining - off);
+            auto pk_result = deserialize(remaining_span, step_type);
+            if (!pk_result) {
+                ok_so_far = false;
+                break;
+            }
+            Value pk = std::move(*pk_result);
+            off += serialized_size(pk);
+
+            if (!check_size(off + sizeof(int64_t))) {
+                ok_so_far = false;
+                break;
+            }
+            int64_t edge_id = read_le<int64_t>(p + off);
+            off += sizeof(int64_t);
+
+            path.steps.push_back({std::move(pk), edge_id});
+        }
+        if (!ok_so_far) {
+            break;
         }
         return ok(Value(std::move(path)));
     }

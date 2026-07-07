@@ -408,7 +408,7 @@ TEST(QA_GDB894_ReconstructPath, GDB894_EmptyParentMap_DepthZeroSelf) {
     auto result = reconstruct_path(Value(int64_t{42}), 0, pm);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     ASSERT_EQ(result->steps.size(), 1u);
-    EXPECT_EQ(result->steps[0].node_pk, int64_t{42});
+    EXPECT_EQ(result->steps[0].node_pk_as_int64(), int64_t{42});
     EXPECT_EQ(result->steps[0].edge_id, int64_t{-1});
 }
 
@@ -421,8 +421,8 @@ TEST(QA_GDB894_ReconstructPath, GDB894_MaxDepthLongChain_Terminates) {
     auto result = reconstruct_path(Value(int64_t{11}), 10, pm);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->steps.size(), 11u); // nodes 1..11
-    EXPECT_EQ(result->steps[0].node_pk, int64_t{1});
-    EXPECT_EQ(result->steps[10].node_pk, int64_t{11});
+    EXPECT_EQ(result->steps[0].node_pk_as_int64(), int64_t{1});
+    EXPECT_EQ(result->steps[10].node_pk_as_int64(), int64_t{11});
     EXPECT_EQ(result->steps[10].edge_id, int64_t{-1}); // terminal
 }
 
@@ -449,8 +449,8 @@ TEST(QA_GDB894_ReconstructPath, GDB894_DepthGuardPreventsCrossTableLoop) {
     auto result = reconstruct_path(Value(int64_t{2}), 1, pm);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     ASSERT_EQ(result->steps.size(), 2u);
-    EXPECT_EQ(result->steps[0].node_pk, int64_t{1});
-    EXPECT_EQ(result->steps[1].node_pk, int64_t{2});
+    EXPECT_EQ(result->steps[0].node_pk_as_int64(), int64_t{1});
+    EXPECT_EQ(result->steps[1].node_pk_as_int64(), int64_t{2});
 }
 
 TEST(QA_GDB894_ReconstructPath, GDB894_Int32PkWidenedToInt64) {
@@ -460,8 +460,8 @@ TEST(QA_GDB894_ReconstructPath, GDB894_Int32PkWidenedToInt64) {
     auto result = reconstruct_path(Value(int32_t{2}), 1, pm);
     ASSERT_TRUE(result.has_value()) << result.error().message;
     ASSERT_EQ(result->steps.size(), 2u);
-    EXPECT_EQ(result->steps[0].node_pk, int64_t{1});
-    EXPECT_EQ(result->steps[1].node_pk, int64_t{2});
+    EXPECT_EQ(result->steps[0].node_pk_as_int64(), int64_t{1});
+    EXPECT_EQ(result->steps[1].node_pk_as_int64(), int64_t{2});
 }
 
 // ---------------------------------------------------------------------------

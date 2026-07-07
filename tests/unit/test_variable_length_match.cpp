@@ -217,8 +217,8 @@ TEST(PathValueTest, PathInValue) {
     const auto& retrieved = v.as_path();
     EXPECT_EQ(retrieved.length(), 1);
     EXPECT_EQ(retrieved.steps.size(), 2u);
-    EXPECT_EQ(retrieved.steps[0].node_pk, 1);
-    EXPECT_EQ(retrieved.steps[1].node_pk, 2);
+    EXPECT_EQ(retrieved.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(retrieved.steps[1].node_pk_as_int64(), 2);
 }
 
 TEST(PathValueTest, EmptyPath) {
@@ -924,11 +924,15 @@ protected:
     table_id_t persons_id_ = 0;
 };
 
-TEST_F(VarLenMatchStringPkTest, VariableLengthReturnsClearErrorInsteadOfSilentlyDroppingSteps) {
+TEST_F(VarLenMatchStringPkTest, VariableLengthProducesCompleteAndCorrectlyAlignedPaths) {
     // (a:persons)-[r:knows]->{1,3}(b:persons) over a STRING-PK table.
-    // Before GDB-1213, pk_to_int64 failures inside the BFS path-building
-    // blocks were silently discarded, producing paths with missing or
-    // misaligned steps instead of a clear error.
+    //
+    // GDB-1292 widened PathStep::node_pk from int64_t to Value, so
+    // variable-length MATCH over a STRING-PK table now succeeds and produces
+    // complete, correctly-aligned path steps -- it no longer needs to reject
+    // the traversal the way the pre-GDB-1292 pk_to_int64 gate did (see
+    // GDB-1213, which hardened that now-removed gate so it errored instead of
+    // silently dropping/misaligning steps).
     MatchConfig config;
     config.nodes.push_back({"a", "persons"});
     config.nodes.push_back({"b", "persons"});
@@ -949,17 +953,29 @@ TEST_F(VarLenMatchStringPkTest, VariableLengthReturnsClearErrorInsteadOfSilently
                                    nullptr,
                                    bound);
     auto open_result = op.open();
-    ASSERT_FALSE(open_result.has_value())
-        << "expected variable-length MATCH over STRING-PK table to fail cleanly";
-    EXPECT_EQ(open_result.error().code, StatusCode::INVALID_ARGUMENT);
-    EXPECT_NE(open_result.error().message.find("integer primary key"), std::string::npos)
-        << "unexpected error message: " << open_result.error().message;
+    ASSERT_TRUE(open_result.has_value())
+        << "variable-length MATCH over STRING-PK table should succeed: "
+        << open_result.error().message;
+
+    std::vector<Tuple> rows;
+    while (true) {
+        auto row = op.next();
+        ASSERT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value())
+            break;
+        rows.push_back(std::move(**row));
+    }
+    op.close();
+
+    // Chain a->b->c->d->e: from a, 1-3 hops reach b, c, d. From b: c, d, e.
+    // From c: d, e. From d: e. Total = 3+3+2+1 = 9.
+    EXPECT_EQ(rows.size(), 9u);
 }
 
-TEST_F(VarLenMatchStringPkTest,
-       FixedLengthSingleHopReturnsClearErrorInsteadOfSilentlyDroppingSteps) {
-    // (a:persons)-[r:knows]->{1}(b:persons) — the fixed-length single-hop
-    // block also builds path steps via pk_to_int64 and must error the same way.
+TEST_F(VarLenMatchStringPkTest, FixedLengthSingleHopProducesCorrectPath) {
+    // (a:persons)-[r:knows]->{1}(b:persons) -- the fixed-length single-hop
+    // block also builds path steps directly from the STRING PK Value now
+    // (GDB-1292), so it must succeed rather than error.
     MatchConfig config;
     config.nodes.push_back({"a", "persons"});
     config.nodes.push_back({"b", "persons"});
@@ -980,11 +996,22 @@ TEST_F(VarLenMatchStringPkTest,
                                    nullptr,
                                    bound);
     auto open_result = op.open();
-    ASSERT_FALSE(open_result.has_value())
-        << "expected fixed-length single-hop MATCH over STRING-PK table to fail cleanly";
-    EXPECT_EQ(open_result.error().code, StatusCode::INVALID_ARGUMENT);
-    EXPECT_NE(open_result.error().message.find("integer primary key"), std::string::npos)
-        << "unexpected error message: " << open_result.error().message;
+    ASSERT_TRUE(open_result.has_value())
+        << "fixed-length single-hop MATCH over STRING-PK table should succeed: "
+        << open_result.error().message;
+
+    std::vector<Tuple> rows;
+    while (true) {
+        auto row = op.next();
+        ASSERT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value())
+            break;
+        rows.push_back(std::move(**row));
+    }
+    op.close();
+
+    // 1-hop edges: a->b, b->c, c->d, d->e = 4 rows.
+    EXPECT_EQ(rows.size(), 4u);
 }
 
 // ============================================================================

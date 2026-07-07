@@ -91,12 +91,17 @@ Path make_path(double weight, uint32_t n_steps) {
 // Drain all tuples from an opened iterator.
 std::vector<Tuple> drain_gdb799(Iterator& iter) {
     auto open = iter.open();
-    if (!open) ADD_FAILURE() << open.error().message;
+    if (!open)
+        ADD_FAILURE() << open.error().message;
     std::vector<Tuple> results;
     while (true) {
         auto row = iter.next();
-        if (!row) { ADD_FAILURE() << row.error().message; break; }
-        if (!row->has_value()) break;
+        if (!row) {
+            ADD_FAILURE() << row.error().message;
+            break;
+        }
+        if (!row->has_value())
+            break;
         results.push_back(std::move(row->value()));
     }
     iter.close();
@@ -117,10 +122,12 @@ protected:
         std::vector<Value> values = {Value(path)};
         auto buf = TupleSerializer::serialize(values, schema);
         EXPECT_TRUE(buf.has_value()) << buf.error().message;
-        if (!buf) return {};
+        if (!buf)
+            return {};
         auto result = TupleSerializer::deserialize(*buf, schema);
         EXPECT_TRUE(result.has_value()) << result.error().message;
-        if (!result) return {};
+        if (!result)
+            return {};
         return *result;
     }
 };
@@ -149,7 +156,7 @@ TEST_F(QA_GDB799_TupleSerializer, GDB799_SingleNodePath) {
     const auto& restored = vals[0].as_path();
     EXPECT_EQ(restored.total_weight, 7.77);
     ASSERT_EQ(restored.steps.size(), 1u);
-    EXPECT_EQ(restored.steps[0].node_pk, 42);
+    EXPECT_EQ(restored.steps[0].node_pk_as_int64(), 42);
     EXPECT_EQ(restored.steps[0].edge_id, -1);
 }
 
@@ -223,8 +230,8 @@ TEST_F(QA_GDB799_TupleSerializer, GDB799_LongPath1000Steps) {
     EXPECT_EQ(restored.total_weight, 999.5);
     ASSERT_EQ(restored.steps.size(), 100u);
     // Spot-check first and last steps.
-    EXPECT_EQ(restored.steps[0].node_pk, 1);
-    EXPECT_EQ(restored.steps[99].node_pk, 100);
+    EXPECT_EQ(restored.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(restored.steps[99].node_pk_as_int64(), 100);
     EXPECT_EQ(restored.steps[99].edge_id, -1);
 }
 
@@ -252,11 +259,11 @@ TEST_F(QA_GDB799_TupleSerializer, GDB799_TwoPathColumnsInOneTuple) {
 
     EXPECT_DOUBLE_EQ(r1.total_weight, 11.1) << "path1 total_weight corrupted";
     ASSERT_EQ(r1.steps.size(), 2u);
-    EXPECT_EQ(r1.steps[0].node_pk, 1);
+    EXPECT_EQ(r1.steps[0].node_pk_as_int64(), 1);
 
     EXPECT_DOUBLE_EQ(r2.total_weight, 22.2) << "path2 total_weight corrupted";
     ASSERT_EQ(r2.steps.size(), 3u);
-    EXPECT_EQ(r2.steps[0].node_pk, 1);
+    EXPECT_EQ(r2.steps[0].node_pk_as_int64(), 1);
 }
 
 // -- PATH mixed with other column types (STRING, INT32, PATH, FLOAT64) --------
@@ -269,10 +276,8 @@ TEST_F(QA_GDB799_TupleSerializer, GDB799_PathMixedWithOtherTypes) {
 
     Path p = make_path(3.5, 3);
 
-    std::vector<Value> values = {Value(std::string("alice")),
-                                 Value(int32_t{42}),
-                                 Value(p),
-                                 Value(double{9.81})};
+    std::vector<Value> values = {
+        Value(std::string("alice")), Value(int32_t{42}), Value(p), Value(double{9.81})};
 
     auto buf = TupleSerializer::serialize(values, schema);
     ASSERT_TRUE(buf.has_value()) << buf.error().message;
@@ -348,21 +353,18 @@ protected:
         std::filesystem::remove_all(temp_dir_);
         std::filesystem::create_directories(temp_dir_);
     }
-    void TearDown() override {
-        std::filesystem::remove_all(temp_dir_);
-    }
+    void TearDown() override { std::filesystem::remove_all(temp_dir_); }
 
     // Build and drain an ExternalSort with a tiny work_mem to force spilling.
     // Schema: [sort_key INT32, path PATH]
-    std::vector<Tuple> sort_and_drain(std::vector<Tuple> input,
-                                      const OutputSchema& schema,
-                                      size_t work_mem = 64) {
+    std::vector<Tuple>
+    sort_and_drain(std::vector<Tuple> input, const OutputSchema& schema, size_t work_mem = 64) {
         auto source = std::make_unique<VectorSource799>(std::move(input), schema);
         BoundStatement bound;
         auto key_expr = col_ref_gdb799("sort_key");
         std::vector<SortKey> keys = {{key_expr.get(), SortDirection::ASC}};
-        ExternalSortOperator sort(std::move(source), std::move(keys), bound,
-                                  work_mem, 128, temp_dir_);
+        ExternalSortOperator sort(
+            std::move(source), std::move(keys), bound, work_mem, 128, temp_dir_);
         return drain_gdb799(sort);
     }
 
@@ -466,8 +468,7 @@ TEST_F(QA_GDB799_ExternalSort, GDB799_MultipleSpillRunsAndMerges) {
     ASSERT_EQ(results.size(), static_cast<size_t>(N));
 
     for (int i = 0; i < N; ++i) {
-        EXPECT_EQ(results[i].values[0].as_int32(), i + 1)
-            << "sort order wrong at index " << i;
+        EXPECT_EQ(results[i].values[0].as_int32(), i + 1) << "sort order wrong at index " << i;
         double expected_weight = static_cast<double>(i + 1) * 1.5;
         EXPECT_DOUBLE_EQ(results[i].values[1].as_path().total_weight, expected_weight)
             << "total_weight wrong after merge for sort_key=" << (i + 1);
@@ -531,11 +532,15 @@ TEST_F(QA_GDB799_ExternalSort, GDB799_SpillTwoPathColumns) {
 
     ASSERT_EQ(results.size(), 2u);
     // sort_key=1: p2a, p2b
-    EXPECT_DOUBLE_EQ(results[0].values[1].as_path().total_weight, 3.3) << "path1 col wrong for row 0";
-    EXPECT_DOUBLE_EQ(results[0].values[2].as_path().total_weight, 4.4) << "path2 col wrong for row 0";
+    EXPECT_DOUBLE_EQ(results[0].values[1].as_path().total_weight, 3.3)
+        << "path1 col wrong for row 0";
+    EXPECT_DOUBLE_EQ(results[0].values[2].as_path().total_weight, 4.4)
+        << "path2 col wrong for row 0";
     // sort_key=2: p1a, p1b
-    EXPECT_DOUBLE_EQ(results[1].values[1].as_path().total_weight, 1.1) << "path1 col wrong for row 1";
-    EXPECT_DOUBLE_EQ(results[1].values[2].as_path().total_weight, 2.2) << "path2 col wrong for row 1";
+    EXPECT_DOUBLE_EQ(results[1].values[1].as_path().total_weight, 1.1)
+        << "path1 col wrong for row 1";
+    EXPECT_DOUBLE_EQ(results[1].values[2].as_path().total_weight, 2.2)
+        << "path2 col wrong for row 1";
 }
 
 // -- Work_mem boundary: flush at exactly 2 tuples -----------------------------

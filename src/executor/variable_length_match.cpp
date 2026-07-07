@@ -517,21 +517,15 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                         }
                     }
                     Binding new_b = binding;
-                    // Build single-hop path.
+                    // Build single-hop path. GDB-1292: PathStep::node_pk is a
+                    // Value, so any PK type (including STRING) is stored
+                    // directly -- no int64 conversion is needed.
                     Path hop_path = binding_paths[bi];
                     if (hop_path.steps.empty()) {
-                        auto src_int = pk_to_int64(it->second);
-                        if (!src_int) {
-                            return tl::unexpected(src_int.error());
-                        }
-                        hop_path.steps.push_back({*src_int, -1});
+                        hop_path.steps.push_back({it->second, -1});
                     }
                     hop_path.steps.back().edge_id = static_cast<int64_t>(edge_row.edge_row_id);
-                    auto nbr_int = pk_to_int64(nbr_pk);
-                    if (!nbr_int) {
-                        return tl::unexpected(nbr_int.error());
-                    }
-                    hop_path.steps.push_back({*nbr_int, -1});
+                    hop_path.steps.push_back({nbr_pk, -1});
                     new_b[tgt_var] = std::move(nbr_pk);
                     new_bindings.push_back(std::move(new_b));
                     new_paths.push_back(std::move(hop_path));
@@ -562,12 +556,9 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                 start.current_pk = start_pk;
                 start.depth = 0;
                 start.visited.insert(start_pk);
-                // Initialize path with starting node.
-                auto pk_int = pk_to_int64(start_pk);
-                if (!pk_int) {
-                    return tl::unexpected(pk_int.error());
-                }
-                start.path.steps.push_back({*pk_int, -1});
+                // Initialize path with starting node. GDB-1292: PathStep::
+                // node_pk is a Value, so any PK type is stored directly.
+                start.path.steps.push_back({start_pk, -1});
                 queue.push(std::move(start));
 
                 while (!queue.empty()) {
@@ -651,11 +642,7 @@ Result<void> VariableLengthMatchOperator::execute_variable_length() {
                                 next.path.steps.back().edge_id =
                                     static_cast<int64_t>(edge_row.edge_row_id);
                             }
-                            auto nbr_int = pk_to_int64(nbr_pk);
-                            if (!nbr_int) {
-                                return tl::unexpected(nbr_int.error());
-                            }
-                            next.path.steps.push_back({*nbr_int, -1});
+                            next.path.steps.push_back({nbr_pk, -1});
                             next.current_pk = std::move(nbr_pk);
                             queue.push(std::move(next));
                         }

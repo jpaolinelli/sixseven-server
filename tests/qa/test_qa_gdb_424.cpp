@@ -331,8 +331,8 @@ TEST_F(QA_GDB424, AC2_AllShortestReturnsBothDiamondPaths) {
     auto& path0 = filtered[0].values[2].as_path();
     auto& path1 = filtered[1].values[2].as_path();
     std::set<int64_t> intermediates;
-    intermediates.insert(path0.steps[1].node_pk);
-    intermediates.insert(path1.steps[1].node_pk);
+    intermediates.insert(path0.steps[1].node_pk_as_int64());
+    intermediates.insert(path1.steps[1].node_pk_as_int64());
     EXPECT_EQ(intermediates.size(), 2u) << "Paths should go through different intermediates";
     EXPECT_TRUE(intermediates.count(2) > 0);
     EXPECT_TRUE(intermediates.count(3) > 0);
@@ -427,10 +427,10 @@ TEST_F(QA_GDB424, AC5_NodesContainsCorrectPKs) {
     ASSERT_EQ(filtered.size(), 1u);
     const auto& path = filtered[0].values[2].as_path();
     ASSERT_EQ(path.steps.size(), 3u);
-    EXPECT_EQ(path.steps[0].node_pk, 1);
+    EXPECT_EQ(path.steps[0].node_pk_as_int64(), 1);
     // Middle is either 2 or 3.
-    EXPECT_TRUE(path.steps[1].node_pk == 2 || path.steps[1].node_pk == 3);
-    EXPECT_EQ(path.steps[2].node_pk, 4);
+    EXPECT_TRUE(path.steps[1].node_pk_as_int64() == 2 || path.steps[1].node_pk_as_int64() == 3);
+    EXPECT_EQ(path.steps[2].node_pk_as_int64(), 4);
 }
 
 TEST_F(QA_GDB424, AC5_NodesSingleNodePath) {
@@ -442,7 +442,7 @@ TEST_F(QA_GDB424, AC5_NodesSingleNodePath) {
     ASSERT_EQ(filtered.size(), 1u);
     const auto& path = filtered[0].values[2].as_path();
     ASSERT_EQ(path.steps.size(), 1u);
-    EXPECT_EQ(path.steps[0].node_pk, 1);
+    EXPECT_EQ(path.steps[0].node_pk_as_int64(), 1);
 }
 
 // ============================================================================
@@ -862,11 +862,11 @@ TEST_F(QA_GDB424, PathNodesAreInOrder) {
     ASSERT_EQ(filtered.size(), 1u);
     const auto& path = filtered[0].values[2].as_path();
     ASSERT_EQ(path.steps.size(), 4u);
-    EXPECT_EQ(path.steps[0].node_pk, 1);
-    EXPECT_EQ(path.steps[3].node_pk, 6);
+    EXPECT_EQ(path.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(path.steps[3].node_pk_as_int64(), 6);
     // The path should be 1→7→8→6.
-    EXPECT_EQ(path.steps[1].node_pk, 7);
-    EXPECT_EQ(path.steps[2].node_pk, 8);
+    EXPECT_EQ(path.steps[1].node_pk_as_int64(), 7);
+    EXPECT_EQ(path.steps[2].node_pk_as_int64(), 8);
 }
 
 // ============================================================================
@@ -912,7 +912,7 @@ TEST_F(QA_GDB424, StressTest_LinearChain20Nodes) {
     const auto& path = filtered[0].values[2].as_path();
     ASSERT_EQ(path.steps.size(), 11u);
     for (int64_t i = 0; i <= 10; ++i) {
-        EXPECT_EQ(path.steps[static_cast<size_t>(i)].node_pk, 10 + i);
+        EXPECT_EQ(path.steps[static_cast<size_t>(i)].node_pk_as_int64(), 10 + i);
     }
 }
 

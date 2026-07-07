@@ -104,8 +104,8 @@ protected:
     /// edge on the first step and a -1 terminal edge.
     static void expect_two_step_path(const Path& p, int64_t from, int64_t to) {
         ASSERT_EQ(p.steps.size(), 2u) << "path must be start -> target, not a self-chain";
-        EXPECT_EQ(p.steps[0].node_pk, from);
-        EXPECT_EQ(p.steps[1].node_pk, to);
+        EXPECT_EQ(p.steps[0].node_pk_as_int64(), from);
+        EXPECT_EQ(p.steps[1].node_pk_as_int64(), to);
         EXPECT_GE(p.steps[0].edge_id, 0) << "start step must carry the outgoing edge id";
         EXPECT_EQ(p.steps[1].edge_id, -1) << "terminal step has no outgoing edge";
     }
@@ -163,7 +163,7 @@ TEST_F(QA_GDB694_TraceCollision, EdgeModeOutColliderAmongMultipleTargets) {
         const Path& p = row[3].as_path();
         ASSERT_EQ(p.steps.size(), 1u)
             << "path to the start (__from) node must be the trivial single step";
-        EXPECT_EQ(p.steps[0].node_pk, 1);
+        EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
         EXPECT_EQ(p.steps[0].edge_id, -1);
     }
 }
@@ -309,8 +309,8 @@ TEST_F(QA_GDB694_TraceCollision, StandaloneTraverseCollisionTerminates) {
         ASSERT_EQ(row[2].type_id(), TypeId::PATH);
         const Path& p = row[2].as_path();
         ASSERT_EQ(p.steps.size(), 2u);
-        EXPECT_EQ(p.steps[0].node_pk, 1);
-        EXPECT_EQ(p.steps[1].node_pk, val_to_int64(row[0]));
+        EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
+        EXPECT_EQ(p.steps[1].node_pk_as_int64(), val_to_int64(row[0]));
         if (val_to_int64(row[0]) == 1) {
             saw_collider = true;
         }
@@ -359,7 +359,12 @@ TEST_F(QA_GDB694_TraceCollision, MaxDepthZeroCollisionYieldsNoRows) {
 // String-PK heterogeneous targets under TRACE
 // ---------------------------------------------------------------------------
 
-TEST_F(QA_GDB694_TraceCollision, StringPkTargetTraceFailsCleanly) {
+TEST_F(QA_GDB694_TraceCollision, StringPkTargetTraceSucceeds) {
+    // GDB-1292 widened PathStep::node_pk from int64_t to Value, so a
+    // heterogeneous target with a STRING PK now encodes into PathStep
+    // successfully under TRACE (previously this was a documented
+    // limitation: a clean INVALID_ARGUMENT rather than a crash or a hang,
+    // but a limitation nonetheless).
     exec_ok("CREATE TABLE docs (slug VARCHAR PRIMARY KEY, body VARCHAR)");
     exec_ok("INSERT INTO docs VALUES ('intro', 'Hello')");
     exec_ok("CREATE EDGE TYPE wrote FROM users TO docs");
@@ -371,13 +376,11 @@ TEST_F(QA_GDB694_TraceCollision, StringPkTargetTraceFailsCleanly) {
     ASSERT_EQ(qr.rows.size(), 1u);
     EXPECT_EQ(qr.rows[0][0].as_string(), "Hello");
 
-    // With TRACE the string PK cannot be encoded into PathStep: clean error,
-    // not a crash or a hang.
-    auto err = exec_err("SELECT body, __node, __path "
-                        "FROM TRAVERSE wrote FROM users(1) DIRECTION OUT WITH TRACE");
-    EXPECT_EQ(err.code, StatusCode::INVALID_ARGUMENT);
-    EXPECT_NE(err.message.find("integer primary keys"), std::string::npos)
-        << "actual message: " << err.message;
+    // With TRACE the STRING PK now encodes into PathStep successfully.
+    auto traced = exec_ok("SELECT body, __node, __path "
+                          "FROM TRAVERSE wrote FROM users(1) DIRECTION OUT WITH TRACE");
+    ASSERT_EQ(traced.rows.size(), 1u);
+    EXPECT_EQ(traced.rows[0][0].as_string(), "Hello");
 }
 
 // ---------------------------------------------------------------------------
@@ -404,8 +407,8 @@ TEST_F(QA_GDB694_TraceCollision, HomogeneousCycleWithShortcutKeepsPathEqualToDep
         const Path& p = row[2].as_path();
         ASSERT_EQ(static_cast<int64_t>(p.steps.size()), depth + 1)
             << "path step count must equal depth + 1 for node " << node;
-        EXPECT_EQ(p.steps.front().node_pk, 1);
-        EXPECT_EQ(p.steps.back().node_pk, node);
+        EXPECT_EQ(p.steps.front().node_pk_as_int64(), 1);
+        EXPECT_EQ(p.steps.back().node_pk_as_int64(), node);
     }
 }
 
@@ -489,7 +492,7 @@ TEST_F(QA_GDB694_TraceCollision, ManyCollidingPairsEdgeModeTrivialPaths) {
         ASSERT_EQ(qr.rows[0][2].type_id(), TypeId::PATH);
         const Path& p = qr.rows[0][2].as_path();
         ASSERT_EQ(p.steps.size(), 1u);
-        EXPECT_EQ(p.steps[0].node_pk, i);
+        EXPECT_EQ(p.steps[0].node_pk_as_int64(), i);
         EXPECT_EQ(p.steps[0].edge_id, -1);
     }
 }

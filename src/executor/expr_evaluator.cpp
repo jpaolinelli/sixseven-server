@@ -1495,6 +1495,85 @@ bool match_like(const std::string& text, const std::string& pattern, size_t ti, 
     return ti == text.size();
 }
 
+// GDB-1292: nodes(p) renders each PathStep's node_pk as a JSON scalar. Prior
+// to GDB-1292 node_pk was always an int64_t so std::to_string() sufficed;
+// node_pk is now a Value and may hold any PK-eligible type (including
+// STRING), so integers are rendered unquoted and strings are JSON-escaped
+// and quoted. Other PK-eligible types fall back to their pg-wire text form,
+// quoted -- graph node PKs are practically always integer or string, but
+// this keeps nodes() total instead of throwing for exotic PK types.
+std::string json_escape_string(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 2);
+    out += '"';
+    for (char c : s) {
+        switch (c) {
+        case '"':
+            out += "\\\"";
+            break;
+        case '\\':
+            out += "\\\\";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        case '\r':
+            out += "\\r";
+            break;
+        case '\t':
+            out += "\\t";
+            break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20) {
+                char buf[8];
+                std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                out += buf;
+            } else {
+                out += c;
+            }
+        }
+    }
+    out += '"';
+    return out;
+}
+
+std::string node_pk_to_json(const Value& pk) {
+    if (pk.is_null()) {
+        return "null";
+    }
+    switch (pk.type_id()) {
+    case TypeId::INT8:
+        return std::to_string(pk.as_int8());
+    case TypeId::INT16:
+        return std::to_string(pk.as_int16());
+    case TypeId::INT32:
+        return std::to_string(pk.as_int32());
+    case TypeId::INT64:
+        return std::to_string(pk.as_int64());
+    case TypeId::UINT8:
+        return std::to_string(pk.as_uint8());
+    case TypeId::UINT16:
+        return std::to_string(pk.as_uint16());
+    case TypeId::UINT32:
+        return std::to_string(pk.as_uint32());
+    case TypeId::UINT64:
+        return std::to_string(pk.as_uint64());
+    case TypeId::STRING:
+        return json_escape_string(pk.as_string());
+    case TypeId::FLOAT32:
+        return std::to_string(pk.as_float32());
+    case TypeId::FLOAT64:
+        return std::to_string(pk.as_float64());
+    case TypeId::BOOL:
+        return pk.as_bool() ? "true" : "false";
+    default:
+        // Exotic PK types (BLOB/UUID/etc.) are not expected in practice for
+        // graph node PKs; render a stable placeholder rather than risk an
+        // unsafe variant access.
+        return json_escape_string(std::string(type_name(pk.type_id())));
+    }
+}
+
 } // namespace
 
 Result<Value> eval_like(const LikeExpr& expr,
@@ -1696,7 +1775,7 @@ Result<Value> eval_function(const FunctionCallExpr& expr,
             if (i > 0) {
                 json += ",";
             }
-            json += std::to_string((*path_ptr)->steps[i].node_pk);
+            json += node_pk_to_json((*path_ptr)->steps[i].node_pk());
         }
         json += "]";
         return ok(Value(JsonString{std::move(json)}));

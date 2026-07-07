@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <variant>
 #include <vector>
@@ -74,12 +75,55 @@ using Blob = std::vector<uint8_t>;
 /// Vector embedding.
 using Embedding = std::vector<float>;
 
+// Forward declaration: Value is defined below (it is a variant that holds
+// Path, which holds PathStep, which holds Value -- a genuine circular
+// dependency). PathStep/Path are declared here as incomplete-friendly shells;
+// their Value-dependent members are implemented out-of-line after Value's
+// full definition, near the bottom of this file.
+class Value;
+
 /// A step in a graph path: a node PK followed by an optional edge ID.
+///
+/// GDB-1292: node_pk was widened from int64_t to Value so that graph paths
+/// can carry STRING (and other non-integer) primary keys end-to-end, not just
+/// the 8 integer types. node_pk is held via unique_ptr because Value is not
+/// yet a complete type at this point in the header (Value's variant holds
+/// Path, which holds PathStep -- a genuine circular dependency); the pointer
+/// is fully hidden behind value-semantics accessors so callers use
+/// PathStep exactly like a plain struct with a Value member.
 struct PathStep {
-    int64_t node_pk = 0;
+    PathStep();
+    PathStep(Value pk, int64_t eid);
+    /// Convenience overload for the very common integer-PK case (mirrors the
+    /// pre-GDB-1292 aggregate-init call sites like `{1, 100}` throughout the
+    /// test suite): builds node_pk() as Value(int64_t{pk}).
+    PathStep(int64_t pk, int64_t eid);
+    PathStep(const PathStep&);
+    PathStep(PathStep&&) noexcept;
+    PathStep& operator=(const PathStep&);
+    PathStep& operator=(PathStep&&) noexcept;
+    ~PathStep();
+
+    /// The node's primary key (any PK-eligible type).
+    [[nodiscard]] const Value& node_pk() const { return *node_pk_; }
+    [[nodiscard]] Value& node_pk() { return *node_pk_; }
+    void set_node_pk(Value v);
+
+    /// Widen an integer-typed node_pk to int64_t (mirrors
+    /// graph_traversal_core.h's pk_to_int64 widening for INT8..INT64/
+    /// UINT8..UINT64). Throws std::bad_variant_access if node_pk() holds a
+    /// non-integer type (e.g. STRING) -- callers that may see non-integer
+    /// PKs (post-GDB-1292) should branch on node_pk().type_id() instead.
+    /// Provided as a convenience for call sites (mostly tests) that only
+    /// ever deal with integer-PK graphs.
+    [[nodiscard]] int64_t node_pk_as_int64() const;
+
     int64_t edge_id = -1; ///< -1 means no edge (terminal node).
 
-    bool operator==(const PathStep& other) const = default;
+    bool operator==(const PathStep& other) const;
+
+private:
+    std::unique_ptr<Value> node_pk_;
 };
 
 /// An ordered graph path: a sequence of (node_pk, edge_id) steps.
@@ -95,7 +139,7 @@ struct Path {
         return static_cast<int64_t>(steps.size()) - 1;
     }
 
-    bool operator==(const Path& other) const = default;
+    bool operator==(const Path& other) const;
 };
 
 // -- Value variant type -------------------------------------------------------
@@ -320,6 +364,10 @@ public:
     [[nodiscard]] const ValueData& data() const { return data_; }
     [[nodiscard]] ValueData& data() { return data_; }
 
+    /// Value equality (defined out-of-line, near PathStep/Path definitions
+    /// below, since Path/PathStep's own operator== must be complete first).
+    bool operator==(const Value& other) const;
+
 private:
     template <typename T>
     [[nodiscard]] Result<const T*> try_get(TypeId expected) const {
@@ -334,5 +382,79 @@ private:
 
     ValueData data_;
 };
+
+// -- Out-of-line definitions for PathStep/Path/Value ------------------------
+// These require Value to be a complete type (Value::operator==), which in
+// turn requires PathStep/Path to be complete (Path is a Value variant
+// alternative). Defining them here, after Value's full class body, breaks
+// the circular dependency between Value <-> Path <-> PathStep (GDB-1292).
+
+inline bool Value::operator==(const Value& other) const {
+    return data_ == other.data_;
+}
+
+inline PathStep::PathStep() : node_pk_(std::make_unique<Value>()) {}
+
+inline PathStep::PathStep(Value pk, int64_t eid)
+    : edge_id(eid), node_pk_(std::make_unique<Value>(std::move(pk))) {}
+
+inline PathStep::PathStep(int64_t pk, int64_t eid)
+    : edge_id(eid), node_pk_(std::make_unique<Value>(pk)) {}
+
+inline PathStep::PathStep(const PathStep& other)
+    : edge_id(other.edge_id), node_pk_(std::make_unique<Value>(*other.node_pk_)) {}
+
+inline PathStep::PathStep(PathStep&&) noexcept = default;
+
+inline PathStep& PathStep::operator=(const PathStep& other) {
+    if (this != &other) {
+        edge_id = other.edge_id;
+        node_pk_ = std::make_unique<Value>(*other.node_pk_);
+    }
+    return *this;
+}
+
+inline PathStep& PathStep::operator=(PathStep&&) noexcept = default;
+
+inline PathStep::~PathStep() = default;
+
+inline void PathStep::set_node_pk(Value v) {
+    node_pk_ = std::make_unique<Value>(std::move(v));
+}
+
+inline int64_t PathStep::node_pk_as_int64() const {
+    const Value& pk = *node_pk_;
+    switch (pk.type_id()) {
+    case TypeId::INT8:
+        return static_cast<int64_t>(pk.as_int8());
+    case TypeId::INT16:
+        return static_cast<int64_t>(pk.as_int16());
+    case TypeId::INT32:
+        return static_cast<int64_t>(pk.as_int32());
+    case TypeId::INT64:
+        return pk.as_int64();
+    case TypeId::UINT8:
+        return static_cast<int64_t>(pk.as_uint8());
+    case TypeId::UINT16:
+        return static_cast<int64_t>(pk.as_uint16());
+    case TypeId::UINT32:
+        return static_cast<int64_t>(pk.as_uint32());
+    case TypeId::UINT64:
+        return static_cast<int64_t>(pk.as_uint64());
+    default:
+        // Non-integer PK type (e.g. STRING): std::get<int64_t> below throws
+        // std::bad_variant_access, matching this method's documented
+        // contract for non-integer node_pk() values.
+        return std::get<int64_t>(pk.data());
+    }
+}
+
+inline bool PathStep::operator==(const PathStep& other) const {
+    return node_pk() == other.node_pk() && edge_id == other.edge_id;
+}
+
+inline bool Path::operator==(const Path& other) const {
+    return steps == other.steps && total_weight == other.total_weight;
+}
 
 } // namespace sixseven

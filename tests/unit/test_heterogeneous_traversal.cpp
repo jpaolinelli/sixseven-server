@@ -299,8 +299,8 @@ TEST_F(HeterogeneousTraversalTest, StandaloneTraverseTraceCollidingTargetPath) {
         ASSERT_EQ(row[2].type_id(), TypeId::PATH);
         const Path& p = row[2].as_path();
         ASSERT_EQ(p.steps.size(), 2u) << "path must be start -> target, not a self-chain";
-        EXPECT_EQ(p.steps[0].node_pk, 1);
-        EXPECT_EQ(p.steps[1].node_pk, val_to_int64(row[0]));
+        EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
+        EXPECT_EQ(p.steps[1].node_pk_as_int64(), val_to_int64(row[0]));
         EXPECT_EQ(p.steps[1].edge_id, -1) << "terminal step has no outgoing edge";
         if (val_to_int64(row[0]) == 1) {
             saw_collider = true;
@@ -361,8 +361,8 @@ TEST_F(HeterogeneousTraversalTest, TraceSamePkEnrichedOutTwoStepPath) {
         ASSERT_EQ(row[3].type_id(), TypeId::PATH);
         const Path& p = row[3].as_path();
         ASSERT_EQ(p.steps.size(), 2u) << "path must be start -> target, not a self-chain";
-        EXPECT_EQ(p.steps[0].node_pk, 1);
-        EXPECT_EQ(p.steps[1].node_pk, val_to_int64(row[1]));
+        EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
+        EXPECT_EQ(p.steps[1].node_pk_as_int64(), val_to_int64(row[1]));
         EXPECT_GE(p.steps[0].edge_id, 0) << "start step must carry the outgoing edge";
         EXPECT_EQ(p.steps[1].edge_id, -1) << "terminal step has no outgoing edge";
         if (val_to_int64(row[1]) == 1) {
@@ -388,7 +388,7 @@ TEST_F(HeterogeneousTraversalTest, TraceSamePkEdgeModeOutTrivialPath) {
         const Path& p = row[2].as_path();
         ASSERT_EQ(p.steps.size(), 1u)
             << "path to the start (__from) node must be the trivial single step";
-        EXPECT_EQ(p.steps[0].node_pk, 1);
+        EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
         EXPECT_EQ(p.steps[0].edge_id, -1);
     }
 }
@@ -406,8 +406,8 @@ TEST_F(HeterogeneousTraversalTest, TraceSamePkEnrichedInTwoStepPath) {
     ASSERT_EQ(qr.rows[0][3].type_id(), TypeId::PATH);
     const Path& p = qr.rows[0][3].as_path();
     ASSERT_EQ(p.steps.size(), 2u) << "path must be start -> source node, not a self-chain";
-    EXPECT_EQ(p.steps[0].node_pk, 1); // start: posts(1)
-    EXPECT_EQ(p.steps[1].node_pk, 1); // reached: users(1)
+    EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1); // start: posts(1)
+    EXPECT_EQ(p.steps[1].node_pk_as_int64(), 1); // reached: users(1)
     EXPECT_GE(p.steps[0].edge_id, 0);
     EXPECT_EQ(p.steps[1].edge_id, -1);
 }
@@ -426,8 +426,8 @@ TEST_F(HeterogeneousTraversalTest, TraceSamePkEdgeModeInTwoStepPath) {
     ASSERT_EQ(qr.rows[0][2].type_id(), TypeId::PATH);
     const Path& p = qr.rows[0][2].as_path();
     ASSERT_EQ(p.steps.size(), 2u) << "path must be start -> __from node, not a self-chain";
-    EXPECT_EQ(p.steps[0].node_pk, 1);
-    EXPECT_EQ(p.steps[1].node_pk, 1);
+    EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(p.steps[1].node_pk_as_int64(), 1);
     EXPECT_GE(p.steps[0].edge_id, 0);
     EXPECT_EQ(p.steps[1].edge_id, -1);
 }
@@ -443,8 +443,8 @@ TEST_F(HeterogeneousTraversalTest, TraceDistinctPksStillCorrect) {
     ASSERT_EQ(qr.rows[0][2].type_id(), TypeId::PATH);
     const Path& p = qr.rows[0][2].as_path();
     ASSERT_EQ(p.steps.size(), 2u);
-    EXPECT_EQ(p.steps[0].node_pk, 2);
-    EXPECT_EQ(p.steps[1].node_pk, 30);
+    EXPECT_EQ(p.steps[0].node_pk_as_int64(), 2);
+    EXPECT_EQ(p.steps[1].node_pk_as_int64(), 30);
     EXPECT_EQ(p.length(), 1);
 }
 

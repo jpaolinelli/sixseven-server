@@ -295,8 +295,8 @@ TEST_F(EnrichedTraversalTest, TraceAddsPathColumn) {
         ASSERT_EQ(row[path_idx].type_id(), TypeId::PATH) << "__path should be a PATH value";
         const Path& p = row[path_idx].as_path();
         ASSERT_FALSE(p.steps.empty());
-        EXPECT_EQ(p.steps.front().node_pk, 1) << "path must start at the source node";
-        EXPECT_EQ(p.steps.back().node_pk, val_to_int64(row[node_idx]))
+        EXPECT_EQ(p.steps.front().node_pk_as_int64(), 1) << "path must start at the source node";
+        EXPECT_EQ(p.steps.back().node_pk_as_int64(), val_to_int64(row[node_idx]))
             << "path must end at the result node";
     }
 }

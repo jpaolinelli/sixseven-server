@@ -1,13 +1,20 @@
-// QA regression tests for GDB-1213.
+// QA regression tests for GDB-1213 (and its GDB-1292 follow-up).
 //
-// GDB-1213 fixes variable-length (and fixed-length single-hop) MATCH path
-// construction so that a non-integer (STRING/UUID) primary key encountered
-// while building a Path yields a clean INVALID_ARGUMENT error instead of
-// silently dropping/misaligning path steps.
+// GDB-1213 originally fixed variable-length (and fixed-length single-hop)
+// MATCH path construction so that a non-integer (STRING/UUID) primary key
+// encountered while building a Path yielded a clean INVALID_ARGUMENT error
+// instead of silently dropping/misaligning path steps.
+//
+// GDB-1292 widened PathStep::node_pk from int64_t to Value, so STRING and
+// UUID primary keys (like any other PK-eligible type) now encode into
+// PathStep directly and these operators succeed end-to-end instead of
+// erroring. The tests below were updated accordingly: the "errors cleanly"
+// behavior from GDB-1213 is now "succeeds with correct results," which is
+// the stronger and more useful guarantee.
 //
 // Adversarial focus:
 //   1. Non-integer PK correctness across {min,max} ranges, single-hop,
-//      BFS multi-hop, and all directions (OUT/IN/BOTH).
+//      BFS multi-hop, and all directions (OUT/IN/BOTH) -- now succeeding.
 //   2. No regression for integer-PK paths: full path content (node sequence +
 //      edge_id alignment) must be identical to pre-fix behavior, not just
 //      row counts.
@@ -15,7 +22,7 @@
 //      ever touch integer-PK nodes even if the table itself is int-keyed vs.
 //      erroring for any string-keyed node reached along the path.
 //   4. Consistency: same shape MATCH via MatchShortestPathOperator gives the
-//      same INVALID_ARGUMENT behavior for non-integer PKs.
+//      same (now successful) behavior for non-integer PKs.
 
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/result.h"
@@ -163,6 +170,46 @@ protected:
         return result;
     }
 
+    // GDB-1292: STRING PKs now succeed end-to-end instead of erroring, so
+    // several tests below need to open + fully drain the operator and
+    // report the row count rather than just the open() result.
+    Result<size_t> run_and_count(TraverseDirection dir,
+                                 std::optional<int32_t> min_hops,
+                                 std::optional<int32_t> max_hops) {
+        MatchConfig config;
+        config.nodes.push_back({"a", "persons"});
+        config.nodes.push_back({"b", "persons"});
+        config.edges.push_back(MatchEdgeDef("r", "knows", dir, min_hops, max_hops));
+
+        BoundStatement bound;
+        VariableLengthMatchOperator op(*graph_,
+                                       *catalog_,
+                                       *storage_,
+                                       default_database_id,
+                                       std::move(config),
+                                       make_schema(),
+                                       nullptr,
+                                       bound);
+        auto open_result = op.open();
+        if (!open_result) {
+            return tl::unexpected(open_result.error());
+        }
+
+        size_t count = 0;
+        while (true) {
+            auto row = op.next();
+            if (!row) {
+                op.close();
+                return tl::unexpected(row.error());
+            }
+            if (!row->has_value())
+                break;
+            ++count;
+        }
+        op.close();
+        return ok(count);
+    }
+
     DiskManager dm_;
     std::filesystem::path data_dir_;
     std::unique_ptr<Catalog> catalog_;
@@ -171,60 +218,64 @@ protected:
     table_id_t persons_id_ = 0;
 };
 
-// -- Direction coverage: OUT / IN / BOTH must all surface the clean error ----
+// -- Direction coverage: OUT / IN / BOTH must all succeed (GDB-1292) ---------
 
-TEST_F(QaGdb1213StringPkTest, VarLenOutDirectionErrorsCleanly) {
-    auto result = run_open(TraverseDirection::OUT, 1, 3);
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
-    EXPECT_NE(result.error().message.find("integer primary key"), std::string::npos);
+TEST_F(QaGdb1213StringPkTest, VarLenOutDirectionSucceeds) {
+    // Chain a->b->c->d->e. OUT {1,3}: from a: b,c,d; from b: c,d,e;
+    // from c: d,e; from d: e. Total = 3+3+2+1 = 9.
+    auto result = run_and_count(TraverseDirection::OUT, 1, 3);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(*result, 9u);
 }
 
-TEST_F(QaGdb1213StringPkTest, VarLenInDirectionErrorsCleanly) {
-    auto result = run_open(TraverseDirection::IN, 1, 3);
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
-    EXPECT_NE(result.error().message.find("integer primary key"), std::string::npos);
+TEST_F(QaGdb1213StringPkTest, VarLenInDirectionSucceeds) {
+    // IN is the mirror of OUT over the same chain: 9 pairs as well.
+    auto result = run_and_count(TraverseDirection::IN, 1, 3);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(*result, 9u);
 }
 
-TEST_F(QaGdb1213StringPkTest, VarLenBothDirectionErrorsCleanly) {
-    auto result = run_open(TraverseDirection::BOTH, 1, 3);
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
-    EXPECT_NE(result.error().message.find("integer primary key"), std::string::npos);
+TEST_F(QaGdb1213StringPkTest, VarLenBothDirectionSucceeds) {
+    // BOTH must succeed and return at least as many pairs as either OUT or IN
+    // alone (it's their union per starting node).
+    auto result = run_and_count(TraverseDirection::BOTH, 1, 3);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_GE(*result, 9u);
 }
 
 // -- Quantifier boundary coverage --------------------------------------------
 
-TEST_F(QaGdb1213StringPkTest, VarLenMinHopsZeroErrorsCleanly) {
-    // min_hops = 0 emits the start node itself at depth 0 -- this still goes
-    // through pk_to_int64 in the BFS start-node init block, so it must still
-    // error rather than silently emit a bogus/zeroed PK.
-    auto result = run_open(TraverseDirection::OUT, 0, 2);
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+TEST_F(QaGdb1213StringPkTest, VarLenMinHopsZeroSucceeds) {
+    // min_hops = 0 emits the start node itself at depth 0. GDB-1292: this now
+    // succeeds and includes the 0-hop self-pairs (a,a), (b,b), ... plus the
+    // {1,2} hop pairs.
+    auto result = run_and_count(TraverseDirection::OUT, 0, 2);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_GT(*result, 0u);
 }
 
-TEST_F(QaGdb1213StringPkTest, VarLenSingleHopMinEqualsMaxErrorsCleanly) {
+TEST_F(QaGdb1213StringPkTest, VarLenSingleHopMinEqualsMaxSucceeds) {
     // {1,1} -- exactly one hop; exercises the BFS path (is_variable_length()
     // is true because min_hops has a value) rather than the fixed-length path.
-    auto result = run_open(TraverseDirection::OUT, 1, 1);
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    // 4 direct edges: a->b, b->c, c->d, d->e.
+    auto result = run_and_count(TraverseDirection::OUT, 1, 1);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(*result, 4u);
 }
 
-TEST_F(QaGdb1213StringPkTest, VarLenLargeMaxHopsErrorsCleanly) {
+TEST_F(QaGdb1213StringPkTest, VarLenLargeMaxHopsSucceeds) {
     // Large max_hops forces deeper BFS expansion before the chain is
-    // exhausted; error must still surface immediately at the first
-    // non-integer PK, not be swallowed by continued expansion.
-    auto result = run_open(TraverseDirection::OUT, 1, 20);
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    // exhausted; must succeed and terminate rather than expand forever
+    // (the chain has no cycle, so BFS naturally bottoms out).
+    // From a: b,c,d,e (4). From b: c,d,e (3). From c: d,e (2). From d: e (1).
+    auto result = run_and_count(TraverseDirection::OUT, 1, 20);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(*result, 10u);
 }
 
 // -- Fixed-length single-hop (non-quantified edge) ---------------------------
 
-TEST_F(QaGdb1213StringPkTest, FixedLengthInDirectionErrorsCleanly) {
+TEST_F(QaGdb1213StringPkTest, FixedLengthInDirectionSucceeds) {
     MatchConfig config;
     config.nodes.push_back({"a", "persons"});
     config.nodes.push_back({"b", "persons"});
@@ -240,12 +291,22 @@ TEST_F(QaGdb1213StringPkTest, FixedLengthInDirectionErrorsCleanly) {
                                    nullptr,
                                    bound);
     auto result = op.open();
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    size_t count = 0;
+    while (true) {
+        auto row = op.next();
+        ASSERT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value())
+            break;
+        ++count;
+    }
     op.close();
+    // IN, single-hop: b->a, c->b, d->c, e->d = 4 pairs.
+    EXPECT_EQ(count, 4u);
 }
 
-TEST_F(QaGdb1213StringPkTest, FixedLengthBothDirectionErrorsCleanly) {
+TEST_F(QaGdb1213StringPkTest, FixedLengthBothDirectionSucceeds) {
     MatchConfig config;
     config.nodes.push_back({"a", "persons"});
     config.nodes.push_back({"b", "persons"});
@@ -261,25 +322,32 @@ TEST_F(QaGdb1213StringPkTest, FixedLengthBothDirectionErrorsCleanly) {
                                    nullptr,
                                    bound);
     auto result = op.open();
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    size_t count = 0;
+    while (true) {
+        auto row = op.next();
+        ASSERT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value())
+            break;
+        ++count;
+    }
     op.close();
+    // BOTH, single-hop: union of OUT (4) and IN (4) = 8 pairs.
+    EXPECT_EQ(count, 8u);
 }
 
-// -- No crash / no partial garbage results -----------------------------------
+// -- No crash / repeatable success (formerly "no partial garbage results") --
 
-TEST_F(QaGdb1213StringPkTest, ErrorLeavesNoPartialResults) {
-    // Ensure that after an error, next() is not silently callable to drain
-    // "partial" results -- open() failing must mean the operator produced no
-    // usable output. We don't call next() after a failed open() (per Iterator
-    // contract), but we do confirm open() doesn't crash and returns cleanly
-    // on repeated invocation (no corrupted internal state from a half-built
-    // BFS queue/path).
-    auto r1 = run_open(TraverseDirection::OUT, 1, 3);
-    ASSERT_FALSE(r1.has_value());
-    auto r2 = run_open(TraverseDirection::OUT, 1, 3);
-    ASSERT_FALSE(r2.has_value());
-    EXPECT_EQ(r1.error().code, r2.error().code);
+TEST_F(QaGdb1213StringPkTest, RepeatedOpenSucceedsConsistently) {
+    // GDB-1292: the operator now succeeds over STRING PKs. Confirm open()
+    // doesn't crash and returns the same result on repeated invocation (no
+    // corrupted internal state from a half-built BFS queue/path).
+    auto r1 = run_and_count(TraverseDirection::OUT, 1, 3);
+    ASSERT_TRUE(r1.has_value()) << r1.error().message;
+    auto r2 = run_and_count(TraverseDirection::OUT, 1, 3);
+    ASSERT_TRUE(r2.has_value()) << r2.error().message;
+    EXPECT_EQ(*r1, *r2);
 }
 
 // ============================================================================
@@ -327,10 +395,38 @@ protected:
             ASSERT_TRUE(sr.has_value()) << sr.error().message;
         }
 
-        uuid1_ = {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
-                  0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11};
-        uuid2_ = {0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22,
-                  0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22};
+        uuid1_ = {0x11,
+                  0x11,
+                  0x11,
+                  0x11,
+                  0x11,
+                  0x11,
+                  0x11,
+                  0x11,
+                  0x11,
+                  0x11,
+                  0x11,
+                  0x11,
+                  0x11,
+                  0x11,
+                  0x11,
+                  0x11};
+        uuid2_ = {0x22,
+                  0x22,
+                  0x22,
+                  0x22,
+                  0x22,
+                  0x22,
+                  0x22,
+                  0x22,
+                  0x22,
+                  0x22,
+                  0x22,
+                  0x22,
+                  0x22,
+                  0x22,
+                  0x22,
+                  0x22};
 
         insert_node(uuid1_, "N1");
         insert_node(uuid2_, "N2");
@@ -371,7 +467,9 @@ protected:
     Uuid uuid2_;
 };
 
-TEST_F(QaGdb1213UuidPkTest, VariableLengthMatchOverUuidPkErrorsCleanly) {
+TEST_F(QaGdb1213UuidPkTest, VariableLengthMatchOverUuidPkSucceeds) {
+    // GDB-1292: UUID is a PK-eligible Value type just like STRING, so this
+    // must now succeed end-to-end. Fixture has one edge: uuid1 -> uuid2.
     MatchConfig config;
     config.nodes.push_back({"a", "nodes_uuid"});
     config.nodes.push_back({"b", "nodes_uuid"});
@@ -392,15 +490,23 @@ TEST_F(QaGdb1213UuidPkTest, VariableLengthMatchOverUuidPkErrorsCleanly) {
                                    nullptr,
                                    bound);
     auto result = op.open();
-    ASSERT_FALSE(result.has_value())
-        << "expected variable-length MATCH over UUID-PK table to fail cleanly";
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
-    EXPECT_NE(result.error().message.find("integer primary key"), std::string::npos)
-        << "unexpected error message: " << result.error().message;
+    ASSERT_TRUE(result.has_value())
+        << "expected variable-length MATCH over UUID-PK table to succeed: "
+        << result.error().message;
+
+    size_t count = 0;
+    while (true) {
+        auto row = op.next();
+        ASSERT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value())
+            break;
+        ++count;
+    }
     op.close();
+    EXPECT_EQ(count, 1u) << "expected exactly one N1->N2 pair";
 }
 
-TEST_F(QaGdb1213UuidPkTest, FixedLengthMatchOverUuidPkErrorsCleanly) {
+TEST_F(QaGdb1213UuidPkTest, FixedLengthMatchOverUuidPkSucceeds) {
     MatchConfig config;
     config.nodes.push_back({"a", "nodes_uuid"});
     config.nodes.push_back({"b", "nodes_uuid"});
@@ -421,18 +527,29 @@ TEST_F(QaGdb1213UuidPkTest, FixedLengthMatchOverUuidPkErrorsCleanly) {
                                    nullptr,
                                    bound);
     auto result = op.open();
-    ASSERT_FALSE(result.has_value())
-        << "expected fixed-length MATCH over UUID-PK table to fail cleanly";
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+    ASSERT_TRUE(result.has_value())
+        << "expected fixed-length MATCH over UUID-PK table to succeed: " << result.error().message;
+
+    size_t count = 0;
+    while (true) {
+        auto row = op.next();
+        ASSERT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value())
+            break;
+        ++count;
+    }
     op.close();
+    EXPECT_EQ(count, 1u) << "expected exactly one N1->N2 pair";
 }
 
 // ============================================================================
 // Consistency: MatchShortestPathOperator (sibling operator) over the same
-// STRING-PK graph shape must exhibit the same INVALID_ARGUMENT behavior.
+// STRING-PK graph shape must exhibit the same (now successful) behavior.
 // ============================================================================
 
-TEST_F(QaGdb1213StringPkTest, ShortestPathOverSamePatternAlsoErrorsCleanly) {
+TEST_F(QaGdb1213StringPkTest, ShortestPathOverSamePatternAlsoSucceeds) {
+    // GDB-1292: MatchShortestPathOperator (sibling operator) must exhibit the
+    // same success behavior as VariableLengthMatchOperator over STRING PKs.
     MatchConfig config;
     config.nodes.push_back({"a", "persons"});
     config.nodes.push_back({"b", "persons"});
@@ -451,13 +568,21 @@ TEST_F(QaGdb1213StringPkTest, ShortestPathOverSamePatternAlsoErrorsCleanly) {
                                  "p",
                                  0);
     auto result = op.open();
-    ASSERT_FALSE(result.has_value())
-        << "expected MatchShortestPathOperator over STRING-PK table to fail cleanly, "
-           "consistent with VariableLengthMatchOperator";
-    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
-    EXPECT_NE(result.error().message.find("integer primary key"), std::string::npos)
-        << "unexpected error message: " << result.error().message;
+    ASSERT_TRUE(result.has_value())
+        << "expected MatchShortestPathOperator over STRING-PK table to succeed, "
+           "consistent with VariableLengthMatchOperator: "
+        << result.error().message;
+
+    size_t count = 0;
+    while (true) {
+        auto row = op.next();
+        ASSERT_TRUE(row.has_value()) << row.error().message;
+        if (!row->has_value())
+            break;
+        ++count;
+    }
     op.close();
+    EXPECT_GT(count, 0u);
 }
 
 // ============================================================================
@@ -594,7 +719,7 @@ TEST_F(QaGdb1213IntPkPathContentTest, VariableLengthPathColumnHasCompleteAligned
 
         // {2,2} means exactly 2 hops -> 3 steps (start, mid, end).
         ASSERT_EQ(path.steps.size(), 3u) << "path must have exactly 3 steps for a 2-hop match "
-                                             "-- a dropped step would shrink this";
+                                            "-- a dropped step would shrink this";
 
         // Every step except the last must have a real edge_id (>= 0);
         // the last step is terminal (edge_id == -1).
@@ -604,10 +729,10 @@ TEST_F(QaGdb1213IntPkPathContentTest, VariableLengthPathColumnHasCompleteAligned
             << "second step's edge_id must be attached (not misaligned/dropped)";
         EXPECT_EQ(path.steps[2].edge_id, -1) << "terminal step must have no outgoing edge_id";
 
-        if (path.steps[0].node_pk == 1 && path.steps[2].node_pk == 3) {
+        if (path.steps[0].node_pk_as_int64() == 1 && path.steps[2].node_pk_as_int64() == 3) {
             found_1_to_3 = true;
             // Middle node on the chain 1->2->3 must be 2.
-            EXPECT_EQ(path.steps[1].node_pk, 2)
+            EXPECT_EQ(path.steps[1].node_pk_as_int64(), 2)
                 << "middle path step misaligned: expected node 2 between 1 and 3";
         }
     }

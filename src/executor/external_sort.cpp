@@ -525,6 +525,230 @@ void write_bytes(std::ofstream& out, const void* data, size_t len) {
     out.write(static_cast<const char*>(data), static_cast<std::streamsize>(len));
 }
 
+// Forward declarations: write_value_payload()/read_value_payload() write/read
+// a Value's non-null payload (tid tag + type-specific data). Used both for
+// top-level Tuple values and, since GDB-1292, for PathStep::node_pk() (which
+// is a Value rather than a fixed-width int64_t and may itself be any
+// PK-eligible type, including STRING). A node PK is never itself PATH-typed
+// in practice, so no unbounded recursion occurs.
+void write_value_payload(std::ofstream& out, const Value& v);
+Value read_value_payload(std::ifstream& in, uint8_t tid);
+
+void write_value_payload(std::ofstream& out, const Value& v) {
+    switch (v.type_id()) {
+    case TypeId::INT8:
+        write_pod(out, v.as_int8());
+        break;
+    case TypeId::INT16:
+        write_pod(out, v.as_int16());
+        break;
+    case TypeId::INT32:
+        write_pod(out, v.as_int32());
+        break;
+    case TypeId::INT64:
+        write_pod(out, v.as_int64());
+        break;
+    case TypeId::UINT8:
+        write_pod(out, v.as_uint8());
+        break;
+    case TypeId::UINT16:
+        write_pod(out, v.as_uint16());
+        break;
+    case TypeId::UINT32:
+        write_pod(out, v.as_uint32());
+        break;
+    case TypeId::UINT64:
+        write_pod(out, v.as_uint64());
+        break;
+    case TypeId::FLOAT32:
+        write_pod(out, v.as_float32());
+        break;
+    case TypeId::FLOAT64:
+        write_pod(out, v.as_float64());
+        break;
+    case TypeId::DECIMAL:
+        write_pod(out, v.as_decimal().hi);
+        write_pod(out, v.as_decimal().lo);
+        break;
+    case TypeId::BOOL:
+        write_pod(out, v.as_bool());
+        break;
+    case TypeId::STRING: {
+        const auto& s = v.as_string();
+        write_bytes(out, s.data(), s.size());
+        break;
+    }
+    case TypeId::BLOB: {
+        const auto& b = v.as_blob();
+        write_bytes(out, b.data(), b.size());
+        break;
+    }
+    case TypeId::DATE:
+        write_pod(out, v.as_date().days_since_epoch);
+        break;
+    case TypeId::TIME:
+        write_pod(out, v.as_time().microseconds);
+        break;
+    case TypeId::TIMESTAMP:
+        write_pod(out, v.as_timestamp().microseconds);
+        break;
+    case TypeId::INTERVAL:
+        write_pod(out, v.as_interval().months);
+        write_pod(out, v.as_interval().microseconds);
+        break;
+    case TypeId::POINT:
+        write_pod(out, v.as_point().x);
+        write_pod(out, v.as_point().y);
+        break;
+    case TypeId::JSON: {
+        const auto& j = v.as_json().data;
+        write_bytes(out, j.data(), j.size());
+        break;
+    }
+    case TypeId::UUID: {
+        const auto& u = v.as_uuid();
+        out.write(reinterpret_cast<const char*>(u.data()), 16);
+        break;
+    }
+    case TypeId::EMBEDDING: {
+        const auto& e = v.as_embedding();
+        auto dim = static_cast<uint32_t>(e.size());
+        write_pod(out, dim);
+        out.write(reinterpret_cast<const char*>(e.data()),
+                  static_cast<std::streamsize>(dim * sizeof(float)));
+        break;
+    }
+    case TypeId::PATH: {
+        const auto& p = v.as_path();
+        write_pod(out, p.total_weight);
+        auto count = static_cast<uint32_t>(p.steps.size());
+        write_pod(out, count);
+        for (const auto& step : p.steps) {
+            const Value& pk = step.node_pk();
+            uint8_t null_flag = pk.is_null() ? 0 : 1;
+            write_pod(out, null_flag);
+            if (null_flag != 0) {
+                auto tid = static_cast<uint8_t>(pk.data().index());
+                write_pod(out, tid);
+                write_value_payload(out, pk);
+            }
+            write_pod(out, step.edge_id);
+        }
+        break;
+    }
+    }
+}
+
+Value read_value_payload(std::ifstream& in, uint8_t tid) {
+    switch (tid) {
+    case 1: // INT8
+        return Value(read_pod<int8_t>(in));
+    case 2: // INT16
+        return Value(read_pod<int16_t>(in));
+    case 3: // INT32
+        return Value(read_pod<int32_t>(in));
+    case 4: // INT64
+        return Value(read_pod<int64_t>(in));
+    case 5: // UINT8
+        return Value(read_pod<uint8_t>(in));
+    case 6: // UINT16
+        return Value(read_pod<uint16_t>(in));
+    case 7: // UINT32
+        return Value(read_pod<uint32_t>(in));
+    case 8: // UINT64
+        return Value(read_pod<uint64_t>(in));
+    case 9: // FLOAT32
+        return Value(read_pod<float>(in));
+    case 10: // FLOAT64
+        return Value(read_pod<double>(in));
+    case 11: { // DECIMAL
+        Decimal128 d;
+        d.hi = read_pod<int64_t>(in);
+        d.lo = read_pod<uint64_t>(in);
+        return Value(d);
+    }
+    case 12: // BOOL
+        return Value(read_pod<bool>(in));
+    case 13: { // STRING
+        auto len = read_pod<uint32_t>(in);
+        std::string s(len, '\0');
+        in.read(s.data(), len);
+        return Value(std::move(s));
+    }
+    case 14: { // BLOB
+        auto len = read_pod<uint32_t>(in);
+        Blob b(len);
+        in.read(reinterpret_cast<char*>(b.data()), len);
+        return Value(std::move(b));
+    }
+    case 15: { // DATE
+        Date d;
+        d.days_since_epoch = read_pod<int32_t>(in);
+        return Value(d);
+    }
+    case 16: { // TIME
+        Time t;
+        t.microseconds = read_pod<int64_t>(in);
+        return Value(t);
+    }
+    case 17: { // TIMESTAMP
+        Timestamp ts;
+        ts.microseconds = read_pod<int64_t>(in);
+        return Value(ts);
+    }
+    case 18: { // INTERVAL
+        Interval iv;
+        iv.months = read_pod<int64_t>(in);
+        iv.microseconds = read_pod<int64_t>(in);
+        return Value(iv);
+    }
+    case 19: { // POINT
+        Point pt;
+        pt.x = read_pod<double>(in);
+        pt.y = read_pod<double>(in);
+        return Value(pt);
+    }
+    case 20: { // JSON
+        auto len = read_pod<uint32_t>(in);
+        std::string s(len, '\0');
+        in.read(s.data(), len);
+        return Value(JsonString{std::move(s)});
+    }
+    case 21: { // UUID
+        Uuid u{};
+        in.read(reinterpret_cast<char*>(u.data()), 16);
+        return Value(u);
+    }
+    case 22: { // EMBEDDING
+        auto dim = read_pod<uint32_t>(in);
+        Embedding e(dim);
+        in.read(reinterpret_cast<char*>(e.data()),
+                static_cast<std::streamsize>(dim * sizeof(float)));
+        return Value(std::move(e));
+    }
+    case 23: { // PATH
+        auto total_weight = read_pod<double>(in);
+        auto count = read_pod<uint32_t>(in);
+        Path p;
+        p.total_weight = total_weight;
+        p.steps.reserve(count);
+        for (uint32_t s = 0; s < count; ++s) {
+            uint8_t null_flag = read_pod<uint8_t>(in);
+            Value pk;
+            if (null_flag != 0) {
+                auto pk_tid = read_pod<uint8_t>(in);
+                pk = read_value_payload(in, pk_tid);
+            }
+            int64_t edge_id = read_pod<int64_t>(in);
+            p.steps.push_back({std::move(pk), edge_id});
+        }
+        return Value(std::move(p));
+    }
+    default:
+        return Value::make_null();
+    }
+}
+
 } // namespace
 
 Result<void> ExternalSortOperator::write_tuple(std::ofstream& out, const Tuple& tuple) {
@@ -548,105 +772,7 @@ Result<void> ExternalSortOperator::write_tuple(std::ofstream& out, const Tuple& 
 
         auto tid = static_cast<uint8_t>(v.data().index());
         write_pod(out, tid);
-
-        switch (v.type_id()) {
-        case TypeId::INT8:
-            write_pod(out, v.as_int8());
-            break;
-        case TypeId::INT16:
-            write_pod(out, v.as_int16());
-            break;
-        case TypeId::INT32:
-            write_pod(out, v.as_int32());
-            break;
-        case TypeId::INT64:
-            write_pod(out, v.as_int64());
-            break;
-        case TypeId::UINT8:
-            write_pod(out, v.as_uint8());
-            break;
-        case TypeId::UINT16:
-            write_pod(out, v.as_uint16());
-            break;
-        case TypeId::UINT32:
-            write_pod(out, v.as_uint32());
-            break;
-        case TypeId::UINT64:
-            write_pod(out, v.as_uint64());
-            break;
-        case TypeId::FLOAT32:
-            write_pod(out, v.as_float32());
-            break;
-        case TypeId::FLOAT64:
-            write_pod(out, v.as_float64());
-            break;
-        case TypeId::DECIMAL: {
-            write_pod(out, v.as_decimal().hi);
-            write_pod(out, v.as_decimal().lo);
-            break;
-        }
-        case TypeId::BOOL:
-            write_pod(out, v.as_bool());
-            break;
-        case TypeId::STRING: {
-            const auto& s = v.as_string();
-            write_bytes(out, s.data(), s.size());
-            break;
-        }
-        case TypeId::BLOB: {
-            const auto& b = v.as_blob();
-            write_bytes(out, b.data(), b.size());
-            break;
-        }
-        case TypeId::DATE:
-            write_pod(out, v.as_date().days_since_epoch);
-            break;
-        case TypeId::TIME:
-            write_pod(out, v.as_time().microseconds);
-            break;
-        case TypeId::TIMESTAMP:
-            write_pod(out, v.as_timestamp().microseconds);
-            break;
-        case TypeId::INTERVAL: {
-            write_pod(out, v.as_interval().months);
-            write_pod(out, v.as_interval().microseconds);
-            break;
-        }
-        case TypeId::POINT: {
-            write_pod(out, v.as_point().x);
-            write_pod(out, v.as_point().y);
-            break;
-        }
-        case TypeId::JSON: {
-            const auto& j = v.as_json().data;
-            write_bytes(out, j.data(), j.size());
-            break;
-        }
-        case TypeId::UUID: {
-            const auto& u = v.as_uuid();
-            out.write(reinterpret_cast<const char*>(u.data()), 16);
-            break;
-        }
-        case TypeId::EMBEDDING: {
-            const auto& e = v.as_embedding();
-            auto dim = static_cast<uint32_t>(e.size());
-            write_pod(out, dim);
-            out.write(reinterpret_cast<const char*>(e.data()),
-                      static_cast<std::streamsize>(dim * sizeof(float)));
-            break;
-        }
-        case TypeId::PATH: {
-            const auto& p = v.as_path();
-            write_pod(out, p.total_weight);
-            auto count = static_cast<uint32_t>(p.steps.size());
-            write_pod(out, count);
-            for (const auto& step : p.steps) {
-                write_pod(out, step.node_pk);
-                write_pod(out, step.edge_id);
-            }
-            break;
-        }
-        }
+        write_value_payload(out, v);
     }
 
     if (!out) {
@@ -686,135 +812,12 @@ Result<std::optional<Tuple>> ExternalSortOperator::read_tuple(std::ifstream& in)
         }
 
         auto tid = read_pod<uint8_t>(in);
-
-        // Reconstruct the value based on the variant index.
-        // tid is the variant index stored during write.
-        switch (tid) {
-        case 1: // INT8
-            tuple.values[i] = Value(read_pod<int8_t>(in));
-            break;
-        case 2: // INT16
-            tuple.values[i] = Value(read_pod<int16_t>(in));
-            break;
-        case 3: // INT32
-            tuple.values[i] = Value(read_pod<int32_t>(in));
-            break;
-        case 4: // INT64
-            tuple.values[i] = Value(read_pod<int64_t>(in));
-            break;
-        case 5: // UINT8
-            tuple.values[i] = Value(read_pod<uint8_t>(in));
-            break;
-        case 6: // UINT16
-            tuple.values[i] = Value(read_pod<uint16_t>(in));
-            break;
-        case 7: // UINT32
-            tuple.values[i] = Value(read_pod<uint32_t>(in));
-            break;
-        case 8: // UINT64
-            tuple.values[i] = Value(read_pod<uint64_t>(in));
-            break;
-        case 9: // FLOAT32
-            tuple.values[i] = Value(read_pod<float>(in));
-            break;
-        case 10: // FLOAT64
-            tuple.values[i] = Value(read_pod<double>(in));
-            break;
-        case 11: { // DECIMAL
-            Decimal128 d;
-            d.hi = read_pod<int64_t>(in);
-            d.lo = read_pod<uint64_t>(in);
-            tuple.values[i] = Value(d);
-            break;
-        }
-        case 12: // BOOL
-            tuple.values[i] = Value(read_pod<bool>(in));
-            break;
-        case 13: { // STRING
-            auto len = read_pod<uint32_t>(in);
-            std::string s(len, '\0');
-            in.read(s.data(), len);
-            tuple.values[i] = Value(std::move(s));
-            break;
-        }
-        case 14: { // BLOB
-            auto len = read_pod<uint32_t>(in);
-            Blob b(len);
-            in.read(reinterpret_cast<char*>(b.data()), len);
-            tuple.values[i] = Value(std::move(b));
-            break;
-        }
-        case 15: { // DATE
-            Date d;
-            d.days_since_epoch = read_pod<int32_t>(in);
-            tuple.values[i] = Value(d);
-            break;
-        }
-        case 16: { // TIME
-            Time t;
-            t.microseconds = read_pod<int64_t>(in);
-            tuple.values[i] = Value(t);
-            break;
-        }
-        case 17: { // TIMESTAMP
-            Timestamp ts;
-            ts.microseconds = read_pod<int64_t>(in);
-            tuple.values[i] = Value(ts);
-            break;
-        }
-        case 18: { // INTERVAL
-            Interval iv;
-            iv.months = read_pod<int64_t>(in);
-            iv.microseconds = read_pod<int64_t>(in);
-            tuple.values[i] = Value(iv);
-            break;
-        }
-        case 19: { // POINT
-            Point p;
-            p.x = read_pod<double>(in);
-            p.y = read_pod<double>(in);
-            tuple.values[i] = Value(p);
-            break;
-        }
-        case 20: { // JSON
-            auto len = read_pod<uint32_t>(in);
-            std::string s(len, '\0');
-            in.read(s.data(), len);
-            tuple.values[i] = Value(JsonString{std::move(s)});
-            break;
-        }
-        case 21: { // UUID
-            Uuid u{};
-            in.read(reinterpret_cast<char*>(u.data()), 16);
-            tuple.values[i] = Value(u);
-            break;
-        }
-        case 22: { // EMBEDDING
-            auto dim = read_pod<uint32_t>(in);
-            Embedding e(dim);
-            in.read(reinterpret_cast<char*>(e.data()),
-                    static_cast<std::streamsize>(dim * sizeof(float)));
-            tuple.values[i] = Value(std::move(e));
-            break;
-        }
-        case 23: { // PATH
-            auto total_weight = read_pod<double>(in);
-            auto count = read_pod<uint32_t>(in);
-            Path p;
-            p.total_weight = total_weight;
-            p.steps.resize(count);
-            for (uint32_t s = 0; s < count; ++s) {
-                p.steps[s].node_pk = read_pod<int64_t>(in);
-                p.steps[s].edge_id = read_pod<int64_t>(in);
-            }
-            tuple.values[i] = Value(std::move(p));
-            break;
-        }
-        default:
+        if (tid < 1 || tid > 23) {
             return make_error(StatusCode::INTERNAL_ERROR,
                               "unknown value type index during deserialization: " +
                                   std::to_string(tid));
         }
+        tuple.values[i] = read_value_payload(in, tid);
     }
 
     if (!in) {

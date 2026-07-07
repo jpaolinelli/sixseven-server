@@ -284,10 +284,10 @@ TEST_F(GDB426_WeightedSP, AC1_DijkstraFindsWeightedShortest) {
     const auto& path = from_1_to_5[0]->values[2].as_path();
     // Should be 1→3→4→5 (cheaper), NOT 1→2→5.
     ASSERT_EQ(path.steps.size(), 4u);
-    EXPECT_EQ(path.steps[0].node_pk, 1);
-    EXPECT_EQ(path.steps[1].node_pk, 3);
-    EXPECT_EQ(path.steps[2].node_pk, 4);
-    EXPECT_EQ(path.steps[3].node_pk, 5);
+    EXPECT_EQ(path.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(path.steps[1].node_pk_as_int64(), 3);
+    EXPECT_EQ(path.steps[2].node_pk_as_int64(), 4);
+    EXPECT_EQ(path.steps[3].node_pk_as_int64(), 5);
     EXPECT_DOUBLE_EQ(path.total_weight, 10.0);
 }
 

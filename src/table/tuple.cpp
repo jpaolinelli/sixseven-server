@@ -1,5 +1,7 @@
 #include "sixseven/table/tuple.h"
 
+#include "sixseven/storage/serialization.h"
+
 #include <cstring>
 
 namespace sixseven {
@@ -290,12 +292,35 @@ std::span<const uint8_t> var_value_bytes(const Value& value) {
         return {reinterpret_cast<const uint8_t*>(e.data()), e.size() * sizeof(float)};
     }
     case TypeId::PATH: {
+        // GDB-1292: node_pk is now a Value (any PK-eligible type, including
+        // STRING), not a fixed-width int64_t, so PathStep is no longer POD
+        // and can't be memcpy'd as a raw array. Layout:
+        //   [total_weight: 8 bytes]
+        //   [step count: 4 bytes]
+        //   per step: [1-byte TypeId tag][serialize(node_pk)][edge_id: 8 bytes]
+        // This mirrors storage/serialization.cpp's PATH format. This is a
+        // deliberate format break from the previous fixed-width layout --
+        // PATH is a query-runtime result type, not long-lived durable table
+        // data, so no backward-compat reader is provided for old PATH bytes.
         const auto& p = value.as_path();
-        // Layout: [total_weight: 8 bytes][steps: variable]
-        const size_t steps_size = p.steps.size() * sizeof(PathStep);
-        g_path_serialize_buffer.resize(sizeof(double) + steps_size);
+        g_path_serialize_buffer.clear();
+        g_path_serialize_buffer.resize(sizeof(double) + sizeof(uint32_t));
         std::memcpy(g_path_serialize_buffer.data(), &p.total_weight, sizeof(double));
-        std::memcpy(g_path_serialize_buffer.data() + sizeof(double), p.steps.data(), steps_size);
+        auto count = static_cast<uint32_t>(p.steps.size());
+        std::memcpy(g_path_serialize_buffer.data() + sizeof(double), &count, sizeof(uint32_t));
+
+        for (const auto& step : p.steps) {
+            const Value& pk = step.node_pk();
+            auto tag = pk.is_null() ? static_cast<uint8_t>(TypeId::INT8)
+                                    : static_cast<uint8_t>(pk.type_id());
+            g_path_serialize_buffer.push_back(tag);
+            auto pk_bytes = serialize(pk);
+            g_path_serialize_buffer.insert(
+                g_path_serialize_buffer.end(), pk_bytes.begin(), pk_bytes.end());
+            const auto* edge_bytes = reinterpret_cast<const uint8_t*>(&step.edge_id);
+            g_path_serialize_buffer.insert(
+                g_path_serialize_buffer.end(), edge_bytes, edge_bytes + sizeof(int64_t));
+        }
         return g_path_serialize_buffer;
     }
     default:
@@ -319,16 +344,43 @@ Value read_var_value(const uint8_t* src, size_t length, TypeId type) {
         return Value(std::move(emb));
     }
     case TypeId::PATH: {
-        // Layout: [total_weight: 8 bytes][steps: variable]
-        if (length < sizeof(double)) {
+        // GDB-1292: mirrors var_value_bytes() above -- see that function for
+        // the layout comment. node_pk is a Value, so steps are read back via
+        // serialization.h's deserialize()/serialized_size(), not memcpy.
+        if (length < sizeof(double) + sizeof(uint32_t)) {
             return Value::make_null();
         }
         Path path;
         std::memcpy(&path.total_weight, src, sizeof(double));
-        const size_t steps_size = length - sizeof(double);
-        size_t count = steps_size / sizeof(PathStep);
-        path.steps.resize(count);
-        std::memcpy(path.steps.data(), src + sizeof(double), steps_size);
+        uint32_t count = 0;
+        std::memcpy(&count, src + sizeof(double), sizeof(uint32_t));
+
+        size_t off = sizeof(double) + sizeof(uint32_t);
+        path.steps.reserve(count);
+        for (uint32_t i = 0; i < count; ++i) {
+            if (off + 1 > length) {
+                return Value::make_null();
+            }
+            auto step_type = static_cast<TypeId>(src[off]);
+            ++off;
+
+            auto remaining_span = std::span<const uint8_t>(src + off, length - off);
+            auto pk_result = deserialize(remaining_span, step_type);
+            if (!pk_result) {
+                return Value::make_null();
+            }
+            Value pk = std::move(*pk_result);
+            off += serialized_size(pk);
+
+            if (off + sizeof(int64_t) > length) {
+                return Value::make_null();
+            }
+            int64_t edge_id = 0;
+            std::memcpy(&edge_id, src + off, sizeof(int64_t));
+            off += sizeof(int64_t);
+
+            path.steps.push_back({std::move(pk), edge_id});
+        }
         return Value(std::move(path));
     }
     default:

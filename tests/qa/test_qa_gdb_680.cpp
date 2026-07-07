@@ -121,8 +121,8 @@ protected:
     static void expect_cycle_free(const Path& path) {
         std::unordered_set<int64_t> seen;
         for (const auto& step : path.steps) {
-            EXPECT_TRUE(seen.insert(step.node_pk).second)
-                << "path contains a repeated node: " << step.node_pk;
+            EXPECT_TRUE(seen.insert(step.node_pk_as_int64()).second)
+                << "path contains a repeated node: " << step.node_pk_as_int64();
         }
     }
 
@@ -150,7 +150,7 @@ TEST_F(QA_GDB680_Trace, SelfLoopOnStartNodeKeepsPathsAcyclic) {
         ASSERT_EQ(row[2].type_id(), TypeId::PATH);
         const Path& p = row[2].as_path();
         expect_cycle_free(p);
-        EXPECT_EQ(p.steps.front().node_pk, 1);
+        EXPECT_EQ(p.steps.front().node_pk_as_int64(), 1);
         EXPECT_EQ(p.length(), val_to_int64(row[1]));
     }
 }
@@ -253,8 +253,8 @@ TEST_F(QA_GDB680_Trace, StandaloneWhereOnDepthFiltersWithTrace) {
     ASSERT_EQ(qr.rows[0][*path_idx].type_id(), TypeId::PATH);
     const Path& standalone_path = qr.rows[0][*path_idx].as_path();
     ASSERT_EQ(standalone_path.steps.size(), 3u) << "depth-2 hit must keep its full two-hop path";
-    EXPECT_EQ(standalone_path.steps.front().node_pk, 1);
-    EXPECT_EQ(standalone_path.steps.back().node_pk, 4);
+    EXPECT_EQ(standalone_path.steps.front().node_pk_as_int64(), 1);
+    EXPECT_EQ(standalone_path.steps.back().node_pk_as_int64(), 4);
     expect_cycle_free(standalone_path);
 
     // The same filter also works through the enriched (FROM TRAVERSE) form.
@@ -265,8 +265,8 @@ TEST_F(QA_GDB680_Trace, StandaloneWhereOnDepthFiltersWithTrace) {
     ASSERT_EQ(enriched.rows[0][1].type_id(), TypeId::PATH);
     const Path& enriched_path = enriched.rows[0][1].as_path();
     ASSERT_EQ(enriched_path.steps.size(), 3u) << "depth-2 hit must keep its full two-hop path";
-    EXPECT_EQ(enriched_path.steps.front().node_pk, 1);
-    EXPECT_EQ(enriched_path.steps.back().node_pk, 4);
+    EXPECT_EQ(enriched_path.steps.front().node_pk_as_int64(), 1);
+    EXPECT_EQ(enriched_path.steps.back().node_pk_as_int64(), 4);
 }
 
 // ---------------------------------------------------------------------------
@@ -347,7 +347,11 @@ TEST_F(QA_GDB680_Trace, WhereEqualityOnPathIsGracefulError) {
 // Non-integer and non-(int32/int64) primary keys under TRACE
 // ---------------------------------------------------------------------------
 
-TEST_F(QA_GDB680_Trace, StringPkTraceFailsCleanlyAndWithoutTraceWorks) {
+TEST_F(QA_GDB680_Trace, StringPkTraceSucceeds) {
+    // GDB-1292 widened PathStep::node_pk from int64_t to Value, so STRING PKs
+    // now encode into PathStep directly and TRACE succeeds (previously this
+    // was a documented limitation: a clean INVALID_ARGUMENT rather than a
+    // crash, but a limitation nonetheless).
     exec_ok("CREATE TABLE people (handle VARCHAR PRIMARY KEY, name VARCHAR)");
     exec_ok("INSERT INTO people VALUES ('a', 'Ann')");
     exec_ok("INSERT INTO people VALUES ('b', 'Ben')");
@@ -358,11 +362,9 @@ TEST_F(QA_GDB680_Trace, StringPkTraceFailsCleanlyAndWithoutTraceWorks) {
     auto qr = exec_ok("TRAVERSE knows FROM people('a')");
     EXPECT_EQ(qr.rows.size(), 1u);
 
-    // With TRACE the string PK cannot be encoded into PathStep: clean error.
-    auto err = exec_err("TRAVERSE knows FROM people('a') WITH TRACE");
-    EXPECT_EQ(err.code, StatusCode::INVALID_ARGUMENT);
-    EXPECT_NE(err.message.find("integer primary keys"), std::string::npos)
-        << "actual message: " << err.message;
+    // With TRACE the STRING PK now encodes into PathStep successfully.
+    auto traced = exec_ok("TRAVERSE knows FROM people('a') WITH TRACE");
+    EXPECT_EQ(traced.rows.size(), 1u);
 }
 
 // Operator-level: UINT32 PKs are integers and are now accepted by TRACE.
@@ -433,8 +435,8 @@ TEST(QA_GDB680_TraceOperator, Uint32PkTraceSucceeds) {
         // GDB-1224: node_pk (PathStep, always int64_t) must equal the
         // widened UINT32 node id -- every step's PK is one of {1, 2}.
         for (const auto& step : path.steps) {
-            EXPECT_TRUE(step.node_pk == 1 || step.node_pk == 2)
-                << "unexpected node_pk in path: " << step.node_pk;
+            EXPECT_TRUE(step.node_pk_as_int64() == 1 || step.node_pk_as_int64() == 2)
+                << "unexpected node_pk in path: " << step.node_pk_as_int64();
         }
     }
     op.close();
@@ -465,8 +467,8 @@ TEST_F(QA_GDB680_Trace, HeterogeneousEnrichedTraceDistinctPks) {
     ASSERT_EQ(qr.rows[0][3].type_id(), TypeId::PATH);
     const Path& p = qr.rows[0][3].as_path();
     ASSERT_EQ(p.steps.size(), 2u);
-    EXPECT_EQ(p.steps[0].node_pk, 1);
-    EXPECT_EQ(p.steps[1].node_pk, 10);
+    EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
+    EXPECT_EQ(p.steps[1].node_pk_as_int64(), 10);
     EXPECT_EQ(p.length(), 1);
 }
 
@@ -500,8 +502,9 @@ TEST_F(QA_GDB680_Trace, HeterogeneousEnrichedTraceSamePkCompletesWithCorrectPath
     // A regressed infinite-loop would grow steps unboundedly; the ASSERT
     // terminates the test before OOM.
     ASSERT_EQ(p.steps.size(), 2u) << "path must be start -> target, not an infinite self-chain";
-    EXPECT_EQ(p.steps[0].node_pk, 1) << "first step must be the start node (users.id=1)";
-    EXPECT_EQ(p.steps[1].node_pk, 1) << "second step must be the target node (posts.id=1)";
+    EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1) << "first step must be the start node (users.id=1)";
+    EXPECT_EQ(p.steps[1].node_pk_as_int64(), 1)
+        << "second step must be the target node (posts.id=1)";
     EXPECT_EQ(p.length(), 1);
 }
 
@@ -531,7 +534,7 @@ TEST_F(QA_GDB680_Trace, HeterogeneousEdgeModeTraceSamePkCompletesWithTrivialPath
     // A regressed infinite-loop would grow steps unboundedly; the ASSERT
     // terminates the test before OOM.
     ASSERT_EQ(p.steps.size(), 1u) << "path to the start node must be the trivial single step";
-    EXPECT_EQ(p.steps[0].node_pk, 1);
+    EXPECT_EQ(p.steps[0].node_pk_as_int64(), 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -552,8 +555,8 @@ TEST_F(QA_GDB680_Trace, EdgeModeTraceWithBackEdgeStaysCycleFree) {
         const Path& p = row[2].as_path();
         expect_cycle_free(p);
         ASSERT_FALSE(p.steps.empty());
-        EXPECT_EQ(p.steps.front().node_pk, 1);
-        EXPECT_EQ(p.steps.back().node_pk, val_to_int64(row[0]))
+        EXPECT_EQ(p.steps.front().node_pk_as_int64(), 1);
+        EXPECT_EQ(p.steps.back().node_pk_as_int64(), val_to_int64(row[0]))
             << "edge-mode path must end at the edge's __from node";
         if (val_to_int64(row[0]) == 5 && val_to_int64(row[1]) == 1) {
             saw_back_edge = true;
@@ -575,8 +578,8 @@ TEST_F(QA_GDB680_Trace, DirectionBothWithCyclePathsStayAcyclic) {
         ASSERT_EQ(row[2].type_id(), TypeId::PATH);
         const Path& p = row[2].as_path();
         expect_cycle_free(p);
-        EXPECT_EQ(p.steps.front().node_pk, 3);
-        EXPECT_EQ(p.steps.back().node_pk, val_to_int64(row[0]));
+        EXPECT_EQ(p.steps.front().node_pk_as_int64(), 3);
+        EXPECT_EQ(p.steps.back().node_pk_as_int64(), val_to_int64(row[0]));
         EXPECT_EQ(p.length(), val_to_int64(row[1]));
     }
 }
@@ -610,12 +613,12 @@ TEST_F(QA_GDB680_Trace, DeepChainTraceStress) {
         ASSERT_EQ(row[2].type_id(), TypeId::PATH);
         const Path& p = row[2].as_path();
         ASSERT_EQ(static_cast<int64_t>(p.steps.size()), depth + 1);
-        EXPECT_EQ(p.steps.front().node_pk, 1);
-        EXPECT_EQ(p.steps.back().node_pk, node);
+        EXPECT_EQ(p.steps.front().node_pk_as_int64(), 1);
+        EXPECT_EQ(p.steps.back().node_pk_as_int64(), node);
         EXPECT_EQ(p.steps.back().edge_id, -1);
         // The chain path must be strictly sequential: 1, 2, ..., node.
         for (size_t s = 0; s < p.steps.size(); ++s) {
-            ASSERT_EQ(p.steps[s].node_pk, static_cast<int64_t>(s) + 1)
+            ASSERT_EQ(p.steps[s].node_pk_as_int64(), static_cast<int64_t>(s) + 1)
                 << "chain path must be strictly sequential";
             if (s + 1 < p.steps.size()) {
                 EXPECT_GE(p.steps[s].edge_id, 0) << "non-terminal steps must carry a real edge id";
