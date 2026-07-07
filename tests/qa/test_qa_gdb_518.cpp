@@ -158,6 +158,14 @@ protected:
         return closeness_centrality_execute(ctx);
     }
 
+    /// Run with a "variant" named argument (e.g. "wasserman_faust", "bogus").
+    Result<std::vector<AlgorithmRow>> run_with_variant(const std::string& edge_type,
+                                                       const std::string& variant) {
+        AlgorithmContext ctx{
+            engine_, default_database_id, edge_type, {{"variant", Value(variant)}}};
+        return closeness_centrality_execute(ctx);
+    }
+
     Catalog catalog_;
     GraphEngine engine_{catalog_};
     table_id_t table_id_ = 0;
@@ -217,7 +225,9 @@ TEST(QA_GDB518_Def, AC1_OutputSchemaColumns) {
     EXPECT_FALSE(def.output_columns[5].nullable);
 }
 
-TEST(QA_GDB518_Def, AC1_NoParameters) {
+TEST(QA_GDB518_Def, AC1_VariantParameterDefinition) {
+    // closeness takes exactly one parameter: "variant" (STRING), used to select
+    // between the "standard" (default) and "wasserman_faust" closeness formulas.
     auto def = make_closeness_centrality_def();
     ASSERT_EQ(def.params.size(), 1u);
     EXPECT_EQ(def.params[0].name, "variant");
@@ -557,6 +567,98 @@ TEST_F(QA_GDB518_ClosenessCentrality, AC3_MixedConnectedAndIsolated) {
 
     // Node 5 isolated from cycle and unreachable from 4's perspective
     EXPECT_DOUBLE_EQ(scores[5].closeness, 0.0);
+}
+
+// ============================================================================
+// Variant parameter: wasserman_faust
+// ============================================================================
+
+TEST_F(QA_GDB518_ClosenessCentrality, Variant_WassermanFaustTwoComponents) {
+    // Two components of DIFFERENT sizes:
+    //   Component A (3 nodes): directed chain 1->2->3
+    //   Component B (2 nodes): directed edge 10->11
+    // Total nodes N = 5.
+    //
+    // C_WF(v) = [r/(N-1)] * [r/sum_farness], where r = reachable_count - 1
+    // (directed-reachable nodes excluding v itself; see closeness_centrality.cpp
+    // lines ~175-195). normalized_closeness = r/sum_farness (the second factor).
+    //
+    // Node 1: reaches 2 (d=1), 3 (d=2). reachable_count=3, r=2, sum_farness=1+2=3.
+    //   normalized = r/sum_farness = 2/3
+    //   scaling    = r/(N-1) = 2/4 = 0.5
+    //   wf_closeness = 0.5 * (2/3) = 1/3
+    //
+    // Node 2: reaches 3 (d=1). reachable_count=2, r=1, sum_farness=1.
+    //   normalized = 1/1 = 1.0
+    //   scaling    = 1/4 = 0.25
+    //   wf_closeness = 0.25 * 1.0 = 0.25
+    //
+    // Node 3: reaches nobody. r=0 -> wf_closeness=0, normalized=0.
+    //
+    // Node 10: reaches 11 (d=1). reachable_count=2, r=1, sum_farness=1.
+    //   normalized = 1/1 = 1.0
+    //   scaling    = 1/(N-1) = 1/4 = 0.25   (scaling uses TOTAL N, not component size)
+    //   wf_closeness = 0.25 * 1.0 = 0.25
+    //
+    // Node 11: reaches nobody. r=0 -> wf_closeness=0, normalized=0.
+    build_graph("knows", {{1, 2}, {2, 3}, {10, 11}});
+
+    auto result = run_with_variant("knows", "wasserman_faust");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_closeness_map(*result);
+    EXPECT_EQ(scores.size(), 5u);
+
+    EXPECT_NEAR(scores[1].closeness, 1.0 / 3.0, 1e-10);
+    EXPECT_NEAR(scores[1].normalized_closeness, 2.0 / 3.0, 1e-10);
+    EXPECT_EQ(scores[1].sum_farness, 3);
+    EXPECT_EQ(scores[1].reachable_count, 3);
+
+    EXPECT_NEAR(scores[2].closeness, 0.25, 1e-10);
+    EXPECT_NEAR(scores[2].normalized_closeness, 1.0, 1e-10);
+
+    EXPECT_DOUBLE_EQ(scores[3].closeness, 0.0);
+    EXPECT_DOUBLE_EQ(scores[3].normalized_closeness, 0.0);
+
+    EXPECT_NEAR(scores[10].closeness, 0.25, 1e-10);
+    EXPECT_NEAR(scores[10].normalized_closeness, 1.0, 1e-10);
+
+    EXPECT_DOUBLE_EQ(scores[11].closeness, 0.0);
+    EXPECT_DOUBLE_EQ(scores[11].normalized_closeness, 0.0);
+}
+
+TEST_F(QA_GDB518_ClosenessCentrality, Variant_UnrecognizedVariantIsInvalidArgument) {
+    build_graph("knows", {{1, 2}});
+
+    auto result = run_with_variant("knows", "bogus");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, StatusCode::INVALID_ARGUMENT);
+}
+
+// ============================================================================
+// component_size: Union-Find component sizing
+// ============================================================================
+
+TEST_F(QA_GDB518_ClosenessCentrality, ComponentSize_TwoComponentsDifferentSizes) {
+    // Component A (3 nodes): 1->2->3 (weakly connected via directed chain).
+    // Component B (2 nodes): 10->11.
+    // Union-Find treats edges as undirected for component membership, so each
+    // node's component_size column should report the size of its WEAK component:
+    // nodes {1,2,3} -> component_size == 3; nodes {10,11} -> component_size == 2.
+    build_graph("knows", {{1, 2}, {2, 3}, {10, 11}});
+
+    auto result = run("knows");
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+
+    auto scores = to_closeness_map(*result);
+    EXPECT_EQ(scores.size(), 5u);
+
+    for (int64_t node : {1, 2, 3}) {
+        EXPECT_EQ(scores[node].component_size, 3) << "node " << node << " in 3-node component";
+    }
+    for (int64_t node : {10, 11}) {
+        EXPECT_EQ(scores[node].component_size, 2) << "node " << node << " in 2-node component";
+    }
 }
 
 // ============================================================================
