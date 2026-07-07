@@ -672,20 +672,50 @@ Result<std::pair<Decimal128, int32_t>> exact_decimal_from_literal_text(const std
     return ok(std::make_pair(coeff, scale));
 }
 
-// If `expr` is a LiteralExpr of kind INTEGER or FLOAT, parse its source text
-// into an exact (coefficient, scale) pair. Returns std::nullopt for any
-// other expression kind (column refs, casts, computed expressions, etc.),
-// which the caller falls back to a scale-preserving Value-based conversion
-// for.
+// If `expr` is a LiteralExpr of kind INTEGER or FLOAT, or a UnaryExpr{NEGATE,
+// LiteralExpr} (a negative literal that has not yet been constant-folded --
+// e.g. an expression that bypasses fold_predicate_for_filter), parse the
+// literal's source text into an exact (coefficient, scale) pair, applying
+// the NEGATE at the Decimal128 level (never through a float). Returns
+// std::nullopt for any other expression kind (column refs, casts, computed
+// expressions, etc.), which the caller falls back to a scale-preserving
+// Value-based conversion for.
+//
+// GDB-1301: negative literals like `-10.001` are normally constant-folded by
+// Planner::fold_predicate_for_filter() (rewrite_rules.cpp fold_constants())
+// before this ever runs, and that fold now negates the literal's TEXT
+// directly (see negate_literal_text_exact() in rewrite_rules.cpp) rather
+// than round-tripping through a double, so the folded LiteralExpr::value
+// this function sees is already exact ("-10.001", not
+// "-10.000999999999999..."). This UnaryExpr-unwrapping path is a second,
+// independent line of defense for the (currently believed unreachable, but
+// not exhaustively proven for every future call site) case where a negative
+// literal reaches eval_binary() BEFORE constant folding runs.
 std::optional<Result<std::pair<Decimal128, int32_t>>> exact_decimal_if_literal(const Expr* expr) {
-    const auto* lit = dynamic_cast<const LiteralExpr*>(expr);
+    bool negate = false;
+    const Expr* inner = expr;
+    if (const auto* un = dynamic_cast<const UnaryExpr*>(inner);
+        un != nullptr && un->op == UnaryOp::NEGATE) {
+        negate = true;
+        inner = un->operand.get();
+    }
+    const auto* lit = dynamic_cast<const LiteralExpr*>(inner);
     if (lit == nullptr) {
         return std::nullopt;
     }
     if (lit->kind != LiteralKind::INTEGER && lit->kind != LiteralKind::FLOAT) {
         return std::nullopt;
     }
-    return exact_decimal_from_literal_text(lit->value);
+    auto parsed = exact_decimal_from_literal_text(lit->value);
+    if (!negate || !parsed.has_value()) {
+        return parsed;
+    }
+    auto negated = dec128_sub(Decimal128{0, 0}, (*parsed).first);
+    if (!negated) {
+        return make_error(StatusCode::TYPE_ERROR,
+                          "numeric literal too large for DECIMAL comparison: " + lit->value);
+    }
+    return ok(std::make_pair(*negated, (*parsed).second));
 }
 
 // ---------------------------------------------------------------------------

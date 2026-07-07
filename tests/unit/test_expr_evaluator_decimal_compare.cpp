@@ -11,6 +11,7 @@
 #include "sixseven/executor/tuple.h"
 #include "sixseven/parser/ast.h"
 #include "sixseven/planner/binder.h"
+#include "sixseven/planner/rewrite_rules.h"
 
 #include <gtest/gtest.h>
 
@@ -74,8 +75,68 @@ ExprPtr binary(BinaryOp op, ExprPtr lhs, ExprPtr rhs) {
     return e;
 }
 
+ExprPtr negate(ExprPtr operand) {
+    auto e = std::make_unique<UnaryExpr>();
+    e->op = UnaryOp::NEGATE;
+    e->operand = std::move(operand);
+    return e;
+}
+
 static BoundStatement empty_bound() {
     return BoundStatement{};
+}
+
+/// Evaluate `amount <op> -literal` (or `-literal <op> amount` if
+/// `literal_lhs`), where the negative literal is built via the REAL
+/// UnaryExpr{NEGATE, LiteralExpr} shape the parser/binder actually produce
+/// for a negative literal -- NOT by pre-baking a '-' into LiteralExpr::value.
+///
+/// `fold_first` mirrors the real planner path (Planner::fold_predicate_for_
+/// filter -> simplify_boolean -> fold_constants), which constant-folds
+/// UnaryExpr{NEGATE, LiteralExpr} into a single LiteralExpr BEFORE the
+/// expression ever reaches eval_binary(); this exercises GDB-1301's actual
+/// bug surface (the fold's std::to_string(-safe_stod(...)) round-trip).
+/// Passing fold_first=false exercises eval_binary()'s own UnaryExpr-
+/// unwrapping defense-in-depth path directly, for the (believed
+/// unreachable) case where folding does not run first.
+Result<Value> eval_decimal_vs_negative_literal(BinaryOp op,
+                                               int64_t coeff,
+                                               int32_t column_scale,
+                                               const std::string& magnitude_text,
+                                               LiteralKind lit_kind,
+                                               bool literal_lhs,
+                                               bool fold_first) {
+    auto schema = make_schema({{"amount", TypeId::DECIMAL}});
+    auto tuple = make_tuple({Value(d128(coeff))});
+    auto bound = empty_bound();
+
+    ExprPtr col = col_ref("amount");
+    const Expr* col_ptr = col.get();
+    ExprType col_type;
+    col_type.type_id = TypeId::DECIMAL;
+    col_type.nullable = false;
+    col_type.decimal_scale = column_scale;
+    bound.expr_types[col_ptr] = col_type;
+
+    ExprPtr magnitude =
+        (lit_kind == LiteralKind::FLOAT) ? lit_float(magnitude_text) : lit_int(magnitude_text);
+    ExprPtr neg_lit = negate(std::move(magnitude));
+    if (fold_first) {
+        auto folded = fold_constants(*neg_lit);
+        if (folded == nullptr) {
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "expected fold_constants to fold NEGATE(literal)");
+        }
+        neg_lit = std::move(folded);
+    }
+
+    ExprPtr expr;
+    if (literal_lhs) {
+        expr = binary(op, std::move(neg_lit), std::move(col));
+    } else {
+        expr = binary(op, std::move(col), std::move(neg_lit));
+    }
+    return evaluate_expr(*expr, tuple, schema, bound);
 }
 
 /// Evaluate `amount <op> literal` (or `literal <op> amount` if `literal_lhs`)
@@ -506,4 +567,157 @@ TEST(ExprEvaluatorDecimalCompare, FinerLiteralScaleUpOverflowReturnsCleanError) 
 
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error().code, StatusCode::TYPE_ERROR);
+}
+
+// =============================================================================
+// GDB-1301 follow-up: negative finer-precision literals must be exact too.
+//
+// A negative literal like `-10.001` does NOT reach eval_binary() as a bare
+// LiteralExpr -- it is parsed as UnaryExpr{NEGATE, LiteralExpr("10.001")}.
+// The real planner path (Planner::fold_predicate_for_filter, invoked for
+// every WHERE/HAVING predicate) constant-folds that UnaryExpr into a single
+// LiteralExpr via fold_constants() BEFORE eval_binary() ever runs. If that
+// fold negates via a float round-trip (std::to_string(-safe_stod(text))),
+// the folded literal's text is already lossy ("-10.000999999999999...")
+// by the time eval_binary()'s exact-literal-parsing fast path sees it --
+// reintroducing the exact rounding bug GDB-1301 fixed, just for negative
+// literals. fold_first=true below exercises precisely that real path.
+// =============================================================================
+
+TEST(ExprEvaluatorDecimalCompare, NegativeFinerLiteralLessThanColumnFoldedPath) {
+    // DECIMAL(10,2) column = -10.00 (coeff -1000); literal = -10.001 (exact
+    // scale 3, coeff -10001). -10.001 < -10.00 is TRUE (more negative is
+    // smaller). Constructed via the REAL UnaryExpr{NEGATE, LiteralExpr}
+    // shape, then folded via fold_constants() exactly as the planner does
+    // for a WHERE clause.
+    auto r = eval_decimal_vs_negative_literal(
+        BinaryOp::LESS, -1000, 2, "10.001", LiteralKind::FLOAT, true, /*fold_first=*/true);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_TRUE(r->as_bool());
+}
+
+TEST(ExprEvaluatorDecimalCompare, NegativeFinerLiteralGreaterThanColumnFoldedPath) {
+    // amount(-10.00) > -10.001 is TRUE (-10.00 is greater than -10.001).
+    auto r = eval_decimal_vs_negative_literal(
+        BinaryOp::GREATER, -1000, 2, "10.001", LiteralKind::FLOAT, false, /*fold_first=*/true);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_TRUE(r->as_bool());
+}
+
+TEST(ExprEvaluatorDecimalCompare, NegativeFinerLiteralEqualsColumnIsFalseFoldedPath) {
+    // amount(-10.00) == -10.001 must be FALSE (they are not the same value).
+    // This is the exact GDB-1301-for-negatives bug: if the fold rounds
+    // -10.001 to -10.00 via a float round-trip, this wrongly reports true.
+    auto r = eval_decimal_vs_negative_literal(
+        BinaryOp::EQUAL, -1000, 2, "10.001", LiteralKind::FLOAT, false, /*fold_first=*/true);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_FALSE(r->as_bool());
+}
+
+TEST(ExprEvaluatorDecimalCompare, NegativeFinerLiteralLessEqualColumnIsTrueFoldedPath) {
+    // amount(-10.00) <= -10.001 must be FALSE: -10.00 > -10.001.
+    auto r = eval_decimal_vs_negative_literal(
+        BinaryOp::LESS_EQUAL, -1000, 2, "10.001", LiteralKind::FLOAT, false, /*fold_first=*/true);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_FALSE(r->as_bool());
+}
+
+TEST(ExprEvaluatorDecimalCompare, NegativeFinerLiteralGreaterEqualColumnIsTrueFoldedPath) {
+    // amount(-10.00) >= -10.001 must be TRUE.
+    auto r = eval_decimal_vs_negative_literal(BinaryOp::GREATER_EQUAL,
+                                              -1000,
+                                              2,
+                                              "10.001",
+                                              LiteralKind::FLOAT,
+                                              false,
+                                              /*fold_first=*/true);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_TRUE(r->as_bool());
+}
+
+TEST(ExprEvaluatorDecimalCompare, NegativeFinerLiteralNotEqualColumnIsTrueFoldedPath) {
+    // amount(-10.00) != -10.001 must be TRUE.
+    auto r = eval_decimal_vs_negative_literal(
+        BinaryOp::NOT_EQUAL, -1000, 2, "10.001", LiteralKind::FLOAT, false, /*fold_first=*/true);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_TRUE(r->as_bool());
+}
+
+TEST(ExprEvaluatorDecimalCompare, NegativeFinerLiteralOnLeftLessThanColumnIsTrueFoldedPath) {
+    // -10.001 < amount(-10.00): literal on the left, folded path.
+    auto r = eval_decimal_vs_negative_literal(
+        BinaryOp::LESS, -1000, 2, "10.001", LiteralKind::FLOAT, true, /*fold_first=*/true);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_TRUE(r->as_bool());
+}
+
+TEST(ExprEvaluatorDecimalCompare, NegativeFinerLiteralOnLeftGreaterThanColumnIsFalseFoldedPath) {
+    // -10.001 > amount(-10.00) must be FALSE.
+    auto r = eval_decimal_vs_negative_literal(
+        BinaryOp::GREATER, -1000, 2, "10.001", LiteralKind::FLOAT, true, /*fold_first=*/true);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_FALSE(r->as_bool());
+}
+
+TEST(ExprEvaluatorDecimalCompare, NegativeFinerLiteralIntOperandFoldedPath) {
+    // amount(-10.00) vs negative INT literal -10: DECIMAL vs negative INT,
+    // through the real folded UnaryExpr{NEGATE, LiteralExpr(INTEGER)} path.
+    auto r = eval_decimal_vs_negative_literal(
+        BinaryOp::EQUAL, -1000, 2, "10", LiteralKind::INTEGER, false, /*fold_first=*/true);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_TRUE(r->as_bool());
+}
+
+// -----------------------------------------------------------------------------
+// Same cases again WITHOUT constant folding (fold_first=false), exercising
+// eval_binary()'s own UnaryExpr-unwrapping defense-in-depth directly for the
+// (believed unreachable, but not exhaustively proven for every call site)
+// case where a negative literal is not folded before reaching eval.
+// -----------------------------------------------------------------------------
+
+TEST(ExprEvaluatorDecimalCompare, NegativeFinerLiteralEqualsColumnIsFalseUnfoldedPath) {
+    auto r = eval_decimal_vs_negative_literal(
+        BinaryOp::EQUAL, -1000, 2, "10.001", LiteralKind::FLOAT, false, /*fold_first=*/false);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_FALSE(r->as_bool());
+}
+
+TEST(ExprEvaluatorDecimalCompare, NegativeFinerLiteralLessThanColumnUnfoldedPath) {
+    auto r = eval_decimal_vs_negative_literal(
+        BinaryOp::LESS, -1000, 2, "10.001", LiteralKind::FLOAT, true, /*fold_first=*/false);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_TRUE(r->as_bool());
+}
+
+TEST(ExprEvaluatorDecimalCompare, NegativeFinerLiteralGreaterThanColumnUnfoldedPath) {
+    auto r = eval_decimal_vs_negative_literal(
+        BinaryOp::GREATER, -1000, 2, "10.001", LiteralKind::FLOAT, false, /*fold_first=*/false);
+    ASSERT_TRUE(r.has_value()) << r.error().message;
+    EXPECT_TRUE(r->as_bool());
+}
+
+// -----------------------------------------------------------------------------
+// Directly verify the upstream fold itself produces an exact literal (the
+// mechanism this fix relies on): fold_constants(NEGATE(LiteralExpr("10.001")))
+// must yield LiteralExpr("-10.001") exactly, not a float round-trip.
+// -----------------------------------------------------------------------------
+
+TEST(ExprEvaluatorDecimalCompare, FoldConstantsNegatesFloatLiteralTextExactly) {
+    ExprPtr neg = negate(lit_float("10.001"));
+    auto folded = fold_constants(*neg);
+    ASSERT_NE(folded, nullptr);
+    const auto* lit = dynamic_cast<const LiteralExpr*>(folded.get());
+    ASSERT_NE(lit, nullptr);
+    EXPECT_EQ(lit->kind, LiteralKind::FLOAT);
+    EXPECT_EQ(lit->value, "-10.001")
+        << "fold_constants must negate literal TEXT exactly, not round-trip through a double";
+}
+
+TEST(ExprEvaluatorDecimalCompare, FoldConstantsNegatesNineNineNineFiveExactly) {
+    ExprPtr neg = negate(lit_float("9.995"));
+    auto folded = fold_constants(*neg);
+    ASSERT_NE(folded, nullptr);
+    const auto* lit = dynamic_cast<const LiteralExpr*>(folded.get());
+    ASSERT_NE(lit, nullptr);
+    EXPECT_EQ(lit->value, "-9.995");
 }
