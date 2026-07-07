@@ -19,6 +19,7 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -565,6 +566,19 @@ TEST_F(QA143ExplainTest, AnalyzeTimingNonZero) {
 
     // With 100 rows, the root operator should show actual rows > 0.
     EXPECT_GT(parsed[0]["Actual Rows"].get<int64_t>(), 0);
+
+    // Verify "Actual Total Time" is genuinely exercised: present, numeric,
+    // finite, and strictly positive. A 100-row scan measured with
+    // std::chrono::steady_clock reliably takes well over a millisecond on
+    // real hardware (observed ~1.0-1.8ms across repeated runs), which is
+    // comfortably above timer resolution, so asserting > 0.0 here is safe
+    // and not flaky. This catches instrumentation regressions that drop the
+    // field, or report it as missing/negative/NaN.
+    ASSERT_TRUE(parsed[0].contains("Actual Total Time"));
+    ASSERT_TRUE(parsed[0]["Actual Total Time"].is_number());
+    double total_time_ms = parsed[0]["Actual Total Time"].get<double>();
+    EXPECT_TRUE(std::isfinite(total_time_ms));
+    EXPECT_GT(total_time_ms, 0.0);
 }
 
 // =============================================================================
