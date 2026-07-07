@@ -689,19 +689,41 @@ TEST_F(GDB519_WassermanFaust, Invariant_ComponentSizesSumToN) {
     ASSERT_TRUE(result.has_value()) << result.error().message;
     auto scores = to_wf_map(*result);
 
-    // Group nodes by their component membership (nodes with same component_size
-    // adjacent in node_id space).
+    // Group nodes by their reported component_size (nodes sharing a
+    // component_size s must partition into whole components of exactly s
+    // nodes each).
     std::unordered_map<int64_t, std::vector<int64_t>> components;
     for (const auto& [node, r] : scores) {
         components[r.component_size].push_back(node);
     }
 
-    // Total node count should match scores size.
-    EXPECT_GT(scores.size(), 0u);
+    ASSERT_EQ(scores.size(), 10u);
 
-    // Verify each node's component_size matches the count of nodes in its component.
-    // We can verify this by checking nodes with the same component root.
-    // Simpler check: each node's component_size >= 1 and <= N.
+    // For each distinct component_size s, the nodes reporting size s must
+    // partition into whole components of exactly s nodes: count % s == 0.
+    size_t total_from_components = 0;
+    for (const auto& [size, nodes] : components) {
+        ASSERT_GT(size, 0) << "component_size must be positive";
+        EXPECT_EQ(nodes.size() % static_cast<size_t>(size), 0u)
+            << "nodes reporting component_size " << size
+            << " must partition into whole components of that size, got " << nodes.size()
+            << " nodes";
+        total_from_components += nodes.size();
+    }
+
+    // The per-component-size node counts must sum to N: this is the "sizes
+    // sum to N" invariant the test name claims to verify.
+    EXPECT_EQ(total_from_components, scores.size());
+
+    // Confirm the exact fixture distribution: two weakly-connected
+    // components of size 3 ({1,2,3} and {20,21,22} -> 6 nodes) and two of
+    // size 2 ({10,11} and {30,31} -> 4 nodes).
+    ASSERT_TRUE(components.count(3) > 0) << "expected a component_size=3 group";
+    ASSERT_TRUE(components.count(2) > 0) << "expected a component_size=2 group";
+    EXPECT_EQ(components[3].size(), 6u) << "two components of size 3 => 6 nodes";
+    EXPECT_EQ(components[2].size(), 4u) << "two components of size 2 => 4 nodes";
+
+    // Per-node sanity bound retained.
     for (const auto& [node, r] : scores) {
         EXPECT_GE(r.component_size, 1) << "node " << node;
         EXPECT_LE(r.component_size, static_cast<int64_t>(scores.size())) << "node " << node;
