@@ -624,20 +624,38 @@ int create_socketpair(int& client_fd_out) {
     return fds[0];
 }
 
-/// Helper: write data to a fd.
+/// Helper: write data to the client side of a socketpair.
+///
+/// `create_socketpair` (sixseven_platform::socketpair) hands back raw socket
+/// handles, not CRT file descriptors: on POSIX a socket *is* a fd so ::write
+/// happens to work, but on Windows the client/server handles are genuine
+/// Winsock SOCKETs (see sixseven_platform::socketpair's TCP-loopback
+/// emulation in platform.h). Calling the CRT's ::write/::read (which index
+/// into the UCRT's internal fd table) on a raw SOCKET value is undefined --
+/// if that integer happens to collide with a valid low-numbered CRT fd it
+/// corrupts that fd's table entry, which later trips the UCRT assertion in
+/// write.cpp ("fh >= 0 && (unsigned)fh < (unsigned)_nhandle") and crashes
+/// whatever unrelated test runs next. Always use send/recv for socket
+/// handles -- they are correct on both POSIX (where they are equivalent to
+/// write/read for stream sockets) and Windows (where they are the only
+/// valid way to move bytes through a SOCKET).
 void write_to_fd(int fd, const std::vector<uint8_t>& data) {
     size_t written = 0;
     while (written < data.size()) {
-        auto n = ::write(fd, data.data() + written, data.size() - written);
+        auto n = ::send(fd,
+                        reinterpret_cast<const char*>(data.data() + written),
+                        static_cast<int>(data.size() - written),
+                        0);
         ASSERT_GT(n, 0);
         written += static_cast<size_t>(n);
     }
 }
 
-/// Helper: read all available data from a fd into a vector.
+/// Helper: read all available data from the client side of a socketpair.
+/// See write_to_fd for why this must use recv, not the CRT's ::read.
 std::vector<uint8_t> read_from_fd(int fd, size_t max_bytes = 8192) {
     std::vector<uint8_t> buf(max_bytes);
-    auto n = ::read(fd, buf.data(), buf.size());
+    auto n = ::recv(fd, reinterpret_cast<char*>(buf.data()), static_cast<int>(buf.size()), 0);
     if (n <= 0) {
         return {};
     }
