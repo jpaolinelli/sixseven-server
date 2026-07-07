@@ -96,24 +96,51 @@ TEST_F(QA_GDB551_Betweenness, AllDuplicateEdges_SameAsNoDuplicates) {
 }
 
 TEST_F(QA_GDB551_Betweenness, MassiveDuplication_StillCorrect) {
-    // Star graph: center node 1, spokes to 2,3,4,5
-    // Add 10 duplicates of each spoke edge.
-    std::vector<std::pair<int64_t, int64_t>> edges;
-    for (int64_t tgt = 2; tgt <= 5; ++tgt) {
-        for (int i = 0; i < 10; ++i) {
-            edges.push_back({1, tgt});
-        }
-    }
-    build_graph("star", edges);
+    // Diamond: 1->2, 1->3, 2->4, 3->4, with the 1->2 edge duplicated 10x
+    // (11 parallel edges 1->2 total, plus one 1->3).
+    //
+    // On the DEDUPED graph, node 4 is reached from 1 via two distinct
+    // shortest paths of length 2: 1->2->4 and 1->3->4. Nodes 2 and 3 are
+    // each the sole intermediary on exactly one of those paths, so Brandes'
+    // dependency accumulation splits evenly: sigma(2)=1, sigma(3)=1,
+    // sigma(4)=2, giving scores[2] == scores[3] == 0.5.
+    //
+    // This is discriminating for the GDB-551 dedup fix: WITHOUT dedup, the
+    // 10 duplicate 1->2 edges would inflate sigma(2) to 10 (edge multiplicity
+    // counted as distinct shortest paths) while sigma(3) stays 1, making
+    // sigma(4) = 11. Brandes' delta accumulation splits the dependency on 4
+    // proportionally to each predecessor's sigma share, so node 2 would get
+    // 10/11 of the credit (~0.909) and node 3 only 1/11 (~0.091) instead of
+    // the correct 0.5/0.5 split -- the exact assertions below would fail
+    // under the un-deduped (buggy) implementation.
+    build_graph("diamond_dup",
+                {
+                    {1, 2},
+                    {1, 2},
+                    {1, 2},
+                    {1, 2},
+                    {1, 2},
+                    {1, 2},
+                    {1, 2},
+                    {1, 2},
+                    {1, 2},
+                    {1, 2},
+                    {1, 2},
+                    {1, 3},
+                    {2, 4},
+                    {3, 4},
+                });
 
-    auto result = run_unnormalized("star");
+    auto result = run_unnormalized("diamond_dup");
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     auto scores = to_centrality_map(*result);
-    // In a star, center has all betweenness. Leaf nodes have 0.
-    for (int64_t leaf = 2; leaf <= 5; ++leaf) {
-        EXPECT_DOUBLE_EQ(scores[leaf], 0.0) << "Leaf node " << leaf << " should have 0 betweenness";
-    }
+    EXPECT_DOUBLE_EQ(scores[1], 0.0) << "Source node has no intermediary role";
+    EXPECT_DOUBLE_EQ(scores[2], 0.5)
+        << "Node 2 is sole intermediary on one of two equal shortest paths";
+    EXPECT_DOUBLE_EQ(scores[3], 0.5)
+        << "Node 3 is sole intermediary on the other equal shortest path";
+    EXPECT_DOUBLE_EQ(scores[4], 0.0) << "Sink node has no intermediary role";
 }
 
 TEST_F(QA_GDB551_Betweenness, SelfLoopDuplicates_Ignored) {
