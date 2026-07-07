@@ -664,14 +664,31 @@ TEST_F(QA_GDB548_E2E, AC4_WhereOnRank) {
 TEST_F(QA_GDB548_E2E, AC4_OrderByDesc) {
     auto result = exec_ok("SELECT node_id, rank FROM pagerank('knows') ORDER BY rank DESC");
     ASSERT_EQ(result.column_names.size(), 2);
-    EXPECT_EQ(result.rows.size(), 3);
-    // First row should have highest rank.
+    ASSERT_EQ(result.rows.size(), 3);
+    // Ranks must be non-increasing across consecutive rows for a DESC sort.
+    for (size_t i = 0; i + 1 < result.rows.size(); ++i) {
+        auto rank_i = std::get<double>(result.rows[i][1].data());
+        auto rank_next = std::get<double>(result.rows[i + 1][1].data());
+        EXPECT_GE(rank_i, rank_next) << "Results should be sorted by rank DESC at index " << i;
+    }
 }
 
 TEST_F(QA_GDB548_E2E, AC4_WhereAndOrderByCombined) {
     auto result = exec_ok("SELECT node_id, rank FROM pagerank('knows') "
                           "WHERE rank > 0.1 ORDER BY node_id ASC");
     ASSERT_EQ(result.column_names.size(), 2);
+    // With damping=0.85, rows are: (1, 0.85), (2, 0.425), (3, 0.085);
+    // rank > 0.1 should filter out node_id=3, leaving 2 rows ordered by node_id ASC.
+    ASSERT_EQ(result.rows.size(), 2);
+    for (size_t i = 0; i < result.rows.size(); ++i) {
+        auto rank_i = std::get<double>(result.rows[i][1].data());
+        EXPECT_GT(rank_i, 0.1) << "Row " << i << " should satisfy WHERE rank > 0.1";
+    }
+    for (size_t i = 0; i + 1 < result.rows.size(); ++i) {
+        auto id_i = std::get<int64_t>(result.rows[i][0].data());
+        auto id_next = std::get<int64_t>(result.rows[i + 1][0].data());
+        EXPECT_LE(id_i, id_next) << "Results should be sorted by node_id ASC at index " << i;
+    }
 }
 
 // ---------------------------------------------------------------------------
