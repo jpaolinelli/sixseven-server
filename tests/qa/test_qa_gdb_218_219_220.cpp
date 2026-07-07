@@ -261,9 +261,39 @@ TEST_F(QA_Binder_219_220, TimestampVsIntComparison) {
     bind_error("SELECT ts > 100 FROM metrics", StatusCode::TYPE_ERROR);
 }
 
+// GDB-1289: maintainer ruling is PG-compatible coercion for TIMESTAMP vs
+// STRING-literal comparisons -- a valid timestamp string literal is coerced to
+// TIMESTAMP and the comparison binds successfully (yielding BOOL), matching
+// PostgreSQL. An invalid timestamp string ('hello' is not a valid timestamp)
+// is rejected at bind time with a clean TYPE_ERROR naming the invalid value,
+// rather than deferring to a runtime comparison failure. This is the inverse
+// of BoolVsStringComparison/FloatVsStringComparison below, which intentionally
+// keep strict rejection -- the coercion special-case applies to temporal
+// types only, since datetime literals are conventionally written as strings.
 TEST_F(QA_Binder_219_220, TimestampVsStringComparison) {
-    GTEST_SKIP() << "TIMESTAMP=string comparison semantics tracked by GDB-1289";
+    auto bound = bind_ok("SELECT ts = '2026-01-01 00:00:00' FROM metrics");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+    EXPECT_EQ(bound.output_columns[0].type_id, TypeId::BOOL);
+}
+
+TEST_F(QA_Binder_219_220, TimestampVsInvalidStringComparisonFails) {
     bind_error("SELECT ts = 'hello' FROM metrics", StatusCode::TYPE_ERROR);
+}
+
+TEST_F(QA_Binder_219_220, TimestampVsDateOnlyStringComparisonOk) {
+    auto bound = bind_ok("SELECT ts > '2026-01-01' FROM metrics");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+    EXPECT_EQ(bound.output_columns[0].type_id, TypeId::BOOL);
+}
+
+TEST_F(QA_Binder_219_220, StringLiteralOnLeftVsTimestampOk) {
+    auto bound = bind_ok("SELECT '2026-01-01 00:00:00' = ts FROM metrics");
+    ASSERT_EQ(bound.output_columns.size(), 1u);
+    EXPECT_EQ(bound.output_columns[0].type_id, TypeId::BOOL);
+}
+
+TEST_F(QA_Binder_219_220, InvalidStringLiteralOnLeftVsTimestampFails) {
+    bind_error("SELECT 'hello' = ts FROM metrics", StatusCode::TYPE_ERROR);
 }
 
 TEST_F(QA_Binder_219_220, BoolVsStringComparison) {

@@ -1142,6 +1142,38 @@ Result<ExprType> Binder::bind_binary(const BinaryExpr& expr, Scope& scope, Bound
                     "incompatible types for comparison: " + std::string(type_name(lhs->type_id)) +
                         " and " + std::string(type_name(rhs->type_id)));
             }
+
+            // GDB-1289: PG-compatible coercion. A STRING literal compared against a
+            // temporal column (DATE/TIME/TIMESTAMP) is implicitly coerced to that
+            // temporal type (common_type() above already accepts this pairing via
+            // can_coerce(STRING, temporal)). Since the literal's text is known at
+            // bind time, validate it parses as a legal value of the target temporal
+            // type right now rather than deferring to a runtime comparison error --
+            // this matches PostgreSQL, which rejects `ts = 'hello'` at parse/bind
+            // time with "invalid input syntax for type timestamp". Only STRING
+            // literals are checked here; the column side is never coerced to STRING.
+            auto validate_temporal_literal = [](const LiteralExpr* lit,
+                                                TypeId other_type) -> Result<void> {
+                if (lit == nullptr || lit->kind != LiteralKind::STRING) {
+                    return ok();
+                }
+                if (other_type != TypeId::DATE && other_type != TypeId::TIME &&
+                    other_type != TypeId::TIMESTAMP) {
+                    return ok();
+                }
+                auto parsed = coerce(Value(lit->value), other_type);
+                if (!parsed) {
+                    return make_error(StatusCode::TYPE_ERROR, parsed.error().message);
+                }
+                return ok();
+            };
+
+            if (auto v = validate_temporal_literal(lhs_lit, rhs->type_id); !v) {
+                return tl::unexpected(v.error());
+            }
+            if (auto v = validate_temporal_literal(rhs_lit, lhs->type_id); !v) {
+                return tl::unexpected(v.error());
+            }
         }
         et.type_id = TypeId::BOOL;
         break;
