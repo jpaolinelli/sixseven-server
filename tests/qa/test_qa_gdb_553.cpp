@@ -104,8 +104,15 @@ TEST_F(QA_GDB553, FromMatchVariableLength_ExactHops) {
     // {2,2} should return exactly 2-hop results.
     auto result = exec_ok("SELECT a.id, b.id FROM MATCH (a:persons)-[r:knows]->{2,2}(b:persons) "
                           "WHERE a.id = 1");
-    // From node 1: 2 hops reaches node 3. Should get exactly 1 result.
-    EXPECT_GE(result.rows.size(), 1u);
+    // From node 1: 2 hops reaches node 3 (1->2->3). Should get exactly 1
+    // result, with b.id == 3. If the {2,2} quantifier is dropped (the
+    // GDB-553 regression) the planner falls back to a single-hop match,
+    // which also returns exactly 1 row but with b.id == 2 (the 1-hop
+    // target) -- asserting the actual b.id value catches that regression,
+    // which a bare row-count check cannot.
+    ASSERT_EQ(result.rows.size(), 1u);
+    EXPECT_EQ(result.rows[0][0].as_int32(), 1);
+    EXPECT_EQ(result.rows[0][1].as_int32(), 3);
 }
 
 TEST_F(QA_GDB553, FromMatchVariableLength_LargeRange) {
