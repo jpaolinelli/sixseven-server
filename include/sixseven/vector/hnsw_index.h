@@ -203,8 +203,25 @@ private:
     /// many-way distance ties (e.g. duplicate vectors) don't let a fixed
     /// tie-break rule permanently strand some nodes without an in-edge
     /// (GDB-1235).
+    ///
+    /// `force_admit_bridge`: when true, the new candidate is guaranteed a
+    /// slot even if it is strictly farther than every existing neighbor,
+    /// evicting the single farthest existing entry to make room. Used only
+    /// for the new node's own *closest* selected neighbor per layer, so
+    /// that every newly inserted node is guaranteed at least one real
+    /// bidirectional edge into the existing graph -- otherwise, when an
+    /// entire cluster of existing neighbors is saturated with mutually
+    /// zero-distance ties (e.g. a prior duplicate-vector cluster), the
+    /// ordinary "reject strictly-farther candidates" rule (added to fix
+    /// GDB-1235's review comment) rejects the new node at every candidate
+    /// neighbor, leaving it with in-degree zero and permanently unreachable
+    /// via multi-layer greedy descent from any other cluster (GDB-1295).
+    /// All other (non-closest) neighbors still go through the ordinary
+    /// gate, so normal recall for non-tied data is unaffected.
     [[nodiscard]] static std::vector<HnswNeighbor>
-    select_neighbors_heuristic(const std::vector<HnswNeighbor>& grown, uint16_t max_neighbors);
+    select_neighbors_heuristic(const std::vector<HnswNeighbor>& grown,
+                               uint16_t max_neighbors,
+                               bool force_admit_bridge = false);
 
     BufferPoolManager& buffer_pool_;
 

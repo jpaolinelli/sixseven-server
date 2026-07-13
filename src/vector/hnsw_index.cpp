@@ -240,10 +240,21 @@ Result<uint32_t> HnswIndex::insert(std::span<const float> vector) {
 
     // Add bidirectional connections: for each neighbor, add new_id to their
     // neighbor list (if not full, or if closer than their farthest neighbor).
+    //
+    // GDB-1295: the new node's own *closest* selected neighbor at each layer
+    // is granted a forced bridge (see select_neighbors_heuristic) so that
+    // every inserted node is guaranteed at least one real bidirectional edge
+    // into the existing graph, even when the rest of its candidate
+    // neighbors are all saturated by a mutually-equidistant existing
+    // cluster that would otherwise reject it outright at every slot.
     for (int layer = static_cast<int>(start_layer); layer >= 0; --layer) {
         uint16_t max_neighbors =
             (layer == 0) ? static_cast<uint16_t>(meta_.m_param * 2) : meta_.m_param;
-        for (const auto& neighbor : new_node.neighbors[static_cast<size_t>(layer)]) {
+        const auto& layer_neighbors = new_node.neighbors[static_cast<size_t>(layer)];
+        for (size_t idx = 0; idx < layer_neighbors.size(); ++idx) {
+            const auto& neighbor = layer_neighbors[idx];
+            bool is_closest_neighbor = (idx == 0);
+
             auto neighbor_loc_result = node_location(neighbor.node_id);
             if (!neighbor_loc_result.has_value()) {
                 continue;
@@ -280,7 +291,7 @@ Result<uint32_t> HnswIndex::insert(std::span<const float> vector) {
                 // the reachable component.
                 std::vector<HnswNeighbor> grown = nlist;
                 grown.push_back({new_id, neighbor.distance});
-                nlist = select_neighbors_heuristic(grown, max_neighbors);
+                nlist = select_neighbors_heuristic(grown, max_neighbors, is_closest_neighbor);
             }
 
             (void)update_node(neighbor_loc_result.value(), neighbor_node);
@@ -1022,9 +1033,8 @@ std::vector<HnswNeighbor> HnswIndex::select_neighbors(const std::vector<Candidat
     return selected;
 }
 
-std::vector<HnswNeighbor>
-HnswIndex::select_neighbors_heuristic(const std::vector<HnswNeighbor>& grown,
-                                      uint16_t max_neighbors) {
+std::vector<HnswNeighbor> HnswIndex::select_neighbors_heuristic(
+    const std::vector<HnswNeighbor>& grown, uint16_t max_neighbors, bool force_admit_bridge) {
     if (grown.size() <= max_neighbors) {
         return grown;
     }
@@ -1040,11 +1050,15 @@ HnswIndex::select_neighbors_heuristic(const std::vector<HnswNeighbor>& grown,
     }
 
     if (keep_count == 0) {
-        // max_neighbors == 1: only one slot total. Ordinary keep-closest:
-        // the new candidate wins only if it's at least as close as the
-        // sole existing neighbor.
+        // max_neighbors == 1: only one slot total. Ordinary keep-closest,
+        // unless a bridge is forced (GDB-1295): a forced bridge must always
+        // win the sole slot, since rejecting it would leave the new node
+        // with zero in-edges through this neighbor.
         const HnswNeighbor& sole = existing.front();
-        return {new_candidate.distance <= sole.distance ? new_candidate : sole};
+        if (force_admit_bridge || new_candidate.distance <= sole.distance) {
+            return {new_candidate};
+        }
+        return {sole};
     }
 
     // Sort existing neighbors by distance and find the eviction boundary:
@@ -1075,7 +1089,25 @@ HnswIndex::select_neighbors_heuristic(const std::vector<HnswNeighbor>& grown,
     // the reachable component. Rotating which tied entry survives (keyed on
     // the new node's strictly-increasing id) spreads eviction fairly
     // instead.
-    if (new_candidate.distance > boundary_distance) {
+    //
+    // GDB-1295: the STRICTLY FARTHER rejection above is otherwise correct
+    // for recall, but it has a connectivity blind spot -- if an *entire*
+    // existing neighborhood is a saturated, mutually-zero-distance cluster
+    // (e.g. 15 duplicate vectors that filled every layer-0 slot with
+    // ties among themselves), a brand-new, genuinely distant cluster's
+    // first arrivals are rejected by every single neighbor they try to
+    // link back into, ending up with in-degree zero: reachable only if
+    // directly chosen as a greedy-descent entry point, and invisible to
+    // every other node's search. `force_admit_bridge` is set by insert()
+    // for exactly one neighbor per layer -- the new node's own *closest*
+    // selected neighbor -- guaranteeing at least one real bidirectional
+    // edge into the existing graph regardless of the boundary check. This
+    // still evicts only a single, farthest-tied existing entry (not the
+    // whole list), so it costs at most one edge of recall for the
+    // evicted neighbor while restoring global reachability for the new
+    // node. All non-closest neighbors keep the ordinary (non-forced) gate,
+    // so ordinary non-tied recall is unaffected.
+    if (!force_admit_bridge && new_candidate.distance > boundary_distance) {
         // Reject the new candidate outright and leave the existing
         // neighbor list untouched (still at full capacity: `existing` has
         // exactly max_neighbors entries here, since select_neighbors_heuristic
@@ -1086,6 +1118,19 @@ HnswIndex::select_neighbors_heuristic(const std::vector<HnswNeighbor>& grown,
         // competing for a slot -- this was the review-caught regression: a
         // rejected far candidate must not leave room behind it.
         return existing;
+    }
+
+    if (force_admit_bridge && new_candidate.distance > boundary_distance) {
+        // The forced bridge is genuinely farther than every existing
+        // neighbor (not merely tied at the boundary) -- evict exactly the
+        // single farthest existing entry to make room, keep all the rest.
+        // This is a deliberate, minimal exception to "never evict a closer
+        // neighbor for a farther candidate": it costs one edge of local
+        // recall for the evicted (farthest) neighbor in exchange for
+        // restoring global reachability for the new node (GDB-1295).
+        std::vector<HnswNeighbor> kept_bridge(sorted.begin(), sorted.end() - 1);
+        kept_bridge.push_back(new_candidate);
+        return kept_bridge;
     }
 
     std::vector<HnswNeighbor> kept;
