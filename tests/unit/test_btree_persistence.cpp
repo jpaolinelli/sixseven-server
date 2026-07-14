@@ -673,3 +673,128 @@ TEST_F(BTreePersistenceTest, V2MagicHighByteMakesCollisionImpossible) {
     EXPECT_NE(old_colliding_root_page_id, magic);
     EXPECT_LT(old_colliding_root_page_id, 0xFF000000u);
 }
+
+// =============================================================================
+// GDB-1299: Legacy old-V2 meta (pre-GDB-1266 2-byte [0x00, 0x02] sentinel)
+// must fail clean on load, not silently misparse as V1.
+// =============================================================================
+
+TEST_F(BTreePersistenceTest, OldV2SentinelMetaFailsCleanRatherThanMisparsing) {
+    auto [fid, bpm] = create_bpm("old_v2_sentinel_fails_clean");
+    ASSERT_NE(bpm, nullptr);
+
+    // Hand-build a meta buffer carrying the legacy 2-byte [0x00, 0x02]
+    // sentinel followed by a real (post-sentinel) root_page_id whose low
+    // two bytes are non-zero, e.g. root_page_id = 7 (LE bytes
+    // [0x07, 0x00, 0x00, 0x00]) -- distinct from the all-zero bytes[2..3]
+    // that a genuine V1 root_page_id == 512 would have.
+    std::vector<uint8_t> buf;
+    write_u8(buf, 0x00); // legacy sentinel byte 0
+    write_u8(buf, 0x02); // legacy sentinel byte 1
+    write_u32(buf, 7);   // "real" root_page_id in the old-V2 layout
+    write_u64(buf, 1);   // tree_size
+    write_u32(buf, 8);   // next_page_id
+    write_u16(buf, 4);   // internal_max_keys
+    write_u16(buf, 4);   // leaf_max_keys
+    write_u8(buf, 1);    // is_unique
+    write_u8(buf, 1);    // key_type_count
+    write_u8(buf, static_cast<uint8_t>(TypeId::INT32));
+
+    // Sanity-check the byte layout matches the old-V2 sentinel and that
+    // bytes[2..3] are non-zero (disambiguating from V1 root_page_id=512).
+    ASSERT_EQ(buf[0], 0x00);
+    ASSERT_EQ(buf[1], 0x02);
+    ASSERT_NE(buf[2], 0x00);
+
+    auto meta_page_r = bpm->new_page();
+    ASSERT_TRUE(meta_page_r.has_value());
+    auto* meta_page = *meta_page_r;
+    PageId meta_page_id = meta_page->page_id();
+    meta_page->reset(meta_page_id, PageType::BTREE_META);
+    auto slot = meta_page->insert_tuple(std::span<const uint8_t>(buf));
+    ASSERT_TRUE(slot.has_value()) << slot.error().message;
+    (void)bpm->unpin_page(meta_page_id, true);
+    ASSERT_TRUE(bpm->flush_all().has_value());
+
+    bpm.reset();
+    (void)dm_->close_file(fid);
+
+    auto [fid2, bpm2] = open_bpm("old_v2_sentinel_fails_clean");
+    auto loaded = BTreePersistence::load(*bpm2, meta_page_id);
+
+    // Must fail clean -- index_manager rebuilds the index on load failure,
+    // which is safe. Silently succeeding here (as V1) would point the
+    // btree at wrong pages.
+    ASSERT_FALSE(loaded.has_value()) << "old-V2 sentinel meta must not silently parse as V1";
+}
+
+TEST_F(BTreePersistenceTest, GenuineV1RootPageId512StillParsesAfterOldV2Fix) {
+    // Regression guard: the old-V2 disambiguation check must not break the
+    // genuine V1 root_page_id == 512 case already covered by
+    // V1MetaRootPageId512NotMisdetectedAsV2 -- bytes[2..3] == 0x00, 0x00
+    // must still be treated as V1, not as an old-V2 meta.
+    auto [fid, bpm] = create_bpm("v1_root_512_after_old_v2_fix");
+    ASSERT_NE(bpm, nullptr);
+
+    std::vector<uint8_t> leaf_buf;
+    write_u32(leaf_buf, 512);
+    write_u32(leaf_buf, 0);
+    write_u32(leaf_buf, 0);
+    write_u32(leaf_buf, 0);
+    write_u16(leaf_buf, 1);
+    auto key_bytes = serialize(Value(int32_t{99}));
+    leaf_buf.insert(leaf_buf.end(), key_bytes.begin(), key_bytes.end());
+    write_u32(leaf_buf, 3);
+    write_u16(leaf_buf, 0);
+
+    auto leaf_page_r = bpm->new_page();
+    ASSERT_TRUE(leaf_page_r.has_value());
+    auto* leaf_page = *leaf_page_r;
+    PageId leaf_disk_page_id = leaf_page->page_id();
+    leaf_page->reset(leaf_disk_page_id, PageType::BTREE_LEAF);
+    auto leaf_slot = leaf_page->insert_tuple(std::span<const uint8_t>(leaf_buf));
+    ASSERT_TRUE(leaf_slot.has_value()) << leaf_slot.error().message;
+    (void)bpm->unpin_page(leaf_disk_page_id, true);
+
+    std::vector<uint8_t> buf;
+    write_u32(buf, 512); // root_page_id (bytes[2..3] == 0x00, 0x00)
+    write_u64(buf, 1);
+    write_u32(buf, 513);
+    write_u16(buf, 4);
+    write_u16(buf, 4);
+    write_u8(buf, 1);
+    write_u8(buf, 1);
+    write_u8(buf, static_cast<uint8_t>(TypeId::INT32));
+    write_u32(buf, 1);
+    write_u32(buf, 512);
+    write_u32(buf, leaf_disk_page_id);
+    write_u32(buf, 0);
+
+    ASSERT_EQ(buf[0], 0x00);
+    ASSERT_EQ(buf[1], 0x02);
+    ASSERT_EQ(buf[2], 0x00);
+    ASSERT_EQ(buf[3], 0x00);
+
+    auto meta_page_r = bpm->new_page();
+    ASSERT_TRUE(meta_page_r.has_value());
+    auto* meta_page = *meta_page_r;
+    PageId meta_page_id = meta_page->page_id();
+    meta_page->reset(meta_page_id, PageType::BTREE_META);
+    auto slot = meta_page->insert_tuple(std::span<const uint8_t>(buf));
+    ASSERT_TRUE(slot.has_value()) << slot.error().message;
+    (void)bpm->unpin_page(meta_page_id, true);
+    ASSERT_TRUE(bpm->flush_all().has_value());
+
+    bpm.reset();
+    (void)dm_->close_file(fid);
+
+    auto [fid2, bpm2] = open_bpm("v1_root_512_after_old_v2_fix");
+    auto loaded = BTreePersistence::load(*bpm2, meta_page_id);
+    ASSERT_TRUE(loaded.has_value()) << loaded.error().message;
+    EXPECT_EQ((*loaded)->size(), 1u);
+
+    auto found = (*loaded)->search({Value(int32_t{99})});
+    ASSERT_TRUE(found.has_value()) << found.error().message;
+    ASSERT_TRUE(found->has_value());
+    EXPECT_EQ(found->value().page_id, static_cast<PageId>(3));
+}

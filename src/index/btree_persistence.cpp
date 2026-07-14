@@ -65,6 +65,28 @@ constexpr uint32_t NODE_OVERFLOW_SENTINEL = 0xFFFFFFFFu;
 // [0x00, 0x02, 0x00, 0x00]), which is trivially reachable (~4 MB index).
 constexpr uint32_t BTREE_META_V2_MAGIC = 0xFF42544DU;
 
+// GDB-1299: The old, unsound 2-byte V2 sentinel from GDB-1266's history:
+// bytes [0x00, 0x02] as the first two bytes of the meta page. Metas written
+// by code that existed after GDB-816 but before GDB-1266 (PR #527) landed
+// carry this old sentinel instead of BTREE_META_V2_MAGIC. Reading such a
+// page today falls into the V1 parse branch (since it isn't
+// BTREE_META_V2_MAGIC) and silently misparses it as a V1 meta with
+// root_page_id == 512 plus garbage read from where the old-V2's
+// tree_size/next_page_id/overflow directory used to be -- a silent
+// misparse rather than a clean failure.
+//
+// A genuine V1 meta with root_page_id == 512 has LE bytes
+// [0x00, 0x02, 0x00, 0x00, ...] (512 == 0x0000_0200). The old-V2 sentinel
+// only occupied the first 2 bytes; bytes[2..3] of an old-V2 meta are the
+// low two bytes of its real (post-sentinel) root_page_id field, which is
+// only [0x00, 0x00] in the astronomically rare case that the real
+// root_page_id happens to be a multiple of 65536. So: [0x00, 0x02] in
+// bytes[0..1] together with non-zero bytes[2..3] unambiguously identifies
+// an old-V2 meta and must fail clean (index_manager rebuilds the index on
+// load failure) rather than being silently parsed as V1.
+constexpr uint8_t OLD_V2_SENTINEL_BYTE0 = 0x00;
+constexpr uint8_t OLD_V2_SENTINEL_BYTE1 = 0x02;
+
 // Maximum bytes of node payload that fit in one page tuple.
 // 8192-byte page, 24-byte page header, 4-byte slot entry → ~8164 bytes usable.
 constexpr size_t NODE_MAX_INLINE_SIZE = 8100;
@@ -531,6 +553,22 @@ Result<std::unique_ptr<BTreeIndex>> BTreePersistence::load(BufferPoolManager& bp
                            (static_cast<uint32_t>((*meta_data)[2]) << 16) |
                            (static_cast<uint32_t>((*meta_data)[3]) << 24);
         is_v2 = (leading == BTREE_META_V2_MAGIC);
+
+        // GDB-1299: Detect an old-V2 meta carrying the legacy 2-byte
+        // [0x00, 0x02] sentinel (see OLD_V2_SENTINEL_BYTE0/1 comment above)
+        // and fail clean instead of silently misparsing it as a V1 meta.
+        // Disambiguate from a genuine V1 meta with root_page_id == 512
+        // (LE bytes [0x00, 0x02, 0x00, 0x00]) by inspecting bytes[2..3]:
+        // a real V1 root_page_id of exactly 512 has zero bytes there.
+        if (!is_v2 && (*meta_data)[0] == OLD_V2_SENTINEL_BYTE0 &&
+            (*meta_data)[1] == OLD_V2_SENTINEL_BYTE1 &&
+            ((*meta_data)[2] != 0x00 || (*meta_data)[3] != 0x00)) {
+            (void)bpm.unpin_page(meta_page_id, false);
+            return make_error(StatusCode::INTERNAL_ERROR,
+                              "btree load: meta page carries legacy old-V2 sentinel "
+                              "[0x00, 0x02] (pre-GDB-1266 format) which is not "
+                              "supported for read; index must be rebuilt");
+        }
     }
     if (is_v2) {
         auto skip_r = meta_r.skip(4);
