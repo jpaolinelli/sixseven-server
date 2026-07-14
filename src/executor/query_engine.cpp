@@ -1170,6 +1170,106 @@ Result<QueryResult> QueryEngine::execute_create_table(const CreateTableStmt& stm
         }
     }
 
+    // Auto-create unique B-tree indexes backing PRIMARY KEY / UNIQUE constraints
+    // (GDB-1298). PK/UNIQUE constraints declared in CREATE TABLE previously had
+    // no backing index: InsertOperator only enforces uniqueness via the
+    // maintenance targets collected from catalog-registered indexes (see
+    // Planner::collect_btree_targets), so without an index here duplicate keys
+    // were silently accepted. Composite constraints are collapsed into one
+    // multi-column index; single-column PK/UNIQUE become single-column indexes.
+    {
+        std::vector<std::vector<std::string>> unique_col_sets;
+
+        // Primary key (single or composite), already resolved into pk_columns.
+        if (!schema->pk_columns.empty()) {
+            std::vector<std::string> pk_cols;
+            std::istringstream pk_ss(schema->pk_columns);
+            std::string pk_tok;
+            while (std::getline(pk_ss, pk_tok, ',')) {
+                if (!pk_tok.empty()) {
+                    pk_cols.push_back(pk_tok);
+                }
+            }
+            if (!pk_cols.empty()) {
+                unique_col_sets.push_back(std::move(pk_cols));
+            }
+        }
+
+        // Table-level UNIQUE(...) constraints (possibly composite).
+        for (const auto& c : stmt.constraints) {
+            if (c.kind == TableConstraint::Kind::UNIQUE && !c.columns.empty()) {
+                unique_col_sets.push_back(c.columns);
+            }
+        }
+
+        // Inline column-level UNIQUE, skipping columns already covered above
+        // (e.g. a single-column PK also marked UNIQUE by the parser).
+        for (const auto& col : stmt.columns) {
+            if (!col.is_unique) {
+                continue;
+            }
+            bool covered = false;
+            for (const auto& set : unique_col_sets) {
+                if (set.size() == 1 && to_upper(set[0]) == to_upper(col.name)) {
+                    covered = true;
+                    break;
+                }
+            }
+            if (!covered) {
+                unique_col_sets.push_back({col.name});
+            }
+        }
+
+        int auto_idx_counter = 0;
+        for (const auto& cols : unique_col_sets) {
+            std::string cols_str;
+            for (size_t i = 0; i < cols.size(); ++i) {
+                if (i > 0) {
+                    cols_str += ",";
+                }
+                cols_str += cols[i];
+            }
+
+            IndexDef def;
+            def.table_id = *table_id;
+            def.name = "__auto_uq_" + stmt.name + "_" + std::to_string(auto_idx_counter++);
+            def.index_type = "btree";
+            def.is_unique = true;
+            def.columns = cols_str;
+
+            auto index_id = catalog_.create_index(def);
+            if (!index_id) {
+                SIXSEVEN_LOG_WARN("failed to auto-create unique index for table '{}' columns "
+                                  "'{}': {}",
+                                  stmt.name,
+                                  cols_str,
+                                  index_id.error().message);
+                continue;
+            }
+
+            auto created_def = catalog_.get_index(current_database_id_, def.name);
+            if (!created_def) {
+                continue;
+            }
+            if (catalog_persistence_ != nullptr) {
+                auto persist = catalog_persistence_->persist_index(*created_def);
+                if (!persist) {
+                    SIXSEVEN_LOG_WARN("failed to persist auto unique index '{}': {}",
+                                      def.name,
+                                      persist.error().message);
+                }
+            }
+            if (index_manager_ != nullptr) {
+                auto populate = index_manager_->create_and_populate_index(*created_def, *schema);
+                if (!populate) {
+                    SIXSEVEN_LOG_WARN("failed to populate auto unique index '{}': {}",
+                                      def.name,
+                                      populate.error().message);
+                }
+            }
+        }
+    }
+
     // Register EMBEDDING column metadata and auto-create HNSW indexes.
     std::vector<EmbeddingColumnDef> emb_defs;
     for (size_t i = 0; i < stmt.columns.size(); ++i) {

@@ -412,10 +412,22 @@ Result<void> InsertOperator::maintain_secondary_indexes(const RID& rid,
         }
         KeyType key;
         key.reserve(target.key_column_ordinals.size());
+        bool has_null = false;
         for (size_t ordinal : target.key_column_ordinals) {
             if (ordinal < values.size()) {
+                if (values[ordinal].is_null()) {
+                    has_null = true;
+                }
                 key.push_back(values[ordinal]);
             }
+        }
+        // SQL semantics: UNIQUE allows multiple rows with a NULL key (only
+        // PRIMARY KEY forbids NULL, which is already rejected by the NOT NULL
+        // constraint before we get here). Skip indexing NULL keys on unique
+        // indexes so they are never compared against each other as duplicates
+        // (GDB-1298).
+        if (has_null && target.index->config().is_unique) {
+            continue;
         }
         auto r = target.index->insert(key, rid);
         if (!r) {
@@ -429,10 +441,17 @@ Result<void> InsertOperator::maintain_secondary_indexes(const RID& rid,
         }
         KeyType key;
         key.reserve(target.key_column_ordinals.size());
+        bool has_null = false;
         for (size_t ordinal : target.key_column_ordinals) {
             if (ordinal < values.size()) {
+                if (values[ordinal].is_null()) {
+                    has_null = true;
+                }
                 key.push_back(values[ordinal]);
             }
+        }
+        if (has_null && target.index->config().is_unique) {
+            continue;
         }
         auto r = target.index->insert(key, rid);
         if (!r) {
