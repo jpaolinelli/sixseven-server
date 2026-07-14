@@ -11,6 +11,7 @@
 #include "sixseven/txn/txn_manager.h"
 
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -194,8 +195,14 @@ public:
     [[nodiscard]] TransactionManager& transaction_manager() { return txn_mgr_; }
 
     /// The id of the explicit transaction opened by BEGIN, or invalid_txn_id
-    /// when the engine is in autocommit mode.
-    [[nodiscard]] txn_id_t active_transaction_id() const { return active_txn_id_; }
+    /// when the engine is in autocommit mode. Thread-safe (GDB-1311): a
+    /// QueryEngine instance may be shared across the server's connection
+    /// thread pool, so this is guarded by txn_state_mutex_ like every other
+    /// access to active_txn_id_.
+    [[nodiscard]] txn_id_t active_transaction_id() const {
+        std::lock_guard<std::mutex> lock(txn_state_mutex_);
+        return active_txn_id_;
+    }
 
     /// Set the session-level default isolation level used by subsequent BEGIN
     /// statements (GDB-978). RC = statement-level snapshot; SI = transaction-
@@ -342,7 +349,24 @@ private:
     /// Transaction manager for MVCC stamping and visibility (GDB-747).
     TransactionManager txn_mgr_;
 
+    /// Guards active_txn_id_ and active_txn_row_deltas_ below (GDB-1311).
+    /// A single QueryEngine instance is shared across the server's
+    /// connection thread pool (see src/main.cpp / src/server/server.cpp),
+    /// so concurrent statements on different connections can call
+    /// execute_begin()/execute_commit()/execute_rollback() and the
+    /// explicit-transaction bookkeeping path in execute_plan() at the same
+    /// time. Without this lock, one thread's active_txn_row_deltas_.clear()
+    /// could free hash-table nodes out from under another thread's
+    /// in-progress iteration (heap-use-after-free). Note: this only makes
+    /// the shared state memory-safe; it does not make BEGIN/COMMIT/ROLLBACK
+    /// semantics correct across concurrent explicit transactions on a
+    /// shared engine (there is exactly one active_txn_id_ slot) -- that is
+    /// a larger, pre-existing architectural issue (one explicit transaction
+    /// "slot" per shared engine) tracked separately from this crash fix.
+    mutable std::mutex txn_state_mutex_;
+
     /// Explicit transaction opened by BEGIN (invalid_txn_id = autocommit).
+    /// Guarded by txn_state_mutex_ (GDB-1311).
     txn_id_t active_txn_id_ = invalid_txn_id;
 
     /// Session-level isolation level, applied by the next BEGIN (GDB-978).
@@ -353,20 +377,39 @@ private:
     /// (GDB-1243): a raw heap pointer can be freed by DROP TABLE before the
     /// transaction ends (e.g. DROP TABLE inside an explicit txn followed by
     /// ROLLBACK), which would otherwise be a use-after-free when compensating.
-    /// Applied in reverse on ROLLBACK / implicit-txn abort so COUNT(*) stays
-    /// accurate after aborted logical inserts/deletes. See
-    /// compensate_row_deltas_and_clear().
+    /// Applied in reverse on ROLLBACK so COUNT(*) stays accurate after an
+    /// aborted explicit transaction's logical inserts/deletes. Guarded by
+    /// txn_state_mutex_ (GDB-1311). Only ever populated/consumed while an
+    /// explicit transaction is active (active_txn_id_ != invalid_txn_id);
+    /// the autocommit/implicit-transaction abort path does NOT use this map
+    /// (see compensate_table_row_delta()) precisely so ordinary concurrent
+    /// autocommit statements never touch this shared, cross-statement
+    /// accumulator. See compensate_row_deltas_and_clear().
     std::unordered_map<table_id_t, int64_t> active_txn_row_deltas_;
 
     /// Reverse every accumulated per-table row-count delta in
     /// active_txn_row_deltas_ (restoring row_count_ to what it was before the
-    /// failed/rolled-back statement(s)), then clear the map. Shared by the
-    /// explicit ROLLBACK path and the implicit-transaction abort path
-    /// (GDB-1243) so both compensate identically. Resolves each table_id to
-    /// its live TableHeap via storage_; tables dropped mid-transaction are
-    /// silently skipped (their storage no longer exists, so there is nothing
-    /// to compensate and no freed pointer is ever touched).
+    /// rolled-back explicit transaction), then clear the map. Used only by
+    /// the explicit ROLLBACK path (GDB-1243). Takes ownership of the map's
+    /// contents under txn_state_mutex_ before doing any storage_ lookups, so
+    /// the lock is not held across those calls and a concurrent BEGIN/COMMIT/
+    /// ROLLBACK on another connection cannot observe or mutate a half-
+    /// applied compensation. Resolves each table_id to its live TableHeap
+    /// via storage_; tables dropped mid-transaction are silently skipped
+    /// (their storage no longer exists, so there is nothing to compensate
+    /// and no freed pointer is ever touched).
     void compensate_row_deltas_and_clear();
+
+    /// Compensate a single table's live-row counter by -delta (GDB-1311).
+    /// Used by the autocommit/implicit-transaction abort path in
+    /// execute_plan(), which -- unlike an explicit transaction -- only ever
+    /// has one table and one delta to undo for the statement that just
+    /// failed, so there is no need to route it through the shared,
+    /// cross-statement active_txn_row_deltas_ map (and therefore nothing for
+    /// concurrent autocommit statements on other connections to race on).
+    /// TableHeap::adjust_row_count() is itself safe to call concurrently
+    /// (atomic/CAS-protected row_count_), so this needs no locking.
+    void compensate_table_row_delta(table_id_t table_id, int64_t delta);
 
     /// GDB-1246: compute the WAL LSN that must be durably flushed before a
     /// commit (explicit or implicit/autocommit) may be acknowledged. Returns
