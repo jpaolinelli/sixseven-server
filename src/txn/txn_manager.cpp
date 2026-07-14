@@ -395,6 +395,31 @@ void TransactionManager::gc_completed_transactions_locked() {
             ++it;
         }
     }
+
+    compact_pruned_committed_locked();
+}
+
+void TransactionManager::compact_pruned_committed_locked() {
+    if (pruned_committed_.size() <= pruned_committed_compaction_threshold) {
+        return;
+    }
+
+    txn_id_t horizon = xmin_horizon_locked();
+    // See the doc comment on pruned_committed_ in the header: every entry
+    // currently in the set has txn_id < horizon (the horizon is monotonically
+    // non-decreasing and each entry was only ever inserted below the horizon
+    // observed at its own insertion time), so dropping every entry is safe --
+    // get_status()'s unknown-xid fallback already resolves each of them to
+    // COMMITTED correctly.
+    pruned_committed_.clear();
+    pruned_committed_watermark_ = std::max(pruned_committed_watermark_, horizon);
+    SIXSEVEN_LOG_DEBUG("compacted pruned_committed_ set, watermark={}",
+                       pruned_committed_watermark_);
+}
+
+txn_id_t TransactionManager::pruned_committed_watermark_for_test() const {
+    std::lock_guard lock(mu_);
+    return pruned_committed_watermark_;
 }
 
 void TransactionManager::set_default_isolation_level(IsolationLevel level) {
