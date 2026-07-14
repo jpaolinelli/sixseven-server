@@ -155,6 +155,23 @@ public:
     /// restart -- acceptable, since ids are cheap and unbounded (64-bit).
     static constexpr txn_id_t txn_id_batch_size = 1024;
 
+    /// Size threshold at which pruned_committed_ is compacted (GDB-1296).
+    /// See compact_pruned_committed_locked() for the correctness argument for
+    /// why compaction at this size is always safe. Exposed so tests can force
+    /// compaction deterministically without looping over an arbitrarily large
+    /// count.
+    static constexpr size_t pruned_committed_compaction_threshold = 512;
+
+    /// The highest xmin_horizon() value observed at the last time
+    /// pruned_committed_ was compacted (GDB-1296): every committed txn_id
+    /// below this watermark has been dropped from pruned_committed_ and now
+    /// resolves via get_status()'s genuinely-unknown-xid fallback
+    /// (COMMITTED) rather than an explicit set lookup -- see
+    /// compact_pruned_committed_locked() for why that fallback is still
+    /// correct for these ids. 0 if no compaction has happened yet. Exposed
+    /// for tests only; not consulted by any resolution logic.
+    [[nodiscard]] txn_id_t pruned_committed_watermark_for_test() const;
+
 private:
     mutable std::mutex mu_;
     txn_id_t next_txn_id_ = 1;
@@ -189,6 +206,22 @@ private:
 
     /// Committed txn_ids that have been garbage-collected from transactions_.
     /// Needed so get_status() can still return COMMITTED for pruned transactions.
+    ///
+    /// Bounded via watermark compaction (GDB-1296): every entry is only ever
+    /// inserted with txn_id < xmin_horizon_locked() at insertion time, and
+    /// the horizon is monotonically non-decreasing (txn ids are assigned in
+    /// strictly increasing order, so the minimum active id -- and therefore
+    /// the horizon -- can only rise as older active transactions complete).
+    /// That means every entry currently in this set has txn_id less than the
+    /// *current* horizon too, at any later point in time. Once the set grows
+    /// past pruned_committed_compaction_threshold, compact_pruned_committed_locked()
+    /// drops it entirely: for any of those ids, get_status()'s final
+    /// fallback (genuinely-unknown xid -> COMMITTED) already returns the
+    /// correct answer, because gc_completed_transactions_locked() only ever
+    /// prunes a completed (non-active) transaction into either this set or
+    /// pruned_aborted_ -- an id that is neither live, nor in pruned_aborted_,
+    /// and below the horizon can only have been COMMITTED. So the explicit
+    /// entry is redundant with the fallback and safe to forget.
     std::unordered_set<txn_id_t> pruned_committed_;
 
     /// Aborted txn_ids that have been garbage-collected from transactions_
@@ -196,13 +229,22 @@ private:
     /// aborted transactions -- without this, their tuples would resurrect
     /// (deletes reverted, inserts made visible) the moment GC/auto-vacuum
     /// runs, because an untracked xid falls back to the unknown-xid
-    /// convention (COMMITTED). Same memory-growth characteristics as
-    /// pruned_committed_ above: both are unbounded-until-restart sets keyed
-    /// by txn_id; neither currently has an eviction policy. This mirrors the
-    /// existing (pre-GDB-1242) behavior of pruned_committed_ rather than
-    /// introducing a new bound -- follow-up if unconstrained growth becomes
-    /// an issue in practice.
+    /// convention (COMMITTED). Deliberately NOT compacted like
+    /// pruned_committed_ above (GDB-1296): unlike committed ids, an aborted
+    /// id cannot be safely forgotten -- dropping it would let it fall back to
+    /// the unknown-xid-as-committed convention and resurrect its writes, the
+    /// exact bug GDB-1242 fixed. This is the "only remember the exceptions"
+    /// half of the watermark approach: aborted transactions are expected to
+    /// be a small minority of completed transactions in practice, so this set
+    /// stays small in the workloads that matter even though it has no formal
+    /// bound. Follow-up if unconstrained growth becomes an issue in practice
+    /// (e.g. a persistent CLOG).
     std::unordered_set<txn_id_t> pruned_aborted_;
+
+    /// Watermark maintained by compact_pruned_committed_locked() (GDB-1296).
+    /// See its doc comment above pruned_committed_watermark_for_test() in the
+    /// public section.
+    txn_id_t pruned_committed_watermark_ = 0;
 
     /// Take a snapshot while holding the lock.
     [[nodiscard]] Snapshot take_snapshot_locked() const;
@@ -212,6 +254,12 @@ private:
 
     /// Garbage-collect completed transactions (caller holds mu_).
     void gc_completed_transactions_locked();
+
+    /// Compact pruned_committed_ once it exceeds
+    /// pruned_committed_compaction_threshold entries (GDB-1296). Caller holds
+    /// mu_. See the doc comment on pruned_committed_ for the correctness
+    /// argument.
+    void compact_pruned_committed_locked();
 
     /// Check for write-write conflicts under Snapshot Isolation / SSI.
     [[nodiscard]] Result<void> check_write_conflicts(const Transaction& txn) const;
