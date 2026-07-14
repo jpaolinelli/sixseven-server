@@ -459,10 +459,18 @@ std::string value_to_pg_text(const Value& value) {
     case TypeId::PATH: {
         // GDB-1292: node_pk is now a Value (any PK-eligible type, including
         // STRING), not a fixed-width int64_t. Render it via the same
-        // value_to_pg_text() recursion used elsewhere (STRING is emitted
-        // unquoted here, consistent with the STRING case above -- this
-        // matches pg-wire text format, where quoting is a client/psql
-        // display convention, not part of the wire text itself).
+        // value_to_pg_text() recursion used elsewhere.
+        //
+        // GDB-1304: a STRING node PK can itself contain the delimiter
+        // characters the PATH text format uses structurally ('[', ']', ',',
+        // '-', '(', ')'), which makes the unquoted rendering ambiguous to
+        // parse -- e.g. a PK of "a,b" is indistinguishable from two separate
+        // steps "a" and "b". STRING node PKs are therefore wrapped in double
+        // quotes with embedded quotes/backslashes backslash-escaped (the
+        // same convention pg-wire composite/array types use), so the path
+        // structure's own delimiters stay unambiguous. Non-STRING PKs
+        // (integers, UUID, etc.) never contain these characters and are
+        // rendered unquoted, unchanged from before.
         const auto& path = value.as_path();
         std::ostringstream oss;
         oss << "[";
@@ -470,7 +478,19 @@ std::string value_to_pg_text(const Value& value) {
             if (i > 0) {
                 oss << ",";
             }
-            oss << value_to_pg_text(path.steps[i].node_pk());
+            const Value& pk = path.steps[i].node_pk();
+            if (pk.type_id() == TypeId::STRING) {
+                oss << '"';
+                for (char c : pk.as_string()) {
+                    if (c == '"' || c == '\\') {
+                        oss << '\\';
+                    }
+                    oss << c;
+                }
+                oss << '"';
+            } else {
+                oss << value_to_pg_text(pk);
+            }
             if (path.steps[i].edge_id >= 0) {
                 oss << "-(" << path.steps[i].edge_id << ")->";
             }
