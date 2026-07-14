@@ -313,7 +313,6 @@ TEST_F(IndexManagerMaintenanceBm25Test, NullTextSkipped) {
     tgt.index = bm25_.get();
     tgt.text_column_index = 0;
 
-    auto rid = make_rid(3, 3);
     std::vector<Value> values = {Value()}; // null
 
     // Null text should be a no-op (mirroring executor maintain_bm25).

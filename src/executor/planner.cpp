@@ -477,7 +477,20 @@ Planner::Planner(Catalog& catalog,
       btree_indexes_(btree_indexes), hash_indexes_(hash_indexes), hnsw_rid_maps_(hnsw_rid_maps),
       bm25_indexes_(bm25_indexes), embedding_pool_(embedding_pool),
       algorithm_registry_(algorithm_registry),
-      subquery_ctx_{catalog_, storage_, graph_engine_, provider_registry_} {}
+      // GDB-1297: thread this Planner's own index handles into subquery_ctx_ so
+      // a subquery re-planned through it (e.g. the expr_evaluator's runtime
+      // fallback for a correlated IN/EXISTS/scalar subquery that could not be
+      // decorrelated into a join at plan time) can locate a BM25/HNSW/B-tree/
+      // hash index exactly as this top-level Planner does.
+      subquery_ctx_{catalog_,
+                    storage_,
+                    graph_engine_,
+                    provider_registry_,
+                    hnsw_indexes_,
+                    btree_indexes_,
+                    hash_indexes_,
+                    hnsw_rid_maps_,
+                    bm25_indexes_} {}
 
 // ---------------------------------------------------------------------------
 // Public API

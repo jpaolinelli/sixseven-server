@@ -177,8 +177,7 @@ TEST_F(QA_TxnManagerGdb1242, AbortedInsertStaysInvisibleAfterGc_CoreAC) {
     EXPECT_EQ(txn_mgr_.get_status(aborted_id), TransactionStatus::ABORTED);
 
     auto post_gc = heap->get_tuple(*rid);
-    EXPECT_FALSE(post_gc.has_value())
-        << "CORRUPTION: aborted insert resurrected after GC";
+    EXPECT_FALSE(post_gc.has_value()) << "CORRUPTION: aborted insert resurrected after GC";
 }
 
 // =============================================================================
@@ -204,8 +203,7 @@ TEST_F(QA_TxnManagerGdb1242, AbortedDeleteStaysReversedAfterGc_ByteLevelCheck) {
     txn_mgr_.gc_completed_transactions();
 
     auto post_gc = heap->get_tuple(*rid);
-    ASSERT_TRUE(post_gc.has_value())
-        << "CORRUPTION: aborted delete took effect after GC";
+    ASSERT_TRUE(post_gc.has_value()) << "CORRUPTION: aborted delete took effect after GC";
     EXPECT_EQ(*post_gc, (std::vector<uint8_t>{9, 9, 9}));
 
     // Belt-and-suspenders: the manager resolves the deleter's xid to ABORTED
@@ -242,8 +240,7 @@ TEST_F(QA_TxnManagerGdb1242, VacuumPath_ReclaimsAbortedPreservesLive) {
     auto stats = vac.run();
     ASSERT_TRUE(stats.has_value()) << stats.error().message;
 
-    EXPECT_EQ(stats->dead_tuples, 1u)
-        << "exactly the GC'd aborted tuple must be reclaimed";
+    EXPECT_EQ(stats->dead_tuples, 1u) << "exactly the GC'd aborted tuple must be reclaimed";
     EXPECT_EQ(count_live_tuples(live_pid), 1u)
         << "the committed-live row must survive; no live-row loss";
 
@@ -264,7 +261,7 @@ TEST_F(QA_TxnManagerGdb1242, VacuumPath_ReclaimsAbortedPreservesLive) {
 TEST_F(QA_TxnManagerGdb1242, VacuumPath_ReclaimsAbortedEvenWithoutPriorGc) {
     auto* aborter = txn_mgr_.begin().value();
     txn_id_t aborted_id = aborter->txn_id;
-    auto [pid, slot] = insert_mvcc_tuple(aborted_id);
+    [[maybe_unused]] auto [pid, slot] = insert_mvcc_tuple(aborted_id);
     ASSERT_TRUE(txn_mgr_.abort(aborted_id).has_value());
 
     advance_horizon_past(aborted_id);
@@ -417,8 +414,7 @@ TEST_F(QA_TxnManagerGdb1242, RepeatedGcIsIdempotentAndRemembersAbortedIds) {
         txn_mgr_.gc_completed_transactions();
         EXPECT_TRUE(txn_mgr_.is_registered(aborted_id))
             << "iteration " << i << ": aborted id forgotten after redundant GC";
-        EXPECT_EQ(txn_mgr_.get_status(aborted_id), TransactionStatus::ABORTED)
-            << "iteration " << i;
+        EXPECT_EQ(txn_mgr_.get_status(aborted_id), TransactionStatus::ABORTED) << "iteration " << i;
     }
 }
 
@@ -481,7 +477,7 @@ TEST_F(QA_TxnManagerGdb1242, VacuumPhysicallyReclaimsSlotLeavesLiveByteExact) {
 TEST_F(QA_TxnManagerGdb1242, InfoOnly_VacuumRunDoesNotItselfInvokeGc) {
     auto* aborter = txn_mgr_.begin().value();
     txn_id_t aborted_id = aborter->txn_id;
-    auto [pid, slot] = insert_mvcc_tuple(aborted_id);
+    [[maybe_unused]] auto [pid, slot] = insert_mvcc_tuple(aborted_id);
     ASSERT_TRUE(txn_mgr_.abort(aborted_id).has_value());
     advance_horizon_past(aborted_id);
 

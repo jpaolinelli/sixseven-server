@@ -6,6 +6,9 @@
 #include "sixseven/parser/ast.h"
 #include "sixseven/planner/binder.h"
 
+#include <unordered_map>
+#include <vector>
+
 namespace sixseven {
 
 // Forward declarations.
@@ -15,6 +18,11 @@ class WalReceiver;
 class WalWriter;
 class GraphEngine;
 class ProviderRegistry;
+class HnswIndex;
+class BTreeIndex;
+class HashIndex;
+class Bm25Index;
+struct RID;
 
 /// Context for evaluating subquery expressions at runtime.
 ///
@@ -24,11 +32,24 @@ class ProviderRegistry;
 ///
 /// `graph_engine` and `provider_registry` are optional and only required when a
 /// subquery is a graph (TRAVERSE/MATCH) or vector (NEAREST) statement.
+///
+/// `hnsw_indexes` / `btree_indexes` / `hash_indexes` / `hnsw_rid_maps` /
+/// `bm25_indexes` (GDB-1297) mirror the top-level Planner's own per-plan index
+/// handles. They let a subquery that is planned or re-planned through this
+/// context -- e.g. the runtime fallback used to (re-)plan a correlated
+/// subquery that could not be decorrelated into a join at plan time --
+/// locate a BM25/HNSW/B-tree/hash index exactly as a top-level query does.
+/// nullptr means "no such index map available", matching Planner's defaults.
 struct SubqueryContext {
     Catalog& catalog;
     StorageManager& storage;
     GraphEngine* graph_engine = nullptr;
     ProviderRegistry* provider_registry = nullptr;
+    std::unordered_map<index_id_t, HnswIndex*>* hnsw_indexes = nullptr;
+    std::unordered_map<index_id_t, BTreeIndex*>* btree_indexes = nullptr;
+    std::unordered_map<index_id_t, HashIndex*>* hash_indexes = nullptr;
+    std::unordered_map<index_id_t, std::vector<RID>>* hnsw_rid_maps = nullptr;
+    std::unordered_map<index_id_t, Bm25Index*>* bm25_indexes = nullptr;
 };
 
 /// Context for evaluating system functions (pg_current_wal_lsn, etc.).
