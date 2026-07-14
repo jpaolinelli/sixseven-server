@@ -97,8 +97,8 @@ protected:
 
     QueryResult exec_ok(const std::string& sql) {
         auto result = engine_->execute(sql);
-        EXPECT_TRUE(result.has_value()) << sql << " failed: "
-                                        << (result ? "" : result.error().message);
+        EXPECT_TRUE(result.has_value())
+            << sql << " failed: " << (result ? "" : result.error().message);
         return result ? std::move(*result) : QueryResult{};
     }
 
@@ -315,10 +315,9 @@ TEST_F(QA_GDB1297, MatchInsideNotInSubqueryUnderJoinNoMatchesReturnsAll) {
 // =============================================================================
 
 TEST_F(QA_GDB1297, MatchSubqueryConjunctAndedWithSiblingPredicateUnderJoin) {
-    const std::string sql =
-        "SELECT r.id FROM reviews r INNER JOIN books b2 ON b2.id = r.book_id "
-        "WHERE r.stars > 3 AND r.book_id IN "
-        "(SELECT id FROM books WHERE MATCH(title) TO 'consciousness')";
+    const std::string sql = "SELECT r.id FROM reviews r INNER JOIN books b2 ON b2.id = r.book_id "
+                            "WHERE r.stars > 3 AND r.book_id IN "
+                            "(SELECT id FROM books WHERE MATCH(title) TO 'consciousness')";
     auto result = engine_->execute(sql);
     ASSERT_TRUE(result.has_value()) << sql << " failed: " << result.error().message;
     // Only review 10 (book 1, stars=5) satisfies both stars > 3 AND book_id

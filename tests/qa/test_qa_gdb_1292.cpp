@@ -21,23 +21,22 @@
 //   - CREATE TABLE ... PATH column gating (empirical verification that the
 //     format break cannot silently corrupt durable data).
 
-#include "sixseven/common/types.h"
-#include "sixseven/common/value.h"
-#include "sixseven/executor/external_sort.h"
-#include "sixseven/executor/iterator.h"
-#include "sixseven/parser/ast.h"
-#include "sixseven/planner/binder.h"
-#include "sixseven/storage/serialization.h"
-#include "sixseven/table/tuple.h"
-
 #include "sixseven/catalog/catalog.h"
 #include "sixseven/common/config.h"
+#include "sixseven/common/types.h"
+#include "sixseven/common/value.h"
 #include "sixseven/executor/catalog_persistence.h"
+#include "sixseven/executor/external_sort.h"
+#include "sixseven/executor/iterator.h"
 #include "sixseven/executor/query_engine.h"
 #include "sixseven/executor/storage_manager.h"
 #include "sixseven/executor/system_bootstrap.h"
 #include "sixseven/graph/graph_engine.h"
+#include "sixseven/parser/ast.h"
+#include "sixseven/planner/binder.h"
 #include "sixseven/storage/disk_manager.h"
+#include "sixseven/storage/serialization.h"
+#include "sixseven/table/tuple.h"
 
 #include <gtest/gtest.h>
 
@@ -203,7 +202,8 @@ TEST(QA_GDB1292_PathStep, AllEightIntegerWidthsRegression) {
 // =============================================================================
 
 TEST(QA_GDB1292_WireSerialization, StringPkRoundTrips) {
-    GTEST_SKIP() << "reproduces pre-existing PATH-serializer total_weight-drop bug, tracked by GDB-1303";
+    GTEST_SKIP()
+        << "reproduces pre-existing PATH-serializer total_weight-drop bug, tracked by GDB-1303";
     Path p;
     p.total_weight = 3.5;
     p.steps.emplace_back(Value(std::string("alpha")), int64_t{100});
@@ -263,7 +263,8 @@ TEST(QA_GDB1292_WireSerialization, UuidPkRoundTrips) {
 }
 
 TEST(QA_GDB1292_WireSerialization, EmptyPathRoundTrips) {
-    GTEST_SKIP() << "reproduces pre-existing PATH-serializer total_weight-drop bug, tracked by GDB-1303";
+    GTEST_SKIP()
+        << "reproduces pre-existing PATH-serializer total_weight-drop bug, tracked by GDB-1303";
     Path p;
     p.total_weight = 7.0;
     Value v(std::move(p));
@@ -451,7 +452,8 @@ TEST_F(QA_GDB1292_ExternalSort, StringPkPathSurvivesForcedSpill) {
     auto key_expr = col_ref_1292("sort_key");
     std::vector<SortKey> keys = {{key_expr.get(), SortDirection::ASC}};
     // work_mem=64 forces a flush after nearly every tuple (per GDB-799 pattern).
-    ExternalSortOperator sort(std::move(source), std::move(keys), bound, /*work_mem=*/64, 128, temp_dir_);
+    ExternalSortOperator sort(
+        std::move(source), std::move(keys), bound, /*work_mem=*/64, 128, temp_dir_);
     auto results = drain_1292(sort);
 
     ASSERT_EQ(results.size(), static_cast<size_t>(N));
@@ -586,8 +588,7 @@ TEST_F(QA_GDB1292_QueryEngine, TraverseWithStringPkNodes) {
     exec_ok("LINK people('alice') TO people('bob') VIA knows");
     exec_ok("LINK people('bob') TO people('carol') VIA knows");
 
-    auto result = exec_ok(
-        "SELECT * FROM TRAVERSE knows FROM people('alice') DIRECTION OUT FETCH");
+    auto result = exec_ok("SELECT * FROM TRAVERSE knows FROM people('alice') DIRECTION OUT FETCH");
     // Must reach bob and carol without crashing and with correct identity.
     EXPECT_GE(result.rows.size(), 1u);
 }
@@ -599,8 +600,7 @@ TEST_F(QA_GDB1292_QueryEngine, StringPkWithCommaAndBracketsFormatsUnambiguously)
     exec_ok("INSERT INTO nodes VALUES ('c]d')");
     exec_ok("LINK nodes('a,b') TO nodes('c]d') VIA link");
 
-    auto result =
-        exec_ok("SELECT * FROM TRAVERSE link FROM nodes('a,b') DIRECTION OUT FETCH");
+    auto result = exec_ok("SELECT * FROM TRAVERSE link FROM nodes('a,b') DIRECTION OUT FETCH");
     // The key correctness property: whatever text is produced, the PK values
     // must be recoverable / the row identity must be correct -- not that a
     // human can visually disambiguate the delimiter collision. We assert on
@@ -618,8 +618,7 @@ TEST_F(QA_GDB1292_QueryEngine, EmptyStringPkNode) {
     if (ins.has_value()) {
         exec_ok("INSERT INTO nodes2 VALUES ('other')");
         exec_ok("LINK nodes2('') TO nodes2('other') VIA link2");
-        auto result =
-            exec_ok("SELECT * FROM TRAVERSE link2 FROM nodes2('') DIRECTION OUT FETCH");
+        auto result = exec_ok("SELECT * FROM TRAVERSE link2 FROM nodes2('') DIRECTION OUT FETCH");
         (void)result;
     }
 }
@@ -660,8 +659,7 @@ TEST_F(QA_GDB1292_QueryEngine, SelfLoopStringPkNoInfiniteLoop) {
     exec_ok("INSERT INTO loopy VALUES ('me')");
     exec_ok("LINK loopy('me') TO loopy('me') VIA self_link");
     // Must terminate (test framework will time out / hang if this loops).
-    auto result =
-        exec_ok("SELECT * FROM TRAVERSE self_link FROM loopy('me') DIRECTION OUT FETCH");
+    auto result = exec_ok("SELECT * FROM TRAVERSE self_link FROM loopy('me') DIRECTION OUT FETCH");
     (void)result;
     SUCCEED();
 }
