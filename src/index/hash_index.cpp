@@ -184,6 +184,30 @@ size_t HashIndex::hash_key(const KeyType& key) const {
         // Mix using a variant of boost::hash_combine.
         combined ^= h + 0x9e3779b9 + (combined << 6) + (combined >> 2);
     }
+    // GDB-1305: boost::hash_combine's mixing is a poor avalanche on its own,
+    // especially starting from a zero seed with a single-column key (the
+    // common case). ValueHash for numeric types delegates to
+    // std::hash<double>, which on this platform's libc++ is a raw bit-cast
+    // with no mixing at all. Every exactly-representable small-integer
+    // double (the overwhelming majority of real integer primary keys) has
+    // all-zero low mantissa bits, so `h + 0x9e3779b9` produces an IDENTICAL
+    // low-32-bit pattern for every such key -- regardless of the key's
+    // value. directory_index() below extracts the *low* bits of the hash to
+    // pick a bucket, so extendible-hash splitting could never actually
+    // separate such entries: every split moved the entire bucket verbatim
+    // to one side, local/global depth climbed by one on every subsequent
+    // insert, and the directory (`1U << global_depth_`) doubled without
+    // bound -- exhausting memory (observed as a hang) or crashing once an
+    // allocation finally failed (observed as a SIGSEGV). Finalizing with a
+    // full-avalanche bit mixer (MurmurHash3's 64-bit finalizer) guarantees
+    // every output bit depends on every input bit, so no subset of bits
+    // extracted by directory_index() can collide across distinct keys this
+    // way again.
+    combined ^= combined >> 33;
+    combined *= 0xff51afd7ed558ccdULL;
+    combined ^= combined >> 33;
+    combined *= 0xc4ceb9fe1a85ec53ULL;
+    combined ^= combined >> 33;
     return combined;
 }
 
@@ -222,7 +246,6 @@ Result<void> HashIndex::split_bucket(uint32_t bucket_idx) {
         for (uint32_t i = 0; i < old_size; ++i) {
             directory_[i + old_size] = directory_[i];
         }
-
     }
 
     // Create the new sibling bucket.
@@ -252,7 +275,6 @@ Result<void> HashIndex::split_bucket(uint32_t bucket_idx) {
             directory_[i] = new_bucket;
         }
     }
-
 
     // If either bucket is still over capacity, continue splitting.
     // This handles the pathological case where all entries hash to the same value.
@@ -285,7 +307,5 @@ Result<void> HashIndex::split_bucket(uint32_t bucket_idx) {
 
     return ok();
 }
-
-
 
 } // namespace sixseven

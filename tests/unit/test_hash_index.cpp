@@ -289,6 +289,73 @@ TEST(HashIndexSplit, ManyEntriesCorrectness) {
     }
 }
 
+// GDB-1305: Regression for a hash-collision bug where every small-integer
+// key hashed to an identical low-bit pattern (ValueHash for numeric types
+// delegates to std::hash<double>, which on libc++ is a raw bit-cast with no
+// mixing; small integer-valued doubles all have zero low mantissa bits, so
+// hash_key()'s single-step boost::hash_combine from a zero seed produced the
+// SAME low 32 bits for every such key). directory_index() reads the low bits
+// of the hash to route entries to a bucket, so a bucket could never actually
+// be separated by splitting: every split moved the whole bucket verbatim to
+// one side, local/global depth grew by one on every subsequent insert, and
+// the directory doubled without bound -- exhausting memory or crashing.
+// Before the fix this test would hang/OOM; after the fix it must complete
+// quickly with a bounded global depth and every key still findable.
+TEST(HashIndexSplit, SmallIntegerKeysSplitWithBoundedDepth) {
+    auto idx = make_test_hash_index(4); // Small bucket capacity forces many splits.
+
+    constexpr int N = 300;
+    for (int i = 1; i <= N; ++i) {
+        auto result = idx.insert(make_key(i), make_rid(static_cast<uint32_t>(i)));
+        ASSERT_TRUE(result.has_value()) << "insert failed at i=" << i;
+    }
+
+    EXPECT_EQ(idx.size(), static_cast<uint64_t>(N));
+
+    // The pathological bug caused global_depth_ (and the 2^depth directory)
+    // to grow by one on every single insert past the first overflow, i.e.
+    // it would reach into the hundreds here. A healthy extendible hash over
+    // 300 well-distributed keys with bucket_capacity=4 should need only a
+    // handful of bits (roughly log2(300/4) =~ 7) to separate them.
+    EXPECT_LT(idx.global_depth(), 20u)
+        << "global depth grew unboundedly -- bucket splits are not separating entries "
+           "(low-order hash bits are colliding across distinct keys)";
+    EXPECT_GT(idx.bucket_count(), 1u);
+
+    for (int i = 1; i <= N; ++i) {
+        auto result = idx.search(make_key(i));
+        ASSERT_TRUE(result.has_value()) << "search failed for key=" << i;
+        ASSERT_TRUE(result->has_value()) << "key not found: " << i;
+        EXPECT_EQ(result->value().page_id, static_cast<uint32_t>(i));
+    }
+}
+
+// GDB-1305: Same collision hazard, but for a single-column composite key
+// (KeyType with exactly one Value) -- the exact shape exercised by
+// HashIndexSearch.CorrectRIDReturned, which crashed deterministically before
+// the fix once the single bucket overflowed its (generously large) capacity.
+TEST(HashIndexSplit, LargeCapacityStillSplitsOnOverflow) {
+    auto idx = make_test_hash_index(64);
+
+    constexpr int N = 200; // Comfortably exceeds capacity to force a split.
+    for (int i = 1; i <= N; ++i) {
+        auto result =
+            idx.insert(make_key(i), make_rid(static_cast<uint32_t>(i), static_cast<uint16_t>(i)));
+        ASSERT_TRUE(result.has_value()) << "insert failed at i=" << i;
+    }
+
+    EXPECT_GT(idx.global_depth(), 0u);
+    EXPECT_LT(idx.global_depth(), 20u);
+
+    for (int i = 1; i <= N; ++i) {
+        auto result = idx.search(make_key(i));
+        ASSERT_TRUE(result.has_value()) << "search failed for key=" << i;
+        ASSERT_TRUE(result->has_value()) << "key not found: " << i;
+        EXPECT_EQ(result->value().page_id, static_cast<uint32_t>(i));
+        EXPECT_EQ(result->value().slot_id, static_cast<uint16_t>(i));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Composite key tests
 // ---------------------------------------------------------------------------
