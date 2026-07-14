@@ -104,7 +104,9 @@ TEST(WalArchiveManager, StartCreatesDirectoryAndStops) {
     // Remove archive dir so start() must create it.
     std::filesystem::remove_all(archive_dir.path());
 
-    WalArchiveManager mgr(wal_dir.path(), archive_dir.path());
+    WalArchiveOptions archive_opts;
+    archive_opts.enabled = true;
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path(), archive_opts);
     auto result = mgr.start();
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
@@ -120,7 +122,9 @@ TEST(WalArchiveManager, StartTwiceFails) {
     TempWalDir wal_dir;
     TempArchiveDir archive_dir;
 
-    WalArchiveManager mgr(wal_dir.path(), archive_dir.path());
+    WalArchiveOptions archive_opts;
+    archive_opts.enabled = true;
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path(), archive_opts);
     ASSERT_TRUE(mgr.start().has_value());
 
     auto result = mgr.start();
@@ -532,7 +536,9 @@ TEST(WalArchiveManager, AsyncArchival) {
     WalWriter writer(wal_dir.path(), opts);
     ASSERT_TRUE(writer.open().has_value());
 
-    WalArchiveManager mgr(wal_dir.path(), archive_dir.path());
+    WalArchiveOptions archive_opts;
+    archive_opts.enabled = true;
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path(), archive_opts);
     ASSERT_TRUE(mgr.start().has_value());
 
     auto completed = write_and_rotate(writer);
@@ -569,7 +575,9 @@ TEST(WalArchiveManager, AsyncArchivalMultipleSegments) {
     WalWriter writer(wal_dir.path(), opts);
     ASSERT_TRUE(writer.open().has_value());
 
-    WalArchiveManager mgr(wal_dir.path(), archive_dir.path());
+    WalArchiveOptions archive_opts;
+    archive_opts.enabled = true;
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path(), archive_opts);
     ASSERT_TRUE(mgr.start().has_value());
 
     // Create and enqueue multiple segments.
@@ -611,7 +619,9 @@ TEST(WalArchiveManager, WalWriterCallbackTriggersArchival) {
     opts.enable_group_commit = false;
     WalWriter writer(wal_dir.path(), opts);
 
-    WalArchiveManager mgr(wal_dir.path(), archive_dir.path());
+    WalArchiveOptions archive_opts;
+    archive_opts.enabled = true;
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path(), archive_opts);
     ASSERT_TRUE(mgr.start().has_value());
 
     // Register the archive callback.
@@ -728,7 +738,9 @@ TEST(WalArchiveManager, StopDrainsQueue) {
     WalWriter writer(wal_dir.path(), opts);
     ASSERT_TRUE(writer.open().has_value());
 
-    WalArchiveManager mgr(wal_dir.path(), archive_dir.path());
+    WalArchiveOptions archive_opts;
+    archive_opts.enabled = true;
+    WalArchiveManager mgr(wal_dir.path(), archive_dir.path(), archive_opts);
     ASSERT_TRUE(mgr.start().has_value());
 
     // Enqueue several segments quickly then stop.
