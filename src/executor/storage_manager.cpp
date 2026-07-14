@@ -294,7 +294,20 @@ Result<void> StorageManager::write_autoincrement(table_id_t table_id, int64_t va
                           "no storage for table_id " + std::to_string(table_id));
     }
 
-    return dm_.write_header_ext_u64(it->second->file_id, 8, static_cast<uint64_t>(value));
+    auto write_result =
+        dm_.write_header_ext_u64(it->second->file_id, 8, static_cast<uint64_t>(value));
+    if (!write_result) {
+        return write_result;
+    }
+
+    // Crash-safety: fsync the header write before reporting success. The pwrite
+    // above only lands the new high-water mark in the OS page cache; without a
+    // durable sync, an OS/power crash could regress the persisted counter and
+    // reissue previously-handed-out ids on recovery (GDB-1302). Use sync_file
+    // (full metadata+data fsync) rather than sync_data since this is a small,
+    // infrequent, correctness-critical write where full durability matters more
+    // than write throughput.
+    return dm_.sync_file(it->second->file_id);
 }
 
 // -- Index file management ---------------------------------------------------

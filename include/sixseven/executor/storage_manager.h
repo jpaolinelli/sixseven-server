@@ -113,7 +113,13 @@ public:
     /// Returns 0 if no counter was previously written.
     [[nodiscard]] Result<int64_t> read_autoincrement(table_id_t table_id);
 
-    /// Write the autoincrement counter to a table file's header extension.
+    /// Write the autoincrement counter to a table file's header extension and
+    /// durably fsync it before returning. This is a crash-safety requirement:
+    /// the high-water mark must never be reported as persisted unless it has
+    /// actually reached durable storage. Without the fsync, an OS/power crash
+    /// occurring after the pwrite but before the OS flushes its page cache
+    /// could restore a stale (lower) counter on recovery, allowing previously
+    /// issued ids to be reissued.
     [[nodiscard]] Result<void> write_autoincrement(table_id_t table_id, int64_t value);
 
     // -- Index file management ---------------------------------------------------
