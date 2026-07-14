@@ -2402,19 +2402,42 @@ Result<QueryResult> QueryEngine::execute_explain(const ExplainStmt& stmt,
 Result<QueryResult> QueryEngine::execute_begin() {
     QueryResult qr;
     qr.message = "BEGIN";
-    if (active_txn_id_ != invalid_txn_id) {
-        // PostgreSQL warns and keeps the current transaction.
-        SIXSEVEN_LOG_WARN("BEGIN: there is already a transaction in progress (txn {})",
-                          active_txn_id_);
-        return ok(std::move(qr));
+    {
+        std::lock_guard<std::mutex> lock(txn_state_mutex_);
+        if (active_txn_id_ != invalid_txn_id) {
+            // PostgreSQL warns and keeps the current transaction.
+            SIXSEVEN_LOG_WARN("BEGIN: there is already a transaction in progress (txn {})",
+                              active_txn_id_);
+            return ok(std::move(qr));
+        }
     }
     // GDB-978: honor the session isolation level set via set_session_isolation().
+    // txn_mgr_.begin() is called without holding txn_state_mutex_ (GDB-1311):
+    // it can block, and this lock must not be held across it.
     auto txn = txn_mgr_.begin(session_isolation_);
     if (!txn) {
         return make_error(txn.error().code, txn.error().message);
     }
-    active_txn_id_ = (*txn)->txn_id;
-    active_txn_row_deltas_.clear();
+    {
+        std::lock_guard<std::mutex> lock(txn_state_mutex_);
+        if (active_txn_id_ != invalid_txn_id) {
+            // Lost a race with a concurrent BEGIN on another connection
+            // sharing this engine between the check above and now (GDB-1311).
+            // Abort the transaction we just opened so it is not leaked, and
+            // report the pre-existing behavior of keeping the winner's txn.
+            auto abort_result = txn_mgr_.abort((*txn)->txn_id);
+            if (!abort_result) {
+                SIXSEVEN_LOG_WARN("BEGIN: abort of losing-race txn {} failed: {}",
+                                  (*txn)->txn_id,
+                                  abort_result.error().message);
+            }
+            SIXSEVEN_LOG_WARN("BEGIN: there is already a transaction in progress (txn {})",
+                              active_txn_id_);
+            return ok(std::move(qr));
+        }
+        active_txn_id_ = (*txn)->txn_id;
+        active_txn_row_deltas_.clear();
+    }
     return ok(std::move(qr));
 }
 
@@ -2466,18 +2489,28 @@ Result<void> QueryEngine::wait_for_commit_durability(lsn_t commit_lsn) {
 Result<QueryResult> QueryEngine::execute_commit() {
     QueryResult qr;
     qr.message = "COMMIT";
-    if (active_txn_id_ == invalid_txn_id) {
-        // PostgreSQL warns; committing outside a transaction is a no-op.
-        return ok(std::move(qr));
+    txn_id_t txn_id;
+    {
+        std::lock_guard<std::mutex> lock(txn_state_mutex_);
+        if (active_txn_id_ == invalid_txn_id) {
+            // PostgreSQL warns; committing outside a transaction is a no-op.
+            return ok(std::move(qr));
+        }
+        txn_id = active_txn_id_;
     }
 
     // Capture the WAL tail LSN *before* releasing the transaction's locks /
     // marking it COMMITTED (GDB-1246; see commit_lsn_watermark()).
     lsn_t commit_lsn = commit_lsn_watermark();
 
-    auto committed = txn_mgr_.commit(active_txn_id_);
-    active_txn_id_ = invalid_txn_id;
-    active_txn_row_deltas_.clear();
+    // txn_mgr_.commit() is called without holding txn_state_mutex_
+    // (GDB-1311): it can block, and this lock must not be held across it.
+    auto committed = txn_mgr_.commit(txn_id);
+    {
+        std::lock_guard<std::mutex> lock(txn_state_mutex_);
+        active_txn_id_ = invalid_txn_id;
+        active_txn_row_deltas_.clear();
+    }
     if (!committed) {
         return make_error(committed.error().code, committed.error().message);
     }
@@ -2491,6 +2524,20 @@ Result<QueryResult> QueryEngine::execute_commit() {
 }
 
 void QueryEngine::compensate_row_deltas_and_clear() {
+    // Take ownership of the accumulated deltas under the lock (GDB-1311),
+    // then release the lock before doing any storage_ lookups / heap
+    // mutation below. This is what actually fixes the heap-use-after-free:
+    // previously this function iterated active_txn_row_deltas_ directly and
+    // then cleared it with no synchronization, so a concurrent
+    // execute_begin()/execute_commit()/execute_rollback() on another
+    // connection sharing this engine could clear() (freeing hash-table
+    // nodes) out from under this function's in-progress iteration.
+    std::unordered_map<table_id_t, int64_t> deltas;
+    {
+        std::lock_guard<std::mutex> lock(txn_state_mutex_);
+        deltas.swap(active_txn_row_deltas_);
+    }
+
     // Compensate live-row counters: the transaction's logical inserts and
     // deletes moved the per-table counters, but its versions are now
     // invisible. Resolve each table_id to its live heap at compensation time
@@ -2499,32 +2546,48 @@ void QueryEngine::compensate_row_deltas_and_clear() {
     // it here would be a use-after-free. Tables that no longer exist are
     // skipped: their storage (and row_count_) is gone, so there is nothing
     // left to compensate.
-    for (auto& [table_id, delta] : active_txn_row_deltas_) {
-        if (delta == 0) {
-            continue;
-        }
-        auto ts = storage_.get_table_storage(table_id);
-        if (!ts || *ts == nullptr || (*ts)->heap == nullptr) {
-            continue;
-        }
-        (*ts)->heap->adjust_row_count(-delta);
+    for (auto& [table_id, delta] : deltas) {
+        compensate_table_row_delta(table_id, delta);
     }
-    active_txn_row_deltas_.clear();
+}
+
+void QueryEngine::compensate_table_row_delta(table_id_t table_id, int64_t delta) {
+    if (delta == 0) {
+        return;
+    }
+    auto ts = storage_.get_table_storage(table_id);
+    if (!ts || *ts == nullptr || (*ts)->heap == nullptr) {
+        return;
+    }
+    (*ts)->heap->adjust_row_count(-delta);
 }
 
 Result<QueryResult> QueryEngine::execute_rollback() {
     QueryResult qr;
     qr.message = "ROLLBACK";
-    if (active_txn_id_ == invalid_txn_id) {
-        return ok(std::move(qr));
+    txn_id_t txn_id;
+    {
+        std::lock_guard<std::mutex> lock(txn_state_mutex_);
+        if (active_txn_id_ == invalid_txn_id) {
+            return ok(std::move(qr));
+        }
+        txn_id = active_txn_id_;
     }
-    auto aborted = txn_mgr_.abort(active_txn_id_);
+    auto aborted = txn_mgr_.abort(txn_id);
     if (!aborted) {
-        SIXSEVEN_LOG_WARN(
-            "ROLLBACK: abort of txn {} failed: {}", active_txn_id_, aborted.error().message);
+        SIXSEVEN_LOG_WARN("ROLLBACK: abort of txn {} failed: {}", txn_id, aborted.error().message);
     }
     compensate_row_deltas_and_clear();
-    active_txn_id_ = invalid_txn_id;
+    {
+        std::lock_guard<std::mutex> lock(txn_state_mutex_);
+        // Only clear our own txn id, not a newer one a concurrent BEGIN may
+        // have already installed (GDB-1311 defensive check; in practice a
+        // second BEGIN cannot race in here today since active_txn_id_ was
+        // still set to txn_id until this point).
+        if (active_txn_id_ == txn_id) {
+            active_txn_id_ = invalid_txn_id;
+        }
+    }
     return ok(std::move(qr));
 }
 
@@ -2697,8 +2760,13 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
     UpdateOperator* update_op = dynamic_cast<UpdateOperator*>(iter->get());
     DeleteOperator* delete_op = dynamic_cast<DeleteOperator*>(iter->get());
     if (insert_op != nullptr || update_op != nullptr || delete_op != nullptr) {
-        if (active_txn_id_ != invalid_txn_id) {
+        {
+            // GDB-1311: active_txn_id_ is shared engine state; guard the read.
+            std::lock_guard<std::mutex> lock(txn_state_mutex_);
             stmt_txn_id = active_txn_id_;
+        }
+        if (stmt_txn_id != invalid_txn_id) {
+            // Explicit transaction is active; run under it.
         } else {
             auto txn = txn_mgr_.begin();
             if (!txn) {
@@ -2764,6 +2832,15 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
     // this statement made (GDB-1243). Mirrors the explicit-ROLLBACK
     // compensation in execute_rollback() via the same shared helper so both
     // paths restore COUNT(*) identically.
+    // GDB-1311: the autocommit/implicit-transaction path deliberately does
+    // NOT go through active_txn_row_deltas_ / compensate_row_deltas_and_clear()
+    // -- that map is shared, cross-statement, engine-instance state meant
+    // only for an explicit BEGIN...COMMIT/ROLLBACK transaction. An implicit
+    // (autocommit) statement transaction has exactly one table and one delta
+    // to undo on failure, so it is compensated directly via
+    // compensate_table_row_delta(), which touches no shared state and is
+    // therefore safe under arbitrarily many concurrent autocommit statements
+    // on other connections sharing this engine.
     auto abort_implicit_txn = [&]() {
         if (implicit_txn) {
             auto aborted = txn_mgr_.abort(stmt_txn_id);
@@ -2771,11 +2848,7 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                 SIXSEVEN_LOG_WARN(
                     "abort of implicit txn {} failed: {}", stmt_txn_id, aborted.error().message);
             }
-            const int64_t partial = dml_partial_delta();
-            if (partial != 0) {
-                active_txn_row_deltas_[dml_table_id] += partial;
-            }
-            compensate_row_deltas_and_clear();
+            compensate_table_row_delta(dml_table_id, dml_partial_delta());
         }
     };
 
@@ -2785,7 +2858,14 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
     // SELECTs read under a fresh snapshot with no viewer, so uncommitted
     // changes from in-flight transactions are invisible. TableHeap reads and
     // the scan operators consult this thread-local view.
-    const txn_id_t viewer_txn_id = stmt_txn_id != invalid_txn_id ? stmt_txn_id : active_txn_id_;
+    txn_id_t viewer_txn_id = stmt_txn_id;
+    if (viewer_txn_id == invalid_txn_id) {
+        // No DML txn was resolved above (this is a non-DML statement, e.g.
+        // SELECT); read the possibly-active explicit transaction under the
+        // lock (GDB-1311).
+        std::lock_guard<std::mutex> lock(txn_state_mutex_);
+        viewer_txn_id = active_txn_id_;
+    }
     MvccReadViewGuard read_view_guard(MvccReadView{
         viewer_txn_id != invalid_txn_id ? txn_mgr_.get_statement_snapshot(viewer_txn_id)
                                         : txn_mgr_.take_snapshot(),
@@ -2860,12 +2940,11 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
                 // (per-row, as they were applied), but the commit that would
                 // have made them durable/visible just failed and the txn was
                 // aborted above -- compensate exactly as abort_implicit_txn()
-                // would, so COUNT(*) is not left drifted.
-                const int64_t partial = dml_partial_delta();
-                if (partial != 0) {
-                    active_txn_row_deltas_[dml_table_id] += partial;
-                }
-                compensate_row_deltas_and_clear();
+                // would, so COUNT(*) is not left drifted. GDB-1311: uses the
+                // same lock-free single-table compensation as
+                // abort_implicit_txn() -- this is still the autocommit path,
+                // so no shared cross-statement state is touched.
+                compensate_table_row_delta(dml_table_id, dml_partial_delta());
                 return make_error(committed.error().code, committed.error().message);
             }
 
@@ -2884,6 +2963,11 @@ Result<QueryResult> QueryEngine::execute_plan(const BoundStatement& bound) {
             // ROLLBACK can compensate the heap counter (keyed by table_id,
             // not the raw heap pointer, so a later DROP TABLE + ROLLBACK in
             // the same transaction can't dereference a freed heap; GDB-1243).
+            // Guarded by txn_state_mutex_ (GDB-1311): this map is also read/
+            // cleared by execute_rollback() / compensate_row_deltas_and_clear()
+            // and execute_begin()/execute_commit(), which may run on other
+            // connections sharing this engine.
+            std::lock_guard<std::mutex> lock(txn_state_mutex_);
             active_txn_row_deltas_[dml_table_id] += dml_row_delta_sign * qr.rows[0][0].as_int64();
         }
     }
