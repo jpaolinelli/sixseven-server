@@ -419,6 +419,39 @@ TEST(Serialization, GDB760_JsonExactFitRoundTrip) {
 
 // -- Little-endian encoding verification --------------------------------------
 
+// -- GDB-1303: PATH total_weight round-trip -----------------------------------
+
+TEST(Serialization, GDB1303_PathRoundTripWithTotalWeight) {
+    Path p;
+    p.total_weight = 3.5;
+    p.steps.emplace_back(Value(int64_t{42}), int64_t{7});
+
+    Value v(std::move(p));
+    auto bytes = serialize(v);
+    auto restored = deserialize(bytes, TypeId::PATH);
+    ASSERT_TRUE(restored.has_value()) << restored.error().message;
+
+    const auto& rp = restored->as_path();
+    EXPECT_DOUBLE_EQ(rp.total_weight, 3.5);
+    ASSERT_EQ(rp.steps.size(), 1u);
+    EXPECT_EQ(rp.steps[0].node_pk_as_int64(), 42);
+    EXPECT_EQ(rp.steps[0].edge_id, 7);
+}
+
+TEST(Serialization, GDB1303_EmptyPathRoundTripWithTotalWeight) {
+    Path p;
+    p.total_weight = 7.0;
+
+    Value v(std::move(p));
+    auto bytes = serialize(v);
+    auto restored = deserialize(bytes, TypeId::PATH);
+    ASSERT_TRUE(restored.has_value()) << restored.error().message;
+
+    const auto& rp = restored->as_path();
+    EXPECT_TRUE(rp.steps.empty());
+    EXPECT_DOUBLE_EQ(rp.total_weight, 7.0);
+}
+
 TEST(Serialization, LittleEndianEncoding) {
     // INT32 value 0x04030201 should be stored as bytes [01, 02, 03, 04] in LE.
     Value v(int32_t{0x04030201});

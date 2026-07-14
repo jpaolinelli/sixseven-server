@@ -98,7 +98,10 @@ size_t payload_size(const Value& value) {
         // payload_size(pk) when non-null (payload_size is called
         // recursively here; this is the same pattern serialize()/
         // serialized_size() use for the top-level null flag).
-        size_t size = 4;
+        // GDB-1303: total_weight (8-byte double) is written before the step
+        // count/steps, mirroring the layout used in tuple.cpp and
+        // external_sort.cpp (fixed in GDB-799).
+        size_t size = sizeof(double) + 4;
         for (const auto& step : value.as_path().steps) {
             const Value& pk = step.node_pk();
             size_t pk_size = pk.is_null() ? 1 : 1 + payload_size(pk);
@@ -220,7 +223,10 @@ std::vector<uint8_t> serialize(const Value& value) {
         // type (produced by graph traversal operators), not long-lived
         // durable table data, so no backward-compat reader is provided for
         // old PATH bytes. See PR description for details.
+        // GDB-1303: write total_weight before the step count so it round-trips
+        // symmetrically with the deserialize() reader below.
         const auto& p = value.as_path();
+        write_le<double>(buf, p.total_weight);
         write_le<uint32_t>(buf, static_cast<uint32_t>(p.steps.size()));
         for (const auto& step : p.steps) {
             const Value& pk = step.node_pk();
@@ -418,12 +424,15 @@ Result<Value> deserialize(std::span<const uint8_t> data, TypeId type_id) {
         // [1-byte TypeId tag][serialized Value PK][int64 edge_id]. The tag
         // is only consulted when the nested Value is non-null (deserialize()
         // checks the null flag byte first and ignores the type for NULLs).
-        if (!check_size(4)) {
+        // GDB-1303: total_weight (8-byte double) precedes the step count.
+        if (!check_size(sizeof(double) + 4)) {
             break;
         }
-        uint32_t count = read_le<uint32_t>(p);
-        size_t off = 4;
+        double total_weight = read_le<double>(p);
+        uint32_t count = read_le<uint32_t>(p + sizeof(double));
+        size_t off = sizeof(double) + 4;
         Path path;
+        path.total_weight = total_weight;
         path.steps.reserve(count);
         bool ok_so_far = true;
         for (uint32_t i = 0; i < count && ok_so_far; ++i) {
