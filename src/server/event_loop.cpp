@@ -155,12 +155,23 @@ public:
     Result<void> modify_fd(int fd, EventType type) override { return set_filters(fd, type); }
 
     Result<void> remove_fd(int fd) override {
-        // Remove both read and write filters; ignore ENOENT.
-        struct kevent changes[2];
-        EV_SET(&changes[0], fd, EVFILT_READ, EV_DELETE, 0, 0, nullptr);
-        EV_SET(&changes[1], fd, EVFILT_WRITE, EV_DELETE, 0, 0, nullptr);
-        // Errors here are non-fatal (filter may not exist).
-        ::kevent(kq_fd_, changes, 2, nullptr, 0, nullptr);
+        // Remove read and write filters individually rather than in a single
+        // batched kevent() call. With nevents == 0, kqueue on macOS aborts
+        // changelist processing on the FIRST error (e.g. ENOENT because only
+        // one of the two filters was ever registered) and silently skips all
+        // subsequent entries -- so a batched 2-entry call can leave the
+        // second filter (e.g. EVFILT_WRITE) still active. That reopens the
+        // GDB-980 busy-poll spin: a removed fd would still appear in poll().
+        // Submitting each delete separately ensures both filters are always
+        // attempted regardless of whether the other one was registered.
+        struct kevent read_change;
+        EV_SET(&read_change, fd, EVFILT_READ, EV_DELETE, 0, 0, nullptr);
+        ::kevent(kq_fd_, &read_change, 1, nullptr, 0, nullptr); // Ignore ENOENT.
+
+        struct kevent write_change;
+        EV_SET(&write_change, fd, EVFILT_WRITE, EV_DELETE, 0, 0, nullptr);
+        ::kevent(kq_fd_, &write_change, 1, nullptr, 0, nullptr); // Ignore ENOENT.
+
         return ok();
     }
 
