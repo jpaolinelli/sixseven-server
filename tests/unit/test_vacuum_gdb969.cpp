@@ -193,7 +193,7 @@ TEST_F(VacuumGDB969Test, ReclaimWorks_AutocommitDeletedRowsAreRemoved) {
     auto* t1 = txn_mgr_.begin().value();
     auto [pid1, slot1] = insert_mvcc_tuple(t1->txn_id);
     auto [pid2, slot2] = insert_mvcc_tuple(t1->txn_id);
-    auto [pid3, slot3] = insert_mvcc_tuple(t1->txn_id);
+    [[maybe_unused]] auto [pid3, slot3] = insert_mvcc_tuple(t1->txn_id);
     ASSERT_TRUE(txn_mgr_.commit(t1->txn_id).has_value());
 
     // Autocommit-delete two of them: stamp xmax = frozen_txn_id directly.
@@ -254,8 +254,8 @@ TEST_F(VacuumGDB969Test, LiveRowsIntact_NeverDeletedRowsSurvive) {
     // Insert multiple rows via committed transactions; none deleted.
     auto* t1 = txn_mgr_.begin().value();
     auto [pid, s0] = insert_mvcc_tuple(t1->txn_id);
-    auto [p2, s1] = insert_mvcc_tuple(t1->txn_id);
-    auto [p3, s2] = insert_mvcc_tuple(t1->txn_id);
+    [[maybe_unused]] auto [p2, s1] = insert_mvcc_tuple(t1->txn_id);
+    [[maybe_unused]] auto [p3, s2] = insert_mvcc_tuple(t1->txn_id);
     ASSERT_TRUE(txn_mgr_.commit(t1->txn_id).has_value());
 
     // All on the same page (page 1).

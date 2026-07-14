@@ -1365,11 +1365,22 @@ Result<Value> eval_in(const InExpr& expr,
             return make_error(sub_bound.error().code, sub_bound.error().message);
         }
 
+        // GDB-1297: thread the outer query's index handles through so a MATCH/
+        // NEAREST/etc. predicate inside this subquery can locate its index
+        // exactly as a top-level query does, instead of always seeing nullptr
+        // maps here and failing with "no BM25/HNSW index available".
         Planner planner(subquery_ctx->catalog,
                         subquery_ctx->storage,
                         default_database_id,
                         subquery_ctx->graph_engine,
-                        subquery_ctx->provider_registry);
+                        subquery_ctx->provider_registry,
+                        subquery_ctx->hnsw_indexes,
+                        subquery_ctx->btree_indexes,
+                        subquery_ctx->hash_indexes,
+                        nullptr, // embedding_pool: INSERT-only, not needed for a read subquery.
+                        nullptr, // algorithm_registry: not threaded through SubqueryContext.
+                        subquery_ctx->hnsw_rid_maps,
+                        subquery_ctx->bm25_indexes);
         if (correlated) {
             planner.set_outer_context(&tuple, &schema, &bound);
         }
@@ -1871,11 +1882,22 @@ Result<Value> eval_exists(const ExistsExpr& expr,
 
     if (sub_bound) {
         // Non-correlated: plan and execute normally.
+        // GDB-1297: thread the outer query's index handles through so a MATCH/
+        // NEAREST/etc. predicate inside this subquery can locate its index
+        // exactly as a top-level query does, instead of always seeing nullptr
+        // maps here and failing with "no BM25/HNSW index available".
         Planner planner(subquery_ctx->catalog,
                         subquery_ctx->storage,
                         default_database_id,
                         subquery_ctx->graph_engine,
-                        subquery_ctx->provider_registry);
+                        subquery_ctx->provider_registry,
+                        subquery_ctx->hnsw_indexes,
+                        subquery_ctx->btree_indexes,
+                        subquery_ctx->hash_indexes,
+                        nullptr, // embedding_pool: INSERT-only, not needed for a read subquery.
+                        nullptr, // algorithm_registry: not threaded through SubqueryContext.
+                        subquery_ctx->hnsw_rid_maps,
+                        subquery_ctx->bm25_indexes);
         std::vector<ExprPtr> owned;
         auto iter = planner.plan(*sub_bound, owned);
         if (!iter) {
@@ -1906,11 +1928,22 @@ Result<Value> eval_exists(const ExistsExpr& expr,
         if (!corr_bound) {
             return make_error(corr_bound.error().code, corr_bound.error().message);
         }
+        // GDB-1297: thread the outer query's index handles through so a MATCH/
+        // NEAREST/etc. predicate inside this subquery can locate its index
+        // exactly as a top-level query does, instead of always seeing nullptr
+        // maps here and failing with "no BM25/HNSW index available".
         Planner planner(subquery_ctx->catalog,
                         subquery_ctx->storage,
                         default_database_id,
                         subquery_ctx->graph_engine,
-                        subquery_ctx->provider_registry);
+                        subquery_ctx->provider_registry,
+                        subquery_ctx->hnsw_indexes,
+                        subquery_ctx->btree_indexes,
+                        subquery_ctx->hash_indexes,
+                        nullptr, // embedding_pool: INSERT-only, not needed for a read subquery.
+                        nullptr, // algorithm_registry: not threaded through SubqueryContext.
+                        subquery_ctx->hnsw_rid_maps,
+                        subquery_ctx->bm25_indexes);
         planner.set_outer_context(&outer_tuple, &outer_schema, &outer_bound);
         std::vector<ExprPtr> owned;
         auto iter = planner.plan(*corr_bound, owned);
@@ -2047,11 +2080,20 @@ Result<Value> eval_scalar_subquery(const SubqueryExpr& expr,
                           "scalar subquery must return exactly one column");
     }
 
+    // GDB-1297: thread the outer query's index handles through (see the
+    // matching comment in eval_in / eval_exists above).
     Planner planner(subquery_ctx->catalog,
                     subquery_ctx->storage,
                     default_database_id,
                     subquery_ctx->graph_engine,
-                    subquery_ctx->provider_registry);
+                    subquery_ctx->provider_registry,
+                    subquery_ctx->hnsw_indexes,
+                    subquery_ctx->btree_indexes,
+                    subquery_ctx->hash_indexes,
+                    nullptr, // embedding_pool: INSERT-only, not needed for a read subquery.
+                    nullptr, // algorithm_registry: not threaded through SubqueryContext.
+                    subquery_ctx->hnsw_rid_maps,
+                    subquery_ctx->bm25_indexes);
     if (correlated) {
         planner.set_outer_context(&tuple, &schema, nullptr);
     }

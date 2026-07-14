@@ -204,8 +204,8 @@ protected:
 
 TEST_F(WalReceiverTest, StartAndStop) {
     // Factory that creates a connected pair.
-    auto factory = [this](const std::string& /*host*/,
-                          uint16_t /*port*/) -> Result<std::unique_ptr<ReplicationConnection>> {
+    auto factory = [](const std::string& /*host*/,
+                      uint16_t /*port*/) -> Result<std::unique_ptr<ReplicationConnection>> {
         auto [standby_conn, primary_conn] = create_connection_pair();
         // The primary side isn't needed for this test; it is dropped here and
         // only the standby side is kept alive by the receiver.
