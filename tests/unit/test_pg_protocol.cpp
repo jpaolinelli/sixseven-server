@@ -159,6 +159,75 @@ TEST(PgProtocol, ValueToTextPoint) {
 }
 
 // =============================================================================
+// PATH text formatting (GDB-1304): STRING node PKs must be quoted/escaped so
+// PATH's own structural delimiters ('[', ']', ',', '-(' ')->') never collide
+// with delimiter characters embedded in the PK data itself.
+// =============================================================================
+
+TEST(PgProtocol, ValueToTextPathIntegerPksUnquoted) {
+    // Baseline: integer node PKs never contain delimiter characters and stay
+    // unquoted, matching the pre-GDB-1304 behavior.
+    Path path;
+    path.steps.emplace_back(Value(static_cast<int64_t>(1)), 100);
+    path.steps.emplace_back(Value(static_cast<int64_t>(2)), -1);
+    EXPECT_EQ(value_to_pg_text(Value(path)), "[1-(100)->,2]");
+}
+
+TEST(PgProtocol, ValueToTextPathStringPkWithCommaIsQuoted) {
+    // A PK containing a comma would otherwise be indistinguishable from two
+    // separate path steps once written into the delimiter-based text format.
+    Path path;
+    path.steps.emplace_back(Value(std::string("a,b")), -1);
+    EXPECT_EQ(value_to_pg_text(Value(path)), R"(["a,b"])");
+}
+
+TEST(PgProtocol, ValueToTextPathStringPkWithBracketsIsQuoted) {
+    // A PK containing brackets would otherwise be indistinguishable from the
+    // PATH's own enclosing '[' ']' delimiters.
+    Path path;
+    path.steps.emplace_back(Value(std::string("[x]")), -1);
+    EXPECT_EQ(value_to_pg_text(Value(path)), R"(["[x]"])");
+}
+
+TEST(PgProtocol, ValueToTextPathStringPkWithQuoteIsEscaped) {
+    // Embedded double quotes must be backslash-escaped so the quoted PK
+    // remains parseable.
+    Path path;
+    path.steps.emplace_back(Value(std::string("a\"b")), -1);
+    EXPECT_EQ(value_to_pg_text(Value(path)), R"(["a\"b"])");
+}
+
+TEST(PgProtocol, ValueToTextPathStringPkWithBackslashIsEscaped) {
+    Path path;
+    path.steps.emplace_back(Value(std::string("a\\b")), -1);
+    EXPECT_EQ(value_to_pg_text(Value(path)), R"(["a\\b"])");
+}
+
+TEST(PgProtocol, ValueToTextPathStringPkWithWhitespaceIsQuoted) {
+    // Whitespace is preserved verbatim inside the quotes (no delimiter
+    // ambiguity, but round-trip fidelity still requires quoting since
+    // whitespace is not otherwise escaped).
+    Path path;
+    path.steps.emplace_back(Value(std::string("a b")), -1);
+    EXPECT_EQ(value_to_pg_text(Value(path)), R"(["a b"])");
+}
+
+TEST(PgProtocol, ValueToTextPathMixedStringAndIntegerSteps) {
+    // A multi-hop path mixing a plain STRING PK with one containing a
+    // delimiter character stays unambiguous end to end.
+    Path path;
+    path.steps.emplace_back(Value(std::string("alice")), 42);
+    path.steps.emplace_back(Value(std::string("bob,carol")), -1);
+    EXPECT_EQ(value_to_pg_text(Value(path)), R"(["alice"-(42)->,"bob,carol"])");
+}
+
+TEST(PgProtocol, ValueToTextPathStringPkEmptyStringIsQuoted) {
+    Path path;
+    path.steps.emplace_back(Value(std::string("")), -1);
+    EXPECT_EQ(value_to_pg_text(Value(path)), R"([""])");
+}
+
+// =============================================================================
 // MessageWriter / MessageReader tests
 // =============================================================================
 
