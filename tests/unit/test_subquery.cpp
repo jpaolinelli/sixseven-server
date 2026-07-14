@@ -442,3 +442,78 @@ TEST_F(SubqueryTest, CorrelatedNotExistsDecorrelatedToAntiJoin) {
     EXPECT_TRUE(names.count("diana"));
     EXPECT_FALSE(names.count("alice"));
 }
+
+// =============================================================================
+// GDB-1309: correlated IN / scalar subquery WHERE-clause outer-column
+// references. Unlike EXISTS (which unconditionally decorrelates into a
+// join at plan time), a genuinely correlated IN or scalar subquery whose
+// WHERE clause references the outer row by column falls to a runtime
+// re-plan/re-evaluation path per outer row -- that path previously had no
+// notion of the outer row at all when evaluating the subquery's own WHERE,
+// so any outer-qualified column comparison failed with NOT_FOUND
+// ("column not found: <outer column>").
+// =============================================================================
+
+TEST_F(SubqueryTest, CorrelatedInSubqueryUnaliasedOuterColumn) {
+    // Mirrors the ticket's exact repro shape:
+    //   SELECT id FROM reviews WHERE book_id IN
+    //       (SELECT id FROM books WHERE id = reviews.book_id)
+    // using this fixture's tables/columns instead. The inner query's WHERE
+    // predicate (`departments.id = users.dept_id`) is a plain equality against
+    // the unaliased outer table/column -- not EXISTS, so it is NOT
+    // unconditionally decorrelated into a join, and previously hit the broken
+    // runtime re-evaluation path.
+    auto qr =
+        exec_ok("SELECT users.name FROM users WHERE users.dept_id IN "
+                "(SELECT departments.id FROM departments WHERE departments.id = users.dept_id)");
+
+    // Every seeded user has a matching department row (10, 20, 30 all exist in
+    // departments), so all four users satisfy the correlated IN.
+    auto names = collect_column_strings(qr, 0);
+    EXPECT_EQ(names.size(), 4u);
+    EXPECT_TRUE(names.count("alice"));
+    EXPECT_TRUE(names.count("bob"));
+    EXPECT_TRUE(names.count("charlie"));
+    EXPECT_TRUE(names.count("diana"));
+}
+
+TEST_F(SubqueryTest, CorrelatedInSubqueryAliasedOuterColumn) {
+    // Same shape as CorrelatedInSubqueryUnaliasedOuterColumn but with an
+    // outer table alias, matching the ticket's second repro variant. Only
+    // departments 10 and 20 are given a discriminating extra predicate so the
+    // test can distinguish "no rows pass" from "wrong rows pass".
+    auto qr = exec_ok("SELECT u.name FROM users u WHERE u.dept_id IN "
+                      "(SELECT d.id FROM departments d WHERE d.id = u.dept_id AND d.id < 30)");
+
+    auto names = collect_column_strings(qr, 0);
+    EXPECT_EQ(names.size(), 3u);
+    EXPECT_TRUE(names.count("alice"));   // dept 10
+    EXPECT_TRUE(names.count("bob"));     // dept 20
+    EXPECT_TRUE(names.count("charlie")); // dept 10
+    EXPECT_FALSE(names.count("diana"));  // dept 30, excluded by d.id < 30
+}
+
+TEST_F(SubqueryTest, CorrelatedInSubqueryNoMatchingOuterRow) {
+    // Users whose department id is NOT reflected back by the correlated inner
+    // query (using a threshold no department satisfies) should be excluded
+    // entirely, proving the correlated predicate is actually being applied
+    // (not just silently passing every row).
+    auto qr = exec_ok("SELECT users.name FROM users WHERE users.dept_id IN "
+                      "(SELECT departments.id FROM departments WHERE departments.id = "
+                      "users.dept_id AND departments.id > 9999)");
+
+    EXPECT_EQ(qr.rows.size(), 0u);
+}
+
+TEST_F(SubqueryTest, CorrelatedScalarSubqueryOuterColumnInWhere) {
+    // Scalar subquery form of the same bug: the inner WHERE clause compares
+    // against the outer row's column directly (rather than the scalar
+    // subquery's own SELECT target referencing it), forcing the same
+    // runtime-fallback / eval_column_ref path as the IN case.
+    auto qr = exec_ok("SELECT users.name, (SELECT departments.dept_name FROM departments WHERE "
+                      "departments.id = users.dept_id) FROM users WHERE users.id = 1");
+
+    ASSERT_EQ(qr.rows.size(), 1u);
+    EXPECT_EQ(qr.rows[0][0].as_string(), "alice");
+    EXPECT_EQ(qr.rows[0][1].as_string(), "engineering");
+}

@@ -40,6 +40,18 @@ struct RID;
 /// subquery that could not be decorrelated into a join at plan time --
 /// locate a BM25/HNSW/B-tree/hash index exactly as a top-level query does.
 /// nullptr means "no such index map available", matching Planner's defaults.
+///
+/// `outer_tuple` / `outer_schema` (GDB-1309) mirror the top-level Planner's
+/// own outer-row context (see Planner::set_outer_context). A correlated
+/// IN/scalar subquery's WHERE clause is planned and evaluated by operators
+/// (FilterOperator, SeqScanOperator's residual, etc.) that only know about
+/// their own row's schema -- they have no notion of the enclosing query's
+/// row. When a qualified column reference does not resolve against the
+/// local schema, eval_column_ref falls back to these fields (when set) so a
+/// plain WHERE-clause outer-column comparison (e.g. `b.id = r.book_id`)
+/// resolves the same way NEAREST/TRAVERSE/MATCH's outer-row config
+/// expressions already do. nullptr means "no outer row available", matching
+/// Planner's defaults for a non-correlated (or top-level) plan.
 struct SubqueryContext {
     Catalog& catalog;
     StorageManager& storage;
@@ -50,6 +62,8 @@ struct SubqueryContext {
     std::unordered_map<index_id_t, HashIndex*>* hash_indexes = nullptr;
     std::unordered_map<index_id_t, std::vector<RID>>* hnsw_rid_maps = nullptr;
     std::unordered_map<index_id_t, Bm25Index*>* bm25_indexes = nullptr;
+    const Tuple* outer_tuple = nullptr;
+    const OutputSchema* outer_schema = nullptr;
 };
 
 /// Context for evaluating system functions (pg_current_wal_lsn, etc.).
