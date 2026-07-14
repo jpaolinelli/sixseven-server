@@ -63,7 +63,7 @@ TEST(QA_GDB1219_SessionDispatch, ShowCommandMixedCase) {
 
 TEST(QA_GDB1219_SessionDispatch, ResetCommandMixedCase) {
     Session session(1);
-    session.set_variable("work_mem", "8MB");
+    (void)session.set_variable("work_mem", "8MB");
     auto result = session.try_handle_command("reSet work_mem");
     ASSERT_TRUE(result.has_value());
     EXPECT_TRUE(result->has_value()) << result->error().message;
@@ -93,7 +93,7 @@ TEST(QA_GDB1219_SessionDispatch, PrepareCommandMixedCase) {
 
 TEST(QA_GDB1219_SessionDispatch, DeallocateCommandMixedCase) {
     Session session(1);
-    session.try_handle_command("PREPARE stmt1 AS SELECT 1");
+    (void)session.try_handle_command("PREPARE stmt1 AS SELECT 1");
     auto result = session.try_handle_command("DeAlLoCaTe stmt1");
     ASSERT_TRUE(result.has_value());
     EXPECT_TRUE(result->has_value()) << result->error().message;

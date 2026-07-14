@@ -264,7 +264,7 @@ TEST_F(QA_TxnManagerGdb1242, VacuumPath_ReclaimsAbortedPreservesLive) {
 TEST_F(QA_TxnManagerGdb1242, VacuumPath_ReclaimsAbortedEvenWithoutPriorGc) {
     auto* aborter = txn_mgr_.begin().value();
     txn_id_t aborted_id = aborter->txn_id;
-    auto [pid, slot] = insert_mvcc_tuple(aborted_id);
+    [[maybe_unused]] auto [pid, slot] = insert_mvcc_tuple(aborted_id);
     ASSERT_TRUE(txn_mgr_.abort(aborted_id).has_value());
 
     advance_horizon_past(aborted_id);
@@ -481,7 +481,7 @@ TEST_F(QA_TxnManagerGdb1242, VacuumPhysicallyReclaimsSlotLeavesLiveByteExact) {
 TEST_F(QA_TxnManagerGdb1242, InfoOnly_VacuumRunDoesNotItselfInvokeGc) {
     auto* aborter = txn_mgr_.begin().value();
     txn_id_t aborted_id = aborter->txn_id;
-    auto [pid, slot] = insert_mvcc_tuple(aborted_id);
+    [[maybe_unused]] auto [pid, slot] = insert_mvcc_tuple(aborted_id);
     ASSERT_TRUE(txn_mgr_.abort(aborted_id).has_value());
     advance_horizon_past(aborted_id);
 

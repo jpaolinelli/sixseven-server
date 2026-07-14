@@ -134,7 +134,8 @@ TEST(QA_GDB1292_PathStep, CopyAssignmentIsDeep) {
 
 TEST(QA_GDB1292_PathStep, SelfAssignmentDoesNotCrashOrCorrupt) {
     PathStep a(Value(std::string("self")), int64_t{9});
-    a = a; // NOLINT -- deliberate self-assignment adversarial test
+    PathStep* self_ptr = &a;
+    a = *self_ptr; // NOLINT -- deliberate self-assignment adversarial test
     EXPECT_EQ(a.node_pk().as_string(), "self");
     EXPECT_EQ(a.edge_id, 9);
 }
@@ -179,7 +180,7 @@ TEST(QA_GDB1292_PathStep, EqualityComparesValueNotPointerIdentity) {
 
 TEST(QA_GDB1292_PathStep, NodePkAsInt64ThrowsOnNonIntegerPk) {
     PathStep s(Value(std::string("not-a-number")), int64_t{-1});
-    EXPECT_THROW(s.node_pk_as_int64(), std::exception)
+    EXPECT_THROW((void)s.node_pk_as_int64(), std::exception)
         << "node_pk_as_int64() on a STRING PK should throw (documented contract), "
            "not silently return garbage";
 }

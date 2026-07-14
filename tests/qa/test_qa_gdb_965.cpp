@@ -138,7 +138,7 @@ static std::vector<uint8_t> gdb965_build_startup() {
 }
 
 // Build a well-formed simple Query ('Q') message.
-static std::vector<uint8_t> gdb965_build_query(const std::string& sql) {
+[[maybe_unused]] static std::vector<uint8_t> gdb965_build_query(const std::string& sql) {
     std::vector<uint8_t> msg;
     msg.push_back('Q');
     uint32_t body_len = static_cast<uint32_t>(4 + sql.size() + 1);
