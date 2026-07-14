@@ -90,6 +90,14 @@ public:
         outer_tuple_ = tuple;
         outer_schema_ = schema;
         outer_bound_ = bound;
+        // GDB-1309: mirror into subquery_ctx_ so eval_column_ref's outer-row
+        // fallback (used by a correlated subquery's own WHERE-clause
+        // evaluation -- SeqScanOperator's residual, FilterOperator, etc.) can
+        // resolve outer-qualified column references the same way
+        // plan_nearest_impl / plan_traverse already do for their own outer-row
+        // config expressions.
+        subquery_ctx_.outer_tuple = tuple;
+        subquery_ctx_.outer_schema = schema;
     }
 
 private:

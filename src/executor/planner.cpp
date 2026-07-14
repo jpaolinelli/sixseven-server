@@ -1662,7 +1662,20 @@ Planner::plan_select(const SelectStmt& stmt,
                         source->iter = std::move(*bm25_scan);
                         source->schema = std::move(score_output);
                         pushed_where = true;
-                    } else if (!has_subquery_predicate) {
+                    } else if (!has_subquery_predicate && outer_tuple_ == nullptr) {
+                        // GDB-1309: when this Planner is planning a correlated
+                        // subquery (outer_tuple_ set), do NOT push the WHERE
+                        // predicate into SeqScanOperator/IndexScanOperator --
+                        // neither threads a SubqueryContext through to its
+                        // residual-predicate evaluation, so an outer-qualified
+                        // column reference (e.g. `id = reviews.book_id`) would
+                        // fail with "column not found" instead of falling back
+                        // to the outer row. Leaving the predicate unpushed here
+                        // routes it through the generic FilterOperator below
+                        // instead, which IS given `&subquery_ctx_` (carrying the
+                        // outer tuple/schema via set_outer_context), so
+                        // eval_column_ref's outer-row fallback applies.
+                        //
                         // Cost-based access path selection (GDB-754): when
                         // ANALYZE statistics exist for this table, let the
                         // optimizer decide between index scan and seq scan.

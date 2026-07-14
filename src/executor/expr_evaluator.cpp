@@ -364,8 +364,10 @@ Result<Value> eval_literal(const LiteralExpr& expr) {
 // Column reference evaluation
 // ---------------------------------------------------------------------------
 
-Result<Value>
-eval_column_ref(const ColumnRefExpr& expr, const Tuple& tuple, const OutputSchema& schema) {
+Result<Value> eval_column_ref(const ColumnRefExpr& expr,
+                              const Tuple& tuple,
+                              const OutputSchema& schema,
+                              const SubqueryContext* subquery_ctx) {
     // Handle temporal pseudo-columns parsed as bare identifiers.
     if (expr.table.empty()) {
         std::string upper;
@@ -391,17 +393,44 @@ eval_column_ref(const ColumnRefExpr& expr, const Tuple& tuple, const OutputSchem
         idx = schema.find_column(expr.column);
     }
 
-    if (!idx.has_value()) {
-        std::string name = expr.table.empty() ? expr.column : (expr.table + "." + expr.column);
-        return make_error(StatusCode::NOT_FOUND, "column not found: " + name);
-    }
-
-    if (*idx >= tuple.values.size()) {
+    if (idx.has_value() && *idx >= tuple.values.size()) {
         return make_error(StatusCode::INTERNAL_ERROR,
                           "column index out of range: " + std::to_string(*idx));
     }
 
-    return ok(tuple.values[*idx]);
+    if (idx.has_value()) {
+        return ok(tuple.values[*idx]);
+    }
+
+    // GDB-1309: a correlated IN/scalar subquery's own WHERE clause (e.g.
+    // `id = reviews.book_id`) is planned and evaluated per-row against the
+    // subquery's own local schema only -- the operator performing this
+    // evaluation (SeqScanOperator's residual, FilterOperator, ...) has no
+    // notion of the enclosing query's row. When the column does not resolve
+    // locally, fall back to the outer row threaded through the runtime
+    // subquery context (set by Planner::set_outer_context and mirrored into
+    // SubqueryContext), mirroring the fallback plan_nearest_impl /
+    // plan_traverse already perform for their own outer-row config
+    // expressions.
+    if (subquery_ctx != nullptr && subquery_ctx->outer_tuple != nullptr &&
+        subquery_ctx->outer_schema != nullptr) {
+        std::optional<size_t> outer_idx;
+        if (!expr.table.empty()) {
+            outer_idx = subquery_ctx->outer_schema->find_column(expr.table, expr.column);
+        } else {
+            outer_idx = subquery_ctx->outer_schema->find_column(expr.column);
+        }
+        if (outer_idx.has_value()) {
+            if (*outer_idx >= subquery_ctx->outer_tuple->values.size()) {
+                return make_error(StatusCode::INTERNAL_ERROR,
+                                  "outer column index out of range: " + std::to_string(*outer_idx));
+            }
+            return ok(subquery_ctx->outer_tuple->values[*outer_idx]);
+        }
+    }
+
+    std::string name = expr.table.empty() ? expr.column : (expr.table + "." + expr.column);
+    return make_error(StatusCode::NOT_FOUND, "column not found: " + name);
 }
 
 // ---------------------------------------------------------------------------
@@ -2150,7 +2179,7 @@ Result<Value> eval(const Expr& expr,
         return eval_literal(*lit);
     }
     if (auto* col = dynamic_cast<const ColumnRefExpr*>(&expr)) {
-        return eval_column_ref(*col, tuple, schema);
+        return eval_column_ref(*col, tuple, schema, subquery_ctx);
     }
     if (auto* bin = dynamic_cast<const BinaryExpr*>(&expr)) {
         return eval_binary(*bin, tuple, schema, bound, subquery_ctx);
